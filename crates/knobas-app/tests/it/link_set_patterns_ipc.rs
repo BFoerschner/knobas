@@ -9,6 +9,7 @@
 
 use knobas_app::IpcErrorCode;
 use knobas_app::link_sets::{self, LinkSetDraft, LinkSetMember, LinkSetPattern, LinkSetRule};
+use knobas_app::sources::Registry;
 use knobas_core::reach::{self, Origin};
 use sqlx::PgPool;
 use std::collections::BTreeSet;
@@ -34,7 +35,9 @@ async fn pool() -> PgPool {
         .await
         .unwrap();
     }
-    knobas_app::commands::search::searcher(&pool).await.unwrap();
+    knobas_app::commands::search::searcher(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     pool
 }
 
@@ -190,6 +193,7 @@ async fn a_pattern_brings_what_it_matches_and_a_new_match_without_a_set_edit() {
 
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             "Payout stack",
             vec![],
@@ -219,6 +223,7 @@ async fn the_jobs_set_group_lists_a_patterns_matches_and_hides_one() {
     let job = ticket(&pool).await;
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             "Hide",
             vec![],
@@ -230,7 +235,9 @@ async fn the_jobs_set_group_lists_a_patterns_matches_and_hides_one() {
     .unwrap();
 
     link_sets::hide(&pool, &job, &a, true).await.unwrap();
-    let shown = link_sets::on_job(&pool, &job).await.unwrap();
+    let shown = link_sets::on_job(&pool, &Registry::for_process(), &job)
+        .await
+        .unwrap();
     let members: Vec<(String, bool)> = shown.sets[0]
         .members
         .iter()
@@ -276,6 +283,7 @@ async fn a_page_pattern_is_a_space_and_a_parent_page() {
 
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             "Runbooks",
             vec![],
@@ -287,6 +295,7 @@ async fn a_page_pattern_is_a_space_and_a_parent_page() {
     .unwrap();
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             "Space",
             vec![],
@@ -320,6 +329,7 @@ async fn the_editor_the_preview_the_job_and_the_launcher_agree() {
 
     let saved = link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft("Ledger", vec![], vec![pattern("pipeline", &query)], &job),
     )
     .await
@@ -328,29 +338,34 @@ async fn the_editor_the_preview_the_job_and_the_launcher_agree() {
     assert_eq!(row.query, query);
     assert_eq!(row.count, 2);
     let editor: BTreeSet<String> = row.matches.iter().map(|m| m.entity_id.clone()).collect();
-    let preview = link_sets::preview_pattern(&pool, &pattern("pipeline", &query))
-        .await
-        .unwrap();
+    let preview = link_sets::preview_pattern(
+        &pool,
+        &Registry::for_process(),
+        &pattern("pipeline", &query),
+    )
+    .await
+    .unwrap();
     assert_eq!(preview.refusal, None);
     let previewed: BTreeSet<String> = preview
         .matches
         .iter()
         .map(|m| m.entity_id.clone())
         .collect();
-    let launcher: BTreeSet<String> = knobas_app::commands::search::searcher(&pool)
-        .await
-        .unwrap()
-        .search(knobas_search::SearchQuery {
-            raw: query.clone(),
-            limit: 200,
-            filters: knobas_search::SearchFilters::default(),
-        })
-        .await
-        .unwrap()
-        .groups
-        .iter()
-        .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
-        .collect();
+    let launcher: BTreeSet<String> =
+        knobas_app::commands::search::searcher(&pool, &Registry::for_process())
+            .await
+            .unwrap()
+            .search(knobas_search::SearchQuery {
+                raw: query.clone(),
+                limit: 200,
+                filters: knobas_search::SearchFilters::default(),
+            })
+            .await
+            .unwrap()
+            .groups
+            .iter()
+            .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
+            .collect();
 
     assert_eq!(editor, ids(&[&a, &b]));
     assert_eq!(previewed, editor);
@@ -416,6 +431,7 @@ async fn a_pipeline_pattern_naming_a_parent_project_takes_its_subprojects() {
         let query = format!("project:\"{parent}\" name:*_payout_*");
         let saved = link_sets::save(
             &pool,
+            &Registry::for_process(),
             draft("Payments", vec![], vec![pattern("pipeline", &query)], &job),
         )
         .await
@@ -428,24 +444,29 @@ async fn a_pipeline_pattern_naming_a_parent_project_takes_its_subprojects() {
         assert_eq!(editor, ids(&[&build, &client]), "{query}");
         assert_eq!(saved.set.patterns[0].count, 2, "{query}");
         assert_eq!(from_sets(&pool, &job).await, editor, "{query}");
-        let preview = link_sets::preview_pattern(&pool, &pattern("pipeline", &query))
-            .await
-            .unwrap();
+        let preview = link_sets::preview_pattern(
+            &pool,
+            &Registry::for_process(),
+            &pattern("pipeline", &query),
+        )
+        .await
+        .unwrap();
         assert_eq!(preview.count, 2, "{query}");
-        let launcher: BTreeSet<String> = knobas_app::commands::search::searcher(&pool)
-            .await
-            .unwrap()
-            .search(knobas_search::SearchQuery {
-                raw: query.clone(),
-                limit: 200,
-                filters: knobas_search::SearchFilters::default(),
-            })
-            .await
-            .unwrap()
-            .groups
-            .iter()
-            .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
-            .collect();
+        let launcher: BTreeSet<String> =
+            knobas_app::commands::search::searcher(&pool, &Registry::for_process())
+                .await
+                .unwrap()
+                .search(knobas_search::SearchQuery {
+                    raw: query.clone(),
+                    limit: 200,
+                    filters: knobas_search::SearchFilters::default(),
+                })
+                .await
+                .unwrap()
+                .groups
+                .iter()
+                .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
+                .collect();
         assert_eq!(launcher, editor, "{query}");
     }
 
@@ -453,6 +474,7 @@ async fn a_pipeline_pattern_naming_a_parent_project_takes_its_subprojects() {
     let job = ticket(&pool).await;
     let saved = link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             "Payouts",
             vec![],
@@ -470,9 +492,10 @@ async fn a_pipeline_pattern_naming_a_parent_project_takes_its_subprojects() {
 
     // The dialog offers the parent, which no configuration sits in directly,
     // and each subproject, each with its chain of names.
-    let preview = link_sets::preview_pattern(&pool, &pattern("pipeline", ""))
-        .await
-        .unwrap();
+    let preview =
+        link_sets::preview_pattern(&pool, &Registry::for_process(), &pattern("pipeline", ""))
+            .await
+            .unwrap();
     let offered = |key: &str| {
         preview
             .projects
@@ -506,6 +529,7 @@ async fn a_pattern_knobas_cannot_read_is_refused() {
     ] {
         let refused = link_sets::save(
             &pool,
+            &Registry::for_process(),
             draft("Bad", vec![], vec![pattern(kind, query)], &job),
         )
         .await
@@ -514,6 +538,7 @@ async fn a_pattern_knobas_cannot_read_is_refused() {
     }
     let twice = link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             "Twice",
             vec![],
@@ -525,9 +550,13 @@ async fn a_pattern_knobas_cannot_read_is_refused() {
     .unwrap_err();
     assert_eq!(twice.code, IpcErrorCode::Invalid);
 
-    let preview = link_sets::preview_pattern(&pool, &pattern("pipeline", "payout"))
-        .await
-        .unwrap();
+    let preview = link_sets::preview_pattern(
+        &pool,
+        &Registry::for_process(),
+        &pattern("pipeline", "payout"),
+    )
+    .await
+    .unwrap();
     assert!(preview.refusal.is_some());
     assert!(preview.matches.is_empty());
 }
@@ -601,6 +630,7 @@ async fn a_member_row_carries_its_line_and_its_dot() {
     };
     let saved = link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             "Rows",
             vec![
@@ -659,7 +689,9 @@ async fn a_member_row_carries_its_line_and_its_dot() {
     .execute(&pool)
     .await
     .unwrap();
-    let again = link_sets::get(&pool, &saved.set.id).await.unwrap();
+    let again = link_sets::get(&pool, &Registry::for_process(), &saved.set.id)
+        .await
+        .unwrap();
     let last = again.set.members.last().unwrap();
     assert_eq!(
         (
@@ -716,6 +748,7 @@ async fn a_monitor_row_draws_its_type_and_dot_and_a_repository_its_team_or_owner
     };
     let saved = link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             "Watched",
             vec![

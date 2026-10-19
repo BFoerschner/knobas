@@ -6,46 +6,20 @@ pub(super) use knobas_core::entity_list::{EntityRow, entity_row, state_of};
 
 use super::*;
 
-/// One page of the room addressed by `filter`.
+/// One page of the room addressed by `filter`, a role
+/// ([`EntityFilter::role`]) answered from `registry`'s claims: the role's
+/// fillers are resolved here and handed to [`entity_list::read`].
 ///
 /// The behaviour lives here rather than in the command so it is reachable from
 /// a test: a `#[tauri::command]` cannot be called directly.
 ///
-/// A role ([`EntityFilter::role`]) is answered by the process's registry, as
-/// the command's declarations are; [`list_entities_with_registry`] takes the
-/// registry from its caller.
-///
 /// # Errors
 ///
 /// [`IpcError`] with [`Internal`](crate::IpcErrorCode::Internal) if the query
-/// fails.
+/// fails; `invalid` for a filter the read refuses.
 pub async fn list_entities_inner(
     pool: &PgPool,
-    filter: &EntityFilter,
-    limit: u32,
-    offset: u32,
-    declarations: &knobas_core::payload::Declarations,
-) -> Result<EntityPage, IpcError> {
-    list_entities_with_registry(
-        pool,
-        &crate::sources::Registry::for_process(),
-        filter,
-        limit,
-        offset,
-        declarations,
-    )
-    .await
-}
-
-/// [`list_entities_inner`], answering a role from `registry`'s claims: the
-/// role's fillers are resolved here and handed to [`entity_list::read`].
-///
-/// # Errors
-///
-/// As [`list_entities_inner`]; `invalid` for a filter the read refuses.
-pub async fn list_entities_with_registry(
-    pool: &PgPool,
-    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    registry: &dyn AdapterRegistry,
     filter: &EntityFilter,
     limit: u32,
     offset: u32,
@@ -73,26 +47,29 @@ pub async fn list_entities(
     offset: u32,
 ) -> Result<EntityPage, IpcError> {
     let pool = lifecycle.pool()?;
-    let declarations = declared_paths(&pool).await?;
-    list_entities_inner(&pool, &filter, limit, offset, &declarations).await
+    let registry = lifecycle.registry();
+    let declarations = declared_paths(&pool, registry).await?;
+    list_entities_inner(&pool, registry, &filter, limit, offset, &declarations).await
 }
 
-/// Every configured source's declared payload paths (#277).
+/// Every configured source's declared payload paths (#277), as `registry`
+/// declares them.
 ///
-/// **`Registry::for_process()` rather than `SourcesState`'s trait object**: a
-/// declaration is a property of the adapter *kind*, held by the process's
-/// registry, so a read that wants one has nothing to wait for.
+/// **The lifecycle's registry rather than `SourcesState`'s** (#1322): a
+/// declaration is a property of the adapter *kind*, which the lifecycle holds
+/// before the database is up, so a read that wants one has nothing to wait for.
 /// Reaching through `SourcesState` would make a room's list, the mini board and
 /// the project census answer `not_ready` until the scheduler is up, which is
 /// later than the pool -- a widening of `not_ready` bought for nothing. The
-/// reads that already hold a `SourcesState` (the inbox, the merge pass) pass
-/// its registry instead, so the injected one is still what a test drives.
+/// commands that already hold a `SourcesState` pass its registry, which is the
+/// same list.
 ///
 /// # Errors
 ///
 /// `internal` if the source listing fails.
 pub(super) async fn declared_paths(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
 ) -> Result<knobas_core::payload::Declarations, IpcError> {
-    crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process()).await
+    crate::sources::paths::declared_paths(pool, registry).await
 }

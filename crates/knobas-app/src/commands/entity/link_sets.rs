@@ -14,7 +14,7 @@ use super::*;
 pub async fn link_sets(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<crate::link_sets::LinkSetRow>, IpcError> {
-    crate::link_sets::list(&lifecycle.pool()?).await
+    crate::link_sets::list(&lifecycle.pool()?, lifecycle.registry()).await
 }
 
 /// One link set and the tickets it shows on (#866, R-7.7):
@@ -29,7 +29,7 @@ pub async fn link_set(
     lifecycle: State<'_, Lifecycle>,
     id: String,
 ) -> Result<crate::link_sets::LinkSetDetail, IpcError> {
-    crate::link_sets::get(&lifecycle.pool()?, &id).await
+    crate::link_sets::get(&lifecycle.pool()?, lifecycle.registry(), &id).await
 }
 
 /// Save a whole link set (#866): [`crate::link_sets::save`].
@@ -43,7 +43,7 @@ pub async fn save_link_set(
     lifecycle: State<'_, Lifecycle>,
     draft: crate::link_sets::LinkSetDraft,
 ) -> Result<crate::link_sets::LinkSetDetail, IpcError> {
-    crate::link_sets::save(&lifecycle.pool()?, draft).await
+    crate::link_sets::save(&lifecycle.pool()?, lifecycle.registry(), draft).await
 }
 
 /// Delete a link set (#866): [`crate::link_sets::delete`].
@@ -69,7 +69,7 @@ pub async fn preview_link_set_rule(
     lifecycle: State<'_, Lifecycle>,
     rule: crate::link_sets::LinkSetRule,
 ) -> Result<Vec<crate::link_sets::RuleTicket>, IpcError> {
-    crate::link_sets::preview(&lifecycle.pool()?, &rule).await
+    crate::link_sets::preview(&lifecycle.pool()?, lifecycle.registry(), &rule).await
 }
 
 /// What a pattern would match now, for the pattern dialog (#868, R-7.7):
@@ -84,7 +84,7 @@ pub async fn preview_link_set_pattern(
     lifecycle: State<'_, Lifecycle>,
     pattern: crate::link_sets::LinkSetPattern,
 ) -> Result<crate::link_sets::PatternPreview, IpcError> {
-    crate::link_sets::preview_pattern(&lifecycle.pool()?, &pattern).await
+    crate::link_sets::preview_pattern(&lifecycle.pool()?, lifecycle.registry(), &pattern).await
 }
 
 /// *Hide here* or *Show again* on one ticket (#866, R-7.5):
@@ -117,7 +117,7 @@ pub async fn job_link_sets(
     lifecycle: State<'_, Lifecycle>,
     entity_id: String,
 ) -> Result<crate::link_sets::JobLinkSets, IpcError> {
-    crate::link_sets::on_job(&lifecycle.pool()?, &entity_id).await
+    crate::link_sets::on_job(&lifecycle.pool()?, lifecycle.registry(), &entity_id).await
 }
 
 /// The Link sets view's hint card (#870, R-7.10): items linked by hand under
@@ -132,5 +132,5 @@ pub async fn job_link_sets(
 pub async fn link_set_hints(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<crate::link_sets::LinkSetHint>, IpcError> {
-    crate::link_sets::hints(&lifecycle.pool()?).await
+    crate::link_sets::hints(&lifecycle.pool()?, lifecycle.registry()).await
 }

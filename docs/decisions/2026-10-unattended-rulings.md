@@ -7803,3 +7803,58 @@ The merge-manager's rulings on #1321 (Opus):
   to `knobas_core::entity_list`; its doc comment and the app shim `commands/entity/list.rs` now
   name `Registry::for_process()`. The §10.8 entry needs no change: the shim's call sites are
   renamed in place as it says. *Reversing:* n/a.
+
+## #1322: every read takes the registry it is given (Opus implementer, 2026-10-20)
+
+- **Existing tests pass the process registry at the call sites whose signature grew.** *Fork:*
+  the third criterion says every existing integration test stays "green unchanged", and the
+  first says the inner reads take `&dyn AdapterRegistry`, which changes the signature those
+  tests call. *Ruling:* "unchanged" means the assertions and fixtures. Each call gains one
+  argument, `&Registry::for_process()`, which is the registry those reads used before, and
+  nothing else changes. *Reversing:* keep pool-only wrappers beside each inner read, which
+  would keep the singleton in the sources #1323 clears.
+- **A command that already holds the sources state passes its registry.** *Fork:* the inbox
+  stream, the standup digest and the Docs writes (edit section, new page, move notes) take
+  `SourcesState`, which holds the registry too. *Ruling:* they pass `state.registry`, the same
+  list. Moving them to the lifecycle would change when they answer `not_ready`, which this
+  ticket does not ask for. *Reversing:* take `State<'_, Lifecycle>` beside the state.
+- **Reads outside the ticket's clusters name the singleton at their call site.** *Fork:* the
+  entity module's `declared_paths` helper and `search::searcher` now take a registry, and the
+  Builds list and runs, the mini board, the saved-view board, the source statuses, code facts,
+  the project census and the viewed-files read call them without one. *Ruling:* those call
+  sites pass `&crate::sources::Registry::for_process()` explicitly, which keeps today's
+  behaviour and lists them for #1323, which replaces every remaining direct call. *Reversing:*
+  thread the lifecycle's registry through them, as #1323 does.
+- **The write queue's post-write read already took a registry.** *Fork:* the ticket names it
+  among the reads that call the singleton; on this tree `resolve_arrivals` takes the sources
+  state's registry since #1050, and the only singleton in `write_queue.rs` is in its unit tests.
+  *Ruling:* no code change there. The new test drives `ArrivalLinks` with the probe registry
+  and with the process registry and gets different links. *Reversing:* n/a.
+- **`list_entities_with_registry` folds into `list_entities_inner`.** The inner read takes the
+  registry as its second argument, as the inbox's inner reads do. *Reversing:* a second name.
+- **Bring-up stores the declarations through the lifecycle's registry.** The search's
+  declaring at bring-up reads `handle.state::<Lifecycle>().registry()`, the list every command
+  then declares through, so the stored copy is never a different list's. *Reversing:* n/a.
+- **Seams, chosen without a person to confirm them:** each of the six tests invokes the read's
+  command through a mock app twice over one scratch database, once on `Lifecycle::new()` and
+  once on `Lifecycle::with_registry(Probe)`, and asserts both answers. The post-write read is not
+  a command, so its test drives `ArrivalLinks`. The prior art is `list_adapters`' injected
+  registry test. *Reversing:* n/a.
+
+The merge-manager's rulings on #1322 (Opus):
+
+- **"Green unchanged" means assertions and fixtures.** *Fork:* the implementer's first ruling.
+  *Ruling:* upheld. Each grown call passes `&Registry::for_process()`, a clone sharing the one
+  process list, so every existing test reads the registry it read before; no assertion moved.
+  *Reversing:* pool-only wrappers, which #1323 would then delete.
+- **Pool-only reads outside the named clusters defer the first criterion's last clause.**
+  *Fork:* `builds.rs`, `board.rs`, `lookups.rs`, `projects.rs` and `viewed.rs` still reach the
+  singleton, now at their call sites. *Ruling:* the clause is ticked for the clusters the
+  ticket names; the rest is deferred to #1323, whose first criterion replaces "every remaining
+  direct call" outside bring-up and the lifecycle's default, so it covers them without a body
+  change. *Reversing:* thread them here instead.
+- **Commands holding `SourcesState` pass its registry.** *Fork:* the inbox stream, standup and
+  the three Docs writes. *Ruling:* upheld. They called `sources::state` before this PR, so their
+  `not_ready` window is unchanged, and in production `state.registry` is the process list. No
+  command's `State` arguments changed, so no read answers `not_ready` that did not before.
+  *Reversing:* n/a.

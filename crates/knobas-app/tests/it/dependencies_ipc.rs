@@ -8,6 +8,7 @@
 
 use knobas_app::assets::dependencies::{self, DepItem, Dependencies};
 use knobas_app::assets::{self, AssetEdit, AssetStatus, Environment, Visibility};
+use knobas_app::sources::Registry;
 use knobas_core::tone::Tone;
 use sqlx::PgPool;
 
@@ -389,7 +390,9 @@ async fn the_read_returns_the_whole_estate_with_health_and_relations() {
     link(&pool, "jira:PAY-232", &vm.id, "mentions", false).await;
     link(&pool, "jira:PAY-233", "teamcity:1", "built-by", true).await;
 
-    let read = dependencies::read(&pool).await.expect("the read");
+    let read = dependencies::read(&pool, &Registry::for_process())
+        .await
+        .expect("the read");
 
     let mut ids: Vec<&str> = read.items.iter().map(|item| item.id.as_str()).collect();
     ids.sort_unstable();
@@ -664,7 +667,9 @@ async fn layers_reorder_remove_and_place_kinds() {
         .await
         .expect("removed");
     assert!(left.iter().all(|l| l.id != "data"));
-    let read = dependencies::read(&pool).await.expect("the read");
+    let read = dependencies::read(&pool, &Registry::for_process())
+        .await
+        .expect("the read");
     for kind in ["database_server", "database", "schema", "table"] {
         assert!(
             read.layers

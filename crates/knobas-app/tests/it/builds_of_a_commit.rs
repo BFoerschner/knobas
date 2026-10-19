@@ -16,13 +16,16 @@
 //! change here never recomputes under its timing.
 
 use knobas_app::commands::entity::get_entity_inner;
+use knobas_app::sources::Registry;
 use sqlx::PgPool;
 
 async fn pool() -> PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
     // The declarations' stored copy, written as bring-up writes it (ADR-0019).
-    knobas_app::commands::search::searcher(&pool).await.unwrap();
+    knobas_app::commands::search::searcher(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     pool
 }
 
@@ -113,12 +116,9 @@ const WALK: &str = concat!(
 );
 
 async fn walked(pool: &PgPool, sha: &str) -> Vec<String> {
-    let declarations = knobas_app::sources::paths::declared_paths(
-        pool,
-        &knobas_app::sources::Registry::for_process(),
-    )
-    .await
-    .unwrap();
+    let declarations = knobas_app::sources::paths::declared_paths(pool, &Registry::for_process())
+        .await
+        .unwrap();
     sqlx::query_scalar(WALK)
         .bind(sha)
         .bind(declarations.as_param())
@@ -129,7 +129,7 @@ async fn walked(pool: &PgPool, sha: &str) -> Vec<String> {
 
 /// The builds the detail of the commit `sha` draws, sorted.
 async fn drawn(pool: &PgPool, commit: &str, sha: &str) -> Vec<String> {
-    let detail = get_entity_inner(pool, &format!("{commit}{sha}"))
+    let detail = get_entity_inner(pool, &Registry::for_process(), &format!("{commit}{sha}"))
         .await
         .unwrap();
     let mut ids: Vec<String> = detail.builds.into_iter().map(|r| r.entity_id).collect();
@@ -291,7 +291,9 @@ async fn a_commits_builds_are_the_walk_after_every_change() {
         0,
         "a declaration change"
     );
-    knobas_app::commands::search::searcher(&pool).await.unwrap();
+    knobas_app::commands::search::searcher(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     assert_eq!(
         agree(&pool, &commit, &shas, "the declaration restored").await,
         [id("2"), id("4")]

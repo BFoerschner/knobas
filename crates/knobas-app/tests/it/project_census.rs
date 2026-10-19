@@ -13,12 +13,15 @@
 //! `sync.parent_declaration` freely.
 
 use knobas_app::commands::entity::list_projects_inner;
+use knobas_app::sources::Registry;
 use sqlx::PgPool;
 
 async fn pool() -> PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
-    knobas_app::commands::search::searcher(&pool).await.unwrap();
+    knobas_app::commands::search::searcher(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     pool
 }
 
@@ -106,12 +109,9 @@ const WALK: &str = concat!(
 type Row = (String, String, Option<String>);
 
 async fn walked(pool: &PgPool, sources: &[&str]) -> Vec<Row> {
-    let declarations = knobas_app::sources::paths::declared_paths(
-        pool,
-        &knobas_app::sources::Registry::for_process(),
-    )
-    .await
-    .unwrap();
+    let declarations = knobas_app::sources::paths::declared_paths(pool, &Registry::for_process())
+        .await
+        .unwrap();
     let rows: Vec<Row> = sqlx::query_as(WALK)
         .bind(declarations.as_param())
         .fetch_all(pool)

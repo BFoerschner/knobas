@@ -505,7 +505,7 @@ pub async fn dependencies(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<assets::dependencies::Dependencies, IpcError> {
     let pool = lifecycle.pool()?;
-    assets::dependencies::read(&pool).await
+    assets::dependencies::read(&pool, lifecycle.registry()).await
 }
 
 /// The shared layers' writes and the saved views of Dependencies (#873,
@@ -938,7 +938,7 @@ pub async fn monitor_roster<R: tauri::Runtime>(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<assets::MonitorRow>, IpcError> {
     let pool = lifecycle.pool()?;
-    let mut rows = assets::monitor_roster(&pool).await?;
+    let mut rows = assets::monitor_roster(&pool, lifecycle.registry()).await?;
     let offered = monitor_write_ops(&app, &rows).await?;
     assets::offer_actions(&mut rows, &offered);
     Ok(rows)

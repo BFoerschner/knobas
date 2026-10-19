@@ -365,7 +365,7 @@ async fn room(
         .unwrap();
     let scan = filter(sources, &[], ctx, project, EntityOrder::UpdatedDesc);
     time(name, "list_entities (room scan, 200)", runs, || {
-        list_entities_inner(pool, &scan, 200, 0, &declarations)
+        list_entities_inner(pool, &registry, &scan, 200, 0, &declarations)
     })
     .await;
     // The tiles `kinds.ts` draws, each with its own order.
@@ -381,7 +381,7 @@ async fn room(
             name,
             &format!("list_entities (tile {tile}, 50)"),
             runs,
-            || list_entities_inner(pool, tile_filter, 50, 0, &declarations),
+            || list_entities_inner(pool, &registry, tile_filter, 50, 0, &declarations),
         )
         .await;
     }
@@ -584,7 +584,7 @@ async fn build_snapshots(
     let db = start_at(&root).await;
     let pool = db.connector().app_pool().await.unwrap();
     knobas_db::migrate::run(&pool).await.unwrap();
-    searcher(&pool).await.unwrap();
+    searcher(&pool, &Registry::for_process()).await.unwrap();
     for table in tables_of_the_mirror(&pool).await {
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "alter table {table} set (autovacuum_enabled = false)"
@@ -651,7 +651,7 @@ async fn build_passed(from: &std::path::Path, to: &std::path::Path, analyzed: bo
     let db = start_at(&root).await;
     let connector = db.connector();
     let pool = connector.app_pool().await.unwrap();
-    searcher(&pool).await.unwrap();
+    searcher(&pool, &Registry::for_process()).await.unwrap();
     run_pass(&connector, &pool, analyzed).await;
     pool.close().await;
     db.stop().await.unwrap();
@@ -789,7 +789,7 @@ async fn what_the_reader_waits_on() {
     let connector = db.connector();
     let ui = connector.app_pool().await.unwrap();
     let pool = &ui;
-    searcher(pool).await.unwrap();
+    searcher(pool, &Registry::for_process()).await.unwrap();
 
     // The seeded Gitea's views are read live, through the token.
     let secrets: std::sync::Arc<dyn SecretStore> = std::sync::Arc::new(MemoryStore::new());
@@ -953,6 +953,7 @@ async fn what_the_reader_waits_on() {
         time(has, &format!("search {raw}"), runs, || {
             search_inner(
                 pool,
+                &registry,
                 knobas_search::SearchQuery {
                     raw: raw.clone(),
                     limit: 50,
@@ -989,7 +990,10 @@ async fn what_the_reader_waits_on() {
         ("detail: build", "ci:build:42", "build"),
         ("detail: page", "wiki:page:42", "page"),
     ] {
-        time(what, "get_entity", runs, || get_entity_inner(pool, id)).await;
+        time(what, "get_entity", runs, || {
+            get_entity_inner(pool, &registry, id)
+        })
+        .await;
         let entity = knobas_core::entity::EntityRef::parse(id).unwrap();
         time(what, "recent_activity (entity, 50)", runs, || {
             recent_activity_inner(pool, 50, Some(&entity))
@@ -1019,11 +1023,11 @@ async fn what_the_reader_waits_on() {
 
     // -- the launcher --------------------------------------------------------
     time("open launcher", "launcher_home", runs, || {
-        launcher_home_inner(pool)
+        launcher_home_inner(pool, &registry)
     })
     .await;
     time("open launcher", "smart_lists", runs, || {
-        smart_lists_inner(pool)
+        smart_lists_inner(pool, &registry)
     })
     .await;
     // Opening the box on a filter token reads the kinds, the sources and the
@@ -1032,7 +1036,7 @@ async fn what_the_reader_waits_on() {
         "open a filter token",
         "filter_suggestions (kinds, sources, parents)",
         runs,
-        || filter_suggestions_inner(pool, "", false),
+        || filter_suggestions_inner(pool, &registry, "", false),
     )
     .await;
     // The first `under:` keystroke asks with nothing typed yet, and each one
@@ -1042,7 +1046,7 @@ async fn what_the_reader_waits_on() {
             "type a filter token",
             &format!("filter_suggestions (under:{under})"),
             runs,
-            || filter_suggestions_inner(pool, under, true),
+            || filter_suggestions_inner(pool, &registry, under, true),
         )
         .await;
     }
@@ -1062,6 +1066,7 @@ async fn what_the_reader_waits_on() {
         time("search keystroke", &format!("search {raw:?}"), runs, || {
             search_inner(
                 pool,
+                &registry,
                 knobas_search::SearchQuery {
                     raw: raw.into(),
                     limit: 50,
@@ -1074,11 +1079,11 @@ async fn what_the_reader_waits_on() {
 
     // -- Docs (#859 to #862) -------------------------------------------------
     time("open Docs", "docs_tree", runs, || {
-        knobas_app::commands::entity::docs_tree_inner(pool)
+        knobas_app::commands::entity::docs_tree_inner(pool, &registry)
     })
     .await;
     time("open Docs", "docs_page", runs, || {
-        knobas_app::commands::entity::docs_page_inner(pool, "wiki:page:42")
+        knobas_app::commands::entity::docs_page_inner(pool, &registry, "wiki:page:42")
     })
     .await;
     let ops = knobas_app::docs::DocsScope {
@@ -1097,14 +1102,14 @@ async fn what_the_reader_waits_on() {
             "docs search keystroke",
             &format!("docs_search {raw:?}"),
             runs,
-            || knobas_app::commands::entity::docs_search_inner(pool, raw, None),
+            || knobas_app::commands::entity::docs_search_inner(pool, &registry, raw, None),
         )
         .await;
         time(
             "docs search keystroke",
             &format!("docs_search {raw:?} in OPS"),
             runs,
-            || knobas_app::commands::entity::docs_search_inner(pool, raw, Some(&ops)),
+            || knobas_app::commands::entity::docs_search_inner(pool, &registry, raw, Some(&ops)),
         )
         .await;
     }
@@ -1127,7 +1132,10 @@ async fn what_the_reader_waits_on() {
                 continue;
             };
             let what = format!("gitea {kind}");
-            time(&what, "get_entity", runs, || get_entity_inner(pool, &id)).await;
+            time(&what, "get_entity", runs, || {
+                get_entity_inner(pool, &registry, &id)
+            })
+            .await;
             let view = time(&what, "entity_view (whole)", runs, || {
                 knobas_app::sources::crud::view(pool, &secrets, &registry, &id, None)
             })
@@ -1333,7 +1341,9 @@ async fn writes(
     const TICKET: &str = "jira0:JIRA0-42";
     let comment = || serde_json::json!({"Comment": {"entity": TICKET, "body": "probe"}});
     let read_back = || async {
-        get_entity_inner(pool, TICKET).await.map_err(said)?;
+        get_entity_inner(pool, &Registry::for_process(), TICKET)
+            .await
+            .map_err(said)?;
         knobas_app::sources::crud::view(pool, &secrets, registry.as_ref(), TICKET, None)
             .await
             .map_err(said)
@@ -1367,7 +1377,9 @@ async fn writes(
         || async {
             submit_in_background(state, setting()).await.map_err(said)?;
             knobas_core::write_queue::open(pool).await.map_err(said)?;
-            get_entity_inner(pool, "ci:build:42").await.map_err(said)?;
+            get_entity_inner(pool, &Registry::for_process(), "ci:build:42")
+                .await
+                .map_err(said)?;
             knobas_app::sources::crud::view(pool, &secrets, registry.as_ref(), "ci:build:42", None)
                 .await
                 .map_err(said)
@@ -1434,7 +1446,7 @@ async fn writes(
                 n.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             );
             knobas_app::commands::entity::create_link_inner(pool, TICKET, &to, None, None).await?;
-            get_entity_inner(pool, TICKET).await?;
+            get_entity_inner(pool, &Registry::for_process(), TICKET).await?;
             Ok::<_, knobas_app::IpcError>(())
         },
     )
@@ -1450,7 +1462,7 @@ async fn writes(
     time("write: unlink", "unlink + get_entity", runs, || async {
         let id = &links[next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % links.len()];
         knobas_app::commands::entity::unlink_inner(pool, id).await?;
-        get_entity_inner(pool, TICKET).await?;
+        get_entity_inner(pool, &Registry::for_process(), TICKET).await?;
         Ok::<_, knobas_app::IpcError>(())
     })
     .await;

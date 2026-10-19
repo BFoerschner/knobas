@@ -10,6 +10,7 @@
 use knobas_app::commands::entity::{
     create_link_inner, get_entity_inner, list_entities_inner, promote_context_inner,
 };
+use knobas_app::sources::Registry;
 use knobas_core::entity_list::{EntityFilter, EntityOrder};
 
 async fn pool() -> sqlx::PgPool {
@@ -86,7 +87,9 @@ async fn a_tickets_detail_carries_its_type_priority_and_estimate() {
     )
     .await;
 
-    let detail = get_entity_inner(&pool, &id).await.unwrap();
+    let detail = get_entity_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
     assert_eq!(detail.issue_type.as_deref(), Some("Story"));
     assert_eq!(detail.priority.as_deref(), Some("High"));
     assert_eq!(detail.estimate_seconds, Some(10800));
@@ -103,7 +106,9 @@ async fn a_missing_or_unreadable_estimate_is_none() {
         serde_json::json!({ "timeoriginalestimate": "3h" }),
     ] {
         let id = issue(&pool, &key(), fields.clone()).await;
-        let detail = get_entity_inner(&pool, &id).await.unwrap();
+        let detail = get_entity_inner(&pool, &Registry::for_process(), &id)
+            .await
+            .unwrap();
         assert_eq!(detail.estimate_seconds, None, "{fields}");
         assert_eq!(detail.priority, None, "{fields}");
     }
@@ -156,6 +161,7 @@ async fn opening_a_job_twice_promotes_its_ticket_once() {
 
     let code = list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &EntityFilter {
             sources: Vec::new(),
             kinds: vec!["pr".into(), "branch".into(), "commit".into(), "repo".into()],
@@ -211,9 +217,16 @@ async fn list_entities_scoped_by_reach_keeps_what_the_ticket_reaches() {
         role: None,
     };
     let none = knobas_core::payload::Declarations::empty();
-    let builds = list_entities_inner(&pool, &filter(&["build"]), 50, 0, &none)
-        .await
-        .unwrap();
+    let builds = list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &filter(&["build"]),
+        50,
+        0,
+        &none,
+    )
+    .await
+    .unwrap();
     let ids: Vec<&str> = builds.rows.iter().map(|r| r.entity_id.as_str()).collect();
     assert_eq!(
         ids,
@@ -222,9 +235,10 @@ async fn list_entities_scoped_by_reach_keeps_what_the_ticket_reaches() {
     );
     assert_eq!(builds.total, 1);
 
-    let everything = list_entities_inner(&pool, &filter(&[]), 50, 0, &none)
-        .await
-        .unwrap();
+    let everything =
+        list_entities_inner(&pool, &Registry::for_process(), &filter(&[]), 50, 0, &none)
+            .await
+            .unwrap();
     assert_eq!(
         everything.total, 2,
         "the PR and the build, never the ticket"

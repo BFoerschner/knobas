@@ -13,6 +13,7 @@ use knobas_app::commands::entity::{
     create_context_inner, create_link_inner, list_entities_inner, promote_context_inner,
     room_suggestions_inner,
 };
+use knobas_app::sources::Registry;
 use knobas_app::{IpcError, IpcErrorCode};
 use knobas_core::entity_list::{EntityFilter, EntityOrder};
 use sqlx::PgPool;
@@ -128,6 +129,7 @@ async fn a_stored_context_scopes_the_page_and_its_total() {
 
     let listed = list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &scoped_to(&ctx.id),
         50,
         0,
@@ -159,6 +161,7 @@ async fn an_unknown_context_is_an_empty_page_not_the_corpus() {
 
     let listed = list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &scoped_to("ctx:gone"),
         50,
         0,

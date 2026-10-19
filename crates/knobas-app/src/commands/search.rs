@@ -16,8 +16,10 @@
 //! only place a behaviour lives is a behaviour no test can reach. Each command
 //! here is therefore two lines (resolve the pool, call the inner function) and
 //! everything worth asserting is in the `_inner`, which takes a `&PgPool` and
-//! is exercised by `tests/it/search_ipc.rs`. `demo_load_inner` set the pattern.
+//! the lifecycle's `&dyn AdapterRegistry` (#1322) and is exercised by
+//! `tests/it/search_ipc.rs`. `demo_load_inner` set the pattern.
 
+use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
 use tauri::State;
 
@@ -102,7 +104,7 @@ pub async fn search(
     lifecycle: State<'_, Lifecycle>,
     query: knobas_search::SearchQuery,
 ) -> Result<knobas_search::SearchResponse, IpcError> {
-    search_inner(&lifecycle.pool()?, query).await
+    search_inner(&lifecycle.pool()?, lifecycle.registry(), query).await
 }
 
 /// What the launcher shows before anything is typed: the smart lists, the
@@ -113,7 +115,7 @@ pub async fn search(
 /// `not_ready` before the database is up, `internal` if either read fails.
 #[tauri::command]
 pub async fn launcher_home(lifecycle: State<'_, Lifecycle>) -> Result<LauncherHome, IpcError> {
-    launcher_home_inner(&lifecycle.pool()?).await
+    launcher_home_inner(&lifecycle.pool()?, lifecycle.registry()).await
 }
 
 /// Every smart list -- built-in and saved -- with its count and its change
@@ -129,7 +131,7 @@ pub async fn launcher_home(lifecycle: State<'_, Lifecycle>) -> Result<LauncherHo
 pub async fn smart_lists(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<knobas_search::SmartListSummary>, IpcError> {
-    smart_lists_inner(&lifecycle.pool()?).await
+    smart_lists_inner(&lifecycle.pool()?, lifecycle.registry()).await
 }
 
 /// The rows of one smart list, shaped exactly like a search.
@@ -146,7 +148,7 @@ pub async fn smart_list_items(
     id: String,
     limit: u32,
 ) -> Result<knobas_search::SearchResponse, IpcError> {
-    smart_list_items_inner(&lifecycle.pool()?, &id, limit).await
+    smart_list_items_inner(&lifecycle.pool()?, lifecycle.registry(), &id, limit).await
 }
 
 /// Save the launcher's current query as a smart list (#506, story 56).
@@ -168,7 +170,7 @@ pub async fn create_smart_list(
     label: String,
     query: String,
 ) -> Result<knobas_search::SmartListSummary, IpcError> {
-    create_smart_list_inner(&lifecycle.pool()?, &label, &query).await
+    create_smart_list_inner(&lifecycle.pool()?, lifecycle.registry(), &label, &query).await
 }
 
 /// Rename a saved smart list (#506, story 58).
@@ -185,7 +187,7 @@ pub async fn rename_smart_list(
     id: String,
     label: String,
 ) -> Result<(), IpcError> {
-    rename_smart_list_inner(&lifecycle.pool()?, &id, &label).await
+    rename_smart_list_inner(&lifecycle.pool()?, lifecycle.registry(), &id, &label).await
 }
 
 /// Forget a saved smart list (#506, story 58).
@@ -199,7 +201,7 @@ pub async fn delete_smart_list(
     lifecycle: State<'_, Lifecycle>,
     id: String,
 ) -> Result<(), IpcError> {
-    delete_smart_list_inner(&lifecycle.pool()?, &id).await
+    delete_smart_list_inner(&lifecycle.pool()?, lifecycle.registry(), &id).await
 }
 
 /// Every ticket view (#812, R-3.2, R-3.3), in list order, each with its count
@@ -213,7 +215,7 @@ pub async fn delete_smart_list(
 pub async fn ticket_views(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<crate::ticket_views::TicketViewRow>, IpcError> {
-    crate::ticket_views::list(&lifecycle.pool()?).await
+    crate::ticket_views::list(&lifecycle.pool()?, lifecycle.registry()).await
 }
 
 /// Save a ticket view (#812): a new one, or over the view the draft names,
@@ -319,19 +321,21 @@ pub async fn filter_suggestions(
 ) -> Result<knobas_search::FilterSuggestions, IpcError> {
     filter_suggestions_inner(
         &lifecycle.pool()?,
+        lifecycle.registry(),
         under.as_deref().unwrap_or(""),
         parents_only.unwrap_or(false),
     )
     .await
 }
 
-/// The launcher's engine, reading what the compiled-in adapters declare about
+/// The launcher's engine, reading what `registry`'s adapters declare about
 /// their payloads -- the parent `under:` scopes by among it (#595) -- and the
 /// one place the app hands those declarations to the database too (#627).
 ///
-/// **`Registry::for_process()`**, for the reason `commands::entity`'s
-/// `declared_paths` gives: a declaration is a property of the adapter kind,
-/// compiled into this binary, so the search has nothing to wait for and no
+/// **`registry` is the lifecycle's** (#1322), for the reason
+/// `commands::entity`'s `declared_paths` gives: a declaration is a property
+/// of the adapter kind, compiled in or installed, which the lifecycle holds
+/// before the database is up, so the search has nothing to wait for and no
 /// reason to answer `not_ready` until the scheduler is up.
 ///
 /// **One function for both copies** (the deputy's ruling of 2026-10-12 on
@@ -339,39 +343,42 @@ pub async fn filter_suggestions(
 /// line and coverage, and writes the same list to `sync.parent_declaration`,
 /// from which the database keeps `sync.item_parent` -- what `under:` reads.
 /// Bring-up calls this before the first sync, and every command calls it
-/// again, so the stored copy is always this binary's. A call that changes
+/// again, so the stored copy is always the running process's. A call that changes
 /// nothing is one read and writes nothing.
 ///
 /// # Errors
 ///
 /// `internal` if the declarations cannot be written.
-pub async fn searcher(pool: &PgPool) -> Result<knobas_search::Searcher, IpcError> {
+pub async fn searcher(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+) -> Result<knobas_search::Searcher, IpcError> {
     // **Notes leave the search while *Show notes and quick capture* is off**
     // (#940, R-13a.6, D10): the one primary-key read of `knobas.setting` that
     // every command's searcher makes, so the launcher, the lists and the
     // suggestions all agree. The notes stay in the database.
     let notes_shown = crate::capture::shown(pool).await?;
-    Ok(knobas_search::Searcher::declaring(
-        pool.clone(),
-        crate::sources::Registry::for_process().templates(),
+    Ok(
+        knobas_search::Searcher::declaring(pool.clone(), registry.descriptors())
+            .await?
+            .with_notes_shown(notes_shown),
     )
-    .await?
-    .with_notes_shown(notes_shown))
 }
 
-/// [`search`], against a pool.
+/// [`search`], against a pool and a registry.
 ///
 /// # Errors
 ///
 /// See [`search`].
 pub async fn search_inner(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     query: knobas_search::SearchQuery,
 ) -> Result<knobas_search::SearchResponse, IpcError> {
-    Ok(searcher(pool).await?.search(query).await?)
+    Ok(searcher(pool, registry).await?.search(query).await?)
 }
 
-/// [`launcher_home`], against a pool.
+/// [`launcher_home`], against a pool and a registry.
 ///
 /// Three reads, deliberately not one: the board is `knobas-search`'s, the
 /// health is stream F's and the queue depth is `knobas-core`'s, and no one of
@@ -381,8 +388,11 @@ pub async fn search_inner(
 /// # Errors
 ///
 /// See [`launcher_home`].
-pub async fn launcher_home_inner(pool: &PgPool) -> Result<LauncherHome, IpcError> {
-    let board = searcher(pool).await?.launcher_board().await?;
+pub async fn launcher_home_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+) -> Result<LauncherHome, IpcError> {
+    let board = searcher(pool, registry).await?.launcher_board().await?;
     let notes_shown = crate::capture::shown(pool).await?;
     Ok(LauncherHome {
         smart_lists: board.smart_lists,
@@ -398,17 +408,18 @@ pub async fn launcher_home_inner(pool: &PgPool) -> Result<LauncherHome, IpcError
     })
 }
 
-/// [`filter_suggestions`], against a pool.
+/// [`filter_suggestions`], against a pool and a registry.
 ///
 /// # Errors
 ///
 /// See [`filter_suggestions`].
 pub async fn filter_suggestions_inner(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     under: &str,
     parents_only: bool,
 ) -> Result<knobas_search::FilterSuggestions, IpcError> {
-    let searcher = searcher(pool).await?;
+    let searcher = searcher(pool, registry).await?;
     Ok(if parents_only {
         searcher.filter_parent_suggestions(under).await?
     } else {
@@ -416,59 +427,80 @@ pub async fn filter_suggestions_inner(
     })
 }
 
-/// [`smart_lists`], against a pool.
+/// [`smart_lists`], against a pool and a registry.
 ///
 /// # Errors
 ///
 /// See [`smart_lists`].
 pub async fn smart_lists_inner(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
 ) -> Result<Vec<knobas_search::SmartListSummary>, IpcError> {
-    Ok(searcher(pool).await?.smart_lists().await?)
+    Ok(searcher(pool, registry).await?.smart_lists().await?)
 }
 
-/// [`smart_list_items`], against a pool.
+/// [`smart_list_items`], against a pool and a registry.
 ///
 /// # Errors
 ///
 /// See [`smart_list_items`].
 pub async fn smart_list_items_inner(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     id: &str,
     limit: u32,
 ) -> Result<knobas_search::SearchResponse, IpcError> {
-    Ok(searcher(pool).await?.smart_list_items(id, limit).await?)
+    Ok(searcher(pool, registry)
+        .await?
+        .smart_list_items(id, limit)
+        .await?)
 }
 
-/// [`create_smart_list`], against a pool.
+/// [`create_smart_list`], against a pool and a registry.
 ///
 /// # Errors
 ///
 /// See [`create_smart_list`].
 pub async fn create_smart_list_inner(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     label: &str,
     query: &str,
 ) -> Result<knobas_search::SmartListSummary, IpcError> {
-    Ok(searcher(pool).await?.save_list(label, query).await?)
+    Ok(searcher(pool, registry)
+        .await?
+        .save_list(label, query)
+        .await?)
 }
 
-/// [`rename_smart_list`], against a pool.
+/// [`rename_smart_list`], against a pool and a registry.
 ///
 /// # Errors
 ///
 /// See [`rename_smart_list`].
-pub async fn rename_smart_list_inner(pool: &PgPool, id: &str, label: &str) -> Result<(), IpcError> {
-    Ok(searcher(pool).await?.rename_list(id, label).await?)
+pub async fn rename_smart_list_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    id: &str,
+    label: &str,
+) -> Result<(), IpcError> {
+    Ok(searcher(pool, registry)
+        .await?
+        .rename_list(id, label)
+        .await?)
 }
 
-/// [`delete_smart_list`], against a pool.
+/// [`delete_smart_list`], against a pool and a registry.
 ///
 /// # Errors
 ///
 /// See [`delete_smart_list`].
-pub async fn delete_smart_list_inner(pool: &PgPool, id: &str) -> Result<(), IpcError> {
-    Ok(searcher(pool).await?.delete_list(id).await?)
+pub async fn delete_smart_list_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    id: &str,
+) -> Result<(), IpcError> {
+    Ok(searcher(pool, registry).await?.delete_list(id).await?)
 }
 
 #[cfg(test)]

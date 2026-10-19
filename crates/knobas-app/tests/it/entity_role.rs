@@ -6,7 +6,7 @@
 //! file), and every source below is named with a run-unique suffix, so each
 //! test asserts on exactly the sources it configured.
 
-use knobas_app::commands::entity::list_entities_with_registry;
+use knobas_app::commands::entity::list_entities_inner;
 use knobas_core::entity_list::{EntityFilter, EntityOrder};
 use knobas_source::role::RoleClaim;
 use knobas_source::{KindInfo, SourceDescriptor};
@@ -164,7 +164,7 @@ fn asking(role: &str) -> EntityFilter {
 /// Other tests in this module write beside these, so their rows are left
 /// out of the pairs.
 async fn read(pool: &PgPool, filter: &EntityFilter, sources: &[&String]) -> Vec<(String, String)> {
-    let page = list_entities_with_registry(
+    let page = list_entities_inner(
         pool,
         &WithCustom,
         filter,
@@ -283,7 +283,7 @@ async fn a_role_intersects_the_named_sources_and_kinds() {
         sources: vec![jira.clone()],
         ..asking(knobas_source::role::CI)
     };
-    let page = list_entities_with_registry(
+    let page = list_entities_inner(
         &pool,
         &WithCustom,
         &none_filling,
@@ -318,7 +318,7 @@ async fn an_unknown_role_is_an_empty_page() {
     let source = configured(&pool, "mock").await;
     holding(&pool, &source, &["ticket"]).await;
     for order in [EntityOrder::UpdatedDesc, EntityOrder::Attention] {
-        let page = list_entities_with_registry(
+        let page = list_entities_inner(
             &pool,
             &WithCustom,
             &EntityFilter {
@@ -388,7 +388,7 @@ async fn every_statement_reads_the_scope() {
             sources: vec![filler.clone(), other.clone()],
             ..asking(knobas_source::role::CODE_HOST)
         };
-        let page = list_entities_with_registry(
+        let page = list_entities_inner(
             &pool,
             &WithCustom,
             &filter,

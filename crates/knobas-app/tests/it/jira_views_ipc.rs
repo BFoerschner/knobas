@@ -11,6 +11,7 @@
 
 use knobas_app::IpcErrorCode;
 use knobas_app::commands::entity::saved_view_board;
+use knobas_app::sources::Registry;
 use knobas_app::ticket_views::{self, TicketViewDraft, TicketViewRow};
 use serde_json::{Value, json};
 
@@ -109,7 +110,7 @@ async fn board(pool: &sqlx::PgPool, p: &str, keys: &[String]) -> (String, String
 }
 
 async fn listed(pool: &sqlx::PgPool, id: &str) -> Option<TicketViewRow> {
-    ticket_views::list(pool)
+    ticket_views::list(pool, &Registry::for_process())
         .await
         .expect("ticket_views")
         .into_iter()

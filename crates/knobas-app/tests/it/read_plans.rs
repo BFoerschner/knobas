@@ -71,7 +71,9 @@ const RESHAPED_RULES: &[knobas_core::inbox::Category] = &[
 async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) {
     let connector = knobas_db::test_util::scratch_database("read_plans").await;
     let pool = connector.app_pool().await.unwrap();
-    knobas_app::commands::search::searcher(&pool).await.unwrap();
+    knobas_app::commands::search::searcher(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     knobas_db::plan_shape::never_analyzed(&pool).await;
     let mut sources = Vec::new();
     for n in 0..3 {

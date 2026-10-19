@@ -835,6 +835,7 @@ async fn samples_of(
 async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
     let kuma = spawn_mock_kuma().await;
     let pool = pool().await;
+    let registry = knobas_app::sources::Registry::for_process();
     let id = unique_id();
     configure(&pool, &id, "kuma", &kuma.uri()).await;
 
@@ -884,6 +885,7 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
     // this file.
     let found = knobas_app::commands::search::search_inner(
         &pool,
+        &Registry::for_process(),
         knobas_search::SearchQuery {
             raw: "canary".to_owned(),
             limit: 20,
@@ -921,6 +923,7 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
     let by_state = |raw: &str| {
         knobas_app::commands::search::search_inner(
             &pool,
+            &registry,
             knobas_search::SearchQuery {
                 raw: raw.to_owned(),
                 limit: 20,

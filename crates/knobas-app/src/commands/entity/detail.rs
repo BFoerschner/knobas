@@ -214,14 +214,18 @@ select i.entity_id, i.source_id, i.kind, i.title, "#,
 /// id -- which is how a mistyped deep link reports itself rather than as a
 /// 500; [`NotFound`](crate::IpcErrorCode::NotFound) if nothing carries it;
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
-pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDetail, IpcError> {
+pub async fn get_entity_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+) -> Result<EntityDetail, IpcError> {
     // First, and before any query: `#/ticket/not-an-id` is a bad address, not
     // a missing entity, and the two want different words on screen.
     let entity = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
 
     // The declarations the path line reads the parent through (#596), as a
     // room's line reads them: the panel and the row draw one path.
-    let declarations = declared_paths(pool).await?;
+    let declarations = declared_paths(pool, registry).await?;
     let row = sqlx::query(DETAIL)
         .bind(entity.to_string())
         .bind(declarations.as_param())
@@ -242,7 +246,7 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
             && row.get::<Option<DateTime<Utc>>, _>("deleted_at").is_none()
             && row.get::<bool, _>("source_enabled")
     });
-    let kind_info = kind_info_for(adapter_kind.as_deref(), &kind);
+    let kind_info = kind_info_for(registry, adapter_kind.as_deref(), &kind);
 
     // The builds of the commit this entity stands at, asked only when it
     // stands at one (see [`DETAIL_BUILDS_AT`] for why).
@@ -311,14 +315,18 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
 /// renders, so the humaniser on the other side is the designed path rather
 /// than a degradation.
 ///
-/// **First declaration wins**, deterministically: `ADAPTERS` is a fixed table
-/// in a fixed order, so two adapters declaring one kind id resolve the same
-/// way on every call rather than by whichever the iterator reached first this
-/// time.
-fn kind_info_for(adapter_kind: Option<&str>, kind: &str) -> Option<knobas_source::KindInfo> {
+/// **First declaration wins**, deterministically: `registry` lists its
+/// adapters in a fixed order, so two adapters declaring one kind id resolve
+/// the same way on every call rather than by whichever the iterator reached
+/// first this time.
+fn kind_info_for(
+    registry: &dyn AdapterRegistry,
+    adapter_kind: Option<&str>,
+    kind: &str,
+) -> Option<knobas_source::KindInfo> {
     let adapter_kind = adapter_kind?;
-    crate::sources::Registry::for_process()
-        .templates()
+    registry
+        .descriptors()
         .into_iter()
         .find(|template| template.adapter_kind == adapter_kind)?
         .entity_kinds
@@ -339,12 +347,16 @@ pub async fn get_entity(
     entity_id: String,
 ) -> Result<EntityDetail, IpcError> {
     let pool = lifecycle.pool()?;
-    get_entity_inner(&pool, &entity_id).await
+    get_entity_inner(&pool, lifecycle.registry(), &entity_id).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn registry() -> crate::sources::Registry {
+        crate::sources::Registry::for_process()
+    }
 
     /// §3a, as a resolution rather than as a claim.
     ///
@@ -367,8 +379,8 @@ mod tests {
             .expect("the mock declares at least one kind")
             .clone();
 
-        let resolved =
-            kind_info_for(Some("mock"), &declared.id).expect("a kind the mock declares resolves");
+        let resolved = kind_info_for(&registry(), Some("mock"), &declared.id)
+            .expect("a kind the mock declares resolves");
         assert_eq!(resolved.id, declared.id);
         assert_eq!(resolved.label, declared.label);
         assert_eq!(resolved.plural, declared.plural);
@@ -383,9 +395,9 @@ mod tests {
     /// would panic on a perfectly ordinary corpus.
     #[test]
     fn nothing_declared_resolves_to_none_rather_than_to_a_guess() {
-        assert!(kind_info_for(Some("mock"), "no-such-kind").is_none());
-        assert!(kind_info_for(None, "ticket").is_none());
-        assert!(kind_info_for(Some("not-a-compiled-in-adapter"), "ticket").is_none());
+        assert!(kind_info_for(&registry(), Some("mock"), "no-such-kind").is_none());
+        assert!(kind_info_for(&registry(), None, "ticket").is_none());
+        assert!(kind_info_for(&registry(), Some("not-a-compiled-in-adapter"), "ticket").is_none());
     }
 
     /// One kind id declared by two adapters resolves by **adapter**, not by
@@ -409,7 +421,7 @@ mod tests {
         );
 
         for template in declaring {
-            let resolved = kind_info_for(Some(&template.adapter_kind), "ticket")
+            let resolved = kind_info_for(&registry(), Some(&template.adapter_kind), "ticket")
                 .expect("the adapter declares `ticket`");
             let expected = template
                 .entity_kinds

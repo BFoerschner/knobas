@@ -19,6 +19,7 @@
 //! whatever the machine is doing, so the limit can be far above anything a
 //! trivial statement takes.
 
+use knobas_app::sources::Registry;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -125,7 +126,7 @@ async fn a_declaration_recompute_runs_past_the_ui_limit_and_leaves_it_in_place()
     let recompute = tokio::spawn({
         let pool = pool.clone();
         async move {
-            knobas_app::commands::search::searcher(&pool)
+            knobas_app::commands::search::searcher(&pool, &Registry::for_process())
                 .await
                 .map(|_| ())
         }

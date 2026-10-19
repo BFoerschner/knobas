@@ -9,6 +9,7 @@
 
 use knobas_app::commands::entity::mini_board_inner;
 use knobas_app::commands::search::search_inner;
+use knobas_app::sources::Registry;
 use knobas_core::mini_board::MiniBoardCard;
 use knobas_search::{SearchFilters, SearchQuery};
 
@@ -180,6 +181,7 @@ fn drawn(card: &MiniBoardCard) -> Vec<String> {
 async fn searched(pool: &sqlx::PgPool, raw: &str) -> Vec<String> {
     let response = search_inner(
         pool,
+        &Registry::for_process(),
         SearchQuery {
             raw: raw.to_owned(),
             limit: 50,
@@ -428,6 +430,7 @@ async fn an_unknown_has_value_is_reported() {
     let pool = pool().await;
     let response = search_inner(
         &pool,
+        &Registry::for_process(),
         SearchQuery {
             raw: "has:dragons".to_owned(),
             limit: 5,
@@ -444,9 +447,14 @@ async fn an_unknown_has_value_is_reported() {
 #[tokio::test]
 async fn the_filter_suggestions_offer_the_four_signals() {
     let pool = pool().await;
-    let lists = knobas_app::commands::search::filter_suggestions_inner(&pool, "", false)
-        .await
-        .unwrap();
+    let lists = knobas_app::commands::search::filter_suggestions_inner(
+        &pool,
+        &Registry::for_process(),
+        "",
+        false,
+    )
+    .await
+    .unwrap();
     let offered: Vec<&str> = lists
         .fields
         .iter()

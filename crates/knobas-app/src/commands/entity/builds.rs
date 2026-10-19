@@ -18,7 +18,7 @@ pub(super) use knobas_core::builds::{PINS_SETTING, PipelineRow, RunRow};
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
 pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError> {
-    let declarations = declared_paths(pool).await?;
+    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
     let identity = identity_of(pool).await?;
     let fillers = crate::sources::crud::fillers(
         pool,
@@ -81,7 +81,7 @@ async fn runs_of_pipeline(
     limit: Option<u32>,
 ) -> Result<Vec<RunRow>, IpcError> {
     let entity = EntityRef::parse(pipeline_id).map_err(IpcError::invalid)?;
-    let declarations = declared_paths(pool).await?;
+    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
     let identity = identity_of(pool).await?;
     let Some(mut runs) =
         knobas_core::builds::pipeline_runs(pool, &declarations, &identity, &entity, limit).await?
@@ -1092,7 +1092,7 @@ pub async fn job_pipelines_inner(
             knobas_core::reach::Origin::LinkSet { .. } => "link_set",
         })
         .collect();
-    let declarations = declared_paths(pool).await?;
+    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
     let rows: Vec<(String, String, String, Option<String>)> = sqlx::query_as(JOB_PIPELINES)
         .bind(declarations.as_param())
         .bind(&ids)

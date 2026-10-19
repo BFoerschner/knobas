@@ -158,10 +158,10 @@ pub async fn mini_board_laned(
         }
         None => Vec::new(),
     };
-    let declarations = declared_paths(pool).await?;
+    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
     let only = match query.map(str::trim).filter(|query| !query.is_empty()) {
         Some(query) => {
-            crate::commands::search::searcher(pool)
+            crate::commands::search::searcher(pool, &crate::sources::Registry::for_process())
                 .await?
                 .matching_ids(query, "ticket")
                 .await?
@@ -256,15 +256,16 @@ pub async fn saved_view_board_laned(
         .collect();
     let mut only = members.clone();
     if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty())
-        && let Some(matched) = crate::commands::search::searcher(pool)
-            .await?
-            .matching_ids(query, "ticket")
-            .await?
+        && let Some(matched) =
+            crate::commands::search::searcher(pool, &crate::sources::Registry::for_process())
+                .await?
+                .matching_ids(query, "ticket")
+                .await?
     {
         let matched: std::collections::HashSet<String> = matched.into_iter().collect();
         only.retain(|id| matched.contains(id));
     }
-    let declarations = declared_paths(pool).await?;
+    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
     let identity = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
         .await?
         .identity;
@@ -355,6 +356,6 @@ pub async fn source_statuses(
     source_id: String,
 ) -> Result<Vec<String>, IpcError> {
     let pool = lifecycle.pool()?;
-    let declarations = declared_paths(&pool).await?;
+    let declarations = declared_paths(&pool, &crate::sources::Registry::for_process()).await?;
     Ok(knobas_core::mini_board::source_statuses(&pool, &source_id, &declarations).await?)
 }

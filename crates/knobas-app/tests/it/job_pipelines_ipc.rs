@@ -4,6 +4,7 @@
 //! step past its edge, which the job must not show.
 
 use knobas_app::commands::entity::{JobPipeline, job_pipelines_inner};
+use knobas_app::sources::Registry;
 use knobas_core::entity::EntityRef;
 use knobas_core::link::{self, Origin as LinkOrigin};
 use sqlx::PgPool;
@@ -13,7 +14,9 @@ async fn pool() -> PgPool {
     knobas_db::migrate::run(&pool).await.unwrap();
     // The declarations' stored copy, written as bring-up writes it (ADR-0019):
     // what fills `sync.item_revision` for the PR-check reason.
-    knobas_app::commands::search::searcher(&pool).await.unwrap();
+    knobas_app::commands::search::searcher(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     pool
 }
 

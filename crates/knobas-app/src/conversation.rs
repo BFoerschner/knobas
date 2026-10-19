@@ -345,7 +345,11 @@ async fn identity(pool: &PgPool) -> Result<Vec<String>, IpcError> {
 ///
 /// `invalid` for something that is not an entity id, `not_found` for one the
 /// mirror does not hold, `internal` for a query failure.
-pub async fn thread(pool: &PgPool, entity_id: &str) -> Result<Thread, IpcError> {
+pub async fn thread(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+) -> Result<Thread, IpcError> {
     let entity = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
     let id = entity.to_string();
     let row = sqlx::query(COMMENTS)
@@ -392,9 +396,7 @@ pub async fn thread(pool: &PgPool, entity_id: &str) -> Result<Thread, IpcError> 
             });
         }
     }
-    let declarations =
-        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process())
-            .await?;
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
     for row in sqlx::query(PULLS)
         .bind(&id)
         .bind(declarations.as_param())

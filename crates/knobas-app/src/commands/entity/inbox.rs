@@ -80,7 +80,7 @@ pub async fn inbox_items<R: tauri::Runtime>(
 #[tauri::command]
 pub async fn inbox_count(lifecycle: State<'_, Lifecycle>) -> Result<i64, IpcError> {
     let pool = lifecycle.pool()?;
-    inbox_count_inner(&pool, &crate::sources::Registry::for_process(), Utc::now()).await
+    inbox_count_inner(&pool, lifecycle.registry(), Utc::now()).await
 }
 
 /// [`inbox_count`], against a pool and a clock.
@@ -152,14 +152,8 @@ pub async fn snooze_inbox_item<R: tauri::Runtime>(
     until: DateTime<Utc>,
 ) -> Result<(), IpcError> {
     let pool = lifecycle.pool()?;
-    let written = snooze_inbox_item_inner(
-        &pool,
-        &crate::sources::Registry::for_process(),
-        Utc::now(),
-        &item_key,
-        until,
-    )
-    .await?;
+    let written =
+        snooze_inbox_item_inner(&pool, lifecycle.registry(), Utc::now(), &item_key, until).await?;
     announce(&app, written);
     Ok(())
 }
@@ -207,13 +201,8 @@ pub async fn complete_inbox_item<R: tauri::Runtime>(
     item_key: String,
 ) -> Result<(), IpcError> {
     let pool = lifecycle.pool()?;
-    let written = complete_inbox_item_inner(
-        &pool,
-        &crate::sources::Registry::for_process(),
-        Utc::now(),
-        &item_key,
-    )
-    .await?;
+    let written =
+        complete_inbox_item_inner(&pool, lifecycle.registry(), Utc::now(), &item_key).await?;
     announce(&app, written);
     Ok(())
 }

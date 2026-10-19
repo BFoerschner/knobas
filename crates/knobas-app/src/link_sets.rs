@@ -499,12 +499,13 @@ fn pattern_refusal(pattern: &LinkSetPattern) -> Option<String> {
 /// Read a pattern's query as the grammar reads it today, or say why not.
 async fn reading(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     pattern: &LinkSetPattern,
 ) -> Result<Result<knobas_search::Pattern, String>, IpcError> {
     if let Some(why) = pattern_refusal(pattern) {
         return Ok(Err(why));
     }
-    Ok(crate::commands::search::searcher(pool)
+    Ok(crate::commands::search::searcher(pool, registry)
         .await?
         .pattern(pattern.query.trim())
         .await?)
@@ -537,14 +538,13 @@ const RULE_TICKETS: &str = concat!(
 /// The tickets each group of rules applies to, by group.
 async fn tickets_of(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     rules: &[(i32, &LinkSetRule)],
 ) -> Result<Vec<(i32, RuleTicket)>, IpcError> {
     if rules.is_empty() {
         return Ok(Vec::new());
     }
-    let declarations =
-        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process())
-            .await?;
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
     let groups: Vec<i32> = rules.iter().map(|(n, _)| *n).collect();
     let kinds: Vec<&str> = rules.iter().map(|(_, rule)| rule.kind.as_str()).collect();
     let values: Vec<&str> = rules.iter().map(|(_, rule)| rule.value.as_str()).collect();
@@ -574,11 +574,12 @@ async fn tickets_of(
 /// rules and how many tickets it shows on; and per set, those tickets.
 async fn read(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     ids: Option<&[String]>,
 ) -> Result<Vec<(LinkSetRow, Vec<RuleTicket>)>, IpcError> {
-    // Make sure the stored parent resolutions are the binary's (#627), as
+    // Make sure the stored parent resolutions are the registry's (#627), as
     // every search does before it reads them.
-    crate::commands::search::searcher(pool).await?;
+    crate::commands::search::searcher(pool, registry).await?;
     let sets = sqlx::query(
         "select id, name, description from knobas.link_set
           where $1::text[] is null or id = any($1)
@@ -601,9 +602,7 @@ async fn read(
         .bind(&ids)
         .fetch_all(pool)
         .await?;
-    let declarations =
-        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process())
-            .await?;
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
     let declarations = declarations.as_param();
     let rules = sqlx::query(
         "select r.set_id, r.kind, r.value,
@@ -706,7 +705,7 @@ async fn read(
         }
     }
     let grouped: Vec<(i32, &LinkSetRule)> = stored.iter().map(|(n, rule)| (*n, rule)).collect();
-    for (n, ticket) in tickets_of(pool, &grouped).await? {
+    for (n, ticket) in tickets_of(pool, registry, &grouped).await? {
         let entry = &mut out[usize::try_from(n).map_err(IpcError::internal)?];
         entry.0.tickets += 1;
         entry.0.mine += i64::from(ticket.mine);
@@ -721,8 +720,11 @@ async fn read(
 /// # Errors
 ///
 /// `internal` if a read fails.
-pub async fn list(pool: &PgPool) -> Result<Vec<LinkSetRow>, IpcError> {
-    Ok(read(pool, None)
+pub async fn list(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+) -> Result<Vec<LinkSetRow>, IpcError> {
+    Ok(read(pool, registry, None)
         .await?
         .into_iter()
         .map(|(row, _)| row)
@@ -734,8 +736,12 @@ pub async fn list(pool: &PgPool) -> Result<Vec<LinkSetRow>, IpcError> {
 /// # Errors
 ///
 /// `not_found` if no set has that id; `internal` if a read fails.
-pub async fn get(pool: &PgPool, id: &str) -> Result<LinkSetDetail, IpcError> {
-    read(pool, Some(&[id.to_owned()]))
+pub async fn get(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    id: &str,
+) -> Result<LinkSetDetail, IpcError> {
+    read(pool, registry, Some(&[id.to_owned()]))
         .await?
         .into_iter()
         .next()
@@ -749,12 +755,16 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<LinkSetDetail, IpcError> {
 /// # Errors
 ///
 /// `invalid` for a rule [`rule_refusal`] names; `internal` if a read fails.
-pub async fn preview(pool: &PgPool, rule: &LinkSetRule) -> Result<Vec<RuleTicket>, IpcError> {
+pub async fn preview(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    rule: &LinkSetRule,
+) -> Result<Vec<RuleTicket>, IpcError> {
     if let Some(why) = rule_refusal(rule) {
         return Err(IpcError::invalid(why));
     }
-    crate::commands::search::searcher(pool).await?;
-    Ok(tickets_of(pool, &[(0, rule)])
+    crate::commands::search::searcher(pool, registry).await?;
+    Ok(tickets_of(pool, registry, &[(0, rule)])
         .await?
         .into_iter()
         .map(|(_, ticket)| ticket)
@@ -771,9 +781,10 @@ pub async fn preview(pool: &PgPool, rule: &LinkSetRule) -> Result<Vec<RuleTicket
 /// `internal` if a read fails.
 pub async fn preview_pattern(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     pattern: &LinkSetPattern,
 ) -> Result<PatternPreview, IpcError> {
-    let read = reading(pool, pattern).await?;
+    let read = reading(pool, registry, pattern).await?;
     let kind = if PATTERN_KINDS.contains(&pattern.kind.as_str()) {
         pattern.kind.as_str()
     } else {
@@ -814,9 +825,7 @@ pub async fn preview_pattern(
         .take(MATCHES_SHOWN)
         .map(|(id, _)| (kind.to_owned(), id))
         .collect();
-    let declarations =
-        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process())
-            .await?;
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
     Ok(PatternPreview {
         count,
         matches: member_rows(pool, &declarations.as_param(), &wanted).await?,
@@ -836,7 +845,11 @@ pub async fn preview_pattern(
 /// for or whose entity is not of the member's kind; `not_found` for a draft
 /// naming a set that is not there (one deleted while its editor was open);
 /// `internal` if the write fails.
-pub async fn save(pool: &PgPool, draft: LinkSetDraft) -> Result<LinkSetDetail, IpcError> {
+pub async fn save(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    draft: LinkSetDraft,
+) -> Result<LinkSetDetail, IpcError> {
     if let Some(why) = refusal(&draft) {
         return Err(IpcError::invalid(why));
     }
@@ -865,7 +878,7 @@ pub async fn save(pool: &PgPool, draft: LinkSetDraft) -> Result<LinkSetDetail, I
     }
     let mut readings: Vec<serde_json::Value> = Vec::with_capacity(draft.patterns.len());
     for pattern in &draft.patterns {
-        match reading(pool, pattern).await? {
+        match reading(pool, registry, pattern).await? {
             Ok(read) => readings.push(serde_json::to_value(read).map_err(IpcError::internal)?),
             Err(why) => {
                 return Err(IpcError::invalid(format!(
@@ -960,7 +973,7 @@ pub async fn save(pool: &PgPool, draft: LinkSetDraft) -> Result<LinkSetDetail, I
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    get(pool, &id).await
+    get(pool, registry, &id).await
 }
 
 /// Forget a set: its members and rules go with it, and every job it applied
@@ -1136,8 +1149,12 @@ const JOB_PARENT: &str = concat!(
 /// # Errors
 ///
 /// `internal` if a read fails.
-pub async fn on_job(pool: &PgPool, ticket_id: &str) -> Result<JobLinkSets, IpcError> {
-    crate::commands::search::searcher(pool).await?;
+pub async fn on_job(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    ticket_id: &str,
+) -> Result<JobLinkSets, IpcError> {
+    crate::commands::search::searcher(pool, registry).await?;
     let sets = sqlx::query(JOB_SETS)
         .bind(ticket_id)
         .fetch_all(pool)
@@ -1275,8 +1292,11 @@ const HINTS: &str = concat!(
 /// # Errors
 ///
 /// `internal` if a read fails.
-pub async fn hints(pool: &PgPool) -> Result<Vec<LinkSetHint>, IpcError> {
-    crate::commands::search::searcher(pool).await?;
+pub async fn hints(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+) -> Result<Vec<LinkSetHint>, IpcError> {
+    crate::commands::search::searcher(pool, registry).await?;
     let rows = sqlx::query(HINTS)
         .bind(HINT_TICKETS)
         .fetch_all(pool)

@@ -22,25 +22,27 @@ use super::*;
 #[tauri::command]
 pub async fn docs_tree(lifecycle: State<'_, Lifecycle>) -> Result<crate::docs::DocsTree, IpcError> {
     let pool = lifecycle.pool()?;
-    docs_tree_inner(&pool).await
+    docs_tree_inner(&pool, lifecycle.registry()).await
 }
 
-/// [`docs_tree`] with the pool handed in, for a test.
+/// [`docs_tree`] with the pool and the registry handed in, for a test.
 ///
 /// # Errors
 ///
 /// As [`docs_tree`].
-pub async fn docs_tree_inner(pool: &PgPool) -> Result<crate::docs::DocsTree, IpcError> {
+pub async fn docs_tree_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+) -> Result<crate::docs::DocsTree, IpcError> {
     // The census table the spaces come from is resolved from the stored
     // declarations, which every search command writes first (#759).
-    crate::commands::search::searcher(pool).await?;
-    let declarations = declared_paths(pool).await?;
+    crate::commands::search::searcher(pool, registry).await?;
+    let declarations = declared_paths(pool, registry).await?;
     let me = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
         .await
         .map_err(IpcError::internal)?
         .identity;
-    let registry = crate::sources::Registry::for_process();
-    let fillers = crate::sources::crud::fillers(pool, &registry, knobas_source::role::WIKI).await?;
+    let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::WIKI).await?;
     crate::docs::tree(
         pool,
         &declarations,
@@ -65,26 +67,26 @@ pub async fn docs_page(
     entity_id: String,
 ) -> Result<crate::docs::DocPage, IpcError> {
     let pool = lifecycle.pool()?;
-    docs_page_inner(&pool, &entity_id).await
+    docs_page_inner(&pool, lifecycle.registry(), &entity_id).await
 }
 
-/// [`docs_page`] with the pool handed in, for a test.
+/// [`docs_page`] with the pool and the registry handed in, for a test.
 ///
 /// # Errors
 ///
 /// As [`docs_page`].
 pub async fn docs_page_inner(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     entity_id: &str,
 ) -> Result<crate::docs::DocPage, IpcError> {
-    crate::commands::search::searcher(pool).await?;
-    let declarations = declared_paths(pool).await?;
+    crate::commands::search::searcher(pool, registry).await?;
+    let declarations = declared_paths(pool, registry).await?;
     let me = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
         .await
         .map_err(IpcError::internal)?
         .identity;
-    let registry = crate::sources::Registry::for_process();
-    let templates = registry.templates();
+    let templates = registry.descriptors();
     crate::docs::page(
         pool,
         &declarations,
@@ -112,23 +114,23 @@ pub async fn docs_search(
     space: Option<crate::docs::DocsScope>,
 ) -> Result<Option<crate::docs::DocsHits>, IpcError> {
     let pool = lifecycle.pool()?;
-    docs_search_inner(&pool, &query, space.as_ref()).await
+    docs_search_inner(&pool, lifecycle.registry(), &query, space.as_ref()).await
 }
 
-/// [`docs_search`] with the pool handed in, for a test.
+/// [`docs_search`] with the pool and the registry handed in, for a test.
 ///
 /// # Errors
 ///
 /// As [`docs_search`].
 pub async fn docs_search_inner(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     query: &str,
     space: Option<&crate::docs::DocsScope>,
 ) -> Result<Option<crate::docs::DocsHits>, IpcError> {
-    let searcher = crate::commands::search::searcher(pool).await?;
-    let registry = crate::sources::Registry::for_process();
+    let searcher = crate::commands::search::searcher(pool, registry).await?;
     // The wiki's search, so it narrows itself to the role's fillers (#1296).
-    let fillers = crate::sources::crud::fillers(pool, &registry, knobas_source::role::WIKI).await?;
+    let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::WIKI).await?;
     crate::docs::search(
         pool,
         &searcher,
@@ -156,7 +158,7 @@ pub async fn docs_export_markdown<R: tauri::Runtime>(
     use tauri::Manager;
     let pool = lifecycle.pool()?;
     let downloads = app.path().download_dir().map_err(IpcError::internal)?;
-    docs_export_markdown_inner(&pool, &entity_id, &downloads).await
+    docs_export_markdown_inner(&pool, lifecycle.registry(), &entity_id, &downloads).await
 }
 
 /// [`docs_export_markdown`] into `folder`, for a test.
@@ -166,12 +168,12 @@ pub async fn docs_export_markdown<R: tauri::Runtime>(
 /// As [`docs_export_markdown`].
 pub async fn docs_export_markdown_inner(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     entity_id: &str,
     folder: &std::path::Path,
 ) -> Result<crate::docs::DocExport, IpcError> {
-    crate::commands::search::searcher(pool).await?;
-    let declarations = declared_paths(pool).await?;
-    let registry = crate::sources::Registry::for_process();
+    crate::commands::search::searcher(pool, registry).await?;
+    let declarations = declared_paths(pool, registry).await?;
     crate::docs::export(
         pool,
         &declarations,
@@ -198,8 +200,15 @@ pub async fn docs_edit_section<R: tauri::Runtime>(
     text: String,
 ) -> Result<knobas_core::write_queue::QueuedWrite, IpcError> {
     let state = crate::sources::state(&app)?;
-    let payload =
-        docs_edit_section_payload(&state.pool, &entity_id, section, version, &text).await?;
+    let payload = docs_edit_section_payload(
+        &state.pool,
+        state.registry.as_ref(),
+        &entity_id,
+        section,
+        version,
+        &text,
+    )
+    .await?;
     crate::sources::write_queue::submit_in_background(&state, payload).await
 }
 
@@ -212,12 +221,12 @@ pub async fn docs_edit_section<R: tauri::Runtime>(
 /// live mirror does not hold.
 pub async fn docs_edit_section_payload(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     entity_id: &str,
     section: u32,
     version: Option<u64>,
     text: &str,
 ) -> Result<serde_json::Value, IpcError> {
-    let registry = crate::sources::Registry::for_process();
     crate::docs::section_edit(
         pool,
         |kind| registry.doc_writes(kind),
@@ -246,7 +255,8 @@ pub async fn docs_create_page<R: tauri::Runtime>(
     link_to: Option<String>,
 ) -> Result<knobas_core::write_queue::QueuedWrite, IpcError> {
     let state = crate::sources::state(&app)?;
-    let (payload, _) = docs_create_page_payload(&state.pool, &page).await?;
+    let (payload, _) =
+        docs_create_page_payload(&state.pool, state.registry.as_ref(), &page).await?;
     create_page_in_background(&state, payload, link_to).await
 }
 
@@ -289,12 +299,12 @@ pub async fn create_page_in_background(
 /// writes no pages; `not_found` for a parent the live mirror does not hold.
 pub async fn docs_create_page_payload(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     page: &crate::docs::NewPage,
 ) -> Result<(serde_json::Value, String), IpcError> {
     // The space comes from the census table, kept from the stored
     // declarations every search command writes first (#759).
-    crate::commands::search::searcher(pool).await?;
-    let registry = crate::sources::Registry::for_process();
+    crate::commands::search::searcher(pool, registry).await?;
     crate::docs::create_page(pool, |kind| registry.doc_writes(kind), page).await
 }
 
@@ -312,7 +322,7 @@ pub async fn move_notes_to_confluence<R: tauri::Runtime>(
     parent: String,
 ) -> Result<Vec<knobas_core::write_queue::QueuedWrite>, IpcError> {
     let state = crate::sources::state(&app)?;
-    let payloads = move_notes_payloads(&state.pool, &parent).await?;
+    let payloads = move_notes_payloads(&state.pool, state.registry.as_ref(), &parent).await?;
     let mut queued = Vec::with_capacity(payloads.len());
     let mut last = None;
     for (payload, _) in payloads {
@@ -336,14 +346,14 @@ pub async fn move_notes_to_confluence<R: tauri::Runtime>(
 /// for the parent.
 pub async fn move_notes_payloads(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     parent: &str,
 ) -> Result<Vec<(serde_json::Value, String)>, IpcError> {
     let notes = knobas_core::note::all(pool).await?;
     if notes.is_empty() {
         return Err(IpcError::invalid("There are no notes to move."));
     }
-    crate::commands::search::searcher(pool).await?;
-    let registry = crate::sources::Registry::for_process();
+    crate::commands::search::searcher(pool, registry).await?;
     let mut payloads = Vec::with_capacity(notes.len());
     for page in crate::notes_export::note_pages(&notes, parent) {
         payloads

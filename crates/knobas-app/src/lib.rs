@@ -699,7 +699,9 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             // parents from them, so a sync that ran first would resolve against
             // nothing and be recomputed a moment later. Failure is logged, not
             // fatal -- every search command writes them again on its way in.
-            if let Err(error) = commands::search::searcher(db.pool()).await {
+            if let Err(error) =
+                commands::search::searcher(db.pool(), handle.state::<Lifecycle>().registry()).await
+            {
                 tracing::error!(?error, "the adapters' declarations could not be stored");
             }
             // Before `Ready`, and before `AppState` is installed: the sync

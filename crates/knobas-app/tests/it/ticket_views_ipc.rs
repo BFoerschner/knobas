@@ -8,6 +8,7 @@
 
 use knobas_app::IpcErrorCode;
 use knobas_app::commands::entity::mini_board_inner;
+use knobas_app::sources::Registry;
 use knobas_app::ticket_views::{self, TicketView, TicketViewDraft, TicketViewRow};
 
 async fn pool() -> sqlx::PgPool {
@@ -86,7 +87,7 @@ fn draft(name: &str, query: &str) -> TicketViewDraft {
 
 /// The rows `ticket_views` answers for these ids, in its order.
 async fn listed(pool: &sqlx::PgPool, ids: &[&str]) -> Vec<TicketViewRow> {
-    ticket_views::list(pool)
+    ticket_views::list(pool, &Registry::for_process())
         .await
         .expect("ticket_views")
         .into_iter()
