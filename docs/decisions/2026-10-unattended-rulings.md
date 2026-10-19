@@ -6391,3 +6391,8 @@ The merge-manager's own rulings:
   Its type is still checked at the call, not at load as `download`'s is: a wrongly typed
   `translate-query` fails one editable copy with a toast, not the install. **Reversing:** low (a
   `check_translate_query` at load).
+- **The health line matches the host's fixed wording (#1252)**, not a structured reason. `Exceeded`
+  in `knobas-wasm-host` already fixes the text ("was stopped at its deadline of N s" / "its memory
+  cap of N MiB"), and a structured field would add an IPC field needing a §10.8 entry and a
+  reserved sign-off. `stoppedAt` in `settings.ts` reads it. **Reversing:** medium (add the field,
+  read it instead of the regex).

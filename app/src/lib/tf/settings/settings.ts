@@ -118,7 +118,7 @@ export function sourceState(
   }
   const outcome = status?.last_outcome ?? source.last_run?.outcome ?? null;
   if (outcome === "error") {
-    const limit = source.last_run?.outcome === "error" ? stoppedAt(source.last_run.error) : null;
+    const limit = stoppedAt(source.last_run?.error);
     const text = `Failed ${ago(finished, now)}`;
     return { tone: "warn", text: limit ? `${text}, stopped at ${limit}` : text, failed: false };
   }
