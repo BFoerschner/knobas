@@ -186,7 +186,8 @@ pub struct EntityFilter {
     /// mirror answers per read (`sources::crud::fillers`). With
     /// [`Self::sources`] as well, the fillers among them. With
     /// [`Self::kinds`] empty it also narrows to the role's kinds (CI's are
-    /// the pipeline and run kinds its fillers declare); with kinds named, to
+    /// the run kinds its fillers declare; a pipeline is the `pipelines`
+    /// read's, #1344); with kinds named, to
     /// the role's among them. An unknown role has no fillers, so its page is
     /// empty, never an error. `None` is unscoped, and absent on the wire
     /// reads as `None`, as [`Self::reach`] does.

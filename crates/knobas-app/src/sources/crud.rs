@@ -1209,9 +1209,10 @@ pub async fn fillers(
 ///
 /// A built-in role's kinds are its minimum's, required and optional: each
 /// kind it names by id, and each kind a filler declares on a frame it names
-/// (CI's pipelines and runs, as the Builds frame reads them; a ticket
-/// system's saved views). A custom role's kinds are those its fillers emit
-/// that are no built-in role's the source claims. An unknown role has no
+/// (CI's runs; a ticket system's saved views), but a kind declared on the
+/// pipeline frame, which is the `pipelines` read's (#1344). A custom role's
+/// kinds are those its fillers emit that are no built-in role's the source
+/// claims, CI's pipelines included. An unknown role has no
 /// fillers and no kinds.
 ///
 /// # Errors
@@ -1255,7 +1256,7 @@ fn role_kinds<'a>(role: &str, fillers: impl Iterator<Item = &'a SourceDescriptor
     let mut kinds = std::collections::BTreeSet::new();
     for template in fillers {
         if let Some(wanted) = builtin_role {
-            kinds.extend(builtin_kinds(wanted, template));
+            kinds.extend(listed_kinds(wanted, template));
             continue;
         }
         let builtin: std::collections::BTreeSet<String> = template
@@ -1273,6 +1274,24 @@ fn role_kinds<'a>(role: &str, fillers: impl Iterator<Item = &'a SourceDescriptor
         );
     }
     kinds.into_iter().collect()
+}
+
+/// The kinds of `min` that the entity list reads for the role: those of
+/// [`builtin_kinds`] but a kind declared on the pipeline frame. A pipeline is
+/// the `pipelines` read's (narrowed to the same fillers), and CI's rows on
+/// the entity list are its runs, which the job's Builds section draws one per
+/// pipeline (#1344).
+fn listed_kinds(min: &knobas_source::role::Minimum, template: &SourceDescriptor) -> Vec<String> {
+    let pipelines: Vec<&String> = template
+        .payload_paths
+        .iter()
+        .filter(|paths| paths.frame == Some(knobas_source::Frame::Pipeline))
+        .map(|paths| &paths.kind)
+        .collect();
+    builtin_kinds(min, template)
+        .into_iter()
+        .filter(|kind| !pipelines.contains(&kind))
+        .collect()
 }
 
 /// The kinds of `min` that `template` emits or may emit: every kind it names

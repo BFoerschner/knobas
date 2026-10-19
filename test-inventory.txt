@@ -784,6 +784,7 @@ knobas-app	test/it	entity_mirror::the_state_chip_and_its_tones_match_their_types
 knobas-app	test/it	entity_mirror::the_suggestion_shapes_match_their_typescript_mirror
 knobas-app	test/it	entity_mirror::the_url_match_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_role::a_custom_role_reads_its_adapters_other_kinds
+knobas-app	test/it	entity_role::a_reached_pipeline_is_not_read_for_ci
 knobas-app	test/it	entity_role::a_role_intersects_the_named_sources_and_kinds
 knobas-app	test/it	entity_role::a_role_reads_its_fillers_and_its_kinds_and_nothing_else
 knobas-app	test/it	entity_role::a_source_filling_two_roles_is_drawn_for_each

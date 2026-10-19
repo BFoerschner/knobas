@@ -7282,3 +7282,28 @@ The merge-manager's rulings (Opus):
 - **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the ones the
   ticket names, which are each adapter's own tests and the Gitea, Forgejo and Kuma live suites,
   plus the descriptor pin. *Reversing:* n/a.
+
+## #1344: A pipeline a ticket reaches is not drawn in the job's Builds section (Opus implementer, 2026-10-19)
+
+- **The entity list's CI kinds are its run kinds.** *Fork (the ticket's three):* the Builds
+  section names CI's run kinds itself, read from the mirror; `list_entities` asked for CI with no
+  kinds answers runs only; or a reached pipeline is drawn on purpose and story 14 is reworded.
+  *Ruling:* the second. `role_scope`'s kinds for a built-in role leave out a kind declared on the
+  `pipeline` frame (`listed_kinds`); the custom-role exclusion still counts it as CI's. A dated
+  §10.8 entry (`1344-entity-list-ci-kinds-are-runs.md`) amends #1294's. *Reasoning:* drawing the
+  pipeline is wrong on screen, not just in the spec: the section reads the latest run per
+  pipeline and its rollup counts each row as a "configuration", so a ticket linked to a build
+  configuration and one of its runs would count that configuration twice. Naming the run kinds in
+  the shell contradicts story 14 ("without the shell having to work out the kinds") and the spec's
+  tally test (the filter carries the role and no run kinds), and would need a new read. The
+  second fork keeps story 14 true word for word, changes no wire shape, and matches #1345's
+  ruling that a pipeline is the `pipelines` read's (the link-set editor's candidates come from
+  it, narrowed to the same fillers). Nothing else asks the entity list for CI. *Cost:* spec
+  #1293's design note "a built-in role's kinds are its minimum's kinds plus the frame kinds its
+  fillers declare" now has a CI exception on the entity list; the §10.8 entry records it.
+  *Reversing:* low (drop the filter in `listed_kinds` and in `fakeRoleScope`).
+- **Seam:** the one the ticket names, the read's interface: `list_entities_with_registry` in
+  `entity_role.rs`, read with the Builds section's filter (CI, no kinds, latest per parent,
+  scoped by a ticket's reach), plus the fake's `fakeRoleScope` in `fake-features.test.ts`. The
+  job and tally tests stub `listEntities`, so they cannot witness what the mirror answers.
+  *Reversing:* n/a.
