@@ -109,8 +109,6 @@ knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_role_the
 knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_saved_view_the_mirror_sends
 knobas-app	lib/knobas_app	commands::entity::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::search::tests::search_failures_keep_their_kind
-knobas-app	lib/knobas_app	commands::search::tests::the_filter_suggestions_shape_matches_its_typescript_mirror
-knobas-app	lib/knobas_app	commands::search::tests::the_launcher_home_shape_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::search::tests::the_two_entity_rows_are_one_wire_shape
 knobas-app	lib/knobas_app	commands::sources::tests::adding_a_source_voids_a_purge_the_scheduler_still_owes_that_id
 knobas-app	lib/knobas_app	commands::sources::tests::deleting_a_source_tells_the_scheduler_to_forget_it
@@ -267,7 +265,8 @@ knobas-app	lib/knobas_app	tests::the_event_names_match_their_typescript_mirror
 knobas-app	lib/knobas_app	tests::the_main_window_is_declared_visible_and_run_does_not_show_it
 knobas-app	lib/knobas_app	ticket_views::tests::a_slug_is_an_address_whatever_the_name_was
 knobas-app	lib/knobas_app	ticket_views::tests::any_text_saves_and_only_the_display_words_are_checked
-knobas-app	lib/knobas_app	ticket_views::tests::the_views_and_their_mirror_agree
+knobas-app	lib/knobas_app	ticket_views::tests::the_view_commands_are_invoked_by_their_names
+knobas-app	lib/knobas_app	ticket_views::tests::the_vocabulary_unions_are_the_lists
 knobas-app	lib/knobas_app	time::passive::tests::a_target_interrupted_by_another_does_not_merge_across_it
 knobas-app	lib/knobas_app	time::passive::tests::a_visit_of_exactly_the_floor_is_a_block
 knobas-app	lib/knobas_app	time::passive::tests::a_visit_of_ninety_seconds_is_not_a_block
@@ -1932,8 +1931,6 @@ knobas-search	lib/knobas_search	tests::a_pasted_document_is_refused_rather_than_
 knobas-search	lib/knobas_search	tests::an_unbounded_filter_list_is_refused
 knobas-search	lib/knobas_search	tests::only_the_absent_corpora_short_circuit
 knobas-search	lib/knobas_search	tests::the_limit_is_clamped_rather_than_refused
-knobas-search	lib/knobas_search	types::tests::the_hit_shape_matches_its_typescript_mirror
-knobas-search	lib/knobas_search	types::tests::the_response_shape_matches_its_typescript_mirror
 knobas-search	lib/knobas_search	vocab::tests::a_derived_monogram_is_always_two_characters
 knobas-search	lib/knobas_search	vocab::tests::a_descriptor_cannot_claim_a_kind_knobas_owns
 knobas-search	lib/knobas_search	vocab::tests::a_short_kind_is_padded_and_a_compound_one_is_initialled

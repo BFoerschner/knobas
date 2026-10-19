@@ -8190,3 +8190,48 @@ types, identical to the hand-written `sources.ts` at 7a96c634.
   `knobas_core::payload`, the re-export), to list the five crates gaining a derive and the one
   gaining a dependency (#1328's ruling), and to record the `transparent` note and #1372.
   *Reversing:* docs only.
+## #1329: the search barrel is generated (Opus implementer, 2026-10-20)
+
+Reserved for Björn, ruled by implementer on Opus (the §10.8 entry), under the 2026-10-18
+reserved-steps rule. The entry is `docs/contract/10.8/1329-the-search-barrel-is-generated.md`.
+
+- **`CredentialHealth` is the sources barrel's, and #1327 is in flight.** *Fork:* `LauncherHome`
+  reaches `knobas_sync::CredentialHealth`; wait for #1327, spell the field with `#[ts(type)]`
+  (an import the generator cannot write), or derive it here. *Ruling:* take #1327's
+  `knobas-sync/Cargo.toml` and `health.rs` byte for byte (its 3eea8956) as a commit of their own.
+  *Reasoning:* nobody waits on a sibling, and identical blobs make the second rebase a no-op
+  rather than a conflict. *Reversing:* drop the commit once #1327 is in `main`.
+- **Two Rust `EntityRow`s, one TypeScript type.** *Fork:* the search crate's `EntityRow` derives
+  `TS` for `SearchHit`'s flatten; export it too, under another name, or type `LauncherHome::recent`
+  with the room's. *Ruling:* `#[ts(as = "Vec<knobas_core::entity_list::EntityRow>")]`, as the
+  hand-written mirror imported entity.ts's; the flatten inlines the search crate's fields, so it
+  is never exported. *Reasoning:* the wire is one shape, pinned by
+  `the_two_entity_rows_are_one_wire_shape`. *Reversing:* export it as `SearchEntityRow`.
+- **The ticket views' string vocabularies.** *Ruling:* #1326's pattern: an enum per list, never
+  built, used through `#[ts(as = …)]`, pinned to its list by `the_vocabulary_unions_are_the_lists`;
+  `Layout` and `SortDirection` inlined because the mirror spelled them inline. *Reasoning:* typing
+  the fields would change what a bad word decodes to (a serde error instead of the save's own
+  sentence). *Reversing:* type the fields with the enums.
+- **`SavedViewSource::kind` and `::sprint`.** *Fork:* no Rust list backs `"board" | "filter"`,
+  and `sprint` is a `serde_json::Value`. *Ruling:* `SavedViewKind` and `ActiveSprint`, never
+  built, inlined. *Reasoning:* the shell's types were narrower than the Rust; widening them to
+  `string` and `unknown` would change what the shell compiles against, which this ticket must
+  not. The kind's list is the `case` in `knobas_sync::saved_views`' projection, which no test
+  compares with the enum. *Reversing:* `#[ts(type = "string")]` and `unknown`, and fix the callers.
+- **Which pins are "the barrel's".** Every test that read `search.ts` for type text:
+  `knobas_search::types`' two, `commands::search`'s two, and the type half of
+  `ticket_views::the_views_and_their_mirror_agree`. The half that checks the barrel invokes the
+  five view commands and `lib.rs` registers the two #1245 renamed stays, renamed
+  `the_view_commands_are_invoked_by_their_names`. `the_two_entity_rows_are_one_wire_shape` stays:
+  it compares two Rust wires, not a mirror.
+- **Docs moved and how.** Every TypeScript doc rule the Rust lacked moved onto the Rust:
+  `owner:`/`by:` naming authors, `Segment`'s `{segment.text}`-never-`{@html}` rule, RFC 3339 on
+  `updated_at`/`synced_at`, the path line's `owner/repo` and its one SQL expression, the smart
+  list's one-shape rule (#506 story 57) and that a refused list does not open, the suggestion caps
+  (twenty, fifty) and #768, `*At most*` on a column's limit, #1208 on the query types. Variant
+  docs moved into the enums' docs (`FilterDimension`, `FilterAnswer`, `Key`). A type's pointer to
+  its own Rust path did not move: the generated file is that type.
+- **`just search-perf` not run.** `crates/knobas-search/src/{types,lists}.rs` changed by derives
+  and doc comments only; no statement, bind or query moved. The reference to the deleted
+  `the_hit_shape_matches_its_typescript_mirror` in `knobas-sync`'s `run_log.rs` is left for #1327,
+  which deletes the test that cites it.
