@@ -65,7 +65,6 @@
     type PipelineReason,
   } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
-  import { CI, sourceRoles } from "../roles.svelte";
   import { resolveTicket } from "../job/job";
   import { inTextField } from "../../shell/keys";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -116,15 +115,18 @@
   const filter = sessionFilter("builds-pipelines");
   const chips = $derived(filter.chips["state"] ?? []);
 
-  let read = $state<PipelineRow[] | null>(null);
+  /**
+   * The pipelines as `pipelines` answers them: the read is CI's, so the mirror
+   * narrows it to the CI role's fillers and the page drops nothing (#1295,
+   * ADR-0029 as amended on 2026-10-19).
+   */
+  let all = $state<PipelineRow[] | null>(null);
   let failed = $state<string | null>(null);
-  /** The pipelines of the sources that claim the CI role, never by adapter kind (#1196, ADR-0029). */
-  const all = $derived(read === null ? null : sourceRoles.keep(CI, read));
 
   $effect(() => {
-    if (!ready || read !== null) return;
+    if (!ready || all !== null) return;
     ports.pipelines().then(
-      (rows) => (read = rows),
+      (rows) => (all = rows),
       (error: unknown) => (failed = message(error)),
     );
   });
@@ -203,7 +205,7 @@
   async function togglePin(pipeline: PipelineRow) {
     const write = ports.setPinned ?? setPipelinePinned;
     const now = await write(pipeline.entity_id, !pipeline.pinned);
-    if (read !== null) read = read.map((p) => (p.entity_id === pipeline.entity_id ? { ...p, pinned: now } : p));
+    if (all !== null) all = all.map((p) => (p.entity_id === pipeline.entity_id ? { ...p, pinned: now } : p));
   }
 
   /** A row's indent class: 14px a level, as prototype-6's, up to {@link DEEPEST}. */

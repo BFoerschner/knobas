@@ -188,7 +188,12 @@ function ports(
     },
     listEntities: (filter) => {
       calls.list.push(filter);
-      const kept = all.filter((row) => filter.kinds.length === 0 || filter.kinds.includes(row.kind));
+      // The mirror answers a role (#1295): asked for CI with no kinds, it
+      // reads the run kinds CI's fillers declare, which here are these two.
+      const roleKinds = filter.role === "ci" ? ["build", "workflow_run"] : null;
+      const kept = all.filter(
+        (row) => (filter.kinds.length === 0 || filter.kinds.includes(row.kind)) && (roleKinds === null || roleKinds.includes(row.kind)),
+      );
       return Promise.resolve({ rows: kept, total: kept.length, tally: null, groups: null });
     },
     reachableTransitions: () =>
@@ -306,8 +311,11 @@ test("every section reads through what the ticket reaches, each for its own kind
   expect(calls.promote).toEqual([ID]);
   expect(calls.list.every((filter) => filter.reach === ID && filter.context === null)).toBe(true);
   const kinds = calls.list.map((filter) => [...filter.kinds].sort().join(","));
-  expect(kinds.sort()).toEqual(["branch,commit,pr,repo", "build", "monitor", "page"]);
-  expect(calls.list.find((filter) => filter.kinds.includes("build"))?.order).toBe("latest_per_parent");
+  // Builds names no kinds: it asks for the CI role, and the mirror reads the role's (#1295).
+  expect(kinds.sort()).toEqual(["", "branch,commit,pr,repo", "monitor", "page"]);
+  const builds = calls.list.find((filter) => filter.order === "latest_per_parent");
+  expect(builds).toMatchObject({ role: "ci", kinds: [] });
+  expect(calls.list.filter((filter) => filter.role != null)).toEqual([builds]);
 });
 
 test("a key nothing answers to says so and offers the way back", async () => {
@@ -530,6 +538,11 @@ function own(entity_id: string, kind: string): Reached {
 
 function section(id: string): Element {
   return target.querySelector(`[aria-labelledby='tf-sec-${id}']`)!;
+}
+
+/** The addresses a section's rows open, in drawn order. */
+function hrefsOf(id: string): string[] {
+  return [...section(id).querySelectorAll(".tf-rows a")].map((row) => row.getAttribute("href") ?? "");
 }
 
 /** A rollup's words, one part per drawn span (the gap between them is CSS). */
@@ -938,17 +951,19 @@ test("a job's Builds section lists the runs of a CI source whose run kind is not
   const registry = claimsRegistry();
   open("PAY-231", { ports: p, registry });
   await settle();
+  // The section asks for the role and names no kinds; the mirror answers both run kinds (#1295).
   const runs = calls.list.find((filter) => filter.order === "latest_per_parent")!;
-  expect([...runs.kinds].sort()).toEqual(["build", "workflow_run"]);
+  expect(runs).toMatchObject({ role: "ci", kinds: [] });
+  expect(hrefsOf("builds")).toHaveLength(2);
   // A run of another kind opens Builds' run page, not the block view (#1256).
   const hrefs = [...section("builds").querySelectorAll(".tf-rows a")].map((row) => decodeURIComponent(row.getAttribute("href") ?? ""));
   expect(hrefs.filter((href) => href === `#/build/${RUN.entity_id}` || href === `#/build/${B_OK.entity_id}`)).toHaveLength(2);
 
-  const tally = await reachTally(p, ID, { registry });
+  const tally = await reachTally(p, ID);
   expect(tally.find((line) => line.kind === "workflow_run")).toEqual({ kind: "workflow_run", tone: "err", count: 1 });
 });
 
-test("a job's sections drop the rows of a source that does not claim the section's role", async () => {
+test("a job's Code section drops the rows of a source that does not claim code-host; Builds draws what the CI read answers (#1295)", async () => {
   sourceRoles.take([
     { id: "gitea", roles: [{ role: "code-host", reads: [] }] },
     { id: "teamcity", roles: [{ role: "ci", reads: [] }] },
@@ -960,17 +975,26 @@ test("a job's sections drop the rows of a source that does not claim the section
   const hrefs = (id: string) => [...section(id).querySelectorAll(".tf-rows a")].map((row) => row.getAttribute("href") ?? "");
   expect(hrefs("code").some((href) => href.includes("mock"))).toBe(false);
   expect(hrefs("code")).toHaveLength(3);
-  expect(hrefs("builds")).toEqual([`#/build/${encodeURIComponent(B_OK.entity_id)}`]);
+  // The source list says mock claims nothing, but Builds no longer keeps
+  // rows by it: the mirror narrowed the read to CI's fillers already.
+  expect(hrefs("builds").sort()).toEqual([`#/build/${encodeURIComponent(B_OK.entity_id)}`, `#/build/${encodeURIComponent(MOCK_BUILD.entity_id)}`].sort());
 
-  const tally = await reachTally(p, ID, { registry: claimsRegistry() });
+  const tally = await reachTally(p, ID);
   const count = (kind: string) => tally.filter((line) => line.kind === kind).reduce((n, line) => n + line.count, 0);
-  expect([count("repo"), count("build")]).toEqual([1, 1]);
+  // The counts are the sections' rows: one repo kept, both builds as read.
+  expect([count("repo"), count("build")]).toEqual([1, 2]);
 });
 
-test("with no CI claim with a run, Builds reads nothing rather than every kind", async () => {
+test("with no CI claim known, Builds still asks for the CI role and names no kinds (#1295)", async () => {
   const registry = createKindRegistry({ listAdapters: () => Promise.resolve([]) });
-  open("PAY-231", { ports: ports({ others: [B_OK] }), registry });
+  const p = ports({ others: [B_OK] });
+  open("PAY-231", { ports: p, registry });
   await settle();
-  expect(calls.list.some((filter) => filter.order === "latest_per_parent")).toBe(false);
-  expect(calls.list.every((filter) => filter.kinds.length > 0)).toBe(true);
+  expect(calls.list.find((filter) => filter.order === "latest_per_parent")).toMatchObject({ role: "ci", kinds: [] });
+  expect(hrefsOf("builds")).toEqual([`#/build/${encodeURIComponent(B_OK.entity_id)}`]);
+
+  calls.list.length = 0;
+  await reachTally(p, ID);
+  const tallied = calls.list.find((filter) => filter.order === "latest_per_parent");
+  expect(tallied).toMatchObject({ role: "ci", kinds: [], reach: ID });
 });

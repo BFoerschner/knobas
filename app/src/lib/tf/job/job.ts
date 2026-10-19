@@ -221,9 +221,9 @@ export function jiraViewSlug(entityId: string): string {
 const NOTES_HASH = "#/settings/notes";
 
 /**
- * The run kind Builds reads while the adapters' claims are not known: the
- * built-in CI adapter's, so a registry that failed to read draws what it drew
- * before #1230, as an unread source list narrows nothing.
+ * The run kind a row is routed by while the adapters' claims are not known:
+ * the built-in CI adapter's, so a registry that failed to read routes what it
+ * routed before #1230. What Builds reads is the mirror's answer (#1295).
  */
 const UNKNOWN_RUN_KINDS = ["build"] as const;
 

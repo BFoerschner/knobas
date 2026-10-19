@@ -339,7 +339,9 @@ test("a job with no pipelines says so and offers to search all of them", async (
   expect(target.querySelectorAll(".tf-pl-fold").length).toBeGreaterThan(0);
 });
 
-test("Builds lists the sources that claim ci, whatever their adapter kind, and no other (#1196)", async () => {
+test("Builds draws every pipeline the read answers and drops none by the source list (#1295)", async () => {
+  // The source list says TeamCity claims no CI; the mirror narrowed the read
+  // to CI's fillers already, so the page keeps its answer as it is.
   sourceRoles.take([
     // An adapter kind the shell has never seen.
     { id: "relay", adapter_kind: "acme-ci", roles: [{ role: "ci", reads: ["run_log"] }] },
@@ -358,5 +360,6 @@ test("Builds lists the sources that claim ci, whatever their adapter kind, and n
   page = mount(TfBuilds, { target, props: { ready: true, head: "builds", rest: [], job: null, ports } });
   await settle();
 
-  expect(names()).toEqual(["Rocket_Build"]);
+  expect(names()).toHaveLength(LIST.length + 1);
+  expect(names()).toContain("Rocket_Build");
 });

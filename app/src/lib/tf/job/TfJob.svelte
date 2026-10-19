@@ -92,9 +92,9 @@
   import { applyToast, savedToast, withHandRule, withoutHandRule } from "../sets/apply";
   import TfApplySet from "./TfApplySet.svelte";
   import TfSaveSet from "./TfSaveSet.svelte";
-  import { ASSET_LIMIT, reachFilter, readSection, runKindsOf, SECTION_LIMIT, sectionReads, type FrameKinds, type SectionRead } from "./sections";
+  import { ASSET_LIMIT, reachFilter, readSection, runKindsOf, SECTION_LIMIT, SECTION_READS, type FrameKinds, type SectionRead } from "./sections";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
-  import { CI, CODE_HOST, MONITORING, sourceRoles, WIKI } from "../roles.svelte";
+  import { CODE_HOST, MONITORING, sourceRoles, WIKI } from "../roles.svelte";
   import { currentJob } from "./current.svelte";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfDeps from "../deps/TfDeps.svelte";
@@ -137,7 +137,7 @@
     apps?: Apps;
     /** *Apply a link set…* and *Save as a link set…* (#869). */
     sets?: JobSetPorts;
-    /** The adapters' claims, for the CI role's run kinds (#1230). */
+    /** The adapters' claims, for the CI role's run kinds a run is routed by (#1230, #1256). */
     registry?: FrameKinds;
   } = $props();
 
@@ -298,21 +298,20 @@
     void readInherited(id, mine);
     void readReach(id, mine);
     readSections(id, mine);
-    void readRows(id, sectionReads(registry).code, mine).then((rows) => {
+    void readRows(id, SECTION_READS.code, mine).then((rows) => {
       if (mine === token && rows) code = rows;
     });
   }
 
   /** Builds, Pages and Monitors, each through the reach. */
   function readSections(id: string, mine: number) {
-    // Builds reads the CI role's run kinds, so it waits for the adapters' claims.
-    void registry
-      .load()
-      .then(() => readRows(id, sectionReads(registry).builds, mine))
-      .then((rows) => {
-        if (mine === token && rows) builds = rows;
-      });
-    const reads = sectionReads(registry);
+    // Builds asks for the CI role and the mirror answers its run kinds
+    // (#1295); the adapters' claims only route a run to its page (#1256).
+    void registry.load();
+    const reads = SECTION_READS;
+    void readRows(id, reads.builds, mine).then((rows) => {
+      if (mine === token && rows) builds = rows;
+    });
     void readRows(id, reads.pages, mine).then((rows) => {
       if (mine === token && rows) pages = rows;
     });
@@ -505,7 +504,7 @@
   const CHECKOUT_TRIES = 3;
 
   async function readCode(id: string, mine: number) {
-    const rows = await readSection(ports.listEntities, id, sectionReads(registry).code);
+    const rows = await readSection(ports.listEntities, id, SECTION_READS.code);
     if (mine !== token) return;
     code = rows;
     // A clone is looked for in the repositories Code draws, never another source's.
@@ -636,10 +635,9 @@
   const blocked = $derived(detail ? blockerEntries(detail) : []);
   // Each section draws the rows of the sources that fill its role (#1196, #1230).
   const codeRows = $derived(code === null ? null : sourceRoles.keep(CODE_HOST, code));
-  const buildRows = $derived(builds === null ? null : sourceRoles.keep(CI, builds));
   const pageRows = $derived(pages === null ? null : sourceRoles.keep(WIKI, pages));
   const monitorRows = $derived(monitors === null ? null : sourceRoles.keep(MONITORING, monitors));
-  const stale = $derived(staleBuilds(sources, health, sync, buildRows ?? [], today()));
+  const stale = $derived(staleBuilds(sources, health, sync, builds ?? [], today()));
   /** What *Start work* suggests: a repository the ticket already reaches. */
   const suggestedRepo = $derived(
     [...reached.values()].find((row) => row.kind === "repo")?.entity_id ?? null,
@@ -722,7 +720,7 @@
           <div class="tf-grid">
             {#if !starting}
               <TfCodeSection rows={codeRows} {reached} {checkout} {checkoutOf} {layers} {apps} />
-              <TfSection id="builds" title="Builds" openLabel="Open Builds view" openHref="#/builds" footHref="#/builds" rows={lines(buildRows)} rollup={buildRows ? buildsRollup(buildRows) : null}>
+              <TfSection id="builds" title="Builds" openLabel="Open Builds view" openHref="#/builds" footHref="#/builds" rows={lines(builds)} rollup={builds ? buildsRollup(builds) : null}>
                 {#snippet before()}
                   {#each stale as warning (warning.sourceId)}
                     <div class="tf-stale">
