@@ -9,7 +9,9 @@
 # 2. A holder merged longer ago than the grace period is dead: two waiters
 #    find it, exactly one takes it over, and the lowest-numbered gets the lock
 #    and keeps it while the other waits. A takeover guard left behind by a
-#    killed waiter goes stale and does not block takeovers for good.
+#    killed waiter goes stale and does not block takeovers for good. A waiter
+#    whose read of the holder went stale while another took over leaves the
+#    new holder's lock alone.
 # 3. `take` is re-entrant for the holder; `assert` exits 0 for the holder and
 #    1 for anyone else.
 #
@@ -38,10 +40,12 @@ mkdir -p "$TMPDIR" "$GH_STUB" "$scratch/bin"
 export PATH=$scratch/bin:$PATH KNOBAS_MERGE_TAIL_POLL=1 KNOBAS_MERGE_TAIL_GRACE=600
 
 # The stub answers `gh pr view <PR> --json state[,closedAt] --jq ...` from
-# $GH_STUB/<PR>, which holds "<STATE> [<closedAt>]".
+# $GH_STUB/<PR>, which holds "<STATE> [<closedAt>]". With $GH_STUB/<PR>.slow,
+# the first answer about that PR takes 2 s.
 cat > "$scratch/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 pr="$3"; f="$GH_STUB/$pr"; [ -e "$f" ] || { echo "stub: no such PR $pr" >&2; exit 1; }
+if [ -e "$f.slow" ] && mkdir "$f.slowed" 2>/dev/null; then sleep 2; fi
 read -r state closed < "$f"
 case " $* " in *closedAt*) echo "$state ${closed:-}" ;; *) echo "$state" ;; esac
 EOF
@@ -119,6 +123,24 @@ check "dead holder: exactly one of two waiters takes it over (got $takeovers)" [
 check "dead holder: the lower-numbered waiter gets the lock" has "$scratch/w2a.out" "held by PR #1261"
 check "dead holder: the lower-numbered waiter keeps it while the other waits" has "$scratch/w2a.assert" "^0$"
 check "dead holder: the other waiter gets it after the release" has "$scratch/w2b.out" "held by PR #1262"
+
+# A waiter that read the dead holder before another waiter took over and
+# acquired must not remove the new holder's lock. 1267 asks first and its
+# answer takes 2 s; 1266 (already queued) takes over and holds meanwhile.
+fresh
+echo OPEN > "$GH_STUB/1266"; echo OPEN > "$GH_STUB/1267"; echo OPEN > "$GH_STUB/1265"
+lock take 1265 > /dev/null
+echo "MERGED $(iso $(( $(date +%s) - 700 )))" > "$GH_STUB/1265"; touch "$GH_STUB/1265.slow"
+mkdir -p "$TMPDIR/knobas-merge-tail.queue"; touch "$TMPDIR/knobas-merge-tail.queue/1266"
+( lock take 1267 > "$scratch/w4b.out"; lock release 1267 > /dev/null ) &
+late_job=$!
+sleep 0.5
+lock take 1266 > "$scratch/w4a.out"
+sleep 3 # 1267's answer arrives at about t+2
+check "stale read: the late waiter leaves the new holder's lock alone" [ "$(assert_status 1266)" = 0 ]
+lock release 1266 > /dev/null
+wait "$late_job"
+check "stale read: the late waiter took nothing over" lacks "$scratch/w4b.out" "taking it over"
 
 # A takeover guard left by a waiter killed mid-takeover goes stale after 60 s
 # and no longer blocks taking over a dead holder.

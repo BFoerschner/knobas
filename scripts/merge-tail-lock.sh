@@ -40,8 +40,9 @@ oldest_live_waiter() {
   done
   echo "${best:-}"
 }
-# GNU stat first: on Linux `stat -f` is file-system status and exits 0.
-mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
+# GNU stat first: on Linux `stat -f` is file-system status and exits 0. A file
+# another waiter removed since the glob reads as epoch 0, i.e. long dead.
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 epoch() { [ -n "$1" ] || { echo 0; return; }; date -j -u -f %Y-%m-%dT%H:%M:%SZ "$1" +%s 2>/dev/null || date -u -d "$1" +%s 2>/dev/null || echo 0; }
 case "$cmd" in
 ready)
@@ -90,7 +91,7 @@ take)
         # found stale is still the holder (another waiter may have taken over
         # and acquired since we read it). A guard older than 60 s was left by
         # a waiter killed mid-takeover and would block every takeover for good.
-        if [ -d "$LOCK.takeover" ] && [ $(( $(date +%s) - $(mtime "$LOCK.takeover" 2>/dev/null || date +%s) )) -gt 60 ]; then
+        if [ -d "$LOCK.takeover" ] && [ $(( $(date +%s) - $(mtime "$LOCK.takeover") )) -gt 60 ]; then
           rmdir "$LOCK.takeover" 2>/dev/null
         fi
         if mkdir "$LOCK.takeover" 2>/dev/null; then
