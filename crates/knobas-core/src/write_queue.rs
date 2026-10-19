@@ -600,7 +600,9 @@ pub fn project(
         Projection::DeclaredState => added(op, target, state),
         Projection::Whole { per_field: true } => {
             match edit_text(edit_writes(payload), target, state) {
-                Some(text) => serde_json::json!({ "op": op, "live": target.is_some(), "text": text }),
+                Some(text) => {
+                    serde_json::json!({ "op": op, "live": target.is_some(), "text": text })
+                }
                 None => whole(op, target),
             }
         }
@@ -1463,14 +1465,16 @@ mod tests {
         // `"update_pull_request_branch"` (#708) and `"source_action"` (#1194)
         // take this shape (`WriteOp::delivery`).
         let op = "transition";
+        let at =
+            |t: Option<&Target>| project(op, Projection::WHOLE, &serde_json::Value::Null, t, &[]);
         assert_ne!(
-            project(op, Projection::WHOLE, &serde_json::Value::Null, Some(&before), &[]),
-            project(op, Projection::WHOLE, &serde_json::Value::Null, Some(&after), &[]),
+            at(Some(&before)),
+            at(Some(&after)),
             "{op}: a payload-only change is exactly the change it is about"
         );
         assert_ne!(
-            project(op, Projection::WHOLE, &serde_json::Value::Null, Some(&before), &[]),
-            project(op, Projection::WHOLE, &serde_json::Value::Null, None, &[]),
+            at(Some(&before)),
+            at(None),
             "{op}: a target that is gone has changed"
         );
     }
@@ -1493,19 +1497,22 @@ mod tests {
         // `"commit_file"`, whose overwrite its `base_sha` guards at the source
         // (#822), take this shape (`WriteOp::delivery`).
         let op = "create_ticket";
+        let live = |t: Option<&Target>| {
+            project(op, Projection::Liveness, &serde_json::Value::Null, t, &[])
+        };
         assert_eq!(
-            project(op, Projection::Liveness, &serde_json::Value::Null, Some(&before), &[]),
-            project(op, Projection::Liveness, &serde_json::Value::Null, Some(&after), &[]),
+            live(Some(&before)),
+            live(Some(&after)),
             "{op}: a payload change is not something a create would overwrite"
         );
         assert_eq!(
-            project(op, Projection::Liveness, &serde_json::Value::Null, Some(&before), &[]),
-            project(op, Projection::Liveness, &serde_json::Value::Null, Some(&renamed), &[]),
+            live(Some(&before)),
+            live(Some(&renamed)),
             "{op}: neither is a retitled or re-touched container"
         );
         assert_ne!(
-            project(op, Projection::Liveness, &serde_json::Value::Null, Some(&before), &[]),
-            project(op, Projection::Liveness, &serde_json::Value::Null, None, &[]),
+            live(Some(&before)),
+            live(None),
             "{op}: a container that is gone must still hold the write"
         );
     }
@@ -1517,11 +1524,29 @@ mod tests {
     #[test]
     fn a_create_into_an_unmirrored_container_is_not_held() {
         assert_eq!(
-            project("create_ticket", Projection::Liveness, &serde_json::Value::Null, None, &[]),
-            project("create_ticket", Projection::Liveness, &serde_json::Value::Null, None, &[])
+            project(
+                "create_ticket",
+                Projection::Liveness,
+                &serde_json::Value::Null,
+                None,
+                &[]
+            ),
+            project(
+                "create_ticket",
+                Projection::Liveness,
+                &serde_json::Value::Null,
+                None,
+                &[]
+            )
         );
         assert_eq!(
-            project("create_ticket", Projection::Liveness, &serde_json::Value::Null, None, &[])["live"],
+            project(
+                "create_ticket",
+                Projection::Liveness,
+                &serde_json::Value::Null,
+                None,
+                &[]
+            )["live"],
             serde_json::json!(false)
         );
     }
@@ -1574,7 +1599,13 @@ mod tests {
         assert_eq!(projected["payload"], before.payload);
         assert_ne!(
             projected,
-            project("edit_pull_request", BY_FIELD, &close, Some(&after), &gitea_pr_state())
+            project(
+                "edit_pull_request",
+                BY_FIELD,
+                &close,
+                Some(&after),
+                &gitea_pr_state()
+            )
         );
     }
 
@@ -1675,7 +1706,13 @@ mod tests {
     #[test]
     fn an_edit_read_that_misses_holds_on_the_whole_record() {
         let (before, after) = payload_differs();
-        let whole = project("transition", Projection::WHOLE, &serde_json::Value::Null, Some(&before), &[]);
+        let whole = project(
+            "transition",
+            Projection::WHOLE,
+            &serde_json::Value::Null,
+            Some(&before),
+            &[],
+        );
         for payload in [
             serde_json::Value::Null,
             serde_json::json!({ "EditPull": { "title": "t", "body": null, "state": null } }),
@@ -1692,8 +1729,9 @@ mod tests {
         }
     }
 
-    /// Each shape projects its own discriminating field set, so two shapes
-    /// can never compare equal by accident.
+    /// Each shape projects the field set its doc names. Liveness and the
+    /// declared state over a kind that declares none share one: both then
+    /// compare only whether the target is there.
     #[test]
     fn every_shape_projects_its_own_fields() {
         let (target, _) = payload_differs();
@@ -1706,13 +1744,18 @@ mod tests {
             ),
             (BY_FIELD, &["live", "op", "text"][..]),
         ] {
-            let keys: std::collections::BTreeSet<String> =
-                project("op", shape, &edit(Some("t"), None, None), Some(&target), &[])
-                    .as_object()
-                    .expect("a projection is an object")
-                    .keys()
-                    .cloned()
-                    .collect();
+            let keys: std::collections::BTreeSet<String> = project(
+                "op",
+                shape,
+                &edit(Some("t"), None, None),
+                Some(&target),
+                &[],
+            )
+            .as_object()
+            .expect("a projection is an object")
+            .keys()
+            .cloned()
+            .collect();
             let projected: Vec<&str> = keys.iter().map(String::as_str).collect();
             assert_eq!(projected, fields, "{shape:?}");
         }

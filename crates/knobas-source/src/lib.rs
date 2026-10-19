@@ -1281,10 +1281,11 @@ impl WriteOp {
     ///
     /// **No wildcard arm**, for [`WriteOp::identifier`]'s reason: a new
     /// variant does not compile until it states its delivery here. The
-    /// reasons per op are argued where each answer is read:
-    /// `knobas_core::write_queue::project` for the projection, and
-    /// `knobas-sync`'s `resend_is_harmless` and `UNCLAIMED_OPS` for the
-    /// resend and the withdrawal.
+    /// reasons per op are argued in `knobas_core::write_queue::project` for
+    /// the projection, and in `knobas-sync`'s `resend_is_harmless` and
+    /// `UNCLAIMED_OPS` for the resend and the withdrawal. Those two, sync's
+    /// `target_entity` and the app's `link_on_arrival` still answer for
+    /// themselves until #1308 and the app's slice of #1301 read this instead.
     #[must_use]
     pub fn delivery(&self) -> Delivery {
         use knobas_spi_types::delivery::{ArrivalLink, Projection, TargetField};
