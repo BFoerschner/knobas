@@ -7143,3 +7143,37 @@ The merge-manager's rulings (Opus):
 - **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the ticket
   names them, the read's interface in the app crate's integration binary (`entity_role.rs`), the
   mirror test and the fake-feature test. *Reversing:* n/a.
+
+## #1311: Confluence and TeamCity authenticate through the transport's credential (Opus implementer, 2026-10-19)
+
+- **Nine credential tests are deleted, not eight.** *Fork:* the ticket says eight. Confluence's
+  `http.rs` holds six tests that exercise only `credential`, TeamCity's three. *Ruling:* all nine
+  go, as Jira's seven did under #1310: each is a row of the transport's table. One assertion in
+  TeamCity's `construction_refuses_credentials_it_cannot_use` was TeamCity's own (a blank
+  username is no username), and the transport cannot see it, so it moves to
+  `source::tests::a_blank_username_is_no_username`, which drives the public `build`. *Reversing:*
+  cheap.
+- **TeamCity trims in `http::nonblank_username(cfg)`, beside its rules.** *Fork:* trim at the
+  call site in `client.rs`, or in a named function in `http.rs`. *Ruling:* `http.rs`, so the rules and the
+  one thing TeamCity does to its input before them read together. The trimmed username is what
+  goes on the wire, as before. *Reversing:* cheap.
+- **Each adapter gains Jira's descriptor pin.** `the_credential_rules_speak_exactly_what_the_form_offers`
+  asserts `CREDENTIAL_RULES.methods` equals `descriptor_template().auth_methods`, as Jira's does.
+  The deleted tests asserted the same indirectly by refusing the two undeclared methods.
+  *Reversing:* one test per adapter.
+- **No §10.8 entry.** The transport's surface does not change. The #1310 entry already names
+  #1311 as needing none beyond it. *Reversing:* n/a.
+
+The merge-manager's rulings (Opus):
+
+- **No §10.8 entry, confirmed by path.** *Fork:* whether swapping two adapters onto
+  `knobas_http::credential` owes an entry. *Ruling:* none. The diff touches only
+  `crates/knobas-source-confluence/**` and `crates/knobas-source-teamcity/**`, which the contract
+  places outside §10.8's list (#284's note). Nothing under `crates/knobas-source/src/**` or
+  `crates/knobas-http/**` changes. *Reversing:* one entry.
+- **Confluence's PAT spelling keeps no offline guard.** *Fork:* add a test that
+  `CREDENTIAL_RULES.pat` is `Bearer`, or rely on the live suite. *Ruling:* the live suite. A test
+  that compares a constant with itself pins nothing a reviewer would miss. What it would guard is
+  whether Confluence DC accepts Bearer, and only `confluence-live` can witness that (its revoked-PAT
+  test signs in with the seeded PAT first). `knobas-http`'s table pins the header each spelling
+  produces. *Reversing:* one test.

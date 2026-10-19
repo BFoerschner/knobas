@@ -244,7 +244,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use crate::http::{ConfluenceHttp, credential};
+    use crate::http::{CREDENTIAL_RULES, ConfluenceHttp, credential};
 
     /// A Confluence that answers every request `503`, `Connection: close`,
     /// and counts them, on a std thread (this crate's tokio has no `net`). A
@@ -267,8 +267,13 @@ mod tests {
                 );
             }
         });
-        let auth = credential(Some(knobas_source::AuthMethod::Pat), None, Some("pat"))
-            .expect("a PAT is enough");
+        let auth = credential(
+            &CREDENTIAL_RULES,
+            Some(knobas_source::AuthMethod::Pat),
+            None,
+            Some("pat"),
+        )
+        .expect("a PAT is enough");
         let http = ConfluenceHttp::new(
             &format!("http://{addr}"),
             &crate::ConfluenceConfig::default(),
@@ -335,8 +340,13 @@ mod tests {
                 let _ = socket.write_all(answer.as_bytes());
             }
         });
-        let auth = credential(Some(knobas_source::AuthMethod::Pat), None, Some("pat"))
-            .expect("a PAT is enough");
+        let auth = credential(
+            &CREDENTIAL_RULES,
+            Some(knobas_source::AuthMethod::Pat),
+            None,
+            Some("pat"),
+        )
+        .expect("a PAT is enough");
         let http = ConfluenceHttp::new(
             &format!("http://{addr}"),
             &crate::ConfluenceConfig::default(),

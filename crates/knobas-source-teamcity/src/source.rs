@@ -554,6 +554,19 @@ mod tests {
         assert!(matches!(build(bad), Err(SourceError::Protocol { .. })));
     }
 
+    /// TeamCity's form lets a blank username through, and the transport uses
+    /// a username as given: a whitespace one is no username, refused as the
+    /// configuration problem it is rather than sent as Basic `"  "`.
+    #[test]
+    fn a_blank_username_is_no_username() {
+        let mut blank = instance(json!({ "username": "  " }));
+        blank.auth = Some(AuthMethod::UserPassword);
+        assert!(matches!(
+            build(blank),
+            Err(SourceError::Protocol { message, .. }) if message.contains("username")
+        ));
+    }
+
     /// Interfaces §3 "Missing": a configured source whose keychain item is
     /// gone reads as unauthorized, so the sources view offers *Re-enter*
     /// instead of a protocol error nobody can act on.

@@ -11,10 +11,11 @@
 //! [`knobas_http::Request`] its builder hands back deliberately has no `send`
 //! of its own.
 //!
-//! Three things are TeamCity's and therefore here: which [`Auth`] variant the
-//! configured [`AuthMethod`] means, the client's timeouts and rate limit, and
-//! reading TeamCity's own error text out of a failing body ([`error_message`],
-//! a [`knobas_http::BodyMessage`] per ADR-0004).
+//! Three things are TeamCity's and therefore here: the [`CredentialRules`] the
+//! transport's [`credential`] maps the configured [`AuthMethod`] under, the
+//! client's timeouts and rate limit, and reading TeamCity's own error text out
+//! of a failing body ([`error_message`], a [`knobas_http::BodyMessage`] per
+//! ADR-0004).
 //!
 //! `Accept: application/json` is **not** here, because it is not this
 //! adapter's to remember: [`knobas_http::HttpClient::new`] sets it as a
@@ -29,7 +30,7 @@
 
 use std::time::Duration;
 
-use knobas_http::{Auth, HttpClient, HttpConfig};
+use knobas_http::{Auth, CredentialRules, HttpClient, HttpConfig, TokenSpelling};
 use knobas_source::{AuthMethod, SourceError};
 
 /// Interfaces §4.1: 10 s to connect.
@@ -37,75 +38,36 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Interfaces §4.1: 30 s for a whole request.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The [`Auth`] the configured method means.
-///
-/// # Errors
-///
-/// [`SourceError::Unauthorized`] when the keychain holds no secret -- the
-/// `missing_secret` state of interfaces §3, which the sources view offers
-/// *Re-enter* for. [`SourceError::Protocol`] for a configuration that cannot
-/// authenticate at all: no method chosen, a method this adapter does not
-/// speak, or user + password with no username beside it.
-pub(crate) fn credential(
-    auth: Option<AuthMethod>,
-    username: Option<&str>,
-    secret: Option<&str>,
-) -> Result<Auth, SourceError> {
-    // The configuration is judged **before** the secret, and the order is the
-    // point. These are two different states with two different remedies:
-    // `missing_secret` sends the user to *Re-enter*, a misconfigured source
-    // sends them to the source's settings. Checking the secret first would
-    // report `Unauthorized` for a source that could not authenticate even
-    // with a secret in hand, and send the user to retype a token that was
-    // never the problem.
-    let scheme = scheme(auth, username)?;
-    let secret = secret.ok_or_else(SourceError::unauthorized)?;
-    Ok(match scheme {
-        Scheme::Bearer => Auth::Bearer(secret.to_owned()),
-        Scheme::Basic(username) => Auth::Basic {
-            username: username.to_owned(),
-            password: secret.to_owned(),
-        },
-    })
-}
+pub(crate) use knobas_http::credential;
 
-/// How this source authenticates, decided from configuration alone.
-enum Scheme<'a> {
-    Bearer,
-    Basic(&'a str),
-}
-
-fn scheme(auth: Option<AuthMethod>, username: Option<&str>) -> Result<Scheme<'_>, SourceError> {
-    let Some(auth) = auth else {
-        // `SourceInstance::auth` is optional because some sources need no
-        // credential at all (P6). TeamCity is not one of them, and neither
-        // method the descriptor declares can be guessed at from a bare secret.
-        return Err(SourceError::protocol(
-            "this TeamCity source has no authentication method configured; choose an access \
-             token or user + password"
-                .to_owned(),
-        ));
-    };
-    match auth {
-        // A TeamCity access token (2019.1+) is a Bearer token.
-        AuthMethod::Pat => Ok(Scheme::Bearer),
-        AuthMethod::UserPassword => username
-            .map(str::trim)
-            .filter(|u| !u.is_empty())
-            .map(Scheme::Basic)
-            .ok_or_else(|| {
-                SourceError::protocol(
-                    "user + password authentication needs a username in the source configuration"
-                        .to_owned(),
-                )
-            }),
-        // Declared in neither `descriptor_template().auth_methods` nor
-        // reachable from the Add-source form; refused rather than guessed at.
-        other => Err(SourceError::protocol(format!(
-            "{other:?} authentication is not supported for TeamCity; use an access token or \
+/// Which [`Auth`] each configured method means for TeamCity, and what a
+/// source that cannot authenticate reads as. The mapping itself, and the
+/// order it judges in, are [`credential`]'s; the transport uses a username as
+/// given, so [`nonblank_username`] trims it first.
+pub(crate) const CREDENTIAL_RULES: CredentialRules = CredentialRules {
+    // A TeamCity access token (2019.1+) is a Bearer token.
+    pat: TokenSpelling::Bearer,
+    // What `descriptor_template().auth_methods` declares and the Add-source
+    // form offers; anything else is refused rather than guessed at.
+    methods: &[AuthMethod::Pat, AuthMethod::UserPassword],
+    unconfigured: "this TeamCity source has no authentication method configured; choose an \
+                   access token or user + password",
+    unsupported: |method| {
+        format!(
+            "{method:?} authentication is not supported for TeamCity; use an access token or \
              user + password"
-        ))),
-    }
+        )
+    },
+};
+
+/// The configured username as [`credential`] should see it: trimmed, and
+/// absent when blank. The form lets whitespace through, and a blank username
+/// is the same mistake as none.
+pub(crate) fn nonblank_username(cfg: &crate::TeamCityConfig) -> Option<&str> {
+    cfg.username
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
 }
 
 /// The shared client for one instance.
@@ -262,67 +224,15 @@ fn plaintext_error_message(body: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    /// A TeamCity access token is a Bearer token; user + password is Basic.
-    /// The two spellings are the one thing no adapter can be trusted to get
-    /// right by inspection, so they are asserted per variant.
+    /// The Add-source form is generated from the descriptor's `auth_methods`
+    /// (spec §3a), and the transport refuses any method the rules leave out.
+    /// The two lists drifting apart either offers a method that is then
+    /// refused, or accepts one nobody can choose.
     #[test]
-    fn each_auth_method_maps_to_its_own_scheme() {
-        let bearer = credential(Some(AuthMethod::Pat), None, Some("tok")).expect("pat");
-        assert!(
-            matches!(&bearer, Auth::Bearer(t) if t == "tok"),
-            "{bearer:?}"
-        );
-        let basic = credential(Some(AuthMethod::UserPassword), Some("mara"), Some("pw"))
-            .expect("user+password");
-        assert!(
-            matches!(&basic, Auth::Basic { username, password } if username == "mara" && password == "pw"),
-            "{basic:?}"
-        );
-    }
-
-    /// Missing secret and missing username are two different mistakes with two
-    /// different remedies, and only one of them is the user's credential.
-    #[test]
-    fn construction_refuses_credentials_it_cannot_use() {
-        assert!(matches!(
-            credential(Some(AuthMethod::Pat), None, None),
-            Err(SourceError::Unauthorized { .. })
-        ));
-        let err =
-            credential(Some(AuthMethod::UserPassword), None, Some("pw")).expect_err("no username");
-        assert!(
-            matches!(&err, SourceError::Protocol { message: m, .. } if m.contains("username")),
-            "{err:?}"
-        );
-        // A blank username is the same mistake with whitespace in it.
-        let err = credential(Some(AuthMethod::UserPassword), Some("  "), Some("pw"))
-            .expect_err("blank username");
-        assert!(
-            matches!(&err, SourceError::Protocol { message: m, .. } if m.contains("username")),
-            "{err:?}"
-        );
-        // No method at all: a configuration problem, not a credential one.
-        let err = credential(None, None, Some("tok")).expect_err("no method");
-        assert!(matches!(err, SourceError::Protocol { .. }), "{err:?}");
-        // A method the descriptor does not declare.
-        for other in [AuthMethod::OAuth, AuthMethod::ApiToken] {
-            let err = credential(Some(other), None, Some("tok")).expect_err("undeclared");
-            assert!(
-                matches!(err, SourceError::Protocol { .. }),
-                "{other:?}: {err:?}"
-            );
-        }
-    }
-
-    /// The configuration is judged before the secret: a source that could not
-    /// authenticate even with a secret must not send the user to *Re-enter*.
-    #[test]
-    fn a_misconfigured_source_is_not_reported_as_a_missing_secret() {
-        let err =
-            credential(Some(AuthMethod::UserPassword), None, None).expect_err("both are wrong");
-        assert!(
-            matches!(&err, SourceError::Protocol { message: m, .. } if m.contains("username")),
-            "the actionable half is the configuration, not the credential: {err:?}"
+    fn the_credential_rules_speak_exactly_what_the_form_offers() {
+        assert_eq!(
+            CREDENTIAL_RULES.methods,
+            crate::descriptor_template().auth_methods.as_slice()
         );
     }
 
@@ -573,13 +483,19 @@ mod tests {
     /// it would get there.
     #[test]
     fn debug_never_prints_the_secret() {
-        let auth =
-            credential(Some(AuthMethod::Pat), None, Some("hunter2-the-real-token")).expect("pat");
+        let auth = credential(
+            &CREDENTIAL_RULES,
+            Some(AuthMethod::Pat),
+            None,
+            Some("hunter2-the-real-token"),
+        )
+        .expect("pat");
         assert!(!format!("{auth:?}").contains("hunter2"), "{auth:?}");
         let c = client(
             "https://ci.example.com",
             &crate::TeamCityConfig::default(),
             credential(
+                &CREDENTIAL_RULES,
                 Some(AuthMethod::UserPassword),
                 Some("mara"),
                 Some("hunter2-the-real-token"),

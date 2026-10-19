@@ -84,6 +84,7 @@ fn trimmed_base_url(raw: &str) -> String {
 pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     let cfg = ConfluenceConfig::from_json(&instance.config)?;
     let credential = http::credential(
+        &http::CREDENTIAL_RULES,
         instance.auth,
         cfg.username.as_deref(),
         instance.secret.as_deref(),
