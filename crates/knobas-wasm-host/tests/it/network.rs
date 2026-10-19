@@ -425,7 +425,8 @@ async fn a_fixed_loopback_address_or_localhost_still_works() {
 
 /// A system proxy on the reader's machine (#1283): it records the request
 /// line of each request it carries, and forwards every one to `to`, as a
-/// proxy that resolves the request's name to that address would.
+/// proxy that resolves the request's name to that address would. It reads
+/// only up to the end of the request line; the rest is copied through.
 struct Proxy {
     url: String,
     carried: Arc<Mutex<Vec<String>>>,
@@ -528,7 +529,10 @@ async fn a_fixed_host_knobas_cannot_resolve_still_goes_through_the_proxy() {
     );
     let (ok, text) = answer(&*source).await;
     assert!(ok, "{text}");
-    assert_eq!(proxy.carried().len(), 1, "{:?}", proxy.carried());
+    assert_eq!(
+        proxy.carried(),
+        ["GET http://unresolved-1283.invalid/data HTTP/1.1"]
+    );
 }
 
 /// A template's value is the reader's to point home: it goes through the
@@ -547,6 +551,6 @@ async fn a_templated_host_that_resolves_to_loopback_goes_through_the_proxy() {
     );
     let (ok, text) = answer(&*source).await;
     assert!(ok, "{text}");
-    assert_eq!(proxy.carried().len(), 1, "{:?}", proxy.carried());
+    assert_eq!(proxy.carried(), [format!("GET {url}/data HTTP/1.1")]);
     assert_eq!(local.seen().len(), 1, "{:?}", local.seen());
 }

@@ -299,7 +299,7 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
         // A system proxy resolves the name itself, and the resolver below
         // never sees it: judge it here first.
         if let Ok(addrs) = lookup(name).await
-            && refuses(name, &addrs)
+            && refuse_if_local(name, &addrs)
         {
             return Err(HttpError::ConnectionRefused);
         }
@@ -496,7 +496,7 @@ impl reqwest::dns::Resolve for Resolver {
         let name = name.as_str().to_owned();
         Box::pin(async move {
             let addrs = lookup(&name).await?;
-            if guarded && is_guarded(&name) && refuses(&name, &addrs) {
+            if guarded && is_guarded(&name) && refuse_if_local(&name, &addrs) {
                 return Err(format!("{name} resolves to a local address").into());
             }
             Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
@@ -506,7 +506,7 @@ impl reqwest::dns::Resolve for Resolver {
 
 /// Whether a guarded `name` is refused for resolving to `addrs`: any of
 /// them local. A refusal is logged with the address.
-fn refuses(name: &str, addrs: &[SocketAddr]) -> bool {
+fn refuse_if_local(name: &str, addrs: &[SocketAddr]) -> bool {
     let Some(local) = addrs.iter().find(|addr| is_local(addr.ip())) else {
         return false;
     };
@@ -545,8 +545,11 @@ pub fn fake_dns(name: &str, ips: &[std::net::IpAddr]) {
 }
 
 #[cfg(feature = "test-util")]
-fn fake_proxies() -> &'static Mutex<std::collections::HashMap<String, String>> {
-    static PROXIES: OnceLock<Mutex<std::collections::HashMap<String, String>>> = OnceLock::new();
+type FakeProxies = Mutex<std::collections::HashMap<String, String>>;
+
+#[cfg(feature = "test-util")]
+fn fake_proxies() -> &'static FakeProxies {
+    static PROXIES: OnceLock<FakeProxies> = OnceLock::new();
     PROXIES.get_or_init(Mutex::default)
 }
 

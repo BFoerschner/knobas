@@ -6830,7 +6830,10 @@ The merge-manager's rulings (Opus):
   system proxy takes, and matching the system's settings ourselves would be a second copy that
   can disagree with it. On a direct connection the resolver still judges the addresses the
   connector then uses, so rebinding stays closed there; the cost is one more lookup, which the
-  system's cache mostly answers. *Reversing:* low.
+  system's cache mostly answers. This narrows #1244's "The check sits in a resolver of a second
+  client", which turned down a check before the request for its second lookup: the resolver stays
+  the guard on a direct connection, and the check before only adds the proxied case.
+  *Reversing:* low.
 - **A name knobas cannot resolve goes on to the proxy.** *Fork:* refuse it. *Ruling:* go on. A
   network whose only way out is the proxy may answer no outside name to the reader's machine; on
   a direct connection the resolver fails the same lookup anyway. A hostile owner gains nothing
