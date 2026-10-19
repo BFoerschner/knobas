@@ -322,7 +322,7 @@
   /** The saved view the board reads (#877), or `null`: its source decides its tickets and their order. */
   const savedViewId = $derived(view?.saved_view_source ? view.saved_view : null);
   /** Where *Choose which* goes: the first Jira view's source, else the sources. */
-  const savedViewSettings = $derived.by(() => {
+  const savedViewSettingsHref = $derived.by(() => {
     const ref = (views ?? []).find((row) => row.saved_view_source !== null)?.saved_view;
     return ref ? sourceHash(savedViewSourceId(ref)) : "#/settings";
   });
@@ -862,7 +862,7 @@
         {/each}
       {/if}
       <p class="tf-vw-foot">
-        Boards and favourite filters come in with the Jira source at every sync. <a href={savedViewSettings}>Choose which</a>
+        Boards and favourite filters come in with the Jira source at every sync. <a href={savedViewSettingsHref}>Choose which</a>
       </p>
     </div>
   </nav>

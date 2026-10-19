@@ -6894,8 +6894,8 @@ The merge-manager's rulings (Opus):
   `restore` loads only what an archive carries. *Reversing:* n/a.
 - **The words.** *Fork:* what the shell's names become. *Ruling:* named for the type they hold:
   `SavedViewSourceLine.svelte` with a `savedViewSource` prop, `savedViewKindWords`,
-  `draftSavedViewCopy`, ViewEditor's `savedViewSource` prop and `fromSavedView`, TicketsPage's
-  `savedViewSource` locals and `savedViewSettings`, the class `.tf-vw-source-query`, and
+  `draftSavedViewCopy`, ViewEditor's `savedViewSource` prop and `fixedSource` (the prop, fixed for
+  the dialog's life), TicketsPage's `savedViewSource` locals and `savedViewSettingsHref`, the class `.tf-vw-source-query`, and
   `viewType({ kind, board_type })`. ViewMenu's `jira` prop, which holds the saved view's kind,
   is `savedViewKind`, typed `SavedViewSource["kind"]`. From #1273's comment on the ticket,
   `boards.ts`' `SourceView` is `SavedViewRow` and `sourceViews` is `savedViewsOf`, so *source
@@ -6904,7 +6904,8 @@ The merge-manager's rulings (Opus):
 - **ViewEditor's kind words reuse the helper.** *Fork:* rename `jiraLine`'s copy of
   `jiraKindWords`' logic in place, or call the helper. *Ruling:* call `savedViewKindWords`; the
   local is `decidesLine`. Same output for every kind and board type (both read `kind` and
-  `board_type` the same way), so the line the reader sees is unchanged. *Reversing:* low.
+  `board_type` the same way), so the line the reader sees is unchanged. `boards.ts`' `viewType`
+  stays apart: it answers other words (*Board*, *Filter*) for the settings table. *Reversing:* low.
 - **What is not renamed.** *Fork:* other Jira names sit beside the ticket's list. *Ruling:*
   `drawnJiraColumns` and `JIRA_GROUPS` stay (they take columns and group words, not a
   `SavedViewSource`, and the groups are words the reader sees), as do every user-facing word

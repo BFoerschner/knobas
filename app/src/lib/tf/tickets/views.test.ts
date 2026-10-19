@@ -130,11 +130,11 @@ test("Jira boards and Jira filters come after every group of your own, and a Jir
   expect(groupViews(views, "project = cus").map((group) => group.views.map((view) => view.id))).toEqual([["cus"]]);
 });
 
-function savedViewOf(jql: string, extra: Partial<SavedViewSource> = {}): SavedViewSource {
+function savedViewOf(sourceQuery: string, extra: Partial<SavedViewSource> = {}): SavedViewSource {
   return {
     kind: "board",
     board_type: "scrum",
-    source_query: jql,
+    source_query: sourceQuery,
     sub_query: null,
     sprint: null,
     last_read: "",
