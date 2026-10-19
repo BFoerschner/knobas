@@ -1,0 +1,41 @@
+// Generated from the Rust types by ts-rs; do not edit. Regenerate with `cargo test -p knobas-app --lib ipc_mirror` (crates/knobas-app/src/ipc_mirror.rs).
+
+/**
+ * What the shell needs to decide what to draw.
+ */
+export type AppStatus = { db: DbState, 
+/**
+ * No source configured and the first run was never completed (§14a).
+ */
+first_run: boolean, 
+/**
+ * The `--demo` profile: its own data dir, port and keychain suffix (P13).
+ */
+demo: boolean, source_count: number, app_version: string, };
+
+/**
+ * How far the database has got.
+ *
+ * Interfaces §2.1. Tagged on `state`, so TypeScript reads it as a
+ * discriminated union and `detail` and `message` are reachable only after
+ * the check that identifies which state this is.
+ *
+ * - `starting`: coming up.
+ * - `migrating`: up, and running migrations.
+ * - `ready`: up, migrated, and answering queries.
+ * - `failed`: it will not come up.
+ *
+ * The states are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/app.ts`) carries a type's
+ * and a field's doc but not a variant's (#1325).
+ */
+export type DbState = { "state": "starting", 
+/**
+ * A line for the boot screen -- "downloading PostgreSQL 18.6", which
+ * on a first run is tens of seconds.
+ */
+detail: string | null, } | { "state": "migrating" } | { "state": "ready" } | { "state": "failed", 
+/**
+ * Why, shown to the user as text.
+ */
+message: string, };

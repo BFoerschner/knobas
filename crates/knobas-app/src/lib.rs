@@ -34,6 +34,8 @@ pub mod docs;
 pub mod downloads;
 mod error;
 pub mod inbox;
+#[cfg(test)]
+mod ipc_mirror;
 pub mod link_sets;
 pub mod logging;
 pub mod notes_export;

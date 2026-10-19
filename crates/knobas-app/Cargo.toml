@@ -126,6 +126,8 @@ percent-encoding = "2"
 # mistyped one is `invalid` rather than an argument Tauri refuses to decode at
 # all -- the same treatment `get_entity` gives a malformed entity id.
 uuid.workspace = true
+# The derive behind the generated IPC mirror (`src/ipc_mirror.rs`, #1325).
+ts-rs.workspace = true
 
 [dev-dependencies]
 # The CRUD tests inject an adapter that refuses to connect.

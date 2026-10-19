@@ -8,6 +8,10 @@
 # anywhere under `crates/` outside `//` comments: a doc comment naming a test
 # file reads nothing, and TF tickets touch those files on every PR. Ruling: Björn, 2026-10-15.
 #
+# `app/src/lib/ipc/generated/` is Rust output, not frontend (#1325): only
+# `check`'s `ipc-mirror` step regenerates it and compares, so a head that
+# touches it takes the full gate even when nothing in `crates/` changed.
+#
 # Usage: scripts/gate-scope.sh [BASE]   (default origin/main)
 set -euo pipefail
 base=${1:-origin/main}
@@ -17,6 +21,8 @@ changed=$(git -C "$root" diff --name-only "$mb" HEAD)
 if [ -z "$changed" ]; then echo "gate-scope: nothing changed since $mb" >&2; echo full; exit 0; fi
 while IFS= read -r f; do
   case $f in
+    app/src/lib/ipc/generated/*)
+      echo "gate-scope: full: $f is generated from the Rust types" >&2; echo full; exit 0 ;;
     app/*)
       rel=${f#app/}
       if grep -rhF --include='*.rs' --include='*.toml' --include='*.json' "app/$rel" "$root/crates" 2>/dev/null \

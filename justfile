@@ -59,7 +59,7 @@ check:
     # cargo or reads `target/`, and in the cargo chain their 23 s (warm,
     # quiet, 2026-10-15) were paid in full ahead of `clippy`.
     script_recipes=(shell test-layout witness-unit conflict-markers)
-    cargo_recipes=(fmt clippy clippy-libs inventory test)
+    cargo_recipes=(fmt clippy clippy-libs inventory ipc-mirror test)
     descendants() {
         local p
         for p in $(pgrep -P "$1" || true); do descendants "$p"; done
@@ -576,6 +576,9 @@ pre-gate:
     just inventory-update
     just contract-index
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source --lib every_op_has_its_own_snake_case_identifier
+    # The generated IPC mirror (#1325): written here so a Rust change arrives
+    # with its TypeScript among the files to commit; `check` fails without it.
+    env -u RUSTUP_TOOLCHAIN cargo test -q -p knobas-app --lib ipc_mirror
     # The gate's clippy, on the crates this branch changed (#972); the flags are
     # the `clippy` and `clippy-libs` recipes' own.
     pkgs=$(scripts/changed-crates.sh)
@@ -2167,6 +2170,40 @@ estate-live:
     fi
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test estate_live \
       -- --ignored --nocapture --test-threads=1
+
+# The generated IPC mirror is current (#1325, contract §2.6 as amended):
+# regenerate `app/src/lib/ipc/generated/` from the Rust types and fail when
+# the result differs from what HEAD holds, untracked files included. The
+# writer is `knobas-app`'s `ipc_mirror` unit test; to regenerate by hand run
+# `cargo test -p knobas-app --lib ipc_mirror` and commit the result.
+#
+# It runs the lib test binary `_test-executables` names, from its package
+# directory as `test` does, rather than `cargo test -p knobas-app`: `-p`
+# resolves features for one package, so it would build a second copy of the
+# crate's test binary beside the workspace one `inventory` has just built
+# (25 s, measured 2026-10-19).
+ipc-mirror:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    line=$(just _test-executables | awk -F'\t' '$2 == "knobas-app" && $3 == "lib/knobas_app"')
+    if [ -z "$line" ]; then
+        echo "error: cargo built no knobas-app lib test executable" >&2
+        exit 1
+    fi
+    exe=$(cut -f4 <<< "$line")
+    dir=$(cut -f5 <<< "$line")
+    (cd "$dir" && "$exe" --exact ipc_mirror::the_generated_ipc_mirror_is_written --quiet)
+    generated=app/src/lib/ipc/generated
+    stale=$( { git diff --name-only HEAD -- "$generated"; git ls-files --others --exclude-standard -- "$generated"; } )
+    if [ -n "$stale" ]; then
+        git --no-pager diff HEAD -- "$generated"
+        echo >&2
+        echo "error: the generated IPC mirror is stale; the Rust types now produce:" >&2
+        sed 's/^/  /' <<< "$stale" >&2
+        echo "  Commit the regenerated files (the run above wrote them)." >&2
+        exit 1
+    fi
+    echo "ipc-mirror: app/src/lib/ipc/generated/ matches the Rust types"
 
 # Move loose section 10.8 entries into docs/contract/10.8/ and regenerate the index (#737).
 contract-index:
