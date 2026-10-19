@@ -715,6 +715,9 @@ function ipcModules(): { name: string; text: string }[] {
     .map((name) => ({ name, text: readFileSync(join(IPC_DIR, name), "utf8") }));
 }
 
+/** An `invoke` call up to its command name, which is the match's one group. */
+const INVOKE_CALL = /\binvoke(?:<[^>]*>)?\(\s*"([a-z0-9_]+)"/g;
+
 /**
  * Every command name the barrel invokes, against the module that invokes it.
  *
@@ -725,7 +728,7 @@ function ipcModules(): { name: string; text: string }[] {
 function barrelCommands(): Map<string, string> {
   const found = new Map<string, string>();
   for (const { name, text } of ipcModules()) {
-    for (const [, cmd] of text.matchAll(/\binvoke(?:<[^>]*>)?\(\s*"([a-z0-9_]+)"/g)) {
+    for (const [, cmd] of text.matchAll(INVOKE_CALL)) {
       found.set(cmd!, name);
     }
   }
@@ -879,66 +882,95 @@ test("the census names a witness that exists for every surface, and files each c
  * The proxy answers `undefined` to every read, so a handler that dereferences
  * an argument throws. That is expected and harmless: the keys it read before
  * the throw are already recorded, and they count. What the proxy cannot see is
- * a read behind a branch the `undefined` answer does not take; this half pins
- * every read a bare call reaches, not every read there is.
+ * a read behind a branch the `undefined` answer does not take, or one made by
+ * listing the keys (`Object.keys`, a rest pattern), which no handler does; this
+ * half pins every read a bare call reaches, not every read there is.
  */
 
-/** The text from `from` up to the paren that closes the call it sits in. */
-function callRest(text: string, from: number): string {
-  let depth = 0;
-  for (let at = from; at < text.length; at++) {
+/**
+ * `text` with every comment and the inside of every string literal blanked to
+ * spaces, at the same offsets, so a scan for brackets and commas reads code
+ * only: a `"{"` in a value or an apostrophe in a comment is not a bracket or a
+ * quote. An `invoke(` the regex finds inside a comment is blank here too.
+ */
+function codeOnly(text: string): string {
+  let code = "";
+  for (let at = 0; at < text.length; at++) {
     const char = text[at]!;
-    if (char === '"' || char === "'" || char === "`") {
-      const close = text.indexOf(char, at + 1);
-      at = close;
-    } else if ("([{".includes(char)) {
-      depth++;
-    } else if (")]}".includes(char)) {
-      if (depth === 0) return text.slice(from, at);
-      depth--;
+    const next = text[at + 1];
+    if (char === "/" && (next === "/" || next === "*")) {
+      const close = next === "/" ? text.indexOf("\n", at) : text.indexOf("*/", at + 2) + 2;
+      const end = close < at ? text.length : close;
+      code += " ".repeat(end - at);
+      at = end - 1;
+    } else if (char === '"' || char === "'" || char === "`") {
+      let end = at + 1;
+      while (end < text.length && text[end] !== char) end += text[end] === "\\" ? 2 : 1;
+      if (end >= text.length) throw new Error(`a string opened at ${at} never closes`);
+      code += char + " ".repeat(end - at - 1) + char;
+      at = end;
+    } else {
+      code += char;
     }
+  }
+  return code;
+}
+
+/**
+ * The second argument of the call whose command name ends at `from`: the
+ * code up to the comma or paren that closes it at the call's own depth.
+ */
+function secondArgument(code: string, from: number): string {
+  let depth = 0;
+  let argument = "";
+  for (const char of code.slice(from).replace(/^\s*,/, "")) {
+    if ("([{".includes(char)) depth++;
+    if (")]}".includes(char) || char === ",") {
+      if (depth === 0) return argument;
+      if (char !== ",") depth--;
+    }
+    argument += char;
   }
   throw new Error(`an invoke call at ${from} never closes`);
 }
 
 /**
- * The keys of every object literal at the top of an `invoke` call's argument
- * expression: one literal in the house style, two for a call that chooses
- * between them (`submit_write` sends `linkTo` only when it has one).
+ * The keys of every object literal at the top of an `invoke` call's argument:
+ * one literal in the house style, two for a call that chooses between them
+ * (`submit_write` sends `linkTo` only when it has one).
  *
  * A spread or a bare identifier is a set of keys the parse cannot read, so it
  * fails rather than counting the call as sending nothing.
  */
 function keysSent(cmd: string, argument: string): string[] {
-  const source = argument.replace(/(^|\s)\/\/[^\n]*/g, "$1");
   const keys: string[] = [];
-  let literals = 0;
+  let objectLiterals = 0;
   let depth = 0;
   let entry = "";
-  const take = () => {
+  const endEntry = () => {
     const key = entry.trim().split(":")[0]!.trim();
     if (key.startsWith("...")) throw new Error(`${cmd}'s invoke spreads ${key.slice(3)}, which the census cannot read`);
     if (key) keys.push(key);
     entry = "";
   };
-  for (const char of source) {
+  for (const char of argument) {
     if ("([{".includes(char)) {
       depth++;
       if (char === "{" && depth === 1) {
-        literals++;
+        objectLiterals++;
         continue;
       }
     } else if (")]}".includes(char)) {
       depth--;
-      if (char === "}" && depth === 0) take();
+      if (char === "}" && depth === 0) endEntry();
     } else if (char === "," && depth === 1) {
-      take();
+      endEntry();
       continue;
     }
     if (depth >= 1) entry += char;
   }
-  if (literals === 0 && source.trim().replace(/^,/, "").trim()) {
-    throw new Error(`${cmd}'s invoke sends ${source.trim()}, which is not an object literal the census can read`);
+  if (objectLiterals === 0 && argument.trim()) {
+    throw new Error(`${cmd}'s invoke sends ${argument.trim()}, which is not an object literal the census can read`);
   }
   return keys;
 }
@@ -947,10 +979,12 @@ function keysSent(cmd: string, argument: string): string[] {
 function barrelArguments(): Map<string, Set<string>> {
   const sent = new Map<string, Set<string>>();
   for (const { text } of ipcModules()) {
-    for (const call of text.matchAll(/\binvoke(?:<[^>]*>)?\(\s*"([a-z0-9_]+)"/g)) {
+    const code = codeOnly(text);
+    for (const call of text.matchAll(INVOKE_CALL)) {
+      if (!code.startsWith("invoke", call.index)) continue;
       const cmd = call[1]!;
       const keys = sent.get(cmd) ?? new Set<string>();
-      for (const key of keysSent(cmd, callRest(text, call.index + call[0].length))) keys.add(key);
+      for (const key of keysSent(cmd, secondArgument(code, call.index + call[0].length))) keys.add(key);
       sent.set(cmd, keys);
     }
   }
@@ -994,6 +1028,8 @@ test("the argument parse reads what the barrel sends, and the recorder keeps a r
   );
   expect([...sent.get("submit_write")!].sort()).toEqual(["linkTo", "payload"]);
   expect([...sent.get("list_sources")!]).toEqual([]);
+  const tricky = codeOnly(`invoke<X>("c", {\n  // the queue's own id\n  q: "a,b}", id }, { headers: {} });`);
+  expect(keysSent("c", secondArgument(tricky, tricky.indexOf(",")))).toEqual(["q", "id"]);
 
   expect(
     await keysRead((args) => {
