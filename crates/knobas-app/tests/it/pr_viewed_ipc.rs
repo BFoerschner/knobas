@@ -11,14 +11,7 @@ use knobas_app::commands::entity::{pr_viewed_files_inner, set_pr_file_viewed_inn
 /// A Gitea source nothing else in this database uses.
 async fn source(pool: &sqlx::PgPool) -> String {
     let id = format!("gt{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ($1, 'gitea', 'Gitea', 'http://x', 'Pat', '{}')",
-    )
-    .bind(&id)
-    .execute(pool)
-    .await
-    .unwrap();
+    crate::support::source_config(pool, &id, "gitea", "Gitea", &serde_json::json!({})).await;
     id
 }
 

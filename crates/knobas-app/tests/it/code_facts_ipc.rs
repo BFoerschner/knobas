@@ -20,15 +20,14 @@ fn unique() -> String {
 /// A Gitea source configured as `username` (blank for none).
 async fn gitea(pool: &PgPool, username: &str) -> String {
     let id = format!("gitea{}", unique());
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ($1, 'gitea', $1, 'http://x', 'Pat', jsonb_build_object('username', $2::text))",
+    crate::support::source_config(
+        pool,
+        &id,
+        "gitea",
+        &id,
+        &serde_json::json!({ "username": username }),
     )
-    .bind(&id)
-    .bind(username)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
     id
 }
 

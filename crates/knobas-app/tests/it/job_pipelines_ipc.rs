@@ -26,15 +26,7 @@ fn unique() -> String {
 
 async fn configured(pool: &PgPool, adapter: &str) -> String {
     let id = format!("{adapter}{}", unique());
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ($1, $2, $2, 'http://x', 'Pat', '{}')",
-    )
-    .bind(&id)
-    .bind(adapter)
-    .execute(pool)
-    .await
-    .unwrap();
+    crate::support::source_config(pool, &id, adapter, adapter, &serde_json::json!({})).await;
     id
 }
 

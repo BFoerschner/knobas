@@ -5534,13 +5534,15 @@ async fn the_roster_holds_only_the_monitoring_fillers_monitors_paused_ones_inclu
     let paused = kuma_monitor(&pool, "kuma", "filler paused", up.clone(), None).await;
     tombstone(&pool, &paused).await;
     kuma_monitor(&pool, "kuma-miss", "with a miss", up.clone(), None).await;
-    sqlx::query(
-        "insert into sync.role_check (source_id, role, missed_kind, missed_field, missed_path)
-         values ('kuma-miss', 'monitoring', 'monitor', 'response_time', 'response_time_ms')",
+    crate::support::role_miss(
+        &pool,
+        "kuma-miss",
+        "monitoring",
+        "monitor",
+        "response_time",
+        "response_time_ms",
     )
-    .execute(&pool)
-    .await
-    .expect("the miss");
+    .await;
     monitor_of(
         &pool,
         "jira",

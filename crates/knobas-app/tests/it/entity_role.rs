@@ -97,15 +97,7 @@ fn unique(prefix: &str) -> String {
 /// One configured source of adapter kind `adapter`.
 async fn configured(pool: &PgPool, adapter: &str) -> String {
     let source = unique(adapter);
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
-         values ($1, $2, $2, 'http://x', 'Pat')",
-    )
-    .bind(&source)
-    .bind(adapter)
-    .execute(pool)
-    .await
-    .unwrap();
+    crate::support::source_config(pool, &source, adapter, adapter, &serde_json::json!({})).await;
     source
 }
 
@@ -135,15 +127,7 @@ async fn holding(pool: &PgPool, source: &str, kinds: &[&str]) {
 
 /// A standing miss of `role` on `source`'s declared paths (ADR-0028, #1199).
 async fn missed(pool: &PgPool, source: &str, role: &str) {
-    sqlx::query(
-        "insert into sync.role_check (source_id, role, missed_kind, missed_field, missed_path)
-         values ($1, $2, 'build', 'pipeline', 'buildType.id')",
-    )
-    .bind(source)
-    .bind(role)
-    .execute(pool)
-    .await
-    .unwrap();
+    crate::support::role_miss(pool, source, role, "build", "pipeline", "buildType.id").await;
 }
 
 fn asking(role: &str) -> EntityFilter {

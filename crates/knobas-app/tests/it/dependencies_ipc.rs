@@ -136,14 +136,7 @@ async fn the_seed_places_every_kind_once() {
 }
 
 async fn source(pool: &PgPool, id: &str) {
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ($1, $1, $1, 'http://x', 'Pat', '{}'::jsonb)",
-    )
-    .bind(id)
-    .execute(pool)
-    .await
-    .expect("the source");
+    crate::support::source_config(pool, id, id, id, &serde_json::json!({})).await;
 }
 
 /// One mirrored item: its entity row and its record.

@@ -122,16 +122,14 @@ async fn database(label: &str) -> PgPool {
         .pool(4)
         .await
         .expect("a pool onto this test's own database");
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ($1, $2, $1, 'http://x', 'Pat', $3)",
+    crate::support::source_config(
+        &pool,
+        SRC,
+        PROBE,
+        SRC,
+        &serde_json::json!({ "username": ME }),
     )
-    .bind(SRC)
-    .bind(PROBE)
-    .bind(json!({ "username": ME }))
-    .execute(&pool)
-    .await
-    .unwrap();
+    .await;
     pool
 }
 
