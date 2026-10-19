@@ -7249,3 +7249,9 @@ The merge-manager's rulings (Opus):
 - **Seams, chosen without a person to confirm them:** the ones the ticket names: `pipelines_inner`
   in `entity_role.rs` (same binary and fixtures as #1294), the fake-feature test, and the Builds,
   job and Tickets page tests. *Reversing:* n/a.
+- **The link-set editor's pipeline candidates narrow too** (merge-manager on Opus, PR #1345).
+  *Fork:* keep `sets/ports.ts`' `candidates("pipeline")` on every source's pipelines, or let it
+  take the narrowed `pipelines` read. *Ruling:* it takes the narrowed read, unchanged. *Reasoning:*
+  §10.8's #1294 entry changes the meaning of `pipelines` itself, not of the Builds page, and a
+  link set's pipeline members are CI rows; a source that fills no CI role offers none, as it draws
+  none on Builds. *Reversing:* low (read the candidates from `list_entities` without a role).
