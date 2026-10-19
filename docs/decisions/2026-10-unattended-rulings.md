@@ -7269,9 +7269,9 @@ The merge-manager's rulings (Opus):
   comment that `methods` leaves `Pat` out. An `Option` in the transport would change
   `knobas-http`'s surface for one adapter's unused field. *Reversing:* one line, or a
   transport change with a §10.8 entry.
-- **Both pass `None` for the username.** Neither descriptor offers user + password, and
+- **Both pass `None` for the username.** *Fork:* what to pass as `username`. *Ruling:* `None`. Neither descriptor offers user + password, and
   `ApiToken` sends an empty username whatever is passed. *Reversing:* n/a.
-- **Refusal sentences are kept word for word.** Gitea's `gitea: …` sentences and Kuma's
+- **Refusal sentences are kept word for word.** *Fork:* reword them to the transport's shared phrasing, or keep them. *Ruling:* keep. Gitea's `gitea: …` sentences and Kuma's
   "…takes an API key, sent as HTTP Basic with an empty username" read as before, so the
   `source::tests` that match on them run unchanged. *Reversing:* n/a.
 - **Each adapter gains the descriptor pin** `the_credential_rules_speak_exactly_what_the_form_offers`,

@@ -17,7 +17,9 @@
 //! each carrying the status it came from ([`SourceError::status`], ADR-0004) --
 //! which is what lets this crate tell a dead credential from a repository it
 //! may not read. This adapter's own reading of a failing body is
-//! [`error_message`], handed over as a [`knobas_http::BodyMessage`].
+//! [`error_message`], handed over as a [`knobas_http::BodyMessage`], and its
+//! credential is the [`CredentialRules`] the transport's [`credential`] maps
+//! the configured method under.
 //! [`knobas_http::HttpClient::send`] is the only way onto the wire -- the
 //! [`knobas_http::Request`] the builder hands back deliberately has no `send`
 //! of its own.
