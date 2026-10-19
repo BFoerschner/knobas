@@ -7518,3 +7518,24 @@ The merge-manager's rulings (Sonnet, #1300):
 - **A §10.8 entry of its own** (`docs/contract/10.8/1314-source-fingerprint.md`), because
   `crates/knobas-source/src/**` is frozen (#1234's entry) and #1310's entry covers
   `crates/knobas-http/**` only. *Reversing:* n/a.
+
+The merge-manager's rulings on #1313 and #1314 (Opus):
+
+- **"Failing body" stays a body that does not decode.** *Fork:* read #1313's "non-JSON or
+  failing body" as also covering a failing status. *Ruling:* uphold the implementer. Jira's
+  wrapper (#877) excerpted only a 2xx body that would not decode; a failing status already
+  carries its body through `status_error` and the caller's `BodyMessage`, bounded there. "A Jira
+  failure reads exactly as before" rules out changing that message. *Reversing:* cheap, but every
+  adapter's status messages would change.
+- **38 pins satisfy "every fixture record", with no more rows.** *Fork:* pin each record the
+  Jira and Gitea sync tests build, one by one. *Ruling:* not needed. The shared module's hasher
+  and feeds are Jira's copy text for text (diffed against `origin/main`; only `pub` and
+  `#[must_use]` differ), Gitea's deleted copy is the same text, and Gitea's 2026-10-14 literal
+  `d24648878fd1af9b`, computed by an independent re-implementation, still holds. So every record
+  fingerprints as before, and the 38 pins catch any drift in the encoding. No cursor shape or
+  version changes, so the "no backfill" promise holds. *Reversing:* more rows.
+- **Jira's two forwarding functions stand.** *Fork:* inline the transport calls at the read
+  and write sites. *Ruling:* keep `http::get_json` and `http::post_json`. #1313 asks for the
+  wrapper struct and its re-decoding read to go, and both are gone. The functions name `SHAPE` and
+  #1122's once-sent POST in one place and keep `knobas-http` confined to `http.rs`.
+  *Reversing:* cheap.
