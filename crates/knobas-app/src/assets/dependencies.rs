@@ -109,12 +109,15 @@ pub fn kinds() -> Vec<DepKind> {
         .collect()
 }
 
-/// One shared layer: its name and the kinds it holds, in order.
+/// One shared layer: its name and the kinds it holds, in order. The layers are
+/// the same in every view (D14).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "assets.ts", rename = "DepLayer")]
 pub struct Layer {
     pub id: String,
     pub name: String,
+    /// [`DepKind`] ids: asset type ids, `ticket`, `pr`, `page`, `repo`,
+    /// `pipeline`, `route`.
     pub kinds: Vec<String>,
 }
 
@@ -124,8 +127,8 @@ pub struct Layer {
 pub struct DepItem {
     /// The entity id: `asset:…`, `route:…`, `jira:PAY-231`.
     pub id: String,
-    /// Dependencies' kind: an asset type id, or one of `ticket`, `pr`,
-    /// `repo`, `pipeline`, `route`.
+    /// One of the [`DepKind`] ids: an asset type id, or one of `ticket`,
+    /// `pr`, `page`, `repo`, `pipeline`, `route`.
     pub kind: String,
     pub name: String,
     /// Broken (`err`), warning (`warn`), in flight (`info`), fine (`ok`), or
@@ -151,7 +154,7 @@ pub struct DepRelation {
     pub from: String,
     pub to: String,
     /// A confirmed link's relation, or [`INSIDE`], [`EXPOSES`], [`LANDS_ON`],
-    /// [`IN_REPOSITORY`].
+    /// [`IN_REPOSITORY`] -- `inside`, `exposes`, `lands-on`, `in-repository`.
     pub relation: String,
 }
 
@@ -660,36 +663,44 @@ pub async fn place_kind(
 // -- The saved views (#873) ---------------------------------------------------
 
 /// How a layer's tiles group in a view (prototype-6's *Group by*).
+///
+/// - `none`: *No groups*.
+/// - `environment`: *Environment*.
+/// - `owner`: *Owner or team*.
+/// - `parent`: *What it runs on*: the asset it sits inside.
+/// - `project`: *Project*.
+/// - `status`: *Status*.
+///
+/// Documented here and not on each variant because the generated TypeScript
+/// carries a type's doc but not a variant's (#1325).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "assets.ts", rename = "DepGroup")]
 pub enum Group {
-    /// *No groups*.
     #[default]
     None,
-    /// *Environment*.
     Environment,
-    /// *Owner or team*.
     Owner,
-    /// *What it runs on*: the asset it sits inside.
     Parent,
-    /// *Project*.
     Project,
-    /// *Status*.
     Status,
 }
 
 /// The tile size (prototype-6's *Tiles*).
+///
+/// - `auto`: small when a layer holds more than 30.
+/// - `roomy`: always roomy.
+/// - `compact`: always small.
+///
+/// Documented here and not on each variant because the generated TypeScript
+/// carries a type's doc but not a variant's (#1325).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "assets.ts", rename = "DepTiles")]
 pub enum Tiles {
-    /// Small when a layer holds more than 30.
     #[default]
     Auto,
-    /// Always roomy.
     Roomy,
-    /// Always small.
     Compact,
 }
 

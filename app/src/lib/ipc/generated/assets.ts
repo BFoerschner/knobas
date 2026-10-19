@@ -38,7 +38,15 @@ path: string | null, };
  * has `up` and `none` in it because "nobody has said" is a thing an asset
  * can be, and an alert that could be `none` would be a row saying nothing
  * is wrong. [`tests::the_alert_states_are_the_ones_the_engine_opens`]
- * holds the two lists together.
+ * holds the two lists together. The spellings are shared with a status
+ * on purpose, so a reader can compare an alert with the health it caused.
+ *
+ * - `down`: the monitor did not answer.
+ * - `warn`: the monitor answered slower than the response-time threshold
+ *   -- knobas' own state, derived at sample time (#443).
+ *
+ * The states are documented here and not on each variant because the
+ * generated TypeScript carries a type's doc but not a variant's (#1325).
  */
 export type AlertState = "down" | "warn";
 
@@ -209,8 +217,55 @@ monitor_targets: Array<MonitorTarget>, };
  * the log. That variant argues the exception where it is declared; this is
  * the header saying it exists, so a reader does not take the rule above for a
  * rule the enum keeps.
+ *
+ * - `name`: rename.
+ * - `status`: set the asset's own status.
+ * - `environment`: set or clear the environment.
+ * - `owner`: set or clear the owner.
+ * - `property`: set or clear one property.
+ * - `monitors`: add Uptime Kuma monitor names to [`AssetDetail::monitors`]
+ *   (issue #453).
+ *
+ *   **The one variant that appends rather than sets**, and the only one
+ *   whose field is a list. It is the same write the import makes -- `0020`'s
+ *   column, [`ADD_MONITORS`]' `array_cat`, an `edited` line spelling
+ *   `field: "monitors"` -- reached from the other of the two surfaces that
+ *   put a name there. *Create monitor for this asset* records the name here
+ *   **before** it queues the write, because the name is what attaches the
+ *   monitor when the next poll mirrors it (`knobas_sync::attach`), and a
+ *   create whose write landed with no name on the asset would be a monitor
+ *   nothing joins to anything.
+ *
+ *   **Append, because a name is never taken away by anything but the
+ *   reader** -- which is the import's own rule ([`ADD_MONITORS`]: *"an
+ *   import never removes a monitor name"*) and the reason a set would be
+ *   wrong here too: this edit knows about one name, and assigning would
+ *   drop the six an estate file put there. Removing one is not this
+ *   ticket's, and the pane offers no control for it.
+ *
+ *   A name the asset already carries is dropped rather than refused, so
+ *   pressing *Create* twice for one name leaves one name and writes no
+ *   history line: `array_cat` cannot deduplicate and [`monitor_plan`]
+ *   matches by name, so a duplicate would be an entry a reader could never
+ *   get rid of.
+ *
+ * The edits are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
-export type AssetEdit = { "field": "name", value: string, } | { "field": "status", value: AssetStatus, } | { "field": "environment", value: Environment | null, } | { "field": "owner", value: string | null, } | { "field": "property", key: string, value: PropertyValue | null, } | { "field": "monitors", added: Array<string>, };
+export type AssetEdit = { "field": "name", value: string, } | { "field": "status", value: AssetStatus, } | { "field": "environment", 
+/**
+ * `null` clears it, so the asset inherits again.
+ */
+value: Environment | null, } | { "field": "owner", 
+/**
+ * `null` clears it.
+ */
+value: string | null, } | { "field": "property", key: string, 
+/**
+ * `null` removes the key. Blank text is refused: clear it instead.
+ */
+value: PropertyValue | null, } | { "field": "monitors", added: Array<string>, };
 
 /**
  * One row of the pane's property list.
@@ -232,7 +287,9 @@ label: string,
  */
 value: PropertyValue | null, 
 /**
- * Whether this key is one the type declares.
+ * Whether this key is the reader's own rather than one the type
+ * declares: `false` for every typed property, `true` for every custom
+ * key.
  */
 custom: boolean, };
 
@@ -268,7 +325,7 @@ type_id: string,
  */
 type_label: string, 
 /**
- * The type's two-character chip.
+ * The type's two-character chip; `"??"` for a type this build has lost.
  */
 monogram: string, name: string, 
 /**
@@ -346,6 +403,10 @@ export type AssetStatus = "up" | "warn" | "down" | "none";
 
 /**
  * One built-in asset type.
+ *
+ * Read off the backend by `asset_types` rather than declared in the frontend,
+ * so the sixteen types are one list. The **ids are wire values and never
+ * change**; the labels are display and may be reworded.
  */
 export type AssetType = { 
 /**
@@ -362,14 +423,15 @@ label: string,
 monogram: string, 
 /**
  * The typed properties, **in the order the pane shows them**. The order is
- * the declaration's; it is not sorted anywhere.
+ * the declaration's; it is not sorted anywhere. `custom` declares none.
  */
 properties: Array<TypedProperty>, 
 /**
  * The child types conventionally suggested under one of these, by id, in
  * the order the create dialog offers them.
  *
- * A **suggestion and not a constraint** -- see the module docs. Empty is
+ * A **suggestion and not a constraint** -- see the module docs: the
+ * create dialog offers all sixteen whatever is in here. Empty is
  * a real answer: nothing usually goes inside a table, a network or a
  * `custom`, and an empty list is what makes the dialog say *any type*
  * rather than name one at random.
@@ -418,7 +480,7 @@ web_url: string | null,
  * deleted-at-source while keeping the row", against *withdraw*, which
  * that glossary gives to a queued write pulled back. The fact itself is
  * [`knobas_core::link::LinkEnd::deleted_at`], which the *Linked* panel
- * under this section renders with the older spelling.
+ * under this section renders with the older spelling, *withdrawn*.
  *
  * A fact the reader is shown rather than a filter, for that field's own
  * reason: a section that silently dropped a paused monitor would tell an
@@ -428,6 +490,16 @@ tombstoned: boolean, };
 
 /**
  * How a layer's tiles group in a view (prototype-6's *Group by*).
+ *
+ * - `none`: *No groups*.
+ * - `environment`: *Environment*.
+ * - `owner`: *Owner or team*.
+ * - `parent`: *What it runs on*: the asset it sits inside.
+ * - `project`: *Project*.
+ * - `status`: *Status*.
+ *
+ * Documented here and not on each variant because the generated TypeScript
+ * carries a type's doc but not a variant's (#1325).
  */
 export type DepGroup = "none" | "environment" | "owner" | "parent" | "project" | "status";
 
@@ -440,8 +512,8 @@ export type DepItem = {
  */
 id: string, 
 /**
- * Dependencies' kind: an asset type id, or one of `ticket`, `pr`,
- * `repo`, `pipeline`, `route`.
+ * One of the [`DepKind`] ids: an asset type id, or one of `ticket`,
+ * `pr`, `page`, `repo`, `pipeline`, `route`.
  */
 kind: string, name: string, 
 /**
@@ -483,9 +555,15 @@ label: string,
 monogram: string, };
 
 /**
- * One shared layer: its name and the kinds it holds, in order.
+ * One shared layer: its name and the kinds it holds, in order. The layers are
+ * the same in every view (D14).
  */
-export type DepLayer = { id: string, name: string, kinds: Array<string>, };
+export type DepLayer = { id: string, name: string, 
+/**
+ * [`DepKind`] ids: asset type ids, `ticket`, `pr`, `page`, `repo`,
+ * `pipeline`, `route`.
+ */
+kinds: Array<string>, };
 
 /**
  * One known relation between two items of the read.
@@ -493,12 +571,19 @@ export type DepLayer = { id: string, name: string, kinds: Array<string>, };
 export type DepRelation = { from: string, to: string, 
 /**
  * A confirmed link's relation, or [`INSIDE`], [`EXPOSES`], [`LANDS_ON`],
- * [`IN_REPOSITORY`].
+ * [`IN_REPOSITORY`] -- `inside`, `exposes`, `lands-on`, `in-repository`.
  */
 relation: string, };
 
 /**
  * The tile size (prototype-6's *Tiles*).
+ *
+ * - `auto`: small when a layer holds more than 30.
+ * - `roomy`: always roomy.
+ * - `compact`: always small.
+ *
+ * Documented here and not on each variant because the generated TypeScript
+ * carries a type's doc but not a variant's (#1325).
  */
 export type DepTiles = "auto" | "roomy" | "compact";
 
@@ -606,6 +691,10 @@ routes: Array<RouteRow>, };
  * sets it -- that walk is #431's. The four spellings are `0017`'s
  * `asset_environment_chk`, kept in step with this list by
  * [`tests::every_environment_is_one_the_schema_accepts`].
+ *
+ * `null` where an asset's own field carries one means *not set here*: what is
+ * in force is [`AssetDetail::effective_environment`], the nearest asset at or
+ * above that sets one.
  */
 export type Environment = "dev" | "stage" | "prod" | "shared";
 
@@ -623,8 +712,9 @@ export type ImportEntry = {
  */
 id: string, 
 /**
- * [`NAMESPACE`] or [`ROUTE_NAMESPACE`] -- the word `knobas.entity.kind`
- * holds, so the preview carries no vocabulary of its own.
+ * `"asset"` or `"route"` ([`NAMESPACE`] or [`ROUTE_NAMESPACE`]) -- the
+ * word `knobas.entity.kind` holds, so the preview carries no vocabulary
+ * of its own.
  */
 kind: string, name: string, 
 /**
@@ -899,7 +989,7 @@ target: string | null,
 response_time_ms: number | null, 
 /**
  * **When knobas last read this monitor** -- `sync.item.synced_at`, the
- * same instant the run's samples carry.
+ * same instant the run's samples carry. RFC 3339 on the wire.
  *
  * Kuma's `/metrics` has no clock in it at all (#442): there is no "last
  * checked" to mirror, so the honest answer is when knobas looked. For a
@@ -969,7 +1059,7 @@ assets: Array<MonitoredAsset>,
  */
 actions: Array<string>, 
 /**
- * Its samples inside the bar's window, **oldest first**.
+ * Its samples inside the bar's 24-hour window, **oldest first**.
  *
  * Raw and not bucketed, because the bucketing is the tab's and is tested
  * there: the backend would otherwise own a number of segments that only a
@@ -990,7 +1080,11 @@ samples: Array<MonitorSample>, };
  * bar"). The reading the tab does show is [`MonitorRow::response_time_ms`],
  * the latest one.
  */
-export type MonitorSample = { taken_at: string, 
+export type MonitorSample = { 
+/**
+ * RFC 3339 on the wire.
+ */
+taken_at: string, 
 /**
  * `up`, `warn`, `down`, `pending`, `maintenance`, or `null` for a poll
  * whose state did not resolve -- which the bar draws as a gap.
@@ -1061,11 +1155,13 @@ type_label: string, };
  * `u32` because neither is ever negative, and both are clamped into range by
  * `knobas_sync::samples` on the way in and on the way out -- a settings
  * dialog and a hand-edited `knobas.setting` row are both places a number
- * arrives from, and only one of them has a spinner on it.
+ * arrives from, and only one of them has a spinner on it. So what a caller
+ * posts and what it gets back can differ, and the settings section draws the
+ * answer.
  */
 export type MonitoringSettings = { 
 /**
- * How many days of samples knobas keeps. Default ninety.
+ * How many days of samples knobas keeps. Default ninety, floor one.
  */
 sample_retention_days: number, 
 /**
@@ -1104,9 +1200,13 @@ monitor_id: string,
  * into Kuma belongs, and [`AttachedMonitor::web_url`] is where one
  * already is.
  */
-monitor_name: string, state: AlertState, opened_at: string, 
+monitor_name: string, state: AlertState, 
 /**
- * When somebody said they had seen it, or `null`. Written by #446's ack;
+ * RFC 3339 on the wire.
+ */
+opened_at: string, 
+/**
+ * When somebody said they had seen it, or `null`; RFC 3339 on the wire. Written by #446's ack;
  * on the wire from this ticket because *acked* is part of what an open
  * alert is, and a list that could not say so would draw every alert as
  * unseen.
@@ -1141,10 +1241,37 @@ assets: Array<AlertAsset>, };
  * asked for -- so the names stand, said here so the next reader does not take
  * the narrowness for a claim. What the *dialog* draws is producer-neutral,
  * because the rendered sentence is nobody's frozen surface.
+ *
+ * - `token_needed`: nothing is stored under this importer's keychain account
+ *   and the caller sent no token, so the dialog asks for one, **once**: the
+ *   backend stores it after the run succeeds, so the next run comes back with
+ *   a file instead. **Answered before any request is made**, so a reader who
+ *   has never used this importer is asked once rather than being shown a 401
+ *   from a call made with nothing. Reachable only from a producer that *has*
+ *   a credential. The Docker importer has none -- it spawns a CLI that reads
+ *   this machine's own contexts -- and `produce_estate_file` refuses a token
+ *   sent to it rather than keeping one nothing would read.
+ * - `landing_needed`: assets the estate does not hold, and nowhere said to
+ *   put them. The reader is asked **once per run**: the answer comes back as
+ *   `land_under` on the next call, and everything named here lands under it.
+ *   One question and not one per asset, because *where the things a provider
+ *   account holds go* is one decision -- and because the estate this was
+ *   written against answers it once, with a site. Reachable only from a
+ *   producer whose findings have no natural parent. Docker's have one by
+ *   construction -- a container lands under the engine whose context found
+ *   it (spec #491, story 68) -- so this state is the hcloud importer's alone
+ *   today.
+ * - `ready`: the estate file, in the checked-in shape, ready for
+ *   [`preview_import`].
+ *
+ * The states are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type Produced = { "state": "token_needed" } | { "state": "landing_needed", 
 /**
- * By name, in the order the live system listed them.
+ * The servers that are not in the tree, by name, in the order the
+ * live system listed them.
  */
 servers: Array<string>, } | { "state": "ready", 
 /**
@@ -1220,6 +1347,14 @@ export type PropertyKind = "text" | "number" | "date" | "url";
  * Two values and no third, because there are two ways a file's value can meet
  * a stored one: nobody has claimed the property, so the file wins, or
  * somebody has, so they do.
+ *
+ * - `set`: the stored value is replaced by the file's.
+ * - `kept`: the stored value stays -- the reader's own value surviving,
+ *   because a person edited this property by hand and the file never silently
+ *   undoes that (story 24).
+ *
+ * The plans are documented here and not on each variant because the
+ * generated TypeScript carries a type's doc but not a variant's (#1325).
  */
 export type PropertyPlan = "set" | "kept";
 
@@ -1230,8 +1365,33 @@ export type PropertyPlan = "set" | "kept";
  * *and* in the `properties` jsonb. A bare JSON scalar would make `"8080"` and
  * `8080` the same property and would leave a date indistinguishable from a
  * string, which is the whole of what story 6's four kinds are for.
+ *
+ * - `text`: free text -- a hostname, an image tag, a size.
+ * - `number`: a port, a row count.
+ * - `date`: a calendar date.
+ * - `url`: an http(s) URL.
+ *
+ * The kinds are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
-export type PropertyValue = { "kind": "text", value: string, } | { "kind": "number", value: number, } | { "kind": "date", value: string, } | { "kind": "url", value: string, };
+export type PropertyValue = { "kind": "text", 
+/**
+ * Never blank: clearing a property is `null`, not `""`.
+ */
+value: string, } | { "kind": "number", 
+/**
+ * Finite; JSON has no other kind of number.
+ */
+value: number, } | { "kind": "date", 
+/**
+ * `YYYY-MM-DD`. Refused by the backend if it is not one.
+ */
+value: string, } | { "kind": "url", 
+/**
+ * Refused by the backend if it carries no scheme.
+ */
+value: string, };
 
 /**
  * Everything the pane draws for one route.
@@ -1259,9 +1419,38 @@ monitor_targets: Array<MonitorTarget>, };
  * [`AssetEdit`]'s shape for [`AssetEdit`]'s reason: one field at a time, one
  * history line each with a `from` and a `to`, and `null` on the two nullable
  * fields is an unambiguous **clear**. The asset that exposes a route is not
- * among them -- see the module docs.
+ * among them -- see the module docs: a route is the address of the thing that
+ * answers it, so re-exposing one elsewhere is a different route with a
+ * different history.
+ *
+ * - `name`: rename the route.
+ * - `url`: set the URL or endpoint.
+ * - `target`: set or clear the asset it lands on.
+ * - `visibility`: set who can reach it.
+ * - `property`: set or clear one of the route's own properties.
+ * - `monitors`: add the names of monitors the route waits for (#976),
+ *   [`AssetEdit`]'s `monitors` append on the route's own column (`0042`):
+ *   *Create monitor* on a route records the name here and the poll draws the
+ *   `monitored-by` link.
+ *
+ * The edits are documented here and not on each variant because the
+ * generated TypeScript carries a type's and a field's doc but not a
+ * variant's (#1325).
  */
-export type RouteEdit = { "field": "name", value: string, } | { "field": "url", value: string, } | { "field": "target", value: string | null, } | { "field": "visibility", value: Visibility, } | { "field": "property", key: string, value: PropertyValue | null, } | { "field": "monitors", added: Array<string>, };
+export type RouteEdit = { "field": "name", value: string, } | { "field": "url", 
+/**
+ * Carries a scheme; a bare host is refused.
+ */
+value: string, } | { "field": "target", 
+/**
+ * The asset it lands on; `null` makes it an endpoint that lands on
+ * nothing knobas knows, which is a legal route.
+ */
+value: string | null, } | { "field": "visibility", value: Visibility, } | { "field": "property", key: string, 
+/**
+ * `null` removes the key.
+ */
+value: PropertyValue | null, } | { "field": "monitors", added: Array<string>, };
 
 /**
  * One route, as both ends read it.
@@ -1271,6 +1460,12 @@ export type RouteEdit = { "field": "name", value: string, } | { "field": "url", 
  * shape per direction would be two things to keep in step for no fact gained.
  * Both names are resolved by the read, so neither end has to fetch the other
  * to draw a line.
+ *
+ * **Where it lands** is [`target_id`](Self::target_id): equal to the asset's
+ * own id means it lands here, and anything else is named by
+ * [`target_name`](Self::target_name) -- an ancestor when the asset's
+ * `held_by` holds it, and something inside otherwise. That comparison is what
+ * story 31's dashed wire is drawn from.
  */
 export type RouteRow = { 
 /**
@@ -1303,7 +1498,11 @@ name: string,
 /**
  * The URL or endpoint, carrying its scheme.
  */
-url: string, visibility: Visibility, 
+url: string, 
+/**
+ * Who can reach it. `internal` is what an unclassified route reads as.
+ */
+visibility: Visibility, 
 /**
  * The reader's own keys, by key. A route has no type, so every one of
  * them is custom -- see [`custom_properties`].
@@ -1317,6 +1516,10 @@ properties: Array<AssetProperty>, };
  * create dialog and the pane's property editor read *one* list. Without it
  * the frontend would carry a second copy of sixteen types -- and, worse,
  * would have to guess which kind an unfilled typed property takes.
+ *
+ * The `kind` is what a pane's editor needs and what an asset's property row
+ * cannot carry: a declared key nobody has filled in arrives with
+ * `value: null`, and there is no kind in a `null`.
  */
 export type TypedProperty = { 
 /**
@@ -1434,5 +1637,9 @@ ratio: number, };
  * nobody has classified, and `0018`'s `route_visibility_chk` is the same two
  * spellings, kept in step by
  * [`tests::every_visibility_is_one_the_schema_accepts`].
+ *
+ * - `internal`: reachable from inside the estate. What an unclassified route
+ *   reads as.
+ * - `public`: reachable from outside it.
  */
 export type Visibility = "internal" | "public";
