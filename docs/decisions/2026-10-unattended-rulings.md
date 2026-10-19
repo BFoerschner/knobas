@@ -7604,4 +7604,42 @@ The merge-manager's rulings on #1313 and #1314 (Opus):
   *Reversing:* n/a.
 - **Seams, chosen without a person to confirm them:** the ones the ticket names, the reader's
   operations and state on fake ports and a fake clock (`board-reader.test.svelte.ts`).
+## #1315: one page walker for the page-sequence protocols (Opus implementer, 2026-10-19)
+
+- **The ticket is not dropped: the three protocols take one shape.** *Fork:* the ticket is
+  droppable if they resist one. *Ruling:* they share the loop, the cap and the stop; they differ
+  in what the next request is asked with (a page number, an offset, a link) and whether an empty
+  page ends the walk. That difference is a `Protocol` value of three, not three loops.
+  *Reversing:* revert the PR; the adapters' loops come back as they were.
+- **A next-link walk does not end on an empty page.** *Fork:* the ticket's walker stops "on an
+  empty page". *Ruling:* only where the client builds the next request itself (page number,
+  offset). A Confluence page with `_links.next` is the server's word that more follows, and
+  Confluence followed it through an empty page before. `a_walk_that_never_ends_is_refused_after_max_pages`
+  serves empty pages with a link and must stay green unchanged. *Reversing:* one constant.
+- **The walker hands pages out one at a time; it does not collect them.** *Fork:* "answers the
+  pages read" read as a `Vec` of pages. *Ruling:* `next()` hands out one page per call. Gitea's
+  pull and commit walks and Jira's search stop on a budget or a watermark mid-page, and handle
+  each page (sink writes, discussion reads) before the next request. Collecting first would
+  read pages they never read today. *Reversing:* a collecting helper on top.
+- **A reached cap is `Walked::Capped`, never `End`.** *Fork:* raise the cap as an error, or
+  end quietly. *Ruling:* the walker answers `Capped` and each adapter decides. Gitea's exhaustive
+  walks, Jira's search and Confluence refuse with their own messages. Gitea's pull, commit and
+  label walks stop quietly, as their caps say. The compiler makes every caller name the case.
+  *Reversing:* cheap.
+- **Jira's comment completion keeps having no cap** (`u32::MAX`). *Fork:* give it one.
+  *Ruling:* no; "under the same caps" rules out adding one. *Reversing:* one constant.
+- **Confluence's `get_link` keeps its own absolute-link guard.** *Fork:* delete it now that the
+  walker refuses first. *Ruling:* keep it, and its `http.rs` test, unchanged. It guards the
+  request seam for any direct `follow`, and the ticket asks the paging tests to stay unchanged.
+  *Reversing:* delete a branch and a test.
+- **Confluence's `Walk` stays as a thin wrapper.** *Fork:* call `PageWalk` at the four sites.
+  *Ruling:* `Walk` keeps the search-then-follow fetch and the refusal naming what it walks, and
+  holds no paging logic. Its cap test drives `Walk::new` and `next_page` and stays unchanged.
+  *Reversing:* inline four call sites.
+- **Scope is the ticket's list.** Gitea's view walks (`view/rows.rs`), Jira's views listings
+  (`views.rs`) and Confluence's comment completion still page on their own. The ticket names the
+  sync pager, the label read, Jira's search and comment loops and Confluence's continuation walk,
+  and the others keep their own end rules, unchanged here. *Reversing:* follow-ups.
+- **Seams, chosen without a person to confirm them:** the transport test, as the ticket names,
+  and each adapter's suite unchanged, plus `just gitea-live` and `just atlassian-live`.
   *Reversing:* n/a.
