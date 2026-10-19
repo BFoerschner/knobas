@@ -2,7 +2,9 @@
  * The Inbox's pure half (#834, R-12.1 to R-12.3): what a row says, where it
  * opens, which job it belongs to, and which rows the filter keeps.
  */
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+
+import { kindRegistry } from "../../shell/kind-registry.svelte";
 
 import type { InboxEntry, InboxItem, Reached } from "../../ipc/entity";
 import { jobIndex } from "../job/open-jobs";
@@ -210,4 +212,13 @@ test("a snooze's toast names the day within a week, the date beyond", () => {
   const now = new Date(2026, 7, 21, 15, 0); // a Friday
   expect(untilLabel(new Date(2026, 7, 24, 9, 0), now)).toBe("Monday 09:00");
   expect(untilLabel(new Date(2026, 8, 4, 9, 0), now)).toBe("2026-09-04 09:00");
+});
+
+test("a run of a kind the CI adapters claim opens Builds' run page (#1278)", () => {
+  const spy = vi.spyOn(kindRegistry, "frameKinds").mockReturnValue(["build", "workflow_run"]);
+  try {
+    expect(opener(item({ category: "mention", entity_id: "forge:run#77", kind: "workflow_run" }))?.href).toBe("#/build/forge%3Arun%2377");
+  } finally {
+    spy.mockRestore();
+  }
 });

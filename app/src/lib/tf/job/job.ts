@@ -22,6 +22,7 @@ export interface SourceFacts {
 }
 import type { Week } from "../../ipc/time";
 import type { RoleClaim } from "../../ipc/sources";
+import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { CI, claims } from "../roles.svelte";
 
 /** Whether an address segment is an entity id (`jira:PAY-231`) rather than a key. */
@@ -220,6 +221,18 @@ export function jiraViewSlug(entityId: string): string {
 const NOTES_HASH = "#/settings/notes";
 
 /**
+ * The run kind Builds reads while the adapters' claims are not known: the
+ * built-in CI adapter's, so a registry that failed to read draws what it drew
+ * before #1230, as an unread source list narrows nothing.
+ */
+const UNKNOWN_RUN_KINDS = ["build"] as const;
+
+/** The CI role's run kinds as the claims stand, the built-in adapter's while they are not known (#1230, #1256). */
+export function runKindsOf(registry: Pick<KindRegistry, "frameKinds">): readonly string[] {
+  return registry.frameKinds(CI, "run") ?? UNKNOWN_RUN_KINDS;
+}
+
+/**
  * The full view a row opens (R-4.10): the item's own address in the new
  * shell, never a panel. The address carries the entity id, because a pull
  * request's number is unique only inside its repository. A kind with no view
@@ -229,11 +242,11 @@ const NOTES_HASH = "#/settings/notes";
  * anything else its item page, `#/item/<id>`, which draws the source's block
  * view (a custom role's item, #1201, ADR-0029). Never Code: a kind that is not code does
  * not belong there (#1094). Every surface opens a kind through this one rule
- * (#1101), except that only a caller passing `runKinds` (the CI role's `run`
- * frame from the adapters' claims, #1256) opens a run of another kind than
- * `build` on Builds' run page; without it such a kind opens its item page.
+ * (#1101), and that includes a run of another kind than `build`: `runKinds`
+ * (the CI role's `run` frame from the adapters' claims, #1256) defaults to the
+ * shared registry's, so no caller can leave it unasked (#1278).
  */
-export function itemHash(row: Pick<EntityRow, "entity_id" | "kind">, runKinds: readonly string[] = []): string {
+export function itemHash(row: Pick<EntityRow, "entity_id" | "kind">, runKinds: readonly string[] = runKindsOf(kindRegistry)): string {
   const id = encodeURIComponent(row.entity_id);
   if (runKinds.includes(row.kind)) return `#/build/${id}`;
   switch (row.kind) {

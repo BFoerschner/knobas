@@ -6660,3 +6660,13 @@ The merge-manager's rulings (Opus):
 - **The handler barrel is renamed in place.** *Fork:* the list is append-only (§10.8). *Ruling:*
   rename the two lines where they stand; a rename has no append form, and the conflict surface is
   the same two lines. Stated in the §10.8 entry. *Reversing:* n/a.
+
+## #1278 — every `itemHash` caller opens a run kind through the claims
+
+- **`itemHash` reads the registry itself; callers do not pass `runKinds`.** The `runKinds`
+  parameter now defaults to `runKindsOf(kindRegistry)`, and `runKindsOf` moved from
+  `tf/job/sections.ts` to `tf/job/job.ts` (re-exported from `sections.ts`) so `job.ts` need not
+  import `sections.ts`, which imports `job.ts`. Passing it at each of the ten callers would leave
+  the next caller free to forget it, which is how #1256 left these; the one-rule comment (#1101)
+  is now true by construction. The TfJob Builds section still passes its injected registry.
+  **Reversing:** low, drop the default and thread the argument.
