@@ -491,17 +491,24 @@ fn sources_state(
 ) -> knobas_app::sources::SourcesState {
     use std::sync::Arc;
     let handle = app.handle().clone();
+    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> =
+        Arc::new(knobas_app::sources::Registry::for_process());
     // `block_in_place` first: this runs inside the test's multi-thread runtime,
     // and `block_on` from within one panics.
     tokio::task::block_in_place(|| {
         tauri::async_runtime::block_on(async move {
             knobas_app::sources::SourcesState {
-                scheduler: knobas_app::sources::test_scheduler(&handle, db, pool.clone())
-                    .await
-                    .expect("a scheduler over the test pool"),
+                scheduler: knobas_app::sources::test_scheduler(
+                    &handle,
+                    db,
+                    pool.clone(),
+                    Arc::clone(&registry),
+                )
+                .await
+                .expect("a scheduler over the test pool"),
                 pool,
                 secrets: Arc::new(knobas_secrets::MemoryStore::new()),
-                registry: Arc::new(knobas_app::sources::Registry::for_process()),
+                registry,
             }
         })
     })

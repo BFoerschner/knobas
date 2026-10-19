@@ -66,10 +66,19 @@ pub async fn mini_board(
         first: lanes_first,
     });
     if let Some(view) = saved_view {
-        return saved_view_board_laned(&pool, &view, per_column, query.as_deref(), lanes).await;
+        return saved_view_board_laned(
+            &pool,
+            lifecycle.registry(),
+            &view,
+            per_column,
+            query.as_deref(),
+            lanes,
+        )
+        .await;
     }
     mini_board_laned(
         &pool,
+        lifecycle.registry(),
         Room {
             ctx_id: ctx_id.as_deref(),
             role: role.as_deref(),
@@ -102,6 +111,7 @@ pub struct Room<'a> {
 /// See [`mini_board`]; a query past the launcher's length is `invalid`.
 pub async fn mini_board_inner(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     ctx_id: Option<&str>,
     role: Option<&str>,
     project: Option<&str>,
@@ -110,6 +120,7 @@ pub async fn mini_board_inner(
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     mini_board_laned(
         pool,
+        registry,
         Room {
             ctx_id,
             role,
@@ -129,6 +140,7 @@ pub async fn mini_board_inner(
 /// See [`mini_board_inner`].
 pub async fn mini_board_laned(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     room: Room<'_>,
     per_column: Option<u32>,
     query: Option<&str>,
@@ -143,9 +155,7 @@ pub async fn mini_board_laned(
     // every source, so a role nobody fills answers here, with nothing on it.
     let sources = match role {
         Some(role) => {
-            let fillers =
-                crate::sources::crud::fillers(pool, &crate::sources::Registry::for_process(), role)
-                    .await?;
+            let fillers = crate::sources::crud::fillers(pool, registry, role).await?;
             if fillers.is_empty() {
                 return Ok(knobas_core::mini_board::MiniBoard {
                     columns: Vec::new(),
@@ -158,10 +168,10 @@ pub async fn mini_board_laned(
         }
         None => Vec::new(),
     };
-    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
+    let declarations = declared_paths(pool, registry).await?;
     let only = match query.map(str::trim).filter(|query| !query.is_empty()) {
         Some(query) => {
-            crate::commands::search::searcher(pool, &crate::sources::Registry::for_process())
+            crate::commands::search::searcher(pool, registry)
                 .await?
                 .matching_ids(query, "ticket")
                 .await?
@@ -205,11 +215,12 @@ pub async fn mini_board_laned(
 /// [`mini_board_inner`].
 pub async fn saved_view_board(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     view: &str,
     per_column: Option<u32>,
     query: Option<&str>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
-    saved_view_board_laned(pool, view, per_column, query, None).await
+    saved_view_board_laned(pool, registry, view, per_column, query, None).await
 }
 
 /// [`saved_view_board`] in lanes (#939): the whole view put in lanes after it
@@ -221,6 +232,7 @@ pub async fn saved_view_board(
 /// See [`saved_view_board`].
 pub async fn saved_view_board_laned(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     view: &str,
     per_column: Option<u32>,
     query: Option<&str>,
@@ -256,16 +268,15 @@ pub async fn saved_view_board_laned(
         .collect();
     let mut only = members.clone();
     if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty())
-        && let Some(matched) =
-            crate::commands::search::searcher(pool, &crate::sources::Registry::for_process())
-                .await?
-                .matching_ids(query, "ticket")
-                .await?
+        && let Some(matched) = crate::commands::search::searcher(pool, registry)
+            .await?
+            .matching_ids(query, "ticket")
+            .await?
     {
         let matched: std::collections::HashSet<String> = matched.into_iter().collect();
         only.retain(|id| matched.contains(id));
     }
-    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
+    let declarations = declared_paths(pool, registry).await?;
     let identity = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
         .await?
         .identity;
@@ -356,6 +367,6 @@ pub async fn source_statuses(
     source_id: String,
 ) -> Result<Vec<String>, IpcError> {
     let pool = lifecycle.pool()?;
-    let declarations = declared_paths(&pool, &crate::sources::Registry::for_process()).await?;
+    let declarations = declared_paths(&pool, lifecycle.registry()).await?;
     Ok(knobas_core::mini_board::source_statuses(&pool, &source_id, &declarations).await?)
 }

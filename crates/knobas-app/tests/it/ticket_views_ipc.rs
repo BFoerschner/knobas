@@ -110,9 +110,17 @@ async fn a_views_count_is_the_tickets_its_board_draws() {
         .await
         .expect("save");
     let rows = listed(&pool, &[&saved.id]).await;
-    let board = mini_board_inner(&pool, None, None, None, None, Some(&text))
-        .await
-        .expect("mini_board");
+    let board = mini_board_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        None,
+        None,
+        None,
+        None,
+        Some(&text),
+    )
+    .await
+    .expect("mini_board");
     let drawn: u32 = board.columns.iter().map(|column| column.total).sum();
 
     assert_eq!(rows.len(), 1);

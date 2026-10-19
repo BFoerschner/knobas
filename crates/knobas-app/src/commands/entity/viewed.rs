@@ -24,8 +24,12 @@ const PR_HEAD: &str = concat!(
     " as head from sync.item i where i.entity_id = $1"
 );
 
-async fn pr_head(pool: &PgPool, entity: &EntityRef) -> Result<Option<String>, IpcError> {
-    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
+async fn pr_head(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity: &EntityRef,
+) -> Result<Option<String>, IpcError> {
+    let declarations = declared_paths(pool, registry).await?;
     let head: Option<Option<String>> = sqlx::query_scalar(PR_HEAD)
         .bind(entity.to_string())
         .bind(declarations.as_param())
@@ -65,9 +69,13 @@ fn viewed_at(stored: &serde_json::Value, entity: &str, head: Option<&str>) -> Ve
 ///
 /// [`Invalid`](crate::IpcErrorCode::Invalid) for an id that is not an entity
 /// id; [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
-pub async fn pr_viewed_files_inner(pool: &PgPool, pr_id: &str) -> Result<Vec<String>, IpcError> {
+pub async fn pr_viewed_files_inner(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    pr_id: &str,
+) -> Result<Vec<String>, IpcError> {
     let entity = EntityRef::parse(pr_id).map_err(IpcError::invalid)?;
-    let head = pr_head(pool, &entity).await?;
+    let head = pr_head(pool, registry, &entity).await?;
     let stored: Option<serde_json::Value> =
         sqlx::query_scalar("select value from knobas.setting where key = $1")
             .bind(VIEWED_SETTING)
@@ -88,13 +96,14 @@ pub async fn pr_viewed_files_inner(pool: &PgPool, pr_id: &str) -> Result<Vec<Str
 /// if the write fails.
 pub async fn set_pr_file_viewed_inner(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     pr_id: &str,
     path: &str,
     viewed: bool,
 ) -> Result<Vec<String>, IpcError> {
     let entity = EntityRef::parse(pr_id).map_err(IpcError::invalid)?;
     let id = entity.to_string();
-    let head = pr_head(pool, &entity).await?;
+    let head = pr_head(pool, registry, &entity).await?;
     let mut tx = pool.begin().await?;
     // The row first, then held: two ticks at once each read the other's.
     sqlx::query(
@@ -145,7 +154,7 @@ pub async fn pr_viewed_files(
     pr_id: String,
 ) -> Result<Vec<String>, IpcError> {
     let pool = lifecycle.pool()?;
-    pr_viewed_files_inner(&pool, &pr_id).await
+    pr_viewed_files_inner(&pool, lifecycle.registry(), &pr_id).await
 }
 
 /// Mark a pull request's file *Viewed* or not (#842).
@@ -162,5 +171,5 @@ pub async fn set_pr_file_viewed(
     viewed: bool,
 ) -> Result<Vec<String>, IpcError> {
     let pool = lifecycle.pool()?;
-    set_pr_file_viewed_inner(&pool, &pr_id, &path, viewed).await
+    set_pr_file_viewed_inner(&pool, lifecycle.registry(), &pr_id, &path, viewed).await
 }

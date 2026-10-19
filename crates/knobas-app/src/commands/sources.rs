@@ -84,6 +84,22 @@ pub fn list_adapters(lifecycle: State<'_, Lifecycle>) -> Vec<knobas_source::Sour
     lifecycle.registry().descriptors()
 }
 
+/// The install flow's paths over the sources state's registry (#1323).
+fn installs(
+    state: &crate::sources::SourcesState,
+    profile_dir: &std::path::Path,
+) -> Result<crate::sources::installed::Installs, IpcError> {
+    let registry = state.installable().ok_or_else(not_installable)?;
+    Ok(crate::sources::installed::Installs::for_profile(
+        registry,
+        profile_dir,
+    ))
+}
+
+fn not_installable() -> IpcError {
+    IpcError::internal("the registry in use does not take installed adapters")
+}
+
 /// Install an external adapter from a local `knobas-adapter.json` (#1202,
 /// ADR-0028): every static check, then the artifact stored under its hash,
 /// the install recorded, and the adapter in `list_adapters` from then on.
@@ -96,7 +112,8 @@ pub async fn install_adapter<R: tauri::Runtime>(
     manifest: String,
 ) -> Result<crate::sources::install::InstalledAdapter, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::install::install_for_profile(&state.pool, &profile.dir, &manifest)
+    let registry = state.installable().ok_or_else(not_installable)?;
+    crate::sources::install::install_for_profile(&state.pool, &registry, &profile.dir, &manifest)
         .await
         .map_err(|error| error.to_ipc())
 }
@@ -109,7 +126,7 @@ pub async fn list_installed_adapters<R: tauri::Runtime>(
     profile: State<'_, crate::Profile>,
 ) -> Result<Vec<crate::sources::installed::AdapterStatus>, IpcError> {
     let state = crate::sources::state(&app)?;
-    let installs = crate::sources::installed::Installs::for_profile(&profile.dir);
+    let installs = installs(&state, &profile.dir)?;
     crate::sources::installed::list(&state.pool, &installs.registry)
         .await
         .map_err(IpcError::internal)
@@ -123,7 +140,7 @@ pub async fn check_adapter_updates<R: tauri::Runtime>(
     profile: State<'_, crate::Profile>,
 ) -> Result<Vec<crate::sources::installed::AdapterStatus>, IpcError> {
     let state = crate::sources::state(&app)?;
-    let installs = crate::sources::installed::Installs::for_profile(&profile.dir);
+    let installs = installs(&state, &profile.dir)?;
     crate::sources::installed::check_updates(&state.pool, &installs.registry, &installs.endpoints)
         .await
         .map_err(IpcError::internal)
@@ -138,7 +155,7 @@ pub async fn update_adapter<R: tauri::Runtime>(
     kind: String,
 ) -> Result<crate::sources::installed::AdapterStatus, IpcError> {
     let state = crate::sources::state(&app)?;
-    let installs = crate::sources::installed::Installs::for_profile(&profile.dir);
+    let installs = installs(&state, &profile.dir)?;
     crate::sources::installed::update(
         &state.pool,
         &installs.registry,
@@ -161,7 +178,7 @@ pub async fn uninstall_adapter<R: tauri::Runtime>(
     removals: Vec<crate::sources::installed::Removal>,
 ) -> Result<(), IpcError> {
     let state = crate::sources::state(&app)?;
-    let installs = crate::sources::installed::Installs::for_profile(&profile.dir);
+    let installs = installs(&state, &profile.dir)?;
     let outcome = crate::sources::installed::uninstall(
         &state.pool,
         &state.secrets,

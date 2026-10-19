@@ -1307,6 +1307,7 @@ async fn a_gitea_issue_is_on_the_tickets_board_beside_a_jira_ticket() {
 
     let board = knobas_app::commands::entity::mini_board_inner(
         &state.pool,
+        &knobas_app::sources::Registry::for_process(),
         None,
         Some(knobas_source::role::TICKET_SYSTEM),
         None,

@@ -33,7 +33,7 @@ use super::*;
 pub async fn list_projects(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<knobas_core::project::Project>, IpcError> {
-    list_projects_inner(&lifecycle.pool()?).await
+    list_projects_inner(&lifecycle.pool()?, lifecycle.registry()).await
 }
 
 /// [`list_projects`] with the pool handed in, so a test can reach it.
@@ -53,10 +53,11 @@ pub async fn list_projects(
 /// failure or a declaration write that fails.
 pub async fn list_projects_inner(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
 ) -> Result<Vec<knobas_core::project::Project>, IpcError> {
     // The declarations' stored copy, written first as every search command
     // writes it (one read when nothing changed): the census reads
     // `sync.item_project`, which the database resolves from it (#759).
-    crate::commands::search::searcher(pool, &crate::sources::Registry::for_process()).await?;
+    crate::commands::search::searcher(pool, registry).await?;
     Ok(knobas_core::project::list(pool).await?)
 }

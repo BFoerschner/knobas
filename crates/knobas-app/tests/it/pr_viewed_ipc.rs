@@ -58,43 +58,85 @@ async fn a_file_is_viewed_until_it_is_unticked_or_the_head_moves() {
     let source = source(&pool).await;
     let pr = pull(&pool, &source, "c90d11").await;
 
-    assert!(pr_viewed_files_inner(&pool, &pr).await.unwrap().is_empty());
-    assert_eq!(
-        set_pr_file_viewed_inner(&pool, &pr, "src/sepa/retry.rs", true)
+    assert!(
+        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &pr)
             .await
-            .unwrap(),
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        set_pr_file_viewed_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            &pr,
+            "src/sepa/retry.rs",
+            true
+        )
+        .await
+        .unwrap(),
         ["src/sepa/retry.rs"]
     );
     // Twice is once; a second file joins it, in path order.
-    set_pr_file_viewed_inner(&pool, &pr, "src/sepa/retry.rs", true)
-        .await
-        .unwrap();
+    set_pr_file_viewed_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &pr,
+        "src/sepa/retry.rs",
+        true,
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        set_pr_file_viewed_inner(&pool, &pr, "docs/backoff.md", true)
-            .await
-            .unwrap(),
+        set_pr_file_viewed_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            &pr,
+            "docs/backoff.md",
+            true
+        )
+        .await
+        .unwrap(),
         ["docs/backoff.md", "src/sepa/retry.rs"]
     );
     assert_eq!(
-        pr_viewed_files_inner(&pool, &pr).await.unwrap(),
+        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &pr)
+            .await
+            .unwrap(),
         ["docs/backoff.md", "src/sepa/retry.rs"]
     );
     // Unticked.
     assert_eq!(
-        set_pr_file_viewed_inner(&pool, &pr, "docs/backoff.md", false)
-            .await
-            .unwrap(),
+        set_pr_file_viewed_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            &pr,
+            "docs/backoff.md",
+            false
+        )
+        .await
+        .unwrap(),
         ["src/sepa/retry.rs"]
     );
 
     // The head moved: nothing is viewed of the new head, and a tick now
     // starts its own set.
     push(&pool, &pr, "e41a07").await;
-    assert!(pr_viewed_files_inner(&pool, &pr).await.unwrap().is_empty());
-    assert_eq!(
-        set_pr_file_viewed_inner(&pool, &pr, "tests/sepa_retry.rs", true)
+    assert!(
+        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &pr)
             .await
-            .unwrap(),
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        set_pr_file_viewed_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            &pr,
+            "tests/sepa_retry.rs",
+            true
+        )
+        .await
+        .unwrap(),
         ["tests/sepa_retry.rs"]
     );
 }
@@ -105,23 +147,57 @@ async fn each_pull_request_keeps_its_own_ticks() {
     let pool = pool().await;
     let one = pull(&pool, &source(&pool).await, "c90d11").await;
     let two = pull(&pool, &source(&pool).await, "c90d11").await;
-    set_pr_file_viewed_inner(&pool, &one, "a.rs", true)
-        .await
-        .unwrap();
-    set_pr_file_viewed_inner(&pool, &two, "b.rs", true)
-        .await
-        .unwrap();
-    assert_eq!(pr_viewed_files_inner(&pool, &one).await.unwrap(), ["a.rs"]);
-    assert_eq!(pr_viewed_files_inner(&pool, &two).await.unwrap(), ["b.rs"]);
+    set_pr_file_viewed_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &one,
+        "a.rs",
+        true,
+    )
+    .await
+    .unwrap();
+    set_pr_file_viewed_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &two,
+        "b.rs",
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &one)
+            .await
+            .unwrap(),
+        ["a.rs"]
+    );
+    assert_eq!(
+        pr_viewed_files_inner(&pool, &knobas_app::sources::Registry::for_process(), &two)
+            .await
+            .unwrap(),
+        ["b.rs"]
+    );
 }
 
 #[tokio::test]
 async fn what_is_not_an_entity_id_is_refused() {
     let pool = pool().await;
-    let refused = pr_viewed_files_inner(&pool, "not an id").await.unwrap_err();
+    let refused = pr_viewed_files_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        "not an id",
+    )
+    .await
+    .unwrap_err();
     assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
-    let refused = set_pr_file_viewed_inner(&pool, "not an id", "a.rs", true)
-        .await
-        .unwrap_err();
+    let refused = set_pr_file_viewed_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        "not an id",
+        "a.rs",
+        true,
+    )
+    .await
+    .unwrap_err();
     assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
 }

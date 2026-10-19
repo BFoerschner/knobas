@@ -338,6 +338,10 @@ impl knobas_sync::scheduler::AdapterRegistry for Registry {
         self.templates()
     }
 
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
     fn doc_projection(&self, kind: &str) -> Option<knobas_source::docs::DocProjection> {
         Registry::doc_projection(self, kind)
     }
@@ -443,6 +447,92 @@ mod tests {
         assert_eq!(
             Registry::default().check_free("jira"),
             Err(KindTaken::new("jira", TakenBy::BuiltIn))
+        );
+    }
+
+    /// **Only bring-up and the lifecycle's default reach the process registry**
+    /// (#1305, #1323). Every other read takes the registry it is given as
+    /// `&dyn AdapterRegistry`, which is what lets a test hand it one of its
+    /// own; a third direct call is the second route growing back.
+    ///
+    /// Scans the non-test source of the app crate: each file up to its first
+    /// `#[cfg(test)]`, comment lines and the definition itself left out. A
+    /// unit test's fixture and the integration tests under `tests/` build the
+    /// process registry as a fixture and are not the route this pins (the
+    /// command-module scan in `commands/mod.rs` likewise reads `src/commands`
+    /// only). The allow-list is a count per file, so a second call beside an
+    /// allowed one is caught too.
+    #[test]
+    fn only_bring_up_and_the_lifecycles_default_call_for_process() {
+        const ALLOWED: [(&str, &str); 2] = [
+            ("sources/mod.rs", "bring-up (`sources::start`)"),
+            (
+                "commands/app.rs",
+                "the lifecycle's default (`Lifecycle::new`)",
+            ),
+        ];
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("a source directory is readable") {
+                let path = entry.expect("a directory entry").path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        walk(&root, &mut files);
+        assert!(
+            files.len() > 50,
+            "the scan found only {} files",
+            files.len()
+        );
+
+        let needle = ["for_process", "()"].concat();
+        let mut hits: Vec<(String, usize)> = Vec::new();
+        for path in files {
+            let relative = path
+                .strip_prefix(&root)
+                .expect("under src")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let text = std::fs::read_to_string(&path).expect("a source file is readable");
+            for (at, line) in text.lines().enumerate() {
+                let line = line.trim_start();
+                if line.starts_with("#[cfg(test)]") {
+                    break;
+                }
+                if line.starts_with("//") || line.contains("fn for_process") {
+                    continue;
+                }
+                if line.contains(&needle) {
+                    hits.push((relative.clone(), at + 1));
+                }
+            }
+        }
+
+        let mut expected: Vec<String> =
+            ALLOWED.iter().map(|(file, _)| (*file).to_owned()).collect();
+        let mut found: Vec<String> = hits.iter().map(|(file, _)| file.clone()).collect();
+        expected.sort();
+        found.sort();
+        let sites = ALLOWED
+            .iter()
+            .map(|(file, what)| format!("{file}: {what}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        let at = hits
+            .iter()
+            .map(|(file, line)| format!("{file}:{line}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        assert_eq!(
+            found, expected,
+            "Registry::for_process() may be called from exactly two places: {sites}. \
+             Every other read takes the registry it is given (`&dyn AdapterRegistry`, from \
+             the lifecycle or the sources state). Found at: {at}"
         );
     }
 }

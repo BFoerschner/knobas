@@ -72,6 +72,14 @@ pub trait AdapterRegistry: Send + Sync + 'static {
         None
     }
 
+    /// The registry itself, for a caller that must reach its concrete type:
+    /// the install flow adds, replaces and removes adapters, which the trait
+    /// has no method for (#1323). `None` for a registry that is not meant to
+    /// be installed into, which every test registry is.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
+
     /// # Errors
     /// [`SourceError::Protocol`] if no adapter answers to the instance's
     /// `kind`, or if the adapter rejected the configuration.

@@ -129,7 +129,9 @@ async fn pipelines_carry_their_name_group_and_last_twelve_runs() {
     )
     .await;
 
-    let all = pipelines_inner(&pool).await.unwrap();
+    let all = pipelines_inner(&pool, &knobas_app::sources::Registry::for_process())
+        .await
+        .unwrap();
     let mine: Vec<_> = all.iter().filter(|p| p.source_id == tc).collect();
     let names: Vec<&str> = mine.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(names, ["Integration Tests", "Lint"], "by name");
@@ -210,7 +212,14 @@ async fn a_pipelines_runs_come_newest_first_with_their_fields() {
     )
     .await;
 
-    let runs = pipeline_runs_inner(&pool, &tests, None).await.unwrap();
+    let runs = pipeline_runs_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &tests,
+        None,
+    )
+    .await
+    .unwrap();
     let ids: Vec<&str> = runs.iter().map(|r| r.entity_id.as_str()).collect();
     assert_eq!(
         ids.len(),
@@ -235,7 +244,14 @@ async fn a_pipelines_runs_come_newest_first_with_their_fields() {
     );
     assert_eq!(f.duration_seconds, Some(257));
 
-    let capped = pipeline_runs_inner(&pool, &tests, Some(1)).await.unwrap();
+    let capped = pipeline_runs_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &tests,
+        Some(1),
+    )
+    .await
+    .unwrap();
     assert_eq!(capped.len(), 1);
 }
 
@@ -257,18 +273,28 @@ async fn runs_of_something_that_is_no_pipeline_are_refused() {
     .await;
     let code = |e: knobas_app::IpcError| e.code;
     assert_eq!(
-        pipeline_runs_inner(&pool, "not an id", None)
-            .await
-            .map_err(code)
-            .unwrap_err(),
+        pipeline_runs_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            "not an id",
+            None
+        )
+        .await
+        .map_err(code)
+        .unwrap_err(),
         knobas_app::IpcErrorCode::Invalid
     );
     for id in [run, format!("{tc}:buildType:Missing")] {
         assert_eq!(
-            pipeline_runs_inner(&pool, &id, None)
-                .await
-                .map_err(code)
-                .unwrap_err(),
+            pipeline_runs_inner(
+                &pool,
+                &knobas_app::sources::Registry::for_process(),
+                &id,
+                None
+            )
+            .await
+            .map_err(code)
+            .unwrap_err(),
             knobas_app::IpcErrorCode::NotFound,
             "{id}"
         );
@@ -311,7 +337,9 @@ async fn a_run_joins_its_pipeline_by_id_within_its_source_only() {
     .await;
     let run_b_payout = build(&pool, &b, 3, "Payout_IntegrationTests", Some("SUCCESS"), at).await;
 
-    let all = pipelines_inner(&pool).await.unwrap();
+    let all = pipelines_inner(&pool, &knobas_app::sources::Registry::for_process())
+        .await
+        .unwrap();
     for (pipeline, run) in [
         (&a_payout, &run_a_payout),
         (&a_billing, &run_a_billing),
@@ -320,7 +348,14 @@ async fn a_run_joins_its_pipeline_by_id_within_its_source_only() {
         let row = all.iter().find(|p| &p.entity_id == pipeline).unwrap();
         let recent: Vec<&str> = row.recent.iter().map(|r| r.entity_id.as_str()).collect();
         assert_eq!(recent, [run.as_str()], "pipelines: {pipeline}");
-        let runs = pipeline_runs_inner(&pool, pipeline, None).await.unwrap();
+        let runs = pipeline_runs_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            pipeline,
+            None,
+        )
+        .await
+        .unwrap();
         let ids: Vec<&str> = runs.iter().map(|r| r.entity_id.as_str()).collect();
         assert_eq!(ids, [run.as_str()], "pipeline_runs: {pipeline}");
     }
@@ -353,7 +388,9 @@ async fn a_pipeline_carries_its_chain_of_groups_outermost_first() {
     .await;
     let flat = configuration(&pool, &tc, "Payout_Lint", "Lint").await;
 
-    let all = pipelines_inner(&pool).await.unwrap();
+    let all = pipelines_inner(&pool, &knobas_app::sources::Registry::for_process())
+        .await
+        .unwrap();
     let path = |id: &str| all.iter().find(|p| p.entity_id == id).unwrap().path.clone();
     assert_eq!(path(&deep), ["Payments", "Payouts", "Deploy"]);
     assert!(path(&flat).is_empty());
@@ -382,7 +419,9 @@ async fn a_pin_is_kept_until_it_is_taken_back() {
         "twice is once"
     );
     assert!(set_pipeline_pinned_inner(&pool, &lint, true).await.unwrap());
-    let all = pipelines_inner(&pool).await.unwrap();
+    let all = pipelines_inner(&pool, &knobas_app::sources::Registry::for_process())
+        .await
+        .unwrap();
     assert!(pinned(&all, &tests) && pinned(&all, &lint));
 
     assert!(
@@ -390,7 +429,9 @@ async fn a_pin_is_kept_until_it_is_taken_back() {
             .await
             .unwrap()
     );
-    let all = pipelines_inner(&pool).await.unwrap();
+    let all = pipelines_inner(&pool, &knobas_app::sources::Registry::for_process())
+        .await
+        .unwrap();
     assert!(!pinned(&all, &tests), "unpinned");
     assert!(pinned(&all, &lint), "the other pin is kept");
 
@@ -956,7 +997,14 @@ async fn runs_carry_their_agent_what_they_do_now_and_their_mirrored_commit() {
     )
     .await;
 
-    let runs = pipeline_runs_inner(&pool, &tests, None).await.unwrap();
+    let runs = pipeline_runs_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &tests,
+        None,
+    )
+    .await
+    .unwrap();
     let seen: Vec<_> = runs
         .iter()
         .map(|r| {
@@ -978,7 +1026,9 @@ async fn runs_carry_their_agent_what_they_do_now_and_their_mirrored_commit() {
             (Some("agent-linux-01"), None, None),
         ]
     );
-    let listed = pipelines_inner(&pool).await.unwrap();
+    let listed = pipelines_inner(&pool, &knobas_app::sources::Registry::for_process())
+        .await
+        .unwrap();
     let row = listed.iter().find(|p| p.entity_id == tests).unwrap();
     let recent: Vec<_> = row
         .recent
@@ -1109,7 +1159,14 @@ async fn a_shared_sha_links_the_commit_in_the_repository_the_pipeline_builds() {
     assert_eq!(commits(unread), [(b4, Some(alone.clone())), (b3, None)]);
 
     // The mirror alone cannot say which repository a run built: the same.
-    let mirror = pipeline_runs_inner(&pool, &tests, None).await.unwrap();
+    let mirror = pipeline_runs_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &tests,
+        None,
+    )
+    .await
+    .unwrap();
     assert_eq!(commits(mirror), [(b2, Some(alone)), (b1, None)]);
 }
 
@@ -1281,7 +1338,14 @@ async fn runs_carry_their_trigger_who_started_them_and_their_commit() {
         .await;
     }
 
-    let runs = pipeline_runs_inner(&pool, &tests, None).await.unwrap();
+    let runs = pipeline_runs_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &tests,
+        None,
+    )
+    .await
+    .unwrap();
     /// How a run was started, by whom, whether that is the reader, its commit.
     type Started<'a> = (Option<Trigger>, Option<&'a str>, bool, Option<&'a str>);
     let seen: Vec<Started> = runs
@@ -1318,7 +1382,9 @@ async fn runs_carry_their_trigger_who_started_them_and_their_commit() {
         ]
     );
 
-    let listed = pipelines_inner(&pool).await.unwrap();
+    let listed = pipelines_inner(&pool, &knobas_app::sources::Registry::for_process())
+        .await
+        .unwrap();
     let row = listed.iter().find(|p| p.entity_id == tests).unwrap();
     let recent: Vec<_> = row
         .recent

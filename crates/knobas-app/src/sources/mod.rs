@@ -97,6 +97,17 @@ pub struct SourcesState {
     pub registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
 }
 
+impl SourcesState {
+    /// The registry as the concrete list the install flow writes to, sharing
+    /// the list the scheduler reads. `None` when the state was built over a
+    /// registry that is not [`Registry`] (a test's), which cannot be
+    /// installed into.
+    #[must_use]
+    pub fn installable(&self) -> Option<Registry> {
+        self.registry.as_any()?.downcast_ref::<Registry>().cloned()
+    }
+}
+
 /// The sources state, or the one honest refusal for a call that beat bring-up.
 ///
 /// **Never `State<'_, SourcesState>` as a command argument.** Carry-over
@@ -430,6 +441,7 @@ pub async fn start<R: tauri::Runtime>(
     // connection each from the connector, outside every pool (§10.6(c)).
     let sync_pool = db.pool_for(knobas_sync::scheduler::SYNC_POOL_SIZE).await?;
     let profile = app.state::<crate::Profile>().inner().clone();
+    let process = Registry::for_process();
     let state = bring_up(
         app,
         BringUp {
@@ -437,7 +449,7 @@ pub async fn start<R: tauri::Runtime>(
             sync_pool,
             connections: db.connector(),
             secrets: secret_store(&profile),
-            registry: Registry::for_process(),
+            registry: process.clone(),
             store: install::store_dir(&profile.dir),
         },
     )
@@ -449,9 +461,7 @@ pub async fn start<R: tauri::Runtime>(
     let pool = state.pool.clone();
     tauri::async_runtime::spawn(async move {
         let endpoints = remote::Endpoints::default();
-        if let Err(error) =
-            installed::check_updates(&pool, &Registry::for_process(), &endpoints).await
-        {
+        if let Err(error) = installed::check_updates(&pool, &process, &endpoints).await {
             tracing::warn!(%error, "the external adapters' update check did not run");
         }
     });
@@ -544,6 +554,9 @@ pub async fn bring_up<R: tauri::Runtime>(
 /// `status_for` sees its runs and nobody else's) would otherwise get a
 /// scheduler whose bookkeeping and whose runs are in *different* databases.
 ///
+/// **The caller names the registry too**, and gives the same one to the
+/// `SourcesState` it builds, so the scheduler and the commands see one list.
+///
 /// # Errors
 /// [`sqlx::Error`] if the startup reconciliation fails.
 #[cfg(feature = "test-util")]
@@ -551,9 +564,8 @@ pub async fn test_scheduler<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     connections: knobas_db::embedded::Connector,
     pool: PgPool,
+    registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
 ) -> Result<Scheduler, sqlx::Error> {
-    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> =
-        Arc::new(Registry::for_process());
     Scheduler::start(SchedulerDeps {
         connections: Arc::new(DbConnections(connections)),
         pool: pool.clone(),

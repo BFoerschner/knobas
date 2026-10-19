@@ -279,6 +279,7 @@ async fn laned_board(
     let by = serde_json::from_value(serde_json::json!(field)).expect("a lane field");
     knobas_app::commands::entity::mini_board_laned(
         pool,
+        &knobas_app::sources::Registry::for_process(),
         knobas_app::commands::entity::Room::default(),
         Some(if query.is_some() { 50 } else { 8 }),
         query,
@@ -845,7 +846,10 @@ async fn what_the_reader_waits_on() {
         knobas_core::context::list(pool)
     })
     .await;
-    time(boot, "list_projects", runs, || list_projects_inner(pool)).await;
+    time(boot, "list_projects", runs, || {
+        list_projects_inner(pool, &registry)
+    })
+    .await;
     time(boot, "inbox_items (stream)", runs, || {
         inbox_items_inner(pool, &registry, now, knobas_core::inbox::Shelf::Stream)
     })
@@ -907,7 +911,17 @@ async fn what_the_reader_waits_on() {
         tickets_view,
         "mini_board (no words, 8 a column)",
         runs,
-        || knobas_app::commands::entity::mini_board_inner(pool, None, None, None, Some(8), None),
+        || {
+            knobas_app::commands::entity::mini_board_inner(
+                pool,
+                &registry,
+                None,
+                None,
+                None,
+                Some(8),
+                None,
+            )
+        },
     )
     .await;
     for word in ["a", "jira0-123", "zzqx"] {
@@ -919,6 +933,7 @@ async fn what_the_reader_waits_on() {
                 || {
                     knobas_app::commands::entity::mini_board_inner(
                         pool,
+                        &registry,
                         None,
                         None,
                         None,
@@ -969,6 +984,7 @@ async fn what_the_reader_waits_on() {
             || {
                 knobas_app::commands::entity::mini_board_inner(
                     pool,
+                    &registry,
                     None,
                     None,
                     None,

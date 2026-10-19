@@ -189,9 +189,15 @@ async fn a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws() {
 async fn a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns() {
     let pool = pool().await;
     let (p, _, view) = seeded(&pool).await;
-    let board = saved_view_board(&pool, &view, None, None)
-        .await
-        .expect("the board");
+    let board = saved_view_board(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &view,
+        None,
+        None,
+    )
+    .await
+    .expect("the board");
     let drawn: Vec<(Option<String>, Vec<String>, u32)> = board
         .columns
         .iter()
@@ -217,14 +223,28 @@ async fn a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns() 
         "Jira's order inside a column of two statuses, an empty column kept, a status on no column not drawn"
     );
 
-    let capped = saved_view_board(&pool, &view, Some(1), None).await.unwrap();
+    let capped = saved_view_board(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &view,
+        Some(1),
+        None,
+    )
+    .await
+    .unwrap();
     assert_eq!(capped.columns[1].cards.len(), 1);
     assert_eq!(capped.columns[1].cards[0].key, format!("{p}-1"));
     assert_eq!(capped.columns[1].total, 2);
 
-    let narrowed = saved_view_board(&pool, &view, None, Some("retry"))
-        .await
-        .unwrap();
+    let narrowed = saved_view_board(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &view,
+        None,
+        Some("retry"),
+    )
+    .await
+    .unwrap();
     let keys: Vec<String> = narrowed
         .columns
         .iter()
@@ -232,9 +252,15 @@ async fn a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns() 
         .collect();
     assert_eq!(keys, [format!("{p}-3"), format!("{p}-2")]);
 
-    let missing = saved_view_board(&pool, "jira:board-nothing", None, None)
-        .await
-        .unwrap_err();
+    let missing = saved_view_board(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        "jira:board-nothing",
+        None,
+        None,
+    )
+    .await
+    .unwrap_err();
     assert_eq!(missing.code, IpcErrorCode::NotFound);
 }
 

@@ -708,14 +708,25 @@ pub fn start<R: tauri::Runtime>(app: &tauri::AppHandle<R>, db: &knobas_db::Embed
         },
         |sources| Arc::clone(&sources.secrets),
     );
+    let state = BackupState::new(
+        db.pool().clone(),
+        db.connector(),
+        profile.backup_dir(),
+        secrets,
+    );
+    // The registry the installed adapters are restored into is the sources
+    // state's (#1323). Without it a restore brings back no adapters, the
+    // same way it brings back no secrets above.
     let state = Arc::new(
-        BackupState::new(
-            db.pool().clone(),
-            db.connector(),
-            profile.backup_dir(),
-            secrets,
-        )
-        .with_adapters(RestoreAdapters::for_profile(&profile.dir)),
+        match app
+            .try_state::<crate::sources::SourcesState>()
+            .and_then(|sources| sources.installable())
+        {
+            Some(registry) => {
+                state.with_adapters(RestoreAdapters::for_profile(registry, &profile.dir))
+            }
+            None => state,
+        },
     );
 
     if !app.manage(Arc::clone(&state)) {

@@ -810,7 +810,7 @@ async fn a_confluence_space_is_a_project_room_and_a_jira_project_is_another() {
     // handed in: a test that called `project::list` directly would be
     // re-typing the command's body, and would go on passing after the command
     // stopped resolving declarations at all.
-    let census = list_projects_inner(&pool)
+    let census = list_projects_inner(&pool, &knobas_app::sources::Registry::for_process())
         .await
         .expect("the census `list_projects` answers with");
     let mine: Vec<(String, String, Option<String>)> = census
@@ -4219,7 +4219,7 @@ async fn a_kuma_source_has_a_room_of_its_own_and_no_project_rooms() {
         .unwrap();
     }
 
-    let census = list_projects_inner(&pool)
+    let census = list_projects_inner(&pool, &knobas_app::sources::Registry::for_process())
         .await
         .expect("the census `list_projects` answers with");
     assert!(
