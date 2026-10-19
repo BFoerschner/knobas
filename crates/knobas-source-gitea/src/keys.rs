@@ -1,6 +1,6 @@
 //! The entity-id grammar (interfaces §4.2, spec §5a).
 //!
-//! Four forms, all namespaced by the **instance** id -- `gitea:` for the
+//! Five forms, all namespaced by the **instance** id -- `gitea:` for the
 //! default instance, `gitea-eu:` for a second one (ruling P10), never the
 //! literal adapter kind:
 //!
@@ -8,6 +8,7 @@
 //! | --- | --- | --- |
 //! | repo | `owner/repo` | `gitea:tidewater/payout-service` |
 //! | pr | `owner/repo#142` | `gitea:tidewater/payout-service#142` |
+//! | ticket | `owner/repo/issues/7` | `gitea:tidewater/payout-service/issues/7` |
 //! | commit | `owner/repo@<oid>` | `gitea:tidewater/payout-service@c90d11…` |
 //! | branch | `owner/repo@refs/heads/<name>` | `gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry` |
 //!
@@ -20,6 +21,13 @@
 //!
 //! Owner and repository names cannot contain `/`, `#` or `@` in Gitea, so the
 //! first of those characters after the repository name is always the separator.
+//!
+//! **An issue is not `#7`** (#1206), though Gitea numbers issues and pull
+//! requests from one counter per repository and writes both as `#7`. The
+//! number alone does not say which it is, and the views and writes here do
+//! different things to each: a pull request's view reads `/pulls/7`, which an
+//! issue answers 404. So an issue's key names it as an issue, in the path
+//! Gitea's own web page for it has.
 
 /// What separates a branch key from a commit key.
 pub const BRANCH_PREFIX: &str = "refs/heads/";
@@ -35,6 +43,16 @@ pub fn repo_key(owner: &str, repo: &str) -> String {
 pub fn pr_key(owner: &str, repo: &str, number: u64) -> String {
     format!("{owner}/{repo}#{number}")
 }
+
+/// `owner/repo/issues/7`: an issue, which knobas mirrors as a `ticket`
+/// (#1206).
+#[must_use]
+pub fn issue_key(owner: &str, repo: &str, number: u64) -> String {
+    format!("{owner}/{repo}/{ISSUE_SEGMENT}/{number}")
+}
+
+/// What separates an issue key from a repository key.
+const ISSUE_SEGMENT: &str = "issues";
 
 /// `owner/repo@<oid>`.
 ///
@@ -53,7 +71,7 @@ pub fn branch_key(owner: &str, repo: &str, branch: &str) -> String {
     format!("{owner}/{repo}@{BRANCH_PREFIX}{branch}")
 }
 
-/// One parsed key, the inverse of the four constructors above.
+/// One parsed key, the inverse of the five constructors above.
 ///
 /// Nothing in M1 needed to go backwards -- but the forms are only unambiguous
 /// if something can actually tell them apart, and this is what proves it (and
@@ -66,6 +84,11 @@ pub enum GiteaKey {
         repo: String,
     },
     Pr {
+        owner: String,
+        repo: String,
+        number: u64,
+    },
+    Issue {
         owner: String,
         repo: String,
         number: u64,
@@ -89,15 +112,26 @@ pub fn parse_key(key: &str) -> Option<GiteaKey> {
     if owner.is_empty() || rest.is_empty() {
         return None;
     }
-    // Neither an owner nor a repository name may contain `#` or `@`, so the
-    // first one that appears is always the separator.
-    let Some(cut) = rest.find(['#', '@']) else {
+    // Neither an owner nor a repository name may contain `/`, `#` or `@`, so
+    // the first one that appears is always the separator.
+    let Some(cut) = rest.find(['/', '#', '@']) else {
         return Some(GiteaKey::Repo {
             owner: owner.to_owned(),
             repo: rest.to_owned(),
         });
     };
     let (repo, tail) = rest.split_at(cut);
+    if let Some(issue) = tail.strip_prefix('/') {
+        let number = issue.strip_prefix(ISSUE_SEGMENT)?.strip_prefix('/')?;
+        if repo.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        return number.parse().ok().map(|number| GiteaKey::Issue {
+            owner: owner.to_owned(),
+            repo: repo.to_owned(),
+            number,
+        });
+    }
     let (marker, value) = tail.split_at(1);
     if repo.is_empty() || value.is_empty() {
         return None;
@@ -131,7 +165,7 @@ mod tests {
     use knobas_core::entity::EntityRef;
 
     #[test]
-    fn the_four_forms_round_trip() {
+    fn the_five_forms_round_trip() {
         let o = "tidewater";
         let r = "payout-service";
         for (key, expected) in [
@@ -148,6 +182,14 @@ mod tests {
                     owner: o.into(),
                     repo: r.into(),
                     number: 142,
+                },
+            ),
+            (
+                issue_key(o, r, 7),
+                GiteaKey::Issue {
+                    owner: o.into(),
+                    repo: r.into(),
+                    number: 7,
                 },
             ),
             (
@@ -182,6 +224,18 @@ mod tests {
         assert!(matches!(parse_key(&commit), Some(GiteaKey::Commit { .. })));
     }
 
+    /// An issue and a pull request of one repository never share a number in
+    /// Gitea, and still never share a key: the key says which it is (#1206).
+    #[test]
+    fn an_issue_is_never_read_as_a_pull_request() {
+        let issue = issue_key("tidewater", "payout-service", 142);
+        assert_ne!(issue, pr_key("tidewater", "payout-service", 142));
+        assert!(matches!(parse_key(&issue), Some(GiteaKey::Issue { .. })));
+        // A branch named like an issue path is still a branch.
+        let branch = branch_key("tidewater", "payout-service", "fix/issues/7");
+        assert!(matches!(parse_key(&branch), Some(GiteaKey::Branch { .. })));
+    }
+
     /// Git allows `@` and `/` inside a branch name; the grammar splits on the
     /// *first* `@` after the repository name, so the rest is the name verbatim.
     #[test]
@@ -206,6 +260,7 @@ mod tests {
             for key in [
                 repo_key("tidewater", "payout-service"),
                 pr_key("tidewater", "payout-service", 142),
+                issue_key("tidewater", "payout-service", 7),
                 commit_key(
                     "tidewater",
                     "payout-service",
@@ -235,6 +290,13 @@ mod tests {
             "tidewater/repo#abc",
             "tidewater/repo@",
             "tidewater/repo@refs/heads/",
+            "tidewater/repo/",
+            "tidewater/repo/issues",
+            "tidewater/repo/issues/",
+            "tidewater/repo/issues/7a",
+            "tidewater/repo/issues/+7",
+            "tidewater/repo/pulls/7",
+            "tidewater/repo/issues/7/comments",
         ] {
             assert_eq!(parse_key(bad), None, "{bad:?} should not parse");
         }

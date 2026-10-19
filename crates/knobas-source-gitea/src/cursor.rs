@@ -96,6 +96,15 @@ pub(crate) struct RepoCursor {
     /// position in the cursor stands.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub pulls_seen_at_watermark: BTreeMap<u64, String>,
+    /// The newest issue `updated_at` delivered so far (#1206), and the issues
+    /// on that instant as delivered: the pull requests' boundary, for the
+    /// same one-second reason. Absent in a cursor from before #1206, whose
+    /// next run reads every issue once: a ticket kind is new, so nothing it
+    /// re-delivers was delivered before, and no version bump is needed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issues_updated_to: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub issues_seen_at_watermark: BTreeMap<u64, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commits_since: Option<DateTime<Utc>>,
     /// The object ids on that instant, already delivered -- the same boundary
@@ -201,6 +210,8 @@ mod tests {
                 repo_fingerprint: Some("00000000000000aa".to_owned()),
                 pulls_updated_to: Some(at("2026-08-22T13:50:00Z")),
                 pulls_seen_at_watermark: BTreeMap::from([(144, "00000000000000bb".to_owned())]),
+                issues_updated_to: Some(at("2026-08-22T12:00:00Z")),
+                issues_seen_at_watermark: BTreeMap::from([(7, "00000000000000cc".to_owned())]),
                 commits_since: Some(at("2026-08-22T11:42:00Z")),
                 commits_at_watermark: vec!["c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192".to_owned()],
                 branches: BTreeMap::from([(

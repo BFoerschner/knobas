@@ -2500,14 +2500,18 @@ async fn approving_your_own_pull_request_is_refused_by_the_server() {
 async fn an_op_gitea_does_not_declare_never_reaches_the_real_server() {
     let env = env();
     let source = env.one_repo();
+    // `log_work`: Gitea declares `transition` since #1206, and keeps no
+    // worklogs.
     let refused = source
-        .write(knobas_source::WriteOp::Transition {
-            entity: format!("gitea:{}#1", env.full_name()),
-            status: "Done".to_owned(),
+        .write(knobas_source::WriteOp::LogWork {
+            entity: format!("gitea:{}/issues/1", env.full_name()),
+            started: chrono::Utc::now(),
+            seconds: 60,
+            comment: String::new(),
         })
         .await;
     assert!(
-        matches!(refused, Err(SourceError::Protocol { message: ref m, .. }) if m.contains("transition")),
+        matches!(refused, Err(SourceError::Protocol { message: ref m, .. }) if m.contains("log_work")),
         "{refused:?}"
     );
 }
@@ -5301,4 +5305,244 @@ async fn fills_every_role_it_claims_on_the_seeded_corpus() {
     let env = env();
     let source = env.source_with(&env.token, serde_json::json!({}));
     knobas_source::contract::fills_its_roles(&*source).await;
+}
+
+// -- issues as tickets (issue #1206) ------------------------------------------
+
+/// The seeded issues of a quiet repository (`seed-gitea.sh` section 7a) come
+/// back as tickets carrying what the ticket system reads, a closed one among
+/// them in its state; and an idle run after the full one emits no ticket.
+/// This is where the fake's issue shapes are certified: the listing's
+/// `repository`, `assignee`, `labels` and `pull_request`, and `since=`.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_seeded_issues_sync_as_tickets_with_their_priority_assignee_and_state() {
+    let env = env();
+    let ledger = format!("{}/ledger-api", env.owner);
+    let source = env.source(serde_json::json!({ "repos": [ledger] }));
+    let (items, cursor) = full(&*source).await;
+    let tickets = of_kind(&items, "ticket");
+    let titled = |title: &str| {
+        *tickets
+            .iter()
+            .find(|t| t.title == title)
+            .unwrap_or_else(|| panic!("no ticket {title:?}: did the seed run?"))
+    };
+
+    let high = titled("Ledger export rounds negative amounts");
+    let id = high.entity.to_string();
+    assert!(
+        id.starts_with(&format!("gitea:{ledger}/issues/")),
+        "the ticket key form: {id}"
+    );
+    assert_eq!(high.payload["state"], "open");
+    assert_eq!(high.payload["knobas"]["priority"], "High");
+    assert_eq!(high.payload["assignee"]["login"], "tomasz.wojcik");
+    assert_eq!(high.payload["repository"]["full_name"], ledger.as_str());
+    assert_eq!(high.payload["pull_request"], serde_json::Value::Null);
+    let labels: Vec<&str> = high.payload["labels"]
+        .as_array()
+        .expect("labels are a list")
+        .iter()
+        .filter_map(|l| l["name"].as_str())
+        .collect();
+    assert!(labels.contains(&"Kind/Bug"), "{labels:?}");
+    assert!(
+        high.body_text.contains("Seen on the September close too."),
+        "the discussion is searchable: {:?}",
+        high.body_text
+    );
+    assert_eq!(high.author.as_deref(), Some("priya.nair"));
+
+    let medium = titled("Reconcile settlement fees nightly");
+    assert_eq!(medium.payload["knobas"]["priority"], "Medium");
+    assert_eq!(medium.payload["assignee"], serde_json::Value::Null);
+    let closed = titled("Drop the v1 balance endpoint");
+    assert_eq!(closed.payload["state"], "closed");
+    assert_eq!(
+        closed.payload["knobas"]["priority"],
+        serde_json::Value::Null
+    );
+    assert!(!closed.deleted);
+    // No pull request of the repository is a ticket.
+    for pull in of_kind(&items, "pr") {
+        assert!(
+            !tickets.iter().any(|t| t.title == pull.title),
+            "{} is a ticket too",
+            pull.title
+        );
+    }
+
+    let mut sink = VecSink(Vec::new());
+    source
+        .sync(Some(cursor), &mut sink)
+        .await
+        .expect("an idle run");
+    assert!(
+        of_kind(&sink.0, "ticket").is_empty(),
+        "an idle run re-delivered tickets: {:?}",
+        of_kind(&sink.0, "ticket")
+            .iter()
+            .map(|t| t.entity.to_string())
+            .collect::<Vec<_>>()
+    );
+    println!("{} tickets from {ledger}", tickets.len());
+}
+
+/// The prefix of every issue the next test files, which it and its next run
+/// delete. Nothing `seed-gitea.sh` creates is titled so.
+const TEST_ISSUE: &str = "knobas-ticket-";
+
+/// Delete every issue of the mutated repository titled [`TEST_ISSUE`]…: this
+/// test's own, and one an earlier run left when it panicked.
+async fn clear_test_issues(http: &reqwest::Client, env: &Env, auth: &str) {
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    // Every page, not `q=`: Gitea's keyword search reads an indexer that may
+    // not hold an issue filed a moment ago.
+    let mut ours = Vec::new();
+    for page in 1.. {
+        let found: Vec<serde_json::Value> = http
+            .get(format!(
+                "{api}/issues?type=issues&state=all&limit=50&page={page}"
+            ))
+            .header("Authorization", auth)
+            .send()
+            .await
+            .expect("list the issues")
+            .json()
+            .await
+            .expect("an issue list");
+        if found.is_empty() {
+            break;
+        }
+        ours.extend(found.into_iter().filter(|issue| {
+            issue["title"]
+                .as_str()
+                .is_some_and(|t| t.starts_with(TEST_ISSUE))
+        }));
+    }
+    for issue in ours {
+        let gone = http
+            .delete(format!("{api}/issues/{}", issue["number"]))
+            .header("Authorization", auth)
+            .send()
+            .await
+            .expect("delete a test issue");
+        assert!(gone.status().is_success(), "{}", gone.status());
+    }
+}
+
+/// Each ticket write the adapter declares, against the real server: an issue
+/// filed with `create_ticket`, read back by the next incremental run; its
+/// workflow read; `transition` closing it, which the next run reads as a
+/// state and not a deletion, and reopening it; and a `comment` on it. The
+/// issue is deleted at the end, and at the start of the next run.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_ticket_is_filed_moved_and_commented_on_through_its_writes() {
+    use knobas_source::WriteOp;
+
+    let env = env();
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    clear_test_issues(&http, &env, &auth).await;
+    let source = env.one_repo();
+    let (_, cursor) = full(&*source).await;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let title = format!("{TEST_ISSUE}{stamp}");
+
+    // 1. Filed, and named by its number.
+    let made = source
+        .write(WriteOp::CreateTicket {
+            entity: format!("gitea:{}", env.full_name()),
+            title: title.clone(),
+            body: "Filed by the live suite.".to_owned(),
+            ticket_type: "Task".to_owned(),
+        })
+        .await
+        .expect("Gitea takes the issue");
+    let number = made.remote_id.expect("the receipt names the issue");
+    let id = format!("gitea:{}/issues/{number}", env.full_name());
+
+    let incremental = |cursor: String| {
+        let source = &source;
+        async move {
+            let mut sink = VecSink(Vec::new());
+            let next = source
+                .sync(Some(cursor), &mut sink)
+                .await
+                .expect("an incremental run");
+            (sink.0, next)
+        }
+    };
+    let (items, cursor) = incremental(cursor).await;
+    let ticket = of_kind(&items, "ticket")
+        .into_iter()
+        .find(|t| t.entity.to_string() == id)
+        .unwrap_or_else(|| panic!("{id} did not arrive"));
+    assert_eq!(ticket.title, title);
+    assert_eq!(ticket.payload["state"], "open");
+
+    // 2. Its workflow, then a move along it.
+    assert_eq!(source.reachable_transitions(&id).await.unwrap(), ["closed"]);
+    source
+        .write(WriteOp::Transition {
+            entity: id.clone(),
+            status: "closed".to_owned(),
+        })
+        .await
+        .expect("Gitea closes the issue");
+    let (items, cursor) = incremental(cursor).await;
+    let moved = of_kind(&items, "ticket")
+        .into_iter()
+        .find(|t| t.entity.to_string() == id)
+        .unwrap_or_else(|| panic!("the closed {id} did not come back"));
+    assert_eq!(moved.payload["state"], "closed");
+    assert!(!moved.deleted, "a closed issue is not a deleted one");
+    assert_eq!(source.reachable_transitions(&id).await.unwrap(), ["open"]);
+    source
+        .write(WriteOp::Transition {
+            entity: id.clone(),
+            status: "open".to_owned(),
+        })
+        .await
+        .expect("Gitea reopens the issue");
+
+    // 3. A comment, read back from the server and by the next run.
+    source
+        .write(WriteOp::Comment {
+            entity: id.clone(),
+            body: format!("comment {stamp}"),
+        })
+        .await
+        .expect("Gitea takes the comment");
+    let comments: Vec<serde_json::Value> = http
+        .get(format!("{api}/issues/{number}/comments"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("read the discussion")
+        .json()
+        .await
+        .expect("a comment list");
+    assert!(
+        comments
+            .iter()
+            .any(|c| c["body"] == format!("comment {stamp}")),
+        "{comments:#?}"
+    );
+    let (items, _) = incremental(cursor).await;
+    let back = of_kind(&items, "ticket")
+        .into_iter()
+        .find(|t| t.entity.to_string() == id)
+        .unwrap_or_else(|| panic!("the commented {id} did not come back"));
+    assert_eq!(back.payload["state"], "open");
+    assert!(back.body_text.contains(&format!("comment {stamp}")));
+
+    clear_test_issues(&http, &env, &auth).await;
+    println!("{id} filed, closed, reopened and commented on");
 }

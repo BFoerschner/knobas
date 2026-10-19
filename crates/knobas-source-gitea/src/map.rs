@@ -9,7 +9,7 @@ use knobas_source::SyncItem;
 use serde_json::Value;
 
 use crate::model;
-use crate::{KIND_BRANCH, KIND_COMMIT, KIND_PR, KIND_REPO, keys};
+use crate::{KIND_BRANCH, KIND_COMMIT, KIND_PR, KIND_REPO, KIND_TICKET, keys};
 
 /// Which repository the record being mapped belongs to.
 #[derive(Debug, Clone, Copy)]
@@ -237,6 +237,72 @@ pub(crate) fn pr_item(
         updated_at: real_time(pr.updated_at).or_else(|| real_time(pr.created_at)),
         payload: raw.clone(),
         web_url: non_blank(pr.html_url.as_deref()),
+        deleted: false,
+    }
+}
+
+/// The scope of the label an issue's priority is read from (#1206), as
+/// Gitea's own *Default* label set spells it: `Priority/High`.
+const PRIORITY_SCOPE: &str = "priority";
+
+/// The priority an issue's labels give it: the value of its first scoped
+/// label `Priority/<value>`, the scope matched case-insensitively. `None`
+/// without one.
+pub(crate) fn priority(labels: &[model::Label]) -> Option<String> {
+    labels.iter().find_map(|label| {
+        let (scope, value) = label.name.as_deref()?.split_once('/')?;
+        let value = value.trim();
+        (scope.trim().eq_ignore_ascii_case(PRIORITY_SCOPE) && !value.is_empty())
+            .then(|| value.to_owned())
+    })
+}
+
+/// An issue as a ticket (#1206): the record verbatim, plus a `knobas` object
+/// holding what the ticket system reads and Gitea has no field for -- its own
+/// key, the priority its labels give, and a type and a parent it never has
+/// (`crate::ticket_paths`). Written over whatever the record holds under
+/// that name, so no field Gitea adds can be read as one of them.
+pub(crate) fn ticket_item(
+    source_id: &str,
+    raw: &Value,
+    at: RepoRef<'_>,
+    issue: &model::Issue,
+    comments: &[model::Comment],
+) -> SyncItem {
+    let title = issue
+        .title
+        .clone()
+        .unwrap_or_else(|| format!("#{}", issue.number));
+    let key = keys::issue_key(at.owner, at.name, issue.number);
+    let mut payload = raw.clone();
+    if let Some(record) = payload.as_object_mut() {
+        record.insert(
+            "knobas".to_owned(),
+            serde_json::json!({
+                "key": key,
+                "priority": priority(issue.labels.as_deref().unwrap_or_default()),
+                "issue_type": null,
+                "parent": null,
+            }),
+        );
+    }
+    SyncItem {
+        entity: EntityRef::new(source_id, &key),
+        kind: KIND_TICKET.to_owned(),
+        title: title.clone(),
+        body_text: body_text(
+            [Some(title), issue.body.clone()]
+                .into_iter()
+                .chain(comments.iter().map(|c| c.body.clone()))
+                .flatten(),
+        ),
+        author: issue
+            .user
+            .as_ref()
+            .and_then(|u| non_blank(u.login.as_deref())),
+        updated_at: real_time(issue.updated_at).or_else(|| real_time(issue.created_at)),
+        payload,
+        web_url: non_blank(issue.html_url.as_deref()),
         deleted: false,
     }
 }
@@ -599,5 +665,85 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
         assert_eq!(real_time(Some(epoch)), None);
+    }
+
+    /// An issue as Gitea 1.27.3's `/issues` listing serves it (measured
+    /// 2026-10-19), as far as the ticket reads it.
+    fn raw_issue(labels: Value) -> Value {
+        serde_json::json!({
+            "number": 7, "title": "Payout CSV drops the currency column",
+            "body": "Seen on the EUR batch.", "state": "open", "comments": 1,
+            "user": { "login": "mara" }, "assignee": { "login": "tom" },
+            "labels": labels, "pull_request": null,
+            "html_url": "https://gitea.example/tidewater/payout-service/issues/7",
+            "repository": { "id": 1, "name": "payout-service", "owner": "tidewater",
+                            "full_name": "tidewater/payout-service" },
+            "created_at": "2026-08-20T09:00:00Z", "updated_at": "2026-08-22T09:00:00Z"
+        })
+    }
+
+    #[test]
+    fn an_issue_becomes_a_ticket_under_its_own_key() {
+        let raw =
+            raw_issue(serde_json::json!([{ "name": "Priority/High" }, { "name": "Kind/Bug" }]));
+        let issue: crate::model::Issue = serde_json::from_value(raw.clone()).unwrap();
+        let comments = [crate::model::Comment {
+            body: Some("Reproduced on main.".to_owned()),
+        }];
+        let item = ticket_item(SOURCE, &raw, at(), &issue, &comments);
+        assert_eq!(
+            item.entity.to_string(),
+            "gitea:tidewater/payout-service/issues/7"
+        );
+        assert_eq!(item.kind, "ticket");
+        assert_eq!(item.title, "Payout CSV drops the currency column");
+        assert_eq!(
+            item.body_text,
+            "Payout CSV drops the currency column\n\nSeen on the EUR batch.\n\nReproduced on main."
+        );
+        assert_eq!(item.author.as_deref(), Some("mara"));
+        assert_eq!(
+            item.updated_at.unwrap().to_rfc3339(),
+            "2026-08-22T09:00:00+00:00"
+        );
+        assert_eq!(
+            item.payload["knobas"],
+            serde_json::json!({
+                "key": "tidewater/payout-service/issues/7",
+                "priority": "High",
+                "issue_type": null,
+                "parent": null
+            })
+        );
+        // Everything else is the record verbatim.
+        assert_eq!(item.payload["assignee"], raw["assignee"]);
+        assert!(!item.deleted);
+    }
+
+    /// The priority is a scoped label's value, the scope in any case; an
+    /// issue without one has none, and so does a bare `priority` label.
+    #[test]
+    fn a_priority_is_read_off_a_scoped_label_or_is_none() {
+        let labels = |names: &[&str]| -> Vec<crate::model::Label> {
+            names
+                .iter()
+                .map(|n| crate::model::Label {
+                    name: Some((*n).to_owned()),
+                })
+                .collect()
+        };
+        assert_eq!(
+            priority(&labels(&["Kind/Bug", "priority/Low"])).as_deref(),
+            Some("Low")
+        );
+        assert_eq!(
+            priority(&labels(&["PRIORITY / Critical"])).as_deref(),
+            Some("Critical")
+        );
+        assert_eq!(
+            priority(&labels(&["Kind/Bug", "priority", "Priority/"])),
+            None
+        );
+        assert_eq!(priority(&[]), None);
     }
 }

@@ -80,13 +80,15 @@ async fn an_undeclared_op_never_reaches_the_network() {
     let source = source(fake.base_url(), serde_json::json!({}));
     let before = fake.requests().await;
     let refused = source
-        .write(WriteOp::Transition {
-            entity: "gitea:tidewater/payout-service#142".into(),
-            status: "Done".into(),
+        .write(WriteOp::LogWork {
+            entity: "gitea:tidewater/payout-service/issues/7".into(),
+            started: chrono::Utc::now(),
+            seconds: 60,
+            comment: String::new(),
         })
         .await;
     assert!(
-        matches!(refused, Err(SourceError::Protocol { message: ref m, .. }) if m.contains("transition")),
+        matches!(refused, Err(SourceError::Protocol { message: ref m, .. }) if m.contains("log_work")),
         "{refused:?}"
     );
     assert_eq!(

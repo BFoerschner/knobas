@@ -69,6 +69,8 @@ pub(crate) async fn draw(
         GiteaKey::Repo { owner, repo } => repo::draw(source, entity, &owner, &repo, section)
             .await
             .map(Some),
+        // An issue's detail is the ticket's, drawn from the mirror (#1206).
+        GiteaKey::Issue { .. } => Ok(None),
     }
 }
 

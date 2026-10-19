@@ -623,6 +623,17 @@ async fn app_timed(
     account: &str,
     timing: knobas_sync::scheduler::SchedulerTiming,
 ) -> SourcesState {
+    app_over(env, jira_url, account, &[env.full_name()], timing).await
+}
+
+/// [`app_timed`] with the Gitea source over `repos`.
+async fn app_over(
+    env: &Env,
+    jira_url: &str,
+    account: &str,
+    repos: &[String],
+    timing: knobas_sync::scheduler::SchedulerTiming,
+) -> SourcesState {
     let connector = knobas_db::test_util::scratch_database("start_work_live").await;
     let pool = connector
         .pool(4)
@@ -648,7 +659,7 @@ async fn app_timed(
             GITEA,
             "gitea",
             env.url.clone(),
-            json!({ "repos": [env.full_name()], "username": account }),
+            json!({ "repos": repos, "username": account }),
         ),
         (JIRA, "jira", jira_url.to_owned(), json!({})),
     ] {
@@ -1250,6 +1261,90 @@ async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commit
 
         live_under::each_exactly(&state.pool, GITEA, &[full_name, name.clone()], &by_kind).await;
     }
+    state.scheduler.shutdown().await;
+}
+
+/// A Gitea issue on the Tickets board beside a Jira ticket (#1206, spec #1192
+/// story 5): both sources synced through the app, and the board read the
+/// Tickets page reads -- the sources that claim the ticket system -- drawing
+/// a card of each, the Gitea one with the status, priority, assignee and
+/// labels its declared paths lead to. Gitea over `ledger-api`, whose issues
+/// the seed made (`seed-gitea.sh` section 7a) and no live test writes to;
+/// read-only at both.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Gitea container -- see this file's header"]
+async fn a_gitea_issue_is_on_the_tickets_board_beside_a_jira_ticket() {
+    let env = env();
+    let jira = knobas_mockd::spawn_mock_jira().await;
+    let account = env.account().await;
+    let ledger = format!("{}/ledger-api", env.owner);
+    let state = app_over(
+        &env,
+        &jira.base_url(),
+        &account,
+        std::slice::from_ref(&ledger),
+        knobas_sync::scheduler::SchedulerTiming::default(),
+    )
+    .await;
+    sync(&state, JIRA).await;
+    sync(&state, GITEA).await;
+
+    // What Tickets reads: the sources whose claims name the ticket system,
+    // and whose records filled it (#1199).
+    let claimers: Vec<String> =
+        knobas_app::sources::crud::list(&state.pool, state.registry.as_ref())
+            .await
+            .expect("the sources")
+            .into_iter()
+            .filter(|s| {
+                s.roles.iter().any(|c| c.role == "ticket-system")
+                    && !s.role_misses.iter().any(|m| m.role == "ticket-system")
+            })
+            .map(|s| s.id)
+            .collect();
+    assert_eq!(claimers, [GITEA, JIRA], "both fill the ticket system");
+
+    let board = knobas_app::commands::entity::mini_board_inner(
+        &state.pool,
+        None,
+        &claimers,
+        None,
+        Some(500),
+        None,
+    )
+    .await
+    .expect("the Tickets board");
+    let cards: Vec<(&Option<String>, &knobas_core::mini_board::MiniBoardCard)> = board
+        .columns
+        .iter()
+        .flat_map(|c| c.cards.iter().map(move |card| (&c.status, card)))
+        .collect();
+    let (status, gitea) = cards
+        .iter()
+        .find(|(_, c)| c.title == "Ledger export rounds negative amounts")
+        .unwrap_or_else(|| panic!("no Gitea card: {board:#?}"));
+    assert_eq!(gitea.source_id, GITEA);
+    assert!(
+        gitea
+            .entity_id
+            .starts_with(&format!("{GITEA}:{ledger}/issues/")),
+        "{}",
+        gitea.entity_id
+    );
+    assert_eq!(status.as_deref(), Some("open"));
+    assert_eq!(gitea.priority.as_deref(), Some("High"));
+    assert_eq!(gitea.assignee.as_deref(), Some("tomasz.wojcik"));
+    assert!(
+        gitea.labels.iter().any(|l| l == "Kind/Bug"),
+        "{:?}",
+        gitea.labels
+    );
+    assert!(
+        cards
+            .iter()
+            .any(|(_, c)| c.source_id == JIRA && c.entity_id == format!("{JIRA}:{ISSUE}")),
+        "no Jira card beside it: {board:#?}"
+    );
     state.scheduler.shutdown().await;
 }
 

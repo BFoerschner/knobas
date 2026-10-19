@@ -247,8 +247,10 @@ max_index() {  # max_index <repo>
 
 # Burn issue indices so the next allocated index is <target>. ~140 calls per
 # repo and a few seconds; worth it because every mockup and link test was
-# written against the fixture's PR numbers. The M1 Gitea adapter lists /pulls,
-# not /issues, so these placeholders are invisible to it.
+# written against the fixture's PR numbers. Since #1206 the adapter mirrors
+# issues as tickets, so these come back as closed "(reserved)" tickets. They
+# stay (ruled on PR #1249): closed and titled as placeholders, they are what a
+# real tracker's closed backlog looks like, and no suite counts tickets.
 burn_to() {  # burn_to <repo> <target index>
   _repo=$1; _target=$2
   _cur=$(max_index "$_repo")
@@ -462,6 +464,89 @@ for num in $(jqf '.prs[] | .num'); do
     fi
   fi
 done
+
+# --------------------------------------------------------------------------
+# 7a. Issues (#1206), which knobas mirrors as tickets: three in ledger-api,
+#    one per shape the ticket system reads -- a priority label and an
+#    assignee and a discussion, a priority and nobody assigned, and a closed
+#    one with no label. Created AFTER every pull request, so no pull request
+#    number moves: Gitea numbers issues and pulls from one counter, and these
+#    take the indices after ledger-api's last pull request. ledger-api is one
+#    of the repositories no live test writes to (`Env::quiet_repos`), so these
+#    stay as seeded. The labels are scoped like Gitea's own Default label set
+#    (`Priority/High`), which is where knobas reads an issue's priority from.
+#    Found again by title, so a re-run changes nothing.
+# --------------------------------------------------------------------------
+ISSUE_REPO=ledger-api
+ensure_label() {  # ensure_label <repo> <name> <color> -> id
+  api "$ADMIN" GET "/repos/$ORG/$1/labels?limit=50"
+  expect "list labels of $1" 200
+  _id=$(printf '%s' "$API_BODY" | jq -r --arg n "$2" '.[] | select(.name==$n) | .id' | head -n 1)
+  if [ -z "$_id" ]; then
+    api "$ADMIN" POST "/repos/$ORG/$1/labels" \
+        "$(jq -n --arg n "$2" --arg c "$3" '{name:$n, color:$c, exclusive:true}')"
+    expect "create label $1 $2" 201
+    _id=$(printf '%s' "$API_BODY" | jq -r .id)
+    echo "seed-gitea: created label $1 $2" >&2
+  fi
+  echo "$_id"
+}
+
+find_issue_by_title() {  # find_issue_by_title <repo> <title> -> index or empty
+  _page=1
+  while :; do
+    api "$ADMIN" GET "/repos/$ORG/$1/issues?type=issues&state=all&limit=50&page=$_page"
+    expect "list issues of $1" 200
+    _n=$(printf '%s' "$API_BODY" | jq 'length')
+    [ "$_n" -eq 0 ] && break
+    _hit=$(printf '%s' "$API_BODY" | jq -r --arg t "$2" '.[] | select(.title==$t) | .number' | head -n 1)
+    [ -n "$_hit" ] && { echo "$_hit"; return 0; }
+    _page=$((_page + 1))
+  done
+  echo ""
+}
+
+HIGH=$(ensure_label "$ISSUE_REPO" "Priority/High" "#e11d21")
+MEDIUM=$(ensure_label "$ISSUE_REPO" "Priority/Medium" "#eb6420")
+BUG=$(ensure_label "$ISSUE_REPO" "Kind/Bug" "#ee0701")
+
+# <by> <assignee or -> <state> <labels json> <title> <body> [<comment by> <comment>]
+ensure_issue() {
+  _by=$(person_field "$1" username)
+  _title=$5
+  _index=$(find_issue_by_title "$ISSUE_REPO" "$_title")
+  if [ -z "$_index" ]; then
+    _assignees='[]'
+    [ "$2" = "-" ] || _assignees=$(jq -n --arg a "$(person_field "$2" username)" '[$a]')
+    api "$_by:$PEOPLE_PASS" POST "/repos/$ORG/$ISSUE_REPO/issues" "$(jq -n \
+          --arg t "$_title" --arg b "$6" --argjson l "$4" --argjson a "$_assignees" \
+          '{title:$t, body:$b, labels:$l, assignees:$a}')"
+    expect "create issue $ISSUE_REPO \"$_title\"" 201
+    _index=$(printf '%s' "$API_BODY" | jq '.number')
+    say "opened issue $ISSUE_REPO#$_index \"$_title\" as $_by"
+    if [ "$#" -gt 6 ]; then
+      api "$(person_field "$7" username):$PEOPLE_PASS" POST \
+          "/repos/$ORG/$ISSUE_REPO/issues/$_index/comments" "$(jq -n --arg b "$8" '{body:$b}')"
+      expect "comment on issue $ISSUE_REPO#$_index" 201
+    fi
+  fi
+  if [ "$3" = "closed" ]; then
+    api "$ADMIN" GET "/repos/$ORG/$ISSUE_REPO/issues/$_index"
+    expect "read issue $ISSUE_REPO#$_index" 200
+    if [ "$(printf '%s' "$API_BODY" | jq -r .state)" != "closed" ]; then
+      api "$ADMIN" PATCH "/repos/$ORG/$ISSUE_REPO/issues/$_index" '{"state":"closed"}'
+      expect "close issue $ISSUE_REPO#$_index" 201
+      say "closed issue $ISSUE_REPO#$_index"
+    fi
+  fi
+}
+
+ensure_issue priya tomasz open "[$HIGH,$BUG]" "Ledger export rounds negative amounts" \
+  "A refund of -0.005 EUR exports as 0.00." jonas "Seen on the September close too."
+ensure_issue lena - open "[$MEDIUM]" "Reconcile settlement fees nightly" \
+  "The fee ledger drifts until somebody reconciles it by hand."
+ensure_issue jonas - closed "[]" "Drop the v1 balance endpoint" \
+  "Nothing has called it since the v2 migration."
 
 # --------------------------------------------------------------------------
 # 8. One access token, for stream B's live suite, ONE PER WORKTREE (#684):

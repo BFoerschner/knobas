@@ -27,6 +27,8 @@
 //! | edit | `PATCH /repos/{o}/{r}/pulls/{index}` | only the given of `{"title":…,"body":…,"state":…}` |
 //! | file commit | `PUT /repos/{o}/{r}/contents/{path}` | `{"content":<base64>,"message":…,"branch":…,"sha":…}`, plus `"new_branch"` when set |
 //! | add label (source action) | `POST /repos/{o}/{r}/issues/{index}/labels` | `{"labels":[<id>]}` |
+//! | transition (an issue, #1206) | `PATCH /repos/{o}/{r}/issues/{index}` | `{"state":"open"\|"closed"}` |
+//! | create ticket (an issue, #1206) | `POST /repos/{o}/{r}/issues` | `{"title":…,"body":…}` |
 //!
 //! The comment goes on the **issue** with the pull request's number, which is
 //! not a quirk of this adapter: Gitea keeps a pull request's discussion on the
@@ -648,6 +650,58 @@ pub(crate) async fn edit_pull_request(
         .patch(&path, &serde_json::Value::Object(fields))
         .await
         .map(|_| ())
+}
+
+// -- an issue's workflow and creation (issue #1206) ---------------------------
+
+/// Move an issue to `status`: `open` or `closed`. Any other status is refused
+/// before a request, naming the two there are. Moving an issue to the state
+/// it is in is Gitea's to take and changes nothing, so a resend is harmless.
+///
+/// # Errors
+///
+/// As [`create_branch`], and [`SourceError::Protocol`] for a status Gitea has
+/// no state for.
+pub(crate) async fn transition(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    index: u64,
+    status: &str,
+) -> Result<(), SourceError> {
+    let state = crate::model::issue_state(status).ok_or_else(|| {
+        SourceError::protocol(format!(
+            "gitea: an issue is open or closed, so it cannot move to {status:?}"
+        ))
+    })?;
+    let path = format!("{}/{index}", crate::client::issues_path(owner, repo)?);
+    client
+        .patch(&path, &json!({ "state": state }))
+        .await
+        .map(|_| ())
+}
+
+/// File an issue in a repository, sent **once**: a resend would file it twice
+/// (#1122). Gitea has no issue type, so the one the dialog chose is not sent.
+/// Answers the new issue's number where Gitea's answer names it; an answer
+/// that does not is still a write that landed, and is not refused.
+///
+/// # Errors
+///
+/// As [`create_branch`].
+pub(crate) async fn create_ticket(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    title: &str,
+    body: &str,
+) -> Result<Option<u64>, SourceError> {
+    let path = crate::client::issues_path(owner, repo)?;
+    let made = client
+        .post_once(&path, &json!({ "title": title, "body": body }))
+        .await?;
+    let answer: serde_json::Value = made.json().await.unwrap_or_default();
+    Ok(answer["number"].as_u64())
 }
 
 // -- the add_label source action (issue #1194) --------------------------------

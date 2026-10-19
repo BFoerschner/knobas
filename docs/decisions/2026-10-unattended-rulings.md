@@ -6191,3 +6191,73 @@ The merge-manager's rulings:
 - **`Frame::SavedView` needs no WIT change: confirmed.** `descriptor: func() -> json` carries the
   whole `SourceDescriptor` as JSON (1198 entry), so the new variant and field are new JSON words,
   not a new WIT case.
+## #1206: Gitea syncs its issues as tickets (Opus implementer)
+
+- **Reserved for Björn, ruled by the implementer on Opus: the §10.8 entry for Gitea's write
+  table.** ADR-0006 makes each growth of the registry's write table a ratified exception, and
+  `transition` and `create_ticket` are new on Gitea. Ratified as
+  `docs/contract/10.8/1206-gitea-ticket-writes.md`: no `WriteOp` variant and no frozen file
+  changes, the two ops are the ticket system's optional writes (ADR-0029), and both are certified
+  against the testenv Gitea and Forgejo. **Reversing:** drop the two ops from the descriptor and
+  the entry.
+- **An issue's key is `owner/repo/issues/<n>`, not `owner/repo#<n>`.** Gitea numbers issues and
+  pull requests from one counter, so `#n` is unique, but it does not say which it is, and the
+  views and writes need to know: a pull request's view reads `/pulls/n`, which an issue answers
+  404, and the battery opens a view of every emitted entity. The key form now says it, as
+  `keys.rs` requires of every form. **Reversing:** cheap before a release, costly after (entity
+  ids are permanent).
+- **`ticket` is not exhaustive, and a refused issue listing skips that repository's tickets on
+  either kind of run.** A token without issue scope (403) or a repository with the unit off or an
+  external tracker (404) must not fail a sync that worked before #1206. A skipped listing is a
+  hole, so a sweep may not run over the kind. Cost: an issue an admin deleted stays in the
+  mirror. A 401 still ends the run. **Reversing:** low (`entity_kinds`, `sync::issues`).
+- **A ticket's project is its repository, though ADR-0010 says Gitea gets no project.** The
+  ticket, spec #1192 and ADR-0029's ticket-system minimum all require one, and name the
+  repository. Only the `ticket` kind declares it. Follow-up #1247 amends ADR-0010.
+  **Reversing:** low (one declared path), but then the role is not filled.
+- **Priority is a scoped label's value (`Priority/High` → `High`, scope in any case); type and
+  parent are always `null`.** Gitea's own *Default* label set spells priority this way. Gitea
+  has no type or parent, so the adapter writes a `knobas` object beside the record with
+  `priority`, `issue_type: null`, `parent: null`, and `key`, the name a ticket answers to as a
+  parent. Clause 6 needs that name to resolve on the tickets. **Reversing:** low.
+- **An issue's discussion is read under `include_pr_comments`.** Gitea keeps both discussions on
+  one endpoint, and one switch turns that off. No new config key. **Reversing:** low (a key).
+- **`transition` and `reachable_transitions` take an issue only; `comment` takes an issue or a
+  pull request.** A pull request is closed and reopened by `edit_pull_request` and has a third
+  state, merged, that no move reaches. **Reversing:** low.
+- **`create_ticket` sends no type and answers the new number as its receipt.** Gitea has no
+  issue type. It is sent once, because a resend files a second issue. **Reversing:** low.
+- **The issue walk reads every page `since=` admits, guarded at 201 pages (10,000 issues), and
+  fails the run there.** The listing ignores `sort=recentupdate`, so there is no order to stop
+  early on, and a silent stop would compute a watermark past issues never read. Under
+  `gitea-live-capped` (one record a page) `payout-service`'s 142 issues fit. **Reversing:** low.
+- **The seed grows three issues and three labels in `ledger-api`**, after every pull request, so
+  no pull request number moves and the new indices (140–142 on Gitea) collide with nothing. No
+  existing kind's count changes. `ledger-api` is a repository no live test writes to. The
+  `(reserved)` index placeholders the seed has always made now sync as closed tickets.
+  **Reversing:** low.
+- **The `?fake-ipc` Gitea source is not given the ticket-system claim.** The frontend
+  suite's Gitea-shaped ticket source (#1200) already witnesses the board. Backlog follow-up
+  #1248. **Reversing:** n/a.
+
+The merge-manager's rulings (PR #1249, on Opus):
+
+- **The seed's `(reserved)` index placeholders stay, and the adapter does not skip them.** About
+  140 per repository now sync as closed tickets. They are closed and titled as placeholders, no
+  suite counts tickets (the live tests find their issues by title, `under:` matches parents and a
+  ticket has none, the digest and the responsiveness probe read by containment or not at all),
+  and the probe's corpus grows by under 2 %. Skipping them in the adapter would put fixture
+  knowledge in product code; deleting them would change a seed whose re-run was proven idempotent
+  on both forges. The seed's comment that called them invisible to the adapter now says so.
+  **Reversing:** low (a seed step deleting them after the burn).
+- **ADR-0010 amended in this PR (#1247 folded in).** ADR-0029 and spec #1192 are later and
+  narrower than ADR-0010 on the one point they share: a ticket-system source's tickets carry a
+  project. The amendment gives only Gitea's `ticket` kind the repository as its project and keeps
+  the code kinds without one, so ADR-0010's rejected option (repositories folded into a scoping
+  concept) still stands for them. `CONTEXT.md`'s **Project** says the same. **Reversing:** low.
+- **The issue walk's 10,000-issue guard stays a run failure.** It is `cap_reached`, the crate's
+  rule for every unbudgeted walk, with the same remedy (narrow `repos[]`). A one-off fake run
+  witnessed the boundary (200 one-record pages fit, the 201st fails naming the cap); it was not
+  committed, because 201 requests against the wiremock fake took 35 s. A repository past the
+  guard costs the whole source until it is narrowed. **Reversing:** low (skip that repository's
+  tickets instead, as a 403 does).
