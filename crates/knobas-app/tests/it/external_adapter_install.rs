@@ -20,7 +20,7 @@ use knobas_app::sources::install::{self, InstallError};
 use knobas_wasm_host::manifest::{self, Manifest};
 use sqlx::PgPool;
 
-fn fixture_bytes() -> Vec<u8> {
+pub(crate) fn fixture_bytes() -> Vec<u8> {
     let path = knobas_wasm_host::fixture_component();
     std::fs::read(&path).unwrap_or_else(|e| {
         panic!(
@@ -32,7 +32,7 @@ fn fixture_bytes() -> Vec<u8> {
 
 /// `bytes` with the one occurrence of `from` replaced by `to`, which must
 /// be as long, so offsets inside the component stay where they were.
-fn patched(bytes: &[u8], from: &str, to: &str) -> Vec<u8> {
+pub(crate) fn patched(bytes: &[u8], from: &str, to: &str) -> Vec<u8> {
     assert_eq!(from.len(), to.len(), "a patch keeps the length");
     let at: Vec<usize> = bytes
         .windows(from.len())
@@ -48,7 +48,7 @@ fn patched(bytes: &[u8], from: &str, to: &str) -> Vec<u8> {
 
 /// The manifest that names `artifact` truthfully: the fixture's kind and
 /// version, interface 1.2.0, its hash.
-fn manifest_for(artifact: &[u8]) -> serde_json::Value {
+pub(crate) fn manifest_for(artifact: &[u8]) -> serde_json::Value {
     serde_json::json!({
         "adapter_kind": "wasm-fixture",
         "adapter_version": "0.1.0",
@@ -346,7 +346,7 @@ fn a_role_whose_required_read_the_claim_does_not_declare_is_refused() {
 // -- an accepted install -------------------------------------------------------
 
 /// A scratch database's pool and connector, for a test that installs.
-async fn scratch(label: &str) -> (PgPool, knobas_db::embedded::Connector) {
+pub(crate) async fn scratch(label: &str) -> (PgPool, knobas_db::embedded::Connector) {
     let connector = knobas_db::test_util::scratch_database(label).await;
     let pool = connector
         .pool(2)
@@ -368,7 +368,7 @@ async fn install_fixture(
     }
 }
 
-fn kinds(registry: &Registry) -> Vec<String> {
+pub(crate) fn kinds(registry: &Registry) -> Vec<String> {
     registry
         .templates()
         .into_iter()
@@ -378,7 +378,7 @@ fn kinds(registry: &Registry) -> Vec<String> {
 
 /// Add a source of the fixture as the Add-source dialog does, sync it, and
 /// answer how many items it stored.
-async fn add_and_sync(
+pub(crate) async fn add_and_sync(
     pool: &PgPool,
     connector: &knobas_db::embedded::Connector,
     registry: &Registry,

@@ -112,6 +112,14 @@ tracing = "0.1"
 # is dropped on the floor, and `tauri dev` is exactly when those are wanted.
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 
+# An external adapter's origin (#1209): a manifest URL read, a release
+# download's path taken apart, an artifact's URL joined beside its manifest.
+# The copy `knobas-http` already resolves.
+url = "2"
+# A release download's tag and file, read out of their path segments, and
+# a tag or file name put back into one. The copy `url` itself depends on.
+percent-encoding = "2"
+
 # `unlink` takes its link id as a string off the wire and parses it, so a
 # mistyped one is `invalid` rather than an argument Tauri refuses to decode at
 # all -- the same treatment `get_entity` gives a malformed entity id.

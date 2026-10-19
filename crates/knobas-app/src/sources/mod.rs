@@ -8,9 +8,11 @@
 pub mod crud;
 pub mod demo;
 pub mod install;
+pub mod installed;
 pub mod paths;
 pub mod progress;
 pub mod registry;
+pub mod remote;
 pub mod write_queue;
 
 // `pub(crate)`: the demo load command builds a `TauriEvents` of its own to
@@ -440,6 +442,18 @@ pub async fn start<R: tauri::Runtime>(
         },
     )
     .await?;
+
+    // The update check at app start (#1209): it reads each installed
+    // adapter's latest release and records what it found, which Settings
+    // shows. It changes no install, and it waits for nothing.
+    let pool = state.pool.clone();
+    tauri::async_runtime::spawn(async move {
+        let endpoints = remote::Endpoints::default();
+        if let Err(error) = installed::check_updates(&pool, &Registry::builtin(), &endpoints).await
+        {
+            tracing::warn!(%error, "the external adapters' update check did not run");
+        }
+    });
 
     // `manage` is the **last** step, and nothing between it and the scheduler's
     // creation can fail. Tauri's `manage` keeps the first value for a type, so

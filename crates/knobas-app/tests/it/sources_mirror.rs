@@ -913,3 +913,88 @@ fn installed_adapter_matches_the_mirror() {
         ],
     );
 }
+
+/// `list_installed_adapters`' row (#1209, #1210), and the update check and
+/// removal inside it.
+#[test]
+fn adapter_status_matches_the_mirror() {
+    use knobas_app::sources::installed::{AdapterSource, AdapterStatus, Removal, UpdateCheck};
+    let status = AdapterStatus {
+        adapter_kind: "wasm-fixture".to_owned(),
+        name: "Harbour surveys".to_owned(),
+        adapter_version: "0.1.0".to_owned(),
+        interface_version: "1.0.0".to_owned(),
+        source_url: "https://github.com/harbour/surveys".to_owned(),
+        tag: Some("v0.1.0".to_owned()),
+        artifact_sha256: "0".repeat(64),
+        hosts: vec![],
+        sources: vec![AdapterSource {
+            id: "quay".to_owned(),
+            display_name: "Quay".to_owned(),
+        }],
+        refused: None,
+        update: Some(UpdateCheck::Current),
+    };
+    let value = serde_json::to_value(&status).unwrap();
+    assert_shape(
+        "AdapterStatus",
+        &value,
+        &[
+            "adapter_kind",
+            "adapter_version",
+            "artifact_sha256",
+            "hosts",
+            "interface_version",
+            "name",
+            "refused",
+            "source_url",
+            "sources",
+            "tag",
+            "update",
+        ],
+    );
+    assert_shape(
+        "AdapterSource",
+        &value["sources"][0],
+        &["display_name", "id"],
+    );
+    let removal = Removal {
+        source_id: "quay".to_owned(),
+        purge_items: true,
+    };
+    assert_shape(
+        "Removal",
+        &serde_json::to_value(&removal).unwrap(),
+        &["purge_items", "source_id"],
+    );
+    for (check, state) in [
+        (UpdateCheck::Current, "current"),
+        (
+            UpdateCheck::Available {
+                tag: None,
+                adapter_version: "0.2.0".to_owned(),
+            },
+            "available",
+        ),
+        (
+            UpdateCheck::Failed {
+                reason: "x".to_owned(),
+            },
+            "failed",
+        ),
+        (
+            UpdateCheck::Refused {
+                tag: None,
+                reason: "x".to_owned(),
+            },
+            "refused",
+        ),
+    ] {
+        let value = serde_json::to_value(&check).unwrap();
+        assert_eq!(value["state"], state);
+        assert!(
+            MIRROR.contains(&format!("state: \"{state}\"")),
+            "UpdateCheck's {state} is not in the mirror"
+        );
+    }
+}

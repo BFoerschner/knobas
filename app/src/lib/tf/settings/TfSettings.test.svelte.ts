@@ -9,7 +9,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { TicketViewRow } from "../../ipc/search";
-import type { CredentialHealth, SourceSummary, SyncRunRow } from "../../ipc/sources";
+import type { AdapterStatus, CredentialHealth, SourceSummary, SyncRunRow } from "../../ipc/sources";
 import { JIRA_SCHEMA } from "../../sources/fixtures";
 import { createLayers } from "../layers.svelte";
 import type { SettingsPorts } from "./ports";
@@ -140,6 +140,10 @@ function ports(over: Partial<SettingsPorts> = {}): SettingsPorts {
     syncAll: vi.fn(() => Promise.resolve([1, 2])),
     addSource: vi.fn(() => Promise.reject(new Error("not in this test"))),
     installAdapter: vi.fn(() => Promise.reject(new Error("not in this test"))),
+    listInstalledAdapters: vi.fn(() => Promise.resolve([])),
+    checkAdapterUpdates: vi.fn(() => Promise.resolve([])),
+    updateAdapter: vi.fn(() => Promise.reject(new Error("not in this test"))),
+    uninstallAdapter: vi.fn(() => Promise.resolve()),
     listen: vi.fn(() => Promise.resolve(() => {})),
     ticketViews: vi.fn(() => Promise.resolve(JIRA_VIEWS.map((row) => ({ ...row })))),
     hideJiraView: vi.fn(() => Promise.resolve()),
@@ -832,4 +836,140 @@ test("a source whose records missed a role's path says so on its row and its pag
   expect(target.querySelector('.tf-stg-alert[role="status"]')?.textContent).toBe(
     "Not drawn as a ticket system: no ticket resolves priority at fields.priority.name. Its tickets stay searchable and linkable.",
   );
+});
+
+// -- Installed adapters (#1209, #1210) ------------------------------------------------
+
+function adapterRow(over: Partial<AdapterStatus> = {}): AdapterStatus {
+  return {
+    adapter_kind: "wasm-fixture",
+    name: "Harbour surveys",
+    adapter_version: "0.1.0",
+    interface_version: "1.0.0",
+    source_url: "https://github.test/harbour/surveys",
+    tag: "v0.1.0",
+    artifact_sha256: "5".repeat(64),
+    hosts: ["{base_url}"],
+    sources: [],
+    refused: null,
+    update: null,
+    ...over,
+  };
+}
+
+function adaptersSection(): HTMLElement {
+  const found = target.querySelector<HTMLElement>('section[aria-labelledby="tf-ext-h"]');
+  if (!found) throw new Error("no Installed adapters section");
+  return found;
+}
+
+test("Installed adapters is drawn only once an adapter is installed (#1209)", async () => {
+  await open([]);
+  expect(target.querySelector('section[aria-labelledby="tf-ext-h"]')).toBeNull();
+});
+
+test("an update available is said, and nothing updates until Update is pressed (#1209)", async () => {
+  const p = ports({
+    listInstalledAdapters: vi.fn(() =>
+      Promise.resolve([adapterRow({ update: { state: "available", tag: "v0.2.0", adapter_version: "0.2.0" } })]),
+    ),
+    updateAdapter: vi.fn(() => Promise.resolve(adapterRow({ tag: "v0.2.0", adapter_version: "0.2.0" }))),
+  });
+  await open([], p);
+  expect(adaptersSection().textContent).toContain("Harbour surveys 0.1.0");
+  expect(adaptersSection().textContent).toContain("v0.1.0 · https://github.test/harbour/surveys");
+  expect(adaptersSection().textContent).toContain("Update available: v0.2.0");
+  expect(p.updateAdapter).not.toHaveBeenCalled();
+
+  button("Update").click();
+  await settle();
+  expect(p.updateAdapter).toHaveBeenCalledWith("wasm-fixture");
+  expect(adaptersSection().textContent).toContain("Harbour surveys 0.2.0");
+  expect(adaptersSection().textContent).not.toContain("Update available");
+});
+
+test("a refused update says why and that the installed version stays (#1209)", async () => {
+  const reason = "install refused: the manifest asks for knobas:adapter@2.0.0, and this knobas hosts knobas:adapter@1.x up to 1.0.0";
+  const before = adapterRow({ update: { state: "available", tag: "v0.2.0", adapter_version: "0.2.0" } });
+  const after = adapterRow({ update: { state: "refused", tag: "v0.2.0", reason } });
+  const listInstalledAdapters = vi.fn().mockResolvedValueOnce([before]).mockResolvedValue([after]);
+  const p = ports({
+    listInstalledAdapters,
+    updateAdapter: vi.fn(() => Promise.reject({ code: "invalid", message: reason, source_id: null })),
+  });
+  await open([], p);
+  button("Update").click();
+  await settle();
+  expect(adaptersSection().textContent).toContain(`Update to v0.2.0 refused, still on v0.1.0: ${reason}`);
+  expect(adaptersSection().querySelector(".tf-stg-errt")).not.toBeNull();
+});
+
+test("Check for updates asks the backend and draws what it found (#1209)", async () => {
+  const p = ports({
+    listInstalledAdapters: vi.fn(() => Promise.resolve([adapterRow()])),
+    checkAdapterUpdates: vi.fn(() =>
+      Promise.resolve([adapterRow({ update: { state: "available", tag: "v0.3.0", adapter_version: "0.3.0" } })]),
+    ),
+  });
+  await open([], p);
+  expect(adaptersSection().textContent).not.toContain("Update available");
+  button("Check for updates").click();
+  await settle();
+  expect(p.checkAdapterUpdates).toHaveBeenCalledTimes(1);
+  expect(adaptersSection().textContent).toContain("Update available: v0.3.0");
+});
+
+test("an adapter refused at restore says why (#1210)", async () => {
+  const refused = "the release's artifact SHA-256 is now 6666, and the backup pinned 5555";
+  await open([], ports({ listInstalledAdapters: vi.fn(() => Promise.resolve([adapterRow({ refused })])) }));
+  expect(adaptersSection().textContent).toContain(`Refused: ${refused}`);
+  expect(() => button("Update")).toThrow();
+});
+
+test("Uninstall asks once per source and sends each answer (#1210)", async () => {
+  const p = ports({
+    listInstalledAdapters: vi.fn(() =>
+      Promise.resolve([
+        adapterRow({
+          sources: [
+            { id: "quay-a", display_name: "Quay A" },
+            { id: "quay-b", display_name: "Quay B" },
+          ],
+        }),
+      ]),
+    ),
+  });
+  await open([], p);
+  button("Uninstall…").click();
+  flushSync();
+  const groups = [...dialog().querySelectorAll('[role="radiogroup"]')];
+  expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual(["What Quay A synced", "What Quay B synced"]);
+  // Keep is each one's default; delete Quay B's.
+  groups[1]!.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1]!.click();
+  flushSync();
+  dialogButton("Uninstall").click();
+  await settle();
+  expect(p.uninstallAdapter).toHaveBeenCalledWith("wasm-fixture", [
+    { source_id: "quay-a", purge_items: false },
+    { source_id: "quay-b", purge_items: true },
+  ]);
+  expect(target.querySelector('section[aria-labelledby="tf-ext-h"]')).toBeNull();
+  // The sources it removed leave the list.
+  expect(p.listSources).toHaveBeenCalledTimes(2);
+});
+
+test("an uninstall that fails part-way reloads the sources it may have removed (#1210)", async () => {
+  const p = ports({
+    listInstalledAdapters: vi.fn(() =>
+      Promise.resolve([adapterRow({ sources: [{ id: "quay-a", display_name: "Quay A" }] })]),
+    ),
+    uninstallAdapter: vi.fn(() => Promise.reject({ kind: "internal", message: "cannot remove quay-b" })),
+  });
+  await open([], p);
+  button("Uninstall…").click();
+  flushSync();
+  dialogButton("Uninstall").click();
+  await settle();
+  expect(p.listInstalledAdapters).toHaveBeenCalledTimes(2);
+  expect(p.listSources).toHaveBeenCalledTimes(2);
 });

@@ -91,13 +91,94 @@ pub async fn install_adapter<R: tauri::Runtime>(
     manifest: String,
 ) -> Result<crate::sources::install::InstalledAdapter, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::install::install_for_profile(
+    crate::sources::install::install_for_profile(&state.pool, &profile.dir, &manifest)
+        .await
+        .map_err(|error| error.to_ipc())
+}
+
+/// Every installed external adapter (#1209, #1210): its pin, its sources,
+/// why it was refused at load or restore, and the last update check.
+#[tauri::command]
+pub async fn list_installed_adapters<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    profile: State<'_, crate::Profile>,
+) -> Result<Vec<crate::sources::installed::AdapterStatus>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let installs = crate::sources::installed::Installs::for_profile(&profile.dir);
+    crate::sources::installed::list(&state.pool, &installs.registry)
+        .await
+        .map_err(IpcError::internal)
+}
+
+/// Check every installed adapter for a newer release (#1209), on demand.
+/// Changes no install; answers the list with each check.
+#[tauri::command]
+pub async fn check_adapter_updates<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    profile: State<'_, crate::Profile>,
+) -> Result<Vec<crate::sources::installed::AdapterStatus>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let installs = crate::sources::installed::Installs::for_profile(&profile.dir);
+    crate::sources::installed::check_updates(&state.pool, &installs.registry, &installs.endpoints)
+        .await
+        .map_err(IpcError::internal)
+}
+
+/// Update an installed adapter to its latest release (#1209), after every
+/// static check; a refusal is `invalid` and leaves the old version running.
+#[tauri::command]
+pub async fn update_adapter<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    profile: State<'_, crate::Profile>,
+    kind: String,
+) -> Result<crate::sources::installed::AdapterStatus, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let installs = crate::sources::installed::Installs::for_profile(&profile.dir);
+    crate::sources::installed::update(
         &state.pool,
-        &profile.dir,
-        std::path::Path::new(&manifest),
+        &installs.registry,
+        &installs.store,
+        &installs.endpoints,
+        &kind,
     )
     .await
     .map_err(|error| error.to_ipc())
+}
+
+/// Uninstall an external adapter (#1210): each of its sources removed as
+/// its answer says, purge or keep, through the source-removal path, the
+/// scheduler told as `delete_source` tells it; then the install.
+#[tauri::command]
+pub async fn uninstall_adapter<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    profile: State<'_, crate::Profile>,
+    kind: String,
+    removals: Vec<crate::sources::installed::Removal>,
+) -> Result<(), IpcError> {
+    let state = crate::sources::state(&app)?;
+    let installs = crate::sources::installed::Installs::for_profile(&profile.dir);
+    let outcome = crate::sources::installed::uninstall(
+        &state.pool,
+        &state.secrets,
+        &installs.registry,
+        &installs.store,
+        &kind,
+        &removals,
+    )
+    .await;
+    // Every source removed is forgotten, the ones before a failure too (#127).
+    let removed = match &outcome {
+        Ok(removed) => removed.as_slice(),
+        Err(crate::sources::install::InstallError::Remove { removed, .. }) => removed.as_slice(),
+        Err(_) => &[],
+    };
+    for removal in removed {
+        state
+            .scheduler
+            .forget_source(&removal.source_id, Purge::from(removal.purge_items))
+            .await;
+    }
+    outcome.map(drop).map_err(|error| error.to_ipc())
 }
 
 #[tauri::command]

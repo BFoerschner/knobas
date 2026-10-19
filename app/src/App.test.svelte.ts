@@ -83,6 +83,7 @@ vi.mock("./lib/ipc/sources", () => ({
   },
   listSources: () => Promise.resolve([]),
   listAdapters: () => Promise.resolve([]),
+  listInstalledAdapters: () => Promise.resolve([]),
   syncStatus: () => Promise.resolve([]),
   listSyncRuns: () => Promise.resolve([]),
   dbStats: () =>

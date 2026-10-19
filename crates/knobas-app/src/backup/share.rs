@@ -454,6 +454,10 @@ mod tests {
             // hands to somebody else. It is in the backup because the backup
             // is the whole schema.
             "monitor_alert",
+            // An installed external adapter (#1210, ADR-0028): which code
+            // this machine trusts with its credentials is the reader's own
+            // choice. The backup carries it as source URL, tag and hash.
+            "external_adapter",
         ] {
             assert!(
                 !everything.tables().contains(&forbidden),

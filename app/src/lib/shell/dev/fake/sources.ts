@@ -3,6 +3,7 @@
  * the Add-source dialog's writes.
  */
 import { GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "../../../sources/fixtures";
+import type { AdapterStatus } from "../../../ipc/sources";
 import type { Handler } from "../fake-tauri";
 import { CORPUS, SYNCED_AT } from "./corpus";
 
@@ -313,16 +314,72 @@ function installAdapter(args: Record<string, unknown>) {
   }
   // Widened: the fixture rows are literal types, and this one is not among them.
   (FIXTURE_ADAPTERS as unknown[]).push(FIXTURE_EXTERNAL);
+  const remote = manifest.startsWith("https://");
+  INSTALLED.push({
+    adapter_kind: FIXTURE_EXTERNAL.adapter_kind,
+    name: FIXTURE_EXTERNAL.name,
+    adapter_version: FIXTURE_EXTERNAL.adapter_version,
+    interface_version: "1.0.0",
+    source_url: manifest,
+    tag: remote ? "v0.1.0" : null,
+    artifact_sha256: "5".repeat(64),
+    hosts: ["{base_url}"],
+    sources: [],
+    refused: null,
+    update: null,
+  });
   return {
     adapter_kind: FIXTURE_EXTERNAL.adapter_kind,
     adapter_version: FIXTURE_EXTERNAL.adapter_version,
     interface_version: "1.0.0",
     source_url: manifest,
-    tag: null,
+    tag: remote ? "v0.1.0" : null,
     artifact_sha256: "5".repeat(64),
     hosts: ["{base_url}"],
     template: FIXTURE_EXTERNAL,
   };
+}
+
+/**
+ * The installed external adapters (#1209, #1210), which an install above
+ * fills. The update check finds a newer release (`v0.2.0`) for one
+ * installed from a URL; a local one is current. Update switches to it.
+ */
+const INSTALLED: AdapterStatus[] = [];
+
+function installed(kind: unknown): AdapterStatus {
+  const row = INSTALLED.find((r) => r.adapter_kind === kind);
+  if (!row) throw { code: "not_found", message: `no external adapter of kind ${JSON.stringify(kind)} is installed`, source_id: null };
+  return row;
+}
+
+function checkUpdates(): AdapterStatus[] {
+  for (const row of INSTALLED) {
+    row.update =
+      row.tag !== null && row.tag !== "v0.2.0"
+        ? { state: "available", tag: "v0.2.0", adapter_version: "0.2.0" }
+        : { state: "current" };
+  }
+  return INSTALLED;
+}
+
+function updateOne(args: Record<string, unknown>): AdapterStatus {
+  const row = installed(args["kind"]);
+  if (row.update?.state === "available") {
+    row.tag = row.update.tag;
+    row.adapter_version = row.update.adapter_version;
+    row.artifact_sha256 = "6".repeat(64);
+  }
+  row.update = null;
+  return row;
+}
+
+function uninstallOne(args: Record<string, unknown>) {
+  const row = installed(args["kind"]);
+  INSTALLED.splice(INSTALLED.indexOf(row), 1);
+  const at = (FIXTURE_ADAPTERS as unknown[]).indexOf(FIXTURE_EXTERNAL);
+  if (at >= 0) (FIXTURE_ADAPTERS as unknown[]).splice(at, 1);
+  return null;
 }
 
 /** This feature's commands. */
@@ -335,6 +392,10 @@ export function handlers(): Record<string, Handler> {
     list_sources: () => FIXTURE_SOURCES,
     list_adapters: () => FIXTURE_ADAPTERS,
     install_adapter: (args) => installAdapter(args),
+    list_installed_adapters: () => INSTALLED,
+    check_adapter_updates: () => checkUpdates(),
+    update_adapter: (args) => updateOne(args),
+    uninstall_adapter: (args) => uninstallOne(args),
     credential_health: () => FIXTURE_SOURCES.map((source) => source.health),
     sync_status: () => FIXTURE_SOURCES.map((source) => fakeStatus(source)),
     list_sync_runs: (args) => fakeRuns(args),
