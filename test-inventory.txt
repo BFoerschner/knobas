@@ -149,6 +149,7 @@ knobas-app	lib/knobas_app	commands::sources::tests::adding_a_source_voids_a_purg
 knobas-app	lib/knobas_app	commands::sources::tests::deleting_a_source_tells_the_scheduler_to_forget_it
 knobas-app	lib/knobas_app	commands::sources::tests::no_command_takes_the_sources_state_directly
 knobas-app	lib/knobas_app	commands::sources::tests::the_forget_scan_would_notice_the_call_going_missing
+knobas-app	lib/knobas_app	commands::sources::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::sources::tests::the_scan_catches_the_signature_it_forbids
 knobas-app	lib/knobas_app	commands::tests::no_command_takes_the_app_state_directly
 knobas-app	lib/knobas_app	commands::time::tests::a_day_review_row_with_no_title_still_carries_the_key

@@ -7433,3 +7433,27 @@ The merge-manager's rulings (Sonnet, #1300):
   (a row carries its frame) is untouched. *Reversing:* restore the `runKinds` parameter.
 - **`ipc/sources.ts` is a comment-only change.** Its doc comments follow the amendment; the
   gate scope reads it as full only because a Rust test reads the file. *Reversing:* n/a.
+## #1324: the fake reads only arguments the barrel sends; the sources barrel is pinned (Opus implementer, 2026-10-19)
+
+- **The proxy answers `undefined` to every read.** *Fork:* answer `undefined`, or something
+  richer (a nested recording proxy, a plausible value per key) so more branches are reached.
+  *Ruling:* `undefined`, and the census's comment says so: it pins every read a bare call
+  reaches. A handler that reads past a branch the `undefined` answer does not take (`mini_board`
+  never reads `ctxId` on that path; `update_source` never reaches `patch`) is not checked there.
+  A fabricated value per key would be a second description of the arguments, the thing the
+  parse exists to avoid. *Reversing:* the proxy's `get` trap.
+- **The argument half runs on a fixture of its own** (`vi.resetModules()` and a fresh import of
+  `fake-tauri`), because calling every write handler with nothing may touch module state the
+  other tests in the file read. Today none of them breaks without it; the isolation is so a
+  future write handler cannot make the file order-dependent. *Reversing:* one line.
+- **The parse fails on an argument it cannot read.** A spread or a bare identifier as `invoke`'s
+  second argument throws rather than counting as "sends nothing", so a call reshaped beyond the
+  parse is a red census, not a silent pass. None exists today. *Reversing:* drop two `throw`s.
+- **The sources pin is a Rust test in `commands/sources.rs`, as its siblings' are**, so this
+  ticket runs cargo although the dispatch expected the diff under `app/`. The criterion names
+  "the sources command module", and the six pins it copies are all Rust tests reading `lib.rs`.
+  It reads the barrel the way `entity.rs` does (both directions) rather than the hand list
+  `backup.rs` keeps. *Reversing:* n/a.
+- **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the ones the
+  ticket and spec #1306 name, the fake census in `fake-tauri.test.ts` and the Rust barrel pin.
+  *Reversing:* n/a.
