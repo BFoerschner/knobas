@@ -5985,3 +5985,28 @@ The merge-manager's rulings (PR #1239, on Opus):
 - **One `list_sources` per finished run is kept.** With five concurrent runs (#1189) that is at
   most five list reads per round of syncs, each one grouped count over `sync.item` plus a query
   per source, the same read a source-health event already costs. **Reversing:** one line.
+## #1229: the demo mock claims the roles its corpus fills (Sonnet implementer)
+
+- **Claim `code-host` and `ticket-system`, not `ci`, `wiki` or `monitoring`.** Reasoning: those
+  two roles' minimums can be filled from the fixture with payload shaping alone. The mock's
+  `build` is no pipeline-and-run pair, its pages name no parent, and it has no monitor, so
+  claiming those would mean inventing records. Builds, Docs and Monitors stay dark under
+  `--demo` (follow-up filed). **Reversing:** low.
+- **The claim lists each minimum's reads, though the mock answers none live.** Clause 10 refuses
+  a claim that omits one; `view` stays `None` and `reachable_transitions` stays refused
+  (ADR-0013: the fixture has no workflow). **Reversing:** low.
+- **Payload builders add derived keys** (`repository`, `parent`, `is_merged`, `head_sha`,
+  `default_branch`, `labels: []`) beside the verbatim record, because the minimums need a parent
+  as an object and a merged flag, and the fixture has flat names and a timestamp. Labels are an
+  empty list on every ticket (the dataset has none), as Jira sends them. **Reversing:** low.
+- **`reviewers` and `assignee` are declared at the person ids the fixture records**, which the
+  minimum forces. An id never equals an identity, so the inbox rules they feed still do not
+  fire on mock records. **Reversing:** low.
+- **`clone_from` is `[BaseUrl]`** (required of a code-host claim). The demo source's base URL is
+  empty, so it names no address. **Reversing:** low.
+- **Three tests moved with the mock.** The mock's pull requests now declare a state, so the
+  recency-fallback test keeps only builds; Jira stands in for "claims no code host" in the clone
+  test; and `backup.rs` counts a source's parent rows for its own adapter only (the mock's
+  declarations now reach `pr`, `commit` and `branch` too, and `0028` tags one row per adapter).
+  **Reversing:** low.
+- No §10.8 entry: no frozen surface changed (adapter-owned descriptor and payloads only).

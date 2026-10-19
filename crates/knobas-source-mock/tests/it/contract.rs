@@ -882,7 +882,11 @@ fn the_mock_claims_the_code_host_and_the_ticket_system() {
     for claim in &d.roles {
         let min = minimum(&claim.role).expect("a built-in role");
         let reads: Vec<&str> = claim.reads.iter().map(String::as_str).collect();
-        assert_eq!(reads, min.reads, "{} claims the minimum's reads", claim.role);
+        assert_eq!(
+            reads, min.reads,
+            "{} claims the minimum's reads",
+            claim.role
+        );
     }
     assert_eq!(check(&d), Ok(()));
 }
@@ -931,7 +935,11 @@ async fn every_path_the_claimed_roles_require_resolves_on_the_corpus() {
                         at(&i.payload, &path).is_some()
                     })
                 });
-                assert!(resolved, "{role}: {kind} {} resolves on no record", field.name());
+                assert!(
+                    resolved,
+                    "{role}: {kind} {} resolves on no record",
+                    field.name()
+                );
             }
         }
     }
