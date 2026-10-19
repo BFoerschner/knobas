@@ -504,6 +504,49 @@ async fn check_source_actions(s: &dyn crate::Source, d: &crate::SourceDescriptor
     );
 }
 
+/// The data half of the role check (#1199, ADR-0028), held to a corpus that
+/// should hold every kind its roles need: a full sync of `source`, and every
+/// built-in role its descriptor claims **filled** on what it emitted, by
+/// [`DataCheck`](crate::role::data::DataCheck), the check a source's first
+/// sync runs in the engine.
+///
+/// Stricter than [`battery`] on purpose. The battery runs against any
+/// instance and judges only the kinds a corpus populates; this one is for a
+/// seeded corpus (the testenv products, an adapter's offline fixture), where
+/// a role whose kinds came back empty is a role nothing showed it fills. The
+/// live suites call it, which is what witnesses that the built-ins fill
+/// every role they claim on real records.
+///
+/// # Panics
+///
+/// When the sync fails, a required path misses, or a required kind has no
+/// record.
+pub async fn fills_its_roles(source: &dyn crate::Source) {
+    let d = source.descriptor();
+    let mut sink = VecSink(Vec::new());
+    if let Err(error) = source.sync(None, &mut sink).await {
+        panic!("the full sync the role check reads failed: {error}");
+    }
+    let mut data = crate::role::data::DataCheck::new(&d);
+    for item in &sink.0 {
+        data.observe(&item.kind, &item.payload);
+    }
+    for verdict in data.finish() {
+        if let Some(miss) = verdict.miss {
+            panic!(
+                "role {:?} is not filled: no {:?} record resolves {} at {}",
+                miss.role, miss.kind, miss.field, miss.path
+            );
+        }
+        assert!(
+            verdict.complete,
+            "role {:?} is not shown filled: the corpus holds no record of some kind it needs \
+             (seen: {:?})",
+            verdict.role, verdict.seen
+        );
+    }
+}
+
 /// Clause 9: the source view of every entity the adapter emitted is an answer,
 /// never a failure.
 ///
@@ -2717,6 +2760,26 @@ mod tests {
             "must answer its own read with exactly that section",
         )
         .await;
+    }
+
+    // -- the role data check on a seeded corpus (#1199) -----------------------
+
+    fn source(behavior: Behavior) -> Box<dyn Source> {
+        Box::new(TestSource {
+            fault: Fault::None,
+            behavior,
+        })
+    }
+
+    #[tokio::test]
+    async fn a_ticket_system_whose_tickets_resolve_its_paths_fills_its_role() {
+        super::fills_its_roles(&*source(Behavior::ClaimsTicketSystem)).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "role \"wiki\" is not shown filled")]
+    async fn a_role_whose_kind_the_corpus_lacks_is_not_shown_filled() {
+        super::fills_its_roles(&*source(Behavior::ClaimsWikiWithoutParent)).await;
     }
 
     // -- clause 10: role claims (#1193) ---------------------------------------

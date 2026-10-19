@@ -3196,3 +3196,18 @@ fn uuid_like() -> u128 {
         .unwrap()
         .as_nanos()
 }
+
+/// The role data check (#1199, ADR-0028) on the seeded corpus: the ticket
+/// system the adapter claims is filled by the records a full sync emits.
+/// Configured as the battery is, the way the Add-source dialog leaves a
+/// source (the discovered Epic Link and Sprint fields).
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn fills_every_role_it_claims_on_the_seeded_corpus() {
+    let seeded = seeded();
+    let configured = serde_json::json!({
+        "epic_link_field": seeded.seed.epic_link_field,
+        "sprint_field": seeded.seed.sprint().field,
+    });
+    knobas_source::contract::fills_its_roles(&*seeded.source(configured)).await;
+}

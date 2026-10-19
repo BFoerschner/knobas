@@ -22,8 +22,13 @@
  * the time before the list has been read (or while it fails), and a row whose
  * source the list does not name, such as the items a removed source left
  * behind. Whether those stay drawn is not a question about roles.
+ *
+ * A claim is not enough where the records said otherwise (#1199, ADR-0028):
+ * a role whose declared paths missed on the source's records
+ * (`SourceSummary.role_misses`) is not drawn for that source, though its
+ * items stay live everywhere else.
  */
-import type { RoleClaim } from "../ipc/sources";
+import type { RoleClaim, RoleMiss } from "../ipc/sources";
 
 /** The built-in roles a surface is drawn for, as `knobas_source::role` spells them. */
 export const CODE_HOST = "code-host";
@@ -38,6 +43,8 @@ export interface ClaimingSource {
   /** Carried as the source list has it and never read: a surface draws by role. */
   adapter_kind?: string;
   roles?: readonly RoleClaim[];
+  /** The claimed roles whose declared paths missed on the source's records (#1199). */
+  role_misses?: readonly RoleMiss[];
 }
 
 /** Whether `source` claims `role`. A source that names no claims claims nothing. */
@@ -45,12 +52,17 @@ export function claims(source: ClaimingSource, role: string): boolean {
   return (source.roles ?? []).some((claim) => claim.role === role);
 }
 
+/** Whether `source` fills `role`: claims it, and its records did not miss one of its paths (#1199). */
+export function fills(source: ClaimingSource, role: string): boolean {
+  return claims(source, role) && !(source.role_misses ?? []).some((miss) => miss.role === role);
+}
+
 export interface SourceRoles {
   /** The source list the shell read last. */
   take(sources: readonly ClaimingSource[]): void;
   /** Back to knowing nothing: every surface draws what it reads. */
   forget(): void;
-  /** Whether a surface of `role` draws the rows of `sourceId`. */
+  /** Whether a surface of `role` draws the rows of `sourceId`: it claims the role and fills it. */
   draws(role: string, sourceId: string): boolean;
   /** `rows` as a surface of `role` draws them: the same array when nothing is dropped. */
   keep<T extends { source_id: string }>(role: string, rows: T[]): T[];
@@ -58,8 +70,8 @@ export interface SourceRoles {
    * The sources a read that the server narrows and counts asks for, for a
    * surface of `role` (Tickets' board, #1200): `null` to narrow nothing, as
    * {@link keep} does while the list is unread or when every listed source
-   * claims `role`; else the ids of the listed sources that claim it, which
-   * may be none.
+   * fills `role`; else the ids of the listed sources that fill it (claim it
+   * with no miss, #1199), which may be none.
    */
   scope(role: string): string[] | null;
 }
@@ -70,12 +82,16 @@ export function createSourceRoles(): SourceRoles {
   function draws(role: string, sourceId: string): boolean {
     if (state.sources === null) return true;
     const source = state.sources.find((row) => row.id === sourceId);
-    return source === undefined || claims(source, role);
+    return source === undefined || fills(source, role);
   }
 
   return {
     take(sources) {
-      state.sources = sources.map((row) => ({ id: row.id, roles: [...(row.roles ?? [])] }));
+      state.sources = sources.map((row) => ({
+        id: row.id,
+        roles: [...(row.roles ?? [])],
+        role_misses: [...(row.role_misses ?? [])],
+      }));
     },
     forget() {
       state.sources = null;
@@ -87,8 +103,9 @@ export function createSourceRoles(): SourceRoles {
     },
     scope(role) {
       if (state.sources === null) return null;
-      const claimers = state.sources.filter((source) => claims(source, role)).map((source) => source.id);
-      return claimers.length === state.sources.length ? null : claimers;
+      // Fillers, not claimers: a source whose records missed the role's paths is left out (#1199).
+      const fillers = state.sources.filter((source) => fills(source, role)).map((source) => source.id);
+      return fillers.length === state.sources.length ? null : fillers;
     },
   };
 }

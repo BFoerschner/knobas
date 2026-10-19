@@ -8,6 +8,7 @@
  */
 import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import { ago } from "../../shell/time";
+import { CI, CODE_HOST, MONITORING, TICKET_SYSTEM, WIKI } from "../roles.svelte";
 import { IDENTITY_FIELD } from "../../sources/new-source";
 
 /** A section of Settings, in prototype-6's order (`STG`). */
@@ -91,7 +92,7 @@ const FAILED: Partial<Record<CredentialHealth["state"], string>> = {
 };
 
 export function sourceState(
-  source: Pick<SourceSummary, "enabled" | "last_run">,
+  source: Pick<SourceSummary, "enabled" | "last_run" | "role_misses">,
   health: CredentialHealth | null,
   status: SourceSyncStatus | null,
   now: Date = new Date(),
@@ -107,7 +108,47 @@ export function sourceState(
   }
   const outcome = status?.last_outcome ?? source.last_run?.outcome ?? null;
   if (outcome === "error") return { tone: "warn", text: `Failed ${ago(finished, now)}`, failed: false };
+  const misses = source.role_misses ?? [];
+  if (misses.length > 0) {
+    const [first] = misses;
+    const more = misses.length > 1 ? ` and ${misses.length - 1} more` : "";
+    return {
+      tone: "warn",
+      text: `Synced ${ago(finished, now)}, ${roleWord(first!.role)} not drawn (${first!.path})${more}`,
+      failed: false,
+    };
+  }
   return { tone: "ok", text: `Synced ${ago(finished, now)}`, failed: false };
+}
+
+/** How the health line names each built-in role: on the row, and in *Not drawn …*. */
+const ROLE_WORDS: Record<string, { word: string; as: string }> = {
+  [CODE_HOST]: { word: "code host", as: "as a code host" },
+  [TICKET_SYSTEM]: { word: "ticket system", as: "as a ticket system" },
+  [CI]: { word: "CI", as: "as CI" },
+  [WIKI]: { word: "wiki", as: "as a wiki" },
+  [MONITORING]: { word: "monitoring", as: "for monitoring" },
+};
+
+/** A role as the health line says it: *ticket system*, *CI*. A custom role keeps its own name. */
+export function roleWord(role: string): string {
+  return ROLE_WORDS[role]?.word ?? role;
+}
+
+/**
+ * The lines on top of a source's page for the roles its records did not fill
+ * (#1199, ADR-0028): which surface leaves it out, and the declared path that
+ * missed. *Not drawn as a ticket system: no ticket resolves priority at
+ * fields.priority.name. Its tickets stay searchable and linkable.*
+ */
+export function roleMissLines(source: Pick<SourceSummary, "kinds" | "role_misses">): string[] {
+  return (source.role_misses ?? []).map((miss) => {
+    const kind = source.kinds.find((info) => info.id === miss.kind);
+    const one = (kind?.label ?? miss.kind).toLowerCase();
+    const many = (kind?.plural ?? miss.kind).toLowerCase();
+    const as = ROLE_WORDS[miss.role]?.as ?? `as ${miss.role}`;
+    return `Not drawn ${as}: no ${one} resolves ${miss.field} at ${miss.path}. Its ${many} stay searchable and linkable.`;
+  });
 }
 
 /**

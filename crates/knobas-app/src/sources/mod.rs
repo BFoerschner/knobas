@@ -285,6 +285,12 @@ pub struct SourceSummary {
     /// Empty for an adapter that claims none, and for a row whose adapter is
     /// no longer compiled in.
     pub roles: Vec<knobas_source::role::RoleClaim>,
+    /// The claimed roles whose declared paths missed on the records this
+    /// source's syncs emitted (#1199, ADR-0028 *The checks*): the shell draws
+    /// none of these roles for the source, and its health line names each
+    /// path. Only roles still in [`roles`](Self::roles); empty when every
+    /// claimed role is filled or not judged yet.
+    pub role_misses: Vec<knobas_source::role::data::RoleMiss>,
 }
 
 /// What *Test connection* found.

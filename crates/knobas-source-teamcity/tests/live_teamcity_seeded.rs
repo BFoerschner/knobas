@@ -4053,3 +4053,15 @@ async fn a_seeded_runs_log_tests_and_artifacts_read_whole() {
     );
     assert!(all.bytes.starts_with(b"PK"), "a zip");
 }
+
+/// The role data check (#1199, ADR-0028) on the seeded corpus: CI, the role
+/// the adapter claims, is filled by the configurations and builds a full sync
+/// emits.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn fills_every_role_it_claims_on_the_seeded_corpus() {
+    let seeded = seeded();
+    let scope = serde_json::json!({ "build_type_ids": QUIET_CONFIGURATIONS });
+    let source = seeded.source_with(&seeded.url, &seeded.token, scope);
+    knobas_source::contract::fills_its_roles(&*source).await;
+}

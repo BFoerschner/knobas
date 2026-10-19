@@ -1105,3 +1105,11 @@ async fn a_docker_check_is_published_with_the_seeded_docker_host() {
         "{docker:?}"
     );
 }
+
+/// The role data check (#1199, ADR-0028) on the seeded estate: monitoring,
+/// the role the adapter claims, is filled by the monitors a full sync emits.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn fills_every_role_it_claims_on_the_seeded_corpus() {
+    knobas_source::contract::fills_its_roles(env().source().as_ref()).await;
+}

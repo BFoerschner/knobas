@@ -786,6 +786,7 @@ fn nothing_in_the_ipc_surface_reads_a_secret_back() {
         auth_kind: Some(AuthMethod::Pat),
         kinds: Vec::new(),
         roles: Vec::new(),
+        role_misses: Vec::new(),
     })
     .unwrap();
     let keys: Vec<&str> = summary
@@ -1450,5 +1451,53 @@ async fn the_source_list_carries_the_role_claims_of_each_sources_adapter() {
     assert!(
         row.roles.is_empty(),
         "the built-in mock claims nothing (#1193)"
+    );
+}
+
+/// The source list carries each standing role miss the sync engine kept
+/// (#1199), for the roles the adapter still claims: a miss of a role it no
+/// longer claims is drawn for nobody and is left out.
+#[tokio::test]
+async fn the_source_list_carries_the_misses_of_the_roles_still_claimed() {
+    let f = fixture().await;
+    sources::crud::add(&f.pool, &f.secrets, &ClaimingRegistry, a_new_source(&f.id))
+        .await
+        .unwrap();
+    for role in [the_claim().role.as_str(), "ticket-system"] {
+        sqlx::query(
+            "insert into sync.role_check (source_id, role, missed_kind, missed_field, missed_path)
+             values ($1, $2, 'demo', 'status_name', 'fields.statuss.name')",
+        )
+        .bind(&f.id)
+        .bind(role)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    }
+
+    let listed = sources::crud::list(&f.pool, &ClaimingRegistry)
+        .await
+        .unwrap();
+    let row = listed.iter().find(|row| row.id == f.id).unwrap();
+    assert_eq!(
+        row.role_misses,
+        [knobas_source::role::data::RoleMiss {
+            role: the_claim().role,
+            kind: "demo".into(),
+            field: "status_name".into(),
+            path: "fields.statuss.name".into(),
+        }]
+    );
+    let updated = sources::crud::update(
+        &f.pool,
+        &ClaimingRegistry,
+        &f.id,
+        sources::SourcePatch::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        updated.role_misses, row.role_misses,
+        "update answers them too"
     );
 }

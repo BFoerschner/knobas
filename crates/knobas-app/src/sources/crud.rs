@@ -322,6 +322,7 @@ pub async fn list(
     let rows = config::list(pool).await?;
     let counts = item_counts(pool).await?;
     let statuses = knobas_sync::scheduler::status_all(pool).await?;
+    let mut misses = knobas_sync::role_check::misses(pool).await?;
     // Once, not once per row: `descriptors()` builds every template.
     let templates = registry.descriptors();
 
@@ -335,17 +336,19 @@ pub async fn list(
             .find(|t| t.adapter_kind == row.adapter_kind)
             .cloned();
         let id = row.id.clone();
+        let roles = template
+            .as_ref()
+            .map(|t| t.roles.clone())
+            .unwrap_or_default();
         out.push(SourceSummary {
+            role_misses: still_claimed(misses.remove(&id).unwrap_or_default(), &roles),
+            roles,
             item_count: counts.get(&id).copied().unwrap_or(0),
             next_run_at: statuses
                 .iter()
                 .find(|s| s.source_id == id)
                 .and_then(|s| s.next_run_at),
             last_run: knobas_sync::run_log::last_finished(pool, &id).await?,
-            roles: template
-                .as_ref()
-                .map(|t| t.roles.clone())
-                .unwrap_or_default(),
             kinds: template.map(|t| t.entity_kinds).unwrap_or_default(),
             auth_kind: row.auth_kind.method(),
             id: row.id,
@@ -1140,6 +1143,18 @@ pub async fn health(pool: &PgPool) -> Result<Vec<CredentialHealth>, SourcesError
     Ok(config::health_all(pool).await?)
 }
 
+/// The misses of the roles `roles` still claims: a role the adapter stopped
+/// claiming is drawn for nobody, so its old miss says nothing.
+fn still_claimed(
+    misses: Vec<knobas_source::role::data::RoleMiss>,
+    roles: &[knobas_source::role::RoleClaim],
+) -> Vec<knobas_source::role::data::RoleMiss> {
+    misses
+        .into_iter()
+        .filter(|miss| roles.iter().any(|claim| claim.role == miss.role))
+        .collect()
+}
+
 async fn summarize(
     pool: &PgPool,
     row: config::SourceConfigRow,
@@ -1158,6 +1173,13 @@ async fn summarize(
         last_run: knobas_sync::run_log::last_finished(pool, &id).await?,
         kinds: template.entity_kinds.clone(),
         roles: template.roles.clone(),
+        role_misses: still_claimed(
+            knobas_sync::role_check::misses(pool)
+                .await?
+                .remove(&id)
+                .unwrap_or_default(),
+            &template.roles,
+        ),
         auth_kind: row.auth_kind.method(),
         id: row.id,
         adapter_kind: row.adapter_kind,

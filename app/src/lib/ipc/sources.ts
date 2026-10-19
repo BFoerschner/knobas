@@ -96,6 +96,21 @@ export interface RoleClaim {
 }
 
 /**
+ * `knobas_source::role::data::RoleMiss` (#1199, ADR-0028): a declared path of
+ * a claimed role that missed on the records the source's syncs emitted, so the
+ * shell does not draw that role for the source.
+ */
+export interface RoleMiss {
+  role: string;
+  /** The kind whose records missed (`ticket`). */
+  kind: string;
+  /** The declared field (`priority`). */
+  field: string;
+  /** The declared path, its segments joined by `.` (`fields.priority.name`). */
+  path: string;
+}
+
+/**
  * `knobas_core::payload::PayloadPath` — the object keys to walk, in order.
  * `["fields", "status", "name"]`.
  */
@@ -448,6 +463,13 @@ export interface SourceSummary {
    * #1196 still type-checks; a summary without it claims nothing.
    */
   roles?: RoleClaim[];
+  /**
+   * The claimed roles whose declared paths missed on this source's records
+   * (#1199): the shell draws none of them for it (`tf/roles.svelte.ts`), and
+   * its health line names each path. Always sent; optional for the reason
+   * {@link roles} is.
+   */
+  role_misses?: RoleMiss[];
 }
 
 /**

@@ -44,6 +44,7 @@ pub mod jira_views;
 #[cfg(any(test, feature = "test-util"))]
 pub mod mirror;
 pub mod progress;
+pub mod role_check;
 pub mod run_log;
 pub mod samples;
 pub mod scheduler;
@@ -637,14 +638,36 @@ async fn run_locked(
     // Jira views, which gates their projection below.
     let declares_jira_views = kinds.contains(jira_views::KIND);
 
-    let (cursor, upserted, deleted, emitted) = {
-        let mut sink = PgSink::new(tx, source_id.to_owned(), kinds);
+    // What is kept of the source's roles, and whether this run judges them:
+    // its first sync does, and a later one while a role is unjudged or missed
+    // (`role_check`).
+    // Built from the descriptor the run syncs under, so an external adapter's
+    // claims are held as a built-in's are.
+    let role_check = knobas_source::role::data::DataCheck::new(&source.descriptor());
+    let kept_roles = role_check::load(tx, source_id).await?;
+    let role_check = (!role_check.is_empty() && role_check::wanted(&role_check, &kept_roles))
+        .then_some(role_check);
+
+    let (cursor, upserted, deleted, emitted, role_check) = {
+        let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check);
         let cursor = source.sync(cursor, &mut sink).await?;
         // The adapter is done, so whatever is still buffered belongs to this
         // run: flush it before the cursor claims to cover it.
         sink.flush().await?;
-        (cursor, sink.upserted, sink.deleted, sink.emitted)
+        (
+            cursor,
+            sink.upserted,
+            sink.deleted,
+            sink.emitted,
+            sink.roles,
+        )
     };
+
+    // The role data check's verdicts, in the run's transaction: a failed run
+    // judges nothing. A miss stops nothing; the items above are written.
+    if let Some(check) = role_check {
+        role_check::record(tx, source_id, &kept_roles, &check.finish()).await?;
+    }
 
     // Reconcile what a full sync did not see. Inside the same transaction as
     // the writes, so a failure rolls the tombstones back with them.
@@ -828,6 +851,9 @@ struct PgSink<'t, 'c> {
     /// arrive" -- and it is bounded by the descriptor's kind list, unlike
     /// `seen`.
     emitted: HashSet<String>,
+    /// The role data check (#1199), fed every item this run accepts, or
+    /// `None` when the run does not judge roles.
+    roles: Option<knobas_source::role::data::DataCheck>,
     upserted: u64,
     deleted: u64,
 }
@@ -837,6 +863,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
         tx: &'t mut Transaction<'c, Postgres>,
         source_id: String,
         kinds: HashSet<String>,
+        roles: Option<knobas_source::role::data::DataCheck>,
     ) -> Self {
         Self {
             tx,
@@ -845,6 +872,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
             buf: Vec::new(),
             seen: HashMap::new(),
             emitted: HashSet::new(),
+            roles,
             upserted: 0,
             deleted: 0,
         }
@@ -1087,6 +1115,9 @@ impl Sink for PgSink<'_, '_> {
     /// whole run back.
     async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
         self.check(&item)?;
+        if let Some(roles) = &mut self.roles {
+            roles.observe(&item.kind, &item.payload);
+        }
         self.buf.push(item);
         if self.buf.len() >= BATCH {
             self.flush().await?;
@@ -1180,7 +1211,7 @@ mod tests {
         let mut tx = pool.begin().await.unwrap();
         let mid_run = {
             let kinds = HashSet::from(["ticket".to_owned()]);
-            let mut sink = PgSink::new(&mut tx, source_id.clone(), kinds);
+            let mut sink = PgSink::new(&mut tx, source_id.clone(), kinds, None);
             for n in 0..BATCH {
                 sink.item(unit_item(&source_id, n)).await.unwrap();
             }

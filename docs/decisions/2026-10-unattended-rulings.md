@@ -5932,3 +5932,56 @@ The implementer's rulings:
 - **Merge-manager, PR #1238: an artifact name must be its own file name and hold no `:`.**
   `C:x.wasm` is drive-relative on Windows, and `Path::join` would follow it off the release;
   `x.wasm:s` names an NTFS stream. **Reversing:** low.
+## #1199 Check a source's declared paths on its first sync (2026-10-18)
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **The §10.8 sign-off** (`docs/contract/10.8/1199-role-data-check.md`): `knobas_source::role::data`
+  and `contract::fills_its_roles`, migration `0052` (`sync.role_check`), and
+  `SourceSummary.role_misses`. Signed: no minimum, battery clause, command or event changes; the
+  shape tests hold the mirror, and the table is derived state outside the backup. **Reversing:** a
+  §10.8 amendment and a migration dropping the table.
+
+The implementer's rulings:
+
+- **What a miss is.** Clause 6's two corpus questions, a wrong shape or a key no record has while
+  nothing resolved, asked only of the paths a claimed role's minimum requires. A path that is null
+  on every record (an unassigned ticket) is not a miss; a misspelled key is. ADR-0028 says "the
+  battery's payload-path checks", and clause 6 is that check. **Reversing:** low (`DataCheck`).
+- **When it runs.** On a source's first sync, and on later runs only while a claimed role is not
+  judged yet or stands missed. A role seen filled is not judged again: an incremental run's few
+  records are no corpus, and one parentless Jira ticket in one would take Tickets away. A miss is
+  cleared by a run whose records of the missed kind pass. **Reversing:** low (`role_check::change`
+  and `wanted`).
+- **Filled needs every kind.** A first sync that emitted nothing of a role's kinds leaves it not
+  judged (still drawn), so the next run with records judges it. **Reversing:** low.
+- **Where it is kept.** `sync.role_check`, not a `knobas.setting` row: per role, cascades with the
+  source, and outside the backup because it is derived from synced records. **Reversing:** a
+  migration.
+- **The health line.** The source's row in Settings › Sources (warn tone, *Synced 4 min ago,
+  ticket system not drawn (fields.priority.name)*) and a status line on its page naming the role,
+  the field and the path. Credential and run failures still win the row. **Reversing:** low
+  (`settings.ts`).
+- **The shell re-reads the source list when a run finishes**, so a miss (or a role filled again)
+  reaches the surfaces without a restart. One `list_sources` per finished run. **Reversing:** one
+  line in `TfShell.svelte`.
+- **How criterion 5 is witnessed.** A new `contract::fills_its_roles`, run by one live test per
+  built-in on the testenv corpus, rather than a battery clause: clause 6 already refuses every miss
+  this check can find, so a battery clause would be a check no mutant could reach, and the battery
+  must tolerate an empty kind on an arbitrary instance where this must not. **Reversing:** low.
+
+The merge-manager's rulings (PR #1239, on Opus):
+
+- **An absent parent is not a miss.** Jira leaves `fields.parent` (and knobas's `epic`) out of a
+  ticket with no parent, so under the implementer's rule a first sync of a project with no epics
+  or sub-tasks found a missing key, no record resolving it, and took Tickets away from the source.
+  A `Field::Parent` now misses only on a wrong shape; `Field::ParentOf` (a branch's repo) and every
+  other field keep both questions. **Reversing:** low (`Need::absent_is_none` in `role::data`).
+- **A role once filled stays filled, even if a later sync regresses.** ADR-0028 runs the data
+  checks "on the first sync of each source", and criterion 4 asks only that a missed role fill
+  again. Re-judging a filled role on incremental runs would judge a corpus of a few records. An
+  adapter update does not reset it either: ADR-0028 gives an update the static checks only.
+  **Reversing:** low (`role_check::wanted`), plus a reset on adapter update if wanted.
+- **One `list_sources` per finished run is kept.** With five concurrent runs (#1189) that is at
+  most five list reads per round of syncs, each one grouped count over `sync.item` plus a query
+  per source, the same read a source-health event already costs. **Reversing:** one line.
