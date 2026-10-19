@@ -6791,3 +6791,24 @@ The merge-manager's rulings (Opus):
 - **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the Rust ↔
   TS mirror test, the IPC body (`jira_views_ipc.rs`), the fake's `ticket_views` answer
   (`fake-tauri.test.ts`) and `groupViews` (`views.test.ts`). *Reversing:* n/a.
+
+### #1273: merge-manager's rulings (Opus)
+
+- **The reverse mirror check compares sets.** *Fork:* keep the implementer's "each field
+  `search.ts` declares is one the wire sends", or compare the declared fields with the sent ones
+  as sets. *Ruling:* sets, per interface (`TicketViewRow`'s own fields beside the flattened
+  `TicketView`, and `SavedViewSource`). *Reasoning:* the per-field loop passed on a body it read
+  as empty, so a re-indented interface (prettier, a nested type) or a header that drifted left it
+  checking nothing; a four-space `SavedViewSource` passed it. Equal sets fail on that, and on a
+  stray `jql` beside `source_query` (both mutants run). *Reversing:* low.
+- **Persistence, checked again.** *Fork:* the implementer's claim that nothing stored carries the
+  old names. *Ruling:* holds. `knobas_db::backup::dump` is scoped to the `knobas` schema; the share
+  export copies `knobas.ticket_view` rows by table and column (`backup/share.rs`), and that table
+  is unchanged; `TicketViewRow` and `SavedViewSource` are built only in `ticket_views::list` and
+  deserialised nowhere; the app's only `localStorage` holds pending comments. No restore shim.
+  *Reversing:* n/a.
+- **The `jql` field, reviewed.** *Fork:* the implementer's wire-only rename to `source_query`.
+  *Ruling:* upheld. #1192 calls JQL "Jira's answer" to `translate_query`, so a second ticket
+  system's query would otherwise arrive under Jira's name. `query` would clash with the view's
+  own knobas-grammar `query` on the same row, and renaming the `sync.saved_view.jql` column is a
+  migration the ticket did not ask for, so it is left to #1285. *Reversing:* low.

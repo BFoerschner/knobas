@@ -877,15 +877,26 @@ mod tests {
         ] {
             assert!(mirror.contains(name), "{name} is not in the mirror");
         }
-        // The other direction for the row's saved-view facts (#1273): every
-        // field the mirror declares is one the wire sends, so a field left on
-        // its old name in `search.ts` fails here rather than reading
-        // `undefined` in the shell.
+        // The other direction for the row's saved-view facts (#1273): the
+        // fields the mirror declares are exactly the ones the wire sends, so
+        // a field left on its old name in `search.ts` fails here rather than
+        // reading `undefined` in the shell. Equal sets, not "each declared
+        // field is sent": a body this parse reads as empty must fail too.
+        let own = |sent: &serde_json::Value, inherited: &serde_json::Value| {
+            let mut fields = keys(sent);
+            fields.retain(|key| inherited.get(key).is_none());
+            fields.sort();
+            fields
+        };
+        let flattened = serde_json::to_value(&view).unwrap();
         for (interface, sent) in [
-            ("export interface TicketViewRow extends TicketView {", &row),
+            (
+                "export interface TicketViewRow extends TicketView {",
+                own(&row, &flattened),
+            ),
             (
                 "export interface SavedViewSource {",
-                &row["saved_view_source"],
+                own(&row["saved_view_source"], &serde_json::json!({})),
             ),
         ] {
             let at = mirror
@@ -895,20 +906,15 @@ mod tests {
             let body = &body[..body
                 .find("\n}")
                 .unwrap_or_else(|| panic!("{interface} never closes"))];
-            for line in body.lines() {
-                let Some((field, _)) = line.strip_prefix("  ").and_then(|l| l.split_once(':'))
-                else {
-                    continue;
-                };
-                if field.starts_with(['/', '*', ' ']) {
-                    continue;
-                }
-                let field = field.trim_end_matches('?');
-                assert!(
-                    sent.get(field).is_some(),
-                    "{interface} declares {field}, which the wire does not send"
-                );
-            }
+            let mut declared: Vec<String> = body
+                .lines()
+                .filter_map(|line| line.strip_prefix("  ")?.split_once(':'))
+                .map(|(field, _)| field)
+                .filter(|field| !field.starts_with(['/', '*', ' ']))
+                .map(|field| field.trim_end_matches('?').to_owned())
+                .collect();
+            declared.sort();
+            assert_eq!(declared, sent, "{interface} and the wire name different fields");
         }
         // Registered under the names the mirror invokes (#1245): a command is
         // addressed by a string, so a barrel line left on the old name is a
