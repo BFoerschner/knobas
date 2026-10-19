@@ -182,7 +182,9 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
             // `commit_file` the ticket-first redesign's (#822), *Commit
             // change…* on a file, through Gitea and never the checkout;
             // `source_action` the roles' (#1194, ADR-0029), *Add label…* on a
-            // pull request, a write no role's vocabulary has.
+            // pull request, a write no role's vocabulary has; `transition`
+            // and `create_ticket` the ticket system's (#1206), on an issue
+            // and in a repository.
             vec![
                 "create_branch",
                 "create_pull_request",
@@ -194,6 +196,8 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
                 "edit_pull_request",
                 "update_pull_request_branch",
                 "commit_file",
+                "transition",
+                "create_ticket",
                 "source_action",
             ],
         ),

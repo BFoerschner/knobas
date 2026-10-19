@@ -440,6 +440,12 @@ Consequences for a live test suite:
 
 Nothing in the §4.2 key forms depends on the fixture's abbreviations.
 
+**Issues (#1206).** The seed also files three issues in `ledger-api`, after every pull
+request so no pull request number moves: one with `Priority/High`, `Kind/Bug`, an assignee and
+a comment, one with `Priority/Medium` and nobody assigned, and one closed. Knobas mirrors them
+as tickets (`gitea:tidewater/ledger-api/issues/<n>`). The closed `(reserved)` index
+placeholders above are issues too, so they come back as closed tickets.
+
 The real TeamCity (`./seed --teamcity`) has the same class of gap, in its own
 places:
 

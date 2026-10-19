@@ -6191,3 +6191,51 @@ The merge-manager's rulings:
 - **`Frame::SavedView` needs no WIT change: confirmed.** `descriptor: func() -> json` carries the
   whole `SourceDescriptor` as JSON (1198 entry), so the new variant and field are new JSON words,
   not a new WIT case.
+## #1206: Gitea syncs its issues as tickets (Opus implementer)
+
+- **Reserved for Björn, ruled by the implementer on Opus: the §10.8 entry for Gitea's write
+  table.** ADR-0006 makes each growth of the registry's write table a ratified exception, and
+  `transition` and `create_ticket` are new on Gitea. Ratified as
+  `docs/contract/10.8/1206-gitea-ticket-writes.md`: no `WriteOp` variant and no frozen file
+  changes, the two ops are the ticket system's optional writes (ADR-0029), and both are certified
+  against the testenv Gitea and Forgejo. **Reversing:** drop the two ops from the descriptor and
+  the entry.
+- **An issue's key is `owner/repo/issues/<n>`, not `owner/repo#<n>`.** Gitea numbers issues and
+  pull requests from one counter, so `#n` is unique, but it does not say which it is, and the
+  views and writes need to know: a pull request's view reads `/pulls/n`, which an issue answers
+  404, and the battery opens a view of every emitted entity. The key form now says it, as
+  `keys.rs` requires of every form. **Reversing:** cheap before a release, costly after (entity
+  ids are permanent).
+- **`ticket` is not exhaustive, and a refused issue listing skips that repository's tickets on
+  either kind of run.** A token without issue scope (403) or a repository with the unit off or an
+  external tracker (404) must not fail a sync that worked before #1206. A skipped listing is a
+  hole, so a sweep may not run over the kind. Cost: an issue an admin deleted stays in the
+  mirror. A 401 still ends the run. **Reversing:** low (`entity_kinds`, `sync::issues`).
+- **A ticket's project is its repository, though ADR-0010 says Gitea gets no project.** The
+  ticket, spec #1192 and ADR-0029's ticket-system minimum all require one, and name the
+  repository. Only the `ticket` kind declares it. Follow-up filed to amend ADR-0010.
+  **Reversing:** low (one declared path), but then the role is not filled.
+- **Priority is a scoped label's value (`Priority/High` → `High`, scope in any case); type and
+  parent are always `null`.** Gitea's own *Default* label set spells priority this way. Gitea
+  has no type or parent, so the adapter writes a `knobas` object beside the record with
+  `priority`, `issue_type: null`, `parent: null`, and `key`, the name a ticket answers to as a
+  parent. Clause 6 needs that name to resolve on the tickets. **Reversing:** low.
+- **An issue's discussion is read under `include_pr_comments`.** Gitea keeps both discussions on
+  one endpoint, and one switch turns that off. No new config key. **Reversing:** low (a key).
+- **`transition` and `reachable_transitions` take an issue only; `comment` takes an issue or a
+  pull request.** A pull request is closed and reopened by `edit_pull_request` and has a third
+  state, merged, that no move reaches. **Reversing:** low.
+- **`create_ticket` sends no type and answers the new number as its receipt.** Gitea has no
+  issue type. It is sent once, because a resend files a second issue. **Reversing:** low.
+- **The issue walk reads every page `since=` admits, guarded at 201 pages (10,000 issues), and
+  fails the run there.** The listing ignores `sort=recentupdate`, so there is no order to stop
+  early on, and a silent stop would compute a watermark past issues never read. Under
+  `gitea-live-capped` (one record a page) `payout-service`'s 142 issues fit. **Reversing:** low.
+- **The seed grows three issues and three labels in `ledger-api`**, after every pull request, so
+  no pull request number moves and the new indices (140–142 on Gitea) collide with nothing. No
+  existing kind's count changes. `ledger-api` is a repository no live test writes to. The
+  `(reserved)` index placeholders the seed has always made now sync as closed tickets.
+  **Reversing:** low.
+- **The `?fake-ipc` Gitea source is not given the ticket-system claim.** The frontend
+  suite's Gitea-shaped ticket source (#1200) already witnesses the board. Backlog follow-up
+  filed. **Reversing:** n/a.
