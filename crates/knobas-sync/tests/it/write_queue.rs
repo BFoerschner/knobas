@@ -1250,6 +1250,40 @@ async fn a_commit_into_a_repository_whose_record_moved_is_not_held() {
     assert_eq!(h.delivered(), vec!["b1: mine\n".to_owned()]);
 }
 
+/// A row no `WriteOp` decodes is refused at its first flush, even over a
+/// target that moved: the hold compares the shape the decoded op states, so
+/// the decode comes first, and a row that can never be sent is not offered
+/// for review as a hold (#1307).
+#[tokio::test]
+async fn an_undecodable_write_is_refused_rather_than_held() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-1307", "a payout fails").await;
+    let write = store::queue(
+        h.pool(),
+        &h.source,
+        &ticket,
+        "comment",
+        serde_json::json!({ "NoSuchOp": { "entity": ticket.to_string() } }),
+        serde_json::json!({ "op": "comment", "live": false }),
+    )
+    .await
+    .unwrap();
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    let refused = h.reload(write.id).await;
+    assert_eq!(refused.state, WriteState::Refused);
+    assert!(
+        refused
+            .detail
+            .as_deref()
+            .is_some_and(|d| d.starts_with("undecodable write")),
+        "{:?}",
+        refused.detail
+    );
+    assert!(h.delivered().is_empty());
+}
+
 /// A source with no stored credential cannot take a write, and that is a
 /// *waiting* fault rather than a lost edit -- entering the credential is what
 /// releases it.

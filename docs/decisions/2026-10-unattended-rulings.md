@@ -7071,3 +7071,23 @@ The merge-manager's rulings (Opus):
   and #1308 and the app ticket make it witness the rest. With core's op-name lists gone, nothing
   pinned `commit_file`'s liveness shape (a whole-record mutant survived every suite), so
   `a_commit_into_a_repository_whose_record_moved_is_not_held` joins the harness. *Reversing:* n/a.
+
+### #1307: merge-manager's rulings (Opus)
+
+- **The PR needs a §10.8 entry.** *Fork:* treat `WriteOp::delivery()` as Rust-only and exempt,
+  or as a change to `crates/knobas-source/src/**`, which §10.8 freezes whatever its wire effect.
+  *Ruling:* an entry, `docs/contract/10.8/1307-writeop-delivery.md`, added on the branch. The
+  frozen list names the path, not the wire; every earlier change under it carries one.
+  *Reversing:* low (delete the file, rerun `just contract-index`).
+- **The reorder in `attempt` gets a witness.** *Fork:* leave "an undecodable row is refused at
+  once" to the PR text, or pin it. *Ruling:* pinned by
+  `an_undecodable_write_is_refused_rather_than_held`: a raw row whose payload no `WriteOp`
+  decodes, with a snapshot the current target does not match, is refused at its first flush and
+  never sent. Under the old order the same row was held. *Reversing:* n/a.
+- **`delivery()`'s values accepted against the old tables.** Checked by reading:
+  the 12 liveness ops, the 3 declared-state ops and the 8 whole ones (`edit_pull_request`
+  per-field) match the deleted `project` arms; the 11 harmless resends match
+  `resend_is_harmless`; the 4 that can leave an unclaimed artefact match `UNCLAIMED_OPS`;
+  `create_page` → `parent` and `commit_file` → `repo` match `target_entity`; `create_branch` and
+  `create_pull_request` → `related`, `create_page` → `documents` match `link_on_arrival`.
+  *Reversing:* n/a.
