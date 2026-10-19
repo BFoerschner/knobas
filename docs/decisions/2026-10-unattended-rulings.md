@@ -8023,3 +8023,23 @@ reserved-steps rule. The entry is `docs/contract/10.8/1326-the-entity-barrel-is-
   Variant docs moved into each enum's doc as bullets (28 enums). Doc references from other
   barrels' tests to the deleted `entity_mirror.rs` (in `commands::time` and `commands::assets`)
   are left for #1328 and #1330, which delete those tests.
+
+### #1326, merge-manager (Opus, 2026-10-20)
+
+- **The §10.8 entry left out `knobas-spi-types`.** *Fork:* the entry named
+  `crates/knobas-source/src/**` but not the SPI types crate, which #1234's entry freezes with it
+  and whose `StateChip`, `Tone` and `Trigger` now derive `ts_rs::TS`, with `ts-rs` a new
+  dependency of a crate that must build for `wasm32-wasip2`. *Ruling:* the entry names the crate,
+  its three derives and the wasm rule (`just wasm-fixture` in the gate holds it). *Reasoning:* the
+  entry must match the diff, and a frozen crate's new dependency is what a later reader looks for.
+  *Reversing:* drop the paragraph.
+- **The three TypeScript-only enums stand.** *Fork:* `DocWrite`, `MemberKind` and `RuleKind` are
+  never constructed and exist to name a union. *Ruling:* keep them, as the implementer ruled.
+  *Reasoning:* spec #1306 wants the shell's types to come from the Rust that serves them; here
+  that Rust is the list the command validates against, and each enum is pinned to it by a test
+  (mutation-killed), so the union cannot drift from the check. A hand `#[ts(type)]` string would
+  be the copy the spec removes. *Reversing:* type the fields with the enums.
+- **Shape identity re-witnessed.** `tsc --strict` type identity of all 170 names, old barrel at
+  8773c5f9 against the head, passes; a control mutation (`DiffLine.kind` losing `"del"`) fails
+  eight names. The Rust diff, normalised for comments, `#[ts]` attributes and the `TS` derive,
+  changes no serde attribute, field or variant, so the wire is the same code.

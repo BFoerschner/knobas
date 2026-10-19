@@ -1,5 +1,5 @@
-- **The entity barrel's types are generated: `crates/knobas-source/src/**` and the IPC surface —
-  issue #1326 (2026-10-20).** Parent spec #1306, the second switching ticket after #1325's app
+- **The entity barrel's types are generated: `crates/knobas-source/src/**`, `knobas-spi-types`
+  and the IPC surface — issue #1326 (2026-10-20).** Parent spec #1306, the second switching ticket after #1325's app
   barrel. No migration, no event, no `WriteOp`, no command added, removed or renamed, no argument
   changed, no field added, removed or renamed, no wire shape changed, nothing added to either
   append-only barrel (`app/src/lib/ipc/index.ts` and `lib.rs`'s handler list are untouched).
@@ -21,6 +21,13 @@
   `DiffLine::kind` is inlined. Their doc comments grew by the rules the TypeScript carried, and
   their enums' variant docs moved into the enums' docs (#1325's convention). No item, field,
   variant, serde attribute or behaviour changed; the contract battery is untouched.
+
+  **`knobas-spi-types`** (the SPI's `payload` and `tone`, frozen with `knobas-source` by #1234's
+  entry). `payload::StateChip` and `tone::Tone` derive `ts_rs::TS` into `entity.ts`, and
+  `payload::Trigger` into `sources.ts` (see *Module layout*); `Tone`'s doc gains the line the
+  TypeScript carried. The crate takes `ts-rs` as a dependency, which builds for
+  `wasm32-wasip2` (`just wasm-fixture`, in the gate), so #1234's rule that the SPI depends on
+  nothing that does not holds. No item, field, variant, serde attribute or behaviour changed.
 
   **The IPC surface.** `app/src/lib/ipc/entity.ts` keeps every `invoke` function and re-exports
   its 168 types from `./generated/entity` instead of declaring them, so no caller changes. Two
