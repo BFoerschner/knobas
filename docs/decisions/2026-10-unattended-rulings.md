@@ -5923,3 +5923,12 @@ The implementer's rulings:
 - **Install is a path field in *Add a source*,** under the adapter radios: knobas has no file
   picker. An installed adapter joins the radios chosen; a refusal is shown with its reason.
   **Reversing:** low.
+- **Merge-manager, PR #1238: the bring-up load is witnessed through `sources::bring_up`.**
+  `start` keeps only what needs the `EmbeddedDb` handle and the profile (the pools, the
+  connector, the secret store, `Registry::builtin()`, the store directory) and calls
+  `bring_up`, which loads the installed adapters and starts the scheduler. A test drives
+  `bring_up` over a scratch database; deleting the load fails it. Still unwitnessed: `start`
+  passing a registry other than `Registry::builtin()`. **Reversing:** low (inline it again).
+- **Merge-manager, PR #1238: an artifact name must be its own file name and hold no `:`.**
+  `C:x.wasm` is drive-relative on Windows, and `Path::join` would follow it off the release;
+  `x.wasm:s` names an NTFS stream. **Reversing:** low.
