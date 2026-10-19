@@ -6137,3 +6137,32 @@ The merge-manager's rulings (PR #1243, on Opus):
 - **A fixed host that resolves to a local address is a follow-up (#1244, backlog).** The allowlist
   holds names, so a declared name can be pointed at loopback or the LAN. No credential goes there.
   **Reversing:** n/a.
+## #1207 Saved views come from any ticket-system source (2026-10-19)
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **Ratifying the §10.8 entry** (`docs/contract/10.8/1207-saved-views-in-ticket-system-minimum.md`):
+  one `Frame` variant (`saved_view`), one `Minimum` field (`optional_kinds`) and the
+  ticket-system minimum's optional saved-view kind. Ruling: ratified as written. Reasoning: the
+  issue asks for exactly this optional kind, nothing existing changes shape (the tables, columns
+  and IPC are the same), and WIT `knobas:adapter@1.0.0` is untouched. **Reversing:** a §10.8
+  amendment before an external ticket system ships against it.
+
+The implementer's rulings:
+
+- **The saved-view kind is named by a frame, not by a kind id.** Jira's views keep the kind
+  `jira_view` and declare `frame: saved_view`, as TeamCity's `build_config` declares `pipeline`.
+  Reasoning: renaming the kind would re-key every mirrored view, and the frame is how CI's
+  minimum already names a kind under an adapter's own id. **Reversing:** low (a kind id in the
+  minimum and a rename in the Jira adapter).
+- **The group is `<descriptor name> boards` / `filters`.** Reasoning: Jira's descriptor is named
+  `Jira`, so its views read *Jira boards* and *Jira filters* as before, with no change to Jira's
+  payload, and the projection names no adapter. **Reversing:** low (one SQL expression; a
+  payload `group` override could be added if a source needs its own word).
+- **The tables, `jira_ref` and the `hide_jira_view` / `open_jira_view` commands keep their names.**
+  Reasoning: renaming them is a migration and a frozen IPC change with no behaviour gained; the
+  issue asks the projection, not the storage, to name no adapter. Filed as a `backlog` follow-up.
+  **Reversing:** that follow-up.
+- **A payload `kind` that is not `filter` is a board.** Before, an unknown word failed the run on
+  `jira_view_ref_kind_chk`; now another source's word (`project`) is a board, as a missing one
+  already was (ADR-0007's miss direction). **Reversing:** low.

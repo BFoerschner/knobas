@@ -171,7 +171,7 @@ export interface KindPaths {
   comment_count: PayloadPath[];
   /** Where a page sits among its siblings in the source's order, a whole number, lowest first (#953). */
   position: PayloadPath[];
-  /** Which part of the Builds frame this kind is, or `null` (ADR-0022, #848). */
+  /** Which part of a shell-owned frame this kind is, or `null` (ADR-0022, #848, #1207). */
   frame: Frame | null;
   /** What a pipeline is called (#848). */
   name: PayloadPath[];
@@ -227,8 +227,11 @@ export interface TriggerValue {
   trigger: Trigger;
 }
 
-/** `knobas_core::payload::Frame` — a pipeline or a run of the Builds frame (#848). */
-export type Frame = "pipeline" | "run";
+/**
+ * `knobas_core::payload::Frame` — a pipeline or a run of the Builds frame
+ * (#848), or a ticket system's saved view (#1207).
+ */
+export type Frame = "pipeline" | "run" | "saved_view";
 
 /**
  * `knobas_core::payload::StatePath` — where a row's state sits, and the values

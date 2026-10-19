@@ -184,6 +184,14 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             },
         ],
         ..KindPaths::default()
+    },
+    // The ticket system's saved views (#1207, ADR-0029): each Jira board and
+    // filter is one, and the engine makes it a ticket view by this frame,
+    // not by the kind's id.
+    KindPaths {
+        kind: crate::KIND_JIRA_VIEW.to_owned(),
+        frame: Some(knobas_core::payload::Frame::SavedView),
+        ..KindPaths::default()
     }]
 }
 
@@ -290,6 +298,14 @@ mod tests {
         );
         let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
         assert_eq!(kinds, vec![crate::KIND_TICKET, crate::KIND_JIRA_VIEW]);
+        // #1207: the views are the ticket system's saved views, by frame.
+        let saved: Vec<&str> = d
+            .payload_paths
+            .iter()
+            .filter(|p| p.frame == Some(knobas_core::payload::Frame::SavedView))
+            .map(|p| p.kind.as_str())
+            .collect();
+        assert_eq!(saved, vec![crate::KIND_JIRA_VIEW]);
         assert_eq!(d.entity_kinds[0].monogram, "JI");
         assert_eq!(d.entity_kinds[0].plural, "Tickets");
     }

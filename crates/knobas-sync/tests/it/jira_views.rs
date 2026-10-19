@@ -17,8 +17,27 @@ use sqlx::{PgPool, Row};
 /// What the fake emits on its next run: `(key, name, payload, deleted)`.
 type Corpus = Arc<Mutex<Vec<(String, String, Value, bool)>>>;
 
+/// The source the fake stands for: Jira by default, or a ticket system
+/// knobas has no adapter for (#1207). `kind` is the item kind its views
+/// arrive as, which declares the saved-view frame when `saved_view` says so.
+#[derive(Clone, Copy)]
+struct Adapter {
+    id: &'static str,
+    name: &'static str,
+    kind: &'static str,
+    saved_view: bool,
+}
+
+const JIRA: Adapter = Adapter {
+    id: "jira",
+    name: "Jira",
+    kind: "jira_view",
+    saved_view: true,
+};
+
 struct Boards {
     corpus: Corpus,
+    adapter: Adapter,
 }
 
 fn kind(id: &str) -> KindInfo {
@@ -42,10 +61,16 @@ impl Source for Boards {
     }
 
     fn descriptor(&self) -> SourceDescriptor {
+        let Adapter {
+            id,
+            name,
+            kind: views,
+            saved_view,
+        } = self.adapter;
         SourceDescriptor {
-            id: "jira".into(),
-            adapter_kind: "jira".into(),
-            name: "Jira".into(),
+            id: id.into(),
+            adapter_kind: id.into(),
+            name: name.into(),
             capabilities: Vec::<Capability>::new(),
             adapter_version: "0.1.0".into(),
             auth_methods: Vec::new(),
@@ -55,9 +80,15 @@ impl Source for Boards {
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             write_ops: Vec::new(),
-            entity_kinds: vec![kind("ticket"), kind("jira_view")],
+            entity_kinds: vec![kind("ticket"), kind(views)],
             config_schema: json!({ "type": "object", "properties": {} }),
-            payload_paths: Vec::new(),
+            // What the Jira adapter declares since #1207: its views are the
+            // ticket system's saved views.
+            payload_paths: vec![knobas_source::KindPaths {
+                kind: views.into(),
+                frame: saved_view.then_some(knobas_core::payload::Frame::SavedView),
+                ..knobas_source::KindPaths::default()
+            }],
         }
     }
 
@@ -73,8 +104,8 @@ impl Source for Boards {
         let corpus = self.corpus.lock().unwrap().clone();
         for (key, name, payload, deleted) in corpus {
             sink.item(SyncItem {
-                entity: knobas_core::entity::EntityRef::new("jira", &key),
-                kind: "jira_view".to_owned(),
+                entity: knobas_core::entity::EntityRef::new(self.adapter.id, &key),
+                kind: self.adapter.kind.to_owned(),
                 title: name,
                 body_text: String::new(),
                 author: None,
@@ -134,10 +165,15 @@ async fn pool_of(label: &str, connections: u32) -> PgPool {
 }
 
 fn source(views: Vec<(String, String, Value, bool)>) -> (Boards, Corpus) {
+    source_of(JIRA, views)
+}
+
+fn source_of(adapter: Adapter, views: Vec<(String, String, Value, bool)>) -> (Boards, Corpus) {
     let corpus: Corpus = Arc::new(Mutex::new(views));
     (
         Boards {
             corpus: Arc::clone(&corpus),
+            adapter,
         },
         corpus,
     )
@@ -460,8 +496,9 @@ async fn a_board_whose_item_is_deleted_mid_projection_is_skipped_not_a_failed_sy
         .fetch_one(&mut *run)
         .await
         .unwrap();
+    let declared = knobas_sync::saved_views::declared(&src.descriptor()).expect("saved views");
     let projection = tokio::spawn(async move {
-        let projected = knobas_sync::jira_views::project(&mut run, "jira").await;
+        let projected = knobas_sync::saved_views::project(&mut run, "jira", &declared).await;
         (projected, run)
     });
 
@@ -500,4 +537,92 @@ async fn a_board_whose_item_is_deleted_mid_projection_is_skipped_not_a_failed_sy
         members(&pool, "jira:board-22").await,
         [("jira:PAY-240".to_owned(), 1)]
     );
+}
+
+/// #1207: the projection is the ticket system's saved views, keyed on the
+/// frame a kind declares and not on Jira. A source knobas has no adapter for
+/// whose views arrive as `project_view` gets a ticket view from each, grouped
+/// under its own name, with its columns and its tickets in its order.
+#[tokio::test]
+async fn a_saved_view_of_a_ticket_system_that_is_not_jira_shows_as_a_ticket_view() {
+    let pool = pool("saved_views_not_jira").await;
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ('forge', 'forge', 'Forge', 'https://forge.example', 'Pat', '{}')",
+    )
+    .execute(&pool)
+    .await
+    .expect("the source row");
+    let forge = Adapter {
+        id: "forge",
+        name: "Forge",
+        kind: "project_view",
+        saved_view: true,
+    };
+    let (src, _) = source_of(
+        forge,
+        vec![
+            (
+                "view-7".into(),
+                "Release train".into(),
+                json!({ "kind": "project", "columns": three_columns(), "keys": ["REL-2", "REL-1"] }),
+                false,
+            ),
+            (
+                "query-3".into(),
+                "Mine".into(),
+                json!({ "kind": "filter", "keys": ["REL-1"] }),
+                false,
+            ),
+        ],
+    );
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    assert_eq!(
+        ticket_view(&pool, "forge-view-7").await,
+        Some((
+            "Release train".into(),
+            "Forge boards".into(),
+            three_columns(),
+            "none".into(),
+            Some("forge:view-7".into())
+        )),
+        "a kind the projection has never heard of is a board, as a missing one is"
+    );
+    assert_eq!(
+        members(&pool, "forge:view-7").await,
+        [("forge:REL-2".to_owned(), 1), ("forge:REL-1".to_owned(), 2)]
+    );
+    assert_eq!(
+        flags(&pool, "forge-query-3").await,
+        ("list".to_owned(), false, false)
+    );
+    let group: String =
+        sqlx::query_scalar("select view_group from knobas.ticket_view where id = 'forge-query-3'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(group, "Forge filters");
+}
+
+/// The other direction: a kind named `jira_view` that does not declare the
+/// saved-view frame is not a saved view, so nothing is projected from it.
+#[tokio::test]
+async fn a_view_kind_that_declares_no_saved_view_frame_makes_no_ticket_view() {
+    let pool = pool("saved_views_undeclared").await;
+    let undeclared = Adapter {
+        saved_view: false,
+        ..JIRA
+    };
+    let (src, _) = source_of(
+        undeclared,
+        vec![(
+            "board-22".into(),
+            "PAY flow".into(),
+            board(22, &["PAY-1"], three_columns()),
+            false,
+        )],
+    );
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(ticket_view(&pool, "jira-board-22").await, None);
 }
