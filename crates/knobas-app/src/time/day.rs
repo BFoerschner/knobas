@@ -79,7 +79,8 @@ use crate::IpcError;
 /// synced at all. Folding the second into the first would make a title look
 /// like something the block remembers, and the first purged ticket would turn
 /// an afternoon into a row with no name.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct DayBlock {
     pub block: Block,
     /// The entity's title from `knobas.entity`, or `null`.
@@ -103,11 +104,16 @@ pub struct DayBlock {
 /// had the app open on draws, and the difference between *knobas has no
 /// observations for this day* and *knobas has observations and they say
 /// nothing* had nowhere to ride.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct DayRecord {
     /// The blocks overlapping the day, earliest first.
     pub blocks: Vec<DayBlock>,
     /// Whether the day reaches back past the observation horizon.
+    ///
+    /// knobas keeps a month of observations, and `#/time/<date>` takes any
+    /// date, so a day older than that draws exactly the strip a day nobody had
+    /// the app open on draws. This is what tells the two apart.
     ///
     /// The same question [`passive::materialize`](super::passive::materialize)
     /// refuses to reconcile on, asked through the same
@@ -143,9 +149,12 @@ pub struct DayRecord {
 }
 
 /// One stretch of focused time nothing claims (#901).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct OpenStretch {
+    /// RFC 3339.
     pub started_at: DateTime<Utc>,
+    /// RFC 3339.
     pub ended_at: DateTime<Utc>,
 }
 

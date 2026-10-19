@@ -111,13 +111,19 @@ pub(crate) const MOST_DAYS: usize = 7;
 /// The instants are the query's; the date is what a cell is keyed and labelled
 /// by, and a backend that recomputed it from the instants would be doing the
 /// timezone arithmetic this shape exists to avoid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// `weekWindows` in `app/src/lib/time/week.ts` is what builds these -- one
+/// `Date` per local midnight, so a week containing a daylight-saving change is
+/// still seven correct windows rather than seven equal ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct DayWindow {
     /// `2026-09-03`, in the reader's own reckoning.
     pub day: NaiveDate,
-    /// The reader's local midnight, in UTC.
+    /// The reader's local midnight, RFC 3339, UTC.
     pub from: DateTime<Utc>,
-    /// The next local midnight, in UTC. Half-open: `to` is the next day's.
+    /// The next local midnight, RFC 3339, UTC. Half-open: `to` is the next
+    /// day's.
     pub to: DateTime<Utc>,
 }
 
@@ -128,10 +134,14 @@ pub struct DayWindow {
 /// on a number that never lost its precision getting there. A backend that
 /// handed over minutes would have rounded seven times per row and the week's
 /// total would not be the total of the week.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct WeekCell {
     /// The day's manual blocks on this target, added up. On the "no target"
     /// row, the focused time no block covered.
+    ///
+    /// Passive blocks are not in it: tracked time is what the reader said
+    /// their day was, which is the same rule the day review's heading states.
     pub tracked_seconds: i64,
     /// The day's **passive** blocks on this target -- what knobas is offering,
     /// which is never tracked and never logged.
@@ -143,17 +153,33 @@ pub struct WeekCell {
     /// pays into no other column here.
     pub offered_seconds: i64,
     /// Worklog seconds whose write is `pending` or `sent`.
+    ///
+    /// **A pending worklog counts as logged** (spec #272 story 39): the number
+    /// is about what the reader did, not about sync timing.
     pub logged_seconds: i64,
-    /// Worklog seconds whose write is waiting on a person.
+    /// Worklog seconds whose write is waiting on a person -- `held`,
+    /// `refused`, `discarded`, or a copy whose queue row is gone.
+    ///
+    /// Shown as *held* rather than folded into either neighbour: the blocks
+    /// under it already carry a worklog id, so *Log all* will not offer them
+    /// again, and drawing it as unlogged would invite logging one afternoon
+    /// twice.
     pub held_seconds: i64,
     /// `tracked - logged - held`, floored at zero.
     pub unlogged_seconds: i64,
 }
 
 /// One row of the timesheet: a target, or the row that has none.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct WeekRow {
     /// The target, or `null` for the **"no target, app open"** row.
+    ///
+    /// That row is focused time no block covers, so that the week's total is
+    /// honest (spec story 41). It is present only when there is something to
+    /// say -- a week knobas was shut for has no such row at all, which is how
+    /// "the app was closed" reads differently from "the app was open and
+    /// idle".
     ///
     /// `null` rather than a third `TimerTarget` variant: that enum is what a
     /// timer may be started on and what a block stores, and "nothing, but the
@@ -185,9 +211,11 @@ impl WeekRow {
 }
 
 /// The week, as the timesheet draws it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct Week {
-    /// The dates asked for, in order -- the column headings.
+    /// The dates asked for (`"2026-08-24"` …), in order -- the column
+    /// headings.
     pub days: Vec<NaiveDate>,
     /// Targets first, in title order, then the no-target row if it has
     /// anything to say.
@@ -216,13 +244,16 @@ pub struct Week {
 /// rather than taking this back, for the reason
 /// [`worklog::log`](super::worklog::log) does not take block ids -- a caller
 /// that could name the blocks could name another ticket's.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct PlannedWorklog {
+    /// `"2026-08-24"` -- the day this worklog is for.
     pub day: NaiveDate,
     pub entity_id: String,
     /// The mirror's title for it, or `null`. For the reader to recognise.
     pub title: Option<String>,
-    /// The first covered block's start -- what the source is told.
+    /// The first covered block's start, RFC 3339, UTC -- what the source is
+    /// told.
     pub started_at: DateTime<Utc>,
     /// The covered blocks' durations added up, gaps excluded.
     pub seconds: i64,

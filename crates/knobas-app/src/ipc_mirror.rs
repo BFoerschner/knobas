@@ -282,6 +282,26 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::ticket_views::TicketView::export_all(cfg)?;
     crate::ticket_views::TicketViewRow::export_all(cfg)?;
     crate::ticket_views::TicketViewDraft::export_all(cfg)?;
+    // time.ts
+    crate::time::TimerTarget::export_all(cfg)?;
+    crate::time::BlockKind::export_all(cfg)?;
+    crate::time::RunningTimer::export_all(cfg)?;
+    crate::time::Block::export_all(cfg)?;
+    crate::time::day::DayBlock::export_all(cfg)?;
+    crate::time::day::DayRecord::export_all(cfg)?;
+    crate::time::day::OpenStretch::export_all(cfg)?;
+    crate::time::worklog::CandidateSource::export_all(cfg)?;
+    crate::time::worklog::Candidate::export_all(cfg)?;
+    crate::time::worklog::Draft::export_all(cfg)?;
+    crate::time::worklog::Worklog::export_all(cfg)?;
+    crate::time::suggest::SuggestionRule::export_all(cfg)?;
+    crate::time::suggest::Suggestion::export_all(cfg)?;
+    crate::time::suggest::AdHocBlock::export_all(cfg)?;
+    crate::time::week::DayWindow::export_all(cfg)?;
+    crate::time::week::WeekCell::export_all(cfg)?;
+    crate::time::week::WeekRow::export_all(cfg)?;
+    crate::time::week::Week::export_all(cfg)?;
+    crate::time::week::PlannedWorklog::export_all(cfg)?;
     Ok(())
 }
 

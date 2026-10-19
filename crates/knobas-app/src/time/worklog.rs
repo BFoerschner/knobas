@@ -126,8 +126,12 @@ const NOT_WORK: &[&str] = &[
 /// One thing knobas saw the reader do inside a draft's interval.
 ///
 /// A proposal for a bullet, not a record of anything: the draft renders these
-/// as checkboxes and the comment is built from the ticked ones.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+/// as checkboxes and the comment is the `bullet`s of the ticked ones, joined
+/// with newlines. **The frontend does not compose a bullet** -- the wording is
+/// the backend's, so that every worklog knobas has ever sent is spelled one
+/// way.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct Candidate {
     /// Stable within a draft, and the key the checkbox list is drawn on --
     /// `"item:jira:PAY-231"`, `"activity:4211"`, `"write:97"`, and a note's own
@@ -138,7 +142,7 @@ pub struct Candidate {
     pub id: String,
     /// Where this candidate was seen.
     pub source: CandidateSource,
-    /// When, which is what puts the list in order.
+    /// When, RFC 3339, UTC -- which is what puts the list in order.
     pub at: DateTime<Utc>,
     /// The entity it is about, when there is one.
     pub entity_id: Option<String>,
@@ -155,41 +159,52 @@ pub struct Candidate {
 knobas_core::closed_vocabulary! {
     /// Where a [`Candidate`] was seen.
     ///
+    /// Four sources because each fact is read from the table it already lives
+    /// in (#409):
+    ///
+    /// - `mirror`: an item in the mirror whose author is the username that
+    ///   item's source is configured with -- a commit, a pull request, a
+    ///   build, a page.
+    /// - `activity`: a line the reader's own actions wrote in
+    ///   `knobas.activity`.
+    /// - `write`: a comment the reader posted through knobas -- a row in
+    ///   `knobas.write_queue`, which is the only place a comment knobas sent
+    ///   exists as a fact of its own.
+    /// - `note`: a note the reader edited -- a row in `knobas.note`, read by
+    ///   its `updated_at`.
+    ///
     /// Declared this way since #409 took it from two members to four: `ALL` is
-    /// generated from the same list as the variants, so a fifth source cannot
-    /// be added without appearing in the list the TypeScript mirror is pinned
-    /// against (`commands::time`'s
-    /// `the_candidate_sources_match_their_typescript_mirror`). The wire
-    /// spelling is unchanged -- the macro applies the same
-    /// `rename_all = "snake_case"` this enum carried by hand.
+    /// generated from the same list as the variants, and the TypeScript union
+    /// is generated from this enum (`app/src/lib/ipc/generated/time.ts`), so a
+    /// fifth source arrives in both with it. The wire spelling is unchanged --
+    /// the macro applies the same `rename_all = "snake_case"` this enum carried
+    /// by hand. The sources are documented here and not on each variant because
+    /// the generated TypeScript carries a type's and a field's doc but not a
+    /// variant's (#1325).
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "time.ts")]
     pub enum CandidateSource {
-        /// An item in the mirror whose author is the username that item's
-        /// source is configured with -- a commit, a pull request, a build, a
-        /// page.
         Mirror => "mirror",
-        /// A line the reader's own actions wrote in `knobas.activity`.
         Activity => "activity",
-        /// A comment the reader posted through knobas -- a row in
-        /// `knobas.write_queue`, which is the only place a comment knobas sent
-        /// exists as a fact of its own.
         Write => "write",
-        /// A note the reader edited -- a row in `knobas.note`, read by its
-        /// `updated_at`.
         Note => "note",
     }
 }
 
 /// What the draft offers: one interval, its candidates, and a comment made
-/// from them.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+/// from them. What stopping the timer on a ticket opens.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct Draft {
     /// The ticket the time goes on.
     pub entity_id: String,
-    /// The reader's day, as they named it.
+    /// The reader's day, as they named it -- `"2026-09-03"`.
     pub day: NaiveDate,
-    /// The first block's start, which is what Jira is told the work began at.
+    /// The first block's start, RFC 3339, UTC -- what Jira is told the work
+    /// began at.
     pub started_at: DateTime<Utc>,
-    /// The last block's end, or now while the clock runs on this ticket.
+    /// The last block's end, or now while the clock runs on this ticket;
+    /// RFC 3339, UTC.
     /// **Not** `started_at + seconds`: it is the far edge of the window, and
     /// the difference between the two is the gaps.
     pub ended_at: DateTime<Utc>,
@@ -199,8 +214,9 @@ pub struct Draft {
     /// The blocks this draft is made of, oldest first. Closed blocks only: the
     /// running timer's stretch has no block yet, and is [`Self::running_since`].
     pub block_ids: Vec<i64>,
-    /// When the running timer started, if it runs on this ticket and started
-    /// on this day (#896). The draft then counts its stretch up to the moment
+    /// When the running timer started, RFC 3339, UTC, if it runs on this
+    /// ticket and started on this day (#896); `null` when the clock is
+    /// elsewhere or stopped. The draft then counts its stretch up to the moment
     /// it was read: `ended_at` is that moment and `seconds` includes it. The
     /// stretch becomes a block when the clock stops, and `log_work` re-derives
     /// the blocks it covers then, so a shell logs only after stopping.
@@ -213,10 +229,12 @@ pub struct Draft {
 }
 
 /// knobas' copy of a worklog it has sent, or is still sending.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct Worklog {
     pub id: i64,
     pub entity_id: String,
+    /// RFC 3339, UTC.
     pub started_at: DateTime<Utc>,
     pub seconds: i64,
     pub comment: String,
@@ -228,6 +246,7 @@ pub struct Worklog {
     /// What Jira called it, once Jira has answered -- `null` while the write
     /// is still owed, and after one that was refused.
     pub remote_id: Option<String>,
+    /// RFC 3339, UTC.
     pub created_at: DateTime<Utc>,
 }
 
