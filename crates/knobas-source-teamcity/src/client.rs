@@ -100,8 +100,9 @@ impl HttpRest {
         cfg: &TeamCityConfig,
     ) -> Result<Self, SourceError> {
         let credential = http::credential(
+            &http::CREDENTIAL_RULES,
             instance.auth,
-            cfg.username.as_deref(),
+            http::username(cfg),
             instance.secret.as_deref(),
         )?;
         Ok(Self {
