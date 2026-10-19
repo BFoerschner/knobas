@@ -1,0 +1,313 @@
+//! Checkouts, the job's conversation, and opening a checkout.
+
+use super::*;
+
+// -- checkouts (#499) -------------------------------------------------------
+//
+// Here rather than in a module pair of their own for the reason `notify` and
+// #290's setting are: a repo and a branch are entities, `get_entity` is in this
+// module, and §10.8 freezes the `commands/` + `ipc/` layout. The behaviour is
+// `crate::checkout`; these four are the thin shims the layout asks for.
+
+/// Where knobas looks for clones, or nothing.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn clones_root(lifecycle: State<'_, Lifecycle>) -> Result<Option<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::clones_root(&pool).await
+}
+
+/// Set the clones root, or clear it with a blank one.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn set_clones_root(
+    lifecycle: State<'_, Lifecycle>,
+    path: Option<String>,
+) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::set_clones_root(&pool, path.as_deref()).await
+}
+
+/// The checkout a repo or branch detail draws -- the override, else the scan,
+/// else *no checkout* and the clone command to copy.
+///
+/// Read on every open rather than stored: a clone that moved between two opens
+/// would leave a cached path pointing at nothing.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an address that
+/// is not an entity id or not a repo or branch,
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) if the mirror
+/// does not hold it, [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal)
+/// for a query failure.
+#[tauri::command]
+pub async fn entity_checkout(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<crate::checkout::CheckoutView, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::view(&pool, &entity_id).await
+}
+
+/// Set this repository's checkout path by hand, or clear it back to the scan.
+///
+/// Answers the fresh view rather than nothing, so the panel draws what is now
+/// true without a second round trip -- and so clearing an override *shows* the
+/// scan taking over, which is the whole of what clearing means.
+///
+/// Keyed on the repository even when a branch was the address: a per-branch
+/// path would be a second answer to one question, stale the moment somebody
+/// switched branches in that working tree.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an address that
+/// is not an entity id or not a repo or branch,
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) if the mirror
+/// holds neither it nor its repository,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn set_checkout_override(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    path: Option<String>,
+) -> Result<crate::checkout::CheckoutView, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::set_override(&pool, &entity_id, path.as_deref()).await?;
+    crate::checkout::view(&pool, &entity_id).await
+}
+
+/// The uncommitted changes at this entity's checkout (#824, ADR-0026): the
+/// unstaged and staged diffs and the untracked paths, read by read-only git
+/// when the *Local changes* tab opens.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an address that
+/// is not an entity id or not a repo or branch,
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) if the mirror
+/// does not hold it or it has no checkout on this machine,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure. What git answered is the read's own arm, never an error.
+#[tauri::command]
+pub async fn entity_checkout_diff(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<crate::checkout::uncommitted::DiffRead, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::local_changes(&pool, &entity_id).await
+}
+
+// -- the job's conversation (#819) ------------------------------------------
+//
+// Two commands, beside the entity reads they belong with (§10.8 freezes the
+// `commands/` + `ipc/` layout). The behaviour is `crate::conversation`.
+
+/// Record that the reader opened this ticket's job, and answer when they last
+/// did before now, or `null` for a first visit (#819, R-5.5's *last visit*).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for something that
+/// is not an entity id, [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound)
+/// for one the database does not know,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+#[tauri::command]
+pub async fn visit_entity(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<Option<DateTime<Utc>>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::conversation::visit(&pool, &entity_id).await
+}
+
+/// A ticket's thread (#819, R-5.2): its comments in the source's order, each
+/// marked when it is the reader's own or mentions them, and the status moves
+/// knobas delivered on it.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for something that
+/// is not an entity id, [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound)
+/// for one the mirror does not hold,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+#[tauri::command]
+pub async fn entity_thread(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<crate::conversation::Thread, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::conversation::thread(&pool, &entity_id).await
+}
+
+// -- opening a checkout (#501) ----------------------------------------------
+//
+// Beside #499's four and for its reason: a repo and a branch are entities, and
+// §10.8 freezes the `commands/` + `ipc/` layout. The behaviour is
+// `crate::checkout`; these are the shims. #844 adds `checkout_settings` and
+// `set_checkout_applications` here, and `open_checkout` takes an application.
+
+/// Every application as #501's buttons draw it, with the command it would run.
+///
+/// Read by the rooms UI's settings section and checkout panel. Since #844 a
+/// view over the *Open in…* list: one row per application, its id as the
+/// action.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn checkout_commands(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<crate::checkout::OpenCommandView>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::commands(&pool).await
+}
+
+/// Set one application's command, or put back the one this platform ships.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an application
+/// that does not exist or a command that cannot be run,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn set_checkout_command(
+    lifecycle: State<'_, Lifecycle>,
+    action: String,
+    template: Option<String>,
+) -> Result<Vec<crate::checkout::OpenCommandView>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::set_command(&pool, &action, template.as_deref()).await?;
+    crate::checkout::commands(&pool).await
+}
+
+/// Run an application at this entity's checkout (#501, #844), at a file in it
+/// when `file` names one. Answers the argument vector it started.
+///
+/// `application` is an id from `checkout_settings`, the default when it is
+/// `None`. `command` instead runs a command typed into *Add an application*
+/// that is not saved yet (*Try it*). `file` is a path relative to the
+/// checkout and must be a file inside it on disk; `line` fills `{line}`.
+///
+/// The one place knobas starts a program a person chose. Every value filled
+/// into it is from this disk: the checkout path and a file inside it, never a
+/// field of the mirrored repo (ADR-0016). It returns as soon as the program
+/// has started.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an unknown
+/// application, an address that is not a repo or a branch, a file that is not
+/// inside the checkout, a command that cannot be run, or a program that would
+/// not start; [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) if the
+/// mirror does not hold the entity or it has no checkout on this machine;
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+#[tauri::command]
+pub async fn open_checkout(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    application: Option<String>,
+    file: Option<String>,
+    line: Option<u32>,
+    command: Option<String>,
+) -> Result<Vec<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    let run = match command.as_deref() {
+        Some(command) => crate::checkout::Run::Command(command),
+        None => crate::checkout::Run::Application(application.as_deref()),
+    };
+    crate::checkout::open::open(&pool, &entity_id, run, file.as_deref(), line).await
+}
+
+/// Settings › Checkouts (#844, R-13a.3): the clones root, the git found, the
+/// *Open in…* applications in their order and the default's id. What every
+/// *Open in…* menu reads.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn checkout_settings(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<crate::checkout::CheckoutSettings, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::settings(&pool).await
+}
+
+/// Save the *Open in…* applications, in order, and which is the default
+/// (#844, R-8.21, R-8.23). Each entry is `{ id?, name, command,
+/// file_command? }`; a new one has no id and gets one from its name. Answers
+/// the fresh settings.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an entry with
+/// no name or a command that cannot be run,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn set_checkout_applications(
+    lifecycle: State<'_, Lifecycle>,
+    applications: Vec<knobas_core::checkout::open::Draft>,
+    default_application: Option<String>,
+) -> Result<crate::checkout::CheckoutSettings, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::set_applications(&pool, &applications, default_application.as_deref()).await?;
+    crate::checkout::settings(&pool).await
+}
+
+/// Clone a repository into the clones root, or stop the clone that is running
+/// (#823, ADR-0023).
+///
+/// One command for both, because ADR-0023 names one: `stop` absent or false
+/// starts (answering at once, with progress on `clone:progress`), `stop` true
+/// stops and answers once the half-made folder is removed. A repo or a
+/// branch; a branch clones its repository.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what [`crate::checkout::clone::start`] and
+/// [`crate::checkout::clone::stop`] refuse with.
+#[tauri::command]
+pub async fn clone_repo<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    stop: Option<bool>,
+) -> Result<crate::checkout::clone::CloneAnswer, IpcError> {
+    let pool = lifecycle.pool()?;
+    let clones = crate::checkout::clone::Clones::global();
+    if stop.unwrap_or(false) {
+        return crate::checkout::clone::stop(&pool, &clones, &entity_id).await;
+    }
+    let registry = std::sync::Arc::clone(&crate::sources::state(&app)?.registry);
+    let events = std::sync::Arc::new(crate::sources::events::TauriEvents::new(app));
+    crate::checkout::clone::start(&pool, registry.as_ref(), &clones, events, &entity_id).await
+}

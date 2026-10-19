@@ -50,9 +50,23 @@ mod tests {
     fn no_command_takes_the_app_state_directly() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
         let mut checked = 0_usize;
+        let mut entity_files = 0_usize;
 
+        // One level down as well: a module that is a directory (`entity/`,
+        // #1316) keeps its commands in the files beside its `mod.rs`.
+        let mut paths = Vec::new();
         for entry in std::fs::read_dir(&dir).expect("src/commands is readable") {
             let path = entry.expect("a directory entry").path();
+            if path.is_dir() {
+                for inner in std::fs::read_dir(&path).expect("a command module directory") {
+                    paths.push(inner.expect("a directory entry").path());
+                }
+            } else {
+                paths.push(path);
+            }
+        }
+
+        for path in paths {
             if path.extension().is_none_or(|extension| extension != "rs") {
                 continue;
             }
@@ -60,10 +74,16 @@ mod tests {
             // test. It is skipped because the assertion below quotes the very
             // signature it forbids, and a scan that matched its own error
             // message could only be kept green by weakening the pattern.
-            if path.file_name().is_some_and(|name| name == "mod.rs") {
+            if path == dir.join("mod.rs") {
                 continue;
             }
             checked += 1;
+            if path
+                .parent()
+                .is_some_and(|parent| parent.ends_with("entity"))
+            {
+                entity_files += 1;
+            }
             let source = std::fs::read_to_string(&path).expect("a command module");
             let code = strip_comments(&source);
 
@@ -90,6 +110,11 @@ mod tests {
             checked >= 4,
             "only {checked} command modules were scanned -- the walk found \
              nothing, so this test proves nothing"
+        );
+        // A module that is a directory (`entity/`, #1316) is walked too.
+        assert!(
+            entity_files > 1,
+            "the walk did not reach `entity/`'s files, so its commands go unscanned"
         );
     }
 

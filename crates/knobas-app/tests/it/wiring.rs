@@ -453,19 +453,7 @@ fn declared_commands() -> Vec<(String, String)> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
     let mut found = Vec::new();
 
-    for entry in std::fs::read_dir(&dir).expect("src/commands is readable") {
-        let path = entry.expect("a directory entry").path();
-        if path.extension().is_none_or(|extension| extension != "rs") {
-            continue;
-        }
-        let module = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .expect("a module name")
-            .to_owned();
-        if module == "mod" {
-            continue;
-        }
+    for (module, path) in command_files(&dir) {
         let code = strip_comments(&std::fs::read_to_string(&path).expect("a command module"));
         let mut rest = code.as_str();
         while let Some(at) = rest.find("#[tauri::command]") {
@@ -484,7 +472,44 @@ fn declared_commands() -> Vec<(String, String)> {
         found.len() >= 8,
         "no commands were found at all, so this test proves nothing"
     );
+    // A module that is a directory (`commands/entity/`, #1316) is walked too:
+    // skipping it would leave this test green over a hundred commands.
+    assert!(
+        found
+            .iter()
+            .any(|(module, command)| module == "entity" && command == "list_entities"),
+        "the walk did not reach `commands/entity/`, so its commands go unchecked"
+    );
     found
+}
+
+/// Every command file under `src/commands`, with the module that addresses
+/// its commands: `x.rs` is module `x`, and every file of a directory module
+/// `x/` (its `mod.rs` included) is module `x` too, because the directory's
+/// root re-exports its commands at `commands::x::` (#1316). The top-level
+/// `mod.rs` declares no commands and is skipped.
+fn command_files(dir: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+    let rust = |path: &std::path::Path| path.extension().is_some_and(|extension| extension == "rs");
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir).expect("src/commands is readable") {
+        let path = entry.expect("a directory entry").path();
+        let module = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .expect("a module name")
+            .to_owned();
+        if path.is_dir() {
+            for inner in std::fs::read_dir(&path).expect("a command module directory is readable") {
+                let inner = inner.expect("a directory entry").path();
+                if rust(&inner) {
+                    files.push((module.clone(), inner));
+                }
+            }
+        } else if rust(&path) && module != "mod" {
+            files.push((module, path));
+        }
+    }
+    files
 }
 
 /// The global-shortcut plugin is registered, with a handler.
