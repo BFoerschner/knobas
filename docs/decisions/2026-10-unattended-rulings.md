@@ -8214,10 +8214,11 @@ reserved-steps rule. The entry is `docs/contract/10.8/1329-the-search-barrel-is-
   sentence). *Reversing:* type the fields with the enums.
 - **`SavedViewSource::kind` and `::sprint`.** *Fork:* no Rust list backs `"board" | "filter"`,
   and `sprint` is a `serde_json::Value`. *Ruling:* `SavedViewKind` and `ActiveSprint`, never
-  built, inlined. *Reasoning:* the shell's types were narrower than the Rust; widening them to
+  built, inlined, departing from #1325's `#[ts(type = "unknown")]` for a `serde_json::Value`.
+  *Reasoning:* the shell's types were narrower than the Rust; widening them to
   `string` and `unknown` would change what the shell compiles against, which this ticket must
-  not. The kind's list is the `case` in `knobas_sync::saved_views`' projection, which no test
-  compares with the enum. *Reversing:* `#[ts(type = "string")]` and `unknown`, and fix the callers.
+  not. The kind's list is the `case` in `knobas_sync::saved_views`' projection, and the sprint's
+  shape is the adapter's payload; no test compares either with its type. *Reversing:* `#[ts(type = "string")]` and `unknown`, and fix the callers.
 - **Which pins are "the barrel's".** Every test that read `search.ts` for type text:
   `knobas_search::types`' two, `commands::search`'s two, and the type half of
   `ticket_views::the_views_and_their_mirror_agree`. The half that checks the barrel invokes the
@@ -8227,8 +8228,8 @@ reserved-steps rule. The entry is `docs/contract/10.8/1329-the-search-barrel-is-
 - **Docs moved and how.** Every TypeScript doc rule the Rust lacked moved onto the Rust:
   `owner:`/`by:` naming authors, `Segment`'s `{segment.text}`-never-`{@html}` rule, RFC 3339 on
   `updated_at`/`synced_at`, the path line's `owner/repo` and its one SQL expression, the smart
-  list's one-shape rule (#506 story 57) and that a refused list does not open, the suggestion caps
-  (twenty, fifty) and #768, `*At most*` on a column's limit, #1208 on the query types. Variant
+  list's one-shape rule (#506 story 57) and that a refused list does not open, #768 on the
+  `under:` read, `*At most*` on a column's limit, #1208 on the query types. Variant
   docs moved into the enums' docs (`FilterDimension`, `FilterAnswer`, `Key`). A type's pointer to
   its own Rust path did not move: the generated file is that type.
 - **`just search-perf` not run.** `crates/knobas-search/src/{types,lists}.rs` changed by derives

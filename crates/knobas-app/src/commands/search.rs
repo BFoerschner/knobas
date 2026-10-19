@@ -520,7 +520,7 @@ mod tests {
     /// `knobas_search::EntityRow` (stream E's, the search corpus) and
     /// `knobas_core::entity_list::EntityRow` (stream D's, a room line) were
     /// declared independently and serialize identically. The generated
-    /// `LauncherHome` types `recent` with D's declaration
+    /// `LauncherHome` types `recent` with the room's declaration
     /// (`#[ts(as = ...)]`, #1329) rather than a second one, which is only
     /// honest while that holds -- and neither struct is declared from the
     /// other, so nothing but this notices the day one of them gains a field.

@@ -13,8 +13,8 @@
   FieldSuggestion, KindSuggestion, SourceSuggestion, ParentSuggestion}` and
   `lists::SmartListSummary` derive `ts_rs::TS` into `search.ts` (`Segment` already did, since
   #1326). `EntityRow` is reached only through `SearchHit`'s `#[serde(flatten)]`, so its fields are
-  inlined there and no `EntityRow` of the search crate is exported. Derives and doc comments only:
-  no statement, bind or query changed, so `just search-perf` has nothing to measure. The two
+  inlined there and no `EntityRow` of the search crate is exported. Derives, doc comments and the
+  deletion of `types`' two mirror tests only: no statement, bind or query changed, so `just search-perf` has nothing to measure. The two
   `FilterDimension`/`FilterAnswer` variant docs moved into the enums' docs (#1325's convention).
 
   **`crates/knobas-source/src/query.rs`.** `Key`, `Condition`, `LeftOut` and `Translation` derive

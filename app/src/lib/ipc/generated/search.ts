@@ -123,7 +123,7 @@ kinds: Array<KindSuggestion>,
  */
 sources: Array<SourceSuggestion>, 
 /**
- * The newest [`crate::PARENT_SUGGESTIONS`] (twenty) names a parent answers to that
+ * The newest [`crate::PARENT_SUGGESTIONS`] names a parent answers to that
  * start with the prefix asked for, ignoring case, each with the parent's
  * kind, newest first (#761). A parent with two names (a Gitea repo's
  * `owner/name` and `name`) is listed once per name that has the prefix.
@@ -132,7 +132,7 @@ parents: Array<ParentSuggestion>,
 /**
  * The values the ticket keys can take (#811): for each of `project:`,
  * `status:`, `issuetype:`, `priority:`, `assignee:` and `label:` the
- * most used [`crate::FIELD_SUGGESTIONS`] (fifty) values the live mirror holds,
+ * most used [`crate::FIELD_SUGGESTIONS`] values the live mirror holds,
  * in the source's spelling; `assignee:`'s `@me` first; `sprint:`'s
  * `current` while a ticket is in an active sprint; `assigned:`'s
  * `today` and `week`. Read with the kinds and the sources, once per

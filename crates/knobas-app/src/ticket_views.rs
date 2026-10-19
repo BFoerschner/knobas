@@ -55,7 +55,11 @@ pub enum Layout {
 
 /// [`LANES`]: what a ticket board's lanes split by (R-3.5).
 #[derive(ts_rs::TS)]
-#[ts(export_to = "search.ts", rename = "ViewLanes", rename_all = "snake_case")]
+#[ts(
+    export_to = "search.ts",
+    rename = "ViewLanes",
+    rename_all = "snake_case"
+)]
 pub enum Lanes {
     None,
     Epic,
@@ -94,7 +98,11 @@ pub enum ListColumn {
 
 /// [`SORT_COLUMNS`]: what a list header sorts by (R-3.6).
 #[derive(ts_rs::TS)]
-#[ts(export_to = "search.ts", rename = "ViewSortColumn", rename_all = "snake_case")]
+#[ts(
+    export_to = "search.ts",
+    rename = "ViewSortColumn",
+    rename_all = "snake_case"
+)]
 pub enum SortColumn {
     Key,
     Summary,
