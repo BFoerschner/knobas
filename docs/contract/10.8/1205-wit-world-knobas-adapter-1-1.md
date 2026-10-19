@@ -32,10 +32,11 @@
   **The limits** (#1204). Every call (instantiation included, and every host call it waits on: a
   request, the sink, the download sink) has a wall-clock deadline; running WASM yields to the
   executor at every epoch tick (50 ms), so a component that never returns is still stopped. Every
-  call's store has a memory cap over all its linear memories; a growth past it traps. A call that
+  call's store has a memory cap over all its linear memories and tables; a growth past it traps. A call that
   passes either fails `SourceError::Protocol` with *"the external adapter "<kind>" was stopped at
-  its deadline of N s"* or *"… its memory cap of N MiB"*, which the run's ending and the source's
-  health line carry (ADR-0005). Defaults 600 s and 256 MiB; the manifest's `limits { deadline_secs,
+  its deadline of N s"* or *"… its memory cap of N MiB"*, which the run's ending carries and the
+  source page's run list shows (ADR-0005); the row's health line says *Failed …* without it, as
+  for every failed run (follow-up #1252). Defaults 600 s and 256 MiB; the manifest's `limits { deadline_secs,
   memory_mib }` may ask up to 3,600 s and 1,024 MiB, and install refuses a value above that, or
   zero, as *"the manifest's limits are refused: …"*. `knobas.external_adapter.limits` (#1202's
   migration `0051`, unchanged) is read at load and applied. Inside a call, a request's

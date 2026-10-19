@@ -6306,3 +6306,23 @@ Forks:
   **Reversing:** low (`net::Bounds`).
 - **`load_fixture()` compiles once per test binary and clones**; the host suite went from 14 to 25 s
   to 2.5 s on a loaded machine. **Reversing:** one `OnceLock`.
+
+The merge-manager's rulings (PR #1250, on Opus):
+
+- **The 1.1.0 sign-off stands.** The fixture's `wit-1.0.0/adapter.wit` is byte-identical to the
+  frozen file on `main` before this PR, and the test reads the version back from the built
+  component (`1.0.0`), so the 1.0.0 build is a 1.0.0 component. **Reversing:** a 2.0.0.
+- **The deadline holds sink and download-sink waits too.** Both sinks are the host's own (the
+  mirror, a local file), not the source's network, so a component cannot be killed by a peer it does
+  not control. A download of a very large artifact over a slow link can pass the 600 s default; its
+  adapter asks for up to 3,600 s. **Reversing:** medium (bound only the component's own time).
+- **Tables count against the memory cap**, at 16 bytes an element, so a table growth cannot ask the
+  host for more than the cap. Before, `table_growing` allowed any size. **Reversing:** one line.
+- **Between-bytes is timed from the read that waits**, not from the last frame: the component's own
+  time between reads (on the sink) is not the server stalling. **Reversing:** one line in
+  `BetweenBytes`.
+- **Connect plus first-byte, summed, is sound** as an upper bound: each wait is inside it, and
+  reqwest offers no separate per-request connect timeout. **Reversing:** low.
+- **The health line not naming the limit is a follow-up (#1252)**, not a blocker: the ticket's
+  criteria ask that the run end failed with the limit named, which the run's recorded error does,
+  and the row's *Failed …* text is the same for every failed run. **Reversing:** n/a.
