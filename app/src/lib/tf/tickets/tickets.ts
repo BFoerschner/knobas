@@ -148,13 +148,14 @@ export interface AroundLine {
  * ticket nobody has opened yet counts what it reaches — grouped the way the room's tiles
  * group kinds (`sectionOf`). Tickets are the view's own and not a section
  * here. A section of one kind says that kind's plural; a mixed one (Code)
- * says *items*. Tone `err` is what fails or is down.
+ * says *items*. Tone `err` is what fails or is down. A kind in `runKinds` (the
+ * CI role's `run` frame, #1256) counts under Builds whatever its id.
  */
-export function aroundLines(tally: EntityPage["tally"]): AroundLine[] {
+export function aroundLines(tally: EntityPage["tally"], runKinds: readonly string[] = []): AroundLine[] {
   const sections = new Map<string, { label: string; order: number; kinds: Set<string>; n: number; bad: number }>();
   for (const line of tally ?? []) {
     if (line.kind === "ticket" || line.count === 0) continue;
-    const section = sectionOf(line.kind);
+    const section = sectionOf(runKinds.includes(line.kind) ? "build" : line.kind);
     const held = sections.get(section.id) ?? { label: section.label, order: section.order, kinds: new Set(), n: 0, bad: 0 };
     held.kinds.add(line.kind);
     held.n += line.count;

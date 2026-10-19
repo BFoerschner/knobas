@@ -148,6 +148,7 @@
     ticketViews,
     translateTicketView,
   } from "../../ipc/search";
+  import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { openExternal } from "../../shell/open-external";
   import { push } from "../../shell/toasts.svelte";
   import { inTextField } from "../../shell/keys";
@@ -705,7 +706,7 @@
     // What the job's sections would show, through the job-reach read: no
     // context is needed, and none is promoted to draw this (#1030).
     void reachTally(ports, id).then((tally) => {
-      if (!dead) around = aroundLines(tally);
+      if (!dead) around = aroundLines(tally, kindRegistry.frameKinds("ci", "run") ?? []);
     });
     return () => (dead = true);
   });

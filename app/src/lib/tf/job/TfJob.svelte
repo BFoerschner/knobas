@@ -598,7 +598,7 @@
   function line(row: EntityRow): SectionRow {
     return {
       id: row.entity_id,
-      href: itemHash(row),
+      href: itemHash(row, registry.frameKinds("ci", "run") ?? []),
       title: row.title,
       mono: false,
       repo: null,
