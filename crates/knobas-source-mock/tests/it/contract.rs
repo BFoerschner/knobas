@@ -868,3 +868,71 @@ async fn the_first_run_subtitle_names_the_size_of_the_corpus_it_loads() {
         sink.0.len()
     );
 }
+
+/// #1229: the demo's only source is the mock, and the shell draws Code and
+/// Tickets from the sources that claim those roles (#1196, #1200). So the mock
+/// claims exactly the two its corpus fills, and the claim passes the static
+/// check the battery's clause 10 runs.
+#[test]
+fn the_mock_claims_the_code_host_and_the_ticket_system() {
+    use knobas_source::role::{CODE_HOST, TICKET_SYSTEM, check, minimum};
+    let d = MockSource::new().descriptor();
+    let claimed: Vec<&str> = d.roles.iter().map(|c| c.role.as_str()).collect();
+    assert_eq!(claimed, [CODE_HOST, TICKET_SYSTEM]);
+    for claim in &d.roles {
+        let min = minimum(&claim.role).expect("a built-in role");
+        let reads: Vec<&str> = claim.reads.iter().map(String::as_str).collect();
+        assert_eq!(reads, min.reads, "{} claims the minimum's reads", claim.role);
+    }
+    assert_eq!(check(&d), Ok(()));
+}
+
+/// #1229, with #1199 in view: a claimed role whose declared paths miss on the
+/// records stops being drawn. Every path of the two minimums resolves on some
+/// record of its kind, except the labels, which are an empty list on every
+/// ticket (the dataset has none) and so resolve to no element.
+#[tokio::test]
+async fn every_path_the_claimed_roles_require_resolves_on_the_corpus() {
+    use knobas_core::payload::{PayloadPath, at};
+    use knobas_source::role::{CODE_HOST, Field, KindOf, TICKET_SYSTEM, minimum};
+    let s = MockSource::new();
+    let d = s.descriptor();
+    let mut sink = VecSink(Vec::new());
+    s.sync(None, &mut sink).await.expect("full sync");
+    for role in [CODE_HOST, TICKET_SYSTEM] {
+        for need in minimum(role).expect("built-in").kinds {
+            let KindOf::Id(kind) = need.kind else {
+                panic!("neither claimed role names a frame")
+            };
+            if need.paths.is_empty() {
+                continue;
+            }
+            let paths = serde_json::to_value(
+                d.payload_paths
+                    .iter()
+                    .find(|p| p.kind == kind)
+                    .unwrap_or_else(|| panic!("{kind} declares no paths")),
+            )
+            .unwrap();
+            for field in need.paths {
+                if *field == Field::Labels {
+                    continue;
+                }
+                let candidates = paths[field.name()].as_array().expect("declared");
+                let resolved = sink.0.iter().filter(|i| i.kind == kind).any(|i| {
+                    candidates.iter().any(|c| {
+                        let walk = if c.is_array() { c } else { &c["at"] };
+                        let path = PayloadPath::of(
+                            walk.as_array()
+                                .expect("a path")
+                                .iter()
+                                .map(|s| s.as_str().expect("a segment").to_owned()),
+                        );
+                        at(&i.payload, &path).is_some()
+                    })
+                });
+                assert!(resolved, "{role}: {kind} {} resolves on no record", field.name());
+            }
+        }
+    }
+}
