@@ -100,5 +100,21 @@ fn the_generated_ipc_mirror_is_written() {
         "the app barrel's types produced nothing, so this test proves nothing: {produced:?}"
     );
 
-    sync(fresh.path(), &ipc_dir().join("generated"));
+    let generated = ipc_dir().join("generated");
+    sync(fresh.path(), &generated);
+
+    // Read back: `just ipc-mirror` compares the folder with HEAD, so a sync
+    // that wrote nothing would pass a stale file as current.
+    assert_eq!(
+        ts_files(&generated),
+        produced,
+        "the folder holds other files than ts-rs wrote"
+    );
+    for name in &produced {
+        assert_eq!(
+            fs::read_to_string(generated.join(name)).expect("the generated file is readable"),
+            fs::read_to_string(fresh.path().join(name)).expect("ts-rs wrote the file"),
+            "app/src/lib/ipc/generated/{name} is not what the Rust types produce"
+        );
+    }
 }
