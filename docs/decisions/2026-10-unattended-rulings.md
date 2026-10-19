@@ -6696,3 +6696,31 @@ The merge-manager's rulings (Opus):
   off `pull.labels` (always `false` there) and drop the parameter. *Ruling:* keep. One private
   field on a module-private type, read in one place, against a reshaped `read` result.
   *Reversing:* low, local to `view/pr/label.rs`.
+### #1244: implementer's rulings (Opus)
+
+- **One local answer refuses the whole name.** *Fork:* drop a fixed name's local answers and
+  connect to its public ones, or refuse the name. *Ruling:* refuse. A name that answers both is
+  already pointing somewhere the manifest did not show the reader, and refusing leaves no
+  ordering or retry for an attacker to work. *Reversing:* low (filter in `net::Resolver`).
+- **What counts as local.** *Fork:* the ticket names loopback, link-local, unique-local and
+  private. *Ruling:* those, plus unspecified (`0.0.0.0/8`, `::`, which reach this machine), the
+  carrier-grade `100.64/10` a tailnet uses, the retired site-local `fec0::/10`, and an IPv6
+  address carrying an IPv4 one (`::ffff:a.b.c.d`, `::a.b.c.d`) judged as that address.
+  Multicast, broadcast, NAT64 and 6to4 stay public: none of them reaches a service on the
+  reader's network. *Reversing:* low (`allow::is_local`).
+- **The check sits in a resolver of a second client.** *Fork:* resolve in `send` before the
+  request leaves, or check in the transport's resolver. *Ruling:* the resolver, on a client
+  only guarded requests use. A check before the request would resolve the name a second time,
+  and a rebinding answer could change between the two; the connector connects to exactly the
+  addresses the resolver passed. A second client so a connection pooled to a name the reader
+  typed (a template) never carries a guarded request. *Reversing:* medium.
+- **Only names a guarded request went to are guarded.** *Fork:* the guarded client's resolver
+  also resolves the system proxy's name, which is often a LAN address. *Ruling:* the resolver
+  refuses only names `send` registered for a guarded request; any other name it is asked for
+  is the proxy's and passes. Through a proxy the proxy resolves the target, so the guard does
+  not hold there: follow-up #1283 (`backlog`). *Reversing:* low.
+- **Seams, chosen without a person to confirm them** (tdd asks to agree them first):
+  `allow::is_local` and `Allowlist::guards` as unit tests, and the SPI (`dyn Source` over the
+  fixture component, against a local server) for the three criteria, with a test-only
+  `fake_dns` standing in for the system's lookup so a name can resolve to loopback without a
+  network. *Reversing:* n/a.
