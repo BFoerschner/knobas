@@ -49,6 +49,9 @@ mod source;
 
 pub use source::WasmSource;
 
+#[cfg(feature = "test-util")]
+pub use net::fake_dns;
+
 mod bindings {
     wasmtime::component::bindgen!({
         // `hosted`, not `adapter`: the optional reads stay out of the static

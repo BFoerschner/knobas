@@ -21,6 +21,17 @@
 //! name, encodes an international one and reads every IPv4 spelling as its
 //! address, and then compare equal or not at all: `api.example.com` does
 //! not allow `api.example.com.evil.test` or `evil-api.example.com`.
+//!
+//! **A fixed name may not lead home** (#1244). The transport resolves a
+//! name when the request leaves, so the owner of `api.attacker.example` can
+//! point it at the reader's own machine or network (DNS rebinding). A
+//! request that only a fixed host *name* allows is [guarded](Allowlist::guards):
+//! it is refused when any address the name resolves to [is
+//! local](is_local). A fixed entry that is an address or `localhost` says
+//! where it goes in the install list, and a template's value is one the
+//! reader typed, so neither is guarded.
+
+use std::net::{IpAddr, Ipv4Addr};
 
 use url::Host;
 
@@ -182,7 +193,12 @@ impl Target {
 /// The hosts one source of an adapter may reach: its manifest's entries,
 /// each template resolved over that source's address and config.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Allowlist(Vec<Allowed>);
+pub struct Allowlist {
+    /// The manifest's fixed entries.
+    fixed: Vec<Allowed>,
+    /// Its templates' values: what the reader typed.
+    typed: Vec<Allowed>,
+}
 
 impl Allowlist {
     /// Resolve `patterns` for one source. A template resolves only over
@@ -194,20 +210,74 @@ impl Allowlist {
         config: &serde_json::Value,
         declared: &[String],
     ) -> Self {
-        let resolved = patterns.iter().filter_map(|pattern| match pattern {
-            HostPattern::Fixed(allowed) => Some(allowed.clone()),
-            HostPattern::Template(key) if !resolvable(key, declared) => None,
-            HostPattern::Template(key) if key == BASE_URL_KEY => Allowed::from_value(base_url),
-            HostPattern::Template(key) => Allowed::from_value(config.get(key)?.as_str()?),
-        });
-        Self(resolved.collect())
+        let mut list = Self::default();
+        for pattern in patterns {
+            match pattern {
+                HostPattern::Fixed(allowed) => list.fixed.push(allowed.clone()),
+                HostPattern::Template(key) if !resolvable(key, declared) => {}
+                HostPattern::Template(key) => {
+                    let value = if key == BASE_URL_KEY {
+                        Some(base_url)
+                    } else {
+                        config.get(key).and_then(serde_json::Value::as_str)
+                    };
+                    list.typed.extend(value.and_then(Allowed::from_value));
+                }
+            }
+        }
+        list
     }
 
     /// Whether a request to `target` may leave.
     #[must_use]
     pub fn allows(&self, target: &Target) -> bool {
-        self.0.iter().any(|allowed| allowed.matches(target))
+        self.fixed
+            .iter()
+            .chain(&self.typed)
+            .any(|allowed| allowed.matches(target))
     }
+
+    /// Whether a request to `target` must not reach a local address: only a
+    /// fixed entry allows it, and that entry is a name other than
+    /// `localhost`.
+    #[must_use]
+    pub fn guards(&self, target: &Target) -> bool {
+        matches!(&target.host, Host::Domain(name) if name != "localhost")
+            && !self.typed.iter().any(|allowed| allowed.matches(target))
+    }
+}
+
+/// Whether a request to `ip` stays on the reader's machine or network:
+/// loopback, unspecified (`0.0.0.0`, `::`, which reach this machine),
+/// private (`10/8`, `172.16/12`, `192.168/16`, the carrier-grade `100.64/10`
+/// a tailnet uses), link-local (`169.254/16`, `fe80::/10`) or unique-local
+/// (`fc00::/7`, and the retired site-local `fec0::/10`). An IPv6 address
+/// that carries an IPv4 one (`::ffff:127.0.0.1`) is that address.
+#[must_use]
+pub fn is_local(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => is_local_v4(v4),
+        IpAddr::V6(v6) => {
+            let first = v6.segments()[0];
+            v6.to_ipv4().is_some_and(is_local_v4)
+                || v6.is_loopback()
+                || v6.is_unspecified()
+                || first & 0xffc0 == 0xfe80
+                || first & 0xffc0 == 0xfec0
+                || first & 0xfe00 == 0xfc00
+        }
+    }
+}
+
+fn is_local_v4(ip: Ipv4Addr) -> bool {
+    let [a, b, ..] = ip.octets();
+    a == 0
+        || a == 127
+        || a == 10
+        || (a == 172 && b & 0xf0 == 16)
+        || (a == 192 && b == 168)
+        || (a == 169 && b == 254)
+        || (a == 100 && b & 0xc0 == 64)
 }
 
 /// Whether a template over `key` may resolve: `base_url`, or a key in
@@ -300,6 +370,86 @@ mod tests {
             let list = list(&["{mirror}"], "", serde_json::json!({ "mirror": value }));
             assert_eq!(list, Allowlist::default(), "{value}");
         }
+    }
+
+    #[test]
+    fn local_addresses_are_loopback_private_link_local_and_unique_local() {
+        for local in [
+            "127.0.0.1",
+            "127.255.0.9",
+            "0.0.0.0",
+            "0.1.2.3",
+            "10.0.0.1",
+            "172.16.0.1",
+            "172.31.255.254",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "100.127.255.254",
+            "::1",
+            "::",
+            "fe80::1",
+            "febf::1",
+            "fec0::1",
+            "fc00::1",
+            "fd12:3456::1",
+            "::ffff:127.0.0.1",
+            "::ffff:10.1.2.3",
+            "::ffff:169.254.169.254",
+            "::127.0.0.1",
+        ] {
+            assert!(is_local(local.parse().unwrap()), "{local}");
+        }
+        for public in [
+            "1.1.1.1",
+            "203.0.113.7",
+            "172.15.255.255",
+            "172.32.0.1",
+            "192.167.1.1",
+            "169.253.1.1",
+            "100.63.255.255",
+            "100.128.0.1",
+            "11.0.0.1",
+            "126.255.255.255",
+            "2606:4700::1111",
+            "fbff::1",
+            "fe00::1",
+            "ff02::1",
+            "::ffff:1.1.1.1",
+        ] {
+            assert!(!is_local(public.parse().unwrap()), "{public}");
+        }
+    }
+
+    fn guards(list: &Allowlist, url: &str) -> bool {
+        let (scheme, rest) = url.split_once("://").unwrap();
+        list.guards(&Target::parse(scheme, rest).unwrap())
+    }
+
+    #[test]
+    fn only_a_fixed_name_is_guarded() {
+        let list = list(
+            &["api.example.com", "127.0.0.1:8080", "[::1]:8080", "localhost:9000", "{mirror}"],
+            "",
+            serde_json::json!({ "mirror": "http://gitea.lan:3000" }),
+        );
+        assert!(guards(&list, "https://api.example.com"));
+        assert!(!guards(&list, "http://127.0.0.1:8080"));
+        assert!(!guards(&list, "http://[::1]:8080"));
+        assert!(!guards(&list, "http://localhost:9000"));
+        assert!(!guards(&list, "http://gitea.lan:3000"));
+    }
+
+    #[test]
+    fn a_name_the_reader_typed_too_is_not_guarded() {
+        let both = list(
+            &["gitea.lan:3000", "{base_url}"],
+            "http://gitea.lan:3000",
+            serde_json::json!({}),
+        );
+        assert!(!guards(&both, "http://gitea.lan:3000"));
+        let fixed_only = list(&["gitea.lan:3000"], "http://gitea.lan:3000", serde_json::json!({}));
+        assert!(guards(&fixed_only, "http://gitea.lan:3000"));
     }
 
     #[test]

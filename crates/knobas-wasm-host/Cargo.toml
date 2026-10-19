@@ -26,7 +26,8 @@ thiserror.workspace = true
 # The sink pump: `sync` runs the component and hands its items to the engine's
 # sink at once, through a channel of one, so a sink failure reaches the
 # component as the answer to the item it refused.
-tokio = { workspace = true, features = ["sync"] }
+# `net`: the external adapters' name lookup, guarded (#1244).
+tokio = { workspace = true, features = ["net", "sync"] }
 tracing = "0.1"
 # Pinned exactly: 49.0.2 is the newest release older than two weeks
 # (2026-10-02). Without its defaults: the component model, a compiler, and
