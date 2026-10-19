@@ -42,19 +42,17 @@
 //! wall-clock loop in the app and calls it from there. The rule stays with the
 //! thing it is about; the clock stays where the app already keeps one.
 //!
-//! # Reading a monitor's state (ADR-0007, #277)
+//! # Reading a monitor's state and response time (ADR-0007, #277, #1224)
 //!
-//! The state comes from the adapter's **declared** `status_name` path and
-//! never from a key spelled here. The response time has no declared slot to
-//! come from -- `KindPaths` has no "a duration in milliseconds" field, and
-//! adding one would be a `crates/knobas-source/src/**` change and a §10.8
-//! conversation of its own -- so that read is under ADR-0007's *interim*
-//! discipline and meets all three requirements:
+//! Both come from the adapter's **declared** paths and never from a key
+//! spelled here: the state from `status_name`, the reading from
+//! `response_time` (#1224, which the monitoring role requires). Both reads
+//! keep ADR-0007's three requirements:
 //!
-//! 1. **It misses, never guesses.** A payload with no `response_time_ms`, a
-//!    value that is not a number, a negative one, or one no `i32` can hold:
-//!    every one of them is `None`, and a sample with no reading derives no
-//!    *warn*. The same applies to the state: a declaration that resolves to
+//! 1. **It misses, never guesses.** A payload whose declared reading is
+//!    absent, not a number, negative, or one no `i32` can hold, and a source
+//!    that declares no reading at all: every one of them is `None`, and a
+//!    sample with no reading derives no *warn*. The same applies to the state: a declaration that resolves to
 //!    nothing, or to a word [`STATES`] does not hold, is `None` rather than a
 //!    new state word.
 //! 2. **One named place**, [`sample_of`] -- with `response_time_of`, its one
@@ -68,7 +66,7 @@
 //!    tab's bar and opens no alert -- never a *down* nobody is having.
 
 use chrono::{DateTime, Duration, Utc};
-use knobas_core::payload::PayloadPath;
+use knobas_core::payload::{KindPaths, PayloadPath};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
@@ -213,18 +211,18 @@ pub struct Sample {
 /// What one payload samples as, under `threshold_ms`.
 ///
 /// The one place a payload is read outside an adapter here (ADR-0007
-/// requirement 2). `declared` is the adapter's `status_name` candidates for
-/// the `monitor` kind -- empty when it declares none, which is a source
-/// saying nothing about where its state lives and therefore a miss.
+/// requirement 2). `declared` is the adapter's declaration for the `monitor`
+/// kind: its `status_name` and `response_time` candidates, each empty when it
+/// declares none, which is a source saying nothing and therefore a miss.
 ///
 /// **Warn replaces `up` and nothing else.** A monitor that is down stays down
 /// however fast it answered: the rollup order is down > warn > up, so reading
 /// a slow *down* as *warn* would be knobas making an outage look milder. A
 /// `pending` or `maintenance` monitor is not being watched for latency either.
 #[must_use]
-pub fn sample_of(payload: &Value, declared: &[PayloadPath], threshold_ms: i64) -> Sample {
-    let response_time_ms = response_time_of(payload);
-    let word = knobas_core::payload::resolve_string(payload, declared);
+pub fn sample_of(payload: &Value, declared: &KindPaths, threshold_ms: i64) -> Sample {
+    let response_time_ms = response_time_of(payload, &declared.response_time);
+    let word = knobas_core::payload::resolve_string(payload, &declared.status_name);
     let state = word
         .as_deref()
         .and_then(|word| STATES.iter().copied().find(|known| *known == word));
@@ -240,15 +238,16 @@ pub fn sample_of(payload: &Value, declared: &[PayloadPath], threshold_ms: i64) -
 
 /// The reading a payload carries, in whole milliseconds, or nothing.
 ///
-/// Everything unusable is `None` and never a zero: a payload with no
-/// `response_time_ms`, one whose value is a string or an object, a negative
-/// number (Uptime Kuma's `-1` for a check that did not answer, which the
-/// adapter already drops -- read again here because this module is not
-/// entitled to assume which source it is looking at), and one too large for
-/// the column. `0` would be a claim about a check that did not happen.
-fn response_time_of(payload: &Value) -> Option<i32> {
-    let ms = payload.get("response_time_ms")?.as_f64()?;
-    if !ms.is_finite() || ms < 0.0 || ms > f64::from(i32::MAX) {
+/// Everything unusable is `None` and never a zero: no declared reading, one
+/// that is a string or an object, a negative number (Uptime Kuma's `-1` for a
+/// check that did not answer, which the adapter already drops --
+/// [`resolve_number`](knobas_core::payload::resolve_number) refuses it again
+/// because this module is not entitled to assume which source it is looking
+/// at), and one too large for the column. `0` would be a claim about a check
+/// that did not happen.
+fn response_time_of(payload: &Value, declared: &[PayloadPath]) -> Option<i32> {
+    let ms = knobas_core::payload::resolve_number(payload, declared)?;
+    if ms > f64::from(i32::MAX) {
         return None;
     }
     // `round`, not `trunc`: a reading of 1500.6 ms is nearer 1501, and the
@@ -260,11 +259,12 @@ fn response_time_of(payload: &Value) -> Option<i32> {
     Some(ms.round() as i32)
 }
 
-/// The candidate paths `descriptor` declares for a monitor's state, when it
-/// declares the [`KIND`] at all.
+/// What `descriptor` declares of a monitor (its state and its response time),
+/// when it declares the [`KIND`] at all.
 ///
-/// `Some(vec![])` is *this source emits monitors and says nothing about where
-/// their state lives*, which is a miss per monitor and still a row per
+/// `Some(KindPaths::default())` is *this source emits monitors and says
+/// nothing about where their state or reading lives*, which is a miss per
+/// monitor and still a row per
 /// monitor. `None` is *this source emits no monitors*, and it is a **saved
 /// round trip rather than a safety check** -- the rule
 /// `run_locked`'s `!sweep_kinds.is_empty()` comment states about itself, and
@@ -280,9 +280,7 @@ fn response_time_of(payload: &Value) -> Option<i32> {
 /// `a_source_that_emits_two_kinds_samples_only_its_monitors` is the fixture
 /// that can tell the two apart.
 #[must_use]
-pub(crate) fn state_paths(
-    descriptor: &knobas_source::SourceDescriptor,
-) -> Option<Vec<PayloadPath>> {
+pub(crate) fn monitor_paths(descriptor: &knobas_source::SourceDescriptor) -> Option<KindPaths> {
     descriptor
         .entity_kinds
         .iter()
@@ -292,7 +290,7 @@ pub(crate) fn state_paths(
                 .payload_paths
                 .iter()
                 .find(|paths| paths.kind == KIND)
-                .map(|paths| paths.status_name.clone())
+                .cloned()
                 .unwrap_or_default()
         })
 }
@@ -352,7 +350,7 @@ fn is_due(row: &Live, state: Option<&str>) -> bool {
 pub(crate) async fn append(
     tx: &mut Transaction<'_, Postgres>,
     source_id: &str,
-    declared: &[PayloadPath],
+    declared: &KindPaths,
 ) -> Result<u64, sqlx::Error> {
     let threshold = THRESHOLD.read(&mut **tx).await?;
 
@@ -489,6 +487,17 @@ mod tests {
         vec![PayloadPath::of([path])]
     }
 
+    /// Uptime Kuma's declaration: the state at `state`, the reading at
+    /// `response_time_ms`.
+    fn kuma() -> KindPaths {
+        KindPaths {
+            kind: KIND.into(),
+            status_name: state_at("state"),
+            response_time: state_at("response_time_ms"),
+            ..KindPaths::default()
+        }
+    }
+
     fn monitor(state: Value, response_time_ms: Value) -> Value {
         serde_json::json!({ "state": state, "response_time_ms": response_time_ms })
     }
@@ -521,7 +530,7 @@ mod tests {
 
     #[test]
     fn a_slow_up_monitor_is_warn_and_a_quick_one_is_up() {
-        let paths = state_at("state");
+        let paths = kuma();
         assert_eq!(
             sample_of(&monitor("up".into(), 1501.into()), &paths, 1500),
             Sample {
@@ -543,7 +552,7 @@ mod tests {
     /// reading of a broken monitor.
     #[test]
     fn only_an_up_monitor_becomes_warn() {
-        let paths = state_at("state");
+        let paths = kuma();
         for state in ["down", "pending", "maintenance"] {
             let sample = sample_of(&monitor(state.into(), 9000.into()), &paths, 1500);
             assert_eq!(
@@ -558,7 +567,7 @@ mod tests {
     /// misses, and a miss is an absence rather than a wrong value.
     #[test]
     fn every_unusable_shape_is_a_miss() {
-        let paths = state_at("state");
+        let paths = kuma();
         let cases = [
             ("no state key at all", serde_json::json!({})),
             ("a null state", monitor(Value::Null, 35.into())),
@@ -603,14 +612,55 @@ mod tests {
     fn the_declared_path_is_what_is_read() {
         let payload = serde_json::json!({ "state": "up", "elsewhere": "down" });
         assert_eq!(
-            sample_of(&payload, &state_at("elsewhere"), 1500).state,
+            sample_of(
+                &payload,
+                &KindPaths {
+                    status_name: state_at("elsewhere"),
+                    ..kuma()
+                },
+                1500
+            )
+            .state,
             Some("down"),
             "the declaration points at `elsewhere` and that is what is read"
         );
         assert_eq!(
-            sample_of(&payload, &[], 1500).state,
+            sample_of(&payload, &KindPaths::default(), 1500).state,
             None,
             "a source that declares nothing gets no state, not the obvious key"
+        );
+    }
+
+    /// The reading is the declared one too (#1224): a source that declares
+    /// its response time elsewhere is read there, and one that declares none
+    /// has no reading -- so no *warn* -- whatever key its payload carries.
+    #[test]
+    fn the_declared_response_time_is_what_is_read() {
+        let payload = serde_json::json!({
+            "state": "up", "response_time_ms": 9000, "latency": 12
+        });
+        let elsewhere = KindPaths {
+            response_time: state_at("latency"),
+            ..kuma()
+        };
+        assert_eq!(
+            sample_of(&payload, &elsewhere, 1500),
+            Sample {
+                state: Some(UP),
+                response_time_ms: Some(12)
+            }
+        );
+        let undeclared = KindPaths {
+            response_time: Vec::new(),
+            ..kuma()
+        };
+        assert_eq!(
+            sample_of(&payload, &undeclared, 1500),
+            Sample {
+                state: Some(UP),
+                response_time_ms: None
+            },
+            "no declaration is a miss, not the obvious key"
         );
     }
 
@@ -618,7 +668,7 @@ mod tests {
     /// rounded number, so the stored row and the derived state agree.
     #[test]
     fn a_reading_is_rounded_and_the_threshold_reads_the_rounded_number() {
-        let paths = state_at("state");
+        let paths = kuma();
         let sample = sample_of(
             &monitor("up".into(), serde_json::json!(1500.6)),
             &paths,
@@ -659,7 +709,7 @@ mod tests {
     /// A descriptor's kinds decide whether a source is sampled at all, and its
     /// declarations decide what is read -- two questions with two answers.
     #[test]
-    fn a_source_with_no_monitor_kind_has_no_state_paths() {
+    fn a_source_with_no_monitor_kind_has_no_monitor_paths() {
         let mut descriptor = knobas_source::SourceDescriptor {
             id: "fake".into(),
             adapter_kind: "fake".into(),
@@ -683,7 +733,7 @@ mod tests {
             config_schema: serde_json::json!({}),
             payload_paths: Vec::new(),
         };
-        assert_eq!(state_paths(&descriptor), None);
+        assert_eq!(monitor_paths(&descriptor), None);
 
         descriptor.entity_kinds.push(knobas_source::KindInfo {
             id: KIND.into(),
@@ -693,16 +743,12 @@ mod tests {
             full_sync_exhaustive: true,
         });
         assert_eq!(
-            state_paths(&descriptor),
-            Some(Vec::new()),
+            monitor_paths(&descriptor),
+            Some(KindPaths::default()),
             "a source that emits monitors and declares no path is sampled, and misses"
         );
 
-        descriptor.payload_paths.push(knobas_source::KindPaths {
-            kind: KIND.into(),
-            status_name: state_at("state"),
-            ..knobas_source::KindPaths::default()
-        });
-        assert_eq!(state_paths(&descriptor), Some(state_at("state")));
+        descriptor.payload_paths.push(kuma());
+        assert_eq!(monitor_paths(&descriptor), Some(kuma()));
     }
 }

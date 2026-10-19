@@ -2080,6 +2080,9 @@ pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> 
         .iter()
         .map(|row| row.try_get("entity_id"))
         .collect::<Result<_, _>>()?;
+    // Where each source keeps a monitor's reading (#1224).
+    let declarations =
+        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::builtin()).await?;
 
     let mut samples: HashMap<String, Vec<MonitorSample>> = HashMap::new();
     for sample in sqlx::query(ROSTER_SAMPLES)
@@ -2118,15 +2121,19 @@ pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> 
     rows.iter()
         .map(|row| {
             let entity_id: String = row.try_get("entity_id")?;
+            let source_id: String = row.try_get("source_id")?;
             let payload: serde_json::Value = row.try_get("payload")?;
-            let reading = reading_of(&payload);
+            let declared = declarations
+                .get(&source_id, MONITOR_KIND)
+                .map_or(&[][..], |paths| paths.response_time.as_slice());
+            let reading = reading_of(&payload, declared);
             let samples = samples.remove(&entity_id).unwrap_or_default();
             let state = match samples.last() {
                 Some(newest) => newest.state.clone(),
                 None => text_at(&payload, "state"),
             };
             Ok(MonitorRow {
-                source_id: row.try_get("source_id")?,
+                source_id,
                 name: row.try_get("title")?,
                 state,
                 monitor_type: reading.monitor_type,
@@ -2437,12 +2444,13 @@ struct Reading {
 ///
 /// # This is a payload read outside an adapter (ADR-0007, #277)
 ///
-/// `KindPaths` has no slot shaped like any of these -- no "what kind of check",
-/// no "what it watches", no "a ratio per window" -- so declaring them would
-/// itself be a `crates/knobas-source/src/**` change and a §10.8 conversation of
-/// its own. Until there is such a slot the interim discipline applies in full,
-/// and this function meets all three requirements the way
-/// `knobas_sync::samples::sample_of` does:
+/// The response time is the one column read through a declaration: the
+/// source's `response_time` (#1224), `declared` here, which the monitoring
+/// role requires, as `knobas_sync::samples::sample_of` reads it. A source
+/// that declares none draws no reading. For the rest `KindPaths` has no slot
+/// shaped like them -- no "what it watches", no "a ratio per window" -- so
+/// the interim discipline applies in full, and this function meets all three
+/// requirements the way `knobas_sync::samples::sample_of` does:
 ///
 /// 1. **It misses, never guesses.** Every field is `None` (or, for the ratios,
 ///    absent from the list) unless the payload holds the shape it expects: a
@@ -2482,7 +2490,7 @@ struct Reading {
 /// roster shows a reader where the check points, port and all, while the rule
 /// joins on a host and stops at the port so that `http://gitea:3000` matches an
 /// asset whose hostname is `gitea`. Same key, different question.
-fn reading_of(payload: &serde_json::Value) -> Reading {
+fn reading_of(payload: &serde_json::Value, declared: &[knobas_core::payload::PayloadPath]) -> Reading {
     let hostname = text_at(payload, "hostname");
     let target = text_at(payload, "url").or_else(|| match (hostname, text_at(payload, "port")) {
         (Some(host), Some(port)) => Some(format!("{host}:{port}")),
@@ -2491,7 +2499,7 @@ fn reading_of(payload: &serde_json::Value) -> Reading {
     Reading {
         monitor_type: text_at(payload, "type"),
         target,
-        response_time_ms: number_at(payload, "response_time_ms"),
+        response_time_ms: knobas_core::payload::resolve_number(payload, declared),
         uptime: payload
             .get("uptime")
             .and_then(serde_json::Value::as_object)

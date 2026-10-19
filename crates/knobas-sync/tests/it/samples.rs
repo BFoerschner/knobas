@@ -8,8 +8,9 @@
 //! **Why the engine and not the adapter.** A sample is knobas' own record of
 //! what it saw, derived under a knobas setting, and the sentence above is
 //! about *a source that emits `monitor`* rather than about Uptime Kuma. The
-//! fake here declares that kind and the same `status_name` path the Kuma
-//! descriptor declares (`state`), so what these tests pin is the engine's
+//! fake here declares that kind and the same `status_name` and
+//! `response_time` paths the Kuma descriptor declares (`state`,
+//! `response_time_ms`, #1224), so what these tests pin is the engine's
 //! rule and not one adapter's payload shape.
 //!
 //! **Why a poll and not a change.** The Kuma adapter's cursor is a digest of
@@ -128,6 +129,7 @@ impl Source for Monitors {
                     .map(|kind| knobas_source::KindPaths {
                         kind: (*kind).to_owned(),
                         status_name: vec![knobas_source::PayloadPath::of(["state"])],
+                        response_time: vec![knobas_source::PayloadPath::of(["response_time_ms"])],
                         ..knobas_source::KindPaths::default()
                     })
                     .collect()
@@ -561,7 +563,8 @@ async fn a_monitor_whose_state_does_not_resolve_is_sampled_as_a_miss() {
 /// An adapter that declares no `status_name` path misses on every monitor: the
 /// engine reads the declaration and never the key (#277, ADR-0007), so a
 /// source that says nothing about where its state lives gets stateless
-/// samples rather than a lucky guess.
+/// samples rather than a lucky guess. The same holds of its reading since
+/// #1224: no `response_time` declared, no reading taken.
 #[tokio::test]
 async fn a_source_declaring_no_state_path_samples_no_state() {
     let pool = pool("a_source_declaring_no_st").await;
@@ -579,8 +582,9 @@ async fn a_source_declaring_no_state_path_samples_no_state() {
 
     assert_eq!(
         taken(&pool, &format!("{id}:gitea")).await,
-        vec![(None, Some(35))],
-        "the payload says `state`, the descriptor does not, and the engine reads the descriptor"
+        vec![(None, None)],
+        "the payload says `state` and `response_time_ms`, the descriptor does not, and the \
+         engine reads the descriptor"
     );
 }
 

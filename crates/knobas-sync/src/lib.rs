@@ -450,8 +450,8 @@ async fn run_inner(
     check_source_id(&descriptor.id)?;
     // Read before the descriptor is taken apart below. `None` is "this source
     // emits no monitors"; `Some(paths)` carries the declaration a sample's
-    // state is read through (#277, ADR-0007).
-    let monitor_paths = samples::state_paths(&descriptor);
+    // state and reading are read through (#277, #1224, ADR-0007).
+    let monitor_paths = samples::monitor_paths(&descriptor);
     let source_id = descriptor.id;
     // Two sets out of one list: everything the sink will accept, and the
     // subset the sweep may act on. Both are read here, before `entity_kinds`
@@ -490,7 +490,7 @@ async fn run_inner(
         &source_id,
         kinds,
         exhaustive,
-        monitor_paths.as_deref(),
+        monitor_paths.as_ref(),
         from,
     )
     .await;
@@ -584,7 +584,7 @@ async fn run_locked(
     source_id: &str,
     kinds: HashSet<String>,
     exhaustive: HashSet<String>,
-    monitor_paths: Option<&[knobas_core::payload::PayloadPath]>,
+    monitor_paths: Option<&knobas_core::payload::KindPaths>,
     from: CursorSource,
 ) -> Result<Locked, SyncError> {
     // Held until this transaction ends, however it ends. Two runs of one source
