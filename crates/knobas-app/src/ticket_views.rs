@@ -914,7 +914,10 @@ mod tests {
                 .map(|field| field.trim_end_matches('?').to_owned())
                 .collect();
             declared.sort();
-            assert_eq!(declared, sent, "{interface} and the wire name different fields");
+            assert_eq!(
+                declared, sent,
+                "{interface} and the wire name different fields"
+            );
         }
         // Registered under the names the mirror invokes (#1245): a command is
         // addressed by a string, so a barrel line left on the old name is a
