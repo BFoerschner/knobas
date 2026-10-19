@@ -5150,43 +5150,68 @@ async fn a_repository_reads_its_language_and_its_own_teams_not_owners() {
 
 // -- a source action: Add label… on a pull request (issue #1194) -------------
 
-/// Delete every label of the mutated repository named `knobas-label-…`: this
-/// test's own, and an earlier run's that panicked before it cleaned up.
-/// Nothing `testenv/seed-gitea.sh` creates is a label, let alone one named so.
+/// Delete every label named `knobas-label-…` of the mutated repository and
+/// of its organisation (#1235): this test's own, and an earlier run's that
+/// panicked before it cleaned up. Nothing `testenv/seed-gitea.sh` creates is
+/// a label, let alone one named so.
 async fn clear_test_labels(http: &reqwest::Client, env: &Env, auth: &str) {
-    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
-    let labels: Vec<serde_json::Value> = http
-        .get(format!("{api}/labels?limit=50"))
-        .header("Authorization", auth)
-        .send()
-        .await
-        .expect("list the labels")
-        .json()
-        .await
-        .expect("a label list");
-    for label in labels {
-        if label["name"]
-            .as_str()
-            .is_some_and(|n| n.starts_with("knobas-label-"))
-        {
-            http.delete(format!("{api}/labels/{}", label["id"]))
-                .header("Authorization", auth)
-                .send()
-                .await
-                .expect("delete a test label");
+    let repo = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let org = format!("{}/api/v1/orgs/{}", env.url, env.owner);
+    for api in [repo, org] {
+        let labels: Vec<serde_json::Value> = http
+            .get(format!("{api}/labels?limit=50"))
+            .header("Authorization", auth)
+            .send()
+            .await
+            .expect("list the labels")
+            .json()
+            .await
+            .expect("a label list");
+        for label in labels {
+            if label["name"]
+                .as_str()
+                .is_some_and(|n| n.starts_with("knobas-label-"))
+            {
+                http.delete(format!("{api}/labels/{}", label["id"]))
+                    .header("Authorization", auth)
+                    .send()
+                    .await
+                    .expect("delete a test label");
+            }
         }
     }
+}
+
+/// Make a label named `name` at `api` (a repository's or an organisation's
+/// `…/labels`), answering its id.
+async fn make_label(http: &reqwest::Client, api: &str, auth: &str, name: &str) -> String {
+    let response = http
+        .post(api)
+        .header("Authorization", auth)
+        .json(&serde_json::json!({ "name": name, "color": "#00aabb" }))
+        .send()
+        .await
+        .expect("make a label");
+    assert!(
+        response.status().is_success(),
+        "{api}: {}",
+        response.status()
+    );
+    let made: serde_json::Value = response.json().await.expect("the label made");
+    made["id"].as_u64().expect("a label id").to_string()
 }
 
 /// ADR-0029's source action against the real server (ADR-0013): on a pull
 /// request this test opens, the toolbar offers *Add label…* over a label this
 /// test makes; the answer the dialog would give, handed to the adapter as the
 /// queue's flush hands a `source_action` back, puts the label on the pull
-/// request; Gitea reads it back, and the view no longer offers it.
+/// request; Gitea reads it back, and the view no longer offers it. A label of
+/// the owning organisation is offered and taken the same way (#1235), and
+/// the organisation listing the adapter reads is 404 for a user.
 ///
-/// Never a seeded pull request or label: both are made here, [`Litter`]
-/// removes the pull request and its branch, and the label is deleted at the
-/// end and at the start of the next run.
+/// Never a seeded pull request or label: all are made here, [`Litter`]
+/// removes the pull request and its branch, and the labels are deleted at
+/// the end and at the start of the next run.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_label_is_added_to_a_pull_request_through_its_source_action() {
@@ -5204,17 +5229,23 @@ async fn a_label_is_added_to_a_pull_request_through_its_source_action() {
         .unwrap()
         .as_nanos();
     let name = format!("knobas-label-{stamp}");
-    let made: serde_json::Value = http
-        .post(format!("{api}/labels"))
+    let label_id = make_label(&http, &format!("{api}/labels"), &auth, &name).await;
+    let org_name = format!("knobas-label-org-{stamp}");
+    let org_labels = format!("{}/api/v1/orgs/{}/labels", env.url, env.owner);
+    let org_label_id = make_label(&http, &org_labels, &auth, &org_name).await;
+    // A user is no organisation: Gitea's 404, which the adapter reads as a
+    // user owner with no organisation labels.
+    let user_labels = http
+        .get(format!(
+            "{}/api/v1/orgs/{}/labels",
+            env.url,
+            env.login().await
+        ))
         .header("Authorization", &auth)
-        .json(&serde_json::json!({ "name": name, "color": "#00aabb" }))
         .send()
         .await
-        .expect("make a label")
-        .json()
-        .await
-        .expect("the label made");
-    let label_id = made["id"].as_u64().expect("a label id").to_string();
+        .expect("a user's organisation labels");
+    assert_eq!(user_labels.status().as_u16(), 404);
 
     let branch = format!("knobas-label-{stamp}");
     litter.branch_off_main(&branch).await;
@@ -5241,26 +5272,30 @@ async fn a_label_is_added_to_a_pull_request_through_its_source_action() {
     let knobas_source::view::FieldKind::Choice { options } = &add.fields[0].kind else {
         panic!("Add label… asks for a choice: {add:#?}")
     };
-    assert!(
-        options
-            .iter()
-            .any(|o| o.value == label_id && o.label == name),
-        "{options:#?}"
-    );
+    for (id, name) in [(&label_id, &name), (&org_label_id, &org_name)] {
+        assert!(
+            options.iter().any(|o| o.value == *id && o.label == *name),
+            "{name}: {options:#?}"
+        );
+    }
 
     // 2. What the shell queues from that dialog -- the fixed values, the id
     //    among them, and the answer -- and the flush hands to the adapter.
-    let mut fields = add.values.clone();
-    let action_id = fields.remove("id").expect("the action's id is fixed");
-    fields.insert(add.fields[0].name.clone(), label_id.clone());
-    source
-        .write(WriteOp::SourceAction {
-            entity: id.clone(),
-            id: action_id,
-            fields,
-        })
-        .await
-        .expect("Gitea takes the label");
+    //    The organisation's label too: Gitea takes it on the repository's
+    //    pull request.
+    for picked in [&label_id, &org_label_id] {
+        let mut fields = add.values.clone();
+        let action_id = fields.remove("id").expect("the action's id is fixed");
+        fields.insert(add.fields[0].name.clone(), picked.clone());
+        source
+            .write(WriteOp::SourceAction {
+                entity: id.clone(),
+                id: action_id,
+                fields,
+            })
+            .await
+            .expect("Gitea takes the label");
+    }
 
     // 3. Read back from the server, and from the view.
     let pull: serde_json::Value = http
@@ -5272,18 +5307,20 @@ async fn a_label_is_added_to_a_pull_request_through_its_source_action() {
         .json()
         .await
         .expect("a pull request record");
-    assert!(
-        pull["labels"]
-            .as_array()
-            .is_some_and(|l| l.iter().any(|l| l["name"] == name.as_str())),
-        "{}",
-        pull["labels"]
-    );
+    for name in [&name, &org_name] {
+        assert!(
+            pull["labels"]
+                .as_array()
+                .is_some_and(|l| l.iter().any(|l| l["name"] == name.as_str())),
+            "{name}: {}",
+            pull["labels"]
+        );
+    }
     let again = toolbar(&view().await, "Add label…");
     let offered_again = match &again.fields.first().map(|f| &f.kind) {
-        Some(knobas_source::view::FieldKind::Choice { options }) => {
-            options.iter().any(|o| o.value == label_id)
-        }
+        Some(knobas_source::view::FieldKind::Choice { options }) => options
+            .iter()
+            .any(|o| o.value == label_id || o.value == org_label_id),
         _ => false,
     };
     assert!(

@@ -208,10 +208,11 @@ async fn slow_gitea(
         .mount(&server)
         .await;
     // The repository's labels, which *Add label…* offers (#1194): `bug` is on
-    // the pull request already.
+    // the pull request already. Gitea counts them (#1235).
     get(format!("{REPO}/labels"))
         .respond_with(
             ResponseTemplate::new(200)
+                .insert_header("X-Total-Count", "2")
                 .set_body_json(json!([{ "id": 3, "name": "bug" }, { "id": 7, "name": "needs-qa" }]))
                 .set_delay(delay),
         )
@@ -1837,8 +1838,8 @@ async fn a_section_read_carries_no_toolbar() {
 /// once the record is in, the reviews, the commits, the comments, who the
 /// token is (#705), landing's three -- the base branch, the head branch,
 /// whether the head is behind (#708) -- the head commit's statuses (#710) and
-/// the repository's labels (#1194) are in flight together. Read in turn, one
-/// is.
+/// the repository's labels (#1194) and its organisation's (#1235) are in
+/// flight together. Read in turn, one is.
 #[tokio::test]
 async fn a_pull_requests_tabs_are_read_at_the_same_time() {
     // A token of its own, so who it is has not been read before (see
@@ -1852,7 +1853,7 @@ async fn a_pull_requests_tabs_are_read_at_the_same_time() {
         .expect("reads")
         .expect("a pull request draws a view");
     assert_eq!(view.sections.len(), 4);
-    assert_eq!(flight.most(), 9, "the tabs' reads in flight at once");
+    assert_eq!(flight.most(), 10, "the tabs' reads in flight at once");
 }
 
 // -- Comment… and the review actions (issue #705) ----------------------------
@@ -2543,4 +2544,136 @@ async fn add_label_with_nothing_to_add_or_no_labels_read_says_why() {
         assert!(disabled.starts_with(reason), "{reason}: {action:#?}");
         assert!(action.fields.is_empty(), "{action:#?}");
     }
+}
+
+/// One page of a label listing at `p`, answered for `page` only.
+async fn label_page(
+    server: &MockServer,
+    p: String,
+    page: u32,
+    labels: Value,
+    total: Option<usize>,
+) {
+    let mut answer = ResponseTemplate::new(200).set_body_json(labels);
+    if let Some(total) = total {
+        answer = answer.insert_header("X-Total-Count", total.to_string().as_str());
+    }
+    Mock::given(method("GET"))
+        .and(path(p))
+        .and(query_param("limit", "50"))
+        .and(query_param("page", page.to_string()))
+        .respond_with(answer)
+        .with_priority(1)
+        .mount(server)
+        .await;
+}
+
+/// *Add label…* reads every page of the repository's labels (#1235): where
+/// the first fifty are all on the pull request, the fifty-first is offered,
+/// not "every label is on this pull request". Gitea's `X-Total-Count` says
+/// when the listing is whole; without one, an empty page does (#81's rule).
+#[tokio::test]
+async fn add_label_offers_the_repositorys_labels_past_the_first_page() {
+    let first: Vec<Value> = (100..150)
+        .map(|id| json!({ "id": id, "name": format!("area/{id}") }))
+        .collect();
+    let mut pull = open_pull();
+    pull["labels"] = Value::Array(first.clone());
+    for total in [Some(51), None] {
+        let server = gitea(pull.clone(), json!([])).await;
+        let labels = format!("{REPO}/labels");
+        label_page(
+            &server,
+            labels.clone(),
+            1,
+            Value::Array(first.clone()),
+            total,
+        )
+        .await;
+        let last = json!([{ "id": 200, "name": "late" }]);
+        label_page(&server, labels.clone(), 2, last, total).await;
+        // Past the end: with a count, a page a correct read never asks for;
+        // without one, the empty page that ends the listing.
+        let beyond = match total {
+            Some(_) => json!([{ "id": 300, "name": "beyond" }]),
+            None => json!([]),
+        };
+        label_page(&server, labels, 3, beyond, total).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        assert_eq!(
+            labelled(&view, "Add label…"),
+            crate::source_action::add_label_action(&[("200", "late")], None),
+            "X-Total-Count {total:?}"
+        );
+    }
+}
+
+/// A short page does not end a label listing (#1235, #81's rule): a Gitea
+/// whose `MAX_RESPONSE_ITEMS` is under fifty answers fewer than were asked
+/// for on every page, and without a count only the empty page says the
+/// listing is whole.
+#[tokio::test]
+async fn add_label_reads_on_past_a_short_page() {
+    let server = gitea(open_pull(), json!([])).await;
+    let labels = format!("{REPO}/labels");
+    let first = json!([{ "id": 7, "name": "needs-qa" }]);
+    label_page(&server, labels.clone(), 1, first, None).await;
+    let second = json!([{ "id": 8, "name": "wontfix" }]);
+    label_page(&server, labels.clone(), 2, second, None).await;
+    label_page(&server, labels, 3, json!([]), None).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        labelled(&view, "Add label…"),
+        crate::source_action::add_label_action(&[("7", "needs-qa"), ("8", "wontfix")], None)
+    );
+}
+
+/// *Add label…* also offers the owning organisation's labels, every page of
+/// them, after the repository's own (#1235): a repository that uses only
+/// organisation labels has some to offer. A user owner is Gitea's 404 there
+/// and has none (the other tests here); any other failure says so.
+#[tokio::test]
+async fn add_label_offers_the_organisations_labels_too() {
+    const ORG: &str = "/api/v1/orgs/tidewater/labels";
+    let org_first: Vec<Value> = (500..550)
+        .map(|id| json!({ "id": id, "name": format!("org/{id}") }))
+        .collect();
+    let mut pull = open_pull();
+    pull["labels"] = Value::Array(org_first.clone());
+    for (own, offered) in [
+        (
+            json!([{ "id": 7, "name": "needs-qa" }]),
+            &[("7", "needs-qa"), ("900", "org-late")][..],
+        ),
+        (json!([]), &[("900", "org-late")][..]),
+    ] {
+        let server = gitea(pull.clone(), json!([])).await;
+        let count = own.as_array().map(Vec::len);
+        label_page(&server, format!("{REPO}/labels"), 1, own, count).await;
+        label_page(
+            &server,
+            ORG.to_owned(),
+            1,
+            Value::Array(org_first.clone()),
+            Some(51),
+        )
+        .await;
+        let last = json!([{ "id": 900, "name": "org-late" }]);
+        label_page(&server, ORG.to_owned(), 2, last, Some(51)).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        assert_eq!(
+            labelled(&view, "Add label…"),
+            crate::source_action::add_label_action(offered, None)
+        );
+    }
+
+    let server = gitea(open_pull(), json!([])).await;
+    answer(&server, ORG.to_owned(), 500, json!({ "message": "boom" })).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    let action = labelled(&view, "Add label…");
+    let disabled = action.disabled.clone().unwrap_or_default();
+    assert!(
+        disabled.starts_with("Could not read this repository's labels"),
+        "{action:#?}"
+    );
 }

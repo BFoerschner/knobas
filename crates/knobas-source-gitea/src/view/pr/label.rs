@@ -3,11 +3,18 @@
 //! here in ADR-0020's action vocabulary; the shell draws it and queues
 //! `source_action` with the answers, never knowing what a label is.
 
+use knobas_source::SourceError;
 use knobas_source::view::{ActionField, ChoiceOption, FieldKind, ViewAction};
 
 use super::Pull;
+use crate::GiteaSource;
 
-/// One label as Gitea lists it, a repository's or a pull request's.
+/// How many pages of fifty labels one listing is read to at most: a
+/// thousand labels, past which the rest is not offered.
+const LABEL_PAGES: u32 = 20;
+
+/// One label as Gitea lists it: a repository's, an organisation's or a
+/// pull request's.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub(super) struct Label {
     pub(super) id: u64,
@@ -15,7 +22,53 @@ pub(super) struct Label {
     pub(super) name: String,
 }
 
-/// *Add label…*: the repository's labels the pull request does not carry, as
+/// The labels a pull request of `owner/repo` may carry (#1235): every page of
+/// the repository's own, then, where `owner` is an organisation, every page
+/// of the organisation's. Gitea's 404 for the organisation's is a user owner,
+/// which has none. Any other failure is the reason the action is disabled.
+pub(super) async fn read(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+) -> Result<Vec<Label>, String> {
+    let client = &source.client;
+    let own = all_pages(|page| client.labels_as(owner, repo, page));
+    let org = async {
+        match all_pages(|page| client.org_labels_as(owner, page)).await {
+            Err(error) if error.status() == Some(404) => Ok(Vec::new()),
+            labels => labels,
+        }
+    };
+    let (mut labels, org) = tokio::try_join!(own, org).map_err(|error| error.to_string())?;
+    labels.extend(org);
+    Ok(labels)
+}
+
+/// Every label of one listing, page by page from the first, at most
+/// [`LABEL_PAGES`] pages. The listing is whole on an empty page -- empty, not
+/// short, as #81 rules for the sync's walks -- or once Gitea's
+/// `X-Total-Count` is reached, which spares the empty page's request.
+async fn all_pages<F, Fut>(mut page_of: F) -> Result<Vec<Label>, SourceError>
+where
+    F: FnMut(u32) -> Fut,
+    Fut: Future<Output = Result<(Vec<Label>, Option<usize>), SourceError>>,
+{
+    let mut labels = Vec::new();
+    for page in 1..=LABEL_PAGES {
+        let (batch, total) = page_of(page).await?;
+        if batch.is_empty() {
+            break;
+        }
+        labels.extend(batch);
+        if total.is_some_and(|total| labels.len() >= total) {
+            break;
+        }
+    }
+    Ok(labels)
+}
+
+/// *Add label…*: the labels the repository may use (its own and its
+/// organisation's, [`read`]) that the pull request does not carry, as
 /// a required choice, in every state (Gitea labels a closed or merged pull
 /// request too). Where none is left, or the labels could not be read, the
 /// action is drawn disabled saying why: a label can be made or taken off, so

@@ -51,7 +51,8 @@ pub(super) async fn draw(
             // on its own pull requests (#705). So do landing's reads (#708)
             // and the head commit's statuses (#710), which *Checks* draws and
             // landing holds against the base's required checks (#721).
-            // And the repository's labels, which *Add label…* offers (#1194).
+            // And the repository's labels and its organisation's, which *Add
+            // label…* offers (#1194, #1235).
             let (reviews, commits, comments, viewer, landing, statuses, labels) = tokio::try_join!(
                 at.reviews(),
                 at.commits(Some(&pull)),
@@ -263,15 +264,11 @@ impl PullView<'_> {
         })
     }
 
-    /// The repository's labels, for *Add label…* (#1194). A failed read costs
-    /// that action, which says so, and never the view.
+    /// The repository's labels and its organisation's, for *Add label…*
+    /// (#1194, #1235). A failed read costs that action, which says so, and
+    /// never the view.
     async fn labels(&self) -> Result<Result<Vec<label::Label>, String>, SourceError> {
-        Ok(self
-            .source
-            .client
-            .labels_as(self.owner, self.repo)
-            .await
-            .map_err(|error| error.to_string()))
+        Ok(label::read(self.source, self.owner, self.repo).await)
     }
 
     /// The login the token belongs to, or `None` where Gitea would not say
