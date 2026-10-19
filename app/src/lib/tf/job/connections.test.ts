@@ -2,7 +2,7 @@
 import { expect, test, vi } from "vitest";
 
 import { kindRegistry } from "../../shell/kind-registry.svelte";
-import { groupsOf, hiddenOf, viaLabel } from "./connections";
+import { groupsOf, hiddenOf, sectionOf, viaLabel } from "./connections";
 
 test("a set's reason names its rule in prototype-6's words", () => {
   expect(viaLabel({ kind: "epic", value: "jira:PAY-200" })).toBe("via epic PAY-200");
@@ -24,6 +24,17 @@ test("a run of a kind the CI adapters claim opens Builds' run page (#1278)", () 
     const member = { kind: "repo" as const, entity_id: "forge:run#77", entity_kind: "workflow_run", title: "ci.yml #77", hidden: false };
     const set = { id: "a", name: "a", via: { kind: "manual" as const, value: "jira:PAY-1", title: null }, members: [member] };
     expect(groupsOf({ sets: [set], parent: null })[0]!.rows[0]!.href).toBe("#/build/forge%3Arun%2377");
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test("a run of a kind the CI adapters claim is labelled Builds, as a build is (#1282)", () => {
+  const spy = vi.spyOn(kindRegistry, "frameKinds").mockReturnValue(["build", "workflow_run"]);
+  try {
+    expect(sectionOf("workflow_run")).toBe("Builds");
+    expect(sectionOf("build")).toBe("Builds");
+    expect(sectionOf("widget")).toBe("Widget");
   } finally {
     spy.mockRestore();
   }
