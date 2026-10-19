@@ -227,7 +227,18 @@ const NOTES_HASH = "#/settings/notes";
  */
 const UNKNOWN_RUN_KINDS = ["build"] as const;
 
-/** The CI role's run kinds as the claims stand, the built-in adapter's while they are not known (#1230, #1256). */
+/** What routing a run needs of the adapters' claims: the kind registry's `run` frame (#1256). */
+export type FrameKinds = Pick<KindRegistry, "frameKinds" | "load">;
+
+/**
+ * The CI role's run kinds as the claims stand, the built-in adapter's while
+ * they are not known (#1230, #1256). For routing a run's address only: which
+ * row opens Builds' run page ({@link itemHash}) and, from the same rule, which
+ * section a linked run names (`connections.ts`), where a row arrives with its
+ * kind and nothing else. No read and no count uses it: the mirror answers a
+ * role's runs and the job's tally says which section counted each line (#1300,
+ * ADR-0029 as amended). It goes once a row carries its frame (#1293, out of scope there).
+ */
 export function runKindsOf(registry: Pick<KindRegistry, "frameKinds">): readonly string[] {
   return registry.frameKinds(CI, "run") ?? UNKNOWN_RUN_KINDS;
 }
