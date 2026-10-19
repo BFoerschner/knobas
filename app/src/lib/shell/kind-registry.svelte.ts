@@ -28,7 +28,7 @@
  */
 import { listAdapters as realListAdapters } from "../ipc/sources";
 import type { KindInfo } from "../ipc/entity";
-import type { SourceDescriptor } from "../ipc/sources";
+import type { Frame, SourceDescriptor } from "../ipc/sources";
 
 /** The one command this needs, injectable so a test needs no Tauri bridge. */
 export interface KindRegistryPorts {
@@ -76,6 +76,13 @@ export interface KindRegistry {
    * none does — the rows then stand for themselves.
    */
   groupedUnder(kind: string): string | null;
+  /**
+   * The kinds the adapters that claim `role` declare `frame` on
+   * (`payload_paths`, ADR-0022, ADR-0029): the CI role's runs are TeamCity's
+   * `build` and whatever another CI adapter calls its run. `null` until the
+   * registry has been read, so a caller can tell *none* from *not known*.
+   */
+  frameKinds(role: string, frame: Frame): string[] | null;
   /** Read the registry. Idempotent after a success; retryable after a failure. */
   load(): Promise<void>;
 }
@@ -115,6 +122,13 @@ export function createKindRegistry(ports?: KindRegistryPorts): KindRegistry {
         if (paths && paths.state.length > 0 && parent) return parent.kind;
       }
       return null;
+    },
+    frameKinds(role: string, frame: Frame) {
+      if (!loaded) return null;
+      const kinds = state.adapters
+        .filter((adapter) => (adapter.roles ?? []).some((claim) => claim.role === role))
+        .flatMap((adapter) => (adapter.payload_paths ?? []).filter((paths) => paths.frame === frame).map((paths) => paths.kind));
+      return [...new Set(kinds)];
     },
     load() {
       if (loaded) return Promise.resolve();

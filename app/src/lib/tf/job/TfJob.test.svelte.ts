@@ -19,7 +19,7 @@ import type {
   StartWorkStep,
   StateChip,
 } from "../../ipc/entity";
-import type { CredentialHealth, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
+import type { CredentialHealth, SourceSyncStatus, SourceDescriptor, WriteOpPayload } from "../../ipc/sources";
 import type { RunningTimer, Week } from "../../ipc/time";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters, sessionFilter } from "../filter/filter-state.svelte";
@@ -27,7 +27,9 @@ import { createLayers, type Layers } from "../layers.svelte";
 import { createApps } from "../openin/apps.svelte";
 import { aroundLines } from "../tickets/tickets";
 import type { JobPorts } from "./ports";
-import { reachTally } from "./sections";
+import { createKindRegistry } from "../../shell/kind-registry.svelte";
+import { sourceRoles } from "../roles.svelte";
+import { reachTally, type FrameKinds } from "./sections";
 import TfJob from "./TfJob.svelte";
 
 let target: HTMLElement;
@@ -235,7 +237,13 @@ function ports(
 
 function open(
   segment = "PAY-231",
-  over: { ports?: JobPorts; timer?: { current: RunningTimer | null; elapsed: string | null }; layers?: Layers; tab?: string | null } = {},
+  over: {
+    ports?: JobPorts;
+    timer?: { current: RunningTimer | null; elapsed: string | null };
+    layers?: Layers;
+    tab?: string | null;
+    registry?: FrameKinds;
+  } = {},
 ) {
   job = mount(TfJob, {
     target,
@@ -248,6 +256,7 @@ function open(
       onstarttimer: (id: string, title: string) => calls.start.push([id, title]),
       ports: over.ports ?? ports(),
       today: () => new Date(2026, 9, 15, 14, 0),
+      ...(over.registry ? { registry: over.registry } : {}),
       apps: createApps({
         checkoutSettings: () => Promise.resolve(APPS),
         setCheckoutApplications: () => Promise.reject(new Error("not in this suite")),
@@ -902,4 +911,66 @@ test("a To Do ticket of somebody else's, or mine in progress, shows no Start wor
   await settle();
   expect(target.querySelector(".tf-steps")).toBeNull();
   expect(section("code")).not.toBeNull();
+});
+
+// ---- #1230: the sections pick by role, not by kind ----
+
+/** The adapters' claims: TeamCity's runs are `build`, another CI's are `workflow_run`. */
+function claimsRegistry() {
+  const descriptor = (adapter_kind: string, role: string, run: string | null) =>
+    ({
+      adapter_kind,
+      roles: [{ role, reads: [] }],
+      payload_paths: run === null ? [] : [{ kind: run, frame: "run" }, { kind: `${run}_pipeline`, frame: "pipeline" }],
+    }) as unknown as SourceDescriptor;
+  return createKindRegistry({
+    listAdapters: () =>
+      Promise.resolve([descriptor("teamcity", "ci", "build"), descriptor("forge", "ci", "workflow_run"), descriptor("gitea", "code-host", null)]),
+  });
+}
+
+const RUN = { ...build("forge:run#77", "ci.yml #77", "err", "failure", "forge"), kind: "workflow_run" };
+const MOCK_REPO = { ...code("mock:demo-repo", "repo", "demo-repo", "2026-10-15T13:00:00Z", null, null), source_id: "mock" };
+const MOCK_BUILD = build("mock:build#1", "Mock_Build #1", "err", "failed", "mock");
+
+test("a job's Builds section lists the runs of a CI source whose run kind is not build", async () => {
+  const p = ports({ others: [B_OK, RUN], jobReach: () => Promise.resolve([own(B_OK.entity_id, "build"), own(RUN.entity_id, "workflow_run")]) });
+  const registry = claimsRegistry();
+  open("PAY-231", { ports: p, registry });
+  await settle();
+  const runs = calls.list.find((filter) => filter.order === "latest_per_parent")!;
+  expect([...runs.kinds].sort()).toEqual(["build", "workflow_run"]);
+  // Where a run of another kind opens is `itemHash`'s question, not the section's.
+  const hrefs = [...section("builds").querySelectorAll(".tf-rows a")].map((row) => decodeURIComponent(row.getAttribute("href") ?? ""));
+  expect(hrefs.filter((href) => href.endsWith(RUN.entity_id) || href.endsWith(B_OK.entity_id))).toHaveLength(2);
+
+  const tally = await reachTally(p, ID, { registry });
+  expect(tally.find((line) => line.kind === "workflow_run")).toEqual({ kind: "workflow_run", tone: "err", count: 1 });
+});
+
+test("a job's sections drop the rows of a source that does not claim the section's role", async () => {
+  sourceRoles.take([
+    { id: "gitea", roles: [{ role: "code-host", reads: [] }] },
+    { id: "teamcity", roles: [{ role: "ci", reads: [] }] },
+    { id: "mock", roles: [] },
+  ]);
+  const p = ports({ others: [MOCK_REPO, B_OK, MOCK_BUILD] });
+  open("PAY-231", { ports: p, registry: claimsRegistry() });
+  await settle();
+  const hrefs = (id: string) => [...section(id).querySelectorAll(".tf-rows a")].map((row) => row.getAttribute("href") ?? "");
+  expect(hrefs("code").some((href) => href.includes("mock"))).toBe(false);
+  expect(hrefs("code")).toHaveLength(3);
+  expect(hrefs("builds")).toEqual([`#/build/${encodeURIComponent(B_OK.entity_id)}`]);
+
+  const tally = await reachTally(p, ID, { registry: claimsRegistry() });
+  const count = (kind: string) => tally.filter((line) => line.kind === kind).reduce((n, line) => n + line.count, 0);
+  expect([count("repo"), count("build")]).toEqual([1, 1]);
+});
+
+test("with no CI claim with a run, Builds reads nothing rather than every kind", async () => {
+  const registry = createKindRegistry({ listAdapters: () => Promise.resolve([]) });
+  open("PAY-231", { ports: ports({ others: [B_OK] }), registry });
+  await settle();
+  expect(calls.list.some((filter) => filter.order === "latest_per_parent")).toBe(false);
+  expect(calls.list.every((filter) => filter.kinds.length > 0)).toBe(true);
 });

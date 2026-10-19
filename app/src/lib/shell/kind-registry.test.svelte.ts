@@ -160,3 +160,19 @@ test("the registry is reactive, so a tile drawn before it loaded redraws", async
   expect(seen[0]).toBeNull();
   stop();
 });
+
+test("a frame's kinds come from the adapters claiming the role, and are unknown until read", async () => {
+  const claiming = (adapterKind: string, role: string, run: string): SourceDescriptor => ({
+    ...descriptor(adapterKind, []),
+    roles: [{ role, reads: [] }],
+    payload_paths: [{ kind: run, frame: "run" } as SourceDescriptor["payload_paths"][number]],
+  });
+  const registry = createKindRegistry({
+    listAdapters: () =>
+      Promise.resolve([claiming("teamcity", "ci", "build"), claiming("forge", "ci", "workflow_run"), claiming("other", "monitoring", "check_run")]),
+  });
+  expect(registry.frameKinds("ci", "run")).toBeNull();
+  await registry.load();
+  expect(registry.frameKinds("ci", "run")).toEqual(["build", "workflow_run"]);
+  expect(registry.frameKinds("ci", "pipeline")).toEqual([]);
+});

@@ -6396,3 +6396,14 @@ The merge-manager's own rulings:
   cap of N MiB"), and a structured field would add an IPC field needing a §10.8 entry and a
   reserved sign-off. `stoppedAt` in `settings.ts` reads it. **Reversing:** medium (add the field,
   read it instead of the regex).
+
+## #1230 The job page's sections pick by role (2026-10-19)
+
+- **The CI role's run kinds come from `kindRegistry.frameKinds(ci, run)`**, the adapters' claims
+  as `list_adapters` gives them, which the app already reads once at start. A new `listAdapters`
+  port on `JobPorts` would have touched every suite that builds one. **Reversing:** low.
+- **While the registry is unread, the job's Builds section reads `build`, as before.** An unread
+  source list narrows nothing, and this keeps that rule. With no claimed run kind it reads
+  nothing, because an empty `kinds` asks for every kind. **Reversing:** low.
+- **The checkout's clone candidates are kept to `code-host` sources too.** A clone is looked for
+  in the repositories Code draws. **Reversing:** low.
