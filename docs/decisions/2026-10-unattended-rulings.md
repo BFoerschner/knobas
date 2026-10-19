@@ -7572,3 +7572,36 @@ The merge-manager's rulings on #1313 and #1314 (Opus):
 - **Seams, chosen without a person to confirm them:** none new. The handler-list scan and the
   `AppState` scan are the seams the ticket names, plus the read-plans suite unedited.
   *Reversing:* n/a.
+
+## #1319: a board reader owns the Tickets page's reads (Opus implementer, 2026-10-19)
+
+- **A factory, no module singleton.** *Fork:* `createBoardReader` plus `export const
+  boardReader`, as the kind registry and the role module have, or the factory alone. *Ruling:*
+  the factory alone, built once per mount. The ports and the typing pause are the page's props
+  (a test hands in its own), so a window-wide instance would be built over the wrong ports; the
+  launcher's `Session`, the spec's precedent for a pause plus a generation, is built per
+  component the same way. *Reversing:* one export.
+- **The session store stays in the page; the reader is handed it.** The ticket gives the reader
+  the expanded columns and list-all and leaves the page the session store. The reader writes
+  `expanded`, `listAll`, `layout` and `lanes` into the view's entry of the store the page owns
+  (`ViewSessions`); `sort` and the selection stay the page's. `viewSession` makes an entry for
+  both. *Reversing:* move the store into the reader module.
+- **The view's own columns and its saved layout and lanes reach the reader through a getter**,
+  read when the board is drawn, not through `open`. A view saved over itself redraws with its
+  new columns without a re-read, as before; `open` takes exactly the ticket's three (base query,
+  saved view, session key) plus the filter as it stands. *Reversing:* widen `BoardScope`.
+- **The filter reaches the reader at each change** (`setFilter({ query, words })`), not read at
+  the end of the pause. `FilterBar` calls `onchange` after every change it makes, so the query a
+  paused read sends is the same. *Reversing:* pass a getter.
+- **Exactly as before, including what looks odd.** The lanes shown are not reset by a scope
+  change (only by another lane field), and the saved view is the one `open` was given rather
+  than read again at each read; neither changes what any write today reaches. *Reversing:* one
+  line each.
+- **The mount test keeps the drawing its moved cases also checked.** The pause-and-race case and
+  the preview-once case moved whole. Four drawing cases (fifty a column, a column's and the
+  list's *Show N more*, *Show N more lanes*) keep what they draw and lose their per-read cap
+  assertions, which the reader tests now own; the drawn counts still witness the wire.
+  *Reversing:* n/a.
+- **Seams, chosen without a person to confirm them:** the ones the ticket names, the reader's
+  operations and state on fake ports and a fake clock (`board-reader.test.svelte.ts`).
+  *Reversing:* n/a.
