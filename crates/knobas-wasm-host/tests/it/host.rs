@@ -122,6 +122,28 @@ fn the_descriptor_template_is_the_component_s_own() {
 }
 
 #[test]
+fn the_fixture_claims_its_custom_role_and_ci_with_every_optional_read() {
+    let roles = load_fixture().template().roles;
+    let claimed: Vec<&str> = roles.iter().map(|c| c.role.as_str()).collect();
+    assert_eq!(claimed, ["wasm-fixture:survey-desk", knobas_source::role::CI]);
+    let ci = roles.iter().find(|c| c.role == knobas_source::role::CI).unwrap();
+    assert_eq!(
+        ci.reads,
+        [
+            "run_log",
+            "pipeline_settings",
+            "older_runs",
+            "run_tests",
+            "test_history",
+            "run_artifacts",
+            "artifact_preview",
+            "download",
+            "run_chain",
+        ]
+    );
+}
+
+#[test]
 fn an_instance_of_another_kind_is_refused() {
     let mut other = instance("surveys", serde_json::json!({}));
     other.kind = "jira".into();
