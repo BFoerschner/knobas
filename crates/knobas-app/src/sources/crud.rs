@@ -1256,7 +1256,7 @@ fn role_kinds<'a>(role: &str, fillers: impl Iterator<Item = &'a SourceDescriptor
     let mut kinds = std::collections::BTreeSet::new();
     for template in fillers {
         if let Some(wanted) = builtin_role {
-            kinds.extend(listed_kinds(wanted, template));
+            kinds.extend(entity_list_kinds(wanted, template));
             continue;
         }
         let builtin: std::collections::BTreeSet<String> = template
@@ -1281,7 +1281,7 @@ fn role_kinds<'a>(role: &str, fillers: impl Iterator<Item = &'a SourceDescriptor
 /// the `pipelines` read's (narrowed to the same fillers), and CI's rows on
 /// the entity list are its runs, which the job's Builds section draws one per
 /// pipeline (#1344).
-fn listed_kinds(min: &knobas_source::role::Minimum, template: &SourceDescriptor) -> Vec<String> {
+fn entity_list_kinds(min: &knobas_source::role::Minimum, template: &SourceDescriptor) -> Vec<String> {
     let pipelines: Vec<&String> = template
         .payload_paths
         .iter()
