@@ -35,8 +35,10 @@
   /** `undefined` until the view answers; `null` when the source draws nothing for the kind. */
   let view = $state<SourceView | null | undefined>(undefined);
   let viewFailed = $state<string | null>(null);
-  /** Deferred sections read so far, by id; a string is the read's failure. */
-  let opened = $state<Record<string, ViewSection | string>>({});
+  /** A deferred section's read, once the reader opened it. */
+  type Opened = { section: ViewSection } | { failed: string };
+  /** Deferred sections read so far, by id. */
+  let opened = $state<Record<string, Opened>>({});
 
   $effect(() => {
     if (!ready) return;
@@ -64,21 +66,26 @@
     };
   });
 
-  function open(section: ViewSection) {
+  function readDeferred(section: ViewSection) {
     const entity = id;
     ports.entityView(entity, section.id).then(
       (answer) => {
         if (entity !== id) return;
-        opened[section.id] = answer?.sections.find((one) => one.id === section.id) ?? "the source drew nothing for it";
+        const found = answer?.sections.find((one) => one.id === section.id);
+        opened[section.id] = found ? { section: found } : { failed: "the source drew nothing for it" };
       },
       (error: unknown) => {
-        if (entity === id) opened[section.id] = ipcErrorMessage(error);
+        if (entity === id) opened[section.id] = { failed: ipcErrorMessage(error) };
       },
     );
   }
 
   const kindLabel = $derived(detail === null ? "" : (detail.kind_info?.label ?? detail.row.kind));
 </script>
+
+{#snippet textOf(text: string)}
+  <div class="tf-panel tf-item-textp"><p class="tf-item-text">{text}</p></div>
+{/snippet}
 
 {#snippet blocksOf(blocks: ViewBlock[])}
   {#each blocks as block, n (n)}
@@ -90,7 +97,7 @@
         {/each}
       </dl>
     {:else if block.type === "text"}
-      <div class="tf-panel tf-prdesc"><p class="tf-item-text">{block.text}</p></div>
+      {@render textOf(block.text)}
     {:else if block.type === "entities"}
       {#if block.title !== null}<h3 class="tf-cgroup-h">{block.title}</h3>{/if}
       <ul class="tf-item-rows">
@@ -133,7 +140,7 @@
       {:else if view === null}
         {#if viewFailed !== null}<p class="tf-cfail">Showing the mirror: {viewFailed}</p>{/if}
         {#if detail.body_text !== ""}
-          <div class="tf-panel tf-prdesc"><p class="tf-item-text">{detail.body_text}</p></div>
+          {@render textOf(detail.body_text)}
         {:else}
           <div class="tf-empty">The mirror holds no text for this {kindLabel.toLowerCase()}.</div>
         {/if}
@@ -144,12 +151,15 @@
             {#if view.sections.length > 1}<h2 class="tf-cgroup-h">{section.title}</h2>{/if}
             {#if !section.deferred}
               {@render blocksOf(section.blocks)}
-            {:else if typeof opened[section.id] === "object"}
-              {@render blocksOf((opened[section.id] as ViewSection).blocks)}
-            {:else if typeof opened[section.id] === "string"}
-              <p class="tf-cfail">Could not read {section.title}: {opened[section.id]}</p>
+            {:else if opened[section.id] !== undefined}
+              {@const read = opened[section.id]!}
+              {#if "section" in read}
+                {@render blocksOf(read.section.blocks)}
+              {:else}
+                <p class="tf-cfail">Could not read {section.title}: {read.failed}</p>
+              {/if}
             {:else}
-              <button type="button" class="tf-btn" onclick={() => open(section)}
+              <button type="button" class="tf-btn" onclick={() => readDeferred(section)}
                 >Show {section.title}{section.count !== null ? ` (${section.count})` : ""}</button
               >
             {/if}

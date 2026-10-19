@@ -6030,6 +6030,10 @@ The implementer's rulings (PR for #1201, on Opus):
   failed read draws it under *Showing the mirror: <reason>* (ADR-0020 rule 2). The payload is
   never drawn (ADR-0007), so the "generic projection" is the mirror's text, not its payload.
   **Reversing:** low.
+- **The page's own words.** Prototype-6 has no item page, so its few sentences are knobas' own:
+  *Showing the mirror: <reason>* is ADR-0020 rule 2's wording, *Show <section> (<count>)* opens a
+  deferred section, and *Could not read …* follows the pull request page's failure line.
+  **Reversing:** copy only.
 - **No navigation entry, no breadcrumb.** The page lights no nav entry (`sectionOf` is `null`) and
   draws its own header; `Esc` falls to the full-view rung (back to the job, else Tickets).
   **Reversing:** low.
