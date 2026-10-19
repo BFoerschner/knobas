@@ -13,8 +13,8 @@
   `MonitorKind`, `clone_urls::CloneFrom`, `role::RoleClaim`, `role::data::RoleMiss`) and the
   payload declarations in `knobas-spi-types` (`PayloadPath`, `ListPath`, `ParentPath`,
   `ProjectPath`, `KindPaths`, `TriggerPath`, `TriggerValue`, `Frame`, `StatePath`, `StateValue`)
-  derive `ts_rs::TS`, and so do `Trigger`, `BuildParameter`, `ReviewSide`, `KindInfo` and `Tone`,
-  with the same lines #1326's open PR adds (`KindInfo` and `Tone` export to `entity.ts`). Attributes only change the TypeScript: `SourceDescriptor::capabilities` is
+  derive `ts_rs::TS`; `Trigger`, `BuildParameter`, `ReviewSide`, `KindInfo` and `Tone` already
+  did (#1326). Attributes only change the TypeScript: `SourceDescriptor::capabilities` is
   `#[ts(as = "Vec<String>")]` (the shell reads `string[]`), `config_schema` is `unknown`,
   `StateValue::value` is `#[ts(type = "string | boolean")]`, and `WriteOp`'s
   `CreateMonitor::kind`, `RunBuild::clean_checkout` and `RunBuild::first_in_queue` are optional
@@ -57,9 +57,6 @@
   `File::create` and `write_all`). The rule test gains four assertions for both.
 
   **Module layout.** `app/src/lib/ipc/generated/sources.ts`, booked by #1325's entry, now
-  holds the whole barrel's types. And `generated/entity.ts`, booked there for #1326, arrives
-  early holding `KindInfo` and `Tone`, which `SourceDescriptor`, `SourceSummary` and
-  `StateValue` reach and which are the entity barrel's (#1325's convention for a shared type):
-  the hand-written `entity.ts` keeps its declarations and `entity_mirror.rs` its pins until #1326
-  switches it, and the two spellings are structurally one type. Whichever of #1326 and #1327
-  merges second regenerates both files.
+  holds the whole barrel's types, which #1326 started with the four the entity types reach.
+  `KindInfo` and `Tone`, which `SourceDescriptor`, `SourceSummary` and `StateValue` reach, stay
+  in `generated/entity.ts` and are imported from there.

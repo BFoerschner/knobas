@@ -8149,8 +8149,7 @@ reserved-steps rule. The entry is `docs/contract/10.8/1327-the-sources-barrel-is
   references, the shell-never-reads rules on the descriptor. A type's pointer to its own Rust
   path did not. Variant docs moved into the enum's doc for fourteen enums (all but `WriteOp`).
   Doc references to the deleted suite in `config_schema_mirror.rs`, `assets_ipc.rs`,
-  `commands::time` and `knobas_sync::mirror` are reworded; those in `entity_mirror.rs` are left
-  for #1326, which deletes that file.
+  `commands::time` and `knobas_sync::mirror` are reworded.
 - **The write choke point and the generator.** *Fork:* `write_choke_point` flagged
   `knobas-core/src/write_queue.rs` (`#[ts(type = "WriteOpPayload")]`) and `ipc_mirror.rs`
   (`knobas_source::WriteOp::export_all`) as second write paths. Add both to `HANDS_TO_THE_QUEUE`,
@@ -8161,6 +8160,3 @@ reserved-steps rule. The entry is `docs/contract/10.8/1327-the-sources-barrel-is
   substring match that fires on a TypeScript name is a false positive, and the identifier match
   loses nothing in the direction the test guards (a dispatch has to name `WriteOp` itself).
   *Reversing:* small; the rule test pins both.
-- **`generated/entity.ts` arrives early.** `KindInfo` and `Tone` are the entity barrel's and
-  are reached from sources types; exported to `entity.ts` with the derive lines #1326's PR adds,
-  so the two PRs merge as one. *Reversing:* none; #1326 extends the file.
