@@ -944,3 +944,10 @@ async fn every_path_the_claimed_roles_require_resolves_on_the_corpus() {
         }
     }
 }
+
+/// #1229 after #1199: the first-sync check the engine runs (`DataCheck`) hides
+/// neither claimed role on the mock's corpus.
+#[tokio::test]
+async fn the_first_sync_check_shows_both_claimed_roles_filled_on_the_corpus() {
+    knobas_source::contract::fills_its_roles(&MockSource::new()).await;
+}

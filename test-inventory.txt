@@ -3184,6 +3184,7 @@ knobas-source-mock	test/it	contract::test_connection_reports_what_it_reached
 knobas-source-mock	test/it	contract::the_dataset_records_who_triggered_build_1188
 knobas-source-mock	test/it	contract::the_descriptor_template_is_the_default_instance
 knobas-source-mock	test/it	contract::the_first_run_subtitle_names_the_size_of_the_corpus_it_loads
+knobas-source-mock	test/it	contract::the_first_sync_check_shows_both_claimed_roles_filled_on_the_corpus
 knobas-source-mock	test/it	contract::the_mock_claims_the_code_host_and_the_ticket_system
 knobas-source-mock	test/it	contract::the_opt_in_tombstone_reports_one_deterministic_deletion
 knobas-source-mock	test/it	contract::the_tombstoning_mock_passes_the_contract_battery
