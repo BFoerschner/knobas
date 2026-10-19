@@ -175,7 +175,8 @@ export const columnKey = (column: Pick<MiniBoardColumn, "status">) => column.sta
 const expandKey = (lane: Lane, column: MiniBoardColumn) =>
   lane.key === null ? columnKey(column) : `${lane.key}|${columnKey(column)}`;
 
-function messageOf(error: unknown): string {
+/** What a failed read says. */
+export function messageOf(error: unknown): string {
   if (error && typeof error === "object" && "message" in error) return String(error.message);
   return String(error);
 }

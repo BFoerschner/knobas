@@ -114,7 +114,7 @@
   import { jobHash } from "../route";
   import { sourceHash } from "../settings/settings";
   import { sourceRoles, TICKET_SYSTEM, TRANSLATE_QUERY } from "../roles.svelte";
-  import { columnKey, createBoardReader, viewSession } from "./board-reader.svelte";
+  import { columnKey, createBoardReader, messageOf, viewSession } from "./board-reader.svelte";
   import SavedViewSourceLine from "./SavedViewSourceLine.svelte";
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
@@ -354,11 +354,6 @@
     reader.refresh();
   }
 
-  function messageOf(error: unknown): string {
-    if (error && typeof error === "object" && "message" in error) return String(error.message);
-    return String(error);
-  }
-
   // ---- the views' writes ----
   /**
    * *Save as a view* (R-3.12): the text the bar sends now, and how the
@@ -441,16 +436,18 @@
   });
 
   // ---- what is drawn, and the selection ----
+  /** The board's columns as read, before the view's own gather them. */
+  const boardColumns = $derived(reader.board?.columns ?? []);
   /** Each card's status, whatever column of the view it sits in. */
   const statusOf = $derived(
-    new Map((reader.board?.columns ?? []).flatMap((column) => column.cards.map((card) => [card.entity_id, column.status]))),
+    new Map(boardColumns.flatMap((column) => column.cards.map((card) => [card.entity_id, column.status]))),
   );
   /** The list's rows: every card read, in the header's order. */
   const rows = $derived(
     sortRows(
-      (reader.board?.columns ?? []).flatMap((column) => column.cards.map((card) => ({ card, status: column.status }))),
+      boardColumns.flatMap((column) => column.cards.map((card) => ({ card, status: column.status }))),
       showing.sort,
-      (reader.board?.columns ?? []).map((column) => column.status),
+      boardColumns.map((column) => column.status),
     ),
   );
   /** The list's columns: the view's, in the list's order (R-3.16). */
@@ -459,9 +456,9 @@
   );
   const SORTABLE: readonly SortColumn[] = ["key", "summary", "status", "priority", "assignee", "updated"];
   const sortable = (column: string): column is SortColumn => (SORTABLE as readonly string[]).includes(column);
-  const listCut = $derived((reader.board?.columns ?? []).some((column) => column.cards.length < column.total));
+  const listCut = $derived(boardColumns.some((column) => column.cards.length < column.total));
   const listRest = $derived(
-    (reader.board?.columns ?? []).reduce((all, column) => all + column.total - column.cards.length, 0),
+    boardColumns.reduce((all, column) => all + column.total - column.cards.length, 0),
   );
   /** What is on screen, in reading order: the first is selected when the selection is not. */
   const visible = $derived(
