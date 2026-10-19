@@ -323,7 +323,14 @@ fn own_draft(name: String) -> TicketViewDraft {
 async fn a_jira_view_hides_and_shows_again_and_keeps_its_tickets() {
     let pool = pool().await;
     let (p, id, _) = seeded(&pool).await;
-    assert!(!listed(&pool, &id).await.unwrap().source_view.unwrap().hidden);
+    assert!(
+        !listed(&pool, &id)
+            .await
+            .unwrap()
+            .source_view
+            .unwrap()
+            .hidden
+    );
 
     ticket_views::hide(&pool, &id, true).await.expect("hide");
     let row = listed(&pool, &id)
@@ -333,7 +340,14 @@ async fn a_jira_view_hides_and_shows_again_and_keeps_its_tickets() {
     assert_eq!(row.count, Some(4), "it keeps syncing");
 
     ticket_views::hide(&pool, &id, false).await.expect("show");
-    assert!(!listed(&pool, &id).await.unwrap().source_view.unwrap().hidden);
+    assert!(
+        !listed(&pool, &id)
+            .await
+            .unwrap()
+            .source_view
+            .unwrap()
+            .hidden
+    );
 
     let own = ticket_views::save(&pool, own_draft(format!("{p} mine")))
         .await
