@@ -25,13 +25,14 @@ use std::time::Instant;
 
 use crate::probe_snapshot;
 use knobas_app::commands::entity::{
-    EntityFilter, EntityOrder, get_entity_inner, inbox_count_inner, inbox_items_inner,
-    list_entities_inner, list_projects_inner, recent_activity_inner, room_suggestions_inner,
+    get_entity_inner, inbox_count_inner, inbox_items_inner, list_entities_inner,
+    list_projects_inner, recent_activity_inner, room_suggestions_inner,
 };
 use knobas_app::commands::search::{
     filter_suggestions_inner, launcher_home_inner, search_inner, searcher, smart_lists_inner,
 };
 use knobas_app::sources::Registry;
+use knobas_core::entity_list::{EntityFilter, EntityOrder};
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::{AuthMethod, Cursor, Sink, Source, SourceDescriptor, SourceError, SyncItem};
 use knobas_sync::config::{self, AuthKind, InsertConfig};

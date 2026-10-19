@@ -225,7 +225,7 @@ export interface LauncherHome {
   smart_lists: SmartListSummary[];
   /**
    * `knobas_search::EntityRow`, which is a *different Rust struct* from
-   * `knobas_app::commands::entity::EntityRow` with the same six fields on the
+   * `knobas_core::entity_list::EntityRow` with the same six fields on the
    * wire. One TypeScript type for both is the truth about the JSON, and a Rust
    * test in `commands/search.rs` fails if the two ever stop agreeing.
    */

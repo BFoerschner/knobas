@@ -29,10 +29,13 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use knobas_app::commands::entity::{
-    AttentionGroup, EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, GroupTally,
-    KindTally, NoteLinkInput, PipelineRow, RunRow, SourceRef, SuggestionPage, UrlMatch,
+    EntityDetail, NoteLinkInput, SourceRef, SuggestionPage, UrlMatch,
 };
 use knobas_core::activity::ActivityRow;
+use knobas_core::builds::{PipelineRow, RunRow};
+use knobas_core::entity_list::{
+    AttentionGroup, EntityFilter, EntityOrder, EntityPage, EntityRow, GroupTally, KindTally,
+};
 use knobas_core::link::{LinkEnd, LinkEntry, LinkRow, Origin};
 use knobas_core::suggest::{RuleClass, SuggestionEntry};
 use knobas_sync::mirror::{declared_inline_union, declared_union, interface_body};

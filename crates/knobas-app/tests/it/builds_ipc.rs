@@ -373,7 +373,7 @@ async fn a_pin_is_kept_until_it_is_taken_back() {
     let tc = source(&pool).await;
     let tests = configuration(&pool, &tc, "Payout_IntegrationTests", "Integration Tests").await;
     let lint = configuration(&pool, &tc, "Payout_Lint", "Lint").await;
-    let pinned = |all: &[knobas_app::commands::entity::PipelineRow], id: &str| {
+    let pinned = |all: &[knobas_core::builds::PipelineRow], id: &str| {
         all.iter().find(|p| p.entity_id == id).unwrap().pinned
     };
 
@@ -403,7 +403,7 @@ async fn a_pin_is_kept_until_it_is_taken_back() {
 
     let stored: serde_json::Value =
         sqlx::query_scalar("select value from knobas.setting where key = $1")
-            .bind(knobas_app::commands::entity::PINS_SETTING)
+            .bind(knobas_core::builds::PINS_SETTING)
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -1093,7 +1093,7 @@ async fn a_shared_sha_links_the_commit_in_the_repository_the_pipeline_builds() {
         )
         .await;
     }
-    let commits = |runs: Vec<knobas_app::commands::entity::RunRow>| {
+    let commits = |runs: Vec<knobas_core::builds::RunRow>| {
         runs.into_iter()
             .map(|r| (r.entity_id, r.commit_id))
             .collect::<Vec<_>>()
@@ -1211,7 +1211,7 @@ async fn a_shared_sha_links_nothing_it_cannot_pin_and_never_waits_on_a_silent_so
         )
         .await;
     }
-    let commits = |runs: Vec<knobas_app::commands::entity::RunRow>| {
+    let commits = |runs: Vec<knobas_core::builds::RunRow>| {
         runs.into_iter()
             .map(|r| (r.entity_id, r.commit_id))
             .collect::<Vec<_>>()

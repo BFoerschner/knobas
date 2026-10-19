@@ -1174,15 +1174,9 @@ fn still_claimed(
         .collect()
 }
 
-/// What a read asked for a role is scoped to (#1294, ADR-0029 as amended on
-/// 2026-10-19): the sources that fill it, and the kinds that are its.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RoleScope {
-    /// The sources filling the role, id order.
-    pub sources: Vec<String>,
-    /// The role's kinds among its fillers, sorted. See [`role_scope`].
-    pub kinds: Vec<String>,
-}
+/// What a read asked for a role is scoped to: [`role_scope`]'s answer, which
+/// the entity list read takes as its fillers (#1317).
+pub use knobas_core::entity_list::RoleScope;
 
 /// The ids of the sources that **fill** `role`, id order.
 ///

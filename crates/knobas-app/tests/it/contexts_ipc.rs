@@ -10,10 +10,11 @@
 //! per run and assertions are set membership, never absolute totals.
 
 use knobas_app::commands::entity::{
-    EntityFilter, EntityOrder, create_context_inner, create_link_inner, list_entities_inner,
-    promote_context_inner, room_suggestions_inner,
+    create_context_inner, create_link_inner, list_entities_inner, promote_context_inner,
+    room_suggestions_inner,
 };
 use knobas_app::{IpcError, IpcErrorCode};
+use knobas_core::entity_list::{EntityFilter, EntityOrder};
 use sqlx::PgPool;
 
 async fn pool() -> PgPool {

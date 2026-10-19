@@ -12,7 +12,7 @@ import type { BuildParameter, QueuedWrite, ReviewSide, Trigger, WriteOpPayload, 
 import type { DayWindow } from "./time";
 
 /**
- * One line in a room — `knobas_app::commands::entity::EntityRow`.
+ * One line in a room — `knobas_core::entity_list::EntityRow`.
  *
  * Deliberately not the whole mirror row: `body_text` and `payload` belong to
  * the detail view, and a tile that fetched them would pull the corpus into the
@@ -459,7 +459,7 @@ export function getEntity(entityId: string): Promise<EntityDetail> {
 }
 
 /**
- * One run of a pipeline — `knobas_app::commands::entity::RunRow` (#848). Every
+ * One run of a pipeline — `knobas_core::builds::RunRow` (#848). Every
  * field is read through the run kind's declared paths; `started` and
  * `finished` are RFC 3339, `null` while queued or in flight.
  */
@@ -493,7 +493,7 @@ export interface RunRow {
 }
 
 /**
- * One pipeline of the Builds list — `knobas_app::commands::entity::PipelineRow`
+ * One pipeline of the Builds list — `knobas_core::builds::PipelineRow`
  * (#848). `source_name` is the one place the source's word appears (ADR-0022);
  * `recent` is the last twelve runs, newest first.
  */

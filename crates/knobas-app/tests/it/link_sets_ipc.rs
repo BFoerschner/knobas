@@ -8,9 +8,10 @@
 
 use knobas_app::IpcErrorCode;
 use knobas_app::commands::entity::{
-    EntityFilter, EntityOrder, list_entities_inner, promote_context_inner, room_suggestions_inner,
+    list_entities_inner, promote_context_inner, room_suggestions_inner,
 };
 use knobas_app::link_sets::{self, LinkSetDraft, LinkSetMember, LinkSetRule};
+use knobas_core::entity_list::{EntityFilter, EntityOrder};
 use knobas_core::reach::{self, Origin};
 use sqlx::PgPool;
 use std::collections::BTreeMap;

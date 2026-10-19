@@ -7692,3 +7692,60 @@ The merge-manager's rulings on #1315 (Opus):
 - **Seams, chosen without a person to confirm them:** the ones the ticket names, the reader's
   operations and slots on fake ports that hold a ticket's reads until released
   (`job-reader.test.svelte.ts`). *Reversing:* n/a.
+## #1317 and #1318: the entity list read and the Builds frame's mirror reads move to core (Opus implementer, 2026-10-19)
+
+- **The core read takes the role's fillers resolved.** *Fork:* hand `knobas_core::entity_list::read`
+  the adapter registry, a callback, or the scope the registry answers. *Ruling:* the scope, as
+  `Option<RoleScope>` (the struct moved to core; `sources::crud` re-exports it). The registry
+  stays in the app crate (spec story 7). The filter's `role` is still the switch: a role named
+  with no fillers passed reads as a role nobody fills, an empty page, never an unscoped one. The
+  shim now resolves the scope before the context and reach reads rather than after; the three are
+  independent reads and no statement or bind changed. *Reversing:* resolve it after them again in
+  the shim, at the cost of passing the context and reach sets in too.
+- **A refused filter is `CoreError::Invalid`.** *Fork:* a new `CoreError` variant, or a
+  read-specific error type. *Ruling:* the variant, mapped to `invalid` beside `AnchorIsAContext`;
+  its message is the old one verbatim. A query failure now crosses as `CoreError::Db`, which maps
+  to `internal` as before but prefixes the message with `database: `, as every other core read
+  (the mini board's included) already does. *Reversing:* match `Db` in the shim and convert the
+  inner `sqlx::Error` directly.
+- **The moved types are not re-exported at their old app paths.** The tickets say the tests
+  re-point, so they do, and a second public path would let the next caller import from either.
+  The `_inner` reads keep their paths: they are the shims, and they hold what core does not (the
+  registry, the declarations' source, the configured identity). *Reversing:* one `pub use` line
+  per file.
+- **What of the Builds frame moved.** The four mirror statements (`PIPELINES`,
+  `PIPELINE_RUNS_OF`, `COMMITS_OF`, `IS_PIPELINE`), both macros, `RunRow`, `PipelineRow`, the
+  pins key and `RawRun` with `RunRow::read` (public, because the live older-runs and chain reads
+  build runs the source answered through it). The #1144 commit resolution (`with_commits`) stays
+  in the app: its mirror half is `builds::commits_of`, its other half is a live settings read.
+  `job_pipelines` stays with the job's reads, so the frame-kinds CTE is `#[macro_export]`ed as
+  `knobas_core::frame_kinds_cte!`. `pipelines_inner` is fourteen lines, two over the ticket's
+  twelve, for the commit linking that needs the app. *Reversing:* move `with_commits` behind a
+  trait in core.
+- **`test-util` in core.** `EntityFilter` and `EntityOrder` derive `Serialize`, and `RunRow` and
+  `PipelineRow` `Deserialize`, behind a new `knobas-core/test-util` feature that `knobas-app`'s
+  `test-util` turns on, so production builds stay as they were.
+- **§10.8: a dated amendment to #1316's entry, not a new entry.** No file under `commands/` is
+  added or removed; the entry's table and its "every path stays" now say less than is true, so
+  the amendment names what left `list.rs` and `builds.rs` and where it went.
+
+The merge-manager's rulings on #1317 and #1318 (Opus):
+
+- **"The app shims stay twelve lines each" (#1318).** *Fork:* hold the PR until `pipelines_inner`
+  (14) and `runs_of_pipeline` (19) fit, or tick it with a note. *Ruling:* ticked with a note. The
+  lines over twelve are the call into `with_commits`, whose other half is a live settings read,
+  and the same ticket keeps the live reads in the app; splitting the shims into helpers would
+  meet the count and not the intent. The statements, binds and row mapping are all in core.
+  *Reversing:* move `with_commits` behind a trait in core.
+- **The fillers resolved before the context and reach reads (#1317).** *Fork:* restore the old
+  order, or accept it. *Ruling:* accepted. All three are reads with nothing written between, so
+  each sees the same set as before; the one extra query is `role_scope` on a filter whose
+  `updated_within_days` is then refused, which answers the same `invalid`. *Reversing:* resolve
+  the scope in core through a callback.
+- **The `database: ` prefix on a query failure.** *Fork:* keep the old message or accept core's.
+  *Ruling:* accepted. No test, page or frontend string matches an `internal` message from these
+  reads, and `CoreError::Db`'s arm still notes a pool timeout. *Reversing:* match `Db` in the
+  shims.
+- **The §10.8 amendment, tightened** to match the diff: it now names `RoleScope`, `RawRun` and
+  `RunRow::read`, the run-columns macro, `declared_paths` left in `list.rs`, the two caller-visible
+  changes above, `CoreError::Invalid` and core's `test-util`. *Reversing:* n/a.

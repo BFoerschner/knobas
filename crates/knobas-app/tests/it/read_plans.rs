@@ -182,7 +182,7 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     ] {
         let plan = explain(
             &pool,
-            knobas_app::commands::entity::planned_latest_per_parent(),
+            knobas_core::entity_list::planned_latest_per_parent(),
             |q| {
                 q.bind(None::<Vec<String>>)
                     .bind(Some(vec!["build".to_owned()]))

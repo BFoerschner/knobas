@@ -6,9 +6,10 @@
 //! membership, never absolute row totals.
 
 use knobas_app::commands::entity::{
-    DEFAULT_RELATION, EntityFilter, EntityOrder, create_link_inner, get_entity_inner,
-    list_entities_inner, list_projects_inner, recent_activity_inner, unlink_inner,
+    DEFAULT_RELATION, create_link_inner, get_entity_inner, list_entities_inner,
+    list_projects_inner, recent_activity_inner, unlink_inner,
 };
+use knobas_core::entity_list::{EntityFilter, EntityOrder};
 use knobas_source_mock::MockSource;
 use sqlx::PgPool;
 
@@ -386,7 +387,7 @@ async fn the_recency_window_is_bound_as_a_parameter() {
         ..all()
     };
 
-    let ids = |page: knobas_app::commands::entity::EntityPage| {
+    let ids = |page: knobas_core::entity_list::EntityPage| {
         page.rows
             .into_iter()
             .map(|row| row.entity_id)
@@ -489,7 +490,7 @@ async fn a_project_narrows_the_room_within_its_sources() {
         project: project.map(str::to_owned),
         ..all()
     };
-    let ids = |page: knobas_app::commands::entity::EntityPage| {
+    let ids = |page: knobas_core::entity_list::EntityPage| {
         page.rows
             .into_iter()
             .map(|row| row.entity_id)
@@ -792,7 +793,7 @@ async fn a_confluence_space_is_a_project_room_and_a_jira_project_is_another() {
     );
 
     // -- the room, narrowed by the same read --------------------------------
-    let ids = |page: knobas_app::commands::entity::EntityPage| {
+    let ids = |page: knobas_core::entity_list::EntityPage| {
         page.rows
             .into_iter()
             .map(|row| row.entity_id)
@@ -1627,7 +1628,7 @@ async fn authored(pool: &PgPool, entity: &str, author: &str) {
 async fn code_room(
     username: Option<&str>,
     kinds: &[&str],
-) -> (String, knobas_app::commands::entity::EntityPage) {
+) -> (String, knobas_core::entity_list::EntityPage) {
     let pool = seeded().await;
     let gitea = configured_as(&pool, username).await;
     let repo =
@@ -1727,7 +1728,7 @@ async fn code_room(
 /// (ADR-0007: the miss fails toward drawing it).
 #[tokio::test]
 async fn the_code_tile_draws_what_needs_me_first_in_four_groups() {
-    use knobas_app::commands::entity::{AttentionGroup, GroupTally};
+    use knobas_core::entity_list::{AttentionGroup, GroupTally};
     let (gitea, page) = code_room(Some("björn"), &["pr", "branch"]).await;
 
     let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
@@ -1782,7 +1783,7 @@ async fn the_code_tile_draws_what_needs_me_first_in_four_groups() {
 /// across the live corpus, not the room.
 #[tokio::test]
 async fn a_branch_whose_pull_request_is_outside_the_room_stays_proposed() {
-    use knobas_app::commands::entity::{AttentionGroup, GroupTally};
+    use knobas_core::entity_list::{AttentionGroup, GroupTally};
     let (gitea, page) = code_room(Some("björn"), &["branch"]).await;
 
     let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
@@ -1842,7 +1843,7 @@ async fn a_code_tile_with_no_identity_draws_todays_order() {
 /// maximised tile. Its pull requests are other open ones.
 #[tokio::test]
 async fn a_source_without_identity_keeps_its_branches_drawn_in_a_mixed_room() {
-    use knobas_app::commands::entity::{AttentionGroup, GroupTally};
+    use knobas_core::entity_list::{AttentionGroup, GroupTally};
     let pool = seeded().await;
     let mine = configured_as(&pool, Some("björn")).await;
     let anon = configured_as(&pool, None).await;
@@ -2005,7 +2006,7 @@ async fn code_pull(
 }
 
 /// The Code tile's attention page over `sources`' pull requests and branches.
-async fn code_page(pool: &PgPool, sources: &[&String]) -> knobas_app::commands::entity::EntityPage {
+async fn code_page(pool: &PgPool, sources: &[&String]) -> knobas_core::entity_list::EntityPage {
     list_entities_inner(
         pool,
         &EntityFilter {
@@ -2030,7 +2031,7 @@ async fn code_page(pool: &PgPool, sources: &[&String]) -> knobas_app::commands::
 /// whose repo declares no default.
 #[tokio::test]
 async fn a_repos_default_branch_is_drawn_in_no_group() {
-    use knobas_app::commands::entity::{AttentionGroup, GroupTally};
+    use knobas_core::entity_list::{AttentionGroup, GroupTally};
     let pool = seeded().await;
     let mine = configured_as(&pool, Some("björn")).await;
     let anon = configured_as(&pool, None).await;
@@ -2147,7 +2148,7 @@ async fn an_ungrouped_room_draws_no_default_branch_either() {
 /// own branch still proposes it.
 #[tokio::test]
 async fn a_fork_pull_request_does_not_propose_the_base_repos_branch() {
-    use knobas_app::commands::entity::{AttentionGroup, GroupTally};
+    use knobas_core::entity_list::{AttentionGroup, GroupTally};
     let pool = seeded().await;
     let mine = configured_as(&pool, Some("björn")).await;
     let base = "tidewater/payout-service";
@@ -2199,7 +2200,7 @@ async fn a_fork_pull_request_does_not_propose_the_base_repos_branch() {
 /// fits is the one it lands in.
 #[tokio::test]
 async fn my_pull_request_asking_me_is_drawn_once_as_review_requested() {
-    use knobas_app::commands::entity::{AttentionGroup, GroupTally};
+    use knobas_core::entity_list::{AttentionGroup, GroupTally};
     let pool = seeded().await;
     let mine = configured_as(&pool, Some("björn")).await;
     let base = "tidewater/payout-service";
@@ -2403,7 +2404,7 @@ async fn a_kind_with_no_declared_state_falls_back_to_recency() {
             recency.rows.len() > 1,
             "the mock corpus has several {kind} rows"
         );
-        let ids = |page: &knobas_app::commands::entity::EntityPage| -> Vec<String> {
+        let ids = |page: &knobas_core::entity_list::EntityPage| -> Vec<String> {
             page.rows.iter().map(|r| r.entity_id.clone()).collect()
         };
         for order in [EntityOrder::Attention, EntityOrder::LatestPerParent] {

@@ -693,10 +693,10 @@ mod tests {
     /// **two** Rust structs, so the two have to keep agreeing.
     ///
     /// `knobas_search::EntityRow` (stream E's, the search corpus) and
-    /// `knobas_app::commands::entity::EntityRow` (stream D's, a room line) were
+    /// `knobas_core::entity_list::EntityRow` (stream D's, a room line) were
     /// declared independently and serialize identically. `app/src/lib/ipc/
     /// search.ts` imports D's declaration rather than repeating it, which is
-    /// only honest while that holds -- and neither crate compiles against the
+    /// only honest while that holds -- and neither struct is declared from the
     /// other, so nothing but this notices the day one of them gains a field.
     ///
     /// **`path` is carried with a value, not left `None`** (#284). Both
@@ -725,7 +725,7 @@ mod tests {
             state: state.clone(),
         })
         .expect("serializes");
-        let room = serde_json::to_value(crate::commands::entity::EntityRow {
+        let room = serde_json::to_value(knobas_core::entity_list::EntityRow {
             entity_id: "jira:PAY-231".to_owned(),
             kind: "ticket".to_owned(),
             source_id: "jira".to_owned(),
