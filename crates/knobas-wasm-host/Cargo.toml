@@ -9,9 +9,10 @@ version.workspace = true
 # that and nothing else.
 [features]
 # `fixture_component` and `load_fixture`, for the tests that load the fixture
-# component: this crate's own and `knobas-app`'s; and `fake_dns`, for the
-# tests that point a host name at a local server (#1244). Off in every
-# shipped build.
+# component: this crate's own and `knobas-app`'s; `fake_dns`, for the
+# tests that point a host name at a local server (#1244); and `fake_proxy`,
+# which sends a name through a test's proxy (#1283) and takes the system
+# proxy's place on the external adapters' clients. Off in every shipped build.
 test-util = []
 
 [dependencies]

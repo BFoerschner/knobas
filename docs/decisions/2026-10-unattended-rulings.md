@@ -6812,3 +6812,37 @@ The merge-manager's rulings (Opus):
   system's query would otherwise arrive under Jira's name. `query` would clash with the view's
   own knobas-grammar `query` on the same row, and renaming the `sync.saved_view.jql` column is a
   migration the ticket did not ask for, so it is left to #1285. *Reversing:* low.
+
+### #1283: implementer's rulings (Opus)
+
+- **How a guarded request is held when a system proxy carries it.** *Fork:* the ticket's three:
+  send guarded requests direct (`no_proxy`), resolve and judge the name before handing it to the
+  proxy, or refuse a guarded request a proxy would carry. *Ruling:* resolve and judge first, then
+  hand it over. Both other choices cut off a reader whose only way out is the proxy (a
+  corporate network, an endpoint agent's local proxy) from every host a manifest fixes, and
+  sending direct also goes around a proxy the reader configured. Judging first holds a name that
+  points home, which is the criterion's case. *Cost:* a name whose owner answers public to knobas
+  and local to the proxy (rebinding, TTL 0) still reaches the proxy's side; with a proxy on the
+  reader's machine, that is the reader's loopback. No credential goes there. *Reversing:* low
+  (one block in `net::send`).
+- **The check runs for every guarded request, proxied or not.** *Fork:* judge first only when a
+  proxy will carry the request. *Ruling:* every one. reqwest does not say which requests its
+  system proxy takes, and matching the system's settings ourselves would be a second copy that
+  can disagree with it. On a direct connection the resolver still judges the addresses the
+  connector then uses, so rebinding stays closed there; the cost is one more lookup, which the
+  system's cache mostly answers. *Reversing:* low.
+- **A name knobas cannot resolve goes on to the proxy.** *Fork:* refuse it. *Ruling:* go on. A
+  network whose only way out is the proxy may answer no outside name to the reader's machine; on
+  a direct connection the resolver fails the same lookup anyway. A hostile owner gains nothing
+  the rebinding cost above does not already give. *Reversing:* low.
+- **The proxy seam for tests.** *Fork:* a test sets the process's proxy settings, or the client
+  takes a test's proxy. *Ruling:* `fake_proxy(name, url)` under `test-util`, a `Proxy::custom`
+  on the two clients that sends only the names a test registered through the test's proxy. A
+  proxy set by a test on its own client cannot reach the process-wide clients, and environment
+  proxies would leak into every parallel test. With `test-util` on, the clients do not read the
+  system proxy (reqwest drops it once a proxy is added); no shipped build has the feature.
+  *Reversing:* low.
+- **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the SPI
+  (`dyn Source` over the fixture component) against a local server and a local forwarding proxy
+  that carries every request to that server, standing in for a proxy that resolves the name to
+  `127.0.0.1`. *Reversing:* n/a.

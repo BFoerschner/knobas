@@ -422,3 +422,131 @@ async fn a_fixed_loopback_address_or_localhost_still_works() {
     }
     assert_eq!(local.seen().len(), 2, "{:?}", local.seen());
 }
+
+/// A system proxy on the reader's machine (#1283): it records the request
+/// line of each request it carries, and forwards every one to `to`, as a
+/// proxy that resolves the request's name to that address would.
+struct Proxy {
+    url: String,
+    carried: Arc<Mutex<Vec<String>>>,
+}
+
+impl Proxy {
+    async fn start(to: &Server) -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let to = to.url.trim_start_matches("http://").to_owned();
+        let carried = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&carried);
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let log = Arc::clone(&log);
+                let to = to.clone();
+                tokio::spawn(async move {
+                    let mut head = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    while !head.windows(2).any(|w| w == b"\r\n") {
+                        match socket.read(&mut chunk).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => head.extend_from_slice(&chunk[..n]),
+                        }
+                    }
+                    let text = String::from_utf8_lossy(&head);
+                    log.lock()
+                        .unwrap()
+                        .push(text.split("\r\n").next().unwrap_or_default().to_owned());
+                    let mut upstream = tokio::net::TcpStream::connect(&to).await.unwrap();
+                    upstream.write_all(&head).await.unwrap();
+                    let _ = tokio::io::copy_bidirectional(&mut socket, &mut upstream).await;
+                });
+            }
+        });
+        Self { url, carried }
+    }
+
+    fn carried(&self) -> Vec<String> {
+        self.carried.lock().unwrap().clone()
+    }
+}
+
+/// Through a system proxy the proxy resolves the name, so the transport's
+/// guard never sees it: the name is checked before the request is handed
+/// over, and the reader's own machine is not reached by way of the proxy.
+#[tokio::test]
+async fn a_fixed_host_that_resolves_to_loopback_is_refused_through_a_proxy() {
+    let local = Server::start(None).await;
+    let proxy = Proxy::start(&local).await;
+    knobas_wasm_host::fake_dns("proxied-1283.test", &[LOOPBACK]);
+    knobas_wasm_host::fake_proxy("proxied-1283.test", &proxy.url);
+    let source = fetching(
+        &[&format!("proxied-1283.test:{}", port(&local))],
+        &format!("http://proxied-1283.test:{}/data", port(&local)),
+        serde_json::json!({}),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(!ok && text.contains("ConnectionRefused"), "{text}");
+    assert!(proxy.carried().is_empty(), "{:?}", proxy.carried());
+    assert!(local.seen().is_empty(), "{:?}", local.seen());
+}
+
+/// A fixed host that resolves to a public address still goes through the
+/// proxy, not around it: a reader whose only way out is the proxy keeps it.
+#[tokio::test]
+async fn a_fixed_public_host_still_goes_through_the_proxy() {
+    let local = Server::start(None).await;
+    let proxy = Proxy::start(&local).await;
+    knobas_wasm_host::fake_dns("public-1283.test", &[PUBLIC]);
+    knobas_wasm_host::fake_proxy("public-1283.test", &proxy.url);
+    let source = fetching(
+        &["public-1283.test"],
+        "http://public-1283.test/data",
+        serde_json::json!({}),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(ok, "{text}");
+    assert_eq!(
+        proxy.carried(),
+        ["GET http://public-1283.test/data HTTP/1.1"]
+    );
+}
+
+/// A network whose only way out is the proxy may answer no name to the
+/// reader's machine: a fixed host knobas cannot resolve is handed to the
+/// proxy, which can. (`.invalid` never resolves, RFC 6761.)
+#[tokio::test]
+async fn a_fixed_host_knobas_cannot_resolve_still_goes_through_the_proxy() {
+    let local = Server::start(None).await;
+    let proxy = Proxy::start(&local).await;
+    knobas_wasm_host::fake_proxy("unresolved-1283.invalid", &proxy.url);
+    let source = fetching(
+        &["unresolved-1283.invalid"],
+        "http://unresolved-1283.invalid/data",
+        serde_json::json!({}),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(ok, "{text}");
+    assert_eq!(proxy.carried().len(), 1, "{:?}", proxy.carried());
+}
+
+/// A template's value is the reader's to point home: it goes through the
+/// proxy as before, unchecked.
+#[tokio::test]
+async fn a_templated_host_that_resolves_to_loopback_goes_through_the_proxy() {
+    let local = Server::start(None).await;
+    let proxy = Proxy::start(&local).await;
+    knobas_wasm_host::fake_dns("typed-1283.test", &[LOOPBACK]);
+    knobas_wasm_host::fake_proxy("typed-1283.test", &proxy.url);
+    let url = format!("http://typed-1283.test:{}", port(&local));
+    let source = fetching(
+        &["{mirror}"],
+        &format!("{url}/data"),
+        serde_json::json!({ "mirror": url }),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(ok, "{text}");
+    assert_eq!(proxy.carried().len(), 1, "{:?}", proxy.carried());
+    assert_eq!(local.seen().len(), 1, "{:?}", local.seen());
+}

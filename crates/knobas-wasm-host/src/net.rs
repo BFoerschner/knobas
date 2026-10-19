@@ -296,6 +296,13 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
     };
     if guarded && let Some(name) = request.uri().host() {
         register_guarded(name);
+        // A system proxy resolves the name itself, and the resolver below
+        // never sees it: judge it here first.
+        if let Ok(addrs) = lookup(name).await
+            && refuses(name, &addrs)
+        {
+            return Err(HttpError::ConnectionRefused);
+        }
     }
     let (mut parts, body) = request.into_parts();
     if for_instance {
@@ -430,12 +437,20 @@ fn client(guarded: bool) -> Result<&'static reqwest::Client, HttpError> {
     static GUARDED: OnceLock<Option<reqwest::Client>> = OnceLock::new();
     let cell = if guarded { &GUARDED } else { &PLAIN };
     cell.get_or_init(|| {
-        reqwest::Client::builder()
+        let builder = reqwest::Client::builder()
             // Explicit, for `knobas-http`'s reason: the platform verifier.
             .use_rustls_tls()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(30))
-            .dns_resolver(Resolver { guarded })
+            .dns_resolver(Resolver { guarded });
+        // In place of the system proxy, which a test must not depend on.
+        #[cfg(feature = "test-util")]
+        let builder = builder.proxy(reqwest::Proxy::custom(|url| {
+            locked(fake_proxies())
+                .get(&url.host_str()?.to_ascii_lowercase())
+                .cloned()
+        }));
+        builder
             .build()
             .inspect_err(|error| tracing::error!(%error, "the external adapters' http client"))
             .ok()
@@ -481,20 +496,26 @@ impl reqwest::dns::Resolve for Resolver {
         let name = name.as_str().to_owned();
         Box::pin(async move {
             let addrs = lookup(&name).await?;
-            if guarded
-                && is_guarded(&name)
-                && let Some(local) = addrs.iter().find(|addr| is_local(addr.ip()))
-            {
-                tracing::warn!(
-                    "an external adapter's request is refused: {name}, a host its manifest \
-                     fixes, resolves to the local address {}",
-                    local.ip()
-                );
+            if guarded && is_guarded(&name) && refuses(&name, &addrs) {
                 return Err(format!("{name} resolves to a local address").into());
             }
             Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
         })
     }
+}
+
+/// Whether a guarded `name` is refused for resolving to `addrs`: any of
+/// them local. A refusal is logged with the address.
+fn refuses(name: &str, addrs: &[SocketAddr]) -> bool {
+    let Some(local) = addrs.iter().find(|addr| is_local(addr.ip())) else {
+        return false;
+    };
+    tracing::warn!(
+        "an external adapter's request is refused: {name}, a host its manifest fixes, \
+         resolves to the local address {}",
+        local.ip()
+    );
+    true
 }
 
 async fn lookup(name: &str) -> std::io::Result<Vec<SocketAddr>> {
@@ -521,6 +542,21 @@ fn fake_answers() -> &'static FakeAnswers {
 #[cfg(feature = "test-util")]
 pub fn fake_dns(name: &str, ips: &[std::net::IpAddr]) {
     locked(fake_answers()).insert(name.to_ascii_lowercase(), ips.to_vec());
+}
+
+#[cfg(feature = "test-util")]
+fn fake_proxies() -> &'static Mutex<std::collections::HashMap<String, String>> {
+    static PROXIES: OnceLock<Mutex<std::collections::HashMap<String, String>>> = OnceLock::new();
+    PROXIES.get_or_init(Mutex::default)
+}
+
+/// Send every later request of the external adapters' clients for `name`
+/// through the proxy at `proxy` (`http://127.0.0.1:<port>`), as a system
+/// proxy would. For tests: in a build with `test-util`, the clients use
+/// these in place of the system's proxy, and send any other name direct.
+#[cfg(feature = "test-util")]
+pub fn fake_proxy(name: &str, proxy: &str) {
+    locked(fake_proxies()).insert(name.to_ascii_lowercase(), proxy.to_owned());
 }
 
 #[cfg(test)]
