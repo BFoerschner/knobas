@@ -668,6 +668,98 @@ async fn the_callers_reading_of_a_failing_body_reaches_the_message() {
     );
 }
 
+// -- the body's start in a decode failure (#877, #1313) ------------------------
+
+/// A body that is not the JSON the caller asked for names its own start when
+/// the caller asks for that, bounded to [`knobas_http::BODY_EXCERPT_CHARS`]
+/// characters, and stays out of the message when it does not.
+///
+/// "Did not answer with the shape" says nothing a person can act on without
+/// the body: an SSO proxy's login page and a gateway's plain text both arrive
+/// as a 200 that is not JSON.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_body_that_is_not_the_shape_asked_for_names_its_start_when_asked() {
+    // Characters, not bytes: the bound must not split a multi-byte character.
+    let page: &'static str =
+        Box::leak(format!("<html>{}</html>", "ä".repeat(400)).into_boxed_str());
+    let server = CountingServer::always_with_body(200, "content-type: text/html\r\n", page);
+    let client = HttpClient::new(config(server.url())).expect("client");
+    let excerpt = knobas_http::BodyExcerpt {
+        contract: "the Test REST contract",
+    };
+
+    let error = client
+        .get_json_with::<serde_json::Value, _>("/thing", &[("start", "0")], Some(excerpt))
+        .await
+        .expect_err("not JSON");
+    let SourceError::Protocol { message, status } = &error else {
+        panic!("a body of the wrong shape is a protocol fault: {error:?}");
+    };
+    let start = format!("<html>{}", "ä".repeat(294));
+    assert_eq!(
+        message,
+        &format!(
+            "/thing did not answer with the shape the Test REST contract documents: expected \
+             value at line 1 column 1; it began {start:?}"
+        ),
+    );
+    assert_eq!(*status, None, "the status was a 200; the fault is the body");
+
+    // Not asked: the same answer keeps the bare decode message.
+    let error = client
+        .get_json_with::<serde_json::Value, _>("/thing", &[("start", "0")], None)
+        .await
+        .expect_err("not JSON");
+    let SourceError::Protocol { message, .. } = &error else {
+        panic!("a body of the wrong shape is a protocol fault: {error:?}");
+    };
+    assert!(message.starts_with("decoding /thing: "), "{message}");
+    assert!(!message.contains("<html>"), "{message}");
+    assert!(!message.contains("began"), "{message}");
+
+    // A body shorter than the bound is quoted whole.
+    let server = CountingServer::always_with_body(200, "", r#"{"values":"#);
+    let client = HttpClient::new(config(server.url())).expect("client");
+    let error = client
+        .get_json_with::<Vec<u32>, _>("/thing", &[] as &[(&str, &str)], Some(excerpt))
+        .await
+        .expect_err("cut short");
+    assert!(
+        matches!(&error, SourceError::Protocol { message, .. }
+                 if message.ends_with(r#"; it began "{\"values\":""#)),
+        "{error:?}"
+    );
+}
+
+/// The excerpt is about a body of the wrong shape, not a failing status: a
+/// 400 still reads the way [`knobas_http::status_error`] words it, and a body
+/// of the right shape decodes.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_excerpt_leaves_a_failing_status_and_a_good_body_alone() {
+    let excerpt = Some(knobas_http::BodyExcerpt {
+        contract: "the Test REST contract",
+    });
+    let server = CountingServer::always_with_body(400, "", "no such field");
+    let client = HttpClient::new(config(server.url())).expect("client");
+    let error = client
+        .get_json_with::<serde_json::Value, _>("/thing", &[] as &[(&str, &str)], excerpt)
+        .await
+        .expect_err("400");
+    assert!(
+        matches!(&error, SourceError::Protocol { message, status: Some(400) }
+                 if message == "HTTP 400 Bad Request: no such field"),
+        "{error:?}"
+    );
+
+    let server = CountingServer::always_with_body(200, "", "[1,2,3]");
+    let client = HttpClient::new(config(server.url())).expect("client");
+    let got = client
+        .get_json_with::<Vec<u32>, _>("/thing", &[] as &[(&str, &str)], excerpt)
+        .await
+        .expect("the right shape");
+    assert_eq!(got, vec![1, 2, 3]);
+}
+
 // -- a request that carries a body (issue #43) --------------------------------
 
 /// M2's write-backs are `POST`s carrying JSON, and until `Request::json`

@@ -6,7 +6,7 @@ use knobas_source::{
 };
 
 use crate::api::JiraApi;
-use crate::http::{self, JiraHttp};
+use crate::http::{self, HttpClient};
 use crate::sync::SyncRun;
 use crate::write;
 use crate::{JiraConfig, descriptor_template};
@@ -20,7 +20,7 @@ pub struct JiraSource {
     /// Without a trailing slash, so `/browse/<key>` composes cleanly.
     base_url: String,
     cfg: JiraConfig,
-    http: JiraHttp,
+    http: HttpClient,
 }
 
 impl JiraSource {
@@ -193,7 +193,7 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         cfg.username.as_deref(),
         instance.secret.as_deref(),
     )?;
-    let http = JiraHttp::new(&instance.base_url, &cfg, credential)?;
+    let http = http::client(&instance.base_url, &cfg, credential)?;
     Ok(Box::new(JiraSource {
         id: instance.id,
         display_name: instance.display_name,
@@ -525,7 +525,7 @@ mod tests {
             display_name: i.display_name.clone(),
             base_url: trimmed_base_url(&i.base_url),
             cfg,
-            http: JiraHttp::new(&i.base_url, &JiraConfig::default(), credential).unwrap(),
+            http: http::client(&i.base_url, &JiraConfig::default(), credential).unwrap(),
         };
         assert_eq!(source.base_url, "https://jira.tidewater.example");
     }

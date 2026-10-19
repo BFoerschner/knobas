@@ -7456,4 +7456,34 @@ The merge-manager's rulings (Sonnet, #1300):
   `backup.rs` keeps. *Reversing:* n/a.
 - **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the ones the
   ticket and spec #1306 name, the fake census in `fake-tauri.test.ts` and the Rust barrel pin.
+## #1313: the transport puts the body excerpt in the message (Opus implementer, 2026-10-19)
+
+- **"A non-JSON or failing body" is a body that does not decode as the asked-for shape.**
+  *Fork:* the ticket's "failing body" could also mean a failing status. *Ruling:* a failing
+  status keeps `status_error`'s message (its own 400-character excerpt, or the caller's
+  `BodyMessage`), as Jira's wrapper left it: it only ever excerpted a 2xx body that would not
+  decode. Excerpting a failing status too would change every adapter's messages. *Reversing:*
+  cheap, but it changes messages.
+- **A sibling read, not a new parameter on `get_json`.** *Fork:* add the option to `get_json`, or
+  beside it. *Ruling:* `HttpClient::get_json_with(path, query, Option<BodyExcerpt>)`, with
+  `get_json` untouched. #1310's §10.8 entry promised an additive change, and `get_json`'s ten
+  transport-test callers and its `decoding <path>: <error>` message stay as they are. `None`
+  keeps that message. `query` is generic so Jira's owned `String` values pass as they are.
+  *Reversing:* fold `get_json` into it, a signature change with a §10.8 amendment.
+- **The option names the contract, so Jira's sentence survives word for word.** *Fork:* a bare
+  flag would make the transport word "the shape … documents" without the Jira contract's name.
+  *Ruling:* `BodyExcerpt { contract: &'static str }`, read into "did not answer with the shape
+  `<contract>` documents". Jira passes "the Jira REST v2 contract". *Reversing:* cheap.
+- **Jira keeps two forwarding functions, not a type.** *Fork:* inline the transport calls at the
+  fourteen read sites and four write sites, or keep a function each. *Ruling:* `http::get_json`
+  (passes `SHAPE`, fixes the query's type so `&[]` infers) and `http::post_json` (the once-sent
+  POST and its #1122 reasoning, in one place). `HttpClient` is re-exported from `http.rs`, so
+  `knobas-http` is still named in one file. The struct and its decoding read are gone.
+  *Reversing:* cheap.
+- **Jira gains one test, `http::tests::a_body_that_is_not_jiras_shape_names_its_start`.** No
+  Jira test pinned #877's message before. With the message now built in another crate, the Jira
+  wording would otherwise be pinned only by the transport test's stand-in contract. *Reversing:*
+  one test.
+- **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the
+  transport test, as the ticket names, and Jira's own suite plus `just jira-live`.
   *Reversing:* n/a.

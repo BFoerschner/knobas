@@ -51,3 +51,28 @@
   refusal's class and its whole message, for the missing-secret, unsupported-method and
   misconfigured refusals, and for the configuration outranking a missing secret. Witnessed against
   the real server by `just jira-live`.
+
+  **Amendment (#1313, 2026-10-19): the excerpt option.** Additive in `crates/knobas-http`, which
+  now depends on `serde_json` (already in the tree through `reqwest`):
+
+  ```rust
+  pub const BODY_EXCERPT_CHARS: usize = 300;    // Jira's bound since #877
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  pub struct BodyExcerpt { pub contract: &'static str }
+  impl HttpClient {
+      pub async fn get_json_with<T: DeserializeOwned, Q: Serialize + ?Sized>(&self,
+          path: &str, query: &Q, excerpt: Option<BodyExcerpt>) -> Result<T, SourceError>;
+  }
+  ```
+
+  With `None` it is `get_json`, message for message (`decoding <path>: <error>`); `get_json`
+  itself is unchanged. With `Some`, a body that does not decode reads `<path> did not answer with
+  the shape <contract> documents: <serde error>; it began <the first 300 characters, Debug-quoted>`,
+  and a body that breaks off reads `<path>: the answer's body broke off: <error>`: the two messages
+  Jira's wrapper built, word for word. A failing status is untouched: it is `status_error`'s, with
+  the caller's `BodyMessage`. Jira's `JiraHttp` and its decoding `get_json` are gone; `http::client`
+  builds the transport's `HttpClient` and `http::get_json` passes `BodyExcerpt { contract: "the
+  Jira REST v2 contract" }`. Pinned by `tests/transport.rs`
+  `a_body_that_is_not_the_shape_asked_for_names_its_start_when_asked` (present when asked, absent
+  when not, bounded in characters) and `the_excerpt_leaves_a_failing_status_and_a_good_body_alone`,
+  and on Jira's side by `http::tests::a_body_that_is_not_jiras_shape_names_its_start`.

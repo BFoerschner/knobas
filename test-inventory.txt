@@ -1767,6 +1767,7 @@ knobas-http	lib/knobas_http	retry::tests::a_broken_request_or_a_broken_server_is
 knobas-http	lib/knobas_http	retry::tests::a_busy_server_is_tried_again
 knobas-http	lib/knobas_http	retry::tests::the_delay_doubles_and_never_wraps
 knobas-http	test/transport	a_bad_base_url_is_refused_up_front
+knobas-http	test/transport	a_body_that_is_not_the_shape_asked_for_names_its_start_when_asked
 knobas-http	test/transport	a_configured_method_maps_to_one_credential_or_one_refusal
 knobas-http	test/transport	a_deterministic_failure_is_asked_once
 knobas-http	test/transport	a_dribbled_body_outlasts_the_request_timeout
@@ -1791,6 +1792,7 @@ knobas-http	test/transport	each_auth_variant_has_its_own_wire_spelling
 knobas-http	test/transport	every_attempt_waits_for_the_rate_limiter
 knobas-http	test/transport	retry_after_is_waited_out_before_the_retry
 knobas-http	test/transport	the_callers_reading_of_a_failing_body_reaches_the_message
+knobas-http	test/transport	the_excerpt_leaves_a_failing_status_and_a_good_body_alone
 knobas-mockd	lib/knobas_mockd	tc_fields::tests::an_unbalanced_expression_is_refused
 knobas-mockd	lib/knobas_mockd	tc_fields::tests::an_unknown_name_is_reported_by_name
 knobas-mockd	lib/knobas_mockd	tc_fields::tests::long_is_everything_and_the_other_presets_are_refused
@@ -2971,6 +2973,7 @@ knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::the_same_record_fi
 knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::the_type_is_part_of_the_record
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_base_url_that_is_not_a_url_is_refused
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_body_that_is_not_jiras_envelope_is_read_as_nothing
+knobas-source-jira	lib/knobas_source_jira	http::tests::a_body_that_is_not_jiras_shape_names_its_start
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_refusal_keeps_its_class_whatever_the_body_says
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_refused_connection_is_unreachable
 knobas-source-jira	lib/knobas_source_jira	http::tests::debug_never_prints_the_secret

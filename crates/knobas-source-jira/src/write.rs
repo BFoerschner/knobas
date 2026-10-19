@@ -35,7 +35,7 @@
 
 use knobas_source::SourceError;
 
-use crate::http::JiraHttp;
+use crate::http::{self, HttpClient};
 
 /// Move a ticket to `status`.
 ///
@@ -59,7 +59,7 @@ use crate::http::JiraHttp;
 /// where the ticket stands, naming what it does offer; otherwise whatever the
 /// two requests map to.
 pub(crate) async fn transition(
-    http: &JiraHttp,
+    http: &HttpClient,
     key: &str,
     status: &str,
 ) -> Result<(), SourceError> {
@@ -79,9 +79,13 @@ pub(crate) async fn transition(
     };
 
     // 204, no body. Nothing is decoded, deliberately -- see `post_json`.
-    http.post_json(&path, &serde_json::json!({ "transition": { "id": id } }))
-        .await
-        .map(|_| ())
+    http::post_json(
+        http,
+        &path,
+        &serde_json::json!({ "transition": { "id": id } }),
+    )
+    .await
+    .map(|_| ())
 }
 
 /// One move this issue's workflow offers from where it stands: the transition
@@ -135,7 +139,7 @@ fn transitions_path(key: &str) -> String {
 ///
 /// [`Source::reachable_transitions`]: knobas_source::Source::reachable_transitions
 pub(crate) async fn offered_transitions(
-    http: &JiraHttp,
+    http: &HttpClient,
     key: &str,
 ) -> Result<Vec<Offered>, SourceError> {
     #[derive(serde::Deserialize)]
@@ -155,7 +159,7 @@ pub(crate) async fn offered_transitions(
         name: Option<String>,
     }
 
-    let available: Available = http.get_json(&transitions_path(key), &[]).await?;
+    let available: Available = http::get_json(http, &transitions_path(key), &[]).await?;
     Ok(available
         .transitions
         .into_iter()
@@ -173,8 +177,9 @@ pub(crate) async fn offered_transitions(
 /// The [`SourceError`] the request maps to. An empty body is refused by Jira
 /// itself with a 400, which reaches the queue as a refusal carrying Jira's own
 /// sentence rather than as a retry.
-pub(crate) async fn comment(http: &JiraHttp, key: &str, body: &str) -> Result<(), SourceError> {
-    http.post_json(
+pub(crate) async fn comment(http: &HttpClient, key: &str, body: &str) -> Result<(), SourceError> {
+    http::post_json(
+        http,
         &format!("rest/api/2/issue/{key}/comment"),
         &serde_json::json!({ "body": body }),
     )
@@ -195,7 +200,7 @@ pub(crate) async fn comment(http: &JiraHttp, key: &str, body: &str) -> Result<()
 /// issue it made -- which would leave the write reported as done with nothing
 /// to point at; otherwise whatever the request maps to.
 pub(crate) async fn create_ticket(
-    http: &JiraHttp,
+    http: &HttpClient,
     project: &str,
     title: &str,
     body: &str,
@@ -210,9 +215,12 @@ pub(crate) async fn create_ticket(
         fields["description"] = serde_json::Value::String(body.to_owned());
     }
 
-    let response = http
-        .post_json("rest/api/2/issue", &serde_json::json!({ "fields": fields }))
-        .await?;
+    let response = http::post_json(
+        http,
+        "rest/api/2/issue",
+        &serde_json::json!({ "fields": fields }),
+    )
+    .await?;
     let status = response.status();
     let created: serde_json::Value = response.json().await.map_err(|error| {
         SourceError::protocol(format!(
@@ -271,22 +279,22 @@ const JIRA_STARTED: &str = "%Y-%m-%dT%H:%M:%S%.3f%z";
 /// refusal [`create_ticket`] makes for the same reason; otherwise whatever the
 /// request maps to.
 pub(crate) async fn log_work(
-    http: &JiraHttp,
+    http: &HttpClient,
     key: &str,
     started: chrono::DateTime<chrono::Utc>,
     seconds: i64,
     comment: &str,
 ) -> Result<String, SourceError> {
-    let response = http
-        .post_json(
-            &format!("rest/api/2/issue/{key}/worklog"),
-            &serde_json::json!({
-                "started": started.format(JIRA_STARTED).to_string(),
-                "timeSpentSeconds": seconds,
-                "comment": comment,
-            }),
-        )
-        .await?;
+    let response = http::post_json(
+        http,
+        &format!("rest/api/2/issue/{key}/worklog"),
+        &serde_json::json!({
+            "started": started.format(JIRA_STARTED).to_string(),
+            "timeSpentSeconds": seconds,
+            "comment": comment,
+        }),
+    )
+    .await?;
     let status = response.status();
     let logged: serde_json::Value = response.json().await.map_err(|error| {
         SourceError::protocol(format!(
@@ -312,12 +320,12 @@ mod tests {
 
     use chrono::TimeZone;
 
-    use crate::http::{CREDENTIAL_RULES, JiraHttp, credential};
+    use crate::http::{CREDENTIAL_RULES, HttpClient, client, credential};
 
     /// A Jira that answers every request `503`, `Connection: close`, and
     /// counts them. A `503` is retried by the transport unless the request
     /// opted out, so the count says which a write did.
-    fn busy() -> (JiraHttp, Arc<AtomicUsize>) {
+    fn busy() -> (HttpClient, Arc<AtomicUsize>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let hits = Arc::new(AtomicUsize::new(0));
@@ -342,7 +350,7 @@ mod tests {
             Some("pat"),
         )
         .expect("a PAT is enough");
-        let http = JiraHttp::new(
+        let http = client(
             &format!("http://{addr}"),
             &crate::JiraConfig::default(),
             auth,

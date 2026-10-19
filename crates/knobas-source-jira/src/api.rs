@@ -1,6 +1,6 @@
 //! The five calls the sync run makes.
 //!
-//! A trait rather than a direct dependency on [`crate::http::JiraHttp`],
+//! A trait rather than a direct dependency on [`crate::http::HttpClient`],
 //! because the interesting part of this adapter is paging and cursor
 //! discipline -- and neither of those needs a socket to be tested. The HTTP
 //! implementation lands beside it (task 6); the tests in [`crate::sync`] use a
@@ -49,6 +49,7 @@
 
 use knobas_source::SourceError;
 
+use crate::http::get_json;
 use crate::model::{CommentPage, FieldMeta, Myself, SearchPage, ServerInfo, WorklogPage};
 
 #[async_trait::async_trait]
@@ -185,19 +186,19 @@ fn search_query(
 /// a key that is not one would 404 and be reported as
 /// [`SourceError::Protocol`].
 #[async_trait::async_trait]
-impl JiraApi for crate::http::JiraHttp {
+impl JiraApi for crate::http::HttpClient {
     async fn server_info(&self) -> Result<ServerInfo, SourceError> {
-        self.get_json("rest/api/2/serverInfo", &[]).await
+        get_json(self, "rest/api/2/serverInfo", &[]).await
     }
 
     async fn myself(&self) -> Result<Myself, SourceError> {
-        self.get_json("rest/api/2/myself", &[]).await
+        get_json(self, "rest/api/2/myself", &[]).await
     }
 
     async fn fields(&self) -> Result<Vec<FieldMeta>, SourceError> {
         // No parameters: the WADL declares none on this resource, and the
         // answer is the whole table either way.
-        self.get_json("rest/api/2/field", &[]).await
+        get_json(self, "rest/api/2/field", &[]).await
     }
 
     async fn search(
@@ -209,7 +210,8 @@ impl JiraApi for crate::http::JiraHttp {
     ) -> Result<SearchPage, SourceError> {
         // Data Center's classic search. NOT Cloud's /rest/api/3/search/jql --
         // roadmap §4 gotcha 4.
-        self.get_json(
+        get_json(
+            self,
             "rest/api/2/search",
             &search_query(jql, start_at, max_results, fields),
         )
@@ -222,7 +224,8 @@ impl JiraApi for crate::http::JiraHttp {
         start_at: u32,
         max_results: u32,
     ) -> Result<CommentPage, SourceError> {
-        self.get_json(
+        get_json(
+            self,
             &format!("rest/api/2/issue/{key}/comment"),
             &[
                 ("startAt", start_at.to_string()),
@@ -234,8 +237,7 @@ impl JiraApi for crate::http::JiraHttp {
 
     async fn worklogs(&self, key: &str) -> Result<WorklogPage, SourceError> {
         // No parameters: the WADL declares none on this resource.
-        self.get_json(&format!("rest/api/2/issue/{key}/worklog"), &[])
-            .await
+        get_json(self, &format!("rest/api/2/issue/{key}/worklog"), &[]).await
     }
 
     async fn boards(
@@ -251,23 +253,28 @@ impl JiraApi for crate::http::JiraHttp {
         if let Some(project) = project {
             query.insert(0, ("projectKeyOrId", project.to_owned()));
         }
-        self.get_json("rest/agile/1.0/board", &query).await
+        get_json(self, "rest/agile/1.0/board", &query).await
     }
 
     async fn favourite_filters(&self) -> Result<Vec<crate::views::FavouriteFilter>, SourceError> {
-        self.get_json("rest/api/2/filter/favourite", &[]).await
+        get_json(self, "rest/api/2/filter/favourite", &[]).await
     }
 
     async fn board_configuration(
         &self,
         board: u64,
     ) -> Result<crate::views::BoardConfiguration, SourceError> {
-        self.get_json(&format!("rest/agile/1.0/board/{board}/configuration"), &[])
-            .await
+        get_json(
+            self,
+            &format!("rest/agile/1.0/board/{board}/configuration"),
+            &[],
+        )
+        .await
     }
 
     async fn active_sprints(&self, board: u64) -> Result<crate::views::SprintPage, SourceError> {
-        self.get_json(
+        get_json(
+            self,
             &format!("rest/agile/1.0/board/{board}/sprint"),
             &[("state", "active".to_owned())],
         )
@@ -275,11 +282,11 @@ impl JiraApi for crate::http::JiraHttp {
     }
 
     async fn filter(&self, id: &str) -> Result<crate::views::Filter, SourceError> {
-        self.get_json(&format!("rest/api/2/filter/{id}"), &[]).await
+        get_json(self, &format!("rest/api/2/filter/{id}"), &[]).await
     }
 
     async fn statuses(&self) -> Result<Vec<crate::views::Status>, SourceError> {
-        self.get_json("rest/api/2/status", &[]).await
+        get_json(self, "rest/api/2/status", &[]).await
     }
 
     async fn search_keys(
@@ -288,7 +295,8 @@ impl JiraApi for crate::http::JiraHttp {
         start_at: u32,
         max_results: u32,
     ) -> Result<crate::views::KeysPage, SourceError> {
-        self.get_json(
+        get_json(
+            self,
             "rest/api/2/search",
             &[
                 ("jql", jql.to_owned()),
@@ -304,7 +312,7 @@ impl JiraApi for crate::http::JiraHttp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http::{CREDENTIAL_RULES, JiraHttp, credential};
+    use crate::http::{CREDENTIAL_RULES, client, credential};
     use knobas_source::AuthMethod;
 
     /// Every call in this trait, once, against `knobas-mockd`.
@@ -330,7 +338,7 @@ mod tests {
     #[tokio::test]
     async fn every_call_is_one_the_wadl_declares() {
         let jira = knobas_mockd::spawn_mock_jira().await;
-        let http = JiraHttp::new(
+        let http = client(
             &jira.base_url(),
             &crate::JiraConfig::default(),
             credential(
