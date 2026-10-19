@@ -8098,3 +8098,54 @@ reserved-steps rule. The entry is `docs/contract/10.8/1326-the-entity-barrel-is-
   they are entity-barrel types and this ticket is the assets barrel; `RuleClass`'s meanings already
   reach the TypeScript through `LinkRow.rule_class`'s field doc, `Origin`'s do not. *Reversing:*
   #1370 does it.
+## #1327: the sources barrel is generated (Opus implementer, 2026-10-20)
+
+Reserved for Björn, ruled by implementer on Opus (the §10.8 entry), under the 2026-10-18
+reserved-steps rule. The entry is `docs/contract/10.8/1327-the-sources-barrel-is-generated.md`.
+
+- **`IpcErrorCode`, which `ConnectionReport::code` reaches.** *Fork:* the type is `index.ts`'s,
+  and `generated/` books no `index.ts`; spell the field `#[ts(type = "IpcErrorCode | null")]`
+  (no import, so the generated file would not compile), or derive the generator and export it to
+  one barrel's file. *Ruling:* derive it, exported to `generated/sources.ts`, the first barrel that
+  reaches it; the sources barrel does not re-export it and `index.ts` keeps its own declaration.
+  *Reasoning:* #1325's convention for a shared type; the two spellings are structurally one type.
+  *Reversing:* switch `index.ts` to re-export the generated one, or move the export to another
+  barrel's file.
+- **Optional where the hand-written mirror was optional.** *Ruling:* `SourcePatch`'s and
+  `SecretInput`'s `Option` fields are `#[ts(optional = nullable)]`; `SourceSummary::roles` and
+  `role_misses` are `#[ts(as = "Option<…>", optional)]`, as the mirror kept them for stand-in
+  summaries written before #1196; `WriteOp`'s `CreateMonitor::kind`, `RunBuild::clean_checkout`
+  and `first_in_queue` likewise, each beside the `#[serde(default)]` that makes absence decode.
+  `MergePullRequest::delete_branch`, also `#[serde(default)]`, stays required, as the mirror had
+  it. *Reasoning:* the ticket asks for shape identity, and a required field here is a type error
+  in every caller that leaves it out. *Reversing:* drop the attribute; svelte-check names the
+  callers.
+- **`WriteOp`'s variant docs stay on the variants.** *Fork:* #1325's convention moves a variant's
+  meaning into the enum's doc with no copy left; `WriteOp`'s 23 variants carry about 400 lines of
+  rationale. *Ruling:* leave them; put what the shell needs of each payload (the target's kind, a
+  field's absence and `null` rules, Confluence's version and body rules) on the payload's fields,
+  which the generator carries, and say so in the enum's doc. Its table already names every
+  variant with its identifier and ticket. *Reasoning:* moving 400 lines into one doc comment would
+  bury the SPI's per-variant rules for adapter authors, who read the variants in rustdoc. The
+  other nine enums with variant docs follow the convention. *Reversing:* move the docs; mechanical.
+- **`PayloadPath`'s `#[serde(transparent)]`.** `ts-rs` 12.0.1 does not parse it and prints a
+  note on every build of `knobas-spi-types` ("failed to parse serde attribute"). The generated
+  type is right regardless (`Array<string>`, a newtype is its field), and the note is not a lint,
+  so `clippy -D warnings` passes. *Ruling:* keep the attribute and the note. *Reasoning:*
+  dropping a serde attribute on an SPI type to quiet a build note changes `knobas-spi-types`
+  for no wire reason, and `no-serde-warnings` would also hide a real unparsed attribute.
+  *Reversing:* drop the attribute (serde_json writes a newtype as its field either way).
+- **Which pins are "the barrel's".** Every test that read `sources.ts` for type text: the suite
+  `tests/it/sources_mirror.rs` and six `knobas-sync` pins. Its
+  `the_mirror_invokes_the_write_queue_commands_by_their_registered_names` goes with it: the
+  handler-list pin in `commands::sources` checks every command in both directions. The
+  suite's wire claims are held elsewhere: `SecretInput`'s `Debug` redaction by
+  `sources_crud::nothing_in_the_ipc_surface_reads_a_secret_back`, and the shared
+  `AuthMethod` spelling by the generated type itself (`auth_kind: AuthMethod | null`).
+  `every_declared_phase_is_actually_emitted` tests behaviour, not the mirror, and stays,
+  reading `SyncPhase` from the generated file.
+- **Docs moved and how.** Every TypeScript doc rule the Rust lacked moved onto the Rust: the
+  render-as-text rule on `QueuedWrite::detail`, miss and `null` semantics, ADR and ticket
+  references, the shell-never-reads rules on the descriptor. A type's pointer to its own Rust
+  path did not. Doc references to the deleted suite in `config_schema_mirror.rs`,
+  `assets_ipc.rs` and `commands::time` are reworded, not left dangling.
