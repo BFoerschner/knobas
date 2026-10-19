@@ -347,7 +347,7 @@ fn target_of(entity_id: Option<String>, label: Option<String>) -> Result<TimerTa
 ///
 /// Spelled out in each statement rather than assembled from a shared constant:
 /// `sqlx::query` takes only a `&'static str`, which is the guard roadmap §4
-/// gotcha 2 asks for, and `commands/entity.rs` records the same discipline --
+/// gotcha 2 asks for, and `commands/entity/mod.rs` records the same discipline --
 /// nothing here concatenates anything into SQL. [`timer_of`] is the one
 /// decoder, so a column added to one statement and not the other fails there
 /// rather than silently.
@@ -381,7 +381,7 @@ const STOP_TIMER: &str = "with stopped as (
 /// **Two statements and not one parameterised statement**, deliberately. The
 /// difference between them is which column becomes the end and whether the
 /// flag is set, and expressing that as a bind would need either dynamic SQL --
-/// which this module does not do, for the reason `commands/entity.rs` records
+/// which this module does not do, for the reason `commands/entity/mod.rs` records
 /// -- or a `case` that made both readings harder than either is now. The two
 /// are also not the same event: one is a person stopping a clock and the other
 /// is knobas admitting it stopped being alive, and the day review distinguishes

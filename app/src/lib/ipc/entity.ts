@@ -1,4 +1,4 @@
-/** Entity and room reads — `crates/knobas-app/src/commands/entity.rs`. */
+/** Entity and room reads — `crates/knobas-app/src/commands/entity/`. */
 import { invoke } from "@tauri-apps/api/core";
 
 // The write queue's own types live with the queue's other commands. A

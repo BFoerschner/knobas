@@ -1,0 +1,746 @@
+//! The link writes, the write-back commands and the entity view, and notes.
+
+use super::*;
+
+// -- the link writes --------------------------------------------------------
+//
+// Two commands, and only two. The *read* stays on `get_entity`: `entries_of`
+// is undirected, so an entity's backlinks are the same query as its links and
+// need no endpoint of their own, and the target picker reuses `search`.
+
+/// The relation a link takes when the caller names none.
+///
+/// A quick link costs no extra decisions, which is only true if "no relation"
+/// is a relation rather than an empty string: the panel groups by this value
+/// and an empty group header is a row nobody can read.
+pub const DEFAULT_RELATION: &str = "related";
+
+/// Who a link made through this surface belongs to, in `created_by` and in the
+/// activity line's `actor`.
+///
+/// knobas has no identity system: there is one person using it, and the only
+/// other actor the log knows is `sync:<source_id>`. Naming it once here keeps
+/// the two spellings from drifting.
+pub(super) const ACTOR: &str = "user";
+
+/// What a link mutation left behind: the row, and the activity line announcing
+/// it.
+///
+/// Not a wire type -- the commands return the link and emit the line. It exists
+/// so the behaviour is reachable from a test without a Tauri app: the emit is
+/// the only part of these commands that a `#[tauri::command]` shell adds, and
+/// everything worth asserting is in here.
+#[derive(Debug)]
+pub struct LinkMutation {
+    pub link: LinkRow,
+    pub activity: ActivityRow,
+    /// The proposal this link displaced, when there was one (#70).
+    ///
+    /// Drawing the *reverse* of a live proposal withdraws it -- see
+    /// [`knobas_core::suggest::resolve_edge`] -- and a proposal leaving the tray
+    /// is a mutation, so it gets its own line rather than disappearing quietly.
+    /// `None` everywhere else, which is every other path in this module.
+    pub superseded: Option<ActivityRow>,
+}
+
+/// Text the user did not type is no text.
+///
+/// A dialog hands back `""` for a field left alone, and `Some("")` is not the
+/// same fact as `None` anywhere downstream: an empty relation is an unreadable
+/// group header, and an empty note is a line the panel would draw with nothing
+/// in it.
+fn present(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|text| !text.is_empty())
+}
+
+/// The relation a link will carry, folded to the one spelling that groups it.
+///
+/// A relation is a *key*, not prose: the panel groups rows by this value and
+/// the duplicate rule compares it verbatim, so `Blocks` and `blocks` would be
+/// two headers for one relationship and neither would see the other as a
+/// duplicate. Björn's ruling on the review of #52 (2026-08-28) is that they are
+/// one relation, and folding on write is what makes that true everywhere at
+/// once -- the stored value, the unique index, and every later reader.
+///
+/// Lowercase because the curated list, [`DEFAULT_RELATION`] and the design's
+/// own vocabulary (`blocks`, `implements`, `documents`, `depends-on`) are all
+/// written that way; a folded value is therefore already the spelling #53's
+/// inverse-label lookup will key on. Display capitalization is the panel's, and
+/// it has the whole string to do it from.
+///
+/// [`str::to_lowercase`] rather than the ASCII form: a user typing a relation
+/// in their own language should get the same folding an English one gets.
+///
+/// The **note** is deliberately not folded -- it is prose in the user's own
+/// words and nothing groups by it.
+fn relation_of(value: Option<&str>) -> String {
+    present(value).map_or_else(|| DEFAULT_RELATION.to_owned(), |named| named.to_lowercase())
+}
+
+/// What an activity line says about a link: the other end, the relation, and
+/// which link it was.
+///
+/// The line is named on the link's `from` end, so `to_id` is the end the reader
+/// does not already know. One helper, because `linked` and `unlinked` describe
+/// the same link and a reader of the log has to be able to pair them.
+///
+/// **These three keys are a shape a second writer depends on.**
+/// `knobas_core::note`'s `DrawnLink` spells them again for the `born[]` entries
+/// of a note's `created` line (#524), so that a born link withdrawn from the
+/// panel pairs with the birth that drew it. They are not one type: this one
+/// carries a fourth key for a proposal's `reason` and lives where `LinkRow`
+/// does, while `born[]` is composed from an insert's `returning` inside the
+/// store's own transaction, where no `LinkRow` exists. What holds them equal is
+/// `a_notes_birth_is_one_line_and_a_withdrawn_born_link_pairs_with_it`, which
+/// reads one against the other -- so a key **renamed** here fails that test.
+/// A key *added* here would not, and would not need to: `born[]` promising less
+/// than a line does is what it already promises.
+fn link_detail(link: &LinkRow) -> serde_json::Value {
+    let mut detail = serde_json::json!({
+        "link_id": link.id,
+        "to_id": link.to_id,
+        "relation": link.relation,
+    });
+    // Only when there is one, which is only ever for a link knobas proposed:
+    // "accepted" with no reason beside it is a line that says a decision was
+    // made and not what it was about. A key that is absent and a key that is
+    // `null` are different facts to a reader of the log, and the second is the
+    // one worth avoiding.
+    if let (Some(map), Some(reason)) = (detail.as_object_mut(), link.reason.as_deref()) {
+        map.insert("reason".to_owned(), serde_json::Value::from(reason));
+    }
+    detail
+}
+
+/// Draw a link between two entities.
+///
+/// `relation` defaults to [`DEFAULT_RELATION`] and is folded by
+/// [`relation_of`]; `note` is optional and is kept as typed; the origin is
+/// always [`Origin::Manual`] -- it is deliberately not client-suppliable in v1,
+/// because the other origins belong to the suggestion engine and to import.
+///
+/// An entity may not be linked to itself.
+///
+/// The behaviour lives here rather than in the command so it is reachable from
+/// a test: a `#[tauri::command]` cannot be called directly.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if either id is not an entity id,
+/// or if the two are the same entity;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if either endpoint has no local
+/// entity -- linking to something that has not synced yet is an ordinary event,
+/// not a fault; [`Conflict`](crate::IpcErrorCode::Conflict) if that pair is
+/// already actively linked under that relation;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn create_link_inner(
+    pool: &PgPool,
+    from_id: &str,
+    to_id: &str,
+    relation: Option<&str>,
+    note: Option<&str>,
+) -> Result<LinkMutation, IpcError> {
+    // Before any query, as `get_entity_inner` does: a malformed id is a bad
+    // address, and the two want different words on screen.
+    let from = EntityRef::parse(from_id).map_err(IpcError::invalid)?;
+    let to = EntityRef::parse(to_id).map_err(IpcError::invalid)?;
+    // Also before any query: an entity linked to itself is a bad *request*, not
+    // a missing thing -- both ends resolve, they are simply the same one, and
+    // the row would draw as a panel entry pointing at the entity you are
+    // already looking at. Björn's ruling on the review of #52 (2026-08-28).
+    if from == to {
+        return Err(IpcError::invalid(format!(
+            "{from} cannot be linked to itself"
+        )));
+    }
+
+    let relation = relation_of(relation);
+
+    // The pair may already carry a *proposal*: `link_pair_active_idx` spans
+    // proposals and links alike (one active edge per pair per relation, whatever
+    // its state), so knobas suggesting this link is what would refuse it. The
+    // proposal is therefore answered *before* the insert rather than after it
+    // fails -- a unique violation aborts the transaction it happens in, and
+    // there would be nothing left to answer it with.
+    //
+    // One transaction, because `Superseded` is only half a mutation: the
+    // withdrawn proposal and the link that replaced it land together or not at
+    // all.
+    let mut tx = pool.begin().await.map_err(knobas_core::CoreError::from)?;
+    let answered = suggest::resolve_edge(&mut tx, &from, &to, &relation).await?;
+
+    let (link, superseded) = match answered {
+        // Drawing by hand the link knobas proposed is the same act as pressing
+        // *Accept*, and the alternative is telling the user "already linked"
+        // about a pair whose links panel is empty.
+        suggest::Edge::Promoted(link) => (link, None),
+        // The user drew the proposal's reverse, which contradicts its direction.
+        // The user wins: the proposal is withdrawn and the link they drew is
+        // written with the ends they gave it.
+        suggest::Edge::Superseded(proposal) => {
+            let line = record_link_activity_with(&mut tx, "dismissed", &proposal).await?;
+            let link = write_link(&mut tx, &from, &to, &relation, note).await?;
+            (link, Some(line))
+        }
+        // Nothing proposed for this pair. Whatever refuses the write now is a
+        // real link, which is what `conflict` has always meant here.
+        suggest::Edge::Open => (
+            write_link(&mut tx, &from, &to, &relation, note).await?,
+            None,
+        ),
+    };
+
+    let activity = record_link_activity_with(&mut tx, "linked", &link).await?;
+    tx.commit().await.map_err(knobas_core::CoreError::from)?;
+    Ok(LinkMutation {
+        link,
+        activity,
+        superseded,
+    })
+}
+
+/// The hand-drawn link itself, once the tray has been answered.
+async fn write_link(
+    conn: &mut sqlx::PgConnection,
+    from: &EntityRef,
+    to: &EntityRef,
+    relation: &str,
+    note: Option<&str>,
+) -> Result<LinkRow, IpcError> {
+    Ok(knobas_core::link::create_with(
+        conn,
+        from,
+        to,
+        relation,
+        Origin::Manual,
+        present(note),
+        ACTOR,
+    )
+    .await?)
+}
+
+/// Withdraw a link.
+///
+/// `Ok(None)` when the link was already withdrawn: the store is idempotent, and
+/// nothing was mutated, so nothing is written to the log and nothing is
+/// announced.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `link_id` is not a UUID;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if no link carries it;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn unlink_inner(pool: &PgPool, link_id: &str) -> Result<Option<LinkMutation>, IpcError> {
+    let id: Uuid = link_id
+        .parse()
+        .map_err(|_| IpcError::invalid(format!("{link_id} is not a link id")))?;
+
+    let Some(link) = knobas_core::link::unlink(pool, id).await? else {
+        return Ok(None);
+    };
+    let activity = record_link_activity(pool, "unlinked", &link).await?;
+    Ok(Some(LinkMutation {
+        link,
+        activity,
+        superseded: None,
+    }))
+}
+
+/// One line, on the end the link was drawn from.
+///
+/// The to-end's own history panel therefore does not list it -- a known and
+/// accepted v1 limitation; that entity's links panel still shows the link. If
+/// the inbox (#45) ever needs the other side, the fix is a read-side change and
+/// not a second row.
+pub(super) async fn record_link_activity(
+    pool: &PgPool,
+    verb: &str,
+    link: &LinkRow,
+) -> Result<ActivityRow, IpcError> {
+    let from = EntityRef::parse(&link.from_id).map_err(IpcError::internal)?;
+    Ok(knobas_core::activity::record(pool, ACTOR, verb, Some(&from), link_detail(link)).await?)
+}
+
+/// [`record_link_activity`], against an executor the caller chooses, so a line
+/// can be written inside the transaction that made the mutation it describes.
+async fn record_link_activity_with(
+    conn: &mut sqlx::PgConnection,
+    verb: &str,
+    link: &LinkRow,
+) -> Result<ActivityRow, IpcError> {
+    let from = EntityRef::parse(&link.from_id).map_err(IpcError::internal)?;
+    Ok(
+        knobas_core::activity::record_with(conn, ACTOR, verb, Some(&from), link_detail(link))
+            .await?,
+    )
+}
+
+/// Put an activity line on `activity:new`.
+///
+/// Best-effort, like every other emit in this app: a failure means no window is
+/// listening, which is not a reason to fail a write that already landed. The
+/// command emits it itself rather than re-reading the log the way the scheduler
+/// does -- the write hands its row back precisely so it does not have to guess
+/// which of the table's rows is its own.
+pub(super) fn announce<R: tauri::Runtime>(app: &tauri::AppHandle<R>, row: ActivityRow) {
+    crate::events::emit(app, None, crate::events::ACTIVITY_NEW, row);
+}
+
+/// Draw a link between two entities, and announce it.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`create_link_inner`] refuses with.
+#[tauri::command]
+pub async fn create_link<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    from_id: String,
+    to_id: String,
+    relation: Option<String>,
+    note: Option<String>,
+) -> Result<LinkRow, IpcError> {
+    let pool = lifecycle.pool()?;
+    let written = create_link_inner(
+        &pool,
+        &from_id,
+        &to_id,
+        relation.as_deref(),
+        note.as_deref(),
+    )
+    .await?;
+    // The displaced proposal first, so the strip reads in the order the two
+    // things happened rather than in the order this function holds them.
+    if let Some(line) = written.superseded {
+        announce(&app, line);
+    }
+    announce(&app, written.activity);
+    Ok(written.link)
+}
+
+/// Withdraw a link, and announce it.
+///
+/// Idempotent: withdrawing an already-withdrawn link succeeds, writes no second
+/// line and announces nothing.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`unlink_inner`] refuses with.
+#[tauri::command]
+pub async fn unlink<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    link_id: String,
+) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    if let Some(written) = unlink_inner(&pool, &link_id).await? {
+        announce(&app, written.activity);
+    }
+    Ok(())
+}
+
+/// Ask a source to change something (issue #43): the one way the UI starts a
+/// write-back.
+///
+/// `payload` is a serialized `knobas_source::WriteOp` -- the same shape
+/// [`crate::commands::sources::pending_writes`] hands back and
+/// [`crate::commands::sources::amend_write`] takes. Untyped on the wire for
+/// #42's ratified reasoning: `WriteOp` grows per milestone (ADR-0006), and a
+/// typed argument would drag the SPI's enum onto the IPC surface and make
+/// every growth an IPC change.
+///
+/// **The write is queued, not sent** -- and the row that comes back is the
+/// write *as queued*, before the attempt, because that is what happened.
+/// Since issue #752 the answer comes as soon as the row exists: the send runs
+/// in the background (`sources::write_queue::submit_in_background`), so a
+/// dialog closes on the local insert rather than on a source's round trip.
+/// Read the outcome back with `pending_writes`, or watch `activity:new`: every
+/// queue transition writes a line, its `detail.write_id` naming the write. A UI that reported "sent" from this return
+/// value would be reporting a hope. The queue is what decides send, pend or
+/// hold (issue #42), and there is no path around it.
+///
+/// **There is no `source_id` argument.** Interfaces §4.1 makes the instance id
+/// and the `EntityRef` namespace the same string, so the target already names
+/// the source; a second argument could only agree or contradict, and a
+/// contradiction would aim a write at a source the target does not belong to.
+///
+/// # Errors
+///
+/// `invalid` if the payload is not a write op, if its target is not an entity
+/// id, or if the source does not offer that op; `not_found` if the target
+/// names a source that is not configured;
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
+///
+/// **`link_to`** (#984, a ticket's entity id) asks for a link from what a
+/// `CreateBranch` or `CreatePullRequest` makes to that ticket, drawn once the
+/// write has been sent and a sync of the source brings it in, on this send or
+/// a later tick (#1050: the intent is held on the queued row,
+/// `sources::write_queue::submit_linked_in_background`); `invalid` for any
+/// other op, `not_found` for a ticket the mirror does not hold. Absent, the
+/// command is what it was.
+#[tauri::command]
+pub async fn submit_write<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    payload: serde_json::Value,
+    link_to: Option<String>,
+) -> Result<knobas_core::write_queue::QueuedWrite, IpcError> {
+    let state = crate::sources::state(&app)?;
+    match link_to {
+        None => crate::sources::write_queue::submit_in_background(&state, payload).await,
+        Some(ticket) => {
+            crate::sources::write_queue::submit_linked_in_background(&state, payload, ticket).await
+        }
+    }
+}
+
+/// The statuses this ticket's workflow offers from where it stands **right
+/// now** (#498, spec #491's stream 3).
+///
+/// The read the status select was built without. Until this existed the select
+/// offered the statuses the source's *corpus* had been seen to use -- every
+/// column the mini board draws for that source -- and the adapter discovered at
+/// write time that half of them were unreachable, which reached the reader as a
+/// refused row in the write queue rather than as an offer that was never made.
+/// This asks the source instead.
+///
+/// **A read straight through to the adapter, with no mirror in it and nothing
+/// stored.** `CONTEXT.md`'s *reachable transition* is an answer about now, so
+/// there is no row to cache it in and no event to invalidate one with; the
+/// answer is good for as long as the detail is open, and the write's own
+/// resolution -- unchanged -- is what still decides whether the move happens.
+///
+/// **A rejection is the ordinary case, not a fault.** A source with no workflow
+/// refuses by name (battery clause 8), which is what a Gitea pull request, a
+/// build, a page and a monitor get; a source whose credential died answers
+/// `unauthorized`. The shell draws no select for a kind that has no workflow
+/// and falls back to the corpus-observed offer, marked *offer unverified*, for
+/// a read that failed on a ticket that does have one. Neither is an empty list:
+/// an empty answer is a real workflow with no moves left, and the two must not
+/// collapse.
+///
+/// **There is no `source_id` argument**, for `submit_write`'s reason above: the
+/// entity id already names the source.
+///
+/// # Errors
+///
+/// `invalid` if `entity_id` is not an entity id, `not_found` if its namespace
+/// is not a configured source, `unauthorized` / `unreachable` / `internal` as
+/// the adapter's own failure maps -- including the refusal of a source with no
+/// workflow, which is `internal` because it is a caller asking the wrong
+/// question rather than anything the user can act on;
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
+#[tauri::command]
+pub async fn reachable_transitions<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+) -> Result<Vec<String>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::sources::crud::reachable_transitions(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &entity_id,
+    )
+    .await
+    .map_err(|error| crate::sources::to_ipc(&error, None))
+}
+
+/// The **source view** of one entity (#661, ADR-0020): what its adapter draws
+/// for its kind, read live when the detail opens and never stored.
+///
+/// `section: None` reads the whole view, deferred sections as stubs;
+/// `Some(id)` reads that one deferred section when the reader opens its tab.
+/// Routed like [`reachable_transitions`]: the entity id names the source, so
+/// there is no `source_id` argument.
+///
+/// **Three answers, and the shell draws each differently** (rule 2): a view is
+/// drawn as tabs with the generic projection behind *Raw*; `null` is an
+/// adapter with nothing to draw for this kind, and the panel is what it was
+/// before views existed; a rejection draws the same panel under one line,
+/// *Showing the mirror: <message>*. An entity-list row keeps its address only
+/// where the mirror holds that entity (rule 7, `sources::crud::view`).
+///
+/// # Errors
+///
+/// `invalid` if `entity_id` is not an entity id, `not_found` if its namespace
+/// is not a configured source, `unauthorized` / `unreachable` / `internal` as
+/// the adapter's own failure maps;
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
+#[tauri::command]
+pub async fn entity_view<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    section: Option<String>,
+) -> Result<Option<knobas_source::view::SourceView>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::sources::crud::view(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &entity_id,
+        section.as_deref(),
+    )
+    .await
+    .map_err(|error| crate::sources::to_ipc(&error, None))
+}
+
+/// Everything the note view draws for one note (#46).
+///
+/// Deliberately **not** [`EntityDetail`], and the difference is not tidiness:
+/// that DTO is shaped around a mirrored item -- a source, a `payload`, a
+/// `web_url`, a `synced_at` -- and a note has none of those. Half of it would
+/// be filled in with placeholders that a reader could not tell from real ones.
+/// A note is an entity and shares the address space; it is not a mirror row.
+///
+/// `refs` and `links` overlap and both are here because they answer different
+/// questions. `refs` is *the body's own list*, in body order, including the
+/// ones that resolve to nothing -- which is what the editor draws chips from
+/// and what makes an unresolved ref visible (story 10). `links` is the panel
+/// #53 built: every link this note takes part in, in either direction, so the
+/// note shows what points at it as well as what it points at.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NoteDetail {
+    pub note: knobas_core::note::NoteRow,
+    /// The `[[refs]]` the body names, in body order, resolved where they
+    /// resolve.
+    pub refs: Vec<knobas_core::note::NoteRef>,
+    /// Every link this note takes part in, each with its other end resolved --
+    /// the ref links it derived, plus anything drawn by hand from either side.
+    pub links: Vec<LinkEntry>,
+}
+
+/// The note at `note_id`, its refs and its links.
+///
+/// Three round trips, like [`get_entity_inner`]'s: the note, the refs, the
+/// links.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `note_id` is not an entity id,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if no note carries it,
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn get_note_inner(pool: &PgPool, note_id: &str) -> Result<NoteDetail, IpcError> {
+    let id = EntityRef::parse(note_id).map_err(IpcError::invalid)?;
+    let note = knobas_core::note::get(pool, &id)
+        .await?
+        .ok_or_else(|| IpcError::not_found(format!("there is no note at {id}")))?;
+    Ok(NoteDetail {
+        note,
+        refs: knobas_core::note::refs_of(pool, &id).await?,
+        links: knobas_core::link::entries_of(pool, &id).await?,
+    })
+}
+
+/// One link a caller asks a new note to be born with (#502).
+///
+/// An **input** DTO: the frontend sends these and nothing sends them back. It
+/// is a pair rather than two named fields (`capturedIn`, `capturedFrom`)
+/// because the command's job is *draw these links with the note*, and the two
+/// words are the caller's vocabulary, not the command's -- exactly as
+/// [`create_link_inner`] takes a relation rather than knowing what `blocks`
+/// means. The capture window (#503) and the in-app *New note* pass the same
+/// two, and a third caller with a third relation needs no argument here.
+///
+/// The note is always the **from** end; see [`knobas_core::note::BornLink`].
+///
+/// `Serialize` behind `test-util` for the reason [`EntityFilter`] carries it:
+/// it is what lets `tests/it/entity_mirror.rs` pin an input DTO through a round
+/// trip, and so see a field the TypeScript mirror never declares.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[cfg_attr(feature = "test-util", derive(serde::Serialize))]
+pub struct NoteLinkInput {
+    /// The other end's entity id.
+    pub target_id: String,
+    /// The relation the link carries, folded to lower case like every other
+    /// relation this module writes.
+    ///
+    /// Required, and blank is refused rather than defaulted. `create_link`'s
+    /// relation is an `Option` and its absence means *nobody named one*, which
+    /// [`DEFAULT_RELATION`] answers; here the caller is drawing a link the
+    /// reader never saw a dialog for, so `""` is a caller bug and a link
+    /// labelled `related` that nobody asked for would be the wrong sentence in
+    /// the panel rather than an error anybody could find.
+    pub relation: String,
+}
+
+/// Write a new note, and the links it is born with.
+///
+/// The first two arguments are optional because the affordance is *"start
+/// writing"*: a note created from an empty editor has no title and no body yet,
+/// and it still has to exist -- story 2 is that a thought is never lost to a
+/// closed window, which needs the row to be there before the first keystroke
+/// settles.
+///
+/// `links` is what a **capture** attaches (`CONTEXT.md`, **Capture**; spec #491
+/// stories 40--43): `captured-in` to the context of the stored room the reader
+/// stands in -- which makes the note a member of it by ADR-0008, since an
+/// explicit add is an ordinary link touching the context's own `ctx:` entity --
+/// and `captured-from` to the **foreground**, the word as `CONTEXT.md`'s
+/// **Passive attribution** defines it and as the heartbeat computes it: the
+/// open detail, else the room's anchor, else nothing (the deputy's ruling of
+/// 2026-09-08 on #502). A derived room has no context (`CONTEXT.md`, **Room**),
+/// so a note born in one is born with nothing, and that is a caller's decision
+/// rather than a rule here: this command draws the links it is handed.
+///
+/// They are drawn in the note's own transaction, which is what the ticket's
+/// title means -- see [`knobas_core::note::create`], which also states what
+/// happens to a target that no longer exists (no link, and the note is still
+/// written).
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if a link's target is not an
+/// entity id, or if its relation is blank -- both are caller bugs, and both are
+/// worth refusing loudly, since every id this command is handed came from a row
+/// the caller was already drawing and every relation from its own vocabulary;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a write failure.
+pub async fn create_note_inner(
+    pool: &PgPool,
+    title: Option<&str>,
+    body_md: Option<&str>,
+    links: &[NoteLinkInput],
+) -> Result<NoteDetail, IpcError> {
+    let born_with = links
+        .iter()
+        .map(|link| {
+            Ok(knobas_core::note::BornLink {
+                target: EntityRef::parse(&link.target_id).map_err(IpcError::invalid)?,
+                relation: present(Some(&link.relation))
+                    .ok_or_else(|| IpcError::invalid("a link drawn with a note needs a relation"))?
+                    .to_lowercase(),
+            })
+        })
+        .collect::<Result<Vec<_>, IpcError>>()?;
+    let note = knobas_core::note::create(
+        pool,
+        title.unwrap_or_default(),
+        body_md.unwrap_or_default(),
+        &born_with,
+        ACTOR,
+    )
+    .await?;
+    get_note_inner(pool, &note.id).await
+}
+
+/// Save a note's title and body, and bring its `[[refs]]` back into step.
+///
+/// This is what the editor's autosave calls, so it answers with the whole
+/// [`NoteDetail`]: the refs it just reconciled are what the editor redraws its
+/// chips from, and a second read to fetch them would race the next keystroke.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `note_id` is not an entity id,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if no note carries it -- an
+/// editor whose note was deleted elsewhere is told so rather than silently
+/// resurrecting it, [`Internal`](crate::IpcErrorCode::Internal) for a write
+/// failure.
+pub async fn save_note_inner(
+    pool: &PgPool,
+    note_id: &str,
+    title: &str,
+    body_md: &str,
+) -> Result<NoteDetail, IpcError> {
+    let id = EntityRef::parse(note_id).map_err(IpcError::invalid)?;
+    knobas_core::note::save(pool, &id, title, body_md, ACTOR)
+        .await?
+        .ok_or_else(|| IpcError::not_found(format!("there is no note at {id}")))?;
+    get_note_inner(pool, note_id).await
+}
+
+/// Delete a note: the body goes, the address stays, tombstoned.
+///
+/// `Ok(false)` when there was nothing to delete. Idempotent, like
+/// [`unlink_inner`]: a second *Delete* on a note already gone is not an error,
+/// and the caller can tell the two apart -- and, like `unlink_inner`, the call
+/// that mutated nothing writes no activity line.
+///
+/// The `deleted` line the first call *does* write is the store's
+/// ([`knobas_core::note::delete`], #524), inside the transaction that took the
+/// body; [`ACTOR`] is who it is attributed to, the same word every other
+/// mutation in this module signs with.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `note_id` is not an entity id,
+/// [`Internal`](crate::IpcErrorCode::Internal) for a write failure.
+pub async fn delete_note_inner(pool: &PgPool, note_id: &str) -> Result<bool, IpcError> {
+    let id = EntityRef::parse(note_id).map_err(IpcError::invalid)?;
+    Ok(knobas_core::note::delete(pool, &id, ACTOR).await?)
+}
+
+/// One note, with its refs and its links.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`get_note_inner`] refuses with.
+#[tauri::command]
+pub async fn get_note(
+    lifecycle: State<'_, Lifecycle>,
+    note_id: String,
+) -> Result<NoteDetail, IpcError> {
+    let pool = lifecycle.pool()?;
+    get_note_inner(&pool, &note_id).await
+}
+
+/// Write a new note, with the links it is born with.
+///
+/// `links` is absent for a caller that attaches none, which reads the same as
+/// an empty list and is spelled that way so *New note* in a derived room sends
+/// nothing rather than sending emptiness.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`create_note_inner`] refuses with.
+#[tauri::command]
+pub async fn create_note(
+    lifecycle: State<'_, Lifecycle>,
+    title: Option<String>,
+    body_md: Option<String>,
+    links: Option<Vec<NoteLinkInput>>,
+) -> Result<NoteDetail, IpcError> {
+    let pool = lifecycle.pool()?;
+    create_note_inner(
+        &pool,
+        title.as_deref(),
+        body_md.as_deref(),
+        links.as_deref().unwrap_or_default(),
+    )
+    .await
+}
+
+/// Save a note, refs and all.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`save_note_inner`] refuses with.
+#[tauri::command]
+pub async fn save_note(
+    lifecycle: State<'_, Lifecycle>,
+    note_id: String,
+    title: String,
+    body_md: String,
+) -> Result<NoteDetail, IpcError> {
+    let pool = lifecycle.pool()?;
+    save_note_inner(&pool, &note_id, &title, &body_md).await
+}
+
+/// Delete a note.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`delete_note_inner`] refuses with.
+#[tauri::command]
+pub async fn delete_note(
+    lifecycle: State<'_, Lifecycle>,
+    note_id: String,
+) -> Result<bool, IpcError> {
+    let pool = lifecycle.pool()?;
+    delete_note_inner(&pool, &note_id).await
+}

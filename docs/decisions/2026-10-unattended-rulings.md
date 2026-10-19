@@ -7539,3 +7539,36 @@ The merge-manager's rulings on #1313 and #1314 (Opus):
   wrapper struct and its re-decoding read to go, and both are gone. The functions name `SHAPE` and
   #1122's once-sent POST in one place and keep `knobas-http` confined to `http.rs`.
   *Reversing:* cheap.
+
+## #1316: the entity commands become a directory of named modules (Opus implementer, 2026-10-19)
+
+- **`viewed.rs` and `projects.rs` stay files of their own.** *Fork:* merge *Viewed* on a pull
+  request's files (160 lines, between the run page's live reads and pins) and the project census
+  (60 lines) into a neighbour, or not. *Ruling:* not. The ticket lists the merges it wants, and
+  neither is among them; the spec names the project census as a section of its own. `builds.rs`
+  is therefore two stretches of the old file, joined. *Reversing:* move one file's body into its
+  neighbour and drop two lines from `mod.rs`.
+- **Names.** Code facts, the pasted URL and recent activity are `lookups.rs` (three small reads
+  by key, none of them Code's alone); the link writes, write-back, the entity view and notes are
+  `links.rs`, the old section's own header. *Reversing:* a rename.
+- **The old file's unit tests went to their subjects.** The statement and order tests to
+  `list.rs`, the declared-kind tests to `detail.rs`, the pins test to `builds.rs`; the mirror
+  tests (the handler barrel and the mini board's two arguments) stay together in `entity/mod.rs`,
+  reading `board.rs` for the signature. Keeping them in one `tests.rs` would have made the
+  statements and `kind_info_for` `pub(super)` for a test's sake. *Reversing:* n/a.
+- **Siblings share through `use super::*`.** The root keeps the old file's imports, each
+  submodule takes them and its siblings' items with one glob, and the seven helpers two sections
+  share are `pub(super)`. Per-file import lists would have been a second thing to keep in step
+  with the code, for a split whose whole claim is that nothing moved but the file boundary.
+  *Reversing:* replace each glob with its file's names.
+- **The section prose moved verbatim**, including the paragraphs that say why a section was in
+  "this module rather than one of its own". They are history of the frozen layout, and editing
+  them would make the move proof weaker. Each file gains a one-line `//!` title. *Reversing:* n/a.
+- **The scans walk one level down and nothing deeper.** Both command scans read every `.rs` file
+  of a directory module, `mod.rs` included, and attribute it to the directory's name; only the
+  top-level `commands/mod.rs` is skipped. Each asserts it reached `entity/`, which failed before
+  the walk was widened. A second level of nesting would be a new §10.8 entry and its own scan
+  change. *Reversing:* n/a.
+- **Seams, chosen without a person to confirm them:** none new. The handler-list scan and the
+  `AppState` scan are the seams the ticket names, plus the read-plans suite unedited.
+  *Reversing:* n/a.

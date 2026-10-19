@@ -11,7 +11,7 @@ The loop runs unattended; one prompt stalls it until Björn is back. Never: chai
 - `gh issue view <N> --json body,comments`. The **body** is the contract; the parent spec is context. If the milestone description has a `## Spec digest`, read it first and only the spec sections it cites. Milestone rules apply to you.
 - Every ADR in `docs/adr/` is in force; a PR that contradicts one is wrong by construction.
 - Re-verify the ticket's diagnosis on the current tree before fixing; say in the PR if a sibling change overtook it.
-- Read `CLAUDE.md`, `docs/agents/working-model.md`, `CONTEXT.md`, and `docs/contract.md` §10.8 if the ticket touches IPC or migrations. §10.8 freezes the **module layout** too: no new files under `crates/knobas-app/src/commands/` or `app/src/lib/ipc/` (new commands join the owning stream's module), and every migration or IPC addition carries its own dated §10.8 entry in the same PR, matching the diff exactly.
+- Read `CLAUDE.md`, `docs/agents/working-model.md`, `CONTEXT.md`, and `docs/contract.md` §10.8 if the ticket touches IPC or migrations. §10.8 freezes the **module layout** too: no new files under `crates/knobas-app/src/commands/` (its `entity/` directory included) or `app/src/lib/ipc/` beyond what a §10.8 entry books (a new command joins the owning stream's module, and under `entity/` the file for its section), and every migration or IPC addition carries its own dated §10.8 entry in the same PR, matching the diff exactly.
 
 ## Decisions
 

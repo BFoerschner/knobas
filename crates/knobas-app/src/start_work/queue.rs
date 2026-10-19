@@ -281,7 +281,7 @@ pub(crate) fn escape_like(value: &str) -> String {
 /// One entity id, or `None`.
 ///
 /// Every value is a bound parameter and `sql` is a `&'static str` -- the rule
-/// `commands/entity.rs` states for this crate, which sqlx now enforces at the
+/// `commands/entity/mod.rs` states for this crate, which sqlx now enforces at the
 /// type level.
 async fn found(
     pool: &PgPool,
