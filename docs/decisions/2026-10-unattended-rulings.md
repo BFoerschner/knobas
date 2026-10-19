@@ -7423,3 +7423,13 @@ The merge-manager's rulings (Opus):
   stale layout wording is outside this ticket. *Reversing:* n/a.
 - **Seams, chosen without a person to confirm them:** the role module's interface, the house-rules
   scan, `aroundLines` and `reachTally`. *Reversing:* n/a.
+
+The merge-manager's rulings (Sonnet, #1300):
+
+- **The section-tagged tally stays.** *Fork:* the section tally and `aroundLines` counting by
+  section go past the ticket's wording, or not. *Ruling:* keep. Criterion 2 asks for a section
+  module with no run kinds and a run-kinds helper used for routing only; the tag is how the module
+  meets it without the Tickets preview reading the registry, and spec #1293's out-of-scope item
+  (a row carries its frame) is untouched. *Reversing:* restore the `runKinds` parameter.
+- **`ipc/sources.ts` is a comment-only change.** Its doc comments follow the amendment; the
+  gate scope reads it as full only because a Rust test reads the file. *Reversing:* n/a.
