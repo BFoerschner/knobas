@@ -8277,9 +8277,9 @@ identity on all 34 names against `search.ts` at 1187a8d5, two control mutations 
   *Reversing:* delete an alias once nothing imports it.
 - **`CandidateSource`'s derive.** *Fork:* add `ts_rs::TS` to `closed_vocabulary!`'s own derive
   list, or pass it in through the enum attributes the macro already forwards. *Ruling:* pass it
-  in. *Reasoning:* the macro serves crates that never cross the bridge (`knobas-sync`'s health
-  and run-log vocabularies); a derive in the macro would make every one of them a `ts-rs`
-  type. *Reversing:* move the two attribute lines into the macro.
+  in. *Reasoning:* #1327 passed `AuthState`'s derive in the same way, and a derive in the macro
+  would make every closed vocabulary a `ts-rs` type whether it crosses the bridge or not.
+  *Reversing:* move the two attribute lines into the macro.
 - **Which tests are fixture pins.** Deleted: the twenty tests in `commands::time` that read type
   text out of the barrel (`*_typescript_mirror`, `the_mirror_declares_the_target_as_a_union_of_its_two_halves`,
   `a_day_review_row_with_no_title_still_carries_the_key`) and their helpers. Kept: the invoke-name

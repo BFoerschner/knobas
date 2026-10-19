@@ -1,6 +1,6 @@
 - **The time barrel's types are generated: the IPC surface, issue #1330 (2026-10-20).** Parent
-  spec #1306, a switching ticket after #1325's app barrel, #1326's entity barrel and #1328's
-  assets barrel. No migration, no event, no `WriteOp`, nothing under
+  spec #1306, a switching ticket after #1325's app barrel, #1326's entity barrel, #1328's
+  assets barrel and #1327's sources barrel. No migration, no event, no `WriteOp`, nothing under
   `crates/knobas-source/src/**` or `crates/knobas-http/**`, no command added, removed or
   renamed, no argument changed, no field, variant or serde attribute added, removed or renamed,
   no wire shape changed, nothing added to either append-only barrel. `generated/time.ts` is the
@@ -19,7 +19,7 @@
 
   Nineteen types, all `#[ts(export_to = "time.ts")]` and nothing else on the TypeScript side.
   `CandidateSource` takes its derive through `knobas_core::closed_vocabulary!`'s enum
-  attributes; the macro is unchanged. Rust doc comments grew by the rules the TypeScript
+  attributes, as #1327's `AuthState` does; the macro is unchanged. Rust doc comments grew by the rules the TypeScript
   carried, enum variant docs moved into the enums' docs (#1325's convention), and
   `Block::worklog_id`'s doc, which still said nothing writes a worklog, is corrected.
 
