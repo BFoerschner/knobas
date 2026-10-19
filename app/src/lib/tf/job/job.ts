@@ -17,7 +17,7 @@ export interface SourceFacts {
   display_name?: string;
   config?: unknown;
   kinds?: { id: string }[];
-  /** The roles it claims (#1196): what the shell draws it for, never its adapter kind. */
+  /** The roles it claims (#1196): read only for the Builds staleness warning; the mirror narrows the rows (#1300). */
   roles?: readonly RoleClaim[];
 }
 import type { Week } from "../../ipc/time";

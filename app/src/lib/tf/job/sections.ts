@@ -77,7 +77,11 @@ export interface ReachPorts {
   jobReach: (entityId: string) => Promise<Reached[]>;
 }
 
-/** One line of the reach tally: a kind and tone's count, and the section whose read counted it. */
+/**
+ * One line of the reach tally: a kind and tone's count, and the section whose
+ * read counted it. `"assets"` is the reached assets, which come from the reach
+ * itself rather than a section read.
+ */
 export interface SectionTally extends KindTally {
   section: Section | "assets";
 }

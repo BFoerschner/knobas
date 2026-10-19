@@ -6,6 +6,7 @@
 import type { KindTally, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type { ListSort as StoredSort, ViewLanes, ViewSortColumn } from "../../ipc/search";
 import { kindLabel, kindSingular, sectionOf } from "../../shell/kinds";
+import type { SectionTally } from "../job/sections";
 
 /** How many cards a column draws before *Show N more* (R-3.4). */
 export const COLUMN_CAP = 8;
@@ -153,7 +154,7 @@ export interface AroundLine {
  * (#1256): the mirror answered it for the CI role, so the shell need not know
  * the role's run kinds (#1300).
  */
-export function aroundLines(tally: readonly (KindTally & { section?: string })[] | null): AroundLine[] {
+export function aroundLines(tally: readonly (KindTally & Partial<Pick<SectionTally, "section">>)[] | null): AroundLine[] {
   const sections = new Map<string, { label: string; order: number; kinds: Set<string>; n: number; bad: number }>();
   for (const line of tally ?? []) {
     if (line.kind === "ticket" || line.count === 0) continue;
