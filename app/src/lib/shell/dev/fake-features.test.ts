@@ -7,6 +7,7 @@ import { expect, test, vi } from "vitest";
 import type { AdHocBlock, DayBlock, OpenStretch } from "../../ipc/time";
 import { dayRows, offerRuns } from "../../tf/time/day-view";
 import { demoHandlers } from "./fake-tauri";
+import { FIXTURE_SOURCES } from "./fake/sources";
 
 const MODULES = import.meta.glob<{ handlers?: unknown }>("./fake/*.ts", { eager: true });
 
@@ -273,6 +274,44 @@ test("job_reach labels a sub-task's parent links behind the switch, and list_ent
   const off = h["job_reach"]!({ entityId: "mock:PAY-232" }) as { origin: { kind: string } }[];
   expect(off.every((row) => row.origin.kind === "link_set")).toBe(true);
   expect(h["set_parent_links"]!({ enabled: true })).toBe(true);
+});
+
+// -- a role, answered by the mirror (#1294) ----------------------------------
+
+test("list_entities asked for a role reads its fillers' rows of its kinds, and a miss takes the source off", () => {
+  const h = demoHandlers() as Calls;
+  const read = (role: string, kinds: string[] = []) =>
+    (
+      h["list_entities"]!({
+        filter: { sources: [], kinds, order: "updated_desc", context: null, project: null, include_deleted: false, role },
+        limit: 500,
+        offset: 0,
+      }) as { rows: { source_id: string; kind: string }[]; total: number }
+    ).rows.map((row) => `${row.source_id}/${row.kind}`);
+  const pairs = (rows: string[]) => [...new Set(rows)].sort();
+
+  // CI is TeamCity's, and its kinds are the frames its adapter declares: the
+  // corpus holds its runs (its pipelines are `builds.ts`'s own read).
+  expect(pairs(read("ci"))).toEqual(["teamcity/build"]);
+  // The code host is the mock's, of the code host's kinds only.
+  const code = pairs(read("code-host"));
+  expect(code.length).toBeGreaterThan(0);
+  expect(code.every((pair) => /^mock\/(repo|branch|pr|commit)$/.test(pair))).toBe(true);
+  // Named kinds intersect the role's.
+  expect(pairs(read("code-host", ["pr", "ticket"]))).toEqual(["mock/pr"]);
+  expect(pairs(read("ticket-system"))).toEqual(["mock/ticket"]);
+  // An unknown role is an empty page.
+  expect(read("nobody:fills-this")).toEqual([]);
+
+  // A recorded miss of the role takes the source off that surface alone.
+  const mock = FIXTURE_SOURCES.find((source) => source.id === "mock") as { role_misses?: { role: string }[] };
+  mock.role_misses = [{ role: "code-host" }];
+  try {
+    expect(read("code-host")).toEqual([]);
+    expect(read("ticket-system")).toContain("mock/ticket");
+  } finally {
+    delete mock.role_misses;
+  }
 });
 
 test("the start-work flow proposes in the named repository, then runs to queued writes and a done link", () => {

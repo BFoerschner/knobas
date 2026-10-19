@@ -711,6 +711,7 @@ async fn a_this_job_list_holds_the_sets_members() {
         order: EntityOrder::UpdatedDesc,
         include_deleted: false,
         reach: Some(ticket.clone()),
+        role: None,
     };
     let page_rows = list_entities_inner(
         &pool,

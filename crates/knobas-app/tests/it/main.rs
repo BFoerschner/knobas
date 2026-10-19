@@ -33,6 +33,7 @@ mod dependencies_ipc;
 mod docs_ipc;
 mod entity;
 mod entity_mirror;
+mod entity_role;
 mod entity_view;
 mod estate_exit;
 mod external_adapter;

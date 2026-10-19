@@ -1174,6 +1174,126 @@ fn still_claimed(
         .collect()
 }
 
+/// What a read asked for a role is scoped to (#1294, ADR-0029 as amended on
+/// 2026-10-19): the sources that fill it, and the kinds that are its.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RoleScope {
+    /// The sources filling the role, id order.
+    pub sources: Vec<String>,
+    /// The role's kinds among its fillers, sorted. See [`role_scope`].
+    pub kinds: Vec<String>,
+}
+
+/// The ids of the sources that **fill** `role`, id order.
+///
+/// A configured source fills a role when its adapter's template claims it
+/// and no miss of that role is recorded on its declared paths (ADR-0028,
+/// #1199). The registry is the one source of claims: a source whose adapter
+/// kind no template answers fills nothing, and so do the items of a source
+/// with no configuration row, which no row names. Read per call, the
+/// registry and `sync.role_check` both, and cached nowhere, so a sync's new
+/// miss or a source just added is in the next read.
+///
+/// # Errors
+///
+/// The database's.
+pub async fn fillers(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    role: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    Ok(role_scope(pool, registry, role).await?.sources)
+}
+
+/// [`fillers`], with the role's kinds among them.
+///
+/// A built-in role's kinds are its minimum's, required and optional: each
+/// kind it names by id, and each kind a filler declares on a frame it names
+/// (CI's pipelines and runs, as the Builds frame reads them; a ticket
+/// system's saved views). A custom role's kinds are those its fillers emit
+/// that are no built-in role's the source claims. An unknown role has no
+/// fillers and no kinds.
+///
+/// # Errors
+///
+/// The database's.
+pub async fn role_scope(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    role: &str,
+) -> Result<RoleScope, sqlx::Error> {
+    let rows = config::list(pool).await?;
+    // The misses as the source list reads them, so the two cannot disagree.
+    let mut misses = knobas_sync::role_check::misses(pool).await?;
+    let templates = registry.descriptors();
+    let filling: Vec<(String, &SourceDescriptor)> = rows
+        .into_iter()
+        .filter_map(|row| {
+            let template = templates
+                .iter()
+                .find(|t| t.adapter_kind == row.adapter_kind)?;
+            let claims = template.roles.iter().any(|claim| claim.role == role);
+            let missed = still_claimed(misses.remove(&row.id).unwrap_or_default(), &template.roles)
+                .iter()
+                .any(|miss| miss.role == role);
+            (claims && !missed).then_some((row.id, template))
+        })
+        .collect();
+    let kinds = role_kinds(role, filling.iter().map(|(_, template)| *template));
+    Ok(RoleScope {
+        sources: filling.into_iter().map(|(id, _)| id).collect(),
+        kinds,
+    })
+}
+
+fn role_kinds<'a>(role: &str, fillers: impl Iterator<Item = &'a SourceDescriptor>) -> Vec<String> {
+    use knobas_source::role::minimum;
+    let mut kinds = std::collections::BTreeSet::new();
+    for template in fillers {
+        match minimum(role) {
+            Some(min) => kinds.extend(builtin_kinds(min, template)),
+            None => {
+                let builtin: std::collections::BTreeSet<String> = template
+                    .roles
+                    .iter()
+                    .filter_map(|claim| minimum(&claim.role))
+                    .flat_map(|min| builtin_kinds(min, template))
+                    .collect();
+                kinds.extend(
+                    template
+                        .entity_kinds
+                        .iter()
+                        .map(|kind| kind.id.clone())
+                        .filter(|kind| !builtin.contains(kind)),
+                );
+            }
+        }
+    }
+    kinds.into_iter().collect()
+}
+
+/// The kinds of `min` that `template` emits or may emit: every kind it names
+/// by id, and every kind `template` declares on a frame it names.
+fn builtin_kinds(
+    min: &knobas_source::role::Minimum,
+    template: &SourceDescriptor,
+) -> Vec<String> {
+    use knobas_source::role::KindOf;
+    min.kinds
+        .iter()
+        .chain(min.optional_kinds)
+        .flat_map(|wanted| match wanted.kind {
+            KindOf::Id(id) => vec![id.to_owned()],
+            KindOf::Frame(frame) => template
+                .payload_paths
+                .iter()
+                .filter(|paths| paths.frame == Some(frame))
+                .map(|paths| paths.kind.clone())
+                .collect(),
+        })
+        .collect()
+}
+
 async fn summarize(
     pool: &PgPool,
     row: config::SourceConfigRow,

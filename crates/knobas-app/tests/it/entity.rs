@@ -111,6 +111,7 @@ fn all() -> EntityFilter {
         order: EntityOrder::UpdatedDesc,
         include_deleted: false,
         reach: None,
+        role: None,
     }
 }
 
@@ -916,6 +917,7 @@ async fn a_project_narrows_the_include_deleted_statements_too() {
                 project: Some("PAY".to_owned()),
                 include_deleted: true,
                 reach: None,
+                role: None,
                 order,
                 ..all()
             },

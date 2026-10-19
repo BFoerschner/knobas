@@ -181,6 +181,17 @@ pub struct EntityFilter {
     /// written before #817 is unscoped as it was.
     #[serde(default)]
     pub reach: Option<String>,
+    /// Only what this role's surface draws (#1294, ADR-0029 as amended on
+    /// 2026-10-19): the rows of the sources that **fill** the role, which the
+    /// mirror answers per read (`sources::crud::fillers`). With
+    /// [`Self::sources`] as well, the fillers among them. With
+    /// [`Self::kinds`] empty it also narrows to the role's kinds (CI's are
+    /// the pipeline and run kinds its fillers declare); with kinds named, to
+    /// the role's among them. An unknown role has no fillers, so its page is
+    /// empty, never an error. `None` is unscoped, and absent on the wire
+    /// reads as `None`, as [`Self::reach`] does.
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 /// The orderings a room reads in: the two plain ones, and since #680 the two
@@ -756,10 +767,23 @@ fn any_of(values: &[String]) -> Option<Vec<String>> {
     (!values.is_empty()).then(|| values.to_vec())
 }
 
+/// `scope` where nothing is `named`, else the values of `scope` that are.
+fn among(scope: Vec<String>, named: &[String]) -> Vec<String> {
+    if named.is_empty() {
+        scope
+    } else {
+        scope.into_iter().filter(|v| named.contains(v)).collect()
+    }
+}
+
 /// One page of the room addressed by `filter`.
 ///
 /// The behaviour lives here rather than in the command so it is reachable from
 /// a test: a `#[tauri::command]` cannot be called directly.
+///
+/// A role ([`EntityFilter::role`]) is answered by the process's registry, as
+/// the command's declarations are; [`list_entities_with_registry`] takes the
+/// registry from its caller.
 ///
 /// # Errors
 ///
@@ -767,6 +791,30 @@ fn any_of(values: &[String]) -> Option<Vec<String>> {
 /// fails.
 pub async fn list_entities_inner(
     pool: &PgPool,
+    filter: &EntityFilter,
+    limit: u32,
+    offset: u32,
+    declarations: &knobas_core::payload::Declarations,
+) -> Result<EntityPage, IpcError> {
+    list_entities_with_registry(
+        pool,
+        &crate::sources::Registry::builtin(),
+        filter,
+        limit,
+        offset,
+        declarations,
+    )
+    .await
+}
+
+/// [`list_entities_inner`], answering a role from `registry`'s claims.
+///
+/// # Errors
+///
+/// As [`list_entities_inner`].
+pub async fn list_entities_with_registry(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     filter: &EntityFilter,
     limit: u32,
     offset: u32,
@@ -808,6 +856,21 @@ pub async fn list_entities_inner(
         None => members,
     };
 
+    // A role narrows the two lists every statement already binds (#1294):
+    // its fillers among the named sources, its kinds among the named kinds.
+    // `Some` of an empty list is a role nobody fills, whose page is honestly
+    // empty -- not unscoped, which is what an empty list alone would mean.
+    let (sources, kinds) = match filter.role.as_deref() {
+        Some(role) => {
+            let scope = crate::sources::crud::role_scope(pool, registry, role).await?;
+            (
+                Some(among(scope.sources, &filter.sources)),
+                Some(among(scope.kinds, &filter.kinds)),
+            )
+        }
+        None => (any_of(&filter.sources), any_of(&filter.kinds)),
+    };
+
     let rows = sqlx::query(statement(filter)?)
         // A tile order is never a named prepared statement (#685's review).
         // PostgreSQL custom-plans a named one for five executions and may
@@ -820,8 +883,8 @@ pub async fn list_entities_inner(
         // `knobas_search::sql::query_as_with`'s remedy for the same switch.
         // The plain orders' plans survive going generic, so they keep theirs.
         .persistent(!filter.order.is_tile_order())
-        .bind(any_of(&filter.sources))
-        .bind(any_of(&filter.kinds))
+        .bind(sources)
+        .bind(kinds)
         .bind(within)
         .bind(i64::from(limit))
         .bind(i64::from(offset))
@@ -5330,6 +5393,7 @@ mod tests {
             order,
             include_deleted,
             reach: None,
+            role: None,
         };
         let chosen = |include_deleted, order| statement(&filter(include_deleted, order)).ok();
         assert_eq!(chosen(false, EntityOrder::UpdatedDesc), Some(LIVE_UPDATED));
