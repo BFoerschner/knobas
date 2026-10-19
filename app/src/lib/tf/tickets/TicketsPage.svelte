@@ -42,12 +42,7 @@
   *Delete*, in the ⋯ menus and the editor, a toast's *Undo* takes back.
 -->
 <script lang="ts" module>
-  import type {
-    ContextRow,
-    EntityDetail,
-    LanesAsked,
-    MiniBoard,
-  } from "../../ipc/entity";
+  import type { ContextRow } from "../../ipc/entity";
   import type {
     FilterSuggestions,
     QueryTranslation,
@@ -55,33 +50,13 @@
     TicketViewDraft,
     TicketViewRow,
   } from "../../ipc/search";
-  import type { ReachPorts } from "../job/sections";
-  import type { LaneField, ListSort } from "./tickets";
+  import type { BoardReaderPorts, ViewSessions } from "./board-reader.svelte";
 
-  /** The reads this page makes, injectable so a test needs no bridge. */
-  export interface TicketsPorts {
-    /**
-     * `mini_board` over the sources filling `role`, every source without one
-     * (#1299): capped per column or not, narrowed by a query or not; or a
-     * Jira view's board, when `savedView` names one (#877); in lanes or not
-     * (#939).
-     */
-    board: (
-      perColumn: number | null,
-      query: string | null,
-      savedView?: string | null,
-      lanes?: LanesAsked | null,
-      role?: string,
-    ) => Promise<MiniBoard>;
+  /** The reads this page makes, injectable so a test needs no bridge: the board reader's, and the views'. */
+  export interface TicketsPorts extends BoardReaderPorts {
     /** Hands a Jira view's address to the browser: *Open in Jira* (#879). */
     openExternal?: (url: string) => Promise<void>;
-    /** The selected ticket's description. */
-    detail: (entityId: string) => Promise<Pick<EntityDetail, "body_text">>;
     contexts: () => Promise<ContextRow[]>;
-    /** The job's section reads, scoped by what a ticket reaches: *Around this ticket* (#1030). */
-    listEntities: ReachPorts["listEntities"];
-    /** What a ticket reaches (`job_reach`, #817), for the Assets line. */
-    jobReach: ReachPorts["jobReach"];
     suggestions: () => Promise<Pick<FilterSuggestions, "fields" | "parents">>;
     /** Every ticket view, each with its count (#812). */
     views: () => Promise<TicketViewRow[]>;
@@ -95,30 +70,11 @@
     translateView: (id: string) => Promise<QueryTranslation | null>;
   }
 
-  /** A board with nothing on it, new each time, as `$state` may take it: what no answer yet draws. */
-  function emptyBoard(): MiniBoard {
-    return { columns: [], sources: [], lanes: [], more_lanes: 0 };
-  }
-
-  /** One view's session: the switches over what it was saved with, and the expanded columns. */
-  interface ViewSession {
-    /** The *Board / List* switch, or `undefined` for the view's own. */
-    layout?: "board" | "list";
-    /** The *Lanes* switch (#813), or `undefined` for the view's own. */
-    lanes?: LaneField;
-    /** The list's sort (#813), or `undefined` for the view's own. */
-    sort?: ListSort;
-    /** Expanded board columns by name (`""` for *No status*); in a lane, `<lane>|<name>`. */
-    expanded: string[];
-    /** Whether the list's *Show N more* was pressed: the list reads every ticket, the board keeps its caps. */
-    listAll: boolean;
-  }
-
   /** What the page keeps for the session: each view's switches, and the selection. */
-  const session = $state({
+  const session = $state<ViewSessions & { selected: string | null }>({
     /** By view id, `""` for *All tickets*. */
-    views: {} as Record<string, ViewSession>,
-    selected: null as string | null,
+    views: {},
+    selected: null,
   });
 
   /** A new session: what each test is. */
@@ -138,7 +94,6 @@
     listEntities,
     miniBoard,
     type MiniBoardCard,
-    type MiniBoardColumn,
   } from "../../ipc/entity";
   import {
     deleteTicketView,
@@ -156,30 +111,23 @@
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
-  import { reachTally } from "../job/sections";
   import { jobHash } from "../route";
   import { sourceHash } from "../settings/settings";
   import { sourceRoles, TICKET_SYSTEM, TRANSLATE_QUERY } from "../roles.svelte";
+  import { columnKey, createBoardReader, viewSession } from "./board-reader.svelte";
   import SavedViewSourceLine from "./SavedViewSourceLine.svelte";
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
   import {
-    aroundLines,
-    boardLanes,
-    COLUMN_CAP,
     columnName,
-    drawnCards,
     LANE_FIELDS,
-    LANES_AT_FIRST,
     moreLanesLine,
     moreLine,
     nextSort,
     sortRows,
-    TYPED_CAP,
     when,
-    type AroundLine,
-    type Lane,
+    type LaneField,
     type SortColumn,
   } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
@@ -201,7 +149,6 @@
     LIST_COLUMN_ORDER,
     OWN_GROUPS,
     savedShowing,
-    viewColumns,
     type CopiedFrom,
   } from "./views";
 
@@ -334,22 +281,24 @@
       .catch(() => (views ??= []));
   }
 
-  /** This view's session, made when first switched. */
-  function here(): ViewSession {
-    // Read back through the store: `??=` answers the plain object, not its proxy.
-    session.views[sessionKey] ??= { expanded: [], listAll: false };
-    return session.views[sessionKey]!;
-  }
-  const own = $derived(session.views[sessionKey]);
   const saved = $derived(savedShowing(view ?? null));
+  /** The view's own columns, which gather the board's statuses (R-3.15). */
+  const ownColumns = $derived(savedViewId !== null ? drawnJiraColumns(view?.columns ?? []) : (view?.columns ?? []));
+
+  // ---- the board: its reads are the reader's (#1319) ----
+  // svelte-ignore state_referenced_locally
+  // Read once: the reader owns the typing pause and the generations.
+  const reader = createBoardReader(ports, {
+    typingPause,
+    sessions: session,
+    view: () => ({ columns: ownColumns, layout: saved.layout, lanes: saved.lanes }),
+  });
   /** How the tickets show now: the session's switches over the view's own (R-3.3). */
   const showing = $derived({
-    layout: own?.layout ?? saved.layout,
-    lanes: own?.lanes ?? saved.lanes,
-    sort: own?.sort ?? saved.sort,
+    layout: reader.layout,
+    lanes: reader.lanes,
+    sort: session.views[sessionKey]?.sort ?? saved.sort,
   });
-  const expanded = $derived(own?.expanded ?? []);
-  const listAll = $derived(own?.listAll ?? false);
 
   // ---- the filter bar ----
   /** The filter bar's id: its state is kept per view. */
@@ -388,161 +337,26 @@
     };
   });
 
-  // ---- the board ----
-  let board = $state<MiniBoard | null>(null);
-  /** How many tickets there are unfiltered: the count's "of 75". */
-  let total = $state<number | null>(null);
-  let failed = $state<string | null>(null);
-  let reading = 0;
-  /** Bumped when another view opens, so a count read for the last one is dropped. */
-  let epoch = 0;
-  /** The read a filter change waits to make until the keys pause. */
-  let pausing: ReturnType<typeof setTimeout> | undefined;
-  $effect(() => () => clearTimeout(pausing));
-
-  const typing = $derived(filter.text.trim() !== "");
-  /**
-   * `ports.board` for the ticket system (#1200, #1299, ADR-0029 as amended):
-   * the server reads it over the sources that fill the role, whatever their
-   * adapter kind, so every count is the fillers' own and nothing is narrowed
-   * here.
-   */
-  function readBoard(
-    perColumn: number | null,
-    query: string | null,
-    savedView: string | null,
-    lanes?: LanesAsked | null,
-  ): Promise<MiniBoard> {
-    return ports.board(perColumn, query, savedView, lanes, TICKET_SYSTEM);
-  }
-
-  const sum = (b: MiniBoard) => b.columns.reduce((all, column) => all + column.total, 0);
-  const columnKey = (column: Pick<MiniBoardColumn, "status">) => column.status ?? "";
-  const isExpanded = (column: MiniBoardColumn) => expanded.includes(columnKey(column));
-  /**
-   * Whether the board is split into lanes: read in lanes on the server
-   * (#939), each lane's column capped as a board's is, the first lanes only.
-   */
-  const laned = $derived(showing.layout === "board" && showing.lanes !== "none");
-  /** How many lanes a laned board reads: the first ten, ten more a *Show N more lanes*. */
-  let lanesShown = $state(LANES_AT_FIRST);
-  /** The view's own columns, which gather the board's statuses (R-3.15). */
-  const ownColumns = $derived(savedViewId !== null ? drawnJiraColumns(view?.columns ?? []) : (view?.columns ?? []));
-  /** The board's columns as the view's own columns gather them (R-3.15). */
-  const cols = $derived(viewColumns(board?.columns ?? [], ownColumns));
-  const expandKey = (lane: Lane, column: MiniBoardColumn) =>
-    lane.key === null ? columnKey(column) : `${lane.key}|${columnKey(column)}`;
-
-  /**
-   * The per-column cap a read asks for: the eight a column draws, fifty while
-   * words filter (R-3.4, #1024), and the largest expanded column's count once
-   * one is expanded (every column's once the list is). In lanes the same,
-   * each lane's column counted on its own (#939).
-   */
-  function capFor(): number | null {
-    const cap = typing ? TYPED_CAP : COLUMN_CAP;
-    if ((expanded.length === 0 && !listAll) || board === null) return cap;
-    const wanted = laned
-      ? bands.flatMap(({ lane, drawn }) =>
-          drawn.filter(({ column }) => expanded.includes(expandKey(lane, column))).map(({ column }) => column.total),
-        )
-      : (listAll ? board.columns : cols.filter((column) => isExpanded(column))).map((column) => column.total);
-    return Math.max(cap, ...wanted);
-  }
-
-  /** What a laned read asks for (#939), or `null` without lanes. */
-  function lanesAsked(): LanesAsked | null {
-    if (!laned || showing.lanes === "none") return null;
-    return { by: showing.lanes, first: lanesShown };
-  }
-
-  /**
-   * A change in the filter bar (#897): the read waits until the keys pause
-   * for `typingPause`, so a word typed at speed is one read and not one a
-   * letter, and an answer still out for the text before it is never drawn.
-   * A read made with words still filters and counts the whole mirror, so on
-   * a large one a short prefix is the broadest of them; it sends fifty cards
-   * a column at most (R-3.4, #1024).
-   */
-  function filterChanged() {
-    clearTimeout(pausing);
-    reading += 1;
-    pausing = setTimeout(read, typingPause);
-  }
-
-  function read() {
-    clearTimeout(pausing);
-    if (base === null) return;
-    const query = toQuery(config, filter);
-    const mine = ++reading;
-    readBoard(capFor(), query === "" ? null : query, savedViewId, lanesAsked())
-      .then((answer) => {
-        if (mine !== reading) return;
-        board = answer;
-        failed = null;
-        if (query === base) total = sum(answer);
-      })
-      .catch((error: unknown) => {
-        if (mine === reading) failed = messageOf(error);
-      });
-    // A session that comes back to a filter has not counted the whole yet.
-    if (query !== base && total === null) {
-      const at = epoch;
-      readBoard(1, base === "" ? null : base, savedViewId)
-        .then((answer) => {
-          if (at === epoch) total ??= sum(answer);
-        })
-        .catch(() => {});
-    }
-  }
-
-  function messageOf(error: unknown): string {
-    if (error && typeof error === "object" && "message" in error) return String(error.message);
-    return String(error);
-  }
-
-  function expand(lane: Lane, column: MiniBoardColumn) {
-    here().expanded = [...expanded, expandKey(lane, column)];
-    // A lane's column is capped as the board's own is (#939).
-    read();
-  }
-
-  /** *Show N more lanes* (#939): ten more of them, read. */
-  function moreLanes() {
-    lanesShown += LANES_AT_FIRST;
-    read();
-  }
-
-  function chooseLayout(layout: "board" | "list") {
-    if (showing.layout === layout) return;
-    const wasLaned = laned;
-    here().layout = layout;
-    if (wasLaned !== laned) read();
-  }
-
-  function chooseLanes(lanes: LaneField) {
-    if (showing.lanes === lanes) return;
-    const wasLaned = laned;
-    here().lanes = lanes;
-    lanesShown = LANES_AT_FIRST;
-    // Each field is its own read of lanes (#939).
-    if (wasLaned || laned) read();
+  /** The filter bar as a read sends it. */
+  function filterNow() {
+    return { query: toQuery(config, filter), words: filter.text.trim() !== "" };
   }
 
   function sortBy(column: SortColumn) {
-    here().sort = nextSort(showing.sort, column);
-  }
-
-  function expandAll() {
-    here().listAll = true;
-    read();
+    viewSession(session, sessionKey).sort = nextSort(showing.sort, column);
   }
 
   function clearFilter() {
     filter.text = "";
     filter.chips = {};
     filter.dropdowns = {};
-    read();
+    reader.setFilter(filterNow());
+    reader.refresh();
+  }
+
+  function messageOf(error: unknown): string {
+    if (error && typeof error === "object" && "message" in error) return String(error.message);
+    return String(error);
   }
 
   // ---- the views' writes ----
@@ -627,28 +441,16 @@
   });
 
   // ---- what is drawn, and the selection ----
-  /** The board's bands (one, untitled, without lanes), each column with the cards it draws. */
-  const bands = $derived(
-    boardLanes(board ?? emptyBoard(), laned ? showing.lanes : "none", (columns) =>
-      viewColumns(columns, ownColumns),
-    ).map((lane) => ({
-      lane,
-      drawn: lane.columns.map((column) => ({
-        column,
-        cards: drawnCards(column, expanded.includes(expandKey(lane, column)), typing),
-      })),
-    })),
-  );
   /** Each card's status, whatever column of the view it sits in. */
   const statusOf = $derived(
-    new Map((board?.columns ?? []).flatMap((column) => column.cards.map((card) => [card.entity_id, column.status]))),
+    new Map((reader.board?.columns ?? []).flatMap((column) => column.cards.map((card) => [card.entity_id, column.status]))),
   );
   /** The list's rows: every card read, in the header's order. */
   const rows = $derived(
     sortRows(
-      (board?.columns ?? []).flatMap((column) => column.cards.map((card) => ({ card, status: column.status }))),
+      (reader.board?.columns ?? []).flatMap((column) => column.cards.map((card) => ({ card, status: column.status }))),
       showing.sort,
-      (board?.columns ?? []).map((column) => column.status),
+      (reader.board?.columns ?? []).map((column) => column.status),
     ),
   );
   /** The list's columns: the view's, in the list's order (R-3.16). */
@@ -657,24 +459,21 @@
   );
   const SORTABLE: readonly SortColumn[] = ["key", "summary", "status", "priority", "assignee", "updated"];
   const sortable = (column: string): column is SortColumn => (SORTABLE as readonly string[]).includes(column);
-  const listCut = $derived((board?.columns ?? []).some((column) => column.cards.length < column.total));
+  const listCut = $derived((reader.board?.columns ?? []).some((column) => column.cards.length < column.total));
   const listRest = $derived(
-    (board?.columns ?? []).reduce((all, column) => all + column.total - column.cards.length, 0),
+    (reader.board?.columns ?? []).reduce((all, column) => all + column.total - column.cards.length, 0),
   );
   /** What is on screen, in reading order: the first is selected when the selection is not. */
   const visible = $derived(
     showing.layout === "board"
-      ? bands.flatMap(({ drawn }) =>
+      ? reader.bands.flatMap(({ drawn }) =>
           drawn.flatMap(({ cards }) => cards.map((card) => ({ card, status: statusOf.get(card.entity_id) ?? null }))),
         )
       : rows,
   );
   const current = $derived(visible.find((entry) => entry.card.entity_id === session.selected) ?? visible[0] ?? null);
-  const shown = $derived(board === null ? null : sum(board));
 
-  // ---- the preview's reads ----
-  let description = $state<string | null>(null);
-  let around = $state<AroundLine[] | null>(null);
+  // ---- the preview ----
   let contexts = $state<ContextRow[] | null>(null);
   const adhoc = $derived((contexts ?? []).filter((context) => context.kind === "adhoc"));
 
@@ -682,42 +481,18 @@
   const currentId = $derived(current?.card.entity_id ?? null);
 
   $effect(() => {
-    const id = currentId;
-    if (!ready || id === null) return;
-    description = null;
-    around = null;
-    let dead = false;
-    ports
-      .detail(id)
-      .then((detail) => {
-        if (!dead) description = detail.body_text;
-      })
-      .catch(() => {});
-    // What the job's sections would show, through the job-reach read: no
-    // context is needed, and none is promoted to draw this (#1030). Each
-    // line says which section's read counted it, so a run of any kind counts
-    // under Builds without the shell knowing the CI role's run kinds (#1300).
-    void reachTally(ports, id).then((tally) => {
-      if (!dead) around = aroundLines(tally);
-    });
-    return () => (dead = true);
+    const id = ready ? currentId : null;
+    untrack(() => reader.preview(id));
   });
 
   // The board, again for each view and once its text is known. Untracked,
   // so a read's own answer does not ask for the read again.
   $effect(() => {
     if (!ready) return;
-    void sessionKey;
-    const text = base;
-    untrack(() => {
-      board = null;
-      total = null;
-      failed = null;
-      reading += 1;
-      epoch += 1;
-      if (text !== null) read();
-    });
+    const scope = { key: sessionKey, base };
+    untrack(() => reader.open({ ...scope, savedView: savedViewId }, filterNow()));
   });
+  $effect(() => () => reader.close());
 
   // Once the database answers: the views, the contexts and the suggestions.
   $effect(() => {
@@ -795,7 +570,7 @@
       </div>
       {#if find.trim() === ""}
         <a href="#/tickets" aria-current={viewId === null ? "true" : undefined}
-          >All tickets {#if viewId === null && total !== null}<span class="tf-count">{total}</span>{/if}</a
+          >All tickets {#if viewId === null && reader.total !== null}<span class="tf-count">{reader.total}</span>{/if}</a
         >
       {/if}
       {#each groups as group (group.name)}
@@ -866,10 +641,10 @@
         >{/if}
       {#if view !== undefined && (view === null || view.unreadable === null)}
         <div class="tf-seg" role="group" aria-label="Layout">
-          <button type="button" aria-pressed={showing.layout === "board"} onclick={() => chooseLayout("board")}
+          <button type="button" aria-pressed={showing.layout === "board"} onclick={() => reader.chooseLayout("board")}
             >Board</button
           >
-          <button type="button" aria-pressed={showing.layout === "list"} onclick={() => chooseLayout("list")}
+          <button type="button" aria-pressed={showing.layout === "list"} onclick={() => reader.chooseLayout("list")}
             >List</button
           >
         </div>
@@ -902,9 +677,9 @@
       <FilterBar
         {config}
         {filter}
-        {shown}
-        {total}
-        onchange={filterChanged}
+        shown={reader.shown}
+        total={reader.total}
+        onchange={() => reader.setFilter(filterNow())}
         extra={lanesSwitch}
         after={saveButton}
       />
@@ -917,7 +692,7 @@
           <select
             aria-label="Lanes"
             value={showing.lanes}
-            onchange={(event) => chooseLanes(event.currentTarget.value as LaneField)}
+            onchange={(event) => reader.chooseLanes(event.currentTarget.value as LaneField)}
           >
             {#each LANE_FIELDS as [value, label] (value)}
               <option {value}>{label}</option>
@@ -944,19 +719,19 @@
           The search cannot read <code class="tf-mono">{view.unreadable}</code> in this view, so it shows no tickets.
         </p>
       </div>
-    {:else if failed !== null}
-      <div class="tf-empty"><p>The tickets could not be read: {failed}</p></div>
-    {:else if board === null}
+    {:else if reader.failed !== null}
+      <div class="tf-empty"><p>The tickets could not be read: {reader.failed}</p></div>
+    {:else if reader.board === null}
       <div class="tf-empty" aria-busy="true"></div>
-    {:else if shown === 0 && isFiltering(filter)}
+    {:else if reader.shown === 0 && isFiltering(filter)}
       <div class="tf-empty">
         <p>No tickets match.</p>
         <button type="button" class="tf-btn tf-sm" onclick={clearFilter}>Clear the filter</button>
       </div>
-    {:else if shown === 0}
+    {:else if reader.shown === 0}
       <div class="tf-empty"><p>No tickets synced yet. Add a ticket system in Settings and they appear here.</p></div>
     {:else if showing.layout === "board"}
-      {#each bands as { lane, drawn } (lane.key ?? "")}
+      {#each reader.bands as { lane, drawn } (lane.key ?? "")}
         <div class="tf-lane">
           {#if lane.key !== null}
             <h2>{lane.title} <span class="tf-count">{lane.count}</span></h2>
@@ -989,7 +764,7 @@
                     <span class="tf-dim tf-nothing">Nothing here</span>
                   {/each}
                   {#if more}
-                    <button type="button" class="tf-more" onclick={() => expand(lane, column)}>{more}</button>
+                    <button type="button" class="tf-more" onclick={() => reader.expand(lane, column)}>{more}</button>
                   {/if}
                 </div>
               </div>
@@ -997,9 +772,9 @@
           </div>
         </div>
       {/each}
-      {@const moreLanesText = laned && board !== null ? moreLanesLine(board.more_lanes) : null}
+      {@const moreLanesText = reader.laned && reader.board !== null ? moreLanesLine(reader.board.more_lanes) : null}
       {#if moreLanesText}
-        <button type="button" class="tf-btn tf-sm" onclick={moreLanes}>{moreLanesText}</button>
+        <button type="button" class="tf-btn tf-sm" onclick={reader.moreLanes}>{moreLanesText}</button>
       {/if}
     {:else}
       <div class="tf-list">
@@ -1057,8 +832,8 @@
             {/each}
           </tbody>
         </table>
-        {#if listCut && !typing}
-          <button type="button" class="tf-more tf-list-more" onclick={expandAll}>Show {listRest} more</button>
+        {#if listCut && !reader.typing}
+          <button type="button" class="tf-more tf-list-more" onclick={reader.expandAll}>Show {listRest} more</button>
         {/if}
       </div>
     {/if}
@@ -1078,7 +853,8 @@
       copiedFrom={drafting.from ?? null}
       copy={drafting.copy ?? null}
       oncopy={editing?.saved_view_source && offersCopy(editing) ? () => void copyView(editing, drafting?.copy ?? null) : undefined}
-      board={(perColumn, query) => readBoard(perColumn, query, editing?.saved_view_source ? editing.saved_view : null)}
+      board={(perColumn, query) =>
+        ports.board(perColumn, query, editing?.saved_view_source ? editing.saved_view : null, undefined, TICKET_SYSTEM)}
       onsave={save}
       ondelete={editing === null ? undefined : deleteFromEditor}
       onclose={() => (drafting = null)}
@@ -1089,8 +865,8 @@
     <TicketPreview
       card={current.card}
       status={current.status}
-      {description}
-      {around}
+      description={reader.description}
+      around={reader.around}
       timerOnIt={timedTicket === current.card.key}
     />
   {:else}
