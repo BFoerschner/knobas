@@ -165,6 +165,7 @@ async fn opening_a_job_twice_promotes_its_ticket_once() {
             order: EntityOrder::UpdatedDesc,
             include_deleted: false,
             reach: None,
+            role: None,
         },
         200,
         0,
@@ -207,6 +208,7 @@ async fn list_entities_scoped_by_reach_keeps_what_the_ticket_reaches() {
         order: EntityOrder::UpdatedDesc,
         include_deleted: false,
         reach: Some(ticket.clone()),
+        role: None,
     };
     let none = knobas_core::payload::Declarations::empty();
     let builds = list_entities_inner(&pool, &filter(&["build"]), 50, 0, &none)

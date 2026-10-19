@@ -5,7 +5,7 @@
 import { GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "../../../sources/fixtures";
 import type { AdapterStatus } from "../../../ipc/sources";
 import type { Handler } from "../fake-tauri";
-import { CORPUS, SYNCED_AT } from "./corpus";
+import { CORPUS, ROLE_CLAIMERS, SYNCED_AT } from "./corpus";
 
 // -- the sources cockpit's fixture -------------------------------------------
 
@@ -238,6 +238,15 @@ const FIXTURE_ADAPTERS = [
     config_schema: TEAMCITY_SCHEMA,
   },
 ];
+
+// The role a faked read asks for (#1294) is answered from these sources'
+// claims and misses, and from the frames their adapter declares kinds on.
+ROLE_CLAIMERS.push(() =>
+  FIXTURE_SOURCES.map((source) => {
+    const adapter = FIXTURE_ADAPTERS.find((entry) => entry.adapter_kind === source.adapter_kind);
+    return { ...source, payload_paths: adapter && "payload_paths" in adapter ? adapter.payload_paths : [] };
+  }),
+);
 
 const FIXTURE_DB_STATS = {
   db_bytes: 222_298_112,

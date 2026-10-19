@@ -67,6 +67,7 @@ fn scoped_to(ctx: &str) -> EntityFilter {
         order: EntityOrder::UpdatedDesc,
         include_deleted: false,
         reach: None,
+        role: None,
     }
 }
 

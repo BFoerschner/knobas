@@ -344,6 +344,7 @@ fn filter(
         order,
         include_deleted: false,
         reach: None,
+        role: None,
     }
 }
 

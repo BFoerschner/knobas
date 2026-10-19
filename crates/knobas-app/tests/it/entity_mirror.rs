@@ -262,6 +262,7 @@ fn the_entity_filter_shape_matches_its_typescript_mirror() {
         "project": null,
         "include_deleted": true,
         "reach": null,
+        "role": "ci",
     });
     let decoded: EntityFilter =
         serde_json::from_value(payload.clone()).expect("the mirror's EntityFilter decodes");
@@ -277,6 +278,7 @@ fn the_entity_filter_shape_matches_its_typescript_mirror() {
             "order",
             "project",
             "reach",
+            "role",
             "sources",
             "updated_within_days",
         ],
@@ -305,6 +307,10 @@ fn a_filter_without_reach_is_unscoped() {
     }))
     .unwrap();
     assert_eq!(decoded.reach, None);
+    assert_eq!(
+        decoded.role, None,
+        "and no role, which is unscoped too (#1294)"
+    );
 }
 
 /// The job-reach read's row (#817), both origins, against `entity.ts`.

@@ -730,6 +730,73 @@ export function fakeTicketKeys(): string[] {
   );
 }
 
+/**
+ * A fake source as {@link fakeRoleScope} reads it: its adapter's claims, the
+ * misses its sync recorded, the kinds it emits and the frames its adapter
+ * declares them on.
+ */
+export interface FakeClaimer {
+  id: string;
+  roles: { role: string }[];
+  role_misses?: { role: string }[];
+  kinds: { id: string }[];
+  payload_paths: { kind: string; frame?: string | null }[];
+}
+
+/**
+ * The fake sources, handed in by `sources.ts`. It reads `CORPUS` as it
+ * loads, so this module cannot import it back.
+ */
+export const ROLE_CLAIMERS: (() => FakeClaimer[])[] = [];
+
+/**
+ * A built-in role's minimum kinds, required and optional, as
+ * `knobas_source::role::MINIMUMS` names them: by id, and by the frame a source
+ * declares a kind on. A copy, because this bridge stands in for the server and
+ * cannot read its table; a changed minimum is a §10.8 entry (ADR-0029), which
+ * is where this copy follows it.
+ */
+const ROLE_MINIMUMS: Record<string, { ids: string[]; frames: string[] }> = {
+  "code-host": { ids: ["repo", "branch", "pr", "commit"], frames: [] },
+  "ticket-system": { ids: ["ticket"], frames: ["saved_view"] },
+  ci: { ids: [], frames: ["pipeline", "run"] },
+  wiki: { ids: ["page"], frames: [] },
+  monitoring: { ids: ["monitor"], frames: [] },
+};
+
+/** The kinds of a built-in role's minimum that `source` emits or may emit. */
+function minimumKinds(minimum: { ids: string[]; frames: string[] }, source: FakeClaimer): string[] {
+  return [
+    ...minimum.ids,
+    ...source.payload_paths.filter((paths) => minimum.frames.includes(paths.frame ?? "")).map((paths) => paths.kind),
+  ];
+}
+
+/**
+ * What a role scopes a faked read to (#1294), as `sources::crud::role_scope`
+ * answers it: the sources that claim the role with no miss recorded for it,
+ * and the role's kinds among them. A custom role's kinds are its sources'
+ * kinds that are no built-in role's they claim. An unknown role has none.
+ */
+export function fakeRoleScope(role: string): { sources: string[]; kinds: string[] } {
+  const fillers = ROLE_CLAIMERS.flatMap((claimers) => claimers()).filter(
+    (source) =>
+      source.roles.some((claim) => claim.role === role) && !(source.role_misses ?? []).some((miss) => miss.role === role),
+  );
+  const kinds = fillers.flatMap((source) => {
+    const minimum = ROLE_MINIMUMS[role];
+    if (minimum) return minimumKinds(minimum, source);
+    const builtin = new Set(
+      source.roles.flatMap((claim) => {
+        const other = ROLE_MINIMUMS[claim.role];
+        return other ? minimumKinds(other, source) : [];
+      }),
+    );
+    return source.kinds.map((kind) => kind.id).filter((kind) => !builtin.has(kind));
+  });
+  return { sources: fillers.map((source) => source.id), kinds: [...new Set(kinds)].sort() };
+}
+
 /** `list_entities`, filtered, ordered and paged the way the real one is. */
 function listEntities(args: Record<string, unknown>) {
   const filter = (args["filter"] ?? {}) as {
@@ -740,6 +807,7 @@ function listEntities(args: Record<string, unknown>) {
     project?: string | null;
     include_deleted?: boolean;
     reach?: string | null;
+    role?: string | null;
   };
   const limit = Number(args["limit"] ?? 50);
   const offset = Number(args["offset"] ?? 0);
@@ -761,6 +829,11 @@ function listEntities(args: Record<string, unknown>) {
   }
   if (filter.sources?.length) rows = rows.filter((entry) => filter.sources?.includes(mirrorRow(entry).source_id));
   if (filter.kinds?.length) rows = rows.filter((entry) => filter.kinds?.includes(entry.kind));
+  // A role (#1294): its fillers' rows, of its kinds.
+  if (filter.role) {
+    const scope = fakeRoleScope(filter.role);
+    rows = rows.filter((entry) => scope.sources.includes(mirrorRow(entry).source_id) && scope.kinds.includes(entry.kind));
+  }
   rows = rows.filter((entry) => inProject(entry, filter.project));
 
   rows = [...rows].sort((a, b) =>

@@ -128,6 +128,16 @@ export interface EntityFilter {
    * both.
    */
   reach?: string | null;
+  /**
+   * Only what this role's surface draws (#1294, ADR-0029 as amended on
+   * 2026-10-19): the rows of the sources that **fill** the role, which the
+   * mirror answers per read. With {@link sources} as well, the fillers among
+   * them. With {@link kinds} empty it also narrows to the role's kinds (CI's
+   * are the pipeline and run kinds its fillers declare); with kinds named, to
+   * the role's among them. An unknown role has no fillers, so its page is
+   * empty, never an error. Absent or `null` is unscoped, as {@link reach} is.
+   */
+  role?: string | null;
 }
 
 /** One page of a room — `EntityPage`. */
