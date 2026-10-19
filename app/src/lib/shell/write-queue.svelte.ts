@@ -257,7 +257,7 @@ export interface WithdrawnWorklog {
  *
  * That other question — did the source make something knobas cannot name,
  * `CONTEXT.md`'s **unclaimed write** — is asked and answered in
- * `knobas_sync::write_queue::UNCLAIMED_OPS`' doc comment. Issue #353 settled
+ * `knobas_sync::write_queue::unclaimed`'s doc comment. Issue #353 settled
  * it there, and settled it against the answer that used to sit on the
  * `create_branch` line, that a 409 stops the duplicate: that one asks whether
  * a *re-send* makes a second artefact, which is neither question. It is the

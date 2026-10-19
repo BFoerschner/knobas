@@ -433,7 +433,13 @@ async fn project_now(
     let shape = op.delivery().projection;
     let target = store::target_of(&deps.pool, entity).await?;
     let state = declared_state(deps, entity, shape, target.as_ref()).await?;
-    Ok(store::project(op.identifier(), shape, payload, target.as_ref(), &state))
+    Ok(store::project(
+        op.identifier(),
+        shape,
+        payload,
+        target.as_ref(),
+        &state,
+    ))
 }
 
 /// Attempt one write. `Ok(true)` if it was delivered, so the caller knows the
@@ -450,7 +456,7 @@ async fn project_now(
 ///
 /// # Resending a send that got no answer (#1125)
 ///
-/// [`Delivery::resend_harmless`](knobas_core::delivery::Delivery) is `true`
+/// [`Delivery::resend_harmless`](knobas_core::delivery::Delivery::resend_harmless) is `true`
 /// where a second arrival changes nothing or is refused by the source,
 /// which is the #1122 audit's "retried" column plus Kuma's pause and resume
 /// (setting a state that is already set). Such a write answered
@@ -722,7 +728,7 @@ async fn waited(
 /// # Which ops
 ///
 /// Those whose delivery says
-/// [`can_leave_unclaimed`](knobas_core::delivery::Delivery), which the
+/// [`can_leave_unclaimed`](knobas_core::delivery::Delivery::can_leave_unclaimed), which the
 /// caller passes in as `can_leave`: `create_ticket`, `create_page`,
 /// `create_monitor` and `source_action`. The op is checked before the row is
 /// re-read, so an ordinary write that landed under a withdrawal costs nothing
@@ -734,7 +740,7 @@ async fn waited(
 /// that knobas cannot name?* A `comment` and an `update_page` change a thing
 /// the mirror already holds, a `transition` and an `approve` change a field, a
 /// build is not an artefact -- for all of those the write simply arrived,
-/// which is what the user asked for. These two make something that exists only
+/// which is what the user asked for. A ticket and a page make something that exists only
 /// at the source until the next sync, with nothing linking it to what asked
 /// for it, and ADR-0012 singles out the first as the op a duplicate files
 /// twice.
@@ -764,7 +770,7 @@ async fn waited(
 /// above is what makes the head an address at all, and what it promises is
 /// **at most one open** pull request per `head`/`base` pair rather than one
 /// per head. That is why `queue::pick_open` reads a record's state instead of
-/// taking a head's word for it (#359), and why this list's address and that
+/// taking a head's word for it (#359), and why the withdrawn row's address and that
 /// rule cannot disagree: neither claims more than the forge promises. The
 /// artefact is reclaimable while it is open, which is the state a withdrawal
 /// in flight leaves it in, so a line saying nothing claims it would be false.
@@ -772,7 +778,7 @@ async fn waited(
 /// **The reclaiming is start-work's; the address is the op's.** A
 /// `create_pull_request` submitted straight through `submit_write` has no flow
 /// to retry it, so nothing walks that path on its own. What is true of the op
-/// either way is the part this list turns on -- the row still names where to
+/// either way is the part this answer turns on -- the row still names where to
 /// look, and the read that looks is already written -- and start-work is the
 /// caller that has one, which is the caller this op exists for (#44).
 ///
@@ -784,7 +790,7 @@ async fn waited(
 /// the look-before-write resolves it rather than taking whichever sorted
 /// first: it settles a step "already open" only against a record it read as
 /// open, and where it cannot tell, nothing is settled and the create goes to
-/// the source to refuse. Neither reading changes what this list needs from the
+/// the source to refuse. Neither reading changes what this answer needs from the
 /// row, which is narrower still: name one repository's pull requests from one
 /// named branch, which is a set a person can look at.
 /// `base` narrows it further; a `title` does not narrow to one artefact at
@@ -800,7 +806,7 @@ async fn waited(
 /// answers `WriteReceipt::none()` for both ops on the *success* path too, so a
 /// pull request's server-assigned number is nothing the withdrawal took away
 /// -- knobas never has it, and reads it back out of the mirror either way.
-/// `create_ticket` is in the list because after the withdrawal nothing
+/// `create_ticket` can leave one because after the withdrawal nothing
 /// recovers *which* ticket: "the next sync cannot tell a ticket it made from
 /// one a colleague made" (below), and a title is not an address
 /// the way a head branch is.

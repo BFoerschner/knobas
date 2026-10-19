@@ -18,5 +18,8 @@
   #1125 hold and passes `delivery().can_leave_unclaimed` to `unclaimed`. `queue`, `amend` and
   `attempt` take the target from `WriteOp::target()`, and the shape, state lookup and projection the
   three repeated are one private `project_now`. `attempt` projects against the decoded op's target
-  instead of the row's `entity_id`; the two are equal for every row `queue` writes. The app's two
+  instead of the row's `entity_id`; the two are equal for every row `queue` writes. The target is
+  parsed after the decode, so a row both undecodable and unparseable is refused as undecodable. The
+  doc comments on `WriteOp`, its `CreatePage` and `CommitFile` fields and `delivery()` now name
+  `target()` and `attempt` instead of the deleted items. The app's two
   callers of `target_entity` (`sources::write_queue`) call `WriteOp::target()`.
