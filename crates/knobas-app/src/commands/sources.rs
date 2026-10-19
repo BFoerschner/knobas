@@ -727,6 +727,9 @@ fn emit<R: tauri::Runtime, T: serde::Serialize>(
 
 #[cfg(test)]
 mod tests {
+    /// The frontend mirror of this module's commands, read at compile time.
+    const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/sources.ts");
+
     /// No command in this file takes `State<'_, SourcesState>`.
     ///
     /// The same rule `commands/mod.rs` enforces for `AppState`, for the same
@@ -976,7 +979,6 @@ mod tests {
     /// command registered and never mirrored fails this too.
     #[test]
     fn the_mirror_invokes_the_commands_by_their_registered_names() {
-        const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/sources.ts");
         let barrel = include_str!("../lib.rs");
         let registered: Vec<&str> = barrel
             .lines()
