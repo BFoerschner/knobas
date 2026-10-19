@@ -969,6 +969,37 @@ async fn a_source_action_is_held_sent_and_refused_as_a_typed_write_is() {
     assert_eq!(h.delivered(), ["add_label: 7"], "a refusal is not retried");
 }
 
+/// A source action is as conservative as knobas can be (#1194), on the two
+/// counts a send can leave in doubt: one that reached the source and got no
+/// answer is held for the reader rather than sent again, and one that landed
+/// after the reader withdrew it is disclosed, since what it made is the
+/// adapter's to know.
+#[tokio::test]
+async fn a_source_action_left_in_doubt_is_held_or_disclosed() {
+    let h = harness().await;
+    let pull = mirror_pull(&h, "o/r#9", "Bound the retry jitter", "open").await;
+    // A second target, since the held write stops the first one's queue.
+    let other = mirror_pull(&h, "o/r#10", "Bound the retry jitter", "open").await;
+
+    h.answer(Answer::LandsThenTimesOut);
+    let unanswered = add_label(&h, &pull, "1").await;
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.delivered(), ["add_label: 1"], "not sent a second time");
+    assert_eq!(h.reload(unanswered.id).await.state, WriteState::Held);
+
+    h.answer(Answer::Unreachable);
+    let withdrawn = add_label(&h, &other, "2").await;
+    h.answer(Answer::Accept);
+    h.interrupt(Interrupt::Withdraw(withdrawn.id));
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.delivered(), ["add_label: 1", "add_label: 2"]);
+    assert_eq!(h.reload(withdrawn.id).await.state, WriteState::Discarded);
+    let line = h.line("unclaimed");
+    assert_eq!(line.detail["op"], "source_action");
+    assert_eq!(line.detail["write_id"], withdrawn.id);
+}
+
 /// The deputy's ruling on #706 through the queue itself, not only through
 /// `project`: a title edit holds on a retitle and goes over a close. The
 /// payload has to reach the projection at the queue *and* at the flush --
