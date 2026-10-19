@@ -96,7 +96,7 @@ pub(crate) fn optional_export(
     name: &str,
 ) -> Result<Option<ComponentExportIndex>, LoadError> {
     let Some(instance) =
-        component.get_export_index(None, &format!("{interface}@{INTERFACE_VERSION}"))
+        component.get_export_index(None, format!("{interface}@{INTERFACE_VERSION}"))
     else {
         return Ok(None);
     };

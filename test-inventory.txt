@@ -3794,6 +3794,8 @@ knobas-wasm-host	lib/knobas_wasm_host	net::tests::a_reader_that_pauses_longer_th
 knobas-wasm-host	lib/knobas_wasm_host	redact::tests::a_body_without_the_secret_passes_unchanged
 knobas-wasm-host	lib/knobas_wasm_host	redact::tests::a_header_holding_the_secret_is_dropped
 knobas-wasm-host	lib/knobas_wasm_host	redact::tests::a_spelling_split_across_chunks_is_redacted
+knobas-wasm-host	lib/knobas_wasm_host	tests::a_1_1_0_component_s_download_is_found_by_the_1_2_0_host
+knobas-wasm-host	lib/knobas_wasm_host	tests::an_optional_interface_without_its_function_is_refused
 knobas-wasm-host	lib/knobas_wasm_host	tests::the_optional_read_is_found_on_any_1_x_that_exports_it_and_on_nothing_else
 knobas-wasm-host	test/it	host::a_component_built_against_a_newer_minor_version_is_refused_at_load
 knobas-wasm-host	test/it	host::a_component_built_against_another_major_version_is_refused_at_load

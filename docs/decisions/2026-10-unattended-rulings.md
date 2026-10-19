@@ -6368,3 +6368,26 @@ The implementer's rulings:
   **Reversing:** low.
 - **`jira_views_ipc.rs`'s source row is `auth_kind 'pat'`**, not `'Pat'`, which read as no
   method; nothing built a Jira adapter from it before. **Reversing:** n/a.
+
+### PR #1251 merge-manager (issue #1208), 2026-10-19
+
+Reserved for Björn, ruled by the merge-manager on Opus:
+
+- **The WIT boundary: `knobas:adapter@1.2.0` with an optional interface `query` is ratified.** #1250
+  landed first as 1.1.0, so this PR keeps 1.2.0 and joins the two worlds: `hosted` stays 1.1.0's
+  (no new import), `adapter` exports `source`, `downloads` and `query`. A free function in its own
+  interface links against every older component, which a method on the `adapter` resource would
+  not. Witnessed: the 1.0.0 dual-build test now also asks the 1.0.0 fixture to translate and
+  gets `None`; a unit test finds a 1.1.0 component's `downloads` through the 1.2.0 host's lookup.
+  **Reversing:** low until a 1.2.0 adapter ships.
+
+The merge-manager's own rulings:
+
+- **One optional-export helper.** #1250's inline `downloads` lookup and this PR's
+  `optional_export` became one `optional_export(component, interface, name)`: it looks the
+  interface up at the host's version and refuses an interface without its function (#1250's
+  rule, now `query`'s too). **Reversing:** low.
+- **`translate_query` runs inside `limits::bounded`**, the deadline #1204 put on every call.
+  Its type is still checked at the call, not at load as `download`'s is: a wrongly typed
+  `translate-query` fails one editable copy with a toast, not the install. **Reversing:** low (a
+  `check_translate_query` at load).

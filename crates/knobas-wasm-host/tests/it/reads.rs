@@ -202,8 +202,9 @@ async fn a_download_the_sink_refuses_fails_with_the_sink_s_error() {
     assert_eq!(sink.writes, 2, "nothing more was written after the refusal");
 }
 
-/// A component built against 1.0.0 still links and syncs, and keeps no runs
-/// to download: what 1.1.0 added is optional to it.
+/// A component built against 1.0.0 still links and syncs, keeps no runs to
+/// download and translates no query: what 1.1.0 and 1.2.0 added is optional
+/// to it.
 #[tokio::test]
 async fn a_component_built_against_1_0_0_is_still_hosted() {
     let path = knobas_wasm_host::fixture_component_v1_0();
@@ -231,4 +232,7 @@ async fn a_component_built_against_1_0_0_is_still_hosted() {
     let answer = source.download(RUN, &DownloadTarget::Log, &mut sink).await;
     assert!(matches!(answer, Ok(false)), "{answer:?}");
     assert!(sink.name.is_none());
+    // 1.2.0's `query` is optional to it too (#1208): it translates no query.
+    let view = serde_json::json!({ "survey_query": "crane 4" });
+    assert_eq!(source.translate_query(&view).await.unwrap(), None);
 }
