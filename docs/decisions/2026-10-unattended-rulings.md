@@ -6137,3 +6137,57 @@ The merge-manager's rulings (PR #1243, on Opus):
 - **A fixed host that resolves to a local address is a follow-up (#1244, backlog).** The allowlist
   holds names, so a declared name can be pointed at loopback or the LAN. No credential goes there.
   **Reversing:** n/a.
+## #1207 Saved views come from any ticket-system source (2026-10-19)
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **Ratifying the §10.8 entry** (`docs/contract/10.8/1207-saved-views-in-ticket-system-minimum.md`):
+  one `Frame` variant (`saved_view`), one `Minimum` field (`optional_kinds`) and the
+  ticket-system minimum's optional saved-view kind. Ruling: ratified as written. Reasoning: the
+  issue asks for exactly this optional kind, nothing existing changes shape (the tables, columns
+  and IPC are the same), and WIT `knobas:adapter@1.0.0` is untouched. **Reversing:** a §10.8
+  amendment before an external ticket system ships against it.
+
+The implementer's rulings:
+
+- **The saved-view kind is named by a frame, not by a kind id.** Jira's views keep the kind
+  `jira_view` and declare `frame: saved_view`, as TeamCity's `build_config` declares `pipeline`.
+  Reasoning: renaming the kind would re-key every mirrored view, and the frame is how CI's
+  minimum already names a kind under an adapter's own id. **Reversing:** low (a kind id in the
+  minimum and a rename in the Jira adapter).
+- **The group is `<descriptor name> boards` / `filters`.** Reasoning: Jira's descriptor is named
+  `Jira`, so its views read *Jira boards* and *Jira filters* as before, with no change to Jira's
+  payload, and the projection names no adapter. ADR-0024 lets *Jira board* stand because the
+  source's name qualifies it; `Forge boards` is qualified the same way, so ADR-0009 holds.
+  **Reversing:** low (one SQL expression; a
+  payload `group` override could be added if a source needs its own word).
+- **The tables, `jira_ref` and the `hide_jira_view` / `open_jira_view` commands keep their names.**
+  Reasoning: renaming them is a migration and a frozen IPC change with no behaviour gained; the
+  issue asks the projection, not the storage, to name no adapter. Filed as `backlog` follow-up #1245.
+  **Reversing:** that follow-up.
+- **A payload `kind` that is not `filter` is a board.** Before, an unknown word failed the run on
+  `jira_view_ref_kind_chk`; now another source's word (`project`) is a board, as a missing one
+  already was. Under ADR-0007 an unrecognised word contributes nothing, so the view keeps the
+  frame's default (a board) rather than failing the source's whole run. **Reversing:** low.
+
+Reserved for Björn, ruled by the merge-manager on Opus (PR #1246):
+
+- **Amending the §10.8 entry with `KindPaths.system_name`.** The implementer's group rule read the
+  instance descriptor's `name`, which is the source's display name: a Jira source named *Jira EU*
+  would list its views under *Jira EU boards*, which the Tickets pane's `JIRA_GROUPS` neither
+  orders last nor marks as synced. That breaks the issue's "Jira's boards and filters behave
+  exactly as today". Ruling: the saved-view kind declares the ticket system's name, Jira's
+  `jira_view` declares `Jira`, and an undeclared one falls back to the descriptor's `name`.
+  Reasoning: the sync engine sees only the instance, never the adapter template, and threading
+  the registry into every run entry point is about 200 call sites; a payload field would leave
+  Jira's unchanged boards, which the adapter does not deliver again, without it. **Reversing:**
+  drop the field and pick another source of the word; the field is optional on the wire.
+
+The merge-manager's rulings:
+
+- **A payload `kind` that is not `filter` is a board: accepted.** Jira's adapter writes only
+  `board` and `filter` (`views.rs`), so no Jira view behaves differently; only a word Jira never
+  sends stops failing the run. **Reversing:** low.
+- **`Frame::SavedView` needs no WIT change: confirmed.** `descriptor: func() -> json` carries the
+  whole `SourceDescriptor` as JSON (1198 entry), so the new variant and field are new JSON words,
+  not a new WIT case.

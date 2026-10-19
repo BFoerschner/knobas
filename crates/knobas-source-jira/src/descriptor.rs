@@ -145,46 +145,59 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// which is what clause 6's shared evidence slot tolerates (#301).
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
     use knobas_source::{KindPaths, ListPath, ParentPath, PayloadPath};
-    vec![KindPaths {
-        kind: crate::KIND_TICKET.to_owned(),
-        status_name: vec![PayloadPath::of(["fields", "status", "name"])],
-        priority: vec![PayloadPath::of(["fields", "priority", "name"])],
-        assignee: vec![
-            PayloadPath::of(["fields", "assignee", "name"]),
-            PayloadPath::of(["fields", "assignee", "key"]),
-        ],
-        project_key: vec![PayloadPath::of(["fields", "project", "key"])],
-        project_name: vec![PayloadPath::of(["fields", "project", "name"])],
-        issue_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
-        estimate: vec![PayloadPath::of(["fields", "timeoriginalestimate"])],
-        comment_count: vec![PayloadPath::of(["fields", "comment", "total"])],
-        labels: vec![ListPath {
-            at: PayloadPath::of(["fields", "labels"]),
-            entry: PayloadPath::default(),
-        }],
-        sprint_state: vec![ListPath {
-            at: PayloadPath::of(["sprints"]),
-            entry: PayloadPath::of(["state"]),
-        }],
-        blocked_statuses: vec![
-            "Blocked".to_owned(),
-            "On Hold".to_owned(),
-            "Impediment".to_owned(),
-        ],
-        parent: vec![
-            ParentPath {
-                kind: crate::KIND_TICKET.to_owned(),
-                at: PayloadPath::of(["fields", "parent"]),
-                names: vec![PayloadPath::of(["key"])],
-            },
-            ParentPath {
-                kind: crate::KIND_TICKET.to_owned(),
-                at: PayloadPath::of(["epic"]),
-                names: vec![PayloadPath::of(["key"])],
-            },
-        ],
-        ..KindPaths::default()
-    }]
+    vec![
+        KindPaths {
+            kind: crate::KIND_TICKET.to_owned(),
+            status_name: vec![PayloadPath::of(["fields", "status", "name"])],
+            priority: vec![PayloadPath::of(["fields", "priority", "name"])],
+            assignee: vec![
+                PayloadPath::of(["fields", "assignee", "name"]),
+                PayloadPath::of(["fields", "assignee", "key"]),
+            ],
+            project_key: vec![PayloadPath::of(["fields", "project", "key"])],
+            project_name: vec![PayloadPath::of(["fields", "project", "name"])],
+            issue_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
+            estimate: vec![PayloadPath::of(["fields", "timeoriginalestimate"])],
+            comment_count: vec![PayloadPath::of(["fields", "comment", "total"])],
+            labels: vec![ListPath {
+                at: PayloadPath::of(["fields", "labels"]),
+                entry: PayloadPath::default(),
+            }],
+            sprint_state: vec![ListPath {
+                at: PayloadPath::of(["sprints"]),
+                entry: PayloadPath::of(["state"]),
+            }],
+            blocked_statuses: vec![
+                "Blocked".to_owned(),
+                "On Hold".to_owned(),
+                "Impediment".to_owned(),
+            ],
+            parent: vec![
+                ParentPath {
+                    kind: crate::KIND_TICKET.to_owned(),
+                    at: PayloadPath::of(["fields", "parent"]),
+                    names: vec![PayloadPath::of(["key"])],
+                },
+                ParentPath {
+                    kind: crate::KIND_TICKET.to_owned(),
+                    at: PayloadPath::of(["epic"]),
+                    names: vec![PayloadPath::of(["key"])],
+                },
+            ],
+            ..KindPaths::default()
+        },
+        // The ticket system's saved views (#1207, ADR-0029): each Jira board and
+        // filter is one, and the engine makes it a ticket view by this frame,
+        // not by the kind's id.
+        KindPaths {
+            kind: crate::KIND_JIRA_VIEW.to_owned(),
+            frame: Some(knobas_core::payload::Frame::SavedView),
+            // Jira's, not the source's name: a source named *Jira EU* still
+            // lists its views under *Jira boards* and *Jira filters*.
+            system_name: Some("Jira".to_owned()),
+            ..KindPaths::default()
+        },
+    ]
 }
 
 /// The JSON Schema the Add-source form is generated from.
@@ -290,6 +303,19 @@ mod tests {
         );
         let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
         assert_eq!(kinds, vec![crate::KIND_TICKET, crate::KIND_JIRA_VIEW]);
+        // #1207: the views are the ticket system's saved views, by frame.
+        let saved: Vec<&str> = d
+            .payload_paths
+            .iter()
+            .filter(|p| p.frame == Some(knobas_core::payload::Frame::SavedView))
+            .map(|p| p.kind.as_str())
+            .collect();
+        assert_eq!(saved, vec![crate::KIND_JIRA_VIEW]);
+        assert_eq!(
+            d.payload_paths[1].system_name.as_deref(),
+            Some("Jira"),
+            "the views' groups say Jira, not the source's own name"
+        );
         assert_eq!(d.entity_kinds[0].monogram, "JI");
         assert_eq!(d.entity_kinds[0].plural, "Tickets");
     }

@@ -1,7 +1,18 @@
-//! Jira views (#877, migration `0044`): every live `jira_view` item of a
-//! source, projected into `sync.jira_view` and `sync.jira_view_member` at the
-//! end of each of that source's runs, and each one's `knobas.ticket_view` row
-//! kept in step.
+//! A ticket system's saved views (#1207, ADR-0029; first Jira's views, #877,
+//! migration `0044`): every live item of a source's saved-view kinds,
+//! projected into `sync.jira_view` and `sync.jira_view_member` at the end of
+//! each of that source's runs, and each one's `knobas.ticket_view` row kept in
+//! step.
+//!
+//! **Keyed on the frame, not on an adapter (#1207).** A saved-view kind is one
+//! whose [`KindPaths`](knobas_core::payload::KindPaths) declares
+//! [`Frame::SavedView`], the ticket-system minimum's optional kind
+//! (`knobas_source::role`); Jira's `jira_view` is one. Nothing here names an
+//! adapter: the group a view is listed under is the ticket system's name the
+//! kind declares (`system_name`, else the descriptor's `name`) with *boards*
+//! or *filters* after it, so Jira's read *Jira boards* and *Jira filters* as
+//! before, whatever the source is called. The tables keep the names #877
+//! gave them.
 //!
 //! **Off the mirror, not off the emitted items**, for `samples`' reason: the
 //! Jira adapter delivers a view only when it changed, so an idle run emits
@@ -14,8 +25,9 @@
 //! foreign key's cascade -- and its ticket view with it. A run that fails
 //! leaves nothing behind.
 //!
-//! **What the ticket view row takes from Jira and what it keeps.** The name,
-//! the group (*Jira boards* or *Jira filters*) and the columns follow Jira at
+//! **What the ticket view row takes from the source and what it keeps.** The name,
+//! the group (*Jira boards* or *Jira filters*: `<system name> boards`, or
+//! `filters` for a view whose `kind` is `filter`) and the columns follow Jira at
 //! every run (R-3.24); the layout, lanes, card fields, list columns and sort
 //! are the reader's (*View settings*) and are written only when the row is
 //! first made -- a filter's as a list, since Jira gives a filter no columns
@@ -28,18 +40,52 @@
 //! does not show: a name collision costs a view, never somebody's own.
 //!
 //! **Payload reads outside the adapter (ADR-0007).** The paths read are the
-//! Jira adapter's own `jira_view` payload (`crate::views` in
-//! `knobas-source-jira` writes it), read in these statements and nowhere
-//! else. **A miss is an empty answer, never a guess**: a payload whose
-//! `columns` is not an array has no columns (one per status on the board), one
-//! whose `keys` is not an array holds no tickets, a missing `sprint` is none
-//! and a missing `kind` is a board. Pinned by
-//! `tests/it/jira_views.rs`'s `a_view_whose_payload_says_nothing_holds_nothing`.
+//! saved-view frame's payload, which a saved-view kind writes (Jira's is
+//! `crate::views` in `knobas-source-jira`): `kind` (`board` or `filter`),
+//! `id`, `columns` (`[{"name", "statuses", "limit"}]`), `keys` (the tickets'
+//! keys in the source's order), and Jira's own `type`, `jql`, `sub_query`,
+//! `query` and `sprint`, which another source leaves out. Read in these
+//! statements and nowhere else. **A miss is an empty answer, never a
+//! guess**: a payload whose `columns` is not an array has no columns (one per
+//! status on the board), one whose `keys` is not an array holds no tickets, a
+//! missing `sprint` is none, and a `kind` that is missing or not `filter` is a
+//! board. Pinned by `tests/it/jira_views.rs`'s
+//! `a_view_whose_payload_says_nothing_holds_nothing` and
+//! `a_saved_view_of_a_ticket_system_that_is_not_jira_shows_as_a_ticket_view`.
 
+use knobas_core::payload::Frame;
+use knobas_source::SourceDescriptor;
 use sqlx::{Postgres, Transaction};
 
-/// The kind a Jira source's views arrive as (`knobas_source_jira::KIND_JIRA_VIEW`).
-pub const KIND: &str = "jira_view";
+/// What a descriptor declares of saved views: the kinds they arrive as, and
+/// the name their groups are made from. `None` when it declares none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedViewKinds {
+    kinds: Vec<String>,
+    source_name: String,
+}
+
+/// The saved-view kinds `descriptor` emits: each declares
+/// [`Frame::SavedView`] and is one of its `entity_kinds`. Their groups take
+/// the first one's declared `system_name`, else the descriptor's `name`: one
+/// source is one ticket system.
+#[must_use]
+pub fn declared(descriptor: &SourceDescriptor) -> Option<SavedViewKinds> {
+    let saved: Vec<&knobas_core::payload::KindPaths> = descriptor
+        .payload_paths
+        .iter()
+        .filter(|p| p.frame == Some(Frame::SavedView))
+        .filter(|p| descriptor.entity_kinds.iter().any(|k| k.id == p.kind))
+        .collect();
+    let first = saved.first()?;
+    Some(SavedViewKinds {
+        kinds: saved.iter().map(|p| p.kind.clone()).collect(),
+        source_name: first
+            .system_name
+            .clone()
+            .unwrap_or_else(|| descriptor.name.clone()),
+    })
+}
 
 /// `held` is what keeps a purge from failing the run (#1088). The statement
 /// reads `sync.live_item` from its snapshot, and the foreign key on
@@ -54,14 +100,15 @@ pub const KIND: &str = "jira_view";
 const UPSERT_VIEWS: &str = "
 with held as (
   select entity_id from sync.item
-   where source_id = $1 and kind = $2
+   where source_id = $1 and kind = any($2)
      for key share
 )
 insert into sync.jira_view
        (entity_id, source_id, ref_kind, ref_id, board_type, name, jql, sub_query, query,
         columns, sprint, last_read)
 select i.entity_id, i.source_id,
-       coalesce(i.payload->>'kind', 'board'), coalesce(i.payload->>'id', ''),
+       case i.payload->>'kind' when 'filter' then 'filter' else 'board' end,
+       coalesce(i.payload->>'id', ''),
        i.payload->>'type', i.title, coalesce(i.payload->>'jql', ''),
        i.payload->>'sub_query', coalesce(i.payload->>'query', ''),
        case when jsonb_typeof(i.payload->'columns') = 'array'
@@ -71,7 +118,7 @@ select i.entity_id, i.source_id,
        now()
   from sync.live_item i
   join held h on h.entity_id = i.entity_id
- where i.source_id = $1 and i.kind = $2
+ where i.source_id = $1 and i.kind = any($2)
     on conflict (entity_id) do update set
        ref_kind = excluded.ref_kind, ref_id = excluded.ref_id,
        board_type = excluded.board_type, name = excluded.name, jql = excluded.jql,
@@ -82,7 +129,7 @@ const DROP_GONE_VIEWS: &str = "
 delete from sync.jira_view v
  where v.source_id = $1
    and not exists (select 1 from sync.live_item i
-                    where i.entity_id = v.entity_id and i.kind = $2)";
+                    where i.entity_id = v.entity_id and i.kind = any($2))";
 
 const DROP_MEMBERS: &str = "
 delete from sync.jira_view_member m
@@ -102,7 +149,7 @@ select v.entity_id, $1 || ':' || k.key, k.n::integer
 const UPSERT_TICKET_VIEWS: &str = "
 with views as (
   select v.entity_id, v.name, v.columns,
-         case v.ref_kind when 'filter' then 'Jira filters' else 'Jira boards' end as view_group,
+         $2 || case v.ref_kind when 'filter' then ' filters' else ' boards' end as view_group,
          case v.ref_kind when 'filter' then 'list' else 'board' end as layout,
          trim(both '-' from regexp_replace(lower(v.entity_id), '[^a-z0-9]+', '-', 'g')) as id,
          row_number() over (order by v.entity_id) as n
@@ -130,7 +177,7 @@ delete from knobas.ticket_view t
  where left(t.jira_ref, length($1) + 1) = $1 || ':'
    and not exists (select 1 from sync.jira_view v where v.entity_id = t.jira_ref)";
 
-/// Project one source's live Jira views (see the module docs).
+/// Project one source's live saved views (see the module docs).
 ///
 /// # Errors
 ///
@@ -139,24 +186,31 @@ delete from knobas.ticket_view t
 pub async fn project(
     tx: &mut Transaction<'_, Postgres>,
     source_id: &str,
+    declared: &SavedViewKinds,
 ) -> Result<(), sqlx::Error> {
     for statement in [UPSERT_VIEWS, DROP_GONE_VIEWS] {
         sqlx::query(statement)
             .bind(source_id)
-            .bind(KIND)
+            .bind(&declared.kinds)
             .execute(&mut **tx)
             .await?;
     }
-    for statement in [
-        DROP_MEMBERS,
-        INSERT_MEMBERS,
-        UPSERT_TICKET_VIEWS,
-        DROP_GONE_TICKET_VIEWS,
-    ] {
+    for statement in [DROP_MEMBERS, INSERT_MEMBERS] {
         sqlx::query(statement)
             .bind(source_id)
             .execute(&mut **tx)
             .await?;
     }
+    // Before the gone ones are dropped: a view that leaves in the run another
+    // turns up in still says the source had views, so the newcomer is new.
+    sqlx::query(UPSERT_TICKET_VIEWS)
+        .bind(source_id)
+        .bind(&declared.source_name)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query(DROP_GONE_TICKET_VIEWS)
+        .bind(source_id)
+        .execute(&mut **tx)
+        .await?;
     Ok(())
 }

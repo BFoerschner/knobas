@@ -795,8 +795,12 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         // The Builds frame (ADR-0022, #848): a run is drawn under the
         // pipeline whose declared `pipeline` equals its own, so both kinds
         // must say where that identity is, and a pipeline must say what it is
-        // called -- or the frame lists rows it cannot name or join.
-        if let Some(frame) = paths.frame {
+        // called -- or the frame lists rows it cannot name or join. A saved
+        // view (#1207) is no part of it.
+        if let Some(frame) = paths
+            .frame
+            .filter(|f| *f != knobas_core::payload::Frame::SavedView)
+        {
             assert!(
                 !paths.pipeline.is_empty(),
                 "descriptor.payload_paths declares kind {:?} a {frame:?} of the Builds frame but \

@@ -338,12 +338,22 @@ pub struct KindPaths {
     /// Empty for every kind the source does not order.
     #[serde(default)]
     pub position: Vec<PayloadPath>,
-    /// Which kind of the Builds frame this kind is (ADR-0022, #848): a
-    /// [`Frame::Pipeline`] the Builds view lists, or a [`Frame::Run`] of one.
-    /// A role, not a path, like [`blocked_statuses`](Self::blocked_statuses).
-    /// `None` for every kind the frame does not draw.
+    /// Which part of a shell-owned frame this kind is: of the Builds frame
+    /// (ADR-0022, #848), a [`Frame::Pipeline`] the Builds view lists or a
+    /// [`Frame::Run`] of one; or a ticket system's [`Frame::SavedView`]
+    /// (#1207). A role, not a path, like
+    /// [`blocked_statuses`](Self::blocked_statuses). `None` for every kind no
+    /// frame draws.
     #[serde(default)]
     pub frame: Option<Frame>,
+    /// The ticket system a [`Frame::SavedView`] kind's views are listed under
+    /// (#1207): Jira's is `Jira`, so its boards and filters sit under *Jira
+    /// boards* and *Jira filters* whatever a person named the source. Not the
+    /// descriptor's `name`, which is the instance's and changes with it.
+    /// `None` lists them under the source's name; `None` for every kind that
+    /// is not a saved view.
+    #[serde(default)]
+    pub system_name: Option<String>,
     /// What a pipeline is called (#848): TeamCity's configuration `name`.
     /// Empty for every kind that is not a pipeline.
     #[serde(default)]
@@ -495,7 +505,8 @@ impl TriggerValue {
     }
 }
 
-/// Which part of the Builds frame a kind is (ADR-0022, #848).
+/// Which part of a shell-owned frame a kind is: the Builds frame (ADR-0022,
+/// #848), or a ticket system's saved views (ADR-0029, #1207).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Frame {
@@ -503,6 +514,11 @@ pub enum Frame {
     Pipeline,
     /// One execution of a pipeline: a TeamCity build.
     Run,
+    /// A view a ticket system keeps of its own tickets (#1207): a Jira board
+    /// or filter. Each item of the kind becomes a ticket view, whichever
+    /// adapter emits it; `knobas_sync::saved_views` reads its payload.
+    #[serde(rename = "saved_view")]
+    SavedView,
 }
 
 /// An ISO 8601 instant in either spelling a declared time may use (#848):
@@ -1686,6 +1702,7 @@ mod tests {
         expected.push("kind");
         expected.push("blocked_statuses");
         expected.push("frame");
+        expected.push("system_name");
         expected.sort_unstable();
         assert_eq!(keys, expected);
     }
@@ -1704,6 +1721,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Frame::Pipeline).unwrap(),
             serde_json::json!("pipeline")
+        );
+        assert_eq!(
+            serde_json::to_value(Frame::SavedView).unwrap(),
+            serde_json::json!("saved_view")
         );
         let older: KindPaths =
             serde_json::from_value(serde_json::json!({ "kind": "build" })).unwrap();

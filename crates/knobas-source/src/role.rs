@@ -69,8 +69,8 @@ impl RoleClaim {
     }
 }
 
-/// How a minimum names a kind: by its id, or, for ADR-0022's Builds frame, by
-/// the [`Frame`] a kind declares (TeamCity's `build_config` is a pipeline).
+/// How a minimum names a kind: by its id, or by the [`Frame`] a kind declares
+/// (TeamCity's `build_config` is a pipeline, Jira's `jira_view` a saved view).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KindOf {
     Id(&'static str),
@@ -159,6 +159,11 @@ pub struct KindMinimum {
 pub struct Minimum {
     pub role: &'static str,
     pub kinds: &'static [KindMinimum],
+    /// The kinds a source filling this role may emit beside them (#1207): a
+    /// ticket system's saved views. A source that emits one is held to its
+    /// paths as to a required kind's; one that emits none still fills the
+    /// role.
+    pub optional_kinds: &'static [KindMinimum],
     /// The reads every claim of this role declares.
     pub reads: &'static [&'static str],
     /// The reads a claim may declare beside them.
@@ -206,6 +211,7 @@ pub const MINIMUMS: &[Minimum] = &[
             ),
             kind("commit", &[Field::ParentOf("repo"), Field::Commit]),
         ],
+        optional_kinds: &[],
         reads: &[
             "pull_request_diff",
             "commit_diff",
@@ -242,6 +248,11 @@ pub const MINIMUMS: &[Minimum] = &[
                 Field::ProjectKey,
             ],
         )],
+        // Saved views (#1207, ADR-0029): Jira's boards and filters. The kind
+        // is named by its frame, as CI's are, so the projection
+        // (`knobas_sync::saved_views`) keys on the frame and not on an
+        // adapter's kind id.
+        optional_kinds: &[frame(Frame::SavedView, &[])],
         reads: &["reachable_transitions"],
         optional_reads: &[],
         writes: &["transition", "comment", "create_ticket", "log_work"],
@@ -262,6 +273,7 @@ pub const MINIMUMS: &[Minimum] = &[
                 ],
             ),
         ],
+        optional_kinds: &[],
         reads: &["run_log"],
         optional_reads: &[
             "pipeline_settings",
@@ -281,6 +293,7 @@ pub const MINIMUMS: &[Minimum] = &[
             crate::docs::PAGE_KIND,
             &[Field::ProjectKey, Field::Parent],
         )],
+        optional_kinds: &[],
         reads: &["doc_content"],
         optional_reads: &[],
         writes: &["create_page", "update_page", "comment"],
@@ -288,6 +301,7 @@ pub const MINIMUMS: &[Minimum] = &[
     Minimum {
         role: MONITORING,
         kinds: &[kind("monitor", &[Field::StatusName])],
+        optional_kinds: &[],
         reads: &[],
         optional_reads: &[],
         writes: &["create_monitor", "pause_monitor", "resume_monitor"],
@@ -373,7 +387,10 @@ pub fn check(descriptor: &SourceDescriptor) -> Result<(), ClaimError> {
             continue;
         };
         for need in min.kinds {
-            check_kind(descriptor, &role, need)?;
+            check_kind(descriptor, &role, need, Need::Required)?;
+        }
+        for need in min.optional_kinds {
+            check_kind(descriptor, &role, need, Need::Optional)?;
         }
         if let Some(read) = min
             .reads
@@ -425,11 +442,27 @@ fn check_clone_from(d: &SourceDescriptor) -> Result<(), ClaimError> {
     Ok(())
 }
 
-fn check_kind(d: &SourceDescriptor, role: &str, need: &KindMinimum) -> Result<(), ClaimError> {
+/// Whether a [`KindMinimum`] is one of the role's `kinds` or its
+/// `optional_kinds`: an optional kind the descriptor does not emit passes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Need {
+    Required,
+    Optional,
+}
+
+fn check_kind(
+    d: &SourceDescriptor,
+    role: &str,
+    need: &KindMinimum,
+    how: Need,
+) -> Result<(), ClaimError> {
     let emitted = |id: &str| d.entity_kinds.iter().any(|k| k.id == id);
     let (named, paths) = match need.kind {
         KindOf::Id(id) => {
             if !emitted(id) {
+                if how == Need::Optional {
+                    return Ok(());
+                }
                 return Err(ClaimError::MissingKind {
                     role: role.to_owned(),
                     kind: format!("{id:?}"),
@@ -444,12 +477,16 @@ fn check_kind(d: &SourceDescriptor, role: &str, need: &KindMinimum) -> Result<()
             let word = match frame {
                 Frame::Pipeline => "pipeline",
                 Frame::Run => "run",
+                Frame::SavedView => "saved_view",
             };
             let Some(paths) = d
                 .payload_paths
                 .iter()
                 .find(|p| p.frame == Some(frame) && emitted(&p.kind))
             else {
+                if how == Need::Optional {
+                    return Ok(());
+                }
                 return Err(ClaimError::MissingKind {
                     role: role.to_owned(),
                     kind: format!("a {word} (a kind declaring frame {word:?})"),

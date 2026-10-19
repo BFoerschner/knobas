@@ -3,7 +3,8 @@
 //! (*View settings*), `delete_ticket_view`, and `mini_board` with its
 //! `jira_view` argument ([`jira_view_board`]). The views are made the way a
 //! sync makes them: a `jira_view` item in the mirror, projected by
-//! `knobas_sync::jira_views::project`.
+//! `knobas_sync::saved_views::project` under the Jira adapter's own
+//! declaration.
 //!
 //! The database is shared by this binary's tests; each uses a project key and
 //! a board id nothing else holds.
@@ -97,7 +98,9 @@ async fn board(pool: &sqlx::PgPool, p: &str, keys: &[String]) -> (String, String
     )
     .await;
     let mut tx = pool.begin().await.unwrap();
-    knobas_sync::jira_views::project(&mut tx, "jira")
+    let declared = knobas_sync::saved_views::declared(&knobas_source_jira::descriptor_template())
+        .expect("Jira declares saved views");
+    knobas_sync::saved_views::project(&mut tx, "jira", &declared)
         .await
         .unwrap();
     tx.commit().await.unwrap();
