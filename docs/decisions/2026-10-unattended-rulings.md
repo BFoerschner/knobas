@@ -7340,3 +7340,12 @@ The merge-manager's rulings (Opus):
 - **The fake board answers a role through `fakeRoleScope`.** The demo's mock, Gitea and Jira all
   fill the ticket system, so `?fake-ipc` draws the same board as before; no screenshot was taken,
   since nothing the page draws changed. *Reversing:* n/a.
+
+The merge-manager's rulings (Opus):
+
+- **The open Tickets page no longer re-reads its board when the source list changes.** *Fork:*
+  keep a re-read on the shell's source list (a claim or miss changing while the page is open), or
+  drop it as the ticket says. *Ruling:* drop it. The ticket names the scope key among what goes,
+  the mirror resolves the fillers on every read, and Settings is its own page, so coming back
+  from adding a source mounts the board afresh. *Reversing:* low, one `void` of the source list
+  in the read effect.
