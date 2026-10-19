@@ -1293,15 +1293,15 @@ async fn a_gitea_issue_is_on_the_tickets_board_beside_a_jira_ticket() {
     // and whose records filled it (#1199).
     let claimers: Vec<String> =
         knobas_app::sources::crud::list(&state.pool, state.registry.as_ref())
-        .await
-        .expect("the sources")
-        .into_iter()
-        .filter(|s| {
-            s.roles.iter().any(|c| c.role == "ticket-system")
-                && !s.role_misses.iter().any(|m| m.role == "ticket-system")
-        })
-        .map(|s| s.id)
-        .collect();
+            .await
+            .expect("the sources")
+            .into_iter()
+            .filter(|s| {
+                s.roles.iter().any(|c| c.role == "ticket-system")
+                    && !s.role_misses.iter().any(|m| m.role == "ticket-system")
+            })
+            .map(|s| s.id)
+            .collect();
     assert_eq!(claimers, [GITEA, JIRA], "both fill the ticket system");
 
     let board = knobas_app::commands::entity::mini_board_inner(
@@ -1325,14 +1325,20 @@ async fn a_gitea_issue_is_on_the_tickets_board_beside_a_jira_ticket() {
         .unwrap_or_else(|| panic!("no Gitea card: {board:#?}"));
     assert_eq!(gitea.source_id, GITEA);
     assert!(
-        gitea.entity_id.starts_with(&format!("{GITEA}:{ledger}/issues/")),
+        gitea
+            .entity_id
+            .starts_with(&format!("{GITEA}:{ledger}/issues/")),
         "{}",
         gitea.entity_id
     );
     assert_eq!(status.as_deref(), Some("open"));
     assert_eq!(gitea.priority.as_deref(), Some("High"));
     assert_eq!(gitea.assignee.as_deref(), Some("tomasz.wojcik"));
-    assert!(gitea.labels.iter().any(|l| l == "Kind/Bug"), "{:?}", gitea.labels);
+    assert!(
+        gitea.labels.iter().any(|l| l == "Kind/Bug"),
+        "{:?}",
+        gitea.labels
+    );
     assert!(
         cards
             .iter()

@@ -111,7 +111,7 @@ pub const KIND_TICKET: &str = "ticket";
 /// corpus, which is the engine's licence to tombstone what that kind stopped
 /// returning (ADR-0003). This adapter splits two ways and is the reason the
 /// declaration is per kind at all -- see
-/// `tests::exactly_the_unbudgeted_kinds_are_exhaustive`, and `sync`'s module
+/// `tests::exactly_the_unbudgeted_code_host_kinds_are_exhaustive_and_the_ticket_is_not`, and `sync`'s module
 /// docs for what makes the `true` half honest.
 #[must_use]
 pub fn entity_kinds() -> Vec<KindInfo> {
@@ -585,7 +585,7 @@ mod tests {
     /// branches makes the two halves disagree instead of quietly licensing a
     /// sweep over a bounded walk.
     #[test]
-    fn exactly_the_unbudgeted_kinds_are_exhaustive() {
+    fn exactly_the_unbudgeted_code_host_kinds_are_exhaustive_and_the_ticket_is_not() {
         let schema = config::config_schema();
         let budgets: Vec<&str> = schema["properties"]
             .as_object()

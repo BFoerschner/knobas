@@ -29,7 +29,10 @@ fn tickets(items: &[SyncItem]) -> Vec<&SyncItem> {
 }
 
 fn ids(items: &[SyncItem]) -> Vec<String> {
-    tickets(items).iter().map(|i| i.entity.to_string()).collect()
+    tickets(items)
+        .iter()
+        .map(|i| i.entity.to_string())
+        .collect()
 }
 
 #[tokio::test]
@@ -113,7 +116,13 @@ async fn a_new_issue_arrives_with_the_next_incremental_run() {
 
     state.issues.get_mut(FULL).unwrap().insert(
         0,
-        issue(150, "Nightly payout report", "open", &["priority/low"], "2026-08-24T07:00:00Z"),
+        issue(
+            150,
+            "Nightly payout report",
+            "open",
+            &["priority/low"],
+            "2026-08-24T07:00:00Z",
+        ),
     );
     fake.remount(&state).await;
     let (items, _) = run(&*source, Some(&cursor)).await;
@@ -171,8 +180,14 @@ async fn a_repository_with_its_issue_unit_off_is_not_asked() {
 async fn an_issues_reachable_transition_is_the_state_it_is_not_in() {
     let fake = Fake::start(&State::tidewater()).await;
     let source = source(fake.base_url(), json!({}));
-    assert_eq!(source.reachable_transitions(OPEN).await.unwrap(), ["closed"]);
-    assert_eq!(source.reachable_transitions(CLOSED).await.unwrap(), ["open"]);
+    assert_eq!(
+        source.reachable_transitions(OPEN).await.unwrap(),
+        ["closed"]
+    );
+    assert_eq!(
+        source.reachable_transitions(CLOSED).await.unwrap(),
+        ["open"]
+    );
     let refused = source
         .reachable_transitions("gitea:tidewater/payout-service#142")
         .await;
@@ -195,9 +210,9 @@ async fn accepting() -> MockServer {
         .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "number": 151 })))
         .mount(&server)
         .await;
-    authed(Mock::given(method("POST")).and(path(format!(
-        "/api/v1/repos/{FULL}/issues/7/comments"
-    ))))
+    authed(
+        Mock::given(method("POST")).and(path(format!("/api/v1/repos/{FULL}/issues/7/comments"))),
+    )
     .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": 9 })))
     .mount(&server)
     .await;

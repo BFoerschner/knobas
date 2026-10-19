@@ -273,12 +273,13 @@ pub(crate) fn ticket_item(
         .title
         .clone()
         .unwrap_or_else(|| format!("#{}", issue.number));
+    let key = keys::issue_key(at.owner, at.name, issue.number);
     let mut payload = raw.clone();
     if let Some(record) = payload.as_object_mut() {
         record.insert(
             "knobas".to_owned(),
             serde_json::json!({
-                "key": keys::issue_key(at.owner, at.name, issue.number),
+                "key": key,
                 "priority": priority(issue.labels.as_deref().unwrap_or_default()),
                 "issue_type": null,
                 "parent": null,
@@ -286,10 +287,7 @@ pub(crate) fn ticket_item(
         );
     }
     SyncItem {
-        entity: EntityRef::new(
-            source_id,
-            &keys::issue_key(at.owner, at.name, issue.number),
-        ),
+        entity: EntityRef::new(source_id, &key),
         kind: KIND_TICKET.to_owned(),
         title: title.clone(),
         body_text: body_text(
@@ -686,7 +684,8 @@ mod tests {
 
     #[test]
     fn an_issue_becomes_a_ticket_under_its_own_key() {
-        let raw = raw_issue(serde_json::json!([{ "name": "Priority/High" }, { "name": "Kind/Bug" }]));
+        let raw =
+            raw_issue(serde_json::json!([{ "name": "Priority/High" }, { "name": "Kind/Bug" }]));
         let issue: crate::model::Issue = serde_json::from_value(raw.clone()).unwrap();
         let comments = [crate::model::Comment {
             body: Some("Reproduced on main.".to_owned()),
@@ -733,9 +732,18 @@ mod tests {
                 })
                 .collect()
         };
-        assert_eq!(priority(&labels(&["Kind/Bug", "priority/Low"])).as_deref(), Some("Low"));
-        assert_eq!(priority(&labels(&["PRIORITY / Critical"])).as_deref(), Some("Critical"));
-        assert_eq!(priority(&labels(&["Kind/Bug", "priority", "Priority/"])), None);
+        assert_eq!(
+            priority(&labels(&["Kind/Bug", "priority/Low"])).as_deref(),
+            Some("Low")
+        );
+        assert_eq!(
+            priority(&labels(&["PRIORITY / Critical"])).as_deref(),
+            Some("Critical")
+        );
+        assert_eq!(
+            priority(&labels(&["Kind/Bug", "priority", "Priority/"])),
+            None
+        );
         assert_eq!(priority(&[]), None);
     }
 }

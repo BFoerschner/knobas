@@ -139,6 +139,18 @@ pub(crate) struct Issue {
     pub pull_request: Option<serde_json::Value>,
 }
 
+/// The two states an issue has, which are its whole workflow: from either,
+/// the other is the one move.
+pub(crate) const ISSUE_STATES: [&str; 2] = ["open", "closed"];
+
+/// The state `status` names, as Gitea spells it, matched case-insensitively;
+/// `None` for anything else.
+pub(crate) fn issue_state(status: &str) -> Option<&'static str> {
+    ISSUE_STATES
+        .into_iter()
+        .find(|state| state.eq_ignore_ascii_case(status.trim()))
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 pub(crate) struct Label {
     #[serde(default)]

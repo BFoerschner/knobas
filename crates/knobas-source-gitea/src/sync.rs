@@ -72,7 +72,7 @@
 //!
 //! Which kind is bounded and which is not is declared in
 //! `crate::entity_kinds`, and pinned against the config schema by
-//! `crate::tests::exactly_the_unbudgeted_kinds_are_exhaustive` -- so a budget
+//! `crate::tests::exactly_the_unbudgeted_code_host_kinds_are_exhaustive_and_the_ticket_is_not` -- so a budget
 //! added for repositories or branches fails there rather than quietly
 //! licensing a sweep over a bounded walk.
 //!
@@ -914,7 +914,7 @@ async fn issues(
                 continue;
             }
             let Some(comments) =
-                discussion(source, at, issue.number, issue.comments, Of::Issue).await?
+                discussion(source, at, issue.number, issue.comments, Thread::Issue).await?
             else {
                 continue;
             };
@@ -1088,12 +1088,12 @@ async fn fetch_comments(
     at: RepoRef<'_>,
     pr: &model::PullRequest,
 ) -> Result<Option<Vec<model::Comment>>, RepoError> {
-    discussion(source, at, pr.number, pr.comments, Of::Pull).await
+    discussion(source, at, pr.number, pr.comments, Thread::Pull).await
 }
 
 /// Whose discussion [`discussion`] reads: which read confirms it is gone.
 #[derive(Debug, Clone, Copy)]
-enum Of {
+enum Thread {
     Pull,
     /// An issue's (#1206), read under the same `include_pr_comments`: Gitea
     /// keeps both on the issue endpoint, and one switch turns that off.
@@ -1107,7 +1107,7 @@ async fn discussion(
     at: RepoRef<'_>,
     number: u64,
     count: u64,
-    of: Of,
+    of: Thread,
 ) -> Result<Option<Vec<model::Comment>>, RepoError> {
     if !source.config.include_pr_comments || count == 0 {
         return Ok(Some(Vec::new()));
@@ -1121,8 +1121,8 @@ async fn discussion(
         Err(error)
             if matches!(error.status(), Some(404 | 500..=599))
                 && match of {
-                    Of::Pull => pull_is_gone(source, at, number).await,
-                    Of::Issue => issue_is_gone(source, at, number).await,
+                    Thread::Pull => pull_is_gone(source, at, number).await,
+                    Thread::Issue => issue_is_gone(source, at, number).await,
                 } =>
         {
             tracing::info!(
@@ -1158,7 +1158,8 @@ async fn discussion(
             "gitea: {}#{} answered {} of its {total} comments (its own X-Total-Count header \
              says {total}) and this endpoint has no second page to ask for, so every long \
              discussion on this instance would be mirrored incomplete without saying so. Set \
-             include_pr_comments to false to index pull requests without their discussion.",
+             include_pr_comments to false to index pull requests and issues without their \
+             discussion.",
             at.full_name,
             number,
             discussion.raw.len(),

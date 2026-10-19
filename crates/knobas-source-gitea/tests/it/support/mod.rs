@@ -331,19 +331,19 @@ impl State {
                     )],
                 ),
                 (
-                "tidewater/payout-service#142".to_owned(),
-                vec![
-                    comment(
-                        "Should the jitter be bounded? +/-20 % feels wide.",
-                        "jonas",
-                        "2026-08-22T09:30:00Z",
-                    ),
-                    comment(
-                        "Bounded to +/-10 % in c90d11.",
-                        "mara",
-                        "2026-08-22T10:20:00Z",
-                    ),
-                ],
+                    "tidewater/payout-service#142".to_owned(),
+                    vec![
+                        comment(
+                            "Should the jitter be bounded? +/-20 % feels wide.",
+                            "jonas",
+                            "2026-08-22T09:30:00Z",
+                        ),
+                        comment(
+                            "Bounded to +/-10 % in c90d11.",
+                            "mara",
+                            "2026-08-22T10:20:00Z",
+                        ),
+                    ],
                 ),
             ]),
             commits: BTreeMap::from([
@@ -441,24 +441,23 @@ impl wiremock::Respond for Issues {
             return ResponseTemplate::new(400)
                 .set_body_json(json!({ "message": "this fake serves type=issues&state=all" }));
         }
-        let since = query.get("since").map(|t| {
-            chrono::DateTime::parse_from_rfc3339(t).expect("since is RFC 3339")
-        });
+        let since = query
+            .get("since")
+            .map(|t| chrono::DateTime::parse_from_rfc3339(t).expect("since is RFC 3339"));
         let admitted: Vec<Value> = self
             .records
             .iter()
             .filter(|issue| {
                 since.is_none_or(|since| {
-                    let updated = issue["updated_at"].as_str().expect("an issue has updated_at");
+                    let updated = issue["updated_at"]
+                        .as_str()
+                        .expect("an issue has updated_at");
                     chrono::DateTime::parse_from_rfc3339(updated).expect("RFC 3339") >= since
                 })
             })
             .cloned()
             .collect();
-        let page: usize = query
-            .get("page")
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(1);
+        let page: usize = query.get("page").and_then(|p| p.parse().ok()).unwrap_or(1);
         let chunk: Vec<Value> = admitted
             .chunks(self.page_size)
             .nth(page - 1)
@@ -727,8 +726,7 @@ impl Fake {
         }
         for (full_name, status) in &state.issues_status {
             authed(
-                Mock::given(method("GET"))
-                    .and(path(format!("/api/v1/repos/{full_name}/issues"))),
+                Mock::given(method("GET")).and(path(format!("/api/v1/repos/{full_name}/issues"))),
             )
             .respond_with(
                 ResponseTemplate::new(*status).set_body_json(json!({ "message": "refused" })),
@@ -739,8 +737,7 @@ impl Fake {
         }
         for (full_name, issues) in &state.issues {
             authed(
-                Mock::given(method("GET"))
-                    .and(path(format!("/api/v1/repos/{full_name}/issues"))),
+                Mock::given(method("GET")).and(path(format!("/api/v1/repos/{full_name}/issues"))),
             )
             .respond_with(Issues {
                 records: issues.clone(),

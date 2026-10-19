@@ -2584,7 +2584,7 @@ knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_default_branch_gets
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_watermark_keeps_every_key_on_the_instant_it_stands_on
 knobas-source-gitea	lib/knobas_source_gitea	tests::a_branch_pr_and_commit_declare_their_repo_as_parent
 knobas-source-gitea	lib/knobas_source_gitea	tests::a_pull_request_draws_merged_open_or_closed
-knobas-source-gitea	lib/knobas_source_gitea	tests::exactly_the_unbudgeted_kinds_are_exhaustive
+knobas-source-gitea	lib/knobas_source_gitea	tests::exactly_the_unbudgeted_code_host_kinds_are_exhaustive_and_the_ticket_is_not
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_claims_the_code_host_and_ticket_system_roles_and_fills_them
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_describes_a_gitea_that_writes
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_round_trips_as_json

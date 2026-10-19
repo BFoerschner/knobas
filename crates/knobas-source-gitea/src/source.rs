@@ -474,14 +474,14 @@ impl Source for GiteaSource {
         let issue = self.client.issue(&owner, &repo, number).await?;
         let state = issue["state"]
             .as_str()
-            .and_then(write::issue_state)
+            .and_then(crate::model::issue_state)
             .ok_or_else(|| {
                 SourceError::protocol(format!(
                     "gitea: {entity:?} answered no state an issue has: {}",
                     issue["state"]
                 ))
             })?;
-        Ok(write::ISSUE_STATES
+        Ok(crate::model::ISSUE_STATES
             .into_iter()
             .filter(|other| *other != state)
             .map(str::to_owned)

@@ -654,18 +654,6 @@ pub(crate) async fn edit_pull_request(
 
 // -- an issue's workflow and creation (issue #1206) ---------------------------
 
-/// The two states an issue has, which are its whole workflow: from either,
-/// the other is the one move.
-pub(crate) const ISSUE_STATES: [&str; 2] = ["open", "closed"];
-
-/// The state `status` names, as Gitea spells it, matched case-insensitively;
-/// `None` for anything else.
-pub(crate) fn issue_state(status: &str) -> Option<&'static str> {
-    ISSUE_STATES
-        .into_iter()
-        .find(|state| state.eq_ignore_ascii_case(status.trim()))
-}
-
 /// Move an issue to `status`: `open` or `closed`. Any other status is refused
 /// before a request, naming the two there are. Moving an issue to the state
 /// it is in is Gitea's to take and changes nothing, so a resend is harmless.
@@ -681,15 +669,12 @@ pub(crate) async fn transition(
     index: u64,
     status: &str,
 ) -> Result<(), SourceError> {
-    let state = issue_state(status).ok_or_else(|| {
+    let state = crate::model::issue_state(status).ok_or_else(|| {
         SourceError::protocol(format!(
             "gitea: an issue is open or closed, so it cannot move to {status:?}"
         ))
     })?;
-    let path = format!(
-        "{}/{index}",
-        crate::client::issues_path(owner, repo)?
-    );
+    let path = format!("{}/{index}", crate::client::issues_path(owner, repo)?);
     client
         .patch(&path, &json!({ "state": state }))
         .await

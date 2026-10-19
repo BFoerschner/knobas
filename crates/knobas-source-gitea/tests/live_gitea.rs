@@ -5359,7 +5359,10 @@ async fn the_seeded_issues_sync_as_tickets_with_their_priority_assignee_and_stat
     assert_eq!(medium.payload["assignee"], serde_json::Value::Null);
     let closed = titled("Drop the v1 balance endpoint");
     assert_eq!(closed.payload["state"], "closed");
-    assert_eq!(closed.payload["knobas"]["priority"], serde_json::Value::Null);
+    assert_eq!(
+        closed.payload["knobas"]["priority"],
+        serde_json::Value::Null
+    );
     assert!(!closed.deleted);
     // No pull request of the repository is a ticket.
     for pull in of_kind(&items, "pr") {
@@ -5527,7 +5530,9 @@ async fn a_ticket_is_filed_moved_and_commented_on_through_its_writes() {
         .await
         .expect("a comment list");
     assert!(
-        comments.iter().any(|c| c["body"] == format!("comment {stamp}")),
+        comments
+            .iter()
+            .any(|c| c["body"] == format!("comment {stamp}")),
         "{comments:#?}"
     );
     let (items, _) = incremental(cursor).await;

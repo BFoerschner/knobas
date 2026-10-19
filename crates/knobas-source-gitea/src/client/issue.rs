@@ -53,5 +53,9 @@ impl GiteaClient {
 
 /// `/repos/{o}/{r}/issues`, each segment checked.
 pub(crate) fn issues_path(owner: &str, repo: &str) -> Result<String, SourceError> {
-    Ok(format!("/repos/{}/{}/issues", segment(owner)?, segment(repo)?))
+    Ok(format!(
+        "/repos/{}/{}/issues",
+        segment(owner)?,
+        segment(repo)?
+    ))
 }
