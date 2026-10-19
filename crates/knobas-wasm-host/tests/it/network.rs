@@ -4,6 +4,7 @@
 //! instance and the other hosts, and record what reached them.
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceError};
@@ -553,4 +554,48 @@ async fn a_templated_host_that_resolves_to_loopback_goes_through_the_proxy() {
     assert!(ok, "{text}");
     assert_eq!(proxy.carried(), [format!("GET {url}/data HTTP/1.1")]);
     assert_eq!(local.seen().len(), 1, "{:?}", local.seen());
+}
+
+/// A network whose DNS drops outside queries never answers the lookup: the
+/// wait before the proxy is bounded, not the system's lookup timeout (#1290).
+#[tokio::test]
+async fn a_fixed_host_whose_lookup_never_answers_reaches_the_proxy_within_the_bound() {
+    let local = Server::start(None).await;
+    let proxy = Proxy::start(&local).await;
+    knobas_wasm_host::fake_dns_hangs("silent-1290.test");
+    knobas_wasm_host::fake_proxy("silent-1290.test", &proxy.url);
+    let source = fetching(
+        &["silent-1290.test"],
+        "http://silent-1290.test/data",
+        serde_json::json!({}),
+    );
+    let (ok, text) = tokio::time::timeout(Duration::from_secs(10), answer(&*source))
+        .await
+        .expect("the request waited on the lookup past the bound");
+    assert!(ok, "{text}");
+    assert_eq!(
+        proxy.carried(),
+        ["GET http://silent-1290.test/data HTTP/1.1"]
+    );
+}
+
+/// The component's own timeouts do not shorten the lookup before hand-off: a
+/// short first-byte timeout would otherwise time the lookup out and send a
+/// name that points home on to the proxy (#1290).
+#[tokio::test]
+async fn a_short_component_timeout_does_not_cut_the_lookup_before_the_proxy() {
+    let local = Server::start(None).await;
+    let proxy = Proxy::start(&local).await;
+    knobas_wasm_host::fake_dns("slow-1290.test", &[LOOPBACK]);
+    knobas_wasm_host::fake_dns_slow("slow-1290.test", Duration::from_millis(300));
+    knobas_wasm_host::fake_proxy("slow-1290.test", &proxy.url);
+    let source = fetching(
+        &["slow-1290.test"],
+        "http://slow-1290.test/data",
+        serde_json::json!({ "first_byte_ms": 20 }),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(!ok && text.contains("ConnectionRefused"), "{text}");
+    assert!(proxy.carried().is_empty(), "{:?}", proxy.carried());
+    assert!(local.seen().is_empty(), "{:?}", local.seen());
 }

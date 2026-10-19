@@ -50,7 +50,7 @@ mod source;
 pub use source::WasmSource;
 
 #[cfg(feature = "test-util")]
-pub use net::{fake_dns, fake_proxy};
+pub use net::{fake_dns, fake_dns_hangs, fake_dns_slow, fake_proxy};
 
 mod bindings {
     wasmtime::component::bindgen!({

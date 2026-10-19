@@ -6930,3 +6930,40 @@ The merge-manager's rulings (Opus):
   (`OWNED_SCHEMA`), share exports dump named `knobas` tables, and no SQL outside
   `knobas_sync::saved_views` and `ticket_views` names the column; the remaining `jql`s are the
   adapter's payload key. *Reversing:* n/a.
+
+## #1290 — bound the lookup before hand-off
+
+- **Which bound** (overruled by the merge-manager below: fixed 2 s). *Fork:* `Bounds::head` alone, or a fixed cap. *Ruling:* the shorter of
+  `Bounds::head` and a 2 s cap (`LOOKUP_CAP`). `head` is `None` when the component sets no
+  timeouts, so it cannot be the only bound; a long `head` (tens of seconds) would still stall a
+  proxy-only reader far past what a lookup is worth. A timed-out lookup is a failed one: the
+  request goes to the proxy. *Reversing:* low (one constant).
+- **Test seam.** `fake_dns_hangs(name)` under `test-util`, beside `fake_dns`: its lookup never
+  answers. No machine DNS or network setting is touched. The test allows 10 s against a 2 s bound.
+  *Reversing:* n/a.
+
+### #1290: merge-manager's rulings (Opus)
+
+- **The component's head bound no longer shortens the lookup.** *Fork:* keep the implementer's
+  `min(Bounds::head, 2 s)`, or a fixed 2 s. *Ruling:* fixed (`LOOKUP_WAIT`), overruling "Which
+  bound" above. `Bounds::head` is the component's own connect and first-byte timeouts, so a
+  component that set a few milliseconds timed out the lookup of a name that steadily resolves to
+  `127.0.0.1` and sent the request on to the proxy, which reached the reader's loopback. That is
+  #1283's criterion-1 case, and #1283's merge-manager kept "a name knobas cannot resolve goes on"
+  only because failing the first lookup needed a hostile DNS owner. With the fixed wait it does
+  again: a name that answers within 2 s is judged, whatever the component asked for. Test
+  `a_short_component_timeout_does_not_cut_the_lookup_before_the_proxy` (a 300 ms lookup to
+  loopback, a 20 ms first-byte timeout) fails on the implementer's version and passes on this
+  one; new seam `fake_dns_slow` under `test-util`. *Cost:* a component with a short head timeout
+  waits up to 2 s on a silent DNS before its own timeout starts. *Reversing:* low, but reopens
+  the bypass.
+- **A timeout going on to the proxy keeps #1283's ruling.** A name that times out at knobas
+  after 2 s and answers loopback to a local proxy asking the same system resolver needs the owner
+  (or the network) to drop the first query and answer the second: the accepted rebinding case.
+  *Reversing:* n/a.
+- **`fake_dns_hangs` and `fake_dns_slow` do not reach a shipped build.** `cargo tree -p knobas-app
+  -e normal,features -i knobas-wasm-host` shows only `default`; `test-util` is on only through
+  dev-dependencies. *Reversing:* n/a.
+- **The 10 s allowance is not load-sensitive.** The fixture builds outside the timed call, the
+  lookup wait is a fixed 2 s on tokio's timer, and the rest is two loopback hops (the whole
+  network suite runs in 2.4 s). 8 s of slack holds under two gates. *Reversing:* n/a.
