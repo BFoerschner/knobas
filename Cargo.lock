@@ -3122,6 +3122,7 @@ dependencies = [
  "knobas-sync",
  "knobas-wasm-host",
  "notify-rust",
+ "percent-encoding",
  "reqwest",
  "serde",
  "serde_json",

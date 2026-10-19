@@ -101,9 +101,11 @@ pub async fn install_adapter<R: tauri::Runtime>(
 #[tauri::command]
 pub async fn list_installed_adapters<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
+    profile: State<'_, crate::Profile>,
 ) -> Result<Vec<crate::sources::installed::AdapterStatus>, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::installed::list(&state.pool, &crate::sources::Registry::builtin())
+    let installs = crate::sources::installed::Installs::for_profile(&profile.dir);
+    crate::sources::installed::list(&state.pool, &installs.registry)
         .await
         .map_err(IpcError::internal)
 }
@@ -113,15 +115,13 @@ pub async fn list_installed_adapters<R: tauri::Runtime>(
 #[tauri::command]
 pub async fn check_adapter_updates<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
+    profile: State<'_, crate::Profile>,
 ) -> Result<Vec<crate::sources::installed::AdapterStatus>, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::installed::check_updates(
-        &state.pool,
-        &crate::sources::Registry::builtin(),
-        &crate::sources::remote::Endpoints::default(),
-    )
-    .await
-    .map_err(IpcError::internal)
+    let installs = crate::sources::installed::Installs::for_profile(&profile.dir);
+    crate::sources::installed::check_updates(&state.pool, &installs.registry, &installs.endpoints)
+        .await
+        .map_err(IpcError::internal)
 }
 
 /// Update an installed adapter to its latest release (#1209), after every
@@ -133,11 +133,12 @@ pub async fn update_adapter<R: tauri::Runtime>(
     kind: String,
 ) -> Result<crate::sources::installed::AdapterStatus, IpcError> {
     let state = crate::sources::state(&app)?;
+    let installs = crate::sources::installed::Installs::for_profile(&profile.dir);
     crate::sources::installed::update(
         &state.pool,
-        &crate::sources::Registry::builtin(),
-        &crate::sources::install::store_dir(&profile.dir),
-        &crate::sources::remote::Endpoints::default(),
+        &installs.registry,
+        &installs.store,
+        &installs.endpoints,
         &kind,
     )
     .await
@@ -155,23 +156,29 @@ pub async fn uninstall_adapter<R: tauri::Runtime>(
     removals: Vec<crate::sources::installed::Removal>,
 ) -> Result<(), IpcError> {
     let state = crate::sources::state(&app)?;
-    let removed = crate::sources::installed::uninstall(
+    let installs = crate::sources::installed::Installs::for_profile(&profile.dir);
+    let outcome = crate::sources::installed::uninstall(
         &state.pool,
         &state.secrets,
-        &crate::sources::Registry::builtin(),
-        &crate::sources::install::store_dir(&profile.dir),
+        &installs.registry,
+        &installs.store,
         &kind,
         &removals,
     )
-    .await
-    .map_err(|error| error.to_ipc())?;
+    .await;
+    // Every source removed is forgotten, the ones before a failure too (#127).
+    let removed = match &outcome {
+        Ok(removed) => removed.as_slice(),
+        Err(crate::sources::install::InstallError::Remove { removed, .. }) => removed.as_slice(),
+        Err(_) => &[],
+    };
     for removal in removed {
         state
             .scheduler
             .forget_source(&removal.source_id, Purge::from(removal.purge_items))
             .await;
     }
-    Ok(())
+    outcome.map(drop).map_err(|error| error.to_ipc())
 }
 
 #[tauri::command]

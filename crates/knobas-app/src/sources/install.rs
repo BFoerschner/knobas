@@ -84,6 +84,9 @@ pub enum InstallError {
     Remove {
         id: String,
         error: super::SourcesError,
+        /// The sources removed before this one, which the scheduler must
+        /// still be told about.
+        removed: Vec<super::installed::Removal>,
     },
 }
 
@@ -103,7 +106,12 @@ impl InstallError {
             Self::Fetch(_) => crate::IpcError::invalid(self),
             Self::KindTaken(_) => crate::IpcError::conflict(self),
             Self::NotInstalled(_) => crate::IpcError::not_found(self),
-            Self::Store(_) | Self::Db(_) | Self::Remove { .. } => crate::IpcError::internal(self),
+            Self::Remove { id, error, .. } => {
+                let mut ipc = super::to_ipc(error, Some(id));
+                ipc.message = self.to_string();
+                ipc
+            }
+            Self::Store(_) | Self::Db(_) => crate::IpcError::internal(self),
         }
     }
 }

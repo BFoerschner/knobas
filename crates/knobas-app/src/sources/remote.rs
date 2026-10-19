@@ -193,14 +193,12 @@ pub fn release_of(url: &url::Url, endpoints: &Endpoints) -> Option<(String, Stri
         let base = base.as_str().trim_end_matches('/').to_owned();
         format!("{base}/api/v1/repos/{owner}/{repo}/releases")
     };
-    let tag = percent_decode(tag);
-    Some((api, tag, percent_decode(file)))
-}
-
-fn percent_decode(segment: &str) -> String {
-    url::form_urlencoded::parse(format!("x={}", segment.replace('+', "%2B")).as_bytes())
-        .next()
-        .map_or_else(|| segment.to_owned(), |(_, v)| v.into_owned())
+    let decode = |s: &str| {
+        percent_encoding::percent_decode_str(s)
+            .decode_utf8_lossy()
+            .into_owned()
+    };
+    Some((api, decode(tag), decode(file)))
 }
 
 /// Find the manifest of the release `pin` names at `origin`.
@@ -302,9 +300,13 @@ pub async fn artifact(located: &Located, file: &str) -> Result<Vec<u8>, FetchErr
                 })
         }
         Assets::Beside(manifest) => {
-            let url = manifest
-                .join(&encode_segment(file))
-                .map_err(|_| FetchError::NotAnOrigin(file.to_owned()))?;
+            let url =
+                manifest
+                    .join(&encode_segment(file))
+                    .map_err(|e| FetchError::Unreachable {
+                        url: format!("{manifest} beside {file}"),
+                        error: SourceError::protocol(e.to_string()),
+                    })?;
             get(url.as_str(), ARTIFACT_CAP).await
         }
         Assets::Listed(assets) => {
@@ -314,10 +316,15 @@ pub async fn artifact(located: &Located, file: &str) -> Result<Vec<u8>, FetchErr
     }
 }
 
+/// `segment` as one path segment: everything but the unreserved
+/// characters escaped, so a tag holding `/`, `?` or `#` stays one segment.
 fn encode_segment(segment: &str) -> String {
-    url::form_urlencoded::byte_serialize(segment.as_bytes())
-        .collect::<String>()
-        .replace('+', "%20")
+    const SEGMENT: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_')
+        .remove(b'~');
+    percent_encoding::utf8_percent_encode(segment, SEGMENT).to_string()
 }
 
 fn text(bytes: &[u8], url: &str) -> Result<String, FetchError> {
@@ -447,10 +454,10 @@ mod tests {
     #[test]
     fn a_forge_release_download_asks_its_own_api_under_its_path_prefix() {
         assert_eq!(
-            release("https://forge.example/git/harbour/surveys/releases/download/v%201/m.json"),
+            release("https://forge.example/git/harbour/surveys/releases/download/v%201&b+c/m.json"),
             Some((
                 "https://forge.example/git/api/v1/repos/harbour/surveys/releases".to_owned(),
-                "v 1".to_owned(),
+                "v 1&b+c".to_owned(),
                 "m.json".to_owned()
             ))
         );

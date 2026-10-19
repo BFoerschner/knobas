@@ -30,6 +30,28 @@ use super::Registry;
 use super::install::{self, InstallError, Loaded};
 use super::remote::{self, Endpoints, Origin, Pin};
 
+/// Where the installed adapters are: the registry they load into, the
+/// artifact store, and where GitHub is. The app's are
+/// [`Installs::for_profile`]'s; a test builds its own.
+#[derive(Debug, Clone)]
+pub struct Installs {
+    pub registry: Registry,
+    pub store: std::path::PathBuf,
+    pub endpoints: Endpoints,
+}
+
+impl Installs {
+    /// The process registry, the profile's store, GitHub itself.
+    #[must_use]
+    pub fn for_profile(profile_dir: &Path) -> Self {
+        Self {
+            registry: Registry::builtin(),
+            store: install::store_dir(profile_dir),
+            endpoints: Endpoints::default(),
+        }
+    }
+}
+
 /// What the last update check of an installed adapter found.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -247,20 +269,24 @@ pub async fn update(
     let install::Fetched { tag, checked } = match fetched {
         Ok(fetched) => fetched,
         Err(error) => {
-            if !matches!(error, InstallError::Db(_)) {
-                let tag = match registry.update(kind) {
-                    Some(UpdateCheck::Available { tag, .. } | UpdateCheck::Refused { tag, .. }) => {
-                        tag
-                    }
-                    _ => None,
-                };
-                registry.set_update(
-                    kind,
-                    UpdateCheck::Refused {
-                        tag,
-                        reason: error.to_string(),
-                    },
-                );
+            let reason = error.to_string();
+            let check = match &error {
+                InstallError::Refused(_) | InstallError::KindChanged { .. } => {
+                    let tag = match registry.update(kind) {
+                        Some(
+                            UpdateCheck::Available { tag, .. } | UpdateCheck::Refused { tag, .. },
+                        ) => tag,
+                        _ => None,
+                    };
+                    Some(UpdateCheck::Refused { tag, reason })
+                }
+                InstallError::Fetch(_) | InstallError::ManifestUnreadable { .. } => {
+                    Some(UpdateCheck::Failed { reason })
+                }
+                _ => None,
+            };
+            if let Some(check) = check {
+                registry.set_update(kind, check);
             }
             return Err(error);
         }
@@ -284,6 +310,7 @@ pub async fn update(
     .bind(sqlx::types::Json(&m.limits))
     .execute(pool)
     .await?;
+    // Cannot fail: the kind is installed, so no compiled-in row has it.
     registry.replace(checked.adapter)?;
     tracing::info!(%kind, ?tag, sha256 = %m.artifact.sha256, "external adapter updated");
     if installed.artifact_sha256 != m.artifact.sha256 {
@@ -343,13 +370,16 @@ pub async fn uninstall(
             missing: missing.join(", "),
         });
     }
-    for removal in &answered {
-        super::crud::delete(pool, secrets, &removal.source_id, removal.purge_items)
-            .await
-            .map_err(|error| InstallError::Remove {
+    for (done, removal) in answered.iter().enumerate() {
+        if let Err(error) =
+            super::crud::delete(pool, secrets, &removal.source_id, removal.purge_items).await
+        {
+            return Err(InstallError::Remove {
                 id: removal.source_id.clone(),
                 error,
-            })?;
+                removed: answered[..done].to_vec(),
+            });
+        }
     }
     sqlx::query("delete from knobas.external_adapter where adapter_kind = $1")
         .bind(kind)

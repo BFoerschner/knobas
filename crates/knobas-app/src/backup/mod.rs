@@ -191,13 +191,8 @@ pub struct BackupState {
     cancel: CancellationToken,
 }
 
-/// The registry, store and endpoints a restore's reinstall uses (#1210).
-#[derive(Debug, Clone)]
-pub struct RestoreAdapters {
-    pub registry: crate::sources::Registry,
-    pub store: PathBuf,
-    pub endpoints: crate::sources::remote::Endpoints,
-}
+/// Where a restore reinstalls the external adapters it brought (#1210).
+pub type RestoreAdapters = crate::sources::installed::Installs;
 
 impl BackupState {
     /// The state, without starting the nightly task.
@@ -720,11 +715,7 @@ pub fn start<R: tauri::Runtime>(app: &tauri::AppHandle<R>, db: &knobas_db::Embed
             profile.backup_dir(),
             secrets,
         )
-        .with_adapters(RestoreAdapters {
-            registry: crate::sources::Registry::builtin(),
-            store: crate::sources::install::store_dir(&profile.dir),
-            endpoints: crate::sources::remote::Endpoints::default(),
-        }),
+        .with_adapters(RestoreAdapters::for_profile(&profile.dir)),
     );
 
     if !app.manage(Arc::clone(&state)) {

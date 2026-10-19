@@ -115,7 +115,8 @@ impl Forge {
             "tag_name": r.tag,
             "assets": [
                 { "name": "knobas-adapter.json", "browser_download_url": self.download(&r.tag, "knobas-adapter.json") },
-                { "name": "fixture.wasm", "browser_download_url": self.download(&r.tag, "fixture.wasm") },
+                // Behind a redirect to another path, as GitHub serves an asset.
+                { "name": "fixture.wasm", "browser_download_url": format!("{}/objects/{}/fixture.wasm", self.server.uri(), r.tag) },
             ],
         });
         let mut apis = vec![
@@ -133,6 +134,14 @@ impl Forge {
                 .mount(&self.server)
                 .await;
         }
+        Mock::given(method("GET"))
+            .and(path(format!("/objects/{}/fixture.wasm", r.tag)))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("location", self.download(&r.tag, "fixture.wasm")),
+            )
+            .mount(&self.server)
+            .await;
         let base = format!("/{OWNER}/{REPO}/releases/download/{}", r.tag);
         Mock::given(method("GET"))
             .and(path(format!("{base}/knobas-adapter.json")))
