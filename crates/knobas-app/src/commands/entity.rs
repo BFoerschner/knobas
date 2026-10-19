@@ -5840,12 +5840,9 @@ pub async fn mini_board_laned(
     // every source, so a role nobody fills answers here, with nothing on it.
     let sources = match role {
         Some(role) => {
-            let fillers = crate::sources::crud::fillers(
-                pool,
-                &crate::sources::Registry::builtin(),
-                role,
-            )
-            .await?;
+            let fillers =
+                crate::sources::crud::fillers(pool, &crate::sources::Registry::builtin(), role)
+                    .await?;
             if fillers.is_empty() {
                 return Ok(knobas_core::mini_board::MiniBoard {
                     columns: Vec::new(),

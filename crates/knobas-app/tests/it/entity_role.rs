@@ -588,13 +588,19 @@ async fn the_ticket_board_reads_the_roles_fillers() {
         .map(|card| (card.source_id.as_str(), card.key.as_str()))
         .collect();
     drawn.sort_unstable();
-    assert_eq!(drawn, vec![(filler.as_str(), "T-1"), (filler.as_str(), "T-2")]);
+    assert_eq!(
+        drawn,
+        vec![(filler.as_str(), "T-1"), (filler.as_str(), "T-2")]
+    );
     let column = board
         .columns
         .iter()
         .find(|column| column.status.as_deref() == Some(status.as_str()))
         .expect("the filler's column");
-    assert_eq!(column.total, 2, "the column counts the filler's tickets alone");
+    assert_eq!(
+        column.total, 2,
+        "the column counts the filler's tickets alone"
+    );
 }
 
 /// A role nobody fills is an empty board, read: not every source's, which
