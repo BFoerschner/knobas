@@ -42,7 +42,7 @@ const UNKNOWN_RUN_KINDS = ["build"] as const;
 export type FrameKinds = Pick<KindRegistry, "frameKinds" | "load">;
 
 /** The four sections read from the mirror, as the claims read now stand. Assets come from the reach itself. */
-export function sectionReads(registry: Pick<KindRegistry, "frameKinds"> = kindRegistry): Record<Section, SectionRead> {
+export function sectionReads(registry: Pick<KindRegistry, "frameKinds">): Record<Section, SectionRead> {
   return {
     code: { role: CODE_HOST, kinds: CODE_KINDS, order: "updated_desc" },
     builds: { role: CI, kinds: registry.frameKinds(CI, "run") ?? UNKNOWN_RUN_KINDS, order: "latest_per_parent" },
