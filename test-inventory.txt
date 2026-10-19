@@ -3867,3 +3867,4 @@ knobas-wasm-host	test/it	reads::a_large_download_streams_without_the_component_h
 knobas-wasm-host	test/it	reads::a_run_s_log_and_one_artifact_download_through_the_host_s_sink
 knobas-wasm-host	test/it	reads::every_run_and_pipeline_read_answers_across_the_boundary
 knobas-wasm-host	test/it	reads::the_run_s_deferred_sections_carry_the_diff_and_the_tree
+knobas-db	test/backup	an_archive_from_before_the_saved_view_rename_restores

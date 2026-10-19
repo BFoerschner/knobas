@@ -6643,3 +6643,20 @@ The merge-manager's rulings (Opus):
   (two `schema.rs` tests: names, and an existing install's rows kept), the IPC bodies (the
   existing Jira-views tests in `knobas-sync` and `knobas-app`), and the TS mirror test in
   `ticket_views.rs` plus the vitest suites the rename reaches. *Reversing:* n/a.
+
+### #1245: merge-manager's rulings (Opus)
+
+- **A backup taken before `0053` stopped restoring.** *Fork:* merge the column rename as the
+  ticket asks and file the restore as a follow-up, or keep older archives restorable in this PR.
+  *Ruling:* in this PR. `restore` is a data-only `pg_restore`, every backup carries
+  `knobas.ticket_view`, and its `COPY` names `jira_ref`, so every backup and share export taken
+  before `0053` failed with "column jira_ref does not exist" (reproduced on Postgres 18.6). The
+  ticket says *no behaviour change*, and its criterion "nothing reads the old names" is about the
+  schema and the code reading it, not about an archive's column list. `knobas_db::backup::restore`
+  adds the old column for the load, copies it into the new one and drops it after, from a
+  `RENAMED_COLUMNS` table a later `knobas` column rename adds a row to. *Reasoning:* a regression
+  in the one path that only runs on a bad day, small and local to fix. *Reversing:* low (drop the
+  row; older archives then fail again).
+- **The handler barrel is renamed in place.** *Fork:* the list is append-only (§10.8). *Ruling:*
+  rename the two lines where they stand; a rename has no append form, and the conflict surface is
+  the same two lines. Stated in the §10.8 entry. *Reversing:* n/a.

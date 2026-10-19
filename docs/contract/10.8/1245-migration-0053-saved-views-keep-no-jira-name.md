@@ -44,3 +44,16 @@
   `savedView`), and every existing Jira-views test
   (`crates/knobas-sync/tests/it/jira_views.rs`, `crates/knobas-app/tests/it/jira_views_ipc.rs`),
   unchanged but for the names.
+
+  **Added by the merge-manager (Opus).** *The barrel.* `crates/knobas-app/src/lib.rs`'s handler
+  list is append-only, and this entry renames two of its lines **in place**
+  (`commands::search::hide_jira_view` and `open_jira_view` become `hide_saved_view` and
+  `open_saved_view`, at the same position). A rename has no append-only form; nothing else in the
+  list moves. *Restore of an older archive.* `0053` is the first migration to rename a column of
+  the `knobas` schema, which a backup carries. A data-only `pg_restore` of an archive taken before
+  it names `jira_ref` in `knobas.ticket_view`'s `COPY` (a `COPY` lists its columns even for an
+  empty table) and failed the whole restore. `knobas_db::backup::restore` now reads such an
+  archive: `RENAMED_COLUMNS` lists `("ticket_view", "jira_ref", "saved_view", "text")`; the old
+  column is added for the load, folded into the new one and dropped after it, whether the load
+  worked or not. The restore's signature, errors and refusals are unchanged. Pinned by
+  `crates/knobas-db/tests/backup.rs`' `an_archive_from_before_the_saved_view_rename_restores`.

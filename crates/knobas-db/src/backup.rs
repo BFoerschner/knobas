@@ -474,8 +474,51 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
             .await?;
         }
     }
+    // An archive taken before a column was renamed names the old column in
+    // its `COPY`, and a data-only load into the renamed table fails the whole
+    // restore. The old name stands for the length of the load and is folded
+    // into the new one after it, whether the load worked or not.
+    for (table, old, _, ty) in RENAMED_COLUMNS {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "alter table {OWNED_SCHEMA}.{table} add column if not exists {old} {ty}"
+        )))
+        .execute(&mut conn)
+        .await?;
+    }
     let _ = conn.close().await;
 
+    let loaded = load(connector, archive).await;
+    let mut conn = connector.connect().await?;
+    for (table, old, new, _) in RENAMED_COLUMNS {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "update {OWNED_SCHEMA}.{table} set {new} = {old} where {old} is not null"
+        )))
+        .execute(&mut conn)
+        .await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "alter table {OWNED_SCHEMA}.{table} drop column {old}"
+        )))
+        .execute(&mut conn)
+        .await?;
+    }
+    let _ = conn.close().await;
+    loaded
+}
+
+/// Columns of the `knobas` schema a migration renamed after archives were
+/// already being taken: table, old name, new name, type.
+///
+/// `0053` (#1245) renamed `ticket_view.jira_ref` to `saved_view`, and every
+/// backup and share export taken before it carries `knobas.ticket_view` with
+/// the old column (a `COPY` names its columns, even for an empty table).
+/// Without this row such an archive no longer restores at all. A later rename
+/// of a `knobas` column adds its row here.
+const RENAMED_COLUMNS: &[(&str, &str, &str, &str)] =
+    &[("ticket_view", "jira_ref", "saved_view", "text")];
+
+/// The `pg_restore` half of [`restore`]: the archive's `knobas` data, loaded
+/// into the migrated database `connector` names.
+async fn load(connector: &Connector, archive: &Path) -> Result<(), BackupError> {
     // Explicit, although `PGDATABASE` is set: `pg_restore` treats "no
     // `--dbname` and no `--file`" as "print the SQL to stdout" and refuses
     // outright rather than falling back to the environment, so a restore

@@ -119,3 +119,46 @@ async fn the_archive_carries_the_owned_schema_and_leaves_the_mirror_out() {
         "the mirror must not be in a backup -- it re-syncs: {toc:?}"
     );
 }
+
+/// An archive taken before `0053` (#1245) still restores. Its `COPY` of
+/// `knobas.ticket_view` names `jira_ref`, a column the migrated target calls
+/// `saved_view`; the restore loads it and the saved view a ticket view shows
+/// comes back under the new name, with no `jira_ref` left behind.
+#[tokio::test]
+async fn an_archive_from_before_the_saved_view_rename_restores() {
+    let from = knobas_db::test_util::scratch_database("before-0053").await;
+    let pool = from.pool(2).await.expect("a pool on the source database");
+    // The archive an install before `0053` took: the old column, and a row.
+    sqlx::raw_sql(
+        "alter table knobas.ticket_view rename column saved_view to jira_ref;
+         insert into knobas.ticket_view (id, name, view_group, position, jira_ref)
+           values ('jira-board-7', 'PAY board', 'Jira boards', 0, 'jira:board-7');",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let archive = dir.path().join("before-0053.knobas");
+    backup::dump(&from, &archive).await.expect("a dump");
+
+    let into = knobas_db::test_util::scratch_database("after-0053").await;
+    backup::restore(&into, &archive)
+        .await
+        .expect("an archive from before 0053 restores");
+
+    let pool = into.pool(2).await.expect("a pool on the target");
+    let shows: Option<String> =
+        sqlx::query_scalar("select saved_view from knobas.ticket_view where id = 'jira-board-7'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(shows.as_deref(), Some("jira:board-7"));
+    let old: i64 = sqlx::query_scalar(
+        "select count(*) from information_schema.columns
+          where table_schema = 'knobas' and table_name = 'ticket_view' and column_name = 'jira_ref'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(old, 0, "the restore left the old column behind");
+}
