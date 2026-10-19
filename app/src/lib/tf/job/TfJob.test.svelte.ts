@@ -811,6 +811,9 @@ test("a To Do ticket of mine shows Start work, proposed in the suggested reposit
   });
   await settle();
   expect(asked).toEqual([null, REPO.entity_id]);
+  // The picker reads every repository, and asks for the code host role (#1350).
+  const picker = calls.list.filter((filter) => filter.reach === null && filter.kinds.join() === "repo");
+  expect(picker.map((filter) => filter.role)).toEqual(["code-host"]);
   expect(steps()).toEqual([
     ["Create branch", "ready"],
     ["Open pull request", "ready"],

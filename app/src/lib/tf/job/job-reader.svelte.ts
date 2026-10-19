@@ -278,7 +278,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
 
   async function readRepos(mine: number) {
     try {
-      const page = await ports.listEntities(reachFilter(null, ["repo"], "title_asc"), SECTION_LIMIT, 0);
+      const page = await ports.listEntities(reachFilter(null, ["repo"], "title_asc", "code-host"), SECTION_LIMIT, 0);
       if (mine === token) state.repos = page.rows.map((row) => ({ entity_id: row.entity_id, title: row.title }));
     } catch {
       if (mine === token) state.repos = [];
