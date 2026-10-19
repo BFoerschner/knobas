@@ -6670,3 +6670,12 @@ The merge-manager's rulings (Opus):
   the next caller free to forget it, which is how #1256 left these; the one-rule comment (#1101)
   is now true by construction. The TfJob Builds section still passes its injected registry.
   **Reversing:** low, drop the default and thread the argument.
+
+## #1271 — a same-named organisation label reads differently in Add label…
+
+- **Only the organisation's label of a shared name is renamed, as `name (organisation)`.**
+  *Fork:* suffix every organisation label, or only those whose name a repository label also
+  has. *Ruling:* only the collisions. The reader sees plain names in the common case, and the
+  repository's label keeps the text it has today. *Reasoning:* the ticket asks that the two read
+  differently, not that every organisation label change. *Reversing:* low (one predicate in
+  `view/pr/label.rs`).
