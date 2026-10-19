@@ -15,7 +15,7 @@
 import type { EntityFilter, EntityOrder, EntityPage, EntityRow, KindTally, Reached } from "../../ipc/entity";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { CI, CODE_HOST, MONITORING, sourceRoles, WIKI, type SourceRoles } from "../roles.svelte";
-import { CODE_KINDS } from "./job";
+import { CODE_KINDS, runKindsOf } from "./job";
 
 /** How many rows a section reads: a job reaches tens, not thousands. */
 export const SECTION_LIMIT = 200;
@@ -31,20 +31,10 @@ export interface SectionRead {
 
 export type Section = "code" | "builds" | "pages" | "monitors";
 
-/**
- * The run kind Builds reads while the adapters' claims are not known: the
- * built-in CI adapter's, so a registry that failed to read draws what it drew
- * before #1230, as an unread source list narrows nothing.
- */
-const UNKNOWN_RUN_KINDS = ["build"] as const;
-
 /** What the sections need of the adapters' claims. */
 export type FrameKinds = Pick<KindRegistry, "frameKinds" | "load">;
 
-/** The CI role's run kinds as the claims stand, the built-in adapter's while they are not known (#1230, #1256). */
-export function runKindsOf(registry: Pick<KindRegistry, "frameKinds">): readonly string[] {
-  return registry.frameKinds(CI, "run") ?? UNKNOWN_RUN_KINDS;
-}
+export { runKindsOf } from "./job";
 
 /** The four sections read from the mirror, as the claims read now stand. Assets come from the reach itself. */
 export function sectionReads(registry: Pick<KindRegistry, "frameKinds">): Record<Section, SectionRead> {

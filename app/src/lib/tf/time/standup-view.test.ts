@@ -3,7 +3,9 @@
  * text, and the protocol's three sections read out of and written back into
  * the note body the backend keeps.
  */
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
+
+import { kindRegistry } from "../../shell/kind-registry.svelte";
 
 import type { DigestLine } from "../../ipc/entity";
 import {
@@ -213,4 +215,13 @@ test("a CRLF body stays CRLF, on the lines an edit writes as well as the rest", 
   expect(withActionItem(crlf, "Ship it")).toBe(crlf.replace("- [x] Rotate the key\r\n", "- [x] Rotate the key\r\n- [ ] Ship it\r\n"));
   expect(withAttendees("# Standup\r\n", ["A"])).toBe("# Standup\r\n\r\n## Attendees\r\n\r\n- A\r\n");
   expect(readProtocol(crlf)).toEqual(readProtocol(FILLED));
+});
+
+test("a run of a kind the CI adapters claim opens Builds' run page (#1278)", () => {
+  const spy = vi.spyOn(kindRegistry, "frameKinds").mockReturnValue(["build", "workflow_run"]);
+  try {
+    expect(lineHash(line({ entity_id: "forge:run#77", kind: "workflow_run" }))).toBe("#/build/forge%3Arun%2377");
+  } finally {
+    spy.mockRestore();
+  }
 });
