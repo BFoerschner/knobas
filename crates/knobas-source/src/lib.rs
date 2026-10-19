@@ -1285,8 +1285,7 @@ impl WriteOp {
     /// reasons per op are argued in `knobas_core::write_queue::project` for
     /// the projection, and in `knobas-sync`'s `attempt` and `unclaimed` for
     /// the resend and the withdrawal, which read this value. The app's
-    /// `link_on_arrival` still answers for itself until the app's slice of
-    /// #1301 reads it instead.
+    /// `link_on_arrival` reads the link from here.
     #[must_use]
     pub fn delivery(&self) -> Delivery {
         use knobas_spi_types::delivery::{ArrivalLink, Projection, TargetField};

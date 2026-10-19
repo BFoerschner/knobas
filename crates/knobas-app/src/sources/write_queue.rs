@@ -287,7 +287,7 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
 ///
 /// # Errors
 ///
-/// `invalid` for a payload that is not one of the three, or a ticket that is
+/// `invalid` for a payload whose op draws no link on arrival, or a ticket that is
 /// not an entity id; `not_found` for a ticket the mirror does not hold;
 /// `internal` if the read fails.
 pub async fn arrival_linkable(
@@ -297,12 +297,7 @@ pub async fn arrival_linkable(
 ) -> Result<(), IpcError> {
     let op: WriteOp = serde_json::from_value(payload.clone())
         .map_err(|error| IpcError::invalid(format!("not a write operation: {error}")))?;
-    if !matches!(
-        op,
-        WriteOp::CreateBranch { .. }
-            | WriteOp::CreatePullRequest { .. }
-            | WriteOp::CreatePage { .. }
-    ) {
+    if op.delivery().link.is_none() {
         return Err(IpcError::invalid(format!(
             "only a new branch, pull request or page is linked once it arrives, not {:?}",
             op.identifier()
@@ -326,7 +321,7 @@ pub async fn arrival_linkable(
 /// sent `CreateBranch` named, or the pull request open on a sent
 /// `CreatePullRequest`'s head, as the mirror holds them (#984), or the page a
 /// sent `CreatePage` made, by the id its settle stamped
-/// (`docs::created_page`, #1121) and drawn as `docs::LINK_RELATION`. Answers
+/// (`docs::created_page`, #1121) and drawn as the relation its op's `delivery()` states. Answers
 /// the entity linked, or `None` where the write was not sent or what it made
 /// is not mirrored yet.
 ///
@@ -354,9 +349,10 @@ pub async fn link_on_arrival(
     let op: WriteOp = serde_json::from_value(write.payload).map_err(IpcError::internal)?;
     let repo_of =
         |entity: &str| knobas_core::entity::EntityRef::parse(entity).map_err(IpcError::internal);
-    let relation = match &op {
-        WriteOp::CreatePage { .. } => crate::docs::LINK_RELATION,
-        _ => crate::commands::entity::DEFAULT_RELATION,
+    // The relation is the op's own to state (`WriteOp::delivery`); an op that
+    // draws no link on arrival has none to resolve.
+    let Some(link) = op.delivery().link else {
+        return Ok(None);
     };
     let made = match &op {
         WriteOp::CreateBranch { entity, name, .. } => {
@@ -381,7 +377,7 @@ pub async fn link_on_arrival(
     let Some(made) = made else {
         return Ok(None);
     };
-    crate::protocol::draw_link(pool, &made, ticket, relation).await?;
+    crate::protocol::draw_link(pool, &made, ticket, link.relation()).await?;
     Ok(Some(made))
 }
 
