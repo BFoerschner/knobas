@@ -285,7 +285,9 @@ const PATH_SEPARATOR: &str = " / ";
 /// vocabulary is a *rendering* decision and lives in
 /// `app/src/lib/detail/relations.ts`, which is where `monitored-by` is given
 /// its two readings. The two spellings are pinned together by
-/// `commands::assets`' mirror test, the way `DEFAULT_RELATION` is.
+/// `commands::assets`'
+/// `the_relation_a_source_rooms_tile_reads_is_in_the_frontend_vocabulary`,
+/// the way `DEFAULT_RELATION` is.
 pub const MONITORED_BY: &str = knobas_core::link::MONITORED_BY;
 
 /// The relation an asset draws at the thing it needs (`CONTEXT.md`,
@@ -466,6 +468,10 @@ impl Environment {
 /// - `internal`: reachable from inside the estate. What an unclassified route
 ///   reads as.
 /// - `public`: reachable from outside it.
+///
+/// The values are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
 )]
@@ -1073,7 +1079,8 @@ knobas_core::closed_vocabulary! {
     ///   -- knobas' own state, derived at sample time (#443).
     ///
     /// The states are documented here and not on each variant because the
-    /// generated TypeScript carries a type's doc but not a variant's (#1325).
+    /// generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+    /// type's and a field's doc but not a variant's (#1325).
     #[derive(ts_rs::TS)]
     #[ts(export_to = "assets.ts")]
     pub enum AlertState {
@@ -1152,10 +1159,10 @@ pub struct OpenAlert {
     pub state: AlertState,
     /// RFC 3339 on the wire.
     pub opened_at: chrono::DateTime<chrono::Utc>,
-    /// When somebody said they had seen it, or `null`; RFC 3339 on the wire. Written by #446's ack;
-    /// on the wire from this ticket because *acked* is part of what an open
-    /// alert is, and a list that could not say so would draw every alert as
-    /// unseen.
+    /// When somebody said they had seen it, or `null`; RFC 3339 on the wire.
+    /// Written by #446's ack; on the wire from this ticket because *acked* is
+    /// part of what an open alert is, and a list that could not say so would
+    /// draw every alert as unseen.
     pub acked_at: Option<chrono::DateTime<chrono::Utc>>,
     /// The assets this alert's monitor watches -- see [`AlertAsset`].
     pub assets: Vec<AlertAsset>,
@@ -1318,8 +1325,8 @@ pub enum AssetEdit {
 ///   `monitored-by` link.
 ///
 /// The edits are documented here and not on each variant because the
-/// generated TypeScript carries a type's and a field's doc but not a
-/// variant's (#1325).
+/// generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(tag = "field", rename_all = "snake_case")]
 #[ts(export_to = "assets.ts")]
@@ -4741,7 +4748,8 @@ pub struct ImportEntry {
 ///   undoes that (story 24).
 ///
 /// The plans are documented here and not on each variant because the
-/// generated TypeScript carries a type's doc but not a variant's (#1325).
+/// generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "assets.ts")]

@@ -46,7 +46,8 @@ path: string | null, };
  *   -- knobas' own state, derived at sample time (#443).
  *
  * The states are documented here and not on each variant because the
- * generated TypeScript carries a type's doc but not a variant's (#1325).
+ * generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type AlertState = "down" | "warn";
 
@@ -498,8 +499,9 @@ tombstoned: boolean, };
  * - `project`: *Project*.
  * - `status`: *Status*.
  *
- * Documented here and not on each variant because the generated TypeScript
- * carries a type's doc but not a variant's (#1325).
+ * The groupings are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type DepGroup = "none" | "environment" | "owner" | "parent" | "project" | "status";
 
@@ -582,8 +584,9 @@ relation: string, };
  * - `roomy`: always roomy.
  * - `compact`: always small.
  *
- * Documented here and not on each variant because the generated TypeScript
- * carries a type's doc but not a variant's (#1325).
+ * The sizes are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type DepTiles = "auto" | "roomy" | "compact";
 
@@ -1206,10 +1209,10 @@ monitor_name: string, state: AlertState,
  */
 opened_at: string, 
 /**
- * When somebody said they had seen it, or `null`; RFC 3339 on the wire. Written by #446's ack;
- * on the wire from this ticket because *acked* is part of what an open
- * alert is, and a list that could not say so would draw every alert as
- * unseen.
+ * When somebody said they had seen it, or `null`; RFC 3339 on the wire.
+ * Written by #446's ack; on the wire from this ticket because *acked* is
+ * part of what an open alert is, and a list that could not say so would
+ * draw every alert as unseen.
  */
 acked_at: string | null, 
 /**
@@ -1354,7 +1357,8 @@ export type PropertyKind = "text" | "number" | "date" | "url";
  *   undoes that (story 24).
  *
  * The plans are documented here and not on each variant because the
- * generated TypeScript carries a type's doc but not a variant's (#1325).
+ * generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type PropertyPlan = "set" | "kept";
 
@@ -1434,8 +1438,8 @@ monitor_targets: Array<MonitorTarget>, };
  *   `monitored-by` link.
  *
  * The edits are documented here and not on each variant because the
- * generated TypeScript carries a type's and a field's doc but not a
- * variant's (#1325).
+ * generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type RouteEdit = { "field": "name", value: string, } | { "field": "url", 
 /**
@@ -1641,5 +1645,9 @@ ratio: number, };
  * - `internal`: reachable from inside the estate. What an unclassified route
  *   reads as.
  * - `public`: reachable from outside it.
+ *
+ * The values are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type Visibility = "internal" | "public";

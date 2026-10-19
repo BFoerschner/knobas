@@ -557,9 +557,9 @@ mod tests {
         }
     }
 
-    /// The kind list and its spellings are one fact; the mirror is pinned
-    /// against `ALL`, so a fifth kind cannot arrive without the mirror hearing
-    /// about it.
+    /// The kind list and its spellings are one fact. The TypeScript union is
+    /// generated from this enum (`app/src/lib/ipc/generated/assets.ts`), so a
+    /// fifth kind arrives there with it; `ALL` is what this test walks.
     #[test]
     fn every_property_kind_spells_itself_the_way_serde_does() {
         for kind in PropertyKind::ALL {

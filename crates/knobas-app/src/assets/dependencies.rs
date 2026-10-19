@@ -671,8 +671,9 @@ pub async fn place_kind(
 /// - `project`: *Project*.
 /// - `status`: *Status*.
 ///
-/// Documented here and not on each variant because the generated TypeScript
-/// carries a type's doc but not a variant's (#1325).
+/// The groupings are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
 )]
@@ -694,8 +695,9 @@ pub enum Group {
 /// - `roomy`: always roomy.
 /// - `compact`: always small.
 ///
-/// Documented here and not on each variant because the generated TypeScript
-/// carries a type's doc but not a variant's (#1325).
+/// The sizes are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
 )]
