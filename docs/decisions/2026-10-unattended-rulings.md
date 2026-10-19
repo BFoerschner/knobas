@@ -7017,3 +7017,15 @@ The merge-manager's rulings (Opus):
   would copy them into a test, which is what the ticket's deletion removed. *Reversing:* one test.
 - **The transport table's Kuma rules use Kuma's real refusal sentence.** The table's doc says each
   row is a literal from the copy it replaces, and the Kuma stand-in was not. *Reversing:* n/a.
+
+## #1337: ADR-0006's delivery amendment names the crate `Delivery` lives in (Opus implementer, 2026-10-19)
+
+- **Reserved for Björn, ruled by implementer on Opus: the corrected sentence.** *Fork:* the
+  amendment is Björn's text, and the ticket asks for his approval of the corrected sentence.
+  *Ruling:* the sentence now says the type sits in `knobas-spi-types`, re-exported as
+  `knobas_core::delivery` as `entity` and `payload` are, because `knobas-source` depends on
+  `knobas-spi-types` and on no other knobas crate (#1234), and a dependency on `knobas-core`
+  would pull sqlx into the `wasm32-wasip2` build. It matches #1307's ruling and the tree
+  (`crates/knobas-source/Cargo.toml` names only `knobas-spi-types`). Only that sentence changed.
+  The rest of the amendment stands as written. A parenthetical marks the correction so a reader
+  of the amendment sees it was edited. *Reversing:* one sentence.
