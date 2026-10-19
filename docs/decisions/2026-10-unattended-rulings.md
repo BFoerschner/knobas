@@ -6917,3 +6917,16 @@ The merge-manager's rulings (Opus):
   (two `schema.rs` tests: names, and an existing install's query kept), the existing saved-view
   tests in `knobas-sync` and `knobas-app`, and the vitest suites the shell rename reaches
   (`views.test.ts`, `boards.test.ts`, `TicketsPage.test.svelte.ts`, `TfSettings`). *Reversing:* n/a.
+
+The merge-manager's rulings (Opus):
+
+- **ViewMenu's renamed prop is pinned by the type checker.** *Fork:* mutant M3 (the board-head
+  `ViewMenu` still passing `jira=`) survives vitest and dies only in `svelte-check`; add a vitest
+  or not. *Ruling:* not. `svelte-check` runs in every `just check` and `check-front`, so the gate
+  fails on it, and an unknown prop is a type error, which is what the type checker is for.
+  *Reasoning:* a vitest would pin the menu's items, which existing `TicketsPage` tests already
+  cover for the other call site. *Reversing:* low.
+- **No restore shim, verified.** `knobas_db::backup::dump` passes `--schema=knobas`
+  (`OWNED_SCHEMA`), share exports dump named `knobas` tables, and no SQL outside
+  `knobas_sync::saved_views` and `ticket_views` names the column; the remaining `jql`s are the
+  adapter's payload key. *Reversing:* n/a.
