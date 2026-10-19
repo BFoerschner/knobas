@@ -2700,7 +2700,11 @@ async fn add_label_tells_a_same_named_organisation_label_apart() {
         ),
         (
             carrying,
-            &[("8", "wontfix"), ("900", "bug (tidewater)"), ("901", "org-late")][..],
+            &[
+                ("8", "wontfix"),
+                ("900", "bug (tidewater)"),
+                ("901", "org-late"),
+            ][..],
         ),
     ] {
         let server = gitea(pull, json!([])).await;
