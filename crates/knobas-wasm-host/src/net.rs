@@ -140,8 +140,13 @@ fn credential(
             ));
         }
     };
+    // The spellings an echo is likeliest to use: form-encoded (both cases of
+    // its escapes) and JSON-escaped.
     let encoded: String = url::form_urlencoded::byte_serialize(secret.as_bytes()).collect();
+    spellings.push(encoded.to_ascii_lowercase());
     spellings.push(encoded);
+    let json = serde_json::to_string(secret).expect("a string serializes");
+    spellings.push(json[1..json.len() - 1].to_owned());
     let mut header = http::HeaderValue::from_str(&value)
         .map_err(|_| SourceError::protocol("the secret cannot be sent in a header"))?;
     header.set_sensitive(true);
@@ -162,8 +167,10 @@ impl Hooks {
 /// Where a request may go, decided before it leaves.
 enum Verdict {
     Refused(String),
-    /// Allowed; `true` when it is for the instance.
-    Allowed(bool),
+    Allowed {
+        /// The request is for the source's own address.
+        for_instance: bool,
+    },
 }
 
 impl Policy {
@@ -175,7 +182,9 @@ impl Policy {
             Some(target) if !self.allowlist.allows(&target) => Verdict::Refused(format!(
                 "{scheme}://{authority} is not a host the adapter's manifest declares"
             )),
-            Some(target) => Verdict::Allowed(self.instance.as_ref() == Some(&target)),
+            Some(target) => Verdict::Allowed {
+                for_instance: self.instance.as_ref() == Some(&target),
+            },
         }
     }
 
@@ -221,7 +230,7 @@ async fn send(policy: &Policy, request: http::Request<WasiBody>) -> SendResult {
             tracing::warn!(source = %policy.source_id, "an external adapter's request is refused: {why}");
             return Err(HttpError::ConnectionRefused);
         }
-        Verdict::Allowed(for_instance) => for_instance,
+        Verdict::Allowed { for_instance } => for_instance,
     };
     let (mut parts, body) = request.into_parts();
     if for_instance {

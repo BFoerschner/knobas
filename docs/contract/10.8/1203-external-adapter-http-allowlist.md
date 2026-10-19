@@ -12,7 +12,8 @@
   0.2 and lives in no `knobas:adapter` type: no WIT record, variant or function of the world
   changes, so a component built before this links as it did, and a component that uses
   `wasi:http` names its own WASI version, which wasmtime's linker matches across 0.2.x patches.
-  The world's interface stays frozen as #1198's entry says. A later knobas that drops `wasi:http`,
+  The world's interface stays frozen as #1198's entry says. This entry amends #1198's
+  minor-version rule to read "a new `knobas:adapter` interface", so the two agree. A later knobas that drops `wasi:http`,
   or moves to `wasi:http` 0.3, is a new major version of `knobas:adapter`.
 
   **The allowlist.** A manifest's `hosts` entry is a fixed host (`api.example.com`,
@@ -23,7 +24,7 @@
   allows nothing. A request leaves only for a host the list allows, compared on the scheme, host
   and port the URL parser resolves (lower-cased, IDNA-encoded, any IPv4 spelling read as its
   address), never on text. A fixed host without a port allows the scheme's default port; a URL
-  value allows its own host and port. Any other request is answered `connection-refused`
+  value allows its own scheme, host and port. Any other request is answered `connection-refused`
   (`wasi:http`'s `error-code`) before a socket opens, and logged on the host's side naming the
   host. The transport follows no redirect, so a redirect the component follows is a new request
   and is held to the list the same way. A component loaded without a manifest (the tests' fixture,
@@ -38,7 +39,8 @@
   account.
 
   **What the component receives from the instance** is redacted first: every spelling of the
-  secret the host sent (the secret, its form-encoding, the basic pair's base64) is replaced by
+  secret the host sent (the secret, its form-encoding in either case of its escapes, its JSON
+  escaping, the basic pair's base64) is replaced by
   `[redacted]` in the body as it streams, a header holding one is dropped, trailers and
   `content-length` are dropped, and a body the transport did not decode (a `content-encoding`
   other than `identity`) is refused with `HTTP-response-content-coding`. A transport error reaches

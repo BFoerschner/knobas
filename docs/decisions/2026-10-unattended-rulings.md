@@ -6087,7 +6087,8 @@ The implementer's rulings:
   (it is the instance's address field), but `{base_url}` is the spec's own example. Install
   refuses a template over any other key, and resolving ignores one. **Reversing:** low.
 - **A fixed host without a port allows the scheme's default port only; a URL value allows its own
-  port only.** So `{base_url}` of `https://jira.example` does not allow `http://jira.example`.
+  scheme and port only.** So `{base_url}` of `https://jira.example` allows neither
+  `http://jira.example` nor `http://jira.example:443`.
   **Reversing:** low.
 - **The credential's shape.** `Pat` and `ApiToken` are `Authorization: Bearer`, `UserPassword` is
   basic auth over the config's `username` (the Jira convention), `OAuth` fails the build (ADR-0028:
@@ -6107,5 +6108,14 @@ The implementer's rulings:
   `{base_url}` is "this source's address" and `{key}` "the host in its key setting". The note reads
   `InstalledAdapter.hosts`, so no IPC change. Showing the resolved list on the source's form is not
   done. **Reversing:** low (`TfAddSource.svelte`).
-- **A 30 s connect timeout** on the transport. The whole-call deadline is #1204's.
-  **Reversing:** one line.
+- **A 30 s connect timeout** on the transport. The component's `request-options` timeouts are
+  not honoured, and an outgoing body is buffered whole: the whole-call deadline and the memory cap
+  are #1204's, which bound both. **Reversing:** one line.
+
+The review's rulings (Standards axis, the implementer on Opus):
+
+- **#1198's minor-version rule is amended to say "a new `knobas:adapter` interface"**, so it agrees
+  with this entry's reading that `wasi:http` is WASI's and not a version bump. **Reversing:** a
+  1.1.0 bump instead.
+- **Redaction also takes the lower-cased form-encoding and the JSON escaping of the secret.**
+  Upper-casing and HTML entities stay accepted residual. **Reversing:** low.

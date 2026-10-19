@@ -7,7 +7,6 @@ use knobas_source::{
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use wasmtime::Store;
-
 use wasmtime::component::ResourceAny;
 
 use crate::bindings::knobas::adapter::{log, sink};

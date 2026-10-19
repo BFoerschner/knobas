@@ -279,8 +279,7 @@ pub fn check_descriptor(manifest: &Manifest, descriptor: &SourceDescriptor) -> R
     let declared = crate::allow::declared_keys(&descriptor.config_schema);
     for pattern in manifest.host_patterns()? {
         if let Some(key) = pattern.template_key()
-            && key != crate::allow::BASE_URL_KEY
-            && !declared.iter().any(|d| d == key)
+            && !crate::allow::resolvable(key, &declared)
         {
             return Err(Refusal::UndeclaredTemplate {
                 key: key.to_owned(),

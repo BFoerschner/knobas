@@ -39,6 +39,8 @@ pub enum HostPattern {
 /// One host a request may go to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Allowed {
+    /// `None` allows `http` and `https`; a URL value allows its own only.
+    scheme: Option<String>,
     host: Host<String>,
     /// `None` is the request scheme's default port.
     port: Option<u16>,
@@ -104,7 +106,11 @@ impl Allowed {
                 .ok()
                 .and_then(|u| u.port())
         });
-        Ok(Self { host, port })
+        Ok(Self {
+            scheme: None,
+            host,
+            port,
+        })
     }
 
     /// What a template's value allows: a URL's host and port, or a bare host.
@@ -115,6 +121,7 @@ impl Allowed {
                 return None;
             }
             return Some(Self {
+                scheme: Some(url.scheme().to_owned()),
                 host: url.host()?.to_owned(),
                 port: url.port_or_known_default(),
             });
@@ -124,7 +131,9 @@ impl Allowed {
 
     /// Whether a request to `host` on `port` over `scheme` is this one.
     fn matches(&self, target: &Target) -> bool {
-        self.host == target.host && self.port.unwrap_or(target.default_port) == target.port
+        self.scheme.as_ref().is_none_or(|s| *s == target.scheme)
+            && self.host == target.host
+            && self.port.unwrap_or(target.default_port) == target.port
     }
 }
 
@@ -187,11 +196,9 @@ impl Allowlist {
     ) -> Self {
         let resolved = patterns.iter().filter_map(|pattern| match pattern {
             HostPattern::Fixed(allowed) => Some(allowed.clone()),
+            HostPattern::Template(key) if !resolvable(key, declared) => None,
             HostPattern::Template(key) if key == BASE_URL_KEY => Allowed::from_value(base_url),
-            HostPattern::Template(key) if declared.iter().any(|d| d == key) => {
-                Allowed::from_value(config.get(key)?.as_str()?)
-            }
-            HostPattern::Template(_) => None,
+            HostPattern::Template(key) => Allowed::from_value(config.get(key)?.as_str()?),
         });
         Self(resolved.collect())
     }
@@ -201,6 +208,13 @@ impl Allowlist {
     pub fn allows(&self, target: &Target) -> bool {
         self.0.iter().any(|allowed| allowed.matches(target))
     }
+}
+
+/// Whether a template over `key` may resolve: `base_url`, or a key in
+/// `declared`.
+#[must_use]
+pub fn resolvable(key: &str, declared: &[String]) -> bool {
+    key == BASE_URL_KEY || declared.iter().any(|d| d == key)
 }
 
 /// The property names a descriptor's `config_schema` declares.
@@ -269,6 +283,7 @@ mod tests {
             !allows(&list, "http://jira.example"),
             "the address pins its port"
         );
+        assert!(!allows(&list, "http://jira.example:443"), "and its scheme");
         assert!(allows(&list, "https://mirror.example:9443"));
         assert!(!allows(&list, "https://undeclared.example"));
     }
