@@ -40,14 +40,15 @@ crate::closed_vocabulary! {
     /// Stored as lowercase text in `knobas.context.kind`, whose
     /// `context_kind_chk` (migration 0010) allows exactly these spellings --
     /// and `ALL` is what the test that pins the two together walks.
+    ///
+    /// - `epic`: A promoted epic: members start from its tickets.
+    /// - `ticket`: A promoted ticket: focused on the one piece of work.
+    /// - `adhoc`: A label the user minted; no source system behind it.
     #[derive(ts_rs::TS)]
     #[ts(export_to = "entity.ts")]
     pub enum ContextKind {
-        /// A promoted epic: members start from its tickets.
         Epic => "epic",
-        /// A promoted ticket: focused on the one piece of work.
         Ticket => "ticket",
-        /// A label the user minted; no source system behind it.
         Adhoc => "adhoc",
     }
 }
@@ -97,6 +98,8 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ContextKind {
 }
 
 /// One context, as `knobas.context` holds it.
+///
+/// Issue #47.
 #[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct ContextRow {
@@ -107,7 +110,9 @@ pub struct ContextRow {
     pub title: String,
     /// The promoted entity this context is about; `None` for an ad-hoc label.
     pub anchor_id: Option<String>,
+    /// RFC 3339 on the wire.
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// RFC 3339 on the wire, or `None` while the context is live.
     pub archived_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 

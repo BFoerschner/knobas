@@ -69,13 +69,27 @@ linked: boolean, };
 /**
  * One line of the activity log.
  */
-export type ActivityRow = { id: number, at: string, 
+export type ActivityRow = { id: number, 
+/**
+ * RFC 3339 on the wire.
+ */
+at: string, 
 /**
  * `"user"`; `"knobas"` for an action knobas took on its own (the
  * start-work flow's reverse direction); or `"sync:<source_id>"` for a
  * synced event.
  */
-actor: string, verb: string, entity_id: string | null, detail: unknown, };
+actor: string, verb: string, entity_id: string | null, 
+/**
+ * Free-form jsonb, so §2.6 maps it to `unknown`.
+ *
+ * Not `Record<string, unknown>`: the Rust type is any JSON value, and only
+ * `activity::insert` coerces a JSON `null` to `{}`. A row written with a
+ * string, a number or an array is well-typed here and would make the
+ * narrower declaration a lie, the kind that type-checks in the frontend
+ * and throws at runtime. Narrow it with a check where you read it.
+ */
+detail: unknown, };
 
 /**
  * One entry of a run's artifact folder (#856).
@@ -116,11 +130,28 @@ truncated: boolean, };
  * compared case-sensitively as the inbox and the standup compare it. A pull request
  * and a branch are knobas' own words (`0001_init.sql`), and the inbox's
  * review rule names `pr` the same way.
+ *
+ * - `review_requested`: Open pull requests whose declared reviewers include me
+ *   (Gitea's `requested_reviewers`, as the inbox reads it). Whether I reviewed
+ *   since the last push is not in the mirror -- it holds no reviews and no
+ *   push times -- so #712's clause asking it is dropped.
+ * - `my_pull_requests`: Open pull requests I opened.
+ * - `open_pull_requests`: Every other open pull request.
+ * - `my_branches`: Branches whose last commit is mine and that no open pull
+ *   request of the same repo is opened from (its declared `head`).
+ * - `branches`: Branches of a source with no configured identity, in a room
+ *   where another source has one (ruled 2026-10-13 on #712): nobody can say
+ *   whose they are, so they are not hidden as somebody else's. The tile draws
+ *   them as it drew every branch before, newest first.
+ * - `other_branches`: Every other branch: somebody else's, or one an open pull
+ *   request already stands for. The tile draws these only maximised.
  */
 export type AttentionGroup = "review_requested" | "my_pull_requests" | "open_pull_requests" | "my_branches" | "branches" | "other_branches";
 
 /**
  * One half of the uncommitted diff, as a diff block carries it.
+ *
+ * Issue #824.
  */
 export type CappedDiff = { files: Array<DiffFile>, 
 /**
@@ -137,6 +168,11 @@ truncated: boolean, };
  * **derived** room -- *All work*, a source, a project -- has no context at
  * all, and a reader browsing with nothing open has no foreground, and either
  * can be true without the other.
+ *
+ * Issue #503. The two ids a capture attaches, and nothing else: `context` is
+ * the **stored** room's `ctx:` entity; `foreground` is the **foreground** as
+ * `CONTEXT.md`'s *Passive attribution* defines it, which is `shell/timer.ts`'s
+ * `roomForeground` and no second spelling of it.
  */
 export type CaptureContext = { 
 /**
@@ -155,6 +191,12 @@ foreground: string | null, };
  * nothing stored (`accelerator: None`), stored and registered
  * (`refusal: None`), and stored but **not** registered, which is an
  * accelerator and a sentence saying why.
+ *
+ * Issue #503. With nothing stored no key is taken from any other application
+ * until somebody chooses one. A refusal is the sentence to show -- the plugin
+ * could not parse the accelerator, or the operating system would not give the
+ * combination up -- because *which* refusal it was is the whole of what the
+ * reader can act on.
  */
 export type CaptureShortcut = { 
 /**
@@ -170,6 +212,8 @@ refusal: string | null,
 /**
  * *Show notes and quick capture* (#832). Off, the stored accelerator is
  * kept and not registered.
+ *
+ * D10. Off, `refusal` is `None` too.
  */
 shown: boolean, 
 /**
@@ -179,6 +223,8 @@ shown: boolean,
 note_count: number, 
 /**
  * When the newest note was last changed, or `None` with no notes.
+ *
+ * RFC 3339 on the wire.
  */
 last_note_at: string | null, };
 
@@ -205,11 +251,20 @@ export type ChainStepRow = { pipeline_id: string, name: string, run: RunRow | nu
 
 /**
  * What a [`ThreadChange`] says happened.
+ *
+ * - `status`: The ticket was moved to another status.
+ * - `opened`: A linked pull request was opened.
+ * - `merged`: A linked pull request was merged.
+ *
+ * Issue #929.
  */
 export type ChangeKind = "status" | "opened" | "merged";
 
 /**
  * One application on the *Open in…* menu.
+ *
+ * Issue #844, R-8.21. Its commands take `{path}`, `{file}`, `{line}` and
+ * `{name}`, all filled from this disk.
  */
 export type CheckoutApplication = { 
 /**
@@ -245,6 +300,11 @@ file_command: string | null, };
 
 /**
  * One application as #501's checkout panel draws it: a button.
+ *
+ * Since #844 a view over the *Open in…* list (`checkout_settings`): one row
+ * per application. `is_default` says whether the command is the one this
+ * platform ships for that id, so the rooms settings field can offer to go back
+ * to it.
  */
 export type CheckoutCommand = { 
 /**
@@ -267,11 +327,20 @@ is_default: boolean, };
 
 /**
  * How a checkout was arrived at, or that it was not.
+ *
+ * - `override`: A path this repository's override carries. Set by hand, and it
+ *   wins.
+ * - `scan`: A clone the scan matched under the clones root.
+ * - `nothing`: Neither -- *no checkout*, with the clone command to copy.
+ *
+ * Issue #499. `nothing` is a state, not a failure.
  */
 export type CheckoutFoundBy = "override" | "scan" | "nothing";
 
 /**
  * What Settings › Checkouts draws, and what every *Open in…* menu reads.
+ *
+ * Issue #844, R-13a.3.
  */
 export type CheckoutSettings = { clones_root: string | null, git: GitFound, 
 /**
@@ -285,6 +354,10 @@ applications: Array<CheckoutApplication>, };
 
 /**
  * What a repo or branch detail draws for its checkout.
+ *
+ * Issue #499. A **checkout** (`CONTEXT.md`) is knobas-owned data about the
+ * local disk, never a field of the mirrored repo: knobas issues no clone, no
+ * checkout and no fetch from this view (ADR-0016).
  */
 export type CheckoutView = { 
 /**
@@ -322,6 +395,8 @@ clone_command: string | null,
  * Where the working tree at [`path`](Self::path) stands, read by
  * read-only git when the view is asked for (ADR-0021). `None` exactly
  * when there is no path.
+ *
+ * Issue #704.
  */
 tree: TreeRead | null, };
 
@@ -341,11 +416,21 @@ label: string, };
 
 /**
  * What `clone_repo` answers.
+ *
+ * - `cloning`: The clone started, or was already running; events follow.
+ * - `adopted`: The folder was already a clone of this repository; nothing ran.
+ * - `stopped`: A running clone was stopped. `removed` says whether the
+ *   half-made folder is gone.
+ * - `not_cloning`: A stop was asked for and no clone of this repository was
+ *   running.
  */
 export type CloneAnswer = { "status": "cloning", path: string, } | { "status": "adopted", path: string, } | { "status": "stopped", path: string, removed: boolean, } | { "status": "not_cloning" };
 
 /**
  * What one clone reports while it runs and when it ends.
+ *
+ * The `clone:progress` payload (#823): the repo entity being cloned, the
+ * folder, and its state.
  */
 export type CloneEvent = { 
 /**
@@ -360,11 +445,26 @@ path: string, } & ({ "state": "progress", phase: string, percent: number, } | { 
 
 /**
  * [`clone::FailureCause`], on the wire.
+ *
+ * - `auth`: git could not sign in with the person's own credentials.
+ * - `disk_full`: The disk is full.
+ * - `other`: The network, the server, or anything else; the reason says which.
+ *
+ * Why a clone failed (#823).
  */
 export type CloneFailureCause = "auth" | "disk_full" | "other";
 
 /**
  * Where a clone is.
+ *
+ * - `progress`: Running: git's step, and the whole clone from 0 to 100.
+ * - `done`: Finished; the scan now finds the folder.
+ * - `failed`: git failed. `reason` is git's own line
+ *   (`clone::failure_reason`); `removed` says whether the half-made folder is
+ *   gone.
+ * - `stopped`: Stopped by [`stop`]. `removed` says whether the folder is gone.
+ *
+ * Issue #823.
  */
 export type CloneState = { "state": "progress", phase: string, percent: number, } | { "state": "done" } | { "state": "failed", reason: string, cause: CloneFailureCause, removed: boolean, } | { "state": "stopped", removed: boolean, };
 
@@ -421,11 +521,17 @@ write_op: string, };
  * Stored as lowercase text in `knobas.context.kind`, whose
  * `context_kind_chk` (migration 0010) allows exactly these spellings --
  * and `ALL` is what the test that pins the two together walks.
+ *
+ * - `epic`: A promoted epic: members start from its tickets.
+ * - `ticket`: A promoted ticket: focused on the one piece of work.
+ * - `adhoc`: A label the user minted; no source system behind it.
  */
 export type ContextKind = "epic" | "ticket" | "adhoc";
 
 /**
  * One context, as `knobas.context` holds it.
+ *
+ * Issue #47.
  */
 export type ContextRow = { 
 /**
@@ -436,16 +542,32 @@ id: string, kind: ContextKind, title: string,
 /**
  * The promoted entity this context is about; `None` for an ad-hoc label.
  */
-anchor_id: string | null, created_at: string, archived_at: string | null, };
+anchor_id: string | null, 
+/**
+ * RFC 3339 on the wire.
+ */
+created_at: string, 
+/**
+ * RFC 3339 on the wire, or `None` while the context is live.
+ */
+archived_at: string | null, };
 
 /**
  * One step of a [`Block::Tree`]'s or [`Block::File`]'s trail: a
  * directory's (or the file's own) name and the section that opens it.
+ *
+ * Issue #711. A section a block names opens **in the tab it is drawn in**,
+ * read with `entity_view(entity, section)`; the id is the source's and never
+ * parsed.
  */
 export type Crumb = { name: string, section: string, };
 
 /**
  * What happened to one file.
+ *
+ * - `renamed`: Moved, with or without edits; `old_path` names where from.
+ * - `binary`: A binary file changed (or was added or deleted): no lines to
+ *   draw.
  */
 export type DiffChange = "added" | "modified" | "deleted" | "renamed" | "binary";
 
@@ -478,6 +600,8 @@ truncated: boolean,
  * source that keeps line comments read for it, in the order the file
  * reads -- empty from the parser, which knows only the text. Absent on
  * the wire reads as empty, so a diff drawn before #709 decodes.
+ *
+ * The outdated ones last.
  */
 threads: Array<LineThread>, };
 
@@ -502,6 +626,14 @@ text: string, };
  * The answer the *Local changes* tab draws: the diff, or why there is none.
  * The same four arms as the working tree's
  * [`TreeRead`](super::working_tree::TreeRead).
+ *
+ * - `read`: git answered.
+ * - `no_git`: No `git` on `PATH`.
+ * - `not_a_repo`: The path is not a git working tree, or not there at all.
+ * - `failed`: git ran and did not answer: it timed out, or refused with
+ *   `reason`.
+ *
+ * Issue #824. None of the arms is an error.
  */
 export type DiffRead = { "status": "read" } & UncommittedDiff | { "status": "no_git" } | { "status": "not_a_repo" } | { "status": "failed", reason: string, };
 
@@ -516,6 +648,8 @@ export type DiffRead = { "status": "read" } & UncommittedDiff | { "status": "no_
  * display time: the discipline `knobas_core::inbox::InboxItem::reason` and
  * `suggest::SuggestionEntry::reason` both record, and for the same reason --
  * a line whose provenance cannot be shown is not shippable.
+ *
+ * Issue #288.
  */
 export type DigestLine = { 
 /**
@@ -526,6 +660,10 @@ export type DigestLine = {
  * credential expiry carries the same absence for the same reason -- a
  * line that pointed somewhere wrong would be worse than one that says it
  * has nowhere to point.
+ *
+ * The view draws that line as text rather than as a link: "DB config for
+ * the migration" is a legal thing to be working on, and a digest that
+ * dropped it would leave the reader's own afternoon out of their standup.
  */
 entity_id: string | null, 
 /**
@@ -536,6 +674,8 @@ kind: string | null,
  * What the line is about, in the source's own words -- or the ad-hoc
  * label, for the one line that has no entity. Untrusted text: render it
  * as text.
+ *
+ * Never as markup (gotcha 7).
  */
 title: string, 
 /**
@@ -558,6 +698,15 @@ source: string,
  * `Other(String)` arm and would then be a closed type pretending. The
  * five knobas-owned words are consts above so that no reader has to
  * spell one twice.
+ *
+ * On the wire: `attributed`, `log_work`, `timer`, `blocked_status`,
+ * `blocked_by`, or a write's op (`comment`, `transition`, …). A view that
+ * branches on it must have a default arm.
+ *
+ * `attributed`, not `authored`: interfaces §4.1's `author` is whoever the
+ * **adapter** says a record belongs to, and Jira's says the assignee, so a
+ * mirror line means "the source attributes this to you", never "you wrote
+ * it".
  */
 verb: string, 
 /**
@@ -567,6 +716,8 @@ reason: string,
 /**
  * When it happened -- and for a blocker, when the item last moved, which
  * is what the list is ordered by.
+ *
+ * RFC 3339 on the wire.
  */
 at: string, };
 
@@ -585,6 +736,19 @@ export type DocBacklink = { entity_id: string, title: string, space_key: string 
  *
  * Internally tagged (`{"type": "heading", ...}`) so the TypeScript mirror is
  * a discriminated union on `type`.
+ *
+ * - `heading`: A section heading. `level` is 1 to 6 as the source wrote it;
+ *   the reader draws every level as a section head.
+ * - `list`: A list. A nested list's items are drawn as a list inside their
+ *   item.
+ * - `code`: A code block, verbatim, with the language the source named.
+ * - `table`: A table, row by row; a header cell says so.
+ * - `panel`: An info, note, warning or tip panel, with the blocks inside it.
+ * - `placeholder`: Something the source has that the reader does not draw: the
+ *   source's own name for it (a Confluence macro's `ac:name`). Never dropped,
+ *   so a page with a part knobas cannot draw says so (story 134).
+ *
+ * Source text, never markup.
  */
 export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<Array<DocBlock>>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "placeholder", name: string, };
 
@@ -608,6 +772,8 @@ at: string | null, blocks: Array<DocBlock>, };
 
 /**
  * What *Export as Markdown* wrote.
+ *
+ * Issue #861.
  */
 export type DocExport = { 
 /**
@@ -650,6 +816,20 @@ matches: number, editor: string | null, editor_name: string | null, updated_at: 
 
 /**
  * One run of text inside a block.
+ *
+ * - `text`: Words, with the marks the source put on them.
+ * - `link`: A link out of the docs source, to a web address.
+ * - `page_link`: A link to another page of the docs source, by its title and
+ *   space. `entity_id` is the mirrored page it names, filled by knobas when
+ *   the reader is read; the adapter leaves it `None`.
+ * - `issue`: A ticket reference (a Confluence Jira-issue macro), drawn as a
+ *   live chip. The adapter fills `key`; knobas fills the rest from the mirror
+ *   when the reader is read, and leaves them `None` for a ticket it does not
+ *   hold.
+ * - `mention`: A mention of a person. `user` is the account name where the
+ *   source says it (the spelling `@me` matches), `name` the display name where
+ *   it is known. `me` is filled by knobas when the reader is read.
+ * - `break`: A hard line break inside a block.
  */
 export type DocInline = { "type": "text", text: string, strong: boolean, emphasis: boolean, code: boolean, } | { "type": "link", text: string, href: string, } | { "type": "page_link", text: string, title: string, space: string | null, entity_id: string | null, } | { "type": "issue", key: string, entity_id: string | null, title: string | null, status: string | null, } | { "type": "mention", user: string | null, name: string | null, me: boolean, } | { "type": "break" };
 
@@ -679,6 +859,8 @@ source_name: string, title: string, space: DocSpaceRef | null,
 ancestors: Array<DocAncestor>, 
 /**
  * Who made this version (contract §4.1's `author`).
+ *
+ * In the source's account spelling.
  */
 editor: string | null, 
 /**
@@ -748,6 +930,8 @@ refusal: SectionRefusal | null, };
 
 /**
  * A hit's snippet: where it is, and its text with the matches marked.
+ *
+ * Source text, never markup.
  */
 export type DocSnippet = { 
 /**
@@ -862,6 +1046,11 @@ for_you: Array<DocForYou>, };
 /**
  * What one download streams (#854's *Download log*, #856's downloads).
  * Tagged on `kind`.
+ *
+ * - `log`: The run's whole log.
+ * - `file`: One artifact file.
+ * - `folder`: One artifact folder, as a zip.
+ * - `all`: Every artifact, as a zip.
  */
 export type DownloadTarget = { "kind": "log" } | { "kind": "file", path: string, } | { "kind": "folder", path: string, } | { "kind": "all" };
 
@@ -886,6 +1075,9 @@ body_text: string, author: string | null,
 /**
  * The source record **verbatim** (§3a): what the generic detail view
  * projects. It is untrusted text all the way down.
+ *
+ * `unknown` in the shell, per §2.6's `serde_json::Value` mapping: project
+ * it as text, never as markup (interfaces §2.5, gotcha 7).
  */
 payload: unknown, 
 /**
@@ -896,6 +1088,8 @@ web_url: string | null,
 /**
  * Set when the source withdrew the entity. The mirror row survives, so
  * links and notes still resolve (§5a).
+ *
+ * RFC 3339 on the wire, `None` while the source still has it.
  */
 deleted_at: string | null, 
 /**
@@ -960,19 +1154,12 @@ estimate_seconds: number | null, };
  * `NULL` rather than as an empty array: `= any('{}')` matches nothing, and a
  * room whose filter said "no sources in particular" would come back empty.
  *
- * `Serialize` behind `test-util`, although nothing sends a filter the other
- * way: it is what lets `knobas-app`'s `tests/it/entity_mirror.rs` pin an *input* DTO through a
- * round trip, and so see a field this struct has that
- * `app/src/lib/ipc/entity.ts` never declares. A decode-only check is blind to
- * that direction -- serde reads a missing `Option` as `None`, so a Rust-only
- * optional field decodes clean and the mirror never has to declare it.
+ * Deserialize only: a filter is something the frontend *sends*. Its
+ * TypeScript is generated from this struct (#1326), so a field added here is
+ * a field the shell's type has; the `Serialize` behind `test-util` that let
+ * the hand-written mirror's suite round-trip it went with that suite.
  *
- * Gated rather than unconditional: a filter is something the frontend
- * *sends*, and a production build that can also write one invites a caller
- * to round-trip a command argument through nothing. The app crate's
- * `test-util` turns this crate's on, and its `cargo test` turns that on
- * through its self-dev-dependency; `tauri build` and the `clippy --lib` half
- * of the gate compile without it.
+ * Do not "helpfully" send every known id instead of an empty list.
  */
 export type EntityFilter = { 
 /**
@@ -994,6 +1181,9 @@ updated_within_days: number | null,
  * rule (§16.11, ADR-0008). `None` is unscoped -- every derived room. The
  * membership is resolved server-side per read rather than shipped as an
  * id list, so a page and its `total` always describe the same instant.
+ *
+ * The fixed rule is the seed, its direct links, one hop, and what the
+ * assets among them hold.
  */
 context: string | null, 
 /**
@@ -1045,9 +1235,32 @@ role?: string | null, };
  * The orderings a room reads in: the two plain ones, and since #680 the two
  * tile orders.
  *
- * `Serialize` behind `test-util` for the same reason [`EntityFilter`] carries
- * it: it rides inside the filter's round trip, and pins this union against the
- * mirror's.
+ * - `updated_desc`: Newest first, by the source's own timestamp. Undated items
+ *   last.
+ * - `title_asc`: Alphabetical by title.
+ * - `attention`: **What needs attention first** (#680): a room's Code tile. A
+ *   row whose declared state is **settled** -- tone `ok` (done and good: a
+ *   merged pull request) or `muted` (over: a closed one) -- is not in the set.
+ *   What is left is ordered by its state's tone, loudest first (`err`, `warn`,
+ *   `info`), then rows with no state, each run newest first.
+ *
+ *   Driven by the declared state and its tone, never by a kind or an adapter:
+ *   a kind whose source declares no state, and a record whose declared state
+ *   misses, has no tone, so nothing hides it and it sorts by recency (§3a; the
+ *   ADR-0007 miss fails toward drawing the row).
+ * - `latest_per_parent`: **One row per parent, its latest** (#680): a room's
+ *   Builds tile. Where a row's kind declares a state, its rows are grouped by
+ *   the parent chain their kind declares (ADR-0018) -- every name each parent
+ *   answers to, so two configurations sharing a display name stay two -- and
+ *   only the newest of each group is kept: a configuration's health is its
+ *   latest build. The kept rows are ordered by tone, every tone drawn (`err`,
+ *   `warn`, `info`, `ok`, `muted`, then no state), each run newest first.
+ *
+ *   A kind that declares no state is not grouped, and a row whose parent
+ *   misses stands alone: both fall back to recency (§3a), so a source that
+ *   never said what its builds' outcomes are draws every build.
+ *
+ * Both tile orders read the live corpus only.
  */
 export type EntityOrder = "updated_desc" | "title_asc" | "attention" | "latest_per_parent";
 
@@ -1083,7 +1296,15 @@ groups: Array<GroupTally> | null, };
  * view's business (the app's `EntityDetail`), and a room that fetched them would pull
  * the whole corpus into the webview to render five columns of it.
  */
-export type EntityRow = { entity_id: string, kind: string, source_id: string, title: string, 
+export type EntityRow = { 
+/**
+ * `"<namespace>:<key>"` -- `mock:PAY-231`. The kind is not part of it.
+ */
+entity_id: string, kind: string, source_id: string, 
+/**
+ * Raw source text. Render it as text, never as markup (gotcha 7).
+ */
+title: string, 
 /**
  * When the *source* says the item changed.
  *
@@ -1091,10 +1312,15 @@ export type EntityRow = { entity_id: string, kind: string, source_id: string, ti
  * the mirror keeps the hole rather than filling it with `now()`, so a row
  * that has never been dated is distinguishable from one changed this
  * second.
+ *
+ * RFC 3339 on the wire. The room sorts an undated row last rather than
+ * first.
  */
 updated_at: string | null, 
 /**
  * When knobas last saw it. Always known -- it is knobas' own clock.
+ *
+ * RFC 3339 on the wire.
  */
 synced_at: string, 
 /**
@@ -1125,6 +1351,8 @@ path: string | null,
  * ADR-0007 **miss**, so a row shows no chip rather than a wrong one.
  *
  * On both `EntityRow`s, pinned to one wire shape like `path`.
+ *
+ * `text` is source text: render it as text.
  */
 state: StateChip | null, };
 
@@ -1150,7 +1378,11 @@ parts: Array<EvidencePart>, };
 /**
  * One run of an excerpt's text.
  */
-export type EvidencePart = { text: string, marked: boolean, };
+export type EvidencePart = { text: string, 
+/**
+ * The match: the key, the host or a shared word.
+ */
+marked: boolean, };
 
 /**
  * One label and its value.
@@ -1164,6 +1396,13 @@ tone: Tone | null, };
 /**
  * How an [`ActionField`] asks. Internally tagged (`{"type": "choice", ...}`),
  * a union on `type` in the TypeScript mirror as [`Block`] is.
+ *
+ * - `text`: One line. `suggestions` are offered as the reader types and none
+ *   is picked: a run's branch suggests the branches recent builds ran on.
+ * - `long_text`: Several lines of Markdown: a description, a comment. Drawn as
+ *   a plain text area; the shell never renders it (ADR-0020 rule 5).
+ * - `choice`: One of `options`, picked.
+ * - `flag`: A checkbox.
  */
 export type FieldKind = { "type": "text", suggestions: Array<string>, } | { "type": "long_text" } | { "type": "choice", options: Array<ChoiceOption>, } | { "type": "flag" };
 
@@ -1181,6 +1420,12 @@ export type FileThread = { path: string, thread: LineThread, };
  * Where it is and nothing more: knobas runs git only for `status`, `diff`
  * and `clone` (ADR-0021, ADR-0026, ADR-0023), so it does not ask git its
  * version.
+ *
+ * - `found`: The `git` on `PATH`.
+ * - `no_git`: None, or Apple's shim without the Command Line Tools.
+ * - `failed`: The Command Line Tools probe did not answer.
+ *
+ * Issue #844.
  */
 export type GitFound = { "status": "found", path: string, } | { "status": "no_git" } | { "status": "failed", reason: string, };
 
@@ -1207,6 +1452,18 @@ header: string, lines: Array<DiffLine>, };
  * composed key as opaque text and nothing constrains it. So this list has no
  * CHECK to be pinned against and is deliberately not declared with
  * [`crate::closed_vocabulary!`], whose whole purpose is that pinning.
+ *
+ * - `review_request`: Somebody is waiting on your review of a pull request.
+ * - `mention`: Somebody wrote your name at you.
+ * - `failed_build`: A build on your work went red.
+ * - `new_assignment`: Work arrived: a ticket somebody else pointed at you.
+ * - `credential_expiry`: A credential knobas holds stops working soon.
+ * - `alert`: A monitor watching something in the estate is down or slow, and a
+ *   context holds the asset it watches.
+ *
+ * The shell's union is generated from this enum, so a category added here
+ * makes a total `switch` over it fail `svelte-check` rather than fall through
+ * to a label nobody notices.
  */
 export type InboxCategory = "review_request" | "mention" | "failed_build" | "new_assignment" | "credential_expiry" | "alert";
 
@@ -1228,6 +1485,10 @@ export type InboxEntry = { item: InboxItem,
  * nothing to ask a source for, and a source with no write capability
  * offers nothing on any of its items. *Open*, *snooze* and *done* are not
  * in here -- they are knobas' own and always available.
+ *
+ * Best first; dispatch one with `submit_write`. **Render exactly these and
+ * no others**: an op absent from this list is one the source cannot
+ * perform, and a button for it would fail on press.
  */
 actions: Array<string>, };
 
@@ -1236,11 +1497,20 @@ actions: Array<string>, };
  *
  * Everything a reader needs to judge an item without opening it (#45, story
  * 7): which source it came from, what it is about, and why it is here.
+ *
+ * **Derived, not stored.** There is no inbox table: every field here is
+ * computed from the mirror when the stream is read, which is why an item
+ * leaves on its own when the thing it was about is resolved at the source.
  */
 export type InboxItem = { 
 /**
  * `'<category>:<subject>'` -- what snooze and done are keyed on, and what
  * the interface hands back when the user answers.
+ *
+ * Stable across syncs: the category is a fixed word and the subject is an
+ * entity id (or a source id, for a credential expiry). The shell never
+ * composes one: it hands back the string it was given, to
+ * `snooze_inbox_item` and `complete_inbox_item`.
  */
 key: string, 
 /**
@@ -1258,6 +1528,9 @@ source_id: string,
  * a source and not an entity: the inbox is a way in, not a dead end
  * (story 8), and the one item with no entity behind it says so by
  * carrying none rather than by pointing somewhere wrong.
+ *
+ * An item with no entity has no *Open*, and that is honest rather than
+ * incomplete.
  */
 entity_id: string | null, 
 /**
@@ -1266,6 +1539,8 @@ entity_id: string | null,
 kind: string | null, 
 /**
  * What the item is about, in the source's own words.
+ *
+ * Raw source text. Render it as text, never as markup (gotcha 7).
  */
 title: string, 
 /**
@@ -1273,11 +1548,15 @@ title: string,
  * re-rendered from the category at display time. The same discipline
  * `suggest::SuggestionEntry::reason` gets: a demand whose reason cannot
  * be shown is not shippable.
+ *
+ * Also raw text.
  */
 reason: string, 
 /**
  * When the item last moved. The stream's ordering, and what *done* is
  * measured against.
+ *
+ * RFC 3339 on the wire.
  */
 occurred_at: string, 
 /**
@@ -1287,6 +1566,8 @@ web_url: string | null,
 /**
  * When this item comes back, for the rows on the snoozed shelf. `None` on
  * the stream itself.
+ *
+ * RFC 3339 on the wire.
  */
 snoozed_until: string | null, };
 
@@ -1297,6 +1578,12 @@ snoozed_until: string | null, };
  * argument: the inbox view and the snoozed panel are one read with one
  * predicate, and asking for the shelf by name is what keeps them from
  * becoming two statements that can disagree about what "snoozed" means.
+ *
+ * - `stream`: What needs you now. This is the inbox.
+ * - `snoozed`: What you deferred, and when it comes back.
+ *
+ * One derivation with one predicate, asked for one side or the other, so the
+ * two shelves can never overlap or leave a gap.
  */
 export type InboxShelf = "stream" | "snoozed";
 
@@ -1309,7 +1596,15 @@ export type JobLink = { entity_id: string, kind: string, title: string | null, }
  * What a job shows beside its own links (#867): the sets that apply, by
  * name, and the parent behind R-7.3's switch.
  */
-export type JobLinkSets = { sets: Array<JobSet>, parent: JobParent | null, };
+export type JobLinkSets = { 
+/**
+ * The sets that apply, by name.
+ */
+sets: Array<JobSet>, 
+/**
+ * `None` with no parent, an epic for one, or R-7.3's switch off.
+ */
+parent: JobParent | null, };
 
 /**
  * One member of a set that applies to a job (#867): what the drawer's
@@ -1324,7 +1619,11 @@ kind: LinkSetMemberKind, entity_id: string,
  * The entity's own kind, what the row links by; `None` when knobas has
  * no entity of that id.
  */
-entity_kind: string | null, title: string | null, hidden: boolean, };
+entity_kind: string | null, title: string | null, 
+/**
+ * Hidden on this ticket by *Hide here* (R-7.5).
+ */
+hidden: boolean, };
 
 /**
  * The parent whose own links a sub-task shows (R-7.3).
@@ -1345,7 +1644,12 @@ export type JobPipeline = { pipeline_id: string, reasons: Array<PipelineReason>,
  * One set that applies to a job (R-4.4, R-6.2): the chip's name, the reason
  * (the first of its rules that matches, in the set's order) and its members.
  */
-export type JobSet = { id: string, name: string, via: LinkSetRuleRow, members: Array<JobMember>, };
+export type JobSet = { id: string, name: string, 
+/**
+ * The first of its rules that matches the ticket, in the set's order: the
+ * reason.
+ */
+via: LinkSetRuleRow, members: Array<JobMember>, };
 
 /**
  * Display metadata for one entity kind an adapter emits, and whether a full
@@ -1419,14 +1723,20 @@ tone: Tone | null, count: number, };
 
 /**
  * One status of a lane: its cards by id, newest first, and its count.
+ *
+ * Issue #939.
  */
 export type LaneColumn = { 
 /**
  * As [`MiniBoardColumn::status`].
+ *
+ * `None` is the terminal group.
  */
 status: string | null, 
 /**
  * The ids of the cards kept, each in [`MiniBoard::columns`].
+ *
+ * Newest first, or in the saved view's order.
  */
 ids: Array<string>, 
 /**
@@ -1437,6 +1747,10 @@ total: number, };
 /**
  * What a board's lanes split by (R-3.5): the Tickets view's *Lanes*
  * switch, spelled as a ticket view stores it.
+ *
+ * - `epic`: The epic: the ticket's path line, as the card draws it.
+ * - `issuetype`: The ticket's type.
+ * - `label`: The ticket's first label.
  */
 export type LaneField = "epic" | "assignee" | "priority" | "issuetype" | "label";
 
@@ -1460,6 +1774,12 @@ at: string | null, };
  * #709). The comments are the shell's -- written on a commentable
  * [`Block::Diff`] and kept until sent or discarded -- and the action only
  * says whether they go with it.
+ *
+ * - `none`: The action never sends them (*Comment…*, *Merge…*).
+ * - `sends`: The action sends them when there are some, and is drawn either
+ *   way (*Approve…*, *Request changes…*): its dialog lists what goes with it.
+ * - `requires`: The action sends them and is drawn only while there are some
+ *   (*Submit review…*, a review that is the comments and nothing else).
  */
 export type LineComments = "none" | "sends" | "requires";
 
@@ -1486,9 +1806,15 @@ export type LineThread = { side: ReviewSide, line: number, outdated: boolean, co
  * story 9). Resolved here rather than by a second read per row, because a
  * detail view drawing ten links would otherwise make ten round trips.
  */
-export type LinkEnd = { entity_id: string, kind: string, 
+export type LinkEnd = { 
+/**
+ * `"<namespace>:<key>"`: the address a row navigates to.
+ */
+entity_id: string, kind: string, 
 /**
  * The entity's own title. Untrusted source text: render it as text.
+ *
+ * Never as markup (gotcha 7).
  */
 title: string, 
 /**
@@ -1497,11 +1823,19 @@ title: string,
  * Not a filter -- a *fact* the reader is shown. A link may point at
  * something that vanished upstream, and hiding it would be a link that
  * dangles silently (#40's story 10).
+ *
+ * RFC 3339 on the wire. Not a reason to hide the row: §5a keeps the entity
+ * so a link never dangles, and the panel marks it instead.
  */
 deleted_at: string | null, };
 
 /**
  * One link, as a detail view draws it: the record, and its other end.
+ *
+ * Which end `other` holds depends on whose detail was read: `A -> B` hydrates
+ * `B` on A's panel and `A` on B's. Direction and the inverse-label wording are
+ * the frontend's (`detail/relations.ts`), computed from `link.from_id` against
+ * the entity being viewed.
  */
 export type LinkEntry = { link: LinkRow, 
 /**
@@ -1516,7 +1850,16 @@ other: LinkEnd, };
 /**
  * One active link, as seen from either of its ends.
  */
-export type LinkRow = { id: string, from_id: string, to_id: string, relation: string, origin: "manual" | "suggested" | "imported" | "source" | "implied", 
+export type LinkRow = { id: string, from_id: string, to_id: string, 
+/**
+ * What kind of link this is: `"related"` unless one was named.
+ *
+ * Always **lower case**: the backend folds it on write, so `Blocks` and
+ * `blocks` are one relation and one panel group rather than two. Key the
+ * curated list and the inverse-label lookup on this spelling; capitalize
+ * for display from the whole string.
+ */
+relation: string, origin: "manual" | "suggested" | "imported" | "source" | "implied", 
 /**
  * Why the link exists, in the user's own words -- `None` unless one was
  * given.
@@ -1527,7 +1870,11 @@ export type LinkRow = { id: string, from_id: string, to_id: string, relation: st
  * recorded" and "a reason recorded as nothing" are different facts and
  * only one of them is worth a line in the panel.
  */
-note: string | null, created_by: string, created_at: string, 
+note: string | null, created_by: string, 
+/**
+ * RFC 3339 on the wire.
+ */
+created_at: string, 
 /**
  * When the user said yes -- and, by being `None`, the whole difference
  * between a link and a [proposal](crate::suggest).
@@ -1537,6 +1884,11 @@ note: string | null, created_by: string, created_at: string,
  * `knobas.confirmed_link`, which cannot contain it, and the tray reads
  * `knobas.proposed_link`, which cannot contain anything else. Every link
  * that predates migration `0007` carries its own `created_at` here.
+ *
+ * RFC 3339 on the wire. A confirmed row is in `EntityDetail.links` and
+ * never in `roomSuggestions`; an unconfirmed one the other way round, and
+ * the two reads cannot overlap. Every link drawn by hand is confirmed the
+ * moment it is written.
  */
 confirmed_at: string | null, 
 /**
@@ -1546,11 +1898,20 @@ confirmed_at: string | null,
  * Deliberately not a closed vocabulary: rules are expected to grow, and a
  * constrained column would make each new one a migration. The *class*
  * below is the closed axis.
+ *
+ * Examples: `"branch_name_key"`, `"similar_text"`. Branch on `rule_class`,
+ * and show `rule` only as provenance: a closed list in the shell would
+ * have to ship before a new detector could.
  */
 rule: string | null, 
 /**
  * Which class of evidence [`rule`](Self::rule) is, or `None` for a link a
  * person drew.
+ *
+ * The axis a reader calibrates trust on and the one a badge should show:
+ * `exact_key` is "the two ends name each other", `similarity` is a guess
+ * from overlapping text, `source_relation` is a relation the source system
+ * already states.
  */
 rule_class: "exact_key" | "similarity" | "source_relation" | null, 
 /**
@@ -1562,6 +1923,8 @@ rule_class: "exact_key" | "similarity" | "source_relation" | null,
  * reason assembled by whichever surface happens to draw it is one that
  * can be missing from the next surface. `link_proposal_chk` (migration
  * `0007`) refuses an unconfirmed row without one.
+ *
+ * `None` for a link a person drew. Raw text: render it as text.
  */
 reason: string | null, };
 
@@ -1569,7 +1932,11 @@ reason: string | null, };
  * One set, as its editor draws it (R-7.7): the row, and the tickets it shows
  * on now (*Shows on N tickets now*).
  */
-export type LinkSetDetail = { shows_on: Array<RuleTicket>, 
+export type LinkSetDetail = { 
+/**
+ * The tickets it shows on now, in key order.
+ */
+shows_on: Array<RuleTicket>, 
 /**
  * A slug: `#/sets/<id>` opens the set.
  */
@@ -1605,6 +1972,9 @@ patterns: Array<LinkSetPattern>, rules: Array<LinkSetRule>, };
 /**
  * R-7.10's hint (#870): "You linked Dashboard_Build by hand to PAY-240 and 2
  * more tickets under PAY-200. Add it to Payout stack?"
+ *
+ * An item linked by hand to two or more tickets under the epic a set's rule
+ * names, which the set does not hold yet.
  */
 export type LinkSetHint = { set_id: string, set_name: string, 
 /**
@@ -1663,6 +2033,9 @@ state: StateChip | null, };
 /**
  * One pattern member (R-7.2): a kind of [`PATTERN_KINDS`] and a query in the
  * search grammar that reads as a [`knobas_search::Pattern`].
+ *
+ * Issue #868. For pipelines and pages; the query reads like `project:Payouts
+ * name:Payout_*`.
  */
 export type LinkSetPattern = { kind: LinkSetMemberKind, query: string, };
 
@@ -1796,6 +2169,8 @@ tone: Tone | null, };
 
 /**
  * One room's tickets as the mini board draws them.
+ *
+ * Issue #177.
  */
 export type MiniBoard = { 
 /**
@@ -1825,6 +2200,8 @@ more_lanes: number, };
 
 /**
  * One ticket on the board.
+ *
+ * Issue #177.
  */
 export type MiniBoardCard = { 
 /**
@@ -1844,6 +2221,8 @@ key: string, title: string,
 /**
  * `None` where the record carries no readable priority; see
  * [`priority_read!`].
+ *
+ * The card omits it rather than guessing (ADR-0007).
  */
 priority: string | null, 
 /**
@@ -1859,11 +2238,15 @@ issue_type: string | null,
 assignee: string | null, 
 /**
  * When the source last changed it, or `None` where it never said.
+ *
+ * RFC 3339 on the wire.
  */
 updated_at: string | null, 
 /**
  * The ticket's declared parent chain as one line (its epic, for Jira):
  * `knobas_core::path_line_read!`, the line every other row draws.
+ *
+ * `None` where no parent is declared or it misses.
  */
 path: string | null, 
 /**
@@ -1902,11 +2285,10 @@ comment_count: number | null,
 signals: Array<Signal>, };
 
 /**
- * One column: a status, and the cards standing in it.
+ * One column: a status, and the cards standing in it (#177).
  *
- * The count the column header shows is `cards.len()`; it is not a field,
- * because a count beside the list it counts is a second copy of the same fact
- * and only one of them can be right.
+ * The count the column header shows is [`total`](Self::total) (#753): on a
+ * capped read `cards` holds only the newest, so its length is not the count.
  */
 export type MiniBoardColumn = { 
 /**
@@ -1930,6 +2312,8 @@ total: number, };
 /**
  * One lane of a laned board: the value its tickets share, how many they
  * are, and its own columns, each capped and counted as a board's column is.
+ *
+ * Issue #939.
  */
 export type MiniBoardLane = { 
 /**
@@ -1948,6 +2332,8 @@ columns: Array<LaneColumn>, };
 
 /**
  * What *New page* asks for (R-10.16).
+ *
+ * Issue #862.
  */
 export type NewPage = { 
 /**
@@ -1998,11 +2384,9 @@ links: Array<LinkEntry>, };
  * means. The capture window (#503) and the in-app *New note* pass the same
  * two, and a third caller with a third relation needs no argument here.
  *
- * The note is always the **from** end; see [`knobas_core::note::BornLink`].
- *
- * `Serialize` behind `test-util` for the reason [`EntityFilter`] carries it:
- * it is what lets `tests/it/entity_mirror.rs` pin an input DTO through a round
- * trip, and so see a field the TypeScript mirror never declares.
+ * The note is always the **from** end, so `captured-in` reads *captured in*
+ * from the note and *captured here* from the context; see
+ * [`knobas_core::note::BornLink`].
  */
 export type NoteLinkInput = { 
 /**
@@ -2024,6 +2408,12 @@ relation: string, };
 
 /**
  * One `[[ref]]` the body names, and what it points at -- if anything.
+ *
+ * `target` is `None` for an **unresolved** ref: nothing carries that id, so it
+ * creates no link and is drawn as unresolved rather than as plain text, which
+ * is how a typo is discoverable. A `target` whose `deleted_at` is set is the
+ * other case entirely: the ref resolves, the link exists, and the chip is
+ * marked withdrawn.
  */
 export type NoteRef = { 
 /**
@@ -2045,25 +2435,47 @@ target: LinkEnd | null, };
 
 /**
  * One note.
+ *
+ * Notes are the first kind knobas *owns* rather than mirrors: nothing synced
+ * this and nothing can re-fetch it, which is why it is in the backup and never
+ * written to a source.
  */
 export type NoteRow = { 
 /**
  * `note:<uuid>`, and also the id of this note's `knobas.entity` row.
+ *
+ * Also this note's entity id, so it links like anything else.
  */
 id: string, 
 /**
  * The note's name. Never blank -- see [`UNTITLED`].
+ *
+ * A note the user has not named is "Untitled note".
  */
 title: string, 
 /**
  * Markdown the user typed. **Untrusted text**: render it as text, never as
  * markup (roadmap §4 gotcha 7). It is the user's own here rather than a
  * source's, which changes who is at fault and nothing else.
+ *
+ * There is no `{@html}` anywhere in the shell: a `[[ref]]` becomes a chip
+ * by parsing the body into tokens and drawing them, not by turning the
+ * string into HTML.
  */
-body_md: string, created_at: string, updated_at: string, };
+body_md: string, 
+/**
+ * RFC 3339 on the wire.
+ */
+created_at: string, 
+/**
+ * RFC 3339 on the wire. Moves on every save.
+ */
+updated_at: string, };
 
 /**
  * What an export wrote.
+ *
+ * *Export notes as Markdown* (#832).
  */
 export type NotesExport = { 
 /**
@@ -2076,13 +2488,20 @@ count: number,
 folder: string, };
 
 /**
- * The `notification:clicked` payload, mirrored as `NotificationClicked`.
+ * The `notification:clicked` payload (#339): the `address` the notification
+ * was sent with.
  */
 export type NotificationClicked = { address: string, };
 
 /**
- * What the frontend asks to have shown: the `notify` command's argument,
- * mirrored as `NotificationDraft` in `app/src/lib/ipc/entity.ts`.
+ * What the frontend asks to have shown: the `notify` command's argument
+ * (#339).
+ *
+ * `address` is where the click goes, the inbox's own `addressOf` hash
+ * (`lib/inbox/address.ts`, shared with the inbox row's *Open* since #447);
+ * the backend carries it unread and hands it back on
+ * `EVENTS.notificationClicked`, so both ends of the click path stay the
+ * frontend's.
  */
 export type NotificationDraft = { title: string, body: string, 
 /**
@@ -2098,6 +2517,10 @@ export type PanelKind = "info" | "note" | "warning" | "tip";
 
 /**
  * The field a parameter is asked with. Tagged on `type`.
+ *
+ * - `text`: Free text: anything typed is the value.
+ * - `select`: One of a fixed list, in the source's order.
+ * - `checkbox`: On or off, each with the value it sends.
  */
 export type ParameterKind = { "type": "text" } | { "type": "select", options: Array<ParameterOption>, } | { "type": "checkbox", checked: string, unchecked: string, };
 
@@ -2136,11 +2559,23 @@ hint: string | null, kind: ParameterKind, };
 /**
  * Why a pipeline is on a job (#850, R-9.1, R-9.2). Tagged on `kind`, so a
  * link set (#866) joins as one more arm without changing these.
+ *
+ * - `branch`: One of its runs built a branch the job reaches: a reached
+ *   branch, by its title, or the branch a reached pull request is opened from
+ *   (its declared `head`). *your branch*.
+ * - `pr_check`: One of its runs checked a pull request the job reaches: it ran
+ *   on the pull request's declared `commit` (its head), or the job reaches the
+ *   run through the pull request. *PR check*.
+ * - `linked`: The job reaches the pipeline, or one of its runs, some other
+ *   way: a direct link, the parent's links (R-7.3), or a link set (#866).
+ *   `step` and `origin` are the reach's own ([`knobas_core::reach::Reached`]).
  */
 export type PipelineReason = { "kind": "branch", branch: string, } | { "kind": "pr_check", pr: string, } | { "kind": "linked", step: string, origin: ReachOrigin, };
 
 /**
  * One repository a pipeline builds.
+ *
+ * Issue #851.
  */
 export type PipelineRepository = { 
 /**
@@ -2186,6 +2621,8 @@ pinned: boolean, web_url: string | null, recent: Array<RunRow>, };
 
 /**
  * A pipeline's settings, read live (#851).
+ *
+ * A secret parameter's value is never sent.
  */
 export type PipelineSettings = { 
 /**
@@ -2232,6 +2669,8 @@ steps: Array<string>, };
 /**
  * One trigger of a pipeline: its kind in the source's word and what it
  * fires on.
+ *
+ * Issue #851.
  */
 export type PipelineTrigger = { 
 /**
@@ -2254,6 +2693,8 @@ disabled: boolean, };
  * Flat, and carrying its source rather than being grouped under it: the
  * switcher wants a room list, and grouping here would only be ungrouped
  * there.
+ *
+ * ADR-0010, issue #208.
  */
 export type Project = { 
 /**
@@ -2279,6 +2720,8 @@ name: string | null, };
 
 /**
  * Everything said for and against one proposal.
+ *
+ * Issue #836.
  */
 export type ProposalEvidence = { link_id: string, 
 /**
@@ -2302,10 +2745,17 @@ against: Array<string>, };
 
 /**
  * A date's protocol: the note, and what became of publishing it.
+ *
+ * `CONTEXT.md`'s **standup protocol**: a note, one per date, holding
+ * attendees, per-person notes and action items. Not a kind of its own, which
+ * is why this carries a `note_id` and everything else about it is read through
+ * `get_note` like any other note.
  */
 export type Protocol = { 
 /**
  * The date this protocol is for, as the reader's own calendar spells it.
+ *
+ * `YYYY-MM-DD` on the wire.
  */
 day: string, 
 /**
@@ -2365,6 +2815,8 @@ linked: boolean, };
  * reader picks out of the mirror. The space key the op also needs is *not*
  * stored here -- it is read off the parent's own record at publish time, so
  * the pair can never disagree about which space the parent is in.
+ *
+ * Issue #289, spec #272 stories 67-68.
  */
 export type PublishTarget = { 
 /**
@@ -2381,6 +2833,14 @@ parent: string, };
  *
  * Tagged on `kind`; #866's link sets joined as the third arm without
  * changing the two before it.
+ *
+ * - `own`: The ticket's own links, its context's adds, and where those lead.
+ * - `parent`: The parent ticket's own links (R-7.3), labelled "Parent
+ *   PAY-231".
+ * - `link_set`: A member of a link set whose rule matches the ticket (#866,
+ *   ADR-0025), labelled with the set's name.
+ *
+ * A link set's arm is named as the reader named the set.
  */
 export type ReachOrigin = { "kind": "own" } | { "kind": "parent", 
 /**
@@ -2398,6 +2858,8 @@ name: string, };
 
 /**
  * One entity a ticket reaches.
+ *
+ * Issue #817.
  */
 export type Reached = { entity_id: string, 
 /**
@@ -2408,6 +2870,8 @@ kind: string,
  * The first step of the path that brought it in: an entity id. Equal to
  * `entity_id` when the entity is itself the first step -- linked to the
  * ticket directly, or one of the parent's own links.
+ *
+ * What the row's reason names.
  */
 step: string, origin: ReachOrigin, };
 
@@ -2436,6 +2900,9 @@ total: number, };
 
 /**
  * One preset, as `save_run_preset` takes it and `run_presets` answers it.
+ *
+ * Issue #852: what a run of one pipeline starts from, saved under a name.
+ * Knobas-local.
  */
 export type RunPreset = { 
 /**
@@ -2463,6 +2930,9 @@ parameters: Array<BuildParameter>, clean_checkout: boolean, first_in_queue: bool
  * extended (`crate::payload::parse_instant`); a run in flight has no
  * `finished`, a queued one neither. `duration_seconds` is the one from the
  * other, only where both are read.
+ *
+ * On the wire `started` and `finished` are RFC 3339, `None` while queued or in
+ * flight.
  */
 export type RunRow = { entity_id: string, 
 /**
@@ -2474,7 +2944,11 @@ number: string | null,
  * The declared state chip (#666): its text in the source's word and the
  * tone the shell draws it in.
  */
-state: StateChip | null, branch: string | null, started: string | null, finished: string | null, duration_seconds: number | null, 
+state: StateChip | null, branch: string | null, started: string | null, finished: string | null, 
+/**
+ * Whole seconds, only where both instants were read.
+ */
+duration_seconds: number | null, 
 /**
  * The source's own timestamp for the row, what runs are ordered by.
  */
@@ -2482,6 +2956,8 @@ updated_at: string | null, web_url: string | null,
 /**
  * How the run was started (#961): the declared `trigger`, in the
  * shell's words.
+ *
+ * `None` where the declaration misses.
  */
 trigger: Trigger | null, 
 /**
@@ -2562,6 +3038,14 @@ truncated: boolean, };
 /**
  * Why a section is edited in the source and not in knobas (R-10.13): a text
  * box round-trips plain text, and what it cannot hold would be lost.
+ *
+ * - `table`: A table.
+ * - `code`: A code block.
+ * - `macro`: A macro, a layout, a mention, a page or ticket link: markup of
+ *   the source's own that text cannot carry. An info, note, warning or tip
+ *   panel is edited (#975) unless it carries more than a title.
+ * - `formatting`: Bold, italics, links, a nested or a numbered list, which the
+ *   text box would flatten.
  */
 export type SectionRefusal = "table" | "code" | "macro" | "formatting";
 
@@ -2586,15 +3070,26 @@ editable: boolean, description: string | null, };
 
 /**
  * One signal on one ticket: what the card and the list row draw.
+ *
+ * Issue #815.
  */
 export type Signal = { kind: SignalKind, 
 /**
  * The words drawn beside the dot (*blocked by OPS-77*).
+ *
+ * Other examples: *build failed*, *PR #142 open*.
  */
 text: string, tone: Tone, };
 
 /**
  * Which fact a [`Signal`] states: the four values `has:` takes.
+ *
+ * - `failing-build`: A build in the ticket's reach is red.
+ * - `blocker`: Something is in the ticket's way.
+ * - `open-pr`: A pull request of the ticket's is open.
+ * - `review-for-me`: One of those asks the user for a review.
+ *
+ * Issue #815.
  */
 export type SignalKind = "failing-build" | "blocker" | "open-pr" | "review-for-me";
 
@@ -2605,7 +3100,12 @@ export type SignalKind = "failing-build" | "blocker" | "open-pr" | "review-for-m
  * that have no `knobas.source_config` row (tests, ad-hoc imports, interfaces
  * §1). An entity whose source was deleted still has to render.
  */
-export type SourceRef = { id: string, display_name: string, 
+export type SourceRef = { id: string, 
+/**
+ * The configured display name, falling back to the id: `run_once` syncs
+ * sources that were never configured, so there is not always a name.
+ */
+display_name: string, 
 /**
  * The *adapter* kind (`jira`, `mock`), not the instance id.
  */
@@ -2630,6 +3130,8 @@ enabled: boolean, };
 
 /**
  * The statuses one source's live ticket corpus shows, in the board's order.
+ *
+ * Issue #177.
  */
 export type SourceStatuses = { source_id: string, 
 /**
@@ -2657,6 +3159,11 @@ actions: Array<ViewAction>, };
 
 /**
  * The four lists, and which day the first of them is about.
+ *
+ * Issues #288 and #932. `CONTEXT.md`'s **digest**, drawn from the mirror and
+ * the activity stream for the configured usernames. Mine only (bar
+ * [`infrastructure`](Self::infrastructure)): it describes the person the
+ * sources were configured as, never a colleague.
  */
 export type StandupDigest = { 
 /**
@@ -2667,6 +3174,8 @@ export type StandupDigest = {
  * week of silence and not an error. The view says so; a date filled in
  * anyway would be a heading over an empty list claiming that day was
  * quiet, when what happened is that no day was found.
+ *
+ * `"2026-08-28"` on the wire.
  */
 yesterday_day: string | null, 
 /**
@@ -2680,6 +3189,10 @@ yesterday: Array<DigestLine>,
 today: Array<DigestLine>, 
 /**
  * The user's items a source calls stuck or a link calls blocked.
+ *
+ * An item can be on this list twice, once for each reason: they are two
+ * different facts about it, and collapsing them would throw one of them
+ * away.
  */
 blockers: Array<DigestLine>, 
 /**
@@ -2692,6 +3205,10 @@ blockers: Array<DigestLine>,
  * in the mirror, and the standup asks what happened to the estate, not
  * what happened to you. A monitor's restart is not here: the mirror
  * records a state change, not why it changed.
+ *
+ * One line per alert: `kind` `"monitor"`, `verb` `"down"` or `"warn"`,
+ * `reason` the duration (`was down 12 min`, `is still down`) and `at` when
+ * it began.
  */
 infrastructure: Array<DigestLine>, };
 
@@ -2701,11 +3218,28 @@ infrastructure: Array<DigestLine>, };
  * Stored as lowercase text in `knobas.start_work_step.outcome`, whose
  * `start_work_outcome_chk` (migration 0008) allows exactly these
  * spellings.
+ *
+ * - `pending`: Planned; nothing has been attempted.
+ * - `running`: Dispatched, no answer yet -- what tells a slow step from a
+ *   stuck one (story 11).
+ * - `succeeded`: The effect exists at the source.
+ * - `queued`: The source could not take the write, so it is a **pending
+ *   write** and will go when the source can (story 15).
+ *
+ *   Deliberately neither a success nor a failure. The flow's completion
+ *   and the write's delivery are different events and the two must not be
+ *   conflated: a queued step has changed nothing at the source yet, so the
+ *   sequence waits rather than reporting a step that has not happened.
+ * - `failed`: The source refused, or knobas could not go on.
+ * - `skipped`: The user chose not to run it (story 14).
  */
 export type StartWorkOutcome = "pending" | "running" | "succeeded" | "queued" | "failed" | "skipped";
 
 /**
  * One step of one flow.
+ *
+ * Issue #44. `payload` is untyped on the wire for `submit_write`'s reason:
+ * `WriteOp` grows per milestone.
  */
 export type StartWorkStep = { id: number, 
 /**
@@ -2714,6 +3248,8 @@ export type StartWorkStep = { id: number,
 ticket_id: string, step: StartWorkStepKind, 
 /**
  * Where the step sits in the sequence.
+ *
+ * The stepper renders in this order.
  */
 position: number, outcome: StartWorkOutcome, 
 /**
@@ -2746,6 +3282,12 @@ detail: string | null, updated_at: string, };
  * created through the link store and never written to either source,
  * which is the whole reason the relationship survives regardless of what
  * Jira or Gitea happens to record (story 9).
+ *
+ * - `create_branch`: The branch, in the repository the user chose.
+ * - `create_pull_request`: The draft pull request, from that branch.
+ * - `link_pull_request`: The knobas link from the pull request back to the
+ *   ticket.
+ * - `transition`: The ticket, to In Progress.
  */
 export type StartWorkStepKind = "create_branch" | "create_pull_request" | "link_pull_request" | "transition";
 
@@ -2787,11 +3329,15 @@ more: number, };
 export type SuggestionPage = { rows: Array<SuggestionEntry>, 
 /**
  * Every proposal in the room, before `limit`.
+ *
+ * The number the tray's heading shows.
  */
 total: number, 
 /**
  * Items holding more proposals than the tray draws for one item (#774),
  * most hidden first. The bound is applied by `suggest::proposals`.
+ *
+ * The tray draws three per item.
  */
 more: Array<SuggestionMore>, };
 
@@ -2816,8 +3362,18 @@ export type TestStatus = "failed" | "passed" | "ignored";
 
 /**
  * A ticket's thread, oldest first.
+ *
+ * Issue #819.
  */
-export type Thread = { comments: Array<ThreadComment>, changes: Array<ThreadChange>, 
+export type Thread = { 
+/**
+ * In the source's order, oldest first.
+ */
+comments: Array<ThreadComment>, 
+/**
+ * Status moves and pull-request events, oldest first; never comments.
+ */
+changes: Array<ThreadChange>, 
 /**
  * The accounts `@me` resolves to, so the shell can mark `@name` in a body
  * by the same identity this read matched.
@@ -2826,6 +3382,9 @@ me: Array<string>, };
 
 /**
  * One change, drawn between the comments when *Include changes* is on.
+ *
+ * Issues #819 and #929: a status move made in Jira or sent by knobas, or a
+ * linked pull request's opening or merge.
  */
 export type ThreadChange = { at: string, kind: ChangeKind, 
 /**
@@ -2860,6 +3419,8 @@ repo: string | null, };
 
 /**
  * One comment of a thread.
+ *
+ * Issue #819.
  */
 export type ThreadComment = { 
 /**
@@ -2870,6 +3431,8 @@ author: string | null,
 /**
  * When it was written. `None` when the source's stamp is absent or reads
  * as no time: such a comment keeps its place in the source's order.
+ *
+ * RFC 3339 on the wire.
  */
 at: string | null, 
 /**
@@ -2882,6 +3445,8 @@ body: string,
 mine: boolean, 
 /**
  * The body names the reader (R-5.3), by [`mentions`]'s rule.
+ *
+ * `@name` or Jira's `[~name]`, for an account `@me` resolves to.
  */
 mentions_me: boolean, };
 
@@ -2896,6 +3461,8 @@ mentions_me: boolean, };
  *
  * Serialized lowercase, the spelling the TypeScript mirror and a declared
  * path's value map both use.
+ *
+ * The adapter says which; the shell owns the colours.
  */
 export type Tone = "ok" | "warn" | "err" | "info" | "muted";
 
@@ -2918,11 +3485,21 @@ section: string | null, };
  *
  * None of these is an error. A checkout panel is worth drawing without a
  * state, and each arm is a sentence the panel says.
+ *
+ * - `read`: git answered.
+ * - `no_git`: No `git` on `PATH`.
+ * - `not_a_repo`: The path is not a git working tree, or not there at all.
+ * - `failed`: git ran and did not answer: it timed out, or refused with
+ *   `reason`.
+ *
+ * Issue #704.
  */
 export type TreeRead = { "status": "read" } & WorkingTreeState | { "status": "no_git" } | { "status": "not_a_repo" } | { "status": "failed", reason: string, };
 
 /**
  * What is uncommitted at a checkout.
+ *
+ * Issue #824, ADR-0026.
  */
 export type UncommittedDiff = { 
 /**
@@ -2978,6 +3555,8 @@ export type UrlMatch = { entity_id: string, kind: string, };
  * An action with no fields, no sentence, no `with_settings` and not
  * `danger` queues on the button, with no dialog; its fixed `values` go with
  * it.
+ *
+ * Issues #667 and #702.
  */
 export type ViewAction = { 
 /**
@@ -3053,6 +3632,66 @@ line_comments: LineComments, };
  *
  * Internally tagged (`{"type": "diff", ...}`) so the TypeScript mirror is a
  * discriminated union on `type`.
+ *
+ * - `facts`: Label and value pairs: a commit's sha and author, a build's
+ *   outcome.
+ * - `text`: Prose: a commit message, a pull request's description. `markdown`
+ *   says the source writes Markdown there; the shell still draws it as text,
+ *   never as markup (ADR-0020 rule 5).
+ * - `entities`: A list of things, each of which may be an address (ADR-0020
+ *   rule 7): a commit's parents, a pull request's commits, a build's changes.
+ * - `diff`: A diff, parsed by [`crate::diff`] and capped there. `truncated`
+ *   says the per-view cap cut it: some file after the cut carries its counts
+ *   and no lines.
+ *
+ *   `commentable` says the reader may write line comments on it (issue #709):
+ *   a pull request's diff, while a review can still be given. The shell keeps
+ *   what the reader writes as pending comments of the entity the view is of,
+ *   and they go with the toolbar actions that take them
+ *   ([`ViewAction::line_comments`]). `None` -- a commit's diff, a closed pull
+ *   request's -- draws no way to comment. Absent on the wire reads as `None`.
+ * - `log`: Plain text with meaningful lines, drawn monospace: a build log's
+ *   tail. `truncated` says this is the end of something longer.
+ * - `settings`: Named values a reader may be allowed to change (ADR-0020 rule
+ *   4): a build configuration's parameters. `entity` is what an edit targets
+ *   and `write_op` is the [`WriteOp`](crate::WriteOp) identifier that changes
+ *   a value; a view never writes.
+ * - `actions`: Writes a reader can start from this section, one button each
+ *   (issue #667, ADR-0020 rule 4). An action of the whole entity belongs in
+ *   [`SourceView::actions`], the toolbar (issue #702); this block is for one
+ *   that belongs to one section, and never repeats a toolbar action.
+ *
+ *   Whether an action can be taken is the source's answer, read in the adapter
+ *   ([`ViewAction::disabled`]); the shell never decides it by reading a fact's
+ *   label or the payload (ADR-0007). The shell additionally draws an action
+ *   only where the source's descriptor declares its `write_op`, and queues it
+ *   through the write queue against the entity the view is of. A view never
+ *   writes.
+ * - `tree`: One directory of a tree of files (issue #711): a repository's at a
+ *   branch. `trail` leads from the tree's top to this directory; each entry
+ *   that can be opened names the section that opens it.
+ *
+ *   **A section a block names opens in the tab it is drawn in**: the shell
+ *   reads it with `view(entity, section)` as it reads a deferred tab, and
+ *   draws the answer in place of this block's section, under the same tab. So
+ *   walking a tree is one tab whose content changes, and the ids are the
+ *   source's own (`files:src/lib`); the shell never parses them.
+ *
+ *   `truncated` says the source's cap cut the listing (Gitea's adapter keeps
+ *   1,000 entries), and `url` is the directory's page at the source, where the
+ *   rest is.
+ * - `file`: One file of a tree (issue #711), drawn monospace with line
+ *   numbers. `trail` leads from the tree's top to the file, the file last.
+ *
+ *   `text` is empty for a `binary` file. `truncated` says a cap cut the text
+ *   (the source's own: Gitea's adapter keeps 1 MB and 10,000 lines), and `url`
+ *   is the file's page at the source, where the rest is. `language` is a hint
+ *   from the file's name (`"rust"`, `"markdown"`), `None` where the source has
+ *   none; the shell may draw a `"markdown"` file rendered, with the raw text a
+ *   toggle away, and never highlights.
+ *
+ * Named `ViewBlock` in the generated TypeScript (#1326), because the shell's
+ * barrel already exports a time-tracking `Block`.
  */
 export type ViewBlock = { "type": "facts", facts: Array<Fact>, } | { "type": "text", text: string, markdown: boolean, } | { "type": "entities", title: string | null, rows: Array<ViewRow>, } | { "type": "diff", files: Array<DiffFile>, truncated: boolean, commentable: Commenting | null, 
 /**
@@ -3060,11 +3699,36 @@ export type ViewBlock = { "type": "facts", facts: Array<Fact>, } | { "type": "te
  * outdated, drawn in a list at the end of the diff. Absent on the
  * wire reads as empty.
  */
-gone: Array<FileThread>, } | { "type": "log", text: string, truncated: boolean, } | { "type": "settings", title: string | null, entity: string, write_op: string, values: Array<Setting>, } | { "type": "actions", actions: Array<ViewAction>, } | { "type": "tree", trail: Array<Crumb>, entries: Array<TreeEntry>, truncated: boolean, url: string | null, } | { "type": "file", trail: Array<Crumb>, path: string, text: string, language: string | null, 
+gone: Array<FileThread>, } | { "type": "log", text: string, truncated: boolean, } | { "type": "settings", title: string | null, entity: string, write_op: string, values: Array<Setting>, } | { "type": "actions", actions: Array<ViewAction>, } | { "type": "tree", trail: Array<Crumb>, entries: Array<TreeEntry>, 
+/**
+ * The source's cap cut the listing; the rest is at `url`.
+ */
+truncated: boolean, 
+/**
+ * The directory's page at its source.
+ */
+url: string | null, } | { "type": "file", trail: Array<Crumb>, path: string, 
+/**
+ * Empty for a binary file.
+ */
+text: string, 
+/**
+ * A hint from the file's name (`"rust"`, `"markdown"`); nothing is
+ * highlighted.
+ */
+language: string | null, 
 /**
  * The file's size in bytes, as the source reports it.
  */
-size: number, truncated: boolean, binary: boolean, url: string | null, 
+size: number, 
+/**
+ * A cap cut the text; the rest is at `url`.
+ */
+truncated: boolean, binary: boolean, 
+/**
+ * The file's page at its source.
+ */
+url: string | null, 
 /**
  * The file's blob sha at the ref drawn (#883): the version an edit
  * of it is made against, `WriteOp::CommitFile`'s `base_sha`. `None`
@@ -3121,6 +3785,8 @@ deferred: boolean, blocks: Array<ViewBlock>, };
 
 /**
  * What a checkout's working tree is doing right now.
+ *
+ * Issue #704.
  */
 export type WorkingTreeState = { 
 /**

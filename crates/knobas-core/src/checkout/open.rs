@@ -28,6 +28,9 @@ use serde::{Deserialize, Serialize};
 pub const PLACEHOLDERS: [&str; 4] = ["path", "file", "line", "name"];
 
 /// One application on the *Open in…* menu.
+///
+/// Issue #844, R-8.21. Its commands take `{path}`, `{file}`, `{line}` and
+/// `{name}`, all filled from this disk.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts", rename = "CheckoutApplication")]
 pub struct Application {

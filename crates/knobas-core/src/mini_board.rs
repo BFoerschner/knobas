@@ -386,6 +386,8 @@ const OBSERVED_STATUSES: &str = concat!(
 );
 
 /// One room's tickets as the mini board draws them.
+///
+/// Issue #177.
 #[derive(Clone, Debug, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct MiniBoard {
@@ -409,18 +411,19 @@ pub struct MiniBoard {
 
 /// What a board's lanes split by (R-3.5): the Tickets view's *Lanes*
 /// switch, spelled as a ticket view stores it.
+///
+/// - `epic`: The epic: the ticket's path line, as the card draws it.
+/// - `issuetype`: The ticket's type.
+/// - `label`: The ticket's first label.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export_to = "entity.ts")]
 pub enum LaneField {
-    /// The epic: the ticket's path line, as the card draws it.
     Epic,
     Assignee,
     Priority,
-    /// The ticket's type.
     #[serde(rename = "issuetype")]
     IssueType,
-    /// The ticket's first label.
     Label,
 }
 
@@ -448,6 +451,8 @@ pub struct Lanes {
 
 /// One lane of a laned board: the value its tickets share, how many they
 /// are, and its own columns, each capped and counted as a board's column is.
+///
+/// Issue #939.
 #[derive(Clone, Debug, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct MiniBoardLane {
@@ -461,22 +466,27 @@ pub struct MiniBoardLane {
 }
 
 /// One status of a lane: its cards by id, newest first, and its count.
+///
+/// Issue #939.
 #[derive(Clone, Debug, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct LaneColumn {
     /// As [`MiniBoardColumn::status`].
+    ///
+    /// `None` is the terminal group.
     pub status: Option<String>,
     /// The ids of the cards kept, each in [`MiniBoard::columns`].
+    ///
+    /// Newest first, or in the saved view's order.
     pub ids: Vec<String>,
     /// How many of the lane's tickets stand in this status, kept or not.
     pub total: u32,
 }
 
-/// One column: a status, and the cards standing in it.
+/// One column: a status, and the cards standing in it (#177).
 ///
-/// The count the column header shows is `cards.len()`; it is not a field,
-/// because a count beside the list it counts is a second copy of the same fact
-/// and only one of them can be right.
+/// The count the column header shows is [`total`](Self::total) (#753): on a
+/// capped read `cards` holds only the newest, so its length is not the count.
 #[derive(Clone, Debug, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct MiniBoardColumn {
@@ -494,6 +504,8 @@ pub struct MiniBoardColumn {
 }
 
 /// One ticket on the board.
+///
+/// Issue #177.
 #[derive(Clone, Debug, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct MiniBoardCard {
@@ -508,6 +520,8 @@ pub struct MiniBoardCard {
     pub title: String,
     /// `None` where the record carries no readable priority; see
     /// [`priority_read!`].
+    ///
+    /// The card omits it rather than guessing (ADR-0007).
     pub priority: Option<String>,
     /// The ticket's type in its source's words (`Story`, `Bug`), at the
     /// declared `issue_type` path (#810); `None` on a miss, drawn as nothing.
@@ -517,9 +531,13 @@ pub struct MiniBoardCard {
     /// ticket and on a miss.
     pub assignee: Option<String>,
     /// When the source last changed it, or `None` where it never said.
+    ///
+    /// RFC 3339 on the wire.
     pub updated_at: Option<DateTime<Utc>>,
     /// The ticket's declared parent chain as one line (its epic, for Jira):
     /// `knobas_core::path_line_read!`, the line every other row draws.
+    ///
+    /// `None` where no parent is declared or it misses.
     pub path: Option<String>,
     /// The title of the item its direct parent names (#894): the epic's
     /// name beside [`Self::path`]'s key, `PAY-200 Payout reliability`. The
@@ -548,6 +566,8 @@ pub struct MiniBoardCard {
 }
 
 /// The statuses one source's live ticket corpus shows, in the board's order.
+///
+/// Issue #177.
 #[derive(Clone, Debug, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct SourceStatuses {

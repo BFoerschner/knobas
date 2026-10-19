@@ -64,6 +64,10 @@ pub struct InboxEntry {
     /// nothing to ask a source for, and a source with no write capability
     /// offers nothing on any of its items. *Open*, *snooze* and *done* are not
     /// in here -- they are knobas' own and always available.
+    ///
+    /// Best first; dispatch one with `submit_write`. **Render exactly these and
+    /// no others**: an op absent from this list is one the source cannot
+    /// perform, and a button for it would fail on press.
     pub actions: Vec<String>,
 }
 

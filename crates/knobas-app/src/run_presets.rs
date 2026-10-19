@@ -17,6 +17,9 @@ use sqlx::{PgPool, Row};
 use crate::IpcError;
 
 /// One preset, as `save_run_preset` takes it and `run_presets` answers it.
+///
+/// Issue #852: what a run of one pipeline starts from, saved under a name.
+/// Knobas-local.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct RunPreset {

@@ -31,6 +31,8 @@ use uuid::Uuid;
 use crate::CoreError;
 
 /// Everything said for and against one proposal.
+///
+/// Issue #836.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct ProposalEvidence {
@@ -63,6 +65,7 @@ pub struct Excerpt {
 #[ts(export_to = "entity.ts", rename = "EvidencePart")]
 pub struct Part {
     pub text: String,
+    /// The match: the key, the host or a shared word.
     pub marked: bool,
 }
 

@@ -28,6 +28,8 @@ use serde::Serialize;
 pub const TIMEOUT: Duration = Duration::from_secs(2);
 
 /// What a checkout's working tree is doing right now.
+///
+/// Issue #704.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct WorkingTreeState {
@@ -55,17 +57,21 @@ pub struct WorkingTreeState {
 ///
 /// None of these is an error. A checkout panel is worth drawing without a
 /// state, and each arm is a sentence the panel says.
+///
+/// - `read`: git answered.
+/// - `no_git`: No `git` on `PATH`.
+/// - `not_a_repo`: The path is not a git working tree, or not there at all.
+/// - `failed`: git ran and did not answer: it timed out, or refused with
+///   `reason`.
+///
+/// Issue #704.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
 pub enum TreeRead {
-    /// git answered.
     Read(WorkingTreeState),
-    /// No `git` on `PATH`.
     NoGit,
-    /// The path is not a git working tree, or not there at all.
     NotARepo,
-    /// git ran and did not answer: it timed out, or refused with `reason`.
     Failed { reason: String },
 }
 
@@ -334,53 +340,6 @@ mod tests {
     const PATIENT: Duration = Duration::from_secs(30);
     /// For the test that expects the cut-off.
     const IMPATIENT: Duration = Duration::from_millis(100);
-
-    /// The four arms serialise as the words `app/src/lib/ipc/entity.ts`
-    /// narrows on, with the state's fields beside the tag.
-    #[test]
-    fn the_read_serialises_as_the_mirror_declares() {
-        let mirror = include_str!("../../../../app/src/lib/ipc/entity.ts");
-        let read = serde_json::to_value(TreeRead::Read(WorkingTreeState::default())).unwrap();
-        let mut keys: Vec<String> = read.as_object().unwrap().keys().cloned().collect();
-        keys.sort();
-        assert_eq!(
-            keys,
-            [
-                "ahead",
-                "behind",
-                "branch",
-                "changed",
-                "conflicted",
-                "head",
-                "status",
-                "untracked",
-                "upstream"
-            ]
-        );
-        for key in &keys {
-            assert!(
-                mirror.contains(&format!("{key}:")),
-                "WorkingTreeState.{key} is missing from app/src/lib/ipc/entity.ts"
-            );
-        }
-        for (arm, word) in [
-            (TreeRead::Read(WorkingTreeState::default()), "read"),
-            (TreeRead::NoGit, "no_git"),
-            (TreeRead::NotARepo, "not_a_repo"),
-            (
-                TreeRead::Failed {
-                    reason: String::new(),
-                },
-                "failed",
-            ),
-        ] {
-            assert_eq!(serde_json::to_value(arm).unwrap()["status"], word);
-            assert!(
-                mirror.contains(&format!("status: \"{word}\"")),
-                "{word:?} is missing from app/src/lib/ipc/entity.ts"
-            );
-        }
-    }
 
     /// A header git may add later, and an ignored entry, change nothing.
     #[test]

@@ -95,6 +95,8 @@ pub struct DocPage {
     /// mirrored page it is where the mirror holds it.
     pub ancestors: Vec<DocAncestor>,
     /// Who made this version (contract §4.1's `author`).
+    ///
+    /// In the source's account spelling.
     pub editor: Option<String>,
     /// The editor's display name, where the source's record carries one.
     pub editor_name: Option<String>,
@@ -761,6 +763,8 @@ pub struct DocHit {
 }
 
 /// A hit's snippet: where it is, and its text with the matches marked.
+///
+/// Source text, never markup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct DocSnippet {
@@ -1196,6 +1200,8 @@ pub fn docs_writes(
 // -- Export as Markdown (#861) ----------------------------------------------
 
 /// What *Export as Markdown* wrote.
+///
+/// Issue #861.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct DocExport {
@@ -1309,6 +1315,8 @@ pub async fn section_edit(
 }
 
 /// What *New page* asks for (R-10.16).
+///
+/// Issue #862.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct NewPage {

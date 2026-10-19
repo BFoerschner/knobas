@@ -21,9 +21,13 @@ use super::*;
 pub struct SuggestionPage {
     pub rows: Vec<SuggestionEntry>,
     /// Every proposal in the room, before `limit`.
+    ///
+    /// The number the tray's heading shows.
     pub total: i64,
     /// Items holding more proposals than the tray draws for one item (#774),
     /// most hidden first. The bound is applied by `suggest::proposals`.
+    ///
+    /// The tray draws three per item.
     pub more: Vec<suggest::SuggestionMore>,
 }
 

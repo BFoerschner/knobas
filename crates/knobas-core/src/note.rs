@@ -108,22 +108,42 @@ pub const UNTITLED: &str = "Untitled note";
 const MAX_REF_CHARS: usize = 512;
 
 /// One note.
+///
+/// Notes are the first kind knobas *owns* rather than mirrors: nothing synced
+/// this and nothing can re-fetch it, which is why it is in the backup and never
+/// written to a source.
 #[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct NoteRow {
     /// `note:<uuid>`, and also the id of this note's `knobas.entity` row.
+    ///
+    /// Also this note's entity id, so it links like anything else.
     pub id: String,
     /// The note's name. Never blank -- see [`UNTITLED`].
+    ///
+    /// A note the user has not named is "Untitled note".
     pub title: String,
     /// Markdown the user typed. **Untrusted text**: render it as text, never as
     /// markup (roadmap §4 gotcha 7). It is the user's own here rather than a
     /// source's, which changes who is at fault and nothing else.
+    ///
+    /// There is no `{@html}` anywhere in the shell: a `[[ref]]` becomes a chip
+    /// by parsing the body into tokens and drawing them, not by turning the
+    /// string into HTML.
     pub body_md: String,
+    /// RFC 3339 on the wire.
     pub created_at: DateTime<Utc>,
+    /// RFC 3339 on the wire. Moves on every save.
     pub updated_at: DateTime<Utc>,
 }
 
 /// One `[[ref]]` the body names, and what it points at -- if anything.
+///
+/// `target` is `None` for an **unresolved** ref: nothing carries that id, so it
+/// creates no link and is drawn as unresolved rather than as plain text, which
+/// is how a typo is discoverable. A `target` whose `deleted_at` is set is the
+/// other case entirely: the ref resolves, the link exists, and the chip is
+/// marked withdrawn.
 #[derive(Clone, Debug, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct NoteRef {

@@ -83,20 +83,21 @@ pub struct DocSection {
 
 /// Why a section is edited in the source and not in knobas (R-10.13): a text
 /// box round-trips plain text, and what it cannot hold would be lost.
+///
+/// - `table`: A table.
+/// - `code`: A code block.
+/// - `macro`: A macro, a layout, a mention, a page or ticket link: markup of
+///   the source's own that text cannot carry. An info, note, warning or tip
+///   panel is edited (#975) unless it carries more than a title.
+/// - `formatting`: Bold, italics, links, a nested or a numbered list, which the
+///   text box would flatten.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
 pub enum SectionRefusal {
-    /// A table.
     Table,
-    /// A code block.
     Code,
-    /// A macro, a layout, a mention, a page or ticket link: markup of the
-    /// source's own that text cannot carry. An info, note, warning or tip
-    /// panel is edited (#975) unless it carries more than a title.
     Macro,
-    /// Bold, italics, links, a nested or a numbered list, which the text box
-    /// would flatten.
     Formatting,
 }
 
@@ -167,12 +168,23 @@ pub struct DocComment {
 ///
 /// Internally tagged (`{"type": "heading", ...}`) so the TypeScript mirror is
 /// a discriminated union on `type`.
+///
+/// - `heading`: A section heading. `level` is 1 to 6 as the source wrote it;
+///   the reader draws every level as a section head.
+/// - `list`: A list. A nested list's items are drawn as a list inside their
+///   item.
+/// - `code`: A code block, verbatim, with the language the source named.
+/// - `table`: A table, row by row; a header cell says so.
+/// - `panel`: An info, note, warning or tip panel, with the blocks inside it.
+/// - `placeholder`: Something the source has that the reader does not draw: the
+///   source's own name for it (a Confluence macro's `ac:name`). Never dropped,
+///   so a page with a part knobas cannot draw says so (story 134).
+///
+/// Source text, never markup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
 pub enum DocBlock {
-    /// A section heading. `level` is 1 to 6 as the source wrote it; the
-    /// reader draws every level as a section head.
     Heading {
         level: u8,
         text: Vec<Inline>,
@@ -180,29 +192,22 @@ pub enum DocBlock {
     Paragraph {
         text: Vec<Inline>,
     },
-    /// A list. A nested list's items are drawn as a list inside their item.
     List {
         ordered: bool,
         items: Vec<Vec<DocBlock>>,
     },
-    /// A code block, verbatim, with the language the source named.
     Code {
         code: String,
         language: Option<String>,
     },
-    /// A table, row by row; a header cell says so.
     Table {
         rows: Vec<Vec<TableCell>>,
     },
-    /// An info, note, warning or tip panel, with the blocks inside it.
     Panel {
         kind: PanelKind,
         title: Option<String>,
         blocks: Vec<DocBlock>,
     },
-    /// Something the source has that the reader does not draw: the source's
-    /// own name for it (a Confluence macro's `ac:name`). Never dropped, so a
-    /// page with a part knobas cannot draw says so (story 134).
     Placeholder {
         name: String,
     },
@@ -228,11 +233,24 @@ pub enum PanelKind {
 }
 
 /// One run of text inside a block.
+///
+/// - `text`: Words, with the marks the source put on them.
+/// - `link`: A link out of the docs source, to a web address.
+/// - `page_link`: A link to another page of the docs source, by its title and
+///   space. `entity_id` is the mirrored page it names, filled by knobas when
+///   the reader is read; the adapter leaves it `None`.
+/// - `issue`: A ticket reference (a Confluence Jira-issue macro), drawn as a
+///   live chip. The adapter fills `key`; knobas fills the rest from the mirror
+///   when the reader is read, and leaves them `None` for a ticket it does not
+///   hold.
+/// - `mention`: A mention of a person. `user` is the account name where the
+///   source says it (the spelling `@me` matches), `name` the display name where
+///   it is known. `me` is filled by knobas when the reader is read.
+/// - `break`: A hard line break inside a block.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts", rename = "DocInline")]
 pub enum Inline {
-    /// Words, with the marks the source put on them.
     Text {
         text: String,
         #[serde(default)]
@@ -242,11 +260,10 @@ pub enum Inline {
         #[serde(default)]
         code: bool,
     },
-    /// A link out of the docs source, to a web address.
-    Link { text: String, href: String },
-    /// A link to another page of the docs source, by its title and space.
-    /// `entity_id` is the mirrored page it names, filled by knobas when the
-    /// reader is read; the adapter leaves it `None`.
+    Link {
+        text: String,
+        href: String,
+    },
     PageLink {
         text: String,
         title: String,
@@ -254,10 +271,6 @@ pub enum Inline {
         #[serde(default)]
         entity_id: Option<String>,
     },
-    /// A ticket reference (a Confluence Jira-issue macro), drawn as a live
-    /// chip. The adapter fills `key`; knobas fills the rest from the mirror
-    /// when the reader is read, and leaves them `None` for a ticket it does
-    /// not hold.
     Issue {
         key: String,
         #[serde(default)]
@@ -267,16 +280,12 @@ pub enum Inline {
         #[serde(default)]
         status: Option<String>,
     },
-    /// A mention of a person. `user` is the account name where the source
-    /// says it (the spelling `@me` matches), `name` the display name where it
-    /// is known. `me` is filled by knobas when the reader is read.
     Mention {
         user: Option<String>,
         name: Option<String>,
         #[serde(default)]
         me: bool,
     },
-    /// A hard line break inside a block.
     Break,
 }
 

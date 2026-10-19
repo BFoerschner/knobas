@@ -218,6 +218,12 @@ pub struct LinkRow {
     pub id: Uuid,
     pub from_id: String,
     pub to_id: String,
+    /// What kind of link this is: `"related"` unless one was named.
+    ///
+    /// Always **lower case**: the backend folds it on write, so `Blocks` and
+    /// `blocks` are one relation and one panel group rather than two. Key the
+    /// curated list and the inverse-label lookup on this spelling; capitalize
+    /// for display from the whole string.
     pub relation: String,
     #[ts(inline)]
     pub origin: Origin,
@@ -231,6 +237,7 @@ pub struct LinkRow {
     /// only one of them is worth a line in the panel.
     pub note: Option<String>,
     pub created_by: String,
+    /// RFC 3339 on the wire.
     pub created_at: chrono::DateTime<chrono::Utc>,
     /// When the user said yes -- and, by being `None`, the whole difference
     /// between a link and a [proposal](crate::suggest).
@@ -240,6 +247,11 @@ pub struct LinkRow {
     /// `knobas.confirmed_link`, which cannot contain it, and the tray reads
     /// `knobas.proposed_link`, which cannot contain anything else. Every link
     /// that predates migration `0007` carries its own `created_at` here.
+    ///
+    /// RFC 3339 on the wire. A confirmed row is in `EntityDetail.links` and
+    /// never in `roomSuggestions`; an unconfirmed one the other way round, and
+    /// the two reads cannot overlap. Every link drawn by hand is confirmed the
+    /// moment it is written.
     pub confirmed_at: Option<chrono::DateTime<chrono::Utc>>,
     /// The named detection rule that proposed this link, or `None` for one a
     /// person drew.
@@ -247,9 +259,18 @@ pub struct LinkRow {
     /// Deliberately not a closed vocabulary: rules are expected to grow, and a
     /// constrained column would make each new one a migration. The *class*
     /// below is the closed axis.
+    ///
+    /// Examples: `"branch_name_key"`, `"similar_text"`. Branch on `rule_class`,
+    /// and show `rule` only as provenance: a closed list in the shell would
+    /// have to ship before a new detector could.
     pub rule: Option<String>,
     /// Which class of evidence [`rule`](Self::rule) is, or `None` for a link a
     /// person drew.
+    ///
+    /// The axis a reader calibrates trust on and the one a badge should show:
+    /// `exact_key` is "the two ends name each other", `similarity` is a guess
+    /// from overlapping text, `source_relation` is a relation the source system
+    /// already states.
     #[ts(inline)]
     pub rule_class: Option<crate::suggest::RuleClass>,
     /// Why knobas proposed this link, in the detector's own words -- "the
@@ -260,6 +281,8 @@ pub struct LinkRow {
     /// reason assembled by whichever surface happens to draw it is one that
     /// can be missing from the next surface. `link_proposal_chk` (migration
     /// `0007`) refuses an unconfirmed row without one.
+    ///
+    /// `None` for a link a person drew. Raw text: render it as text.
     pub reason: Option<String>,
 }
 
@@ -352,19 +375,30 @@ where
 #[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct LinkEnd {
+    /// `"<namespace>:<key>"`: the address a row navigates to.
     pub entity_id: String,
     pub kind: String,
     /// The entity's own title. Untrusted source text: render it as text.
+    ///
+    /// Never as markup (gotcha 7).
     pub title: String,
     /// Set when the source withdrew this entity.
     ///
     /// Not a filter -- a *fact* the reader is shown. A link may point at
     /// something that vanished upstream, and hiding it would be a link that
     /// dangles silently (#40's story 10).
+    ///
+    /// RFC 3339 on the wire. Not a reason to hide the row: §5a keeps the entity
+    /// so a link never dangles, and the panel marks it instead.
     pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// One link, as a detail view draws it: the record, and its other end.
+///
+/// Which end `other` holds depends on whose detail was read: `A -> B` hydrates
+/// `B` on A's panel and `A` on B's. Direction and the inverse-label wording are
+/// the frontend's (`detail/relations.ts`), computed from `link.from_id` against
+/// the entity being viewed.
 #[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct LinkEntry {

@@ -29,6 +29,8 @@ use crate::IpcError;
 pub const FOLDER: &str = "knobas-notes";
 
 /// What an export wrote.
+///
+/// *Export notes as Markdown* (#832).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct NotesExport {

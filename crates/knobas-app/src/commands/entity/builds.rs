@@ -972,21 +972,26 @@ pub async fn delete_run_preset(
 
 /// Why a pipeline is on a job (#850, R-9.1, R-9.2). Tagged on `kind`, so a
 /// link set (#866) joins as one more arm without changing these.
+///
+/// - `branch`: One of its runs built a branch the job reaches: a reached
+///   branch, by its title, or the branch a reached pull request is opened from
+///   (its declared `head`). *your branch*.
+/// - `pr_check`: One of its runs checked a pull request the job reaches: it ran
+///   on the pull request's declared `commit` (its head), or the job reaches the
+///   run through the pull request. *PR check*.
+/// - `linked`: The job reaches the pipeline, or one of its runs, some other
+///   way: a direct link, the parent's links (R-7.3), or a link set (#866).
+///   `step` and `origin` are the reach's own ([`knobas_core::reach::Reached`]).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
 pub enum PipelineReason {
-    /// One of its runs built a branch the job reaches: a reached branch, by
-    /// its title, or the branch a reached pull request is opened from (its
-    /// declared `head`). *your branch*.
-    Branch { branch: String },
-    /// One of its runs checked a pull request the job reaches: it ran on the
-    /// pull request's declared `commit` (its head), or the job reaches the run
-    /// through the pull request. *PR check*.
-    PrCheck { pr: String },
-    /// The job reaches the pipeline, or one of its runs, some other way: a
-    /// direct link, the parent's links (R-7.3), or a link set (#866). `step` and `origin` are
-    /// the reach's own ([`knobas_core::reach::Reached`]).
+    Branch {
+        branch: String,
+    },
+    PrCheck {
+        pr: String,
+    },
     Linked {
         step: String,
         origin: knobas_core::reach::Origin,

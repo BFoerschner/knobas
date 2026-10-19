@@ -76,33 +76,81 @@ pub struct ViewSection {
 ///
 /// Internally tagged (`{"type": "diff", ...}`) so the TypeScript mirror is a
 /// discriminated union on `type`.
+///
+/// - `facts`: Label and value pairs: a commit's sha and author, a build's
+///   outcome.
+/// - `text`: Prose: a commit message, a pull request's description. `markdown`
+///   says the source writes Markdown there; the shell still draws it as text,
+///   never as markup (ADR-0020 rule 5).
+/// - `entities`: A list of things, each of which may be an address (ADR-0020
+///   rule 7): a commit's parents, a pull request's commits, a build's changes.
+/// - `diff`: A diff, parsed by [`crate::diff`] and capped there. `truncated`
+///   says the per-view cap cut it: some file after the cut carries its counts
+///   and no lines.
+///
+///   `commentable` says the reader may write line comments on it (issue #709):
+///   a pull request's diff, while a review can still be given. The shell keeps
+///   what the reader writes as pending comments of the entity the view is of,
+///   and they go with the toolbar actions that take them
+///   ([`ViewAction::line_comments`]). `None` -- a commit's diff, a closed pull
+///   request's -- draws no way to comment. Absent on the wire reads as `None`.
+/// - `log`: Plain text with meaningful lines, drawn monospace: a build log's
+///   tail. `truncated` says this is the end of something longer.
+/// - `settings`: Named values a reader may be allowed to change (ADR-0020 rule
+///   4): a build configuration's parameters. `entity` is what an edit targets
+///   and `write_op` is the [`WriteOp`](crate::WriteOp) identifier that changes
+///   a value; a view never writes.
+/// - `actions`: Writes a reader can start from this section, one button each
+///   (issue #667, ADR-0020 rule 4). An action of the whole entity belongs in
+///   [`SourceView::actions`], the toolbar (issue #702); this block is for one
+///   that belongs to one section, and never repeats a toolbar action.
+///
+///   Whether an action can be taken is the source's answer, read in the adapter
+///   ([`ViewAction::disabled`]); the shell never decides it by reading a fact's
+///   label or the payload (ADR-0007). The shell additionally draws an action
+///   only where the source's descriptor declares its `write_op`, and queues it
+///   through the write queue against the entity the view is of. A view never
+///   writes.
+/// - `tree`: One directory of a tree of files (issue #711): a repository's at a
+///   branch. `trail` leads from the tree's top to this directory; each entry
+///   that can be opened names the section that opens it.
+///
+///   **A section a block names opens in the tab it is drawn in**: the shell
+///   reads it with `view(entity, section)` as it reads a deferred tab, and
+///   draws the answer in place of this block's section, under the same tab. So
+///   walking a tree is one tab whose content changes, and the ids are the
+///   source's own (`files:src/lib`); the shell never parses them.
+///
+///   `truncated` says the source's cap cut the listing (Gitea's adapter keeps
+///   1,000 entries), and `url` is the directory's page at the source, where the
+///   rest is.
+/// - `file`: One file of a tree (issue #711), drawn monospace with line
+///   numbers. `trail` leads from the tree's top to the file, the file last.
+///
+///   `text` is empty for a `binary` file. `truncated` says a cap cut the text
+///   (the source's own: Gitea's adapter keeps 1 MB and 10,000 lines), and `url`
+///   is the file's page at the source, where the rest is. `language` is a hint
+///   from the file's name (`"rust"`, `"markdown"`), `None` where the source has
+///   none; the shell may draw a `"markdown"` file rendered, with the raw text a
+///   toggle away, and never highlights.
+///
+/// Named `ViewBlock` in the generated TypeScript (#1326), because the shell's
+/// barrel already exports a time-tracking `Block`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts", rename = "ViewBlock")]
 pub enum Block {
-    /// Label and value pairs: a commit's sha and author, a build's outcome.
-    Facts { facts: Vec<Fact> },
-    /// Prose: a commit message, a pull request's description. `markdown`
-    /// says the source writes Markdown there; the shell still draws it as
-    /// text, never as markup (ADR-0020 rule 5).
-    Text { text: String, markdown: bool },
-    /// A list of things, each of which may be an address (ADR-0020 rule 7):
-    /// a commit's parents, a pull request's commits, a build's changes.
+    Facts {
+        facts: Vec<Fact>,
+    },
+    Text {
+        text: String,
+        markdown: bool,
+    },
     Entities {
         title: Option<String>,
         rows: Vec<ViewRow>,
     },
-    /// A diff, parsed by [`crate::diff`] and capped there. `truncated` says
-    /// the per-view cap cut it: some file after the cut carries its counts and
-    /// no lines.
-    ///
-    /// `commentable` says the reader may write line comments on it (issue
-    /// #709): a pull request's diff, while a review can still be given. The
-    /// shell keeps what the reader writes as pending comments of the entity
-    /// the view is of, and they go with the toolbar actions that take them
-    /// ([`ViewAction::line_comments`]). `None` -- a commit's diff, a closed
-    /// pull request's -- draws no way to comment. Absent on the wire reads as
-    /// `None`.
     Diff {
         files: Vec<DiffFile>,
         truncated: bool,
@@ -114,68 +162,41 @@ pub enum Block {
         #[serde(default)]
         gone: Vec<FileThread>,
     },
-    /// Plain text with meaningful lines, drawn monospace: a build log's tail.
-    /// `truncated` says this is the end of something longer.
-    Log { text: String, truncated: bool },
-    /// Named values a reader may be allowed to change (ADR-0020 rule 4): a
-    /// build configuration's parameters. `entity` is what an edit targets and
-    /// `write_op` is the [`WriteOp`](crate::WriteOp) identifier that changes a
-    /// value; a view never writes.
+    Log {
+        text: String,
+        truncated: bool,
+    },
     Settings {
         title: Option<String>,
         entity: String,
         write_op: String,
         values: Vec<Setting>,
     },
-    /// Writes a reader can start from this section, one button each (issue
-    /// #667, ADR-0020 rule 4). An action of the whole entity belongs in
-    /// [`SourceView::actions`], the toolbar (issue #702); this block is for
-    /// one that belongs to one section, and never repeats a toolbar action.
-    ///
-    /// Whether an action can be taken is the source's answer, read in the
-    /// adapter ([`ViewAction::disabled`]); the shell never decides it by
-    /// reading a fact's label or the payload (ADR-0007). The shell
-    /// additionally draws an action only where the source's descriptor
-    /// declares its `write_op`, and queues it through the write queue against
-    /// the entity the view is of. A view never writes.
-    Actions { actions: Vec<ViewAction> },
-    /// One directory of a tree of files (issue #711): a repository's at a
-    /// branch. `trail` leads from the tree's top to this directory; each
-    /// entry that can be opened names the section that opens it.
-    ///
-    /// **A section a block names opens in the tab it is drawn in**: the shell
-    /// reads it with `view(entity, section)` as it reads a deferred tab, and
-    /// draws the answer in place of this block's section, under the same tab.
-    /// So walking a tree is one tab whose content changes, and the ids are the
-    /// source's own (`files:src/lib`); the shell never parses them.
-    ///
-    /// `truncated` says the source's cap cut the listing (Gitea's adapter
-    /// keeps 1,000 entries), and `url` is the directory's page at the
-    /// source, where the rest is.
+    Actions {
+        actions: Vec<ViewAction>,
+    },
     Tree {
         trail: Vec<Crumb>,
         entries: Vec<TreeEntry>,
+        /// The source's cap cut the listing; the rest is at `url`.
         truncated: bool,
+        /// The directory's page at its source.
         url: Option<String>,
     },
-    /// One file of a tree (issue #711), drawn monospace with line numbers.
-    /// `trail` leads from the tree's top to the file, the file last.
-    ///
-    /// `text` is empty for a `binary` file. `truncated` says a cap cut the
-    /// text (the source's own: Gitea's adapter keeps 1 MB and 10,000 lines),
-    /// and `url` is the file's page at the source, where the rest is.
-    /// `language` is a hint from the file's name (`"rust"`, `"markdown"`),
-    /// `None` where the source has none; the shell may draw a `"markdown"`
-    /// file rendered, with the raw text a toggle away, and never highlights.
     File {
         trail: Vec<Crumb>,
         path: String,
+        /// Empty for a binary file.
         text: String,
+        /// A hint from the file's name (`"rust"`, `"markdown"`); nothing is
+        /// highlighted.
         language: Option<String>,
         /// The file's size in bytes, as the source reports it.
         size: u64,
+        /// A cap cut the text; the rest is at `url`.
         truncated: bool,
         binary: bool,
+        /// The file's page at its source.
         url: Option<String>,
         /// The file's blob sha at the ref drawn (#883): the version an edit
         /// of it is made against, `WriteOp::CommitFile`'s `base_sha`. `None`
@@ -187,6 +208,10 @@ pub enum Block {
 
 /// One step of a [`Block::Tree`]'s or [`Block::File`]'s trail: a
 /// directory's (or the file's own) name and the section that opens it.
+///
+/// Issue #711. A section a block names opens **in the tab it is drawn in**,
+/// read with `entity_view(entity, section)`; the id is the source's and never
+/// parsed.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct Crumb {
@@ -231,6 +256,8 @@ pub enum EntryKind {
 /// An action with no fields, no sentence, no `with_settings` and not
 /// `danger` queues on the button, with no dialog; its fixed `values` go with
 /// it.
+///
+/// Issues #667 and #702.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct ViewAction {
@@ -293,18 +320,21 @@ pub struct ViewAction {
 /// #709). The comments are the shell's -- written on a commentable
 /// [`Block::Diff`] and kept until sent or discarded -- and the action only
 /// says whether they go with it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+///
+/// - `none`: The action never sends them (*Comment…*, *Merge…*).
+/// - `sends`: The action sends them when there are some, and is drawn either
+///   way (*Approve…*, *Request changes…*): its dialog lists what goes with it.
+/// - `requires`: The action sends them and is drawn only while there are some
+///   (*Submit review…*, a review that is the comments and nothing else).
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
+)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
 pub enum LineComments {
-    /// The action never sends them (*Comment…*, *Merge…*).
     #[default]
     None,
-    /// The action sends them when there are some, and is drawn either way
-    /// (*Approve…*, *Request changes…*): its dialog lists what goes with it.
     Sends,
-    /// The action sends them and is drawn only while there are some
-    /// (*Submit review…*, a review that is the comments and nothing else).
     Requires,
 }
 
@@ -383,22 +413,25 @@ impl ActionField {
 
 /// How an [`ActionField`] asks. Internally tagged (`{"type": "choice", ...}`),
 /// a union on `type` in the TypeScript mirror as [`Block`] is.
+///
+/// - `text`: One line. `suggestions` are offered as the reader types and none
+///   is picked: a run's branch suggests the branches recent builds ran on.
+/// - `long_text`: Several lines of Markdown: a description, a comment. Drawn as
+///   a plain text area; the shell never renders it (ADR-0020 rule 5).
+/// - `choice`: One of `options`, picked.
+/// - `flag`: A checkbox.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
 pub enum FieldKind {
-    /// One line. `suggestions` are offered as the reader types and none is
-    /// picked: a run's branch suggests the branches recent builds ran on.
     Text {
         #[serde(default)]
         suggestions: Vec<String>,
     },
-    /// Several lines of Markdown: a description, a comment. Drawn as a plain
-    /// text area; the shell never renders it (ADR-0020 rule 5).
     LongText,
-    /// One of `options`, picked.
-    Choice { options: Vec<ChoiceOption> },
-    /// A checkbox.
+    Choice {
+        options: Vec<ChoiceOption>,
+    },
     Flag,
 }
 
@@ -460,6 +493,9 @@ pub struct ViewRow {
     /// either way it clears this field, so it never crosses to the shell.
     /// Absent on the wire when `None`, so a row without one is the shape it
     /// was before.
+    ///
+    /// Not in the generated TypeScript (`#[ts(skip)]`, #1326): it never reaches
+    /// the shell.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(skip)]
     pub commit: Option<CommitHint>,

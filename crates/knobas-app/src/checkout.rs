@@ -83,19 +83,27 @@ pub const CLONES_ROOT_KEY: &str = "checkout.clones_root";
 pub const CHECKOUT_KINDS: [&str; 2] = ["repo", "branch"];
 
 /// How a checkout was arrived at, or that it was not.
+///
+/// - `override`: A path this repository's override carries. Set by hand, and it
+///   wins.
+/// - `scan`: A clone the scan matched under the clones root.
+/// - `nothing`: Neither -- *no checkout*, with the clone command to copy.
+///
+/// Issue #499. `nothing` is a state, not a failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "entity.ts", rename = "CheckoutFoundBy")]
 pub enum FoundBy {
-    /// A path this repository's override carries. Set by hand, and it wins.
     Override,
-    /// A clone the scan matched under the clones root.
     Scan,
-    /// Neither -- *no checkout*, with the clone command to copy.
     Nothing,
 }
 
 /// What a repo or branch detail draws for its checkout.
+///
+/// Issue #499. A **checkout** (`CONTEXT.md`) is knobas-owned data about the
+/// local disk, never a field of the mirrored repo: knobas issues no clone, no
+/// checkout and no fetch from this view (ADR-0016).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct CheckoutView {
@@ -124,6 +132,8 @@ pub struct CheckoutView {
     /// Where the working tree at [`path`](Self::path) stands, read by
     /// read-only git when the view is asked for (ADR-0021). `None` exactly
     /// when there is no path.
+    ///
+    /// Issue #704.
     pub tree: Option<TreeRead>,
 }
 
@@ -433,63 +443,5 @@ mod tests {
             "migration 0024 no longer names {CLONES_ROOT_KEY}, so spec #491's \
              \"a settings row for the clones root\" has no record in the schema"
         );
-    }
-
-    /// The three states serialise as the words `app/src/lib/ipc/entity.ts`
-    /// narrows on. A renamed variant is a panel that draws nothing.
-    #[test]
-    fn found_by_serialises_as_the_mirror_declares() {
-        let mirror = include_str!("../../../app/src/lib/ipc/entity.ts");
-        for (state, word) in [
-            (FoundBy::Override, "override"),
-            (FoundBy::Scan, "scan"),
-            (FoundBy::Nothing, "nothing"),
-        ] {
-            assert_eq!(
-                serde_json::to_value(state).unwrap(),
-                serde_json::json!(word)
-            );
-            assert!(
-                mirror.contains(&format!("\"{word}\"")),
-                "{word:?} is missing from app/src/lib/ipc/entity.ts"
-            );
-        }
-    }
-
-    /// Exactly the keys the mirror declares -- a field added on one side only
-    /// is invisible to a walk over a hardcoded list.
-    #[test]
-    fn the_view_serialises_the_keys_the_mirror_declares() {
-        let view = CheckoutView {
-            repo_entity_id: Some("gitea:tidewater/payout-service".to_owned()),
-            repo_url: Some("https://gitea.example.com/tidewater/payout-service".to_owned()),
-            path: None,
-            found_by: FoundBy::Nothing,
-            clones_root: None,
-            clone_command: None,
-            tree: None,
-        };
-        let json = serde_json::to_value(&view).unwrap();
-        let mut keys: Vec<String> = json.as_object().unwrap().keys().cloned().collect();
-        keys.sort();
-        assert_eq!(
-            keys,
-            [
-                "clone_command",
-                "clones_root",
-                "found_by",
-                "path",
-                "repo_entity_id",
-                "repo_url",
-                "tree"
-            ]
-        );
-        let mirror = include_str!("../../../app/src/lib/ipc/entity.ts");
-        for key in &keys {
-            assert!(
-                mirror.contains(&format!("{key}:")),
-                "CheckoutView.{key} is missing from app/src/lib/ipc/entity.ts"
-            );
-        }
     }
 }

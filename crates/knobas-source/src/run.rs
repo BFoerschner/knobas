@@ -167,17 +167,18 @@ pub struct ArtifactPreview {
 
 /// What one download streams (#854's *Download log*, #856's downloads).
 /// Tagged on `kind`.
+///
+/// - `log`: The run's whole log.
+/// - `file`: One artifact file.
+/// - `folder`: One artifact folder, as a zip.
+/// - `all`: Every artifact, as a zip.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
 pub enum DownloadTarget {
-    /// The run's whole log.
     Log,
-    /// One artifact file.
     File { path: String },
-    /// One artifact folder, as a zip.
     Folder { path: String },
-    /// Every artifact, as a zip.
     All,
 }
 

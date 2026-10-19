@@ -4,8 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [features]
-# The derives `knobas-app`'s mirror tests round-trip through: `Serialize` on
-# `entity_list::EntityFilter` and `EntityOrder` (#1317), `Deserialize` on
+# The derives `knobas-app`'s tests read answers back through: `Deserialize` on
 # `builds::RunRow` and `PipelineRow` (#1318). Turned on by that crate's
 # `test-util`; off in every production build.
 test-util = []

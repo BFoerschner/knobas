@@ -30,6 +30,8 @@ use crate::view::{Fact, Setting};
 pub const OLDER_RUNS_MAX: u32 = 100;
 
 /// A pipeline's settings, read live (#851).
+///
+/// A secret parameter's value is never sent.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct PipelineSettings {
@@ -106,17 +108,23 @@ pub struct ParameterSpec {
 }
 
 /// The field a parameter is asked with. Tagged on `type`.
+///
+/// - `text`: Free text: anything typed is the value.
+/// - `select`: One of a fixed list, in the source's order.
+/// - `checkbox`: On or off, each with the value it sends.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
 pub enum ParameterKind {
-    /// Free text: anything typed is the value.
     #[default]
     Text,
-    /// One of a fixed list, in the source's order.
-    Select { options: Vec<ParameterOption> },
-    /// On or off, each with the value it sends.
-    Checkbox { checked: String, unchecked: String },
+    Select {
+        options: Vec<ParameterOption>,
+    },
+    Checkbox {
+        checked: String,
+        unchecked: String,
+    },
 }
 
 /// One value a [`ParameterKind::Select`] offers.
@@ -130,6 +138,8 @@ pub struct ParameterOption {
 }
 
 /// One repository a pipeline builds.
+///
+/// Issue #851.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct PipelineRepository {
@@ -149,6 +159,8 @@ pub struct PipelineRepository {
 
 /// One trigger of a pipeline: its kind in the source's word and what it
 /// fires on.
+///
+/// Issue #851.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct PipelineTrigger {

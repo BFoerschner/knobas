@@ -43,7 +43,11 @@ pub const RULE_KINDS: &[&str] = &["epic", "parent", "project", "manual"];
 /// enum only names the union a member's `kind` is in the shell.
 /// `the_kind_unions_are_the_kind_lists` pins it to the list.
 #[derive(ts_rs::TS)]
-#[ts(export_to = "entity.ts", rename = "LinkSetMemberKind", rename_all = "snake_case")]
+#[ts(
+    export_to = "entity.ts",
+    rename = "LinkSetMemberKind",
+    rename_all = "snake_case"
+)]
 pub enum MemberKind {
     Repo,
     Pipeline,
@@ -56,7 +60,11 @@ pub enum MemberKind {
 /// (#1326): what a rule matches on, R-7.1. Never built, as [`MemberKind`]
 /// is not, and pinned to the list by the same test.
 #[derive(ts_rs::TS)]
-#[ts(export_to = "entity.ts", rename = "LinkSetRuleKind", rename_all = "snake_case")]
+#[ts(
+    export_to = "entity.ts",
+    rename = "LinkSetRuleKind",
+    rename_all = "snake_case"
+)]
 pub enum RuleKind {
     Epic,
     Parent,
@@ -88,6 +96,9 @@ pub struct LinkSetMember {
 
 /// One pattern member (R-7.2): a kind of [`PATTERN_KINDS`] and a query in the
 /// search grammar that reads as a [`knobas_search::Pattern`].
+///
+/// Issue #868. For pipelines and pages; the query reads like `project:Payouts
+/// name:Payout_*`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct LinkSetPattern {
@@ -230,6 +241,7 @@ pub struct RuleTicket {
 pub struct LinkSetDetail {
     #[serde(flatten)]
     pub set: LinkSetRow,
+    /// The tickets it shows on now, in key order.
     pub shows_on: Vec<RuleTicket>,
 }
 
@@ -1084,6 +1096,7 @@ pub struct JobMember {
     /// no entity of that id.
     pub entity_kind: Option<String>,
     pub title: Option<String>,
+    /// Hidden on this ticket by *Hide here* (R-7.5).
     pub hidden: bool,
 }
 
@@ -1094,6 +1107,8 @@ pub struct JobMember {
 pub struct JobSet {
     pub id: String,
     pub name: String,
+    /// The first of its rules that matches the ticket, in the set's order: the
+    /// reason.
     pub via: RuleRow,
     pub members: Vec<JobMember>,
 }
@@ -1122,7 +1137,9 @@ pub struct JobParent {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct JobLinkSets {
+    /// The sets that apply, by name.
     pub sets: Vec<JobSet>,
+    /// `None` with no parent, an epic for one, or R-7.3's switch off.
     pub parent: Option<JobParent>,
 }
 
@@ -1268,6 +1285,9 @@ pub const HINT_TICKETS: i64 = 2;
 
 /// R-7.10's hint (#870): "You linked Dashboard_Build by hand to PAY-240 and 2
 /// more tickets under PAY-200. Add it to Payout stack?"
+///
+/// An item linked by hand to two or more tickets under the epic a set's rule
+/// names, which the set does not hold yet.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct LinkSetHint {
@@ -1392,10 +1412,7 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join(" | ")
         };
-        assert_eq!(
-            <MemberKind as ts_rs::TS>::inline(&cfg),
-            union(MEMBER_KINDS)
-        );
+        assert_eq!(<MemberKind as ts_rs::TS>::inline(&cfg), union(MEMBER_KINDS));
         assert_eq!(<RuleKind as ts_rs::TS>::inline(&cfg), union(RULE_KINDS));
     }
 

@@ -134,19 +134,24 @@ async fn save(pool: &PgPool, stored: &Stored) -> Result<(), IpcError> {
 /// Where it is and nothing more: knobas runs git only for `status`, `diff`
 /// and `clone` (ADR-0021, ADR-0026, ADR-0023), so it does not ask git its
 /// version.
+///
+/// - `found`: The `git` on `PATH`.
+/// - `no_git`: None, or Apple's shim without the Command Line Tools.
+/// - `failed`: The Command Line Tools probe did not answer.
+///
+/// Issue #844.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
 pub enum GitFound {
-    /// The `git` on `PATH`.
     Found { path: String },
-    /// None, or Apple's shim without the Command Line Tools.
     NoGit,
-    /// The Command Line Tools probe did not answer.
     Failed { reason: String },
 }
 
 /// What Settings › Checkouts draws, and what every *Open in…* menu reads.
+///
+/// Issue #844, R-13a.3.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct CheckoutSettings {
@@ -210,6 +215,11 @@ pub async fn set_applications(
 // -- #501's two commands, over the list --------------------------------------
 
 /// One application as #501's checkout panel draws it: a button.
+///
+/// Since #844 a view over the *Open in…* list (`checkout_settings`): one row
+/// per application. `is_default` says whether the command is the one this
+/// platform ships for that id, so the rooms settings field can offer to go back
+/// to it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts", rename = "CheckoutCommand")]
 pub struct OpenCommandView {
@@ -430,110 +440,14 @@ fn spawn(argv: &[String]) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
-    const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/entity.ts");
-
-    /// The body of one `export interface <name> {` in the mirror.
-    fn interface(name: &str) -> &'static str {
-        MIRROR
-            .split_once(&format!("export interface {name} {{"))
-            .unwrap_or_else(|| panic!("entity.ts declares {name}"))
-            .1
-            .split_once("\n}")
-            .expect("the interface is closed")
-            .0
-    }
-
-    fn keys(value: &serde_json::Value) -> Vec<String> {
-        let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
-        keys.sort();
-        keys
-    }
-
-    /// Exactly the keys the mirror declares, for each shape on the wire: a
-    /// field added on one side only is invisible to a walk over a hardcoded
-    /// list.
+    /// #501's button view names the application and says whether its
+    /// command is the one this platform ships.
     #[test]
-    fn the_settings_serialise_the_keys_the_mirror_declares() {
-        let settings = CheckoutSettings {
-            clones_root: None,
-            git: GitFound::NoGit,
-            default_application: Some("vscode".to_owned()),
-            applications: vec![Application {
-                id: "vscode".to_owned(),
-                name: "VS Code".to_owned(),
-                command: "code {path}".to_owned(),
-                file_command: None,
-            }],
-        };
-        let json = serde_json::to_value(&settings).unwrap();
-        assert_eq!(
-            keys(&json),
-            ["applications", "clones_root", "default_application", "git"]
-        );
-        let body = interface("CheckoutSettings");
-        for key in keys(&json) {
-            assert!(body.contains(&format!("{key}:")), "CheckoutSettings.{key}");
-        }
-        let app = &json["applications"][0];
-        assert_eq!(keys(app), ["command", "file_command", "id", "name"]);
-        let body = interface("CheckoutApplication");
-        for key in keys(app) {
-            assert!(
-                body.contains(&format!("{key}:")),
-                "CheckoutApplication.{key}"
-            );
-        }
-        // A draft is what the mirror sends back: the same four, the id optional.
-        let draft: knobas_core::checkout::open::Draft = serde_json::from_value(serde_json::json!({
-            "id": null, "name": "X", "command": "x {path}", "file_command": null
-        }))
-        .unwrap();
-        assert_eq!(draft.id, None);
-        let body = interface("CheckoutApplicationDraft");
-        for key in ["id", "name", "command", "file_command"] {
-            assert!(
-                body.contains(&format!("{key}:")),
-                "CheckoutApplicationDraft.{key}"
-            );
-        }
-    }
-
-    /// The git found is tagged on `status`, with the words the mirror narrows on.
-    #[test]
-    fn the_git_found_serialises_as_the_mirror_declares() {
-        for (git, word) in [
-            (
-                GitFound::Found {
-                    path: "/usr/bin/git".to_owned(),
-                },
-                "found",
-            ),
-            (GitFound::NoGit, "no_git"),
-            (
-                GitFound::Failed {
-                    reason: "x".to_owned(),
-                },
-                "failed",
-            ),
-        ] {
-            assert_eq!(serde_json::to_value(&git).unwrap()["status"], word);
-            assert!(MIRROR.contains(&format!("status: \"{word}\"")), "{word}");
-        }
-    }
-
-    /// #501's button view keeps its four keys, which the rooms panel reads.
-    #[test]
-    fn the_open_command_serialises_the_keys_the_mirror_declares() {
+    fn the_open_command_view_names_the_application() {
         let shipped = knobas_core::checkout::open::shipped_on("macos");
         let view = command_view(&shipped[0], &shipped);
         assert_eq!(view.label, "Open in VS Code");
         assert!(view.is_default);
-        let json = serde_json::to_value(view).unwrap();
-        assert_eq!(keys(&json), ["action", "is_default", "label", "template"]);
-        let body = interface("CheckoutCommand");
-        for key in keys(&json) {
-            assert!(body.contains(&format!("{key}:")), "CheckoutCommand.{key}");
-        }
     }
 
     /// A default that names no entry is the first one, and an empty list has

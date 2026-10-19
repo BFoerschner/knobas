@@ -56,6 +56,9 @@ use super::working_tree;
 pub const PROGRESS_EVERY: Duration = Duration::from_secs(1);
 
 /// What one clone reports while it runs and when it ends.
+///
+/// The `clone:progress` payload (#823): the repo entity being cloned, the
+/// folder, and its state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct CloneEvent {
@@ -69,35 +72,47 @@ pub struct CloneEvent {
 }
 
 /// Where a clone is.
+///
+/// - `progress`: Running: git's step, and the whole clone from 0 to 100.
+/// - `done`: Finished; the scan now finds the folder.
+/// - `failed`: git failed. `reason` is git's own line
+///   (`clone::failure_reason`); `removed` says whether the half-made folder is
+///   gone.
+/// - `stopped`: Stopped by [`stop`]. `removed` says whether the folder is gone.
+///
+/// Issue #823.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "state", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
 pub enum CloneState {
-    /// Running: git's step, and the whole clone from 0 to 100.
-    Progress { phase: String, percent: u8 },
-    /// Finished; the scan now finds the folder.
+    Progress {
+        phase: String,
+        percent: u8,
+    },
     Done,
-    /// git failed. `reason` is git's own line (`clone::failure_reason`);
-    /// `removed` says whether the half-made folder is gone.
     Failed {
         reason: String,
         cause: FailureCause,
         removed: bool,
     },
-    /// Stopped by [`stop`]. `removed` says whether the folder is gone.
-    Stopped { removed: bool },
+    Stopped {
+        removed: bool,
+    },
 }
 
 /// [`clone::FailureCause`], on the wire.
+///
+/// - `auth`: git could not sign in with the person's own credentials.
+/// - `disk_full`: The disk is full.
+/// - `other`: The network, the server, or anything else; the reason says which.
+///
+/// Why a clone failed (#823).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "entity.ts", rename = "CloneFailureCause")]
 pub enum FailureCause {
-    /// git could not sign in with the person's own credentials.
     Auth,
-    /// The disk is full.
     DiskFull,
-    /// The network, the server, or anything else; the reason says which.
     Other,
 }
 
@@ -112,18 +127,20 @@ impl From<clone::FailureCause> for FailureCause {
 }
 
 /// What `clone_repo` answers.
+///
+/// - `cloning`: The clone started, or was already running; events follow.
+/// - `adopted`: The folder was already a clone of this repository; nothing ran.
+/// - `stopped`: A running clone was stopped. `removed` says whether the
+///   half-made folder is gone.
+/// - `not_cloning`: A stop was asked for and no clone of this repository was
+///   running.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
 pub enum CloneAnswer {
-    /// The clone started, or was already running; events follow.
     Cloning { path: String },
-    /// The folder was already a clone of this repository; nothing ran.
     Adopted { path: String },
-    /// A running clone was stopped. `removed` says whether the half-made
-    /// folder is gone.
     Stopped { path: String, removed: bool },
-    /// A stop was asked for and no clone of this repository was running.
     NotCloning,
 }
 
@@ -667,86 +684,4 @@ async fn remove(target: &Path) -> bool {
         }
     }
     false
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The shapes cross the bridge with exactly the keys
-    /// `app/src/lib/ipc/entity.ts` declares, and the tags it narrows on.
-    #[test]
-    fn the_clone_shapes_serialise_as_the_mirror_declares() {
-        let mirror = include_str!("../../../../app/src/lib/ipc/entity.ts");
-        let event = serde_json::to_value(CloneEvent {
-            entity_id: "gitea:a/b".to_owned(),
-            path: "/x/b".to_owned(),
-            state: CloneState::Failed {
-                reason: String::new(),
-                cause: FailureCause::Auth,
-                removed: true,
-            },
-        })
-        .unwrap();
-        let mut keys: Vec<&String> = event.as_object().unwrap().keys().collect();
-        keys.sort();
-        assert_eq!(
-            keys,
-            ["cause", "entity_id", "path", "reason", "removed", "state"]
-        );
-        for key in keys {
-            assert!(
-                mirror.contains(&format!("{key}:")),
-                "{key} is not in entity.ts"
-            );
-        }
-        for (state, word) in [
-            (
-                CloneState::Progress {
-                    phase: String::new(),
-                    percent: 0,
-                },
-                "progress",
-            ),
-            (CloneState::Done, "done"),
-            (CloneState::Stopped { removed: true }, "stopped"),
-        ] {
-            assert_eq!(serde_json::to_value(state).unwrap()["state"], word);
-            assert!(mirror.contains(&format!("state: \"{word}\"")), "{word}");
-        }
-        assert!(mirror.contains("state: \"failed\""));
-        for (cause, word) in [
-            (FailureCause::Auth, "auth"),
-            (FailureCause::DiskFull, "disk_full"),
-            (FailureCause::Other, "other"),
-        ] {
-            assert_eq!(serde_json::to_value(cause).unwrap(), word);
-            assert!(mirror.contains(&format!("\"{word}\"")), "{word}");
-        }
-        for (answer, word) in [
-            (
-                CloneAnswer::Cloning {
-                    path: String::new(),
-                },
-                "cloning",
-            ),
-            (
-                CloneAnswer::Adopted {
-                    path: String::new(),
-                },
-                "adopted",
-            ),
-            (
-                CloneAnswer::Stopped {
-                    path: String::new(),
-                    removed: true,
-                },
-                "stopped",
-            ),
-            (CloneAnswer::NotCloning, "not_cloning"),
-        ] {
-            assert_eq!(serde_json::to_value(answer).unwrap()["status"], word);
-            assert!(mirror.contains(&format!("status: \"{word}\"")), "{word}");
-        }
-    }
 }

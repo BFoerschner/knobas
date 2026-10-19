@@ -544,13 +544,10 @@ pub async fn get_note_inner(pool: &PgPool, note_id: &str) -> Result<NoteDetail, 
 /// means. The capture window (#503) and the in-app *New note* pass the same
 /// two, and a third caller with a third relation needs no argument here.
 ///
-/// The note is always the **from** end; see [`knobas_core::note::BornLink`].
-///
-/// `Serialize` behind `test-util` for the reason [`EntityFilter`] carries it:
-/// it is what lets `tests/it/entity_mirror.rs` pin an input DTO through a round
-/// trip, and so see a field the TypeScript mirror never declares.
+/// The note is always the **from** end, so `captured-in` reads *captured in*
+/// from the note and *captured here* from the context; see
+/// [`knobas_core::note::BornLink`].
 #[derive(Debug, Clone, serde::Deserialize, ts_rs::TS)]
-#[cfg_attr(feature = "test-util", derive(serde::Serialize))]
 #[ts(export_to = "entity.ts")]
 pub struct NoteLinkInput {
     /// The other end's entity id.

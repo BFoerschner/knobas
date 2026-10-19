@@ -19,6 +19,10 @@ pub const MAX_LINES_PER_FILE: usize = 1_500;
 pub const MAX_LINES_PER_VIEW: usize = 6_000;
 
 /// What happened to one file.
+///
+/// - `renamed`: Moved, with or without edits; `old_path` names where from.
+/// - `binary`: A binary file changed (or was added or deleted): no lines to
+///   draw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
@@ -26,9 +30,7 @@ pub enum DiffChange {
     Added,
     Modified,
     Deleted,
-    /// Moved, with or without edits; `old_path` names where from.
     Renamed,
-    /// A binary file changed (or was added or deleted): no lines to draw.
     Binary,
 }
 
@@ -52,6 +54,8 @@ pub struct DiffFile {
     /// source that keeps line comments read for it, in the order the file
     /// reads -- empty from the parser, which knows only the text. Absent on
     /// the wire reads as empty, so a diff drawn before #709 decodes.
+    ///
+    /// The outdated ones last.
     #[serde(default)]
     pub threads: Vec<LineThread>,
 }

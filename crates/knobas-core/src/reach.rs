@@ -271,19 +271,23 @@ macro_rules! reach_walk {
 ///
 /// Tagged on `kind`; #866's link sets joined as the third arm without
 /// changing the two before it.
+///
+/// - `own`: The ticket's own links, its context's adds, and where those lead.
+/// - `parent`: The parent ticket's own links (R-7.3), labelled "Parent
+///   PAY-231".
+/// - `link_set`: A member of a link set whose rule matches the ticket (#866,
+///   ADR-0025), labelled with the set's name.
+///
+/// A link set's arm is named as the reader named the set.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts", rename = "ReachOrigin")]
 pub enum Origin {
-    /// The ticket's own links, its context's adds, and where those lead.
     Own,
-    /// The parent ticket's own links (R-7.3), labelled "Parent PAY-231".
     Parent {
         /// The parent ticket's entity id.
         ticket: String,
     },
-    /// A member of a link set whose rule matches the ticket (#866,
-    /// ADR-0025), labelled with the set's name.
     LinkSet {
         /// The set's id, its address: `#/sets/<set>`.
         set: String,
@@ -293,6 +297,8 @@ pub enum Origin {
 }
 
 /// One entity a ticket reaches.
+///
+/// Issue #817.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct Reached {
@@ -302,6 +308,8 @@ pub struct Reached {
     /// The first step of the path that brought it in: an entity id. Equal to
     /// `entity_id` when the entity is itself the first step -- linked to the
     /// ticket directly, or one of the parent's own links.
+    ///
+    /// What the row's reason names.
     pub step: String,
     pub origin: Origin,
 }
