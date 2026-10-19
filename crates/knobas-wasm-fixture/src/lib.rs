@@ -212,7 +212,7 @@ impl Adapter {
     }
 
     fn survey(&self, (key, title, body): (&str, &str, &str)) -> SyncItem {
-        emitted(knobas_source::SyncItem {
+        wit_item(knobas_source::SyncItem {
             entity: EntityRef::new(&self.id, key),
             kind: "survey".into(),
             title: title.into(),
@@ -233,7 +233,7 @@ impl Adapter {
         title: &str,
         payload: serde_json::Value,
     ) -> SyncItem {
-        emitted(knobas_source::SyncItem {
+        wit_item(knobas_source::SyncItem {
             entity: EntityRef::new(&self.id, key),
             kind: kind.into(),
             title: title.into(),
@@ -289,7 +289,7 @@ impl Adapter {
 
 /// The SPI's item as the WIT world carries it: the entity as `ns:key`, the
 /// instant as RFC 3339, the payload as its JSON text.
-fn emitted(item: knobas_source::SyncItem) -> SyncItem {
+fn wit_item(item: knobas_source::SyncItem) -> SyncItem {
     SyncItem {
         entity: item.entity.to_string(),
         kind: item.kind,

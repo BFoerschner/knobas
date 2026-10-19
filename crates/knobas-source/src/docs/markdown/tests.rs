@@ -1,5 +1,5 @@
 //! The converter's rules, one block at a time, in the frame's vocabulary
-//! (ported from `knobas_spi_types::markdown`'s tests, #952).
+//! (ported from `knobas_core::markdown`'s tests, #952).
 
 use super::*;
 

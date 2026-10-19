@@ -200,9 +200,9 @@ pub struct SourceDescriptor {
 
 // The declaration types themselves live in `knobas-spi-types`, not here: the
 // adapters that write them depend on this crate, and the readers that resolve
-// them are in `knobas-core`, which may not depend on the SPI. Neither crate
-// needs a database, so both build for `wasm32-wasip2` (#1234). Re-exported so
-// an adapter needs one `use`.
+// them are in `knobas-core`, which may not depend on the SPI. Neither
+// `knobas-spi-types` nor this crate needs a database, so both build for
+// `wasm32-wasip2` (#1234). Re-exported so an adapter needs one `use`.
 pub use knobas_spi_types::entity::EntityRef;
 pub use knobas_spi_types::payload::{
     Frame, KindPaths, ListPath, ParentPath, PayloadPath, ProjectPath, StateChip, StatePath,
@@ -446,7 +446,7 @@ pub enum SourceError {
     /// that version: what a reader compares their own against before they
     /// choose. The write queue holds the write with both rather than
     /// refusing it, and *Apply anyway* re-sends it against `base`
-    /// (`knobas_spi_types::write_queue::apply_anyway`). Never retried on its own,
+    /// (`knobas_core::write_queue::apply_anyway`). Never retried on its own,
     /// and not a fault of the credential or the network.
     ///
     /// Two strings and no status, so it crosses a process boundary as plain
@@ -680,7 +680,7 @@ pub enum WriteOp {
     /// which is how Confluence is asked to abort when somebody else got there
     /// first. That abort is the **backstop** and not the mechanism: the write
     /// queue holds this op when the mirror moved on after it was queued
-    /// (`knobas_spi_types::write_queue::project`), and Confluence's own conflict
+    /// (`knobas_core::write_queue::project`), and Confluence's own conflict
     /// answer catches the window the mirror could not see.
     UpdatePage {
         entity: String,
@@ -811,7 +811,7 @@ pub enum WriteOp {
     ///
     /// Hold detection takes the whole mirrored record, as for
     /// [`MergePullRequest`](WriteOp::MergePullRequest): see
-    /// `knobas_spi_types::write_queue::project` for what that record can and
+    /// `knobas_core::write_queue::project` for what that record can and
     /// cannot witness for a parameter.
     SetParameter {
         entity: String,
@@ -922,7 +922,7 @@ pub enum WriteOp {
     /// Hold detection is per field (the deputy's ruling on #706): a title
     /// edit holds on a retitle, a description edit on the description, a
     /// close or reopen on the state the source declares for the kind -- see
-    /// `knobas_spi_types::write_queue::project`.
+    /// `knobas_core::write_queue::project`.
     EditPullRequest {
         entity: String,
         #[serde(default)]
@@ -978,7 +978,7 @@ pub enum WriteOp {
     /// liveness, as for a create.
     ///
     /// *Apply anyway* re-sends against their version by itself
-    /// (`knobas_spi_types::write_queue::apply_anyway`). *Edit* is an amend, and an
+    /// (`knobas_core::write_queue::apply_anyway`). *Edit* is an amend, and an
     /// amend's payload is the caller's whole: one answering a moved commit
     /// carries `base_sha` set to the held side's `base`, or the source
     /// compares it against the stale blob again and it is held again.

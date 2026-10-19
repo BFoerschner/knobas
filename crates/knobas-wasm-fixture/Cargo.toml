@@ -21,6 +21,7 @@ test = false
 doctest = false
 
 [dependencies]
+# The items' `updated_at`, an SPI `SyncItem` field.
 chrono.workspace = true
 knobas-source = { path = "../knobas-source" }
 serde_json.workspace = true
