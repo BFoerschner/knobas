@@ -173,6 +173,8 @@ export interface KindPaths {
   position: PayloadPath[];
   /** Which part of a shell-owned frame this kind is, or `null` (ADR-0022, #848, #1207). */
   frame: Frame | null;
+  /** The ticket system a saved-view kind's views are listed under: `Jira` (#1207). */
+  system_name: string | null;
   /** What a pipeline is called (#848). */
   name: PayloadPath[];
   /** The group a pipeline sits in, in the source's word (#848). */

@@ -8,9 +8,11 @@
 //! whose [`KindPaths`](knobas_core::payload::KindPaths) declares
 //! [`Frame::SavedView`], the ticket-system minimum's optional kind
 //! (`knobas_source::role`); Jira's `jira_view` is one. Nothing here names an
-//! adapter: the group a view is listed under is the source's descriptor name
-//! with *boards* or *filters* after it, so Jira's read *Jira boards* and
-//! *Jira filters* as before. The tables keep the names #877 gave them.
+//! adapter: the group a view is listed under is the ticket system's name the
+//! kind declares (`system_name`, else the descriptor's `name`) with *boards*
+//! or *filters* after it, so Jira's read *Jira boards* and *Jira filters* as
+//! before, whatever the source is called. The tables keep the names #877
+//! gave them.
 //!
 //! **Off the mirror, not off the emitted items**, for `samples`' reason: the
 //! Jira adapter delivers a view only when it changed, so an idle run emits
@@ -24,7 +26,7 @@
 //! leaves nothing behind.
 //!
 //! **What the ticket view row takes from the source and what it keeps.** The name,
-//! the group (*Jira boards* or *Jira filters*: `<descriptor name> boards`, or
+//! the group (*Jira boards* or *Jira filters*: `<system name> boards`, or
 //! `filters` for a view whose `kind` is `filter`) and the columns follow Jira at
 //! every run (R-3.24); the layout, lanes, card fields, list columns and sort
 //! are the reader's (*View settings*) and are written only when the row is
@@ -64,19 +66,24 @@ pub struct SavedViewKinds {
 }
 
 /// The saved-view kinds `descriptor` emits: each declares
-/// [`Frame::SavedView`] and is one of its `entity_kinds`.
+/// [`Frame::SavedView`] and is one of its `entity_kinds`. Their groups take
+/// the first one's declared `system_name`, else the descriptor's `name`: one
+/// source is one ticket system.
 #[must_use]
 pub fn declared(descriptor: &SourceDescriptor) -> Option<SavedViewKinds> {
-    let kinds: Vec<String> = descriptor
+    let saved: Vec<&knobas_core::payload::KindPaths> = descriptor
         .payload_paths
         .iter()
         .filter(|p| p.frame == Some(Frame::SavedView))
         .filter(|p| descriptor.entity_kinds.iter().any(|k| k.id == p.kind))
-        .map(|p| p.kind.clone())
         .collect();
-    (!kinds.is_empty()).then(|| SavedViewKinds {
-        kinds,
-        source_name: descriptor.name.clone(),
+    let first = saved.first()?;
+    Some(SavedViewKinds {
+        kinds: saved.iter().map(|p| p.kind.clone()).collect(),
+        source_name: first
+            .system_name
+            .clone()
+            .unwrap_or_else(|| descriptor.name.clone()),
     })
 }
 

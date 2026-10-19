@@ -346,6 +346,14 @@ pub struct KindPaths {
     /// frame draws.
     #[serde(default)]
     pub frame: Option<Frame>,
+    /// The ticket system a [`Frame::SavedView`] kind's views are listed under
+    /// (#1207): Jira's is `Jira`, so its boards and filters sit under *Jira
+    /// boards* and *Jira filters* whatever a person named the source. Not the
+    /// descriptor's `name`, which is the instance's and changes with it.
+    /// `None` lists them under the source's name; `None` for every kind that
+    /// is not a saved view.
+    #[serde(default)]
+    pub system_name: Option<String>,
     /// What a pipeline is called (#848): TeamCity's configuration `name`.
     /// Empty for every kind that is not a pipeline.
     #[serde(default)]
@@ -1694,6 +1702,7 @@ mod tests {
         expected.push("kind");
         expected.push("blocked_statuses");
         expected.push("frame");
+        expected.push("system_name");
         expected.sort_unstable();
         assert_eq!(keys, expected);
     }

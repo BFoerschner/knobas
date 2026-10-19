@@ -6169,3 +6169,25 @@ The implementer's rulings:
   `jira_view_ref_kind_chk`; now another source's word (`project`) is a board, as a missing one
   already was. Under ADR-0007 an unrecognised word contributes nothing, so the view keeps the
   frame's default (a board) rather than failing the source's whole run. **Reversing:** low.
+
+Reserved for Björn, ruled by the merge-manager on Opus (PR #1246):
+
+- **Amending the §10.8 entry with `KindPaths.system_name`.** The implementer's group rule read the
+  instance descriptor's `name`, which is the source's display name: a Jira source named *Jira EU*
+  would list its views under *Jira EU boards*, which the Tickets pane's `JIRA_GROUPS` neither
+  orders last nor marks as synced. That breaks the issue's "Jira's boards and filters behave
+  exactly as today". Ruling: the saved-view kind declares the ticket system's name, Jira's
+  `jira_view` declares `Jira`, and an undeclared one falls back to the descriptor's `name`.
+  Reasoning: the sync engine sees only the instance, never the adapter template, and threading
+  the registry into every run entry point is about 200 call sites; a payload field would leave
+  Jira's unchanged boards, which the adapter does not deliver again, without it. **Reversing:**
+  drop the field and pick another source of the word; the field is optional on the wire.
+
+The merge-manager's rulings:
+
+- **A payload `kind` that is not `filter` is a board: accepted.** Jira's adapter writes only
+  `board` and `filter` (`views.rs`), so no Jira view behaves differently; only a word Jira never
+  sends stops failing the run. **Reversing:** low.
+- **`Frame::SavedView` needs no WIT change: confirmed.** `descriptor: func() -> json` carries the
+  whole `SourceDescriptor` as JSON (1198 entry), so the new variant and field are new JSON words,
+  not a new WIT case.

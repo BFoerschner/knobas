@@ -26,6 +26,9 @@ struct Adapter {
     name: &'static str,
     kind: &'static str,
     saved_view: bool,
+    /// The ticket system its views are listed under, as the Jira adapter
+    /// declares `Jira`; `None` lists them under the source's `name`.
+    system: Option<&'static str>,
 }
 
 const JIRA: Adapter = Adapter {
@@ -33,6 +36,7 @@ const JIRA: Adapter = Adapter {
     name: "Jira",
     kind: "jira_view",
     saved_view: true,
+    system: Some("Jira"),
 };
 
 struct Boards {
@@ -66,6 +70,7 @@ impl Source for Boards {
             name,
             kind: views,
             saved_view,
+            system,
         } = self.adapter;
         SourceDescriptor {
             id: id.into(),
@@ -87,6 +92,7 @@ impl Source for Boards {
             payload_paths: vec![knobas_source::KindPaths {
                 kind: views.into(),
                 frame: saved_view.then_some(knobas_core::payload::Frame::SavedView),
+                system_name: system.map(str::to_owned),
                 ..knobas_source::KindPaths::default()
             }],
         }
@@ -558,6 +564,7 @@ async fn a_saved_view_of_a_ticket_system_that_is_not_jira_shows_as_a_ticket_view
         name: "Forge",
         kind: "project_view",
         saved_view: true,
+        system: None,
     };
     let (src, _) = source_of(
         forge,
@@ -625,4 +632,48 @@ async fn a_view_kind_that_declares_no_saved_view_frame_makes_no_ticket_view() {
     );
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
     assert_eq!(ticket_view(&pool, "jira-board-22").await, None);
+}
+
+/// #1207, "Jira's boards and filters behave exactly as today": a Jira source
+/// a person named *Jira EU* still lists its views under *Jira boards* and
+/// *Jira filters*, the groups the Tickets pane puts last. The group is the
+/// ticket system's name the kind declares, never the source's own.
+#[tokio::test]
+async fn a_renamed_jira_source_still_lists_its_views_under_jira_boards_and_filters() {
+    let pool = pool("saved_views_renamed_jira").await;
+    let renamed = Adapter {
+        name: "Jira EU",
+        ..JIRA
+    };
+    let (src, _) = source_of(
+        renamed,
+        vec![
+            (
+                "board-22".into(),
+                "PAY flow".into(),
+                board(22, &["PAY-1"], three_columns()),
+                false,
+            ),
+            (
+                "filter-9".into(),
+                "Mine".into(),
+                filter("9", &["PAY-1"]),
+                false,
+            ),
+        ],
+    );
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    let groups: Vec<(String, String)> = sqlx::query_as(
+        "select id, view_group from knobas.ticket_view where jira_ref like 'jira:%' order by id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        groups,
+        [
+            ("jira-board-22".to_owned(), "Jira boards".to_owned()),
+            ("jira-filter-9".to_owned(), "Jira filters".to_owned())
+        ]
+    );
 }

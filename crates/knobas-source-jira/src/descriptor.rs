@@ -192,6 +192,9 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
         KindPaths {
             kind: crate::KIND_JIRA_VIEW.to_owned(),
             frame: Some(knobas_core::payload::Frame::SavedView),
+            // Jira's, not the source's name: a source named *Jira EU* still
+            // lists its views under *Jira boards* and *Jira filters*.
+            system_name: Some("Jira".to_owned()),
             ..KindPaths::default()
         },
     ]
@@ -308,6 +311,11 @@ mod tests {
             .map(|p| p.kind.as_str())
             .collect();
         assert_eq!(saved, vec![crate::KIND_JIRA_VIEW]);
+        assert_eq!(
+            d.payload_paths[1].system_name.as_deref(),
+            Some("Jira"),
+            "the views' groups say Jira, not the source's own name"
+        );
         assert_eq!(d.entity_kinds[0].monogram, "JI");
         assert_eq!(d.entity_kinds[0].plural, "Tickets");
     }
