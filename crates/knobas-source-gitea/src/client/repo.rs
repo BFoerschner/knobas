@@ -23,22 +23,38 @@ impl GiteaClient {
         .await
     }
 
-    /// `GET /repos/{o}/{r}/labels` -- the repository's labels, the first
-    /// page of fifty, which a pull request's *Add label…* offers (#1194). A
-    /// repository with more offers its first fifty, in Gitea's order.
+    /// One page of fifty of `GET /repos/{o}/{r}/labels`, the repository's
+    /// own labels, with Gitea's `X-Total-Count` where it sent one. A pull
+    /// request's *Add label…* reads them all (#1194, #1235).
     pub(crate) async fn labels_as<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,
         repo: &str,
-    ) -> Result<Vec<T>, SourceError> {
-        let (limit, page) = page_params(1);
-        let labels: Option<Vec<T>> = self
-            .get_json(
+        page: u32,
+    ) -> Result<(Vec<T>, Option<usize>), SourceError> {
+        let (limit, page) = page_params(page);
+        let (labels, total): (Option<Vec<T>>, _) = self
+            .get_json_counted(
                 &format!("/repos/{}/{}/labels", segment(owner)?, segment(repo)?),
                 &[limit, page],
             )
             .await?;
-        Ok(labels.unwrap_or_default())
+        Ok((labels.unwrap_or_default(), total))
+    }
+
+    /// One page of fifty of `GET /orgs/{org}/labels`, the organisation's
+    /// labels, which every repository it owns may use (#1235). Gitea answers
+    /// 404 where `org` is a user, not an organisation.
+    pub(crate) async fn org_labels_as<T: serde::de::DeserializeOwned>(
+        &self,
+        org: &str,
+        page: u32,
+    ) -> Result<(Vec<T>, Option<usize>), SourceError> {
+        let (limit, page) = page_params(page);
+        let (labels, total): (Option<Vec<T>>, _) = self
+            .get_json_counted(&format!("/orgs/{}/labels", segment(org)?), &[limit, page])
+            .await?;
+        Ok((labels.unwrap_or_default(), total))
     }
 
     /// `GET /repos/{o}/{r}/branches/{branch}` -- one branch and its tip.
