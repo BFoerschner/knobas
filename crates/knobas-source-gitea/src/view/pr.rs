@@ -69,7 +69,7 @@ pub(super) async fn draw(
             // last.
             actions.extend(review::actions(&pull, viewer.as_deref()));
             actions.extend(maintain::actions(&pull));
-            actions.push(label::action(&pull, &labels));
+            actions.push(label::action(&pull, at.owner, &labels));
             actions.extend(land::actions(&pull, &reviews, &landing));
             vec![
                 overview(&pull, &reviews, &landing, checks),

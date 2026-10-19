@@ -2677,3 +2677,35 @@ async fn add_label_offers_the_organisations_labels_too() {
         "{action:#?}"
     );
 }
+
+/// A repository label and an organisation label of one name read as two
+/// options (#1271): the organisation's carries the organisation's name, the
+/// repository's keeps its plain one, and a name only one list has stays plain.
+#[tokio::test]
+async fn add_label_tells_a_same_named_organisation_label_apart() {
+    let server = gitea(open_pull(), json!([])).await;
+    let own = json!([{ "id": 7, "name": "bug" }, { "id": 8, "name": "wontfix" }]);
+    label_page(&server, format!("{REPO}/labels"), 1, own, Some(2)).await;
+    let org = json!([{ "id": 900, "name": "bug" }, { "id": 901, "name": "org-late" }]);
+    label_page(
+        &server,
+        "/api/v1/orgs/tidewater/labels".to_owned(),
+        1,
+        org,
+        Some(2),
+    )
+    .await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        labelled(&view, "Add label…"),
+        crate::source_action::add_label_action(
+            &[
+                ("7", "bug"),
+                ("8", "wontfix"),
+                ("900", "bug (tidewater)"),
+                ("901", "org-late"),
+            ],
+            None
+        )
+    );
+}
