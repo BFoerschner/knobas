@@ -6475,4 +6475,28 @@ The implementer's rulings:
 - **Installed adapters are drawn on Settings › Sources under the source list**, only once one is
   installed, with *Check for updates*, *Update* and *Uninstall…*; prototype-6 has no design for
   them, and the uninstall dialog reuses *Remove…*'s two answers word for word, once per source.
+
+### Issue #1234 implementer, 2026-10-19
+
+No step of the ticket is reserved for Björn. The implementer's rulings:
+
+- **The new crate is `knobas-spi-types`, and `knobas-source` builds on it rather than moving into
+  it.** `payload`, `entity` and `tone` were the only things `knobas-source` took from
+  `knobas-core`; with them in a crate that needs no sqlx, `knobas-source` itself builds for
+  `wasm32-wasip2`, so its DTOs (`SourceDescriptor`, `SyncItem`, `WriteOp`, the view and run types)
+  reach a component without moving a line, and their serde form cannot have changed.
+  **Reversing:** low; the SDK step can fold the crate into whatever it names.
+- **`knobas-core` re-exports the three modules and the payload SQL macros under their old paths.**
+  No caller outside `knobas-source` changed, which keeps #1255's rebase clear. The macros moved
+  with `payload.rs` rather than splitting the file. **Reversing:** low (move them into a
+  `knobas-core` module; the `knobas_core::declared_*!` paths stay).
+- **`Declarations::as_param` sits behind the new crate's `sqlx` feature**, which `knobas-core`
+  turns on; a wasm build never does. Its 53 call sites stay as they were. **Reversing:** low.
+- **`knobas-source`'s tests now spell `knobas_spi_types::` where they spelled `knobas_core::`.**
+  Only the import paths changed; no assertion did. **Reversing:** low.
+- **`knobas-source` re-exports `EntityRef` and `Frame`** beside the payload types it already
+  re-exported, so an adapter building a `SyncItem` or a Builds-frame declaration needs one crate.
+  **Reversing:** low.
+- **Only the fixture's descriptor and items moved to the SPI types.** Its views, run reads and
+  settings stay hand-written JSON, as the ticket asks; the battery still holds them to the SPI.
   **Reversing:** low.
