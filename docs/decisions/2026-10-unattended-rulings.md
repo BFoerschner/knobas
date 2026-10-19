@@ -6042,3 +6042,17 @@ The implementer's rulings (PR for #1201, on Opus):
   migration, `WriteOp` or minimum. The battery gains two clause-10 tests (`test:thing` passes,
   `other-adapter:thing` is refused), which are tests, not a surface. **Reversing:** a §10.8 entry
   if a reviewer reads the criterion as asking for one of #1201's own.
+
+The merge-manager's rulings (PR #1242, on Opus):
+
+- **A §10.8 entry is owed after all, for the battery's tests.** §10.8 freezes "any change to
+  `crates/knobas-source/src/**` (the `Source` trait, its DTOs, the contract battery)", and every
+  earlier PR that touched that path carried an entry, however small. The two clause-10 tests live
+  in `contract.rs`, so the PR adds `docs/contract/10.8/1201-custom-role-battery-witness.md`, which
+  records the touch as tests only. **Reversing:** delete one file and rerun `just contract-index`.
+- **The shell route `#/item/<entity id>` is not frozen IPC.** A hash route is the frontend's own
+  address; it adds no command, event, DTO field or barrel line, and the page reads only
+  `get_entity` and `entity_view`. The entry above says so. **Reversing:** none needed.
+- **An inbox, standup or connection row whose kind is unknown now opens the item page, not
+  Tickets.** It draws *Could not read …* when the mirror lacks the item, which says more than
+  Tickets did. Accepted as part of the default case. **Reversing:** one guard in `itemHash`.
