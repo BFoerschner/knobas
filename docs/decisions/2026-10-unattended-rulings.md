@@ -6579,3 +6579,18 @@ No step of the ticket is reserved for Björn. The implementer's rulings:
 - **The repository's labels come first, then the organisation's, under their plain names**, as
   Gitea's own label picker lists them. A repository label and an organisation label of the same
   name are two options of the same text. **Reversing:** low.
+
+The merge-manager's rulings (Opus):
+
+- **A short page ends nothing, and a test now says so.** The implementer's tests passed with a
+  listing that stopped on a short page (every short page in them was also the last), so
+  `add_label_reads_on_past_a_short_page` reads a one-label page 1, a one-label page 2 and an
+  empty page 3 with no count; a stop-on-short-page mutant fails only it. **Reversing:** low.
+- **A failed organisation read keeps the sentence "Could not read this repository's labels: …".**
+  The labels are the ones the repository may use, and the error that follows names the `/orgs/…`
+  path, so the reader sees which read failed. A second sentence would be one more string for a
+  rare failure. **Reversing:** low.
+- **Two options of the same text, where a repository label and an organisation label share a
+  name, stay for now** and are #1271 (backlog): the case is rare, `ChoiceOption` has no second
+  line to tell them apart with, and the wrong pick is a label the reader can take off again.
+  **Reversing:** low.

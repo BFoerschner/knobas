@@ -2608,6 +2608,26 @@ async fn add_label_offers_the_repositorys_labels_past_the_first_page() {
     }
 }
 
+/// A short page does not end a label listing (#1235, #81's rule): a Gitea
+/// whose `MAX_RESPONSE_ITEMS` is under fifty answers fewer than were asked
+/// for on every page, and without a count only the empty page says the
+/// listing is whole.
+#[tokio::test]
+async fn add_label_reads_on_past_a_short_page() {
+    let server = gitea(open_pull(), json!([])).await;
+    let labels = format!("{REPO}/labels");
+    let first = json!([{ "id": 7, "name": "needs-qa" }]);
+    label_page(&server, labels.clone(), 1, first, None).await;
+    let second = json!([{ "id": 8, "name": "wontfix" }]);
+    label_page(&server, labels.clone(), 2, second, None).await;
+    label_page(&server, labels, 3, json!([]), None).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        labelled(&view, "Add label…"),
+        crate::source_action::add_label_action(&[("7", "needs-qa"), ("8", "wontfix")], None)
+    );
+}
+
 /// *Add label…* also offers the owning organisation's labels, every page of
 /// them, after the repository's own (#1235): a repository that uses only
 /// organisation labels has some to offer. A user owner is Gitea's 404 there
