@@ -112,6 +112,7 @@ struct Row {
     tag: Option<String>,
     artifact_sha256: String,
     hosts: Vec<String>,
+    limits: sqlx::types::Json<knobas_wasm_host::manifest::Limits>,
 }
 
 /// The rows' select, with `$tail` after it: one spelling of the columns.
@@ -119,7 +120,7 @@ macro_rules! rows_sql {
     ($tail:literal) => {
         concat!(
             "select adapter_kind, adapter_version, interface_version, source_url, tag,
-                    artifact_sha256, hosts
+                    artifact_sha256, hosts, limits
                from knobas.external_adapter ",
             $tail
         )
@@ -434,10 +435,13 @@ async fn reinstall_one(
     let pinned = &row.artifact_sha256;
     let load = |bytes: Vec<u8>| {
         let (kind, sha, hosts) = (row.adapter_kind.clone(), pinned.clone(), row.hosts.clone());
+        let limits = row.limits.0.clone();
         async move {
-            tokio::task::spawn_blocking(move || install::load_one(&kind, &sha, &bytes, &hosts))
-                .await
-                .unwrap_or_else(|e| Err(e.to_string()))
+            tokio::task::spawn_blocking(move || {
+                install::load_one(&kind, &sha, &bytes, &hosts, &limits)
+            })
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()))
         }
     };
     if let Ok(bytes) = tokio::fs::read(install::artifact_path(store, pinned)).await
