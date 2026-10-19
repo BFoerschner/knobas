@@ -6724,3 +6724,21 @@ The merge-manager's rulings (Opus):
   fixture component, against a local server) for the three criteria, with a test-only
   `fake_dns` standing in for the system's lookup so a name can resolve to loopback without a
   network. *Reversing:* n/a.
+
+### #1244: merge-manager's rulings (Opus)
+
+- **Criterion 1 under a system proxy.** *Fork:* hold the PR until a proxied request is guarded
+  too, or merge with the direct path guarded. *Ruling:* merge; criterion 1 is met on a direct
+  connection, which is the default. Through a proxy the proxy resolves the target, so a local
+  proxy reaches the reader's own loopback: #1283 stays `backlog` (nothing in the app shows it).
+  Sending guarded requests past the proxy (`no_proxy`) would cut off a reader whose only egress
+  is the proxy, so that choice stays with #1283. *Reversing:* low.
+- **`100.64/10` counts as local.** *Fork:* an ISP's carrier-grade NAT uses it on the customer
+  side. *Ruling:* keep it. RFC 6598 shared space is not routed on the internet, so no service a
+  manifest fixes answers there; a tailnet or CGNAT host is one the reader types, as a template's
+  value, and templates are not guarded. *Reversing:* low (`allow::is_local_v4`).
+- **The registry keys on the request URI's host, lower-cased**, not on the URL parser's form the
+  resolver is asked for. *Fork:* register `Target`'s normalised name. *Ruling:* keep. For every
+  authority `wasi:http` admits the two are equal: a percent-encoded host is refused by
+  `set_authority` before `send` (probe on `57e8ac50`), and non-ASCII never reaches `http::Uri`.
+  *Reversing:* low.
