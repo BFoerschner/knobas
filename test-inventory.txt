@@ -3848,6 +3848,7 @@ knobas-wasm-host	test/it	host::a_sink_error_the_component_swallows_still_fails_t
 knobas-wasm-host	test/it	host::a_sync_emits_the_fixed_corpus_and_resumes_from_its_cursor
 knobas-wasm-host	test/it	host::an_instance_of_another_kind_is_refused
 knobas-wasm-host	test/it	host::the_descriptor_template_is_the_component_s_own
+knobas-wasm-host	test/it	host::the_fixture_claims_its_custom_role_and_ci_with_every_optional_read
 knobas-wasm-host	test/it	host::the_host_wrapping_the_fixture_passes_the_contract_battery
 knobas-wasm-host	test/it	limits::a_fixture_that_allocates_past_its_cap_is_stopped_naming_it
 knobas-wasm-host	test/it	limits::a_fixture_that_spins_forever_is_stopped_at_its_deadline
