@@ -14,6 +14,7 @@ mod client;
 mod contract;
 mod source_action;
 mod sync;
+mod tickets;
 mod view;
 mod view_branch;
 mod view_files;
