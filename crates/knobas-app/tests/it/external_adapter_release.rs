@@ -451,11 +451,11 @@ async fn uninstall_with_two_sources_asks_once_per_source_and_does_what_each_says
     install_from(&pool, &registry, store.path(), &forge, &forge.repo_url()).await;
     assert_eq!(
         add_and_sync(&pool, &connector, &registry, "quay-a").await,
-        3
+        5
     );
     assert_eq!(
         add_and_sync(&pool, &connector, &registry, "quay-b").await,
-        3
+        5
     );
     let secrets: Arc<dyn knobas_secrets::SecretStore> =
         Arc::new(knobas_secrets::MemoryStore::new());
@@ -524,7 +524,7 @@ async fn uninstall_with_two_sources_asks_once_per_source_and_does_what_each_says
     );
     assert_eq!(
         items_of(&pool, "quay-b").await,
-        3,
+        5,
         "keep left quay-b's items"
     );
     assert!(installed::list(&pool, &registry).await.unwrap().is_empty());
