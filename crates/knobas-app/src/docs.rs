@@ -840,7 +840,9 @@ pub async fn search(
     // A hit with no row is not drawn, so it is not counted either.
     let left_out = found.hits.len() - hits.len();
     Ok(Some(DocsHits {
-        total: found.total.saturating_sub(left_out.try_into().unwrap_or(u32::MAX)),
+        total: found
+            .total
+            .saturating_sub(left_out.try_into().unwrap_or(u32::MAX)),
         took_ms: found.took_ms,
         needles: found.needles,
         unknown_tokens: found.unknown_tokens,

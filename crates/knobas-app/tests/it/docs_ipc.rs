@@ -1103,12 +1103,22 @@ async fn the_docs_reads_hold_only_the_wiki_fillers_pages() {
     let not_claiming = configured_as(&pool, "jira").await;
     let leftover = confluence(&pool).await;
     let uninstalled = configured_as(&pool, "role_nowhere").await;
+    let ours = [&filler, &with_miss, &not_claiming, &leftover, &uninstalled];
 
     let mut pages = Vec::new();
-    for source in [&filler, &with_miss, &not_claiming, &leftover, &uninstalled] {
+    for source in ours {
         let home_title = format!("Home {w}");
         let home = page(&pool, source, "1", &home_title, "OPS", &[], "").await;
-        let child = page(&pool, source, "2", &format!("Child {w}"), "OPS", &[&home_title], "").await;
+        let child = page(
+            &pool,
+            source,
+            "2",
+            &format!("Child {w}"),
+            "OPS",
+            &[&home_title],
+            "",
+        )
+        .await;
         for id in [&home, &child] {
             indexed(
                 &pool,
@@ -1138,7 +1148,6 @@ async fn the_docs_reads_hold_only_the_wiki_fillers_pages() {
         knobas_app::conversation::visit(&pool, home).await.unwrap();
     }
 
-    let ours = [&filler, &with_miss, &not_claiming, &leftover, &uninstalled];
     let tree = docs_tree_inner(&pool).await.unwrap();
     type Node<'a> = (&'a str, Option<&'a str>);
     let spaces: Vec<(&str, Vec<Node>)> = tree
@@ -1160,7 +1169,9 @@ async fn the_docs_reads_hold_only_the_wiki_fillers_pages() {
     let all: Vec<&String> = pages.iter().flat_map(|(h, c)| [h, c]).collect();
     let outsiders = &all[2..];
     assert!(
-        tree.last_read.as_ref().is_none_or(|id| !outsiders.contains(&id)),
+        tree.last_read
+            .as_ref()
+            .is_none_or(|id| !outsiders.contains(&id)),
         "the page read last is a filler's: {:?}",
         tree.last_read
     );

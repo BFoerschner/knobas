@@ -5525,9 +5525,25 @@ async fn the_roster_holds_only_the_monitoring_fillers_monitors_paused_ones_inclu
     .execute(&pool)
     .await
     .expect("the miss");
-    monitor_of(&pool, "jira", "not claiming", up.clone(), None, Some("jira")).await;
+    monitor_of(
+        &pool,
+        "jira",
+        "not claiming",
+        up.clone(),
+        None,
+        Some("jira"),
+    )
+    .await;
     monitor_of(&pool, "gone", "left behind", up.clone(), None, None).await;
-    monitor_of(&pool, "nowhere", "uninstalled", up, None, Some("role_nowhere")).await;
+    monitor_of(
+        &pool,
+        "nowhere",
+        "uninstalled",
+        up,
+        None,
+        Some("role_nowhere"),
+    )
+    .await;
 
     let roster = assets::monitor_roster(&pool).await.expect("the roster");
     assert_eq!(names(&roster), ["filler paused", "filler up"]);

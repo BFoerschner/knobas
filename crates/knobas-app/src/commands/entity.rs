@@ -6153,8 +6153,7 @@ pub async fn docs_tree_inner(pool: &PgPool) -> Result<crate::docs::DocsTree, Ipc
         .map_err(IpcError::internal)?
         .identity;
     let registry = crate::sources::Registry::builtin();
-    let fillers =
-        crate::sources::crud::fillers(pool, &registry, knobas_source::role::WIKI).await?;
+    let fillers = crate::sources::crud::fillers(pool, &registry, knobas_source::role::WIKI).await?;
     crate::docs::tree(
         pool,
         &declarations,
@@ -6242,8 +6241,7 @@ pub async fn docs_search_inner(
     let searcher = crate::commands::search::searcher(pool).await?;
     let registry = crate::sources::Registry::builtin();
     // The wiki's search, so it narrows itself to the role's fillers (#1296).
-    let fillers =
-        crate::sources::crud::fillers(pool, &registry, knobas_source::role::WIKI).await?;
+    let fillers = crate::sources::crud::fillers(pool, &registry, knobas_source::role::WIKI).await?;
     crate::docs::search(
         pool,
         &searcher,

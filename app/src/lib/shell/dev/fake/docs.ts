@@ -58,6 +58,11 @@ const WIKI_ROLE = "wiki";
 /** The source the fixture's spaces and pages are of. */
 const SOURCE = "confluence";
 
+/** Whether the fixture's source fills the wiki, which both Docs reads narrow to (#1296). */
+function wikiFilled(): boolean {
+  return fakeRoleScope(WIKI_ROLE).sources.includes(SOURCE);
+}
+
 const HOST = "http://127.0.0.1:5399/confluence";
 const ME = "mara";
 
@@ -355,7 +360,7 @@ function generic(page: FakePage, by: string): Body {
  * tree holds no space, no page read last and no *For you*.
  */
 function tree(): DocsTree {
-  if (!fakeRoleScope(WIKI_ROLE).sources.includes(SOURCE)) return { spaces: [], last_read: null, for_you: [] };
+  if (!wikiFilled()) return { spaces: [], last_read: null, for_you: [] };
   const spaces: DocSpace[] = Object.entries(SPACES).map(([key, name]) => ({
     source_id: SOURCE,
     key,
@@ -536,8 +541,7 @@ function search(args: Record<string, unknown>): DocsHits | null {
   const count = (text: string, s: string) => text.toLowerCase().split(s).length - 1;
   const hits: (DocHit & { score: number })[] = [];
   // The wiki's search, narrowed to the role's fillers as the tree is (#1296).
-  const filling = fakeRoleScope(WIKI_ROLE).sources.includes(SOURCE);
-  for (const p of filling ? PAGES : []) {
+  for (const p of wikiFilled() ? PAGES : []) {
     if (space && p.space.toLowerCase() !== space) continue;
     const doc = page({ entityId: p.id });
     if (q.by && doc.editor !== q.by && !(doc.editor_name ?? "").toLowerCase().startsWith(q.by)) continue;

@@ -3260,8 +3260,8 @@ export type DocInline =
 
 /**
  * The Docs reader's left pane — `docs_tree` (#859). The read narrows itself
- * to the wiki role's fillers (#1296, §10.8's #1294 entry): a space, the page
- * read last and *For you* are only theirs.
+ * to the wiki role's fillers (#1296, §10.8's #1294 and #1296 entries): a
+ * space, the page read last and *For you* are only theirs.
  */
 export function docsTree(): Promise<DocsTree> {
   return invoke<DocsTree>("docs_tree");
