@@ -1,0 +1,153 @@
+/* ---------- the job's conversation (#819): the card's summary and the tab ---------- */
+.tf-jobcard .tf-last { font-size: var(--t-sm); background: rgba(255,255,255,.28); border-radius: 4px; padding: 7px 9px; margin: 6px 0 8px; color: var(--card-ink); }
+.tf-jobcard .tf-last b, .tf-jobcard p b { font-weight: 600; }
+.tf-jobcard .tf-cbtn { background: transparent; border-color: rgba(0,0,0,.3); color: var(--card-ink); text-decoration: none; }
+.tf-count.tf-info { background: var(--info-bg); color: var(--info); }
+.tf-convo-bar { margin: -18px -22px 0; }
+.tf-convo { display: flex; flex-direction: column; gap: 10px; max-width: 820px; }
+.tf-msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
+.tf-msg-body { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 12px; }
+.tf-msg-body p { white-space: pre-line; overflow-wrap: anywhere; }
+.tf-who { font-size: var(--t-sm); color: var(--ink-2); margin-bottom: 2px; display: flex; gap: 8px; align-items: center; }
+.tf-who b { color: var(--ink); font-weight: 600; }
+.tf-msg.tf-new .tf-msg-body { border-color: var(--info); box-shadow: inset 3px 0 0 var(--info); }
+.tf-msg.tf-mention .tf-msg-body { box-shadow: inset 3px 0 0 var(--card-2); }
+.tf-chip.tf-chip-mention, .tf-chip.tf-chip-job { background: var(--card); color: var(--card-ink); }
+.tf-msg.tf-event { grid-template-columns: 28px 1fr; font-size: var(--t-sm); color: var(--ink-2); align-items: center; }
+.tf-at { font-weight: 600; color: var(--info); }
+.tf-fold {
+  align-self: flex-start; margin-left: 38px; border: 1px dashed var(--rule); background: none; border-radius: 4px;
+  padding: 5px 12px; cursor: pointer; color: var(--ink-2);
+}
+.tf-fold:hover { border-color: var(--ink-2); color: var(--ink); }
+.tf-newline { display: flex; align-items: center; gap: 10px; color: var(--info); font-size: var(--t-xs); font-weight: 600; margin-left: 38px; }
+.tf-newline::after { content: ""; flex: 1; border-top: 1px solid var(--info); }
+.tf-compose {
+  display: flex; flex-direction: column; gap: 8px; background: var(--sheet); border: 1px solid var(--rule);
+  border-radius: 6px; padding: 10px; margin-left: 38px;
+}
+.tf-compose textarea {
+  min-height: 64px; border: 1px solid var(--rule); border-radius: 4px; padding: 8px; background: var(--paper);
+  color: var(--ink); resize: vertical; font: inherit;
+}
+.tf-compose .tf-acts { display: flex; justify-content: flex-end; }
+
+/* ---------- the Connections button and drawer (#820, R-4.3, R-6.1) ---------- */
+.tf-conn {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--rule);
+  background: var(--sheet); padding: 4px 10px; border-radius: 4px; cursor: pointer; color: var(--ink-2);
+  font-size: var(--t-sm); margin-bottom: 6px;
+}
+.tf-conn:hover { color: var(--ink); border-color: var(--ink-2); }
+.tf-conn b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.tf-conn .tf-p { color: var(--info); font-weight: 600; }
+.tf-scrim { position: fixed; inset: 0; background: rgba(10,15,20,.35); z-index: 20; animation: tf-fade .15s ease-out; }
+.tf-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); background: var(--sheet);
+  border-left: 1px solid var(--rule); z-index: 21; display: flex; flex-direction: column; box-shadow: var(--shadow);
+  animation: tf-slide .18s ease-out;
+}
+@keyframes tf-fade { from { opacity: 0; } }
+@keyframes tf-slide { from { transform: translateX(100%); } }
+.tf-drawer header { display: flex; align-items: center; gap: 8px; padding: 14px 16px 10px; }
+.tf-drawer header h2 { font-size: var(--t-xl); margin-right: auto; }
+.tf-dfilter { padding: 0 16px 10px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 8px; }
+.tf-dfilter .tf-fsearch { flex: none; max-width: none; }
+.tf-dacts { display: flex; gap: 6px; flex-wrap: wrap; }
+.tf-dbody { overflow: auto; padding: 4px 0 20px; flex: 1; }
+.tf-dbody h3 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 12px 16px 4px; display: flex; gap: 6px; }
+.tf-lk { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; padding: 6px 16px; align-items: center; }
+.tf-lk:hover { background: var(--sheet-2); }
+.tf-lk a { text-decoration: none; }
+.tf-lk a:hover { text-decoration: underline; }
+.tf-how { font-size: var(--t-xs); color: var(--ink-2); }
+.tf-lk .tf-x {
+  opacity: 0; border: 0; background: none; cursor: pointer; color: var(--ink-2); padding: 2px 6px; border-radius: 3px;
+  transition: opacity .1s;
+}
+.tf-lk:hover .tf-x, .tf-lk:focus-within .tf-x, .tf-lk .tf-x.tf-shown { opacity: 1; }
+.tf-lk .tf-x:hover { background: var(--err-bg); color: var(--err); }
+.tf-dnone { padding: 0 16px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-proposed { margin: 16px; padding: 12px; border: 1px dashed var(--info); border-radius: 6px; display: flex; flex-direction: column; gap: 8px; }
+.tf-proposed .tf-btn { align-self: flex-start; }
+.tf-dnote { font-size: var(--t-xs); color: var(--ink-2); padding: 0 16px; }
+
+/* *Link to…* (#820): the picker inside the dialog. */
+.tf-dialog .tf-body > input[type="text"], .tf-field select {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); color: var(--ink);
+}
+.tf-field { display: flex; gap: 8px; align-items: center; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-picklist { display: flex; flex-direction: column; max-height: 240px; overflow: auto; border: 1px solid var(--rule); border-radius: 4px; }
+.tf-picklist button {
+  display: flex; gap: 8px; justify-content: space-between; border: 0; border-top: 1px solid var(--rule-2);
+  background: none; padding: 6px 10px; text-align: left; cursor: pointer; color: var(--ink);
+}
+.tf-picklist button:first-child { border-top: 0; }
+.tf-picklist button:hover, .tf-picklist button[aria-selected="true"] { background: var(--sheet-2); }
+.tf-picked { display: flex; gap: 8px; align-items: center; }
+
+/* ---------- Proposed links (#835, R-6.3, R-6.4): the queue and the proposal ---------- */
+.tf-seg .tf-jobk { font-family: var(--mono); font-size: var(--t-xs); }
+.tf-rv { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: 100%; }
+.tf-rvq { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
+.tf-rvq .tf-fbar { position: static; padding: 10px 12px; }
+.tf-rvq .tf-fsearch { max-width: none; flex-basis: 200px; }
+.tf-rvq .tf-fchips button { padding: 1px 9px; }
+.tf-ql { overflow: auto; flex: 1; }
+.tf-ql a {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 2px 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--rule-2); text-decoration: none; font-size: var(--t-sm); color: var(--ink);
+}
+.tf-ql a:hover { background: var(--sheet-2); }
+.tf-ql a[aria-current="true"] { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--ink); }
+.tf-ql a .tf-dot { margin-top: 5px; }
+.tf-ql a .tf-s { grid-column: 2; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-ql a.tf-decided { opacity: .6; }
+.tf-review { padding: 22px; display: flex; flex-direction: column; gap: 16px; max-width: 980px; }
+.tf-review h1 { font-size: var(--t-3xl); font-weight: 700; font-variation-settings: "wdth" 85; }
+.tf-review .tf-start { align-self: flex-start; }
+.tf-review-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tf-review-top a { text-decoration: underline; text-underline-offset: 2px; }
+.tf-pair { display: grid; grid-template-columns: minmax(0, 1fr) 190px minmax(0, 1fr); align-items: stretch; }
+.tf-pend {
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+}
+.tf-pend .tf-kind { font-size: var(--t-xs); color: var(--ink-2); }
+.tf-pend .tf-name { font-size: var(--t-xl); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.tf-bridge { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 0 10px; position: relative; }
+.tf-bridge::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px dashed var(--rule); }
+.tf-bridge select {
+  position: relative; font-weight: 600; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--ink-2);
+  background: var(--sheet); color: var(--ink);
+}
+.tf-strength { position: relative; background: var(--paper); padding: 0 6px; font-size: var(--t-sm); font-weight: 600; }
+.tf-strength.tf-strong { color: var(--ok); } .tf-strength.tf-indirect { color: var(--info); } .tf-strength.tf-weak { color: var(--warn); }
+.tf-evidence {
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.tf-evidence h2 { font-size: var(--t-lg); font-weight: 600; font-variation-settings: "wdth" 88; }
+.tf-evidence .tf-claim { font-size: var(--t-lg); }
+.tf-quotes { display: flex; flex-direction: column; gap: 10px; }
+.tf-quotes.tf-sbs { display: grid; grid-template-columns: 1fr 1fr; }
+.tf-evidence blockquote {
+  margin: 0; padding: 8px 12px; border-left: 3px solid var(--rule); background: var(--sheet-2);
+  border-radius: 0 4px 4px 0; font-size: var(--t-sm); overflow-wrap: anywhere;
+}
+.tf-against { font-size: var(--t-sm); color: var(--ink-2); display: flex; flex-direction: column; gap: 4px; }
+.tf-against strong { color: var(--ink); }
+.tf-decide { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tf-decide .tf-btn { padding: 9px 16px; font-size: var(--t-md); }
+.tf-decide .tf-yes { background: var(--ok); border-color: var(--ok); color: var(--sheet); font-weight: 600; }
+.tf-decide .tf-yes kbd { background: transparent; color: inherit; border-color: currentColor; }
+.tf-decide .tf-no { color: var(--err); border-color: var(--err); }
+.tf-decide .tf-hint { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); }
+@media (max-width: 900px) {
+  .tf-rv { grid-template-columns: minmax(0, 1fr); }
+  .tf-rvq { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 260px; }
+  .tf-pair { grid-template-columns: minmax(0, 1fr); }
+  .tf-quotes.tf-sbs { grid-template-columns: minmax(0, 1fr); }
+  .tf-bridge { padding: 12px 0; }
+  .tf-bridge::before { display: none; }
+}

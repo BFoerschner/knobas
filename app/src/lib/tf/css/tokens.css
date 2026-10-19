@@ -1,0 +1,82 @@
+/* ---------- tokens: light, then dark by the OS unless forced light, then forced dark ---------- */
+:root {
+  --paper: #E4E8EC; --sheet: #F7F8F9; --sheet-2: #EEF1F4; --ink: #17212B; --ink-2: #4B5663;
+  --rule: #CBD2D9; --rule-2: #DDE2E7;
+  --card: #F2D157; --card-2: #E8C440; --card-ink: #2A230B; --card-ink-2: #5A4D1E;
+  --focus: #2F55D4; --mark: #F6E08F;
+  --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
+  --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
+  --shadow: 0 1px 0 rgba(23,33,43,.06), 0 8px 24px -12px rgba(23,33,43,.25);
+  --sans: "Archivo Variable", system-ui, sans-serif;
+  --serif: "Source Serif 4 Variable", Georgia, serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  /* The type scale. Rounding of half a pixel to two against prototype-6 is expected. */
+  --t-2xs: 11px; --t-xs: 12px; --t-sm: 13px; --t-md: 14px; --t-lg: 15px; --t-xl: 17px;
+  --t-2xl: 20px; --t-3xl: 24px; --t-d1: 34px; --t-d2: 44px; --t-d3: 64px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --ink: #E4E9EE; --ink-2: #A0ABB7;
+    --rule: #323C47; --rule-2: #28313A;
+    --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
+    --focus: #8AA6FF; --mark: #5C4E17;
+    --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
+    --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
+    --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --ink: #E4E9EE; --ink-2: #A0ABB7;
+  --rule: #323C47; --rule-2: #28313A;
+  --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
+  --focus: #8AA6FF; --mark: #5C4E17;
+  --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
+  --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
+  --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
+  color-scheme: dark;
+}
+
+/* ---------- the document: the reset the shell has always drawn on (it was app.css's until #881),
+   no scroll behind the window, and the paper under it ---------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; background: var(--paper); color: var(--ink); }
+body { font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { font: inherit; color: inherit; background: none; border: 0; }
+button { cursor: pointer; }
+a { color: var(--info); text-decoration: none; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 2px; }
+
+/* ---------- the root: its own paper, the whole window ---------- */
+.tf {
+  position: fixed; inset: 0;
+  display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr);
+  background: var(--paper); color: var(--ink);
+  font: 400 var(--t-md)/1.45 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+.tf *, .tf *::before, .tf *::after { box-sizing: border-box; }
+.tf button, .tf select, .tf input, .tf textarea { font: inherit; color: inherit; }
+.tf a { color: inherit; }
+.tf h1, .tf h2, .tf h3, .tf p { margin: 0; }
+
+/* Focus is always visible: 2px --focus, and --card-ink on a yellow card, where --focus is 1.22:1 in dark. */
+.tf :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.tf .tf-card:focus-visible, .tf .tf-card :focus-visible { outline-color: var(--card-ink); }
+
+.tf .tf-mono { font-family: var(--mono); font-size: .9em; }
+.tf .tf-dim { color: var(--ink-2); }
+.tf .tf-num { font-variant-numeric: tabular-nums; }
+
+/* A state dot. A running one pulses: the only motion nobody started. */
+.tf-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; display: inline-block; }
+.tf-dot.tf-ok { background: var(--ok); } .tf-dot.tf-warn { background: var(--warn); }
+.tf-dot.tf-err { background: var(--err); } .tf-dot.tf-info { background: var(--info); }
+.tf-dot.tf-run { background: var(--info); animation: tf-pulse 1.4s ease-in-out infinite; }
+
+/* The yellow card: the ticket you are on, and nothing else. */
+.tf .tf-card { background: var(--card); color: var(--card-ink); }
+

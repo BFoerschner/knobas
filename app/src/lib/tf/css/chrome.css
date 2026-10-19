@@ -1,0 +1,116 @@
+/* ---------- top bar ---------- */
+.tf-top {
+  display: flex; align-items: center; gap: 6px; padding: 8px 14px;
+  background: var(--sheet); border-bottom: 1px solid var(--rule); min-width: 0;
+}
+.tf-brand { font-weight: 800; font-variation-settings: "wdth" 70; font-size: var(--t-2xl); margin-right: 10px; }
+.tf-nav { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tf-nav a {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 4px;
+  text-decoration: none; color: var(--ink-2); white-space: nowrap;
+}
+.tf-nav a:hover { background: var(--sheet-2); color: var(--ink); }
+.tf-nav a[aria-current="page"] { color: var(--ink); background: var(--sheet-2); box-shadow: inset 0 -2px 0 var(--ink); }
+.tf-navkey { font-family: var(--mono); font-size: var(--t-2xs); }
+.tf-count {
+  font-size: var(--t-2xs); font-weight: 600; padding: 0 6px; border-radius: 9px;
+  background: var(--muted-bg); color: var(--ink-2); font-variant-numeric: tabular-nums;
+}
+.tf-count.tf-err { background: var(--err-bg); color: var(--err); }
+.tf-spacer { flex: 1; }
+.tf-search {
+  display: flex; align-items: center; gap: 8px; border: 1px solid var(--rule); background: var(--paper);
+  border-radius: 4px; padding: 5px 10px; color: var(--ink-2); cursor: pointer; min-width: 170px;
+}
+.tf-search kbd { margin-left: auto; }
+.tf kbd {
+  font: 600 var(--t-2xs) var(--mono); padding: 1px 5px; border: 1px solid var(--rule); border-bottom-width: 2px;
+  border-radius: 3px; background: var(--sheet); color: var(--ink-2);
+}
+.tf-timer {
+  display: flex; align-items: center; gap: 8px; border-radius: 4px; padding: 4px 4px 4px 10px;
+  font-weight: 600; border: 0; cursor: pointer; white-space: nowrap;
+}
+.tf-timer.tf-off { background: var(--sheet-2); color: var(--ink-2); }
+.tf-timer-key { font-family: var(--mono); font-size: var(--t-xs); }
+/* A duration is Archivo with tabular figures, not mono (design system, Type). */
+.tf-timer-t { font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+.tf-timer-stop { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 3px; background: rgba(0,0,0,.12); }
+.tf-timer.tf-off .tf-timer-stop { background: none; }
+.tf-timer-stop i { width: 9px; height: 9px; background: currentColor; border-radius: 1px; }
+.tf-iconbtn {
+  display: inline-flex; border: 0; background: none; cursor: pointer; color: var(--ink-2); padding: 6px; border-radius: 4px;
+}
+.tf-iconbtn:hover { background: var(--sheet-2); color: var(--ink); }
+.tf-iconbtn[aria-current="page"] { color: var(--ink); background: var(--sheet-2); }
+.tf-iconbtn svg { width: 16px; height: 16px; }
+
+/* ---------- status bar ---------- */
+.tf-status {
+  display: flex; gap: 18px; align-items: center; padding: 5px 14px; font-size: var(--t-xs); color: var(--ink-2);
+  background: var(--sheet); border-top: 1px solid var(--rule); overflow-x: auto; white-space: nowrap;
+}
+.tf-status .tf-bad { color: var(--err); font-weight: 600; }
+.tf-status button, .tf-status a {
+  border: 0; background: none; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; color: inherit;
+}
+.tf-status a.tf-sources { font-weight: 600; text-decoration: none; }
+.tf-status a.tf-sources:hover { text-decoration: underline; }
+.tf-status .tf-queue { margin-left: auto; }
+.tf-status button.tf-queued { color: var(--warn); font-weight: 600; }
+
+/* ---------- main, full views, breadcrumb ---------- */
+.tf-main { overflow: auto; min-height: 0; min-width: 0; }
+.tf-full { display: flex; flex-direction: column; min-height: 100%; }
+.tf-crumbs {
+  display: flex; align-items: center; gap: 8px; padding: 9px 22px; background: var(--sheet);
+  border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); flex-wrap: wrap;
+}
+.tf-crumbs a { text-decoration: none; }
+.tf-crumbs a.tf-crumb { text-decoration: underline; text-underline-offset: 2px; }
+.tf-jobchip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 3px;
+  font-weight: 600; text-decoration: none; font-family: var(--mono); font-size: var(--t-xs);
+}
+.tf-crumbs .tf-sep { color: var(--ink-2); }
+.tf-crumbs .tf-esc { margin-left: auto; color: var(--ink-2); }
+.tf-fhead { padding: 16px 22px 12px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.tf-fhead h1 { font-size: var(--t-3xl); line-height: 1.15; font-weight: 700; font-variation-settings: "wdth" 85; }
+.tf-fhead .tf-sub { color: var(--ink-2); margin-top: 4px; font-size: var(--t-sm); }
+
+/* An empty state: centred, says what would fill it, offers the action. */
+.tf-empty { padding: 22px; color: var(--ink-2); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.tf-empty p { max-width: 60ch; }
+
+/* The job key: Archivo at width 62, weight 800, 64px. The identity of the app. */
+.tf-jobkey { font-weight: 800; font-variation-settings: "wdth" 62; font-size: var(--t-d3); line-height: 1; letter-spacing: -.01em; }
+
+/* ---------- buttons ---------- */
+.tf-btn {
+  display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--rule); background: var(--sheet);
+  padding: 5px 11px; border-radius: 4px; cursor: pointer; font-weight: 500; white-space: nowrap; text-decoration: none;
+}
+.tf-btn:hover { border-color: var(--ink-2); }
+.tf-btn.tf-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.tf-btn.tf-ghost { border-color: transparent; background: none; }
+.tf-btn.tf-ghost:hover { background: var(--sheet-2); }
+.tf-btn[disabled], .tf-btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+
+/* ---------- chips, signals, small text ---------- */
+.tf-chip {
+  display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-xs); font-weight: 600; padding: 1px 7px;
+  border-radius: 3px; white-space: nowrap; background: var(--muted-bg); color: var(--muted);
+}
+.tf-chip.tf-ok { background: var(--ok-bg); color: var(--ok); } .tf-chip.tf-warn { background: var(--warn-bg); color: var(--warn); }
+.tf-chip.tf-err { background: var(--err-bg); color: var(--err); } .tf-chip.tf-info { background: var(--info-bg); color: var(--info); }
+.tf-signal { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); }
+.tf .tf-small { font-size: var(--t-xs); }
+.tf-btn.tf-sm { padding: 3px 8px; font-size: var(--t-sm); }
+.tf-linkish {
+  border: 0; background: none; padding: 0; cursor: pointer; color: var(--ink-2);
+  text-decoration: underline; text-underline-offset: 2px; font-size: var(--t-sm);
+}
+.tf-run-start { display: flex; align-items: center; gap: 12px; }
+.tf-run-start select { flex: 1; min-width: 0; }
+.tf-run-remove { color: var(--err); white-space: nowrap; }
+

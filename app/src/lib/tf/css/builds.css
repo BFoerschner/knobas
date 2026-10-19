@@ -1,0 +1,148 @@
+/* ---------- Builds, the pipeline page (#851): header, history chart, tabs ---------- */
+.tf-bhead { padding-bottom: 8px; }
+.tf-bhead .tf-sub { max-width: 80ch; }
+.tf-bhead .tf-sub a { color: inherit; }
+.tf-bstale { margin: 0 22px 10px; }
+.tf-hist { display: flex; gap: 22px; align-items: flex-end; padding: 4px 22px 14px; flex-wrap: wrap; }
+.tf-chart .tf-bars { display: block; border-bottom: 1px solid var(--rule); overflow: visible; }
+.tf-bar { fill: var(--ok); opacity: .85; }
+.tf-bar.tf-run-err { fill: var(--err); }
+.tf-bar.tf-run-warn { fill: var(--warn); }
+.tf-bar.tf-run-run { fill: var(--info); }
+.tf-bar.tf-run-q, .tf-bar.tf-run-muted { fill: var(--rule); }
+.tf-bars a:hover .tf-bar, .tf-bars a:focus-visible .tf-bar { opacity: 1; stroke: var(--ink); stroke-width: 2px; }
+.tf-bars a:focus-visible { outline: none; }
+.tf-axis { display: flex; justify-content: space-between; font-size: var(--t-2xs); color: var(--ink-2); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.tf-legend { display: flex; gap: 10px; font-size: var(--t-2xs); color: var(--ink-2); margin-top: 4px; }
+.tf-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; background: var(--ok); }
+.tf-legend i.tf-run-err { background: var(--err); }
+.tf-legend i.tf-run-run { background: var(--info); }
+.tf-facts2 { display: flex; gap: 22px; font-size: var(--t-sm); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.tf-facts2 b { display: block; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
+.tf-runbar { padding: 8px 22px 0; }
+.tf-dayh { font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); margin: 14px 0 6px; }
+.tf-runs .tf-run-dur { width: 150px; }
+.tf-runs .tf-run-at { width: 110px; }
+.tf-runs .tf-run-acts { width: 150px; text-align: right; }
+.tf-durbar { vertical-align: middle; margin-right: 6px; }
+.tf-durbar rect { fill: var(--ink-2); opacity: .35; }
+.tf-progress { width: 70px; height: 4px; vertical-align: middle; appearance: none; border: 0; border-radius: 2px; background: var(--rule-2); }
+.tf-progress::-webkit-progress-bar { background: var(--rule-2); border-radius: 2px; }
+.tf-chip.tf-jobchip-sm { background: var(--card); color: var(--card-ink); }
+.tf-older { padding: 12px 0; display: flex; gap: 8px; align-items: center; }
+.tf-bsettings { padding-top: 12px; }
+.tf-bsettings > p { font-size: var(--t-sm); margin: 0 0 8px; }
+.tf-bsettings .tf-sub { display: block; color: var(--ink-2); font-size: var(--t-xs); }
+.tf-bsettings input { width: 100%; padding: 3px 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); }
+
+/* ---------- Builds, the Run… dialog (#852): prototype-6's .combo, .prm and .runsum ---------- */
+.tf-dialog.tf-run-dialog { width: min(680px, calc(100vw - 32px)); }
+.tf-combo { position: relative; }
+.tf-combo input { width: 100%; font-family: var(--mono); }
+.tf-combo .tf-opts {
+  position: absolute; left: 0; right: 0; top: 100%; margin-top: 2px; background: var(--sheet);
+  border: 1px solid var(--rule); border-radius: 4px; box-shadow: var(--shadow); max-height: 220px; overflow: auto; z-index: 5;
+}
+.tf-combo .tf-opts [role="option"] { display: flex; gap: 8px; padding: 6px 10px; cursor: pointer; font: var(--t-xs) var(--mono); }
+.tf-combo .tf-opts [role="option"]:hover, .tf-combo .tf-opts .tf-act { background: var(--sheet-2); }
+.tf-combo .tf-opts .tf-dim { margin-left: auto; font-family: var(--sans); font-size: var(--t-2xs); }
+.tf-prm { display: grid; grid-template-columns: 180px minmax(0, 1fr) 80px; gap: 6px 10px; align-items: center; }
+.tf-prm .tf-k { font: var(--t-xs) var(--mono); }
+.tf-prm select, .tf-prm input {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 4px 8px; background: var(--paper); color: var(--ink); width: 100%;
+}
+.tf-prm .tf-chg { font-size: var(--t-2xs); color: var(--info); font-weight: 600; }
+.tf-run-add { align-self: flex-start; }
+.tf-run-opts > summary { cursor: pointer; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-run-opts > div { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.tf-run-save input[type="text"] { width: 160px; padding: 2px 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--ink); }
+.tf-runsum { font-size: var(--t-xs); color: var(--ink-2); margin-right: auto; align-self: center; }
+
+/* ---------- Builds, the run page (#853): prototype-6's .bhead chip, .problem and the Run panel ---------- */
+.tf-bhead h1 .tf-run-chip { font-size: var(--t-sm); vertical-align: 4px; }
+.tf-runbody { padding: 16px 22px 24px; }
+/* The run page's steps bar (#1003, R-9.10): prototype-6's `.steps2`, one SVG so widths are attributes. */
+.tf-stepsbar { margin: 0 22px 14px; height: 30px; border-radius: 5px; overflow: hidden; }
+.tf-stepsbar > svg { display: block; }
+.tf-sbseg { fill: var(--ok); }
+.tf-sbgap { fill: var(--sheet); }
+.tf-sbseg.tf-err { fill: var(--err); }
+.tf-sbseg.tf-run { fill: var(--info); }
+.tf-sbseg.tf-wait { fill: var(--rule); }
+.tf-stepsbar text { fill: var(--sheet); font-size: var(--t-2xs); pointer-events: none; }
+.tf-sbseg.tf-wait ~ text { fill: var(--ink-2); }
+.tf-stepsbar a { cursor: pointer; }
+.tf-stepsbar a:hover .tf-sbseg, .tf-stepsbar a:focus-visible .tf-sbseg { opacity: .85; }
+.tf-stepsbar a:focus-visible { outline: none; }
+.tf-stepsbar a:focus-visible .tf-sbseg { stroke: var(--ink); stroke-width: 4px; }
+.tf-runbody > .tf-dim { font-size: var(--t-sm); margin: 0 0 10px; }
+.tf-runov { display: flex; flex-direction: column; gap: 14px; max-width: 980px; }
+.tf-problem {
+  border: 1px solid var(--err); background: var(--err-bg); border-radius: 6px; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.tf-problem h3 { font-size: var(--t-md); font-weight: 700; color: var(--err); overflow-wrap: anywhere; }
+.tf-problem pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tf-problem .tf-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.tf-problem .tf-dim { font-size: var(--t-sm); }
+.tf-runfacts { padding: 0 12px 12px; }
+.tf-runfacts .tf-mono { font-size: var(--t-xs); }
+.tf-runbody .tf-r .tf-mono { font-size: var(--t-xs); }
+.tf-runbody .tf-r .tf-dim { font-size: var(--t-xs); }
+.tf-runagain { margin-top: 10px; }
+@media (max-width: 900px) { .tf-runbody { padding-left: 16px; padding-right: 16px; } }
+
+/* ---------- Builds (#848): the pipeline list beside the selected pipeline's runs ---------- */
+.tf-bv { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; }
+.tf-pl { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
+.tf-pl-top { padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--rule-2); }
+.tf-pl-top .tf-fsearch { max-width: none; flex: none; }
+.tf-pl-list { overflow: auto; flex: 1; padding: 4px 0 16px; }
+.tf-pl h3 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 12px 14px 4px; }
+.tf-pl-note { font-size: var(--t-sm); color: var(--ink-2); padding: 12px 14px; }
+.tf-pi {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; align-items: center;
+  padding: 5px 14px; text-decoration: none; font-size: var(--t-sm); color: var(--ink);
+}
+.tf-pi:hover { background: var(--sheet-2); }
+.tf-pi[aria-current="true"] { background: var(--ink); color: var(--sheet); }
+.tf-pi-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-pi-nm.tf-bad { color: var(--err); }
+.tf-pi-when { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tf-pi[aria-current="true"] .tf-pi-when { color: inherit; opacity: .8; }
+.tf-pi[aria-current="true"] .tf-pi-nm.tf-bad { color: inherit; }
+.tf-strip { display: flex; gap: 2px; grid-column: 1 / span 2; margin-top: 3px; }
+.tf-strip i { width: 7px; height: 5px; border-radius: 1px; background: var(--ok); }
+.tf-strip i.tf-run-err { background: var(--err); }
+.tf-strip i.tf-run-warn { background: var(--warn); }
+.tf-strip i.tf-run-run { background: var(--info); }
+.tf-strip i.tf-run-q { background: var(--rule); }
+.tf-strip i.tf-run-muted { background: var(--muted); }
+/* The project tree, pins and *This job* (#849, #850): prototype-6's .pl details and .scope-note. */
+.tf-pl-top .tf-seg { align-self: flex-start; }
+.tf-pl-fold > summary {
+  list-style: none; cursor: pointer; font-size: var(--t-sm); font-weight: 600; color: var(--ink-2);
+  padding: 6px 14px; display: flex; gap: 6px; align-items: center;
+}
+.tf-pl-fold > summary::-webkit-details-marker { display: none; }
+.tf-pl-fold > summary::before { content: "▸"; font-size: var(--t-2xs); width: 10px; }
+.tf-pl-fold[open] > summary::before { content: "▾"; }
+.tf-pl-fold > summary .tf-chip { font-size: var(--t-2xs); }
+/* The indent, 14px a level as prototype-6's `padding-left:14+depth*14`, as classes (no inline styles). */
+.tf-pl .tf-d1 { padding-left: 28px; } .tf-pl .tf-d2 { padding-left: 42px; } .tf-pl .tf-d3 { padding-left: 56px; }
+.tf-pl .tf-d4 { padding-left: 70px; } .tf-pl .tf-d5 { padding-left: 84px; } .tf-pl .tf-d6 { padding-left: 98px; }
+.tf-pl .tf-d7 { padding-left: 112px; } .tf-pl .tf-d8 { padding-left: 126px; }
+.tf-pi-why { grid-column: 1 / span 2; font-size: var(--t-xs); color: var(--ink-2); margin-top: 2px; }
+.tf-pi[aria-current="true"] .tf-pi-why { color: inherit; }
+.tf-scope-note { font-size: var(--t-sm); color: var(--ink-2); padding: 8px 14px 0; margin: 0; }
+.tf-bmain { overflow: auto; min-width: 0; }
+.tf-runs { padding: 0 22px 18px; }
+.tf-runs .tf-run-no { width: 150px; }
+.tf-runs .tf-run-no a { color: inherit; text-decoration: none; margin-right: 6px; }
+.tf-runs .tf-run-br { font-size: var(--t-xs); }
+.tf-runs .tf-run-trig { font-size: var(--t-sm); }
+@media (max-width: 900px) {
+  .tf-bv { grid-template-columns: 1fr; height: auto; }
+  .tf-pl { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 50vh; }
+  .tf-runs { padding-left: 16px; padding-right: 16px; }
+}

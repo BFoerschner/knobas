@@ -1,0 +1,87 @@
+/* ---------- settings: prototype-6's .stg ---------- */
+.tf-stg { display: grid; grid-template-columns: 230px minmax(0, 1fr); flex: 1; min-height: 0; }
+.tf-stg-nav { border-right: 1px solid var(--rule); background: var(--sheet); padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; }
+.tf-stg-nav a { padding: 6px 10px; border-radius: 4px; text-decoration: none; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+.tf-stg-nav a:hover { background: var(--sheet-2); }
+.tf-stg-nav a[aria-current="page"] { background: var(--ink); color: var(--sheet); }
+.tf-stg-nav .tf-dot { margin-left: auto; }
+.tf-stg-body { padding: 18px 28px 48px; max-width: 860px; min-width: 0; }
+.tf-stg-h { margin-bottom: 16px; }
+.tf-stg-h h1 {
+  font-size: var(--t-3xl); font-weight: 700; font-variation-settings: "wdth" 85; display: flex; align-items: center; gap: 10px;
+}
+.tf-stg-h p { margin-top: 4px; color: var(--ink-2); font-size: var(--t-md); max-width: 70ch; }
+.tf-stg-srch { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.tf-stg-sec { margin-top: 26px; }
+.tf-stg-sec h2 { font-size: var(--t-lg); margin: 0 0 8px; font-weight: 700; }
+.tf-stg-p { font-size: var(--t-sm); color: var(--ink-2); margin: 0 0 10px; max-width: 72ch; }
+.tf-stg-gap { margin-top: 14px; }
+.tf-stg-row {
+  display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; padding: 11px 0;
+  border-bottom: 1px solid var(--rule-2); align-items: center;
+}
+.tf-stg-l { font-weight: 500; }
+.tf-stg-l small { display: block; font-weight: 400; font-size: var(--t-sm); color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
+.tf-stg-c { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tf-stg-inl { flex-wrap: wrap; }
+.tf-stg-in {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--sheet); color: var(--ink);
+  font-size: var(--t-md); width: min(420px, 100%);
+}
+.tf-stg-acts { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; }
+.tf-stg-acts.tf-stg-flush { margin: 0; }
+.tf-stg-sw {
+  width: 36px; height: 20px; border-radius: 10px; border: 1px solid var(--rule); background: var(--rule-2);
+  position: relative; cursor: pointer; flex: none; padding: 0;
+}
+.tf-stg-sw i {
+  position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--sheet); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: left .15s;
+}
+.tf-stg-sw[aria-checked="true"] { background: var(--ink); border-color: var(--ink); }
+.tf-stg-sw[aria-checked="true"] i { left: 18px; }
+.tf-stg-srcs {
+  display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet);
+  margin-top: 14px; overflow: hidden;
+}
+.tf-stg-src {
+  display: grid; grid-template-columns: auto minmax(0, 1.3fr) minmax(0, 1fr) 150px auto; gap: 12px; align-items: center;
+  padding: 12px 14px; border-bottom: 1px solid var(--rule-2); text-decoration: none; color: var(--ink);
+}
+.tf-stg-src:last-child { border-bottom: 0; }
+.tf-stg-src:hover { background: var(--sheet-2); }
+.tf-stg-sn { display: flex; flex-direction: column; min-width: 0; }
+.tf-stg-sn .tf-dim { font-size: var(--t-sm); }
+.tf-stg-si { font-size: var(--t-sm); color: var(--ink-2); }
+.tf .tf-stg-errt { color: var(--err); }
+.tf-stg-go { color: var(--ink-2); }
+.tf-stg-alert {
+  display: flex; gap: 10px; align-items: center; padding: 10px 14px; border: 1px solid var(--rule);
+  border-left: 3px solid var(--err); border-radius: 4px; background: var(--sheet); font-size: var(--t-md);
+}
+.tf-stg-alert .tf-btn { margin-left: auto; }
+.tf-stg-note { font-size: var(--t-sm); color: var(--ink-2); margin-top: 10px; }
+/* the generated config form (#903, #904): TfSchemaForm, in rows on a source's page and a grid in a dialog */
+.tf-sf-c { flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; display: flex; }
+.tf-sf-row .tf-stg-l { align-self: start; padding-top: 5px; }
+.tf-sf-grid { align-items: start; }
+.tf-sf-grid > label { padding-top: 5px; }
+.tf-sf-area { resize: vertical; min-height: 54px; line-height: 1.45; font: inherit; }
+.tf .tf-sf-mono { font-family: var(--mono); font-size: var(--t-sm); }
+.tf-sf-help { font-size: var(--t-xs); color: var(--ink-2); line-height: 1.4; }
+/* the other sections (#831): prototype-6's inline widths, .stg-checks and .stg-keys */
+.tf-stg-in.tf-stg-n70 { width: 70px; }
+.tf-stg-in.tf-stg-n90 { width: 90px; }
+.tf-stg-checks { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 14px 0 4px; }
+.tf-stg-checks .tf-ck { font-size: var(--t-md); }
+.tf-tbl.tf-stg-keys td { padding: 8px 10px; font-size: var(--t-md); }
+.tf-stg-kk { white-space: nowrap; }
+.tf-stg-r { text-align: right; }
+.tf-stg-pick { display: grid; gap: 8px; margin-top: 12px; }
+/* the unported PublishTargetPicker inside a tf dialog: the reset strips bare fields; --link is --info already since #881, kept so the picker cannot drift */
+.tf-stg-pick { --link: var(--info); }
+.tf-stg-pick select, .tf-stg-pick input {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--sheet); color: var(--ink);
+  font-size: var(--t-md); width: min(420px, 100%);
+}
+
