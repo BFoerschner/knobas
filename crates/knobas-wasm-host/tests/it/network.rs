@@ -578,3 +578,24 @@ async fn a_fixed_host_whose_lookup_never_answers_reaches_the_proxy_within_the_bo
         ["GET http://silent-1290.test/data HTTP/1.1"]
     );
 }
+
+/// The component's own timeouts do not shorten the lookup before hand-off: a
+/// short first-byte timeout would otherwise time the lookup out and send a
+/// name that points home on to the proxy (#1290).
+#[tokio::test]
+async fn a_short_component_timeout_does_not_cut_the_lookup_before_the_proxy() {
+    let local = Server::start(None).await;
+    let proxy = Proxy::start(&local).await;
+    knobas_wasm_host::fake_dns("slow-1290.test", &[LOOPBACK]);
+    knobas_wasm_host::fake_dns_slow("slow-1290.test", Duration::from_millis(300));
+    knobas_wasm_host::fake_proxy("slow-1290.test", &proxy.url);
+    let source = fetching(
+        &["slow-1290.test"],
+        "http://slow-1290.test/data",
+        serde_json::json!({ "first_byte_ms": 20 }),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(!ok && text.contains("ConnectionRefused"), "{text}");
+    assert!(proxy.carried().is_empty(), "{:?}", proxy.carried());
+    assert!(local.seen().is_empty(), "{:?}", local.seen());
+}

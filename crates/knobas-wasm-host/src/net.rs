@@ -26,10 +26,12 @@
 //! proxy's side, which is the reader's loopback when the proxy runs on the
 //! reader's machine. No credential goes there. A name knobas cannot resolve
 //! goes on to the proxy too: a network whose only way out is the proxy may
-//! answer no outside name, or none at all, so the lookup waits a few seconds
-//! at most (#1290) and a silent one counts as unresolved. The check also runs on a direct connection,
-//! where the resolver's check is still the one that holds against
-//! rebinding.
+//! answer no outside name, or none at all, so the lookup waits a fixed two
+//! seconds at most (#1290) and a silent one counts as unresolved. The
+//! component's own timeouts do not shorten that wait: a component that
+//! could cut the lookup short could send a name that points home on to the
+//! proxy. The check also runs on a direct connection, where the resolver's
+//! check is still the one that holds against rebinding.
 //!
 //! **The credential.** It is attached only to a request whose origin
 //! (scheme, host and port) is the source's address: `Authorization: Bearer
@@ -311,7 +313,7 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
         // A system proxy resolves the name itself, and the resolver below
         // never sees it: judge it here first.
         // A lookup that never answers is a failed one: the request goes on to the proxy.
-        if let Ok(Ok(addrs)) = tokio::time::timeout(lookup_wait(bounds), lookup(name)).await
+        if let Ok(Ok(addrs)) = tokio::time::timeout(LOOKUP_WAIT, lookup(name)).await
             && refuse_if_local(name, &addrs)
         {
             return Err(HttpError::ConnectionRefused);
@@ -531,19 +533,20 @@ fn refuse_if_local(name: &str, addrs: &[SocketAddr]) -> bool {
     true
 }
 
-/// The longest the pre-proxy lookup waits: the request's head bound when it
-/// is shorter than the cap, so the lookup never outlasts what the component
-/// asked for.
-const LOOKUP_CAP: Duration = Duration::from_secs(2);
-
-fn lookup_wait(bounds: Bounds) -> Duration {
-    bounds.head.map_or(LOOKUP_CAP, |head| head.min(LOOKUP_CAP))
-}
+/// The longest the lookup before hand-off waits. Fixed, not the component's
+/// head bound: a component that set a short timeout would otherwise time
+/// the lookup out and send a name that points home on to the proxy.
+const LOOKUP_WAIT: Duration = Duration::from_secs(2);
 
 async fn lookup(name: &str) -> std::io::Result<Vec<SocketAddr>> {
     #[cfg(feature = "test-util")]
-    if locked(silent_names()).contains(&name.to_ascii_lowercase()) {
-        return std::future::pending().await;
+    {
+        let delay = locked(slow_names()).get(&name.to_ascii_lowercase()).copied();
+        match delay {
+            Some(None) => return std::future::pending().await,
+            Some(Some(delay)) => tokio::time::sleep(delay).await,
+            None => {}
+        }
     }
     #[cfg(feature = "test-util")]
     if let Some(ips) = locked(fake_answers()).get(&name.to_ascii_lowercase()) {
@@ -570,9 +573,13 @@ pub fn fake_dns(name: &str, ips: &[std::net::IpAddr]) {
     locked(fake_answers()).insert(name.to_ascii_lowercase(), ips.to_vec());
 }
 
+/// Names whose lookup waits before it answers; `None` never answers.
 #[cfg(feature = "test-util")]
-fn silent_names() -> &'static Mutex<std::collections::HashSet<String>> {
-    static NAMES: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+type SlowNames = Mutex<std::collections::HashMap<String, Option<Duration>>>;
+
+#[cfg(feature = "test-util")]
+fn slow_names() -> &'static SlowNames {
+    static NAMES: OnceLock<SlowNames> = OnceLock::new();
     NAMES.get_or_init(Mutex::default)
 }
 
@@ -580,7 +587,14 @@ fn silent_names() -> &'static Mutex<std::collections::HashSet<String>> {
 /// as a network whose DNS drops outside queries. For tests.
 #[cfg(feature = "test-util")]
 pub fn fake_dns_hangs(name: &str) {
-    locked(silent_names()).insert(name.to_ascii_lowercase());
+    locked(slow_names()).insert(name.to_ascii_lowercase(), None);
+}
+
+/// Answer a later lookup of `name` by the external adapters' clients only
+/// after `delay`, as a slow resolver. For tests.
+#[cfg(feature = "test-util")]
+pub fn fake_dns_slow(name: &str, delay: Duration) {
+    locked(slow_names()).insert(name.to_ascii_lowercase(), Some(delay));
 }
 
 #[cfg(feature = "test-util")]
