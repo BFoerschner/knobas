@@ -7,15 +7,15 @@
  * `list_entities` scoped by `reach`), which takes the ticket's entity id and
  * needs no stored context: nothing here promotes one.
  *
- * Each section is a role's (ADR-0029): its rows are the sources' that fill
- * the role. Builds asks the mirror for the CI role and names no kinds, so the
- * read itself narrows to CI's fillers and the run kinds they declare (#1295,
- * ADR-0029 as amended on 2026-10-19); the other sections are still kept to
- * their role's sources after reading (`sourceRoles.keep`, #1196).
+ * Each section is a role's (ADR-0029): it asks the mirror for its role, so
+ * the read itself narrows to the role's fillers and its rows are drawn as
+ * read (ADR-0029 as amended on 2026-10-19). Builds names no kinds, and the
+ * mirror answers the run kinds CI's fillers declare (#1295); Code, Pages and
+ * Monitors name theirs within the role (#1296, #1297, #1298).
  */
 import type { EntityFilter, EntityOrder, EntityPage, EntityRow, KindTally, Reached } from "../../ipc/entity";
 import type { KindRegistry } from "../../shell/kind-registry.svelte";
-import { CI, CODE_HOST, MONITORING, sourceRoles, WIKI, type SourceRoles } from "../roles.svelte";
+import { CI, CODE_HOST, MONITORING, WIKI } from "../roles.svelte";
 import { CODE_KINDS } from "./job";
 
 /** How many rows a section reads: a job reaches tens, not thousands. */
@@ -23,18 +23,14 @@ export const SECTION_LIMIT = 200;
 /** How many reached assets are read one by one for the Assets section. */
 export const ASSET_LIMIT = 50;
 
-/** One section's read: the role it draws, the kinds it asks for and their order. */
+/**
+ * One section's read: the role it asks for, the kinds it names within the
+ * role (none: the role's kinds) and their order.
+ */
 export interface SectionRead {
   role: string;
   kinds: readonly string[];
   order: EntityOrder;
-  /**
-   * Whether the read carries `role`, so the mirror narrows it to the role's
-   * fillers (and, with no kinds, to the role's kinds) and its rows are drawn
-   * as read (#1295). A section without it is kept to its role's sources after
-   * reading, and reads nothing when it names no kinds.
-   */
-  sendsRole: boolean;
 }
 
 export type Section = "code" | "builds" | "pages" | "monitors";
@@ -50,21 +46,15 @@ export { runKindsOf } from "./job";
  * the shell's (#1295).
  */
 export const SECTION_READS: Readonly<Record<Section, SectionRead>> = {
-  code: { role: CODE_HOST, kinds: CODE_KINDS, order: "updated_desc", sendsRole: false },
-  builds: { role: CI, kinds: [], order: "latest_per_parent", sendsRole: true },
-  pages: { role: WIKI, kinds: ["page"], order: "updated_desc", sendsRole: false },
-  monitors: { role: MONITORING, kinds: ["monitor"], order: "updated_desc", sendsRole: false },
+  code: { role: CODE_HOST, kinds: CODE_KINDS, order: "updated_desc" },
+  builds: { role: CI, kinds: [], order: "latest_per_parent" },
+  pages: { role: WIKI, kinds: ["page"], order: "updated_desc" },
+  monitors: { role: MONITORING, kinds: ["monitor"], order: "updated_desc" },
 };
 
-/**
- * One section's rows as the reach read answers them: a section that asks
- * for its role as drawn, the others before they are kept to the sources that
- * fill it (`sourceRoles.keep(read.role, rows)`). For those, no kinds is no
- * read, since an empty `kinds` with no role asks for every kind.
- */
+/** One section's rows as the reach read answers them for its role, drawn as read. */
 export async function readSection(listEntities: ReachPorts["listEntities"], id: string, read: SectionRead): Promise<EntityRow[]> {
-  if (!read.sendsRole && read.kinds.length === 0) return [];
-  const page = await listEntities(reachFilter(id, read.kinds, read.order, read.sendsRole ? read.role : null), SECTION_LIMIT, 0);
+  const page = await listEntities(reachFilter(id, read.kinds, read.order, read.role), SECTION_LIMIT, 0);
   return page.rows;
 }
 
@@ -91,22 +81,14 @@ export interface ReachPorts {
 
 /**
  * What the job's sections would hold for ticket `id`, counted by kind and
- * tone: the Code, Builds, Pages and Monitors reads as the job makes them
- * (Builds sends the CI role, the others kept to their role's sources), and
+ * tone: the Code, Builds, Pages and Monitors reads as the job makes them,
+ * each for its role, and
  * the reached assets the Assets section reads (with no tone: their health is
  * read one asset at a time, and only on the job). A read that fails counts
  * nothing, as its section draws nothing.
  */
-export async function reachTally(
-  ports: ReachPorts,
-  id: string,
-  { roles = sourceRoles }: { roles?: Pick<SourceRoles, "keep"> } = {},
-): Promise<KindTally[]> {
-  const reads = Object.values(SECTION_READS).map((read) =>
-    readSection(ports.listEntities, id, read)
-      .then((rows) => (read.sendsRole ? rows : roles.keep(read.role, rows)))
-      .catch(() => []),
-  );
+export async function reachTally(ports: ReachPorts, id: string): Promise<KindTally[]> {
+  const reads = Object.values(SECTION_READS).map((read) => readSection(ports.listEntities, id, read).catch(() => []));
   const assets = ports
     .jobReach(id)
     .then((rows) => rows.filter((row) => row.kind === "asset").slice(0, ASSET_LIMIT))

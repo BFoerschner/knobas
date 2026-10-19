@@ -480,6 +480,7 @@ knobas-app	test/it	assets_ipc::the_panel_refuses_an_id_no_asset_carries
 knobas-app	test/it	assets_ipc::the_rollup_takes_the_worst_of_an_assets_status_and_its_monitors
 knobas-app	test/it	assets_ipc::the_roster_carries_the_environment_and_owner_in_force
 knobas-app	test/it	assets_ipc::the_roster_draws_each_monitors_type_target_reading_uptime_and_certificate
+knobas-app	test/it	assets_ipc::the_roster_holds_only_the_monitoring_fillers_monitors_paused_ones_included
 knobas-app	test/it	assets_ipc::the_roster_is_ordered_by_where_an_asset_sits_and_then_by_name
 knobas-app	test/it	assets_ipc::the_roster_lists_the_assets_nothing_watches_and_leaves_out_the_ones_it_does
 knobas-app	test/it	assets_ipc::the_roster_lists_the_routes_nothing_watches_and_leaves_out_the_ones_it_does
@@ -669,6 +670,7 @@ knobas-app	test/it	docs_ipc::export_writes_the_page_as_markdown
 knobas-app	test/it	docs_ipc::for_you_is_the_pages_that_mention_the_reader
 knobas-app	test/it	docs_ipc::moving_the_notes_queues_one_page_each_under_the_parent
 knobas-app	test/it	docs_ipc::only_a_mirrored_page_reads
+knobas-app	test/it	docs_ipc::the_docs_reads_hold_only_the_wiki_fillers_pages
 knobas-app	test/it	docs_ipc::the_page_read_last_is_the_newest_visit
 knobas-app	test/it	docs_ipc::the_space_the_grammar_and_the_empty_query
 knobas-app	test/it	docs_ipc::the_tree_hangs_each_page_under_its_declared_parent

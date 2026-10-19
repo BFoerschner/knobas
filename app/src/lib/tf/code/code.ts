@@ -68,25 +68,6 @@ export function prNumber(entityId: string): string | null {
 }
 
 /**
- * `read` with only the rows `draws` keeps: Code draws the sources that claim
- * the code host role (#1196, `tf/roles.svelte.ts`). The attention read's
- * groups are positional (the n-th row is in the n-th slot), so each group is
- * counted again over the rows it keeps, and a group left empty is dropped.
- * The same page when nothing is dropped.
- */
-export function keptPage(read: EntityPage, draws: (sourceId: string) => boolean): EntityPage {
-  const rows = read.rows.filter((row) => draws(row.source_id));
-  if (rows.length === read.rows.length) return read;
-  let at = 0;
-  const groups = read.groups?.flatMap((tally) => {
-    const count = read.rows.slice(at, at + tally.count).filter((row) => draws(row.source_id)).length;
-    at += tally.count;
-    return count > 0 ? [{ ...tally, count }] : [];
-  });
-  return { ...read, rows, total: read.total - (read.rows.length - rows.length), groups: groups ?? null };
-}
-
-/**
  * The tab's rows: first the attention read's (#712), which holds the open
  * pull requests group by group in its own order, then every other pull
  * request the recency read holds (merged or closed, which attention drops as

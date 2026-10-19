@@ -51,7 +51,17 @@ import type {
   SectionRefusal,
 } from "../../../ipc/entity";
 import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
-import { CORPUS } from "./corpus";
+import { CORPUS, fakeRoleScope } from "./corpus";
+
+/** The role `docs_tree` is read for, as `knobas_source::role::WIKI` spells it. */
+const WIKI_ROLE = "wiki";
+/** The source the fixture's spaces and pages are of. */
+const SOURCE = "confluence";
+
+/** Whether the fixture's source fills the wiki, which both Docs reads narrow to (#1296). */
+function wikiFilled(): boolean {
+  return fakeRoleScope(WIKI_ROLE).sources.includes(SOURCE);
+}
 
 const HOST = "http://127.0.0.1:5399/confluence";
 const ME = "mara";
@@ -344,9 +354,15 @@ function generic(page: FakePage, by: string): Body {
   };
 }
 
+/**
+ * `docs_tree`, the wiki role's read by definition: narrowed to the role's
+ * fillers as the server's is (#1296), so with Confluence filling no wiki the
+ * tree holds no space, no page read last and no *For you*.
+ */
 function tree(): DocsTree {
+  if (!wikiFilled()) return { spaces: [], last_read: null, for_you: [] };
   const spaces: DocSpace[] = Object.entries(SPACES).map(([key, name]) => ({
-    source_id: "confluence",
+    source_id: SOURCE,
     key,
     name,
     pages: PAGES.filter((p) => p.space === key)
@@ -524,7 +540,8 @@ function search(args: Record<string, unknown>): DocsHits | null {
   const stems = q.need.map(stem);
   const count = (text: string, s: string) => text.toLowerCase().split(s).length - 1;
   const hits: (DocHit & { score: number })[] = [];
-  for (const p of PAGES) {
+  // The wiki's search, narrowed to the role's fillers as the tree is (#1296).
+  for (const p of wikiFilled() ? PAGES : []) {
     if (space && p.space.toLowerCase() !== space) continue;
     const doc = page({ entityId: p.id });
     if (q.by && doc.editor !== q.by && !(doc.editor_name ?? "").toLowerCase().startsWith(q.by)) continue;

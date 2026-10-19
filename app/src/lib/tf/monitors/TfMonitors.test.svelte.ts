@@ -271,14 +271,16 @@ test("a create the backend refuses stays open and says why", async () => {
   expect(text(document.querySelector(".tf-dialog [role='alert']"))).toContain("no Docker host");
 });
 
-test("Monitors draws the sources that claim monitoring, whatever their adapter kind, and no other (#1196)", async () => {
+test("Monitors draws the roster as read and keeps no rows by source: the read narrows itself to monitoring's fillers (#1297)", async () => {
+  // A source list that says no source claims monitoring: the page drew none
+  // of these rows while it kept them by claims, and must now draw them all.
   sourceRoles.take([
-    { id: "pulse", adapter_kind: "acme-pulse", roles: [{ role: "monitoring", reads: [] }] },
+    { id: "pulse", adapter_kind: "acme-pulse", roles: [] },
     { id: "kuma", adapter_kind: "kuma", roles: [] },
   ]);
   const beacon = monitor("pulse:9", "beacon /ping", { source_id: "pulse" });
   await draw([], "PAY-231", ports({ monitorRoster: async () => [...ROSTER, beacon] }));
 
-  expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["beacon /ping HTTP"]);
-  expect(text(target.querySelector(".tf-tabs a"))).toBe("Monitors 1");
+  expect(rows()).toHaveLength(ROSTER.length + 1);
+  expect(text(target.querySelector(".tf-tabs a"))).toBe(`Monitors ${ROSTER.length + 1}`);
 });

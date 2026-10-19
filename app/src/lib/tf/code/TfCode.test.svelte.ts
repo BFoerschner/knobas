@@ -252,9 +252,10 @@ test("New pull request opens the compare page for the job's branch; with no job 
   expect(target.querySelector(".tf-chip-job")).toBeNull();
 });
 
-test("Code draws the sources that claim code-host, whatever their adapter kind, and no other (#1196)", async () => {
+test("Code asks every read for the code host role with its own kinds, and draws the rows as read (#1298)", async () => {
+  // A source list that says gitea fills no code host: the page dropped its
+  // rows while it kept them by claims, and must now draw what the read answers.
   sourceRoles.take([
-    // An adapter kind the shell has never seen.
     { id: "forge", adapter_kind: "acme-forge", roles: [{ role: "code-host", reads: [] }] },
     { id: "gitea", adapter_kind: "gitea", roles: [{ role: "ticket-system", reads: [] }] },
   ]);
@@ -264,11 +265,13 @@ test("Code draws the sources that claim code-host, whatever their adapter kind, 
     path: "acme/rocket",
     state: { text: "open", tone: "info" },
   });
+  const asked: EntityFilter[] = [];
   await draw(
     [],
-    null,
+    "PAY-231",
     ports({
       listEntities: async (filter) => {
+        asked.push(filter);
         if (filter.kinds.includes("repo")) return page([...REPOS, rocket]);
         if (filter.kinds.includes("branch")) return page([]);
         return page([...OPEN, launch]);
@@ -276,6 +279,8 @@ test("Code draws the sources that claim code-host, whatever their adapter kind, 
     }),
   );
 
-  expect([...target.querySelectorAll("tbody tr")].map((tr) => cells(tr)[0])).toEqual(["acme/rocket"]);
-  expect([...target.querySelectorAll(".tf-tabs a")].map(text)).toEqual(["Repositories 1", "Pull requests 1"]);
+  const kinds = asked.map((filter) => `${filter.role}:${filter.kinds.join(",")}:${filter.order}`);
+  expect(kinds.sort()).toEqual(["code-host:branch:updated_desc", "code-host:pr:attention", "code-host:pr:updated_desc", "code-host:repo:updated_desc"]);
+  expect(target.querySelectorAll("tbody tr")).toHaveLength(REPOS.length + 1);
+  expect([...target.querySelectorAll(".tf-tabs a")].map(text)[0]).toBe(`Repositories ${REPOS.length + 1}`);
 });

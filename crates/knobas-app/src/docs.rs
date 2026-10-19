@@ -162,7 +162,9 @@ pub struct DocAncestor {
 /// `position`, #953) and by title where the source gives none. Ordering the
 /// whole space by it orders every parent's children, because the reader picks
 /// a parent's children out of the list in list order. `$1` is the
-/// declarations.
+/// declarations, `$2` the wiki role's fillers: the tree is the wiki's by
+/// definition, so a space of any other source is not in it (#1296,
+/// ADR-0029 as amended on 2026-10-19).
 ///
 /// The pages are read from `sync.item` by their kind, live by
 /// [`knobas_core::live_by_exclusion!`], not through `sync.live_item` (#981).
@@ -179,7 +181,7 @@ const PAGES: &str = concat!(
        from sync.item i \
        join sync.item_project p on p.entity_id = i.entity_id \
        join knobas.source_config s on s.id = p.source_id and s.kind = p.adapter_kind \
-      where i.kind = 'page' and ",
+      where i.kind = 'page' and i.source_id = any($2::text[]) and ",
     knobas_core::live_by_exclusion!("i"),
     " order by p.source_id, p.key, ",
     knobas_core::declared_integer!("$1", "position"),
@@ -194,14 +196,19 @@ pub fn planned_tree() -> &'static str {
     PAGES
 }
 
+/// The page read last, among the tree's: `$2` is the wiki role's fillers.
 const LAST_READ: &str = "\
 select a.entity_id from knobas.activity a
   join sync.live_item i on i.entity_id = a.entity_id
  where a.verb = $1 and a.actor = 'user' and i.kind = 'page'
+   and i.source_id = any($2::text[])
  order by a.at desc, a.id desc
  limit 1";
 
-/// The spaces with their trees, the page read last and *For you*.
+/// The spaces with their trees, the page read last and *For you*, each
+/// narrowed to `fillers`, the sources filling the wiki role (#1296): a page
+/// of any other source is in no space, is never the page read last and is
+/// never *For you*.
 ///
 /// # Errors
 ///
@@ -211,9 +218,11 @@ pub async fn tree(
     declarations: &Declarations,
     project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
     me: &[String],
+    fillers: &[String],
 ) -> Result<DocsTree, IpcError> {
     let rows = sqlx::query(PAGES)
         .bind(declarations.as_param())
+        .bind(fillers)
         .fetch_all(pool)
         .await?;
     let mut spaces: Vec<DocSpace> = Vec::new();
@@ -263,9 +272,10 @@ pub async fn tree(
     }
     let last_read = sqlx::query_scalar(LAST_READ)
         .bind(knobas_core::activity::VISITED)
+        .bind(fillers)
         .fetch_optional(pool)
         .await?;
-    let for_you = for_you(pool, declarations, project, me).await?;
+    let for_you = for_you(pool, declarations, project, me, fillers).await?;
     Ok(DocsTree {
         spaces,
         last_read,
@@ -273,22 +283,25 @@ pub async fn tree(
     })
 }
 
-/// The rows *For you* reads its pages from. `$1` the ids.
+/// The rows *For you* reads its pages from. `$1` the ids, `$2` the wiki
+/// role's fillers.
 const FOR_YOU_ROWS: &str = "\
 select i.entity_id, i.payload, s.kind as adapter_kind, p.key
   from sync.live_item i
   join knobas.source_config s on s.id = i.source_id
   left join sync.item_project p on p.entity_id = i.entity_id and p.adapter_kind = s.kind
- where i.entity_id = any($1)";
+ where i.entity_id = any($1) and i.source_id = any($2::text[])";
 
 /// *For you*: the inbox's mentions of the reader that are pages, as the
 /// inbox has them now (a mention marked done or snoozed there is not here),
-/// each with who mentioned the reader.
+/// each with who mentioned the reader. Only the pages of `fillers`, as the
+/// tree holds only theirs: a mention whose page no filler holds is left out.
 async fn for_you(
     pool: &PgPool,
     declarations: &Declarations,
     project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
     me: &[String],
+    fillers: &[String],
 ) -> Result<Vec<DocForYou>, IpcError> {
     use knobas_core::inbox::{Category, Shelf, items_from, rule};
     let Some(mention) = rule(Category::Mention) else {
@@ -304,6 +317,7 @@ async fn for_you(
     let ids: Vec<&String> = items.iter().map(|(id, _)| id).collect();
     let rows: HashMap<String, sqlx::postgres::PgRow> = sqlx::query(FOR_YOU_ROWS)
         .bind(&ids)
+        .bind(fillers)
         .fetch_all(pool)
         .await?
         .into_iter()
@@ -311,19 +325,18 @@ async fn for_you(
         .collect();
     Ok(items
         .into_iter()
-        .map(|(entity_id, title)| {
-            let row = rows.get(&entity_id);
-            let by_name = row.and_then(|row| {
-                let payload: serde_json::Value = row.get("payload");
-                let content = project(&row.get::<String, _>("adapter_kind"))?(PAGE_KIND, &payload)?;
-                mentioner(&content, me)
-            });
-            DocForYou {
-                space_key: row.and_then(|r| r.get("key")),
+        .filter_map(|(entity_id, title)| {
+            let row = rows.get(&entity_id)?;
+            let payload: serde_json::Value = row.get("payload");
+            let by_name = project(&row.get::<String, _>("adapter_kind"))
+                .and_then(|project| project(PAGE_KIND, &payload))
+                .and_then(|content| mentioner(&content, me));
+            Some(DocForYou {
+                space_key: row.get("key"),
                 entity_id,
                 title,
                 by_name,
-            }
+            })
         })
         .collect())
 }
@@ -746,16 +759,20 @@ pub struct DocSnippet {
     pub segments: Vec<knobas_search::Segment>,
 }
 
-/// The rows a set of hits draws from. `$1` the ids.
+/// The rows a set of hits draws from. `$1` the ids, `$2` the wiki role's
+/// fillers: a hit on any other source's page has no row, so it is not drawn.
 const HIT_ROWS: &str = "\
 select i.entity_id, i.body_text, i.author, i.payload, s.kind as adapter_kind, p.key, p.name
   from sync.live_item i
   join knobas.source_config s on s.id = i.source_id
   left join sync.item_project p on p.entity_id = i.entity_id and p.adapter_kind = s.kind
- where i.entity_id = any($1)";
+ where i.entity_id = any($1) and i.source_id = any($2::text[])";
 
 /// The Docs search (#860): the pages `raw` admits, in `scope` when given,
-/// each with its snippet, match count, space, path and editor.
+/// each with its snippet, match count, space, path and editor. Only the pages
+/// of `fillers`, the sources filling the wiki role, as the tree holds only
+/// theirs (#1296): a hit on another source's page is left out and is not in
+/// `total` either.
 ///
 /// `None` for a query with neither words nor a filter.
 ///
@@ -769,6 +786,7 @@ pub async fn search(
     project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
     raw: &str,
     scope: Option<&DocsScope>,
+    fillers: &[String],
 ) -> Result<Option<DocsHits>, IpcError> {
     let found = searcher
         .page_search(
@@ -781,13 +799,17 @@ pub async fn search(
         return Ok(None);
     };
     let ids: Vec<String> = found.hits.iter().map(|h| h.row.entity_id.clone()).collect();
-    let rows = sqlx::query(HIT_ROWS).bind(&ids).fetch_all(pool).await?;
+    let rows = sqlx::query(HIT_ROWS)
+        .bind(&ids)
+        .bind(fillers)
+        .fetch_all(pool)
+        .await?;
     let by_id: HashMap<String, sqlx::postgres::PgRow> = rows
         .into_iter()
         .map(|r| (r.get::<String, _>("entity_id"), r))
         .collect();
     let stems: Vec<Vec<char>> = found.needles.iter().map(|n| stem(n)).collect();
-    let hits = found
+    let hits: Vec<DocHit> = found
         .hits
         .iter()
         .filter_map(|hit| {
@@ -815,8 +837,12 @@ pub async fn search(
             })
         })
         .collect();
+    // A hit with no row is not drawn, so it is not counted either.
+    let left_out = found.hits.len() - hits.len();
     Ok(Some(DocsHits {
-        total: found.total,
+        total: found
+            .total
+            .saturating_sub(left_out.try_into().unwrap_or(u32::MAX)),
         took_ms: found.took_ms,
         needles: found.needles,
         unknown_tokens: found.unknown_tokens,

@@ -310,12 +310,11 @@ test("every section reads through what the ticket reaches, each for its own kind
   // The ticket's context is promoted first, and the reach starts from it.
   expect(calls.promote).toEqual([ID]);
   expect(calls.list.every((filter) => filter.reach === ID && filter.context === null)).toBe(true);
-  const kinds = calls.list.map((filter) => [...filter.kinds].sort().join(","));
-  // Builds names no kinds: it asks for the CI role, and the mirror reads the role's (#1295).
-  expect(kinds.sort()).toEqual(["", "branch,commit,pr,repo", "monitor", "page"]);
-  const builds = calls.list.find((filter) => filter.order === "latest_per_parent");
-  expect(builds).toMatchObject({ role: "ci", kinds: [] });
-  expect(calls.list.filter((filter) => filter.role != null)).toEqual([builds]);
+  // Each asks for its role (#1295, #1296, #1297, #1298); Builds names no
+  // kinds, and the mirror reads the role's.
+  const asked = calls.list.map((filter) => `${filter.role}:${[...filter.kinds].sort().join(",")}`);
+  expect(asked.sort()).toEqual(["ci:", "code-host:branch,commit,pr,repo", "monitoring:monitor", "wiki:page"]);
+  expect(calls.list.find((filter) => filter.order === "latest_per_parent")).toMatchObject({ role: "ci", kinds: [] });
 });
 
 test("a key nothing answers to says so and offers the way back", async () => {
@@ -963,7 +962,9 @@ test("a job's Builds section lists the runs of a CI source whose run kind is not
   expect(tally.find((line) => line.kind === "workflow_run")).toEqual({ kind: "workflow_run", tone: "err", count: 1 });
 });
 
-test("a job's Code section drops the rows of a source that does not claim code-host; Builds draws what the CI read answers (#1295)", async () => {
+test("a job's sections draw their rows as read and keep none by source: each read asked for its role (#1295-#1298)", async () => {
+  // A source list that says mock fills nothing: the sections dropped its rows
+  // while they kept them by claims, and must now draw what the mirror answered.
   sourceRoles.take([
     { id: "gitea", roles: [{ role: "code-host", reads: [] }] },
     { id: "teamcity", roles: [{ role: "ci", reads: [] }] },
@@ -972,16 +973,15 @@ test("a job's Code section drops the rows of a source that does not claim code-h
   const p = ports({ others: [MOCK_REPO, B_OK, MOCK_BUILD] });
   open("PAY-231", { ports: p, registry: claimsRegistry() });
   await settle();
-  expect(hrefsOf("code").some((href) => href.includes("mock"))).toBe(false);
-  expect(hrefsOf("code")).toHaveLength(3);
-  // The source list says mock claims nothing, but Builds no longer keeps
-  // rows by it: the mirror narrowed the read to CI's fillers already.
+  expect(hrefsOf("code").filter((href) => href.includes("mock"))).toHaveLength(1);
+  expect(hrefsOf("code")).toHaveLength(4);
   expect(hrefsOf("builds").sort()).toEqual([`#/build/${encodeURIComponent(B_OK.entity_id)}`, `#/build/${encodeURIComponent(MOCK_BUILD.entity_id)}`].sort());
 
   const tally = await reachTally(p, ID);
   const count = (kind: string) => tally.filter((line) => line.kind === kind).reduce((n, line) => n + line.count, 0);
-  // The counts are the sections' rows: one repo kept, both builds as read.
-  expect([count("repo"), count("build")]).toEqual([1, 2]);
+  // The counts are the sections' rows, as read.
+  expect([count("repo"), count("build")]).toEqual([2, 2]);
+  expect(calls.list.every((filter) => typeof filter.role === "string")).toBe(true);
 });
 
 test("with no CI claim known, Builds still asks for the CI role and names no kinds (#1295)", async () => {

@@ -1147,7 +1147,9 @@ export interface MonitorSample {
 }
 
 /**
- * The Monitors tab's roster: every mirrored monitor, tombstones included.
+ * The Monitors tab's roster: every monitor of a source filling the
+ * monitoring role, tombstones included. The read narrows itself to the
+ * role's fillers by source (#1297, §10.8's #1294 entry).
  *
  * One read for the whole tab. The chip counts are counts of these rows, so a
  * second command answering counts would be a second answer that could

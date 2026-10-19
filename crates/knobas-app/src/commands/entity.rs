@@ -6121,7 +6121,12 @@ pub async fn list_projects_inner(
 // module). The reads are `crate::docs`; these are the shims.
 
 /// The Docs reader's left pane: every space the mirror holds pages of, each
-/// with its page tree, and the page read last (#859, ADR-0022).
+/// with its page tree, and the page read last (#859, ADR-0022). The tree is
+/// the wiki role's by definition, so it narrows itself to the role's fillers
+/// (`sources::crud::fillers`, #1296, ADR-0029 as amended on 2026-10-19)
+/// with no argument: a source with a wiki miss, one whose adapter claims no
+/// wiki or is not installed, and the pages a removed source left behind are
+/// in no space, never the page read last and never *For you*.
 ///
 /// # Errors
 ///
@@ -6148,11 +6153,13 @@ pub async fn docs_tree_inner(pool: &PgPool) -> Result<crate::docs::DocsTree, Ipc
         .map_err(IpcError::internal)?
         .identity;
     let registry = crate::sources::Registry::builtin();
+    let fillers = crate::sources::crud::fillers(pool, &registry, knobas_source::role::WIKI).await?;
     crate::docs::tree(
         pool,
         &declarations,
         |kind| registry.doc_projection(kind),
         &me,
+        &fillers,
     )
     .await
 }
@@ -6233,12 +6240,15 @@ pub async fn docs_search_inner(
 ) -> Result<Option<crate::docs::DocsHits>, IpcError> {
     let searcher = crate::commands::search::searcher(pool).await?;
     let registry = crate::sources::Registry::builtin();
+    // The wiki's search, so it narrows itself to the role's fillers (#1296).
+    let fillers = crate::sources::crud::fillers(pool, &registry, knobas_source::role::WIKI).await?;
     crate::docs::search(
         pool,
         &searcher,
         |kind| registry.doc_projection(kind),
         query,
         space,
+        &fillers,
     )
     .await
 }

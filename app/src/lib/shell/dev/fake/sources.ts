@@ -59,6 +59,14 @@ export const FIXTURE_SOURCES = [
       secret_expires_at: "2026-08-30T14:30:00Z",
     },
   },
+  // The Docs tree's spaces name `confluence` (#860): the tree is the wiki
+  // role's read and answers only its fillers (#1296), so the source whose
+  // pages it holds is configured and claims the wiki, as in prototype-6's
+  // status line.
+  {
+    ...fixtureSource("confluence", "confluence", "Tidewater Confluence", "https://wiki.tidewater.example", "ok", 64, 93, "UserPassword"),
+    roles: [{ role: "wiki", reads: [] }],
+  },
   // The refusing one is TeamCity, as in prototype-6, so Settings' source page
   // can be photographed at the prototype's own address (#830).
   {
