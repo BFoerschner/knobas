@@ -7414,7 +7414,7 @@ The merge-manager's rulings (Opus):
   Spec #1293 puts "a row carries its frame" out of scope, so that is as narrow as routing gets.
   *Reversing:* restore the `runKinds` parameter.
 - **The house rule over-reports and lists its exemptions.** It flags every `.filter(` callback
-  naming `source_id` under `lib/tf/` and expects four by name: the shell's sync-status merge (two),
+  naming `source_id` under `lib/tf/` and expects five by name: the shell's sync-status merge (two),
   Code's team lookup by repository address, the Builds staleness warning's source pick, and a
   repository's own pull requests. A lexical rule cannot tell a row filter by role from these, so
   each carries its reason and a new one fails until someone writes one. *Reversing:* n/a.
