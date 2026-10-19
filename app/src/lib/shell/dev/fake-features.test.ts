@@ -348,6 +348,20 @@ test("builds: 59 pipelines by name, each with at most twelve runs, and pipeline_
   expect(() => h["pipeline_runs"]!({ pipelineId: "teamcity:buildType:Nope" })).toThrow();
 });
 
+test("builds: pipelines reads CI's fillers alone, so a recorded CI miss takes the source's pipelines off (#1295)", () => {
+  const h = demoHandlers() as Calls;
+  const sources = () => [...new Set((h["pipelines"]!({}) as { source_id: string }[]).map((p) => p.source_id))];
+  expect(sources()).toEqual(["teamcity"]);
+  const teamcity = FIXTURE_SOURCES.find((source) => source.id === "teamcity") as { role_misses?: { role: string }[] };
+  teamcity.role_misses = [{ role: "ci" }];
+  try {
+    expect(h["pipelines"]!({})).toEqual([]);
+  } finally {
+    delete teamcity.role_misses;
+  }
+  expect(h["pipelines"]!({})).toHaveLength(59);
+});
+
 test("builds: every pipeline carries its project path, prototype-6's three are pinned, and a pin is kept (#849)", () => {
   const h = demoHandlers() as Calls;
   type Row = { entity_id: string; name: string; path: string[]; pinned: boolean };
