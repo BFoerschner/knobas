@@ -29,7 +29,8 @@
 use knobas_source::{Cursor, Sink, Source, SourceError, SyncItem};
 
 /// One progress message.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct SyncProgress {
     /// `knobas.sync_run.id` -- on every message, so a UI watching two runs can
     /// tell them apart.
@@ -43,13 +44,19 @@ pub struct SyncProgress {
 }
 
 /// Where a run is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// - `fetching`: waiting on the remote system.
+/// - `writing`: writing a batch into Postgres.
+///
+/// The phases are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum SyncPhase {
     Started,
-    /// Waiting on the remote system.
     Fetching,
-    /// Writing a batch into Postgres.
     Writing,
     Finished,
     Failed,
@@ -429,51 +436,5 @@ impl Sink for Counting<'_> {
             self.emit();
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The phases are one list in two languages; the mirror is
-    /// `app/src/lib/ipc/sources.ts`. A rename on one side is a progress bar
-    /// that silently never advances.
-    ///
-    /// This is the **spelling** half only. That a phase is *ever emitted* is a
-    /// different claim and a stronger one -- a variant declared on both sides
-    /// and sent by nobody invites a frontend to wait for a state that never
-    /// arrives -- and it is asserted by
-    /// `knobas-sync/tests/it/scheduler_run.rs::every_declared_phase_is_actually_emitted`,
-    /// which drives real runs and collects what comes out.
-    #[test]
-    fn the_phase_names_match_their_typescript_mirror() {
-        let mirror = include_str!("../../../app/src/lib/ipc/sources.ts");
-        for phase in [
-            SyncPhase::Started,
-            SyncPhase::Fetching,
-            SyncPhase::Writing,
-            SyncPhase::Finished,
-            SyncPhase::Failed,
-        ] {
-            let wire = serde_json::to_string(&phase).unwrap();
-            assert!(
-                mirror.contains(&wire),
-                "{wire} is missing from app/src/lib/ipc/sources.ts"
-            );
-        }
-    }
-
-    /// The union the emission test reads is the one the mirror declares.
-    #[test]
-    fn the_declared_union_is_read_out_of_the_mirror() {
-        assert_eq!(
-            crate::mirror::declared_union(
-                include_str!("../../../app/src/lib/ipc/sources.ts"),
-                "SyncPhase"
-            ),
-            ["started", "fetching", "writing", "finished", "failed"],
-            "the union moved or changed shape; the emission test reads it"
-        );
     }
 }

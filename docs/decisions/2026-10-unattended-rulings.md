@@ -8098,3 +8098,95 @@ reserved-steps rule. The entry is `docs/contract/10.8/1326-the-entity-barrel-is-
   they are entity-barrel types and this ticket is the assets barrel; `RuleClass`'s meanings already
   reach the TypeScript through `LinkRow.rule_class`'s field doc, `Origin`'s do not. *Reversing:*
   #1370 does it.
+## #1327: the sources barrel is generated (Opus implementer, 2026-10-20)
+
+Reserved for Björn, ruled by implementer on Opus (the §10.8 entry), under the 2026-10-18
+reserved-steps rule. The entry is `docs/contract/10.8/1327-the-sources-barrel-is-generated.md`.
+
+- **`IpcErrorCode`, which `ConnectionReport::code` reaches.** *Fork:* the type is `index.ts`'s,
+  and `generated/` books no `index.ts`; spell the field `#[ts(type = "IpcErrorCode | null")]`
+  (no import, so the generated file would not compile), or derive the generator and export it to
+  one barrel's file. *Ruling:* derive it, exported to `generated/sources.ts`, the first barrel that
+  reaches it; the sources barrel does not re-export it and `index.ts` keeps its own declaration.
+  *Reasoning:* #1325's convention for a shared type; the two spellings are structurally one type.
+  *Reversing:* switch `index.ts` to re-export the generated one, or move the export to another
+  barrel's file.
+- **Optional where the hand-written mirror was optional.** *Ruling:* `SourcePatch`'s and
+  `SecretInput`'s `Option` fields are `#[ts(optional = nullable)]`; `SourceSummary::roles` and
+  `role_misses` are `#[ts(as = "Option<…>", optional)]`, as the mirror kept them for stand-in
+  summaries written before #1196; `WriteOp`'s `CreateMonitor::kind`, `RunBuild::clean_checkout`
+  and `first_in_queue` likewise, each beside the `#[serde(default)]` that makes absence decode.
+  `MergePullRequest::delete_branch`, also `#[serde(default)]`, stays required, as the mirror had
+  it. *Reasoning:* the ticket asks for shape identity, and a required field here is a type error
+  in every caller that leaves it out. *Reversing:* drop the attribute; svelte-check names the
+  callers.
+- **`WriteOp`'s variant docs stay on the variants.** *Fork:* #1325's convention moves a variant's
+  meaning into the enum's doc with no copy left; `WriteOp`'s 23 variants carry about 400 lines of
+  rationale. *Ruling:* leave them; put what the shell needs of each payload (the target's kind, a
+  field's absence and `null` rules, Confluence's version and body rules) on the payload's fields,
+  which the generator carries, and say so in the enum's doc. Its table already names every
+  variant with its identifier and ticket. *Reasoning:* moving 400 lines into one doc comment would
+  bury the SPI's per-variant rules for adapter authors, who read the variants in rustdoc. The
+  other fourteen enums with variant docs follow the convention. *Reversing:* move the docs; mechanical.
+- **`PayloadPath`'s `#[serde(transparent)]`.** `ts-rs` 12.0.1 does not parse it and prints a
+  note on every build of `knobas-spi-types` ("failed to parse serde attribute"). The generated
+  type is right regardless (`Array<string>`, a newtype is its field), and the note is not a lint,
+  so `clippy -D warnings` passes. *Ruling:* keep the attribute and the note. *Reasoning:*
+  dropping a serde attribute on an SPI type to quiet a build note changes `knobas-spi-types`
+  for no wire reason, and `no-serde-warnings` would also hide a real unparsed attribute.
+  *Reversing:* drop the attribute (serde_json writes a newtype as its field either way).
+- **Which pins are "the barrel's".** Every test that read `sources.ts` for type text: the suite
+  `tests/it/sources_mirror.rs` and six `knobas-sync` pins. Its
+  `the_mirror_invokes_the_write_queue_commands_by_their_registered_names` goes with it: the
+  handler-list pin in `commands::sources` checks every command in both directions. The
+  suite's wire claims are held elsewhere: `SecretInput`'s `Debug` redaction by
+  `sources_crud::nothing_in_the_ipc_surface_reads_a_secret_back`, and the shared
+  `AuthMethod` spelling by the generated type itself (`auth_kind: AuthMethod | null`).
+  `every_declared_phase_is_actually_emitted` tests behaviour, not the mirror, and stays,
+  reading `SyncPhase` from the generated file.
+- **Docs moved and how.** Every TypeScript doc rule the Rust lacked moved onto the Rust: the
+  render-as-text rule on `QueuedWrite::detail`, miss and `null` semantics, ADR and ticket
+  references, the shell-never-reads rules on the descriptor. A type's pointer to its own Rust
+  path did not. Variant docs moved into the enum's doc for fourteen enums (all but `WriteOp`).
+  Doc references to the deleted suite in `config_schema_mirror.rs`, `assets_ipc.rs`,
+  `commands::time` and `knobas_sync::mirror` are reworded.
+- **The write choke point and the generator.** *Fork:* `write_choke_point` flagged
+  `knobas-core/src/write_queue.rs` (`#[ts(type = "WriteOpPayload")]`) and `ipc_mirror.rs`
+  (`knobas_source::WriteOp::export_all`) as second write paths. Add both to `HANDS_TO_THE_QUEUE`,
+  or teach the rule what they are. *Ruling:* the needle matches a whole identifier, so a longer
+  name is not the op; `ipc_mirror.rs` gets its own list, `GENERATES_ITS_TYPESCRIPT`, held to the
+  no-dispatch rule, which meant its two `fs::write` calls became `File::create` + `write_all`.
+  *Reasoning:* neither file hands anything to the queue, so that list would misdescribe them; a
+  substring match that fires on a TypeScript name is a false positive, and the identifier match
+  loses nothing in the direction the test guards (a dispatch has to name `WriteOp` itself).
+  *Reversing:* small; the rule test pins both.
+
+### #1327, merge-manager on Opus (2026-10-20)
+
+Deep pass on the head rebased over #1369 (assets). The witness re-run there: 242 lines for 52
+types, identical to the hand-written `sources.ts` at 7a96c634.
+
+- **Two declarations of `IpcErrorCode`.** *Fork:* unify now (`index.ts` re-exports the generated
+  one) or leave both until a later ticket. *Ruling:* leave both; follow-up #1372 (backlog).
+  *Reasoning:* `index.ts` is orchestrator-owned and append-only, and replacing a declaration
+  there is not an append; the duplicate cannot drift silently, because `error.rs`'s pin holds
+  `index.ts`'s union to the Rust enum and the generated one is the Rust enum. #1332 does not
+  cover it, hence the follow-up. *Reversing:* #1372.
+- **`WriteOp`'s variant docs on the variants.** *Ruling:* confirmed. The convention exists so
+  the shell's half reaches the generated file without two copies; here the variant docs are SPI
+  rationale nobody copies, the enum's table names every variant, and every shell rule sits on a
+  payload field, which the generator carries. Not a contradiction of a ticket, spec or ADR.
+  *Reversing:* mechanical.
+- **`PayloadPath`'s `transparent` note.** *Ruling:* confirmed, no mapping gap. It is the only
+  type deriving `TS` with `#[serde(transparent)]` (`Declarations` does not derive), and it is a
+  tuple newtype, which `ts-rs` emits as its field: `Array<string>`, the old `string[]`. A
+  transparent struct with a *named* field would generate wrongly, and the note would be the only
+  sign; none exists. *Reversing:* nothing to reverse.
+- **The write choke point.** *Ruling:* confirmed. Planted a `.write(` call in
+  `knobas-app/src/ipc_mirror.rs` and, separately, an `Option<knobas_source::WriteOp>` in
+  `knobas-app/src/sources/mod.rs`: `only_the_write_queue_may_send_to_a_source` went red naming
+  each file, and green again with the plants removed. *Reversing:* small.
+- **The §10.8 entry.** *Ruling:* amended to name `knobas-spi-types` as the crate (it said
+  `knobas_core::payload`, the re-export), to list the five crates gaining a derive and the one
+  gaining a dependency (#1328's ruling), and to record the `transparent` note and #1372.
+  *Reversing:* docs only.

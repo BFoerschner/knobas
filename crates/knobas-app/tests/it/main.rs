@@ -61,7 +61,6 @@ mod run_reads_ipc;
 mod search_ipc;
 mod signals_ipc;
 mod sources_crud;
-mod sources_mirror;
 mod sources_registry;
 mod standup_ipc;
 mod start_work;

@@ -23,24 +23,33 @@ pub struct IpcError {
 }
 
 /// The failure classes the frontend branches on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+///
+/// - `unauthorized`: the remote system refused the credential (401/403). A
+///   human must act.
+/// - `unreachable`: the remote system could not be reached: connect, DNS, TLS,
+///   timeout.
+/// - `not_found`: the thing addressed does not exist.
+/// - `conflict`: the write lost a race, or a uniqueness rule rejected it.
+/// - `invalid`: the arguments cannot be honoured -- a malformed id, an
+///   unsupported combination, a mode the app is not in.
+/// - `not_ready`: the app is not there yet: the database is still starting, or
+///   the source has never been configured. Retrying later is the right move.
+/// - `internal`: everything else. Nothing downstream can do anything but show
+///   it.
+///
+/// The codes are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum IpcErrorCode {
-    /// The remote system refused the credential (401/403). A human must act.
     Unauthorized,
-    /// The remote system could not be reached: connect, DNS, TLS, timeout.
     Unreachable,
-    /// The thing addressed does not exist.
     NotFound,
-    /// The write lost a race, or a uniqueness rule rejected it.
     Conflict,
-    /// The arguments cannot be honoured -- a malformed id, an unsupported
-    /// combination, a mode the app is not in.
     Invalid,
-    /// The app is not there yet: the database is still starting, or the
-    /// source has never been configured. Retrying later is the right move.
     NotReady,
-    /// Everything else. Nothing downstream can do anything but show it.
     Internal,
 }
 

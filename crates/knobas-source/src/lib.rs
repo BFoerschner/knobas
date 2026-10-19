@@ -46,8 +46,14 @@ fn default_min_sync_interval_secs() -> u32 {
     DEFAULT_MIN_SYNC_INTERVAL_SECS
 }
 
-/// Everything knobas needs to know about a configured adapter instance.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+/// Everything knobas needs to know about a configured adapter instance: what
+/// the Add-source form is generated from.
+///
+/// A *template* (one per adapter kind, what `list_adapters` answers) has
+/// `id == adapter_kind`; a configured instance's descriptor carries the
+/// instance id instead.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct SourceDescriptor {
     /// Instance id, e.g. `"jira"`. Doubles as the [`EntityRef`] namespace for
     /// every item this instance emits, so it must be non-blank and free of `:`.
@@ -59,6 +65,7 @@ pub struct SourceDescriptor {
     pub adapter_kind: String,
     /// Human-readable name for the source list.
     pub name: String,
+    #[ts(as = "Vec<String>")]
     pub capabilities: Vec<Capability>,
     pub adapter_version: String,
     /// How this adapter can authenticate (spec §3, §3a). The Add-source form
@@ -123,9 +130,10 @@ pub struct SourceDescriptor {
     /// the sweep's precondition and is declared **per kind** (ADR-0003).
     pub entity_kinds: Vec<KindInfo>,
     /// JSON Schema for this adapter's configuration; the Add-source form is
-    /// generated from it (spec §3a). Never holds secrets -- those live in the
-    /// OS keychain, keyed by the chosen [`AuthMethod`]. M0: the mock declares
-    /// an empty object schema.
+    /// generated from it (spec §3a), never hand-built per adapter. Never
+    /// holds secrets -- those live in the OS keychain, keyed by the chosen
+    /// [`AuthMethod`]. M0: the mock declares an empty object schema.
+    #[ts(type = "unknown")]
     pub config_schema: serde_json::Value,
     /// Where this adapter's records keep the things knobas reads but §4.1 does
     /// not normalize: a status, a priority, an assignee, requested reviewers,
@@ -167,7 +175,8 @@ pub struct SourceDescriptor {
     /// runs as clause 10: the kinds it names are in [`Self::entity_kinds`],
     /// the paths it needs are in [`Self::payload_paths`], and the reads it
     /// needs are in the claim. A role's writes are declared, one by one, in
-    /// [`Self::write_ops`] as every write is.
+    /// [`Self::write_ops`] as every write is. A surface reads the claim,
+    /// never the adapter kind.
     ///
     /// `#[serde(default)]`, so a descriptor from a peer that predates this
     /// decodes as an adapter that claims nothing.
@@ -179,7 +188,9 @@ pub struct SourceDescriptor {
     /// lists [`SOURCE_ACTION`], and an adapter refuses a source action whose
     /// id is not here with [`SourceError::Protocol`]; [`contract::battery`]
     /// holds both (clause 11). Each action's dialog is drawn by the view that
-    /// offers it, in ADR-0020's action vocabulary, as every action's is.
+    /// offers it, in ADR-0020's action vocabulary, as every action's is: its
+    /// views offer them as `source_action` actions, and the shell never reads
+    /// this list.
     ///
     /// `#[serde(default)]`, so a descriptor from a peer that predates this
     /// decodes as an adapter with none.
@@ -192,6 +203,7 @@ pub struct SourceDescriptor {
     /// exactly when a [`role::CODE_HOST`] claim reads `clone_urls`, and a
     /// config key named here is a string property of
     /// [`Self::config_schema`]; [`role::check`] holds both (clause 10).
+    /// *Clone* reads it on the Rust side; the shell never does.
     ///
     /// `#[serde(default)]`, so a descriptor from a peer that predates this
     /// decodes as an adapter that names no address to clone from.
@@ -324,8 +336,10 @@ pub enum Capability {
 /// How an adapter authenticates against its remote system (spec §3).
 ///
 /// The descriptor declares which of these it accepts; the secret itself is
-/// stored in the OS keychain, never in the source's configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// stored in the OS keychain, never in the source's configuration. Spelled in
+/// PascalCase on the wire, unchanged since M0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub enum AuthMethod {
     UserPassword,
     Pat,
@@ -527,6 +541,16 @@ impl SourceError {
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
 /// with [`SourceError::Protocol`].
 ///
+/// On the wire it is externally tagged, so the variant name is the object's
+/// one key, and a frontend written today will meet a payload it does not
+/// recognise. It handles that by narrowing on the key rather than assuming
+/// `Comment`: an unrecognised op can still be applied and discarded, and only
+/// *editing* needs to know where the words are. What each variant means is
+/// in the table above and on the variant; what the shell needs of its payload
+/// is on the payload's fields, because the generated TypeScript
+/// (`app/src/lib/ipc/generated/sources.ts`) carries a field's doc but not a
+/// variant's (#1325).
+///
 /// **One variant per operation, never per adapter** (ADR-0006). Two sources
 /// that do the same conceptual thing share a variant, and the adapter-specific
 /// spelling lives behind the adapter's own `write`. That is why `Comment` says
@@ -550,7 +574,8 @@ impl SourceError {
 /// rather than an error.
 ///
 /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts", rename = "WriteOpPayload")]
 pub enum WriteOp {
     /// Identifier `"comment"`. Reply on a ticket or a pull request.
     Comment { entity: String, body: String },
@@ -630,7 +655,9 @@ pub enum WriteOp {
     /// question no surface in knobas puts to the user.
     LogWork {
         entity: String,
+        /// RFC 3339, UTC -- when the logged span began.
         started: chrono::DateTime<chrono::Utc>,
+        /// How long was **worked**, which is not the span's length.
         seconds: i64,
         comment: String,
     },
@@ -663,9 +690,12 @@ pub enum WriteOp {
     ///
     /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     CreatePage {
+        /// The **parent page**, as an entity id -- this op's queue target.
         parent: String,
+        /// The space key in Confluence's own spelling (`ENG`), not an id.
         space: String,
         title: String,
+        /// Storage format, not text: what a later read must return unchanged.
         body: String,
     },
     /// Identifier `"update_page"`. Replace a wiki page's body (M3.2, issue
@@ -688,7 +718,14 @@ pub enum WriteOp {
     /// answer catches the window the mirror could not see.
     UpdatePage {
         entity: String,
+        /// The version the edit was made **against**, not the one to write:
+        /// the adapter sends `base_version + 1` and Confluence aborts if
+        /// somebody else got there first (#286).
         base_version: i64,
+        /// The page's **whole** storage format. Confluence's content `PUT`
+        /// replaces the record, so a body carrying only the edited section
+        /// would delete the rest of the page -- `page-sections.ts`'s
+        /// `replaceSectionBody` is what composes this.
         body: String,
     },
     /// Identifier `"pause_monitor"`. Stop a monitor checking (M4.1, issue
@@ -700,7 +737,13 @@ pub enum WriteOp {
     /// asks a reader for and then throws away, and a *silence for an hour*
     /// that knobas kept locally would be a scheduler this milestone does not
     /// have (spec #427, *Out of scope*).
-    PauseMonitor { entity: String },
+    PauseMonitor {
+        /// The **monitor** (`kuma:8`). No second field: Uptime Kuma's
+        /// `pauseMonitor` takes a monitor id and nothing else, so a duration
+        /// or a reason here would be something knobas asked a reader for and
+        /// threw away.
+        entity: String,
+    },
     /// Identifier `"resume_monitor"`. Start a paused monitor checking again
     /// (M4.1, issue #452). `entity` is the **monitor**.
     ///
@@ -710,7 +753,10 @@ pub enum WriteOp {
     /// are two acts a reader chooses between rather than one act with an
     /// argument. It is also what lets a descriptor offer one without the
     /// other, which is what a source with a read-only account would declare.
-    ResumeMonitor { entity: String },
+    ResumeMonitor {
+        /// The paused **monitor**, to start checking again.
+        entity: String,
+    },
     /// Identifier `"create_monitor"`. Ask a monitoring source to start
     /// watching a URL (M4.1, issue #453).
     ///
@@ -744,10 +790,21 @@ pub enum WriteOp {
     /// -- it is the address the attachment is made through, which is why the
     /// caller records it on the asset *before* queueing the write.
     CreateMonitor {
+        /// What the create targets: the source that will make it, as
+        /// `assets::MonitorTarget.entity` gives it. Never composed by a
+        /// caller (#453).
         entity: String,
+        /// What the monitor is called, and therefore what attaches it: the
+        /// next poll mirrors it, and `knobas_sync::attach` draws the
+        /// `monitored-by` link to every asset carrying this name.
         name: String,
+        /// What it checks, spelled as `kind` reads it: an http(s) URL,
+        /// `host:port`, a host, or a container's name (#864).
         url: String,
+        /// The kind of check; absent is `http`, what every create meant
+        /// before #864.
         #[serde(default)]
+        #[ts(as = "Option<MonitorKind>", optional)]
         kind: MonitorKind,
     },
     /// Identifier `"merge_pull_request"`. Merge a pull request into its base
@@ -783,10 +840,16 @@ pub enum WriteOp {
     /// meant; absent on the wire when `None`, so such a merge reads and
     /// writes the shape it had.
     MergePullRequest {
+        /// The **pull request** (#667).
         entity: String,
+        /// How the merge lands; a word outside the three does not decode.
         style: MergeStyle,
+        /// Delete the head branch once merged (#708); absent reads as
+        /// `false`.
         #[serde(default)]
         delete_branch: bool,
+        /// The commit message the reader wrote (#843): first line the title;
+        /// absent or `null` keeps the source's default.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
     },
@@ -818,9 +881,16 @@ pub enum WriteOp {
     /// `knobas_core::write_queue::project` for what that record can and
     /// cannot witness for a parameter.
     SetParameter {
+        /// The **build configuration** (#668).
         entity: String,
+        /// The parameter's full name. On an inherited parameter the source
+        /// creates an own value that overrides it.
         name: String,
         value: String,
+        /// The value the edit was made against; the source refuses the
+        /// write when the parameter no longer holds it. `null` for a secret,
+        /// whose value is never drawn and whose write is last-write-wins, and
+        /// for a parameter that did not exist.
         base: Option<String>,
     },
     /// Identifier `"run_build"`. Put one build of a build configuration on
@@ -854,12 +924,20 @@ pub enum WriteOp {
     /// Hold detection takes liveness alone, as for a trigger: a run adds a
     /// build beside whatever the configuration holds and overwrites nothing.
     RunBuild {
+        /// The **build configuration** (#669).
         entity: String,
+        /// The source's name for the branch; `null` for the default branch.
         branch: Option<String>,
+        /// Only the values the reader changed, for this build alone.
         parameters: Vec<BuildParameter>,
+        /// Check the sources out anew (#852); absent reads as `false`.
         #[serde(default)]
+        #[ts(as = "Option<bool>", optional)]
         clean_checkout: bool,
+        /// Put the run at the top of the source's queue (#852); absent reads
+        /// as `false`.
         #[serde(default)]
+        #[ts(as = "Option<bool>", optional)]
         first_in_queue: bool,
     },
     /// Identifier `"submit_review"`. Review a pull request: approve it,
@@ -883,9 +961,12 @@ pub enum WriteOp {
     /// Hold detection takes the whole mirrored record, as for `Approve`: a
     /// review is a judgement on one state of the pull request.
     SubmitReview {
+        /// The **pull request** (#705).
         entity: String,
         verdict: ReviewVerdict,
         body: String,
+        /// The line comments that go with the review; empty for a review of
+        /// the whole change.
         #[serde(default)]
         comments: Vec<ReviewComment>,
     },
@@ -906,7 +987,11 @@ pub enum WriteOp {
     /// Like a merge it leaves nothing new at the source, so a withdrawal in
     /// flight leaves no unclaimed write: what is left is the branch gone,
     /// which the next sync reads back.
-    DeleteBranch { entity: String },
+    DeleteBranch {
+        /// The **branch** (#707); the source refuses the default branch and a
+        /// protected one.
+        entity: String,
+    },
     /// Identifier `"edit_pull_request"`. Edit a pull request's title and
     /// description, close it or reopen it (spec #701 workflow 8, issue #706).
     /// `entity` is the **pull request**.
@@ -928,6 +1013,8 @@ pub enum WriteOp {
     /// close or reopen on the state the source declares for the kind -- see
     /// `knobas_core::write_queue::project`.
     EditPullRequest {
+        /// The **pull request** (#706). A field below left `null` is not
+        /// written, so only what the reader changed reaches the source.
         entity: String,
         #[serde(default)]
         title: Option<String>,
@@ -950,7 +1037,11 @@ pub enum WriteOp {
     /// merge it makes nothing new knobas would have to claim, so a withdrawal
     /// in flight leaves no unclaimed write: what is left is the head moved,
     /// which the next sync reads back.
-    UpdatePullRequestBranch { entity: String, style: UpdateStyle },
+    UpdatePullRequestBranch {
+        /// The **pull request** (#708).
+        entity: String,
+        style: UpdateStyle,
+    },
     /// Identifier `"commit_file"`. Commit a new version of one file through
     /// the source, never through a checkout (spec #808 D4, R-8.6, issue
     /// #822). `repo` is the **repository**, an [`EntityRef`] in string form
@@ -993,13 +1084,22 @@ pub enum WriteOp {
     ///
     /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     CommitFile {
+        /// The **repository** (#822), this op's queue target.
         repo: String,
         branch: String,
+        /// Makes this branch from `branch` first; `null` commits onto
+        /// `branch`.
         #[serde(default)]
         new_branch: Option<String>,
         path: String,
+        /// The whole new text, never a patch.
         content: String,
         message: String,
+        /// The blob the edit was made against. A file that changed since
+        /// comes back held, theirs in the held snapshot (`text`, `base`) and
+        /// this payload as the reader's. *Apply anyway* re-sends against
+        /// `base` by itself; an *Edit* (amend) of a moved commit sends
+        /// `base_sha` set to the held side's `base`, or it is held again.
         base_sha: String,
     },
     /// Identifier `"source_action"`. A write outside every
@@ -1028,7 +1128,10 @@ pub enum WriteOp {
     /// unanswered is held for a person.
     SourceAction {
         entity: String,
+        /// The adapter's own name for the action (#1194, ADR-0029).
         id: String,
+        /// The answers of the dialog the adapter declared, by field name. The
+        /// shell copies `id` and these from the action and never reads them.
         #[serde(default)]
         fields: std::collections::BTreeMap<String, String>,
     },
@@ -1049,8 +1152,9 @@ pub const SOURCE_ACTION_ID: &str = "id";
 /// The state an [`EditPullRequest`](WriteOp::EditPullRequest) puts a pull
 /// request in. Serialized as the lowercase word (`"closed"`), which is also
 /// Gitea's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum PullRequestState {
     Open,
     Closed,
@@ -1071,20 +1175,27 @@ impl PullRequestState {
 /// What a [`SubmitReview`](WriteOp::SubmitReview) says of the pull request.
 /// Serialized as the snake_case word (`"request_changes"`); each adapter
 /// spells it its own way (Gitea's `event`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// - `approve`: the change may land.
+/// - `request_changes`: the change must change before it lands.
+/// - `comment`: words, and no verdict.
+///
+/// The verdicts are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum ReviewVerdict {
-    /// The change may land.
     Approve,
-    /// The change must change before it lands.
     RequestChanges,
-    /// Words, and no verdict.
     Comment,
 }
 
 /// One line comment of a [`SubmitReview`](WriteOp::SubmitReview): the file's
 /// path in the change, the line number on `side`, and what it says.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct ReviewComment {
     pub path: String,
     pub line: u64,
@@ -1103,7 +1214,7 @@ pub enum ReviewSide {
     New,
 }
 
-/// One parameter of a [`RunBuild`](WriteOp::RunBuild): its full name
+/// One parameter of a [`RunBuild`](WriteOp::RunBuild) (#669): its full name
 /// (`env.SEPA_RETRIES`) and the value this run takes for it. A struct rather
 /// than a pair so the wire reads `{"name": .., "value": ..}`, the shape a
 /// source's own parameter lists have.
@@ -1122,17 +1233,26 @@ pub struct BuildParameter {
 /// service, TCP for a database, Docker for a container, Ping for a VM. A
 /// closed set, so a payload naming a check no adapter makes fails to decode at
 /// `submit_write` rather than reaching a source.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// - `http`: an http(s) URL fetched and expected to answer 2xx.
+/// - `tcp`: a TCP connection to `host:port`.
+/// - `ping`: an ICMP ping to a host.
+/// - `docker`: a container, by name, asked of the monitoring source's Docker
+///   host.
+///
+/// The kinds are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
+)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum MonitorKind {
-    /// An http(s) URL fetched and expected to answer 2xx.
     #[default]
     Http,
-    /// A TCP connection to `host:port`.
     Tcp,
-    /// An ICMP ping to a host.
     Ping,
-    /// A container, by name, asked of the monitoring source's Docker host.
     Docker,
 }
 
@@ -1152,14 +1272,20 @@ impl MonitorKind {
 /// How a [`MergePullRequest`](WriteOp::MergePullRequest) lands its commits on
 /// the base branch. Serialized as the lowercase word (`"squash"`), which is
 /// also what a source view's merge action offers as its options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// - `merge`: a merge commit joining head into base.
+/// - `rebase`: the head's commits replayed onto base, no merge commit.
+/// - `squash`: the head's commits folded into one commit on base.
+///
+/// The styles are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum MergeStyle {
-    /// A merge commit joining head into base.
     Merge,
-    /// The head's commits replayed onto base, no merge commit.
     Rebase,
-    /// The head's commits folded into one commit on base.
     Squash,
 }
 
@@ -1183,12 +1309,18 @@ impl MergeStyle {
 /// brings the head up to date with its base. Serialized as the lowercase
 /// word, which is also what the view's *Update branch…* offers as its options
 /// and what Gitea's `?style=` takes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// - `merge`: the base merged into the head: a merge commit on the head.
+/// - `rebase`: the head's commits replayed onto the base: the head rewritten.
+///
+/// The styles are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum UpdateStyle {
-    /// The base merged into the head: a merge commit on the head.
     Merge,
-    /// The head's commits replayed onto the base: the head rewritten.
     Rebase,
 }
 

@@ -35,8 +35,11 @@ use serde_json::Value;
 use super::{Field, KindOf, minimum};
 use crate::SourceDescriptor;
 
-/// One declared path of a claimed role that missed on the records.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// One declared path of a claimed role that missed on the records the
+/// source's syncs emitted (#1199, ADR-0028), so the shell does not draw that
+/// role for the source.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct RoleMiss {
     /// The role, as claimed (`ticket-system`).
     pub role: String,

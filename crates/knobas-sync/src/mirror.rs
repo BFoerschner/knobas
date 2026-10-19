@@ -1,10 +1,11 @@
 //! Asserting that a Rust shape and its TypeScript mirror are the same shape.
 //!
 //! **One implementation, because a duplicated detector is two detectors that
-//! drift.** Four types on this bridge need it -- `SourceSyncStatus`,
+//! drift.** Four types on this bridge needed it -- `SourceSyncStatus`,
 //! `SyncReport`, `CredentialHealth` here, and `knobas-app`'s sources DTOs --
 //! and they were checked four times by hand before this module existed. Three
-//! of those copies did it wrong in the same way.
+//! of those copies did it wrong in the same way. Those types are generated
+//! now (#1327); the barrels still written by hand are its callers.
 //!
 //! # What the wrong way was
 //!

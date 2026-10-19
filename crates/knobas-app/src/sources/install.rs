@@ -42,14 +42,17 @@ pub fn store_dir(profile_dir: &Path) -> PathBuf {
     profile_dir.join(STORE_DIR)
 }
 
-/// What an install recorded, and the adapter's descriptor template: what
-/// the Add-source dialog chooses once the install answers.
-#[derive(Debug, Clone, serde::Serialize)]
+/// What an install recorded (#1202, ADR-0028), and the adapter's descriptor
+/// template: what the Add-source dialog chooses once the install answers, and
+/// what `list_adapters` answers from then on.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct InstalledAdapter {
     pub adapter_kind: String,
     pub adapter_version: String,
     pub interface_version: String,
     pub source_url: String,
+    /// The release's tag; `None` for a local manifest, which is no release.
     pub tag: Option<String>,
     pub artifact_sha256: String,
     pub hosts: Vec<String>,

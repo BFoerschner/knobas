@@ -13,7 +13,7 @@ knobas-spi-types = { path = "../knobas-spi-types" }
 serde.workspace = true
 serde_json.workspace = true
 # The derive behind the generated IPC mirror (`knobas-app`'s `ipc_mirror`,
-# #1325): the entity barrel's types are declared here (#1326).
+# #1325): the entity and sources barrels' types are declared here (#1326, #1327).
 ts-rs.workspace = true
 thiserror.workspace = true
 

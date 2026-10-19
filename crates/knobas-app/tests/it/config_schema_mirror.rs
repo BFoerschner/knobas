@@ -24,10 +24,11 @@
 //!   number instead fires either way, which is a value pin doing a drift
 //!   detector's job by accident.
 //!
-//! The idiom is `tests/it/sources_mirror.rs`'s: `include_str!` the TypeScript,
-//! compare it against a real value. The difference is that the mirror there is
-//! a set of `interface` declarations, where a key set is the whole content;
-//! here the mirror is data, so the comparison is over values.
+//! The idiom was the sources barrel's old mirror suite's (deleted by #1327, when
+//! those types became generated): `include_str!` the TypeScript, compare it
+//! against a real value. The difference is that the mirror there was a set of
+//! `interface` declarations, where a key set is the whole content; here the
+//! mirror is data, so the comparison is over values.
 //!
 //! **The rule, taken from the fixture's own header:** *a property that is here
 //! is verbatim; a property may be absent, and each absence is named.* The

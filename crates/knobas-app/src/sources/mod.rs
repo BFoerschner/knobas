@@ -131,13 +131,15 @@ pub fn state<R: tauri::Runtime>(
 
 /// What the Add-source form submits. Carries the typed secret, which goes to
 /// the keychain and never to Postgres (§14).
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct NewSource {
     pub id: String,
     pub adapter_kind: String,
     pub display_name: String,
     pub base_url: String,
     pub auth_kind: knobas_source::AuthMethod,
+    #[ts(type = "unknown")]
     pub config: serde_json::Value,
     pub secret: SecretInput,
     pub sync_interval_secs: u32,
@@ -149,12 +151,18 @@ pub struct NewSource {
 /// `id` and `adapter_kind` are absent **on purpose**: the instance id is the
 /// entity namespace, baked into every entity id, link and activity row, and is
 /// therefore immutable (P10). `display_name` is the renameable one.
-#[derive(Debug, Default, serde::Deserialize)]
+#[derive(Debug, Default, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct SourcePatch {
+    #[ts(optional = nullable)]
     pub display_name: Option<String>,
+    #[ts(optional = nullable)]
     pub base_url: Option<String>,
+    #[ts(type = "unknown", optional)]
     pub config: Option<serde_json::Value>,
+    #[ts(optional = nullable)]
     pub sync_interval_secs: Option<u32>,
+    #[ts(optional = nullable)]
     pub enabled: Option<bool>,
 }
 
@@ -167,14 +175,20 @@ pub struct SourcePatch {
 /// account beside it. `add_source` is the one caller for which "keep" has no
 /// meaning -- nothing is stored yet -- and it refuses a `value` of `None` by
 /// name.
-#[derive(Clone, Default, serde::Deserialize)]
+#[derive(Clone, Default, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct SecretInput {
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub value: Option<String>,
     /// The optional second credential of the version-2 keychain envelope: a
     /// username and password stored *beside* [`value`](Self::value), not
-    /// instead of it. Only Uptime Kuma reads one today (spec #427, story 69).
+    /// instead of it. Only Uptime Kuma reads one today (spec #427, story 69),
+    /// and only for its write half: the API key opens `/metrics`, the account
+    /// opens socket.io, and a source with only the key reads every monitor
+    /// and pauses none of them.
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub account: Option<AccountInput>,
 }
 
@@ -184,7 +198,8 @@ pub struct SecretInput {
 /// Its own type rather than that one re-used, because this is an IPC argument
 /// and the SPI's struct is a frozen surface: the day a stored account grows a
 /// field, the form and the keychain should be able to move one at a time.
-#[derive(Clone, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts", rename = "SecretAccount")]
 pub struct AccountInput {
     pub username: String,
     pub password: String,
@@ -239,8 +254,10 @@ impl std::fmt::Debug for AccountInput {
 ///
 /// `secret: None` **with** `source_id` set re-tests the stored credential,
 /// which is what *Test connection* on an existing source does.
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct SourceDraft {
+    /// Set, with `secret: None`, to re-test the stored credential.
     pub source_id: Option<String>,
     pub adapter_kind: String,
     pub base_url: String,
@@ -255,12 +272,14 @@ pub struct SourceDraft {
     /// draft that has not been saved yet. Every source the Add-source form can
     /// create has an auth method by construction ([`NewSource::auth_kind`]).
     pub auth_kind: knobas_source::AuthMethod,
+    #[ts(type = "unknown")]
     pub config: serde_json::Value,
     pub secret: Option<SecretInput>,
 }
 
 /// One row of the sources view.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct SourceSummary {
     pub id: String,
     pub adapter_kind: String,
@@ -268,9 +287,12 @@ pub struct SourceSummary {
     pub base_url: String,
     pub enabled: bool,
     pub sync_interval_secs: u32,
+    #[ts(type = "unknown")]
     pub config: serde_json::Value,
     pub health: knobas_sync::config::CredentialHealth,
     pub last_run: Option<knobas_sync::run_log::SyncRunRow>,
+    /// When the scheduler runs this source next; `None` when the source is
+    /// disabled, running, or needs a human.
     pub next_run_at: Option<chrono::DateTime<chrono::Utc>>,
     pub item_count: i64,
     /// Which kind of credential this source authenticates with, or `None`
@@ -297,17 +319,33 @@ pub struct SourceSummary {
     /// `kinds` (#1196, ADR-0029): what the shell draws each surface for.
     /// Empty for an adapter that claims none, and for a row whose adapter is
     /// no longer compiled in.
+    ///
+    /// The mirror narrows a role's reads by these claims itself; the shell
+    /// reads them only for which optional reads a source answers
+    /// (`tf/roles.svelte.ts`, #1300).
+    ///
+    /// Always sent. Optional in the generated TypeScript (`#[ts(optional)]`)
+    /// only so a stand-in summary written before #1196 still type-checks; a
+    /// summary without it claims nothing.
+    #[ts(as = "Option<Vec<knobas_source::role::RoleClaim>>", optional)]
     pub roles: Vec<knobas_source::role::RoleClaim>,
     /// The claimed roles whose declared paths missed on the records this
-    /// source's syncs emitted (#1199, ADR-0028 *The checks*): the shell draws
-    /// none of these roles for the source, and its health line names each
-    /// path. Only roles still in [`roles`](Self::roles); empty when every
-    /// claimed role is filled or not judged yet.
+    /// source's syncs emitted (#1199, ADR-0028 *The checks*): the mirror
+    /// leaves the source out of those roles' reads, the shell draws none of
+    /// these roles for the source and offers none of their optional reads
+    /// (`tf/roles.svelte.ts`), and its health line names each path. Only
+    /// roles still in [`roles`](Self::roles); empty when every claimed role
+    /// is filled or not judged yet.
+    ///
+    /// Always sent; optional in the generated TypeScript for the reason
+    /// [`roles`](Self::roles) is.
+    #[ts(as = "Option<Vec<knobas_source::role::data::RoleMiss>>", optional)]
     pub role_misses: Vec<knobas_source::role::data::RoleMiss>,
 }
 
 /// What *Test connection* found.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct ConnectionReport {
     pub ok: bool,
     pub account: Option<String>,
@@ -339,7 +377,8 @@ pub struct ConnectionReport {
     pub elapsed_ms: u32,
     /// Config values the adapter learned from the far end
     /// ([`knobas_source::ConnectionInfo::discovered`]), keyed by the
-    /// `config_schema` property each belongs in.
+    /// `config_schema` property each belongs in: Jira's Epic Link custom
+    /// field id, whose value is different on every instance (#297).
     ///
     /// Carried through verbatim, and **acted on by the dialog, not here**:
     /// `AddSource.svelte` puts a value into the matching form field when the
@@ -350,6 +389,7 @@ pub struct ConnectionReport {
     ///
     /// Empty on a failed test: an adapter that could not connect learned
     /// nothing, and a stale map would fill the form with another server's ids.
+    /// Empty too for an adapter that discovers nothing.
     pub discovered: std::collections::BTreeMap<String, String>,
 }
 

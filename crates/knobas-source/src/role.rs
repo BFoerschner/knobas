@@ -52,9 +52,12 @@ pub const MONITORING: &str = "monitoring";
 /// reads of its own; its view is the `view` read.
 ///
 /// Plain serde data, like everything crossing the SPI (spec §3a).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct RoleClaim {
     pub role: String,
+    /// The live reads the source answers for the role, by identifier
+    /// (`run_log`).
     #[serde(default)]
     pub reads: Vec<String>,
 }

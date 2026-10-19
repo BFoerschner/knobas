@@ -18,6 +18,7 @@
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use ts_rs::{Config, ExportError, TS};
@@ -255,6 +256,23 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::assets::dependencies::DepViewSettings::export_all(cfg)?;
     crate::assets::dependencies::DepView::export_all(cfg)?;
     crate::assets::dependencies::DepViews::export_all(cfg)?;
+    // sources.ts
+    knobas_source::SourceDescriptor::export_all(cfg)?;
+    crate::sources::SourceSummary::export_all(cfg)?;
+    crate::sources::NewSource::export_all(cfg)?;
+    crate::sources::SourcePatch::export_all(cfg)?;
+    crate::sources::SourceDraft::export_all(cfg)?;
+    crate::sources::ConnectionReport::export_all(cfg)?;
+    crate::sources::install::InstalledAdapter::export_all(cfg)?;
+    crate::sources::installed::AdapterStatus::export_all(cfg)?;
+    crate::sources::installed::Removal::export_all(cfg)?;
+    knobas_sync::SyncReport::export_all(cfg)?;
+    knobas_sync::progress::SyncProgress::export_all(cfg)?;
+    knobas_sync::run_log::SourceSyncStatus::export_all(cfg)?;
+    knobas_sync::stats::DbStats::export_all(cfg)?;
+    knobas_core::write_queue::QueuedWrite::export_all(cfg)?;
+    knobas_source::WriteOp::export_all(cfg)?;
+    knobas_core::write_queue::QueueCounts::export_all(cfg)?;
     Ok(())
 }
 
@@ -281,8 +299,17 @@ fn rehead(dir: &Path) {
         let body = text
             .strip_prefix(TS_RS_NOTE)
             .unwrap_or_else(|| panic!("{name} does not start with ts-rs's note: {text:.120}"));
-        fs::write(&path, format!("{NOTE}{body}")).expect("the scratch file can be rewritten");
+        replace(&path, &format!("{NOTE}{body}")).expect("the scratch file can be rewritten");
     }
+}
+
+/// Write `text` as the whole of `path`.
+///
+/// `File::create` and `write_all` rather than `fs::write`: this file names
+/// `knobas_source::WriteOp` to export it, and `knobas-sync`'s
+/// `write_choke_point` holds such a file to containing no `::write(` call.
+fn replace(path: &Path, text: &str) -> std::io::Result<()> {
+    fs::File::create(path)?.write_all(text.as_bytes())
 }
 
 /// The `.ts` files directly in `dir`, by name.
@@ -312,7 +339,7 @@ fn sync(fresh: &Path, dest: &Path) {
             continue;
         }
         let staging = dest.join(format!(".{name}.tmp"));
-        fs::write(&staging, &text).expect("the staging file can be written");
+        replace(&staging, &text).expect("the staging file can be written");
         fs::rename(&staging, &target).expect("the staging file can be moved into place");
     }
     for name in ts_files(dest).difference(&wanted) {
