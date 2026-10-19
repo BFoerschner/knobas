@@ -9,7 +9,7 @@ version.workspace = true
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
-knobas-core = { path = "../knobas-core" }
+knobas-spi-types = { path = "../knobas-spi-types" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

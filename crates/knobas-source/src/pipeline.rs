@@ -66,7 +66,7 @@ pub struct PipelineSettings {
 /// One pipeline of a chain (#857).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChainStep {
-    /// The pipeline's [`EntityRef`](knobas_core::entity::EntityRef) in string
+    /// The pipeline's [`EntityRef`](knobas_spi_types::entity::EntityRef) in string
     /// form, of the same source.
     pub pipeline: String,
     /// What the source calls the pipeline.

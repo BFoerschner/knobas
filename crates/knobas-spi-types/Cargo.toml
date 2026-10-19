@@ -1,0 +1,24 @@
+[package]
+name = "knobas-spi-types"
+edition.workspace = true
+version.workspace = true
+
+# The types the source SPI shares with the core (#1234): payload
+# declarations, entity references and tones. `knobas-source` builds its
+# DTOs on these, and `knobas-core` re-exports them under their old paths.
+#
+# Nothing here may need a database or an async runtime: this crate, and
+# `knobas-source` on top of it, build for `wasm32-wasip2`, so an external
+# adapter can depend on them (the fixture component does). `just
+# wasm-fixture` is the build that holds that.
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Only for `Declarations::as_param`, the one bind the core's statements
+# share. `knobas-core` turns it on; a wasm build never does.
+sqlx = { workspace = true, optional = true }
+thiserror.workspace = true
+
+[features]
+sqlx = ["dep:sqlx"]

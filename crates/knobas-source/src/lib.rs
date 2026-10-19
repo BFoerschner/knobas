@@ -51,7 +51,7 @@ pub struct SourceDescriptor {
     /// Instance id, e.g. `"jira"`. Doubles as the [`EntityRef`] namespace for
     /// every item this instance emits, so it must be non-blank and free of `:`.
     ///
-    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     pub id: String,
     /// Which adapter this is an instance of, e.g. `"jira"`, `"mock"`. Distinct
     /// from [`Self::entity_kinds`], which is about the *items* it emits.
@@ -157,9 +157,9 @@ pub struct SourceDescriptor {
     /// an out-of-process adapter, a stored blob -- decodes as an adapter that
     /// declares nothing, which every reader already handles.
     ///
-    /// [`KindPaths::kind`]: knobas_core::payload::KindPaths::kind
+    /// [`KindPaths::kind`]: knobas_spi_types::payload::KindPaths::kind
     #[serde(default)]
-    pub payload_paths: Vec<knobas_core::payload::KindPaths>,
+    pub payload_paths: Vec<knobas_spi_types::payload::KindPaths>,
     /// The [roles](role) this adapter claims (ADR-0029, issue #1193): which
     /// of the shell's surfaces it fills. Each claim is held to its role's
     /// [`role::Minimum`] by [`role::check`], which [`contract::battery`]
@@ -198,15 +198,16 @@ pub struct SourceDescriptor {
     pub clone_from: Vec<clone_urls::CloneFrom>,
 }
 
-// The declaration types themselves live in `knobas-core`, not here: the
+// The declaration types themselves live in `knobas-spi-types`, not here: the
 // adapters that write them depend on this crate, and the readers that resolve
-// them are in `knobas-core`, which may not depend on the SPI. Re-exported so
+// them are in `knobas-core`, which may not depend on the SPI. Neither crate
+// needs a database, so both build for `wasm32-wasip2` (#1234). Re-exported so
 // an adapter needs one `use`.
-pub use knobas_core::payload::{
+pub use knobas_spi_types::payload::{
     KindPaths, ListPath, ParentPath, PayloadPath, ProjectPath, StateChip, StatePath, StateValue,
     Trigger, TriggerPath, TriggerValue,
 };
-pub use knobas_core::tone::Tone;
+pub use knobas_spi_types::tone::Tone;
 
 /// What a successful [`Source::test_connection`] learned about the far end.
 ///
@@ -331,7 +332,7 @@ pub enum AuthMethod {
 /// One entity pushed across the SPI during a sync.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SyncItem {
-    pub entity: knobas_core::entity::EntityRef,
+    pub entity: knobas_spi_types::entity::EntityRef,
     /// The *entity* kind, naming one of the descriptor's
     /// [`entity_kinds`](SourceDescriptor::entity_kinds):
     /// ticket|pr|build|page|commit|branch|repo|monitor|…
@@ -444,7 +445,7 @@ pub enum SourceError {
     /// that version: what a reader compares their own against before they
     /// choose. The write queue holds the write with both rather than
     /// refusing it, and *Apply anyway* re-sends it against `base`
-    /// (`knobas_core::write_queue::apply_anyway`). Never retried on its own,
+    /// (`knobas_spi_types::write_queue::apply_anyway`). Never retried on its own,
     /// and not a fault of the credential or the network.
     ///
     /// Two strings and no status, so it crosses a process boundary as plain
@@ -543,7 +544,7 @@ impl SourceError {
 /// foreign key on it, and hold detection reads "not in the mirror" as a fact
 /// rather than an error.
 ///
-/// [`EntityRef`]: knobas_core::entity::EntityRef
+/// [`EntityRef`]: knobas_spi_types::entity::EntityRef
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum WriteOp {
     /// Identifier `"comment"`. Reply on a ticket or a pull request.
@@ -655,7 +656,7 @@ pub enum WriteOp {
     /// HTML: what goes out is what a later read must return unchanged, and a
     /// translation layer here would make the round trip lossy.
     ///
-    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     CreatePage {
         parent: String,
         space: String,
@@ -678,7 +679,7 @@ pub enum WriteOp {
     /// which is how Confluence is asked to abort when somebody else got there
     /// first. That abort is the **backstop** and not the mechanism: the write
     /// queue holds this op when the mirror moved on after it was queued
-    /// (`knobas_core::write_queue::project`), and Confluence's own conflict
+    /// (`knobas_spi_types::write_queue::project`), and Confluence's own conflict
     /// answer catches the window the mirror could not see.
     UpdatePage {
         entity: String,
@@ -809,7 +810,7 @@ pub enum WriteOp {
     ///
     /// Hold detection takes the whole mirrored record, as for
     /// [`MergePullRequest`](WriteOp::MergePullRequest): see
-    /// `knobas_core::write_queue::project` for what that record can and
+    /// `knobas_spi_types::write_queue::project` for what that record can and
     /// cannot witness for a parameter.
     SetParameter {
         entity: String,
@@ -920,7 +921,7 @@ pub enum WriteOp {
     /// Hold detection is per field (the deputy's ruling on #706): a title
     /// edit holds on a retitle, a description edit on the description, a
     /// close or reopen on the state the source declares for the kind -- see
-    /// `knobas_core::write_queue::project`.
+    /// `knobas_spi_types::write_queue::project`.
     EditPullRequest {
         entity: String,
         #[serde(default)]
@@ -976,7 +977,7 @@ pub enum WriteOp {
     /// liveness, as for a create.
     ///
     /// *Apply anyway* re-sends against their version by itself
-    /// (`knobas_core::write_queue::apply_anyway`). *Edit* is an amend, and an
+    /// (`knobas_spi_types::write_queue::apply_anyway`). *Edit* is an amend, and an
     /// amend's payload is the caller's whole: one answering a moved commit
     /// carries `base_sha` set to the held side's `base`, or the source
     /// compares it against the stale blob again and it is held again.
@@ -985,7 +986,7 @@ pub enum WriteOp {
     /// bytes. A file that does not exist on `branch` is refused rather than
     /// created: an edit is of a file somebody read.
     ///
-    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     CommitFile {
         repo: String,
         branch: String,
@@ -1393,7 +1394,7 @@ pub trait Source: Send + Sync {
     /// everywhere else, and the shell falls back to the corpus-observed offer
     /// rather than showing an empty select.
     ///
-    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError>;
     /// The **source view** this adapter draws for one of its own entities
     /// (ADR-0020, `CONTEXT.md` *Source view*): sections of typed blocks from
@@ -1420,7 +1421,7 @@ pub trait Source: Send + Sync {
     /// answering `Ok(None)` for every kind. [`contract::battery`] clause 9
     /// asks every adapter for the view of every entity it emitted.
     ///
-    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     async fn view(
         &self,
         entity: &str,
@@ -1434,10 +1435,10 @@ pub trait Source: Send + Sync {
     /// `Ok(None)` is **this adapter keeps no pipelines**, and is the default:
     /// a source with no Builds frame has nothing to answer, and every adapter
     /// but a CI one is that. An adapter whose descriptor declares a
-    /// [`Frame::Pipeline`](knobas_core::payload::Frame::Pipeline) kind
+    /// [`Frame::Pipeline`](knobas_spi_types::payload::Frame::Pipeline) kind
     /// overrides it, and must never answer `None` for a read that failed.
     ///
-    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     async fn pipeline_settings(
         &self,
         entity: &str,
@@ -1457,7 +1458,7 @@ pub trait Source: Send + Sync {
     ///
     /// `Ok(None)` as for [`pipeline_settings`](Source::pipeline_settings).
     ///
-    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     async fn older_runs(
         &self,
         entity: &str,
@@ -1475,7 +1476,7 @@ pub trait Source: Send + Sync {
     ///
     /// `Ok(None)` as for [`pipeline_settings`](Source::pipeline_settings).
     ///
-    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
     async fn run_chain(
         &self,
         run: &str,
@@ -1540,7 +1541,7 @@ pub trait Source: Send + Sync {
     /// ADR-0029): the conditions knobas can test and the parts left out, each
     /// with its reason, for *Make an editable copy*. `view` is the saved
     /// view's payload as this adapter emitted it (a kind declaring
-    /// [`Frame::SavedView`](knobas_core::payload::Frame::SavedView)), so the
+    /// [`Frame::SavedView`](knobas_spi_types::payload::Frame::SavedView)), so the
     /// source's query language stays inside the adapter.
     ///
     /// `Ok(None)` is **this adapter translates no query**, and is the
@@ -1688,7 +1689,7 @@ mod tests {
         assert_eq!(back.config_schema, d.config_schema);
 
         let item = SyncItem {
-            entity: knobas_core::entity::EntityRef::new("jira", "PAY-231"),
+            entity: knobas_spi_types::entity::EntityRef::new("jira", "PAY-231"),
             kind: "ticket".into(),
             title: "SEPA payout fails".into(),
             body_text: "the batch job times out".into(),
@@ -2420,7 +2421,7 @@ mod tests {
     fn the_create_target_is_not_a_monitor_id() {
         let target = monitor_target("kuma");
         assert_eq!(target, "kuma:monitors");
-        let parsed = knobas_core::entity::EntityRef::parse(&target).expect("the target parses");
+        let parsed = knobas_spi_types::entity::EntityRef::parse(&target).expect("the target parses");
         assert_eq!(parsed.namespace, "kuma");
         assert_eq!(parsed.key, MONITOR_TARGET_KEY);
         assert!(

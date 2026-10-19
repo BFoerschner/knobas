@@ -134,7 +134,7 @@ pub struct OwnedKind {
 /// the launcher and `NT` in a room tile would be two kinds to a reader.
 ///
 /// `asset` joined in M4.0 (issue #428) and is **the kind, not the type**: an
-/// asset's *type* -- VM, container, database -- is [`crate::asset::TYPES`],
+/// asset's *type* -- VM, container, database -- is `knobas_core::asset::TYPES`,
 /// sixteen of them with monograms of their own,
 /// and the chip a column row draws is the type's. `AS` is what the launcher
 /// and a room tile put on an asset, where the question is which kind of thing
@@ -144,7 +144,7 @@ pub struct OwnedKind {
 /// entity for the reason spec §12.1 gives: a route is "addressable in its own
 /// right -- searchable, linkable, chip-able, with its own `#/route/<id>`
 /// address". `RO` rather than `RT`: `RP` is already the *repository* chip on
-/// this list, and the estate's own type table (`crate::asset::TYPES`) spends
+/// this list, and the estate's own type table (`knobas_core::asset::TYPES`) spends
 /// both `RP` and `RT` on a reverse proxy and a runtime -- a route's chip has
 /// to be readable beside those without being one of them.
 pub const OWNED_KINDS: &[OwnedKind] = &[

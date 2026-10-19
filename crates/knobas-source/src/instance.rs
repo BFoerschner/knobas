@@ -26,7 +26,7 @@ pub const INSTANCE_ID_MAX: usize = 32;
 /// are `jira` and `jira-eu`. [`display_name`](Self::display_name) is the
 /// renameable half (interfaces §8 P10).
 ///
-/// [`EntityRef`]: knobas_core::entity::EntityRef
+/// [`EntityRef`]: knobas_spi_types::entity::EntityRef
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceInstance {
     pub id: String,
@@ -173,7 +173,7 @@ pub fn validate_instance_id(id: &str) -> Result<(), InstanceIdError> {
     }
     // The list lives beside `EntityRef`: a second copy is how an adapter comes
     // to pass validation here and be refused by the engine on every run.
-    if knobas_core::entity::is_reserved_namespace(id) {
+    if knobas_spi_types::entity::is_reserved_namespace(id) {
         return Err(InstanceIdError::Reserved(id.to_owned()));
     }
     Ok(())
