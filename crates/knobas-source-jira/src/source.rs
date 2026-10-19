@@ -188,6 +188,7 @@ fn trimmed_base_url(raw: &str) -> String {
 pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     let cfg = JiraConfig::from_json(&instance.config)?;
     let credential = http::credential(
+        &http::CREDENTIAL_RULES,
         instance.auth,
         cfg.username.as_deref(),
         instance.secret.as_deref(),
@@ -512,8 +513,13 @@ mod tests {
         let mut i = instance(json!({}));
         i.base_url = "https://jira.tidewater.example/".to_owned();
         let cfg = JiraConfig::from_json(&i.config).unwrap();
-        let credential =
-            http::credential(i.auth, cfg.username.as_deref(), i.secret.as_deref()).unwrap();
+        let credential = http::credential(
+            &http::CREDENTIAL_RULES,
+            i.auth,
+            cfg.username.as_deref(),
+            i.secret.as_deref(),
+        )
+        .unwrap();
         let source = JiraSource {
             id: i.id.clone(),
             display_name: i.display_name.clone(),

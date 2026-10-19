@@ -50,34 +50,18 @@ async fn a_bad_base_url_is_refused_up_front() {
 /// *Re-enter password* for a password that was right all along.
 #[test]
 fn each_auth_variant_has_its_own_wire_spelling() {
-    fn authorization(auth: Auth) -> Option<String> {
-        let client = HttpClient::new(HttpConfig {
-            auth,
-            ..config("https://example.test".to_owned())
-        })
-        .expect("client");
-        let request = client
-            .request(Method::GET, "/api/v1/user")
-            .build()
-            .expect("a GET with no body always builds");
-        request
-            .headers()
-            .get("authorization")
-            .map(|value| value.to_str().expect("ascii").to_owned())
-    }
-
-    assert_eq!(authorization(Auth::None), None);
+    assert_eq!(authorization_of(Auth::None), None);
     assert_eq!(
-        authorization(Auth::Bearer("t".to_owned())),
+        authorization_of(Auth::Bearer("t".to_owned())),
         Some("Bearer t".to_owned())
     );
     assert_eq!(
-        authorization(Auth::GiteaToken("t".to_owned())),
+        authorization_of(Auth::GiteaToken("t".to_owned())),
         Some("token t".to_owned())
     );
     // Basic is base64("someone:secret").
     assert_eq!(
-        authorization(Auth::Basic {
+        authorization_of(Auth::Basic {
             username: "someone".to_owned(),
             password: "secret".to_owned(),
         }),
@@ -907,4 +891,155 @@ async fn a_streamed_send_with_no_headers_is_unreachable() {
     .expect("the headers timeout ends the call")
     .expect_err("nothing ever answers");
     assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
+}
+
+/// The `Authorization` header a client built over `auth` sends, if any.
+fn authorization_of(auth: Auth) -> Option<String> {
+    let client = HttpClient::new(HttpConfig {
+        auth,
+        ..config("https://example.test".to_owned())
+    })
+    .expect("client");
+    let request = client
+        .request(Method::GET, "/api/v1/user")
+        .build()
+        .expect("a GET with no body always builds");
+    request
+        .headers()
+        .get("authorization")
+        .map(|value| value.to_str().expect("ascii").to_owned())
+}
+
+/// What `credential` should hand back: the header the client then sends, or
+/// the refusal's class and its whole message.
+#[derive(Debug, Clone, PartialEq)]
+enum Outcome {
+    Header(String),
+    Unauthorized,
+    Protocol(String),
+}
+
+fn outcome(result: Result<Auth, SourceError>) -> Outcome {
+    match result {
+        Ok(auth) => {
+            Outcome::Header(authorization_of(auth).expect("every credential is sent as a header"))
+        }
+        Err(SourceError::Unauthorized { status: None }) => Outcome::Unauthorized,
+        Err(SourceError::Protocol {
+            status: None,
+            message,
+        }) => Outcome::Protocol(message),
+        Err(other) => panic!("a credential is refused as Unauthorized or Protocol: {other:?}"),
+    }
+}
+
+/// Spec #1302, issue #1310: one mapping from a source's configured method,
+/// username and keychain secret to the header the transport sends, for every
+/// built-in adapter. Each row is a literal taken from the adapter copy it
+/// replaces, so the wording a credential health line shows cannot drift.
+#[test]
+fn a_configured_method_maps_to_one_credential_or_one_refusal() {
+    use knobas_http::{CredentialRules, TokenSpelling, credential};
+    use knobas_source::AuthMethod::{ApiToken, OAuth, Pat, UserPassword};
+
+    // Jira Data Center's rules, as `knobas-source-jira` states them.
+    const JIRA: CredentialRules = CredentialRules {
+        pat: TokenSpelling::Bearer,
+        methods: &[Pat, UserPassword],
+        unconfigured: "this Jira source has no authentication method configured; choose a \
+                       personal access token or user + password",
+        unsupported: |method| {
+            format!(
+                "{method:?} authentication is not supported for Jira Data Center; use a \
+                 personal access token or user + password"
+            )
+        },
+    };
+    // Gitea's: a PAT only, sent in Gitea's own `token` scheme.
+    const GITEA: CredentialRules = CredentialRules {
+        pat: TokenSpelling::Token,
+        methods: &[Pat],
+        unconfigured: "gitea: this source has no authentication method configured; choose a \
+                       personal access token",
+        unsupported: |method| {
+            format!(
+                "gitea: {method:?} authentication is not supported; this adapter authenticates \
+                 with a personal access token"
+            )
+        },
+    };
+    // Uptime Kuma's: an API key, which `/metrics` takes as Basic with an
+    // empty username.
+    const KUMA: CredentialRules = CredentialRules {
+        pat: TokenSpelling::Bearer,
+        methods: &[ApiToken],
+        unconfigured: "this Uptime Kuma source has no authentication method configured; choose \
+                       an API key",
+        unsupported: |method| {
+            format!(
+                "{method:?} authentication is not supported for Uptime Kuma; /metrics takes an \
+                 API key, sent as HTTP Basic with an empty username"
+            )
+        },
+    };
+    // Rules that list every method, OAuth included, which has no wire form.
+    const EVERY: CredentialRules = CredentialRules {
+        pat: TokenSpelling::Bearer,
+        methods: &[Pat, UserPassword, ApiToken, OAuth],
+        unconfigured: "no method",
+        unsupported: |method| format!("{method:?} has no wire form"),
+    };
+
+    let header = |value: &str| Outcome::Header(value.to_owned());
+    let protocol = |message: &str| Outcome::Protocol(message.to_owned());
+    let no_username =
+        protocol("user + password authentication needs a username in the source configuration");
+    let jira_unconfigured = protocol(JIRA.unconfigured);
+    let jira_unsupported = |method| Outcome::Protocol((JIRA.unsupported)(method));
+
+    #[rustfmt::skip]
+    let table = [
+        // rules, method, username, secret => outcome
+        // Every method that maps, in both token spellings.
+        (&JIRA,  Some(Pat),          None,         Some("t"),  header("Bearer t")),
+        (&GITEA, Some(Pat),          None,         Some("t"),  header("token t")),
+        (&JIRA,  Some(UserPassword), Some("mara"), Some("pw"), header("Basic bWFyYTpwdw==")),
+        (&KUMA,  Some(ApiToken),     None,         Some("k"),  header("Basic Oms=")),
+        // An API key's Basic username is empty whatever the configuration
+        // holds; a PAT's username beside it is ignored, not sent.
+        (&KUMA,  Some(ApiToken),     Some("mara"), Some("k"),  header("Basic Oms=")),
+        (&JIRA,  Some(Pat),          Some("mara"), Some("t"),  header("Bearer t")),
+        // Refusal one: a well-configured source with no secret is the
+        // `missing_secret` state, the one the sources view offers Re-enter for.
+        (&JIRA,  Some(Pat),          None,         None,       Outcome::Unauthorized),
+        (&GITEA, Some(Pat),          None,         None,       Outcome::Unauthorized),
+        (&JIRA,  Some(UserPassword), Some("mara"), None,       Outcome::Unauthorized),
+        (&KUMA,  Some(ApiToken),     None,         None,       Outcome::Unauthorized),
+        // Refusal two: a method the adapter does not speak, by name. OAuth has
+        // no wire form at all, and is refused even by rules that list it.
+        (&JIRA,  Some(OAuth),        Some("mara"), Some("t"),  jira_unsupported(OAuth)),
+        (&JIRA,  Some(ApiToken),     Some("mara"), Some("t"),  jira_unsupported(ApiToken)),
+        (&GITEA, Some(UserPassword), Some("mara"), Some("t"),  protocol("gitea: UserPassword authentication is not supported; this adapter authenticates with a personal access token")),
+        (&KUMA,  Some(Pat),          None,         Some("k"),  protocol("Pat authentication is not supported for Uptime Kuma; /metrics takes an API key, sent as HTTP Basic with an empty username")),
+        (&EVERY, Some(OAuth),        Some("mara"), Some("t"),  protocol("OAuth has no wire form")),
+        // Refusal three: a misconfigured source -- no method, or user +
+        // password with no username.
+        (&JIRA,  None,               None,         Some("t"),  jira_unconfigured.clone()),
+        (&GITEA, None,               None,         Some("t"),  protocol(GITEA.unconfigured)),
+        (&JIRA,  Some(UserPassword), None,         Some("pw"), no_username.clone()),
+        // The configuration outranks the secret: retyping a token cannot fix a
+        // source with no method chosen, so Re-enter must not be offered for it.
+        (&JIRA,  None,               None,         None,       jira_unconfigured),
+        (&JIRA,  Some(OAuth),        Some("mara"), None,       jira_unsupported(OAuth)),
+        (&JIRA,  Some(UserPassword), None,         None,       no_username),
+    ];
+
+    for (rules, method, username, secret, expected) in table {
+        assert_eq!(
+            outcome(credential(rules, method, username, secret)),
+            expected,
+            "{method:?} / {username:?} / secret {:?}",
+            secret.is_some(),
+        );
+    }
 }

@@ -6967,3 +6967,53 @@ The merge-manager's rulings (Opus):
 - **The 10 s allowance is not load-sensitive.** The fixture builds outside the timed call, the
   lookup wait is a fixed 2 s on tokio's timer, and the rest is two loopback hops (the whole
   network suite runs in 2.4 s). 8 s of slack holds under two gates. *Reversing:* n/a.
+
+---
+
+## #1310: the transport maps a credential (Opus implementer, 2026-10-19)
+
+- **The per-adapter parameter is a rules value, not only a token spelling.** *Fork:* the ticket
+  names one parameter, how a PAT is spelled. The five copies also differ in which methods they
+  speak (Jira, Confluence and TeamCity take PAT and user + password, Gitea only PAT, Kuma only an
+  API key) and in the wording of both configuration refusals. One of them, Gitea's, has a
+  different sentence shape (`gitea: … is not supported; …`). Spec #1302 user story 2 keeps every
+  health line's wording. *Ruling:* `CredentialRules { pat, methods, unconfigured, unsupported }`,
+  stated as a `const` in each adapter. The mapping, the judging order and the classes stay in the
+  transport. #1311 and #1312 carry no §10.8 criterion, so the surface has to serve all five
+  adapters now. *Cost:* the wording stays in the adapters, which is where the reader's words
+  belong anyway. *Reversing:* cheap while only Jira uses it.
+- **`ApiToken` maps to Basic with an empty username for every adapter that lists it.** *Fork:*
+  this is Kuma's mapping and only Kuma lists the method. *Ruling:* the transport defines it that
+  way and documents it. An adapter whose API key goes on the wire differently does not list
+  `ApiToken` until it needs to. *Reversing:* an additive `TokenSpelling`-like field.
+- **`OAuth` is refused as unsupported even by rules that list it.** It has no wire form in `Auth`.
+  *Reversing:* n/a.
+- **The username is used as given; TeamCity trims its own.** *Fork:* TeamCity trims and drops an
+  empty username, Jira and Confluence do not. *Ruling:* trimming in the transport would change
+  Jira ("authenticates exactly as before"), so #1311 trims before the call. *Reversing:* cheap.
+- **All seven Jira credential tests are deleted, not four.** The ticket says four, but Jira's
+  `http.rs` holds seven tests that exercise only `credential`, and every one is a row of the
+  transport's table. The Jira-specific wording now has no Jira-side test. The transport's table
+  pins a literal copy of Jira's rules, and `just jira-live` runs a correctly configured source
+  only. *Reversing:* one table row per adapter in its own crate.
+
+The merge-manager's rulings (Opus):
+
+- **The judging order in `credential.rs` stands.** *Fork:* the implementer asked whether no
+  method, then an unlisted method or `OAuth`, then a missing username, then the secret is the
+  right order. *Ruling:* it is the order all five adapter copies use today (Jira, Confluence and
+  TeamCity through `scheme`, Gitea and Kuma through their `match`), so moving any adapter onto it
+  changes no refusal. *Reversing:* n/a.
+- **Naming #1313 and #1315 by behaviour in the §10.8 entry is enough.** *Fork:* name them now, or
+  write their signatures in advance. *Ruling:* the ticket asks for them to be named in advance,
+  and a signature written before its ticket's design would be a guess that the follow-up then has
+  to amend anyway. Each follow-up adds its signatures in an `Amendment` line. *Reversing:* cheap.
+- **Jira's rules get one Jira-side test, for the method list; the wording stays unpinned.**
+  *Fork:* with the seven tests gone, nothing reads `knobas-source-jira`'s `CREDENTIAL_RULES`.
+  *Ruling:* add `http::tests::the_credential_rules_speak_exactly_what_the_form_offers`, which
+  checks the rules' `methods` against `descriptor_template().auth_methods`. If those two drift,
+  the form offers a method that is then refused. A mutant adding `ApiToken` to Jira's rules is
+  killed. A typo in the two sentences is still caught only by reading. Pinning the sentences
+  would copy them into a test, which is what the ticket's deletion removed. *Reversing:* one test.
+- **The transport table's Kuma rules use Kuma's real refusal sentence.** The table's doc says each
+  row is a literal from the copy it replaces, and the Kuma stand-in was not. *Reversing:* n/a.
