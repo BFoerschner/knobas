@@ -977,6 +977,13 @@ fn a_configured_method_maps_to_one_credential_or_one_refusal() {
                        an API key",
         unsupported: |method| format!("{method:?} is not Kuma's"),
     };
+    // Rules that list every method, OAuth included, which has no wire form.
+    const EVERY: CredentialRules = CredentialRules {
+        pat: TokenSpelling::Bearer,
+        methods: &[Pat, UserPassword, ApiToken, OAuth],
+        unconfigured: "no method",
+        unsupported: |method| format!("{method:?} has no wire form"),
+    };
 
     let header = |value: &str| Outcome::Header(value.to_owned());
     let protocol = |message: &str| Outcome::Protocol(message.to_owned());
@@ -993,7 +1000,9 @@ fn a_configured_method_maps_to_one_credential_or_one_refusal() {
         (&GITEA, Some(Pat),          None,         Some("t"),  header("token t")),
         (&JIRA,  Some(UserPassword), Some("mara"), Some("pw"), header("Basic bWFyYTpwdw==")),
         (&KUMA,  Some(ApiToken),     None,         Some("k"),  header("Basic Oms=")),
-        // A username beside a PAT is ignored, not sent.
+        // An API key's Basic username is empty whatever the configuration
+        // holds; a PAT's username beside it is ignored, not sent.
+        (&KUMA,  Some(ApiToken),     Some("mara"), Some("k"),  header("Basic Oms=")),
         (&JIRA,  Some(Pat),          Some("mara"), Some("t"),  header("Bearer t")),
         // Refusal one: a well-configured source with no secret is the
         // `missing_secret` state, the one the sources view offers Re-enter for.
@@ -1007,6 +1016,7 @@ fn a_configured_method_maps_to_one_credential_or_one_refusal() {
         (&JIRA,  Some(ApiToken),     Some("mara"), Some("t"),  protocol("ApiToken authentication is not supported for Jira Data Center; use a personal access token or user + password")),
         (&GITEA, Some(UserPassword), Some("mara"), Some("t"),  protocol("gitea: UserPassword authentication is not supported; this adapter authenticates with a personal access token")),
         (&KUMA,  Some(Pat),          None,         Some("k"),  protocol("Pat is not Kuma's")),
+        (&EVERY, Some(OAuth),        Some("mara"), Some("t"),  protocol("OAuth has no wire form")),
         // Refusal three: a misconfigured source -- no method, or user +
         // password with no username.
         (&JIRA,  None,               None,         Some("t"),  jira_unconfigured.clone()),
