@@ -507,6 +507,7 @@ const SURVEYS = {
     additionalProperties: false,
   },
   payload_paths: [],
+  clone_from: [],
 };
 
 test("Add a source installs an adapter from a manifest, and it joins the radios chosen (#1202)", async () => {
