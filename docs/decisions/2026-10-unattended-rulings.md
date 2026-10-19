@@ -8195,12 +8195,11 @@ types, identical to the hand-written `sources.ts` at 7a96c634.
 Reserved for Björn, ruled by implementer on Opus (the §10.8 entry), under the 2026-10-18
 reserved-steps rule. The entry is `docs/contract/10.8/1329-the-search-barrel-is-generated.md`.
 
-- **`CredentialHealth` is the sources barrel's, and #1327 is in flight.** *Fork:* `LauncherHome`
+- **`CredentialHealth` is the sources barrel's, and #1327 was in flight.** *Fork:* `LauncherHome`
   reaches `knobas_sync::CredentialHealth`; wait for #1327, spell the field with `#[ts(type)]`
-  (an import the generator cannot write), or derive it here. *Ruling:* take #1327's
-  `knobas-sync/Cargo.toml` and `health.rs` byte for byte (its 3eea8956) as a commit of their own.
-  *Reasoning:* nobody waits on a sibling, and identical blobs make the second rebase a no-op
-  rather than a conflict. *Reversing:* drop the commit once #1327 is in `main`.
+  (an import the generator cannot write), or derive it here. *Ruling:* work on a commit holding
+  #1327's `knobas-sync/Cargo.toml` and `health.rs` byte for byte, and drop it at the rebase.
+  #1327 merged first, so this PR does not touch `knobas-sync`. *Reversing:* n/a.
 - **Two Rust `EntityRow`s, one TypeScript type.** *Fork:* the search crate's `EntityRow` derives
   `TS` for `SearchHit`'s flatten; export it too, under another name, or type `LauncherHome::recent`
   with the room's. *Ruling:* `#[ts(as = "Vec<knobas_core::entity_list::EntityRow>")]`, as the

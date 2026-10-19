@@ -1,5 +1,5 @@
-- **The search barrel's types are generated: `knobas-search`, `crates/knobas-source/src/query.rs`,
-  `knobas-sync`'s credential health and the IPC surface — issue #1329 (2026-10-20).** Parent spec
+- **The search barrel's types are generated: `knobas-search`, `crates/knobas-source/src/query.rs`
+  and the IPC surface — issue #1329 (2026-10-20).** Parent spec
   #1306, the switching ticket for `search.ts` after #1325's app barrel and #1326's entity barrel.
   No migration, no event, no `WriteOp`, no command added, removed or renamed, no argument changed,
   no field added, removed or renamed, no wire shape changed, nothing added to either append-only
@@ -22,10 +22,8 @@
   names the hand-written mirror gave them; `Key`'s variant docs moved into its doc. No item,
   field, variant, serde attribute or behaviour changed.
 
-  **`knobas-sync`.** `health::{CredentialHealth, AuthState}` derive `ts_rs::TS` into
-  `sources.ts` and the crate takes `ts-rs`, exactly as #1327's entry books them: `LauncherHome`
-  reaches `CredentialHealth`. Whichever of #1327 and #1329 merges first brings them; the other's
-  rebase finds them in place.
+  **`knobas-sync`.** Unchanged: `LauncherHome` reaches `health::CredentialHealth`, which #1327
+  exported to `sources.ts`, so `generated/search.ts` imports it from there.
 
   **`knobas-app`.** `commands::search::LauncherHome` and `ticket_views::{ViewColumn, ListSort,
   TicketView, TicketViewDraft, TicketViewRow, SavedViewSource, Unsynced}` derive `ts_rs::TS`
