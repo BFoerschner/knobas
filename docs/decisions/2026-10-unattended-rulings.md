@@ -7779,3 +7779,27 @@ The merge-manager's rulings on #1317 and #1318 (Opus):
 - **Seams, chosen without a person to confirm them:** the integration binary's mock-app invoke
   of `list_adapters`, as the ticket names it, and a unit test over `&dyn AdapterRegistry` for
   the trait growth. *Reversing:* n/a.
+
+The merge-manager's rulings on #1321 (Opus):
+
+- **The trait growth satisfies the first criterion; it does not bend it.** *Fork:* the ticket
+  names "the templates (kinds, declared paths, views, write ops per adapter kind)", the PR adds
+  only `doc_projection` and `doc_writes`. *Ruling:* accepted. `descriptors()` already returns
+  `Registry::templates()`, and `declared_paths`, `fillers` and the kind-info reads already take
+  `&dyn AdapterRegistry` or read the templates. The only reads still bound to the concrete type
+  were the Docs reader's projection and writes, which the two methods cover. *Reversing:* add a
+  trait method and implement it in the fakes.
+- **Bring-up loading into `Registry::for_process()` meets "bring-up fills that same one".**
+  *Fork:* a lifecycle over a test registry gets no bring-up loads. *Ruling:* accepted. In the
+  app the lifecycle's default and bring-up's `BringUp::registry` are clones of one shared list,
+  so the lifecycle, the scheduler and `SourcesState` see one list. The criterion asks that a test
+  can build a lifecycle over its own registry, not that bring-up loads into it, and loading needs
+  `Registry::add`, which the spec does not put on the trait. *Reversing:* a `BringUp` field fed
+  from the lifecycle.
+- **The cold-start test managing a fresh `Lifecycle` is faithful.** *Ruling:* accepted.
+  `Lifecycle` is managed synchronously at the start of `setup`, before any webview can invoke,
+  so a not-ready lifecycle is exactly the state the cold-start command meets. *Reversing:* n/a.
+- **The rebase over #1360 carries the rename into the moved code.** The entity list read moved
+  to `knobas_core::entity_list`; its doc comment and the app shim `commands/entity/list.rs` now
+  name `Registry::for_process()`. The §10.8 entry needs no change: the shim's call sites are
+  renamed in place as it says. *Reversing:* n/a.
