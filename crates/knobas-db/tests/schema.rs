@@ -2199,7 +2199,10 @@ async fn zero_fifty_three_names_the_saved_views_for_the_role() {
     .fetch_all(pool)
     .await
     .unwrap();
-    assert!(named_for_jira.is_empty(), "still named for Jira: {named_for_jira:?}");
+    assert!(
+        named_for_jira.is_empty(),
+        "still named for Jira: {named_for_jira:?}"
+    );
 }
 
 /// An existing install (#1245): the views, their members and a ticket view's
@@ -2275,11 +2278,10 @@ async fn zero_fifty_three_keeps_the_saved_views_an_install_already_had() {
         members,
         [("jira:PAY-2".to_owned(), 1), ("jira:PAY-1".to_owned(), 2)]
     );
-    let shows: Option<String> = sqlx::query_scalar(
-        "select saved_view from knobas.ticket_view where id = 'jira-board-53'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let shows: Option<String> =
+        sqlx::query_scalar("select saved_view from knobas.ticket_view where id = 'jira-board-53'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(shows.as_deref(), Some("jira:board-53"));
 }

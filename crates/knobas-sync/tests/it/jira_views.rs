@@ -407,7 +407,12 @@ async fn a_favourite_filter_shows_as_a_list_under_jira_filters() {
         .await
         .expect("a ticket view for the filter");
     assert_eq!(
-        (name.as_str(), group.as_str(), columns, saved_view.as_deref()),
+        (
+            name.as_str(),
+            group.as_str(),
+            columns,
+            saved_view.as_deref()
+        ),
         (
             "PAY without a fix version",
             "Jira filters",
