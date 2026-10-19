@@ -10,7 +10,7 @@ use wasmtime::Store;
 use wasmtime::component::ResourceAny;
 
 use crate::bindings::knobas::adapter::{log, sink};
-use crate::{HostState, WasmAdapter, bindings, convert, net, new_store, wit};
+use crate::{HostState, WasmAdapter, bindings, convert, limits, net, new_store, wit};
 
 /// One item on its way from the component to the engine's sink, with the
 /// channel the sink's answer goes back on.
@@ -84,8 +84,12 @@ impl log::Host for HostState {
     }
 }
 
-/// A trap, or a failure to instantiate: the component failed the call.
+/// A trap, or a failure to instantiate: the component failed the call, or
+/// passed its memory cap.
 fn failed(adapter: &WasmAdapter, error: &wasmtime::Error) -> SourceError {
+    if let Some(limit) = limits::exceeded(error) {
+        return limit.into_error(adapter.kind());
+    }
     SourceError::protocol(format!(
         "the external adapter {:?} failed: {error:#}",
         adapter.kind()
@@ -117,19 +121,28 @@ async fn open(
 }
 
 /// One call that needs no sink: open a store, call `$method` with `$args`,
-/// and hand back what it answered as a `Result<_, SourceError>`.
+/// and hand back what it answered as a `Result<_, SourceError>`, all of it
+/// within the adapter's deadline.
 macro_rules! call {
-    ($self:expr, $method:ident $(, $arg:expr)*) => {{
-        let (mut store, bindings, resource) =
-            open(&$self.adapter, &$self.instance, SinkSlot::none(), Arc::clone(&$self.policy)).await?;
-        bindings
-            .knobas_adapter_source()
-            .adapter()
-            .$method(&mut store, resource $(, $arg)*)
-            .await
-            .map_err(|e| failed(&$self.adapter, &e))?
-            .map_err(convert::error)
-    }};
+    ($self:expr, $method:ident $(, $arg:expr)*) => {
+        limits::bounded($self.adapter.kind(), $self.adapter.limits(), async {
+            let (mut store, bindings, resource) = open(
+                &$self.adapter,
+                &$self.instance,
+                SinkSlot::none(),
+                Arc::clone(&$self.policy),
+            )
+            .await?;
+            bindings
+                .knobas_adapter_source()
+                .adapter()
+                .$method(&mut store, resource $(, $arg)*)
+                .await
+                .map_err(|e| failed(&$self.adapter, &e))?
+                .map_err(convert::error)
+        })
+        .await
+    };
 }
 
 /// The component's descriptor for `instance`, decoded.
@@ -138,15 +151,18 @@ pub(crate) async fn descriptor(
     instance: wit::Instance,
     policy: Arc<net::Policy>,
 ) -> Result<SourceDescriptor, SourceError> {
-    let (mut store, bindings, resource) =
-        open(adapter, &instance, SinkSlot::none(), policy).await?;
-    let text = bindings
-        .knobas_adapter_source()
-        .adapter()
-        .call_descriptor(&mut store, resource)
-        .await
-        .map_err(|e| failed(adapter, &e))?;
-    convert::json(&text, "descriptor")
+    limits::bounded(adapter.kind(), adapter.limits(), async {
+        let (mut store, bindings, resource) =
+            open(adapter, &instance, SinkSlot::none(), policy).await?;
+        let text = bindings
+            .knobas_adapter_source()
+            .adapter()
+            .call_descriptor(&mut store, resource)
+            .await
+            .map_err(|e| failed(adapter, &e))?;
+        convert::json(&text, "descriptor")
+    })
+    .await
 }
 
 /// A configured source of an external adapter.
@@ -231,8 +247,14 @@ impl Source for WasmSource {
                 let _ = answer.send(sink.item(item).await);
             }
         };
-        let (result, ()) = tokio::join!(run, pump);
-        result
+        // The deadline holds the whole sync, the sink's time included: a
+        // pump that outlived it would hand the engine items of a call that
+        // was stopped.
+        limits::bounded(self.adapter.kind(), self.adapter.limits(), async {
+            let (result, ()) = tokio::join!(run, pump);
+            result
+        })
+        .await
     }
 
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {

@@ -21,11 +21,15 @@
 //! * **`"fault": "swallow_sink"`** is a misbehaving adapter: it ignores what
 //!   `sink.item` answers and returns its cursor anyway, so the host's own
 //!   hold on a refused item is witnessed.
+//! * **`"fault": "spin"` and `"fault": "hog"`** are adapters that pass a
+//!   limit (#1204): `sync` spins forever, or allocates a MiB at a time and
+//!   never lets go, so the host's deadline and memory cap are witnessed.
 //! * **`"fetch": "<url>"`** makes `test_connection` `GET` that URL through
 //!   `wasi:http`, following redirects itself, and answer everything it was
 //!   handed (its instance record, every hop's status, headers and body, the
 //!   error that ended the walk) as JSON: in `detail` when the walk ended on
-//!   a response, in an `Unreachable` error when it did not (#1203). `mirror`
+//!   a response, in an `Unreachable` error when it did not (#1203).
+//!   `"first_byte_ms"` and `"post_mib"` bend that request ([`fetch::Options`]). `mirror`
 //!   and `username` are config keys it declares and never reads, for a
 //!   manifest's host template and the host's basic auth.
 
@@ -78,6 +82,8 @@ enum Fault {
     Unauthorized,
     Unreachable,
     SwallowSink,
+    Spin,
+    Hog,
 }
 
 struct Fixture;
@@ -93,6 +99,7 @@ pub struct Adapter {
     fault: Result<Fault, String>,
     /// The URL `test_connection` reads, when the config names one.
     fetch: Option<String>,
+    fetch_options: fetch::Options,
     /// The instance record as the host handed it over, for the fetch answer.
     received: serde_json::Value,
 }
@@ -110,10 +117,17 @@ fn read_fault(config: &str) -> Result<Fault, String> {
     let object = value
         .as_object()
         .ok_or_else(|| format!("config must be an object, got {value}"))?;
-    if let Some(key) = object
-        .keys()
-        .find(|k| !["fault", "fetch", "mirror", "username"].contains(&k.as_str()))
-    {
+    if let Some(key) = object.keys().find(|k| {
+        ![
+            "fault",
+            "fetch",
+            "first_byte_ms",
+            "post_mib",
+            "mirror",
+            "username",
+        ]
+        .contains(&k.as_str())
+    }) {
         return Err(format!(
             "config has a key the fixture does not know: {key:?}"
         ));
@@ -123,6 +137,8 @@ fn read_fault(config: &str) -> Result<Fault, String> {
         Some("unauthorized") => Ok(Fault::Unauthorized),
         Some("unreachable") => Ok(Fault::Unreachable),
         Some("swallow_sink") => Ok(Fault::SwallowSink),
+        Some("spin") => Ok(Fault::Spin),
+        Some("hog") => Ok(Fault::Hog),
         Some(other) => Err(format!(
             "config fault {other:?} is not one the fixture knows"
         )),
@@ -134,7 +150,7 @@ impl Adapter {
     fn faulted(&self) -> Result<Option<SourceError>, SourceError> {
         match &self.fault {
             Err(message) => Err(protocol(message.clone())),
-            Ok(Fault::None | Fault::SwallowSink) => Ok(None),
+            Ok(Fault::None | Fault::SwallowSink | Fault::Spin | Fault::Hog) => Ok(None),
             Ok(Fault::Unauthorized) => Ok(Some(SourceError::Unauthorized(Some(401)))),
             Ok(Fault::Unreachable) => Ok(Some(SourceError::Unreachable(
                 "the fixture was told to be unreachable".into(),
@@ -171,14 +187,38 @@ impl Adapter {
     }
 }
 
+/// Never returns, and never calls the host: only the deadline stops it.
+fn spin() -> ! {
+    let mut turns: u64 = 0;
+    loop {
+        turns = std::hint::black_box(turns.wrapping_add(1));
+    }
+}
+
+/// Allocates a MiB at a time and keeps all of it: only the memory cap
+/// stops it.
+fn hog() -> ! {
+    let mut held: Vec<Vec<u8>> = Vec::new();
+    loop {
+        held.push(std::hint::black_box(vec![1; 1 << 20]));
+    }
+}
+
 impl GuestAdapter for Adapter {
     fn new(instance: Instance) -> Self {
-        let fetch = serde_json::from_str::<serde_json::Value>(&instance.config)
-            .ok()
+        let config = serde_json::from_str::<serde_json::Value>(&instance.config).ok();
+        let read = |key: &str| config.as_ref().and_then(|c| c.get(key)?.as_u64());
+        let fetch = config
+            .as_ref()
             .and_then(|config| config.get("fetch")?.as_str().map(str::to_owned));
+        let fetch_options = fetch::Options {
+            first_byte_ms: read("first_byte_ms"),
+            post_mib: read("post_mib"),
+        };
         Self {
             fault: read_fault(&instance.config),
             fetch,
+            fetch_options,
             received: serde_json::json!({
                 "id": instance.id,
                 "kind": instance.kind,
@@ -214,8 +254,10 @@ impl GuestAdapter for Adapter {
             "config_schema": {
                 "type": "object",
                 "properties": {
-                    "fault": { "type": "string", "enum": ["none", "unauthorized", "unreachable", "swallow_sink"] },
+                    "fault": { "type": "string", "enum": ["none", "unauthorized", "unreachable", "swallow_sink", "spin", "hog"] },
                     "fetch": { "type": "string" },
+                    "first_byte_ms": { "type": "integer" },
+                    "post_mib": { "type": "integer" },
                     "mirror": { "type": "string" },
                     "username": { "type": "string" },
                 },
@@ -230,7 +272,7 @@ impl GuestAdapter for Adapter {
     fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
         self.healthy()?;
         if let Some(url) = &self.fetch {
-            let trace = fetch::get(url);
+            let trace = fetch::get(url, self.fetch_options);
             let mut answer = trace.to_json();
             answer["instance"] = self.received.clone();
             if trace.error.is_some() {
@@ -255,6 +297,11 @@ impl GuestAdapter for Adapter {
 
     fn sync(&self, cursor: Option<String>) -> Result<String, SourceError> {
         self.healthy()?;
+        match self.fault {
+            Ok(Fault::Spin) => spin(),
+            Ok(Fault::Hog) => hog(),
+            _ => {}
+        }
         let from = match cursor.as_deref() {
             None => 0,
             Some(c) => c

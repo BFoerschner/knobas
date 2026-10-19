@@ -12,8 +12,9 @@
 //! refuses one whose hash is no longer the row's: the code that holds a
 //! credential is the code the reader installed, or none. A refused adapter is
 //! recorded on the registry, so its sources fail to build with the reason.
-//! The row's `hosts` become the adapter's allowlist (#1203), as install's
-//! manifest made them.
+//! The row's `hosts` become the adapter's allowlist (#1203), and its
+//! `limits` the deadline and memory cap of every call into it (#1204), as
+//! install's manifest made them.
 //!
 //! A manifest from a URL or a GitHub repository, and updates, are #1209;
 //! uninstall, backup and restore #1210.
@@ -214,22 +215,30 @@ pub async fn load_installed(
     registry: &Registry,
     store: &Path,
 ) -> Result<Vec<Loaded>, sqlx::Error> {
-    let rows: Vec<(String, String, Vec<String>)> = sqlx::query_as(
-        "select adapter_kind, artifact_sha256, hosts from knobas.external_adapter
+    type Row = (
+        String,
+        String,
+        Vec<String>,
+        sqlx::types::Json<manifest::Limits>,
+    );
+    let rows: Vec<Row> = sqlx::query_as(
+        "select adapter_kind, artifact_sha256, hosts, limits from knobas.external_adapter
          order by adapter_kind",
     )
     .fetch_all(pool)
     .await?;
     let mut out = Vec::with_capacity(rows.len());
-    for (kind, sha256, hosts) in rows {
+    for (kind, sha256, hosts, sqlx::types::Json(limits)) in rows {
         let path = artifact_path(store, &sha256);
         let outcome = match tokio::fs::read(&path).await {
             Err(error) => Err(format!("cannot read {}: {error}", path.display())),
             Ok(bytes) => {
                 let kind = kind.clone();
-                tokio::task::spawn_blocking(move || load_one(&kind, &sha256, &bytes, &hosts))
-                    .await
-                    .unwrap_or_else(|e| Err(e.to_string()))
+                tokio::task::spawn_blocking(move || {
+                    load_one(&kind, &sha256, &bytes, &hosts, &limits)
+                })
+                .await
+                .unwrap_or_else(|e| Err(e.to_string()))
             }
         }
         .and_then(|adapter| registry.add(adapter).map_err(|e| e.to_string()));
@@ -250,7 +259,9 @@ fn load_one(
     sha256: &str,
     bytes: &[u8],
     hosts: &[String],
+    limits: &manifest::Limits,
 ) -> Result<WasmAdapter, String> {
+    let limits = knobas_wasm_host::limits::Limits::from_manifest(limits)?;
     let hosts = hosts
         .iter()
         .map(|entry| knobas_wasm_host::allow::HostPattern::parse(entry))
@@ -268,5 +279,5 @@ fn load_one(
             adapter.kind()
         ));
     }
-    Ok(adapter.with_hosts(hosts))
+    Ok(adapter.with_hosts(hosts).with_limits(limits))
 }

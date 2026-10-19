@@ -123,6 +123,16 @@ async fn a_manifest_missing_a_field_is_refused_naming_it() {
 }
 
 #[tokio::test]
+async fn a_manifest_asking_above_the_host_maximum_is_refused() {
+    let message = refusal_of(|m| m["limits"] = serde_json::json!({ "memory_mib": 4_096 })).await;
+    says(
+        &message,
+        "install refused: the manifest's limits are refused: limits.memory_mib 4096 is outside \
+         what this knobas allows (1 to 1024)",
+    );
+}
+
+#[tokio::test]
 async fn a_manifest_field_it_does_not_know_is_refused_naming_it() {
     let message = refusal_of(|m| m["host"] = serde_json::json!(["api.example.com"])).await;
     says(&message, "unknown field `host`");
@@ -374,6 +384,22 @@ async fn add_and_sync(
     registry: &Registry,
     id: &str,
 ) -> u64 {
+    let source = add_source(pool, registry, id, serde_json::json!({ "fault": "none" })).await;
+    let mut conn = connector.connect().await.unwrap();
+    knobas_sync::run_from_stored_cursor(&mut conn, pool, source.as_ref())
+        .await
+        .unwrap()
+        .upserted
+}
+
+/// Add a source of the fixture with `config` as the Add-source dialog does,
+/// and build it as the scheduler does.
+async fn add_source(
+    pool: &PgPool,
+    registry: &Registry,
+    id: &str,
+    config: serde_json::Value,
+) -> Box<dyn knobas_source::Source> {
     use knobas_sync::scheduler::AdapterRegistry as _;
     let secrets: std::sync::Arc<dyn knobas_secrets::SecretStore> =
         std::sync::Arc::new(knobas_secrets::MemoryStore::new());
@@ -383,7 +409,7 @@ async fn add_and_sync(
         "display_name": "Harbour surveys",
         "base_url": "https://surveys.example",
         "auth_kind": "Pat",
-        "config": { "fault": "none" },
+        "config": config,
         "secret": { "value": "a token the fixture never sees" },
         "sync_interval_secs": 900,
         "enabled": true,
@@ -400,7 +426,7 @@ async fn add_and_sync(
         "the source claims the fixture's custom role: {:?}",
         summary.roles
     );
-    let source = registry
+    registry
         .build(knobas_source::instance::SourceInstance {
             id: id.to_owned(),
             kind: "wasm-fixture".to_owned(),
@@ -409,14 +435,9 @@ async fn add_and_sync(
             auth: Some(knobas_source::AuthMethod::Pat),
             secret: None,
             account: None,
-            config: serde_json::json!({ "fault": "none" }),
+            config,
         })
-        .unwrap();
-    let mut conn = connector.connect().await.unwrap();
-    knobas_sync::run_from_stored_cursor(&mut conn, pool, source.as_ref())
-        .await
         .unwrap()
-        .upserted
 }
 
 #[tokio::test]
@@ -648,4 +669,59 @@ async fn a_stored_artifact_whose_hash_no_longer_matches_is_refused_at_load() {
         panic!("a source of a refused adapter must not build");
     };
     says(&error.to_string(), "was refused at load");
+}
+
+/// The limits a manifest asks for are what every call is held to after a
+/// restart (#1204): the row's `limits` come back with the adapter. A run
+/// past its deadline ends failed naming it, and a source synced beside it
+/// is not held up.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_past_its_deadline_ends_failed_naming_it_and_its_neighbour_syncs() {
+    let (pool, connector) = scratch("install-deadline").await;
+    let store = tempfile::tempdir().unwrap();
+    let artifact = fixture_bytes();
+    let mut asked = manifest_for(&artifact);
+    asked["limits"] = serde_json::json!({ "deadline_secs": 1 });
+    let (_dir, path) = release(&artifact, &asked.to_string());
+    install::install(&pool, &Registry::default(), store.path(), &path)
+        .await
+        .unwrap();
+
+    let restarted = Registry::default();
+    install::load_installed(&pool, &restarted, store.path())
+        .await
+        .unwrap();
+    let spinner = add_source(
+        &pool,
+        &restarted,
+        "spinner",
+        serde_json::json!({ "fault": "spin" }),
+    )
+    .await;
+    let healthy = add_source(
+        &pool,
+        &restarted,
+        "surveys",
+        serde_json::json!({ "fault": "none" }),
+    )
+    .await;
+    let mut spin_conn = connector.connect().await.unwrap();
+    let mut sync_conn = connector.connect().await.unwrap();
+    let (spun, synced) = tokio::join!(
+        knobas_sync::run_from_stored_cursor(&mut spin_conn, &pool, spinner.as_ref()),
+        knobas_sync::run_from_stored_cursor(&mut sync_conn, &pool, healthy.as_ref()),
+    );
+    let Err(error) = spun else {
+        panic!("a run past its deadline must fail");
+    };
+    assert_eq!(
+        knobas_sync::run_log::SyncOutcome::of(&error),
+        knobas_sync::run_log::SyncOutcome::Error,
+        "the run ends failed"
+    );
+    says(
+        &error.to_string(),
+        "the external adapter \"wasm-fixture\" was stopped at its deadline of 1 s",
+    );
+    assert!(synced.unwrap().upserted > 0, "the neighbour synced");
 }

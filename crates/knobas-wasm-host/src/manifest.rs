@@ -26,8 +26,9 @@
 //! `hosts` is the adapter's allowlist (#1203, [`crate::allow`]): each entry
 //! is a fixed host or a whole-entry template `{key}`, and a template's key
 //! must be `base_url` or a key the descriptor's `config_schema` declares.
-//! `limits` are stored as written and enforced by nothing yet: the deadline
-//! and memory cap are #1204.
+//! `limits` ask for a per-call deadline and memory cap beyond the host's
+//! defaults (#1204, [`crate::limits`]). One above the host's maximum, or
+//! zero, is refused as not well formed.
 
 use knobas_source::SourceDescriptor;
 use knobas_source::role::ClaimError;
@@ -52,7 +53,7 @@ pub struct Manifest {
     /// template over its config (`{base_url}`): [`crate::allow`].
     #[serde(default)]
     pub hosts: Vec<String>,
-    /// The limits the adapter asks for. Enforced from #1204.
+    /// The limits the adapter asks for ([`Manifest::limits`]).
     #[serde(default)]
     pub limits: Limits,
 }
@@ -118,6 +119,8 @@ pub enum Refusal {
          declares (nor base_url)"
     )]
     UndeclaredTemplate { key: String },
+    #[error("the manifest's limits are refused: {0}")]
+    Limits(String),
     #[error("the adapter's role claims are refused: {0}")]
     Role(#[from] ClaimError),
 }
@@ -159,6 +162,7 @@ impl Manifest {
         }
         manifest.interface()?;
         manifest.host_patterns()?;
+        manifest.limits()?;
         let file = &manifest.artifact.file;
         // One normal component, and no `:`: on Windows `C:x.wasm` is a
         // drive-relative path, which `Path::join` would follow off the release.
@@ -188,6 +192,16 @@ impl Manifest {
             .iter()
             .map(|entry| crate::allow::HostPattern::parse(entry).map_err(Refusal::Manifest))
             .collect()
+    }
+
+    /// The limits every call into the adapter is held to: what it asks
+    /// for, each absent one at the host's default.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::Limits`] for one that is zero or above the host's maximum.
+    pub fn limits(&self) -> Result<crate::limits::Limits, Refusal> {
+        crate::limits::Limits::from_manifest(&self.limits).map_err(Refusal::Limits)
     }
 
     /// The interface version the manifest names.
@@ -240,7 +254,9 @@ pub fn check(manifest: Manifest, artifact: Vec<u8>) -> Result<Checked, Refusal> 
         });
     }
     check_descriptor(&manifest, &adapter.template())?;
-    let adapter = adapter.with_hosts(manifest.host_patterns()?);
+    let adapter = adapter
+        .with_hosts(manifest.host_patterns()?)
+        .with_limits(manifest.limits()?);
     Ok(Checked {
         manifest,
         adapter,

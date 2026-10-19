@@ -15,7 +15,9 @@
 //! context's defaults refuse every socket and name lookup; and `wasi:http`
 //! 0.2's outgoing handler, held to the hosts its manifest declares, with the
 //! credential attached by the host to requests for the source's own address
-//! ([`net`], #1203). Call deadlines and memory caps are #1204.
+//! ([`net`], #1203). Every call has a deadline and a memory cap
+//! ([`limits`], #1204): one that passes either is stopped, and fails naming
+//! the limit.
 //!
 //! **One store per call.** Every call instantiates the component afresh,
 //! constructs its `adapter` from the instance, calls one function and drops
@@ -34,6 +36,7 @@ use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
 pub mod allow;
 mod convert;
+pub mod limits;
 pub mod manifest;
 mod net;
 mod redact;
@@ -131,6 +134,8 @@ pub struct WasmAdapter {
     /// The hosts its manifest declares; none for a component loaded
     /// without one, which then reaches nothing.
     hosts: Arc<[allow::HostPattern]>,
+    /// The deadline and memory cap of every call into it.
+    limits: limits::Limits,
 }
 
 struct Inner {
@@ -146,6 +151,7 @@ impl std::fmt::Debug for WasmAdapter {
             .field("kind", &self.inner.template.adapter_kind)
             .field("version", &self.inner.version)
             .field("hosts", &self.hosts)
+            .field("limits", &self.limits)
             .finish_non_exhaustive()
     }
 }
@@ -180,7 +186,7 @@ impl WasmAdapter {
     ///
     /// The [`LoadError`] naming which of those failed.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, LoadError> {
-        let engine = Engine::default();
+        let engine = limits::engine().clone();
         let component = Component::from_binary(&engine, bytes)
             .map_err(|e| LoadError::NotAComponent(format!("{e:#}")))?;
         let version = interface_version(&engine, &component)?;
@@ -209,6 +215,7 @@ impl WasmAdapter {
                 template: placeholder_descriptor(),
             }),
             hosts: Arc::from([]),
+            limits: limits::Limits::default(),
         };
         // Twice: the template's id is the adapter kind (`descriptor_template`'s
         // rule for a compiled-in adapter), which only the first answer names.
@@ -230,6 +237,20 @@ impl WasmAdapter {
     pub fn with_hosts(mut self, hosts: Vec<allow::HostPattern>) -> Self {
         self.hosts = Arc::from(hosts);
         self
+    }
+
+    /// This adapter with the limits its manifest asks for
+    /// ([`limits::Limits::from_manifest`]).
+    #[must_use]
+    pub fn with_limits(mut self, limits: limits::Limits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// The deadline and memory cap of every call into it.
+    #[must_use]
+    pub fn limits(&self) -> limits::Limits {
+        self.limits
     }
 
     /// The hosts its manifest declares.
@@ -389,21 +410,28 @@ pub(crate) struct HostState {
     http: wasmtime_wasi_http::WasiHttpCtx,
     hooks: net::Hooks,
     table: ResourceTable,
+    memory: limits::MemoryCap,
     sink: source::SinkSlot,
     /// The instance id, for the component's log lines.
     source_id: String,
 }
 
 impl HostState {
-    fn new(source_id: String, sink: source::SinkSlot, policy: Arc<net::Policy>) -> Self {
+    fn new(
+        source_id: String,
+        sink: source::SinkSlot,
+        policy: Arc<net::Policy>,
+        limits: limits::Limits,
+    ) -> Self {
         Self {
             // Nothing in it: no preopened directory, no environment, no
             // argument, stdio to nowhere, and the defaults refuse every
             // socket address and every name lookup.
             wasi: WasiCtx::builder().build(),
             http: wasmtime_wasi_http::WasiHttpCtx::new(),
-            hooks: net::Hooks::new(policy),
+            hooks: net::Hooks::new(policy, limits),
             table: ResourceTable::new(),
+            memory: limits::MemoryCap::new(limits),
             sink,
             source_id,
         }
@@ -435,10 +463,16 @@ fn new_store(
     sink: source::SinkSlot,
     policy: Arc<net::Policy>,
 ) -> Store<HostState> {
-    Store::new(
+    let mut store = Store::new(
         &adapter.inner.engine,
-        HostState::new(source_id.to_owned(), sink, policy),
-    )
+        HostState::new(source_id.to_owned(), sink, policy, adapter.limits),
+    );
+    store.limiter(|state| &mut state.memory);
+    // Yield at every tick, so the deadline (`limits::bounded`) can drop a
+    // call whose WASM never returns to the executor on its own.
+    store.set_epoch_deadline(1);
+    store.epoch_deadline_callback(|_| Ok(wasmtime::UpdateDeadline::Yield(1)));
+    store
 }
 
 /// Where `just wasm-fixture` writes the fixture component, or
