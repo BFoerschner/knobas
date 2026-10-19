@@ -931,6 +931,22 @@ pub async fn read(
 mod tests {
     use super::*;
 
+    /// A filter written before #817 carries no `reach`, and one written
+    /// before #1294 no `role`: both read as unscoped. The generated
+    /// TypeScript declares both optional (`reach?`, `role?`), and the shell
+    /// leaves them out; this is the half of that promise the Rust keeps.
+    /// Moved here from the hand-written mirror's suite, deleted by #1326.
+    #[test]
+    fn a_filter_without_reach_or_role_is_unscoped() {
+        let decoded: EntityFilter = serde_json::from_value(serde_json::json!({
+            "sources": [], "kinds": [], "updated_within_days": null, "order": "updated_desc",
+            "context": null, "project": null, "include_deleted": false,
+        }))
+        .unwrap();
+        assert_eq!(decoded.reach, None);
+        assert_eq!(decoded.role, None);
+    }
+
     /// The six statements are six, and each names its columns.
     ///
     /// This reads the constants themselves -- the strings that are sent to

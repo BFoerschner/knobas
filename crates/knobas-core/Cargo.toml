@@ -4,9 +4,9 @@ edition.workspace = true
 version.workspace = true
 
 [features]
-# The derives `knobas-app`'s tests read answers back through: `Deserialize` on
-# `builds::RunRow` and `PipelineRow` (#1318). Turned on by that crate's
-# `test-util`; off in every production build.
+# The test-only derives #1318 added: `Deserialize` on `builds::RunRow` and
+# `PipelineRow`. Turned on by `knobas-app`'s `test-util`; off in every
+# production build.
 test-util = []
 
 [dependencies]

@@ -15,7 +15,7 @@ version.workspace = true
 # `cargo build`, in `tauri build`, and in the `clippy --lib` half of the gate,
 # which turns "a stream used the test constructor in a command" from something a
 # reviewer has to notice into a compile error.
-# It turns on knobas-core's own, for the tests' reads of the Builds frame's
+# It turns on knobas-core's own: the test-only derives on the Builds frame's
 # DTOs, which live there (#1318).
 test-util = ["knobas-core/test-util"]
 
