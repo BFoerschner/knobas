@@ -146,7 +146,7 @@ function ports(over: Partial<SettingsPorts> = {}): SettingsPorts {
     uninstallAdapter: vi.fn(() => Promise.resolve()),
     listen: vi.fn(() => Promise.resolve(() => {})),
     ticketViews: vi.fn(() => Promise.resolve(JIRA_VIEWS.map((row) => ({ ...row })))),
-    hideJiraView: vi.fn(() => Promise.resolve()),
+    hideSavedView: vi.fn(() => Promise.resolve()),
     ...over,
   };
 }
@@ -167,7 +167,7 @@ const JIRA_VIEWS: TicketViewRow[] = [
   card_fields: [],
   list_columns: ["key" as const],
   list_sort: null,
-  jira_ref: `jira:${(id as string).replace("jira-", "")}`,
+  saved_view: `jira:${(id as string).replace("jira-", "")}`,
   count: count as number,
   unreadable: null,
   jira: {
@@ -218,7 +218,7 @@ test("Boards and filters: the choice and the favourite filters saved into the co
   ]);
   boards.querySelector<HTMLButtonElement>('button[aria-label="Show PAY without a fix version"]')!.click();
   await settle();
-  expect(p.hideJiraView).toHaveBeenCalledWith("jira-filter-10300", false);
+  expect(p.hideSavedView).toHaveBeenCalledWith("jira-filter-10300", false);
 });
 
 async function settle() {

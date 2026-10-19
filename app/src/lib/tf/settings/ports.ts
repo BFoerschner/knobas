@@ -30,7 +30,7 @@ import {
   type PublishTarget,
 } from "../../ipc/entity";
 import {
-  hideJiraView,
+  hideSavedView,
   search,
   smartLists,
   ticketViews,
@@ -99,7 +99,7 @@ export interface SettingsPorts {
   /** Every ticket view (#812): a Jira source's page lists its Jira views (#878). */
   ticketViews: () => Promise<TicketViewRow[]>;
   /** *Hide* or *Show* a Jira view (#878). */
-  hideJiraView: (id: string, hidden: boolean) => Promise<void>;
+  hideSavedView: (id: string, hidden: boolean) => Promise<void>;
 }
 
 /**
@@ -127,7 +127,7 @@ export const realSettingsPorts: SettingsPorts = {
   uninstallAdapter: (kind, removals) => uninstallAdapter(kind, removals),
   listen: (event, handler) => tauriListen(event, handler),
   ticketViews: () => ticketViews(),
-  hideJiraView: (id, hidden) => hideJiraView(id, hidden),
+  hideSavedView: (id, hidden) => hideSavedView(id, hidden),
 };
 
 /**

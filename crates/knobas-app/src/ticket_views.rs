@@ -77,9 +77,10 @@ pub struct TicketView {
     pub list_columns: Vec<String>,
     /// `None` is newest first.
     pub list_sort: Option<ListSort>,
-    /// The Jira board or filter a Jira view shows (#877); `None` on a view
-    /// somebody made.
-    pub jira_ref: Option<String>,
+    /// The saved view (a board or filter, `sync.saved_view`'s entity id) a
+    /// view from a ticket system shows (#877; named for the role by #1245);
+    /// `None` on a view somebody made.
+    pub saved_view: Option<String>,
 }
 
 /// What `save_ticket_view` takes: a view, with the id and position left to
@@ -100,7 +101,7 @@ pub struct TicketViewDraft {
     pub card_fields: Vec<String>,
     pub list_columns: Vec<String>,
     pub list_sort: Option<ListSort>,
-    pub jira_ref: Option<String>,
+    pub saved_view: Option<String>,
 }
 
 /// One row of the views pane: the view, and what its text reads as today.
@@ -117,7 +118,7 @@ pub struct TicketViewRow {
     pub jira: Option<JiraSource>,
 }
 
-/// What Jira says about a Jira view (#877, `sync.jira_view`): enough for the
+/// What Jira says about a Jira view (#877, `sync.saved_view`): enough for the
 /// views pane and *View settings* to say where it comes from.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct JiraSource {
@@ -162,7 +163,7 @@ pub struct Unsynced {
 macro_rules! fields {
     () => {
         "id, name, view_group, position, query, layout, columns, lanes, card_fields, \
-         list_columns, list_sort, jira_ref"
+         list_columns, list_sort, saved_view"
     };
 }
 
@@ -189,7 +190,7 @@ fn view_of(row: &sqlx::postgres::PgRow) -> Result<TicketView, IpcError> {
             .map(serde_json::from_value)
             .transpose()
             .map_err(IpcError::internal)?,
-        jira_ref: row.get("jira_ref"),
+        saved_view: row.get("saved_view"),
     })
 }
 
@@ -203,14 +204,14 @@ pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
     // A Jira view whose item is not live is not listed: its source is turned
     // off, and it comes back with the source, or its source was deleted with
     // the mirror purged, which leaves the entity tombstoned and no
-    // `sync.jira_view` row, and no later sync of that source to drop this one.
-    // Read off the entity rather than `sync.jira_view` for that second case.
+    // `sync.saved_view` row, and no later sync of that source to drop this one.
+    // Read off the entity rather than `sync.saved_view` for that second case.
     let rows = sqlx::query(concat!(
         "select ",
         fields!(),
         " from knobas.ticket_view t
           where not exists (select 1 from knobas.entity e
-                             where e.id = t.jira_ref
+                             where e.id = t.saved_view
                                and not exists (select 1 from sync.live_item i
                                                 where i.entity_id = e.id))
           order by position, id"
@@ -230,7 +231,7 @@ pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
         .map(|(view, reading)| {
             // A Jira view counts what Jira put on it that knobas mirrors,
             // which is what its board draws (#877); its text is not its own.
-            let source = view.jira_ref.as_ref().and_then(|r| jira.remove(r));
+            let source = view.saved_view.as_ref().and_then(|r| jira.remove(r));
             let reading = match &source {
                 Some((count, _)) => knobas_search::Reading::Count(*count),
                 None => reading,
@@ -256,7 +257,7 @@ pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
 
 /// Per Jira view among `views`: how many of the tickets Jira put on it the
 /// mirror holds live, and where it comes from (#877). A view whose
-/// `jira_ref` names no Jira view is absent, and is counted by its text like
+/// `saved_view` names no Jira view is absent, and is counted by its text like
 /// any other.
 async fn jira_sources(
     pool: &PgPool,
@@ -264,7 +265,7 @@ async fn jira_sources(
 ) -> Result<std::collections::HashMap<String, (u64, JiraSource)>, IpcError> {
     let refs: Vec<&str> = views
         .iter()
-        .filter_map(|view| view.jira_ref.as_deref())
+        .filter_map(|view| view.saved_view.as_deref())
         .collect();
     if refs.is_empty() {
         return Ok(std::collections::HashMap::new());
@@ -276,7 +277,7 @@ async fn jira_sources(
     let rows = sqlx::query(
         "select v.entity_id, v.ref_kind, v.board_type, v.jql, v.sub_query, v.sprint,
                 v.last_read, i.web_url, tv.hidden, tv.is_new,
-                (select count(*) from sync.jira_view_member m
+                (select count(*) from sync.saved_view_member m
                    join sync.live_item t on t.entity_id = m.entity_id and t.kind = 'ticket'
                   where m.view_id = v.entity_id) as n,
                 -- R-3.23: the keys Jira returned minus the tickets knobas
@@ -295,7 +296,7 @@ async fn jira_sources(
                                            order by u.n desc, u.project), '[]'::jsonb)
                    from (select substring(m.entity_id from ':([^:]+)-[^-]*$') as project,
                                 count(*) as n
-                           from sync.jira_view_member m
+                           from sync.saved_view_member m
                           where m.view_id = v.entity_id
                             and not exists (select 1 from sync.live_item l
                                              where l.entity_id = m.entity_id
@@ -313,9 +314,9 @@ async fn jira_sources(
                                  case when jsonb_typeof(c.config->'projects') = 'array'
                                       then c.config->'projects' else '[]'::jsonb end) p(key)
                            where c.id = v.source_id and upper(p.key) = u.project)) as unsynced
-           from sync.jira_view v
+           from sync.saved_view v
            join sync.item i on i.entity_id = v.entity_id
-           join knobas.ticket_view tv on tv.jira_ref = v.entity_id
+           join knobas.ticket_view tv on tv.saved_view = v.entity_id
           where v.entity_id = any($1)",
     )
     .bind(&refs)
@@ -361,9 +362,9 @@ pub async fn translate(
     id: &str,
 ) -> Result<Option<knobas_source::query::Translation>, IpcError> {
     let row: Option<(Option<String>, Option<serde_json::Value>)> = sqlx::query_as(
-        "select tv.jira_ref, i.payload
+        "select tv.saved_view, i.payload
            from knobas.ticket_view tv
-           left join sync.live_item i on i.entity_id = tv.jira_ref
+           left join sync.live_item i on i.entity_id = tv.saved_view
           where tv.id = $1",
     )
     .bind(id)
@@ -401,7 +402,7 @@ pub async fn translate(
 pub async fn hide(pool: &PgPool, id: &str, hidden: bool) -> Result<(), IpcError> {
     let written = sqlx::query(
         "update knobas.ticket_view set hidden = $2
-          where id = $1 and jira_ref in (select entity_id from sync.jira_view)",
+          where id = $1 and saved_view in (select entity_id from sync.saved_view)",
     )
     .bind(id)
     .bind(hidden)
@@ -449,7 +450,7 @@ pub async fn open(pool: &PgPool, id: &str) -> Result<(), IpcError> {
 }
 
 /// The view `id` names if it is a Jira view (#877), as stored.
-async fn jira_view_row(
+async fn saved_view_row(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     id: &str,
 ) -> Result<Option<TicketView>, IpcError> {
@@ -457,7 +458,7 @@ async fn jira_view_row(
         "select ",
         fields!(),
         " from knobas.ticket_view
-          where id = $1 and jira_ref in (select entity_id from sync.jira_view)"
+          where id = $1 and saved_view in (select entity_id from sync.saved_view)"
     ))
     .bind(id)
     .fetch_optional(&mut **tx)
@@ -559,13 +560,13 @@ pub async fn save(pool: &PgPool, mut draft: TicketViewDraft) -> Result<TicketVie
     // tickets and the columns are Jira's, so the stored ones stand whatever
     // the draft says.
     if let Some(id) = &draft.id
-        && let Some(jira) = jira_view_row(&mut tx, id).await?
+        && let Some(jira) = saved_view_row(&mut tx, id).await?
     {
         draft.name = jira.name;
         draft.group = jira.group;
         draft.query = jira.query;
         draft.columns = jira.columns;
-        draft.jira_ref = jira.jira_ref;
+        draft.saved_view = jira.saved_view;
     }
     let id = match &draft.id {
         Some(id) => id.clone(),
@@ -586,14 +587,14 @@ pub async fn save(pool: &PgPool, mut draft: TicketViewDraft) -> Result<TicketVie
             .await?;
     let row = sqlx::query(concat!(
         "insert into knobas.ticket_view as v (id, name, view_group, position, query, layout, columns, \
-                                              lanes, card_fields, list_columns, list_sort, jira_ref)
+                                              lanes, card_fields, list_columns, list_sort, saved_view)
          values ($1, $2, $3, coalesce($4, $5), $6, $7, $8, $9, $10, $11, $12, $13)
          on conflict (id) do update set
            name = excluded.name, view_group = excluded.view_group,
            position = coalesce($4, v.position), query = excluded.query, layout = excluded.layout,
            columns = excluded.columns, lanes = excluded.lanes, card_fields = excluded.card_fields,
            list_columns = excluded.list_columns, list_sort = excluded.list_sort,
-           jira_ref = excluded.jira_ref, updated_at = now()
+           saved_view = excluded.saved_view, updated_at = now()
          returning ",
         fields!()
     ))
@@ -609,7 +610,7 @@ pub async fn save(pool: &PgPool, mut draft: TicketViewDraft) -> Result<TicketVie
     .bind(json(&draft.card_fields)?)
     .bind(json(&draft.list_columns)?)
     .bind(draft.list_sort.as_ref().map(json).transpose()?)
-    .bind(&draft.jira_ref)
+    .bind(&draft.saved_view)
     .fetch_one(&mut *tx)
     .await?;
     let view = view_of(&row)?;
@@ -627,7 +628,7 @@ pub async fn delete(pool: &PgPool, id: &str) -> Result<(), IpcError> {
     // A Jira view is Jira's: deleted here, the next sync would put it back.
     let jira: bool = sqlx::query_scalar(
         "select exists (select 1 from knobas.ticket_view
-                         where id = $1 and jira_ref in (select entity_id from sync.jira_view))",
+                         where id = $1 and saved_view in (select entity_id from sync.saved_view))",
     )
     .bind(id)
     .fetch_one(pool)
@@ -668,7 +669,7 @@ mod tests {
             card_fields: vec!["type".to_owned(), "assignee".to_owned()],
             list_columns: vec!["key".to_owned(), "summary".to_owned()],
             list_sort: None,
-            jira_ref: None,
+            saved_view: None,
         }
     }
 
@@ -814,7 +815,7 @@ mod tests {
                 column: String::new(),
                 direction: String::new(),
             }),
-            jira_ref: None,
+            saved_view: None,
         };
         let row = serde_json::to_value(TicketViewRow {
             view: view.clone(),
@@ -865,8 +866,8 @@ mod tests {
             "\"ticket_views\"",
             "\"save_ticket_view\"",
             "\"delete_ticket_view\"",
-            "\"hide_jira_view\"",
-            "\"open_jira_view\"",
+            "\"hide_saved_view\"",
+            "\"open_saved_view\"",
         ] {
             assert!(mirror.contains(name), "{name} is not in the mirror");
         }

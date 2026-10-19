@@ -507,7 +507,7 @@ function settingsPorts() {
     uninstallAdapter: () => new Promise<never>(() => {}),
     listen: (event: string, handler: (event: { payload: unknown }) => void) => mockedListen(event, handler),
     ticketViews: () => deferred([]),
-    hideJiraView: () => deferred(undefined),
+    hideSavedView: () => deferred(undefined),
   };
 }
 

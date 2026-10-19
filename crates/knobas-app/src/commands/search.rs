@@ -255,7 +255,7 @@ pub async fn delete_ticket_view(
 /// `not_found` if no view has that id, `invalid` for a view somebody made,
 /// `not_ready` before the database is up, `internal` if the write fails.
 #[tauri::command]
-pub async fn hide_jira_view(
+pub async fn hide_saved_view(
     lifecycle: State<'_, Lifecycle>,
     id: String,
     hidden: bool,
@@ -287,7 +287,7 @@ pub async fn translate_ticket_view<R: tauri::Runtime>(
 /// `not_found` if no view has that id, `not_ready` before the database is
 /// up, `internal` if the write fails.
 #[tauri::command]
-pub async fn open_jira_view(lifecycle: State<'_, Lifecycle>, id: String) -> Result<(), IpcError> {
+pub async fn open_saved_view(lifecycle: State<'_, Lifecycle>, id: String) -> Result<(), IpcError> {
     crate::ticket_views::open(&lifecycle.pool()?, &id).await
 }
 

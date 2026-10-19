@@ -1,7 +1,7 @@
 //! Jira views (#877) through the IPC bodies they reach: `ticket_views` (a
-//! Jira view is a ticket view row with a `jira_ref`), `save_ticket_view`
+//! Jira view is a ticket view row with a `saved_view`), `save_ticket_view`
 //! (*View settings*), `delete_ticket_view`, and `mini_board` with its
-//! `jira_view` argument ([`jira_view_board`]). The views are made the way a
+//! `saved_view` argument ([`saved_view_board`]). The views are made the way a
 //! sync makes them: a `jira_view` item in the mirror, projected by
 //! `knobas_sync::saved_views::project` under the Jira adapter's own
 //! declaration.
@@ -10,7 +10,7 @@
 //! a board id nothing else holds.
 
 use knobas_app::IpcErrorCode;
-use knobas_app::commands::entity::jira_view_board;
+use knobas_app::commands::entity::saved_view_board;
 use knobas_app::ticket_views::{self, TicketViewDraft, TicketViewRow};
 use serde_json::{Value, json};
 
@@ -142,7 +142,7 @@ async fn a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws() {
     let row = listed(&pool, &id).await.expect("the Jira view is listed");
     assert_eq!(row.view.name, format!("{p} flow"));
     assert_eq!(row.view.group, "Jira boards");
-    assert_eq!(row.view.jira_ref.as_deref(), Some(view.as_str()));
+    assert_eq!(row.view.saved_view.as_deref(), Some(view.as_str()));
     assert_eq!(row.view.columns.len(), 3);
     assert_eq!(row.view.columns[1].limit, Some(2));
     assert_eq!(
@@ -173,7 +173,7 @@ async fn a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws() {
             card_fields: vec!["type".into()],
             list_columns: vec!["key".into()],
             list_sort: None,
-            jira_ref: None,
+            saved_view: None,
         },
     )
     .await
@@ -185,7 +185,7 @@ async fn a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws() {
 async fn a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns() {
     let pool = pool().await;
     let (p, _, view) = seeded(&pool).await;
-    let board = jira_view_board(&pool, &view, None, None)
+    let board = saved_view_board(&pool, &view, None, None)
         .await
         .expect("the board");
     let drawn: Vec<(Option<String>, Vec<String>, u32)> = board
@@ -213,12 +213,12 @@ async fn a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns() 
         "Jira's order inside a column of two statuses, an empty column kept, a status on no column not drawn"
     );
 
-    let capped = jira_view_board(&pool, &view, Some(1), None).await.unwrap();
+    let capped = saved_view_board(&pool, &view, Some(1), None).await.unwrap();
     assert_eq!(capped.columns[1].cards.len(), 1);
     assert_eq!(capped.columns[1].cards[0].key, format!("{p}-1"));
     assert_eq!(capped.columns[1].total, 2);
 
-    let narrowed = jira_view_board(&pool, &view, None, Some("retry"))
+    let narrowed = saved_view_board(&pool, &view, None, Some("retry"))
         .await
         .unwrap();
     let keys: Vec<String> = narrowed
@@ -228,7 +228,7 @@ async fn a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns() 
         .collect();
     assert_eq!(keys, [format!("{p}-3"), format!("{p}-2")]);
 
-    let missing = jira_view_board(&pool, "jira:board-nothing", None, None)
+    let missing = saved_view_board(&pool, "jira:board-nothing", None, None)
         .await
         .unwrap_err();
     assert_eq!(missing.code, IpcErrorCode::NotFound);
@@ -253,7 +253,7 @@ async fn view_settings_keep_what_jira_decides_and_a_jira_view_is_not_deleted() {
             card_fields: vec!["type".into()],
             list_columns: vec!["key".into(), "summary".into()],
             list_sort: None,
-            jira_ref: None,
+            saved_view: None,
         },
     )
     .await
@@ -267,7 +267,7 @@ async fn view_settings_keep_what_jira_decides_and_a_jira_view_is_not_deleted() {
     assert_eq!(saved.group, "Jira boards");
     assert_eq!(saved.query, stored.query);
     assert_eq!(saved.columns, stored.columns);
-    assert_eq!(saved.jira_ref.as_deref(), Some(view.as_str()));
+    assert_eq!(saved.saved_view.as_deref(), Some(view.as_str()));
 
     let refused = ticket_views::delete(&pool, &id).await.unwrap_err();
     assert_eq!(refused.code, IpcErrorCode::Invalid);
@@ -275,7 +275,7 @@ async fn view_settings_keep_what_jira_decides_and_a_jira_view_is_not_deleted() {
 }
 
 /// A Jira source deleted with its mirror purged takes its views' items, and
-/// with them their `sync.jira_view` rows, but no sync of that source runs
+/// with them their `sync.saved_view` rows, but no sync of that source runs
 /// again to drop the ticket view rows. Those rows must not then be listed as
 /// views somebody made, whose empty text holds every ticket.
 #[tokio::test]
@@ -314,7 +314,7 @@ fn own_draft(name: String) -> TicketViewDraft {
         card_fields: vec!["type".into()],
         list_columns: vec!["key".into()],
         list_sort: None,
-        jira_ref: None,
+        saved_view: None,
     }
 }
 
@@ -478,7 +478,7 @@ async fn make_an_editable_copy_asks_the_saved_views_source_to_translate_its_quer
     .await
     .unwrap();
     let mut draft = own_draft(format!("Mock {p}"));
-    draft.jira_ref = Some(mock_ref);
+    draft.saved_view = Some(mock_ref);
     let mock_view = ticket_views::save(&pool, draft).await.unwrap();
     let none = ticket_views::translate(&pool, &secrets, &registry, &mock_view.id)
         .await

@@ -33,7 +33,7 @@ export function drawnJiraColumns(own: ViewColumn[]): ViewColumn[] {
   return own.map((column) => ({ ...column, statuses: [column.name] }));
 }
 
-/** The Jira source a Jira view comes from: its `jira_ref`'s source id (`jira:board-21` → `jira`). */
+/** The Jira source a Jira view comes from: its `saved_view`'s source id (`jira:board-21` → `jira`). */
 export function jiraSourceId(ref: string): string {
   return ref.split(":")[0]!;
 }
@@ -224,7 +224,7 @@ export function draftEdit(view: TicketView): TicketViewDraft {
 
 /** What *Undo* on a delete saves: the view back, under its id and in its place. */
 export function draftRestore(view: TicketView): TicketViewDraft {
-  return { ...draftOf(view), id: view.id, position: view.position, jira_ref: view.jira_ref };
+  return { ...draftOf(view), id: view.id, position: view.position, saved_view: view.saved_view };
 }
 
 function draftOf(view: TicketView | null): TicketViewDraft {
@@ -241,7 +241,7 @@ function draftOf(view: TicketView | null): TicketViewDraft {
     list_columns: [...(view?.list_columns ?? DEFAULT_LIST_COLUMNS)],
     list_sort: view?.list_sort ?? null,
     // A copy is your own view: Jira decides nothing about it.
-    jira_ref: null,
+    saved_view: null,
   };
 }
 

@@ -371,10 +371,10 @@ function miniBoard(args: Record<string, unknown>) {
   const lanes = (args["lanes"] as LaneField | null | undefined) ?? null;
   // A Jira view's board (#877): the whole board under the same words, cut
   // to the view's tickets in Jira's order under its own columns.
-  const jiraView = args["jiraView"];
+  const savedView = args["savedView"];
   const whole =
-    typeof jiraView === "string"
-      ? fakeJiraBoard(jiraView, boardOf({ ...args, sources: [], ctxId: null, project: null, perColumn: null }), null)
+    typeof savedView === "string"
+      ? fakeJiraBoard(savedView, boardOf({ ...args, sources: [], ctxId: null, project: null, perColumn: null }), null)
       : boardOf({ ...args, perColumn: null });
   // In lanes (#939): each lane's column capped, the first lanes sent.
   if (lanes !== null) {
