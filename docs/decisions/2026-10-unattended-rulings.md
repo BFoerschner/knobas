@@ -6561,3 +6561,19 @@ No step of the ticket is reserved for Björn. The implementer's rulings:
   refuses the foreign namespace with `?` in `key_of` before any client call, so the source sent
   no request. A server only that test knows about makes the strict assertion safe.
   **Reversing:** none needed.
+
+## #1235 Add label… reads every page, and the organisation's labels (Opus implementer)
+
+- **A label listing is whole at Gitea's `X-Total-Count`, or on an empty page; with no count, on a
+  page shorter than fifty.** Gitea sends the count on both listings, so a server whose
+  `MAX_RESPONSE_ITEMS` is under fifty still pages through. At most 20 pages (a thousand labels)
+  per listing are read; past that the rest is not offered and nothing says so. **Reversing:** low.
+- **Whether the owner is an organisation is Gitea's answer to `GET /orgs/{owner}/labels`**: its
+  404 is a user owner, with no organisation labels. Gitea's pull request and repository records
+  carry no owner type, so asking first would be one more request for the same answer. Any other
+  failure of that read disables the action as a failed repository read does. It is read beside
+  the repository's labels, so a pull request's view has ten reads in flight, not nine.
+  **Reversing:** low.
+- **The repository's labels come first, then the organisation's, under their plain names**, as
+  Gitea's own label picker lists them. A repository label and an organisation label of the same
+  name are two options of the same text. **Reversing:** low.
