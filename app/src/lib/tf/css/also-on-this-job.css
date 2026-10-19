@@ -1,0 +1,23 @@
+/* ---------- Also on this job (#867, R-4.4) and the drawer's set groups (R-6.2) ---------- */
+.tf-setsbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--t-sm); }
+.tf-setchip {
+  display: inline-flex; gap: 6px; align-items: baseline; padding: 3px 9px;
+  border: 1px solid var(--rule); border-radius: 3px; background: var(--sheet); color: var(--ink); text-decoration: none;
+}
+.tf-setchip:hover { border-color: var(--ink-2); }
+.tf-setchip b { font-weight: 600; }
+.tf-setchip span { font-size: var(--t-xs); color: var(--ink-2); }
+.tf-dbody h3 .tf-dedit { margin-left: auto; font-weight: 400; font-size: var(--t-xs); }
+
+/* An item's page (#1201): the block view of an item no surface draws. */
+.tf-item-body { padding: 0 22px 22px; display: flex; flex-direction: column; gap: 12px; max-width: 90ch; }
+.tf-item-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: var(--t-sm); }
+.tf-item-facts dt { color: var(--ink-2); }
+.tf-item-facts dd { overflow-wrap: anywhere; }
+.tf-item-facts dd.tf-ok { color: var(--ok); } .tf-item-facts dd.tf-warn { color: var(--warn); } .tf-item-facts dd.tf-err { color: var(--err); }
+.tf-item-rows { list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); }
+.tf-item-rows li { display: flex; gap: 8px; align-items: baseline; }
+.tf-item-textp { padding: 12px 14px; }
+.tf-item-text { white-space: pre-line; overflow-wrap: anywhere; font-size: var(--t-sm); }
+.tf-item-meta { color: var(--ink-2); font-size: var(--t-sm); }
+.tf-item-log { font-family: var(--mono); font-size: var(--t-xs); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 10px 12px; }

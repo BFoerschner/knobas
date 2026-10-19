@@ -1,0 +1,76 @@
+/* ---------- Builds, build chains (#857): prototype-6's .chainrow on the run's Overview ---------- */
+.tf-chain { grid-column: 1 / -1; }
+.tf-chainrow { display: flex; gap: 6px; align-items: stretch; padding: 0 12px 10px; flex-wrap: wrap; }
+.tf-chainrow .tf-link {
+  display: flex; flex-direction: column; padding: 6px 10px; border: 1px solid var(--rule); border-left-width: 4px;
+  border-radius: 4px; text-decoration: none; font-size: var(--t-xs); color: var(--ink);
+}
+.tf-chainrow .tf-link span { color: var(--ink-2); }
+.tf-chainrow .tf-link.tf-ok { border-left-color: var(--ok); }
+.tf-chainrow .tf-link.tf-err { border-left-color: var(--err); }
+.tf-chainrow .tf-link.tf-run { border-left-color: var(--info); }
+.tf-chainrow .tf-link.tf-warn { border-left-color: var(--warn); }
+.tf-chainrow .tf-link.tf-q { border-left-style: dashed; border-left-color: var(--info); }
+.tf-chainrow .tf-link[aria-current="page"] { background: var(--sheet-2); border-color: var(--ink); }
+.tf-chainrow .tf-arrow { align-self: center; color: var(--ink-2); }
+.tf-chain > .tf-dim { font-size: var(--t-xs); margin: 0; padding: 0 12px 12px; }
+
+/* The run page's Log, Tests and Artifacts tabs (#854, #855, #856): prototype-6's
+   .logbar, .logv, .ll, .trow, .tdetail, .atree, .arow, .apreview. */
+.tf-logbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 0; position: sticky; top: 0; background: var(--paper); z-index: 4; }
+.tf-logbar .tf-fsearch { max-width: 320px; }
+.tf-logbar .tf-lqn { font-size: var(--t-xs); white-space: nowrap; }
+.tf-nav2 { display: flex; gap: 2px; }
+.tf-nav2 button { border: 1px solid var(--rule); background: var(--sheet); color: var(--ink); border-radius: 3px; cursor: pointer; width: 26px; height: 26px; }
+.tf-logacts { margin-left: auto; display: flex; gap: 6px; }
+.tf-logv { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; font: var(--t-xs)/1.55 var(--mono); overflow: auto; }
+.tf-logv details { border-top: 1px solid var(--rule-2); }
+.tf-logv > :first-child { border-top: 0; }
+.tf-logloose { border-top: 1px solid var(--rule-2); padding: 4px 0; }
+.tf-logv summary { list-style: none; cursor: pointer; padding: 6px 12px; display: flex; gap: 10px; align-items: center; font-family: var(--sans); font-size: var(--t-sm); background: var(--sheet-2); }
+.tf-logv summary::-webkit-details-marker { display: none; }
+.tf-logv summary::before { content: "▸"; font-size: 10px; color: var(--ink-2); }
+.tf-logv details[open] > summary::before { content: "▾"; }
+.tf-logv summary .tf-d { margin-left: auto; color: var(--ink-2); font-size: var(--t-xs); }
+.tf-ll { display: grid; grid-template-columns: 52px 70px 1fr; white-space: pre; padding: 0 12px 0 0; }
+.tf-logv.tf-wrap .tf-ll { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tf-logv.tf-nots .tf-ll { grid-template-columns: 52px 1fr; }
+.tf-logv.tf-nots .tf-ll .tf-ts { display: none; }
+.tf-ll .tf-no { color: var(--ink-2); text-align: right; padding-right: 12px; user-select: none; }
+.tf-ll .tf-ts { color: var(--ink-2); }
+.tf-ll.tf-e { background: var(--err-bg); color: var(--err); }
+.tf-ll.tf-w { background: var(--warn-bg); color: var(--warn); }
+.tf-ll mark.tf-curm { outline: 2px solid var(--ink); }
+.tf-logfoot { font-size: var(--t-sm); margin: 8px 0 0; }
+.tf-atree { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
+.tf-arow { display: grid; grid-template-columns: minmax(0, 1fr) 90px auto; gap: 10px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-arow:first-child { border-top: 0; }
+.tf-arow .tf-nm { font-family: var(--mono); font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-arow .tf-sz { text-align: right; color: var(--ink-2); font-size: var(--t-xs); }
+.tf-arow .tf-acts { display: flex; gap: 6px; justify-content: flex-end; }
+.tf-arow.tf-dir { font-weight: 600; background: var(--sheet-2); }
+.tf-arow.tf-dir > button.tf-fold { all: unset; cursor: pointer; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-arow.tf-dir > button.tf-fold:focus-visible { outline: 2px solid var(--focus); }
+.tf-arow.tf-ad1 .tf-nm, .tf-arow.tf-ad1 > .tf-fold { padding-left: 18px; }
+.tf-arow.tf-ad2 .tf-nm, .tf-arow.tf-ad2 > .tf-fold { padding-left: 36px; }
+.tf-arow.tf-ad3 .tf-nm, .tf-arow.tf-ad3 > .tf-fold { padding-left: 54px; }
+.tf-arow.tf-ad4 .tf-nm, .tf-arow.tf-ad4 > .tf-fold { padding-left: 72px; }
+.tf-arow.tf-ad5 .tf-nm, .tf-arow.tf-ad5 > .tf-fold { padding-left: 90px; }
+.tf-arow.tf-ad6 .tf-nm, .tf-arow.tf-ad6 > .tf-fold { padding-left: 108px; }
+.tf-aall { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+.tf-aall .tf-dim { font-size: var(--t-sm); }
+.tf-apreview { margin-top: 12px; }
+.tf-tres { margin-top: 10px; }
+.tf-trow { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-trow:first-child { border-top: 0; }
+.tf-trow .tf-nm { font-family: var(--mono); font-size: var(--t-sm); overflow-wrap: anywhere; }
+.tf-trow .tf-nm button { all: unset; cursor: pointer; }
+.tf-trow .tf-nm button:focus-visible { outline: 2px solid var(--focus); }
+.tf-trow .tf-dim { font-size: var(--t-xs); }
+.tf-tdetail { padding: 4px 12px 10px 34px; }
+.tf-tdetail pre { margin: 0; font: var(--t-xs)/1.55 var(--mono); white-space: pre-wrap; background: var(--sheet-2); border: 1px solid var(--rule-2); border-radius: 4px; padding: 8px 10px; }
+.tf-tdetail .tf-tacts { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+.tf-tdetail .tf-tacts .tf-dim { font-size: var(--t-sm); }
+/* prototype-6 draws the Tests bar flat inside the run page: static, no frame. */
+.tf-runbody > .tf-fbar { position: static; padding: 0; border: 0; background: none; }
+

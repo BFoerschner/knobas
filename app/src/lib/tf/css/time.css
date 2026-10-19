@@ -1,0 +1,142 @@
+/* ---------- time: the Day tab (#827) ----------
+   The strip is SVG, so its geometry is attributes rather than inline style.
+   Yellow (--card) is the running timer's block alone. */
+.tf-tm-wrap { padding: 16px 22px 40px; max-width: 1240px; }
+.tf-tm-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; }
+.tf-tm-nav h2 { font-size: var(--t-xl); margin: 0 6px; font-weight: 700; }
+.tf-tm-sum { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
+.tf-tm-sum div { display: flex; flex-direction: column; }
+.tf-tm-sum b {
+  font-size: var(--t-d1); line-height: 1; font-weight: 800; font-variation-settings: "wdth" 62;
+  font-variant-numeric: tabular-nums;
+}
+.tf-tm-sum span { font-size: var(--t-xs); color: var(--ink-2); margin-top: 3px; }
+.tf-tm-sum .tf-warn b { color: var(--warn); }
+.tf .tf-tm-note, .tf .tf-tm-fail {
+  padding: 10px 14px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet);
+  margin-bottom: 14px; font-size: var(--t-sm); color: var(--ink-2);
+}
+.tf .tf-tm-fail { border-left: 3px solid var(--err); color: var(--ink); }
+.tf-tm-strip { display: block; overflow: visible; margin: 0 0 8px; }
+.tf-tm-bed { fill: var(--sheet); stroke: var(--rule); }
+.tf-tm-hr { stroke: var(--rule-2); shape-rendering: crispEdges; }
+.tf-tm-hl { font-size: var(--t-2xs); font-variant-numeric: tabular-nums; fill: var(--ink-2); }
+.tf-tm-b { cursor: pointer; }
+.tf-tm-b text { font: 600 var(--t-2xs) var(--mono); }
+.tf-tm-b text.tf-tm-plain { font-family: var(--sans); }
+.tf-tm-b:focus-visible { outline: none; }
+.tf-tm-b.tf-tm-manual rect { fill: var(--ink); } .tf-tm-b.tf-tm-manual text { fill: var(--sheet); }
+.tf-tm-b.tf-tm-logged rect { fill: var(--ok-bg); stroke: var(--ok); } .tf-tm-b.tf-tm-logged text { fill: var(--ok); }
+.tf-tm-b.tf-tm-run rect { fill: var(--card); stroke: var(--card-2); } .tf-tm-b.tf-tm-run text { fill: var(--card-ink); }
+.tf-tm-b.tf-tm-label rect { fill: var(--sheet-2); stroke: var(--ink-2); } .tf-tm-b.tf-tm-label text { fill: var(--ink); }
+.tf-tm-b.tf-tm-passive rect { fill: url(#tf-tm-hatch); stroke: var(--info); } .tf-tm-b.tf-tm-passive text { fill: var(--info); }
+.tf-tm-b.tf-tm-gap rect { fill: transparent; stroke: var(--ink-2); stroke-dasharray: 4 3; }
+.tf-tm-hatch { fill: var(--info-bg); }
+/* After the states, so the ring wins over each state's own edge. */
+.tf-tm-b:focus-visible rect, .tf-tm-b.tf-on rect { stroke: var(--focus); stroke-width: 2; }
+/* On the yellow block the ring is --card-ink: --focus is 1.22:1 on --card in dark. */
+.tf-tm-b.tf-tm-run:focus-visible rect, .tf-tm-b.tf-tm-run.tf-on rect { stroke: var(--card-ink); }
+.tf-tm-now { fill: var(--err); }
+.tf-tm-legend {
+  display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: var(--t-xs); color: var(--ink-2);
+  margin-bottom: 18px;
+}
+.tf-tm-legend span { display: flex; align-items: center; gap: 6px; }
+.tf-tm-legend i { width: 16px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid transparent; }
+.tf-tm-legend i.tf-tm-manual { background: var(--ink); }
+.tf-tm-legend i.tf-tm-logged { background: var(--ok-bg); border-color: var(--ok); }
+.tf-tm-legend i.tf-tm-run { background: var(--card); }
+.tf-tm-legend i.tf-tm-passive {
+  background: repeating-linear-gradient(135deg, var(--info-bg) 0 3px, transparent 3px 6px); border-color: var(--info);
+}
+.tf-tm-legend i.tf-tm-gap { border: 1px dashed var(--ink-2); }
+.tf-tm-legend .tf-btn { margin-left: auto; }
+.tf-tm-list {
+  display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet);
+  overflow: hidden;
+}
+.tf-tm-row {
+  display: grid; grid-template-columns: 150px minmax(0, 1fr) 120px auto; gap: 12px; align-items: center;
+  padding: 10px 14px; border-bottom: 1px solid var(--rule-2); cursor: pointer;
+}
+.tf-tm-row:last-child { border-bottom: 0; }
+.tf-tm-row:hover { background: var(--sheet-2); }
+.tf-tm-row.tf-on { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--ink); }
+.tf-tm-when { font-size: var(--t-xs); font-variant-numeric: tabular-nums; color: var(--ink-2); display: flex; flex-direction: column; }
+.tf-tm-when b { font: 700 var(--t-lg) var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }
+.tf-tm-what small { display: block; color: var(--ink-2); font-size: var(--t-xs); margin-top: 2px; }
+.tf-tm-acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.tf-tm-group {
+  display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  padding: 8px 14px; border-bottom: 1px solid var(--rule-2); background: var(--info-bg); font-size: var(--t-sm);
+}
+.tf-tm-group small { display: block; color: var(--ink-2); font-size: var(--t-xs); margin-top: 2px; }
+.tf .tf-tm-foot { font-size: var(--t-xs); color: var(--ink-2); margin: 14px 0 0; max-width: 80ch; }
+.tf .tf-tm-foot a { text-decoration: underline; }
+.tf-tm-empty { padding: 28px; border: 1px dashed var(--rule); border-radius: 6px; max-width: 640px; }
+.tf .tf-tm-empty p { margin: 0 0 10px; }
+.tf-tm-on { display: flex; gap: 8px; }
+.tf-tm-on input { flex: 1; }
+.tf-tm-refusal { color: var(--err); font-size: var(--t-sm); }
+
+/* The Week tab (#828): a row per target, a column per day, the weekend shaded. */
+.tf-tm-held {
+  display: flex; gap: 10px; align-items: baseline; padding: 10px 14px; border: 1px solid var(--rule);
+  border-left: 3px solid var(--warn); border-radius: 4px; background: var(--sheet); margin-bottom: 14px; font-size: var(--t-sm);
+}
+.tf-tm-held .tf-btn { margin-left: 8px; }
+.tf-tm-scroll { overflow-x: auto; }
+.tf-tm-week th a { color: inherit; text-decoration: none; }
+.tf-tm-week th a:hover { text-decoration: underline; }
+.tf-tm-week .tf-tm-we { background: var(--sheet-2); }
+.tf-tm-t { min-width: 240px; }
+.tf-tm-t small { display: block; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-tm-t a { color: inherit; text-decoration: underline; }
+.tf-tm-c { min-width: 92px; font-variant-numeric: tabular-nums; }
+.tf-tm-c a { display: flex; flex-direction: column; gap: 3px; text-decoration: none; color: inherit; }
+.tf-tm-c small { font-size: var(--t-2xs); color: var(--ink-2); }
+.tf-tm-c.tf-tm-tot { border-left: 1px solid var(--rule); }
+.tf-tm-bar { display: block; border-radius: 2px; overflow: hidden; }
+.tf-tm-bar-bed { fill: var(--rule-2); }
+.tf-tm-bar-lg { fill: var(--ok); }
+.tf-tm-bar-hd { fill: var(--warn); }
+.tf-tm-bar-un { fill: var(--ink-2); }
+.tf-tm-total td { background: var(--sheet-2); font-weight: 600; }
+/* *Log all…*: wider than a form dialog, for the comment column. */
+.tf-dialog.tf-tm-logall { width: min(720px, calc(100vw - 32px)); }
+/* Dependencies' *Import…* (#1066): wide enough for a preview's property lines. */
+.tf-dialog.tf-im-dialog { width: min(640px, calc(100vw - 32px)); }
+.tf-tm-num { font-variant-numeric: tabular-nums; }
+.tf-tm-comment { width: 100%; }
+.tf-tm-comment textarea {
+  width: 100%; resize: vertical; font: inherit; border: 1px solid var(--rule); border-radius: 4px; padding: 3px 6px; background: var(--paper); color: var(--ink);
+}
+
+/* ---------- time: the Standup tab (#829) ---------- */
+.tf-su { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.tf-su-body { padding: 4px 14px 14px; }
+.tf-su-body h4 { font-size: var(--t-sm); margin: 12px 0 4px; color: var(--ink-2); font-weight: 600; }
+.tf-su-body ul { margin: 0; padding: 0; list-style: none; }
+.tf-su-body li > a, .tf-su-body li > span { display: block; padding: 5px 6px; border-radius: 4px; color: var(--ink); text-decoration: none; line-height: 1.4; }
+.tf-su-body li > a:hover { background: var(--sheet-2); }
+.tf .tf-su-none { margin: 0; padding: 5px 6px; color: var(--ink-2); font-size: var(--t-sm); }
+.tf-su-day { font-size: var(--t-sm); }
+.tf-su-people { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.tf-su-val {
+  border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); border-radius: 3px;
+  padding: 2px 8px; font-size: var(--t-sm); line-height: 1.35; cursor: pointer;
+}
+.tf-su-val:hover { border-color: var(--ink-2); color: var(--ink); }
+.tf-su-val[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+.tf-su-add { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--paper); color: var(--ink); font-size: var(--t-sm); }
+.tf-su-add.tf-su-wide { width: 100%; margin: 6px 0; }
+.tf-su-pn { display: flex; flex-direction: column; gap: 3px; font-size: var(--t-sm); color: var(--ink-2); margin-top: 8px; }
+.tf-su-pn textarea { border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); color: var(--ink); font: inherit; font-size: var(--t-md); resize: vertical; }
+.tf .tf-su-gap { margin-top: 12px; }
+.tf-su-ai { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--rule-2); font-size: var(--t-md); }
+.tf-su-ai > span:first-child { flex: 1; }
+.tf-su-done { text-decoration: line-through; color: var(--ink-2); }
+.tf .tf-su-foot { font-size: var(--t-xs); color: var(--ink-2); margin: 10px 0 0; }
+.tf .tf-su-foot a { text-decoration: underline; }
+@media (max-width: 900px) { .tf-su { grid-template-columns: 1fr; } }
+

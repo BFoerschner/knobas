@@ -1,0 +1,32 @@
+/* ---------- narrow: 1240px closes side rails, 900px stacks ---------- */
+@media (max-width: 900px) {
+  .tf-search { min-width: 0; }
+  .tf-search .tf-label { display: none; }
+  .tf-brand { margin-right: 2px; }
+  .tf-nav { flex: 1; }
+  .tf-spacer { display: none; }
+  .tf-timer-key { display: none; }
+  .tf-crumbs, .tf-fhead, .tf-tabs, .tf-tm-wrap { padding-left: 16px; padding-right: 16px; }
+  .tf-tm-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .tf-tm-acts { grid-column: 1 / -1; justify-content: flex-start; }
+  .tf-jobkey { font-size: var(--t-d2); }
+  .tf-ws { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .tf-jobcard, .tf-work { overflow: visible; }
+  .tf-jobcard { border-right: 0; }
+  .tf-wbody, .tf-wtabs { padding-left: 16px; padding-right: 16px; }
+  .tf-stg { grid-template-columns: 1fr; }
+  .tf-stg-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .tf-stg-nav a { white-space: nowrap; }
+  .tf-stg-row { grid-template-columns: 1fr; }
+  .tf-stg-src { grid-template-columns: auto 1fr auto; }
+  .tf-stg-src .tf-stg-si { display: none; }
+}
+@media (max-width: 1240px) {
+  .tf-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Reduced motion stops everything above: the pulse, the toast's rise, every transition. */
+@media (prefers-reduced-motion: reduce) {
+  .tf *, .tf *::before, .tf *::after { transition: none !important; animation: none !important; }
+}
+

@@ -1,0 +1,106 @@
+/* ---------- Pull request page (#841, R-8.15, R-8.16, R-8.20) ---------- */
+/* prototype-6's `.fbody`: the tab's body beside a 300px side column. */
+.tf-cbody.tf-pr { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
+.tf-pr .tf-side { display: flex; flex-direction: column; gap: 14px; }
+.tf-pr .tf-side .tf-panel > header h3 { font-size: var(--t-md); }
+.tf-prready, .tf-prlocal { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); }
+.tf-prready > span { display: flex; gap: 6px; align-items: baseline; }
+.tf-prlocal { gap: 6px; }
+.tf-prlocal-acts { display: flex; gap: 6px; }
+.tf-prchecks td:first-child { white-space: nowrap; }
+.tf-prchecks td:first-child .tf-dot { margin-right: 6px; }
+.tf-prdesc { padding: 12px 14px; }
+.tf-prdesc p { white-space: pre-line; overflow-wrap: anywhere; font-size: var(--t-sm); }
+.tf-dialog.tf-pr-dialog { width: min(620px, calc(100vw - 32px)); }
+.tf-pra { display: flex; flex-direction: column; gap: 8px; }
+.tf-pra input[type="text"], .tf-pra textarea {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); color: var(--ink); font: inherit; width: 100%;
+}
+.tf-pra textarea { resize: vertical; }
+.tf-pra fieldset { border: 0; padding: 0; margin: 0; }
+@media (max-width: 900px) {
+  .tf-cbody.tf-pr { grid-template-columns: minmax(0, 1fr); }
+}
+/* Open in… and Clone (#844, #846): prototype-6's `.appmenu`, `.phs`, `pre.log`. */
+.tf-openin { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tf-menu.tf-appmenu { width: 300px; padding: 4px 0; }
+.tf-appmenu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 6px 12px; border-radius: 0; color: var(--ink); font-size: var(--t-sm); }
+.tf-appmenu button:focus-visible { background: var(--sheet-2); outline: none; }
+.tf-appmenu b { font-weight: 600; }
+.tf-appmenu .tf-plain { font-weight: 400; }
+.tf-appmenu .tf-mono { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.tf-appmenu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
+.tf-dialog.tf-app-dialog { width: min(640px, calc(100vw - 32px)); }
+.tf-app-dialog .tf-body { display: flex; flex-direction: column; gap: 8px; }
+.tf-phs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tf-phb { border: 1px solid var(--rule); background: var(--sheet); border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-phb .tf-mono { color: var(--ink); font-weight: 600; }
+.tf-log { margin: 0; font: var(--t-xs)/1.5 var(--mono); background: var(--paper); border-radius: 4px; padding: 8px 10px; overflow: auto; color: var(--ink); white-space: pre-wrap; }
+.tf-dialog .tf-remove { margin-right: auto; color: var(--err); }
+.tf-applist { display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 4px; }
+.tf-approw { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-approw:last-child { border-bottom: 0; }
+.tf-approw .tf-appname .tf-mono { display: block; font-size: var(--t-xs); }
+.tf-approw .tf-appacts { margin-left: auto; display: flex; gap: 4px; }
+.tf-dnote { font-size: var(--t-sm); }
+.tf-clonefail { font-size: var(--t-sm); color: var(--err); max-width: 60ch; }
+.tf-banner.tf-err { background: var(--err-bg); color: var(--err); }
+.tf-stg-ok { display: inline-flex; align-items: center; gap: 6px; }
+.tf .tf-right { text-align: right; }
+.tf-local-line { margin: 0 0 12px; }
+.tf-local-note { margin: 0 0 10px; font-size: var(--t-sm); }
+.tf-local-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.tf-untracked { margin-top: 14px; }
+.tf-untracked ul { margin: 0; padding: 0 12px 12px 30px; font-size: var(--t-sm); }
+
+/* ---------- Files changed, Submit review, Merge… (#842, #843, R-8.15, R-8.17-R-8.19) ---------- */
+/* *Submit review (N pending)*: prototype-6's warn-edged button. */
+.tf-btn.tf-warnbtn { border-color: var(--warn); color: var(--warn); }
+.tf-prfiles { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
+.tf-prfiles-nav .tf-minif { max-width: none; margin-bottom: 8px; }
+.tf-flist {
+  display: flex; flex-direction: column; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px;
+  font-size: var(--t-sm); position: sticky; top: 64px;
+}
+.tf-flist button {
+  display: flex; gap: 8px; padding: 6px 10px; border: 0; border-top: 1px solid var(--rule-2); background: none; color: var(--ink);
+  font: var(--t-sm) var(--mono); align-items: center; text-align: left; cursor: pointer;
+}
+.tf-flist button:first-of-type { border-top: 0; }
+.tf-flist button:hover { background: var(--sheet-2); }
+.tf-flist .tf-n { margin-left: auto; font-family: var(--sans); white-space: nowrap; }
+.tf-flist .tf-viewed { opacity: 0.5; }
+.tf-flist-none { padding: 8px; }
+.tf-prdiff .tf-ln { grid-template-columns: 44px 1fr auto; position: relative; }
+.tf-prdiff .tf-fh-viewed { margin-left: auto; font: 400 var(--t-sm) var(--sans); display: flex; gap: 6px; align-items: center; }
+.tf-addc {
+  opacity: 0; border: 0; background: var(--info); color: var(--sheet); border-radius: 4px; width: 18px; height: 18px;
+  line-height: 16px; cursor: pointer; margin: 2px 6px 0; font: 700 var(--t-sm) var(--sans); padding: 0;
+}
+.tf-prdiff .tf-ln:hover .tf-addc, .tf-addc:focus-visible { opacity: 1; }
+.tf-thread {
+  margin: 4px 12px 8px 56px; padding: 6px 10px; border: 1px solid var(--rule); border-left-width: 3px; border-radius: 4px;
+  background: var(--sheet); font: var(--t-sm)/1.5 var(--sans); white-space: normal;
+}
+.tf-thread p { margin: 0 0 4px; overflow-wrap: anywhere; }
+.tf-thread p:last-child { margin-bottom: 0; }
+.tf-thread.tf-pending { border-color: var(--warn); }
+.tf-newc { margin: 4px 12px 8px 56px; display: flex; flex-direction: column; gap: 6px; font-family: var(--sans); }
+.tf-newc textarea {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); color: var(--ink); min-height: 54px; font: inherit;
+}
+.tf-newc .tf-acts { display: flex; gap: 6px; justify-content: flex-end; }
+.tf-outdated { margin: 6px 12px 10px; font: var(--t-sm) var(--sans); }
+.tf-outdated summary { cursor: pointer; color: var(--ink-2); }
+.tf-outdated .tf-thread { margin-left: 0; }
+.tf-gone { margin: 12px 0 0; }
+.tf-prfiles-cut { margin: 12px 0 0; font-size: var(--t-sm); }
+.tf-prr-line { font-size: var(--t-sm); }
+.tf-prm-ready { padding: 0; }
+.tf-prm-blocked { flex-direction: column; align-items: flex-start; gap: 2px; }
+.tf-prm-note { margin: 0; font-size: var(--t-sm); }
+@media (max-width: 900px) {
+  .tf-prfiles { grid-template-columns: minmax(0, 1fr); }
+  .tf-flist { position: static; }
+}
+

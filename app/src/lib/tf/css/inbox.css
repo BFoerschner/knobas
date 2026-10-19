@@ -1,0 +1,22 @@
+/* ---------- Inbox (#834, R-12.1 to R-12.3) ---------- */
+.tf-ibody { padding: 16px 22px 40px; display: flex; flex-direction: column; gap: 12px; }
+.tf-inbox { display: flex; flex-direction: column; gap: 6px; }
+.tf-ib {
+  display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 2px 14px; padding: 10px 14px;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; align-items: center;
+}
+.tf-ib time { font-size: var(--t-xs); color: var(--ink-2); grid-row: 1 / span 2; font-variant-numeric: tabular-nums; }
+.tf-ib .tf-what { font-weight: 600; }
+.tf-ib .tf-ctx { grid-column: 2; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-ib .tf-acts { grid-row: 1 / span 2; grid-column: 3; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.tf-isnooze { grid-column: 2 / span 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding-top: 6px; }
+.tf-isnooze input { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 6px; background: var(--sheet); color: var(--ink); font: inherit; font-size: var(--t-sm); }
+.tf-ishelf { font-size: var(--t-sm); }
+.tf-ifail { color: var(--err); font-size: var(--t-sm); }
+@media (max-width: 900px) {
+  .tf-ibody { padding-left: 16px; padding-right: 16px; }
+  .tf-ib { grid-template-columns: minmax(0, 1fr); }
+  .tf-ib time, .tf-ib .tf-acts, .tf-ib .tf-ctx, .tf-isnooze { grid-row: auto; grid-column: 1; }
+  .tf-ib .tf-acts { justify-content: flex-start; }
+}
+

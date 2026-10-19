@@ -1,0 +1,55 @@
+/* ---------- link sets (#866): prototype-6's `renderSets` and `renderSet` ---------- */
+.tf-sets-intro { max-width: 76ch; }
+.tf-cbody.tf-sets { display: flex; flex-direction: column; gap: 12px; }
+.tf-sets .tf-tbl .tf-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-set-name { font-weight: 600; }
+.tf-toggle { display: flex; gap: 12px; align-items: center; padding: 12px 14px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; font-size: var(--t-sm); }
+.tf-toggle input { width: 18px; height: 18px; accent-color: var(--ink); }
+.tf-toggle b { font-weight: 600; }
+.tf-toggle-sub { display: block; font-size: var(--t-xs); }
+/* R-7.10's hint card (#870): prototype-6's `.hint-card`. */
+.tf-hint-card { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 14px; border: 1px dashed var(--info); border-radius: 6px; background: var(--info-bg); font-size: var(--t-sm); }
+.tf-hint-card b { font-weight: 600; }
+.tf-hint-card .tf-acts { margin-left: auto; display: flex; gap: 6px; }
+.tf-set-desc:empty::before { content: attr(data-placeholder); color: var(--ink-2); }
+.tf-cbody.tf-set { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
+.tf-set-panels, .tf-set .tf-side { display: flex; flex-direction: column; gap: 14px; }
+.tf-set .tf-side .tf-panel > header h3 { font-size: var(--t-md); }
+.tf-set-add { margin-left: auto; display: flex; gap: 6px; }
+.tf-members { padding-bottom: 4px; }
+.tf-member { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-member .tf-x, .tf-rule .tf-x { margin-left: auto; }
+.tf-rule { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-rule select { border: 1px solid var(--rule); background: var(--sheet); border-radius: 4px; padding: 3px 6px; color: var(--ink); max-width: 240px; font: inherit; }
+.tf-rule-n { font-size: var(--t-xs); }
+.tf-rule-add { padding: 8px 12px 10px; }
+.tf-keys { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 12px; align-items: baseline; }
+.tf-keys a { font: 600 var(--t-2xs) var(--mono); padding: 1px 6px; border-radius: 3px; background: var(--sheet-2); color: var(--ink); text-decoration: none; }
+.tf-keys a.tf-mine { background: var(--card); color: var(--card-ink); }
+.tf-keys .tf-dim { font-size: var(--t-xs); }
+.tf-set-note { margin: 0; font-size: var(--t-xs); }
+.tf-fsearch.tf-wide { max-width: none; flex: none; }
+.tf-picks { display: flex; flex-direction: column; max-height: 46vh; overflow: auto; border: 1px solid var(--rule); border-radius: 4px; }
+.tf-picks label, .tf-picks .tf-pickrow { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-picks label .tf-dim, .tf-picks .tf-pickrow > .tf-dim { margin-left: auto; font-size: var(--t-xs); }
+.tf-picks label.tf-in, .tf-picks .tf-pickrow.tf-in { opacity: .55; }
+/* *Apply a link set…* (#869): a set's name over what it holds. */
+.tf-pickrow .tf-pick-sub { display: block; font-size: var(--t-xs); }
+.tf-picks-more { padding: 6px 10px; margin: 0; }
+.tf-picked { margin-right: auto; align-self: center; }
+.tf-stays { margin: 0; font-size: var(--t-xs); }
+.tf-member-line { font-size: var(--t-xs); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-pattern { align-items: flex-start; }
+.tf-pattern details { min-width: 0; }
+.tf-pattern summary { cursor: pointer; }
+.tf-pattern code, .tf-pat-query code { font: var(--t-xs) var(--mono); }
+.tf-pattern ul { margin: 6px 0 2px; padding-left: 18px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-pat-intro, .tf-pat-query { margin: 0; font-size: var(--t-sm); }
+.tf-pat-query { font-size: var(--t-xs); }
+.tf-pat-matches { max-height: 30vh; }
+.tf-pat-match { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-pat-match .tf-dim { margin-left: auto; font-size: var(--t-xs); }
+@media (max-width: 900px) {
+  .tf-cbody.tf-set { grid-template-columns: minmax(0, 1fr); }
+}
+

@@ -11,7 +11,14 @@ import { brotliDecompressSync } from "node:zlib";
 import { expect, test } from "vitest";
 
 const APP = process.cwd();
-const css = readFileSync(join(APP, "src/lib/tf/tf.css"), "utf8");
+/**
+ * The sheet as the browser sees it: `tf.css` with each `./css/<area>.css`
+ * import replaced by that file, in import order, so the checks below read
+ * the cascade and not one part of it. The font imports stay as written.
+ */
+const css = readFileSync(join(APP, "src/lib/tf/tf.css"), "utf8").replace(/^@import "(\.\/css\/[^"]+)";$/gm, (_, part: string) =>
+  readFileSync(join(APP, "src/lib/tf", part), "utf8"),
+);
 /** What the components not yet ported still draw with (#881). */
 const unportedCode = readFileSync(join(APP, "src/unported.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 const spec = readFileSync(join(APP, "../docs/specs/2026-10-15-ticket-first-design-system.md"), "utf8");
