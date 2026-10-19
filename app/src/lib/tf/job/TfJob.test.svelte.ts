@@ -28,7 +28,6 @@ import { createApps } from "../openin/apps.svelte";
 import { aroundLines } from "../tickets/tickets";
 import type { JobPorts } from "./ports";
 import { createKindRegistry } from "../../shell/kind-registry.svelte";
-import { sourceRoles } from "../roles.svelte";
 import { reachTally, type FrameKinds } from "./sections";
 import TfJob from "./TfJob.svelte";
 
@@ -963,13 +962,6 @@ test("a job's Builds section lists the runs of a CI source whose run kind is not
 });
 
 test("a job's sections draw their rows as read and keep none by source: each read asked for its role (#1295-#1298)", async () => {
-  // A source list that says mock fills nothing: the sections dropped its rows
-  // while they kept them by claims, and must now draw what the mirror answered.
-  sourceRoles.take([
-    { id: "gitea", roles: [{ role: "code-host", reads: [] }] },
-    { id: "teamcity", roles: [{ role: "ci", reads: [] }] },
-    { id: "mock", roles: [] },
-  ]);
   const p = ports({ others: [MOCK_REPO, B_OK, MOCK_BUILD] });
   open("PAY-231", { ports: p, registry: claimsRegistry() });
   await settle();

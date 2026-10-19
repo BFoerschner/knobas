@@ -603,11 +603,11 @@ test("the shell hands the source list's role claims to the surfaces (#1196)", as
   });
   await at("#/tickets");
 
-  expect(sourceRoles.draws("code-host", "forge")).toBe(true);
-  expect(sourceRoles.draws("code-host", "jira")).toBe(false);
+  expect(sourceRoles.answers("ticket-system", "jira", "reachable_transitions")).toBe(true);
+  expect(sourceRoles.answers("code-host", "jira", "reachable_transitions")).toBe(false);
 });
 
-test("a finished sync reads the source list again, so a role its records missed stops drawing (#1199)", async () => {
+test("a finished sync reads the source list again, so a role its records missed stops answering (#1199)", async () => {
   const claim = [{ role: "ticket-system", reads: ["reachable_transitions"] }];
   const miss = { role: "ticket-system", kind: "ticket", field: "priority", path: "fields.priority.name" };
   let answer: Awaited<ReturnType<TfShellPorts["listSources"]>> = [{ id: "jira", display_name: "Jira", roles: claim }];
@@ -617,7 +617,7 @@ test("a finished sync reads the source list again, so a role its records missed 
     listen: (event, handler) => (handlers.set(event, handler), Promise.resolve(() => {})),
   });
   await tick();
-  expect(sourceRoles.draws("ticket-system", "jira")).toBe(true);
+  expect(sourceRoles.answers("ticket-system", "jira", "reachable_transitions")).toBe(true);
 
   const row = (running: boolean) => ({
     source_id: "jira", running, run_id: 2, started_at: null, last_finished_at: null,
@@ -627,7 +627,7 @@ test("a finished sync reads the source list again, so a role its records missed 
   handlers.get("sync:state")!({ payload: row(true) });
   handlers.get("sync:state")!({ payload: row(false) });
   await tick();
-  expect(sourceRoles.draws("ticket-system", "jira")).toBe(false);
+  expect(sourceRoles.answers("ticket-system", "jira", "reachable_transitions")).toBe(false);
 });
 
 test("an item of a custom-role source opens its block view, and the role gets no nav entry (#1201)", async () => {

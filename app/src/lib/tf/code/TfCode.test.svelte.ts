@@ -12,7 +12,6 @@ import type { CheckoutView, CodeFacts, EntityFilter, EntityPage, EntityRow, Grou
 import { forgetFilters } from "../filter/filter-state.svelte";
 import type { CodePorts } from "./TfCode.svelte";
 import TfCode from "./TfCode.svelte";
-import { sourceRoles } from "../roles.svelte";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
 
@@ -253,12 +252,6 @@ test("New pull request opens the compare page for the job's branch; with no job 
 });
 
 test("Code asks every read for the code host role with its own kinds, and draws the rows as read (#1298)", async () => {
-  // A source list that says gitea fills no code host: the page dropped its
-  // rows while it kept them by claims, and must now draw what the read answers.
-  sourceRoles.take([
-    { id: "forge", adapter_kind: "acme-forge", roles: [{ role: "code-host", reads: [] }] },
-    { id: "gitea", adapter_kind: "gitea", roles: [{ role: "ticket-system", reads: [] }] },
-  ]);
   const rocket = row("forge:acme/rocket", "repo", "acme/rocket", { source_id: "forge", updated_at: "2026-08-22T11:00:00Z" });
   const launch = row("forge:acme/rocket#1", "pr", "Launch window", {
     source_id: "forge",
