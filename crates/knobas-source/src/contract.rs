@@ -1012,7 +1012,10 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         // a key the declaration invented. Type-checked still, never evidence.
         let nobody_started = matches!(
             resolve_trigger(&item.payload, &paths.trigger),
-            Some(knobas_spi_types::payload::Trigger::Change | knobas_spi_types::payload::Trigger::Schedule)
+            Some(
+                knobas_spi_types::payload::Trigger::Change
+                    | knobas_spi_types::payload::Trigger::Schedule
+            )
         );
         // Only a run in flight is doing something now (#1004): its declared
         // `started` reads and its `finished` does not. TeamCity serves

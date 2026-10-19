@@ -130,7 +130,8 @@ fn dotted(path: &PayloadPath) -> String {
 /// [`Field::declared_in`] reads too.
 pub(super) fn needs_of(field: Field, paths: &KindPaths) -> (Shape, Vec<PayloadPath>) {
     let plain = |v: &Vec<PayloadPath>| v.clone();
-    let lists = |v: &Vec<knobas_spi_types::payload::ListPath>| v.iter().map(|l| l.at.clone()).collect();
+    let lists =
+        |v: &Vec<knobas_spi_types::payload::ListPath>| v.iter().map(|l| l.at.clone()).collect();
     match field {
         Field::StatusName => (Shape::Text, plain(&paths.status_name)),
         Field::Priority => (Shape::Text, plain(&paths.priority)),
