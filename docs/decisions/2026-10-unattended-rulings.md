@@ -7255,3 +7255,30 @@ The merge-manager's rulings (Opus):
   §10.8's #1294 entry changes the meaning of `pipelines` itself, not of the Builds page, and a
   link set's pipeline members are CI rows; a source that fills no CI role offers none, as it draws
   none on Builds. *Reversing:* low (read the candidates from `list_entities` without a role).
+## #1312: Gitea and Kuma authenticate through the transport's credential (Opus implementer, 2026-10-19)
+
+- **Five credential tests are deleted.** Gitea's `client.rs` held three tests that exercise only
+  `credential` (`a_pat_becomes_a_gitea_token_credential`, `a_missing_secret_is_unauthorized`,
+  `a_configuration_problem_outranks_a_missing_secret`), and Kuma's `http.rs` held two
+  (`an_api_key_is_basic_auth_with_no_username`,
+  `a_missing_key_and_a_wrong_method_are_different_failures`). *Ruling:* all five go, as #1310's
+  and #1311's did. The transport's table covers each one. Gitea's `debug_never_prints_the_secret`
+  stays: it pins the client's `Debug`, not the mapping. *Reversing:* cheap.
+- **Kuma's `pat` field is `Bearer`, and it is never read.** *Fork:* `CredentialRules` requires a
+  spelling, and Kuma offers no personal access token. *Ruling:* `TokenSpelling::Bearer` with a
+  comment that `methods` leaves `Pat` out. An `Option` in the transport would change
+  `knobas-http`'s surface for one adapter's unused field. *Reversing:* one line, or a
+  transport change with a §10.8 entry.
+- **Both pass `None` for the username.** *Fork:* what to pass as `username`. *Ruling:* `None`. Neither descriptor offers user + password, and
+  `ApiToken` sends an empty username whatever is passed. *Reversing:* n/a.
+- **Refusal sentences are kept word for word.** *Fork:* reword them to the transport's shared phrasing, or keep them. *Ruling:* keep. Gitea's `gitea: …` sentences and Kuma's
+  "…takes an API key, sent as HTTP Basic with an empty username" read as before, so the
+  `source::tests` that match on them run unchanged. *Reversing:* n/a.
+- **Each adapter gains the descriptor pin** `the_credential_rules_speak_exactly_what_the_form_offers`,
+  as Confluence's and TeamCity's did under #1311. *Reversing:* one test per adapter.
+- **No §10.8 entry.** The diff touches only `crates/knobas-source-gitea/**` and
+  `crates/knobas-source-kuma/**`, which #1311's merge-manager placed outside §10.8's list.
+  *Reversing:* one entry.
+- **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the ones the
+  ticket names, which are each adapter's own tests and the Gitea, Forgejo and Kuma live suites,
+  plus the descriptor pin. *Reversing:* n/a.

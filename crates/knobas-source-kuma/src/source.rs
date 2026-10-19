@@ -71,7 +71,12 @@ fn trimmed_base_url(raw: &str) -> String {
 /// describe.
 pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     let cfg = KumaConfig::from_json(&instance.config)?;
-    let credential = http::credential(instance.auth, instance.secret.as_deref())?;
+    let credential = http::credential(
+        &http::CREDENTIAL_RULES,
+        instance.auth,
+        None,
+        instance.secret.as_deref(),
+    )?;
     let http = KumaHttp::new(&instance.base_url, &cfg, credential)?;
     // The account is optional and its absence is not a fault: a Kuma with only
     // an API key is the ordinary configuration (spec #427, story 50) and reads

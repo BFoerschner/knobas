@@ -72,7 +72,12 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         (&instance.id, &instance.base_url, &instance.secret).hash(&mut hasher);
         hasher.finish()
     };
-    let credential = client::credential(instance.auth, instance.secret.as_deref())?;
+    let credential = client::credential(
+        &client::CREDENTIAL_RULES,
+        instance.auth,
+        None,
+        instance.secret.as_deref(),
+    )?;
     let client = GiteaClient::new(&instance.base_url, &config, credential)?;
     Ok(Box::new(GiteaSource {
         id: instance.id,
