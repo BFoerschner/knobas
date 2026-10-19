@@ -2190,6 +2190,7 @@ knobas-source	lib/knobas_source	contract::tests::accepts_a_declared_write_op_wit
 knobas-source	lib/knobas_source	contract::tests::accepts_a_later_candidate_an_earlier_one_resolves_for
 knobas-source	lib/knobas_source	contract::tests::accepts_a_parent_name_an_earlier_name_resolves_for
 knobas-source	lib/knobas_source	contract::tests::accepts_a_read_only_ticket_system_that_refuses_its_transitions_read
+knobas-source	lib/knobas_source	contract::tests::accepts_a_response_time_with_a_fraction
 knobas-source	lib/knobas_source	contract::tests::accepts_a_started_by_absent_from_runs_nobody_started
 knobas-source	lib/knobas_source	contract::tests::accepts_a_ticket_system_claim_its_tickets_fill
 knobas-source	lib/knobas_source	contract::tests::accepts_a_wrong_declaration_for_a_kind_the_corpus_never_populates

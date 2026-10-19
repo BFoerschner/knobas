@@ -1498,6 +1498,9 @@ mod tests {
         /// Declares a response time (#1224) at the ticket's `key`, a string:
         /// a reading must be a number.
         ResponseTimeThatIsNoNumber,
+        /// Declares a response time at a reading with a fraction (`13.5`),
+        /// as Uptime Kuma reports one: conforming (#1224).
+        ResponseTimeWithAFraction,
         /// Declares the branch a pull request is opened into (#1227) at a
         /// key its records do not have (`bse`).
         BaseAtAMissingKey,
@@ -1880,6 +1883,10 @@ mod tests {
                             }],
                             ..good
                         }],
+                        Behavior::ResponseTimeWithAFraction => vec![KindPaths {
+                            response_time: vec![PayloadPath::of(["response_time_ms"])],
+                            ..good
+                        }],
                         Behavior::ResponseTimeThatIsNoNumber => vec![KindPaths {
                             response_time: vec![PayloadPath::of(["key"])],
                             ..good
@@ -2050,6 +2057,9 @@ mod tests {
                             // A run in flight (#1004): started, not finished.
                             Behavior::CurrentStepOnRunsInFlight => {
                                 payload["started"] = serde_json::json!("2026-08-22T10:20:00Z");
+                            }
+                            Behavior::ResponseTimeWithAFraction => {
+                                payload["response_time_ms"] = serde_json::json!(13.5);
                             }
                             // A finished run, which is doing nothing now.
                             Behavior::CurrentStepOnRunsNotInFlight => {
@@ -2623,6 +2633,13 @@ mod tests {
             "declares current_step of kind \"ticket\" at a path no item of that kind resolves",
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn accepts_a_response_time_with_a_fraction() {
+        run(Behavior::ResponseTimeWithAFraction)
+            .await
+            .expect("a reading in milliseconds may carry a fraction");
     }
 
     #[tokio::test]
