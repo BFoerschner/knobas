@@ -13,10 +13,10 @@
 //! [`SourceError::Unreachable`]; everything else → [`SourceError::Protocol`]),
 //! each carrying the status it came from (ADR-0004).
 //!
-//! What is Kuma's, and therefore here: **how an API key is sent**, and the one
-//! path this adapter reads.
+//! What is Kuma's, and therefore here: **the [`CredentialRules`] its API key is
+//! sent under**, and the one path this adapter reads.
 
-use knobas_http::{Auth, HttpClient, HttpConfig, Method};
+use knobas_http::{Auth, CredentialRules, HttpClient, HttpConfig, Method, TokenSpelling};
 use knobas_source::{AuthMethod, SourceError};
 
 /// The one endpoint this adapter reads.
@@ -26,51 +26,34 @@ use knobas_source::{AuthMethod, SourceError};
 /// adapter*: "Reads poll `/metrics` with the API key").
 pub(crate) const METRICS: &str = "/metrics";
 
-/// The [`Auth`] a Kuma API key means.
+pub(crate) use knobas_http::credential;
+
+/// Which [`Auth`] a Kuma API key means, and what a source that cannot
+/// authenticate reads as. The mapping itself, and the order it judges in, are
+/// [`credential`]'s.
 ///
-/// **HTTP Basic with an empty username**, which is how Kuma authenticates
+/// An API key goes as **HTTP Basic with an empty username**, the transport's
+/// mapping for [`AuthMethod::ApiToken`], which is how Kuma authenticates
 /// `/metrics` and how the environment's own README reads it back
 /// (`curl -u ":$(cat kuma-api-key)"`). Not a bearer token: measured on the
 /// pinned image, an unauthenticated request answers `401` with
 /// `WWW-Authenticate: Basic` and an empty body.
-///
-/// # Errors
-///
-/// [`SourceError::Unauthorized`] when the keychain holds no key -- the
-/// `missing_secret` state of contract §3, which the sources view offers
-/// *Re-enter* for. [`SourceError::Protocol`] for a source configured with no
-/// authentication method, or with one Kuma's `/metrics` does not speak.
-pub(crate) fn credential(
-    auth: Option<AuthMethod>,
-    secret: Option<&str>,
-) -> Result<Auth, SourceError> {
-    // The configuration is judged before the secret, and the order matters:
-    // these are two states with two remedies (§3). `missing_secret` sends the
-    // user to *Re-enter*; a source that could not authenticate even with a key
-    // in hand sends them to its settings, and reporting `Unauthorized` for
-    // that would send them to retype a key that was never the problem.
-    match auth {
-        Some(AuthMethod::ApiToken) => {}
-        None => {
-            return Err(SourceError::protocol(
-                "this Uptime Kuma source has no authentication method configured; choose an API \
-                 key"
-                .to_owned(),
-            ));
-        }
-        Some(other) => {
-            return Err(SourceError::protocol(format!(
-                "{other:?} authentication is not supported for Uptime Kuma; /metrics takes an API \
-                 key, sent as HTTP Basic with an empty username"
-            )));
-        }
-    }
-    let secret = secret.ok_or_else(SourceError::unauthorized)?;
-    Ok(Auth::Basic {
-        username: String::new(),
-        password: secret.to_owned(),
-    })
-}
+pub(crate) const CREDENTIAL_RULES: CredentialRules = CredentialRules {
+    // Kuma offers no personal access token; `methods` leaves `Pat` out, so
+    // this spelling is never reached.
+    pat: TokenSpelling::Bearer,
+    // What `descriptor_template().auth_methods` declares and the Add-source
+    // form offers; anything else is refused rather than guessed at.
+    methods: &[AuthMethod::ApiToken],
+    unconfigured: "this Uptime Kuma source has no authentication method configured; choose an \
+                   API key",
+    unsupported: |method| {
+        format!(
+            "{method:?} authentication is not supported for Uptime Kuma; /metrics takes an API \
+             key, sent as HTTP Basic with an empty username"
+        )
+    },
+};
 
 /// One Kuma instance's HTTP access.
 #[derive(Debug)]
@@ -137,42 +120,15 @@ impl KumaHttp {
 mod tests {
     use super::*;
 
-    /// The API key goes out as Basic with an empty username, which is what
-    /// Kuma's `/metrics` accepts and what the test environment's README reads
-    /// it back with.
+    /// The Add-source form is generated from the descriptor's `auth_methods`
+    /// (spec §3a), and the transport refuses any method the rules leave out.
+    /// The two lists drifting apart either offers a method that is then
+    /// refused, or accepts one nobody can choose.
     #[test]
-    fn an_api_key_is_basic_auth_with_no_username() {
-        let auth = credential(Some(AuthMethod::ApiToken), Some("uk1_secret")).unwrap();
-        match auth {
-            Auth::Basic { username, password } => {
-                assert_eq!(username, "");
-                assert_eq!(password, "uk1_secret");
-            }
-            other => panic!("expected Basic, got {other:?}"),
-        }
-    }
-
-    /// The two ways a source can be unusable, and the different remedies they
-    /// send the user to. A missing key is `Unauthorized` -- *Re-enter* -- and a
-    /// method this adapter cannot speak is a configuration fault that says so
-    /// by name.
-    #[test]
-    fn a_missing_key_and_a_wrong_method_are_different_failures() {
-        assert!(matches!(
-            credential(Some(AuthMethod::ApiToken), None),
-            Err(SourceError::Unauthorized { status: None })
-        ));
-        for wrong in [AuthMethod::Pat, AuthMethod::UserPassword, AuthMethod::OAuth] {
-            let refused = credential(Some(wrong), Some("uk1_secret"));
-            let message = match refused {
-                Err(SourceError::Protocol { message, .. }) => message,
-                other => panic!("expected Protocol, got {other:?}"),
-            };
-            assert!(message.contains("API key"), "{message}");
-        }
-        assert!(matches!(
-            credential(None, Some("uk1_secret")),
-            Err(SourceError::Protocol { .. })
-        ));
+    fn the_credential_rules_speak_exactly_what_the_form_offers() {
+        assert_eq!(
+            CREDENTIAL_RULES.methods,
+            crate::descriptor_template().auth_methods.as_slice()
+        );
     }
 }
