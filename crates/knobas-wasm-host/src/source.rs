@@ -9,8 +9,8 @@ use tokio::sync::{mpsc, oneshot};
 use wasmtime::Store;
 use wasmtime::component::ResourceAny;
 
-use crate::bindings::knobas::adapter::{log, sink};
-use crate::{HostState, WasmAdapter, bindings, convert, net, new_store, wit};
+use crate::bindings::knobas::adapter::{download_sink, log, sink};
+use crate::{HostState, WasmAdapter, bindings, convert, limits, net, new_store, wit};
 
 /// One item on its way from the component to the engine's sink, with the
 /// channel the sink's answer goes back on.
@@ -39,6 +39,90 @@ impl SinkSlot {
         let answer = convert::to_wit_error(&error);
         self.failure.get_or_insert(error);
         answer
+    }
+}
+
+/// One piece of a download on its way from the component to the engine's
+/// download sink, with the channel the sink's answer goes back on.
+enum Piece {
+    Start(String),
+    Bytes(Vec<u8>),
+}
+
+type Chunk = (Piece, oneshot::Sender<Result<(), SourceError>>);
+
+/// The download sink a call's store holds: a channel to the engine's sink
+/// while a download runs, and none for every other call.
+pub(crate) struct DownloadSlot {
+    chunks: Option<mpsc::Sender<Chunk>>,
+    started: bool,
+    /// The first piece the sink refused, or the first out of order. Once
+    /// set the download has failed, whatever the component answers.
+    failure: Option<SourceError>,
+}
+
+impl DownloadSlot {
+    pub(crate) fn none() -> Self {
+        Self {
+            chunks: None,
+            started: false,
+            failure: None,
+        }
+    }
+
+    /// The slot of a download whose pieces go to `chunks`.
+    fn to(chunks: mpsc::Sender<Chunk>) -> Self {
+        Self {
+            chunks: Some(chunks),
+            ..Self::none()
+        }
+    }
+
+    fn fail(&mut self, error: SourceError) -> wit::SourceError {
+        let answer = convert::to_wit_error(&error);
+        self.failure.get_or_insert(error);
+        answer
+    }
+
+    /// Hand `piece` to the engine's sink and wait for its answer.
+    async fn send(&mut self, piece: Piece) -> Result<(), wit::SourceError> {
+        if let Some(failure) = &self.failure {
+            return Err(convert::to_wit_error(failure));
+        }
+        let Some(chunks) = self.chunks.clone() else {
+            return Err(convert::to_wit_error(&SourceError::protocol(
+                "download-sink was called outside a download",
+            )));
+        };
+        let out_of_order = match (&piece, self.started) {
+            (Piece::Start(_), true) => Some("download-sink.start was called twice"),
+            (Piece::Bytes(_), false) => Some("download-sink.write was called before start"),
+            _ => None,
+        };
+        if let Some(why) = out_of_order {
+            return Err(self.fail(SourceError::protocol(why)));
+        }
+        self.started = true;
+        let (answer, answered) = oneshot::channel();
+        let gone = || SourceError::protocol("the download's sink is gone");
+        if chunks.send((piece, answer)).await.is_err() {
+            return Err(self.fail(gone()));
+        }
+        match answered.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(self.fail(error)),
+            Err(_) => Err(self.fail(gone())),
+        }
+    }
+}
+
+impl download_sink::Host for HostState {
+    async fn start(&mut self, file_name: String) -> Result<(), wit::SourceError> {
+        self.download.send(Piece::Start(file_name)).await
+    }
+
+    async fn write(&mut self, bytes: Vec<u8>) -> Result<(), wit::SourceError> {
+        self.download.send(Piece::Bytes(bytes)).await
     }
 }
 
@@ -84,8 +168,12 @@ impl log::Host for HostState {
     }
 }
 
-/// A trap, or a failure to instantiate: the component failed the call.
+/// A trap, or a failure to instantiate: the component failed the call, or
+/// passed its memory cap.
 fn failed(adapter: &WasmAdapter, error: &wasmtime::Error) -> SourceError {
+    if let Some(limit) = limits::exceeded(error) {
+        return limit.into_error(adapter.kind());
+    }
     SourceError::protocol(format!(
         "the external adapter {:?} failed: {error:#}",
         adapter.kind()
@@ -99,7 +187,7 @@ async fn open(
     instance: &wit::Instance,
     sink: SinkSlot,
     policy: Arc<net::Policy>,
-) -> Result<(Store<HostState>, bindings::Adapter, ResourceAny), SourceError> {
+) -> Result<(Store<HostState>, bindings::Hosted, ResourceAny), SourceError> {
     let mut store = new_store(adapter, &instance.id, sink, policy);
     let bindings = adapter
         .inner
@@ -117,19 +205,69 @@ async fn open(
 }
 
 /// One call that needs no sink: open a store, call `$method` with `$args`,
-/// and hand back what it answered as a `Result<_, SourceError>`.
+/// and hand back what it answered as a `Result<_, SourceError>`, all of it
+/// within the adapter's deadline.
 macro_rules! call {
-    ($self:expr, $method:ident $(, $arg:expr)*) => {{
-        let (mut store, bindings, resource) =
-            open(&$self.adapter, &$self.instance, SinkSlot::none(), Arc::clone(&$self.policy)).await?;
-        bindings
-            .knobas_adapter_source()
-            .adapter()
-            .$method(&mut store, resource $(, $arg)*)
-            .await
-            .map_err(|e| failed(&$self.adapter, &e))?
-            .map_err(convert::error)
-    }};
+    ($self:expr, $method:ident $(, $arg:expr)*) => {
+        limits::bounded(&$self.adapter, async {
+            let (mut store, bindings, resource) = open(
+                &$self.adapter,
+                &$self.instance,
+                SinkSlot::none(),
+                Arc::clone(&$self.policy),
+            )
+            .await?;
+            bindings
+                .knobas_adapter_source()
+                .adapter()
+                .$method(&mut store, resource $(, $arg)*)
+                .await
+                .map_err(|e| failed(&$self.adapter, &e))?
+                .map_err(convert::error)
+        })
+        .await
+    };
+}
+
+/// `downloads.download`'s parameters and results, as the host calls it.
+type DownloadParams<'a> = (&'a wit::Instance, &'a str, &'a str);
+type DownloadResults = (Result<bool, wit::SourceError>,);
+
+/// `downloads.download` of a fresh instance of the component in `store`.
+async fn download_func<'a>(
+    adapter: &WasmAdapter,
+    store: &mut Store<HostState>,
+) -> Result<wasmtime::component::TypedFunc<DownloadParams<'a>, DownloadResults>, SourceError> {
+    let index = adapter
+        .inner
+        .download
+        .as_ref()
+        .ok_or_else(|| SourceError::protocol("the component exports no download"))?;
+    let instance = adapter
+        .inner
+        .pre
+        .instance_pre()
+        .instantiate_async(&mut *store)
+        .await
+        .map_err(|e| failed(adapter, &e))?;
+    instance
+        .get_typed_func(&mut *store, index)
+        .map_err(|e| failed(adapter, &e))
+}
+
+/// At load: the `download` a component exports has the type 1.1.0 gives it.
+pub(crate) async fn check_download(adapter: &WasmAdapter) -> Result<(), String> {
+    let mut store = new_store(
+        adapter,
+        crate::PROBE_ID,
+        SinkSlot::none(),
+        Arc::new(net::Policy::none(crate::PROBE_ID)),
+    );
+    limits::bounded(adapter, async {
+        download_func(adapter, &mut store).await.map(drop)
+    })
+    .await
+    .map_err(|e| format!("its download does not have the type knobas hosts: {e}"))
 }
 
 /// The component's descriptor for `instance`, decoded.
@@ -138,15 +276,18 @@ pub(crate) async fn descriptor(
     instance: wit::Instance,
     policy: Arc<net::Policy>,
 ) -> Result<SourceDescriptor, SourceError> {
-    let (mut store, bindings, resource) =
-        open(adapter, &instance, SinkSlot::none(), policy).await?;
-    let text = bindings
-        .knobas_adapter_source()
-        .adapter()
-        .call_descriptor(&mut store, resource)
-        .await
-        .map_err(|e| failed(adapter, &e))?;
-    convert::json(&text, "descriptor")
+    limits::bounded(adapter, async {
+        let (mut store, bindings, resource) =
+            open(adapter, &instance, SinkSlot::none(), policy).await?;
+        let text = bindings
+            .knobas_adapter_source()
+            .adapter()
+            .call_descriptor(&mut store, resource)
+            .await
+            .map_err(|e| failed(adapter, &e))?;
+        convert::json(&text, "descriptor")
+    })
+    .await
 }
 
 /// A configured source of an external adapter.
@@ -231,8 +372,14 @@ impl Source for WasmSource {
                 let _ = answer.send(sink.item(item).await);
             }
         };
-        let (result, ()) = tokio::join!(run, pump);
-        result
+        // The deadline holds the whole sync, the sink's time included: a
+        // pump that outlived it would hand the engine items of a call that
+        // was stopped.
+        limits::bounded(&self.adapter, async {
+            let (result, ()) = tokio::join!(run, pump);
+            result
+        })
+        .await
     }
 
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
@@ -326,5 +473,57 @@ impl Source for WasmSource {
             call!(self, call_artifact_preview, entity, path)?,
             "artifact preview",
         )
+    }
+
+    /// `downloads.download`, streaming: the component hands each chunk to
+    /// `download-sink.write`, and each waits until `sink` has written it, so
+    /// neither side holds the download whole. A 1.0.0 component, which
+    /// exports no `download`, keeps no runs to download.
+    async fn download(
+        &self,
+        entity: &str,
+        target: &run::DownloadTarget,
+        sink: &mut dyn run::DownloadSink,
+    ) -> Result<bool, SourceError> {
+        if !self.adapter.downloads() {
+            return Ok(false);
+        }
+        let target = convert::to_json(target);
+        let (chunks, mut received) = mpsc::channel::<Chunk>(1);
+        let run = async {
+            let mut store = new_store(
+                &self.adapter,
+                &self.instance.id,
+                SinkSlot::none(),
+                Arc::clone(&self.policy),
+            );
+            store.data_mut().download = DownloadSlot::to(chunks);
+            let func = download_func(&self.adapter, &mut store).await?;
+            let (answer,) = func
+                .call_async(&mut store, (&self.instance, entity, &target))
+                .await
+                .map_err(|e| failed(&self.adapter, &e))?;
+            let failure = store.data_mut().download.failure.take();
+            // Dropping the store closes the channel, which ends the pump.
+            drop(store);
+            match failure {
+                Some(failure) => Err(failure),
+                None => answer.map_err(convert::error),
+            }
+        };
+        let pump = async {
+            while let Some((piece, answer)) = received.recv().await {
+                let written = match piece {
+                    Piece::Start(name) => sink.start(&name).await,
+                    Piece::Bytes(bytes) => sink.write(&bytes).await,
+                };
+                let _ = answer.send(written);
+            }
+        };
+        limits::bounded(&self.adapter, async {
+            let (result, ()) = tokio::join!(run, pump);
+            result
+        })
+        .await
     }
 }

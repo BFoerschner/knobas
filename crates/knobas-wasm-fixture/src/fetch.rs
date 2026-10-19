@@ -2,10 +2,23 @@
 //! `wasi:http/outgoing-handler`, following redirects itself, and keep every
 //! hop's status, headers and body, so a test can see all the component was
 //! handed. The host decides which requests leave, and with what credential.
+//!
+//! [`Options`] bend the request for the host's bounds (#1204): a first-byte
+//! timeout in its `request-options`, or a `POST` of a body of some MiB,
+//! written 4 KiB at a time so the component never holds it.
 
 use wasip2::http::outgoing_handler;
-use wasip2::http::types::{Fields, OutgoingRequest, Scheme};
+use wasip2::http::types::{Fields, Method, OutgoingBody, OutgoingRequest, RequestOptions, Scheme};
 use wasip2::io::streams::StreamError;
+
+/// How the fetch's first request is sent.
+#[derive(Clone, Copy, Default)]
+pub struct Options {
+    /// `request-options`' first-byte timeout, in milliseconds.
+    pub first_byte_ms: Option<u64>,
+    /// `POST` this many MiB instead of a `GET`.
+    pub post_mib: Option<u64>,
+}
 
 /// Redirects the fixture follows before it gives up.
 const MAX_HOPS: usize = 4;
@@ -43,15 +56,16 @@ impl Trace {
     }
 }
 
-/// `GET url`, following up to [`MAX_HOPS`] absolute redirects.
-pub fn get(url: &str) -> Trace {
+/// `GET url` (or what `options` make of it), following up to [`MAX_HOPS`]
+/// absolute redirects.
+pub fn get(url: &str, options: Options) -> Trace {
     let mut trace = Trace {
         hops: Vec::new(),
         error: None,
     };
     let mut next = url.to_owned();
     for _ in 0..MAX_HOPS {
-        match one(&next) {
+        match one(&next, options) {
             Err(error) => {
                 trace.error = Some(format!("{next}: {error}"));
                 return trace;
@@ -75,7 +89,7 @@ pub fn get(url: &str) -> Trace {
     trace
 }
 
-fn one(url: &str) -> Result<Hop, String> {
+fn one(url: &str, options: Options) -> Result<Hop, String> {
     let (scheme, rest) = url
         .split_once("://")
         .ok_or_else(|| format!("{url:?} is not an absolute URL"))?;
@@ -98,7 +112,36 @@ fn one(url: &str) -> Result<Hop, String> {
     request
         .set_path_with_query(Some(path))
         .map_err(|()| "path refused".to_owned())?;
-    let pending = outgoing_handler::handle(request, None).map_err(|e| format!("{e:?}"))?;
+    if options.post_mib.is_some() {
+        request
+            .set_method(&Method::Post)
+            .map_err(|()| "method refused".to_owned())?;
+    }
+    let body = request.body().map_err(|()| "no request body".to_owned())?;
+    let request_options = match options.first_byte_ms {
+        None => None,
+        Some(ms) => {
+            let set = RequestOptions::new();
+            set.set_first_byte_timeout(Some(ms * 1_000_000))
+                .map_err(|()| "first-byte timeout refused".to_owned())?;
+            Some(set)
+        }
+    };
+    let pending =
+        outgoing_handler::handle(request, request_options).map_err(|e| format!("{e:?}"))?;
+    if let Some(mib) = options.post_mib {
+        let out = body.write().map_err(|()| "no body stream".to_owned())?;
+        let chunk = [b'q'; 4096];
+        // A write the host refused ends the body; the response says why.
+        for _ in 0..mib * 256 {
+            if out.blocking_write_and_flush(&chunk).is_err() {
+                break;
+            }
+        }
+        drop(out);
+    }
+    // A body the host stopped reading cannot finish; the response says why.
+    let _ = OutgoingBody::finish(body, None);
     pending.subscribe().block();
     let response = pending
         .get()

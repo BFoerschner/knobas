@@ -6261,3 +6261,68 @@ The merge-manager's rulings (PR #1249, on Opus):
   committed, because 201 requests against the wiremock fake took 35 s. A repository past the
   guard costs the whole source until it is narrowed. **Reversing:** low (skip that repository's
   tickets instead, as a 403 does).
+
+## #1204 + #1205 Call limits, and every live read through the sandbox (2026-10-19)
+
+The implementer's rulings (Opus, one PR for both tickets).
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **The §10.8 sign-off of `knobas:adapter@1.1.0`** (`docs/contract/10.8/1205-wit-world-knobas-adapter-1-1.md`).
+  It only adds: an imported interface, an exported interface the host looks up as optional, and a
+  `hosted` world for the host's binding. Witnessed, not argued: the fixture built against the
+  frozen 1.0.0 file (`--features v1_0`) loads, syncs and answers `download` with `false` under this
+  host. **Reversing:** a 2.0.0 instead, which every adapter is rebuilt for.
+
+Forks:
+
+- **Defaults 600 s and 256 MiB, maximums 3,600 s and 1,024 MiB, zero refused.** The slowest
+  built-in call is a first sync of a large instance, page after page at up to `knobas-http`'s 45 s
+  per request; ten minutes is room for that, and a hang still ends inside an hour. **Reversing:**
+  four constants in `limits.rs`.
+- **The deadline is wall-clock over the whole call**, the sink's and the network's waits included,
+  enforced by a timeout over the call future with WASM yielding at every 50 ms epoch tick, not by an
+  epoch trap. A trap alone would not stop a component parked on a request that never answers.
+  **Reversing:** medium; `limits::bounded`.
+- **The memory cap is over all of a store's linear memories, and passing it traps** (naming the
+  cap) instead of answering `-1`, which a Rust guest turns into an abort with no reason in it.
+  **Reversing:** return `Ok(false)` in `MemoryCap::memory_growing`.
+- **A passed limit is `SourceError::Protocol`**, so the run's outcome is `error` and the scheduler
+  backs off as for any adapter failure. **Reversing:** low.
+- **`download` is a free function in its own exported interface, taking the `instance` record**, not
+  a method on `adapter`: a new method on `adapter` would make every 1.0.0 component fail to link.
+  **Reversing:** a 2.0.0.
+- **The host-owned stream is an imported `download-sink` with `start` and `write(list<u8>)`**, the
+  shape of `run::DownloadSink` and of `sink.item`, rather than a `wasi:io` `output-stream` resource:
+  each write waits on the host's sink, which is the back-pressure, and a sink error reaches the
+  component as an answer. **Reversing:** a 1.2.0 with an `output-stream` parameter.
+- **The code-host diff and tree reads need no new function**: the SPI reads them through `view`
+  and its deferred sections (`diff`, `tree` and `file` blocks), which already cross as JSON. The
+  fixture's run view carries one of each. **Reversing:** n/a.
+- **The fixture claims CI and serves a pipeline and a run**, so its corpus is five items, not three.
+  A separate fixture would cost a second component build per gate. **Reversing:** low.
+- **`request-options`: connect and first-byte timeouts are summed into one wait for the response
+  head**, because reqwest has no per-request connect timeout; between-bytes bounds each body frame.
+  **Reversing:** low (`net::Bounds`).
+- **`load_fixture()` compiles once per test binary and clones**; the host suite went from 14 to 25 s
+  to 2.5 s on a loaded machine. **Reversing:** one `OnceLock`.
+
+The merge-manager's rulings (PR #1250, on Opus):
+
+- **The 1.1.0 sign-off stands.** The fixture's `wit-1.0.0/adapter.wit` is byte-identical to the
+  frozen file on `main` before this PR, and the test reads the version back from the built
+  component (`1.0.0`), so the 1.0.0 build is a 1.0.0 component. **Reversing:** a 2.0.0.
+- **The deadline holds sink and download-sink waits too.** Both sinks are the host's own (the
+  mirror, a local file), not the source's network, so a component cannot be killed by a peer it does
+  not control. A download of a very large artifact over a slow link can pass the 600 s default; its
+  adapter asks for up to 3,600 s. **Reversing:** medium (bound only the component's own time).
+- **Tables count against the memory cap**, at 16 bytes an element, so a table growth cannot ask the
+  host for more than the cap. Before, `table_growing` allowed any size. **Reversing:** one line.
+- **Between-bytes is timed from the read that waits**, not from the last frame: the component's own
+  time between reads (on the sink) is not the server stalling. **Reversing:** one line in
+  `BetweenBytes`.
+- **Connect plus first-byte, summed, is sound** as an upper bound: each wait is inside it, and
+  reqwest offers no separate per-request connect timeout. **Reversing:** low.
+- **The health line not naming the limit is a follow-up (#1252)**, not a blocker: the ticket's
+  criteria ask that the run end failed with the limit named, which the run's recorded error does,
+  and the row's *Failed …* text is the same for every failed run. **Reversing:** n/a.

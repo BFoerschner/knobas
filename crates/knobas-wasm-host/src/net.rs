@@ -19,12 +19,24 @@
 //! those requests, so the body reaches the redactor decoded. A request to
 //! any other declared host carries nothing of the host's.
 //!
+//! **Bounds** (#1204). The call's deadline holds every request, since it
+//! stops the whole call. Within it, the component's `request-options` are
+//! honoured: its connect and first-byte timeouts together bound the wait
+//! for the response's head, and its between-bytes timeout each wait for the
+//! next frame of the body. An outgoing body is buffered whole before it
+//! leaves, so it is refused (`HTTP-request-body-size`) past the adapter's
+//! memory cap. A response body streams through to the component and is
+//! never buffered here.
+//!
 //! **The transport** is the workspace's reqwest, rustls with the platform
 //! verifier and the system proxy, as the built-in adapters' is. It follows
 //! no redirect and keeps no cookie. A transport error reaches the component
 //! as a bare `wasi:http` error code, with no text that could quote a request.
 
+use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
+use std::task::{Context, Poll};
+use std::time::Duration;
 
 use base64::Engine as _;
 use bytes::Bytes;
@@ -34,6 +46,7 @@ use knobas_source::{AuthMethod, SourceError};
 use wasmtime_wasi_http::{Error as HttpError, RequestOptions, WasiBody, WasiHttpHooks};
 
 use crate::allow::{Allowlist, HostPattern, Target, declared_keys};
+use crate::limits::Limits;
 use crate::redact::{self, Needles, RedactedBody};
 
 /// What a source's calls may reach and attach.
@@ -156,11 +169,12 @@ fn credential(
 /// The `wasi:http` hooks of one call's store.
 pub struct Hooks {
     policy: Arc<Policy>,
+    limits: Limits,
 }
 
 impl Hooks {
-    pub fn new(policy: Arc<Policy>) -> Self {
-        Self { policy }
+    pub fn new(policy: Arc<Policy>, limits: Limits) -> Self {
+        Self { policy, limits }
     }
 }
 
@@ -216,15 +230,44 @@ impl WasiHttpHooks for Hooks {
     fn send_request(
         &mut self,
         request: http::Request<WasiBody>,
-        _options: Option<RequestOptions>,
+        options: Option<RequestOptions>,
         _fut: Box<dyn Future<Output = Result<(), HttpError>> + Send>,
     ) -> Box<dyn Future<Output = SendResult> + Send> {
         let policy = Arc::clone(&self.policy);
-        Box::new(async move { send(&policy, request).await })
+        let bounds = Bounds::new(options.as_ref(), self.limits);
+        Box::new(async move { send(&policy, bounds, request).await })
     }
 }
 
-async fn send(policy: &Policy, request: http::Request<WasiBody>) -> SendResult {
+/// What one request is held to, besides the call's deadline.
+#[derive(Debug, Clone, Copy)]
+struct Bounds {
+    /// The longest wait for the response's head: the component's connect
+    /// and first-byte timeouts together. `None` waits out the deadline.
+    head: Option<Duration>,
+    /// The longest wait for each next frame of the response body.
+    between: Option<Duration>,
+    /// The most an outgoing body may hold.
+    body_bytes: usize,
+}
+
+impl Bounds {
+    fn new(options: Option<&RequestOptions>, limits: Limits) -> Self {
+        let connect = options.and_then(|o| o.connect_timeout);
+        let first_byte = options.and_then(|o| o.first_byte_timeout);
+        let head = match (connect, first_byte) {
+            (None, None) => None,
+            (a, b) => Some(a.unwrap_or_default() + b.unwrap_or_default()),
+        };
+        Self {
+            head,
+            between: options.and_then(|o| o.between_bytes_timeout),
+            body_bytes: usize::try_from(limits.memory_bytes()).unwrap_or(usize::MAX),
+        }
+    }
+}
+
+async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>) -> SendResult {
     let for_instance = match policy.judge(request.uri()) {
         Verdict::Refused(why) => {
             tracing::warn!(source = %policy.source_id, "an external adapter's request is refused: {why}");
@@ -236,16 +279,31 @@ async fn send(policy: &Policy, request: http::Request<WasiBody>) -> SendResult {
     if for_instance {
         policy.attach(&mut parts.headers);
     }
-    let body: Bytes = body.collect().await?.to_bytes();
+    let body: Bytes = http_body_util::Limited::new(body, bounds.body_bytes)
+        .collect()
+        .await
+        .map_err(|error| match error.downcast::<HttpError>() {
+            Ok(error) => *error,
+            Err(_) => HttpError::HttpRequestBodySize(None),
+        })?
+        .to_bytes();
     let request = reqwest::Request::try_from(http::Request::from_parts(parts, body))
         .map_err(|_| HttpError::HttpRequestUriInvalid)?;
-    let response = client()?.execute(request).await.map_err(|error| {
+    let sent = client()?.execute(request);
+    let sent = match bounds.head {
+        None => sent.await,
+        Some(wait) => tokio::time::timeout(wait, sent)
+            .await
+            .map_err(|_| HttpError::ConnectionReadTimeout)?,
+    };
+    let response = sent.map_err(|error| {
         tracing::debug!(source = %policy.source_id, %error, "an external adapter's request failed");
         transport_error(&error)
     })?;
     let mut response: http::Response<reqwest::Body> = response.into();
     let body = std::mem::replace(response.body_mut(), reqwest::Body::from(Bytes::new()));
     let body = body.map_err(|_| HttpError::HttpResponseIncomplete);
+    let body = BetweenBytes::new(body.boxed_unsync(), bounds.between);
     let (mut parts, ()) = response.map(|_| ()).into_parts();
     let body: WasiBody = if for_instance {
         // A body reqwest did not decode could hide the secret from the redactor.
@@ -265,6 +323,71 @@ async fn send(policy: &Policy, request: http::Request<WasiBody>) -> SendResult {
     };
     let done: Box<dyn Future<Output = Result<(), HttpError>> + Send> = Box::new(async { Ok(()) });
     Ok((http::Response::from_parts(parts, body), done))
+}
+
+/// A response body that fails `connection-read-timeout` when the next frame
+/// is longer coming than `gap`.
+///
+/// The wait is timed from the first poll that finds no frame, not from the
+/// last frame: time the component spends elsewhere between reads (on the
+/// sink, say) is its own, and a server held back by it has not stalled.
+struct BetweenBytes {
+    inner: WasiBody,
+    gap: Option<(Duration, Pin<Box<tokio::time::Sleep>>)>,
+    /// Whether the timer runs: set by a poll that found no frame, cleared by
+    /// one that found one.
+    waiting: bool,
+}
+
+impl BetweenBytes {
+    fn new(inner: WasiBody, gap: Option<Duration>) -> Self {
+        Self {
+            inner,
+            gap: gap.map(|gap| (gap, Box::pin(tokio::time::sleep(gap)))),
+            waiting: false,
+        }
+    }
+}
+
+impl http_body::Body for BetweenBytes {
+    type Data = Bytes;
+    type Error = HttpError;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<http_body::Frame<Bytes>, HttpError>>> {
+        let this = &mut *self;
+        match Pin::new(&mut this.inner).poll_frame(cx) {
+            Poll::Ready(frame) => {
+                this.waiting = false;
+                Poll::Ready(frame)
+            }
+            Poll::Pending => {
+                let Some((gap, timer)) = this.gap.as_mut() else {
+                    return Poll::Pending;
+                };
+                if !this.waiting {
+                    this.waiting = true;
+                    timer.as_mut().reset(tokio::time::Instant::now() + *gap);
+                }
+                let stalled = timer.as_mut().poll(cx).is_ready();
+                if stalled {
+                    Poll::Ready(Some(Err(HttpError::ConnectionReadTimeout)))
+                } else {
+                    Poll::Pending
+                }
+            }
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
 }
 
 fn transport_error(error: &reqwest::Error) -> HttpError {
@@ -293,4 +416,64 @@ fn client() -> Result<&'static reqwest::Client, HttpError> {
         })
         .as_ref()
         .ok_or(HttpError::ConfigurationError)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A body whose frames arrive when the test sends them.
+    struct Gated(tokio::sync::mpsc::Receiver<Bytes>);
+
+    impl http_body::Body for Gated {
+        type Data = Bytes;
+        type Error = HttpError;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<http_body::Frame<Bytes>, HttpError>>> {
+            self.0
+                .poll_recv(cx)
+                .map(|bytes| bytes.map(|b| Ok(http_body::Frame::data(b))))
+        }
+    }
+
+    const GAP: Duration = Duration::from_millis(100);
+
+    fn gated() -> (tokio::sync::mpsc::Sender<Bytes>, BetweenBytes) {
+        let (frames, rx) = tokio::sync::mpsc::channel(4);
+        (
+            frames,
+            BetweenBytes::new(Gated(rx).boxed_unsync(), Some(GAP)),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_body_that_stalls_past_its_gap_fails_read_timeout() {
+        let (_frames, mut body) = gated();
+        let next = body.frame().await;
+        assert!(
+            matches!(next, Some(Err(HttpError::ConnectionReadTimeout))),
+            "{next:?}"
+        );
+    }
+
+    /// The component's own time between reads is not the server's stall: a
+    /// frame that comes inside the gap of the read that waits for it passes,
+    /// however long ago the last read was.
+    #[tokio::test]
+    async fn a_reader_that_pauses_longer_than_the_gap_is_not_timed_out() {
+        let (frames, mut body) = gated();
+        frames.send(Bytes::from_static(b"one")).await.unwrap();
+        assert!(matches!(body.frame().await, Some(Ok(_))));
+        tokio::time::sleep(GAP * 3).await;
+        let later = tokio::spawn(async move {
+            tokio::time::sleep(GAP / 4).await;
+            frames.send(Bytes::from_static(b"two")).await.unwrap();
+        });
+        let next = body.frame().await;
+        assert!(matches!(next, Some(Ok(_))), "{next:?}");
+        later.await.unwrap();
+    }
 }

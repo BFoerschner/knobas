@@ -49,11 +49,17 @@ async fn a_sync_emits_the_fixed_corpus_and_resumes_from_its_cursor() {
     };
     let mut sink = VecSink(Vec::new());
     let cursor = source.sync(None, &mut sink).await.unwrap();
-    assert_eq!(cursor, "3");
+    assert_eq!(cursor, "5");
     let ids: Vec<String> = sink.0.iter().map(|i| i.entity.to_string()).collect();
     assert_eq!(
         ids,
-        ["surveys:survey-1", "surveys:survey-2", "surveys:survey-3"]
+        [
+            "surveys:survey-1",
+            "surveys:survey-2",
+            "surveys:survey-3",
+            "surveys:pipeline-1",
+            "surveys:run-1"
+        ]
     );
     assert_eq!(sink.0[1].title, "Berth 7 fender survey");
     assert_eq!(sink.0[1].payload["key"], "survey-2");
@@ -63,10 +69,10 @@ async fn a_sync_emits_the_fixed_corpus_and_resumes_from_its_cursor() {
     );
 
     let mut rest = VecSink(Vec::new());
-    let again = source.sync(Some("1".into()), &mut rest).await.unwrap();
-    assert_eq!(again, "3");
+    let again = source.sync(Some("3".into()), &mut rest).await.unwrap();
+    assert_eq!(again, "5");
     let ids: Vec<String> = rest.0.iter().map(|i| i.entity.to_string()).collect();
-    assert_eq!(ids, ["surveys:survey-2", "surveys:survey-3"]);
+    assert_eq!(ids, ["surveys:pipeline-1", "surveys:run-1"]);
 }
 
 /// Takes the first item and refuses the second, counting every call.
@@ -87,7 +93,7 @@ impl knobas_source::Sink for RefusesTheSecond {
 #[tokio::test]
 async fn a_sink_error_the_component_swallows_still_fails_the_sync() {
     // The `swallow_sink` fixture ignores what `sink.item` answers and hands
-    // back cursor "3", which would skip the item the engine never stored.
+    // back cursor "5", which would skip the item the engine never stored.
     let source = match load_fixture().build(instance(
         "surveys",
         serde_json::json!({ "fault": "swallow_sink" }),
@@ -101,7 +107,7 @@ async fn a_sink_error_the_component_swallows_still_fails_the_sync() {
         matches!(&answer, Err(SourceError::Sink(m)) if m == "the mirror is full"),
         "{answer:?}"
     );
-    // Once refused, the host answers the third item itself.
+    // Once refused, the host answers every item after it itself.
     assert_eq!(sink.0, 2);
 }
 
@@ -163,13 +169,13 @@ fn a_component_built_against_another_major_version_is_refused_at_load() {
     assert_eq!(
         error.to_string(),
         "the component is built against knobas:adapter@2.0.0, and this knobas hosts \
-         knobas:adapter@1.x up to 1.0.0"
+         knobas:adapter@1.x up to 1.1.0"
     );
 }
 
 #[test]
 fn a_component_built_against_a_newer_minor_version_is_refused_at_load() {
-    let error = load_error(&exporting("1.1.0"));
+    let error = load_error(&exporting("1.2.0"));
     assert!(matches!(error, LoadError::Unsupported { .. }), "{error:?}");
 }
 
