@@ -1,33 +1,21 @@
 # CLAUDE.md
 
-## Agent skills
+## Tracker
 
-### Issue tracker
+GitHub Issues on `BFoerschner/knobas` via `gh` (`docs/agents/issue-tracker.md`). Labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `backlog`, `wontfix` (`docs/agents/triage-labels.md`).
 
-Issues are tracked as GitHub Issues on `BFoerschner/knobas` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+## Documents
 
-### Triage labels
+Single context: `CONTEXT.md` + `docs/adr/` (`docs/agents/domain.md`). Spec `docs/specs/2026-08-23-knobas-design.md` · frozen contract `docs/contract.md` (§10.8 is the IPC/migration ledger) · roadmap `docs/roadmap.md` · working model `docs/agents/working-model.md` · dated rulings `docs/decisions/`.
 
-Default label vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+## Flow
 
-### Domain docs
+mattpocock-skills only: grilling → to-spec → to-tickets → `/loop /ticket-loop` (`.claude/commands/ticket-loop.md`; agent briefs `docs/agents/implementer-brief.md`, `docs/agents/merge-manager-brief.md`). `triage`, `to-spec`, `to-tickets` and `handoff` refuse the Skill tool: Björn types them. A handoff lands in `$TMPDIR/handoff-*.md`, not the repo.
 
-Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+**Standing rules live in the skill, the briefs and `docs/`, never in memory** (Björn, 2026-10-19: memories get skipped). A new rule is a docs-only PR to the file whose reader needs it.
 
-### Planning flow
+## Machine
 
-mattpocock-skills only (grilling → spec → tickets), decided 2026-08-28; do not use the
-superpowers planning skills. Task tracking is GitHub Issues (milestone M2 onward); the
-retired superpowers plan docs are in git history. Key documents: spec
-`docs/specs/2026-08-23-knobas-design.md` · frozen-contract record `docs/contract.md` ·
-roadmap `docs/roadmap.md` · agent working model `docs/agents/working-model.md`.
-
-### Unattended: no permission prompts
-
-Björn runs agents unattended in bypass mode (2026-10-16); a permission prompt stalls the work until he is back. Bypass mode still prompts for these, so never do them, and put the rule in every brief you hand an agent:
-
-- `cd` chained into a compound command (`cd X && …`). Use absolute paths, `git -C <dir>`, `npm --prefix <dir>`.
-- Writing, deleting or moving anything under `~/.claude/` or a `.git/` directory from Bash. Git commands are fine; change memory files with the Write and Edit tools.
-- Editing shell config files.
-
-If a step seems to need one, skip it and say so in your report.
+- **Unattended in bypass mode: no permission prompts.** Never: `cd` chained into a compound command (absolute paths, `git -C`, `npm --prefix`); Bash writes, deletes or moves under `~/.claude/` or any `.git/` (git commands are fine; memory files via Write/Edit); shell-config edits. If a step needs one, skip it and say so. Put this rule in every agent brief.
+- The Bash tool is Homebrew bash 5.3 (`CLAUDE_CODE_SHELL` in `~/.claude/settings.json`; PATH from `~/.bashrc`). macOS: no `timeout` binary, no `pgrep -c`; never call a pager. Start piped test or gate commands with `set -o pipefail;`.
+- `gh pr merge` from the root checkout tries to switch it to `main`; a dirty root makes it exit 1 after the merge succeeded on GitHub.

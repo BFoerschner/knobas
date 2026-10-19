@@ -237,12 +237,30 @@ shot slot out +routes:
 
 # The merge gate: `check-front` when `scripts/gate-scope.sh BASE` says the head
 # is frontend-only against BASE, the full `check` otherwise.
+#
+# A full gate runs `pre-gate` first. Of 112 failed gate runs in Oct 10-19,
+# 32 full gates failed on rustfmt (12) or clippy (20), both of which pre-gate
+# answers in under a minute and the first of which it fixes; they failed
+# because the merge-manager's fix commits and rebase landed after the
+# implementer's pre-gate. What pre-gate changes is left uncommitted and named,
+# so the merge-manager commits it before merging; the gate itself ran on it.
+# A frontend-only head skips it: nothing pre-gate fixes applies to one, and
+# `check-front` already runs its svelte-check and its three vitest guards.
 gate base="origin/main":
     #!/usr/bin/env bash
     set -euo pipefail
     scope=$(scripts/gate-scope.sh "{{base}}")
     echo "gate: $scope"
-    if [ "$scope" = front ]; then just check-front "{{base}}"; else just check; fi
+    if [ "$scope" = front ]; then
+        just check-front "{{base}}"
+    else
+        just pre-gate
+        just check
+        if [ -n "$(git status --short)" ]; then
+            echo "gate: green, and pre-gate changed files; commit them before merging:"
+            git status --short
+        fi
+    fi
 
 # The test inventory: every test this workspace defines, by name, committed.
 #

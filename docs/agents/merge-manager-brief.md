@@ -8,7 +8,7 @@ The loop runs unattended; one prompt stalls it until Björn is back. Never: chai
 
 ## Before you start
 
-Read `docs/agents/working-model.md`, `/Users/dev/Projects/knobas/CLAUDE.md` (gitignored, absent from worktrees), `docs/agents/issue-tracker.md`, `CONTEXT.md`. In the worktree from your dispatch: `git fetch && git status`; the branch must be pushed and clean, else **report, never force**.
+Read `docs/agents/working-model.md`, `CLAUDE.md`, `docs/agents/issue-tracker.md`, `CONTEXT.md`. In the worktree from your dispatch: `git fetch && git status`; the branch must be pushed and clean, else **report, never force**.
 
 **Pre-build** unless `scripts/gate-scope.sh` says `front`: `nice -n 10 env -u RUSTUP_TOOLCHAIN CARGO_BUILD_JOBS=4 cargo test --workspace --no-run` in the background, log in the scratchpad. Wait for it or kill it before taking the lock.
 
@@ -37,7 +37,7 @@ Start as soon as the PR opens, even as a draft.
 
 Yours is the ticket's only full gate: `just gate` on the **final merge head** (after fixes and rebase), **foreground**, Bash timeout 600000, `export CARGO_BUILD_JOBS=4` first. It picks `check-front` for a frontend-only head, else full `just check`; report which. Expect 150 s median, ~290 s p90 with two gates running. Red is yours to diagnose.
 
-- **`just pre-gate` first, on that same head**, and commit what it changes: fix commits and the rebase land after the implementer's pre-gate, and 32 of 112 failed gates in Oct 10–19 were clippy or rustfmt, which pre-gate catches in ~40 s.
+- A full gate runs `just pre-gate` itself first (fix commits and the rebase land after the implementer's pre-gate; 32 of 112 failed gates in Oct 10–19 were clippy or rustfmt). If it ends with "pre-gate changed files", commit them before the merge: the gate ran on them.
 - Start any piped test or gate command with `set -o pipefail;`, or `| tail` turns a red run into exit 0. Never poll with `sleep N; cat log`; foreground or Monitor.
 
 - Contention, not the diff: only `Failed to start forks worker` / `Timeout waiting for worker`, or `initdb` / `pg_ctl` / `shmget: No space left on device` (SysV `shmmni` is 32; each embedded postmaster holds one segment), with zero assertion failures. Check `ipcs -m`; after a killed run, `ipcrm -m` segments with no live postmaster; wait a minute, re-run once, say so.
@@ -49,7 +49,7 @@ Yours is the ticket's only full gate: `just gate` on the **final merge head** (a
 Lock script from your dispatch. Take the lock only once the PR is **ready** and your fixes are pushed.
 
 1. `bash <lock> ready <PR> $(git rev-parse HEAD)`, then `bash <lock> take <PR>` (foreground). **Exit 3**: a partner merged your PR in a batch; confirm the issue closed, delete branch and worktree, `bash <lock> release <PR>`, report the merge SHA it printed.
-2. Holding the lock: rebase onto `origin/main`; `MAIN=$(git rev-parse origin/main)`; `just pre-gate`, commit its changes. Merge only against SHAs you recorded.
+2. Holding the lock: rebase onto `origin/main`; `MAIN=$(git rev-parse origin/main)`. Merge only against SHAs you recorded.
 3. `bash <lock> partner <PR>`. Nothing printed: gate your rebased head, merge alone. `<B> <B-sha>` printed:
    1. `git fetch origin "pull/<B>/head"`; if `gh pr view <B> --json headRefOid` ≠ `<B-sha>`, merge alone.
    2. `git switch -c batch-<PR>-<B>` from your rebased head; `git cherry-pick $(git merge-base $MAIN <B-sha>)..<B-sha>`. Any conflict: `--abort`, back to your branch, merge alone.
