@@ -20,6 +20,10 @@ pub(super) struct Label {
     pub(super) id: u64,
     #[serde(default)]
     pub(super) name: String,
+    /// Whether it is the organisation's, not the repository's (set by
+    /// [`read`], not by Gitea).
+    #[serde(skip)]
+    org: bool,
 }
 
 /// The labels a pull request of `owner/repo` may carry (#1235): every page of
@@ -40,7 +44,7 @@ pub(super) async fn read(
         }
     };
     let (mut labels, org) = tokio::try_join!(own, org).map_err(|error| error.to_string())?;
-    labels.extend(org);
+    labels.extend(org.into_iter().map(|label| Label { org: true, ..label }));
     Ok(labels)
 }
 
@@ -70,10 +74,13 @@ where
 /// *Add label…*: the labels the repository may use (its own and its
 /// organisation's, [`read`]) that the pull request does not carry, as
 /// a required choice, in every state (Gitea labels a closed or merged pull
-/// request too). Where none is left, or the labels could not be read, the
-/// action is drawn disabled saying why: a label can be made or taken off, so
-/// the reader can still get to an enabled one (the #701 ruling).
-pub(super) fn action(pull: &Pull, labels: &Result<Vec<Label>, String>) -> ViewAction {
+/// request too). An organisation label whose name a repository label also
+/// has reads `name (owner)`, `owner` being the organisation (#1271); every
+/// other option is the plain name. Where none is left, or the labels could
+/// not be read, the action is drawn disabled saying why: a label can be made
+/// or taken off, so the reader can still get to an enabled one (the #701
+/// ruling).
+pub(super) fn action(pull: &Pull, owner: &str, labels: &Result<Vec<Label>, String>) -> ViewAction {
     let base = ViewAction {
         values: [(
             knobas_source::SOURCE_ACTION_ID.to_owned(),
@@ -93,10 +100,25 @@ pub(super) fn action(pull: &Pull, labels: &Result<Vec<Label>, String>) -> ViewAc
     if labels.is_empty() {
         return disabled("This repository has no labels.".to_owned());
     }
+    // Gitea lets a repository and its organisation share a label name; the
+    // organisation's then carries the organisation's name (#1271).
+    let shared = |label: &Label| {
+        label.org
+            && labels
+                .iter()
+                .any(|other| !other.org && other.name == label.name)
+    };
     let options: Vec<ChoiceOption> = labels
         .iter()
         .filter(|label| !pull.labels.iter().any(|on| on.id == label.id))
-        .map(|label| ChoiceOption::new(label.id.to_string(), label.name.clone()))
+        .map(|label| {
+            let name = if shared(label) {
+                format!("{} ({owner})", label.name)
+            } else {
+                label.name.clone()
+            };
+            ChoiceOption::new(label.id.to_string(), name)
+        })
         .collect();
     if options.is_empty() {
         return disabled("Every label of this repository is on this pull request.".to_owned());

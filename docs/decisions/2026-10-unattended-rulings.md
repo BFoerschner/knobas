@@ -6670,3 +6670,29 @@ The merge-manager's rulings (Opus):
   the next caller free to forget it, which is how #1256 left these; the one-rule comment (#1101)
   is now true by construction. The TfJob Builds section still passes its injected registry.
   **Reversing:** low, drop the default and thread the argument.
+
+## #1271 — a same-named organisation label reads differently in Add label…
+
+- **Only the organisation's label of a shared name is renamed, as `name (organisation)`.**
+  *Fork:* suffix every organisation label, or only those whose name a repository label also
+  has. *Ruling:* only the collisions. The reader sees plain names in the common case, and the
+  repository's label keeps the text it has today. *Reasoning:* the ticket asks that the two read
+  differently, not that every organisation label change. *Reversing:* low (one predicate in
+  `view/pr/label.rs`).
+
+The merge-manager's rulings (Opus):
+
+- **The implementer's ruling stands: only the collisions are renamed.** *Fork:* keep it, or
+  suffix every organisation label. *Ruling:* keep it. The ticket's criterion is about labels that
+  share a name, the suffix is the organisation's name (`bug (tidewater)`), and the common case
+  keeps the plain names readers know. *Reversing:* low, one predicate.
+- **A collision counts against every label, not only those still offered.** *Fork:* suffix the
+  organisation's `bug` only while the repository's `bug` is also offered, or also when the
+  repository's is already on the pull request. *Ruling:* also then, now pinned by the test. The
+  pull request shows the repository's `bug`, and an option reading `bug` would look like it.
+  *Reversing:* low, run the predicate over the filtered options.
+- **`Label.org` stays a `bool` on the shared `Label`, and `action` takes `owner`.** *Fork:* the
+  Standards pass suggested an origin carried by what `read` returns, which would keep the flag
+  off `pull.labels` (always `false` there) and drop the parameter. *Ruling:* keep. One private
+  field on a module-private type, read in one place, against a reshaped `read` result.
+  *Reversing:* low, local to `view/pr/label.rs`.
