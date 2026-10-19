@@ -398,26 +398,30 @@ function boardOf(args: Record<string, unknown>) {
   if (args["ctxId"]) return { columns: [], sources: [] };
 
   const sources = (args["sources"] as string[] | undefined) ?? [];
-  if (sources.length && !sources.includes("mock")) return { columns: [], sources: [] };
-
-  const text = (value: unknown) =>
-    typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  const wantsMock = !sources.length || sources.includes("mock");
+  const wantsGitea = !sources.length || sources.includes("gitea");
+  if (!wantsMock && !wantsGitea) return { columns: [], sources: [] };
 
   const project = args["project"] as string | null | undefined;
   const query = typeof args["query"] === "string" ? args["query"].trim() : "";
-  const tickets = CORPUS.filter(
-    (entry) =>
-      entry.kind === "ticket" &&
-      entry.deleted_at === null &&
-      inProject(entry, project) &&
-      (query === "" || fakeQueryMatches(entry, query)),
-  )
-    .slice()
-    .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
+  const mockTickets = wantsMock
+    ? CORPUS.filter(
+        (entry) =>
+          entry.kind === "ticket" &&
+          entry.deleted_at === null &&
+          inProject(entry, project) &&
+          (query === "" || fakeQueryMatches(entry, query)),
+      )
+    : [];
+  // The Gitea source's tickets (#1248) sit beside the corpus, not in it: they
+  // are the board's rows only, and a project or a query (Jira's words) names
+  // none of them.
+  const giteaTickets = wantsGitea && !project && query === "" ? GITEA_TICKETS : [];
+  const tickets = [...mockTickets, ...giteaTickets].sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
 
   const columns: { status: string | null; cards: ReturnType<typeof boardCard>[] }[] = [];
   for (const entry of tickets) {
-    const status = text(entry.payload["status"]);
+    const status = ticketStatus(entry);
     const column = columns.find((candidate) => candidate.status === status);
     if (column) column.cards.push(boardCard(entry));
     else columns.push({ status, cards: [boardCard(entry)] });
@@ -435,7 +439,7 @@ function boardOf(args: Record<string, unknown>) {
     return aClass - bClass || aAt - bAt || aFolded.localeCompare(bFolded);
   });
 
-  const observed = [...new Set(tickets.map((entry) => text(entry.payload["status"])))]
+  const observed = [...new Set(tickets.map((entry) => ticketStatus(entry)))]
     .filter((status): status is string => status !== null)
     .sort((a, b) => {
       const [aClass, aAt, aFolded] = rank(a);
@@ -451,7 +455,12 @@ function boardOf(args: Record<string, unknown>) {
       cards: perColumn == null ? column.cards : column.cards.slice(0, perColumn),
       total: column.cards.length,
     })),
-    sources: columns.length ? [{ source_id: "mock", statuses: observed }] : [],
+    sources: columns.length
+      ? [
+          ...(mockTickets.length ? [{ source_id: "mock", statuses: observed.filter((status) => mockTickets.some((entry) => ticketStatus(entry) === status)) }] : []),
+          ...(giteaTickets.length ? [{ source_id: "gitea", statuses: observed.filter((status) => giteaTickets.some((entry) => ticketStatus(entry) === status)) }] : []),
+        ]
+      : [],
   };
 }
 
@@ -504,6 +513,7 @@ function listProjects() {
 function boardCard(entry: (typeof CORPUS)[number]) {
   const text = (value: unknown) =>
     typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  if (entry.entity_id.startsWith("gitea:")) return giteaCard(entry);
   const assignee = text(entry.payload["assignee"]);
   return {
     entity_id: entry.entity_id,
@@ -524,6 +534,67 @@ function boardCard(entry: (typeof CORPUS)[number]) {
     // flat, so the count is the list's length, and a ticket with no list has
     // none declared (a miss, `null`).
     comment_count: Array.isArray(entry.payload["comments"]) ? entry.payload["comments"].length : null,
+    signals: fakeSignals(entry.entity_id),
+  };
+}
+
+/**
+ * The Gitea source's tickets (#1248), in the shape the real adapter mirrors an
+ * issue: key `owner/repo/issues/<n>`, `state`, `knobas.priority`,
+ * `assignee.login`, `labels[].name` and `repository.full_name`.
+ */
+const GITEA_TICKETS: (typeof CORPUS)[number][] = (
+  [
+    ["tidewater/payout-service", 143, "Retry window ignores the clock skew", "open", "high", "mara", ["bug"], "2026-08-22T10:40:00Z"],
+    ["tidewater/payout-service", 138, "Document the payout webhook payload", "open", "low", null, ["docs"], "2026-08-20T13:00:00Z"],
+    ["tidewater/ledger", 57, "Ledger export drops the last row", "open", "medium", "jonas", ["bug", "export"], "2026-08-21T08:30:00Z"],
+    ["tidewater/ledger", 52, "Pin the Kotlin toolchain", "closed", "low", "priya", [], "2026-08-17T15:00:00Z"],
+  ] as const
+).map(([repo, n, title, state, priority, login, labels, at]) => {
+  const key = `${repo}/issues/${n}`;
+  return {
+    ...row(`gitea:${key}`, "ticket", title, at, login, {
+      source: "gitea",
+      key,
+      state,
+      knobas: { priority },
+      assignee: login ? { login } : null,
+      labels: labels.map((name) => ({ name })),
+      repository: { full_name: repo },
+      description: title,
+    }),
+    web_url: `https://git.tidewater.example/${repo}/issues/${n}`,
+  };
+});
+
+/** A ticket's column: a Gitea issue's `state`, the corpus's flat `status` otherwise. */
+function ticketStatus(entry: (typeof CORPUS)[number]): string | null {
+  const value = entry.entity_id.startsWith("gitea:") ? entry.payload["state"] : entry.payload["status"];
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+/** A Gitea ticket's board card, read at the paths the real adapter writes. */
+function giteaCard(entry: (typeof CORPUS)[number]) {
+  const payload = entry.payload as {
+    knobas: { priority: string };
+    assignee: { login: string } | null;
+    labels: { name: string }[];
+  };
+  const assignee = payload.assignee?.login ?? null;
+  return {
+    entity_id: entry.entity_id,
+    source_id: "gitea",
+    key: entry.entity_id.slice(entry.entity_id.indexOf(":") + 1),
+    title: entry.title,
+    priority: payload.knobas.priority,
+    issue_type: null,
+    assignee,
+    updated_at: entry.updated_at,
+    path: null,
+    parent_title: null,
+    mine: assignee !== null && assignee.toLowerCase() === FAKE_IDENTITY,
+    labels: payload.labels.map((label) => label.name),
+    comment_count: null,
     signals: fakeSignals(entry.entity_id),
   };
 }

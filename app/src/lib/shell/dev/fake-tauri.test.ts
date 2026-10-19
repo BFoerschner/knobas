@@ -859,3 +859,25 @@ test("the census names a witness that exists for every surface, and files each c
     }
   }
 });
+
+// -- the Gitea source as a ticket system (#1248) -------------------------------
+
+test("the fake Gitea source claims ticket-system and its tickets reach the board", () => {
+  const handlers = demoHandlers();
+  const sources = handlers["list_sources"]!({}) as { id: string; roles: { role: string; reads: string[] }[] }[];
+  const gitea = sources.find((source) => source.id === "gitea");
+  expect(gitea?.roles.find((claim) => claim.role === "ticket-system")?.reads).toContain("reachable_transitions");
+
+  const board = handlers["mini_board"]!({ sources: ["gitea"], ctxId: null, project: null, perColumn: null }) as {
+    columns: { status: string | null; cards: { source_id: string; key: string; priority: string | null; assignee: string | null; labels: string[] }[] }[];
+  };
+  const cards = board.columns.flatMap((column) => column.cards);
+  expect(cards.length).toBeGreaterThan(0);
+  expect(cards.every((card) => card.source_id === "gitea" && /^tidewater\/[^/]+\/issues\/\d+$/.test(card.key))).toBe(true);
+  expect(cards.find((card) => card.key === "tidewater/ledger/issues/57")).toMatchObject({
+    priority: "medium",
+    assignee: "jonas",
+    labels: ["bug", "export"],
+  });
+  expect(board.columns.map((column) => column.status).sort()).toEqual(["closed", "open"]);
+});
