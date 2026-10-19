@@ -1466,15 +1466,15 @@ async fn the_source_list_carries_the_misses_of_the_roles_still_claimed() {
         .await
         .unwrap();
     for role in [the_claim().role.as_str(), "ticket-system"] {
-        sqlx::query(
-            "insert into sync.role_check (source_id, role, missed_kind, missed_field, missed_path)
-             values ($1, $2, 'demo', 'status_name', 'fields.statuss.name')",
+        crate::support::role_miss(
+            &f.pool,
+            &f.id,
+            role,
+            "demo",
+            "status_name",
+            "fields.statuss.name",
         )
-        .bind(&f.id)
-        .bind(role)
-        .execute(&f.pool)
-        .await
-        .unwrap();
+        .await;
     }
 
     let listed = sources::crud::list(&f.pool, &ClaimingRegistry)

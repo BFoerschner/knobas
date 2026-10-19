@@ -27,14 +27,14 @@ async fn pool() -> sqlx::PgPool {
 /// A Confluence source nothing else in this database uses.
 async fn confluence(pool: &sqlx::PgPool) -> String {
     let id = format!("conf{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ($1, 'confluence', 'Confluence', 'http://x', 'Pat', '{\"username\":\"mara\"}')",
+    crate::support::source_config(
+        pool,
+        &id,
+        "confluence",
+        "Confluence",
+        &serde_json::json!({"username": "mara"}),
     )
-    .bind(&id)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
     id
 }
 
@@ -281,14 +281,7 @@ async fn a_page_reads_as_blocks_with_the_mirror_filled_in() {
     let src = confluence(&pool).await;
     // A Jira ticket in the mirror, with its status where Jira keeps it.
     let jira = format!("jira{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ($1, 'jira', 'Jira', 'http://x', 'Pat', '{}')",
-    )
-    .bind(&jira)
-    .execute(&pool)
-    .await
-    .unwrap();
+    crate::support::source_config(&pool, &jira, "jira", "Jira", &serde_json::json!({})).await;
     let key = format!(
         "D{}-77",
         uuid::Uuid::new_v4().simple().to_string()[..4]
@@ -786,14 +779,7 @@ async fn the_space_the_grammar_and_the_empty_query() {
 /// A Jira source and a ticket in it with a status, for *Work it belongs to*.
 async fn ticket(pool: &sqlx::PgPool, title: &str, status: &str) -> (String, String) {
     let jira = format!("jira{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ($1, 'jira', 'Jira', 'http://x', 'Pat', '{}')",
-    )
-    .bind(&jira)
-    .execute(pool)
-    .await
-    .unwrap();
+    crate::support::source_config(pool, &jira, "jira", "Jira", &serde_json::json!({})).await;
     // A Jira key is letters, then a number. Every hex digit stays distinct
     // (0-9 become G-P, a-f stay A-F): collapsing digits to one letter left
     // about one key in a hundred shared by two tickets of one test, and a
@@ -1161,15 +1147,14 @@ async fn moving_the_notes_queues_one_page_each_under_the_parent() {
 /// A source configured as `adapter`, its user `mara` as [`confluence`]'s.
 async fn configured_as(pool: &sqlx::PgPool, adapter: &str) -> String {
     let id = format!("role{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ($1, $2, $2, 'http://x', 'Pat', '{\"username\":\"mara\"}')",
+    crate::support::source_config(
+        pool,
+        &id,
+        adapter,
+        adapter,
+        &serde_json::json!({"username": "mara"}),
     )
-    .bind(&id)
-    .bind(adapter)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
     id
 }
 
@@ -1186,14 +1171,7 @@ async fn the_docs_reads_hold_only_the_wiki_fillers_pages() {
     let w = word();
     let filler = confluence(&pool).await;
     let with_miss = confluence(&pool).await;
-    sqlx::query(
-        "insert into sync.role_check (source_id, role, missed_kind, missed_field, missed_path)
-         values ($1, 'wiki', 'page', 'parent', 'ancestors')",
-    )
-    .bind(&with_miss)
-    .execute(&pool)
-    .await
-    .unwrap();
+    crate::support::role_miss(&pool, &with_miss, "wiki", "page", "parent", "ancestors").await;
     let not_claiming = configured_as(&pool, "jira").await;
     let leftover = confluence(&pool).await;
     let uninstalled = configured_as(&pool, "role_nowhere").await;

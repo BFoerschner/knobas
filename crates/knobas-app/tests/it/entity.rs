@@ -1357,14 +1357,7 @@ async fn an_entity_whose_source_was_never_configured_is_still_readable() {
 async fn a_commits_room_line_and_detail_carry_its_repo_as_the_path() {
     let pool = seeded().await;
     let source = format!("gitea-{}", unique());
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
-         values ($1, 'gitea', 'Gitea', 'http://x', 'Pat')",
-    )
-    .bind(&source)
-    .execute(&pool)
-    .await
-    .unwrap();
+    crate::support::source_config(&pool, &source, "gitea", "Gitea", &serde_json::json!({})).await;
     let entity = format!("{source}:tidewater/payout-service@c90d11");
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'commit', 'fix typo')")
         .bind(&entity)
@@ -1414,15 +1407,7 @@ async fn a_commits_room_line_and_detail_carry_its_repo_as_the_path() {
 /// One configured source of `adapter`, under a run-unique id.
 async fn configured(pool: &PgPool, adapter: &str) -> String {
     let source = format!("{adapter}-{}", unique());
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
-         values ($1, $2, $2, 'http://x', 'Pat')",
-    )
-    .bind(&source)
-    .bind(adapter)
-    .execute(pool)
-    .await
-    .unwrap();
+    crate::support::source_config(pool, &source, adapter, adapter, &serde_json::json!({})).await;
     source
 }
 

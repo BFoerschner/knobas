@@ -13,14 +13,7 @@ use knobas_app::commands::entity::{
 /// A TeamCity source nothing else in this database uses.
 async fn source(pool: &sqlx::PgPool) -> String {
     let id = format!("tc{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ($1, 'teamcity', 'TeamCity', 'http://x', 'Pat', '{}')",
-    )
-    .bind(&id)
-    .execute(pool)
-    .await
-    .unwrap();
+    crate::support::source_config(pool, &id, "teamcity", "TeamCity", &serde_json::json!({})).await;
     id
 }
 
@@ -894,14 +887,7 @@ async fn runs_carry_their_agent_what_they_do_now_and_their_mirrored_commit() {
     let pool = pool().await;
     let tc = source(&pool).await;
     let gitea = format!("gitea{}", &tc[2..]);
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ($1, 'gitea', 'Gitea', 'http://gitea.example', 'Pat', '{}')",
-    )
-    .bind(&gitea)
-    .execute(&pool)
-    .await
-    .unwrap();
+    crate::support::source_config(&pool, &gitea, "gitea", "Gitea", &serde_json::json!({})).await;
     let sha = format!("a41f2c0b9e11{}", &tc[2..]);
     let commit = format!("{gitea}:commit:tidewater/payout-service/{sha}");
     let tip = format!("{gitea}:branch:tidewater/payout-service/main");

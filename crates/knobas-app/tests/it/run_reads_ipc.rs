@@ -25,14 +25,7 @@ async fn pool() -> sqlx::PgPool {
 /// A TeamCity source nothing else in this database uses.
 async fn source(pool: &sqlx::PgPool) -> String {
     let id = format!("tc{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
-    sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ($1, 'teamcity', 'TeamCity', 'http://x', 'Pat', '{}')",
-    )
-    .bind(&id)
-    .execute(pool)
-    .await
-    .unwrap();
+    crate::support::source_config(pool, &id, "teamcity", "TeamCity", &serde_json::json!({})).await;
     id
 }
 

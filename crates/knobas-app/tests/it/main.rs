@@ -4,7 +4,8 @@
 //! name, so a test's full name still says where it lives. Each module still
 //! gets a database of its own: `knobas_db::test_util` keys the shared database
 //! by the calling source file, not by the process (#572). `support/` holds
-//! fixture files the modules embed with `include_str!`.
+//! the fixture helpers the modules share (`support::source_config`,
+//! `support::role_miss`) and the fixture files they embed with `include_str!`.
 //!
 //! The live suites (`alert_chain_live`, `atlassian_live`, `confluence_live`,
 //! `estate_live`, `kuma_write_live`, `start_work_live`, `teamcity_seeded_live`)
@@ -68,6 +69,7 @@ mod start_work;
 mod status_move;
 mod suggestion_pass;
 mod suggestions_ipc;
+mod support;
 mod ticket_keys_ipc;
 mod ticket_views_ipc;
 mod time_ipc;
