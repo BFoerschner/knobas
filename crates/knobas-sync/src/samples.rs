@@ -52,9 +52,9 @@
 //! 1. **It misses, never guesses.** A payload whose declared reading is
 //!    absent, not a number, negative, or one no `i32` can hold, and a source
 //!    that declares no reading at all: every one of them is `None`, and a
-//!    sample with no reading derives no *warn*. The same applies to the state: a declaration that resolves to
-//!    nothing, or to a word [`STATES`] does not hold, is `None` rather than a
-//!    new state word.
+//!    sample with no reading derives no *warn*. The same applies to the
+//!    state: a declaration that resolves to nothing, or to a word [`STATES`]
+//!    does not hold, is `None` rather than a new state word.
 //! 2. **One named place**, [`sample_of`] -- with `response_time_of`, its one
 //!    private helper and its only caller -- reached from [`append`] and from
 //!    nowhere else.
