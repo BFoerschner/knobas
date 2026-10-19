@@ -727,6 +727,9 @@ fn emit<R: tauri::Runtime, T: serde::Serialize>(
 
 #[cfg(test)]
 mod tests {
+    /// The frontend mirror of this module's commands, read at compile time.
+    const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/sources.ts");
+
     /// No command in this file takes `State<'_, SourcesState>`.
     ///
     /// The same rule `commands/mod.rs` enforces for `AppState`, for the same
@@ -963,5 +966,47 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// Every command this module registers is invoked by that name from the
+    /// mirror, and every command the mirror invokes is registered -- the pin
+    /// its six siblings carry (#1324).
+    ///
+    /// A `#[tauri::command]` is addressed by a *string*, so a rename on one
+    /// side is no compile error anywhere: it is a Sources pane that rejects
+    /// with Tauri's own "command not found" the first time it asks. The list
+    /// is read off `lib.rs`'s handler barrel, as `entity.rs` reads it, so a
+    /// command registered and never mirrored fails this too.
+    #[test]
+    fn the_mirror_invokes_the_commands_by_their_registered_names() {
+        let barrel = include_str!("../lib.rs");
+        let registered: Vec<&str> = barrel
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("commands::sources::"))
+            .map(|line| line.trim_end_matches(','))
+            .collect();
+        assert!(
+            registered.len() >= 25,
+            "only {} sources commands found in the handler barrel -- the parse \
+             is wrong, not the barrel",
+            registered.len()
+        );
+        for command in &registered {
+            assert!(
+                MIRROR.contains(&format!("\"{command}\"")),
+                "{command} is registered but never invoked from sources.ts"
+            );
+        }
+        for invoked in MIRROR.split("invoke<").skip(1) {
+            let name = invoked
+                .split_once('"')
+                .and_then(|(_, rest)| rest.split_once('"'))
+                .map(|(name, _)| name)
+                .expect("every invoke names a command");
+            assert!(
+                registered.contains(&name),
+                "sources.ts invokes {name}, which is not in the handler barrel"
+            );
+        }
     }
 }
