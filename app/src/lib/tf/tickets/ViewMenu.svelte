@@ -9,11 +9,12 @@
 -->
 <script lang="ts">
   import { tick } from "svelte";
+  import type { SavedViewSource } from "../../ipc/search";
 
   let {
     name,
     className = "tf-vw-more",
-    jira = null,
+    savedViewKind = null,
     copies = true,
     onedit,
     onduplicate,
@@ -24,10 +25,10 @@
     name: string;
     className?: string;
     /**
-     * A Jira view's kind (#877): *View settings* and *Make an editable copy*
+     * A saved view's kind (#877): *View settings* and *Make an editable copy*
      * (`onduplicate`, #880) only; Jira decides the rest.
      */
-    jira?: "board" | "filter" | null;
+    savedViewKind?: SavedViewSource["kind"] | null;
     /** Whether a Jira view's source translates its query (#1208): no *Make an editable copy* where it does not. */
     copies?: boolean;
     onedit: () => void;
@@ -89,13 +90,13 @@
   >
   {#if open}
     <div class="tf-menu" role="menu" tabindex="-1" bind:this={menu} {onkeydown}>
-      {#if jira !== null}
+      {#if savedViewKind !== null}
         <button type="button" role="menuitem" onclick={() => pick(onedit)}
           ><b>View settings</b><span>lanes, cards and list columns</span></button
         >
         {#if copies}
           <button type="button" role="menuitem" onclick={() => pick(onduplicate)}
-            ><b>Make an editable copy</b><span>your own view, starting from this {jira}</span></button
+            ><b>Make an editable copy</b><span>your own view, starting from this {savedViewKind}</span></button
           >
         {/if}
         <hr />

@@ -38,10 +38,10 @@ export function savedViewSourceId(ref: string): string {
   return ref.split(":")[0]!;
 }
 
-/** What a Jira view is read from, in prototype-6's words (#879): *Kanban board*, *saved filter*. */
-export function jiraKindWords(jira: Pick<SavedViewSource, "kind" | "board_type">): string {
-  if (jira.kind !== "board") return "saved filter";
-  const type = jira.board_type ? jira.board_type[0]!.toUpperCase() + jira.board_type.slice(1) : "";
+/** What a saved view is read from, in prototype-6's words (#879): *Kanban board*, *saved filter*. */
+export function savedViewKindWords({ kind, board_type }: Pick<SavedViewSource, "kind" | "board_type">): string {
+  if (kind !== "board") return "saved filter";
+  const type = board_type ? board_type[0]!.toUpperCase() + board_type.slice(1) : "";
   return `${type} board`.trim();
 }
 
@@ -192,9 +192,9 @@ export function copyKeeps(copy: QueryTranslation): string {
  * view* on a Jira view: no name yet, `extra` (what the filter bar adds now)
  * after the conditions, and how the tickets show now.
  */
-export function draftJiraCopy(
+export function draftSavedViewCopy(
   view: TicketView,
-  jira: SavedViewSource,
+  savedViewSource: SavedViewSource,
   copy: QueryTranslation,
   extra = "",
   showing?: Showing,
@@ -209,7 +209,7 @@ export function draftJiraCopy(
       list_sort: sameSort(showing.sort, DEFAULT_SORT) ? null : showing.sort,
     });
   }
-  return { draft, from: { kind: jira.kind, name: view.name, left: copy.left_out } };
+  return { draft, from: { kind: savedViewSource.kind, name: view.name, left: copy.left_out } };
 }
 
 /** What *+ New view* starts from (R-3.12): no conditions, one column per status, the defaults. */

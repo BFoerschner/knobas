@@ -1,5 +1,5 @@
 <!--
-  Where a Jira view comes from (#879, R-3.22, R-3.23), under the board head,
+  Where a saved view comes from (#879, R-3.22, R-3.23), under the board head,
   in prototype-6's words (`vwSrcLine`): board or filter, its type, the active
   sprint and its end, the JQL (and a Kanban board's sub-filter), when the
   last sync read it, and *Open in Jira*. Then, per project the source does not
@@ -10,15 +10,15 @@
   import type { SavedViewSource } from "../../ipc/search";
   import { ago } from "../../shell/time";
   import { sourceHash } from "../settings/settings";
-  import { jiraKindWords, sprintEnds } from "./views";
+  import { savedViewKindWords, sprintEnds } from "./views";
 
   let {
-    jira,
+    savedViewSource,
     name,
     sourceId,
     openExternal,
   }: {
-    jira: SavedViewSource;
+    savedViewSource: SavedViewSource;
     /** The view's name, which is the board's or the filter's. */
     name: string;
     /** The Jira source the view comes from. */
@@ -33,18 +33,18 @@
 
   function open(event: MouseEvent) {
     event.preventDefault();
-    if (jira.web_url) void openExternal(jira.web_url).catch(() => {});
+    if (savedViewSource.web_url) void openExternal(savedViewSource.web_url).catch(() => {});
   }
 </script>
 
 <p class="tf-vw-srcline">
-  Jira decides which tickets, from the {jiraKindWords(jira)} <b>{name}</b>{#if jira.sprint}, active sprint {jira.sprint
-      .name}{#if jira.sprint.end_date}{" "}(ends {sprintEnds(jira.sprint.end_date)}){/if}{/if}:
-  <code>{jira.source_query}</code>{#if jira.sub_query}{" "}and <code>{jira.sub_query}</code>{/if}. Read again at every sync, last
-  {ago(jira.last_read)}.
-  {#if jira.web_url}<a href={jira.web_url} onclick={open}>Open in Jira</a>{/if}
+  Jira decides which tickets, from the {savedViewKindWords(savedViewSource)} <b>{name}</b>{#if savedViewSource.sprint}, active sprint {savedViewSource.sprint
+      .name}{#if savedViewSource.sprint.end_date}{" "}(ends {sprintEnds(savedViewSource.sprint.end_date)}){/if}{/if}:
+  <code>{savedViewSource.source_query}</code>{#if savedViewSource.sub_query}{" "}and <code>{savedViewSource.sub_query}</code>{/if}. Read again at every sync, last
+  {ago(savedViewSource.last_read)}.
+  {#if savedViewSource.web_url}<a href={savedViewSource.web_url} onclick={open}>Open in Jira</a>{/if}
 </p>
-{#each jira.unsynced as { project, count } (project)}
+{#each savedViewSource.unsynced as { project, count } (project)}
   <p class="tf-vw-srcline tf-vw-warn">
     {count}
     {count === 1 ? "ticket on it is" : "tickets on it are"} in {project}, which the Jira source does not sync, so

@@ -160,7 +160,7 @@
   import { jobHash } from "../route";
   import { sourceHash } from "../settings/settings";
   import { sourceRoles, TICKET_SYSTEM, TRANSLATE_QUERY } from "../roles.svelte";
-  import JiraSourceLine from "./JiraSourceLine.svelte";
+  import SavedViewSourceLine from "./SavedViewSourceLine.svelte";
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
@@ -190,7 +190,7 @@
     draftCopy,
     draftEdit,
     draftFromFilter,
-    draftJiraCopy,
+    draftSavedViewCopy,
     draftNew,
     draftRestore,
     drawnJiraColumns,
@@ -279,9 +279,9 @@
   /** *Duplicate*; on a Jira view, *Make an editable copy* (#880, R-3.25), from its source's reading (#1208). */
   async function copyView(row: TicketViewRow, known: QueryTranslation | null = null) {
     if (row.saved_view_source === null) return newView(draftCopy(row));
-    const jira = row.saved_view_source;
+    const savedViewSource = row.saved_view_source;
     const copy = known ?? (await translation(row));
-    if (copy !== null) drafting = { ...draftJiraCopy(row, jira, copy), editing: null };
+    if (copy !== null) drafting = { ...draftSavedViewCopy(row, savedViewSource, copy), editing: null };
   }
 
   function editView(row: TicketViewRow) {
@@ -322,7 +322,7 @@
   /** The saved view the board reads (#877), or `null`: its source decides its tickets and their order. */
   const savedViewId = $derived(view?.saved_view_source ? view.saved_view : null);
   /** Where *Choose which* goes: the first Jira view's source, else the sources. */
-  const jiraSettings = $derived.by(() => {
+  const savedViewSettings = $derived.by(() => {
     const ref = (views ?? []).find((row) => row.saved_view_source !== null)?.saved_view;
     return ref ? sourceHash(savedViewSourceId(ref)) : "#/settings";
   });
@@ -563,9 +563,9 @@
    */
   async function saveAsView() {
     if (view?.saved_view_source) {
-      const [row, jira, extra, now] = [view, view.saved_view_source, toQuery({ ...config, base: "" }, filter), showing];
+      const [row, savedViewSource, extra, now] = [view, view.saved_view_source, toQuery({ ...config, base: "" }, filter), showing];
       const copy = await translation(row);
-      if (copy !== null) drafting = { ...draftJiraCopy(row, jira, copy, extra, now), editing: null };
+      if (copy !== null) drafting = { ...draftSavedViewCopy(row, savedViewSource, copy, extra, now), editing: null };
     } else newView(draftFromFilter(view ?? null, toQuery(config, filter), showing));
   }
 
@@ -823,7 +823,7 @@
             >
             <ViewMenu
               name={row.name}
-              jira={row.saved_view_source?.kind ?? null}
+              savedViewKind={row.saved_view_source?.kind ?? null}
               copies={offersCopy(row)}
               onedit={() => editView(row)}
               onduplicate={() => copyView(row)}
@@ -862,7 +862,7 @@
         {/each}
       {/if}
       <p class="tf-vw-foot">
-        Boards and favourite filters come in with the Jira source at every sync. <a href={jiraSettings}>Choose which</a>
+        Boards and favourite filters come in with the Jira source at every sync. <a href={savedViewSettings}>Choose which</a>
       </p>
     </div>
   </nav>
@@ -889,7 +889,7 @@
         >
         <ViewMenu
           name="this view"
-          jira={view.saved_view_source?.kind ?? null}
+          savedViewKind={view.saved_view_source?.kind ?? null}
           copies={offersCopy(view)}
           className="tf-btn tf-sm tf-ghost"
           onedit={() => editView(view)}
@@ -900,8 +900,8 @@
       {/if}
     </div>
     {#if view?.saved_view_source && view.saved_view}
-      <JiraSourceLine
-        jira={view.saved_view_source}
+      <SavedViewSourceLine
+        savedViewSource={view.saved_view_source}
         name={view.name}
         sourceId={savedViewSourceId(view.saved_view)}
         openExternal={ports.openExternal ?? openExternal}
@@ -1083,7 +1083,7 @@
       groups={groupNames}
       fields={suggested?.fields ?? []}
       parents={suggested?.parents ?? []}
-      jira={editing?.saved_view_source ?? null}
+      savedViewSource={editing?.saved_view_source ?? null}
       copiedFrom={drafting.from ?? null}
       copy={drafting.copy ?? null}
       oncopy={editing?.saved_view_source && offersCopy(editing) ? () => void copyView(editing, drafting?.copy ?? null) : undefined}
