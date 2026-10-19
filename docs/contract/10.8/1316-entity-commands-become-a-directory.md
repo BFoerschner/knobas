@@ -42,7 +42,8 @@
   which reaches no further than the old file did.
 
   **No statement, bind or behaviour changed.** Every line of the old file is in the new ones
-  unchanged but for those seven visibilities, three `include_str!` paths one level deeper, and
+  unchanged but for those seven visibilities, three `include_str!` paths (the mirror and `lib.rs`
+  one level deeper, the mini board's signature read from `board.rs` rather than `entity.rs`), and
   rustfmt's wrap of one signature; the read-plans suite runs unedited.
 
   **The frozen-layout rule reads one level down.** "No new files under
