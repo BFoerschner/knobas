@@ -29,9 +29,10 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use knobas_app::commands::entity::{
-    EntityDetail, NoteLinkInput, PipelineRow, RunRow, SourceRef, SuggestionPage, UrlMatch,
+    EntityDetail, NoteLinkInput, SourceRef, SuggestionPage, UrlMatch,
 };
 use knobas_core::activity::ActivityRow;
+use knobas_core::builds::{PipelineRow, RunRow};
 use knobas_core::entity_list::{
     AttentionGroup, EntityFilter, EntityOrder, EntityPage, EntityRow, GroupTally, KindTally,
 };
