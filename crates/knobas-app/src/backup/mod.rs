@@ -89,17 +89,20 @@ const TICK: Duration = Duration::from_secs(60);
 const STARTUP_DELAY: Duration = Duration::from_secs(30);
 
 /// What one successful export produced.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "backup.ts")]
 pub struct BackupRecord {
+    /// RFC 3339, UTC.
     pub taken_at: DateTime<Utc>,
-    /// The file name inside the backup directory, not a path: the directory
+    /// The file name inside `BackupStatus::directory`, not a path: the directory
     /// moves with the profile, and a stored absolute path would outlive it.
     pub file: String,
     pub bytes: i64,
 }
 
 /// One archive sitting in the backup directory.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "backup.ts")]
 pub struct ArchiveFile {
     pub file: String,
     pub bytes: i64,
@@ -117,14 +120,15 @@ pub struct ArchiveFile {
     pub share: bool,
 }
 
-/// Everything the settings dialog draws (issue #69).
-#[derive(Debug, Clone, serde::Serialize)]
+/// Everything the backup settings dialog draws (issue #69).
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "backup.ts")]
 pub struct BackupStatus {
     pub schedule: BackupSchedule,
     /// Absolute path of the directory the archives live in.
     pub directory: String,
     pub last: Option<BackupRecord>,
-    /// `None` when the schedule is off.
+    /// RFC 3339, UTC; `null` when the schedule is off.
     pub next_due_at: Option<DateTime<Utc>>,
     /// What is on disk right now, newest first.
     pub archives: Vec<ArchiveFile>,

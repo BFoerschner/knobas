@@ -92,13 +92,21 @@
 
 /// Which parts of the owned schema a share export carries.
 ///
+/// A backup is everything knobas owns; a **share export** is the same archive
+/// restricted to the parts a colleague should get.
+///
+/// `knobas.setting` is in no part, so a share export never carries the
+/// sharer's schedule, first-run state or preferences: `backup::share`'s module
+/// docs say why "the time settings" could not be one of them.
+///
 /// The defaults are the spec's: links, assets, contexts and sources on; notes
 /// and time off. `#[serde(default)]` on the struct means a caller may send
 /// only the toggles it wants to change and get the ratified answer for the
 /// rest -- and a knobas built before a future part still decodes a payload
 /// that names it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(default)]
+#[ts(export_to = "backup.ts")]
 pub struct ShareParts {
     /// `knobas.link` and the entity rows its ends name.
     pub links: bool,
@@ -122,13 +130,19 @@ pub struct ShareParts {
     /// map, not a private note about it. The built-in lists are code and are
     /// rows nowhere, so a knobas nobody has saved a list on carries an empty
     /// table here -- which is why the dialog offers no toggle for it until a
-    /// saved one exists, and sends the part off while there is none.
+    /// saved one exists, and sends the part off while there is none, so the
+    /// archive of a knobas nobody has saved a list on carries no list table
+    /// at all (#507).
+    ///
+    /// The query crosses exactly as it was typed: nothing on either side of an
+    /// archive rewrites a stored query to a newer grammar.
     pub smart_lists: bool,
     /// `knobas.ticket_view` -- the ticket views somebody made (#812, story
     /// 41). **On by default**, beside smart lists and for their reason: a view
     /// is a query and a layout, not a private note. Like a saved list it is no
     /// entity, so it brings no address book, and its text crosses exactly as
-    /// it was saved.
+    /// it was saved. The dialog offers its toggle only once a view exists and
+    /// sends it off while there is none, as with smart lists.
     pub ticket_views: bool,
     /// `knobas.link_set`, `link_set_member` and `link_set_rule` -- the link
     /// sets somebody made (#870, R-7.11). **On by default**, beside ticket
@@ -138,7 +152,9 @@ pub struct ShareParts {
     /// `0039`), so it resolves once the colleague's own sources sync that
     /// item. A pattern crosses as saved, its query and its reading together.
     /// `knobas.link_set_hidden` stays behind: *Hide here* is one reader's
-    /// choice about one ticket, as a note is.
+    /// choice about one ticket, as a note is. The dialog offers its toggle
+    /// only once a set exists and sends it off while there is none, as with
+    /// smart lists.
     pub link_sets: bool,
 }
 

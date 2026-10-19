@@ -98,10 +98,6 @@ knobas-app	lib/knobas_app	commands::assets::tests::the_mirror_sends_the_argument
 knobas-app	lib/knobas_app	commands::assets::tests::the_relation_a_source_rooms_tile_reads_is_in_the_frontend_vocabulary
 knobas-app	lib/knobas_app	commands::assets::tests::the_relations_the_panel_walks_are_in_the_frontend_vocabulary
 knobas-app	lib/knobas_app	commands::backup::tests::the_mirror_invokes_the_commands_by_their_registered_names
-knobas-app	lib/knobas_app	commands::backup::tests::the_schedule_decodes_from_the_dialogs_shape
-knobas-app	lib/knobas_app	commands::backup::tests::the_schedule_serialises_the_keys_the_mirror_declares
-knobas-app	lib/knobas_app	commands::backup::tests::the_share_parts_serialise_the_keys_the_mirror_declares
-knobas-app	lib/knobas_app	commands::backup::tests::the_status_and_the_record_serialise_the_keys_the_mirror_declares
 knobas-app	lib/knobas_app	commands::entity::detail::tests::a_declared_kind_resolves_to_the_adapters_own_metadata
 knobas-app	lib/knobas_app	commands::entity::detail::tests::nothing_declared_resolves_to_none_rather_than_to_a_guess
 knobas-app	lib/knobas_app	commands::entity::detail::tests::two_adapters_declaring_one_kind_do_not_fight

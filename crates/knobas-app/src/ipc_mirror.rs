@@ -302,6 +302,12 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::time::week::WeekRow::export_all(cfg)?;
     crate::time::week::Week::export_all(cfg)?;
     crate::time::week::PlannedWorklog::export_all(cfg)?;
+    // backup.ts
+    crate::backup::BackupSchedule::export_all(cfg)?;
+    crate::backup::BackupRecord::export_all(cfg)?;
+    crate::backup::ShareParts::export_all(cfg)?;
+    crate::backup::ArchiveFile::export_all(cfg)?;
+    crate::backup::BackupStatus::export_all(cfg)?;
     Ok(())
 }
 
