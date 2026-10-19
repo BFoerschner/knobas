@@ -6407,3 +6407,27 @@ The merge-manager's own rulings:
   nothing, because an empty `kinds` asks for every kind. **Reversing:** low.
 - **The checkout's clone candidates are kept to `code-host` sources too.** A clone is looked for
   in the repositories Code draws. **Reversing:** low.
+
+### Issues #1224, #1225, #1227 implementer (one PR), 2026-10-19
+
+No step of the three tickets is reserved for Björn. The implementer's rulings:
+
+- **#1225: the minimum gives way, not clause 8.** The ticket-system minimum keeps
+  `reachable_transitions` required and `transition` optional (ADR-0029 as written); a ticket system
+  that declares no `transition` claims the read and answers it with a refusal by name, which
+  clause 8 already demanded. ADR-0029's ticket-system line now says so. Reasoning: a source that
+  cannot move a ticket has no moves to offer, so answering the read would feed a *Move to …* that
+  the shell draws absent; keying clause 8 on the claim instead would let such a source answer with
+  moves it cannot make, and would make the mock and the battery's own read-only ticket system
+  (both refusing today) wrong. Every built-in ticket system (Jira, Gitea) declares `transition`.
+  **Reversing:** low (clause 8 skips the probe when a claim names the read).
+- **The fields are `response_time` and `base`.** The unit sits in the doc, as `estimate`'s seconds
+  do; `base` pairs with `head`. **Reversing:** low until an external adapter declares them.
+- **`resolve_number` refuses a negative.** The roster and the samples now read one rule; the
+  roster used to draw any number. Kuma's `-1` is already `null` in its payload, so nothing drawn
+  changes. **Reversing:** low.
+- **Clause 6 and the role data check weigh `response_time` as any JSON number**, not a whole
+  number: Kuma reports `13.0` and fractions, and the samples round. **Reversing:** low.
+- **#1224's "search reads it from the declaration" had nothing to move.** `knobas-search`'s
+  lists name `response_time_ms` only in a doc comment about the sample column; no search read
+  reaches into a monitor's payload for it. Recorded in the PR. **Reversing:** n/a.

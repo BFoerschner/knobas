@@ -95,6 +95,8 @@ pub enum Field {
     Reviewers,
     Merged,
     Head,
+    /// The branch a pull request is opened into (#1227).
+    Base,
     Commit,
     DefaultBranch,
     Name,
@@ -103,6 +105,8 @@ pub enum Field {
     Branch,
     Started,
     Finished,
+    /// A monitor's response time in milliseconds (#1224).
+    ResponseTime,
 }
 
 impl Field {
@@ -121,6 +125,7 @@ impl Field {
             Field::Reviewers => "reviewers",
             Field::Merged => "merged",
             Field::Head => "head",
+            Field::Base => "base",
             Field::Commit => "commit",
             Field::DefaultBranch => "default_branch",
             Field::Name => "name",
@@ -129,6 +134,7 @@ impl Field {
             Field::Branch => "branch",
             Field::Started => "started",
             Field::Finished => "finished",
+            Field::ResponseTime => "response_time",
         }
     }
 
@@ -204,6 +210,7 @@ pub const MINIMUMS: &[Minimum] = &[
                     Field::ParentOf("repo"),
                     Field::State,
                     Field::Head,
+                    Field::Base,
                     Field::Commit,
                     Field::Reviewers,
                     Field::Merged,
@@ -253,6 +260,10 @@ pub const MINIMUMS: &[Minimum] = &[
         // (`knobas_sync::saved_views`) keys on the frame and not on an
         // adapter's kind id.
         optional_kinds: &[frame(Frame::SavedView, &[])],
+        // Required of every ticket system, and answered with a refusal by
+        // name by one that declares no `transition` (#1225): a read-only
+        // ticket system has no moves to offer. The battery's clause 8 holds
+        // both halves.
         reads: &["reachable_transitions"],
         // *Make an editable copy* of a saved view (#1208).
         optional_reads: &[TRANSLATE_QUERY],
@@ -301,7 +312,9 @@ pub const MINIMUMS: &[Minimum] = &[
     },
     Minimum {
         role: MONITORING,
-        kinds: &[kind("monitor", &[Field::StatusName])],
+        // The state and the response time its samples are taken from
+        // (#1224, ADR-0029).
+        kinds: &[kind("monitor", &[Field::StatusName, Field::ResponseTime])],
         optional_kinds: &[],
         reads: &[],
         optional_reads: &[],
@@ -572,6 +585,7 @@ mod tests {
                 KindPaths {
                     state: vec![crate::StatePath::default()],
                     head: at("head"),
+                    base: at("base"),
                     reviewers: vec![crate::ListPath::default()],
                     merged: at("merged"),
                     ..paths("pr")
@@ -642,6 +656,47 @@ mod tests {
         assert_eq!(
             refused.to_string(),
             r#"role "code-host" needs kind "branch" to declare the path parent (a "repo")"#
+        );
+    }
+
+    /// The code-host minimum's pull request names both ends (#1227, spec
+    /// #1192): head and base.
+    #[test]
+    fn a_pull_request_that_declares_no_base_misses_the_base() {
+        let mut d = code_host(vec![code_host_claim()], "repo");
+        let pr = d.payload_paths.iter_mut().find(|p| p.kind == "pr").unwrap();
+        pr.base.clear();
+        assert_eq!(
+            check(&d).unwrap_err().to_string(),
+            r#"role "code-host" needs kind "pr" to declare the path base"#
+        );
+    }
+
+    /// The monitoring minimum (#1224, ADR-0029): a monitor with a state *and*
+    /// a response time, the two facts its samples are taken from.
+    #[test]
+    fn a_monitor_needs_its_state_and_its_response_time() {
+        let mut d = code_host(vec![RoleClaim::new(MONITORING, [])], "repo");
+        d.clone_from.clear();
+        d.entity_kinds.push(KindInfo {
+            id: "monitor".into(),
+            label: "Monitor".into(),
+            plural: "Monitors".into(),
+            monogram: "MO".into(),
+            full_sync_exhaustive: true,
+        });
+        let monitor = KindPaths {
+            kind: "monitor".into(),
+            status_name: vec![PayloadPath::of(["state"])],
+            response_time: vec![PayloadPath::of(["response_time_ms"])],
+            ..KindPaths::default()
+        };
+        d.payload_paths.push(monitor.clone());
+        assert_eq!(check(&d), Ok(()));
+        d.payload_paths.last_mut().unwrap().response_time.clear();
+        assert_eq!(
+            check(&d).unwrap_err().to_string(),
+            r#"role "monitoring" needs kind "monitor" to declare the path response_time"#
         );
     }
 

@@ -151,6 +151,8 @@ export interface KindPaths {
   state: StatePath[];
   /** The branch a pull request is opened from, by its name (#712). */
   head: PayloadPath[];
+  /** The branch a pull request is opened into, by its name (#1227). */
+  base: PayloadPath[];
   /** The commit a record of code stands at, by full sha (#710). */
   commit: PayloadPath[];
   /** The commits a build ran on, one per VCS root (#710). */
@@ -211,6 +213,8 @@ export interface KindPaths {
   opened: PayloadPath[];
   /** When a pull request was merged, ISO 8601; absent until it is (#929). */
   merged_at: PayloadPath[];
+  /** A monitor's last check, in milliseconds: a JSON number (#1224). */
+  response_time: PayloadPath[];
 }
 
 /** `knobas_core::payload::Trigger` — how a run was started, in the shell's words (#961, #1146). */

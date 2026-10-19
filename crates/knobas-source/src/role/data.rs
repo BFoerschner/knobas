@@ -67,6 +67,8 @@ pub(super) enum Shape {
     Text,
     Instant,
     Flag,
+    /// A JSON number (#1224): a monitor's response time.
+    Number,
     /// A state: a string or a boolean.
     TextOrFlag,
     List,
@@ -82,6 +84,7 @@ impl Shape {
                 .as_str()
                 .is_some_and(|t| knobas_core::payload::parse_instant(t).is_some()),
             Shape::Flag => value.is_boolean(),
+            Shape::Number => value.is_number(),
             Shape::TextOrFlag => value.is_string() || value.is_boolean(),
             Shape::List => value.is_array(),
             Shape::Parent => {
@@ -135,6 +138,7 @@ pub(super) fn needs_of(field: Field, paths: &KindPaths) -> (Shape, Vec<PayloadPa
         Field::IssueType => (Shape::Text, plain(&paths.issue_type)),
         Field::ProjectKey => (Shape::Text, plain(&paths.project_key)),
         Field::Head => (Shape::Text, plain(&paths.head)),
+        Field::Base => (Shape::Text, plain(&paths.base)),
         Field::Commit => (Shape::Text, plain(&paths.commit)),
         Field::DefaultBranch => (Shape::Text, plain(&paths.default_branch)),
         Field::Name => (Shape::Text, plain(&paths.name)),
@@ -144,6 +148,7 @@ pub(super) fn needs_of(field: Field, paths: &KindPaths) -> (Shape, Vec<PayloadPa
         Field::Started => (Shape::Instant, plain(&paths.started)),
         Field::Finished => (Shape::Instant, plain(&paths.finished)),
         Field::Merged => (Shape::Flag, plain(&paths.merged)),
+        Field::ResponseTime => (Shape::Number, plain(&paths.response_time)),
         Field::State => (
             Shape::TextOrFlag,
             paths.state.iter().map(|s| s.at.clone()).collect(),
@@ -451,6 +456,36 @@ mod tests {
         let d = tickets(&["fields", "priority"]);
         let [v] = verdicts(&d, &[ticket(Value::Null)]).try_into().unwrap();
         assert_eq!(v.miss.map(|m| m.path), Some("fields.priority".to_owned()));
+    }
+
+    /// A monitor's response time is a number (#1224): one written as a
+    /// string is a wrong shape, and Kuma's `null` for a check that did not
+    /// answer is the source saying nothing.
+    #[test]
+    fn a_response_time_that_is_no_number_is_a_miss_and_a_null_is_not() {
+        let mut d = tickets(&["fields", "priority", "name"]);
+        d.roles = vec![RoleClaim::new(crate::role::MONITORING, [])];
+        d.entity_kinds[0].id = "monitor".into();
+        d.payload_paths = vec![KindPaths {
+            kind: "monitor".into(),
+            status_name: vec![PayloadPath::of(["state"])],
+            response_time: vec![PayloadPath::of(["response_time_ms"])],
+            ..KindPaths::default()
+        }];
+        let judge = |records: &[Value]| {
+            let mut check = DataCheck::new(&d);
+            for record in records {
+                check.observe("monitor", record);
+            }
+            let [v] = check.finish().try_into().unwrap();
+            v.miss.map(|m| m.path)
+        };
+        let up = json!({ "state": "up", "response_time_ms": 13.0 });
+        let silent = json!({ "state": "down", "response_time_ms": null });
+        let spelled = json!({ "state": "up", "response_time_ms": "13" });
+        assert_eq!(judge(&[up, silent.clone()]), None);
+        assert_eq!(judge(&[silent]), None);
+        assert_eq!(judge(&[spelled]), Some("response_time_ms".to_owned()));
     }
 
     #[test]

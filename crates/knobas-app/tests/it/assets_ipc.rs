@@ -5120,6 +5120,32 @@ async fn kuma_monitor(
     payload: serde_json::Value,
     web_url: Option<&str>,
 ) -> String {
+    monitor_of(pool, source, key, payload, web_url, Some("kuma")).await
+}
+
+/// [`kuma_monitor`], of a source configured as `adapter_kind` -- whose
+/// declarations say where a monitor keeps its reading (#1224) -- or of no
+/// configured source at all.
+async fn monitor_of(
+    pool: &PgPool,
+    source: &str,
+    key: &str,
+    payload: serde_json::Value,
+    web_url: Option<&str>,
+    adapter_kind: Option<&str>,
+) -> String {
+    if let Some(kind) = adapter_kind {
+        sqlx::query(
+            "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+             values ($1, $2, $1, 'http://localhost', 'pat')
+             on conflict (id) do nothing",
+        )
+        .bind(source)
+        .bind(kind)
+        .execute(pool)
+        .await
+        .expect("the source row");
+    }
     let id = format!("{source}:{key}");
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'monitor',$2)")
         .bind(&id)
@@ -5302,6 +5328,26 @@ async fn a_drifted_payload_reads_as_absence_and_never_as_a_guess() {
     assert_eq!(drifted.state, None, "and no state was invented either");
 }
 
+/// **The reading is read where the source declares it** (#1224). A monitor of
+/// a source whose adapter declares no response time -- an unconfigured
+/// source, so no adapter at all -- draws no reading whatever its payload
+/// carries; the same payload under Uptime Kuma's declaration draws it.
+#[tokio::test]
+async fn a_reading_is_drawn_only_where_its_source_declares_one() {
+    let pool = pool("monitors-roster-declared").await;
+    let payload = serde_json::json!({ "state": "up", "response_time_ms": 13.0 });
+    kuma_monitor(&pool, "kuma", "declared", payload.clone(), None).await;
+    monitor_of(&pool, "unknown", "undeclared", payload, None, None).await;
+
+    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    assert_eq!(row(&roster, "declared").response_time_ms, Some(13.0));
+    assert_eq!(
+        row(&roster, "undeclared").response_time_ms,
+        None,
+        "no declaration, no reading: never the obvious key"
+    );
+}
+
 /// **The chip's state is the bar's right-hand end.**
 ///
 /// *warn* is knobas' own and exists in no Kuma payload, so a roster that took
@@ -5442,7 +5488,8 @@ async fn a_disabled_sources_monitors_leave_the_roster() {
     sqlx::query(
         "insert into knobas.source_config
              (id, kind, display_name, base_url, auth_kind, config, sync_interval_secs, enabled)
-         values ('kuma-eu','kuma','Kuma EU','http://eu:3001','api_key','{}'::jsonb, 60, false)",
+         values ('kuma-eu','kuma','Kuma EU','http://eu:3001','api_key','{}'::jsonb, 60, false)
+         on conflict (id) do update set enabled = false",
     )
     .execute(&pool)
     .await
@@ -5805,7 +5852,8 @@ async fn a_monitor_from_a_source_the_reader_turned_off_still_counts_as_attached(
     sqlx::query(
         "insert into knobas.source_config
              (id, kind, display_name, base_url, auth_kind, config, sync_interval_secs, enabled)
-         values ('kuma-eu','kuma','Kuma EU','http://eu:3001','api_key','{}'::jsonb, 60, false)",
+         values ('kuma-eu','kuma','Kuma EU','http://eu:3001','api_key','{}'::jsonb, 60, false)
+         on conflict (id) do update set enabled = false",
     )
     .execute(&pool)
     .await

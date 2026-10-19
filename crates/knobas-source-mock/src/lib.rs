@@ -865,6 +865,8 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
                 ],
             }],
             head: vec![PayloadPath::of(["from"])],
+            // The target branch (#1227), where the dataset names one.
+            base: vec![PayloadPath::of(["to"])],
             commit: vec![PayloadPath::of(["head_sha"])],
             reviewers: vec![ListPath {
                 at: PayloadPath::of(["review_requested_from"]),

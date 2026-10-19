@@ -158,7 +158,7 @@ pub fn descriptor_template() -> SourceDescriptor {
 
 /// Where a monitor keeps what knobas reads (#277, ADR-0007).
 ///
-/// **One declaration: `state`.** A monitor's status in Uptime Kuma's own words
+/// **The state.** A monitor's status in Uptime Kuma's own words
 /// -- `up`, `down`, `pending`, `maintenance` -- is a status in exactly the
 /// sense the mini board, the standup and the detail view mean, and
 /// `crate::map` writes it at the top level of every monitor payload, tombstones
@@ -174,6 +174,11 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// **`monitor_type` is Kuma's `type`** (`http`, `ping`, `dns`), which
 /// `crate::map` writes at the top level too: the line a set's monitor row
 /// draws (#1020).
+///
+/// **`response_time` is the `response_time_ms` `crate::map` writes** (#1224):
+/// the last check's duration in milliseconds, `null` where Kuma reported its
+/// `-1` for a check that did not answer. The monitoring role requires it,
+/// beside the state, because knobas takes its samples from the two.
 ///
 /// **Everything else is a miss, and deliberately.** A monitor has no priority,
 /// no assignee, no reviewers and no merged flag -- nothing watches a URL on
@@ -194,6 +199,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
         status_name: vec![PayloadPath::of(["state"])],
         state: monitor_state(),
         monitor_type: vec![PayloadPath::of(["type"])],
+        response_time: vec![PayloadPath::of(["response_time_ms"])],
         ..KindPaths::default()
     }]
 }
@@ -310,6 +316,11 @@ mod tests {
         assert_eq!(
             paths.monitor_type,
             vec![knobas_source::PayloadPath::of(["type"])]
+        );
+        assert_eq!(
+            paths.response_time,
+            vec![knobas_source::PayloadPath::of(["response_time_ms"])],
+            "the reading the samples are taken from (#1224)"
         );
         let chip = |state: &str| {
             let payload = serde_json::json!({ "state": state });

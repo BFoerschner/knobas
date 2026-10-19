@@ -839,7 +839,9 @@ pub struct AttachedMonitor {
 /// identity and the address are `knobas.entity`'s and `sync.item`'s. The
 /// **reading** -- [`monitor_type`], [`target`], [`response_time_ms`],
 /// [`uptime`], [`cert_days_remaining`] -- is read out of the mirrored
-/// payload, under ADR-0007's interim discipline (see [`reading_of`]). And
+/// payload (see [`reading_of`]): the response time through the source's
+/// declared `response_time` (#1224), the rest under ADR-0007's interim
+/// discipline. And
 /// [`state`] and [`samples`] are knobas' own timeseries: *warn* exists
 /// nowhere in Uptime Kuma and is derived at sample time (`0021`), so a chip
 /// counting warns has to count samples and not the mirror.
@@ -2080,6 +2082,9 @@ pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> 
         .iter()
         .map(|row| row.try_get("entity_id"))
         .collect::<Result<_, _>>()?;
+    // Where each source keeps a monitor's reading (#1224).
+    let declarations =
+        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::builtin()).await?;
 
     let mut samples: HashMap<String, Vec<MonitorSample>> = HashMap::new();
     for sample in sqlx::query(ROSTER_SAMPLES)
@@ -2118,15 +2123,19 @@ pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> 
     rows.iter()
         .map(|row| {
             let entity_id: String = row.try_get("entity_id")?;
+            let source_id: String = row.try_get("source_id")?;
             let payload: serde_json::Value = row.try_get("payload")?;
-            let reading = reading_of(&payload);
+            let response_time = declarations
+                .get(&source_id, MONITOR_KIND)
+                .map_or(&[][..], |paths| paths.response_time.as_slice());
+            let reading = reading_of(&payload, response_time);
             let samples = samples.remove(&entity_id).unwrap_or_default();
             let state = match samples.last() {
                 Some(newest) => newest.state.clone(),
                 None => text_at(&payload, "state"),
             };
             Ok(MonitorRow {
-                source_id: row.try_get("source_id")?,
+                source_id,
                 name: row.try_get("title")?,
                 state,
                 monitor_type: reading.monitor_type,
@@ -2437,16 +2446,18 @@ struct Reading {
 ///
 /// # This is a payload read outside an adapter (ADR-0007, #277)
 ///
-/// `KindPaths` has no slot shaped like any of these -- no "what kind of check",
-/// no "what it watches", no "a ratio per window" -- so declaring them would
-/// itself be a `crates/knobas-source/src/**` change and a §10.8 conversation of
-/// its own. Until there is such a slot the interim discipline applies in full,
-/// and this function meets all three requirements the way
-/// `knobas_sync::samples::sample_of` does:
+/// The response time is the one column read through a declaration: the
+/// source's `response_time` (#1224), the paths passed in, which the monitoring
+/// role requires, as `knobas_sync::samples::sample_of` reads it. A source
+/// that declares none draws no reading. For the rest `KindPaths` has no slot
+/// shaped like them -- no "what it watches", no "a ratio per window" -- so
+/// the interim discipline applies in full, and this function meets all three
+/// requirements the way `knobas_sync::samples::sample_of` does:
 ///
 /// 1. **It misses, never guesses.** Every field is `None` (or, for the ratios,
 ///    absent from the list) unless the payload holds the shape it expects: a
-///    non-string type, a non-number reading, a `uptime` that is not an object,
+///    non-string type, a non-number or undeclared reading, a `uptime` that is
+///    not an object,
 ///    a ratio that is not a number -- each one is left out rather than
 ///    coerced. A blank string is a miss too, for `estate_file.rs`' reason:
 ///    *nothing here* and *somebody meant to fill this in* must not read alike.
@@ -2455,7 +2466,8 @@ struct Reading {
 ///    [`monitor_roster`] takes with [`text_at`] because it is the *fallback*
 ///    for a value the samples normally supply, and the pane's own monitoring
 ///    section already reads it that way (#445, [`MONITOR_READINGS`]).
-/// 3. **The failure direction is absence.** A drifted key draws an empty cell
+/// 3. **The failure direction is absence.** A drifted key, and a source that
+///    declares no `response_time`, draws an empty cell
 ///    in the roster -- never a target that is somebody else's host, never a
 ///    ratio invented from a string.
 ///
@@ -2482,7 +2494,10 @@ struct Reading {
 /// roster shows a reader where the check points, port and all, while the rule
 /// joins on a host and stops at the port so that `http://gitea:3000` matches an
 /// asset whose hostname is `gitea`. Same key, different question.
-fn reading_of(payload: &serde_json::Value) -> Reading {
+fn reading_of(
+    payload: &serde_json::Value,
+    response_time: &[knobas_core::payload::PayloadPath],
+) -> Reading {
     let hostname = text_at(payload, "hostname");
     let target = text_at(payload, "url").or_else(|| match (hostname, text_at(payload, "port")) {
         (Some(host), Some(port)) => Some(format!("{host}:{port}")),
@@ -2491,7 +2506,7 @@ fn reading_of(payload: &serde_json::Value) -> Reading {
     Reading {
         monitor_type: text_at(payload, "type"),
         target,
-        response_time_ms: number_at(payload, "response_time_ms"),
+        response_time_ms: knobas_core::payload::resolve_number(payload, response_time),
         uptime: payload
             .get("uptime")
             .and_then(serde_json::Value::as_object)

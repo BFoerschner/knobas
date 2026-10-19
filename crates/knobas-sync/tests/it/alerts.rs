@@ -114,6 +114,7 @@ impl Source for Monitors {
                 .map(|kind| knobas_source::KindPaths {
                     kind: (*kind).to_owned(),
                     status_name: vec![knobas_source::PayloadPath::of(["state"])],
+                    response_time: vec![knobas_source::PayloadPath::of(["response_time_ms"])],
                     ..knobas_source::KindPaths::default()
                 })
                 .collect(),
