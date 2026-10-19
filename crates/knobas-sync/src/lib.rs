@@ -95,7 +95,8 @@ pub struct SyncReport {
     /// exhaustive half; the budgeted half is never in it. What that leaves
     /// unreachable is on [`run_once`], under *Limitations*.
     pub swept: u64,
-    /// Where the source says the next run should resume.
+    /// Where the source says the next run should resume. Opaque to the
+    /// frontend: it is handed back, unread, to resume an incremental sync.
     pub cursor: Cursor,
 }
 
@@ -1147,28 +1148,6 @@ mod tests {
                 "{reserved:?} should be refused"
             );
         }
-    }
-
-    /// `SyncReport` crosses the bridge -- `demo_load` returns one -- so its
-    /// shape is contract. The **exact key set**, for the reason the M0
-    /// carry-over spells out: a test that only walks a hardcoded list of
-    /// fields cannot see a Rust field added with no TypeScript counterpart,
-    /// and `swept` was exactly such an addition.
-    #[test]
-    fn the_report_shape_matches_its_typescript_mirror() {
-        let report = SyncReport {
-            source_id: "mock".to_owned(),
-            upserted: 12,
-            deleted: 1,
-            swept: 2,
-            cursor: r#"{"v":1}"#.to_owned(),
-        };
-        crate::mirror::assert_shape(
-            include_str!("../../../app/src/lib/ipc/sources.ts"),
-            "SyncReport",
-            &serde_json::to_value(&report).expect("a report serializes"),
-            &["cursor", "deleted", "source_id", "swept", "upserted"],
-        );
     }
 
     fn unit_item(source_id: &str, n: usize) -> SyncItem {

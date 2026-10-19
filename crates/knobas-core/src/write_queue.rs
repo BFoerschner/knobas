@@ -40,30 +40,44 @@ use crate::payload::{StatePath, resolve_state};
 crate::closed_vocabulary! {
     /// What the queue will do about a write next.
     ///
+    /// The queue panel branches on this and so does the shell badge, so the
+    /// three open states are three different sentences, not three shades of
+    /// "waiting":
+    ///
+    /// - `pending`: needs **patience**. Retried automatically, and it goes on
+    ///   its own when the source can take it.
+    /// - `held`: needs a **decision**. The target changed after the write was
+    ///   queued. Waits for the user and for nothing else: no timeout, no
+    ///   auto-apply, no auto-discard. Since migration `0012` a target also
+    ///   leaves the view when the user turns its source off, and that write
+    ///   holds by the same mechanism. [`QueuedWrite::source_enabled`] is what
+    ///   tells the two apart -- the state stays one word because the queue's
+    ///   answer is the same (nothing sends until someone acts); only the
+    ///   explanation differs.
+    /// - `refused`: needs a **decision**. The source rejected the write
+    ///   outright. Deliberately never retried -- a refusal is a decision, not
+    ///   a blip (ADR-0004 is what tells the two apart).
+    /// - `sent`: delivered. Terminal.
+    /// - `discarded`: withdrawn by the user. Terminal.
+    ///
+    /// `sent` and `discarded` are settled and never appear in
+    /// `pending_writes`.
+    ///
     /// Stored as lowercase text in `knobas.write_queue.state`, whose
     /// `write_queue_state_chk` (migration 0005) allows exactly these
     /// spellings -- and `ALL` is what the test that pins the two together
     /// walks.
+    ///
+    /// The states are documented here and not on each variant because the
+    /// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+    /// type's and a field's doc but not a variant's (#1325).
     #[derive(ts_rs::TS)]
     #[ts(export_to = "sources.ts")]
     pub enum WriteState {
-        /// Will be retried automatically when the source can take it.
         Pending => "pending",
-        /// The target changed after the write was queued. Waits for the user
-        /// and for nothing else: no timeout, no auto-apply, no auto-discard.
-        ///
-        /// Since migration `0012` a target also leaves the view when the user
-        /// turns its source off, and that write holds by the same mechanism.
-        /// [`QueuedWrite::source_enabled`] is what tells the two apart -- the
-        /// state stays one word because the queue's answer is the same
-        /// (nothing sends until someone acts); only the explanation differs.
         Held => "held",
-        /// The source rejected the write outright. Not retried -- a refusal is
-        /// a decision, not a blip (ADR-0004 is what tells the two apart).
         Refused => "refused",
-        /// Delivered. Terminal.
         Sent => "sent",
-        /// Withdrawn by the user. Terminal.
         Discarded => "discarded",
     }
 }
@@ -82,17 +96,25 @@ impl WriteState {
 crate::closed_vocabulary! {
     /// Why a pending write has not gone yet.
     ///
-    /// Only the two *retryable* faults appear here. A refusal is not a reason
-    /// to wait, it is a reason to stop, and it has its own
-    /// [`WriteState::Refused`]; `write_queue_reason_state_chk` in migration
-    /// 0005 is what keeps a held or refused row from also claiming to be
-    /// waiting on a network.
+    /// - `unreachable`: the server did not answer.
+    /// - `unauthorized`: the credential was refused.
+    ///
+    /// Only the two *retryable* faults appear here, the ones that pass on
+    /// their own or with a human's help. A refusal is not a reason to wait,
+    /// it is a reason to stop, and it has its own [`WriteState::Refused`];
+    /// `write_queue_reason_state_chk` in migration 0005 is what keeps a held
+    /// or refused row from also claiming to be waiting on a network. So a
+    /// row's `wait_reason` is `null` on every row that is not `pending`, and
+    /// on a pending one that has not been tried yet, which `attempted_at` is
+    /// what distinguishes.
+    ///
+    /// The reasons are documented here and not on each variant because the
+    /// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+    /// type's and a field's doc but not a variant's (#1325).
     #[derive(ts_rs::TS)]
     #[ts(export_to = "sources.ts")]
     pub enum WaitReason {
-        /// The server did not answer.
         Unreachable => "unreachable",
-        /// The credential was refused.
         Unauthorized => "unauthorized",
     }
 }
@@ -193,24 +215,33 @@ pub struct QueuedWrite {
     pub source_id: String,
     /// The target, as an entity id.
     pub entity_id: String,
-    /// `knobas_source::WriteOp::identifier()`.
+    /// `knobas_source::WriteOp::identifier()`: the stable snake_case
+    /// operation name, `"comment"`.
     pub op: String,
-    /// The serialized `WriteOp`.
+    /// The serialized `WriteOp`; `amend_write` takes it back, edited.
     #[ts(type = "WriteOpPayload")]
     pub payload: serde_json::Value,
     /// The target as it was when the write was queued -- [`project`]'s output.
+    ///
+    /// One half of the two versions a held write is shown with. Its shape is
+    /// per-op; for `"comment"` it carries `{op, live, text}`, where `text` is
+    /// the item's indexed text -- which every adapter builds from its title,
+    /// description and comment bodies, so a new reply is exactly what changes
+    /// it.
     #[ts(type = "unknown")]
     pub target_snapshot: serde_json::Value,
     pub state: WriteState,
     /// Why a pending write is waiting; `None` while nothing has been tried.
     pub wait_reason: Option<WaitReason>,
-    /// What the source said, in its own words. Untrusted source text.
+    /// What the source said, in its own words. Untrusted source text: render
+    /// it as text, never as markup.
     pub detail: Option<String>,
     pub queued_at: chrono::DateTime<chrono::Utc>,
     pub attempted_at: Option<chrono::DateTime<chrono::Utc>>,
     pub attempts: i32,
     /// The target as it stood when the write was held -- the other half of
-    /// "both versions side by side".
+    /// "both versions side by side". `None` until a write is held; kept
+    /// afterwards.
     #[ts(type = "unknown | null")]
     pub held_snapshot: Option<serde_json::Value>,
     pub settled_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -230,6 +261,11 @@ pub struct QueuedWrite {
     /// with no row at all reads `true`, matching `0012`'s
     /// `coalesce(enabled, true)`: absence of configuration is not a decision
     /// the user made.
+    ///
+    /// The remedies differ as the facts do: a target that changed wants the
+    /// two-versions choice, a source that is off wants re-enabling. Say
+    /// which, and never offer *Send mine anyway* for a source that cannot
+    /// take it. Flips on the next read once the source is back on.
     pub source_enabled: bool,
 }
 

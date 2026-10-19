@@ -1018,8 +1018,9 @@ async fn a_running_state_names_its_own_run_not_another_open_one() {
 /// no message claims the run took no time at all.
 ///
 /// The declaration half -- that the five spellings agree across the bridge --
-/// is `progress::the_phase_names_match_their_typescript_mirror`. This is the
-/// stronger half, and it was missing: `Started` was declared on both sides and
+/// holds by construction: the TypeScript union is generated from `SyncPhase`
+/// (`app/src/lib/ipc/generated/sources.ts`, #1327). This is the stronger
+/// half, and it was missing: `Started` was declared on both sides and
 /// sent by nobody, `Writing` was sent from the scheduler *after* the run had
 /// finished (and on the failure path, where nothing was written), and the
 /// terminal message carried a hardcoded `elapsed_ms: 0`. A phase the UI can
@@ -1034,7 +1035,7 @@ async fn a_running_state_names_its_own_run_not_another_open_one() {
 async fn every_declared_phase_is_actually_emitted() {
     let _serial = serially().await;
     let declared = knobas_sync::mirror::declared_union(
-        include_str!("../../../app/src/lib/ipc/sources.ts"),
+        include_str!("../../../app/src/lib/ipc/generated/sources.ts"),
         "SyncPhase",
     );
 

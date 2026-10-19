@@ -9,35 +9,46 @@ use chrono::{DateTime, Utc};
 knobas_core::closed_vocabulary! {
     /// What the last attempt to use a source's credential established.
     ///
+    /// - `ok`: the credential worked.
+    /// - `unauthorized`: 401/403, the credential is wrong, expired, or locked
+    ///   out. **No automatic retry** -- a human must act (interfaces §8 P7).
+    ///   The one state the UI must act on: it is what puts *Re-enter
+    ///   password* on the row rather than a shrug.
+    /// - `unreachable`: the system could not be reached. Retried with
+    ///   backoff.
+    /// - `missing_secret`: the source is configured but the keychain has no
+    ///   secret for it, so the scheduler skips it entirely rather than
+    ///   churning backoff on a request it knows will fail (§3). A different
+    ///   prompt from a secret that was rejected.
+    /// - `unknown`: never tested, or not tested since something changed.
+    ///
     /// The wire spellings are the same five literals
     /// `source_config_auth_state_chk` allows -- one list, two places, pinned
     /// by tests on both sides.
+    ///
+    /// The states are documented here and not on each variant because the
+    /// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+    /// type's and a field's doc but not a variant's (#1325).
     #[derive(ts_rs::TS)]
     #[ts(export_to = "sources.ts")]
     pub enum AuthState {
-        /// The credential worked.
         Ok => "ok",
-        /// 401/403: the credential is wrong, expired, or locked out. **No
-        /// automatic retry** -- a human must act (interfaces §8 P7).
         Unauthorized => "unauthorized",
-        /// The system could not be reached. Retried with backoff.
         Unreachable => "unreachable",
-        /// The source is configured but the keychain has no secret for it: the
-        /// scheduler skips it entirely rather than churning backoff on a
-        /// request it knows will fail (§3).
         MissingSecret => "missing_secret",
-        /// Never tested, or not tested since something changed.
         Unknown => "unknown",
     }
 }
 
 /// One source's credential health -- the cheap poll the top strip's sync
-/// monograms render from, and the payload of the `source:health` event.
+/// monograms render from, the payload of the `source:health` event, and the
+/// answer of `credential_health`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "sources.ts")]
 pub struct CredentialHealth {
     pub source_id: String,
     pub state: AuthState,
+    /// When the credential was last checked; `None` if it never has been.
     pub checked_at: Option<DateTime<Utc>>,
     /// One line of detail for the sources view -- the server's own message
     /// where there is one. Never a secret.
@@ -72,46 +83,6 @@ mod tests {
             line.matches('\'').count() / 2,
             AuthState::ALL.len(),
             "the constraint and the enum list different numbers of states: {line}"
-        );
-    }
-
-    /// The enum and the CHECK constraint are one list in two places. The other
-    /// half of this pin lives in `crates/knobas-db/tests/schema.rs`.
-    /// The five states are also a TypeScript union, and the frontend branches
-    /// on them: `unauthorized` is what puts *Re-enter password* on a row. A
-    /// spelling that exists on one side only is a branch that can never be
-    /// taken.
-    #[test]
-    fn the_states_match_their_typescript_mirror() {
-        let mirror = include_str!("../../../app/src/lib/ipc/sources.ts");
-        for state in AuthState::ALL {
-            let wire = serde_json::to_string(&state).unwrap();
-            assert!(
-                mirror.contains(&wire),
-                "{wire} is missing from app/src/lib/ipc/sources.ts"
-            );
-        }
-        // The struct half, scoped to its own interface. A whole-file
-        // `contains` passes as soon as *any* interface declares a field of the
-        // name -- `detail:` is also `SyncRunRow`'s neighbour in that file.
-        crate::mirror::assert_shape(
-            mirror,
-            "CredentialHealth",
-            &serde_json::to_value(CredentialHealth {
-                source_id: "mock".to_owned(),
-                state: AuthState::Unauthorized,
-                checked_at: Some(chrono::Utc::now()),
-                detail: Some("401".to_owned()),
-                secret_expires_at: Some(chrono::Utc::now()),
-            })
-            .expect("a health serializes"),
-            &[
-                "checked_at",
-                "detail",
-                "secret_expires_at",
-                "source_id",
-                "state",
-            ],
         );
     }
 

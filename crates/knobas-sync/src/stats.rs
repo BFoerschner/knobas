@@ -8,6 +8,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
+/// The diagnostics view's numbers.
 #[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "sources.ts")]
 pub struct DbStats {
@@ -19,6 +20,7 @@ pub struct DbStats {
     pub newest_synced_at: Option<DateTime<Utc>>,
 }
 
+/// One source's line of [`DbStats`].
 #[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "sources.ts")]
 pub struct SourceCount {

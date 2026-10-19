@@ -6125,8 +6125,9 @@ fn the_pane_offers_the_create_the_spi_names_at_the_target_the_spi_spells() {
 /// so a backend that grows a third monitor op does not draw a nameless button.
 /// The cost of that design is that a renamed identifier is not an error on
 /// either side: `assets::PAUSE_MONITOR` and the mirror's `WriteOpPayload` would
-/// still agree, `sources_mirror.rs` pins the payload **tag** rather than the
-/// snake_case identifier, and every button would simply stop being drawn.
+/// still agree, the generated `WriteOpPayload` carries the payload **tag**
+/// rather than the snake_case identifier, and every button would simply stop
+/// being drawn.
 ///
 /// So the same pin the two Rust copies get (`the_monitors_tab_offers_the_ops_the_spi_names`
 /// above, and the Kuma crate's `the_declared_ops_are_the_spis_own_identifiers`),

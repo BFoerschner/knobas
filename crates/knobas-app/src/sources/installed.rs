@@ -54,23 +54,34 @@ impl Installs {
     }
 }
 
-/// What the last update check of an installed adapter found.
+/// What the last update check of an installed adapter found (#1209).
+///
+/// - `current`: the installed release is the latest.
+/// - `available`: a newer release exists, which nothing has switched to;
+///   nothing changes until the reader updates.
+/// - `failed`: the check could not read the latest release.
+/// - `refused`: the reader updated, and the new release's static checks
+///   refused it: the installed one stays.
+///
+/// The states are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(tag = "state", rename_all = "snake_case")]
 #[ts(export_to = "sources.ts")]
 pub enum UpdateCheck {
-    /// The installed release is the latest.
     Current,
-    /// A newer release exists; nothing changes until the reader updates.
     Available {
         tag: Option<String>,
         adapter_version: String,
     },
-    /// The check could not read the latest release.
-    Failed { reason: String },
-    /// The reader updated, and the new release's static checks refused it:
-    /// the installed one stays.
-    Refused { tag: Option<String>, reason: String },
+    Failed {
+        reason: String,
+    },
+    Refused {
+        tag: Option<String>,
+        reason: String,
+    },
 }
 
 /// A source of an installed adapter, for uninstall's question.
@@ -81,7 +92,9 @@ pub struct AdapterSource {
     pub display_name: String,
 }
 
-/// One installed adapter, as Settings lists it.
+/// One installed external adapter, as Settings lists it (#1209, #1210): its
+/// pin, its sources, why it was refused at load or restore, and the last
+/// update check.
 #[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "sources.ts")]
 pub struct AdapterStatus {

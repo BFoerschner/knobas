@@ -7,7 +7,9 @@ import type { KindInfo, Tone } from "./entity";
 export type AdapterSource = { id: string, display_name: string, };
 
 /**
- * One installed adapter, as Settings lists it.
+ * One installed external adapter, as Settings lists it (#1209, #1210): its
+ * pin, its sources, why it was refused at load or restore, and the last
+ * update check.
  */
 export type AdapterStatus = { adapter_kind: string, 
 /**
@@ -27,21 +29,39 @@ update: UpdateCheck | null, };
  * How an adapter authenticates against its remote system (spec §3).
  *
  * The descriptor declares which of these it accepts; the secret itself is
- * stored in the OS keychain, never in the source's configuration.
+ * stored in the OS keychain, never in the source's configuration. Spelled in
+ * PascalCase on the wire, unchanged since M0.
  */
 export type AuthMethod = "UserPassword" | "Pat" | "ApiToken" | "OAuth";
 
 /**
  * What the last attempt to use a source's credential established.
  *
+ * - `ok`: the credential worked.
+ * - `unauthorized`: 401/403, the credential is wrong, expired, or locked
+ *   out. **No automatic retry** -- a human must act (interfaces §8 P7).
+ *   The one state the UI must act on: it is what puts *Re-enter
+ *   password* on the row rather than a shrug.
+ * - `unreachable`: the system could not be reached. Retried with
+ *   backoff.
+ * - `missing_secret`: the source is configured but the keychain has no
+ *   secret for it, so the scheduler skips it entirely rather than
+ *   churning backoff on a request it knows will fail (§3). A different
+ *   prompt from a secret that was rejected.
+ * - `unknown`: never tested, or not tested since something changed.
+ *
  * The wire spellings are the same five literals
  * `source_config_auth_state_chk` allows -- one list, two places, pinned
  * by tests on both sides.
+ *
+ * The states are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type AuthState = "ok" | "unauthorized" | "unreachable" | "missing_secret" | "unknown";
 
 /**
- * One parameter of a [`RunBuild`](WriteOp::RunBuild): its full name
+ * One parameter of a [`RunBuild`](WriteOp::RunBuild) (#669): its full name
  * (`env.SEPA_RETRIES`) and the value this run takes for it. A struct rather
  * than a pair so the wire reads `{"name": .., "value": ..}`, the shape a
  * source's own parameter lists have.
@@ -93,7 +113,8 @@ code: IpcErrorCode | null, elapsed_ms: number,
 /**
  * Config values the adapter learned from the far end
  * ([`knobas_source::ConnectionInfo::discovered`]), keyed by the
- * `config_schema` property each belongs in.
+ * `config_schema` property each belongs in: Jira's Epic Link custom
+ * field id, whose value is different on every instance (#297).
  *
  * Carried through verbatim, and **acted on by the dialog, not here**:
  * `AddSource.svelte` puts a value into the matching form field when the
@@ -104,14 +125,20 @@ code: IpcErrorCode | null, elapsed_ms: number,
  *
  * Empty on a failed test: an adapter that could not connect learned
  * nothing, and a stale map would fill the form with another server's ids.
+ * Empty too for an adapter that discovers nothing.
  */
-discovered: Record<string, string>, };
+discovered: { [key in string]: string }, };
 
 /**
  * One source's credential health -- the cheap poll the top strip's sync
- * monograms render from, and the payload of the `source:health` event.
+ * monograms render from, the payload of the `source:health` event, and the
+ * answer of `credential_health`.
  */
-export type CredentialHealth = { source_id: string, state: AuthState, checked_at: string | null, 
+export type CredentialHealth = { source_id: string, state: AuthState, 
+/**
+ * When the credential was last checked; `None` if it never has been.
+ */
+checked_at: string | null, 
 /**
  * One line of detail for the sources view -- the server's own message
  * where there is one. Never a secret.
@@ -123,6 +150,9 @@ detail: string | null,
  */
 secret_expires_at: string | null, };
 
+/**
+ * The diagnostics view's numbers.
+ */
 export type DbStats = { db_bytes: number, entity_count: number, item_count: number, per_source: Array<SourceCount>, oldest_synced_at: string | null, newest_synced_at: string | null, };
 
 /**
@@ -132,10 +162,15 @@ export type DbStats = { db_bytes: number, entity_count: number, item_count: numb
 export type Frame = "pipeline" | "run" | "saved_view";
 
 /**
- * What an install recorded, and the adapter's descriptor template: what
- * the Add-source dialog chooses once the install answers.
+ * What an install recorded (#1202, ADR-0028), and the adapter's descriptor
+ * template: what the Add-source dialog chooses once the install answers, and
+ * what `list_adapters` answers from then on.
  */
-export type InstalledAdapter = { adapter_kind: string, adapter_version: string, interface_version: string, source_url: string, tag: string | null, artifact_sha256: string, hosts: Array<string>, template: SourceDescriptor, };
+export type InstalledAdapter = { adapter_kind: string, adapter_version: string, interface_version: string, source_url: string, 
+/**
+ * The release's tag; `None` for a local manifest, which is no release.
+ */
+tag: string | null, artifact_sha256: string, hosts: Array<string>, template: SourceDescriptor, };
 
 /**
  * The failure classes the frontend branches on.
@@ -151,6 +186,9 @@ export type IpcErrorCode = "unauthorized" | "unreachable" | "not_found" | "confl
  * this that difference was a `case when i.kind = 'build_config'` guard in
  * knobas' own SQL (#232); now it is two entries in the adapter's own
  * declaration, which is where the knowledge belongs.
+ *
+ * Every path field is a list of *candidates*, most specific first: one
+ * adapter's alternative spellings of its own field, never knobas guessing.
  *
  * Every field defaults to empty and empty means **the adapter says nothing
  * about it**, which is a miss and never a guess. `#[serde(default)]`
@@ -644,15 +682,22 @@ source_id: string,
  */
 entity_id: string, 
 /**
- * `knobas_source::WriteOp::identifier()`.
+ * `knobas_source::WriteOp::identifier()`: the stable snake_case
+ * operation name, `"comment"`.
  */
 op: string, 
 /**
- * The serialized `WriteOp`.
+ * The serialized `WriteOp`; `amend_write` takes it back, edited.
  */
 payload: WriteOpPayload, 
 /**
  * The target as it was when the write was queued -- [`project`]'s output.
+ *
+ * One half of the two versions a held write is shown with. Its shape is
+ * per-op; for `"comment"` it carries `{op, live, text}`, where `text` is
+ * the item's indexed text -- which every adapter builds from its title,
+ * description and comment bodies, so a new reply is exactly what changes
+ * it.
  */
 target_snapshot: unknown, state: WriteState, 
 /**
@@ -660,12 +705,14 @@ target_snapshot: unknown, state: WriteState,
  */
 wait_reason: WaitReason | null, 
 /**
- * What the source said, in its own words. Untrusted source text.
+ * What the source said, in its own words. Untrusted source text: render
+ * it as text, never as markup.
  */
 detail: string | null, queued_at: string, attempted_at: string | null, attempts: number, 
 /**
  * The target as it stood when the write was held -- the other half of
- * "both versions side by side".
+ * "both versions side by side". `None` until a write is held; kept
+ * afterwards.
  */
 held_snapshot: unknown | null, settled_at: string | null, 
 /**
@@ -685,6 +732,11 @@ held_snapshot: unknown | null, settled_at: string | null,
  * with no row at all reads `true`, matching `0012`'s
  * `coalesce(enabled, true)`: absence of configuration is not a decision
  * the user made.
+ *
+ * The remedies differ as the facts do: a target that changed wants the
+ * two-versions choice, a source that is off wants re-enabling. Say
+ * which, and never offer *Send mine anyway* for a source that cannot
+ * take it. Flips on the next read once the source is back on.
  */
 source_enabled: boolean, };
 
@@ -725,10 +777,17 @@ export type ReviewVerdict = "approve" | "request_changes" | "comment";
  *
  * Plain serde data, like everything crossing the SPI (spec §3a).
  */
-export type RoleClaim = { role: string, reads: Array<string>, };
+export type RoleClaim = { role: string, 
+/**
+ * The live reads the source answers for the role, by identifier
+ * (`run_log`).
+ */
+reads: Array<string>, };
 
 /**
- * One declared path of a claimed role that missed on the records.
+ * One declared path of a claimed role that missed on the records the
+ * source's syncs emitted (#1199, ADR-0028), so the shell does not draw that
+ * role for the source.
  */
 export type RoleMiss = { 
 /**
@@ -774,14 +833,25 @@ export type SecretInput = { value?: string | null,
 /**
  * The optional second credential of the version-2 keychain envelope: a
  * username and password stored *beside* [`value`](Self::value), not
- * instead of it. Only Uptime Kuma reads one today (spec #427, story 69).
+ * instead of it. Only Uptime Kuma reads one today (spec #427, story 69),
+ * and only for its write half: the API key opens `/metrics`, the account
+ * opens socket.io, and a source with only the key reads every monitor
+ * and pauses none of them.
  */
 account?: SecretAccount | null, };
 
+/**
+ * One source's line of [`DbStats`].
+ */
 export type SourceCount = { source_id: string, items: number, synced_at: string | null, };
 
 /**
- * Everything knobas needs to know about a configured adapter instance.
+ * Everything knobas needs to know about a configured adapter instance: what
+ * the Add-source form is generated from.
+ *
+ * A *template* (one per adapter kind, what `list_adapters` answers) has
+ * `id == adapter_kind`; a configured instance's descriptor carries the
+ * instance id instead.
  */
 export type SourceDescriptor = { 
 /**
@@ -871,9 +941,9 @@ write_ops: Array<string>,
 entity_kinds: Array<KindInfo>, 
 /**
  * JSON Schema for this adapter's configuration; the Add-source form is
- * generated from it (spec §3a). Never holds secrets -- those live in the
- * OS keychain, keyed by the chosen [`AuthMethod`]. M0: the mock declares
- * an empty object schema.
+ * generated from it (spec §3a), never hand-built per adapter. Never
+ * holds secrets -- those live in the OS keychain, keyed by the chosen
+ * [`AuthMethod`]. M0: the mock declares an empty object schema.
  */
 config_schema: unknown, 
 /**
@@ -918,7 +988,8 @@ payload_paths: Array<KindPaths>,
  * runs as clause 10: the kinds it names are in [`Self::entity_kinds`],
  * the paths it needs are in [`Self::payload_paths`], and the reads it
  * needs are in the claim. A role's writes are declared, one by one, in
- * [`Self::write_ops`] as every write is.
+ * [`Self::write_ops`] as every write is. A surface reads the claim,
+ * never the adapter kind.
  *
  * `#[serde(default)]`, so a descriptor from a peer that predates this
  * decodes as an adapter that claims nothing.
@@ -931,7 +1002,9 @@ roles: Array<RoleClaim>,
  * lists [`SOURCE_ACTION`], and an adapter refuses a source action whose
  * id is not here with [`SourceError::Protocol`]; [`contract::battery`]
  * holds both (clause 11). Each action's dialog is drawn by the view that
- * offers it, in ADR-0020's action vocabulary, as every action's is.
+ * offers it, in ADR-0020's action vocabulary, as every action's is: its
+ * views offer them as `source_action` actions, and the shell never reads
+ * this list.
  *
  * `#[serde(default)]`, so a descriptor from a peer that predates this
  * decodes as an adapter with none.
@@ -945,6 +1018,7 @@ source_actions: Array<string>,
  * exactly when a [`role::CODE_HOST`] claim reads `clone_urls`, and a
  * config key named here is a string property of
  * [`Self::config_schema`]; [`role::check`] holds both (clause 10).
+ * *Clone* reads it on the Rust side; the shell never does.
  *
  * `#[serde(default)]`, so a descriptor from a peer that predates this
  * decodes as an adapter that names no address to clone from.
@@ -957,7 +1031,11 @@ clone_from: Array<CloneFrom>, };
  * `secret: None` **with** `source_id` set re-tests the stored credential,
  * which is what *Test connection* on an existing source does.
  */
-export type SourceDraft = { source_id: string | null, adapter_kind: string, base_url: string, 
+export type SourceDraft = { 
+/**
+ * Set, with `secret: None`, to re-test the stored credential.
+ */
+source_id: string | null, adapter_kind: string, base_url: string, 
 /**
  * The frozen shape's `AuthMethod`, not an `Option`.
  *
@@ -984,7 +1062,12 @@ export type SourcePatch = { display_name?: string | null, base_url?: string | nu
 /**
  * One row of the sources view.
  */
-export type SourceSummary = { id: string, adapter_kind: string, display_name: string, base_url: string, enabled: boolean, sync_interval_secs: number, config: unknown, health: CredentialHealth, last_run: SyncRunRow | null, next_run_at: string | null, item_count: number, 
+export type SourceSummary = { id: string, adapter_kind: string, display_name: string, base_url: string, enabled: boolean, sync_interval_secs: number, config: unknown, health: CredentialHealth, last_run: SyncRunRow | null, 
+/**
+ * When the scheduler runs this source next; `None` when the source is
+ * disabled, running, or needs a human.
+ */
+next_run_at: string | null, item_count: number, 
 /**
  * Which kind of credential this source authenticates with, or `None`
  * when it needs none.
@@ -1014,14 +1097,27 @@ kinds: Array<KindInfo>,
  * `kinds` (#1196, ADR-0029): what the shell draws each surface for.
  * Empty for an adapter that claims none, and for a row whose adapter is
  * no longer compiled in.
+ *
+ * The mirror narrows a role's reads by these claims itself; the shell
+ * reads them only for which optional reads a source answers
+ * (`tf/roles.svelte.ts`, #1300).
+ *
+ * Always sent. Optional in the generated TypeScript (`#[ts(optional)]`)
+ * only so a stand-in summary written before #1196 still type-checks; a
+ * summary without it claims nothing.
  */
 roles?: Array<RoleClaim>, 
 /**
  * The claimed roles whose declared paths missed on the records this
- * source's syncs emitted (#1199, ADR-0028 *The checks*): the shell draws
- * none of these roles for the source, and its health line names each
- * path. Only roles still in [`roles`](Self::roles); empty when every
- * claimed role is filled or not judged yet.
+ * source's syncs emitted (#1199, ADR-0028 *The checks*): the mirror
+ * leaves the source out of those roles' reads, the shell draws none of
+ * these roles for the source and offers none of their optional reads
+ * (`tf/roles.svelte.ts`), and its health line names each path. Only
+ * roles still in [`roles`](Self::roles); empty when every claimed role
+ * is filled or not judged yet.
+ *
+ * Always sent; optional in the generated TypeScript for the reason
+ * [`roles`](Self::roles) is.
  */
 role_misses?: Array<RoleMiss>, };
 
@@ -1061,7 +1157,11 @@ run_id: number | null,
  * terminal emit carries the run's time in
  * [`last_finished_at`](Self::last_finished_at) rather than here (#304).
  */
-started_at: string | null, last_finished_at: string | null, last_outcome: SyncOutcome | null, 
+started_at: string | null, 
+/**
+ * When the last run that finished, finished.
+ */
+last_finished_at: string | null, last_outcome: SyncOutcome | null, 
 /**
  * When the scheduler will run this source next: last finish + interval,
  * clamped up by [`backoff_until`](Self::backoff_until). **Derived, never
@@ -1191,7 +1291,8 @@ deleted: number,
  */
 swept: number, 
 /**
- * Where the source says the next run should resume.
+ * Where the source says the next run should resume. Opaque to the
+ * frontend: it is handed back, unread, to resume an incremental sync.
  */
 cursor: string, };
 
@@ -1202,19 +1303,44 @@ export type SyncRunRow = { id: number, source_id: string, trigger: SyncTrigger, 
 /**
  * `None` while the run is in flight -- which is what "running" means.
  */
-finished_at: string | null, outcome: SyncOutcome | null, upserted: number, deleted: number, swept: number, error: string | null, cursor_after: string | null, };
+finished_at: string | null, outcome: SyncOutcome | null, upserted: number, deleted: number, 
+/**
+ * Rows the full-sync sweep tombstoned.
+ */
+swept: number, error: string | null, cursor_after: string | null, };
 
 /**
- * Why a run happened.
+ * Why a run happened: the `trigger` of a `knobas.sync_run` row, which
+ * the diagnostics list labels a run with.
+ *
+ * - `schedule`: the scheduler's interval elapsed.
+ * - `manual`: the user's *Sync now*.
+ * - `first_run`: the first sync after a source was added, the one the
+ *   first-run wizard draws a progress bar for.
+ * - `backfill`: a deliberate cursor-less run that widens the payload of
+ *   items an incremental would never re-fetch (#32), and is **forbidden
+ *   to reconcile**: ratified non-sweeping by Björn 2026-08-28, because
+ *   the way a cursor-less run goes wrong produces no error -- a
+ *   credential that quietly loses sight of a project answers with a
+ *   smaller corpus and a 200, and a sweeping backfill would read that as
+ *   "those items are gone". So unlike every other cursor-less run it
+ *   *cannot* have tombstoned anything. Its own spelling because logged as
+ *   `manual` it would be indistinguishable from *Sync now*, and when a
+ *   suspicious `swept` count needs explaining, this spelling is what
+ *   rules a run out.
  *
  * Stored in `knobas.sync_run.trigger`, whose `sync_run_trigger_chk`
  * allows exactly these spellings -- as last defined, which is 0004 for
  * this vocabulary and 0002 for `SyncOutcome`.
+ *
+ * The triggers are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type SyncTrigger = "schedule" | "manual" | "first_run" | "backfill";
 
 /**
- * How a run was started, in the shell's words (#961).
+ * How a run was started, in the shell's words (#961, #1146).
  */
 export type Trigger = "change" | "schedule" | "person" | "chain";
 
@@ -1245,7 +1371,18 @@ value: string,
 trigger: Trigger, };
 
 /**
- * What the last update check of an installed adapter found.
+ * What the last update check of an installed adapter found (#1209).
+ *
+ * - `current`: the installed release is the latest.
+ * - `available`: a newer release exists, which nothing has switched to;
+ *   nothing changes until the reader updates.
+ * - `failed`: the check could not read the latest release.
+ * - `refused`: the reader updated, and the new release's static checks
+ *   refused it: the installed one stays.
+ *
+ * The states are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type UpdateCheck = { "state": "current" } | { "state": "available", tag: string | null, adapter_version: string, } | { "state": "failed", reason: string, } | { "state": "refused", tag: string | null, reason: string, };
 
@@ -1260,11 +1397,21 @@ export type UpdateStyle = "merge" | "rebase";
 /**
  * Why a pending write has not gone yet.
  *
- * Only the two *retryable* faults appear here. A refusal is not a reason
- * to wait, it is a reason to stop, and it has its own
- * [`WriteState::Refused`]; `write_queue_reason_state_chk` in migration
- * 0005 is what keeps a held or refused row from also claiming to be
- * waiting on a network.
+ * - `unreachable`: the server did not answer.
+ * - `unauthorized`: the credential was refused.
+ *
+ * Only the two *retryable* faults appear here, the ones that pass on
+ * their own or with a human's help. A refusal is not a reason to wait,
+ * it is a reason to stop, and it has its own [`WriteState::Refused`];
+ * `write_queue_reason_state_chk` in migration 0005 is what keeps a held
+ * or refused row from also claiming to be waiting on a network. So a
+ * row's `wait_reason` is `null` on every row that is not `pending`, and
+ * on a pending one that has not been tried yet, which `attempted_at` is
+ * what distinguishes.
+ *
+ * The reasons are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type WaitReason = "unreachable" | "unauthorized";
 
@@ -1298,6 +1445,16 @@ export type WaitReason = "unreachable" | "unauthorized";
  * The enum grows per milestone and **each growth is a §10.8 ratified
  * exception** (ADR-0006); an adapter must reject every op it does not declare
  * with [`SourceError::Protocol`].
+ *
+ * On the wire it is externally tagged, so the variant name is the object's
+ * one key, and a frontend written today will meet a payload it does not
+ * recognise. It handles that by narrowing on the key rather than assuming
+ * `Comment`: an unrecognised op can still be applied and discarded, and only
+ * *editing* needs to know where the words are. What each variant means is
+ * in the table above and on the variant; what the shell needs of its payload
+ * is on the payload's fields, because the generated TypeScript
+ * (`app/src/lib/ipc/generated/sources.ts`) carries a field's doc but not a
+ * variant's (#1325).
  *
  * **One variant per operation, never per adapter** (ADR-0006). Two sources
  * that do the same conceptual thing share a variant, and the adapter-specific
@@ -1341,14 +1498,215 @@ head: string,
 /**
  * The branch it is proposed into.
  */
-base: string, } } | { "Approve": { entity: string, body: string, } } | { "TriggerBuild": { entity: string, } } | { "RerunBuild": { entity: string, } } | { "LogWork": { entity: string, started: string, seconds: number, comment: string, } } | { "CreatePage": { parent: string, space: string, title: string, body: string, } } | { "UpdatePage": { entity: string, base_version: number, body: string, } } | { "PauseMonitor": { entity: string, } } | { "ResumeMonitor": { entity: string, } } | { "CreateMonitor": { entity: string, name: string, url: string, kind?: MonitorKind, } } | { "MergePullRequest": { entity: string, style: MergeStyle, delete_branch: boolean, message?: string | null, } } | { "SetParameter": { entity: string, name: string, value: string, base: string | null, } } | { "RunBuild": { entity: string, branch: string | null, parameters: Array<BuildParameter>, clean_checkout?: boolean, first_in_queue?: boolean, } } | { "SubmitReview": { entity: string, verdict: ReviewVerdict, body: string, comments: Array<ReviewComment>, } } | { "DeleteBranch": { entity: string, } } | { "EditPullRequest": { entity: string, title: string | null, body: string | null, state: PullRequestState | null, } } | { "UpdatePullRequestBranch": { entity: string, style: UpdateStyle, } } | { "CommitFile": { repo: string, branch: string, new_branch: string | null, path: string, content: string, message: string, base_sha: string, } } | { "SourceAction": { entity: string, id: string, fields: { [key in string]: string }, } };
+base: string, } } | { "Approve": { entity: string, body: string, } } | { "TriggerBuild": { entity: string, } } | { "RerunBuild": { entity: string, } } | { "LogWork": { entity: string, 
+/**
+ * RFC 3339, UTC -- when the logged span began.
+ */
+started: string, 
+/**
+ * How long was **worked**, which is not the span's length.
+ */
+seconds: number, comment: string, } } | { "CreatePage": { 
+/**
+ * The **parent page**, as an entity id -- this op's queue target.
+ */
+parent: string, 
+/**
+ * The space key in Confluence's own spelling (`ENG`), not an id.
+ */
+space: string, title: string, 
+/**
+ * Storage format, not text: what a later read must return unchanged.
+ */
+body: string, } } | { "UpdatePage": { entity: string, 
+/**
+ * The version the edit was made **against**, not the one to write:
+ * the adapter sends `base_version + 1` and Confluence aborts if
+ * somebody else got there first (#286).
+ */
+base_version: number, 
+/**
+ * The page's **whole** storage format. Confluence's content `PUT`
+ * replaces the record, so a body carrying only the edited section
+ * would delete the rest of the page -- `page-sections.ts`'s
+ * `replaceSectionBody` is what composes this.
+ */
+body: string, } } | { "PauseMonitor": { 
+/**
+ * The **monitor** (`kuma:8`). No second field: Uptime Kuma's
+ * `pauseMonitor` takes a monitor id and nothing else, so a duration
+ * or a reason here would be something knobas asked a reader for and
+ * threw away.
+ */
+entity: string, } } | { "ResumeMonitor": { 
+/**
+ * The paused **monitor**, to start checking again.
+ */
+entity: string, } } | { "CreateMonitor": { 
+/**
+ * What the create targets: the source that will make it, as
+ * `assets::MonitorTarget.entity` gives it. Never composed by a
+ * caller (#453).
+ */
+entity: string, 
+/**
+ * What the monitor is called, and therefore what attaches it: the
+ * next poll mirrors it, and `knobas_sync::attach` draws the
+ * `monitored-by` link to every asset carrying this name.
+ */
+name: string, 
+/**
+ * What it checks, spelled as `kind` reads it: an http(s) URL,
+ * `host:port`, a host, or a container's name (#864).
+ */
+url: string, 
+/**
+ * The kind of check; absent is `http`, what every create meant
+ * before #864.
+ */
+kind?: MonitorKind, } } | { "MergePullRequest": { 
+/**
+ * The **pull request** (#667).
+ */
+entity: string, 
+/**
+ * How the merge lands; a word outside the three does not decode.
+ */
+style: MergeStyle, 
+/**
+ * Delete the head branch once merged (#708); absent reads as
+ * `false`.
+ */
+delete_branch: boolean, 
+/**
+ * The commit message the reader wrote (#843): first line the title;
+ * absent or `null` keeps the source's default.
+ */
+message?: string | null, } } | { "SetParameter": { 
+/**
+ * The **build configuration** (#668).
+ */
+entity: string, 
+/**
+ * The parameter's full name. On an inherited parameter the source
+ * creates an own value that overrides it.
+ */
+name: string, value: string, 
+/**
+ * The value the edit was made against; the source refuses the
+ * write when the parameter no longer holds it. `null` for a secret,
+ * whose value is never drawn and whose write is last-write-wins, and
+ * for a parameter that did not exist.
+ */
+base: string | null, } } | { "RunBuild": { 
+/**
+ * The **build configuration** (#669).
+ */
+entity: string, 
+/**
+ * The source's name for the branch; `null` for the default branch.
+ */
+branch: string | null, 
+/**
+ * Only the values the reader changed, for this build alone.
+ */
+parameters: Array<BuildParameter>, 
+/**
+ * Check the sources out anew (#852); absent reads as `false`.
+ */
+clean_checkout?: boolean, 
+/**
+ * Put the run at the top of the source's queue (#852); absent reads
+ * as `false`.
+ */
+first_in_queue?: boolean, } } | { "SubmitReview": { 
+/**
+ * The **pull request** (#705).
+ */
+entity: string, verdict: ReviewVerdict, body: string, 
+/**
+ * The line comments that go with the review; empty for a review of
+ * the whole change.
+ */
+comments: Array<ReviewComment>, } } | { "DeleteBranch": { 
+/**
+ * The **branch** (#707); the source refuses the default branch and a
+ * protected one.
+ */
+entity: string, } } | { "EditPullRequest": { 
+/**
+ * The **pull request** (#706). A field below left `null` is not
+ * written, so only what the reader changed reaches the source.
+ */
+entity: string, title: string | null, body: string | null, state: PullRequestState | null, } } | { "UpdatePullRequestBranch": { 
+/**
+ * The **pull request** (#708).
+ */
+entity: string, style: UpdateStyle, } } | { "CommitFile": { 
+/**
+ * The **repository** (#822), this op's queue target.
+ */
+repo: string, branch: string, 
+/**
+ * Makes this branch from `branch` first; `null` commits onto
+ * `branch`.
+ */
+new_branch: string | null, path: string, 
+/**
+ * The whole new text, never a patch.
+ */
+content: string, message: string, 
+/**
+ * The blob the edit was made against. A file that changed since
+ * comes back held, theirs in the held snapshot (`text`, `base`) and
+ * this payload as the reader's. *Apply anyway* re-sends against
+ * `base` by itself; an *Edit* (amend) of a moved commit sends
+ * `base_sha` set to the held side's `base`, or it is held again.
+ */
+base_sha: string, } } | { "SourceAction": { entity: string, 
+/**
+ * The adapter's own name for the action (#1194, ADR-0029).
+ */
+id: string, 
+/**
+ * The answers of the dialog the adapter declared, by field name. The
+ * shell copies `id` and these from the action and never reads them.
+ */
+fields: { [key in string]: string }, } };
 
 /**
  * What the queue will do about a write next.
+ *
+ * The queue panel branches on this and so does the shell badge, so the
+ * three open states are three different sentences, not three shades of
+ * "waiting":
+ *
+ * - `pending`: needs **patience**. Retried automatically, and it goes on
+ *   its own when the source can take it.
+ * - `held`: needs a **decision**. The target changed after the write was
+ *   queued. Waits for the user and for nothing else: no timeout, no
+ *   auto-apply, no auto-discard. Since migration `0012` a target also
+ *   leaves the view when the user turns its source off, and that write
+ *   holds by the same mechanism. [`QueuedWrite::source_enabled`] is what
+ *   tells the two apart -- the state stays one word because the queue's
+ *   answer is the same (nothing sends until someone acts); only the
+ *   explanation differs.
+ * - `refused`: needs a **decision**. The source rejected the write
+ *   outright. Deliberately never retried -- a refusal is a decision, not
+ *   a blip (ADR-0004 is what tells the two apart).
+ * - `sent`: delivered. Terminal.
+ * - `discarded`: withdrawn by the user. Terminal.
+ *
+ * `sent` and `discarded` are settled and never appear in
+ * `pending_writes`.
  *
  * Stored as lowercase text in `knobas.write_queue.state`, whose
  * `write_queue_state_chk` (migration 0005) allows exactly these
  * spellings -- and `ALL` is what the test that pins the two together
  * walks.
+ *
+ * The states are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type WriteState = "pending" | "held" | "refused" | "sent" | "discarded";

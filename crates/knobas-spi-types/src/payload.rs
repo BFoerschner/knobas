@@ -198,6 +198,9 @@ pub struct ChainProject {
 /// knobas' own SQL (#232); now it is two entries in the adapter's own
 /// declaration, which is where the knowledge belongs.
 ///
+/// Every path field is a list of *candidates*, most specific first: one
+/// adapter's alternative spellings of its own field, never knobas guessing.
+///
 /// Every field defaults to empty and empty means **the adapter says nothing
 /// about it**, which is a miss and never a guess. `#[serde(default)]`
 /// throughout, so a descriptor serialized by an older peer -- an out-of-process
@@ -480,7 +483,7 @@ pub struct KindPaths {
     pub base: Vec<PayloadPath>,
 }
 
-/// How a run was started, in the shell's words (#961).
+/// How a run was started, in the shell's words (#961, #1146).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export_to = "sources.ts")]

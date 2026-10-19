@@ -56,6 +56,8 @@ pub const MONITORING: &str = "monitoring";
 #[ts(export_to = "sources.ts")]
 pub struct RoleClaim {
     pub role: String,
+    /// The live reads the source answers for the role, by identifier
+    /// (`run_log`).
     #[serde(default)]
     pub reads: Vec<String>,
 }
