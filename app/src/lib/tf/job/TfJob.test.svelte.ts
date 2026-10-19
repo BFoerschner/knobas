@@ -296,11 +296,13 @@ test("a key opens its ticket and promotes it once, and the card shows key, summa
   expect(card.textContent).toContain("Payouts to two SEPA banks fail with a 409 on retry.");
   expect(target.querySelector<HTMLAnchorElement>(".tf-back")?.getAttribute("href")).toBe("#/tickets");
 
-  // A move re-reads nothing and promotes nothing again.
+  // A move re-reads the ticket (the reader's tests hold what else it reads) and promotes nothing again.
+  calls.read.length = 0;
   const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
   select.value = "In Review";
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
+  expect(calls.read).toEqual([ID]);
   expect(calls.promote).toEqual([ID]);
 });
 
