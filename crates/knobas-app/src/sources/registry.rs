@@ -455,8 +455,12 @@ mod tests {
     /// `&dyn AdapterRegistry`, which is what lets a test hand it one of its
     /// own; a third direct call is the second route growing back.
     ///
-    /// Scans the non-test source of the app crate: each file up to its first
-    /// `#[cfg(test)]`, comment lines and the definition itself left out. A
+    /// Scans the non-test source of the app crate: every item gated by
+    /// `#[cfg(test)]` is skipped (it ends at the first line at the attribute's
+    /// own indent that ends in `;` or is a closing brace, which is where
+    /// rustfmt puts it), so a gated `use` near the top of a file or a test
+    /// module in its middle hides nothing after it. Comment lines and the
+    /// definition itself are left out too. A
     /// unit test's fixture and the integration tests under `tests/` build the
     /// process registry as a fixture and are not the route this pins (the
     /// command-module scan in `commands/mod.rs` likewise reads `src/commands`
@@ -499,10 +503,23 @@ mod tests {
                 .to_string_lossy()
                 .replace('\\', "/");
             let text = std::fs::read_to_string(&path).expect("a source file is readable");
-            for (at, line) in text.lines().enumerate() {
-                let line = line.trim_start();
+            let mut lines = text.lines().enumerate();
+            while let Some((at, raw)) = lines.next() {
+                let line = raw.trim_start();
                 if line.starts_with("#[cfg(test)]") {
-                    break;
+                    let indent = &raw[..raw.len() - line.len()];
+                    for (_, item) in lines.by_ref() {
+                        let Some(rest) = item.strip_prefix(indent) else {
+                            continue;
+                        };
+                        let rest = rest.trim_end();
+                        if !rest.starts_with(char::is_whitespace)
+                            && (rest.ends_with(';') || rest == "}")
+                        {
+                            break;
+                        }
+                    }
+                    continue;
                 }
                 if line.starts_with("//") || line.contains("fn for_process") {
                     continue;

@@ -7941,8 +7941,8 @@ The merge-manager's ruling on #1351 (Sonnet):
   state, restores no adapters, as it restores no secrets. *Reversing:* n/a.
 - **The scan covers non-test source of `src/` only.** *Fork:* whether `tests/` and unit-test
   modules are in scope. *Ruling:* no. They build the process registry as a fixture, and the
-  command-module scan is scoped to `src/commands`. Each file is read up to its first
-  `#[cfg(test)]`; comment lines and the definition are skipped; every occurrence counts, so a
+  command-module scan is scoped to `src/commands`. Each `#[cfg(test)]` item is skipped (amended
+  by the merge-manager, below); comment lines and the definition are skipped; every occurrence counts, so a
   second call beside an allowed one fails. The allow-list is a count per file (`sources/mod.rs`,
   `commands/app.rs`), and widening it is a reviewed edit to the test: a mutant that widened it
   and added a call passed, by design. *Reversing:* extend the walk to `tests/`.
@@ -7950,3 +7950,25 @@ The merge-manager's ruling on #1351 (Sonnet):
   passes the same registry to the `SourcesState` it builds. *Reversing:* n/a.
 - **Reads that held only a pool take the lifecycle's registry as a second argument,** as #1322's
   did; tests pass `&Registry::for_process()`. No command's wire shape changed.
+
+The merge-manager's rulings on #1323 (Opus):
+
+- **`as_any()` and `SourcesState::installable()` stand.** *Fork:* a downcast on the ADR-0028
+  trait, or a concrete `Registry` field on the sources state. *Ruling:* the downcast. The ticket
+  asks that the install flow take the registry from the sources state, and it does: the handle is
+  the very list the state's trait object wraps, so install and scheduler cannot diverge, which a
+  second field could (two values to keep in step). The trait gains one provided method with a
+  `None` default; no implementer changes and the trait object stays what every read takes. A test
+  state answering install commands `internal` is the honest answer for a registry that cannot be
+  installed into. *Reversing:* a `SourcesState` field, one PR.
+- **The restore's missing-state branch is not a behaviour change.** `spawn_bring_up` runs
+  `sources::start(..).await?` before `backup::start`, and `start` manages the state or returns
+  `Err`, so the branch is unreachable in the app; it now logs the same error the secrets fallback
+  does. *Reversing:* n/a.
+- **The scan skips each `#[cfg(test)]` item rather than stopping at the first.** Stopping hid
+  all of `commands/search.rs` after line 26 (a gated `use`), `standup.rs` after a gated `const`
+  and `docs.rs`'s production code after its `search_tests` module. The item ends at the first line
+  at the attribute's indent ending in `;` or `}`, which is rustfmt's layout; a mutant call in
+  `commands/search.rs` now fails the scan. *Reversing:* n/a.
+- **No §10.8 entry.** No command's arguments, results or `State` parameters changed; the new
+  trait method is crate-internal. *Reversing:* n/a.

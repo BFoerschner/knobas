@@ -725,7 +725,10 @@ pub fn start<R: tauri::Runtime>(app: &tauri::AppHandle<R>, db: &knobas_db::Embed
             Some(registry) => {
                 state.with_adapters(RestoreAdapters::for_profile(registry, &profile.dir))
             }
-            None => state,
+            None => {
+                tracing::error!("no sources state: a restore brings back no adapters");
+                state
+            }
         },
     );
 
