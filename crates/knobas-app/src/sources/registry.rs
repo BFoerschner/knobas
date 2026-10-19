@@ -507,7 +507,7 @@ mod tests {
                 if line.starts_with("//") || line.contains("fn for_process") {
                     continue;
                 }
-                if line.contains(&needle) {
+                for _ in line.matches(needle.as_str()) {
                     hits.push((relative.clone(), at + 1));
                 }
             }
