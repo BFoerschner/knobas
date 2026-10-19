@@ -268,6 +268,26 @@ async fn a_role_intersects_the_named_sources_and_kinds() {
         "the fillers among the named sources: jira is named and fills nothing here"
     );
 
+    let none_filling = EntityFilter {
+        sources: vec![jira.clone()],
+        ..asking(knobas_source::role::CI)
+    };
+    let page = list_entities_with_registry(
+        &pool,
+        &WithCustom,
+        &none_filling,
+        50,
+        0,
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        (page.rows.len(), page.total),
+        (0, 0),
+        "named sources none of which fills the role read nothing, not every filler"
+    );
+
     let kinds = EntityFilter {
         kinds: vec!["build".to_owned(), "ticket".to_owned()],
         ..asking(knobas_source::role::CI)
