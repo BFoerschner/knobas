@@ -6764,7 +6764,7 @@ The merge-manager's rulings (Opus):
   storage, and a rename there is a migration the ticket does not ask for. It is filed with the
   shell-side names as #1285 (`backlog`). *Reversing:* low.
 - **Scope.** *Fork:* how far into the shell to follow the type. *Ruling:* the wire field and its
-  type, their mirrors, `sub`-field `jql`, the helpers the ticket names (`jiraOf` in the fake and
+  type, their mirrors, the type's `jql` field, the helpers the ticket names (`jiraOf` in the fake and
   in `views.test.ts`, `jiraSourceId`), and every read of `.jira` on a row. Left for #1285: the
   component `JiraSourceLine.svelte`, `jiraKindWords`, `draftJiraCopy`, the `jira` props and
   locals that hold a `SavedViewSource`, the CSS class `.tf-vw-jql`, and every user-facing word
