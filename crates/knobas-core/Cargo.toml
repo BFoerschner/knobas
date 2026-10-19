@@ -4,10 +4,9 @@ edition.workspace = true
 version.workspace = true
 
 [features]
-# The derives `knobas-app`'s mirror tests round-trip through: `Serialize` on
-# `entity_list::EntityFilter` and `EntityOrder` (#1317), `Deserialize` on
-# `builds::RunRow` and `PipelineRow` (#1318). Turned on by that crate's
-# `test-util`; off in every production build.
+# The test-only derives #1318 added: `Deserialize` on `builds::RunRow` and
+# `PipelineRow`. Turned on by `knobas-app`'s `test-util`; off in every
+# production build.
 test-util = []
 
 [dependencies]
@@ -18,6 +17,9 @@ chrono.workspace = true
 knobas-spi-types = { path = "../knobas-spi-types", features = ["sqlx"] }
 serde.workspace = true
 serde_json.workspace = true
+# The derive behind the generated IPC mirror (`knobas-app`'s `ipc_mirror`,
+# #1325): the entity barrel's types are declared here (#1326).
+ts-rs.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tracing = "0.1"

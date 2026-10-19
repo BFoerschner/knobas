@@ -500,7 +500,8 @@ pub async fn entity_view<R: tauri::Runtime>(
 /// and what makes an unresolved ref visible (story 10). `links` is the panel
 /// #53 built: every link this note takes part in, in either direction, so the
 /// note shows what points at it as well as what it points at.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct NoteDetail {
     pub note: knobas_core::note::NoteRow,
     /// The `[[refs]]` the body names, in body order, resolved where they
@@ -543,13 +544,11 @@ pub async fn get_note_inner(pool: &PgPool, note_id: &str) -> Result<NoteDetail, 
 /// means. The capture window (#503) and the in-app *New note* pass the same
 /// two, and a third caller with a third relation needs no argument here.
 ///
-/// The note is always the **from** end; see [`knobas_core::note::BornLink`].
-///
-/// `Serialize` behind `test-util` for the reason [`EntityFilter`] carries it:
-/// it is what lets `tests/it/entity_mirror.rs` pin an input DTO through a round
-/// trip, and so see a field the TypeScript mirror never declares.
-#[derive(Debug, Clone, serde::Deserialize)]
-#[cfg_attr(feature = "test-util", derive(serde::Serialize))]
+/// The note is always the **from** end, so `captured-in` reads *captured in*
+/// from the note and *captured here* from the context; see
+/// [`knobas_core::note::BornLink`].
+#[derive(Debug, Clone, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct NoteLinkInput {
     /// The other end's entity id.
     pub target_id: String,

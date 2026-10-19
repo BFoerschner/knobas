@@ -7972,3 +7972,74 @@ The merge-manager's rulings on #1323 (Opus):
   `commands/search.rs` now fails the scan. *Reversing:* n/a.
 - **No §10.8 entry.** No command's arguments, results or `State` parameters changed; the new
   trait method is crate-internal. *Reversing:* n/a.
+## #1326: the entity barrel is generated (Opus implementer, 2026-10-20)
+
+Reserved for Björn, ruled by implementer on Opus (the §10.8 entry), under the 2026-10-18
+reserved-steps rule. The entry is `docs/contract/10.8/1326-the-entity-barrel-is-generated.md`.
+
+- **Two types with no Rust type.** *Fork:* `LanesAsked` and `OpenAt` bundle one `invoke`
+  function's arguments (`mini_board` takes `lanes` and `lanes_first`, `open_checkout` four
+  optionals); give each a Rust struct, or keep them hand-written. *Ruling:* keep them in the
+  barrel beside their functions. *Reasoning:* §2.6 keeps the `invoke` functions hand-written, and
+  these are part of a function's signature, not a wire type; a Rust struct would either be unused
+  or change the commands' arguments, which this ticket must not. *Reversing:* make a command take
+  the struct and derive it.
+- **Three string vocabularies the shell types as unions.** *Fork:* `DocPage::writes` and the
+  link-set `kind` fields are `String` on the wire and unions in the shell; turn the fields into
+  enums, spell the union with `#[ts(type = "…")]`, or add a TypeScript-only enum. *Ruling:* an
+  enum per vocabulary (`DocWrite`, `MemberKind` as `LinkSetMemberKind`, `RuleKind` as
+  `LinkSetRuleKind`), never constructed, used through `#[ts(as = …)]`, each pinned to the list
+  the Rust checks against by a test that compares the generated union with the list.
+  *Reasoning:* a typed field would change what a bad kind decodes to (a serde error instead of
+  the save's own `invalid` sentence); `#[ts(type)]` is a hand-written copy the generator cannot
+  see. *Reversing:* change the fields to the enums; the enums are already there.
+- **The sources barrel's types reached from entity types.** *Fork:* `Trigger`, `BuildParameter`,
+  `ReviewSide` and `WriteState` are the sources barrel's; export them to `generated/sources.ts`
+  now (the file #1325 booked for #1327), or spell them with `#[ts(type)]` and an import the
+  generator cannot write. *Ruling:* export them now; the hand-written `sources.ts` keeps its
+  copies until #1327, and their variant docs move then. *Reasoning:* #1325's convention for a
+  shared type; the two spellings are structurally one type to TypeScript. *Reversing:* none;
+  #1327 extends the file.
+- **Inline where the hand-written mirror inlined.** *Ruling:* `LinkRow::origin`,
+  `LinkRow::rule_class`, `DiffLine::kind` and `DocSnippet::segments` are `#[ts(inline)]`, so the
+  shell's types read as before and `knobas_core::link::Origin` cannot collide with
+  `knobas_core::reach::Origin` (exported as `ReachOrigin`). The rule classes' meanings, which
+  an inlined type's doc cannot carry, are on the field.
+- **`reach` and `role` stay optional in the shell.** *Ruling:* `#[ts(optional = nullable)]`,
+  `reach?: string | null`, as before; the shell's filters leave them out. The test that a filter
+  without them decodes as unscoped moves from the deleted suite to `knobas_core::entity_list`.
+- **`ViewRow::commit` is `#[ts(skip)]`.** The hand-written mirror left it out on purpose: the app
+  resolves and clears it before a view reaches the shell.
+- **The suite-only derives.** *Ruling:* the `Serialize` behind `test-util` on `EntityFilter`,
+  `EntityOrder` and `NoteLinkInput` goes: its only user was the deleted suite's round trip. The
+  `Deserialize` derives #1318 put behind the same feature stay; this ticket did not add them.
+- **Which pins are "the barrel's".** Every test that read `entity.ts` for type text: the suite,
+  the `KindInfo` pin in `sources_mirror.rs`, and eight per-type pins in the app crate. A ninth
+  (`checkout::open`'s command view) also asserted the view's label and default flag; those
+  assertions stay under a new name. The pins on `invoke` names and arguments stay.
+- **Docs moved and how.** Every TypeScript doc rule the Rust lacked moved onto the Rust:
+  rendering rules, RFC 3339 on the wire, ADR and ticket references, miss semantics. A type's
+  pointer to its own Rust path (`— knobas_core::…`) did not: the generated file is that type.
+  Variant docs moved into each enum's doc as bullets (28 enums). Doc references from other
+  barrels' tests to the deleted `entity_mirror.rs` (in `commands::time` and `commands::assets`)
+  are left for #1328 and #1330, which delete those tests.
+
+### #1326, merge-manager (Opus, 2026-10-20)
+
+- **The §10.8 entry left out `knobas-spi-types`.** *Fork:* the entry named
+  `crates/knobas-source/src/**` but not the SPI types crate, which #1234's entry freezes with it
+  and whose `StateChip`, `Tone` and `Trigger` now derive `ts_rs::TS`, with `ts-rs` a new
+  dependency of a crate that must build for `wasm32-wasip2`. *Ruling:* the entry names the crate,
+  its three derives and the wasm rule (`just wasm-fixture` in the gate holds it). *Reasoning:* the
+  entry must match the diff, and a frozen crate's new dependency is what a later reader looks for.
+  *Reversing:* drop the paragraph.
+- **The three TypeScript-only enums stand.** *Fork:* `DocWrite`, `MemberKind` and `RuleKind` are
+  never constructed and exist to name a union. *Ruling:* keep them, as the implementer ruled.
+  *Reasoning:* spec #1306 wants the shell's types to come from the Rust that serves them; here
+  that Rust is the list the command validates against, and each enum is pinned to it by a test
+  (mutation-killed), so the union cannot drift from the check. A hand `#[ts(type)]` string would
+  be the copy the spec removes. *Reversing:* type the fields with the enums.
+- **Shape identity re-witnessed.** `tsc --strict` type identity of all 170 names, old barrel at
+  8773c5f9 against the head, passes; a control mutation (`DiffLine.kind` losing `"del"`) fails
+  eight names. The Rust diff, normalised for comments, `#[ts]` attributes and the `TS` derive,
+  changes no serde attribute, field or variant, so the wire is the same code.

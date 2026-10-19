@@ -47,14 +47,18 @@ crate::closed_vocabulary! {
     /// created through the link store and never written to either source,
     /// which is the whole reason the relationship survives regardless of what
     /// Jira or Gitea happens to record (story 9).
+    ///
+    /// - `create_branch`: The branch, in the repository the user chose.
+    /// - `create_pull_request`: The draft pull request, from that branch.
+    /// - `link_pull_request`: The knobas link from the pull request back to the
+    ///   ticket.
+    /// - `transition`: The ticket, to In Progress.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "entity.ts", rename = "StartWorkStepKind")]
     pub enum Step {
-        /// The branch, in the repository the user chose.
         CreateBranch => "create_branch",
-        /// The draft pull request, from that branch.
         CreatePullRequest => "create_pull_request",
-        /// The knobas link from the pull request back to the ticket.
         LinkPullRequest => "link_pull_request",
-        /// The ticket, to In Progress.
         Transition => "transition",
     }
 }
@@ -65,26 +69,28 @@ crate::closed_vocabulary! {
     /// Stored as lowercase text in `knobas.start_work_step.outcome`, whose
     /// `start_work_outcome_chk` (migration 0008) allows exactly these
     /// spellings.
+    ///
+    /// - `pending`: Planned; nothing has been attempted.
+    /// - `running`: Dispatched, no answer yet -- what tells a slow step from a
+    ///   stuck one (story 11).
+    /// - `succeeded`: The effect exists at the source.
+    /// - `queued`: The source could not take the write, so it is a **pending
+    ///   write** and will go when the source can (story 15).
+    ///
+    ///   Deliberately neither a success nor a failure. The flow's completion
+    ///   and the write's delivery are different events and the two must not be
+    ///   conflated: a queued step has changed nothing at the source yet, so the
+    ///   sequence waits rather than reporting a step that has not happened.
+    /// - `failed`: The source refused, or knobas could not go on.
+    /// - `skipped`: The user chose not to run it (story 14).
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "entity.ts", rename = "StartWorkOutcome")]
     pub enum StepOutcome {
-        /// Planned; nothing has been attempted.
         Pending => "pending",
-        /// Dispatched, no answer yet -- what tells a slow step from a stuck
-        /// one (story 11).
         Running => "running",
-        /// The effect exists at the source.
         Succeeded => "succeeded",
-        /// The source could not take the write, so it is a **pending write**
-        /// and will go when the source can (story 15).
-        ///
-        /// Deliberately neither a success nor a failure. The flow's completion
-        /// and the write's delivery are different events and the two must not
-        /// be conflated: a queued step has changed nothing at the source yet,
-        /// so the sequence waits rather than reporting a step that has not
-        /// happened.
         Queued => "queued",
-        /// The source refused, or knobas could not go on.
         Failed => "failed",
-        /// The user chose not to run it (story 14).
         Skipped => "skipped",
     }
 }
@@ -171,18 +177,25 @@ macro_rules! step_columns {
 }
 
 /// One step of one flow.
-#[derive(Clone, Debug, PartialEq, Serialize, sqlx::FromRow)]
+///
+/// Issue #44. `payload` is untyped on the wire for `submit_write`'s reason:
+/// `WriteOp` grows per milestone.
+#[derive(Clone, Debug, PartialEq, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "StartWorkStep")]
 pub struct FlowStep {
     pub id: i64,
     /// The ticket the flow is about -- and the flow's identity.
     pub ticket_id: String,
     pub step: Step,
     /// Where the step sits in the sequence.
+    ///
+    /// The stepper renders in this order.
     pub position: i32,
     pub outcome: StepOutcome,
     /// **The proposal**, as the user last left it: the serialized
     /// `knobas_source::WriteOp` a dispatching step will submit, or the link's
     /// relation.
+    #[ts(type = "unknown")]
     pub payload: serde_json::Value,
     /// The `knobas.write_queue` row this step dispatched, once it has one.
     ///

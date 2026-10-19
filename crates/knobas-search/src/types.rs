@@ -275,7 +275,8 @@ pub struct SearchHit {
 /// **`text` is raw source text** -- whatever a person typed into a ticket,
 /// `<script>` included. Render it as text; the highlighting is the `hit` flag,
 /// never markup inside the string (roadmap §4 gotcha 7).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct Segment {
     pub text: String,
     pub hit: bool,

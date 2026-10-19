@@ -256,7 +256,8 @@ pub struct ConnectionInfo {
 
 /// Display metadata for one entity kind an adapter emits, and whether a full
 /// sync of that kind is exhaustive.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct KindInfo {
     /// Matches [`SyncItem::kind`], e.g. `"ticket"`.
     pub id: String,
@@ -1094,8 +1095,9 @@ pub struct ReviewComment {
 /// Which side of a diff a [`ReviewComment`]'s `line` counts on: the file as it
 /// was (`old`, a removed or unchanged line's old number) or as it becomes
 /// (`new`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum ReviewSide {
     Old,
     New,
@@ -1105,7 +1107,8 @@ pub enum ReviewSide {
 /// (`env.SEPA_RETRIES`) and the value this run takes for it. A struct rather
 /// than a pair so the wire reads `{"name": .., "value": ..}`, the shape a
 /// source's own parameter lists have.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct BuildParameter {
     pub name: String,
     pub value: String,

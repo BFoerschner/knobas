@@ -64,18 +64,22 @@ use serde::{Deserialize, Serialize};
 use crate::tone::Tone;
 
 /// Which fact a [`Signal`] states: the four values `has:` takes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// - `failing-build`: A build in the ticket's reach is red.
+/// - `blocker`: Something is in the ticket's way.
+/// - `open-pr`: A pull request of the ticket's is open.
+/// - `review-for-me`: One of those asks the user for a review.
+///
+/// Issue #815.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub enum SignalKind {
-    /// A build in the ticket's reach is red.
     #[serde(rename = "failing-build")]
     FailingBuild,
-    /// Something is in the ticket's way.
     #[serde(rename = "blocker")]
     Blocker,
-    /// A pull request of the ticket's is open.
     #[serde(rename = "open-pr")]
     OpenPr,
-    /// One of those asks the user for a review.
     #[serde(rename = "review-for-me")]
     ReviewForMe,
 }
@@ -121,10 +125,15 @@ impl SignalKind {
 }
 
 /// One signal on one ticket: what the card and the list row draw.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Issue #815.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct Signal {
     pub kind: SignalKind,
     /// The words drawn beside the dot (*blocked by OPS-77*).
+    ///
+    /// Other examples: *build failed*, *PR #142 open*.
     pub text: String,
     pub tone: Tone,
 }

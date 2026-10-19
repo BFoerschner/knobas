@@ -53,7 +53,8 @@ const ACTOR: &str = "user";
 /// than a habit: the item is `knobas_core`'s record and the actions are this
 /// crate's answer about it, and a flattened bag would make a later reader
 /// guess which half a field came from.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct InboxEntry {
     pub item: InboxItem,
     /// `knobas_source::WriteOp` identifiers, in the order the category asks
@@ -63,6 +64,10 @@ pub struct InboxEntry {
     /// nothing to ask a source for, and a source with no write capability
     /// offers nothing on any of its items. *Open*, *snooze* and *done* are not
     /// in here -- they are knobas' own and always available.
+    ///
+    /// Best first; dispatch one with `submit_write`. **Render exactly these and
+    /// no others**: an op absent from this list is one the source cannot
+    /// perform, and a button for it would fail on press.
     pub actions: Vec<String>,
 }
 

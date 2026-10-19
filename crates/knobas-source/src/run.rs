@@ -44,7 +44,8 @@ pub const TEST_HISTORY_RUNS: u32 = 10;
 pub const PREVIEW_BYTES_MAX: usize = 256 * 1024;
 
 /// A range of a run's log (#854).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct RunLog {
     /// The lines asked for, in order.
     pub lines: Vec<LogLine>,
@@ -56,7 +57,8 @@ pub struct RunLog {
 }
 
 /// One line of a log.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LogLine {
     /// Its place in the whole log, from 1.
     pub number: u64,
@@ -72,7 +74,8 @@ pub struct LogLine {
 }
 
 /// One step of a run, as a range of its log's lines.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LogStep {
     /// The step's name as the source gave it.
     pub name: String,
@@ -86,7 +89,8 @@ pub struct LogStep {
 }
 
 /// A run's tests (#855).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct RunTests {
     /// The run's tests, failed ones first, at most [`TESTS_MAX`].
     pub tests: Vec<RunTest>,
@@ -95,7 +99,8 @@ pub struct RunTests {
 }
 
 /// One test of a run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct RunTest {
     /// The source's id for the test across runs: what [`TestOutcome`]s are
     /// asked by. `None` where the source has none.
@@ -115,8 +120,9 @@ pub struct RunTest {
 }
 
 /// How a test came out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum TestStatus {
     Failed,
     Passed,
@@ -124,7 +130,8 @@ pub enum TestStatus {
 }
 
 /// How one test came out in one run: its history, newest first (#855).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct TestOutcome {
     /// The run, as an entity id.
     pub run: String,
@@ -134,7 +141,8 @@ pub struct TestOutcome {
 }
 
 /// One entry of a run's artifact folder (#856).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ArtifactEntry {
     /// From the artifacts' root, `/`-separated, no leading `/`.
     pub path: String,
@@ -147,7 +155,8 @@ pub struct ArtifactEntry {
 }
 
 /// The head of a text artifact (#856).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ArtifactPreview {
     /// The text, at most [`PREVIEW_BYTES_MAX`] bytes of it; `None` for a file
     /// that is not text.
@@ -158,16 +167,18 @@ pub struct ArtifactPreview {
 
 /// What one download streams (#854's *Download log*, #856's downloads).
 /// Tagged on `kind`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// - `log`: The run's whole log.
+/// - `file`: One artifact file.
+/// - `folder`: One artifact folder, as a zip.
+/// - `all`: Every artifact, as a zip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum DownloadTarget {
-    /// The run's whole log.
     Log,
-    /// One artifact file.
     File { path: String },
-    /// One artifact folder, as a zip.
     Folder { path: String },
-    /// Every artifact, as a zip.
     All,
 }
 

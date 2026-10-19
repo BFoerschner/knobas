@@ -26,6 +26,9 @@ serde.workspace = true
 # The declarations `under:` binds as one jsonb (#595).
 serde_json.workspace = true
 sqlx.workspace = true
+# The derive behind the generated IPC mirror (`knobas-app`'s `ipc_mirror`,
+# #1325): `Segment` rides inline in the entity barrel's `DocSnippet` (#1326).
+ts-rs.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

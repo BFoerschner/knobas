@@ -37,6 +37,41 @@ pub const MEMBER_KINDS: &[&str] = &["repo", "pipeline", "page", "asset", "monito
 /// What a rule can match on (R-7.1).
 pub const RULE_KINDS: &[&str] = &["epic", "parent", "project", "manual"];
 
+/// [`MEMBER_KINDS`] as the generated TypeScript's `LinkSetMemberKind` union
+/// (#1326): what a link-set member can be, R-7.7's five panels. Never built:
+/// the wire carries the kind as a string, checked against the list, and this
+/// enum only names the union a member's `kind` is in the shell.
+/// `the_kind_unions_are_the_kind_lists` pins it to the list.
+#[derive(ts_rs::TS)]
+#[ts(
+    export_to = "entity.ts",
+    rename = "LinkSetMemberKind",
+    rename_all = "snake_case"
+)]
+pub enum MemberKind {
+    Repo,
+    Pipeline,
+    Page,
+    Asset,
+    Monitor,
+}
+
+/// [`RULE_KINDS`] as the generated TypeScript's `LinkSetRuleKind` union
+/// (#1326): what a rule matches on, R-7.1. Never built, as [`MemberKind`]
+/// is not, and pinned to the list by the same test.
+#[derive(ts_rs::TS)]
+#[ts(
+    export_to = "entity.ts",
+    rename = "LinkSetRuleKind",
+    rename_all = "snake_case"
+)]
+pub enum RuleKind {
+    Epic,
+    Parent,
+    Project,
+    Manual,
+}
+
 /// The member kinds a pattern may be (R-7.7: *Add a pattern…* for builds and
 /// pages).
 pub const PATTERN_KINDS: &[&str] = &["pipeline", "page"];
@@ -51,30 +86,40 @@ use crate::slug::is_slug;
 const NOT_PIPELINES: &[&str] = knobas_core::link_set::NOT_PIPELINE_KINDS;
 
 /// One fixed member: an entity of one of [`MEMBER_KINDS`].
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LinkSetMember {
+    #[ts(as = "MemberKind")]
     pub kind: String,
     pub entity_id: String,
 }
 
 /// One pattern member (R-7.2): a kind of [`PATTERN_KINDS`] and a query in the
 /// search grammar that reads as a [`knobas_search::Pattern`].
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// Issue #868. For pipelines and pages; the query reads like `project:Payouts
+/// name:Payout_*`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LinkSetPattern {
+    #[ts(as = "MemberKind")]
     pub kind: String,
     pub query: String,
 }
 
 /// One rule (R-7.1): a ticket entity id for `epic`, `parent` and `manual`;
 /// `<source id>:<project key>` for `project`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LinkSetRule {
+    #[ts(as = "RuleKind")]
     pub kind: String,
     pub value: String,
 }
 
 /// What `save_link_set` takes: the whole set, members and rules in order.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LinkSetDraft {
     /// `None` makes a new set with an id from its name; an id saves over that
     /// set.
@@ -91,8 +136,10 @@ pub struct LinkSetDraft {
 
 /// A member as the views draw it: a fixed member, or one item a pattern
 /// matches.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "LinkSetMemberRow")]
 pub struct MemberRow {
+    #[ts(as = "MemberKind")]
     pub kind: String,
     pub entity_id: String,
     /// The item's title, or `None` when knobas has no entity of that id.
@@ -109,8 +156,10 @@ pub struct MemberRow {
 
 /// A pattern member as the editor draws it: its query and what it matches
 /// now, "(N match now)".
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "LinkSetPatternRow")]
 pub struct PatternRow {
+    #[ts(as = "MemberKind")]
     pub kind: String,
     pub query: String,
     /// How many live items it matches now.
@@ -121,7 +170,8 @@ pub struct PatternRow {
 
 /// A project or space the items of a pattern's kind sit in, for the
 /// pattern dialog's dropdown.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "LinkSetPatternProject")]
 pub struct PatternProject {
     pub source_id: String,
     pub key: String,
@@ -135,7 +185,8 @@ pub struct PatternProject {
 /// What the pattern dialog shows (R-7.7, "Matches now: N"): what the query
 /// would match, the projects to pick from, and why the query is not a
 /// pattern, if it is not.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "LinkSetPatternPreview")]
 pub struct PatternPreview {
     pub count: i64,
     pub matches: Vec<MemberRow>,
@@ -145,8 +196,10 @@ pub struct PatternPreview {
 }
 
 /// A rule as the views draw it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "LinkSetRuleRow")]
 pub struct RuleRow {
+    #[ts(as = "RuleKind")]
     pub kind: String,
     pub value: String,
     /// The rule's ticket's title, or its project's name; `None` when knobas
@@ -155,7 +208,8 @@ pub struct RuleRow {
 }
 
 /// One set, as the Link sets view lists it (R-7.6).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LinkSetRow {
     /// A slug: `#/sets/<id>` opens the set.
     pub id: String,
@@ -172,7 +226,8 @@ pub struct LinkSetRow {
 }
 
 /// A ticket a rule or a set applies to.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct RuleTicket {
     pub entity_id: String,
     pub title: String,
@@ -181,10 +236,12 @@ pub struct RuleTicket {
 
 /// One set, as its editor draws it (R-7.7): the row, and the tickets it shows
 /// on now (*Shows on N tickets now*).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LinkSetDetail {
     #[serde(flatten)]
     pub set: LinkSetRow,
+    /// The tickets it shows on now, in key order.
     pub shows_on: Vec<RuleTicket>,
 }
 
@@ -1028,30 +1085,37 @@ pub async fn hide(
 
 /// One member of a set that applies to a job (#867): what the drawer's
 /// group lists, and whether *Hide here* hid it on this ticket.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct JobMember {
     /// The member's kind, one of [`MEMBER_KINDS`]: the row's section.
+    #[ts(as = "MemberKind")]
     pub kind: String,
     pub entity_id: String,
     /// The entity's own kind, what the row links by; `None` when knobas has
     /// no entity of that id.
     pub entity_kind: Option<String>,
     pub title: Option<String>,
+    /// Hidden on this ticket by *Hide here* (R-7.5).
     pub hidden: bool,
 }
 
 /// One set that applies to a job (R-4.4, R-6.2): the chip's name, the reason
 /// (the first of its rules that matches, in the set's order) and its members.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct JobSet {
     pub id: String,
     pub name: String,
+    /// The first of its rules that matches the ticket, in the set's order: the
+    /// reason.
     pub via: RuleRow,
     pub members: Vec<JobMember>,
 }
 
 /// One of a parent ticket's own links: the far end.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct JobLink {
     pub entity_id: String,
     pub kind: String,
@@ -1059,7 +1123,8 @@ pub struct JobLink {
 }
 
 /// The parent whose own links a sub-task shows (R-7.3).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct JobParent {
     /// The parent ticket's entity id.
     pub ticket: String,
@@ -1069,9 +1134,12 @@ pub struct JobParent {
 
 /// What a job shows beside its own links (#867): the sets that apply, by
 /// name, and the parent behind R-7.3's switch.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct JobLinkSets {
+    /// The sets that apply, by name.
     pub sets: Vec<JobSet>,
+    /// `None` with no parent, an epic for one, or R-7.3's switch off.
     pub parent: Option<JobParent>,
 }
 
@@ -1217,7 +1285,11 @@ pub const HINT_TICKETS: i64 = 2;
 
 /// R-7.10's hint (#870): "You linked Dashboard_Build by hand to PAY-240 and 2
 /// more tickets under PAY-200. Add it to Payout stack?"
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// An item linked by hand to two or more tickets under the epic a set's rule
+/// names, which the set does not hold yet.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LinkSetHint {
     pub set_id: String,
     pub set_name: String,
@@ -1325,6 +1397,24 @@ pub async fn hints(
 mod tests {
     use super::*;
     use crate::slug::MAX_ID_CHARS;
+
+    /// The two kind unions the generated TypeScript declares (#1326) are
+    /// exactly the lists the saves check against, in their order: a kind
+    /// added to a list alone would be refused by the shell's types, and one
+    /// added to an enum alone offered by the shell and refused on save.
+    #[test]
+    fn the_kind_unions_are_the_kind_lists() {
+        let cfg = ts_rs::Config::new();
+        let union = |kinds: &[&str]| {
+            kinds
+                .iter()
+                .map(|kind| format!("\"{kind}\""))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
+        assert_eq!(<MemberKind as ts_rs::TS>::inline(&cfg), union(MEMBER_KINDS));
+        assert_eq!(<RuleKind as ts_rs::TS>::inline(&cfg), union(RULE_KINDS));
+    }
 
     fn draft() -> LinkSetDraft {
         LinkSetDraft {

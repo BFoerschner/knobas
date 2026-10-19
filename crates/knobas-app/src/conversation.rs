@@ -99,36 +99,51 @@ pub async fn visit(pool: &PgPool, entity_id: &str) -> Result<Option<DateTime<Utc
 }
 
 /// One comment of a thread.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+///
+/// Issue #819.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ThreadComment {
     /// Who wrote it, as the source names them to a person (Jira's
     /// `displayName`), else their account. `None` when the record says nobody.
     pub author: Option<String>,
     /// When it was written. `None` when the source's stamp is absent or reads
     /// as no time: such a comment keeps its place in the source's order.
+    ///
+    /// RFC 3339 on the wire.
     pub at: Option<DateTime<Utc>>,
     /// The text as the source wrote it (Jira's wiki markup), never markup here.
     pub body: String,
     /// The reader wrote it: its author's account is one of the identity's.
     pub mine: bool,
     /// The body names the reader (R-5.3), by [`mentions`]'s rule.
+    ///
+    /// `@name` or Jira's `[~name]`, for an account `@me` resolves to.
     pub mentions_me: bool,
 }
 
 /// What a [`ThreadChange`] says happened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+///
+/// - `status`: The ticket was moved to another status.
+/// - `opened`: A linked pull request was opened.
+/// - `merged`: A linked pull request was merged.
+///
+/// Issue #929.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export_to = "entity.ts")]
 pub enum ChangeKind {
-    /// The ticket was moved to another status.
     Status,
-    /// A linked pull request was opened.
     Opened,
-    /// A linked pull request was merged.
     Merged,
 }
 
 /// One change, drawn between the comments when *Include changes* is on.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+///
+/// Issues #819 and #929: a status move made in Jira or sent by knobas, or a
+/// linked pull request's opening or merge.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ThreadChange {
     pub at: DateTime<Utc>,
     pub kind: ChangeKind,
@@ -152,9 +167,14 @@ pub struct ThreadChange {
 }
 
 /// A ticket's thread, oldest first.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+///
+/// Issue #819.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct Thread {
+    /// In the source's order, oldest first.
     pub comments: Vec<ThreadComment>,
+    /// Status moves and pull-request events, oldest first; never comments.
     pub changes: Vec<ThreadChange>,
     /// The accounts `@me` resolves to, so the shell can mark `@name` in a body
     /// by the same identity this read matched.
@@ -482,57 +502,6 @@ mod tests {
         assert_eq!(read.author.as_deref(), Some("mara"));
         assert!(read.mine);
         assert!(!read.mentions_me);
-    }
-
-    /// The wire shape and its hand-written mirror (`app/src/lib/ipc/entity.ts`)
-    /// name the same fields and the same two commands.
-    #[test]
-    fn the_thread_and_its_mirror_agree() {
-        let mirror = include_str!("../../../app/src/lib/ipc/entity.ts");
-        let thread = serde_json::to_value(Thread {
-            comments: vec![ThreadComment {
-                author: None,
-                at: None,
-                body: String::new(),
-                mine: false,
-                mentions_me: false,
-            }],
-            changes: vec![ThreadChange {
-                at: Utc::now(),
-                kind: ChangeKind::Opened,
-                status: None,
-                from: None,
-                by: None,
-                mine: false,
-                number: None,
-                repo: None,
-            }],
-            me: vec![],
-        })
-        .unwrap();
-        let fields = |value: &serde_json::Value| -> Vec<String> {
-            value.as_object().unwrap().keys().cloned().collect()
-        };
-        for key in fields(&thread)
-            .iter()
-            .chain(&fields(&thread["comments"][0]))
-            .chain(&fields(&thread["changes"][0]))
-        {
-            assert!(
-                mirror.contains(&format!("  {key}:")),
-                "{key} is not mirrored"
-            );
-        }
-        assert!(mirror.contains("export interface Thread {"));
-        for kind in [ChangeKind::Status, ChangeKind::Opened, ChangeKind::Merged] {
-            let word = serde_json::to_value(kind).unwrap();
-            assert!(
-                mirror.contains(&format!("\"{}\"", word.as_str().unwrap())),
-                "{word} is not mirrored"
-            );
-        }
-        assert!(mirror.contains("\"visit_entity\""));
-        assert!(mirror.contains("\"entity_thread\""));
     }
 
     #[test]

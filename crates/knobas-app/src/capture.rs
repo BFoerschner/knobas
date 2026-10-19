@@ -111,7 +111,13 @@ const WINDOW_URL: &str = "capture.html";
 /// **derived** room -- *All work*, a source, a project -- has no context at
 /// all, and a reader browsing with nothing open has no foreground, and either
 /// can be true without the other.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+///
+/// Issue #503. The two ids a capture attaches, and nothing else: `context` is
+/// the **stored** room's `ctx:` entity; `foreground` is the **foreground** as
+/// `CONTEXT.md`'s *Passive attribution* defines it, which is `shell/timer.ts`'s
+/// `roomForeground` and no second spelling of it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "CaptureContext")]
 pub struct Recorded {
     /// The `ctx:` entity of the last **stored** room, or `None`.
     pub context: Option<String>,
@@ -125,7 +131,14 @@ pub struct Recorded {
 /// nothing stored (`accelerator: None`), stored and registered
 /// (`refusal: None`), and stored but **not** registered, which is an
 /// accelerator and a sentence saying why.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+///
+/// Issue #503. With nothing stored no key is taken from any other application
+/// until somebody chooses one. A refusal is the sentence to show -- the plugin
+/// could not parse the accelerator, or the operating system would not give the
+/// combination up -- because *which* refusal it was is the whole of what the
+/// reader can act on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "CaptureShortcut")]
 pub struct ShortcutView {
     /// What is stored, or `None` when nothing is -- the default, in which case
     /// no shortcut is registered and knobas has taken no key from anybody.
@@ -135,11 +148,15 @@ pub struct ShortcutView {
     pub refusal: Option<String>,
     /// *Show notes and quick capture* (#832). Off, the stored accelerator is
     /// kept and not registered.
+    ///
+    /// D10. Off, `refusal` is `None` too.
     pub shown: bool,
     /// How many notes there are (#832): Settings › Notes and capture draws
     /// the count beside the switch, from this one read.
     pub note_count: u64,
     /// When the newest note was last changed, or `None` with no notes.
+    ///
+    /// RFC 3339 on the wire.
     pub last_note_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 

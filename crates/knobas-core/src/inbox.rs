@@ -105,21 +105,27 @@ use crate::CoreError;
 /// composed key as opaque text and nothing constrains it. So this list has no
 /// CHECK to be pinned against and is deliberately not declared with
 /// [`crate::closed_vocabulary!`], whose whole purpose is that pinning.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
+///
+/// - `review_request`: Somebody is waiting on your review of a pull request.
+/// - `mention`: Somebody wrote your name at you.
+/// - `failed_build`: A build on your work went red.
+/// - `new_assignment`: Work arrived: a ticket somebody else pointed at you.
+/// - `credential_expiry`: A credential knobas holds stops working soon.
+/// - `alert`: A monitor watching something in the estate is down or slow, and a
+///   context holds the asset it watches.
+///
+/// The shell's union is generated from this enum, so a category added here
+/// makes a total `switch` over it fail `svelte-check` rather than fall through
+/// to a label nobody notices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "InboxCategory")]
 pub enum Category {
-    /// Somebody is waiting on your review of a pull request.
     ReviewRequest,
-    /// Somebody wrote your name at you.
     Mention,
-    /// A build on your work went red.
     FailedBuild,
-    /// Work arrived: a ticket somebody else pointed at you.
     NewAssignment,
-    /// A credential knobas holds stops working soon.
     CredentialExpiry,
-    /// A monitor watching something in the estate is down or slow, and a
-    /// context holds the asset it watches.
     Alert,
 }
 
@@ -213,10 +219,20 @@ impl std::str::FromStr for Category {
 ///
 /// Everything a reader needs to judge an item without opening it (#45, story
 /// 7): which source it came from, what it is about, and why it is here.
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+///
+/// **Derived, not stored.** There is no inbox table: every field here is
+/// computed from the mirror when the stream is read, which is why an item
+/// leaves on its own when the thing it was about is resolved at the source.
+#[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct InboxItem {
     /// `'<category>:<subject>'` -- what snooze and done are keyed on, and what
     /// the interface hands back when the user answers.
+    ///
+    /// Stable across syncs: the category is a fixed word and the subject is an
+    /// entity id (or a source id, for a credential expiry). The shell never
+    /// composes one: it hands back the string it was given, to
+    /// `snooze_inbox_item` and `complete_inbox_item`.
     pub key: String,
     /// Which demand this is. Decoded from the statement's text column so the
     /// wire form is the enum rather than a bare string.
@@ -229,23 +245,34 @@ pub struct InboxItem {
     /// a source and not an entity: the inbox is a way in, not a dead end
     /// (story 8), and the one item with no entity behind it says so by
     /// carrying none rather than by pointing somewhere wrong.
+    ///
+    /// An item with no entity has no *Open*, and that is honest rather than
+    /// incomplete.
     pub entity_id: Option<String>,
     /// The entity's kind, for the monogram. `None` with `entity_id`.
     pub kind: Option<String>,
     /// What the item is about, in the source's own words.
+    ///
+    /// Raw source text. Render it as text, never as markup (gotcha 7).
     pub title: String,
     /// Why this is in the stream, as a sentence -- produced by the rule, not
     /// re-rendered from the category at display time. The same discipline
     /// `suggest::SuggestionEntry::reason` gets: a demand whose reason cannot
     /// be shown is not shippable.
+    ///
+    /// Also raw text.
     pub reason: String,
     /// When the item last moved. The stream's ordering, and what *done* is
     /// measured against.
+    ///
+    /// RFC 3339 on the wire.
     pub occurred_at: DateTime<Utc>,
     /// Where a human reads this in the source's own UI, when the mirror knows.
     pub web_url: Option<String>,
     /// When this item comes back, for the rows on the snoozed shelf. `None` on
     /// the stream itself.
+    ///
+    /// RFC 3339 on the wire.
     pub snoozed_until: Option<DateTime<Utc>>,
 }
 
@@ -841,12 +868,17 @@ pub fn rule(category: Category) -> Option<&'static Rule> {
 /// argument: the inbox view and the snoozed panel are one read with one
 /// predicate, and asking for the shelf by name is what keeps them from
 /// becoming two statements that can disagree about what "snoozed" means.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+///
+/// - `stream`: What needs you now. This is the inbox.
+/// - `snoozed`: What you deferred, and when it comes back.
+///
+/// One derivation with one predicate, asked for one side or the other, so the
+/// two shelves can never overlap or leave a gap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "InboxShelf")]
 pub enum Shelf {
-    /// What needs you now. This is the inbox.
     Stream,
-    /// What you deferred, and when it comes back.
     Snoozed,
 }
 

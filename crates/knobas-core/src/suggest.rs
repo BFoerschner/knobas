@@ -64,6 +64,8 @@ crate::closed_vocabulary! {
     /// The *rule* name beside it is deliberately unconstrained: rules are
     /// expected to grow and a new one must not cost a migration. The class is
     /// the closed axis because it is the one a surface branches on.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "entity.ts")]
     pub enum RuleClass {
         /// The two ends name each other: an issue key found in text that
         /// belongs to the other end. Nothing is inferred.

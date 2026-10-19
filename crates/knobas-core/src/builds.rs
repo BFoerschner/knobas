@@ -24,8 +24,12 @@ use crate::entity::EntityRef;
 /// extended (`crate::payload::parse_instant`); a run in flight has no
 /// `finished`, a queued one neither. `duration_seconds` is the one from the
 /// other, only where both are read.
-#[derive(Debug, Clone, serde::Serialize)]
+///
+/// On the wire `started` and `finished` are RFC 3339, `None` while queued or in
+/// flight.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
 pub struct RunRow {
     pub entity_id: String,
     /// The run's number in the source's own spelling; a queued TeamCity
@@ -37,12 +41,15 @@ pub struct RunRow {
     pub branch: Option<String>,
     pub started: Option<DateTime<Utc>>,
     pub finished: Option<DateTime<Utc>>,
+    /// Whole seconds, only where both instants were read.
     pub duration_seconds: Option<i64>,
     /// The source's own timestamp for the row, what runs are ordered by.
     pub updated_at: Option<DateTime<Utc>>,
     pub web_url: Option<String>,
     /// How the run was started (#961): the declared `trigger`, in the
     /// shell's words.
+    ///
+    /// `None` where the declaration misses.
     pub trigger: Option<crate::payload::Trigger>,
     /// Who started it, as the source spells the account: the declared
     /// `started_by`. A run a change or a schedule started has none.
@@ -71,8 +78,9 @@ pub struct RunRow {
 /// source's word appears, in the list's header line (ADR-0022). `recent` is
 /// its last runs newest first, at most [`PIPELINE_RECENT`]: the strip, the
 /// latest time, and whether the latest run failed.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
 pub struct PipelineRow {
     pub entity_id: String,
     pub source_id: String,

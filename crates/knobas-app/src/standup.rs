@@ -192,7 +192,10 @@ const BLOCKED_BY: &str = "blocked_by";
 /// display time: the discipline `knobas_core::inbox::InboxItem::reason` and
 /// `suggest::SuggestionEntry::reason` both record, and for the same reason --
 /// a line whose provenance cannot be shown is not shippable.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+///
+/// Issue #288.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DigestLine {
     /// The item to open, as an entity id -- what the view addresses.
     ///
@@ -201,12 +204,18 @@ pub struct DigestLine {
     /// credential expiry carries the same absence for the same reason -- a
     /// line that pointed somewhere wrong would be worse than one that says it
     /// has nowhere to point.
+    ///
+    /// The view draws that line as text rather than as a link: "DB config for
+    /// the migration" is a legal thing to be working on, and a digest that
+    /// dropped it would leave the reader's own afternoon out of their standup.
     pub entity_id: Option<String>,
     /// The entity's kind, for the monogram. `None` with `entity_id`.
     pub kind: Option<String>,
     /// What the line is about, in the source's own words -- or the ad-hoc
     /// label, for the one line that has no entity. Untrusted text: render it
     /// as text.
+    ///
+    /// Never as markup (gotcha 7).
     pub title: String,
     /// **Which source.** A `source_config.id` for anything the mirror saw or a
     /// write was addressed to; [`KNOBAS`] for a line that is knobas' own
@@ -225,16 +234,33 @@ pub struct DigestLine {
     /// `Other(String)` arm and would then be a closed type pretending. The
     /// five knobas-owned words are consts above so that no reader has to
     /// spell one twice.
+    ///
+    /// On the wire: `attributed`, `log_work`, `timer`, `blocked_status`,
+    /// `blocked_by`, or a write's op (`comment`, `transition`, …). A view that
+    /// branches on it must have a default arm.
+    ///
+    /// `attributed`, not `authored`: interfaces §4.1's `author` is whoever the
+    /// **adapter** says a record belongs to, and Jira's says the assignee, so a
+    /// mirror line means "the source attributes this to you", never "you wrote
+    /// it".
     pub verb: String,
     /// Why this line is here, as a sentence naming the source and the verb.
     pub reason: String,
     /// When it happened -- and for a blocker, when the item last moved, which
     /// is what the list is ordered by.
+    ///
+    /// RFC 3339 on the wire.
     pub at: DateTime<Utc>,
 }
 
 /// The four lists, and which day the first of them is about.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+///
+/// Issues #288 and #932. `CONTEXT.md`'s **digest**, drawn from the mirror and
+/// the activity stream for the configured usernames. Mine only (bar
+/// [`infrastructure`](Self::infrastructure)): it describes the person the
+/// sources were configured as, never a colleague.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct StandupDigest {
     /// The day [`yesterday`](Self::yesterday) is really about, in the reader's
     /// own reckoning -- Friday, on a Monday.
@@ -243,6 +269,8 @@ pub struct StandupDigest {
     /// week of silence and not an error. The view says so; a date filled in
     /// anyway would be a heading over an empty list claiming that day was
     /// quiet, when what happened is that no day was found.
+    ///
+    /// `"2026-08-28"` on the wire.
     pub yesterday_day: Option<NaiveDate>,
     /// The newest earlier day with any of the user's activity, newest first.
     pub yesterday: Vec<DigestLine>,
@@ -250,6 +278,10 @@ pub struct StandupDigest {
     /// timer's target, newest first.
     pub today: Vec<DigestLine>,
     /// The user's items a source calls stuck or a link calls blocked.
+    ///
+    /// An item can be on this list twice, once for each reason: they are two
+    /// different facts about it, and collapsing them would throw one of them
+    /// away.
     pub blockers: Vec<DigestLine>,
     /// The monitor alerts since the last working day (#932, R-13.4): every
     /// [alert](knobas_sync::alerts) that was open at any point from the start
@@ -260,6 +292,10 @@ pub struct StandupDigest {
     /// in the mirror, and the standup asks what happened to the estate, not
     /// what happened to you. A monitor's restart is not here: the mirror
     /// records a state change, not why it changed.
+    ///
+    /// One line per alert: `kind` `"monitor"`, `verb` `"down"` or `"warn"`,
+    /// `reason` the duration (`was down 12 min`, `is still down`) and `at` when
+    /// it began.
     pub infrastructure: Vec<DigestLine>,
 }
 

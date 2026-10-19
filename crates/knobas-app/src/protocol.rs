@@ -147,7 +147,10 @@ const ACTOR: &str = "user";
 /// reader picks out of the mirror. The space key the op also needs is *not*
 /// stored here -- it is read off the parent's own record at publish time, so
 /// the pair can never disagree about which space the parent is in.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Issue #289, spec #272 stories 67-68.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct PublishTarget {
     /// The Confluence source's instance id.
     pub source_id: String,
@@ -156,7 +159,8 @@ pub struct PublishTarget {
 }
 
 /// What became of a date's publication, as far as knobas can tell.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct Publication {
     /// The write queue row that carries it.
     pub write_id: i64,
@@ -175,9 +179,17 @@ pub struct Publication {
 }
 
 /// A date's protocol: the note, and what became of publishing it.
-#[derive(Clone, Debug, Serialize)]
+///
+/// `CONTEXT.md`'s **standup protocol**: a note, one per date, holding
+/// attendees, per-person notes and action items. Not a kind of its own, which
+/// is why this carries a `note_id` and everything else about it is read through
+/// `get_note` like any other note.
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct Protocol {
     /// The date this protocol is for, as the reader's own calendar spells it.
+    ///
+    /// `YYYY-MM-DD` on the wire.
     pub day: NaiveDate,
     /// The note's entity id.
     pub note_id: String,

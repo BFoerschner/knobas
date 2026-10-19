@@ -33,7 +33,6 @@ mod demo_delete_during_load;
 mod dependencies_ipc;
 mod docs_ipc;
 mod entity;
-mod entity_mirror;
 mod entity_role;
 mod entity_view;
 mod estate_exit;

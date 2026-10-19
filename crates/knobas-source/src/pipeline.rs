@@ -30,7 +30,10 @@ use crate::view::{Fact, Setting};
 pub const OLDER_RUNS_MAX: u32 = 100;
 
 /// A pipeline's settings, read live (#851).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// A secret parameter's value is never sent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct PipelineSettings {
     /// The repositories the pipeline checks out, in the source's order. Most
     /// pipelines build one.
@@ -64,7 +67,8 @@ pub struct PipelineSettings {
 }
 
 /// One pipeline of a chain (#857).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ChainStep {
     /// The pipeline's [`EntityRef`](knobas_spi_types::entity::EntityRef) in string
     /// form, of the same source.
@@ -91,7 +95,8 @@ pub struct RunChainStep {
 /// How one parameter is asked for when a run is started (#852): the
 /// source's own spec of it, parsed. A parameter the source says nothing
 /// about, or says something the adapter cannot read, is [`ParameterKind::Text`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ParameterSpec {
     /// The parameter's full name, as in [`PipelineSettings::parameters`].
     pub name: String,
@@ -103,20 +108,28 @@ pub struct ParameterSpec {
 }
 
 /// The field a parameter is asked with. Tagged on `type`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// - `text`: Free text: anything typed is the value.
+/// - `select`: One of a fixed list, in the source's order.
+/// - `checkbox`: On or off, each with the value it sends.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum ParameterKind {
-    /// Free text: anything typed is the value.
     #[default]
     Text,
-    /// One of a fixed list, in the source's order.
-    Select { options: Vec<ParameterOption> },
-    /// On or off, each with the value it sends.
-    Checkbox { checked: String, unchecked: String },
+    Select {
+        options: Vec<ParameterOption>,
+    },
+    Checkbox {
+        checked: String,
+        unchecked: String,
+    },
 }
 
 /// One value a [`ParameterKind::Select`] offers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ParameterOption {
     /// What the run sends.
     pub value: String,
@@ -125,7 +138,10 @@ pub struct ParameterOption {
 }
 
 /// One repository a pipeline builds.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Issue #851.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct PipelineRepository {
     /// What the source calls the checkout.
     pub name: String,
@@ -143,7 +159,10 @@ pub struct PipelineRepository {
 
 /// One trigger of a pipeline: its kind in the source's word and what it
 /// fires on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Issue #851.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct PipelineTrigger {
     /// The kind of trigger, in the source's word (`VCS`, `Schedule`).
     pub name: String,

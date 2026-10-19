@@ -37,11 +37,14 @@ use crate::CoreError;
 /// Deliberately not the mirror row. `body_text` and `payload` are the detail
 /// view's business (the app's `EntityDetail`), and a room that fetched them would pull
 /// the whole corpus into the webview to render five columns of it.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct EntityRow {
+    /// `"<namespace>:<key>"` -- `mock:PAY-231`. The kind is not part of it.
     pub entity_id: String,
     pub kind: String,
     pub source_id: String,
+    /// Raw source text. Render it as text, never as markup (gotcha 7).
     pub title: String,
     /// When the *source* says the item changed.
     ///
@@ -49,8 +52,13 @@ pub struct EntityRow {
     /// the mirror keeps the hole rather than filling it with `now()`, so a row
     /// that has never been dated is distinguishable from one changed this
     /// second.
+    ///
+    /// RFC 3339 on the wire. The room sorts an undated row last rather than
+    /// first.
     pub updated_at: Option<DateTime<Utc>>,
     /// When knobas last saw it. Always known -- it is knobas' own clock.
+    ///
+    /// RFC 3339 on the wire.
     pub synced_at: DateTime<Utc>,
     /// Where this row sits **inside its source**, as one line -- a Confluence
     /// page's ancestor path, `Engineering \u{203a} Payments` (#284, ratified
@@ -77,6 +85,8 @@ pub struct EntityRow {
     /// ADR-0007 **miss**, so a row shows no chip rather than a wrong one.
     ///
     /// On both `EntityRow`s, pinned to one wire shape like `path`.
+    ///
+    /// `text` is source text: render it as text.
     pub state: Option<crate::payload::StateChip>,
 }
 
@@ -116,22 +126,13 @@ pub fn entity_row(row: &sqlx::postgres::PgRow) -> Result<EntityRow, sqlx::Error>
 /// Both lists are *unfiltered when empty*, which is why they are bound as
 /// `NULL` rather than as an empty array: `= any('{}')` matches nothing, and a
 /// room whose filter said "no sources in particular" would come back empty.
+/// Do not "helpfully" send every known id instead of an empty list.
 ///
-/// `Serialize` behind `test-util`, although nothing sends a filter the other
-/// way: it is what lets `knobas-app`'s `tests/it/entity_mirror.rs` pin an *input* DTO through a
-/// round trip, and so see a field this struct has that
-/// `app/src/lib/ipc/entity.ts` never declares. A decode-only check is blind to
-/// that direction -- serde reads a missing `Option` as `None`, so a Rust-only
-/// optional field decodes clean and the mirror never has to declare it.
-///
-/// Gated rather than unconditional: a filter is something the frontend
-/// *sends*, and a production build that can also write one invites a caller
-/// to round-trip a command argument through nothing. The app crate's
-/// `test-util` turns this crate's on, and its `cargo test` turns that on
-/// through its self-dev-dependency; `tauri build` and the `clippy --lib` half
-/// of the gate compile without it.
-#[derive(Debug, Clone, serde::Deserialize)]
-#[cfg_attr(feature = "test-util", derive(serde::Serialize))]
+/// Deserialize only: a filter is something the frontend *sends*, and its
+/// TypeScript is generated from this struct (#1326), so a field added here is
+/// a field the shell's type has without a round trip to prove it.
+#[derive(Debug, Clone, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct EntityFilter {
     /// Source ids to include; empty means every source.
     pub sources: Vec<String>,
@@ -145,6 +146,9 @@ pub struct EntityFilter {
     /// rule (§16.11, ADR-0008). `None` is unscoped -- every derived room. The
     /// membership is resolved server-side per read rather than shipped as an
     /// id list, so a page and its `total` always describe the same instant.
+    ///
+    /// The fixed rule is the seed, its direct links, one hop, and what the
+    /// assets among them hold.
     pub context: Option<String>,
     /// Only items carrying this project key, in the source's own word
     /// (ADR-0010, issue #208). `None` is unscoped, the same "empty means
@@ -173,6 +177,7 @@ pub struct EntityFilter {
     /// row must be in both. Absent on the wire reads as `None`, so a caller
     /// written before #817 is unscoped as it was.
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub reach: Option<String>,
     /// Only what this role's surface draws (#1294, ADR-0029 as amended on
     /// 2026-10-19): the rows of the sources that **fill** the role, which the
@@ -184,46 +189,46 @@ pub struct EntityFilter {
     /// empty, never an error. `None` is unscoped, and absent on the wire
     /// reads as `None`, as [`Self::reach`] does.
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub role: Option<String>,
 }
 
 /// The orderings a room reads in: the two plain ones, and since #680 the two
 /// tile orders.
 ///
-/// `Serialize` behind `test-util` for the same reason [`EntityFilter`] carries
-/// it: it rides inside the filter's round trip, and pins this union against the
-/// mirror's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
-#[cfg_attr(feature = "test-util", derive(serde::Serialize))]
+/// - `updated_desc`: Newest first, by the source's own timestamp. Undated items
+///   last.
+/// - `title_asc`: Alphabetical by title.
+/// - `attention`: **What needs attention first** (#680): a room's Code tile. A
+///   row whose declared state is **settled** -- tone `ok` (done and good: a
+///   merged pull request) or `muted` (over: a closed one) -- is not in the set.
+///   What is left is ordered by its state's tone, loudest first (`err`, `warn`,
+///   `info`), then rows with no state, each run newest first.
+///
+///   Driven by the declared state and its tone, never by a kind or an adapter:
+///   a kind whose source declares no state, and a record whose declared state
+///   misses, has no tone, so nothing hides it and it sorts by recency (§3a; the
+///   ADR-0007 miss fails toward drawing the row).
+/// - `latest_per_parent`: **One row per parent, its latest** (#680): a room's
+///   Builds tile. Where a row's kind declares a state, its rows are grouped by
+///   the parent chain their kind declares (ADR-0018) -- every name each parent
+///   answers to, so two configurations sharing a display name stay two -- and
+///   only the newest of each group is kept: a configuration's health is its
+///   latest build. The kept rows are ordered by tone, every tone drawn (`err`,
+///   `warn`, `info`, `ok`, `muted`, then no state), each run newest first.
+///
+///   A kind that declares no state is not grouped, and a row whose parent
+///   misses stands alone: both fall back to recency (§3a), so a source that
+///   never said what its builds' outcomes are draws every build.
+///
+/// Both tile orders read the live corpus only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum EntityOrder {
-    /// Newest first, by the source's own timestamp. Undated items last.
     UpdatedDesc,
-    /// Alphabetical by title.
     TitleAsc,
-    /// **What needs attention first** (#680): a room's Code tile. A row whose
-    /// declared state is **settled** -- tone `ok` (done and good: a merged
-    /// pull request) or `muted` (over: a closed one) -- is not in the set.
-    /// What is left is ordered by its state's tone, loudest first (`err`,
-    /// `warn`, `info`), then rows with no state, each run newest first.
-    ///
-    /// Driven by the declared state and its tone, never by a kind or an
-    /// adapter: a kind whose source declares no state, and a record whose
-    /// declared state misses, has no tone, so nothing hides it and it sorts
-    /// by recency (§3a; the ADR-0007 miss fails toward drawing the row).
     Attention,
-    /// **One row per parent, its latest** (#680): a room's Builds tile. Where
-    /// a row's kind declares a state, its rows are grouped by the parent
-    /// chain their kind declares (ADR-0018) -- every name each parent answers
-    /// to, so two configurations sharing a display name stay two -- and only
-    /// the newest of each group is kept: a configuration's health is its
-    /// latest build. The kept rows are ordered by tone, every tone drawn
-    /// (`err`, `warn`, `info`, `ok`, `muted`, then no state), each run newest
-    /// first.
-    ///
-    /// A kind that declares no state is not grouped, and a row whose parent
-    /// misses stands alone: both fall back to recency (§3a), so a source
-    /// that never said what its builds' outcomes are draws every build.
     LatestPerParent,
 }
 
@@ -241,7 +246,8 @@ impl EntityOrder {
 /// What a tile's header phrases ("2 open pull requests · 5 branches", "1
 /// failing · 7 build configurations"), counted over the whole ordered set
 /// rather than the page, as [`EntityPage::total`] is.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct KindTally {
     pub kind: String,
     /// The tone of the rows' state chip; `None` for rows that have none.
@@ -256,40 +262,44 @@ pub struct KindTally {
 /// compared case-sensitively as the inbox and the standup compare it. A pull request
 /// and a branch are knobas' own words (`0001_init.sql`), and the inbox's
 /// review rule names `pr` the same way.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// - `review_requested`: Open pull requests whose declared reviewers include me
+///   (Gitea's `requested_reviewers`, as the inbox reads it). Whether I reviewed
+///   since the last push is not in the mirror -- it holds no reviews and no
+///   push times -- so #712's clause asking it is dropped.
+/// - `my_pull_requests`: Open pull requests I opened.
+/// - `open_pull_requests`: Every other open pull request.
+/// - `my_branches`: Branches whose last commit is mine and that no open pull
+///   request of the same repo is opened from (its declared `head`).
+/// - `branches`: Branches of a source with no configured identity, in a room
+///   where another source has one (ruled 2026-10-13 on #712): nobody can say
+///   whose they are, so they are not hidden as somebody else's. The tile draws
+///   them as it drew every branch before, newest first.
+/// - `other_branches`: Every other branch: somebody else's, or one an open pull
+///   request already stands for. The tile draws these only maximised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum AttentionGroup {
-    /// Open pull requests whose declared reviewers include me (Gitea's
-    /// `requested_reviewers`, as the inbox reads it). Whether I reviewed
-    /// since the last push is not in the mirror -- it holds no reviews and
-    /// no push times -- so #712's clause asking it is dropped.
     ReviewRequested,
-    /// Open pull requests I opened.
     MyPullRequests,
-    /// Every other open pull request.
     OpenPullRequests,
-    /// Branches whose last commit is mine and that no open pull request of
-    /// the same repo is opened from (its declared `head`).
     MyBranches,
-    /// Branches of a source with no configured identity, in a room where
-    /// another source has one (ruled 2026-10-13 on #712): nobody can say
-    /// whose they are, so they are not hidden as somebody else's. The tile
-    /// draws them as it drew every branch before, newest first.
     Branches,
-    /// Every other branch: somebody else's, or one an open pull request
-    /// already stands for. The tile draws these only maximised.
     OtherBranches,
 }
 
 /// How many rows of the set one [`AttentionGroup`] holds.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct GroupTally {
     pub group: AttentionGroup,
     pub count: i64,
 }
 
 /// One page of a room, plus the size of the set it was cut from.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct EntityPage {
     pub rows: Vec<EntityRow>,
     /// The whole filtered set, before `limit`/`offset`. `0` for an empty page.
@@ -918,6 +928,22 @@ pub async fn read(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A filter written before #817 carries no `reach`, and one written
+    /// before #1294 no `role`: both read as unscoped. The generated
+    /// TypeScript declares both optional (`reach?`, `role?`), and the shell
+    /// leaves them out; this is the half of that promise the Rust keeps.
+    /// Moved here from the hand-written mirror's suite, deleted by #1326.
+    #[test]
+    fn a_filter_without_reach_or_role_is_unscoped() {
+        let decoded: EntityFilter = serde_json::from_value(serde_json::json!({
+            "sources": [], "kinds": [], "updated_within_days": null, "order": "updated_desc",
+            "context": null, "project": null, "include_deleted": false,
+        }))
+        .unwrap();
+        assert_eq!(decoded.reach, None);
+        assert_eq!(decoded.role, None);
+    }
 
     /// The six statements are six, and each names its columns.
     ///

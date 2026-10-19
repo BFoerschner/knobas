@@ -9,9 +9,12 @@ use super::*;
 /// Every field falls back to the source id, because `run_once` syncs sources
 /// that have no `knobas.source_config` row (tests, ad-hoc imports, interfaces
 /// §1). An entity whose source was deleted still has to render.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct SourceRef {
     pub id: String,
+    /// The configured display name, falling back to the id: `run_once` syncs
+    /// sources that were never configured, so there is not always a name.
     pub display_name: String,
     /// The *adapter* kind (`jira`, `mock`), not the instance id.
     pub adapter_kind: String,
@@ -33,7 +36,8 @@ pub struct SourceRef {
 }
 
 /// Everything the slide-over draws for one entity (interfaces §2.5).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct EntityDetail {
     pub row: EntityRow,
     pub source: SourceRef,
@@ -50,12 +54,18 @@ pub struct EntityDetail {
     pub author: Option<String>,
     /// The source record **verbatim** (§3a): what the generic detail view
     /// projects. It is untrusted text all the way down.
+    ///
+    /// `unknown` in the shell, per §2.6's `serde_json::Value` mapping: project
+    /// it as text, never as markup (interfaces §2.5, gotcha 7).
+    #[ts(type = "unknown")]
     pub payload: serde_json::Value,
     /// Where the item lives in its own system, or `None` when the adapter
     /// reported no page -- in which case *Open in browser* is absent (P5).
     pub web_url: Option<String>,
     /// Set when the source withdrew the entity. The mirror row survives, so
     /// links and notes still resolve (§5a).
+    ///
+    /// RFC 3339 on the wire, `None` while the source still has it.
     pub deleted_at: Option<DateTime<Utc>>,
     /// Every link this entity takes part in, newest first, each with the end
     /// the reader is *not* on already resolved.

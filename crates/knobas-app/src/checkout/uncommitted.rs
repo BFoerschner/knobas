@@ -69,7 +69,10 @@ pub const READ_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_UNTRACKED: usize = 1_000;
 
 /// One half of the uncommitted diff, as a diff block carries it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+///
+/// Issue #824.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct CappedDiff {
     pub files: Vec<DiffFile>,
     /// A cap cut this half: the per-view cap of the parser, or the read cap
@@ -78,7 +81,10 @@ pub struct CappedDiff {
 }
 
 /// What is uncommitted at a checkout.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+///
+/// Issue #824, ADR-0026.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct UncommittedDiff {
     /// Changed in the working tree and not staged (`git diff`).
     pub unstaged: CappedDiff,
@@ -95,16 +101,21 @@ pub struct UncommittedDiff {
 /// The answer the *Local changes* tab draws: the diff, or why there is none.
 /// The same four arms as the working tree's
 /// [`TreeRead`](super::working_tree::TreeRead).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+///
+/// - `read`: git answered.
+/// - `no_git`: No `git` on `PATH`.
+/// - `not_a_repo`: The path is not a git working tree, or not there at all.
+/// - `failed`: git ran and did not answer: it timed out, or refused with
+///   `reason`.
+///
+/// Issue #824. None of the arms is an error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum DiffRead {
-    /// git answered.
     Read(UncommittedDiff),
-    /// No `git` on `PATH`.
     NoGit,
-    /// The path is not a git working tree, or not there at all.
     NotARepo,
-    /// git ran and did not answer: it timed out, or refused with `reason`.
     Failed { reason: String },
 }
 
@@ -307,50 +318,6 @@ async fn run_capped(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The four arms serialise as the words `app/src/lib/ipc/entity.ts`
-    /// narrows on, with the diff's fields beside the tag.
-    #[test]
-    fn the_read_serialises_as_the_mirror_declares() {
-        let mirror = include_str!("../../../../app/src/lib/ipc/entity.ts");
-        let read = serde_json::to_value(DiffRead::Read(UncommittedDiff::default())).unwrap();
-        let mut keys: Vec<String> = read.as_object().unwrap().keys().cloned().collect();
-        keys.sort();
-        assert_eq!(
-            keys,
-            [
-                "staged",
-                "status",
-                "unstaged",
-                "untracked",
-                "untracked_truncated"
-            ]
-        );
-        let half = serde_json::to_value(CappedDiff::default()).unwrap();
-        let mut half_keys: Vec<String> = half.as_object().unwrap().keys().cloned().collect();
-        half_keys.sort();
-        assert_eq!(half_keys, ["files", "truncated"]);
-        for key in keys.iter().chain(&half_keys) {
-            assert!(
-                mirror.contains(&format!("{key}:")),
-                "{key} is missing from app/src/lib/ipc/entity.ts"
-            );
-        }
-        for (arm, word) in [
-            (DiffRead::NoGit, "no_git"),
-            (DiffRead::NotARepo, "not_a_repo"),
-            (
-                DiffRead::Failed {
-                    reason: String::new(),
-                },
-                "failed",
-            ),
-        ] {
-            assert_eq!(serde_json::to_value(arm).unwrap()["status"], word);
-        }
-        assert!(mirror.contains("export type DiffRead ="));
-        assert!(mirror.contains("\"entity_checkout_diff\""));
-    }
 
     /// Long enough that git finishes on a loaded machine.
     const PATIENT: Duration = Duration::from_secs(30);

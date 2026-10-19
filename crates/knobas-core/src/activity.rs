@@ -11,9 +11,11 @@ use crate::CoreError;
 use crate::entity::EntityRef;
 
 /// One line of the activity log.
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ActivityRow {
     pub id: i64,
+    /// RFC 3339 on the wire.
     pub at: chrono::DateTime<chrono::Utc>,
     /// `"user"`; `"knobas"` for an action knobas took on its own (the
     /// start-work flow's reverse direction); or `"sync:<source_id>"` for a
@@ -21,6 +23,14 @@ pub struct ActivityRow {
     pub actor: String,
     pub verb: String,
     pub entity_id: Option<String>,
+    /// Free-form jsonb, so §2.6 maps it to `unknown`.
+    ///
+    /// Not `Record<string, unknown>`: the Rust type is any JSON value, and only
+    /// `activity::insert` coerces a JSON `null` to `{}`. A row written with a
+    /// string, a number or an array is well-typed here and would make the
+    /// narrower declaration a lie, the kind that type-checks in the frontend
+    /// and throws at runtime. Narrow it with a check where you read it.
+    #[ts(type = "unknown")]
     pub detail: serde_json::Value,
 }
 

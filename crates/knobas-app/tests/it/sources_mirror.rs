@@ -12,7 +12,6 @@
 //! field there is a form whose submissions Tauri rejects at run time.
 
 const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/sources.ts");
-const ENTITY_MIRROR: &str = include_str!("../../../../app/src/lib/ipc/entity.ts");
 
 /// The keys `value` serializes to must be exactly `expected`, and exactly what
 /// the mirror's `interface <name>` declares -- both directions.
@@ -298,16 +297,11 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "write_ops",
         ],
     );
-    // `KindInfo` rides inside it, and `entity.ts` is where the mirror declares
-    // it -- so the keys are looked for there rather than in `sources.ts`.
-    knobas_sync::mirror::assert_shape(
-        ENTITY_MIRROR,
-        "KindInfo",
-        &wire["entity_kinds"][0],
-        &["full_sync_exhaustive", "id", "label", "monogram", "plural"],
-    );
-    // So does the declaration of where this source's payloads keep what
-    // knobas reads (#277) -- and the frontend reads it: an adapter's
+    // `KindInfo` rides inside it, and is generated from its Rust type into
+    // `generated/entity.ts` (#1326), so it has no hand-written shape to pin.
+    //
+    // The declaration of where this source's payloads keep what knobas reads
+    // (#277) rides inside it too -- and the frontend reads it: an adapter's
     // declaration is what the sources view can show and what a later reader
     // resolves, so a Rust field with no counterpart here is the same silent
     // drift `KindInfo` records.

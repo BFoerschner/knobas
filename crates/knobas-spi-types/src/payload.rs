@@ -476,8 +476,9 @@ pub struct KindPaths {
 }
 
 /// How a run was started, in the shell's words (#961).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export_to = "sources.ts")]
 pub enum Trigger {
     /// A change pushed to what the pipeline builds: TeamCity's `vcs`.
     Change,
@@ -605,7 +606,8 @@ impl StateValue {
 ///
 /// `EntityRow.state` on the wire. `text` is source text (or the adapter's
 /// rename of it) and is drawn as text.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct StateChip {
     pub text: String,
     pub tone: crate::tone::Tone,

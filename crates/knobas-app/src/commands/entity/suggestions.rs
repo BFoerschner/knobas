@@ -16,13 +16,18 @@ use super::*;
 /// suggestions are waiting, so that I can choose when to spend attention on
 /// them", and a number capped by `limit` answers a different question. Same
 /// shape and same reason as [`EntityPage`].
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct SuggestionPage {
     pub rows: Vec<SuggestionEntry>,
     /// Every proposal in the room, before `limit`.
+    ///
+    /// The number the tray's heading shows.
     pub total: i64,
     /// Items holding more proposals than the tray draws for one item (#774),
     /// most hidden first. The bound is applied by `suggest::proposals`.
+    ///
+    /// The tray draws three per item.
     pub more: Vec<suggest::SuggestionMore>,
 }
 

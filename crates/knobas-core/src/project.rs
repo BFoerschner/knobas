@@ -111,7 +111,10 @@ macro_rules! project_chain_has {
 /// Flat, and carrying its source rather than being grouped under it: the
 /// switcher wants a room list, and grouping here would only be ungrouped
 /// there.
-#[derive(Clone, Debug, Serialize)]
+///
+/// ADR-0010, issue #208.
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct Project {
     /// Which source shows it.
     ///

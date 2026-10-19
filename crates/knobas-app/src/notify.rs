@@ -64,9 +64,16 @@ pub const WAITER_CAP: usize = 16;
 /// cleared or dismissed rather than clicked, on every backend.
 pub const CLOSED: &str = "__closed";
 
-/// What the frontend asks to have shown: the `notify` command's argument,
-/// mirrored as `NotificationDraft` in `app/src/lib/ipc/entity.ts`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// What the frontend asks to have shown: the `notify` command's argument
+/// (#339).
+///
+/// `address` is where the click goes, the inbox's own `addressOf` hash
+/// (`lib/inbox/address.ts`, shared with the inbox row's *Open* since #447);
+/// the backend carries it unread and hands it back on
+/// `EVENTS.notificationClicked`, so both ends of the click path stay the
+/// frontend's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct NotificationDraft {
     pub title: String,
     pub body: String,
@@ -75,8 +82,10 @@ pub struct NotificationDraft {
     pub address: String,
 }
 
-/// The `notification:clicked` payload, mirrored as `NotificationClicked`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The `notification:clicked` payload (#339): the `address` the notification
+/// was sent with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct NotificationClicked {
     pub address: String,
 }
