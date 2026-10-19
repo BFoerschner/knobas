@@ -304,7 +304,7 @@ impl JiraApi for crate::http::JiraHttp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http::{JiraHttp, credential};
+    use crate::http::{CREDENTIAL, JiraHttp, credential};
     use knobas_source::AuthMethod;
 
     /// Every call in this trait, once, against `knobas-mockd`.
@@ -333,7 +333,7 @@ mod tests {
         let http = JiraHttp::new(
             &jira.base_url(),
             &crate::JiraConfig::default(),
-            credential(Some(AuthMethod::Pat), None, Some(knobas_mockd::JIRA_TOKEN))
+            credential(&CREDENTIAL, Some(AuthMethod::Pat), None, Some(knobas_mockd::JIRA_TOKEN))
                 .expect("a PAT is a credential"),
         )
         .expect("mockd's base URL is a URL");
