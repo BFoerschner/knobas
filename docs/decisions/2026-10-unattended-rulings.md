@@ -7917,3 +7917,11 @@ The merge-manager's rulings on #1325 (Opus):
   and `cfg(test)` is set only for the crate under test, so those crates need the impl in their
   ordinary build anyway; one spelling everywhere. The cost is compile time of a derive, nothing
   at run time. *Reversing:* swap to `cfg_attr` per crate.
+
+The merge-manager's ruling on #1351 (Sonnet):
+
+- **"The per-file copies are gone" met for the shared shape.** *Fork:* owe a second helper shape for
+  the ~30 `source_config` inserts with another `base_url`, `auth_kind`, extra columns or `on conflict`
+  clauses, or accept. *Ruling:* accept. The ticket names copies of the same helper; the inserts left
+  differ in shape, and folding them in would need a many-argument helper that hides what each test
+  varies. No follow-up. *Reversing:* file a ticket for a second helper; call sites are mechanical.
