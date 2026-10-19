@@ -6239,3 +6239,25 @@ The merge-manager's rulings:
 - **The `?fake-ipc` Gitea source is not given the ticket-system claim.** The frontend
   suite's Gitea-shaped ticket source (#1200) already witnesses the board. Backlog follow-up
   #1248. **Reversing:** n/a.
+
+The merge-manager's rulings (PR #1249, on Opus):
+
+- **The seed's `(reserved)` index placeholders stay, and the adapter does not skip them.** About
+  140 per repository now sync as closed tickets. They are closed and titled as placeholders, no
+  suite counts tickets (the live tests find their issues by title, `under:` matches parents and a
+  ticket has none, the digest and the responsiveness probe read by containment or not at all),
+  and the probe's corpus grows by under 2 %. Skipping them in the adapter would put fixture
+  knowledge in product code; deleting them would change a seed whose re-run was proven idempotent
+  on both forges. The seed's comment that called them invisible to the adapter now says so.
+  **Reversing:** low (a seed step deleting them after the burn).
+- **ADR-0010 amended in this PR (#1247 folded in).** ADR-0029 and spec #1192 are later and
+  narrower than ADR-0010 on the one point they share: a ticket-system source's tickets carry a
+  project. The amendment gives only Gitea's `ticket` kind the repository as its project and keeps
+  the code kinds without one, so ADR-0010's rejected option (repositories folded into a scoping
+  concept) still stands for them. `CONTEXT.md`'s **Project** says the same. **Reversing:** low.
+- **The issue walk's 10,000-issue guard stays a run failure.** It is `cap_reached`, the crate's
+  rule for every unbudgeted walk, with the same remedy (narrow `repos[]`). A one-off fake run
+  witnessed the boundary (200 one-record pages fit, the 201st fails naming the cap); it was not
+  committed, because 201 requests against the wiremock fake took 35 s. A repository past the
+  guard costs the whole source until it is narrowed. **Reversing:** low (skip that repository's
+  tickets instead, as a 403 does).

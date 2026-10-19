@@ -247,8 +247,10 @@ max_index() {  # max_index <repo>
 
 # Burn issue indices so the next allocated index is <target>. ~140 calls per
 # repo and a few seconds; worth it because every mockup and link test was
-# written against the fixture's PR numbers. The M1 Gitea adapter lists /pulls,
-# not /issues, so these placeholders are invisible to it.
+# written against the fixture's PR numbers. Since #1206 the adapter mirrors
+# issues as tickets, so these come back as closed "(reserved)" tickets. They
+# stay (ruled on PR #1249): closed and titled as placeholders, they are what a
+# real tracker's closed backlog looks like, and no suite counts tickets.
 burn_to() {  # burn_to <repo> <target index>
   _repo=$1; _target=$2
   _cur=$(max_index "$_repo")
