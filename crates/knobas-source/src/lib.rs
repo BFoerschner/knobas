@@ -203,9 +203,10 @@ pub struct SourceDescriptor {
 // them are in `knobas-core`, which may not depend on the SPI. Neither crate
 // needs a database, so both build for `wasm32-wasip2` (#1234). Re-exported so
 // an adapter needs one `use`.
+pub use knobas_spi_types::entity::EntityRef;
 pub use knobas_spi_types::payload::{
-    KindPaths, ListPath, ParentPath, PayloadPath, ProjectPath, StateChip, StatePath, StateValue,
-    Trigger, TriggerPath, TriggerValue,
+    Frame, KindPaths, ListPath, ParentPath, PayloadPath, ProjectPath, StateChip, StatePath,
+    StateValue, Trigger, TriggerPath, TriggerValue,
 };
 pub use knobas_spi_types::tone::Tone;
 
@@ -2421,7 +2422,8 @@ mod tests {
     fn the_create_target_is_not_a_monitor_id() {
         let target = monitor_target("kuma");
         assert_eq!(target, "kuma:monitors");
-        let parsed = knobas_spi_types::entity::EntityRef::parse(&target).expect("the target parses");
+        let parsed =
+            knobas_spi_types::entity::EntityRef::parse(&target).expect("the target parses");
         assert_eq!(parsed.namespace, "kuma");
         assert_eq!(parsed.key, MONITOR_TARGET_KEY);
         assert!(

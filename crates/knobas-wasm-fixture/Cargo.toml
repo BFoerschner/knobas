@@ -7,10 +7,11 @@ version.workspace = true
 # WASM host is tested with, built to a component by `just wasm-fixture`
 # (`--target wasm32-wasip2`). It emits a fixed corpus with a cursor.
 #
-# It cannot use `knobas-source`'s types: that crate pulls `knobas-core`, which
-# pulls sqlx, and none of that builds for wasm. So it writes the SPI's serde
-# JSON by hand, which is what an adapter in any other language would do too.
-# The host's battery run is what holds that JSON to the SPI.
+# Its descriptor and items are `knobas-source`'s own types (#1234), which
+# build for wasm32-wasip2 since they stopped pulling `knobas-core` and sqlx.
+# The rest of its answers are serde JSON written by hand, which is what an
+# adapter in any other language would do too. The host's battery run is what
+# holds both to the SPI.
 #
 # A workspace member, so the gate's fmt and clippy see it; on the host target
 # it compiles to a library nothing loads.
@@ -20,6 +21,8 @@ test = false
 doctest = false
 
 [dependencies]
+chrono.workspace = true
+knobas-source = { path = "../knobas-source" }
 serde_json.workspace = true
 # Pinned exactly: 0.62.0 is the newest release older than two weeks
 # (2026-09-10). The bindings it generates are the guest half of

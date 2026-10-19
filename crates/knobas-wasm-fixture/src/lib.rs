@@ -48,11 +48,14 @@
 mod builds;
 mod fetch;
 
+use chrono::{TimeZone, Utc};
 use exports::knobas::adapter::source::{Guest, GuestAdapter};
 use knobas::adapter::sink;
 use knobas::adapter::types::{
     ConnectionInfo, Fault as WitFault, Instance, RunChainStep, SourceError, SyncItem, WriteReceipt,
 };
+use knobas_source::role::RoleClaim;
+use knobas_source::{AuthMethod, EntityRef, KindInfo, SourceDescriptor};
 
 #[cfg(not(feature = "v1_0"))]
 wit_bindgen::generate!({
@@ -209,17 +212,17 @@ impl Adapter {
     }
 
     fn survey(&self, (key, title, body): (&str, &str, &str)) -> SyncItem {
-        SyncItem {
-            entity: format!("{}:{key}", self.id),
+        emitted(knobas_source::SyncItem {
+            entity: EntityRef::new(&self.id, key),
             kind: "survey".into(),
             title: title.into(),
             body_text: body.into(),
             author: Some("harbourmaster".into()),
-            updated_at: Some("2026-10-18T09:00:00Z".into()),
-            payload: serde_json::json!({ "key": key, "title": title }).to_string(),
+            updated_at: Utc.with_ymd_and_hms(2026, 10, 18, 9, 0, 0).single(),
+            payload: serde_json::json!({ "key": key, "title": title }),
             web_url: None,
             deleted: false,
-        }
+        })
     }
 
     /// A frame item: the pipeline, or a run of it.
@@ -230,17 +233,17 @@ impl Adapter {
         title: &str,
         payload: serde_json::Value,
     ) -> SyncItem {
-        SyncItem {
-            entity: format!("{}:{key}", self.id),
+        emitted(knobas_source::SyncItem {
+            entity: EntityRef::new(&self.id, key),
             kind: kind.into(),
             title: title.into(),
             body_text: String::new(),
             author: None,
-            updated_at: Some("2026-10-18T09:04:00Z".into()),
-            payload: payload.to_string(),
+            updated_at: Utc.with_ymd_and_hms(2026, 10, 18, 9, 4, 0).single(),
+            payload,
             web_url: None,
             deleted: false,
-        }
+        })
     }
 
     /// Every item, in the order the cursor counts them.
@@ -281,6 +284,24 @@ impl Adapter {
             "the {KIND} adapter has no workflow: source {:?} offers no transitions",
             self.id
         ))
+    }
+}
+
+/// The SPI's item as the WIT world carries it: the entity as `ns:key`, the
+/// instant as RFC 3339, the payload as its JSON text.
+fn emitted(item: knobas_source::SyncItem) -> SyncItem {
+    SyncItem {
+        entity: item.entity.to_string(),
+        kind: item.kind,
+        title: item.title,
+        body_text: item.body_text,
+        author: item.author,
+        updated_at: item
+            .updated_at
+            .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+        payload: item.payload.to_string(),
+        web_url: item.web_url,
+        deleted: item.deleted,
     }
 }
 
@@ -330,26 +351,31 @@ impl GuestAdapter for Adapter {
     }
 
     fn descriptor(&self) -> String {
-        serde_json::json!({
-            "id": self.id,
-            "adapter_kind": KIND,
-            "name": self.name,
-            "capabilities": [],
-            "adapter_version": "0.1.0",
+        let [pipeline, run] = builds::kinds();
+        let descriptor = SourceDescriptor {
+            id: self.id.clone(),
+            adapter_kind: KIND.into(),
+            name: self.name.clone(),
+            capabilities: Vec::new(),
+            adapter_version: "0.1.0".into(),
             // A token, which the fixture never reads: every source takes a
             // credential at Add source, and the host attaches it (#1203).
-            "auth_methods": ["Pat"],
-            "accepts_account": false,
-            "min_sync_interval_secs": 60,
-            "write_ops": [],
-            "entity_kinds": [{
-                "id": "survey",
-                "label": "Survey",
-                "plural": "Surveys",
-                "monogram": "SV",
-                "full_sync_exhaustive": true,
-            }, builds::kinds()[0], builds::kinds()[1]],
-            "config_schema": {
+            auth_methods: vec![AuthMethod::Pat],
+            accepts_account: false,
+            min_sync_interval_secs: 60,
+            write_ops: Vec::new(),
+            entity_kinds: vec![
+                KindInfo {
+                    id: "survey".into(),
+                    label: "Survey".into(),
+                    plural: "Surveys".into(),
+                    monogram: "SV".into(),
+                    full_sync_exhaustive: true,
+                },
+                pipeline,
+                run,
+            ],
+            config_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "fault": { "type": "string", "enum": ["none", "unauthorized", "unreachable", "swallow_sink", "spin", "hog"] },
@@ -361,11 +387,19 @@ impl GuestAdapter for Adapter {
                     "username": { "type": "string" },
                 },
                 "additionalProperties": false,
-            },
-            "payload_paths": builds::payload_paths(),
-            "roles": [{ "role": ROLE, "reads": [] }, builds::role()],
-        })
-        .to_string()
+            }),
+            payload_paths: builds::payload_paths().into(),
+            roles: vec![
+                RoleClaim {
+                    role: ROLE.into(),
+                    reads: Vec::new(),
+                },
+                builds::role(),
+            ],
+            source_actions: Vec::new(),
+            clone_from: Vec::new(),
+        };
+        serde_json::to_string(&descriptor).expect("a descriptor serializes")
     }
 
     fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {

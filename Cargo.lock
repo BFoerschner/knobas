@@ -3400,6 +3400,8 @@ dependencies = [
 name = "knobas-wasm-fixture"
 version = "2.0.0"
 dependencies = [
+ "chrono",
+ "knobas-source",
  "serde_json",
  "wasip2",
  "wit-bindgen 0.62.0",
