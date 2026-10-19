@@ -34,45 +34,32 @@
   import { onMount, untrack } from "svelte";
 
   import type {
-    CheckoutView,
-    EntityDetail,
     EntityRow,
-    JobLinkSets,
     LinkEntry,
     LinkSetDetail,
     LinkSetRow,
-    Reached,
-    SuggestionEntry,
-    Thread,
   } from "../../ipc/entity";
-  import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
   import { ipcErrorMessage } from "../../ipc";
   import { inTextField } from "../../shell/keys";
   import type { Timer } from "../../shell/timer.svelte";
   import { push } from "../../shell/toasts.svelte";
   import { openWriteQueue } from "../../shell/write-queue.svelte";
-  import { dayKey } from "../../time/day";
-  import { weekWindows } from "../../time/week";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { Layers } from "../layers.svelte";
   import {
-    PROPOSAL_LIMIT,
     alsoIn,
     connectedCount,
     hiddenOf,
     linkedOn,
     groupsOf,
-    proposalsFor,
     type GroupRow,
   } from "./connections";
   import { summary } from "./conversation";
   import {
-    assetTone,
     assetsRollup,
     blockerEntries,
     buildsRollup,
     byAttention,
-    isEntityId,
     isMine,
     itemHash,
     keyOf,
@@ -80,21 +67,16 @@
     offersStartWork,
     originLabel,
     pagesRollup,
-    resolveTicket,
     runKindsOf,
     staleBuilds,
-    weekReading,
-    type AssetLine,
     type FrameKinds,
     type SectionRow,
-    type SourceFacts,
-    type WeekReading,
   } from "./job";
   import { bridgePorts, bridgeSetPorts, type JobPorts, type JobSetPorts } from "./ports";
   import { applyToast, savedToast, withHandRule, withoutHandRule } from "../sets/apply";
   import TfApplySet from "./TfApplySet.svelte";
   import TfSaveSet from "./TfSaveSet.svelte";
-  import { ASSET_LIMIT, reachFilter, readSection, SECTION_LIMIT, SECTION_READS, type SectionRead } from "./sections";
+  import { createJobReader } from "./job-reader.svelte";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { currentJob } from "./current.svelte";
   import TfCodeSection from "./TfCodeSection.svelte";
@@ -142,183 +124,49 @@
     registry?: FrameKinds;
   } = $props();
 
-  /** `undefined` while reading, `null` when nothing answers to the address. */
-  let detail = $state<EntityDetail | null | undefined>(undefined);
-  let offered = $state<string[] | null>(null);
-  let week = $state<WeekReading | null>(null);
-  let code = $state<EntityRow[] | null>(null);
-  let checkout = $state<CheckoutView | null>(null);
-  let checkoutOf = $state<string | null>(null);
-  let failure = $state<string | null>(null);
-  let thread = $state<Thread | null>(null);
-  let threadFailure = $state<string | null>(null);
-  /** When the reader last opened this job before now: `null` for never. */
-  let lastVisit = $state<string | null>(null);
-  let proposals = $state<SuggestionEntry[] | null>(null);
   let drawer = $state(false);
   let linking = $state(false);
   /** *Apply a link set…* and *Save as a link set…* open (#869). */
   let applyingSet = $state(false);
   let savingSet = $state(false);
-  /** The job-reach read, by entity id: the rows' labels. */
-  let reached = $state<Map<string, Reached>>(new Map());
-  /** The link sets that apply and the parent (#867), `null` until read. */
-  let inherited = $state<JobLinkSets | null>(null);
-  let builds = $state<EntityRow[] | null>(null);
-  let pages = $state<EntityRow[] | null>(null);
-  let monitors = $state<EntityRow[] | null>(null);
-  let assets = $state<AssetLine[] | null>(null);
-  let sources = $state<SourceFacts[]>([]);
-  let health = $state<CredentialHealth[]>([]);
-  let sync = $state<SourceSyncStatus[]>([]);
-  /** Every repository, for *Start work*'s dropdown; `null` until asked. */
-  let repos = $state<{ entity_id: string; title: string }[] | null>(null);
+
+  // ---- the job's reads are the reader's (#1320) ----
+  // svelte-ignore state_referenced_locally
+  // Built once per mount over the ports this page was given: the reader owns the token.
+  const reader = createJobReader(ports, { today: () => today(), registry: { load: () => registry.load() } });
+  const detail = $derived(reader.detail);
+  const offered = $derived(reader.transitions);
+  const week = $derived(reader.week);
+  const code = $derived(reader.code);
+  const checkout = $derived(reader.checkout);
+  const checkoutOf = $derived(reader.checkoutOf);
+  const failure = $derived(reader.failure);
+  const thread = $derived(reader.thread);
+  const threadFailure = $derived(reader.threadFailure);
+  const lastVisit = $derived(reader.lastVisit);
+  const proposals = $derived(reader.proposals);
+  const reached = $derived(reader.reached);
+  const inherited = $derived(reader.inherited);
+  const builds = $derived(reader.builds);
+  const pages = $derived(reader.pages);
+  const monitors = $derived(reader.monitors);
+  const assets = $derived(reader.assets);
+  const sources = $derived(reader.sources);
+  const health = $derived(reader.health);
+  const sync = $derived(reader.sync);
+  const repos = $derived(reader.repos);
 
   // The job on screen is what the timer chip and ⌘T start on (R-1.4).
   $effect(() => currentJob.set(detail?.row.entity_id ?? null));
 
-  /** The read's generation, so an answer for a ticket left behind is dropped. */
-  let token = 0;
-
   $effect(() => {
     const wanted = segment;
-    const mine = ++token;
-    detail = undefined;
-    offered = null;
-    week = null;
-    code = null;
-    checkout = null;
-    checkoutOf = null;
-    failure = null;
-    thread = null;
-    threadFailure = null;
-    lastVisit = null;
-    proposals = null;
     drawer = false;
     linking = false;
-    reached = new Map();
-    inherited = null;
-    builds = null;
-    pages = null;
-    monitors = null;
-    assets = null;
-    repos = null;
-    // Only the address re-opens a job: what `open` reads before its first
-    // await (the ports) is not a reason to read again.
-    untrack(() => void open(wanted, mine));
+    // Only the address re-opens a job: what the reader reads before its first
+    // await is not a reason to read again.
+    untrack(() => reader.open(wanted));
   });
-
-  async function open(wanted: string, mine: number) {
-    try {
-      const listed = await ports.listSources().catch(() => [] as SourceFacts[]);
-      if (mine !== token) return;
-      sources = listed;
-      const found = await resolveTicket(wanted, isEntityId(wanted) ? [] : listed, ports.getEntity);
-      if (mine !== token) return;
-      detail = found;
-      if (found === null) return;
-      const id = found.row.entity_id;
-      void readWorkflow(id, mine);
-      void readWeek(id, mine);
-      void readConversation(id, mine);
-      void readStale(mine);
-      void readInherited(id, mine);
-      // The reach starts from the ticket's context, so the context first.
-      const context = await ports.promoteContext(id);
-      if (mine !== token) return;
-      void readProposals(context.id, id, mine);
-      void readReach(id, mine);
-      readSections(id, mine);
-      if (offersStartWork(found.status, isMine(found, listed))) void readRepos(mine);
-      await readCode(id, mine);
-    } catch (cause) {
-      if (mine === token) failure = ipcErrorMessage(cause);
-    }
-  }
-
-  /** One section's rows, through the reach; `[]` when the read fails. */
-  async function readRows(id: string, section: SectionRead, mine: number): Promise<EntityRow[] | null> {
-    try {
-      const rows = await readSection(ports.listEntities, id, section);
-      return mine === token ? rows : null;
-    } catch {
-      // A section that cannot be read draws as having nothing; the Work tab's
-      // line says when the reads themselves fail.
-      return mine === token ? [] : null;
-    }
-  }
-
-  /** The reach itself, for the labels, and the reached assets for their section. */
-  async function readReach(id: string, mine: number) {
-    let rows: Reached[] = [];
-    try {
-      rows = await ports.jobReach(id);
-    } catch {
-      // No labels, and an Assets section with nothing in it.
-    }
-    if (mine !== token) return;
-    reached = new Map(rows.map((row) => [row.entity_id, row]));
-    const ids = rows.filter((row) => row.kind === "asset").slice(0, ASSET_LIMIT);
-    const read = await Promise.allSettled(ids.map((row) => ports.getAsset(row.entity_id)));
-    if (mine !== token) return;
-    assets = read.flatMap((answer) =>
-      answer.status === "fulfilled"
-        ? [
-            {
-              id: answer.value.asset.id,
-              name: answer.value.asset.name,
-              type: answer.value.asset.type_label,
-              environment: answer.value.effective_environment?.value ?? null,
-              on: answer.value.held_by.at(-1)?.name ?? null,
-              tone: assetTone(answer.value.asset.health),
-            },
-          ]
-        : [],
-    );
-  }
-
-  /** The link sets that apply and the parent; nothing of either when the read fails. */
-  async function readInherited(id: string, mine: number) {
-    try {
-      const read = await ports.jobLinkSets(id);
-      if (mine === token) inherited = read;
-    } catch {
-      if (mine === token) inherited = { sets: [], parent: null };
-    }
-  }
-
-  /**
-   * After *Hide here* or *Show again*: the groups, the labels and the
-   * sections' rows again, since a hidden member leaves the job's reach. The
-   * checkout line stays as it was. Nothing when the page has moved on to
-   * another job while the write was out.
-   */
-  function rereadReach(id: string) {
-    if (detail?.row.entity_id !== id) return;
-    const mine = token;
-    void readInherited(id, mine);
-    void readReach(id, mine);
-    readSections(id, mine);
-    void readRows(id, SECTION_READS.code, mine).then((rows) => {
-      if (mine === token && rows) code = rows;
-    });
-  }
-
-  /** Builds, Pages and Monitors, each through the reach. */
-  function readSections(id: string, mine: number) {
-    // Builds asks for the CI role and the mirror answers its run kinds
-    // (#1295); the adapters' claims only route a run to its page (#1256).
-    void registry.load();
-    void readRows(id, SECTION_READS.builds, mine).then((rows) => {
-      if (mine === token && rows) builds = rows;
-    });
-    void readRows(id, SECTION_READS.pages, mine).then((rows) => {
-      if (mine === token && rows) pages = rows;
-    });
-    void readRows(id, SECTION_READS.monitors, mine).then((rows) => {
-      if (mine === token && rows) monitors = rows;
-    });
-  }
 
   /** *Hide here* (R-7.5): one member off this ticket only, with *Undo*. The set is not touched. */
   async function hideHere(row: GroupRow) {
@@ -327,7 +175,7 @@
     const key = keyOf(id);
     try {
       await ports.hideLinkSetMember(id, row.id, true);
-      rereadReach(id);
+      reader.rereadReach(id);
       push({
         text: `Hidden on ${key}. The link set stays as it is.`,
         action: { label: "Undo", run: () => void showAgain(row.id, id) },
@@ -345,7 +193,7 @@
     if (!id) return;
     try {
       await ports.hideLinkSetMember(id, memberId, false);
-      rereadReach(id);
+      reader.rereadReach(id);
     } catch (cause) {
       push({ text: `Could not show it again: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -362,7 +210,7 @@
     applyingSet = false;
     try {
       const stored = await sets.saveLinkSet(withHandRule(set, id));
-      rereadReach(id);
+      reader.rereadReach(id);
       push({
         text: applyToast(stored, keyOf(id)),
         action: {
@@ -370,7 +218,7 @@
           run: () =>
             void sets
               .saveLinkSet(withoutHandRule(stored, id))
-              .then(() => rereadReach(id))
+              .then(() => reader.rereadReach(id))
               .catch((cause: unknown) => push({ text: `Could not undo it: ${ipcErrorMessage(cause)}`, tone: "err" })),
         },
       });
@@ -383,91 +231,18 @@
   function savedSet(set: LinkSetDetail) {
     savingSet = false;
     drawer = false;
-    if (detail) rereadReach(detail.row.entity_id);
+    if (detail) reader.rereadReach(detail.row.entity_id);
     push({
       text: savedToast(set),
       action: { label: "Open it", run: () => (location.hash = `#/sets/${encodeURIComponent(set.id)}`) },
     });
   }
 
-  /** What the Builds section's warning reads: every source's credential and last run. */
-  async function readStale(mine: number) {
-    const [credentials, runs] = await Promise.all([
-      ports.credentialHealth().catch(() => [] as CredentialHealth[]),
-      ports.syncStatus().catch(() => [] as SourceSyncStatus[]),
-    ]);
-    if (mine !== token) return;
-    health = credentials;
-    sync = runs;
-  }
-
-  async function readRepos(mine: number) {
-    try {
-      const page = await ports.listEntities(reachFilter(null, ["repo"], "title_asc"), SECTION_LIMIT, 0);
-      if (mine === token) repos = page.rows.map((row) => ({ entity_id: row.entity_id, title: row.title }));
-    } catch {
-      if (mine === token) repos = [];
-    }
-  }
-
-  async function readWorkflow(id: string, mine: number) {
-    try {
-      const statuses = await ports.reachableTransitions(id);
-      if (mine === token) offered = statuses;
-    } catch {
-      // A workflow that cannot be read offers nothing: the select shows where
-      // the ticket stands, and the move waits for a read that works.
-      if (mine === token) offered = [];
-    }
-  }
-
-  async function readWeek(id: string, mine: number) {
-    try {
-      const now = today();
-      const answer = await ports.weekTimesheet(weekWindows(dayKey(now)));
-      if (mine === token) week = weekReading(answer, id, dayKey(now));
-    } catch {
-      // *Time this week* is an extra; the line stays at its ellipsis.
-    }
-  }
-
-  async function readConversation(id: string, mine: number) {
-    // The visit is written first and answers the one before it; a visit that
-    // cannot be written reads as no earlier visit, so nothing is called new.
-    const [visit, read] = await Promise.allSettled([ports.visitEntity(id), ports.entityThread(id)]);
-    if (mine !== token) return;
-    lastVisit = visit.status === "fulfilled" ? visit.value : null;
-    if (read.status === "fulfilled") thread = read.value;
-    else threadFailure = ipcErrorMessage(read.reason);
-  }
-
-  async function readProposals(context: string, id: string, mine: number) {
-    try {
-      const page = await ports.roomSuggestions([], context, PROPOSAL_LIMIT);
-      if (mine === token) proposals = proposalsFor(page.rows, id);
-    } catch {
-      // A tray that cannot be read proposes nothing; the button says connected only.
-      if (mine === token) proposals = [];
-    }
-  }
-
-  /** Re-read the ticket after a link changed, keeping what else the job read. */
-  async function relink() {
-    if (!detail) return;
-    const mine = token;
-    try {
-      const again = await ports.getEntity(detail.row.entity_id);
-      if (mine === token) detail = again;
-    } catch {
-      // The drawer keeps the rows it has; the next open reads them again.
-    }
-  }
-
   async function unlinkEntry(entry: LinkEntry) {
     const { link } = entry;
     try {
       await ports.unlink(link.id);
-      void relink();
+      reader.rereadDetail();
       push({
         text: "Unlinked in knobas only.",
         action: {
@@ -475,7 +250,7 @@
           run: () =>
             void ports
               .createLink(link.from_id, link.to_id, link.relation, link.note ?? undefined)
-              .then(relink)
+              .then(() => reader.rereadDetail())
               .catch((cause: unknown) => push({ text: `Could not link it again: ${ipcErrorMessage(cause)}`, tone: "err" })),
         },
       });
@@ -500,65 +275,23 @@
     }
   }
 
-  /** How many branches and repositories are asked for a clone before giving up. */
-  const CHECKOUT_TRIES = 3;
-
-  async function readCode(id: string, mine: number) {
-    const rows = await readSection(ports.listEntities, id, SECTION_READS.code);
-    if (mine !== token) return;
-    code = rows;
-    // A clone is looked for in the repositories Code draws: the read asked for
-    // the code host role, so they are its fillers' alone (#1298).
-    const sorted = byAttention(rows);
-    const candidates = [
-      ...sorted.filter((row) => row.kind === "branch"),
-      ...sorted.filter((row) => row.kind === "repo"),
-    ].slice(0, CHECKOUT_TRIES);
-    // The first clone found; else the first repository, which then offers
-    // *Clone* on the line (R-8.25).
-    let uncloned: { view: CheckoutView; of: string } | null = null;
-    for (const row of candidates) {
-      try {
-        const view = await ports.entityCheckout(row.entity_id);
-        if (mine !== token) return;
-        if (view.path) {
-          checkout = view;
-          checkoutOf = row.entity_id;
-          break;
-        }
-        if (uncloned === null && row.kind === "repo") uncloned = { view, of: row.entity_id };
-      } catch {
-        // A checkout that cannot be read is a checkout not shown.
-      }
-    }
-    if (checkout === null && uncloned !== null) {
-      checkout = uncloned.view;
-      checkoutOf = uncloned.of;
-    }
-  }
-
   // A clone that finished: the line reads its checkout again, and *Clone*
   // becomes *Open in…*.
   let seenClones = clones.finished;
   $effect(() => {
     if (clones.finished === seenClones) return;
     seenClones = clones.finished;
-    const of = checkoutOf;
-    const mine = token;
-    if (of === null || checkout?.path) return;
-    void ports.entityCheckout(of).then(
-      (view) => {
-        if (mine === token && of === checkoutOf) checkout = view;
-      },
-      () => {},
-    );
+    untrack(() => reader.rereadCheckout());
   });
 
+  /** A move queued, then the ticket and its transitions read again: nothing else it reaches changed. */
   async function move(status: string) {
     if (!detail) return;
-    const key = keyOf(detail.row.entity_id);
+    const id = detail.row.entity_id;
+    const key = keyOf(id);
     try {
-      await ports.submitWrite({ Transition: { entity: detail.row.entity_id, status } });
+      await ports.submitWrite({ Transition: { entity: id, status } });
+      reader.rereadDetail(id);
       push({
         text: `Queued: ${key} to ${status}. Sends with the next sync.`,
         action: { label: "Show queue", run: openWriteQueue },
@@ -590,7 +323,7 @@
     window.addEventListener("keydown", onkey);
     return () => {
       window.removeEventListener("keydown", onkey);
-      token += 1;
+      reader.close();
     };
   });
 
@@ -796,7 +529,7 @@
       onlinked={() => {
         linking = false;
         push({ text: "Linked in knobas" });
-        void relink();
+        reader.rereadDetail();
       }}
     />
   {/if}
