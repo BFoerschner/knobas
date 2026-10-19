@@ -76,3 +76,58 @@
   `a_body_that_is_not_the_shape_asked_for_names_its_start_when_asked` (present when asked, absent
   when not, bounded in characters) and `the_excerpt_leaves_a_failing_status_and_a_good_body_alone`,
   and on Jira's side by `http::tests::a_body_that_is_not_jiras_shape_names_its_start`.
+
+  **Amendment (#1315, 2026-10-19): the page walker.** Additive in `crates/knobas-http`, a new
+  private module `walk` whose items are re-exported at the crate root:
+
+  ```rust
+  pub trait Paged {                             // an adapter's page type
+      fn rows(&self) -> usize;
+      fn total(&self) -> Option<usize> { None } // Jira's total, Gitea's X-Total-Count
+      fn next_link(&self) -> Option<&str> { None } // Confluence's _links.next
+  }
+  impl<T> Paged for Vec<T>;                     // rows only
+  impl<T> Paged for (Vec<T>, Option<usize>);    // rows and a total
+  pub trait Protocol {
+      type At;
+      const EMPTY_ENDS: bool;
+      fn first(&self) -> Self::At;
+      fn after(&self, pages: u32, rows: usize, page: &impl Paged)
+          -> Result<Option<Self::At>, SourceError>;
+  }
+  #[derive(Debug, Clone, Copy)] pub struct PageNumber;   // At = u32, from 1
+  #[derive(Debug, Clone, Copy)] pub struct Offset;       // At = u32, from 0
+  #[derive(Debug, Clone, Copy)] pub struct NextLink { pub product: &'static str } // At = Option<String>
+  #[derive(Debug)] pub enum Walked<T> { Page(T), End, Capped }
+  pub struct PageWalk<P: Protocol, F>;          // Debug
+  impl<P: Protocol, F: FnMut(P::At) -> Fut, Fut: Future<Output = Result<T, SourceError>>, T: Paged>
+      PageWalk<P, F> {
+      pub fn new(protocol: P, cap: u32, fetch: F) -> Self;
+      pub async fn next(&mut self) -> Result<Walked<T>, SourceError>;
+      pub fn rows(&self) -> usize;              // records on the pages handed out
+  }
+  ```
+
+  `PageNumber` asks `1, 2, 3, …`; `Offset` asks `0` and then the records read so far. Both end on
+  an empty page, which is not handed out, or once the records read reach the total the last page
+  reported; a short page never ends them. `NextLink` asks `None` first and then the link the page
+  before offered; it ends on a page with no link, follows an empty page that has one, and refuses
+  a link that does not start with `/` with `Protocol("<product> answered with a continuation link
+  this adapter cannot follow: <link, Debug-quoted> is not a path rooted at the instance. Refusing
+  rather than reporting a walk that stopped early as a completed one.")`, raised on the call after
+  that page. `next` answers `Capped`, never `End`, when the walk would ask for a page past `cap`
+  pages, so `cap` pages are read at most; whether that fails the run stays the adapter's. The
+  crate docs gain one bullet naming the walk; nothing else in the crate changes.
+
+  **The adapters:** Gitea's five sync walks (repositories, branches, pull requests, issues,
+  commits) and its label read walk `PageNumber`, and its `sync::last_page` is gone; Jira's search
+  walks `Offset` under its `MAX_PAGES` and its comment completion walks `Offset` with no cap
+  (`u32::MAX`), as before; Confluence's `sync::Walk` wraps a `NextLink { product: "Confluence" }`
+  walk under its `MAX_PAGES` and keeps its own refusal message. Every cap and every message is
+  unchanged. TeamCity's widening re-read (`sync::all_of`) is not a page sequence and stays its
+  own, documented there. Pinned by `tests/transport.rs`'s `walk::*` (the empty-page stop and
+  short-page continue for page number and offset, the total stop, the cap answered as `Capped`
+  with no request past it, the link followed through an empty page, the absolute-link refusal
+  word for word, a failing fetch), and on each adapter's side by its existing paging tests,
+  unchanged: Jira's and Confluence's page-cap tests, Gitea's cap and label tests. Witnessed against
+  the real servers by `just gitea-live` and `just atlassian-live`.

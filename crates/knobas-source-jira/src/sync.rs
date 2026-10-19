@@ -49,6 +49,7 @@
 //! needed no such coincidence.
 
 use chrono::{DateTime, Utc};
+use knobas_http::{Offset, PageWalk, Walked};
 use knobas_source::{Sink, SourceError};
 
 use crate::api::JiraApi;
@@ -119,7 +120,7 @@ comment,worklog";
 ///    server is progress against a number it is getting wrong, so advancing a
 ///    watermark on that basis skips whatever sat in the gap.
 /// 2. **It is the only thing that terminates the loop.** The other exit is
-///    `start_at >= total`, and `total` is the very number the server is
+///    the records read reaching `total`, and `total` is the very number the server is
 ///    inflating. Restricting the refusal to full syncs -- which looks like the
 ///    careful, narrower fix, since no sweep follows an incremental -- makes an
 ///    incremental against such a server run forever. Verified: the test below
@@ -150,8 +151,6 @@ impl SyncRun<'_> {
         let jql = build_jql(self.cfg, since, offset);
         let fields = self.fields();
 
-        let mut start_at: u32 = 0;
-        let mut pages: u32 = 0;
         let mut emitted: usize = 0;
         // Every record this run *saw* in the window -- see the module docs.
         // Skipped ones belong here as much as emitted ones.
@@ -160,16 +159,29 @@ impl SyncRun<'_> {
         // `max(previous, newest emitted)` rather than "newest emitted".
         let mut watermark: Option<DateTime<Utc>> = previous.as_ref().and_then(|c| c.updated_to);
 
+        let mut walk = PageWalk::new(Offset, MAX_PAGES, |start_at| {
+            self.api.search(&jql, start_at, self.cfg.page_size, &fields)
+        });
+        // The last page's own total, which the refusal quotes.
+        let mut total = 0;
         loop {
-            let page: SearchPage = self
-                .api
-                .search(&jql, start_at, self.cfg.page_size, &fields)
-                .await?;
-            let total = page.total;
-            let returned = page.issues.len() as u32;
-            if returned == 0 {
-                break;
-            }
+            let page: SearchPage = match walk.next().await? {
+                Walked::Page(page) => page,
+                Walked::End => break,
+                Walked::Capped => {
+                    // Not a `break`: see the note on MAX_PAGES. Leaving the
+                    // loop here and returning `Ok` would hand the engine a
+                    // partial walk wearing a completed one's clothes.
+                    return Err(SourceError::protocol(format!(
+                        "the Jira search did not reach its own reported total of {total} \
+                         issues within {MAX_PAGES} pages of {}; refusing to report a partial \
+                         walk as a completed sync. Narrow this source with `projects` or \
+                         `jql_filter`.",
+                        self.cfg.page_size
+                    )));
+                }
+            };
+            total = page.total;
             for mut raw in page.issues {
                 let updated = raw
                     .issue
@@ -210,22 +222,6 @@ impl SyncRun<'_> {
                 if let Some(u) = updated {
                     watermark = Some(watermark.map_or(u, |w| w.max(u)));
                 }
-            }
-            start_at += returned;
-            pages += 1;
-            if start_at >= total {
-                break;
-            }
-            if pages >= MAX_PAGES {
-                // Not a `break`: see the note on MAX_PAGES. Leaving the loop
-                // here and returning `Ok` would hand the engine a partial walk
-                // wearing a completed one's clothes.
-                return Err(SourceError::protocol(format!(
-                    "the Jira search did not reach its own reported total of {total} issues \
-                     within {MAX_PAGES} pages of {}; refusing to report a partial walk as a \
-                     completed sync. Narrow this source with `projects` or `jql_filter`.",
-                    self.cfg.page_size
-                )));
             }
         }
 
@@ -301,21 +297,13 @@ impl SyncRun<'_> {
         };
         if comments_truncated {
             let mut all = Vec::new();
-            let mut start_at: u32 = 0;
-            loop {
-                let page = self
-                    .api
-                    .comments(&key, start_at, self.cfg.page_size)
-                    .await?;
-                let returned = page.comments.len() as u32;
-                if returned == 0 {
-                    break;
-                }
+            // No cap: the walk ends on the server's total or an empty page,
+            // as it always has.
+            let mut walk = PageWalk::new(Offset, u32::MAX, |start_at| {
+                self.api.comments(&key, start_at, self.cfg.page_size)
+            });
+            while let Walked::Page(page) = walk.next().await? {
                 all.extend(page.comments);
-                start_at += returned;
-                if start_at >= page.total {
-                    break;
-                }
             }
             raw.set_comments(all);
         }
@@ -1090,7 +1078,7 @@ mod tests {
     /// stopped. That narrower fix is worse than it looks, for a reason the
     /// mutation check turned up rather than the argument: with
     /// `&& cursor.is_none()` on the cap, **this test does not terminate**. The
-    /// loop's only other exit is `start_at >= total`, and `total` is the number
+    /// loop's only other exit is the records read reaching `total`, and `total` is the number
     /// the server is inflating -- so an incremental against a mispaging server
     /// has no stop at all. (Measured: no completion in 180 s, against 1.7 s for
     /// the whole lib suite.)

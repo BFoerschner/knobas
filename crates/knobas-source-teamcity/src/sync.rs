@@ -421,6 +421,12 @@ fn last_page(page: &Page<Build>, asked: u32) -> bool {
 /// a ceiling the client does not know. Held by
 /// `a_query_that_exactly_fills_a_server_s_ceiling_is_refused_though_it_fitted`,
 /// so the next reader meets it as a decision rather than as a bug.
+///
+/// **Not the transport's page walk** (`knobas_http::PageWalk`, #1315). That
+/// walk asks for the page *after* the last and keeps what each page held; this
+/// one re-reads the query from the top with a wider `count:` and keeps only the
+/// last answer, ending where the server's own `nextHref` stops, so neither the
+/// page-sequence protocols nor the empty-page rule describe it.
 async fn all_of(
     rest: &dyn Rest,
     locator: &Locator,

@@ -3,6 +3,7 @@
 //! here in ADR-0020's action vocabulary; the shell draws it and queues
 //! `source_action` with the answers, never knowing what a label is.
 
+use knobas_http::{PageNumber, PageWalk, Walked};
 use knobas_source::SourceError;
 use knobas_source::view::{ActionField, ChoiceOption, FieldKind, ViewAction};
 
@@ -52,21 +53,17 @@ pub(super) async fn read(
 /// [`LABEL_PAGES`] pages. The listing is whole on an empty page -- empty, not
 /// short, as #81 rules for the sync's walks -- or once Gitea's
 /// `X-Total-Count` is reached, which spares the empty page's request.
-async fn all_pages<F, Fut>(mut page_of: F) -> Result<Vec<Label>, SourceError>
+async fn all_pages<F, Fut>(page_of: F) -> Result<Vec<Label>, SourceError>
 where
     F: FnMut(u32) -> Fut,
     Fut: Future<Output = Result<(Vec<Label>, Option<usize>), SourceError>>,
 {
     let mut labels = Vec::new();
-    for page in 1..=LABEL_PAGES {
-        let (batch, total) = page_of(page).await?;
-        if batch.is_empty() {
-            break;
-        }
+    // Past the cap the rest is not offered, as the constant says: not a
+    // failure.
+    let mut walk = PageWalk::new(PageNumber, LABEL_PAGES, page_of);
+    while let Walked::Page((batch, _)) = walk.next().await? {
         labels.extend(batch);
-        if total.is_some_and(|total| labels.len() >= total) {
-            break;
-        }
     }
     Ok(labels)
 }

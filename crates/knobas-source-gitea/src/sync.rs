@@ -34,7 +34,7 @@
 //!
 //! * **A page shorter than the one this run asked for is not the end of a
 //!   listing.** Every walk here pages until a page comes back *empty*
-//!   ([`last_page`]), never until one comes back short. `limit=50` is a
+//!   ([`PageWalk`]), never until one comes back short. `limit=50` is a
 //!   request and Gitea's 50 is a *default* an admin of a self-hosted instance
 //!   can lower, so a short page means "the collection ran out" or "the server
 //!   capped us" and nothing in the answer says which. Reading it as the first
@@ -130,6 +130,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use chrono::{DateTime, Utc};
+use knobas_http::{PageNumber, PageWalk, Walked};
 use knobas_source::{Cursor, Sink, SourceError, SyncItem};
 use serde_json::Value;
 
@@ -144,7 +145,7 @@ use crate::model;
 /// **A request budget, and the arithmetic that sizes it.** The target has
 /// always been a *record* count: this comment used to read "At 50 per page:
 /// 1,000 repositories, and 1,000 branches per repository", and 20 was that
-/// target divided by the 50 a request asks for. Since [`last_page`] a walk
+/// target divided by the 50 a request asks for. Since the empty-page rule a walk
 /// spends one further request on the empty page that proves the listing ended,
 /// so the same 1,000 costs 21 requests -- twenty pages of records, plus the one
 /// that ends them. Keeping 20 would have kept the arithmetic and quietly shrunk
@@ -155,7 +156,7 @@ use crate::model;
 ///
 /// **A literal, not `1_000 / PAGE_SIZE + 1`.** Deriving it would put the
 /// honoured-page-size assumption back into this file in executable form, which
-/// is exactly what [`last_page`] took out of it. The guard is sized under an
+/// is exactly what the empty-page rule took out of it. The guard is sized under an
 /// assumption it does not depend on: against a server capping lower the real
 /// capacity is lower, and a corpus past the guard still fails loudly with an
 /// accurate count of what it walked ([`cap_reached`]) rather than being
@@ -177,7 +178,7 @@ const MAX_BRANCH_PAGES: u32 = 21;
 // `*_per_repo` of theirs and are never swept, so stopping is the normal case
 // and cannot be read downstream as a deletion.
 //
-// `last_page` costs these two nothing, unlike the exhaustive pair: a budget
+// The empty page costs these two nothing, unlike the exhaustive pair: a budget
 // of 1,000 is spent by the last record of page 20 and breaks the walk there,
 // before any request for the empty page that would have confirmed the end.
 // That is why these two stayed at 20 when `MAX_LIST_PAGES` and
@@ -264,7 +265,7 @@ fn in_repository(full_name: &str, error: SourceError) -> SourceError {
 ///
 /// **`seen` is what the walk actually counted**, and it used to be
 /// `cap * PAGE_SIZE`. That arithmetic assumed the server put the requested 50
-/// records on every page -- the assumption [`last_page`] exists to remove.
+/// records on every page -- the assumption the empty-page rule exists to remove.
 /// Against an instance capping at 10, a reached cap means 200 records walked,
 /// and a message naming 1,000 would send the user narrowing a source that was
 /// never that big.
@@ -276,40 +277,27 @@ fn cap_reached(what: &str, seen: usize) -> SourceError {
     ))
 }
 
-/// Whether a page just answered is the end of its listing.
-///
-/// **Empty, not short.** The obvious spelling -- `batch.len() < PAGE_SIZE` --
-/// reads a page shorter than the `limit` the request asked for as the end of
-/// the collection, and that is sound only if the server honoured `limit`
-/// exactly. It is not a promise it makes: `PAGE_SIZE` documents 50 as Gitea's
-/// *default* cap, a self-hosted instance can lower `MAX_RESPONSE_ITEMS`, an
-/// endpoint can carry its own maximum, and a loaded server can answer a partial
-/// page. Under any of those the short-page rule stops the walk early and
-/// returns `Ok`, with the watermark advancing past every record after the stop
-/// -- silent truncation, which is the failure the whole module docs above are
-/// about. An empty page is the one answer that cannot mean anything else.
-///
-/// **One spelling, in one place, for all four walks.** Issue #81 was filed
-/// because the rule had been copied to four sites and asked for one deliberate
-/// decision instead of four accidental ones; option 1 (page until empty) was
-/// ruled on 2026-08-29. Splitting it back into four inline comparisons is how
-/// three of them drift.
-///
-/// **Four, and [`fetch_comments`] is deliberately not a fifth.** Issue #131
-/// read the discussion request as a paged listing that never paged, and the
-/// pinned container says it is not one: `issueGetComments` declares no `page`
-/// and no `limit` and ignores both, so "page until empty" there would re-read
-/// the same discussion until the budget ran out and fold it into `body_text`
-/// once per request. That read gets the server's own `X-Total-Count` instead
-/// -- see [`crate::client::GiteaClient::issue_comments`] for the measurements.
-///
-/// The price is one extra request per *exhausted* walk, under the 10 req/s
-/// limiter of interfaces §4.1 -- and the `MAX_*_PAGES` caps above are what keep
-/// "until empty" from becoming "until forever" against a server that ignores
-/// the `page` parameter.
-fn last_page(batch: &[Value]) -> bool {
-    batch.is_empty()
-}
+// Where a listing ends is the transport's `PageWalk` over `PageNumber`
+// (#1315): on an **empty** page, never a short one (#81, ruled 2026-08-29).
+// `PAGE_SIZE` documents 50 as Gitea's *default* cap, a self-hosted instance
+// can lower `MAX_RESPONSE_ITEMS`, an endpoint can carry its own maximum, and a
+// loaded server can answer a partial page; under any of those a short-page
+// rule stops the walk early and returns `Ok`, with the watermark advancing
+// past every record after the stop. One walker for the five walks here, rather
+// than five inline comparisons, is how none of them drifts.
+//
+// `fetch_comments` is deliberately not a sixth. Issue #131 read the
+// discussion request as a paged listing that never paged, and the pinned
+// container says it is not one: `issueGetComments` declares no `page` and no
+// `limit` and ignores both, so "page until empty" there would re-read the same
+// discussion until the budget ran out and fold it into `body_text` once per
+// request. That read gets the server's own `X-Total-Count` instead -- see
+// `GiteaClient::issue_comments` for the measurements.
+//
+// The price is one extra request per *exhausted* walk, under the 10 req/s
+// limiter of interfaces §4.1 -- and the `MAX_*_PAGES` caps above are what keep
+// "until empty" from becoming "until forever" against a server that ignores
+// the `page` parameter.
 
 /// Copy the stored position of every repository this run refused into the
 /// cursor it is about to write.
@@ -455,22 +443,19 @@ async fn select_repos(
     let config = &source.config;
 
     if config.repos.is_empty() {
-        let mut page = 1;
-        let mut seen = 0usize;
+        let mut walk = PageWalk::new(PageNumber, MAX_LIST_PAGES, |page| {
+            source.client.search_repos(page)
+        });
         loop {
-            let batch = source.client.search_repos(page).await?;
-            let last = last_page(&batch);
-            seen += batch.len();
-            for raw in batch {
-                push_selected(&mut out, raw, config, true);
+            match walk.next().await? {
+                Walked::Page(batch) => {
+                    for raw in batch {
+                        push_selected(&mut out, raw, config, true);
+                    }
+                }
+                Walked::End => break,
+                Walked::Capped => return Err(cap_reached("repositories", walk.rows())),
             }
-            if last {
-                break;
-            }
-            if page == MAX_LIST_PAGES {
-                return Err(cap_reached("repositories", seen));
-            }
-            page += 1;
         }
     } else {
         for entry in &config.repos {
@@ -652,12 +637,20 @@ async fn branches(
     let default_changed = before.default_branch.as_deref() != at.default_branch;
     after.default_branch = at.default_branch.map(str::to_owned);
 
-    let mut page = 1;
-    let mut seen = 0usize;
+    let mut walk = PageWalk::new(PageNumber, MAX_BRANCH_PAGES, |page| {
+        source.client.branches(at.owner, at.name, page)
+    });
     loop {
-        let batch = source.client.branches(at.owner, at.name, page).await?;
-        let last = last_page(&batch);
-        seen += batch.len();
+        let batch = match walk.next().await? {
+            Walked::Page(batch) => batch,
+            Walked::End => break,
+            Walked::Capped => {
+                return Err(RepoError::Fatal(cap_reached(
+                    "branches in one repository",
+                    walk.rows(),
+                )));
+            }
+        };
         for raw in batch {
             let branch: model::Branch = match serde_json::from_value(raw.clone()) {
                 Ok(branch) => branch,
@@ -691,16 +684,6 @@ async fn branches(
             }
             heads.insert(branch.name, head);
         }
-        if last {
-            break;
-        }
-        if page == MAX_BRANCH_PAGES {
-            return Err(RepoError::Fatal(cap_reached(
-                "branches in one repository",
-                seen,
-            )));
-        }
-        page += 1;
     }
 
     for gone in before
@@ -759,9 +742,15 @@ async fn pulls(
     // the closing position records for the ones on the new mark.
     let mut fingerprints: BTreeMap<u64, String> = BTreeMap::new();
 
-    'paging: for page in 1..=MAX_PR_PAGES {
-        let batch = source.client.pulls(at.owner, at.name, page).await?;
-        let last = last_page(&batch);
+    // A reached cap ends this walk quietly: see the note on the caps.
+    let mut walk = PageWalk::new(PageNumber, MAX_PR_PAGES, |page| {
+        source.client.pulls(at.owner, at.name, page)
+    });
+    'paging: loop {
+        let batch = match walk.next().await? {
+            Walked::Page(batch) => batch,
+            Walked::End | Walked::Capped => break,
+        };
         for raw in batch {
             let pr: model::PullRequest = match serde_json::from_value(raw.clone()) {
                 Ok(pr) => pr,
@@ -811,9 +800,6 @@ async fn pulls(
             if budget == 0 {
                 break 'paging;
             }
-        }
-        if last {
-            break;
         }
     }
 
@@ -868,15 +854,19 @@ async fn issues(
     let watermark = before.issues_updated_to;
     let mut examined: Vec<(u64, Option<DateTime<Utc>>)> = Vec::new();
     let mut fingerprints: BTreeMap<u64, String> = BTreeMap::new();
-    let mut page = 1;
-    let mut seen = 0usize;
+    let mut walk = PageWalk::new(PageNumber, MAX_ISSUE_PAGES, |page| {
+        source.client.issues(at.owner, at.name, watermark, page)
+    });
     loop {
-        let batch: Vec<Value> = match source
-            .client
-            .issues(at.owner, at.name, watermark, page)
-            .await
-        {
-            Ok(batch) => batch,
+        let batch: Vec<Value> = match walk.next().await {
+            Ok(Walked::Page(batch)) => batch,
+            Ok(Walked::End) => break,
+            Ok(Walked::Capped) => {
+                return Err(RepoError::Fatal(cap_reached(
+                    "issues in one repository",
+                    walk.rows(),
+                )));
+            }
             Err(error) if is_repo_scoped(&error) => {
                 tracing::warn!(
                     repository = %at.full_name,
@@ -887,8 +877,6 @@ async fn issues(
             }
             Err(error) => return Err(RepoError::Fatal(error)),
         };
-        let last = last_page(&batch);
-        seen += batch.len();
         for raw in batch {
             let issue = match serde_json::from_value::<model::Issue>(raw.clone()) {
                 Ok(issue) if issue.pull_request.is_none() => issue,
@@ -927,16 +915,6 @@ async fn issues(
             )
             .await?;
         }
-        if last {
-            break;
-        }
-        if page == MAX_ISSUE_PAGES {
-            return Err(RepoError::Fatal(cap_reached(
-                "issues in one repository",
-                seen,
-            )));
-        }
-        page += 1;
     }
 
     let carried: Vec<u64> = before.issues_seen_at_watermark.keys().copied().collect();
@@ -1270,13 +1248,16 @@ async fn commits(
     let mut seen: HashSet<String> = HashSet::new();
 
     'branches: for branch in walk_order(repo.default_branch.as_deref(), moved) {
-        for page in 1..=MAX_COMMIT_PAGES {
-            let batch = match source
+        // A reached cap ends this branch quietly: see the note on the caps.
+        let mut walk = PageWalk::new(PageNumber, MAX_COMMIT_PAGES, |page| {
+            source
                 .client
                 .commits(at.owner, at.name, &branch, since, page)
-                .await
-            {
-                Ok(batch) => batch,
+        });
+        loop {
+            let batch = match walk.next().await {
+                Ok(Walked::Page(batch)) => batch,
+                Ok(Walked::End | Walked::Capped) => break,
                 // Listed a moment ago and gone now (#724): a merge with
                 // delete-branch on a busy repository. Gitea answers `404
                 // object does not exist` for the ref, and the branch's own
@@ -1298,7 +1279,6 @@ async fn commits(
                 }
                 Err(error) => return Err(RepoError::from(error)),
             };
-            let last = last_page(&batch);
             let mut fresh = 0usize;
             for raw in batch {
                 let commit: model::Commit = match serde_json::from_value(raw.clone()) {
@@ -1344,7 +1324,7 @@ async fn commits(
             // A page with nothing new on it is the end of this branch's new
             // history -- and if the server ignored `since=` altogether, it is
             // the point where paging stops being worth anything.
-            if last || fresh == 0 {
+            if fresh == 0 {
                 break;
             }
         }
@@ -1584,7 +1564,7 @@ mod tests {
     /// limit, because it is what the user sees when a source is too big.
     ///
     /// The number is the walk's own count, hedged with "at least": since
-    /// `last_page` there is no page size to multiply by, and inventing one
+    /// the empty-page rule there is no page size to multiply by, and inventing one
     /// would misreport every server that caps its pages lower than the 50 the
     /// request asks for.
     #[test]

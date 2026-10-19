@@ -32,6 +32,16 @@ pub(crate) struct ContentPage {
     pub links: PageLinks,
 }
 
+/// A next-link page for the transport's walk ([`knobas_http::NextLink`]).
+impl knobas_http::Paged for ContentPage {
+    fn rows(&self) -> usize {
+        self.results.len()
+    }
+    fn next_link(&self) -> Option<&str> {
+        self.links.next.as_deref()
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct PageLinks {
     /// The next page, as a path and query rooted at the instance -- e.g.

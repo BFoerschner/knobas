@@ -96,6 +96,7 @@
 //!   *one edited page and then an idle poll*, never a full sync and then one.
 
 use chrono::{DateTime, Utc};
+use knobas_http::{NextLink, PageWalk, Walked};
 use knobas_source::{Sink, SourceError};
 
 use crate::ConfluenceConfig;
@@ -139,22 +140,31 @@ const SWEEP_PAGE_SIZE: u32 = 200;
 /// [`MAX_PAGES`] refusal in the one place it lives.
 ///
 /// Every walk in this module (the page walk, the mention walk, the positions
-/// sweep, the re-read of moved pages) is this loop: ask for a page, handle its
-/// rows, follow the link, refuse past the stop. The caller owns the rows;
-/// this owns the paging and the refusal.
+/// sweep, the re-read of moved pages) is this one: the transport's
+/// [`PageWalk`] over the [`NextLink`] protocol, which follows the link,
+/// refuses one that is not rooted at the instance, and answers the cap. The
+/// caller owns the rows; this names what they are when the cap refuses.
 struct Walk<'a> {
-    api: &'a (dyn ConfluenceApi + 'a),
-    cql: &'a str,
+    walk: PageWalk<NextLink, Fetch<'a>>,
     limit: u32,
-    expand: &'a str,
     /// What the rows are, for the refusal message ("positions", "mention
     /// results").
     noun: &'a str,
-    /// The link the previous page offered, still to be followed.
-    pending: Option<String>,
-    started: bool,
-    requests: u32,
 }
+
+/// The search for the first page, then whichever link the page before offered.
+type Fetch<'a> = Box<
+    dyn FnMut(
+            Option<String>,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<crate::model::ContentPage, SourceError>>
+                    + Send
+                    + 'a,
+            >,
+        > + Send
+        + 'a,
+>;
 
 impl<'a> Walk<'a> {
     fn new(
@@ -164,15 +174,24 @@ impl<'a> Walk<'a> {
         expand: &'a str,
         noun: &'a str,
     ) -> Self {
+        let fetch: Fetch<'a> = Box::new(move |link| {
+            Box::pin(async move {
+                match link {
+                    None => api.search(cql, limit, expand).await,
+                    Some(link) => api.follow(&link).await,
+                }
+            })
+        });
         Self {
-            api,
-            cql,
+            walk: PageWalk::new(
+                NextLink {
+                    product: "Confluence",
+                },
+                MAX_PAGES,
+                fetch,
+            ),
             limit,
-            expand,
             noun,
-            pending: None,
-            started: false,
-            requests: 0,
         }
     }
 
@@ -184,25 +203,16 @@ impl<'a> Walk<'a> {
     /// on the call after a page, the caller has handled that page's rows
     /// first.
     async fn next_page(&mut self) -> Result<Option<crate::model::ContentPage>, SourceError> {
-        let page = if !self.started {
-            self.started = true;
-            self.api.search(self.cql, self.limit, self.expand).await?
-        } else if let Some(link) = self.pending.take() {
-            self.requests += 1;
-            if self.requests >= MAX_PAGES {
-                return Err(SourceError::protocol(format!(
-                    "Confluence kept offering another page of {} after {MAX_PAGES} requests of \
-                     {}; refusing to report a partial walk as a completed sync. Narrow this \
-                     source with a space list.",
-                    self.noun, self.limit
-                )));
-            }
-            self.api.follow(&link).await?
-        } else {
-            return Ok(None);
-        };
-        self.pending.clone_from(&page.links.next);
-        Ok(Some(page))
+        match self.walk.next().await? {
+            Walked::Page(page) => Ok(Some(page)),
+            Walked::End => Ok(None),
+            Walked::Capped => Err(SourceError::protocol(format!(
+                "Confluence kept offering another page of {} after {MAX_PAGES} requests of {}; \
+                 refusing to report a partial walk as a completed sync. Narrow this source \
+                 with a space list.",
+                self.noun, self.limit
+            ))),
+        }
     }
 }
 

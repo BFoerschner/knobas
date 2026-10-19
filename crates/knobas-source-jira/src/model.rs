@@ -36,6 +36,16 @@ pub(crate) struct SearchPage {
     pub issues: Vec<RawIssue>,
 }
 
+/// An offset page for the transport's walk ([`knobas_http::Offset`]).
+impl knobas_http::Paged for SearchPage {
+    fn rows(&self) -> usize {
+        self.issues.len()
+    }
+    fn total(&self) -> Option<usize> {
+        Some(self.total as usize)
+    }
+}
+
 /// One issue: the record as it arrived, plus the fields the adapter reads.
 #[derive(Debug, Clone)]
 pub(crate) struct RawIssue {
@@ -156,6 +166,16 @@ pub(crate) struct CommentContainer {
     pub total: Option<u32>,
     #[serde(default)]
     pub comments: Vec<RawComment>,
+}
+
+/// An offset page for the transport's walk ([`knobas_http::Offset`]).
+impl knobas_http::Paged for CommentPage {
+    fn rows(&self) -> usize {
+        self.comments.len()
+    }
+    fn total(&self) -> Option<usize> {
+        Some(self.total as usize)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

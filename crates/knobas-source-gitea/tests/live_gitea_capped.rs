@@ -38,7 +38,7 @@
 //! file, not against a count: [`Raw::walk`] pages `limit=50&page=1..` until a
 //! page comes back empty and collects what it saw, and the adapter's own emitted
 //! keys must equal it. That hand-walk deliberately shares no code with
-//! `sync::last_page` -- an oracle built out of the thing under test proves
+//! the transport's `PageWalk` -- an oracle built out of the thing under test proves
 //! nothing -- and it makes the assertions independent of how many records the
 //! seed happens to have created, which is the live suite's standing discipline
 //! (Gitea assigns the pull-request indices and git the object ids, so a fixed
@@ -222,7 +222,7 @@ impl Raw {
     /// `key` from every record.
     ///
     /// Hand-written on purpose. This is the oracle the adapter is measured
-    /// against, so it must share no line with `sync::last_page`; and it must
+    /// against, so it must share no line with `knobas_http::PageWalk`; and it must
     /// not stop on a short page either, or it would be exactly as wrong as the
     /// bug and the two would agree.
     async fn walk(
@@ -287,7 +287,7 @@ fn sorted(keys: impl IntoIterator<Item = String>) -> Vec<String> {
 /// Issue #115. All four paged walks, against a real Gitea capping every page
 /// below the `limit=50` they ask for.
 ///
-/// Reverting `sync::last_page` to `batch.len() < PAGE_SIZE` -- the reading
+/// Ending a `PageNumber` walk on `rows < PAGE_SIZE` -- the reading
 /// issue #81 removed -- reddens all four assertions here, which is the whole
 /// reason this suite exists: a live test that passes either way certifies
 /// nothing.
