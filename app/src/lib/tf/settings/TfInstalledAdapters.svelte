@@ -126,6 +126,9 @@
       if (row.sources.length > 0) onremoved();
     } catch (cause) {
       push({ text: `Could not uninstall ${row.name}: ${ipcErrorMessage(cause)}`, tone: "err" });
+      // A failure part-way has removed the sources before it.
+      rows = await ports.listInstalledAdapters().catch(() => rows);
+      if (row.sources.length > 0) onremoved();
     }
   }
 </script>

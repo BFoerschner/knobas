@@ -957,3 +957,19 @@ test("Uninstall asks once per source and sends each answer (#1210)", async () =>
   // The sources it removed leave the list.
   expect(p.listSources).toHaveBeenCalledTimes(2);
 });
+
+test("an uninstall that fails part-way reloads the sources it may have removed (#1210)", async () => {
+  const p = ports({
+    listInstalledAdapters: vi.fn(() =>
+      Promise.resolve([adapterRow({ sources: [{ id: "quay-a", display_name: "Quay A" }] })]),
+    ),
+    uninstallAdapter: vi.fn(() => Promise.reject({ kind: "internal", message: "cannot remove quay-b" })),
+  });
+  await open([], p);
+  button("Uninstall…").click();
+  flushSync();
+  dialogButton("Uninstall").click();
+  await settle();
+  expect(p.listInstalledAdapters).toHaveBeenCalledTimes(2);
+  expect(p.listSources).toHaveBeenCalledTimes(2);
+});
