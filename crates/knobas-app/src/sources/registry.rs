@@ -156,8 +156,8 @@ impl Registry {
     /// process, which bring-up fills and an install adds to; every call
     /// returns a clone sharing it.
     ///
-    /// Bring-up and [`Lifecycle`](crate::Lifecycle)'s default are the callers
-    /// meant to stay (#1305 moves the rest). A read takes the lifecycle's
+    /// Bring-up and [`Lifecycle`](crate::Lifecycle)'s default are the only
+    /// callers, and a scan test keeps it so (#1323). A read takes the lifecycle's
     /// registry as `&dyn AdapterRegistry` instead, so a test can give it one
     /// of its own.
     #[must_use]
