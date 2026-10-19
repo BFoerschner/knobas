@@ -1682,6 +1682,7 @@ knobas-db	lib/knobas_db	test_util::tests::a_removed_root_takes_its_lock_with_it
 knobas-db	lib/knobas_db	test_util::tests::a_sweep_removes_the_abandoned_and_spares_the_owned
 knobas-db	lib/knobas_db	test_util::tests::the_nonce_identifies_this_run_and_nothing_else
 knobas-db	lib/knobas_db	test_util::tests::the_reaper_holds_the_lock_it_took_until_the_directory_is_gone
+knobas-db	test/backup	an_archive_from_before_the_saved_view_rename_restores
 knobas-db	test/backup	the_archive_carries_the_owned_schema_and_leaves_the_mirror_out
 knobas-db	test/embedded	a_connector_does_not_print_its_password
 knobas-db	test/embedded	a_connector_hands_out_connections_outside_every_pool
@@ -3867,4 +3868,3 @@ knobas-wasm-host	test/it	reads::a_large_download_streams_without_the_component_h
 knobas-wasm-host	test/it	reads::a_run_s_log_and_one_artifact_download_through_the_host_s_sink
 knobas-wasm-host	test/it	reads::every_run_and_pipeline_read_answers_across_the_boundary
 knobas-wasm-host	test/it	reads::the_run_s_deferred_sections_carry_the_diff_and_the_tree
-knobas-db	test/backup	an_archive_from_before_the_saved_view_rename_restores
