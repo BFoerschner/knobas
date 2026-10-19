@@ -953,7 +953,11 @@ fn adapter_status_matches_the_mirror() {
             "update",
         ],
     );
-    assert_shape("AdapterSource", &value["sources"][0], &["display_name", "id"]);
+    assert_shape(
+        "AdapterSource",
+        &value["sources"][0],
+        &["display_name", "id"],
+    );
     let removal = Removal {
         source_id: "quay".to_owned(),
         purge_items: true,

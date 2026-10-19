@@ -281,7 +281,11 @@ pub fn artifact_path(store: &Path, sha256: &str) -> PathBuf {
 
 /// Write the artifact under its hash, through a temporary file renamed into
 /// place, so a crash never leaves a half-written file under a hash.
-pub(crate) async fn store_artifact(store: &Path, sha256: &str, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) async fn store_artifact(
+    store: &Path,
+    sha256: &str,
+    bytes: &[u8],
+) -> std::io::Result<()> {
     tokio::fs::create_dir_all(store).await?;
     let target = artifact_path(store, sha256);
     let partial = store.join(format!("{sha256}.wasm.partial"));

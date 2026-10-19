@@ -177,8 +177,7 @@ impl Origin {
 pub fn release_of(url: &url::Url, endpoints: &Endpoints) -> Option<(String, String, String)> {
     let parts: Vec<&str> = url.path_segments()?.collect();
     let n = parts.len();
-    if n < 6 || parts[n - 4] != "releases" || parts[n - 3] != "download" || url.query().is_some()
-    {
+    if n < 6 || parts[n - 4] != "releases" || parts[n - 3] != "download" || url.query().is_some() {
         return None;
     }
     let (owner, repo, tag, file) = (parts[n - 6], parts[n - 5], parts[n - 2], parts[n - 1]);
@@ -216,12 +215,13 @@ pub async fn locate(
 ) -> Result<Located, FetchError> {
     match origin {
         Origin::Local(path) => {
-            let manifest = tokio::fs::read_to_string(path).await.map_err(|error| {
-                FetchError::Unreadable {
-                    path: path.display().to_string(),
-                    error,
-                }
-            })?;
+            let manifest =
+                tokio::fs::read_to_string(path)
+                    .await
+                    .map_err(|error| FetchError::Unreadable {
+                        path: path.display().to_string(),
+                        error,
+                    })?;
             let dir = path.parent().map(PathBuf::from).unwrap_or_default();
             Ok(Located {
                 tag: None,
@@ -356,15 +356,13 @@ async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
         url: url.to_owned(),
         cap,
     };
-    if response
-        .content_length()
-        .is_some_and(|n| n > cap as u64)
-    {
+    if response.content_length().is_some_and(|n| n > cap as u64) {
         return Err(too_large());
     }
-    let bytes = response.bytes().await.map_err(|e| {
-        unreachable(SourceError::Unreachable(format!("reading the body: {e}")))
-    })?;
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| unreachable(SourceError::Unreachable(format!("reading the body: {e}"))))?;
     if bytes.len() > cap {
         return Err(too_large());
     }
@@ -401,8 +399,14 @@ mod tests {
     fn any_other_url_is_a_manifest_and_anything_else_a_local_file() {
         let url = "https://github.com/harbour/surveys/releases/download/v1/knobas-adapter.json";
         assert!(matches!(parse(url), Origin::Manifest(_)));
-        assert!(matches!(parse("https://forge.example/m.json"), Origin::Manifest(_)));
-        assert!(matches!(parse("/tmp/knobas-adapter.json"), Origin::Local(_)));
+        assert!(matches!(
+            parse("https://forge.example/m.json"),
+            Origin::Manifest(_)
+        ));
+        assert!(matches!(
+            parse("/tmp/knobas-adapter.json"),
+            Origin::Local(_)
+        ));
         assert!(Origin::parse("  ", &Endpoints::default()).is_err());
     }
 
@@ -429,7 +433,9 @@ mod tests {
     #[test]
     fn a_github_release_download_asks_github_s_api() {
         assert_eq!(
-            release("https://github.com/harbour/surveys/releases/download/v1.2.0/knobas-adapter.json"),
+            release(
+                "https://github.com/harbour/surveys/releases/download/v1.2.0/knobas-adapter.json"
+            ),
             Some((
                 "https://api.github.com/repos/harbour/surveys/releases".to_owned(),
                 "v1.2.0".to_owned(),

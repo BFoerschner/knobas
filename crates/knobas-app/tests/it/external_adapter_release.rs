@@ -209,7 +209,10 @@ async fn a_manifest_url_that_is_no_release_installs_pinned_by_its_hash() {
     let forge = Forge::start().await;
     let artifact = fixture_bytes();
     for (file, body) in [
-        ("/adapters/knobas-adapter.json", manifest_for(&artifact).to_string().into_bytes()),
+        (
+            "/adapters/knobas-adapter.json",
+            manifest_for(&artifact).to_string().into_bytes(),
+        ),
         ("/adapters/fixture.wasm", artifact.clone()),
     ] {
         Mock::given(method("GET"))
@@ -226,7 +229,10 @@ async fn a_manifest_url_that_is_no_release_installs_pinned_by_its_hash() {
     let installed = install_from(&pool, &registry, store.path(), &forge, &url).await;
 
     assert_eq!(installed.tag, None);
-    assert_eq!(installed.artifact_sha256, knobas_wasm_host::manifest::sha256(&artifact));
+    assert_eq!(
+        installed.artifact_sha256,
+        knobas_wasm_host::manifest::sha256(&artifact)
+    );
 }
 
 #[tokio::test]
@@ -241,18 +247,30 @@ async fn a_release_with_no_manifest_is_refused_naming_it() {
         .await;
     let (pool, _connector) = scratch("release-none").await;
     let store = tempfile::tempdir().unwrap();
-    let Err(error) =
-        install::install_from(&pool, &Registry::default(), store.path(), &forge.endpoints(), &forge.repo_url()).await
+    let Err(error) = install::install_from(
+        &pool,
+        &Registry::default(),
+        store.path(),
+        &forge.endpoints(),
+        &forge.repo_url(),
+    )
+    .await
     else {
         panic!("a release with no manifest must not install");
     };
-    assert_eq!(error.to_ipc().message, "the release v1 has no knobas-adapter.json");
+    assert_eq!(
+        error.to_ipc().message,
+        "the release v1 has no knobas-adapter.json"
+    );
 }
 
 // -- the update check and update (#1209) ---------------------------------------
 
 fn sha_of(release: &Published) -> String {
-    release.manifest["artifact"]["sha256"].as_str().unwrap().to_owned()
+    release.manifest["artifact"]["sha256"]
+        .as_str()
+        .unwrap()
+        .to_owned()
 }
 
 /// A source of the fixture builds: the adapter is loaded and running.
@@ -280,11 +298,15 @@ async fn a_newer_tag_shows_update_available_and_nothing_changes_until_the_reader
     let registry = Registry::default();
     install_from(&pool, &registry, store.path(), &forge, &forge.repo_url()).await;
 
-    let list = installed::check_updates(&pool, &registry, &forge.endpoints()).await.unwrap();
+    let list = installed::check_updates(&pool, &registry, &forge.endpoints())
+        .await
+        .unwrap();
     assert_eq!(list[0].update, Some(UpdateCheck::Current));
 
     let newer = forge.publish("v0.2.0", &newer_bytes(), |_| {}).await;
-    let list = installed::check_updates(&pool, &registry, &forge.endpoints()).await.unwrap();
+    let list = installed::check_updates(&pool, &registry, &forge.endpoints())
+        .await
+        .unwrap();
     assert_eq!(
         list[0].update,
         Some(UpdateCheck::Available {
@@ -297,9 +319,15 @@ async fn a_newer_tag_shows_update_available_and_nothing_changes_until_the_reader
     assert_eq!(list[0].artifact_sha256, sha_of(&first));
     assert!(!install::artifact_path(store.path(), &sha_of(&newer)).exists());
 
-    let updated = installed::update(&pool, &registry, store.path(), &forge.endpoints(), "wasm-fixture")
-        .await
-        .expect("the newer release passes every check");
+    let updated = installed::update(
+        &pool,
+        &registry,
+        store.path(),
+        &forge.endpoints(),
+        "wasm-fixture",
+    )
+    .await
+    .expect("the newer release passes every check");
     assert_eq!(updated.tag.as_deref(), Some("v0.2.0"));
     assert_eq!(updated.artifact_sha256, sha_of(&newer));
     assert_eq!(updated.update, None, "the check is answered by the update");
@@ -312,7 +340,9 @@ async fn a_newer_tag_shows_update_available_and_nothing_changes_until_the_reader
 
     // And a restart loads the updated pin.
     let restarted = Registry::default();
-    let loaded = install::load_installed(&pool, &restarted, store.path()).await.unwrap();
+    let loaded = install::load_installed(&pool, &restarted, store.path())
+        .await
+        .unwrap();
     assert_eq!(loaded, vec![("wasm-fixture".to_owned(), Ok(()))]);
 }
 
@@ -327,7 +357,9 @@ async fn a_forge_release_url_sees_its_forge_s_newer_release() {
     install_from(&pool, &registry, store.path(), &forge, &url).await;
 
     forge.publish("v0.2.0", &newer_bytes(), |_| {}).await;
-    let list = installed::check_updates(&pool, &registry, &forge.endpoints()).await.unwrap();
+    let list = installed::check_updates(&pool, &registry, &forge.endpoints())
+        .await
+        .unwrap();
     assert!(
         matches!(&list[0].update, Some(UpdateCheck::Available { tag: Some(t), .. }) if t == "v0.2.0"),
         "{:?}",
@@ -344,12 +376,22 @@ async fn an_update_whose_static_checks_fail_stays_on_the_old_version_with_the_re
     let registry = Registry::default();
     install_from(&pool, &registry, store.path(), &forge, &forge.repo_url()).await;
     forge
-        .publish("v0.2.0", &newer_bytes(), |m| m["interface_version"] = "2.0.0".into())
+        .publish("v0.2.0", &newer_bytes(), |m| {
+            m["interface_version"] = "2.0.0".into()
+        })
         .await;
-    installed::check_updates(&pool, &registry, &forge.endpoints()).await.unwrap();
+    installed::check_updates(&pool, &registry, &forge.endpoints())
+        .await
+        .unwrap();
 
-    let Err(error) =
-        installed::update(&pool, &registry, store.path(), &forge.endpoints(), "wasm-fixture").await
+    let Err(error) = installed::update(
+        &pool,
+        &registry,
+        store.path(),
+        &forge.endpoints(),
+        "wasm-fixture",
+    )
+    .await
     else {
         panic!("an update the checks refuse must not happen");
     };
@@ -398,39 +440,84 @@ async fn uninstall_with_two_sources_asks_once_per_source_and_does_what_each_says
     let store = tempfile::tempdir().unwrap();
     let registry = Registry::default();
     install_from(&pool, &registry, store.path(), &forge, &forge.repo_url()).await;
-    assert_eq!(add_and_sync(&pool, &connector, &registry, "quay-a").await, 3);
-    assert_eq!(add_and_sync(&pool, &connector, &registry, "quay-b").await, 3);
+    assert_eq!(
+        add_and_sync(&pool, &connector, &registry, "quay-a").await,
+        3
+    );
+    assert_eq!(
+        add_and_sync(&pool, &connector, &registry, "quay-b").await,
+        3
+    );
     let secrets: Arc<dyn knobas_secrets::SecretStore> =
         Arc::new(knobas_secrets::MemoryStore::new());
 
-    let asked: Vec<String> = only(&pool, &registry).await.sources.into_iter().map(|s| s.id).collect();
-    assert_eq!(asked, ["quay-a", "quay-b"], "the question names each source");
+    let asked: Vec<String> = only(&pool, &registry)
+        .await
+        .sources
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(
+        asked,
+        ["quay-a", "quay-b"],
+        "the question names each source"
+    );
 
     // One answer of two: refused, and nothing removed.
-    let purge_a = Removal { source_id: "quay-a".to_owned(), purge_items: true };
-    let keep_b = Removal { source_id: "quay-b".to_owned(), purge_items: false };
+    let purge_a = Removal {
+        source_id: "quay-a".to_owned(),
+        purge_items: true,
+    };
+    let keep_b = Removal {
+        source_id: "quay-b".to_owned(),
+        purge_items: false,
+    };
     let Err(error) = installed::uninstall(
-        &pool, &secrets, &registry, store.path(), "wasm-fixture", std::slice::from_ref(&purge_a),
+        &pool,
+        &secrets,
+        &registry,
+        store.path(),
+        "wasm-fixture",
+        std::slice::from_ref(&purge_a),
     )
     .await
     else {
         panic!("an uninstall missing an answer must not happen");
     };
     assert!(matches!(error, InstallError::Unanswered { .. }), "{error}");
-    assert!(error.to_string().contains("no answer for quay-b"), "{error}");
+    assert!(
+        error.to_string().contains("no answer for quay-b"),
+        "{error}"
+    );
     assert_eq!(source_ids(&pool).await, ["quay-a", "quay-b"]);
     assert!(builds(&registry));
 
     let removed = installed::uninstall(
-        &pool, &secrets, &registry, store.path(), "wasm-fixture", &[purge_a.clone(), keep_b.clone()],
+        &pool,
+        &secrets,
+        &registry,
+        store.path(),
+        "wasm-fixture",
+        &[purge_a.clone(), keep_b.clone()],
     )
     .await
     .expect("every source answered");
     assert_eq!(removed, [purge_a, keep_b]);
 
-    assert!(source_ids(&pool).await.is_empty(), "both sources are removed");
-    assert_eq!(items_of(&pool, "quay-a").await, 0, "purge took quay-a's items");
-    assert_eq!(items_of(&pool, "quay-b").await, 3, "keep left quay-b's items");
+    assert!(
+        source_ids(&pool).await.is_empty(),
+        "both sources are removed"
+    );
+    assert_eq!(
+        items_of(&pool, "quay-a").await,
+        0,
+        "purge took quay-a's items"
+    );
+    assert_eq!(
+        items_of(&pool, "quay-b").await,
+        3,
+        "keep left quay-b's items"
+    );
     assert!(installed::list(&pool, &registry).await.unwrap().is_empty());
     assert!(!kinds(&registry).contains(&"wasm-fixture".to_owned()));
     assert!(!builds(&registry));
@@ -445,7 +532,11 @@ async fn backup_service(
     label: &str,
     registry: &Registry,
     forge: &Forge,
-) -> (Arc<knobas_app::backup::BackupState>, tempfile::TempDir, tempfile::TempDir) {
+) -> (
+    Arc<knobas_app::backup::BackupState>,
+    tempfile::TempDir,
+    tempfile::TempDir,
+) {
     let connector = knobas_db::test_util::scratch_database(label).await;
     let pool = connector.pool(2).await.unwrap();
     let archives = tempfile::tempdir().unwrap();
@@ -478,7 +569,9 @@ async fn old_machine(label: &str, forge: &Forge) -> (String, tempfile::TempDir) 
         "secret": { "value": "t" }, "sync_interval_secs": 900, "enabled": true,
     }))
     .unwrap();
-    knobas_app::sources::crud::add(&old.pool, &secrets, &registry, input).await.unwrap();
+    knobas_app::sources::crud::add(&old.pool, &secrets, &registry, input)
+        .await
+        .unwrap();
     let archive = knobas_app::backup::export_now(&old).await.unwrap();
     (archive.file, archives)
 }
@@ -494,7 +587,9 @@ async fn a_backup_restored_on_a_fresh_profile_reinstalls_the_adapter_at_its_tag_
     let registry = Registry::default();
     let (fresh, archives, store) = backup_service("restore-fresh", &registry, &forge).await;
     std::fs::copy(old_archives.path().join(&file), archives.path().join(&file)).unwrap();
-    knobas_app::backup::restore(&fresh, &file).await.expect("the restore");
+    knobas_app::backup::restore(&fresh, &file)
+        .await
+        .expect("the restore");
 
     let status = only(&fresh.pool, &registry).await;
     assert_eq!(status.tag.as_deref(), Some("v0.1.0"));
@@ -516,7 +611,9 @@ async fn a_restore_whose_release_artifact_changed_hash_is_refused_and_the_rest_p
     let registry = Registry::default();
     let (fresh, archives, store) = backup_service("rehash-fresh", &registry, &forge).await;
     std::fs::copy(old_archives.path().join(&file), archives.path().join(&file)).unwrap();
-    knobas_app::backup::restore(&fresh, &file).await.expect("the restore itself stands");
+    knobas_app::backup::restore(&fresh, &file)
+        .await
+        .expect("the restore itself stands");
 
     let status = only(&fresh.pool, &registry).await;
     assert_eq!(
@@ -532,7 +629,11 @@ async fn a_restore_whose_release_artifact_changed_hash_is_refused_and_the_rest_p
     );
     assert!(std::fs::read_dir(store.path()).map_or(true, |mut d| d.next().is_none()));
     assert!(!builds(&registry));
-    assert_eq!(source_ids(&fresh.pool).await, ["quay"], "the rest of the restore proceeds");
+    assert_eq!(
+        source_ids(&fresh.pool).await,
+        ["quay"],
+        "the rest of the restore proceeds"
+    );
 }
 
 /// A manifest that still names the pinned hash over an artifact that is not
@@ -544,7 +645,9 @@ async fn a_restore_whose_artifact_bytes_changed_under_the_same_manifest_is_refus
     let (file, old_archives) = old_machine("rebytes-old", &forge).await;
     let pinned = sha_of(&release);
     forge
-        .publish("v0.1.0", &newer_bytes(), |m| m["artifact"]["sha256"] = pinned.clone().into())
+        .publish("v0.1.0", &newer_bytes(), |m| {
+            m["artifact"]["sha256"] = pinned.clone().into()
+        })
         .await;
 
     let registry = Registry::default();
@@ -552,8 +655,14 @@ async fn a_restore_whose_artifact_bytes_changed_under_the_same_manifest_is_refus
     std::fs::copy(old_archives.path().join(&file), archives.path().join(&file)).unwrap();
     knobas_app::backup::restore(&fresh, &file).await.unwrap();
 
-    let refused = only(&fresh.pool, &registry).await.refused.unwrap_or_default();
-    assert!(refused.contains(&format!("and the backup pinned {pinned}")), "{refused}");
+    let refused = only(&fresh.pool, &registry)
+        .await
+        .refused
+        .unwrap_or_default();
+    assert!(
+        refused.contains(&format!("and the backup pinned {pinned}")),
+        "{refused}"
+    );
     assert!(!builds(&registry));
 }
 
@@ -563,12 +672,28 @@ async fn a_share_export_carries_no_external_adapter_record() {
     forge.publish("v0.1.0", &fixture_bytes(), |_| {}).await;
     let registry = Registry::default();
     let (state, archives, store) = backup_service("share-adapter", &registry, &forge).await;
-    install_from(&state.pool, &registry, store.path(), &forge, &forge.repo_url()).await;
+    install_from(
+        &state.pool,
+        &registry,
+        store.path(),
+        &forge,
+        &forge.repo_url(),
+    )
+    .await;
     let every = knobas_app::backup::ShareParts {
-        links: true, assets: true, contexts: true, notes: true, time: true, sources: true,
-        smart_lists: true, ticket_views: true, link_sets: true,
+        links: true,
+        assets: true,
+        contexts: true,
+        notes: true,
+        time: true,
+        sources: true,
+        smart_lists: true,
+        ticket_views: true,
+        link_sets: true,
     };
-    let share = knobas_app::backup::share_export(&state, every).await.unwrap();
+    let share = knobas_app::backup::share_export(&state, every)
+        .await
+        .unwrap();
     let backup = knobas_app::backup::export_now(&state).await.unwrap();
 
     let tables = |file: String| {
@@ -583,9 +708,15 @@ async fn a_share_export_carries_no_external_adapter_record() {
                 .collect::<Vec<_>>()
         }
     };
-    assert!(!tables(share.file).await.contains(&"external_adapter".to_owned()));
     assert!(
-        tables(backup.file).await.contains(&"external_adapter".to_owned()),
+        !tables(share.file)
+            .await
+            .contains(&"external_adapter".to_owned())
+    );
+    assert!(
+        tables(backup.file)
+            .await
+            .contains(&"external_adapter".to_owned()),
         "the backup is what carries the record, so the share export's absence is a choice"
     );
 }
@@ -612,6 +743,12 @@ async fn a_public_github_repository_installs_its_latest_release() {
         .unwrap_or_else(|error| panic!("{repo} must install: {error}"));
     assert!(installed.tag.is_some(), "a release has a tag");
     assert!(install::artifact_path(store.path(), &installed.artifact_sha256).is_file());
-    let list = installed::check_updates(&pool, &registry, &endpoints).await.unwrap();
-    assert_eq!(list[0].update, Some(UpdateCheck::Current), "the latest is installed");
+    let list = installed::check_updates(&pool, &registry, &endpoints)
+        .await
+        .unwrap();
+    assert_eq!(
+        list[0].update,
+        Some(UpdateCheck::Current),
+        "the latest is installed"
+    );
 }

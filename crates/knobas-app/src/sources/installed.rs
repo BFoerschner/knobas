@@ -45,10 +45,7 @@ pub enum UpdateCheck {
     Failed { reason: String },
     /// The reader updated, and the new release's static checks refused it:
     /// the installed one stays.
-    Refused {
-        tag: Option<String>,
-        reason: String,
-    },
+    Refused { tag: Option<String>, reason: String },
 }
 
 /// A source of an installed adapter, for uninstall's question.
@@ -134,7 +131,11 @@ async fn sources_of(pool: &PgPool, kind: &str) -> Result<Vec<AdapterSource>, sql
         .collect())
 }
 
-async fn status(pool: &PgPool, registry: &Registry, row: Row) -> Result<AdapterStatus, sqlx::Error> {
+async fn status(
+    pool: &PgPool,
+    registry: &Registry,
+    row: Row,
+) -> Result<AdapterStatus, sqlx::Error> {
     let name = registry
         .external_template(&row.adapter_kind)
         .map_or_else(|| row.adapter_kind.clone(), |t| t.name);
@@ -382,7 +383,9 @@ pub async fn reinstall_restored(
             Err(reason) => Err(reason),
         };
         match &outcome {
-            Ok(()) => tracing::info!(kind = %row.adapter_kind, "restored external adapter installed"),
+            Ok(()) => {
+                tracing::info!(kind = %row.adapter_kind, "restored external adapter installed")
+            }
             Err(reason) => {
                 tracing::error!(kind = %row.adapter_kind, %reason, "a restored external adapter is refused");
                 registry.refuse(&row.adapter_kind, reason.clone());

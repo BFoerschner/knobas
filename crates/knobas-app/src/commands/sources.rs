@@ -91,13 +91,9 @@ pub async fn install_adapter<R: tauri::Runtime>(
     manifest: String,
 ) -> Result<crate::sources::install::InstalledAdapter, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::install::install_for_profile(
-        &state.pool,
-        &profile.dir,
-        &manifest,
-    )
-    .await
-    .map_err(|error| error.to_ipc())
+    crate::sources::install::install_for_profile(&state.pool, &profile.dir, &manifest)
+        .await
+        .map_err(|error| error.to_ipc())
 }
 
 /// Every installed external adapter (#1209, #1210): its pin, its sources,
