@@ -2524,14 +2524,12 @@ knobas-source-confluence	test/live_confluence_seeded	the_space_and_the_ancestors
 knobas-source-confluence	test/live_confluence_seeded	the_storage_format_is_verbatim_in_the_payload_and_stripped_in_the_body
 knobas-source-confluence	test/live_confluence_seeded	the_walk_follows_the_next_link_and_the_expansions_survive_it
 knobas-source-gitea	lib/knobas_source_gitea	client::tests::a_base_url_that_is_not_a_url_is_refused
-knobas-source-gitea	lib/knobas_source_gitea	client::tests::a_configuration_problem_outranks_a_missing_secret
-knobas-source-gitea	lib/knobas_source_gitea	client::tests::a_missing_secret_is_unauthorized
-knobas-source-gitea	lib/knobas_source_gitea	client::tests::a_pat_becomes_a_gitea_token_credential
 knobas-source-gitea	lib/knobas_source_gitea	client::tests::a_path_segment_cannot_walk_out_of_the_api_root
 knobas-source-gitea	lib/knobas_source_gitea	client::tests::debug_never_prints_the_secret
 knobas-source-gitea	lib/knobas_source_gitea	client::tests::giteas_error_envelope_becomes_the_message
 knobas-source-gitea	lib/knobas_source_gitea	client::tests::only_a_refusal_or_an_absence_is_scoped_to_one_repository
 knobas-source-gitea	lib/knobas_source_gitea	client::tests::paging_parameters_carry_the_contracts_page_size
+knobas-source-gitea	lib/knobas_source_gitea	client::tests::the_credential_rules_speak_exactly_what_the_form_offers
 knobas-source-gitea	lib/knobas_source_gitea	client::wire_tests::a_broken_commit_listing_still_fails
 knobas-source-gitea	lib/knobas_source_gitea	client::wire_tests::a_commit_listing_turns_off_the_projections_gitea_defaults_to_on
 knobas-source-gitea	lib/knobas_source_gitea	client::wire_tests::a_discussion_with_no_count_header_is_no_count_at_all
@@ -3147,8 +3145,7 @@ knobas-source-kuma	lib/knobas_source_kuma	descriptor::tests::the_state_is_declar
 knobas-source-kuma	lib/knobas_source_kuma	descriptor::tests::the_template_claims_the_monitoring_role_and_fills_it
 knobas-source-kuma	lib/knobas_source_kuma	descriptor::tests::the_template_declares_one_kind_and_no_writes
 knobas-source-kuma	lib/knobas_source_kuma	descriptor::tests::the_template_survives_a_json_round_trip
-knobas-source-kuma	lib/knobas_source_kuma	http::tests::a_missing_key_and_a_wrong_method_are_different_failures
-knobas-source-kuma	lib/knobas_source_kuma	http::tests::an_api_key_is_basic_auth_with_no_username
+knobas-source-kuma	lib/knobas_source_kuma	http::tests::the_credential_rules_speak_exactly_what_the_form_offers
 knobas-source-kuma	lib/knobas_source_kuma	map::tests::a_monitor_carries_what_the_spec_names
 knobas-source-kuma	lib/knobas_source_kuma	map::tests::a_monitor_links_to_its_own_page_in_kuma
 knobas-source-kuma	lib/knobas_source_kuma	map::tests::a_tombstone_keeps_the_name_and_drops_the_link
