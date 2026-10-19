@@ -16,8 +16,19 @@
 //! connection is then made to, so a name that answers public once and
 //! local the next time (DNS rebinding) cannot slip between a check and the
 //! connect. The refusal reaches the component as `connection-refused`.
-//! Through a system proxy the proxy resolves the name, and the guard sees
-//! only the proxy's own name, which it lets through.
+//!
+//! **Through a system proxy** (#1283) the proxy resolves the name, and the
+//! resolver sees only the proxy's own name, which it lets through. So
+//! `send` resolves a guarded name itself first and refuses it the same way
+//! when any answer is local; only then does the request go out, through the
+//! proxy as before. That is a second lookup, so a name whose owner answers
+//! public to knobas and local to the proxy (rebinding) still reaches the
+//! proxy's side, which is the reader's loopback when the proxy runs on the
+//! reader's machine. No credential goes there. A name knobas cannot resolve
+//! goes on to the proxy too: a network whose only way out is the proxy may
+//! answer no outside name. The check also runs on a direct connection,
+//! where the resolver's check is still the one that holds against
+//! rebinding.
 //!
 //! **The credential.** It is attached only to a request whose origin
 //! (scheme, host and port) is the source's address: `Authorization: Bearer

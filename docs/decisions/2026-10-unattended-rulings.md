@@ -6849,3 +6849,30 @@ The merge-manager's rulings (Opus):
   (`dyn Source` over the fixture component) against a local server and a local forwarding proxy
   that carries every request to that server, standing in for a proxy that resolves the name to
   `127.0.0.1`. *Reversing:* n/a.
+
+### #1283: merge-manager's rulings (Opus)
+
+- **The rebinding window through a proxy.** *Fork:* hold the PR until a proxied request is guarded
+  against rebinding too, or merge with the static case closed. *Ruling:* merge. #1244 named the
+  threat as reach, not theft: no credential goes to a guarded host. The criterion's case (a name
+  that points home) is closed; what stays open needs a hostile owner timing two answers, and only
+  for a reader who configured a proxy. The only ways to close it (`no_proxy`, or refusing proxied
+  guarded requests) cut a proxy-only reader off every fixed host, which #1244's merge-manager
+  already turned down. *Reversing:* low.
+- **A name knobas cannot resolve does not reopen criterion 1.** *Fork:* refuse it. *Ruling:* keep
+  the implementer's pass-on. On the reader's machine a local proxy asks the same system resolver,
+  so a name that fails for knobas and answers loopback to the proxy needs the owner to fail the
+  first query and answer the second, which is the rebinding case above, not a new one. A name
+  that steadily resolves to `127.0.0.1` is refused (the criterion's test). *Reversing:* low.
+- **`fake_proxy` under `test-util` does not reach a shipped build.** `knobas-app` depends on
+  `knobas-wasm-host` without features and turns `test-util` on only as a dev-dependency; with
+  `resolver = "2"` that does not unify into `cargo build` (`cargo tree -p knobas-app -e
+  normal,features -i knobas-wasm-host` shows only `default`). No recipe or `tauri.conf.json`
+  passes `--features`. *Reversing:* n/a.
+- **The module comment still said the guard does not hold through a proxy.** The PR described a
+  "Through a system proxy" paragraph, but the module comment kept #1244's sentence. Rewritten by
+  the merge-manager to describe the check before hand-off and its cost. *Reversing:* n/a.
+- **The lookup before hand-off has no bound of its own.** On a proxy-only network whose DNS drops
+  outside queries rather than answering them, each guarded request now waits for the system's
+  lookup timeout before it goes to the proxy (the call's deadline still holds it). Not in the
+  ticket's criteria: follow-up #1290 (`backlog`). *Reversing:* n/a.
