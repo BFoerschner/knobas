@@ -327,9 +327,16 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
 
 /// A response body that fails `connection-read-timeout` when the next frame
 /// is longer coming than `gap`.
+///
+/// The wait is timed from the first poll that finds no frame, not from the
+/// last frame: time the component spends elsewhere between reads (on the
+/// sink, say) is its own, and a server held back by it has not stalled.
 struct BetweenBytes {
     inner: WasiBody,
     gap: Option<(Duration, Pin<Box<tokio::time::Sleep>>)>,
+    /// Whether the timer runs: set by a poll that found no frame, cleared by
+    /// one that found one.
+    waiting: bool,
 }
 
 impl BetweenBytes {
@@ -337,6 +344,7 @@ impl BetweenBytes {
         Self {
             inner,
             gap: gap.map(|gap| (gap, Box::pin(tokio::time::sleep(gap)))),
+            waiting: false,
         }
     }
 }
@@ -352,16 +360,18 @@ impl http_body::Body for BetweenBytes {
         let this = &mut *self;
         match Pin::new(&mut this.inner).poll_frame(cx) {
             Poll::Ready(frame) => {
-                if let Some((gap, timer)) = &mut this.gap {
-                    timer.as_mut().reset(tokio::time::Instant::now() + *gap);
-                }
+                this.waiting = false;
                 Poll::Ready(frame)
             }
             Poll::Pending => {
-                let stalled = this
-                    .gap
-                    .as_mut()
-                    .is_some_and(|(_, timer)| timer.as_mut().poll(cx).is_ready());
+                let Some((gap, timer)) = this.gap.as_mut() else {
+                    return Poll::Pending;
+                };
+                if !this.waiting {
+                    this.waiting = true;
+                    timer.as_mut().reset(tokio::time::Instant::now() + *gap);
+                }
+                let stalled = timer.as_mut().poll(cx).is_ready();
                 if stalled {
                     Poll::Ready(Some(Err(HttpError::ConnectionReadTimeout)))
                 } else {
@@ -406,4 +416,65 @@ fn client() -> Result<&'static reqwest::Client, HttpError> {
         })
         .as_ref()
         .ok_or(HttpError::ConfigurationError)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http_body_util::BodyExt as _;
+
+    /// A body whose frames arrive when the test sends them.
+    struct Gated(tokio::sync::mpsc::Receiver<Bytes>);
+
+    impl http_body::Body for Gated {
+        type Data = Bytes;
+        type Error = HttpError;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<http_body::Frame<Bytes>, HttpError>>> {
+            self.0
+                .poll_recv(cx)
+                .map(|bytes| bytes.map(|b| Ok(http_body::Frame::data(b))))
+        }
+    }
+
+    const GAP: Duration = Duration::from_millis(100);
+
+    fn gated() -> (tokio::sync::mpsc::Sender<Bytes>, BetweenBytes) {
+        let (frames, rx) = tokio::sync::mpsc::channel(4);
+        (
+            frames,
+            BetweenBytes::new(Gated(rx).boxed_unsync(), Some(GAP)),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_body_that_stalls_past_its_gap_fails_read_timeout() {
+        let (_frames, mut body) = gated();
+        let next = body.frame().await;
+        assert!(
+            matches!(next, Some(Err(HttpError::ConnectionReadTimeout))),
+            "{next:?}"
+        );
+    }
+
+    /// The component's own time between reads is not the server's stall: a
+    /// frame that comes inside the gap of the read that waits for it passes,
+    /// however long ago the last read was.
+    #[tokio::test]
+    async fn a_reader_that_pauses_longer_than_the_gap_is_not_timed_out() {
+        let (frames, mut body) = gated();
+        frames.send(Bytes::from_static(b"one")).await.unwrap();
+        assert!(matches!(body.frame().await, Some(Ok(_))));
+        tokio::time::sleep(GAP * 3).await;
+        let later = tokio::spawn(async move {
+            tokio::time::sleep(GAP / 4).await;
+            frames.send(Bytes::from_static(b"two")).await.unwrap();
+        });
+        let next = body.frame().await;
+        assert!(matches!(next, Some(Ok(_))), "{next:?}");
+        later.await.unwrap();
+    }
 }

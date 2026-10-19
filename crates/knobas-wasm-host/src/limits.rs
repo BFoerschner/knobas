@@ -9,8 +9,8 @@
 //! be dropped. [`bounded`] drops it at the deadline: the store goes with it,
 //! and nothing the component did outlives the call.
 //!
-//! **The memory cap** bounds the linear memories of one call's store, all of
-//! them together. A growth past it traps the call at once, naming the cap,
+//! **The memory cap** bounds the linear memories and tables of one call's
+//! store, all of them together. A growth past it traps the call at once, naming the cap,
 //! rather than answering `-1` for the component to turn into an abort with
 //! no reason in it. It is also what bounds an outgoing request body, which
 //! the host buffers ([`crate::net`]).
@@ -119,13 +119,22 @@ impl Exceeded {
     }
 }
 
-/// The store's limiter: the memory cap over all of its linear memories.
+/// The store's limiter: the memory cap over all of its linear memories and
+/// tables.
 pub struct MemoryCap {
     mib: u32,
     cap: usize,
     /// Bytes the store's memories hold now, summed.
-    used: usize,
+    memories: usize,
+    /// Bytes the store's tables hold now, summed, at [`TABLE_ELEMENT_BYTES`]
+    /// an element: a table is host memory too, and a growth the cap did not
+    /// see could ask the host for more than it has.
+    tables: usize,
 }
+
+/// What one table element is counted as: the widest a wasmtime table
+/// element is, so the count is never under what the host holds.
+const TABLE_ELEMENT_BYTES: usize = 16;
 
 impl MemoryCap {
     /// The cap `limits` set, over a store that holds nothing yet.
@@ -134,7 +143,8 @@ impl MemoryCap {
         Self {
             mib: limits.memory_mib,
             cap: usize::try_from(limits.memory_bytes()).unwrap_or(usize::MAX),
-            used: 0,
+            memories: 0,
+            tables: 0,
         }
     }
 }
@@ -146,20 +156,27 @@ impl ResourceLimiter for MemoryCap {
         desired: usize,
         _maximum: Option<usize>,
     ) -> wasmtime::Result<bool> {
-        let used = self.used - current.min(self.used) + desired;
-        if used > self.cap {
+        let memories = (self.memories - current.min(self.memories)).saturating_add(desired);
+        if memories.saturating_add(self.tables) > self.cap {
             return Err(Exceeded::Memory(self.mib).into());
         }
-        self.used = used;
+        self.memories = memories;
         Ok(true)
     }
 
     fn table_growing(
         &mut self,
-        _current: usize,
-        _desired: usize,
+        current: usize,
+        desired: usize,
         _maximum: Option<usize>,
     ) -> wasmtime::Result<bool> {
+        let current = current.saturating_mul(TABLE_ELEMENT_BYTES);
+        let desired = desired.saturating_mul(TABLE_ELEMENT_BYTES);
+        let tables = (self.tables - current.min(self.tables)).saturating_add(desired);
+        if tables.saturating_add(self.memories) > self.cap {
+            return Err(Exceeded::Memory(self.mib).into());
+        }
+        self.tables = tables;
         Ok(true)
     }
 }
@@ -201,4 +218,40 @@ pub(crate) async fn bounded<T>(
 /// The limit a trap names, if it was one.
 pub(crate) fn exceeded(error: &wasmtime::Error) -> Option<Exceeded> {
     error.downcast_ref::<Exceeded>().copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cap_of(mib: u32) -> MemoryCap {
+        MemoryCap::new(Limits {
+            memory_mib: mib,
+            ..Limits::default()
+        })
+    }
+
+    /// A table is host memory too: a growth past the cap traps naming it,
+    /// rather than asking the host for whatever the component wants.
+    #[test]
+    fn a_table_growth_past_the_cap_is_refused_naming_it() {
+        let mut cap = cap_of(1);
+        assert!(cap.table_growing(0, 1_000, None).unwrap());
+        let error = cap.table_growing(1_000, usize::MAX / 2, None).unwrap_err();
+        assert_eq!(exceeded(&error), Some(Exceeded::Memory(1)));
+    }
+
+    /// Memories and tables share the one cap.
+    #[test]
+    fn memories_and_tables_count_against_one_cap() {
+        let mut cap = cap_of(1);
+        assert!(cap.memory_growing(0, 768 * 1024, None).unwrap());
+        let error = cap.table_growing(0, 32 * 1024, None).unwrap_err();
+        assert_eq!(exceeded(&error), Some(Exceeded::Memory(1)));
+        assert!(cap.table_growing(0, 1_024, None).unwrap());
+        let error = cap
+            .memory_growing(768 * 1024, 1024 * 1024, None)
+            .unwrap_err();
+        assert_eq!(exceeded(&error), Some(Exceeded::Memory(1)));
+    }
 }

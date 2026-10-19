@@ -263,10 +263,11 @@ pub(crate) async fn check_download(adapter: &WasmAdapter) -> Result<(), String> 
         SinkSlot::none(),
         Arc::new(net::Policy::none(crate::PROBE_ID)),
     );
-    download_func(adapter, &mut store)
-        .await
-        .map(drop)
-        .map_err(|e| format!("its download does not have the type knobas hosts: {e}"))
+    limits::bounded(adapter, async {
+        download_func(adapter, &mut store).await.map(drop)
+    })
+    .await
+    .map_err(|e| format!("its download does not have the type knobas hosts: {e}"))
 }
 
 /// The component's descriptor for `instance`, decoded.
