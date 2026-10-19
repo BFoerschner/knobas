@@ -6611,3 +6611,8 @@ The merge-manager's rulings (Opus):
   15 s to the scripts half of the gate, which runs beside the cargo half. It runs a private copy
   of the lock script under a private `TMPDIR`, so its cleanup and its 90 s watchdog can
   `pkill` its own `take`s without touching a merge-manager's. **Reversing:** low.
+- **File ages read GNU `stat -c %Y` first, then BSD `stat -f %m`, and a vanished file is 0.** The
+  test now runs in `just check`, and `check.yml` runs that on Linux, where `stat -f` is
+  file-system status and exits 0. A queue entry another waiter removed between the glob and the
+  `stat` raised an arithmetic error before #1274; reading it as epoch 0 marks it dead.
+  **Reversing:** low.
