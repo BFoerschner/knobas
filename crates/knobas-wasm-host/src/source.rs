@@ -70,6 +70,14 @@ impl DownloadSlot {
         }
     }
 
+    /// The slot of a download whose pieces go to `chunks`.
+    fn to(chunks: mpsc::Sender<Chunk>) -> Self {
+        Self {
+            chunks: Some(chunks),
+            ..Self::none()
+        }
+    }
+
     fn fail(&mut self, error: SourceError) -> wit::SourceError {
         let answer = convert::to_wit_error(&error);
         self.failure.get_or_insert(error);
@@ -201,7 +209,7 @@ async fn open(
 /// within the adapter's deadline.
 macro_rules! call {
     ($self:expr, $method:ident $(, $arg:expr)*) => {
-        limits::bounded($self.adapter.kind(), $self.adapter.limits(), async {
+        limits::bounded(&$self.adapter, async {
             let (mut store, bindings, resource) = open(
                 &$self.adapter,
                 &$self.instance,
@@ -267,7 +275,7 @@ pub(crate) async fn descriptor(
     instance: wit::Instance,
     policy: Arc<net::Policy>,
 ) -> Result<SourceDescriptor, SourceError> {
-    limits::bounded(adapter.kind(), adapter.limits(), async {
+    limits::bounded(adapter, async {
         let (mut store, bindings, resource) =
             open(adapter, &instance, SinkSlot::none(), policy).await?;
         let text = bindings
@@ -366,7 +374,7 @@ impl Source for WasmSource {
         // The deadline holds the whole sync, the sink's time included: a
         // pump that outlived it would hand the engine items of a call that
         // was stopped.
-        limits::bounded(self.adapter.kind(), self.adapter.limits(), async {
+        limits::bounded(&self.adapter, async {
             let (result, ()) = tokio::join!(run, pump);
             result
         })
@@ -488,11 +496,7 @@ impl Source for WasmSource {
                 SinkSlot::none(),
                 Arc::clone(&self.policy),
             );
-            store.data_mut().download = DownloadSlot {
-                chunks: Some(chunks),
-                started: false,
-                failure: None,
-            };
+            store.data_mut().download = DownloadSlot::to(chunks);
             let func = download_func(&self.adapter, &mut store).await?;
             let (answer,) = func
                 .call_async(&mut store, (&self.instance, entity, &target))
@@ -515,7 +519,7 @@ impl Source for WasmSource {
                 let _ = answer.send(written);
             }
         };
-        limits::bounded(self.adapter.kind(), self.adapter.limits(), async {
+        limits::bounded(&self.adapter, async {
             let (result, ()) = tokio::join!(run, pump);
             result
         })

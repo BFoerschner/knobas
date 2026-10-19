@@ -303,7 +303,7 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
     let mut response: http::Response<reqwest::Body> = response.into();
     let body = std::mem::replace(response.body_mut(), reqwest::Body::from(Bytes::new()));
     let body = body.map_err(|_| HttpError::HttpResponseIncomplete);
-    let body = Stall::new(body.boxed_unsync(), bounds.between);
+    let body = BetweenBytes::new(body.boxed_unsync(), bounds.between);
     let (mut parts, ()) = response.map(|_| ()).into_parts();
     let body: WasiBody = if for_instance {
         // A body reqwest did not decode could hide the secret from the redactor.
@@ -327,12 +327,12 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
 
 /// A response body that fails `connection-read-timeout` when the next frame
 /// is longer coming than `gap`.
-struct Stall {
+struct BetweenBytes {
     inner: WasiBody,
     gap: Option<(Duration, Pin<Box<tokio::time::Sleep>>)>,
 }
 
-impl Stall {
+impl BetweenBytes {
     fn new(inner: WasiBody, gap: Option<Duration>) -> Self {
         Self {
             inner,
@@ -341,7 +341,7 @@ impl Stall {
     }
 }
 
-impl http_body::Body for Stall {
+impl http_body::Body for BetweenBytes {
     type Data = Bytes;
     type Error = HttpError;
 

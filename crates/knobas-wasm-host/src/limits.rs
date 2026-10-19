@@ -49,7 +49,9 @@ const MIB: u64 = 1024 * 1024;
 /// One adapter's limits, applied to every call into it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
+    /// The wall-clock time one call may take.
     pub deadline: Duration,
+    /// What one call's store may hold in its linear memories, in MiB.
     pub memory_mib: u32,
 }
 
@@ -126,6 +128,7 @@ pub struct MemoryCap {
 }
 
 impl MemoryCap {
+    /// The cap `limits` set, over a store that holds nothing yet.
     #[must_use]
     pub fn new(limits: Limits) -> Self {
         Self {
@@ -183,16 +186,15 @@ pub(crate) fn engine() -> &'static Engine {
     })
 }
 
-/// `call`, stopped at `limits.deadline`, and its failure named when it was
-/// the memory cap that stopped it.
+/// `call` into `adapter`, stopped at its deadline.
 pub(crate) async fn bounded<T>(
-    kind: &str,
-    limits: Limits,
+    adapter: &crate::WasmAdapter,
     call: impl Future<Output = Result<T, SourceError>>,
 ) -> Result<T, SourceError> {
-    match tokio::time::timeout(limits.deadline, call).await {
+    let deadline = adapter.limits().deadline;
+    match tokio::time::timeout(deadline, call).await {
         Ok(answer) => answer,
-        Err(_) => Err(Exceeded::Deadline(limits.deadline).into_error(kind)),
+        Err(_) => Err(Exceeded::Deadline(deadline).into_error(adapter.kind())),
     }
 }
 
