@@ -1281,7 +1281,10 @@ fn role_kinds<'a>(role: &str, fillers: impl Iterator<Item = &'a SourceDescriptor
 /// the `pipelines` read's (narrowed to the same fillers), and CI's rows on
 /// the entity list are its runs, which the job's Builds section draws one per
 /// pipeline (#1344).
-fn entity_list_kinds(min: &knobas_source::role::Minimum, template: &SourceDescriptor) -> Vec<String> {
+fn entity_list_kinds(
+    min: &knobas_source::role::Minimum,
+    template: &SourceDescriptor,
+) -> Vec<String> {
     let pipelines: Vec<&String> = template
         .payload_paths
         .iter()
