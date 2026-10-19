@@ -7307,3 +7307,12 @@ The merge-manager's rulings (Opus):
   scoped by a ticket's reach), plus the fake's `fakeRoleScope` in `fake-features.test.ts`. The
   job and tally tests stub `listEntities`, so they cannot witness what the mirror answers.
   *Reversing:* n/a.
+- **The custom-role direction gets its witness in this PR (merge-manager on Opus).** *Fork:* the
+  implementer left one direction unwitnessed, the custom-role exclusion still counting CI's
+  pipelines as built-in (no fixture source claimed CI and a custom role), or a test now.
+  *Ruling:* a test now. The §10.8 entry states that direction as part of the frozen surface, and
+  harmonising the custom branch onto `entity_list_kinds` is the likely regression; the fixture
+  `WithCustom` is hand-built, so the desk adapter now also claims CI and declares a `pipeline`
+  kind on the pipeline frame, and `a_custom_role_reads_its_adapters_other_kinds` holds a desk
+  pipeline that the custom role does not read. That mutant (`builtin_kinds` → `entity_list_kinds`
+  in the custom branch) now dies there. *Reversing:* low (drop the desk's CI claim and pipeline).

@@ -21,5 +21,6 @@
   (`fake/corpus.ts`' `fakeRoleScope`) and in the doc of `EntityFilter::role` on both sides.
 
   Pinned by `crates/knobas-app/tests/it/entity_role.rs`' `a_reached_pipeline_is_not_read_for_ci`
-  (a ticket reaching a pipeline and its run, read as the Builds section reads it) and its two
-  earlier CI cases, and by `fake-features.test.ts`.
+  (a ticket reaching a pipeline and its run, read as the Builds section reads it), its two
+  earlier CI cases, `a_custom_role_reads_its_adapters_other_kinds` (a source claiming CI and a
+  custom role keeps its pipelines out of the custom role's page), and `fake-features.test.ts`.

@@ -11,8 +11,8 @@ use knobas_source::role::RoleClaim;
 use knobas_source::{KindInfo, SourceDescriptor};
 use sqlx::PgPool;
 
-/// The adapter kind of the custom-role fixture: it claims the ticket system
-/// and a role of its own, and emits tickets and surveys.
+/// The adapter kind of the custom-role fixture: it claims the ticket system,
+/// CI and a role of its own, and emits tickets, pipelines and surveys.
 const CUSTOM: &str = "role_desk";
 /// Its custom role, namespaced to it.
 const DESK: &str = "role_desk:survey-desk";
@@ -46,14 +46,21 @@ impl knobas_sync::scheduler::AdapterRegistry for WithCustom {
                     knobas_source::role::TICKET_SYSTEM,
                     ["reachable_transitions"],
                 ),
+                RoleClaim::new(knobas_source::role::CI, ["run_log"]),
                 RoleClaim::new(DESK, []),
             ],
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             write_ops: Vec::new(),
-            entity_kinds: vec![kind("ticket"), kind("survey")],
+            entity_kinds: vec![kind("ticket"), kind("pipeline"), kind("survey")],
             config_schema: serde_json::json!({}),
-            payload_paths: Vec::new(),
+            // Its pipelines are CI's though the entity list leaves them out
+            // of CI's kinds (#1344), so they are no kind of its custom role.
+            payload_paths: vec![knobas_source::KindPaths {
+                kind: "pipeline".to_owned(),
+                frame: Some(knobas_source::Frame::Pipeline),
+                ..knobas_source::KindPaths::default()
+            }],
         });
         all
     }
@@ -329,14 +336,15 @@ async fn an_unknown_role_is_an_empty_page() {
 }
 
 /// A custom role reads its adapter's kinds that belong to no built-in role
-/// the source claims: the desk's surveys, not its tickets.
+/// the source claims: the desk's surveys, not its tickets nor its CI
+/// pipelines, which the entity list reads for no role (#1344).
 #[tokio::test]
 async fn a_custom_role_reads_its_adapters_other_kinds() {
     let pool = pool().await;
     let desk = configured(&pool, CUSTOM).await;
     let mock = configured(&pool, "mock").await;
     for source in [&desk, &mock] {
-        holding(&pool, source, &["ticket", "survey"]).await;
+        holding(&pool, source, &["ticket", "pipeline", "survey"]).await;
     }
     assert_eq!(
         read(&pool, &asking(DESK), &[&desk, &mock]).await,
