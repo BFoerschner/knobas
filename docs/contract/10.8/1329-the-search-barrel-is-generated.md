@@ -4,8 +4,15 @@
   No migration, no event, no `WriteOp`, no command added, removed or renamed, no argument changed,
   no field added, removed or renamed, no wire shape changed, nothing added to either append-only
   barrel (`app/src/lib/ipc/index.ts` and `lib.rs`'s handler list are untouched). Ratified by the
-  implementer on Opus under Björn's 2026-10-18 reserved-steps rule; the rulings are in
+  implementer on Opus under Björn's 2026-10-18 reserved-steps rule and checked against the merge
+  head by the merge-manager on Opus; the rulings are in
   `docs/decisions/2026-10-unattended-rulings.md` under `## #1329`.
+
+  **Crates that gain a derive.** Three: `knobas-search`, `knobas-source` (only `query.rs`) and
+  `knobas-app`, listed type by type below. None gains a dependency: all three already had
+  `ts-rs`. `knobas-sync` and `knobas-core` are unchanged. `knobas-source-jira` changes in one
+  test only (below). `knobas-source` still builds for `wasm32-wasip2` (the gate's
+  `wasm-fixture` step).
 
   **`knobas-search`** (the frozen search IPC types, interfaces §2.4). `types::{SearchQuery,
   SearchFilters, ParsedQuery, Prefix, SearchResponse, FilterCoverage, FilterDimension,
@@ -41,6 +48,12 @@
   `SavedViewKind` (inlined, `board` or `filter`, the projection `knobas_sync::saved_views` writes)
   and `ActiveSprint` (inlined, the shape of `SavedViewSource::sprint`'s JSON, which stays a
   `serde_json::Value`) type the two other fields the shell typed more narrowly than the Rust.
+  Both are the types the hand-written mirror had. `ref_kind`'s check constraint
+  (`jira_view_ref_kind_chk`, migration 0044) holds the kind to `board` or `filter`. The sprint
+  object is what the Jira adapter writes (`views.rs`, `{"id", "name", "end_date"}`), and
+  `sync.saved_view` passes any object through unchecked, so the adapter's test
+  `each_board_arrives_as_a_view_with_jiras_columns_limits_sprint_and_keys_in_order` now asserts
+  the whole object rather than its `name`: a renamed or added key fails there.
 
   **The IPC surface.** `app/src/lib/ipc/search.ts` keeps every `invoke` function and
   `noFilters`, and re-exports its 34 types from `./generated/search` instead of declaring them,

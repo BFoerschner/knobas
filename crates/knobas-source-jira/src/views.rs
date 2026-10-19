@@ -810,7 +810,13 @@ mod tests {
             Some("https://jira.example/secure/RapidBoard.jspa?rapidView=21")
         );
         assert_eq!(scrum.payload["keys"], json!(["PAY-231", "PAY-228"]));
-        assert_eq!(scrum.payload["sprint"]["name"], "Sprint of 21");
+        // The whole object, because the shell types it field for field:
+        // `knobas_app::ticket_views::ActiveSprint` (#1329) is this shape, and
+        // `sync.saved_view` passes any object through unchecked.
+        assert_eq!(
+            scrum.payload["sprint"],
+            json!({ "id": 7, "name": "Sprint of 21", "end_date": "2026-10-31T10:00:00.000Z" })
+        );
         assert_eq!(
             scrum.payload["query"],
             "(project = PAY) AND sprint in openSprints() ORDER BY Rank ASC"

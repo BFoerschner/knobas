@@ -8235,3 +8235,31 @@ reserved-steps rule. The entry is `docs/contract/10.8/1329-the-search-barrel-is-
   and doc comments only; no statement, bind or query moved. The reference to the deleted
   `the_hit_shape_matches_its_typescript_mirror` in `knobas-sync`'s `run_log.rs` is left for #1327,
   which deletes the test that cites it.
+
+### #1329, merge-manager on Opus (2026-10-20)
+
+Deep pass on the head rebased over #1368 and #1369. The witness re-run there: `tsc --strict`
+identity on all 34 names against `search.ts` at 1187a8d5, two control mutations failing
+(`ActiveSprint.end_date` loses `| null`; `SavedViewSource.kind` loses `"filter"`).
+
+- **`SavedViewKind`, narrower than the Rust `String`.** *Ruling:* kept. *Reasoning:* it matches
+  every value the Rust can emit: the projection's `case` writes only `board` or `filter`, and
+  `jira_view_ref_kind_chk` (migration 0044) refuses anything else, so a third kind needs a
+  migration, which §10.8 books. That constraint is the pin. *Reversing:* `#[ts(type = "string")]`.
+- **`ActiveSprint` instead of `unknown`.** *Ruling:* kept, plus a pin. *Reasoning:* it matches
+  the only emitter (the Jira adapter's `{"id": u64, "name", "end_date": Option<String>}`) and is
+  the type the shell compiled against before, so this ticket keeps it. But `sync.saved_view`
+  passes any JSON object through, and nothing tied the adapter's keys to the type: the Jira
+  test checked `name` alone. It now asserts the whole object; renaming `end_date` in the adapter
+  fails it (checked). Another adapter emitting a different sprint object would still be typed
+  wrongly; none does today. *Reversing:* `unknown`, and narrow in the shell.
+- **The `LauncherHome::recent` survivor.** *Ruling:* equivalent, as the implementer says. Both
+  `EntityRow`s serialize to one shape, and `the_two_entity_rows_are_one_wire_shape` fails if
+  they part. *Reversing:* n/a.
+- **`just search-perf`.** *Ruling:* not owed. Every changed line in `knobas-search/src` and
+  `knobas-source/src/query.rs` that is not a doc comment is a `derive` gaining `ts_rs::TS`, a
+  `#[ts(...)]` attribute, or a deleted mirror test. *Reversing:* n/a.
+- **The §10.8 entry.** *Ruling:* amended to list the crates gaining a derive by crate name
+  (#1328's and #1327's rulings), to say none gains a dependency, and to record the two narrow
+  types' pins and the Jira test. The implementer's last line above (a `run_log.rs` reference
+  left for #1327) is moot: #1327 removed it. *Reversing:* docs only.
