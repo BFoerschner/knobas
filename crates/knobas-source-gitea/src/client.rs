@@ -32,7 +32,7 @@
 //! it. A field Gitea adds tomorrow lands in the payload either way.
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use knobas_http::{Auth, HttpClient, HttpConfig, Method};
+use knobas_http::{Auth, CredentialRules, HttpClient, HttpConfig, Method, TokenSpelling};
 use knobas_source::{AuthMethod, SourceError};
 use serde_json::Value;
 
@@ -92,46 +92,31 @@ const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// Whole-request timeout, interfaces §4.1.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// The [`Auth`] the configured method means.
+pub(crate) use knobas_http::credential;
+
+/// Which [`Auth`] each configured method means for Gitea, and what a source
+/// that cannot authenticate reads as. The mapping itself, and the order it
+/// judges in, are [`credential`]'s.
 ///
-/// # Errors
-///
-/// [`SourceError::Unauthorized`] when the keychain holds no secret -- the
-/// `missing_secret` state of interfaces §3, which the sources view offers
-/// *Re-enter* for. [`SourceError::Protocol`] for a source configured with a
-/// method this adapter does not speak, or with none at all: the descriptor
-/// offers exactly [`AuthMethod::Pat`], and an anonymous Gitea would sync
-/// whatever happens to be public rather than what the user asked for.
-pub(crate) fn credential(
-    auth: Option<AuthMethod>,
-    secret: Option<&str>,
-) -> Result<Auth, SourceError> {
-    // The configuration is judged **before** the secret, and the order is the
-    // point: `missing_secret` sends the user to *Re-enter*, a misconfigured
-    // source sends them to the source's settings (§3, §10.2). Retyping a token
-    // cannot fix a source with no auth method chosen.
-    match auth {
-        Some(AuthMethod::Pat) => {}
-        Some(other) => {
-            return Err(SourceError::protocol(format!(
-                "gitea: {other:?} authentication is not supported; this adapter authenticates \
-                 with a personal access token"
-            )));
-        }
-        None => {
-            return Err(SourceError::protocol(
-                "gitea: this source has no authentication method configured; choose a personal \
-                 access token"
-                    .to_owned(),
-            ));
-        }
-    }
-    let secret = secret.ok_or_else(SourceError::unauthorized)?;
+/// The descriptor offers exactly [`AuthMethod::Pat`]: an anonymous Gitea
+/// would sync whatever happens to be public rather than what the user asked
+/// for.
+pub(crate) const CREDENTIAL_RULES: CredentialRules = CredentialRules {
     // Gitea: "API tokens must be prepended with `token` followed by a space"
-    // (interfaces §4.2). The header spelling itself is `knobas-http`'s and is
-    // pinned there; what this crate owns is picking the variant.
-    Ok(Auth::GiteaToken(secret.to_owned()))
-}
+    // (interfaces §4.2). Forgejo keeps the spelling.
+    pat: TokenSpelling::Token,
+    // What `descriptor_template().auth_methods` declares and the Add-source
+    // form offers; anything else is refused rather than guessed at.
+    methods: &[AuthMethod::Pat],
+    unconfigured: "gitea: this source has no authentication method configured; choose a \
+                   personal access token",
+    unsupported: |method| {
+        format!(
+            "gitea: {method:?} authentication is not supported; this adapter authenticates \
+             with a personal access token"
+        )
+    },
+};
 
 /// The sentence inside Gitea's error envelope, for `knobas-http` to build the
 /// message out of ([`knobas_http::BodyMessage`], ADR-0004).
@@ -663,55 +648,24 @@ mod tests {
 
     const SECRET: &str = "tidewater-pat-not-in-any-log";
 
-    /// Gitea's own spelling of the header is `Authorization: token <pat>`
-    /// (interfaces §4.2), which `knobas-http` renders for
-    /// [`Auth::GiteaToken`]. What this crate owns is picking that variant.
+    /// The Add-source form is generated from the descriptor's `auth_methods`
+    /// (spec §3a), and the transport refuses any method the rules leave out.
+    /// The two lists drifting apart either offers a method that is then
+    /// refused, or accepts one nobody can choose.
     #[test]
-    fn a_pat_becomes_a_gitea_token_credential() {
-        let got = credential(Some(AuthMethod::Pat), Some(SECRET)).unwrap();
-        assert!(
-            matches!(got, Auth::GiteaToken(ref token) if token == SECRET),
-            "{got:?}"
+    fn the_credential_rules_speak_exactly_what_the_form_offers() {
+        assert_eq!(
+            CREDENTIAL_RULES.methods,
+            crate::descriptor_template().auth_methods.as_slice()
         );
-    }
-
-    /// Interfaces §3 `missing_secret`: a configured source whose keychain entry
-    /// is gone reads as unauthorized, which is what puts *Re-enter* on screen.
-    #[test]
-    fn a_missing_secret_is_unauthorized() {
-        assert!(matches!(
-            credential(Some(AuthMethod::Pat), None),
-            Err(SourceError::Unauthorized { .. })
-        ));
-    }
-
-    /// A source that could not authenticate even with a secret in hand has a
-    /// configuration problem, and reporting `Unauthorized` for it would send
-    /// the user to retype a token that was never the issue.
-    #[test]
-    fn a_configuration_problem_outranks_a_missing_secret() {
-        for method in [
-            None,
-            Some(AuthMethod::UserPassword),
-            Some(AuthMethod::OAuth),
-            Some(AuthMethod::ApiToken),
-        ] {
-            for secret in [None, Some(SECRET)] {
-                let error = credential(method, secret).unwrap_err();
-                assert!(
-                    matches!(error, SourceError::Protocol { message: ref m, .. } if m.contains("token")),
-                    "{method:?}/{}: {error:?}",
-                    secret.is_some()
-                );
-            }
-        }
     }
 
     /// Spec §14: the secret exists in one place. `Debug` is the leak that gets
     /// forgotten -- a `dbg!` on the client would otherwise put a PAT in a log.
     #[test]
     fn debug_never_prints_the_secret() {
-        let auth = credential(Some(AuthMethod::Pat), Some(SECRET)).unwrap();
+        let auth =
+            credential(&CREDENTIAL_RULES, Some(AuthMethod::Pat), None, Some(SECRET)).unwrap();
         assert!(!format!("{auth:?}").contains(SECRET));
         let client = GiteaClient::new(
             "https://gitea.tidewater.example",
