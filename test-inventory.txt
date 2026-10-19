@@ -2200,7 +2200,7 @@ knobas-source	lib/knobas_source	contract::tests::accepts_a_wrong_declaration_for
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_answers_the_read
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_draws_no_view
 knobas-source	lib/knobas_source	contract::tests::every_role_write_is_a_known_write_op
-knobas-source	lib/knobas_source	contract::tests::every_write_op_answers_an_identifier_and_a_delivery
+knobas-source	lib/knobas_source	contract::tests::every_write_op_answers_a_delivery_whose_target_it_carries
 knobas-source	lib/knobas_source	contract::tests::no_role_names_the_source_action
 knobas-source	lib/knobas_source	contract::tests::rejects_a_base_at_a_key_no_record_has
 knobas-source	lib/knobas_source	contract::tests::rejects_a_blank_source_id
