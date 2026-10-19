@@ -7,7 +7,7 @@
  * second half: a file-local guard protects the one file that remembered it,
  * and the file that leaks is by definition the one that did not (#103).
  */
-import { afterAll, afterEach, expect } from "vitest";
+import { afterAll, afterEach, beforeEach, expect, vi } from "vitest";
 
 // First: it must run before any module that looks for a storage is evaluated.
 import "./test-no-storage";
@@ -52,6 +52,29 @@ if (zone !== PINNED_ZONE) {
     `the suite is pinned to ${PINNED_ZONE} but is running in ${zone}: ` +
       "`test.env.TZ` in vite.config.ts has stopped taking effect",
   );
+}
+
+/**
+ * `KNOBAS_TEST_CLOCK=HH:MM` runs every test with the wall clock at that time
+ * of today, in the pinned zone (`just test-midnight` passes `00:10`).
+ *
+ * The suite is pinned to Berlin, UTC+1 or +2, so a test that builds a local
+ * date from "now" and compares it with a UTC one (`toISOString().slice(0, 10)`)
+ * agrees with itself for 22 hours a day and fails in the first hours after
+ * midnight, which is when nobody runs it: #1031, #1150 and #1155 were one
+ * bug filed three times. Only `Date` is faked, and it keeps advancing with
+ * real time, so timers, `vi.waitFor` and the rejection guard below are
+ * untouched. A file that installs its own fake timers overrides this for the
+ * tests that do, and gets it back from the next `beforeEach`.
+ */
+const CLOCK = process.env.KNOBAS_TEST_CLOCK;
+if (CLOCK) {
+  const [hours, minutes] = CLOCK.split(":").map(Number);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) throw new Error(`KNOBAS_TEST_CLOCK=${CLOCK}: expected HH:MM`);
+  const pinned = new Date();
+  pinned.setHours(hours!, minutes!, 0, 0);
+  beforeEach(() => vi.useFakeTimers({ toFake: ["Date"], now: pinned, shouldAdvanceTime: true }));
+  afterEach(() => vi.useRealTimers());
 }
 
 // jsdom has no `matchMedia`, and the shell asks it about reduced motion the

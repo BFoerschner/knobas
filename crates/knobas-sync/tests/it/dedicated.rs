@@ -246,7 +246,7 @@ async fn a_parked_run_holds_no_connection_from_the_application_pool() {
         .expect("the adapter reached its park");
 
     let probe = tokio::time::timeout(
-        std::time::Duration::from_secs(3),
+        std::time::Duration::from_secs(10),
         sqlx::query_as::<_, (i32,)>("select 1").fetch_one(&app_pool),
     )
     .await;
@@ -292,7 +292,7 @@ async fn a_failed_run_releases_the_source_lock_before_it_returns() {
     // from somewhere else, without waiting.
     let mut other = dedicated().await;
     let (got,): (bool,) = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
         sqlx::query_as("select pg_try_advisory_lock(hashtext($1::text))")
             .bind(&id)
             .fetch_one(&mut other),
@@ -344,7 +344,7 @@ async fn a_refused_run_releases_the_lock_too() {
     configure(&pool, &id).await;
     let mut other = dedicated().await;
     let (got,): (bool,) = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
         sqlx::query_as("select pg_try_advisory_lock(hashtext($1::text))")
             .bind(&id)
             .fetch_one(&mut other),

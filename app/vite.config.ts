@@ -102,6 +102,11 @@ export default defineConfig(({ mode }) => ({
     // a share of cores; `"33%"` lands on 4 here only because
     // `Math.round(0.33 * 12)` happens to.
     maxWorkers: 4,
+    // Three times Vitest's default. The suite shares the machine with up to
+    // two gates and their agents' cargo builds; the tests that failed under
+    // that load in October (#609, #782, #968, #1060) had each finished in
+    // well under a second idle, so a 5 s budget measured the neighbours.
+    testTimeout: 15_000,
   },
   // Vitest must resolve Svelte's *browser* build, or `mount` runs the SSR
   // entry point and produces no DOM.

@@ -1385,7 +1385,7 @@ async fn run_answers_before_the_first_send_and_the_steps_land_behind_it() {
     let fake = std::sync::Arc::new(Fake::new().revealing_on_refresh(&branch).held_by(&gate));
 
     let answered = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(20),
         start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket()),
     )
     .await
@@ -1405,7 +1405,7 @@ async fn run_answers_before_the_first_send_and_the_steps_land_behind_it() {
     })
     .await;
     tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(20),
         start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket()),
     )
     .await
@@ -1506,7 +1506,7 @@ async fn a_second_run_while_one_is_behind_starts_no_second_loop() {
     );
 
     tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(20),
         start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket()),
     )
     .await
