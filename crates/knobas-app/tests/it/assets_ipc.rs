@@ -5328,10 +5328,11 @@ async fn a_drifted_payload_reads_as_absence_and_never_as_a_guess() {
     assert_eq!(drifted.state, None, "and no state was invented either");
 }
 
-/// **The reading is read where the source declares it** (#1224). A monitor of
-/// a source whose adapter declares no response time -- an unconfigured
-/// source, so no adapter at all -- draws no reading whatever its payload
-/// carries; the same payload under Uptime Kuma's declaration draws it.
+/// **The reading is read where the source declares it** (#1224). The
+/// payload under Uptime Kuma's declaration draws it. A source whose adapter
+/// declares no response time -- an unconfigured source, so no adapter at all
+/// -- fills no monitoring role, since the role requires the path, so its
+/// monitor has no row to draw a reading in (#1297).
 #[tokio::test]
 async fn a_reading_is_drawn_only_where_its_source_declares_one() {
     let pool = pool("monitors-roster-declared").await;
@@ -5342,9 +5343,9 @@ async fn a_reading_is_drawn_only_where_its_source_declares_one() {
     let roster = assets::monitor_roster(&pool).await.expect("the roster");
     assert_eq!(row(&roster, "declared").response_time_ms, Some(13.0));
     assert_eq!(
-        row(&roster, "undeclared").response_time_ms,
-        None,
-        "no declaration, no reading: never the obvious key"
+        names(&roster),
+        ["declared"],
+        "no declaration, no monitoring filler, no row: never the obvious key"
     );
 }
 
@@ -5499,8 +5500,38 @@ async fn a_disabled_sources_monitors_leave_the_roster() {
     assert_eq!(
         names(&roster),
         ["gitea"],
-        "a source nobody configured stays visible; one turned off does not"
+        "a configured source's monitors stay visible; one turned off does not"
     );
+}
+
+/// **The roster is monitoring's read by definition, so it narrows itself to
+/// the role's fillers, by source only** (#1297, ADR-0029 as amended on
+/// 2026-10-19): a filler's monitors come back, the paused one included,
+/// since the tombstone exemption is untouched; a Kuma with a monitoring
+/// miss, a source whose adapter claims no monitoring, the monitors a removed
+/// source left behind and a source whose adapter is not installed draw none.
+#[tokio::test]
+async fn the_roster_holds_only_the_monitoring_fillers_monitors_paused_ones_included() {
+    let pool = pool("monitors-roster-role").await;
+    let up = serde_json::json!({ "state": "up" });
+    kuma_monitor(&pool, "kuma", "filler up", up.clone(), None).await;
+    let paused = kuma_monitor(&pool, "kuma", "filler paused", up.clone(), None).await;
+    tombstone(&pool, &paused).await;
+    kuma_monitor(&pool, "kuma-miss", "with a miss", up.clone(), None).await;
+    sqlx::query(
+        "insert into sync.role_check (source_id, role, missed_kind, missed_field, missed_path)
+         values ('kuma-miss', 'monitoring', 'monitor', 'response_time', 'response_time_ms')",
+    )
+    .execute(&pool)
+    .await
+    .expect("the miss");
+    monitor_of(&pool, "jira", "not claiming", up.clone(), None, Some("jira")).await;
+    monitor_of(&pool, "gone", "left behind", up.clone(), None, None).await;
+    monitor_of(&pool, "nowhere", "uninstalled", up, None, Some("role_nowhere")).await;
+
+    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    assert_eq!(names(&roster), ["filler paused", "filler up"]);
+    assert!(row(&roster, "filler paused").tombstoned);
 }
 
 /// **A monitor links to the assets it watches; one without says so by carrying

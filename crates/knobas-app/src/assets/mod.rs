@@ -1976,7 +1976,7 @@ async fn attached_monitors(
 /// samples per monitor, and that bound is the reason the read needs no `limit`.
 const BAR_WINDOW_HOURS: i32 = 24;
 
-/// Every monitor the mirror holds, tombstones included.
+/// Every monitor the monitoring role's fillers hold, tombstones included.
 ///
 /// **`sync.item` and not `sync.live_item`**, which is the one place in this
 /// module that departs from the view every other read goes through. That view
@@ -1997,6 +1997,13 @@ const BAR_WINDOW_HOURS: i32 = 24;
 /// `CONTEXT.md`'s **Live item** entry carries the exception, so the next
 /// reader tempted to copy this finds the reason before the statement.
 ///
+/// **Only the monitoring role's fillers' monitors** (`$2`, #1297, ADR-0029 as
+/// amended on 2026-10-19): the roster is monitoring's by definition, so it
+/// narrows itself by source, and only by source. A source with a monitoring
+/// miss, one whose adapter claims no monitoring or is not installed, and the
+/// monitors a removed source left behind draw no row; a filler's tombstones
+/// still do, so the exemption above is untouched.
+///
 /// By name, then by id: the tab is a list a person reads down, and two
 /// monitors named the same still draw in a fixed order.
 const ROSTER: &str = "select i.entity_id, i.source_id, i.title, i.payload, i.web_url, i.synced_at,
@@ -2006,6 +2013,7 @@ const ROSTER: &str = "select i.entity_id, i.source_id, i.title, i.payload, i.web
   left join knobas.source_config s on s.id = i.source_id
  where i.kind = $1
    and coalesce(s.enabled, true)
+   and i.source_id = any($2::text[])
  order by i.title asc, i.entity_id asc";
 
 /// Every sample of these monitors inside the bar's window, oldest first.
@@ -2043,9 +2051,10 @@ const ROSTER_ASSETS: &str = "select m.id as monitor_id, a.id, a.name, a.type_id,
  where l.relation = $2
  order by a.name asc, a.id asc";
 
-/// What the Monitors tab draws: every mirrored monitor with its state, its
-/// last day of samples, its last check, its uptime, its certificate days and
-/// the assets it watches (spec #427 story 68, issue #448).
+/// What the Monitors tab draws: every monitor of a source filling the
+/// monitoring role (#1297), with its state, its last day of samples, its last
+/// check, its uptime, its certificate days and the assets it watches (spec
+/// #427 story 68, issue #448).
 ///
 /// # Three statements, not one and not one per row
 ///
@@ -2070,8 +2079,15 @@ const ROSTER_ASSETS: &str = "select m.id as monitor_id, a.id, a.name, a.type_id,
 ///
 /// [`IpcError`] if a read fails.
 pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> {
+    let fillers = crate::sources::crud::fillers(
+        pool,
+        &crate::sources::Registry::builtin(),
+        knobas_source::role::MONITORING,
+    )
+    .await?;
     let rows = sqlx::query(ROSTER)
         .bind(MONITOR_KIND)
+        .bind(&fillers)
         .fetch_all(pool)
         .await?;
     if rows.is_empty() {
@@ -2356,6 +2372,8 @@ select r.id, r.name, r.url,
 /// quiet in **both** lists: [`monitor_roster`] drops a monitor whose source the
 /// reader turned off (`0012`'s `coalesce(s.enabled, true)`), so an asset
 /// watched only by such a monitor has no row up there and no row here either.
+/// A monitor of a source that fills no monitoring role (#1297) is the same
+/// case: off the roster, still an attachment here.
 ///
 /// It is the right way round all the same. A source-aware read would put the
 /// **whole estate** on this roster the moment somebody turned their one Uptime

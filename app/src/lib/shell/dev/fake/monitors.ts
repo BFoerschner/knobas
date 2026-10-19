@@ -6,9 +6,13 @@
 // `fakeMonitorRoster`.
 import SEEDED_MONITORS from "../../../../../../testenv/monitors.json";
 import type { Handler } from "../fake-tauri";
+import { fakeRoleScope } from "./corpus";
 import { FIXTURE_ESTATE, FIXTURE_ROUTES, assetPathText } from "./estate";
 
 // -- the Monitors tab (#448) ------------------------------------------------
+
+/** The role `monitor_roster` is read for, as `knobas_source::role::MONITORING` spells it. */
+const MONITORING_ROLE = "monitoring";
 
 /**
  * The monitors the estate file asks for, as `monitor_roster` answers them.
@@ -316,7 +320,12 @@ export function handlers(): Record<string, Handler> {
     // estate file's names -- see `fakeMonitorRoster` -- so the roster a
     // browser draws is the set of monitors the seed creates, with a reading
     // invented on top.
-    monitor_roster: () => fakeMonitorRoster(),
+    // Monitoring's read by definition, so it narrows itself to the role's
+    // fillers by source, tombstones kept, as the server's does (#1297).
+    monitor_roster: () => {
+      const fillers = new Set(fakeRoleScope(MONITORING_ROLE).sources);
+      return fakeMonitorRoster().filter((row) => fillers.has(row.source_id));
+    },
     // The Monitors tab's Pause / Resume (#452). Answers the queued row the
     // real command answers, and remembers nothing: `?fake-ipc` has no Kuma
     // behind it, so the honest fixture is "knobas took the write" and a
