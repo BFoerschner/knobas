@@ -3876,6 +3876,7 @@ knobas-wasm-host	test/it	network::a_fixed_public_host_still_goes_through_the_pro
 knobas-wasm-host	test/it	network::a_header_token_reaches_the_instance_and_never_the_component
 knobas-wasm-host	test/it	network::a_redirect_to_an_undeclared_host_is_refused
 knobas-wasm-host	test/it	network::a_request_to_an_undeclared_host_is_refused_before_it_leaves
+knobas-wasm-host	test/it	network::a_short_component_timeout_does_not_cut_the_lookup_before_the_proxy
 knobas-wasm-host	test/it	network::a_templated_host_that_resolves_to_loopback_goes_through_the_proxy
 knobas-wasm-host	test/it	network::a_templated_host_that_resolves_to_loopback_still_works
 knobas-wasm-host	test/it	network::basic_auth_reaches_the_instance_and_never_the_component

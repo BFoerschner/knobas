@@ -541,7 +541,9 @@ const LOOKUP_WAIT: Duration = Duration::from_secs(2);
 async fn lookup(name: &str) -> std::io::Result<Vec<SocketAddr>> {
     #[cfg(feature = "test-util")]
     {
-        let delay = locked(slow_names()).get(&name.to_ascii_lowercase()).copied();
+        let delay = locked(slow_names())
+            .get(&name.to_ascii_lowercase())
+            .copied();
         match delay {
             Some(None) => return std::future::pending().await,
             Some(Some(delay)) => tokio::time::sleep(delay).await,
