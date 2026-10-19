@@ -22,6 +22,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use crate::support::{InFlight, TOKEN, instance};
 
 const REPO: &str = "/api/v1/repos/tidewater/payout-service";
+/// The owning organisation's labels (#1235).
+const ORG: &str = "/api/v1/orgs/tidewater/labels";
 const PR: &str = "gitea:tidewater/payout-service#142";
 const HEAD_SHA: &str = "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192";
 /// The account the token belongs to: not the pull request's author.
@@ -2634,7 +2636,6 @@ async fn add_label_reads_on_past_a_short_page() {
 /// and has none (the other tests here); any other failure says so.
 #[tokio::test]
 async fn add_label_offers_the_organisations_labels_too() {
-    const ORG: &str = "/api/v1/orgs/tidewater/labels";
     let org_first: Vec<Value> = (500..550)
         .map(|id| json!({ "id": id, "name": format!("org/{id}") }))
         .collect();
@@ -2681,31 +2682,36 @@ async fn add_label_offers_the_organisations_labels_too() {
 /// A repository label and an organisation label of one name read as two
 /// options (#1271): the organisation's carries the organisation's name, the
 /// repository's keeps its plain one, and a name only one list has stays plain.
+/// The organisation's keeps its suffix when the repository's is already on the
+/// pull request, so it reads apart from the label the pull request shows.
 #[tokio::test]
 async fn add_label_tells_a_same_named_organisation_label_apart() {
-    let server = gitea(open_pull(), json!([])).await;
-    let own = json!([{ "id": 7, "name": "bug" }, { "id": 8, "name": "wontfix" }]);
-    label_page(&server, format!("{REPO}/labels"), 1, own, Some(2)).await;
-    let org = json!([{ "id": 900, "name": "bug" }, { "id": 901, "name": "org-late" }]);
-    label_page(
-        &server,
-        "/api/v1/orgs/tidewater/labels".to_owned(),
-        1,
-        org,
-        Some(2),
-    )
-    .await;
-    let view = source(&server).view(PR, None).await.unwrap().unwrap();
-    assert_eq!(
-        labelled(&view, "Add label…"),
-        crate::source_action::add_label_action(
+    let mut carrying = open_pull();
+    carrying["labels"] = json!([{ "id": 7, "name": "bug" }]);
+    for (pull, offered) in [
+        (
+            open_pull(),
             &[
                 ("7", "bug"),
                 ("8", "wontfix"),
                 ("900", "bug (tidewater)"),
                 ("901", "org-late"),
-            ],
-            None
-        )
-    );
+            ][..],
+        ),
+        (
+            carrying,
+            &[("8", "wontfix"), ("900", "bug (tidewater)"), ("901", "org-late")][..],
+        ),
+    ] {
+        let server = gitea(pull, json!([])).await;
+        let own = json!([{ "id": 7, "name": "bug" }, { "id": 8, "name": "wontfix" }]);
+        label_page(&server, format!("{REPO}/labels"), 1, own, Some(2)).await;
+        let org = json!([{ "id": 900, "name": "bug" }, { "id": 901, "name": "org-late" }]);
+        label_page(&server, ORG.to_owned(), 1, org, Some(2)).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        assert_eq!(
+            labelled(&view, "Add label…"),
+            crate::source_action::add_label_action(offered, None)
+        );
+    }
 }

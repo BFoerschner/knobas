@@ -74,9 +74,12 @@ where
 /// *Add label…*: the labels the repository may use (its own and its
 /// organisation's, [`read`]) that the pull request does not carry, as
 /// a required choice, in every state (Gitea labels a closed or merged pull
-/// request too). Where none is left, or the labels could not be read, the
-/// action is drawn disabled saying why: a label can be made or taken off, so
-/// the reader can still get to an enabled one (the #701 ruling).
+/// request too). An organisation label whose name a repository label also
+/// has reads `name (owner)`, `owner` being the organisation (#1271); every
+/// other option is the plain name. Where none is left, or the labels could
+/// not be read, the action is drawn disabled saying why: a label can be made
+/// or taken off, so the reader can still get to an enabled one (the #701
+/// ruling).
 pub(super) fn action(pull: &Pull, owner: &str, labels: &Result<Vec<Label>, String>) -> ViewAction {
     let base = ViewAction {
         values: [(
