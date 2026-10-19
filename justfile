@@ -1330,6 +1330,14 @@ deps:
 front: deps
     cd app && npm run check && npm run build
 
+# The frontend suite with the wall clock at TIME today, in the suite's zone
+# (Europe/Berlin): a test that builds a local date from "now" and compares it
+# with a UTC one fails only in the first hours after midnight, and that is when
+# nobody runs it (#1031, #1150, #1155 were one bug filed three times). The pin
+# is `test-setup.ts`'s, read from `KNOBAS_TEST_CLOCK`; only `Date` is faked.
+test-midnight time="00:10": deps
+    cd app && KNOBAS_TEST_CLOCK={{time}} npx vitest run
+
 # The desktop app against the embedded database. Set KNOBAS_DB_URL to point it
 # at a server you manage instead.
 #

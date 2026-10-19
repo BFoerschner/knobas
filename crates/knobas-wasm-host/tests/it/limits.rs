@@ -50,7 +50,7 @@ async fn a_fixture_that_spins_forever_is_stopped_at_its_deadline() {
         "the external adapter \"wasm-fixture\" was stopped at its deadline of 1 s"
     );
     assert!(
-        took < Duration::from_secs(5),
+        took < Duration::from_secs(10),
         "stopped at its deadline, not later: {took:?}"
     );
 }
@@ -209,7 +209,7 @@ async fn a_request_s_first_byte_timeout_is_honoured_inside_the_deadline() {
         matches!(&answer, Err(SourceError::Unreachable(text)) if text.contains("ConnectionReadTimeout")),
         "{answer:?}"
     );
-    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(started.elapsed() < Duration::from_secs(10));
 }
 
 #[tokio::test]

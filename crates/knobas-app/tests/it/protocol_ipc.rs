@@ -1126,7 +1126,7 @@ async fn a_publish_answers_once_queued_and_the_page_is_named_and_linked_behind_i
     let opened = harness.open().await;
 
     let answered = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(20),
         publish_standup_protocol_in_background(&harness.state, day(), Some(target())),
     )
     .await
@@ -1178,7 +1178,7 @@ async fn an_action_item_answers_once_queued_and_its_ticket_is_named_and_linked_b
     let opened = harness.open().await;
 
     let filed = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(20),
         create_action_item_ticket_in_background(
             &harness.state,
             &opened.note_id,

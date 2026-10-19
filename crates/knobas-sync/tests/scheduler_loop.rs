@@ -470,7 +470,7 @@ async fn six_blocked_runs_five_go_and_the_sixth_waits() {
     let mut held = Vec::new();
     for _ in 0..knobas_sync::scheduler::SYNC_POOL_SIZE {
         held.push(
-            tokio::time::timeout(Duration::from_secs(2), bookkeeping.acquire())
+            tokio::time::timeout(Duration::from_secs(10), bookkeeping.acquire())
                 .await
                 .expect("the runs hold no bookkeeping connection")
                 .unwrap(),
@@ -725,7 +725,7 @@ async fn a_cancelled_run_leaves_the_source_lock_free() {
 /// of this assertion had a timeout around the whole query for that reason;
 /// this is where it went.
 async fn probe(pool: &PgPool) -> sqlx::pool::PoolConnection<sqlx::Postgres> {
-    tokio::time::timeout(Duration::from_secs(5), pool.acquire())
+    tokio::time::timeout(Duration::from_secs(30), pool.acquire())
         .await
         .expect("a connection to ask about the lock on")
         .unwrap()

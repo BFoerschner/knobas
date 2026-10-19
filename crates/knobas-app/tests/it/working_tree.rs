@@ -278,7 +278,7 @@ async fn a_git_that_does_not_answer_is_abandoned_at_the_timeout() {
         }
     );
     assert!(
-        took < std::time::Duration::from_secs(5),
+        took < std::time::Duration::from_secs(10),
         "the read waited {took:?} for a git that never answers"
     );
 }

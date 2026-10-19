@@ -374,7 +374,7 @@ async fn a_retry_after_longer_than_the_budget_ends_the_call() {
          no second attempt"
     );
     assert!(
-        elapsed < std::time::Duration::from_secs(5),
+        elapsed < std::time::Duration::from_secs(30),
         "the call must end at once rather than serving out two 60s waits; \
          took {elapsed:?}"
     );

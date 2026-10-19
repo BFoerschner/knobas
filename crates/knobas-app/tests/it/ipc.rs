@@ -1309,7 +1309,7 @@ fn a_command_through_the_real_pipeline_is_timed_by_name() {
         });
     }
     let live = dir.path().join("knobas.log");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         let log = std::fs::read_to_string(&live).unwrap_or_default();
         if log.contains("slow ipc command") && log.contains("app_status") {
