@@ -474,7 +474,7 @@ pub struct Fake {
 impl Fake {
     pub async fn start(state: &State) -> Self {
         let fake = Self {
-            server: MockServer::start().await,
+            server: MockServer::builder().start().await,
         };
         fake.mount(state, 1_000).await;
         fake
@@ -485,7 +485,7 @@ impl Fake {
     /// answer.
     pub async fn start_paged(state: &State) -> Self {
         let fake = Self {
-            server: MockServer::start().await,
+            server: MockServer::builder().start().await,
         };
         fake.mount(state, PAGE).await;
         fake
@@ -512,7 +512,7 @@ impl Fake {
             "a cap only says anything below the page size the adapter asks for"
         );
         let fake = Self {
-            server: MockServer::start().await,
+            server: MockServer::builder().start().await,
         };
         fake.mount(state, cap).await;
         fake
@@ -527,7 +527,7 @@ impl Fake {
     /// token would quietly mirror whatever is public instead.
     pub async fn start_public(state: &State) -> Self {
         let fake = Self {
-            server: MockServer::start().await,
+            server: MockServer::builder().start().await,
         };
         fake.mount_as(state, 1_000, Reads::Anonymous).await;
         fake

@@ -139,7 +139,7 @@ impl Engine {
 
 impl Kuma {
     async fn start(login_limit: usize) -> (MockServer, Self) {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         let kuma = Self(Arc::new(Mutex::new(Engine {
             login_limit,
             ..Engine::default()

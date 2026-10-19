@@ -35,7 +35,7 @@ fn entry(name: &str, path: &str, kind: &str, size: u64) -> Value {
 }
 
 async fn gitea() -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("GET"))
         .and(path(REPO))
         .and(header("Authorization", format!("token {TOKEN}").as_str()))

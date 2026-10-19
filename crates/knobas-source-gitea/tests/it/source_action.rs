@@ -34,7 +34,7 @@ fn add_label(entity: &str, fields: &[(&str, &str)]) -> WriteOp {
 
 /// A Gitea that takes a pull request's labels and answers them, as 1.27 does.
 async fn labelling() -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST"))
         .and(path(format!("{REPO}/issues/142/labels")))
         .respond_with(
@@ -139,7 +139,7 @@ async fn add_label_without_a_label_or_aimed_wrong_is_refused_before_a_request() 
 /// queue as a refusal with its sentence.
 #[tokio::test]
 async fn a_label_gitea_refuses_is_a_refusal_with_its_sentence() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST"))
         .respond_with(ResponseTemplate::new(422).set_body_json(json!({
             "message": "label does not exist [id: 99]",

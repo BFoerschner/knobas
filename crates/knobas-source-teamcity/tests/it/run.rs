@@ -77,7 +77,7 @@ async fn only_body(server: &MockServer) -> serde_json::Value {
 /// receipt names the queued build.
 #[tokio::test]
 async fn a_run_queues_its_branch_and_only_its_overrides() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     queue_answers(&server).await;
     let receipt = source(&server)
         .write(run(
@@ -106,7 +106,7 @@ async fn a_run_queues_its_branch_and_only_its_overrides() {
 /// empty -- an empty `branchName` is not the default branch.
 #[tokio::test]
 async fn a_run_without_a_branch_or_overrides_sends_neither() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     queue_answers(&server).await;
     source(&server)
         .write(run(CONFIG, None, &[]))
@@ -134,7 +134,7 @@ async fn a_runs_options_cross_as_triggering_options_and_only_when_ticked() {
         (false, true, Some(json!({ "queueAtTop": true }))),
         (false, false, None),
     ] {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         queue_answers(&server).await;
         let WriteOp::RunBuild {
             entity,
@@ -168,7 +168,7 @@ async fn a_runs_options_cross_as_triggering_options_and_only_when_ticked() {
 /// it: the write succeeded, and only the receipt is empty.
 #[tokio::test]
 async fn an_answer_without_an_id_is_still_a_queued_run() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST"))
         .and(path("/app/rest/buildQueue"))
         .respond_with(ResponseTemplate::new(200).set_body_string("queued"))
@@ -192,7 +192,7 @@ async fn a_run_is_put_on_the_queue_once_even_on_a_busy_answer() {
         },
         run(CONFIG, Some("main"), &[]),
     ] {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("POST"))
             .and(path("/app/rest/buildQueue"))
             .respond_with(ResponseTemplate::new(503))
@@ -215,7 +215,7 @@ async fn a_run_is_put_on_the_queue_once_even_on_a_busy_answer() {
 /// parameter are all refused before a request leaves.
 #[tokio::test]
 async fn a_run_that_names_nothing_runnable_is_refused_before_a_request() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     for op in [
         run("teamcity:build:1187", None, &[]),
         run("teamcity-eu:buildType:Payout_IntegrationTests", None, &[]),
@@ -241,7 +241,7 @@ async fn a_run_that_names_nothing_runnable_is_refused_before_a_request() {
 /// that is gone is a refusal carrying TeamCity's own sentence.
 #[tokio::test]
 async fn a_refused_run_is_classified_as_elsewhere_in_the_adapter() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST"))
         .respond_with(ResponseTemplate::new(403).set_body_string(
             "You do not have enough permissions to run builds in project with id: Payout",
@@ -257,7 +257,7 @@ async fn a_refused_run_is_classified_as_elsewhere_in_the_adapter() {
         "{error:?}"
     );
 
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST"))
         .respond_with(
             ResponseTemplate::new(404).set_body_json(json!({ "errors": [{

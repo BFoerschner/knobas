@@ -110,7 +110,7 @@ async fn only_request(server: &MockServer) -> (String, String, String, String, S
 /// trusting the mock to refuse.
 #[tokio::test]
 async fn a_parameter_is_put_as_plain_text_on_its_value_resource() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("PUT"))
         .and(path(
             "/app/rest/buildTypes/id:Payout_IntegrationTests/parameters/env.SEPA_RETRIES/value",
@@ -142,7 +142,7 @@ async fn a_parameter_is_put_as_plain_text_on_its_value_resource() {
 #[tokio::test]
 async fn a_value_is_sent_byte_for_byte_and_an_empty_one_too() {
     for value in ["", "  two words  ", "line one\nline \"two\"", "%{x}%"] {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("PUT"))
             .respond_with(ResponseTemplate::new(200))
             .mount(&server)
@@ -160,7 +160,7 @@ async fn a_value_is_sent_byte_for_byte_and_an_empty_one_too() {
 /// must not move the request to another resource.
 #[tokio::test]
 async fn a_name_stays_one_path_segment() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("PUT"))
         .respond_with(ResponseTemplate::new(200))
         .mount(&server)
@@ -181,7 +181,7 @@ async fn a_name_stays_one_path_segment() {
 /// configuration that is gone is a refusal carrying TeamCity's sentence.
 #[tokio::test]
 async fn a_refusal_is_classified_as_elsewhere_in_the_adapter() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("PUT"))
         .respond_with(
             ResponseTemplate::new(403).set_body_string(
@@ -199,7 +199,7 @@ async fn a_refusal_is_classified_as_elsewhere_in_the_adapter() {
         "{error:?}"
     );
 
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("PUT"))
         .respond_with(
             ResponseTemplate::new(404).set_body_json(json!({ "errors": [{
@@ -224,7 +224,7 @@ async fn a_refusal_is_classified_as_elsewhere_in_the_adapter() {
 /// all refused before a request leaves.
 #[tokio::test]
 async fn a_target_that_is_no_configuration_is_refused_before_a_request() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     for (entity, name) in [
         ("teamcity:build:1187", "env.SEPA_RETRIES"),
         (
@@ -254,7 +254,7 @@ async fn a_target_that_is_no_configuration_is_refused_before_a_request() {
 /// rather than overwrite it silently. Nothing is written.
 #[tokio::test]
 async fn a_parameter_changed_since_the_edit_is_refused_with_its_value_now() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     holding(
         &server,
         "env.SEPA_RETRIES",
@@ -286,7 +286,7 @@ async fn a_parameter_changed_since_the_edit_is_refused_with_its_value_now() {
 #[tokio::test]
 async fn a_parameter_still_as_edited_or_already_set_is_written() {
     for now in ["5", "7"] {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         holding(
             &server,
             "env.SEPA_RETRIES",
@@ -309,7 +309,7 @@ async fn a_parameter_still_as_edited_or_already_set_is_written() {
 /// configuration inherits, and a project-level change since is a change.
 #[tokio::test]
 async fn an_inherited_value_changed_above_is_refused() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     holding(
         &server,
         "tidewater.region",
@@ -331,7 +331,7 @@ async fn an_inherited_value_changed_above_is_refused() {
 /// value and a URL's credential stay out of it as they stay out of the view.
 #[tokio::test]
 async fn a_refusal_never_names_what_the_view_would_not_draw() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     holding(
         &server,
         "vcs.mirror",

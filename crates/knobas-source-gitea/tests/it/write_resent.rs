@@ -25,7 +25,7 @@ fn source(server: &MockServer) -> Box<dyn Source> {
 /// a gateway's `504`, and that refuses every repeat with `status` and
 /// `sentence`, as it does a second one.
 async fn lands_then_refuses(at: &str, status: u16, sentence: &str) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST"))
         .and(path(format!("{REPO}{at}")))
         .respond_with(ResponseTemplate::new(504))
@@ -107,7 +107,7 @@ async fn a_branch_created_whose_answer_was_lost_is_delivered() {
 /// Gitea's 409, and the branch is there at `main`'s commit.
 #[tokio::test]
 async fn a_branch_the_queue_resends_after_its_answers_were_lost_is_delivered() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST"))
         .and(path(format!("{REPO}/branches")))
         .respond_with(ResponseTemplate::new(504))

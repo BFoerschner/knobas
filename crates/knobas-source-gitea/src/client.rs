@@ -872,7 +872,7 @@ mod wire_tests {
     /// dropping any one of them fails this test.
     #[tokio::test]
     async fn a_commit_listing_turns_off_the_projections_gitea_defaults_to_on() {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/repos/tidewater/payout-service/commits"))
             .and(query_param("sha", "main"))
@@ -903,7 +903,7 @@ mod wire_tests {
     /// parameter is "from the beginning", and sending an empty one is a 400.
     #[tokio::test]
     async fn a_first_commit_listing_sends_no_since_at_all() {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/repos/tidewater/payout-service/commits"))
             .and(|request: &wiremock::Request| {
@@ -923,7 +923,7 @@ mod wire_tests {
     /// the ticket-to-PR story ends on.
     #[tokio::test]
     async fn a_pull_listing_asks_for_every_state_most_recently_updated_first() {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/repos/tidewater/payout-service/pulls"))
             .and(query_param("state", "all"))
@@ -947,7 +947,7 @@ mod wire_tests {
     /// would leave the run with no repositories and no error.
     #[tokio::test]
     async fn the_repository_search_envelope_is_unwrapped() {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/repos/search"))
             .and(query_param("sort", "updated"))
@@ -974,7 +974,7 @@ mod wire_tests {
     /// disappears from the mirror.
     #[tokio::test]
     async fn a_repository_search_without_a_data_array_is_a_protocol_failure() {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/repos/search"))
             .respond_with(
@@ -993,7 +993,7 @@ mod wire_tests {
     /// repository is not a failed sync.
     #[tokio::test]
     async fn an_empty_repository_answers_no_commits_rather_than_failing() {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/repos/tidewater/fresh/commits"))
             .respond_with(
@@ -1021,7 +1021,7 @@ mod wire_tests {
     /// next reader would take it as proof that the discussion pages.
     #[tokio::test]
     async fn pull_request_discussion_is_read_from_the_issue_with_the_same_index() {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path(
                 "/api/v1/repos/tidewater/payout-service/issues/142/comments",
@@ -1048,7 +1048,7 @@ mod wire_tests {
     /// everything, which is the shape of a guard that is not there at all.
     #[tokio::test]
     async fn the_servers_own_count_of_a_discussion_reaches_the_caller() {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path(
                 "/api/v1/repos/tidewater/payout-service/issues/142/comments",
@@ -1075,7 +1075,7 @@ mod wire_tests {
     /// malformed header from failing every run.
     #[tokio::test]
     async fn a_discussion_with_no_count_header_is_no_count_at_all() {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path(
                 "/api/v1/repos/tidewater/payout-service/issues/142/comments",
@@ -1098,7 +1098,7 @@ mod wire_tests {
     /// Every other status still fails: only 409 is forgiven, and only there.
     #[tokio::test]
     async fn a_broken_commit_listing_still_fails() {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/repos/tidewater/broken/commits"))
             .respond_with(ResponseTemplate::new(500).set_body_string("boom"))

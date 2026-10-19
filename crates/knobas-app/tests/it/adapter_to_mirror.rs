@@ -660,7 +660,7 @@ async fn spawn_mock_kuma() -> wiremock::MockServer {
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, ResponseTemplate};
 
-    let server = wiremock::MockServer::start().await;
+    let server = wiremock::MockServer::builder().start().await;
     Mock::given(method("GET"))
         .and(path("/metrics"))
         .and(header("authorization", KUMA_AUTHORIZATION))

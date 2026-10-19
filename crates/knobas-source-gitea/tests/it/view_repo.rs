@@ -146,7 +146,7 @@ impl Default for Served {
 }
 
 async fn gitea(served: Served) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let token = format!("token {TOKEN}");
     let authed = |m: wiremock::MockBuilder| m.and(header("Authorization", token.as_str()));
     if let Some(flight) = &served.flight {

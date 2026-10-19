@@ -72,7 +72,7 @@ async fn gitea_of(diff_status: u16, mirror: bool) -> MockServer {
 
 /// [`gitea_with_statuses`] and [`gitea_of`] in one.
 async fn gitea_full(diff_status: u16, statuses: serde_json::Value, mirror: bool) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let token = format!("token {TOKEN}");
     let authed = |m: wiremock::MockBuilder| m.and(header("Authorization", token.as_str()));
     authed(Mock::given(method("GET")).and(path(REPO)))

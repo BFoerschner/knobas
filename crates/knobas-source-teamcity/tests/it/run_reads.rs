@@ -55,7 +55,7 @@ fn long_log() -> String {
 
 #[tokio::test]
 async fn the_whole_log_is_streamed_and_only_the_range_asked_for_is_answered() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     get("/downloadBuildLog.html")
         .and(query_param("buildId", "2401"))
         .respond_with(ResponseTemplate::new(200).set_body_string(long_log()))
@@ -95,7 +95,7 @@ async fn the_whole_log_is_streamed_and_only_the_range_asked_for_is_answered() {
 
 #[tokio::test]
 async fn a_log_of_something_that_is_not_a_build_is_refused_before_any_request() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let refused = source(&server)
         .run_log("teamcity:buildType:Payout_Build", None, 10)
         .await;
@@ -108,7 +108,7 @@ async fn a_log_of_something_that_is_not_a_build_is_refused_before_any_request() 
 
 #[tokio::test]
 async fn tests_come_back_failed_first_with_their_module_details_and_id() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     get("/app/rest/testOccurrences")
         .and(query_param("locator", "build:(id:2401),count:5001"))
         .and(query_param_contains("fields", "test(id)"))
@@ -153,7 +153,7 @@ async fn tests_come_back_failed_first_with_their_module_details_and_id() {
 
 #[tokio::test]
 async fn past_the_cap_the_failed_tests_are_read_on_their_own_so_none_is_left_out() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let passed: Vec<_> = (0..5_001)
         .map(|i| json!({ "name": format!("t{i}"), "status": "SUCCESS" }))
         .collect();
@@ -185,7 +185,7 @@ async fn past_the_cap_the_failed_tests_are_read_on_their_own_so_none_is_left_out
 
 #[tokio::test]
 async fn a_tests_history_is_its_configurations_last_ten_runs_newest_first() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     get("/app/rest/builds/id:2401")
         .and(query_param("fields", "number,buildType(id)"))
         .respond_with(
@@ -224,7 +224,7 @@ async fn a_tests_history_is_its_configurations_last_ten_runs_newest_first() {
 
 #[tokio::test]
 async fn a_folder_is_read_by_its_path_and_its_entries_carry_their_whole_path() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     get("/app/rest/builds/id:2401/artifacts")
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "file": [
             { "name": "test report", "children": { "count": 2 } },
@@ -266,7 +266,7 @@ async fn a_folder_is_read_by_its_path_and_its_entries_carry_their_whole_path() {
 
 #[tokio::test]
 async fn a_preview_is_the_files_text() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     get("/app/rest/builds/id:2401/artifacts/files/logs/psp-sandbox.log")
         .respond_with(ResponseTemplate::new(200).set_body_string("10:08:41 POST /batches 503\n"))
         .mount(&server)
@@ -303,7 +303,7 @@ impl DownloadSink for Kept {
 
 #[tokio::test]
 async fn each_download_streams_its_url_under_the_name_it_suggests() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     get("/app/rest/builds/id:2401")
         .and(query_param("fields", "number,buildType(id)"))
         .respond_with(ResponseTemplate::new(200).set_body_json(
@@ -368,7 +368,7 @@ async fn each_download_streams_its_url_under_the_name_it_suggests() {
 
 #[tokio::test]
 async fn a_failed_download_never_starts_the_file() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     get("/app/rest/builds/id:2401/artifacts/files/gone.txt")
         .respond_with(ResponseTemplate::new(404))
         .mount(&server)
