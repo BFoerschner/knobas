@@ -13,7 +13,9 @@ import { push, toasts } from "../shell/toasts.svelte";
 import { createBadges } from "./badges.svelte";
 import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
+import { entityAddress } from "./address";
 import { sourceRoles } from "./roles.svelte";
+import { NAV, SECTION_NAME } from "./route";
 import TfShell, { type TfShellPorts } from "./TfShell.svelte";
 import { createTheme, type Theme } from "./theme.svelte";
 
@@ -25,6 +27,38 @@ vi.mock("../ipc/time", async (importOriginal) => ({
       blocks: [],
       past_horizon: false,
       open: [{ started_at: new Date(2026, 7, 22, 12, 35).toISOString(), ended_at: new Date(2026, 7, 22, 13, 10).toISOString() }],
+    }),
+}));
+
+// An item's page (#1201) reads the bridge: a survey of the fixture adapter's
+// custom role, and the view its `view` answers (#1202).
+vi.mock("../ipc/entity", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../ipc/entity")>()),
+  getEntity: (id: string) =>
+    id === "surveys:survey-1"
+      ? Promise.resolve({
+          row: { entity_id: id, kind: "survey", source_id: "surveys", title: "Quay crane 4 inspection", updated_at: null, synced_at: "", path: null, state: null },
+          source: { id: "surveys", display_name: "Harbour surveys", adapter_kind: "wasm-fixture", enabled: true },
+          kind_info: { id: "survey", label: "Survey", plural: "Surveys", monogram: "SV", full_sync_exhaustive: true },
+          body_text: "",
+          web_url: null,
+        })
+      : Promise.reject({ code: "not_found", message: `${id} is not in the mirror`, source_id: null }),
+  entityView: () =>
+    Promise.resolve({
+      sections: [
+        {
+          id: "survey",
+          title: "Quay crane 4 inspection",
+          count: null,
+          deferred: false,
+          blocks: [
+            { type: "facts", facts: [{ label: "Surveyor", value: "harbourmaster", tone: null }] },
+            { type: "text", text: "hoist brake worn, booked for Tuesday", markdown: false },
+          ],
+        },
+      ],
+      actions: [],
     }),
 }));
 
@@ -594,4 +628,26 @@ test("a finished sync reads the source list again, so a role its records missed 
   handlers.get("sync:state")!({ payload: row(false) });
   await tick();
   expect(sourceRoles.draws("ticket-system", "jira")).toBe(false);
+});
+
+test("an item of a custom-role source opens its block view, and the role gets no nav entry (#1201)", async () => {
+  start({
+    sources: [
+      { id: "jira", display_name: "Jira", roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }] },
+      { id: "surveys", display_name: "Harbour surveys", roles: [{ role: "wasm-fixture:survey-desk", reads: [] }] },
+    ],
+  });
+  // Opened as every surface opens an item: by its kind's address.
+  await at(entityAddress("survey", "surveys:survey-1"));
+
+  const main = target.querySelector(".tf-full")!;
+  expect(main.querySelector("h1")?.textContent).toBe("Quay crane 4 inspection");
+  expect([...main.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Surveyor"]);
+  expect(main.textContent).toContain("hoist brake worn, booked for Tuesday");
+
+  const nav = target.querySelector('nav[aria-label="Main"]')!;
+  const entries = [...nav.querySelectorAll("a")];
+  expect(entries.map((a) => a.textContent?.replace(/\d+$/, "").trim())).toEqual(NAV.map((section) => SECTION_NAME[section]));
+  expect(nav.textContent).not.toMatch(/survey/i);
+  expect(entries.filter((a) => a.getAttribute("aria-current") === "page")).toEqual([]);
 });

@@ -1501,6 +1501,12 @@ mod tests {
         ClaimsWikiWithoutParent,
         /// Claims monitoring over monitors that declare no state (#1193).
         ClaimsMonitoringWithoutState,
+        /// Claims a custom role namespaced to its own kind, `test:thing`, with
+        /// no reads: conforming (#1201, ADR-0029).
+        ClaimsItsCustomRole,
+        /// Claims `other-adapter:thing`, a custom role namespaced to another
+        /// adapter, which no adapter but that one may claim (#1201).
+        ClaimsAnotherAdaptersCustomRole,
         /// Declares the source action `add_label` and `source_action` beside
         /// it, refuses every other id, and panics if the declared one is
         /// performed (#1194): the conforming case of clause 11.
@@ -1587,6 +1593,10 @@ mod tests {
                         }
                         Behavior::ClaimsMonitoringWithoutState => {
                             vec![RoleClaim::new(MONITORING, [])]
+                        }
+                        Behavior::ClaimsItsCustomRole => vec![RoleClaim::new("test:thing", [])],
+                        Behavior::ClaimsAnotherAdaptersCustomRole => {
+                            vec![RoleClaim::new("other-adapter:thing", [])]
                         }
                         _ => Vec::new(),
                     }
@@ -2852,6 +2862,26 @@ mod tests {
         rejects(
             Behavior::ClaimsMonitoringWithoutState,
             r#"descriptor.roles: role "monitoring" needs kind "monitor" to declare the path status_name"#,
+        )
+        .await;
+    }
+
+    /// A custom role has no minimum: a claim namespaced to the adapter's own
+    /// kind passes with no reads (#1201).
+    #[tokio::test]
+    async fn accepts_a_custom_role_namespaced_to_the_adapter() {
+        run(Behavior::ClaimsItsCustomRole)
+            .await
+            .expect("a custom role of the adapter's own kind");
+    }
+
+    /// No other adapter fills a custom role (ADR-0029): adapter `test` may not
+    /// claim `other-adapter:thing`.
+    #[tokio::test]
+    async fn rejects_a_custom_role_namespaced_to_another_adapter() {
+        rejects(
+            Behavior::ClaimsAnotherAdaptersCustomRole,
+            r#"descriptor.roles: role "other-adapter:thing" is neither a built-in role (code-host, ticket-system, ci, wiki, monitoring) nor a custom role named "test:<name>""#,
         )
         .await;
     }

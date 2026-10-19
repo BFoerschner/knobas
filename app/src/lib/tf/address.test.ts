@@ -19,9 +19,13 @@ test("a Jira view opens its ticket view, by the projection's slug (#1094)", () =
   expect(entityAddress("jira_view", "jira:filter-10230")).toBe("#/tickets/jira-filter-10230");
 });
 
-test("a kind with no page lands on its section or on Tickets, never on Code (#1094)", () => {
+test("a kind with no page of its own lands on its section, never on Code (#1094)", () => {
   expect(entityAddress("build_config", "teamcity:Pay_Build")).toBe("#/builds");
-  expect(entityAddress("mystery", "x:1")).toBe("#/tickets");
+});
+
+test("a kind no surface draws, such as a custom role's, opens its item page (#1201)", () => {
+  expect(entityAddress("survey", "surveys:survey-1")).toBe("#/item/surveys%3Asurvey-1");
+  expect(parseTfHash("#/item/surveys%3Asurvey-1")).toEqual({ view: "item", id: "surveys:survey-1" });
 });
 
 test("every address entityAddress produces has a place in the new shell", () => {
