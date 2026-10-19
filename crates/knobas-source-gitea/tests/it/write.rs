@@ -28,7 +28,7 @@ use crate::support::{TOKEN, instance};
 /// Mounted per test rather than shared, so `received_requests` is this test's
 /// requests and nothing else.
 async fn accepting() -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let token = format!("token {TOKEN}");
     let authed = |m: wiremock::MockBuilder| m.and(header("Authorization", token.as_str()));
 
@@ -69,7 +69,7 @@ async fn accepting() -> MockServer {
 
 /// A Gitea that refuses everything with `status` and its own error envelope.
 async fn refusing(status: u16, message: &str) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST"))
         .respond_with(ResponseTemplate::new(status).set_body_json(json!({
             "message": message,
@@ -362,7 +362,7 @@ async fn a_403_refusing_the_write_and_a_403_refusing_the_token_are_different_fau
     // A 403 that is not Gitea's envelope at all -- a proxy's page -- is not
     // read as a refusal: what it refuses is unknown, and the token is the
     // conservative guess.
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST"))
         .respond_with(ResponseTemplate::new(403).set_body_string("<html>Forbidden</html>"))
         .mount(&server)
@@ -387,7 +387,7 @@ async fn a_merge_carries_the_style_the_reader_picked_as_gitea_do() {
         (knobas_source::MergeStyle::Rebase, "rebase"),
         (knobas_source::MergeStyle::Squash, "squash"),
     ] {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("POST"))
             .and(path(
                 "/api/v1/repos/tidewater/payout-service/pulls/142/merge",
@@ -425,7 +425,7 @@ async fn a_merge_carries_the_style_the_reader_picked_as_gitea_do() {
 #[tokio::test]
 async fn a_merge_says_whether_gitea_deletes_the_branch_after_it() {
     for delete_branch in [true, false] {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("POST"))
             .and(path(
                 "/api/v1/repos/tidewater/payout-service/pulls/142/merge",
@@ -476,7 +476,7 @@ async fn a_merge_carries_the_message_the_reader_wrote() {
             json!({ "Do": "squash", "delete_branch_after_merge": false }),
         ),
     ] {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("POST"))
             .and(path(
                 "/api/v1/repos/tidewater/payout-service/pulls/142/merge",
@@ -507,7 +507,7 @@ async fn an_update_brings_the_head_up_to_date_in_the_style_picked() {
         (knobas_source::UpdateStyle::Merge, "merge"),
         (knobas_source::UpdateStyle::Rebase, "rebase"),
     ] {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("POST"))
             .and(path(
                 "/api/v1/repos/tidewater/payout-service/pulls/142/update",
@@ -608,7 +608,7 @@ async fn merge_refused(server: &MockServer, message: &str, times: Option<u64>) {
 /// that answer is tried again, and the merge lands once Gitea has looked.
 #[tokio::test]
 async fn a_merge_gitea_is_still_checking_is_tried_again_until_it_lands() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     merge_refused(&server, "Please try again later", Some(2)).await;
     Mock::given(method("POST"))
         .and(path(
@@ -636,7 +636,7 @@ async fn a_merge_gitea_refuses_arrives_as_a_refusal_with_its_sentence() {
         "The PR is already merged",
         "User not allowed to merge PR",
     ] {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         merge_refused(&server, sentence, None).await;
         let error = merge_142(&server).await.expect_err("the server refused");
         assert_eq!(error.status(), Some(405), "{error:?}");
@@ -807,7 +807,7 @@ async fn a_review_aimed_at_a_repository_is_refused_before_a_request() {
 /// A Gitea holding `tidewater/payout-service` (default branch `main`) and one
 /// branch `name`, protected or not, that answers a delete with Gitea's 204.
 async fn holding_branch(name: &str, protected: bool) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let token = format!("token {TOKEN}");
     Mock::given(method("GET"))
         .and(path("/api/v1/repos/tidewater/payout-service"))
@@ -941,7 +941,7 @@ async fn a_delete_aimed_at_anything_but_a_branch_is_refused_before_a_request() {
 /// repository would let the real default go.
 #[tokio::test]
 async fn a_delete_where_gitea_names_no_default_branch_is_refused() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/repos/tidewater/payout-service"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -980,7 +980,7 @@ async fn a_delete_where_gitea_names_no_default_branch_is_refused() {
 /// shared fault mapping reads as a dead credential.
 #[tokio::test]
 async fn a_branch_of_a_mirror_is_refused_before_a_delete() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/repos/tidewater/payout-service"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -1098,7 +1098,7 @@ async fn an_edit_with_nothing_in_it_is_refused_before_a_request() {
 /// refusal with the sentence, never retried (ADR-0004).
 #[tokio::test]
 async fn reopening_a_merged_pull_request_is_refused_with_gitea_sentence() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("PATCH"))
         .respond_with(ResponseTemplate::new(412).set_body_json(json!({
             "message": "cannot change state of this pull request, it was already merged",
@@ -1168,7 +1168,7 @@ async fn holding_text(
     put_status: u16,
     said: &str,
 ) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let token = format!("token {TOKEN}");
     Mock::given(method("GET"))
         .and(path("/api/v1/repos/tidewater/payout-service/branches/main"))

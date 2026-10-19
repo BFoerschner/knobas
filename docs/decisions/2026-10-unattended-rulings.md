@@ -6546,3 +6546,18 @@ No step of the ticket is reserved for Björn. The implementer's rulings:
   hand-written fixture and already sits beside fake CI, wiki and Kuma sources; the real `--demo`
   is a Tauri window that only the desktop-witness slot may take. Handed to the milestone review.
 - No §10.8 entry: no frozen surface changed (adapter-owned descriptor, payloads and fixture).
+## #1266 Every wiremock server in the suites is a bare one (Opus implementer, 2026-10-19)
+
+- **A test starts its own server, never one from wiremock's pool.** `MockServer::start()` hands
+  out a pooled server: a dropped one goes back with its port and its open connections, and the
+  next test gets it reset. A probe showed a request sent over a previous tenant's kept-alive
+  connection recorded by the new tenant. The fix was to change every call site across the four
+  crates that use wiremock to `MockServer::builder().start()`, not just the assertions that
+  check for an empty request list: a stray request also shows up in `.expect(n)` counts and in
+  exact request lists. A workspace `clippy.toml` bans the pooled constructor, so a new call fails
+  `just clippy`. Cost: one thread and one listener per test server instead of a reused one.
+  **Reversing:** low (delete the `clippy.toml` entry).
+- **The strict `is_empty()` assertion in `view::a_foreign_id_is_refused` stays.** The source
+  refuses the foreign namespace with `?` in `key_of` before any client call, so the source sent
+  no request. A server only that test knows about makes the strict assertion safe.
+  **Reversing:** none needed.

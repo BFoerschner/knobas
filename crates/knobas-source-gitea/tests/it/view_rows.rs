@@ -85,7 +85,7 @@ fn ok(body: Value) -> ResponseTemplate {
 /// only commit, and the default branch's latest commit. Branches and pull
 /// requests are `pages` full pages of fifty each, then an empty one.
 async fn gitea(pages: u32, compare: Value) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     get(REPO.to_owned())
         .respond_with(ok(repo_record()))
         .mount(&server)

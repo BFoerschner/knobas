@@ -150,7 +150,7 @@ async fn slow_gitea(
     flight: Option<&Arc<InFlight>>,
     token: &str,
 ) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     if let Some(flight) = flight {
         flight.watch(&server).await;
     }
@@ -635,7 +635,7 @@ fn line_comment(who: &str, at: &str, new: u32, old: u32, hunk_tail: &str, body: 
 /// comment with four (one on a file the diff no longer holds), and Kai's draft (`PENDING`), whose comment is nobody's
 /// yet -- whose comments are answered by review id.
 async fn gitea_with_line_comments(pull: Value) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let get = |p: String| {
         Mock::given(method("GET"))
             .and(path(p))
@@ -969,7 +969,7 @@ async fn a_pull_request_past_the_commit_budget_says_what_it_left_out() {
         ),
         (None, "The first 250 commits; there may be more on Gitea."),
     ] {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         let page: Vec<Value> = (0..50)
             .map(
                 |i| json!({ "sha": format!("{i:040x}"), "commit": { "message": format!("c{i}") } }),
@@ -1998,7 +1998,7 @@ async fn an_action_that_can_never_apply_is_not_offered() {
 #[tokio::test]
 async fn a_view_whose_viewer_cannot_be_read_still_offers_the_review() {
     const UNREAD: &str = "a-token-gitea-will-not-name";
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let token = format!("token {UNREAD}");
     let get = |p: String| {
         Mock::given(method("GET"))
@@ -2038,7 +2038,7 @@ async fn a_view_whose_viewer_cannot_be_read_still_offers_the_review() {
 /// A server answering a pull request's whole view to any token, and `/user`
 /// to each `(token, login)` with that login.
 async fn gitea_for_viewers(pull: Value, viewers: &[(&str, &str)]) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     for (p, body) in [
         (format!("{REPO}/pulls/142"), pull),
         (format!("{REPO}/pulls/142/reviews"), json!([])),
@@ -2241,7 +2241,7 @@ async fn the_edit_is_prefilled_with_the_description_as_gitea_holds_it() {
 #[tokio::test]
 async fn the_reviews_line_comments_are_read_at_the_same_time() {
     let flight = InFlight::new(Duration::from_millis(300));
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     flight.watch(&server).await;
     let held = |body: ResponseTemplate| body.set_delay(flight.delay());
     let reviews: Vec<Value> = (31..=34)
@@ -2315,7 +2315,7 @@ async fn a_comment_past_a_files_cut_is_not_called_outdated() {
     for n in 1..=lines {
         diff.push_str(&format!("+line {n}\n"));
     }
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let reviews = json!([{ "id": 41, "user": { "login": "olu" }, "state": "COMMENT",
                            "submitted_at": "2026-08-22T11:00:00Z", "comments_count": 2 }]);
     let comment = |line: usize| {

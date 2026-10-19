@@ -6649,7 +6649,7 @@ async fn spawn_mock_hcloud(body: &str) -> wiremock::MockServer {
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, ResponseTemplate};
 
-    let server = wiremock::MockServer::start().await;
+    let server = wiremock::MockServer::builder().start().await;
     Mock::given(method("GET"))
         .and(path("/v1/servers"))
         .and(header("authorization", format!("Bearer {HCLOUD_TOKEN}")))
@@ -6994,7 +6994,7 @@ async fn a_field_this_build_has_never_heard_of_does_not_refuse_the_run() {
 /// bug about a token they can re-enter.
 #[tokio::test]
 async fn a_refused_token_is_unauthorized_and_not_an_internal_fault() {
-    let hcloud = wiremock::MockServer::start().await;
+    let hcloud = wiremock::MockServer::builder().start().await;
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .respond_with(wiremock::ResponseTemplate::new(401).set_body_string(
             r#"{"error":{"code":"unauthorized","message":"unable to authenticate"}}"#,

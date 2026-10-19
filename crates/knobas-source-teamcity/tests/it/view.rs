@@ -121,7 +121,7 @@ fn builds() -> serde_json::Value {
 
 /// A TeamCity that answers the configuration and its builds.
 async fn teamcity() -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let bearer = format!("Bearer {TOKEN}");
     Mock::given(method("GET"))
         .and(path(CONFIG_PATH))
@@ -325,7 +325,7 @@ async fn the_overview_says_where_it_lives_whether_it_is_paused_and_how_it_has_be
 /// `<default>`*), so the default is the empty field and not a suggestion.
 #[tokio::test]
 async fn the_overview_offers_a_run_suggesting_its_recent_builds_branches() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("GET"))
         .and(path(CONFIG_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(config_record()))
@@ -393,7 +393,7 @@ async fn the_overview_offers_a_run_suggesting_its_recent_builds_branches() {
 /// with nothing to suggest.
 #[tokio::test]
 async fn a_configuration_with_no_builds_still_offers_a_run() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("GET"))
         .and(path(CONFIG_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(config_record()))
@@ -579,7 +579,7 @@ async fn an_unknown_trigger_type_shows_its_type_and_no_properties() {
                 { "name": "endpoint", "value": "https://hooks.example/payout" }
             ]}}),
         );
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("GET"))
         .and(path(CONFIG_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(record))
@@ -642,7 +642,7 @@ async fn one_section_is_read_without_the_others() {
 /// *Showing the mirror* and why (ADR-0020 rule 2).
 #[tokio::test]
 async fn a_configuration_the_server_does_not_know_is_its_404() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("GET"))
         .and(path("/app/rest/buildTypes/id:Gone"))
         .respond_with(ResponseTemplate::new(404).set_body_json(json!({

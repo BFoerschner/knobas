@@ -1,0 +1,9 @@
+disallowed-methods = [
+    # wiremock hands `MockServer::start()` servers out of a process-wide pool:
+    # a dropped server goes back with its port and its open connections, and
+    # the next test to start one gets it, reset. A request a previous test left
+    # in flight then lands on the new tenant and shows in its
+    # `received_requests()` and `.expect(n)` counts (#1266). A test that asserts
+    # on what its server heard starts a server of its own.
+    { path = "wiremock::MockServer::start", reason = "pooled: a previous test's in-flight request can reach this one's server (#1266); use `MockServer::builder().start()`" },
+]

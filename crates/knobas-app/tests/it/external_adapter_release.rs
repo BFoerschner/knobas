@@ -57,7 +57,7 @@ struct Forge {
 impl Forge {
     async fn start() -> Self {
         Self {
-            server: MockServer::start().await,
+            server: MockServer::builder().start().await,
             releases: Mutex::new(Vec::new()),
         }
     }

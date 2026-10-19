@@ -123,7 +123,7 @@ async fn teamcity() -> MockServer {
 }
 
 async fn teamcity_with_log(log: String) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let bearer = format!("Bearer {TOKEN}");
     let get = |p: &str| {
         Mock::given(method("GET"))
@@ -386,7 +386,7 @@ async fn the_overview_names_the_revision_it_built_by_repository_and_sha() {
 /// A server answering one full read of failed tests (100 rows) for a build
 /// whose record counts `failed` of them.
 async fn a_full_page_of_failed_tests(failed: u64) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let page: Vec<_> = (0..100)
         .map(|i| json!({ "name": format!("t{i}"), "newFailure": false, "muted": false }))
         .collect();
@@ -613,7 +613,7 @@ async fn parameters_are_what_the_build_ran_with_and_never_carry_a_secret() {
 /// configuration.
 #[tokio::test]
 async fn a_value_teamcity_masked_is_drawn_as_a_secret() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let mut record = build_record();
     record["properties"] = json!({ "property": [
         { "name": "system.teamcity.auth.password", "value": "*******" }
@@ -633,7 +633,7 @@ async fn a_value_teamcity_masked_is_drawn_as_a_secret() {
 /// A refusal is the error it maps to, status and all (ADR-0020 rule 2).
 #[tokio::test]
 async fn a_build_the_server_does_not_know_is_its_404() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("GET"))
         .and(path("/app/rest/builds/id:99"))
         .respond_with(ResponseTemplate::new(404).set_body_json(json!({

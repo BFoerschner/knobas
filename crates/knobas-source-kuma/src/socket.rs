@@ -800,7 +800,7 @@ mod tests {
         /// `hold` stands in for the ping interval, scaled down so a test can
         /// watch several polls go by inside a sub-second deadline.
         async fn start(hold: Duration) -> Self {
-            let server = MockServer::start().await;
+            let server = MockServer::builder().start().await;
             // The handshake: the one GET that carries no session yet.
             Mock::given(method("GET"))
                 .and(path(PATH))

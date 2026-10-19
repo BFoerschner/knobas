@@ -52,7 +52,7 @@ impl Fake {
     /// The same fake over a body of the caller's choosing -- how a test makes
     /// the remote system change between two sync runs.
     pub async fn serving(body: &str) -> Self {
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path("/metrics"))
             .and(header("authorization", AUTHORIZATION))

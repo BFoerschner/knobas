@@ -199,7 +199,7 @@ async fn an_issues_reachable_transition_is_the_state_it_is_not_in() {
 
 /// A Gitea that takes an issue's writes and records them.
 async fn accepting() -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let token = format!("token {TOKEN}");
     let authed = |m: wiremock::MockBuilder| m.and(header("Authorization", token.as_str()));
     authed(Mock::given(method("PATCH")).and(path(format!("/api/v1/repos/{FULL}/issues/7"))))

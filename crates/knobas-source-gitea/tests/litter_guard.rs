@@ -265,7 +265,7 @@ struct Gitea {
 impl Gitea {
     async fn holding(repository: Repository) -> Gitea {
         let state = Arc::new(Mutex::new(repository));
-        let server = MockServer::start().await;
+        let server = MockServer::builder().start().await;
         let handler = Arc::clone(&state);
         let auth = format!("token {TOKEN}");
         let prefix = format!("/api/v1/repos/{OWNER}/{REPO}");
