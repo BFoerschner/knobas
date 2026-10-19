@@ -871,6 +871,16 @@ mod tests {
         ] {
             assert!(mirror.contains(name), "{name} is not in the mirror");
         }
+        // Registered under the names the mirror invokes (#1245): a command is
+        // addressed by a string, so a barrel line left on the old name is a
+        // button Tauri answers with "command not found".
+        let barrel = include_str!("lib.rs");
+        for command in ["hide_saved_view", "open_saved_view"] {
+            assert!(
+                barrel.contains(&format!("commands::search::{command},")),
+                "{command} is not in the handler barrel"
+            );
+        }
         for (words, mirrored) in [
             (LANES, "export type ViewLanes"),
             (CARD_FIELDS, "export type CardField"),

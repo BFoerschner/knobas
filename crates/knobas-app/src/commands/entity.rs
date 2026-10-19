@@ -5167,6 +5167,35 @@ mod tests {
         }
     }
 
+    /// `mini_board`'s saved-view argument (#1245) is the one `entity.ts` sends.
+    /// Tauri reads a command's arguments by name, camel-cased, so a rename on
+    /// one side alone is no compile error: the board would quietly answer the
+    /// room instead of the view. Read off both sources, the way
+    /// [`the_mirror_invokes_the_commands_by_their_registered_names`] reads the
+    /// barrel.
+    #[test]
+    fn mini_board_takes_the_saved_view_the_mirror_sends() {
+        let own = include_str!("entity.rs");
+        let signature = own
+            .split_once(concat!("pub async fn ", "mini_board(")) // split, or it finds this line
+            .and_then(|(_, rest)| rest.split_once(") ->"))
+            .map(|(arguments, _)| arguments)
+            .expect("mini_board's signature");
+        assert!(
+            signature.contains("saved_view: Option<String>,"),
+            "mini_board takes no `saved_view`: {signature}"
+        );
+        let sent = MIRROR
+            .split_once("invoke<MiniBoard>(\"mini_board\", {")
+            .and_then(|(_, rest)| rest.split_once("});"))
+            .map(|(arguments, _)| arguments)
+            .expect("entity.ts invokes mini_board");
+        assert!(
+            sent.contains("savedView: "),
+            "entity.ts sends mini_board no `savedView`: {sent}"
+        );
+    }
+
     /// §3a, as a resolution rather than as a claim.
     ///
     /// The whole promise is *"a new source's items get grouped, chipped and
