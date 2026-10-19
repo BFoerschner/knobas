@@ -522,9 +522,8 @@ pub(crate) async fn submittable(
 ) -> Result<(WriteOp, String), IpcError> {
     let op: WriteOp = serde_json::from_value(payload)
         .map_err(|error| IpcError::invalid(format!("not a write operation: {error}")))?;
-    let entity =
-        knobas_core::entity::EntityRef::parse(knobas_sync::write_queue::target_entity(&op))
-            .map_err(|error| IpcError::invalid(error.to_string()))?;
+    let entity = knobas_core::entity::EntityRef::parse(op.target())
+        .map_err(|error| IpcError::invalid(error.to_string()))?;
 
     let source = knobas_sync::config::get(pool, &entity.namespace)
         .await
@@ -663,7 +662,7 @@ fn check(existing: &knobas_core::write_queue::QueuedWrite, op: &WriteOp) -> Resu
             op.identifier()
         )));
     }
-    let target = knobas_sync::write_queue::target_entity(op);
+    let target = op.target();
     if target != existing.entity_id {
         return Err(IpcError::invalid(format!(
             "write {} targets {:?}, not {:?} -- queue a new write instead",

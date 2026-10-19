@@ -282,7 +282,7 @@ impl Source for KumaSource {
             // **The one op here that answers a receipt** (issue #453). Kuma's
             // `add` names the monitor it minted, and that id is what a
             // withdrawn create's disclosure line points at
-            // (`knobas_sync::write_queue::UNCLAIMED_OPS`). It is not how the
+            // (`WriteOp::delivery`'s `can_leave_unclaimed`). It is not how the
             // monitor is attached to an asset -- that is the name, resolved by
             // the next poll -- because the receipt exists only on the machine
             // that made the write and only until the row settles.

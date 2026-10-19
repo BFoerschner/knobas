@@ -531,13 +531,14 @@ impl SourceError {
 /// nothing about issues or pull requests, and why `CreateTicket` is spelled in
 /// knobas' vocabulary (`CONTEXT.md`: a ticket) rather than in Jira's.
 ///
-/// ## Every variant carries `entity`, and it is the same field everywhere
+/// ## Every variant names its target, almost always as `entity`
 ///
-/// `entity` is an [`EntityRef`] in string form, and it is three things at once:
-/// the **target** the adapter resolves to an API path, the **ordering key** the
+/// The target is an [`EntityRef`] in string form, and it is three things at
+/// once: what the adapter resolves to an API path, the **ordering key** the
 /// write queue keeps per-entity order within, and the thing hold detection
-/// snapshots. `knobas_sync::write_queue::target_entity` reads it out of every
-/// variant with no wildcard arm, so a variant without one does not compile.
+/// snapshots. [`WriteOp::delivery`] says which field carries it and
+/// [`WriteOp::target`] reads that field; `CreatePage`'s `parent` and
+/// `CommitFile`'s `repo` are the two that are not `entity`.
 ///
 /// For an op that *creates* something, the entity is the **container** the new
 /// thing goes into -- the Jira project, the Gitea repository -- addressed in
@@ -640,7 +641,7 @@ pub enum WriteOp {
     /// wants both. Calling the parent `entity` and leaving `space` beside it
     /// would read as though the space were incidental; naming the field for
     /// what it is says which of the two the queue orders and holds against.
-    /// `knobas_sync::write_queue::target_entity` has an arm of its own for it.
+    /// Its delivery names `parent` as the target ([`WriteOp::target`]).
     ///
     /// `parent` is an [`EntityRef`] in string form naming a **mirrored page**
     /// (`confluence:98400`) -- unlike a create's container elsewhere in this
@@ -958,7 +959,7 @@ pub enum WriteOp {
     /// name: the spec names the fields, and the op has a branch and a path
     /// beside its repository, so naming the container for what it is says
     /// which of the three the queue orders and holds against.
-    /// `knobas_sync::write_queue::target_entity` has an arm of its own for it.
+    /// Its delivery names `repo` as the target ([`WriteOp::target`]).
     ///
     /// `branch` is the branch the file was read on. With `new_branch` set,
     /// the source makes that branch from `branch` first and commits there, so
@@ -1282,10 +1283,10 @@ impl WriteOp {
     /// **No wildcard arm**, for [`WriteOp::identifier`]'s reason: a new
     /// variant does not compile until it states its delivery here. The
     /// reasons per op are argued in `knobas_core::write_queue::project` for
-    /// the projection, and in `knobas-sync`'s `resend_is_harmless` and
-    /// `UNCLAIMED_OPS` for the resend and the withdrawal. Those two, sync's
-    /// `target_entity` and the app's `link_on_arrival` still answer for
-    /// themselves until #1308 and the app's slice of #1301 read this instead.
+    /// the projection, and in `knobas-sync`'s `attempt` and `unclaimed` for
+    /// the resend and the withdrawal, which read this value. The app's
+    /// `link_on_arrival` still answers for itself until the app's slice of
+    /// #1301 reads it instead.
     #[must_use]
     pub fn delivery(&self) -> Delivery {
         use knobas_spi_types::delivery::{ArrivalLink, Projection, TargetField};
@@ -1388,6 +1389,56 @@ impl WriteOp {
                 ..conservative
             },
         }
+    }
+
+    /// The entity this write targets, read from the field its
+    /// [`delivery`](WriteOp::delivery) names: what the queue orders against,
+    /// what hold detection snapshots, and what an amendment may not repoint.
+    ///
+    /// The `entity` arm has **no wildcard**, so a new variant does not compile
+    /// until it says whether it carries one. A delivery that names a field
+    /// its variant lacks answers `""`, which no `EntityRef` parses, so the
+    /// queue refuses the write rather than ordering it against nothing; the
+    /// battery's `every_write_op_answers_a_delivery_whose_target_it_carries`
+    /// is what keeps that from happening.
+    #[must_use]
+    pub fn target(&self) -> &str {
+        use knobas_spi_types::delivery::TargetField;
+        let field = match self.delivery().target {
+            TargetField::Parent => match self {
+                WriteOp::CreatePage { parent, .. } => Some(parent),
+                _ => None,
+            },
+            TargetField::Repository => match self {
+                WriteOp::CommitFile { repo, .. } => Some(repo),
+                _ => None,
+            },
+            TargetField::Entity => match self {
+                WriteOp::Comment { entity, .. }
+                | WriteOp::Transition { entity, .. }
+                | WriteOp::CreateTicket { entity, .. }
+                | WriteOp::CreateBranch { entity, .. }
+                | WriteOp::CreatePullRequest { entity, .. }
+                | WriteOp::Approve { entity, .. }
+                | WriteOp::TriggerBuild { entity }
+                | WriteOp::RerunBuild { entity }
+                | WriteOp::LogWork { entity, .. }
+                | WriteOp::UpdatePage { entity, .. }
+                | WriteOp::PauseMonitor { entity }
+                | WriteOp::ResumeMonitor { entity }
+                | WriteOp::CreateMonitor { entity, .. }
+                | WriteOp::MergePullRequest { entity, .. }
+                | WriteOp::SetParameter { entity, .. }
+                | WriteOp::RunBuild { entity, .. }
+                | WriteOp::SubmitReview { entity, .. }
+                | WriteOp::DeleteBranch { entity }
+                | WriteOp::EditPullRequest { entity, .. }
+                | WriteOp::UpdatePullRequestBranch { entity, .. }
+                | WriteOp::SourceAction { entity, .. } => Some(entity),
+                WriteOp::CreatePage { .. } | WriteOp::CommitFile { .. } => None,
+            },
+        };
+        field.map_or("", String::as_str)
     }
 }
 
