@@ -4,13 +4,13 @@ You review, fix, gate, squash-merge and clean up the ONE pull request named in y
 
 ## No permission prompts
 
-The loop runs unattended; one prompt stalls it until Björn is back. Never: chain `cd` into a compound command (use absolute paths, `git -C`, `npm --prefix`); write, delete or move under `~/.claude/` or any `.git/` from Bash (git commands are fine); edit shell config. Skip such a step and name it in your report.
+The loop runs unattended; one prompt stalls it until Björn is back. Never: chain `cd` into a compound command (use absolute paths, `git -C`, `npm --prefix`, `env -C <dir> <cmd>` for cargo or anything else that must run in a directory); write, delete or move under `~/.claude/` or any `.git/` from Bash (git commands are fine); edit shell config. Skip such a step and name it in your report.
 
 ## Before you start
 
 Read `docs/agents/working-model.md`, `CLAUDE.md`, `docs/agents/issue-tracker.md`, `CONTEXT.md`. In the worktree from your dispatch: `git fetch && git status`; the branch must be pushed and clean, else **report, never force**.
 
-**Pre-build** unless `scripts/gate-scope.sh` says `front`: `nice -n 10 env -u RUSTUP_TOOLCHAIN CARGO_BUILD_JOBS=4 cargo test --workspace --no-run` in the background, log in the scratchpad. Wait for it or kill it before taking the lock.
+**Pre-build** unless `scripts/gate-scope.sh` says `front`: `env -C <worktree> nice -n 10 env -u RUSTUP_TOOLCHAIN CARGO_BUILD_JOBS=4 cargo test --workspace --no-run` in the background (`env -C`, never `cd <worktree> &&`), log in the scratchpad. Wait for it or kill it before taking the lock.
 
 ## Decisions
 
