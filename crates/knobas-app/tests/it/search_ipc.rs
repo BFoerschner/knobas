@@ -101,10 +101,10 @@ fn query(raw: &str) -> SearchQuery {
 
 /// The field names are the contract.
 ///
-/// `app/src/lib/ipc/search.ts` is written by hand, so a rename on this side is
-/// a field the frontend reads as `undefined` -- no compile error on either
-/// half. The crate's own unit tests pin the shape of a `SearchHit` against the
-/// mirror's text; this pins the shape of a **live answer**, which is the only
+/// The shell's types are generated from these structs
+/// (`app/src/lib/ipc/generated/search.ts`, #1329), so a rename on this side
+/// reaches the frontend's types; this pins the shape of a **live answer**,
+/// which is the only
 /// place `interpreted`, `groups` and `took_ms` appear together and the only
 /// place the flatten is observed on data that came out of PostgreSQL.
 #[tokio::test]
@@ -2013,7 +2013,7 @@ async fn under_reads_the_parent_the_compiled_in_gitea_adapter_declares() {
 }
 
 /// The query box's suggestions cross the bridge in the shape
-/// `app/src/lib/ipc/search.ts` mirrors (#601), and through the searcher the
+/// `app/src/lib/ipc/generated/search.ts` declares (#601), and through the searcher the
 /// app builds: the compiled-in adapters' declarations, so a Gitea commit's
 /// repo is offered for `under:` with its kind.
 #[tokio::test]

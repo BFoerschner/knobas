@@ -273,6 +273,16 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_core::write_queue::QueuedWrite::export_all(cfg)?;
     knobas_source::WriteOp::export_all(cfg)?;
     knobas_core::write_queue::QueueCounts::export_all(cfg)?;
+||||||| parent of 7a1133ab (Derive ts-rs on the search barrel's types and move their doc rules)
+    // search.ts
+    knobas_search::SearchQuery::export_all(cfg)?;
+    knobas_search::SearchResponse::export_all(cfg)?;
+    crate::commands::search::LauncherHome::export_all(cfg)?;
+    knobas_search::FilterSuggestions::export_all(cfg)?;
+    knobas_source::query::Translation::export_all(cfg)?;
+    crate::ticket_views::TicketView::export_all(cfg)?;
+    crate::ticket_views::TicketViewRow::export_all(cfg)?;
+    crate::ticket_views::TicketViewDraft::export_all(cfg)?;
     Ok(())
 }
 
