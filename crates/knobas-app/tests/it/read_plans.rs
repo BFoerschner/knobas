@@ -386,9 +386,9 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
 
     // The Docs tree's pages (#981): found by their kind, never by a probe per
     // item of the mirror that filters the kind after (the timings are on
-    // `knobas_app::docs::PAGES`).
+    // `knobas_app::docs::PAGES`). `$2` is the wiki's fillers (#1296).
     let plan = explain(&pool, knobas_app::docs::planned_tree(), |q| {
-        q.bind(declared.clone())
+        q.bind(declared.clone()).bind(vec!["wiki".to_owned()])
     })
     .await;
     wrong.extend(shapes("docs_tree", &plan));

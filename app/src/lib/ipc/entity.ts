@@ -3258,7 +3258,11 @@ export type DocInline =
   | { type: "mention"; user: string | null; name: string | null; me: boolean }
   | { type: "break" };
 
-/** The Docs reader's left pane — `docs_tree` (#859). */
+/**
+ * The Docs reader's left pane — `docs_tree` (#859). The read narrows itself
+ * to the wiki role's fillers (#1296, §10.8's #1294 entry): a space, the page
+ * read last and *For you* are only theirs.
+ */
 export function docsTree(): Promise<DocsTree> {
   return invoke<DocsTree>("docs_tree");
 }
@@ -3274,7 +3278,8 @@ export function docsPage(entityId: string): Promise<DocPage> {
 /**
  * The Docs search — `docs_search` (#860): the pages `query` admits in `space`
  * (the picker's; a typed `space:` wins), or `null` for a query with neither
- * words nor a filter.
+ * words nor a filter. Only the wiki role's fillers' pages, as the tree
+ * (#1296, §10.8's #1296 entry).
  */
 export function docsSearch(
   query: string,

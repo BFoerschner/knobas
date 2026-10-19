@@ -596,9 +596,11 @@ test("the choice is kept for the session, and without a job there is no switch",
   expect(target.querySelector("select[aria-label='Space']")).not.toBeNull();
 });
 
-test("Docs lists the spaces of the sources that claim wiki, whatever their adapter kind, and no other (#1196)", async () => {
+test("Docs draws the spaces as read and keeps none by source: the read narrows itself to the wiki's fillers (#1296)", async () => {
+  // A source list that says neither source fills the wiki: the page drew
+  // neither space while it kept them by claims, and must now draw both.
   sourceRoles.take([
-    { id: "notes", adapter_kind: "acme-notes", roles: [{ role: "wiki", reads: ["doc_content"] }] },
+    { id: "notes", adapter_kind: "acme-notes", roles: [] },
     { id: "confluence", adapter_kind: "confluence", roles: [{ role: "ci", reads: [] }] },
   ]);
   const tree: DocsTree = {
@@ -608,12 +610,13 @@ test("Docs lists the spaces of the sources that claim wiki, whatever their adapt
   await draw(["notes:1"], ports({ docsTree: vi.fn(async () => tree) }));
 
   const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
-  expect([...select.options].map((o) => o.textContent)).toEqual(["All spaces (1)", "HB Handbook (1)"]);
+  expect([...select.options].map((o) => o.textContent)).toContain("HB Handbook (1)");
+  expect(select.options).toHaveLength(tree.spaces.length + 1);
 });
 
-test("Docs' search hits drop the pages of a source that does not claim wiki (#1196)", async () => {
+test("Docs draws the search hits as read, the read being the wiki's (#1296)", async () => {
   sourceRoles.take([
-    { id: "notes", adapter_kind: "acme-notes", roles: [{ role: "wiki", reads: ["doc_content"] }] },
+    { id: "notes", adapter_kind: "acme-notes", roles: [] },
     { id: "confluence", adapter_kind: "confluence", roles: [{ role: "ci", reads: [] }] },
   ]);
   const tree: DocsTree = {
@@ -621,12 +624,10 @@ test("Docs' search hits drop the pages of a source that does not claim wiki (#11
     spaces: [...TREE.spaces, { source_id: "notes", key: "HB", name: "Handbook", pages: [{ entity_id: "notes:1", title: "Welcome", parent: null }] }],
   };
   const onNotes = { ...HITS.hits[0]!, entity_id: "notes:1", title: "Welcome", space: { key: "HB", name: "Handbook" }, path: null };
-  const answer: DocsHits = { ...HITS, total: 3, hits: [...HITS.hits, onNotes] };
+  const answer: DocsHits = { ...HITS, total: HITS.hits.length + 1, hits: [...HITS.hits, onNotes] };
   await draw(["notes:1"], ports({ docsTree: vi.fn(async () => tree), docsSearch: vi.fn(async () => answer) }));
 
   type("ledger");
   await settle();
-  const hits = [...target.querySelectorAll<HTMLAnchorElement>("a.tf-dl-hit")];
-  expect(hits.map((h) => h.getAttribute("href"))).toEqual(["#/page/notes%3A1"]);
-  expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("1 page in");
+  expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(answer.hits.length);
 });

@@ -58,7 +58,6 @@
   import { resolveTicket } from "../job/job";
   import TfLinkTo from "../job/TfLinkTo.svelte";
   import type { JobPorts } from "../job/ports";
-  import { WIKI, sourceRoles } from "../roles.svelte";
   import { jobHash } from "../route";
   import { initials, when } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
@@ -141,13 +140,12 @@
       copy: (text) => navigator.clipboard.writeText(text),
     },
   );
-  let answered = $state<DocsTree | null>(null);
-  /** The spaces of the sources that claim the wiki role, never by adapter kind (#1196, ADR-0029). */
-  const tree = $derived.by((): DocsTree | null => {
-    if (answered === null) return null;
-    const spaces = sourceRoles.keep(WIKI, answered.spaces);
-    return spaces === answered.spaces ? answered : { ...answered, spaces };
-  });
+  /**
+   * The tree as read: the read narrows itself to the sources filling the wiki
+   * role, so nothing here keeps spaces by source (#1296, ADR-0029 as amended
+   * on 2026-10-19). The search is narrowed the same way.
+   */
+  let tree = $state<DocsTree | null>(null);
   let treeError = $state<string | null>(null);
   let page = $state<DocPage | null>(null);
   let pageError = $state<string | null>(null);
@@ -217,7 +215,7 @@
 
   async function readTree() {
     try {
-      answered = await io.docsTree();
+      tree = await io.docsTree();
       treeError = null;
     } catch (cause) {
       treeError = ipcErrorMessage(cause);
@@ -288,28 +286,11 @@
     );
   });
 
-  /**
-   * The pages of the spaces the tree dropped, whose sources do not claim the
-   * wiki role (#1196). A hit names no source, so it is matched to its space's
-   * page here. `null` while nothing is dropped.
-   */
-  const unclaimed = $derived.by((): Set<string> | null => {
-    if (answered === null || tree === null || tree === answered) return null;
-    const drawn = new Set(tree.spaces);
-    return new Set(answered.spaces.filter((s) => !drawn.has(s)).flatMap((s) => s.pages.map((p) => p.entity_id)));
-  });
-
-  /** The hits on the wiki sources' pages, kept to the job's pages while *This job* is on. */
+  /** The hits as read, kept to the job's pages while *This job* is on. */
   const hits = $derived.by((): DocsHits | null => {
-    if (found === null) return found;
-    let wiki = found;
-    if (unclaimed !== null) {
-      const onWiki = found.hits.filter((h) => !unclaimed.has(h.entity_id));
-      wiki = { ...found, total: found.total - (found.hits.length - onWiki.length), hits: onWiki };
-    }
-    if (!jobOn) return wiki;
-    const kept = wiki.hits.filter((h) => jobIds?.has(h.entity_id) ?? false);
-    return { ...wiki, total: kept.length, hits: kept };
+    if (found === null || !jobOn) return found;
+    const kept = found.hits.filter((h) => jobIds?.has(h.entity_id) ?? false);
+    return { ...found, total: kept.length, hits: kept };
   });
   const searchScope = $derived(jobOn ? `${job}'s pages` : scopeName(shownSpace));
 

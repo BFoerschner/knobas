@@ -1063,3 +1063,121 @@ async fn moving_the_notes_queues_one_page_each_under_the_parent() {
     let elsewhere = move_notes_payloads(&pool, "conf-none:9").await.unwrap_err();
     assert_eq!(elsewhere.code, knobas_app::IpcErrorCode::NotFound);
 }
+
+/// A source configured as `adapter`, its user `mara` as [`confluence`]'s.
+async fn configured_as(pool: &sqlx::PgPool, adapter: &str) -> String {
+    let id = format!("role{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ($1, $2, $2, 'http://x', 'Pat', '{\"username\":\"mara\"}')",
+    )
+    .bind(&id)
+    .bind(adapter)
+    .execute(pool)
+    .await
+    .unwrap();
+    id
+}
+
+/// The tree is the wiki role's read by definition, so it narrows itself to
+/// the role's fillers (#1296, ADR-0029 as amended on 2026-10-19): a wiki
+/// filler's space comes back with its tree, and a Confluence source with a
+/// wiki miss, a source whose adapter claims no wiki, a removed source's
+/// leftover pages and a source whose adapter is not installed contribute no
+/// space, are never the page read last, are never *For you* and draw no
+/// search hit. Every page here mentions the reader and holds the same word.
+#[tokio::test]
+async fn the_docs_reads_hold_only_the_wiki_fillers_pages() {
+    let pool = pool().await;
+    let w = word();
+    let filler = confluence(&pool).await;
+    let with_miss = confluence(&pool).await;
+    sqlx::query(
+        "insert into sync.role_check (source_id, role, missed_kind, missed_field, missed_path)
+         values ($1, 'wiki', 'page', 'parent', 'ancestors')",
+    )
+    .bind(&with_miss)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let not_claiming = configured_as(&pool, "jira").await;
+    let leftover = confluence(&pool).await;
+    let uninstalled = configured_as(&pool, "role_nowhere").await;
+
+    let mut pages = Vec::new();
+    for source in [&filler, &with_miss, &not_claiming, &leftover, &uninstalled] {
+        let home_title = format!("Home {w}");
+        let home = page(&pool, source, "1", &home_title, "OPS", &[], "").await;
+        let child = page(&pool, source, "2", &format!("Child {w}"), "OPS", &[&home_title], "").await;
+        for id in [&home, &child] {
+            indexed(
+                &pool,
+                id,
+                &[
+                    format!("Page {w}"),
+                    comment_line(Some("Priya Nair")),
+                    "Thanks @mara ".into(),
+                ],
+                "tomasz",
+                0,
+            )
+            .await;
+        }
+        pages.push((home, child));
+    }
+    sqlx::query("delete from knobas.source_config where id = $1")
+        .bind(&leftover)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // The filler's page is visited first, every other page after it.
+    knobas_app::conversation::visit(&pool, &pages[0].0)
+        .await
+        .unwrap();
+    for (home, _) in &pages[1..] {
+        knobas_app::conversation::visit(&pool, home).await.unwrap();
+    }
+
+    let ours = [&filler, &with_miss, &not_claiming, &leftover, &uninstalled];
+    let tree = docs_tree_inner(&pool).await.unwrap();
+    type Node<'a> = (&'a str, Option<&'a str>);
+    let spaces: Vec<(&str, Vec<Node>)> = tree
+        .spaces
+        .iter()
+        .filter(|s| ours.contains(&&s.source_id))
+        .map(|s| {
+            let nodes = s.pages.iter();
+            let nodes = nodes.map(|p| (p.entity_id.as_str(), p.parent.as_deref()));
+            (s.source_id.as_str(), nodes.collect())
+        })
+        .collect();
+    let (home, child) = (pages[0].0.as_str(), pages[0].1.as_str());
+    assert_eq!(
+        spaces,
+        vec![(filler.as_str(), vec![(child, Some(home)), (home, None)])],
+        "the filler's space alone, with its tree"
+    );
+    let all: Vec<&String> = pages.iter().flat_map(|(h, c)| [h, c]).collect();
+    let outsiders = &all[2..];
+    assert!(
+        tree.last_read.as_ref().is_none_or(|id| !outsiders.contains(&id)),
+        "the page read last is a filler's: {:?}",
+        tree.last_read
+    );
+    let mut mine: Vec<&str> = tree
+        .for_you
+        .iter()
+        .filter(|f| all.contains(&&f.entity_id))
+        .map(|f| f.entity_id.as_str())
+        .collect();
+    mine.sort_unstable();
+    let mut wanted = vec![home, child];
+    wanted.sort_unstable();
+    assert_eq!(mine, wanted, "For you is the filler's pages alone");
+
+    let found = docs_search_inner(&pool, &w, None).await.unwrap().unwrap();
+    let mut hits: Vec<&str> = found.hits.iter().map(|h| h.entity_id.as_str()).collect();
+    hits.sort_unstable();
+    assert_eq!(hits, wanted, "the search hits the filler's pages alone");
+    assert_eq!(found.total, 2, "and counts no other");
+}
