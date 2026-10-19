@@ -8160,3 +8160,33 @@ reserved-steps rule. The entry is `docs/contract/10.8/1327-the-sources-barrel-is
   substring match that fires on a TypeScript name is a false positive, and the identifier match
   loses nothing in the direction the test guards (a dispatch has to name `WriteOp` itself).
   *Reversing:* small; the rule test pins both.
+
+### #1327, merge-manager on Opus (2026-10-20)
+
+Deep pass on the head rebased over #1369 (assets). The witness re-run there: 242 lines for 52
+types, identical to the hand-written `sources.ts` at 7a96c634.
+
+- **Two declarations of `IpcErrorCode`.** *Fork:* unify now (`index.ts` re-exports the generated
+  one) or leave both until a later ticket. *Ruling:* leave both; follow-up #1372 (backlog).
+  *Reasoning:* `index.ts` is orchestrator-owned and append-only, and replacing a declaration
+  there is not an append; the duplicate cannot drift silently, because `error.rs`'s pin holds
+  `index.ts`'s union to the Rust enum and the generated one is the Rust enum. #1332 does not
+  cover it, hence the follow-up. *Reversing:* #1372.
+- **`WriteOp`'s variant docs on the variants.** *Ruling:* confirmed. The convention exists so
+  the shell's half reaches the generated file without two copies; here the variant docs are SPI
+  rationale nobody copies, the enum's table names every variant, and every shell rule sits on a
+  payload field, which the generator carries. Not a contradiction of a ticket, spec or ADR.
+  *Reversing:* mechanical.
+- **`PayloadPath`'s `transparent` note.** *Ruling:* confirmed, no mapping gap. It is the only
+  type deriving `TS` with `#[serde(transparent)]` (`Declarations` does not derive), and it is a
+  tuple newtype, which `ts-rs` emits as its field: `Array<string>`, the old `string[]`. A
+  transparent struct with a *named* field would generate wrongly, and the note would be the only
+  sign; none exists. *Reversing:* nothing to reverse.
+- **The write choke point.** *Ruling:* confirmed. Planted a `.write(` call in
+  `knobas-app/src/ipc_mirror.rs` and, separately, an `Option<knobas_source::WriteOp>` in
+  `knobas-app/src/sources/mod.rs`: `only_the_write_queue_may_send_to_a_source` went red naming
+  each file, and green again with the plants removed. *Reversing:* small.
+- **The §10.8 entry.** *Ruling:* amended to name `knobas-spi-types` as the crate (it said
+  `knobas_core::payload`, the re-export), to list the five crates gaining a derive and the one
+  gaining a dependency (#1328's ruling), and to record the `transparent` note and #1372.
+  *Reversing:* docs only.

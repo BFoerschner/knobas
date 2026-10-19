@@ -1,17 +1,24 @@
-- **The sources barrel's types are generated: `crates/knobas-source/src/**`, `knobas_core::payload`
+- **The sources barrel's types are generated: `crates/knobas-source/src/**`, `knobas-spi-types`
   and the IPC surface — issue #1327 (2026-10-20).** Parent spec #1306, the third switching ticket
   after #1325's app barrel and #1326's entity barrel. No migration, no event, no `WriteOp` variant,
   no command added, removed or renamed, no argument changed, no field added, removed or renamed,
   no serde attribute changed, no wire shape changed, nothing added to either append-only barrel
   (`app/src/lib/ipc/index.ts` and `lib.rs`'s handler list are untouched). Ratified by the
-  implementer on Opus under Björn's 2026-10-18 reserved-steps rule; the rulings are in
+  implementer on Opus under Björn's 2026-10-18 reserved-steps rule and checked against the merge
+  head by the merge-manager on Opus; the rulings are in
   `docs/decisions/2026-10-unattended-rulings.md` under `## #1327`.
 
-  **`crates/knobas-source/src/**` and `knobas_core::payload`.** The SPI types the sources barrel
+  **Crates that gain a derive.** Five: `knobas-source`, `knobas-spi-types`, `knobas-core`,
+  `knobas-sync` and `knobas-app`, listed type by type below. Only `knobas-sync` gains a
+  dependency (`ts-rs`); the other four already had it, and the comments on the `ts-rs` lines of
+  `knobas-source`, `knobas-spi-types` and `knobas-core` are reworded. `knobas-source` and
+  `knobas-spi-types` still build for `wasm32-wasip2` (the gate's `wasm-fixture` step).
+
+  **`crates/knobas-source/src/**` and `knobas-spi-types`.** The SPI types the sources barrel
   declares (`SourceDescriptor`, `AuthMethod`, `WriteOp` exported as `WriteOpPayload`,
   `MergeStyle`, `UpdateStyle`, `PullRequestState`, `ReviewVerdict`, `ReviewComment`,
   `MonitorKind`, `clone_urls::CloneFrom`, `role::RoleClaim`, `role::data::RoleMiss`) and the
-  payload declarations in `knobas-spi-types` (`PayloadPath`, `ListPath`, `ParentPath`,
+  payload declarations in `knobas-spi-types` (`knobas_core::payload`: `PayloadPath`, `ListPath`, `ParentPath`,
   `ProjectPath`, `KindPaths`, `TriggerPath`, `TriggerValue`, `Frame`, `StatePath`, `StateValue`)
   derive `ts_rs::TS`; `Trigger`, `BuildParameter`, `ReviewSide`, `KindInfo` and `Tone` already
   did (#1326). Attributes only change the TypeScript: `SourceDescriptor::capabilities` is
@@ -22,8 +29,10 @@
   `WriteOp`'s payload rules on its variants' fields, and the variant docs of fourteen enums
   (`Trigger`, `Frame`, `MergeStyle`, `UpdateStyle`, `ReviewVerdict`, `MonitorKind`, `CloneFrom`,
   and in the other crates `AuthState`, `SyncTrigger`, `SyncPhase`, `WriteState`, `WaitReason`,
-  `UpdateCheck`, `IpcErrorCode`) moved into the enums' docs (#1325's convention). `WriteOp`'s variants keep their own docs; its enum doc says where the shell's half
-  is. No item, field, variant, serde attribute or behaviour changed; the contract battery is
+  `UpdateCheck`, `IpcErrorCode`) moved into the enums' docs (#1325's convention). `WriteOp`'s
+  variants keep their own docs; its enum doc says where the shell's half is. `PayloadPath`'s
+  `#[serde(transparent)]` is not parsed by `ts-rs`, which notes it at build time; a newtype is
+  its field either way, so it generates as `Array<string>`, as the mirror had it. No item, field, variant, serde attribute or behaviour changed; the contract battery is
   untouched.
 
   **The other crates.** `knobas-sync` takes `ts-rs` as a dependency for `SyncReport`,
@@ -41,9 +50,11 @@
 
   **The IPC surface.** `app/src/lib/ipc/sources.ts` keeps every `invoke` function and re-exports
   its 52 types from `./generated/sources` instead of declaring them, so no caller changes. The old
-  and the new declarations are type-identical name for name (the PR's witness). `IpcErrorCode`
+  and the new declarations are type-identical name for name (the PR's witness, 242 lines for 52
+  types, re-run on the merge head). `IpcErrorCode`
   is generated into the same file because `ConnectionReport` reaches it; the sources barrel does
-  not re-export it, and `index.ts` keeps its own declaration, structurally the same type. The
+  not re-export it, and `index.ts` keeps its own declaration, structurally the same type and held
+  to the Rust enum by `error.rs`'s pin; making it one declaration is #1372. The
   fixture tests go with the hand-written types: `crates/knobas-app/tests/it/sources_mirror.rs`
   (23 tests) and six pins in `knobas-sync` (`health`, `run_log` twice, `progress` twice, the
   crate root). `knobas-sync`'s `every_declared_phase_is_actually_emitted` stays and reads
