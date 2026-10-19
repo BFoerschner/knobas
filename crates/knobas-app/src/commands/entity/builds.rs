@@ -4,7 +4,7 @@ use super::*;
 
 // -- the Builds frame (ADR-0022, #848) -------------------------------------
 
-use knobas_core::builds::{self as frame, RawRun};
+use knobas_core::builds::RawRun;
 pub(super) use knobas_core::builds::{PINS_SETTING, PipelineRow, RunRow};
 
 /// Every pipeline the sources filling the CI role declare, for the Builds
@@ -26,10 +26,11 @@ pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError
         knobas_source::role::CI,
     )
     .await?;
-    let mut pipelines = frame::pipelines(pool, &declarations, &identity, &fillers).await?;
+    let mut pipelines =
+        knobas_core::builds::pipelines(pool, &declarations, &identity, &fillers).await?;
     // The list reads the mirror only: a sha two repositories share links
     // nothing here, rather than one live read per pipeline (#1144).
-    let runs = frame::recent_runs(&mut pipelines);
+    let runs = knobas_core::builds::recent_runs(&mut pipelines);
     with_commits(pool, &declarations, None, runs).await?;
     Ok(pipelines)
 }
@@ -83,7 +84,7 @@ async fn runs_of_pipeline(
     let declarations = declared_paths(pool).await?;
     let identity = identity_of(pool).await?;
     let Some(mut runs) =
-        frame::pipeline_runs(pool, &declarations, &identity, &entity, limit).await?
+        knobas_core::builds::pipeline_runs(pool, &declarations, &identity, &entity, limit).await?
     else {
         return Err(IpcError::not_found(format!(
             "{entity} is not a pipeline in the mirror"
@@ -141,7 +142,7 @@ async fn with_commits<'a>(
         .iter()
         .filter_map(|(_, r)| r.revision.as_deref())
         .collect();
-    let held = frame::commits_of(pool, declarations, &shas).await?;
+    let held = knobas_core::builds::commits_of(pool, declarations, &shas).await?;
     let mut shared: std::collections::BTreeMap<&str, Vec<String>> =
         std::collections::BTreeMap::new();
     for (pipeline, run) in &runs {
@@ -200,7 +201,7 @@ async fn live_pipeline(
     declarations: &knobas_core::payload::Declarations,
     entity: &EntityRef,
 ) -> Result<(), IpcError> {
-    if frame::is_pipeline(pool, declarations, entity).await? {
+    if knobas_core::builds::is_pipeline(pool, declarations, entity).await? {
         Ok(())
     } else {
         Err(IpcError::not_found(format!(

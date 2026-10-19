@@ -130,14 +130,9 @@ knobas-app	lib/knobas_app	commands::backup::tests::the_schedule_decodes_from_the
 knobas-app	lib/knobas_app	commands::backup::tests::the_schedule_serialises_the_keys_the_mirror_declares
 knobas-app	lib/knobas_app	commands::backup::tests::the_share_parts_serialise_the_keys_the_mirror_declares
 knobas-app	lib/knobas_app	commands::backup::tests::the_status_and_the_record_serialise_the_keys_the_mirror_declares
-knobas-app	lib/knobas_app	commands::entity::builds::tests::the_pins_are_read_by_their_constant
 knobas-app	lib/knobas_app	commands::entity::detail::tests::a_declared_kind_resolves_to_the_adapters_own_metadata
 knobas-app	lib/knobas_app	commands::entity::detail::tests::nothing_declared_resolves_to_none_rather_than_to_a_guess
 knobas-app	lib/knobas_app	commands::entity::detail::tests::two_adapters_declaring_one_kind_do_not_fight
-knobas-app	lib/knobas_app	commands::entity::list::tests::an_empty_list_binds_as_null
-knobas-app	lib/knobas_app	commands::entity::list::tests::every_combination_chooses_its_statement
-knobas-app	lib/knobas_app	commands::entity::list::tests::every_statement_names_its_columns_and_no_two_are_the_same
-knobas-app	lib/knobas_app	commands::entity::list::tests::the_order_deserializes_as_the_frontend_spells_it
 knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_role_the_mirror_sends
 knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_saved_view_the_mirror_sends
 knobas-app	lib/knobas_app	commands::entity::tests::the_mirror_invokes_the_commands_by_their_registered_names
@@ -1317,6 +1312,7 @@ knobas-core	lib/knobas_core	asset::tests::find_answers_for_a_declared_type_and_m
 knobas-core	lib/knobas_core	asset::tests::no_type_declares_one_key_twice
 knobas-core	lib/knobas_core	asset::tests::the_table_holds_the_sixteen_types_the_spec_names
 knobas-core	lib/knobas_core	asset::tests::the_two_chains_the_design_draws_are_each_a_link_at_a_time
+knobas-core	lib/knobas_core	builds::tests::the_pins_are_read_by_their_constant
 knobas-core	lib/knobas_core	checkout::clone::tests::a_clone_is_finished_when_its_head_names_a_commit
 knobas-core	lib/knobas_core	checkout::clone::tests::a_failure_is_said_with_gits_own_line
 knobas-core	lib/knobas_core	checkout::clone::tests::a_failure_names_its_cause
@@ -1348,6 +1344,10 @@ knobas-core	lib/knobas_core	context::tests::a_minted_id_is_a_parseable_local_ref
 knobas-core	lib/knobas_core	context::tests::kind_roundtrips_through_its_column_value
 knobas-core	lib/knobas_core	context::tests::kind_serializes_as_its_column_value
 knobas-core	lib/knobas_core	context::tests::the_kinds_are_exactly_what_the_migration_allows
+knobas-core	lib/knobas_core	entity_list::tests::an_empty_list_binds_as_null
+knobas-core	lib/knobas_core	entity_list::tests::every_combination_chooses_its_statement
+knobas-core	lib/knobas_core	entity_list::tests::every_statement_names_its_columns_and_no_two_are_the_same
+knobas-core	lib/knobas_core	entity_list::tests::the_order_deserializes_as_the_frontend_spells_it
 knobas-core	lib/knobas_core	evidence::names::every_rule_named_here_is_a_rule_the_detector_runs
 knobas-core	lib/knobas_core	evidence::tests::a_headline_is_split_at_its_markers
 knobas-core	lib/knobas_core	evidence::tests::a_key_is_found_only_as_a_whole_word

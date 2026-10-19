@@ -67,7 +67,7 @@ pub struct EntityRow {
     /// this row and the launcher's cannot disagree about what a path is.
     ///
     /// This struct and `knobas_search::EntityRow` are pinned to **one wire
-    /// shape** by `commands::search`'s own test; the field is on both.
+    /// shape** by `knobas-app`'s `commands::search` test; the field is on both.
     pub path: Option<String>,
     /// The item's state chip -- a pull request's `open` / `merged` /
     /// `closed`, a build's `running` or outcome (#666) -- resolved by
@@ -118,7 +118,7 @@ pub fn entity_row(row: &sqlx::postgres::PgRow) -> Result<EntityRow, sqlx::Error>
 /// room whose filter said "no sources in particular" would come back empty.
 ///
 /// `Serialize` behind `test-util`, although nothing sends a filter the other
-/// way: it is what lets `tests/it/entity_mirror.rs` pin an *input* DTO through a
+/// way: it is what lets `knobas-app`'s `tests/it/entity_mirror.rs` pin an *input* DTO through a
 /// round trip, and so see a field this struct has that
 /// `app/src/lib/ipc/entity.ts` never declares. A decode-only check is blind to
 /// that direction -- serde reads a missing `Option` as `None`, so a Rust-only
@@ -641,9 +641,9 @@ drawn as (
 /// record that names no parent; such a row stands alone under its own id.
 ///
 /// Whether a kind declares a state is read from `$8`; the parents from the
-/// stored copy of the declarations. Both are this binary's
+/// stored copy of the declarations. Both are the app binary's
 /// `Registry::builtin()`, which bring-up writes to the database before its
-/// first sync (`commands::search::searcher`), so they agree. If that write
+/// first sync (`knobas-app`'s `commands::search::searcher`), so they agree. If that write
 /// failed (bring-up logs it and goes on), no row has a key and every build
 /// draws alone: the tile shows too many rows, never too few.
 ///
@@ -724,7 +724,7 @@ drawn as (
 );
 
 /// [`EntityOrder::LatestPerParent`]'s statement, for the plan test
-/// (`tests/it/read_plans.rs`, #778). It binds what [`read`]
+/// (`knobas-app`'s `tests/it/read_plans.rs`, #778). It binds what [`read`]
 /// binds.
 #[doc(hidden)]
 #[must_use]

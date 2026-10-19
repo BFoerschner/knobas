@@ -64,3 +64,5 @@
   `knobas_core::frame_kinds_cte!`) and the four mirror statements are in `knobas_core::builds`.
   Those types are no longer at `knobas_app::commands::entity::<name>`; the mirror tests and the
   integration tests import them from core. Every command and every `_inner` read keeps its path.
+  Of the seven shared helpers, `state_of` and `entity_row` moved with the row and are `pub` in
+  `knobas_core::entity_list`; `list.rs` brings them back to its siblings with a `pub(super) use`.

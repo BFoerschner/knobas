@@ -10,30 +10,20 @@
 //! always there; `lifecycle.pool()?` is the single place `not_ready` comes
 //! from.
 //!
-//! ## Why there is no query builder here
+//! ## Where the reads live
 //!
-//! Roadmap §4 gotcha 2 asks for dynamic SQL to live in one reviewed module
-//! behind `AssertSqlSafe`. This module dodges the question instead: every
-//! optional predicate is a **nullable parameter** (`$1::text[] is null or ...`)
-//! and every ordering and scope is its own `const` statement chosen by a
-//! `match` (six since #680's two tile orders), so
-//! nothing here ever concatenates a string into SQL and `sqlx::query` is only
-//! ever handed a `&'static str`. A filter that grows a new optional predicate
-//! adds a parameter, not a branch.
-//!
-//! ## Why the columns are named
-//!
-//! `sync.live_item` exposes `fts`, a `tsvector` (migration `0002`'s own
-//! WARNING). Naming the six columns each statement wants keeps that value out
-//! of the result set entirely rather than relying on nobody ever asking for it
-//! by name.
+//! The entity list read and the Builds frame's mirror reads are in the core
+//! crate (`knobas_core::entity_list`, `knobas_core::builds`, #1317 and
+//! #1318), beside the mini board read, with their statements and types; the
+//! commands here are their shims.
 //!
 //! ## Layout
 //!
 //! One submodule per section of what was one file (#1316, contract §10.8),
 //! each named for what it holds. This root re-exports every command and type
 //! at `commands::entity::*`, the path each had before the split, so the
-//! handler list, the mirror and every test address them unchanged. A helper
+//! handler list, the mirror and every test address them unchanged. The
+//! types the two core modules hold are addressed there, not here. A helper
 //! one section shares with another is `pub(super)`, and each submodule takes
 //! its siblings and this root's imports through `use super::*`.
 
