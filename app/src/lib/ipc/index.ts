@@ -3,10 +3,12 @@
  * (`crates/knobas-app/src/commands/`), re-exported here so callers import from
  * one place.
  *
- * These mirrors are written by hand on purpose. `tauri-specta`, which would
- * generate them, is still `2.0.0-rc.*`. What is declared here is exactly the
- * serde output of the Rust types: `DateTime<Utc>` → `string` (RFC 3339),
- * `Option<T>` → `T | null`, `i64`/`u64`/`f32` → `number`,
+ * The `invoke` functions are written by hand. The types are generated from
+ * the Rust by `ts-rs` into `./generated/`, barrel by barrel (contract §2.6 as
+ * amended by #1325); a barrel not yet switched still declares its own. Either
+ * way what is declared is exactly the serde output of the Rust types:
+ * `DateTime<Utc>` → `string` (RFC 3339), `Option<T>` → `T | null`,
+ * `i64`/`u64`/`f32` → `number`,
  * `serde_json::Value` → `unknown`, `#[serde(flatten)]` → inlined fields,
  * snake_case enums → string unions, tagged enums → discriminated unions.
  *

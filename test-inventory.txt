@@ -93,11 +93,9 @@ knobas-app	lib/knobas_app	checkout::working_tree::tests::what_the_reader_does_no
 knobas-app	lib/knobas_app	commands::app::tests::a_call_before_the_database_is_up_is_not_ready
 knobas-app	lib/knobas_app	commands::app::tests::a_failed_bring_up_says_why_in_the_refusal
 knobas-app	lib/knobas_app	commands::app::tests::a_retry_is_claimed_once_and_only_out_of_a_failure
-knobas-app	lib/knobas_app	commands::app::tests::app_status_serialises_the_keys_the_mirror_declares
 knobas-app	lib/knobas_app	commands::app::tests::completing_the_first_run_upserts_the_key_app_status_reads
 knobas-app	lib/knobas_app	commands::app::tests::db_state_serialises_as_the_contract_declares
 knobas-app	lib/knobas_app	commands::app::tests::every_command_in_this_module_has_a_typescript_mirror
-knobas-app	lib/knobas_app	commands::app::tests::every_db_state_has_its_typescript_counterpart
 knobas-app	lib/knobas_app	commands::app::tests::lifecycle_starts_starting_and_remembers_the_last_set
 knobas-app	lib/knobas_app	commands::assets::tests::every_edit_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::assets::tests::every_produced_state_matches_its_typescript_mirror
@@ -199,6 +197,7 @@ knobas-app	lib/knobas_app	inbox::tests::every_candidate_op_has_a_form_in_the_int
 knobas-app	lib/knobas_app	inbox::tests::every_inbox_category_has_a_toggle_in_the_interface
 knobas-app	lib/knobas_app	inbox::tests::the_categories_with_no_write_op_offer_nothing_from_any_source
 knobas-app	lib/knobas_app	inbox::tests::the_interfaces_window_matches_the_backends
+knobas-app	lib/knobas_app	ipc_mirror::the_generated_ipc_mirror_is_written
 knobas-app	lib/knobas_app	link_sets::tests::a_draft_is_refused_for_what_cannot_be_a_set
 knobas-app	lib/knobas_app	link_sets::tests::a_member_fits_its_kind
 knobas-app	lib/knobas_app	link_sets::tests::a_slug_is_an_address_whatever_the_name_was

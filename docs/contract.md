@@ -365,7 +365,7 @@ pub struct SourceRef { pub id: String, pub display_name: String, pub adapter_kin
 
 ### 2.6 TS mirrors (`app/src/lib/ipc/*.ts`)
 
-Mirrors stay hand-written (M0 rationale: `tauri-specta` is still an RC). Mechanical mapping: `DateTime<Utc>` → `string` (RFC 3339), `Option<T>` → `T | null`, `i64/u64/f32` → `number`, `serde_json::Value` → `unknown`, `#[serde(flatten)]` → inlined fields, snake_case enums → string unions, tagged enums → discriminated unions. The function surface:
+~~Mirrors stay hand-written (M0 rationale: `tauri-specta` is still an RC).~~ Amended by #1325 (2026-10-19, `docs/contract/10.8/1325-the-ipc-mirror-is-generated.md`): a barrel's **types** are generated from its Rust types by `ts-rs` into `app/src/lib/ipc/generated/<barrel>.ts`, barrel by barrel, and `just check` fails on a stale one; the `invoke` functions stay hand-written. Mechanical mapping: `DateTime<Utc>` → `string` (RFC 3339), `Option<T>` → `T | null`, `i64/u64/f32` → `number`, `serde_json::Value` → `unknown`, `#[serde(flatten)]` → inlined fields, snake_case enums → string unions, tagged enums → discriminated unions. The function surface:
 
 ```ts
 // app.ts
@@ -2714,6 +2714,7 @@ the entries are no longer in this file, so a line number in `docs/contract.md` s
 - [#1314](contract/10.8/1314-source-fingerprint.md) — `crates/knobas-source/src/**` (one new public module, `knobas_source::fingerprint`) — issue #1314 ...
 - [#1316](contract/10.8/1316-entity-commands-become-a-directory.md) — The module layout of `crates/knobas-app/src/commands/`: `entity.rs` becomes the directory `entity/`, issue ...
 - [#1321](contract/10.8/1321-lifecycle-carries-the-registry.md) — `crates/knobas-app/src/sources/registry.rs` and the `AdapterRegistry` trait: the singleton accessor is ...
+- [#1325](contract/10.8/1325-the-ipc-mirror-is-generated.md) — The IPC mirror's types are generated from Rust: `ts-rs`, the `generated/` folder, and §2.6 amended — issue ...
 - [#1344](contract/10.8/1344-entity-list-ci-kinds-are-runs.md) — The meaning of `list_entities`' `role` for CI: its kinds are the run kinds, not the pipelines — issue #1344 ...
 
 <!-- 10.8-index:end -->

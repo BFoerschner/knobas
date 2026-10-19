@@ -7858,3 +7858,47 @@ The merge-manager's rulings on #1322 (Opus):
   `not_ready` window is unchanged, and in production `state.registry` is the process list. No
   command's `State` arguments changed, so no read answers `not_ready` that did not before.
   *Reversing:* n/a.
+## #1325: the IPC mirror's types are generated; the app barrel first (Opus implementer, 2026-10-19)
+
+Reserved for Björn, ruled by implementer on Opus (the §10.8 entry and §2.6's amendment), under
+the 2026-10-18 reserved-steps rule. The evidence is in
+`docs/contract/10.8/1325-the-ipc-mirror-is-generated.md`.
+
+- **The generator.** *Fork:* `ts-rs`, `specta` 2, `typeshare` or `tsify`. *Ruling:* `ts-rs =
+  "=12.0.1"`. It is stable, runs inside a cargo test, and on a probe of the derives in use met all
+  three requirements, with two settings and one gap. *Reasoning:* `specta` is still
+  `2.0.0-rc.25`, the reason §2.6 gave in the first place; `typeshare` is an external CLI; `tsify`
+  targets `wasm-bindgen`. *Reversing:* swap the derive and the writer test; the generated files
+  would change format and nothing else.
+- **Requirement one is met short of enum variant docs.** *Fork:* reject `ts-rs` for dropping a
+  `///` on a variant, or keep it and move those rules. *Ruling:* keep it. A variant's rule goes
+  into the enum's doc comment as one bullet per variant, done for `DbState` here. Docs on types,
+  fields, fields inside variants and flattened fields all carry. *Reasoning:* the spec's own
+  fallback for what the generator cannot map is an annotation on the Rust side, and no other
+  candidate is both stable and a cargo test. *Reversing:* a ts-rs release that emits variant
+  docs; the bullets can then move back onto the variants.
+- **`i64`/`u64` and `serde_json::Value`.** *Fork:* annotate each field, or configure. *Ruling:*
+  `Config::with_large_int("number")` in the writer test for the 64-bit integers; for `Value`,
+  `#[ts(type = "unknown")]` per field, not the `serde-json-impl` feature, whose `JsonValue` is a
+  named type and not §2.6's `unknown`. The configuration lives in code, not in `TS_RS_*`
+  variables, so the output cannot depend on who runs it. *Reversing:* one line each.
+- **Where the writer lives and how `check` runs it.** *Fork:* the `export` attribute's per-type
+  tests, or one test with an explicit list. *Ruling:* one `#[cfg(test)]` module,
+  `crates/knobas-app/src/ipc_mirror.rs`. It exports into a scratch directory, rejects a file
+  with no barrel of its name, syncs only changed files by rename, and reads them back.
+  `just ipc-mirror` runs it through the workspace-built test binary, not `cargo test -p`, which
+  compiles a second copy of the crate's test binary (25 s, measured). *Reasoning:* the
+  `export` attribute writes on every `cargo test` run, through a process-global merge that
+  appends to whatever is on disk. svelte-check runs beside it in `check`, so a write must
+  never be visible half-done. *Reversing:* small; the file is one test.
+- **`gate-scope.sh` and the generated folder.** *Fork:* count `app/src/lib/ipc/generated/` as
+  frontend or as Rust. *Ruling:* Rust: a head touching it takes the full gate. *Reasoning:* only
+  `check`'s `ipc-mirror` step can say a generated file is current, and `check-front` does not
+  run it; a frontend-only head is unaffected (checked both ways). *Reversing:* delete the case.
+- **`pre-gate` regenerates.** *Ruling:* it runs the writer, so the regenerated file is among the
+  uncommitted changes it lists, like `cargo fmt`'s. *Reversing:* one line.
+- **The two pins deleted, the wire test kept.** The ticket names "the app barrel's two Rust-side
+  fixture pins": `every_db_state_has_its_typescript_counterpart` and
+  `app_status_serialises_the_keys_the_mirror_declares`, the two that read `app.ts` for type
+  text. `db_state_serialises_as_the_contract_declares` pins the wire shape, not the mirror, and
+  stays.
