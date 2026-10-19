@@ -188,6 +188,10 @@ pub(crate) fn engine() -> &'static Engine {
     ENGINE.get_or_init(|| {
         let mut config = Config::new();
         config.epoch_interruption(true);
+        // wasmtime's macOS mach-port trap handler aborts the process when its
+        // `mach_msg` returns anything but success (#1257). Signal handlers, as
+        // on Linux, have no such thread to die.
+        config.macos_use_mach_ports(false);
         let engine = Engine::new(&config).expect("the host's engine configuration is valid");
         let ticking = engine.clone();
         std::thread::Builder::new()
