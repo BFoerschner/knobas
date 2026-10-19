@@ -195,6 +195,52 @@ impl GiteaSource {
             ))),
         }
     }
+
+    /// The issue a write or a read acts on (#1206).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::key_of`], plus an id that names anything but an issue.
+    fn issue_of(&self, entity: &str) -> Result<(String, String, u64), SourceError> {
+        match self.key_of(entity)? {
+            crate::keys::GiteaKey::Issue {
+                owner,
+                repo,
+                number,
+            } => Ok((owner, repo, number)),
+            _ => Err(SourceError::protocol(format!(
+                "gitea: {entity:?} is not an issue -- this operation is performed on one, so the \
+                 target is an id like \"{}:owner/repo/issues/7\"",
+                self.id
+            ))),
+        }
+    }
+
+    /// What a comment is written on: a pull request or an issue, whose
+    /// discussions Gitea keeps on one endpoint.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::key_of`], plus an id that names neither.
+    fn discussion_of(&self, entity: &str) -> Result<(String, String, u64), SourceError> {
+        match self.key_of(entity)? {
+            crate::keys::GiteaKey::Pr {
+                owner,
+                repo,
+                number,
+            }
+            | crate::keys::GiteaKey::Issue {
+                owner,
+                repo,
+                number,
+            } => Ok((owner, repo, number)),
+            _ => Err(SourceError::protocol(format!(
+                "gitea: {entity:?} is not a pull request or an issue -- a comment is written on \
+                 one, so the target is an id like \"{}:owner/repo#142\"",
+                self.id
+            ))),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -278,7 +324,7 @@ impl Source for GiteaSource {
                 Ok(WriteReceipt::none())
             }
             WriteOp::Comment { entity, body } => {
-                let (owner, repo, index) = self.pull_of(entity)?;
+                let (owner, repo, index) = self.discussion_of(entity)?;
                 write::comment(&self.client, &owner, &repo, index, body).await?;
                 Ok(WriteReceipt::none())
             }
@@ -383,9 +429,24 @@ impl Source for GiteaSource {
                 write::add_label(&self.client, &owner, &repo, index, label).await?;
                 Ok(WriteReceipt::none())
             }
-            WriteOp::Transition { .. }
-            | WriteOp::CreateTicket { .. }
-            | WriteOp::TriggerBuild { .. }
+            WriteOp::Transition { entity, status } => {
+                let (owner, repo, index) = self.issue_of(entity)?;
+                write::transition(&self.client, &owner, &repo, index, status).await?;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::CreateTicket {
+                entity,
+                title,
+                body,
+                ticket_type: _,
+            } => {
+                let (owner, repo) = self.repo_of(entity)?;
+                let made = write::create_ticket(&self.client, &owner, &repo, title, body).await?;
+                Ok(made.map_or_else(WriteReceipt::none, |number| {
+                    WriteReceipt::id(number.to_string())
+                }))
+            }
+            WriteOp::TriggerBuild { .. }
             | WriteOp::RerunBuild { .. }
             | WriteOp::LogWork { .. }
             | WriteOp::CreatePage { .. }
@@ -401,31 +462,30 @@ impl Source for GiteaSource {
         }
     }
 
-    /// Refused: Gitea has no workflow (#498).
+    /// An issue's workflow (#1206): its two states, so from where it stands
+    /// the one move is to the other. Read live, as Jira's is, so a select is
+    /// never built from a state the mirror has not caught up with.
     ///
-    /// A pull request and an issue have **states**, not a workflow -- open,
-    /// closed, merged are what happened to the thing rather than a
-    /// configurable set of moves somebody may take next -- and Gitea offers no
-    /// endpoint that answers "what can this move to from here". Which is why
-    /// this adapter declares no `transition` write op either: the two are one
-    /// fact, and the contract battery holds them together.
-    ///
-    /// **Refused rather than answered empty**, and the difference is what a
-    /// reader sees. An empty list is a workflow with nowhere left to go, which
-    /// is a real state a real Jira ticket can be in; this is a source that was
-    /// asked the wrong question. The two are not drawn the same way: an empty
-    /// answer *is* an answer, and the select is built from it, so there is no
-    /// select; a refusal is a **failed** read, and the corpus-observed offer
-    /// stands in its place marked *offer unverified*. In practice the detail
-    /// never asks -- it gates the read on the descriptor's `transition` op,
-    /// which this adapter does not declare, so a pull request draws no select
-    /// and makes no call -- and what holds this adapter to a refusal is
-    /// contract battery clause 8.
+    /// Refused for anything but an issue: a pull request is closed and
+    /// reopened by `edit_pull_request`, and has a third state, merged, that
+    /// no move reaches.
     async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
-        Err(SourceError::protocol(format!(
-            "gitea: this adapter has no workflow, so there are no reachable transitions to read \
-             for {entity:?}"
-        )))
+        let (owner, repo, number) = self.issue_of(entity)?;
+        let issue = self.client.issue(&owner, &repo, number).await?;
+        let state = issue["state"]
+            .as_str()
+            .and_then(write::issue_state)
+            .ok_or_else(|| {
+                SourceError::protocol(format!(
+                    "gitea: {entity:?} answered no state an issue has: {}",
+                    issue["state"]
+                ))
+            })?;
+        Ok(write::ISSUE_STATES
+            .into_iter()
+            .filter(|other| *other != state)
+            .map(str::to_owned)
+            .collect())
     }
 
     /// A commit's overview and diff; `None` for the kinds whose views are
@@ -472,23 +532,8 @@ mod tests {
         assert_eq!(d.adapter_kind, "gitea");
         assert_eq!(d.name, "Tidewater Git");
         // Everything else is still the template's.
-        assert_eq!(d.entity_kinds.len(), 4);
-        assert_eq!(
-            d.write_ops,
-            vec![
-                "create_branch",
-                "create_pull_request",
-                "comment",
-                "approve",
-                "merge_pull_request",
-                "submit_review",
-                "delete_branch",
-                "edit_pull_request",
-                "update_pull_request_branch",
-                "commit_file",
-                "source_action"
-            ]
-        );
+        assert_eq!(d.entity_kinds.len(), 5);
+        assert_eq!(d.write_ops, crate::descriptor_template().write_ops);
         // Including the 2026-08-25 budget ruling -- an instance cannot quietly
         // re-grant the sweep the template refuses it.
         assert_eq!(
@@ -501,6 +546,7 @@ mod tests {
                 (crate::KIND_BRANCH, true),
                 (crate::KIND_PR, false),
                 (crate::KIND_COMMIT, false),
+                (crate::KIND_TICKET, false),
             ]
         );
     }
@@ -586,20 +632,13 @@ mod tests {
         let source = build(instance()).unwrap();
         for (op, name) in [
             (
-                WriteOp::Transition {
-                    entity: "gitea:tidewater/payout-service#142".to_owned(),
-                    status: "Done".to_owned(),
+                WriteOp::LogWork {
+                    entity: "gitea:tidewater/payout-service/issues/7".to_owned(),
+                    seconds: 60,
+                    started: chrono::Utc::now(),
+                    comment: String::new(),
                 },
-                "transition",
-            ),
-            (
-                WriteOp::CreateTicket {
-                    entity: "gitea:tidewater/payout-service".to_owned(),
-                    title: "t".to_owned(),
-                    body: String::new(),
-                    ticket_type: "Task".to_owned(),
-                },
-                "create_ticket",
+                "log_work",
             ),
             (
                 WriteOp::TriggerBuild {
@@ -652,6 +691,7 @@ mod tests {
         let repo = "gitea:tidewater/payout-service";
         let pull = "gitea:tidewater/payout-service#142";
         let branch = "gitea:tidewater/payout-service@refs/heads/main";
+        let issue = "gitea:tidewater/payout-service/issues/7";
 
         for (op, expected) in [
             (
@@ -685,6 +725,36 @@ mod tests {
                     body: String::new(),
                 },
                 "not a pull request",
+            ),
+            (
+                WriteOp::Approve {
+                    entity: issue.to_owned(),
+                    body: String::new(),
+                },
+                "not a pull request",
+            ),
+            (
+                WriteOp::Transition {
+                    entity: pull.to_owned(),
+                    status: "closed".to_owned(),
+                },
+                "not an issue",
+            ),
+            (
+                WriteOp::Transition {
+                    entity: issue.to_owned(),
+                    status: "Done".to_owned(),
+                },
+                "open or closed",
+            ),
+            (
+                WriteOp::CreateTicket {
+                    entity: issue.to_owned(),
+                    title: "t".to_owned(),
+                    body: String::new(),
+                    ticket_type: "Task".to_owned(),
+                },
+                "not a repository",
             ),
         ] {
             let refused = source.write(op).await.unwrap_err();

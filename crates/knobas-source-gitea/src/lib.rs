@@ -1,5 +1,6 @@
-//! The Gitea adapter: repositories, branches, pull requests and commits, read
-//! only (interfaces §4.1: M1 is read-only toward every source).
+//! The Gitea adapter: repositories, branches, pull requests and commits, and
+//! since #1206 its issues, as tickets. It fills two roles (ADR-0029): the code
+//! host and the ticket system.
 //!
 //! # Why the client is hand-rolled
 //!
@@ -98,6 +99,9 @@ pub const KIND_REPO: &str = "repo";
 pub const KIND_BRANCH: &str = "branch";
 pub const KIND_PR: &str = "pr";
 pub const KIND_COMMIT: &str = "commit";
+/// An issue (#1206): the ticket-system role's kind, spelled as Jira's is, so
+/// Tickets draws it beside Jira's.
+pub const KIND_TICKET: &str = "ticket";
 
 /// The kinds this adapter emits, with the display metadata the launcher renders
 /// groups, chips and monograms from (spec §3a -- nothing downstream carries a
@@ -153,6 +157,21 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             // `commits_per_repo`, likewise.
             full_sync_exhaustive: false,
         },
+        KindInfo {
+            id: KIND_TICKET.into(),
+            label: "Issue".into(),
+            plural: "Issues".into(),
+            monogram: "IS".into(),
+            // No budget bounds it, and still not exhaustive (#1206): a
+            // repository whose issue listing is refused -- a token without
+            // issue scope, the unit switched off -- is skipped rather than
+            // failing the run, as its discussions are, so a cursor-less run
+            // may not have seen every issue, and a sweep would retire tickets
+            // nobody deleted. The cost is the budgeted kinds': an issue an
+            // admin deleted stays in the mirror. A closed one is still listed
+            // (`state=all`), so closing moves its state and never tombstones it.
+            full_sync_exhaustive: false,
+        },
     ]
 }
 
@@ -185,6 +204,11 @@ pub const WRITE_OP_UPDATE_PULL_REQUEST_BRANCH: &str = "update_pull_request_branc
 /// See [`WRITE_OP_CREATE_BRANCH`]. *Commit change…* on a file, through the
 /// contents API and never the checkout (spec #808 D4, issue #822).
 pub const WRITE_OP_COMMIT_FILE: &str = "commit_file";
+/// See [`WRITE_OP_CREATE_BRANCH`]. An issue's *Move to…*: `open` or
+/// `closed`, the two states Gitea has (#1206).
+pub const WRITE_OP_TRANSITION: &str = "transition";
+/// See [`WRITE_OP_CREATE_BRANCH`]. A new issue in a repository (#1206).
+pub const WRITE_OP_CREATE_TICKET: &str = "create_ticket";
 
 /// This adapter's one [source action](knobas_source::WriteOp::SourceAction)
 /// (#1194, ADR-0029): *Add label…* on a pull request, a write no role's
@@ -217,18 +241,25 @@ pub fn descriptor_template() -> SourceDescriptor {
         min_sync_interval_secs: knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS,
         // The code host (#1193, ADR-0029). Its views draw a pull request's
         // diff with its line threads, a commit's diff, and a repository's tree
-        // and files. Its issues join the ticket system with #1206.
-        roles: vec![knobas_source::role::RoleClaim::new(
-            knobas_source::role::CODE_HOST,
-            [
-                "pull_request_diff",
-                "commit_diff",
-                "repository_tree",
-                "file_contents",
-                "line_threads",
-                "clone_urls",
-            ],
-        )],
+        // and files. Its issues are the ticket system's tickets (#1206), and
+        // their workflow is Gitea's two states.
+        roles: vec![
+            knobas_source::role::RoleClaim::new(
+                knobas_source::role::CODE_HOST,
+                [
+                    "pull_request_diff",
+                    "commit_diff",
+                    "repository_tree",
+                    "file_contents",
+                    "line_threads",
+                    "clone_urls",
+                ],
+            ),
+            knobas_source::role::RoleClaim::new(
+                knobas_source::role::TICKET_SYSTEM,
+                ["reachable_transitions"],
+            ),
+        ],
         // M2's ratified Gitea set (issue #43, ADR-0006) and the merge the
         // source views added (issue #667, §10.8), the review and the edit the
         // git workstation added (issues #705, #706, §10.8), and the whole of what the
@@ -245,6 +276,8 @@ pub fn descriptor_template() -> SourceDescriptor {
             WRITE_OP_EDIT_PULL_REQUEST.to_owned(),
             WRITE_OP_UPDATE_PULL_REQUEST_BRANCH.to_owned(),
             WRITE_OP_COMMIT_FILE.to_owned(),
+            WRITE_OP_TRANSITION.to_owned(),
+            WRITE_OP_CREATE_TICKET.to_owned(),
             knobas_source::SOURCE_ACTION.to_owned(),
         ],
         // Writes outside every role's vocabulary (#1194, ADR-0029), each
@@ -322,10 +355,14 @@ pub fn descriptor_template() -> SourceDescriptor {
 ///   `default_branch` into the `repository` object it already writes, and a
 ///   branch titled so is the default (#718).
 ///
-/// **No project.** Gitea has no project grouping in knobas (ADR-0010 says so
-/// in as many words: "Gitea has no such thing here and gets none"), and a
-/// repository is an entity *kind*, not the axis a room is drawn along -- and
-/// it is a parent, which is not a project either (ADR-0018).
+/// **No project for the code kinds.** Gitea has no project grouping in knobas
+/// (ADR-0010 says so in as many words: "Gitea has no such thing here and gets
+/// none"), and a repository is an entity *kind*, not the axis a room is drawn
+/// along -- and it is a parent, which is not a project either (ADR-0018).
+///
+/// **A ticket's project is its repository** (#1206): the ticket system's
+/// minimum requires a project (ADR-0029), and the ticket names the repository
+/// as Gitea's. Only the ticket declares one; [`ticket_paths`] has the rest.
 #[must_use]
 fn payload_paths() -> Vec<KindPaths> {
     let repo = |at: &[&str]| {
@@ -375,7 +412,53 @@ fn payload_paths() -> Vec<KindPaths> {
             commit: vec![PayloadPath::of(["sha"])],
             ..KindPaths::default()
         },
+        ticket_paths(),
     ]
+}
+
+/// Where an issue keeps what the ticket system reads (#1206, ADR-0029).
+///
+/// The issue record as Gitea's `/issues` listing serves it, plus a `knobas`
+/// object `map::ticket_item` writes beside it for the three fields Gitea has
+/// no field for:
+///
+/// * **status** is Gitea's `state`, `open` or `closed`: the workflow
+///   `reachable_transitions` answers and `transition` moves.
+/// * **priority** is the value of a scoped label `Priority/<value>`, the
+///   spelling of Gitea's own *Default* label set (`Priority/High`), matched
+///   case-insensitively on the scope. An issue with none has no priority:
+///   `knobas.priority` is `null`, which every reader reads as a miss.
+/// * **type** and **parent** are always `null` in `knobas`: Gitea issues
+///   have neither. Declared so the role's minimum is met, and a miss for
+///   every reader. A ticket answers as a parent to `knobas.key`, its own
+///   key (`owner/repo/issues/7`), which no Gitea record names today.
+/// * **assignee** is `assignee.login`, `null` when nobody is assigned.
+/// * **labels** are the label records' names.
+/// * **project** is the repository the issue is in: `repository.full_name`
+///   as its key, the bare `name` as its name.
+/// * **comment count** is Gitea's `comments`, the card's *N comments*.
+fn ticket_paths() -> KindPaths {
+    let knobas = |key: &str| vec![PayloadPath::of(["knobas", key])];
+    KindPaths {
+        kind: KIND_TICKET.to_owned(),
+        status_name: vec![PayloadPath::of(["state"])],
+        priority: knobas("priority"),
+        issue_type: knobas("issue_type"),
+        assignee: vec![PayloadPath::of(["assignee", "login"])],
+        labels: vec![ListPath {
+            at: PayloadPath::of(["labels"]),
+            entry: PayloadPath::of(["name"]),
+        }],
+        parent: vec![ParentPath {
+            kind: KIND_TICKET.to_owned(),
+            at: PayloadPath::of(["knobas", "parent"]),
+            names: vec![PayloadPath::of(["knobas", "key"])],
+        }],
+        project_key: vec![PayloadPath::of(["repository", "full_name"])],
+        project_name: vec![PayloadPath::of(["repository", "name"])],
+        comment_count: vec![PayloadPath::of(["comments"])],
+        ..KindPaths::default()
+    }
 }
 
 /// A pull request's state chip (#666): `merged` when Gitea's merged flag is
@@ -458,13 +541,18 @@ mod tests {
                 "edit_pull_request",
                 "update_pull_request_branch",
                 "commit_file",
+                "transition",
+                "create_ticket",
                 "source_action"
             ],
             "the action bar is rendered from this list alone (issue #43)"
         );
         assert_eq!(d.auth_methods, vec![AuthMethod::Pat]);
         let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
-        assert_eq!(kinds, vec![KIND_REPO, KIND_BRANCH, KIND_PR, KIND_COMMIT]);
+        assert_eq!(
+            kinds,
+            vec![KIND_REPO, KIND_BRANCH, KIND_PR, KIND_COMMIT, KIND_TICKET]
+        );
         for k in &d.entity_kinds {
             assert_eq!(
                 k.monogram.chars().count(),
@@ -530,9 +618,14 @@ mod tests {
                 (KIND_BRANCH.to_owned(), true),
                 (KIND_PR.to_owned(), false),
                 (KIND_COMMIT.to_owned(), false),
+                (KIND_TICKET.to_owned(), false),
             ]
         );
-        for (kind, exhaustive) in &claims {
+        // The ticket is the one unbudgeted kind that is not exhaustive: its
+        // listing may be refused per repository without failing the run
+        // (`sync::issues`), which a budget-free walk of the code host's kinds
+        // never is.
+        for (kind, exhaustive) in claims.iter().filter(|(kind, _)| kind != KIND_TICKET) {
             assert_eq!(
                 *exhaustive,
                 !budgeted.contains(&kind.as_str()),
@@ -574,7 +667,7 @@ mod tests {
     fn the_template_round_trips_as_json() {
         let json = serde_json::to_value(descriptor_template()).unwrap();
         let back: SourceDescriptor = serde_json::from_value(json).unwrap();
-        assert_eq!(back.entity_kinds.len(), 4);
+        assert_eq!(back.entity_kinds.len(), 5);
         assert_eq!(back.config_schema, config::config_schema());
     }
 
@@ -582,10 +675,16 @@ mod tests {
     /// on the descriptor alone: the install-time check, which the battery
     /// repeats as its clause 10.
     #[test]
-    fn the_template_claims_the_code_host_role_and_fills_it() {
+    fn the_template_claims_the_code_host_and_ticket_system_roles_and_fills_them() {
         let d = descriptor_template();
         let roles: Vec<&str> = d.roles.iter().map(|c| c.role.as_str()).collect();
-        assert_eq!(roles, [knobas_source::role::CODE_HOST]);
+        assert_eq!(
+            roles,
+            [
+                knobas_source::role::CODE_HOST,
+                knobas_source::role::TICKET_SYSTEM
+            ]
+        );
         assert_eq!(knobas_source::role::check(&d), Ok(()));
     }
 }

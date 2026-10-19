@@ -38,6 +38,8 @@ use serde_json::Value;
 
 use crate::config::GiteaConfig;
 
+mod issue;
+pub(crate) use issue::issues_path;
 mod pull;
 mod repo;
 

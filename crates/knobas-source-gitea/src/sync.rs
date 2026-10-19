@@ -187,6 +187,11 @@ const MAX_PR_PAGES: u32 = 20;
 /// Commits per *branch* per run. `commits_per_repo` is the whole-repository
 /// budget the walk actually spends, and is what bites first.
 const MAX_COMMIT_PAGES: u32 = 20;
+/// Issues per repository per run (#1206): 10,000 at 50 a page, plus the empty
+/// page that ends them. Unbudgeted, so reaching it ends the run with
+/// [`cap_reached`] rather than mirroring a part of the issues as if it were
+/// all of them.
+const MAX_ISSUE_PAGES: u32 = 201;
 
 /// One repository this run will walk.
 pub(crate) struct Selected {
@@ -611,6 +616,9 @@ async fn sync_repo(
     //    otherwise read as a hole and fail on.
     pulls(source, at, &selected.repo, before, after, sink, emitted).await?;
 
+    // 3a. Issues, as tickets (#1206), down to their own watermark.
+    issues(source, at, &selected.repo, before, after, sink, emitted).await?;
+
     // 4. Commits, only where a head moved. On a first sync every branch counts
     //    as moved, so this is the full walk the budget bounds.
     commits(
@@ -826,6 +834,126 @@ async fn pulls(
     Ok(())
 }
 
+/// Issues changed since the watermark, as tickets (#1206).
+///
+/// **Every page `since` admits is read.** Gitea's issue listing ignores
+/// `sort=recentupdate` (it answers newest *created* first, measured on
+/// 1.27.3), so unlike [`pulls`] there is no order to stop early on. `since` is
+/// server-side and inclusive, so the watermark second comes back on every run
+/// and `issues_seen_at_watermark` keeps it from being re-delivered, by
+/// fingerprint as the pull requests' does (#764). An idle repository costs one
+/// request: the empty page.
+///
+/// **A refused listing skips this repository's issues, on either kind of
+/// run**, with a warning, and keeps their watermark: a 403 is a token without
+/// issue scope and a 404 a repository whose issue unit is off or points at an
+/// external tracker. Neither is the code host's failure, and a sync that
+/// worked before #1206 must not start failing on issues it never read. That
+/// is why `ticket` is not exhaustive (`crate::entity_kinds`). A 401 is the
+/// run's, as everywhere.
+async fn issues(
+    source: &crate::GiteaSource,
+    at: RepoRef<'_>,
+    repo: &model::Repo,
+    before: &RepoCursor,
+    after: &mut RepoCursor,
+    sink: &mut (dyn Sink + Send),
+    emitted: &mut u64,
+) -> Result<(), RepoError> {
+    after.issues_updated_to = before.issues_updated_to;
+    after.issues_seen_at_watermark = before.issues_seen_at_watermark.clone();
+    if !repo.has_issues {
+        return Ok(());
+    }
+    let watermark = before.issues_updated_to;
+    let mut examined: Vec<(u64, Option<DateTime<Utc>>)> = Vec::new();
+    let mut fingerprints: BTreeMap<u64, String> = BTreeMap::new();
+    let mut page = 1;
+    let mut seen = 0usize;
+    loop {
+        let batch: Vec<Value> = match source
+            .client
+            .issues(at.owner, at.name, watermark, page)
+            .await
+        {
+            Ok(batch) => batch,
+            Err(error) if is_repo_scoped(&error) => {
+                tracing::warn!(
+                    repository = %at.full_name,
+                    %error,
+                    "gitea: not reading this repository's issues for this run"
+                );
+                return Ok(());
+            }
+            Err(error) => return Err(RepoError::Fatal(error)),
+        };
+        let last = last_page(&batch);
+        seen += batch.len();
+        for raw in batch {
+            let issue = match serde_json::from_value::<model::Issue>(raw.clone()) {
+                Ok(issue) if issue.pull_request.is_none() => issue,
+                Ok(_) => continue,
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        repository = %at.full_name,
+                        "gitea: skipping an unreadable issue"
+                    );
+                    continue;
+                }
+            };
+            let updated =
+                map::real_time(issue.updated_at).or_else(|| map::real_time(issue.created_at));
+            let fingerprint = crate::fingerprint::of(&raw);
+            if watermark.is_some()
+                && updated == watermark
+                && before.issues_seen_at_watermark.get(&issue.number) == Some(&fingerprint)
+            {
+                examined.push((issue.number, updated));
+                fingerprints.insert(issue.number, fingerprint);
+                continue;
+            }
+            let Some(comments) =
+                discussion(source, at, issue.number, issue.comments, Of::Issue).await?
+            else {
+                continue;
+            };
+            examined.push((issue.number, updated));
+            fingerprints.insert(issue.number, fingerprint);
+            push(
+                sink,
+                map::ticket_item(&source.id, &raw, at, &issue, &comments),
+                emitted,
+            )
+            .await?;
+        }
+        if last {
+            break;
+        }
+        if page == MAX_ISSUE_PAGES {
+            return Err(RepoError::Fatal(cap_reached(
+                "issues in one repository",
+                seen,
+            )));
+        }
+        page += 1;
+    }
+
+    let carried: Vec<u64> = before.issues_seen_at_watermark.keys().copied().collect();
+    let (mark, on_mark) = close_watermark(&examined, watermark, &carried);
+    after.issues_updated_to = mark;
+    after.issues_seen_at_watermark = on_mark
+        .into_iter()
+        .filter_map(|number| {
+            fingerprints
+                .get(&number)
+                .or_else(|| before.issues_seen_at_watermark.get(&number))
+                .map(|fingerprint| (number, fingerprint.clone()))
+        })
+        .collect();
+    Ok(())
+}
+
 /// Where a budgeted walk's watermark now stands, and which keys sit exactly on
 /// it.
 ///
@@ -960,33 +1088,57 @@ async fn fetch_comments(
     at: RepoRef<'_>,
     pr: &model::PullRequest,
 ) -> Result<Option<Vec<model::Comment>>, RepoError> {
-    if !source.config.include_pr_comments || pr.comments == 0 {
+    discussion(source, at, pr.number, pr.comments, Of::Pull).await
+}
+
+/// Whose discussion [`discussion`] reads: which read confirms it is gone.
+#[derive(Debug, Clone, Copy)]
+enum Of {
+    Pull,
+    /// An issue's (#1206), read under the same `include_pr_comments`: Gitea
+    /// keeps both on the issue endpoint, and one switch turns that off.
+    Issue,
+}
+
+/// [`fetch_comments`]'s reading, for a pull request or an issue `number`
+/// with `count` comments.
+async fn discussion(
+    source: &crate::GiteaSource,
+    at: RepoRef<'_>,
+    number: u64,
+    count: u64,
+    of: Of,
+) -> Result<Option<Vec<model::Comment>>, RepoError> {
+    if !source.config.include_pr_comments || count == 0 {
         return Ok(Some(Vec::new()));
     }
     let discussion = match source
         .client
-        .issue_comments(at.owner, at.name, pr.number)
+        .issue_comments(at.owner, at.name, number)
         .await
     {
         Ok(discussion) => discussion,
         Err(error)
             if matches!(error.status(), Some(404 | 500..=599))
-                && pull_is_gone(source, at, pr.number).await =>
+                && match of {
+                    Of::Pull => pull_is_gone(source, at, number).await,
+                    Of::Issue => issue_is_gone(source, at, number).await,
+                } =>
         {
             tracing::info!(
                 repository = %at.full_name,
-                number = pr.number,
+                number,
                 %error,
-                "gitea: pull request deleted since the listing; skipping it"
+                "gitea: deleted since the listing; skipping it"
             );
             return Ok(None);
         }
         Err(error) if is_repo_scoped(&error) => {
             tracing::warn!(
                 repository = %at.full_name,
-                number = pr.number,
+                number,
                 %error,
-                "gitea: indexing this pull request without its discussion; \
+                "gitea: indexing this item without its discussion; \
                  set include_pr_comments to false to stop asking"
             );
             return Ok(Some(Vec::new()));
@@ -1008,7 +1160,7 @@ async fn fetch_comments(
              discussion on this instance would be mirrored incomplete without saying so. Set \
              include_pr_comments to false to index pull requests without their discussion.",
             at.full_name,
-            pr.number,
+            number,
             discussion.raw.len(),
         ))));
     }
@@ -1051,6 +1203,14 @@ async fn branch_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, branch: &s
 async fn pull_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, number: u64) -> bool {
     matches!(
         source.client.pull(at.owner, at.name, number).await,
+        Err(error) if error.status() == Some(404)
+    )
+}
+
+/// Whether the issue itself now answers 404. As [`pull_is_gone`].
+async fn issue_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, number: u64) -> bool {
+    matches!(
+        source.client.issue(at.owner, at.name, number).await,
         Err(error) if error.status() == Some(404)
     )
 }

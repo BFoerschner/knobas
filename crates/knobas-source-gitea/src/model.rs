@@ -39,6 +39,10 @@ pub(crate) struct Repo {
     /// the same bare 404. Absent reads as on, which is Gitea's default.
     #[serde(default = "enabled")]
     pub has_pull_requests: bool,
+    /// Whether the issue unit is switched on (#1206). With it off, `/issues`
+    /// is a 404. Absent reads as on, which is Gitea's default.
+    #[serde(default = "enabled")]
+    pub has_issues: bool,
 }
 
 fn enabled() -> bool {
@@ -106,6 +110,39 @@ pub(crate) struct PullRequest {
     /// How many comments the discussion has; `0` saves a request.
     #[serde(default)]
     pub comments: u64,
+}
+
+/// One issue as Gitea's `/issues` listing serves it (#1206).
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct Issue {
+    pub number: u64,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub user: Option<UserRef>,
+    #[serde(default)]
+    pub html_url: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
+    /// How many comments the discussion has; `0` saves a request.
+    #[serde(default)]
+    pub comments: u64,
+    #[serde(default)]
+    pub labels: Option<Vec<Label>>,
+    /// Set on a pull request, which the listing serves too unless asked for
+    /// `type=issues`; `null` on an issue.
+    #[serde(default)]
+    pub pull_request: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct Label {
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -217,6 +254,7 @@ mod tests {
             empty: false,
             mirror: false,
             has_pull_requests: true,
+            has_issues: true,
         };
         assert_eq!(
             repo("tidewater/payout-service").owner_repo(),

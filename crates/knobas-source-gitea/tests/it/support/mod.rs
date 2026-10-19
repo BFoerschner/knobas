@@ -58,7 +58,15 @@ pub struct State {
     pub branches: BTreeMap<String, Vec<Value>>,
     /// `owner/repo` -> pull-request records, most recently updated first.
     pub pulls: BTreeMap<String, Vec<Value>>,
-    /// `owner/repo#index` -> comment records.
+    /// `owner/repo` -> issue records (#1206), in the listing's order: newest
+    /// created first, which is what Gitea 1.27.3 answers whatever `sort`
+    /// says. Served filtered by `since`, inclusive, as Gitea does.
+    pub issues: BTreeMap<String, Vec<Value>>,
+    /// `owner/repo` entries whose issue listing answers this status (#1206):
+    /// 403 for a token without issue scope, 404 for the unit switched off.
+    pub issues_status: BTreeMap<String, u16>,
+    /// `owner/repo#index` -> comment records. An issue's discussion is keyed
+    /// the same way: Gitea keeps both on `/issues/{index}/comments`.
     pub comments: BTreeMap<String, Vec<Value>>,
     /// `owner/repo#index` -> the `X-Total-Count` that discussion is served
     /// with, when it must differ from the number of records actually served.
@@ -207,6 +215,25 @@ pub fn pull(number: u64, title: &str, body: &str, updated: &str, comments: u64) 
     })
 }
 
+/// One issue as Gitea 1.27.3's `/issues?type=issues` listing serves it
+/// (measured 2026-10-19), with the labels named.
+pub fn issue(number: u64, title: &str, state: &str, labels: &[&str], updated: &str) -> Value {
+    json!({
+        "id": 100 + number, "number": number, "title": title, "body": "",
+        "state": state, "comments": 0, "is_locked": false, "pull_request": null,
+        "user": { "login": "mara", "id": 7 }, "assignee": null, "assignees": null,
+        "labels": labels.iter().map(|name| json!({ "id": 1, "name": name, "exclusive": true })).collect::<Vec<_>>(),
+        "milestone": null,
+        "html_url": format!("https://gitea.example/tidewater/payout-service/issues/{number}"),
+        "repository": {
+            "id": 1, "name": "payout-service", "owner": "tidewater",
+            "full_name": "tidewater/payout-service"
+        },
+        "created_at": "2026-08-20T09:00:00Z", "updated_at": updated,
+        "closed_at": if state == "closed" { json!(updated) } else { Value::Null }
+    })
+}
+
 pub fn comment(body: &str, who: &str, when: &str) -> Value {
     json!({ "id": 1, "body": body, "user": { "login": who }, "created_at": when, "updated_at": when })
 }
@@ -269,7 +296,41 @@ impl State {
                     ),
                 ],
             )]),
-            comments: BTreeMap::from([(
+            issues: BTreeMap::from([(
+                full.clone(),
+                vec![
+                    {
+                        let mut open = issue(
+                            7,
+                            "Payout CSV drops the currency column",
+                            "open",
+                            &["Priority/High", "Kind/Bug"],
+                            "2026-08-22T09:00:00Z",
+                        );
+                        open["assignee"] = json!({ "login": "tom", "id": 8 });
+                        open["comments"] = json!(1);
+                        open
+                    },
+                    issue(
+                        3,
+                        "Document the retry budget",
+                        "closed",
+                        &[],
+                        "2026-08-21T12:00:00Z",
+                    ),
+                ],
+            )]),
+            issues_status: BTreeMap::new(),
+            comments: BTreeMap::from([
+                (
+                    "tidewater/payout-service#7".to_owned(),
+                    vec![comment(
+                        "Reproduced on the EUR batch.",
+                        "jonas",
+                        "2026-08-22T09:00:00Z",
+                    )],
+                ),
+                (
                 "tidewater/payout-service#142".to_owned(),
                 vec![
                     comment(
@@ -283,7 +344,8 @@ impl State {
                         "2026-08-22T10:20:00Z",
                     ),
                 ],
-            )]),
+                ),
+            ]),
             commits: BTreeMap::from([
                 (
                     format!("{full}@feature/PAY-231-sepa-retry"),
@@ -350,6 +412,59 @@ impl State {
             }
         }
         pulls.sort_by(|a, b| b["updated_at"].as_str().cmp(&a["updated_at"].as_str()));
+    }
+
+    /// Change issue `number` of `full_name`: `edit` is handed its record.
+    pub fn edit_issue(&mut self, full_name: &str, number: u64, edit: impl FnOnce(&mut Value)) {
+        let issue = self
+            .issues
+            .get_mut(full_name)
+            .and_then(|issues| issues.iter_mut().find(|i| i["number"] == json!(number)))
+            .expect("the repository has that issue");
+        edit(issue);
+    }
+}
+
+/// Gitea's issue listing: `type=issues` required, `state=all`, filtered by
+/// `since` inclusively, paged by `page` and the fake's page size.
+struct Issues {
+    records: Vec<Value>,
+    page_size: usize,
+}
+
+impl wiremock::Respond for Issues {
+    fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
+        let query: BTreeMap<String, String> = request.url.query_pairs().into_owned().collect();
+        if query.get("type").map(String::as_str) != Some("issues")
+            || query.get("state").map(String::as_str) != Some("all")
+        {
+            return ResponseTemplate::new(400)
+                .set_body_json(json!({ "message": "this fake serves type=issues&state=all" }));
+        }
+        let since = query.get("since").map(|t| {
+            chrono::DateTime::parse_from_rfc3339(t).expect("since is RFC 3339")
+        });
+        let admitted: Vec<Value> = self
+            .records
+            .iter()
+            .filter(|issue| {
+                since.is_none_or(|since| {
+                    let updated = issue["updated_at"].as_str().expect("an issue has updated_at");
+                    chrono::DateTime::parse_from_rfc3339(updated).expect("RFC 3339") >= since
+                })
+            })
+            .cloned()
+            .collect();
+        let page: usize = query
+            .get("page")
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(1);
+        let chunk: Vec<Value> = admitted
+            .chunks(self.page_size)
+            .nth(page - 1)
+            .map(<[Value]>::to_vec)
+            .unwrap_or_default();
+        ResponseTemplate::new(200).set_body_json(chunk)
     }
 }
 
@@ -606,6 +721,40 @@ impl Fake {
                         .and(query_param("page", index.to_string().as_str())),
                 )
                 .respond_with(ok(json!(chunk)))
+                .mount(&self.server)
+                .await;
+            }
+        }
+        for (full_name, status) in &state.issues_status {
+            authed(
+                Mock::given(method("GET"))
+                    .and(path(format!("/api/v1/repos/{full_name}/issues"))),
+            )
+            .respond_with(
+                ResponseTemplate::new(*status).set_body_json(json!({ "message": "refused" })),
+            )
+            .with_priority(FORBIDDEN_PRIORITY)
+            .mount(&self.server)
+            .await;
+        }
+        for (full_name, issues) in &state.issues {
+            authed(
+                Mock::given(method("GET"))
+                    .and(path(format!("/api/v1/repos/{full_name}/issues"))),
+            )
+            .respond_with(Issues {
+                records: issues.clone(),
+                page_size,
+            })
+            .mount(&self.server)
+            .await;
+            for record in issues {
+                let number = &record["number"];
+                authed(
+                    Mock::given(method("GET"))
+                        .and(path(format!("/api/v1/repos/{full_name}/issues/{number}"))),
+                )
+                .respond_with(ok(record.clone()))
                 .mount(&self.server)
                 .await;
             }
