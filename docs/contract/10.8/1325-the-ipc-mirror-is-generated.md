@@ -29,7 +29,7 @@
   | requirement | Rust | generated TypeScript | verdict |
   | --- | --- | --- | --- |
   | doc comments → JSDoc | `///` on a type, a field, a field inside a variant, a flattened field | `/** … */` above each, paragraphs and lists kept | met |
-  | | `///` on an **enum variant** | dropped | gap: a variant's rule goes in the type's doc (convention below) |
+  | | `///` on an **enum variant** | dropped | gap: a variant's meaning goes in the type's doc, its payload's rules on the fields (convention below) |
   | tagged unions | `#[serde(tag = "state", rename_all = "snake_case")]` | `{ "state": "starting", detail: string \| null } \| …` | met |
   | externally tagged | default enum with struct and newtype variants | `{ "Comment": { body: string } } \| { "Plain": string }` | met |
   | `rename_all` | `snake_case` on an enum, `camelCase` on a struct | `"ticket_view" \| "pull_request"`; `someField` | met |
@@ -92,7 +92,8 @@
   `#[ts(export_to = "<barrel>.ts")]`, and its barrel's root types are listed in
   `export_roots` (a type a listed one reaches is exported with it). A type that reaches a type
   without `export_to` fails the writer test, so a missing annotation cannot become a new file.
-  A `serde_json::Value` field carries `#[ts(type = "unknown")]`. A rule written on an enum
-  variant goes into the enum's own doc comment, one bullet per variant, because ts-rs drops
-  variant docs. A type two barrels use is exported to one barrel's file, and ts-rs writes the
+  A `serde_json::Value` field carries `#[ts(type = "unknown")]`. Because ts-rs drops a
+  variant's doc, a rule about a variant's payload goes on that payload's field (field docs inside
+  a variant are carried), and what each variant means goes into the enum's own doc comment, one
+  bullet per variant, with no copy left on the variants; `DbState` is the example. A type two barrels use is exported to one barrel's file, and ts-rs writes the
   `import type` into the other's.

@@ -12,32 +12,38 @@ use tauri::Manager;
 
 use crate::{AppState, IpcError, Profile};
 
-/// How far the database has got -- `commands::app::DbState`.
+/// How far the database has got.
 ///
 /// Interfaces §2.1. Tagged on `state`, so TypeScript reads it as a
 /// discriminated union and `detail` and `message` are reachable only after
 /// the check that identifies which state this is.
 ///
-/// - `starting`: coming up; `detail` is a line for the boot screen.
+/// - `starting`: coming up.
 /// - `migrating`: up, and running migrations.
 /// - `ready`: up, migrated, and answering queries.
-/// - `failed`: it will not come up; `message` is shown to the user as text.
+/// - `failed`: it will not come up.
+///
+/// The states are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/app.ts`) carries a type's
+/// and a field's doc but not a variant's (#1325).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(tag = "state", rename_all = "snake_case")]
 #[ts(export_to = "app.ts")]
 pub enum DbState {
-    /// Coming up. `detail` is a line for the boot screen -- "downloading
-    /// PostgreSQL 18.6", which on a first run is tens of seconds.
-    Starting { detail: Option<String> },
-    /// Up, and running migrations.
+    Starting {
+        /// A line for the boot screen -- "downloading PostgreSQL 18.6", which
+        /// on a first run is tens of seconds.
+        detail: Option<String>,
+    },
     Migrating,
-    /// Up, migrated, and answering queries.
     Ready,
-    /// It will not come up. The message is shown to the user as text.
-    Failed { message: String },
+    Failed {
+        /// Why, shown to the user as text.
+        message: String,
+    },
 }
 
-/// What the shell needs to decide what to draw -- `commands::app::AppStatus`.
+/// What the shell needs to decide what to draw.
 #[derive(Debug, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "app.ts")]
 pub struct AppStatus {
@@ -411,8 +417,9 @@ mod tests {
     /// Every command in this module is callable from the frontend.
     ///
     /// The invoke functions are hand-written (contract §2.6), so a command
-    /// added on the Rust side alone compiles, lints and tests green while being unreachable
-    /// from the window -- and a command *renamed* on the Rust side alone leaves
+    /// added on the Rust side alone compiles, lints and tests green while
+    /// being unreachable from the window -- and a command *renamed* on the
+    /// Rust side alone leaves
     /// the mirror invoking a name that no longer exists, which fails only when
     /// a person clicks the button.
     ///

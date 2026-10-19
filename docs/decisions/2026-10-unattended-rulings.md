@@ -7871,8 +7871,9 @@ the 2026-10-18 reserved-steps rule. The evidence is in
   targets `wasm-bindgen`. *Reversing:* swap the derive and the writer test; the generated files
   would change format and nothing else.
 - **Requirement one is met short of enum variant docs.** *Fork:* reject `ts-rs` for dropping a
-  `///` on a variant, or keep it and move those rules. *Ruling:* keep it. A variant's rule goes
-  into the enum's doc comment as one bullet per variant, done for `DbState` here. Docs on types,
+  `///` on a variant, or keep it and move those rules. *Ruling:* keep it. A rule about a variant's
+  payload goes on the payload's field; what each variant means goes into the enum's doc comment
+  as one bullet per variant, and the variants keep no copy (done for `DbState` here). Docs on types,
   fields, fields inside variants and flattened fields all carry. *Reasoning:* the spec's own
   fallback for what the generator cannot map is an annotation on the Rust side, and no other
   candidate is both stable and a cargo test. *Reversing:* a ts-rs release that emits variant
