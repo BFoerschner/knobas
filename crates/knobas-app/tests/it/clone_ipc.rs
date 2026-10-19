@@ -511,8 +511,10 @@ async fn a_repository_clones_only_with_a_root_set_and_from_an_address_its_adapte
     );
 
     let (_dir, _root) = root(&pool).await;
-    // The mock claims no code host, so it names no address to clone from.
-    let mock = repo(&pool, "mock", &base, "tidewater/x").await;
+    // Jira claims no code host, so it names no address to clone from. (The
+    // mock claims one since #1229: its base URL is the address, and the
+    // demo's is empty.)
+    let mock = repo(&pool, "jira", &base, "tidewater/x").await;
     let error = start_admitting(
         &pool,
         &Registry::builtin(),

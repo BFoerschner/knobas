@@ -1448,9 +1448,11 @@ async fn the_source_list_carries_the_role_claims_of_each_sources_adapter() {
 
     let builtin = sources::crud::list(&f.pool, &f.registry).await.unwrap();
     let row = builtin.iter().find(|row| row.id == f.id).unwrap();
-    assert!(
-        row.roles.is_empty(),
-        "the built-in mock claims nothing (#1193)"
+    let claimed: Vec<&str> = row.roles.iter().map(|c| c.role.as_str()).collect();
+    assert_eq!(
+        claimed,
+        ["code-host", "ticket-system"],
+        "the built-in mock claims the roles its corpus fills (#1229)"
     );
 }
 

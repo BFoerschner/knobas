@@ -493,11 +493,17 @@ async fn under_answers(pool: &PgPool, t: &str) -> UnderAnswers {
     }
 }
 
-/// What the database stored for these items, every row counted.
+/// What the database stored for these items **as the source's own adapter
+/// (Gitea) declares them**, every row counted. A row is stored for each stored
+/// adapter whose declarations reach the item's kind (`0028`), and since #1229
+/// the mock's reach `pr`, `commit` and `branch` too; the readers join on the
+/// source's adapter kind, so the rows of another adapter are never read and are
+/// not what a restore must reproduce.
 async fn stored_parents(pool: &PgPool, ids: &[String]) -> Vec<(String, String, String, i64)> {
     sqlx::query_as(
         "select entity_id, name, kind, count(*) from sync.item_parent
-          where entity_id = any($1) group by 1, 2, 3 order by 1, 2, 3",
+          where entity_id = any($1) and adapter_kind = 'gitea'
+          group by 1, 2, 3 order by 1, 2, 3",
     )
     .bind(ids)
     .fetch_all(pool)

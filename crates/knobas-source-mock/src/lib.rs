@@ -529,7 +529,10 @@ fn tombstoned_item(source_id: &str) -> SyncItem {
             "Withdrawn upstream: superseded by the SEPA retry work.".to_owned(),
             None,
             None,
-            &serde_json::json!({ "key": TOMBSTONED_KEY, "status": "Deleted" }),
+            // `labels` is on every ticket (see [`ticket_payload`]), a withdrawn
+            // one included: a record without the key would read as the path
+            // naming a key the records do not have.
+            &serde_json::json!({ "key": TOMBSTONED_KEY, "status": "Deleted", "labels": [] }),
             // An item withdrawn upstream has no page left to open.
             None,
         )
@@ -559,6 +562,71 @@ fn ticket_payload(t: &Ticket) -> serde_json::Value {
     if let Some(project) = &t.project {
         payload["fields"]["project"] =
             serde_json::to_value(project).expect("a project must serialize");
+    }
+    // The two shapes the ticket-system role's declared paths need (#1229) and
+    // the fixture's flat record does not have. `labels` is the list the
+    // dataset has no entry for, so it is empty on every ticket, which is what
+    // Jira sends for a ticket with none; and the epic is a *parent object*
+    // (`{"key"}`), where the flat `epic` is the bare key. A ticket with no
+    // epic gets no `parent`: absence stays absence.
+    payload["labels"] = serde_json::json!([]);
+    if let Some(epic) = &t.epic {
+        payload["parent"] = serde_json::json!({ "key": epic });
+    }
+    payload
+}
+
+/// The newest commit the fixture records on `branch` of `repo`: the head a
+/// branch or a pull request from it stands at.
+fn head_commit(repo: &str, branch: &str) -> Option<&'static str> {
+    fixture()
+        .commits
+        .iter()
+        .filter(|c| c.repo == repo && c.branch == branch)
+        .max_by_key(|c| c.when)
+        .map(|c| c.sha.as_str())
+}
+
+/// `payload` with the repository it sits in as a parent object (`{"name"}`),
+/// which the code-host role's declared paths read (#1229): the fixture's flat
+/// `repo` is the bare name, and a parent is an object.
+fn in_repo(mut payload: serde_json::Value, repo: &str) -> serde_json::Value {
+    payload["repository"] = serde_json::json!({ "name": repo });
+    payload
+}
+
+/// A pull request's payload: the record, in its repository, with the head
+/// commit its branch stands at and a merged *flag* (the record's own `merged`
+/// is a timestamp, a different fact; see [`payload_paths`]).
+fn pr_payload(p: &PullRequest) -> serde_json::Value {
+    let mut payload = in_repo(
+        serde_json::to_value(p).expect("a fixture record must serialize"),
+        &p.repo,
+    );
+    payload["is_merged"] = serde_json::Value::Bool(p.merged.is_some());
+    if let Some(sha) = p.from.as_deref().and_then(|b| head_commit(&p.repo, b)) {
+        payload["head_sha"] = serde_json::Value::from(sha);
+    }
+    payload
+}
+
+/// A branch's payload: the record, in its repository, with the commit it
+/// stands at and its repository's default branch, where the fixture knows them.
+fn branch_payload(b: &Branch) -> serde_json::Value {
+    let mut payload = in_repo(
+        serde_json::to_value(b).expect("a fixture record must serialize"),
+        &b.repo,
+    );
+    if let Some(sha) = head_commit(&b.repo, &b.name) {
+        payload["head_sha"] = serde_json::Value::from(sha);
+    }
+    if let Some(default) = fixture()
+        .repos
+        .iter()
+        .find(|r| r.name == b.repo)
+        .and_then(|r| r.default_branch.as_deref())
+    {
+        payload["default_branch"] = serde_json::Value::from(default);
     }
     payload
 }
@@ -598,7 +666,7 @@ fn items(source_id: &str) -> Vec<SyncItem> {
             ),
             Some(p.by.clone()),
             p.merged.or(p.opened),
-            p,
+            &pr_payload(p),
             Some(format!("{MOCK_BASE}/tidewater/{}/pulls/{}", p.repo, p.num)),
         ));
     }
@@ -650,7 +718,10 @@ fn items(source_id: &str) -> Vec<SyncItem> {
             body_text([c.msg.clone(), c.branch.clone()]),
             Some(c.by.clone()),
             Some(c.when),
-            c,
+            &in_repo(
+                serde_json::to_value(c).expect("a fixture record must serialize"),
+                &c.repo,
+            ),
             Some(format!("{MOCK_BASE}/tidewater/{}/commit/{}", c.repo, c.sha)),
         ));
     }
@@ -688,7 +759,7 @@ fn items(source_id: &str) -> Vec<SyncItem> {
             body_text([b.name.clone(), b.repo.clone()]),
             None,
             None,
-            b,
+            &branch_payload(b),
             Some(format!("{}/src/branch/{}", repo_url(&b.repo), b.name)),
         ));
     }
@@ -723,44 +794,99 @@ fn branch_key(repo: &str, branch: &str) -> String {
     format!("{repo}@refs/heads/{branch}")
 }
 
-/// Where the fixture's records keep what knobas reads (#277).
+/// Where the fixture's records keep what knobas reads (#277, #1229).
 ///
-/// Only what the transcription really carries, in the spelling
-/// [`ticket_payload`] leaves it in: a ticket's `status` and `priority` are
-/// flat, because that is where the dataset has them, and its project is at
-/// `fields.project` because that is where a source would have written it.
+/// Only what the transcription really carries, in the spelling the payload
+/// builders ([`ticket_payload`], [`pr_payload`], [`branch_payload`]) leave it
+/// in: a ticket's `status` and `priority` are flat, because that is where the
+/// dataset has them, and its project is at `fields.project` because that is
+/// where a source would have written it.
 ///
-/// **Three fields are deliberately not declared**, and each absence is the
-/// same judgement: a declaration says where a fact *is*, and the mock does not
-/// have these facts in the shape the reader wants.
+/// **The two roles the mock claims** (#1229, ADR-0029) set what must be
+/// declared here: `knobas_source::role::MINIMUMS` names the paths of a
+/// `code-host` and a `ticket-system`, and a descriptor that claims a role and
+/// leaves one out fails the battery's clause 10. So the paths below are the
+/// minimum's, each pointing at a fact the dataset has, in the shape the
+/// reader wants:
 ///
-/// * `assignee` and `reviewers` — the fixture records a [`Person::id`]
-///   (`mara`), not the username the inbox matches against
-///   ([`Person::username`]). Declaring them would point the inbox's rules at a
-///   value that can never equal an identity, which is a rule that looks wired
-///   and never fires.
-/// * `merged` — [`PullRequest::merged`] is a *timestamp*, present when the
-///   pull request was merged. A merged flag is a boolean (see
-///   [`knobas_source::KindPaths::merged`]); a timestamp is a different fact
-///   with a different absence, and the start-work merge pass has never matched
-///   this source's pull requests.
-///
-/// So the demo profile reads exactly what it read before this landed, which is
-/// the point: the growth moves where a spelling is written down, not what any
-/// corpus says.
+/// * a *parent* is an object, and the fixture's flat `repo` and `epic` are
+///   bare names, so the builders add `repository` and `parent`;
+/// * a pull request's *merged* is a boolean, and [`PullRequest::merged`] is a
+///   timestamp, so the builder adds `is_merged` and leaves the timestamp be;
+/// * a *commit* a branch or a pull request stands at is the newest commit the
+///   fixture records on the branch (`head_sha`), absent where it records none;
+/// * *reviewers* and *assignee* point at the person **ids** the fixture
+///   records ([`Person::id`], `mara`), not the username the inbox matches
+///   against ([`Person::username`]). The minimum forces the declaration, and
+///   it changes nothing the demo read before: an id never equals an identity,
+///   so the inbox rules these feed still do not fire on the mock's records.
 ///
 /// [`Person::id`]: Person::id
 /// [`Person::username`]: Person::username
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
-    use knobas_source::{KindPaths, PayloadPath};
-    vec![KindPaths {
-        kind: "ticket".to_owned(),
-        status_name: vec![PayloadPath::of(["status"])],
-        priority: vec![PayloadPath::of(["priority"])],
-        project_key: vec![PayloadPath::of(["fields", "project", "key"])],
-        project_name: vec![PayloadPath::of(["fields", "project", "name"])],
-        ..KindPaths::default()
-    }]
+    use knobas_source::{
+        KindPaths, ListPath, ParentPath, PayloadPath, StatePath, StateValue, Tone,
+    };
+    let in_repo = || {
+        vec![ParentPath {
+            kind: "repo".to_owned(),
+            at: PayloadPath::of(["repository"]),
+            names: vec![PayloadPath::of(["name"])],
+        }]
+    };
+    vec![
+        KindPaths {
+            kind: "ticket".to_owned(),
+            status_name: vec![PayloadPath::of(["status"])],
+            priority: vec![PayloadPath::of(["priority"])],
+            assignee: vec![PayloadPath::of(["assignee"])],
+            issue_type: vec![PayloadPath::of(["type"])],
+            labels: vec![ListPath {
+                at: PayloadPath::of(["labels"]),
+                entry: PayloadPath::default(),
+            }],
+            parent: vec![ParentPath {
+                kind: "ticket".to_owned(),
+                at: PayloadPath::of(["parent"]),
+                names: vec![PayloadPath::of(["key"])],
+            }],
+            project_key: vec![PayloadPath::of(["fields", "project", "key"])],
+            project_name: vec![PayloadPath::of(["fields", "project", "name"])],
+            ..KindPaths::default()
+        },
+        KindPaths {
+            kind: "pr".to_owned(),
+            parent: in_repo(),
+            state: vec![StatePath {
+                at: PayloadPath::of(["state"]),
+                values: vec![
+                    StateValue::of("open", Tone::Info),
+                    StateValue::of("merged", Tone::Ok),
+                ],
+            }],
+            head: vec![PayloadPath::of(["from"])],
+            commit: vec![PayloadPath::of(["head_sha"])],
+            reviewers: vec![ListPath {
+                at: PayloadPath::of(["review_requested_from"]),
+                entry: PayloadPath::of(["who"]),
+            }],
+            merged: vec![PayloadPath::of(["is_merged"])],
+            ..KindPaths::default()
+        },
+        KindPaths {
+            kind: "branch".to_owned(),
+            parent: in_repo(),
+            commit: vec![PayloadPath::of(["head_sha"])],
+            default_branch: vec![PayloadPath::of(["default_branch"])],
+            ..KindPaths::default()
+        },
+        KindPaths {
+            kind: "commit".to_owned(),
+            parent: in_repo(),
+            commit: vec![PayloadPath::of(["sha"])],
+            ..KindPaths::default()
+        },
+    ]
 }
 
 #[async_trait::async_trait]
@@ -782,9 +908,32 @@ impl Source for MockSource {
             auth_methods: Vec::new(),
             accepts_account: false,
             min_sync_interval_secs: knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS,
-            roles: Vec::new(),
+            // The two roles the fixture's corpus fills (#1229): the shell
+            // draws Code and Tickets from the sources that claim them, and
+            // the demo's only source is this one. Builds, Docs and Monitors
+            // are not claimed: the mock's `build` is no pipeline-and-run pair,
+            // its pages name no parent, and it has no monitor.
+            //
+            // A claim states the role's minimum, reads included, and the
+            // minimum is the same for a real adapter and a fixture. The mock
+            // answers none of them live (`view` is `None`, there is no
+            // workflow to read: see `reachable_transitions`), so its claim is
+            // "my records fill the role", which `payload_paths` and the
+            // battery's clauses 6 and 10 hold it to.
+            roles: {
+                use knobas_source::role::{CODE_HOST, RoleClaim, TICKET_SYSTEM, minimum};
+                [CODE_HOST, TICKET_SYSTEM]
+                    .map(|role| {
+                        let reads = minimum(role).map_or(&[][..], |m| m.reads);
+                        RoleClaim::new(role, reads.iter().copied())
+                    })
+                    .to_vec()
+            },
             source_actions: Vec::new(),
-            clone_from: Vec::new(),
+            // The code host's clone URLs (#1197) are required of its claim.
+            // The demo source has an empty base URL, so this names no address
+            // and a clone is built from each repository's own page, as before.
+            clone_from: vec![knobas_source::clone_urls::CloneFrom::BaseUrl],
             write_ops: vec!["comment".to_owned()],
             // The UI renders this source's launcher groups and chips from these
             // alone, so every kind `sync` emits is declared here.

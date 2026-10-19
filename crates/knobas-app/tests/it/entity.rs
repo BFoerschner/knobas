@@ -2371,7 +2371,7 @@ async fn a_builds_configuration_is_the_parent_its_own_adapter_says_it_names() {
 }
 
 /// §3a's fallback (#680): a kind whose source declares no state -- the mock
-/// adapter's pull requests and builds -- draws under both tile orders exactly
+/// adapter's builds (its pull requests declared one with #1229) -- draws under both tile orders exactly
 /// what the recency order draws. Nothing is hidden, nothing is collapsed into
 /// its parent, nothing is reordered: a state the source never declared cannot
 /// say a row is settled, or that one build stands for another.
@@ -2379,7 +2379,7 @@ async fn a_builds_configuration_is_the_parent_its_own_adapter_says_it_names() {
 async fn a_kind_with_no_declared_state_falls_back_to_recency() {
     let pool = seeded().await;
     let declarations = builtin_declarations(&pool).await;
-    for kind in ["pr", "build"] {
+    for kind in ["build"] {
         let read = |order| {
             let filter = EntityFilter {
                 sources: vec!["mock".to_owned()],
