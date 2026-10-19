@@ -987,10 +987,10 @@ fn a_configured_method_maps_to_one_credential_or_one_refusal() {
 
     let header = |value: &str| Outcome::Header(value.to_owned());
     let protocol = |message: &str| Outcome::Protocol(message.to_owned());
-    let no_username = protocol(
-        "user + password authentication needs a username in the source configuration",
-    );
+    let no_username =
+        protocol("user + password authentication needs a username in the source configuration");
     let jira_unconfigured = protocol(JIRA.unconfigured);
+    let jira_unsupported = |method| Outcome::Protocol((JIRA.unsupported)(method));
 
     #[rustfmt::skip]
     let table = [
@@ -1012,8 +1012,8 @@ fn a_configured_method_maps_to_one_credential_or_one_refusal() {
         (&KUMA,  Some(ApiToken),     None,         None,       Outcome::Unauthorized),
         // Refusal two: a method the adapter does not speak, by name. OAuth has
         // no wire form at all, and is refused even by rules that list it.
-        (&JIRA,  Some(OAuth),        Some("mara"), Some("t"),  protocol("OAuth authentication is not supported for Jira Data Center; use a personal access token or user + password")),
-        (&JIRA,  Some(ApiToken),     Some("mara"), Some("t"),  protocol("ApiToken authentication is not supported for Jira Data Center; use a personal access token or user + password")),
+        (&JIRA,  Some(OAuth),        Some("mara"), Some("t"),  jira_unsupported(OAuth)),
+        (&JIRA,  Some(ApiToken),     Some("mara"), Some("t"),  jira_unsupported(ApiToken)),
         (&GITEA, Some(UserPassword), Some("mara"), Some("t"),  protocol("gitea: UserPassword authentication is not supported; this adapter authenticates with a personal access token")),
         (&KUMA,  Some(Pat),          None,         Some("k"),  protocol("Pat is not Kuma's")),
         (&EVERY, Some(OAuth),        Some("mara"), Some("t"),  protocol("OAuth has no wire form")),
@@ -1025,7 +1025,7 @@ fn a_configured_method_maps_to_one_credential_or_one_refusal() {
         // The configuration outranks the secret: retyping a token cannot fix a
         // source with no method chosen, so Re-enter must not be offered for it.
         (&JIRA,  None,               None,         None,       jira_unconfigured),
-        (&JIRA,  Some(OAuth),        Some("mara"), None,       protocol("OAuth authentication is not supported for Jira Data Center; use a personal access token or user + password")),
+        (&JIRA,  Some(OAuth),        Some("mara"), None,       jira_unsupported(OAuth)),
         (&JIRA,  Some(UserPassword), None,         None,       no_username),
     ];
 

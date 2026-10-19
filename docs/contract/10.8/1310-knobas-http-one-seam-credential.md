@@ -39,7 +39,7 @@
   empty page ends the walk and a short one does not, for page plus limit, offset plus total and
   next link (#1315).
 
-  **The adapter (Jira):** `knobas-source-jira`'s `http::CREDENTIAL` states Jira Data Center's
+  **The adapter (Jira):** `knobas-source-jira`'s `http::CREDENTIAL_RULES` states Jira Data Center's
   rules with its existing messages word for word, and `source::build` calls
   `knobas_http::credential` with them. Its private `credential`, `Scheme` and `scheme` are gone.
   Confluence and TeamCity (#1311), then Gitea and Kuma (#1312), follow and need no surface beyond

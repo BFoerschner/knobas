@@ -38,7 +38,7 @@ pub(crate) use knobas_http::credential;
 /// Which [`Auth`] each configured method means for Jira Data Center, and what
 /// a source that cannot authenticate reads as. The mapping itself, and the
 /// order it judges in, are [`credential`]'s.
-pub(crate) const CREDENTIAL: CredentialRules = CredentialRules {
+pub(crate) const CREDENTIAL_RULES: CredentialRules = CredentialRules {
     // Jira DC >= 8.14: personal access tokens are Bearer tokens.
     pat: TokenSpelling::Bearer,
     // What `descriptor_template().auth_methods` declares and the Add-source
@@ -212,7 +212,8 @@ mod tests {
     const SECRET: &str = "NjE2NTM3-super-secret-pat";
 
     fn a_credential() -> Auth {
-        credential(&CREDENTIAL, Some(AuthMethod::Pat), None, Some(SECRET)).expect("a PAT is enough")
+        credential(&CREDENTIAL_RULES, Some(AuthMethod::Pat), None, Some(SECRET))
+            .expect("a PAT is enough")
     }
 
     /// Spec §14: the secret is never displayed. `Debug` is the leak that gets

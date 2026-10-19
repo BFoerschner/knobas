@@ -312,7 +312,7 @@ mod tests {
 
     use chrono::TimeZone;
 
-    use crate::http::{CREDENTIAL, JiraHttp, credential};
+    use crate::http::{CREDENTIAL_RULES, JiraHttp, credential};
 
     /// A Jira that answers every request `503`, `Connection: close`, and
     /// counts them. A `503` is retried by the transport unless the request
@@ -335,8 +335,13 @@ mod tests {
                 );
             }
         });
-        let auth = credential(&CREDENTIAL, Some(knobas_source::AuthMethod::Pat), None, Some("pat"))
-            .expect("a PAT is enough");
+        let auth = credential(
+            &CREDENTIAL_RULES,
+            Some(knobas_source::AuthMethod::Pat),
+            None,
+            Some("pat"),
+        )
+        .expect("a PAT is enough");
         let http = JiraHttp::new(
             &format!("http://{addr}"),
             &crate::JiraConfig::default(),
