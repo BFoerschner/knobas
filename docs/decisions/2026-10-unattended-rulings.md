@@ -6431,3 +6431,48 @@ No step of the three tickets is reserved for Björn. The implementer's rulings:
 - **#1224's "search reads it from the declaration" had nothing to move.** `knobas-search`'s
   lists name `response_time_ms` only in a doc comment about the sample column; no search read
   reaches into a monitor's payload for it. Recorded in the PR. **Reversing:** n/a.
+## #1209 + #1210: install from a release, update, uninstall, backup and restore of external adapters (Opus implementer)
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **The §10.8 entry is ratified** (`docs/contract/10.8/1209-1210-external-adapter-release-lifecycle.md`):
+  four new commands, three DTOs and `UpdateCheck`, and `install_adapter`'s argument widened to a
+  URL. No migration, no event, no new module, `restore_backup` unchanged. Every addition is one
+  the tickets name; none touches a frozen crate. **Reversing:** medium (four commands and their
+  mirror).
+
+The implementer's rulings:
+
+- **Criterion 1's "real public test repository" is an `#[ignore]`d live test; the gate runs a
+  local forge.** `tests/it/external_adapter_release.rs` serves GitHub's
+  `/repos/<o>/<r>/releases/{latest,tags/<t>}` and Gitea's and Forgejo's `/api/v1/…` from a
+  wiremock server, with assets under the forge download path, and points `Endpoints` at it, so
+  the gate takes no network. `a_public_github_repository_installs_its_latest_release` reaches
+  github.com for the repository `KNOBAS_ADAPTER_LIVE_REPO` names. No such repository exists yet,
+  and publishing a public repository on Björn's account is not the loop's to do unasked, so the
+  live half is not witnessed in this PR; #1253 asks for the repository. **Reversing:** low.
+- **A URL that is no release has no tag; its hash pins it.** A GitHub release answers
+  `tag_name`; a manifest URL shaped `…/<o>/<r>/releases/download/<tag>/<file>` (GitHub, Gitea,
+  Forgejo alike) records `<tag>`; any other URL and a local file record none. The update check
+  calls a tagged install behind when the latest tag differs, an untagged one when the latest
+  manifest's hash differs. **Reversing:** low.
+- **A forge release URL's update check asks that forge's release API**: GitHub's API for a
+  `github.com` URL, `<forge>[/<prefix>]/api/v1/repos/<o>/<r>/releases/latest` for any other host.
+  A Forgejo or Gitea release is then updatable as a GitHub one is. **Reversing:** low.
+- **The update check's answer lives in process memory, on the registry**, not in a table: no
+  migration, and the app asks again at every start. A refused update is recorded there too, as
+  `refused`, so the row says why the version did not move. **Reversing:** low (a migration).
+- **A restore's refusal is shown on Settings' installed-adapter row (`refused`), not in
+  `restore_backup`'s answer**, which stays `null`. The restore reinstalls through
+  `BackupState::with_adapters`; an artifact already in the store under the row's hash loads
+  without a fetch. The manifest's hash and the fetched bytes are both held to the row's.
+  **Reversing:** low.
+- **Uninstall needs an answer for every source of the adapter** and refuses, removing nothing,
+  when one is missing. Each source goes through `crud::delete`, the `delete_source` path, and the
+  scheduler is told as `delete_source` tells it. **Reversing:** low.
+- **The fetches go through `knobas-http` with no credential** (a release is public), refusing a
+  manifest over 1 MiB and an artifact over 64 MiB. **Reversing:** low.
+- **Installed adapters are drawn on Settings › Sources under the source list**, only once one is
+  installed, with *Check for updates*, *Update* and *Uninstall…*; prototype-6 has no design for
+  them, and the uninstall dialog reuses *Remove…*'s two answers word for word, once per source.
+  **Reversing:** low.
