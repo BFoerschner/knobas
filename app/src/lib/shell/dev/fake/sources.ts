@@ -38,7 +38,7 @@ export const FIXTURE_SOURCES = [
   },
   {
     ...fixtureSource("jira", "jira", "Tidewater Jira", "https://jira.tidewater.example", "ok", 213, 92, "UserPassword"),
-    roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }],
+    roles: [{ role: "ticket-system", reads: ["reachable_transitions", "translate_query"] }],
     // What its page edits (#904, #1021): prototype-6's four projects, and a
     // Sprint field id the sync recorded beside an Epic Link id nobody set.
     config: { username: "mara.oyelaran", projects: ["PAY", "OPS", "CUS", "TRK"], sprint_field: "customfield_10107" } as Record<
@@ -181,8 +181,8 @@ const FIXTURE_ADAPTERS = [
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
     min_sync_interval_secs: 60,
-    // The role it claims, as the real adapter does (#1193).
-    roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }],
+    // The role it claims, as the real adapter does (#1193, #1208).
+    roles: [{ role: "ticket-system", reads: ["reachable_transitions", "translate_query"] }],
     write_ops: [],
     entity_kinds: KIND_INFO,
     // The generated-form case: a select with a default, two lists, two texts.

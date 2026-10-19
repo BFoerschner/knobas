@@ -2,9 +2,10 @@
 import { expect, test } from "vitest";
 
 import type { MiniBoardCard } from "../../ipc/entity";
-import type { JiraSource, TicketViewRow } from "../../ipc/search";
+import type { JiraSource, QueryTranslation, TicketViewRow } from "../../ipc/search";
 import {
   columnLimit,
+  copyKeeps,
   draftCopy,
   draftFromFilter,
   draftJiraCopy,
@@ -15,6 +16,7 @@ import {
   jiraKindWords,
   savedShowing,
   sprintEnds,
+  translationText,
   viewColumns,
 } from "./views";
 
@@ -184,7 +186,13 @@ test("Make an editable copy starts a view of your own from the Jira view: its co
   };
   const columns = [{ name: "Working", statuses: ["In Progress", "In Review"], limit: 3 }];
   const board = row("mock-board-40", "Jira boards", 4, { name: "Platform on-call", jira, jira_ref: "mock:board-40", columns, lanes: "priority" });
-  const { draft, from } = draftJiraCopy(board, jira);
+  // As the Jira adapter reads the query (#1208): the source's answer, not the shell's.
+  const copy: QueryTranslation = {
+    conditions: [{ key: "project", negated: false, values: ["OPS", "WEB"] }],
+    kept: 1,
+    left_out: [{ clause: "component = on-call", reason: "knobas does not sync components" }],
+  };
+  const { draft, from } = draftJiraCopy(board, jira, copy);
   expect(draft).toEqual(
     expect.objectContaining({ id: null, position: null, name: "Platform on-call", group: "Mine", query: "project:OPS project:WEB", lanes: "priority", jira_ref: null }),
   );
@@ -197,9 +205,25 @@ test("Make an editable copy starts a view of your own from the Jira view: its co
   });
 
   // *Save as a view* on a Jira view: the copy's conditions, then what the bar adds, and how the tickets show now.
-  const saved = draftJiraCopy(board, jira, "priority:High retry", { layout: "list", lanes: "epic", sort: savedShowing(null).sort });
+  const saved = draftJiraCopy(board, jira, copy, "priority:High retry", { layout: "list", lanes: "epic", sort: savedShowing(null).sort });
   expect(saved.draft).toEqual(
     expect.objectContaining({ name: "", group: "Mine", query: "project:OPS project:WEB priority:High retry", layout: "list", lanes: "epic", jira_ref: null }),
   );
   expect(saved.from.left).toHaveLength(1);
+});
+
+test("a source's translation is search text in the grammar's keys, quoted where a value has a space (#1208)", () => {
+  const copy: QueryTranslation = {
+    conditions: [
+      { key: "status", negated: false, values: ["In Review"] },
+      { key: "under", negated: false, values: ["PAY-12"] },
+      { key: "label", negated: true, values: ["a", "b"] },
+      { key: "assignee", negated: false, values: ["me"] },
+    ],
+    kept: 4,
+    left_out: [],
+  };
+  expect(translationText(copy)).toBe('status:"In Review" under:PAY-12 -label:a -label:b assignee:me');
+  expect(copyKeeps(copy)).toBe("A copy keeps every part of the query.");
+  expect(copyKeeps({ ...copy, kept: 1, left_out: [{ clause: "x", reason: "y" }] })).toBe("A copy keeps 1 of 2 parts of the query.");
 });

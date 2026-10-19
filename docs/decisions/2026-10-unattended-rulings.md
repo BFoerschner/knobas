@@ -6326,3 +6326,45 @@ The merge-manager's rulings (PR #1250, on Opus):
 - **The health line not naming the limit is a follow-up (#1252)**, not a blocker: the ticket's
   criteria ask that the run end failed with the limit named, which the run's recorded error does,
   and the row's *Failed …* text is the same for every failed run. **Reversing:** n/a.
+
+## #1208 translate_query moves the editable copy into the adapter (2026-10-19)
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **The §10.8 entry `1208-translate-query-and-knobas-adapter-1-2.md` is ratified:** a `Source`
+  method with a default, a `knobas_source::query` module, the ticket-system minimum's optional
+  read, one command `translate_ticket_view`, and `knobas:adapter@1.2.0`. Reasoning: the issue
+  asks for each, ADR-0029 names the read optional, and the 1198 entry's minor-version rule
+  allows a new interface the host reads. **Reversing:** a later entry; 1.2.0 is unreleased.
+
+The implementer's rulings:
+
+- **How the read crosses WIT: a new interface `query` in 1.2.0, looked up by name.** Numbered
+  after PR #1250's 1.1.0 (`downloads`, #1205), which is in review and takes the same route.
+  Fork: an optional function on the `adapter` resource, or an existing JSON call. A resource method is
+  bound with the resource, so binding it fails every 1.0.0 component at link; no existing call
+  carries a payload in and a translation out without overloading its meaning. So `query` holds a
+  free function taking the `instance` record, the guest world `adapter` exports it, and the host
+  binds a world `hosted` without it and finds it with `optional_export` (wasmtime's
+  semver-compatible lookup). Witnessed both ways: this branch's fixture translates, and main's 1.0.0
+  fixture loads, passes the battery and syncs on this host, answering `None` (run by hand, not
+  kept: it needs a second fixture build). **Reversing:** low until a 1.2.0 adapter ships.
+  Whichever of #1250 and this PR lands second renumbers its minor and merges the two `hosted` and `adapter` worlds.
+- **The read takes the saved view's payload.** The query is the source's, in the payload the
+  adapter wrote (Jira's `jql`, `type`, `sub_query`), so no Jira-shaped argument joins the SPI.
+  **Reversing:** low.
+- **The answer is conditions in the grammar's keys, not search text.** The shell keeps writing
+  search text (`conditionsText`), so quoting stays in one place and an external adapter needs no
+  copy of it; `Key` is a closed enum, so a word the grammar lacks is refused at decode.
+  **Reversing:** low.
+- **A live command, not a field of the views list.** Building an adapter reads the keychain, and
+  the list is read on every sync; the copy is asked for when the reader asks for it, as `view` is.
+  **Reversing:** medium (an IPC field instead of a command).
+- **The shell offers the copy by the claim, and not knowing the claims is no.** *Make an
+  editable copy*, *Save as a view* on a saved view, and *A copy keeps …* show only where the
+  source's ticket-system claim names `translate_query`; View settings then says only "change it
+  in Jira". A claimed source that answers `None` for one view gets a toast and no editor. Reasoning:
+  ADR-0020 draws an undeclared write absent, and an optional read is the same case.
+  **Reversing:** low.
+- **`jira_views_ipc.rs`'s source row is `auth_kind 'pat'`**, not `'Pat'`, which read as no
+  method; nothing built a Jira adapter from it before. **Reversing:** n/a.

@@ -817,6 +817,7 @@ const CASES: Case[] = [
             deleteView: () => new Promise(() => {}),
             hideView: () => new Promise(() => {}),
             openView: () => new Promise(() => {}),
+            translateView: () => new Promise(() => {}),
           },
         },
       }),

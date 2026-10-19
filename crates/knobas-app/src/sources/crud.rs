@@ -856,6 +856,25 @@ pub async fn pipeline_settings(
     Ok(Some(settings))
 }
 
+/// A saved view's query read into the search grammar by its own source's
+/// adapter (#1208, `Source::translate_query`), routed like [`view`].
+/// `entity_id` is the saved view's item; `payload` is what its adapter
+/// emitted for it.
+///
+/// # Errors
+///
+/// As [`view`]. `Ok(None)` is a source that translates no query.
+pub async fn translate_query(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+    payload: &serde_json::Value,
+) -> Result<Option<knobas_source::query::Translation>, SourcesError> {
+    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    Ok(source.translate_query(payload).await?)
+}
+
 /// The mirrored commit of each of `shas` in the repositories pipeline
 /// `entity_id` builds (#1144), for a sha two mirrored repositories share.
 ///

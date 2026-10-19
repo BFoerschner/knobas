@@ -36,6 +36,8 @@ export const CI = "ci";
 export const WIKI = "wiki";
 export const MONITORING = "monitoring";
 export const TICKET_SYSTEM = "ticket-system";
+/** The ticket system's optional read that turns a saved view's query into conditions (#1208). */
+export const TRANSLATE_QUERY = "translate_query";
 
 /** What a surface needs to know of one source: its id and the roles it claims. */
 export interface ClaimingSource {
@@ -64,6 +66,13 @@ export interface SourceRoles {
   forget(): void;
   /** Whether a surface of `role` draws the rows of `sourceId`: it claims the role and fills it. */
   draws(role: string, sourceId: string): boolean;
+  /**
+   * Whether `sourceId` answers the optional read `read` of `role` (#1208,
+   * `translate_query`): it fills the role and its claim names the read.
+   * Unlike {@link draws}, not knowing is no: an optional read is offered only
+   * where it is claimed, as an undeclared write is not drawn (ADR-0020).
+   */
+  answers(role: string, sourceId: string, read: string): boolean;
   /** `rows` as a surface of `role` draws them: the same array when nothing is dropped. */
   keep<T extends { source_id: string }>(role: string, rows: T[]): T[];
   /**
@@ -97,6 +106,11 @@ export function createSourceRoles(): SourceRoles {
       state.sources = null;
     },
     draws,
+    answers(role, sourceId, read) {
+      const source = state.sources?.find((row) => row.id === sourceId);
+      if (source === undefined || !fills(source, role)) return false;
+      return (source.roles ?? []).some((claim) => claim.role === role && claim.reads.includes(read));
+    },
     keep(role, rows) {
       const kept = rows.filter((row) => draws(role, row.source_id));
       return kept.length === rows.length ? rows : kept;

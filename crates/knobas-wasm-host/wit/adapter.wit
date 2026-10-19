@@ -15,7 +15,7 @@
 /// round-trip tested there, and it is what spec §3a made the SPI's types for:
 /// plain data that can leave the process without a contract change. Each
 /// such parameter or result names the Rust type whose JSON it is.
-package knobas:adapter@1.1.0;
+package knobas:adapter@1.2.0;
 
 interface types {
     /// The serde JSON of the `knobas-source` type its use names.
@@ -207,9 +207,25 @@ interface downloads {
     download: func(instance: instance, entity: string, target: json) -> result<bool, source-error>;
 }
 
+/// `Source::translate_query` (1.2.0, #1208): a saved view's query read into
+/// knobas' search grammar, for *Make an editable copy*.
+///
+/// Its own interface, not a function on `adapter`, for the reason
+/// `downloads` is: a component built against an earlier 1.x, which does not
+/// export it, still links, and translates no query.
+interface query {
+    use types.{json, instance, source-error};
+
+    /// `saved-view` is the payload this adapter emitted for the view; the
+    /// answer is a `query::Translation` as JSON, or `none` for a view whose
+    /// query it does not translate.
+    translate-query: func(instance: instance, saved-view: json) -> result<option<json>, source-error>;
+}
+
 /// What the host binds of every 1.x component: the 1.0.0 world, and the
 /// imports later minors add, which a component that does not use them never
-/// imports. `downloads` (1.1.0) is looked up apart, as optional.
+/// imports. `downloads` (1.1.0) and `query` (1.2.0) are looked up apart, as
+/// optional.
 world hosted {
     import sink;
     import log;
@@ -217,15 +233,17 @@ world hosted {
     export source;
 }
 
-/// What an external adapter is: it exports `source` and `downloads`, and may
-/// call `sink`, `download-sink` and `log`. Nothing else is granted beyond
-/// WASI with nothing in it (no directory, no environment, no socket) and
-/// `wasi:http` 0.2's outgoing handler, which the host holds to the hosts the
-/// adapter's manifest declares and attaches the source's credential to
+/// What an external adapter is: it exports `source`, `downloads` and `query`,
+/// and may call `sink`, `download-sink` and `log`. Nothing else is granted
+/// beyond WASI with nothing in it (no directory, no environment, no socket)
+/// and `wasi:http` 0.2's outgoing handler, which the host holds to the hosts
+/// the adapter's manifest declares and attaches the source's credential to
 /// (#1203).
 ///
-/// 1.1.0 added `download-sink` and `downloads` (#1205).
+/// 1.1.0 added `download-sink` and `downloads` (#1205); 1.2.0 added `query`
+/// (#1208).
 world adapter {
     include hosted;
     export downloads;
+    export query;
 }

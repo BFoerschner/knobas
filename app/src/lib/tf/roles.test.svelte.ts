@@ -76,3 +76,22 @@ test("a source whose records missed a path of a role it claims is not drawn for 
   expect(roles.draws("ticket-system", "forge")).toBe(true);
   expect(roles.scope("ticket-system")).toBeNull();
 });
+
+test("an optional read is answered only by a listed source whose claim names it (#1208)", () => {
+  const roles = createSourceRoles();
+  expect(roles.answers("ticket-system", "jira", "translate_query")).toBe(false);
+  roles.take([
+    { id: "jira", roles: [{ role: "ticket-system", reads: ["reachable_transitions", "translate_query"] }] },
+    { id: "gitea", roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }] },
+    {
+      id: "missed",
+      roles: [{ role: "ticket-system", reads: ["translate_query"] }],
+      role_misses: [{ role: "ticket-system", kind: "ticket", field: "status", path: "fields.status.name" }],
+    },
+  ]);
+  expect(roles.answers("ticket-system", "jira", "translate_query")).toBe(true);
+  expect(roles.answers("ci", "jira", "translate_query")).toBe(false);
+  expect(roles.answers("ticket-system", "gitea", "translate_query")).toBe(false);
+  expect(roles.answers("ticket-system", "missed", "translate_query")).toBe(false);
+  expect(roles.answers("ticket-system", "unlisted", "translate_query")).toBe(false);
+});

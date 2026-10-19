@@ -345,6 +345,51 @@ async fn jira_sources(
         .collect()
 }
 
+/// *Make an editable copy* (#1208): the saved view `id`'s query, read into
+/// the search grammar by its source's adapter (`Source::translate_query`).
+/// `None` when the adapter translates no query: that source offers no copy.
+///
+/// # Errors
+///
+/// `not_found` for no view, or a saved view whose item is not live;
+/// `invalid` for a view somebody made; the source's own failure as
+/// [`crate::sources::to_ipc`] maps it; `internal` if a read fails.
+pub async fn translate(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    id: &str,
+) -> Result<Option<knobas_source::query::Translation>, IpcError> {
+    let row: Option<(Option<String>, Option<serde_json::Value>)> = sqlx::query_as(
+        "select tv.jira_ref, i.payload
+           from knobas.ticket_view tv
+           left join sync.live_item i on i.entity_id = tv.jira_ref
+          where tv.id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((saved, payload)) = row else {
+        return Err(IpcError::not_found(format!(
+            "no ticket view is called {id}"
+        )));
+    };
+    let Some(saved) = saved else {
+        return Err(IpcError::invalid(format!(
+            "{id} is a view of your own: only a saved view of a source has a query to translate"
+        )));
+    };
+    let Some(payload) = payload else {
+        return Err(IpcError::not_found(format!("{saved} is not synced")));
+    };
+    let namespace = knobas_core::entity::EntityRef::parse(&saved)
+        .map(|entity| entity.namespace)
+        .map_err(IpcError::invalid)?;
+    crate::sources::crud::translate_query(pool, secrets, registry, &saved, &payload)
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&namespace)))
+}
+
 /// *Hide from the list* or *Show* a Jira view (#878, R-3.25). It keeps
 /// syncing either way. One statement writes it, and only on a Jira view;
 /// when it writes nothing, a second read says why.

@@ -459,6 +459,52 @@ export function openJiraView(id: string): Promise<void> {
   return invoke<void>("open_jira_view", { id });
 }
 
+/** A search-grammar key a translated condition tests — `knobas_source::query::Key` (#1208). */
+export type QueryKey =
+  | "project"
+  | "status"
+  | "issuetype"
+  | "priority"
+  | "assignee"
+  | "under"
+  | "label"
+  | "sprint"
+  | "has"
+  | "updated"
+  | "assigned";
+
+/** One condition: a key, *is* or *is not*, and values any of which it means — `query::Condition`. */
+export interface QueryCondition {
+  key: QueryKey;
+  negated: boolean;
+  values: string[];
+}
+
+/** One part of a source's query knobas left out, as the source spells it, and why — `query::LeftOut`. */
+export interface LeftOut {
+  clause: string;
+  reason: string;
+}
+
+/**
+ * A saved view's query read into the search grammar by its own source —
+ * `knobas_source::query::Translation` (#1208): the conditions in the query's
+ * order, how many of its parts they keep, and the parts left out.
+ */
+export interface QueryTranslation {
+  conditions: QueryCondition[];
+  kept: number;
+  left_out: LeftOut[];
+}
+
+/**
+ * *Make an editable copy* (#1208): the saved view `id`'s query, read by its
+ * source's adapter, live. `null` for a source that translates no query.
+ */
+export function translateTicketView(id: string): Promise<QueryTranslation | null> {
+  return invoke<QueryTranslation | null>("translate_ticket_view", { id });
+}
+
 /** What `save_ticket_view` takes — `ticket_views::TicketViewDraft`. */
 export interface TicketViewDraft {
   /** `null` makes a new view; an id saves over it, or puts a deleted one back. */

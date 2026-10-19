@@ -7,14 +7,16 @@ import type { MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type {
   CardField,
   JiraSource,
+  LeftOut,
   ListColumn,
+  QueryTranslation,
   TicketView,
   TicketViewDraft,
   TicketViewRow,
   ViewColumn,
 } from "../../ipc/search";
 import { matchesAll } from "../filter/filter";
-import { translateJira, type LeftOut } from "./jql";
+import { CONDITION_FIELDS, conditionsText } from "./editor";
 import { DEFAULT_SORT, type LaneField, type ListSort } from "./tickets";
 
 /** The groups that come first, in this order (R-3.2); typed groups follow. */
@@ -165,21 +167,39 @@ export interface CopiedFrom {
   left: LeftOut[];
 }
 
+/** A source's translation of its query as the search text a view stores (#1208): its conditions, in order. */
+export function translationText(copy: QueryTranslation): string {
+  const conditions = copy.conditions.map((condition) => ({
+    field: CONDITION_FIELDS.find((entry) => entry.key === condition.key)!.field,
+    negated: condition.negated,
+    values: [...condition.values],
+  }));
+  return conditionsText({ conditions, words: "" });
+}
+
+/** *A copy keeps 1 of 2 parts of the query.*, in View settings on a saved view (#880). */
+export function copyKeeps(copy: QueryTranslation): string {
+  return copy.left_out.length === 0
+    ? "A copy keeps every part of the query."
+    : `A copy keeps ${copy.kept} of ${copy.kept + copy.left_out.length} parts of the query.`;
+}
+
 /**
  * What *Make an editable copy* starts from (#880, R-3.25): a view of your
- * own under *Mine*, the JQL parts knobas can test as its conditions, Jira's
- * columns as its own, and the rest of the Jira view's setup. With `showing`,
- * *Save as a view* on a Jira view: no name yet, `extra` (what the filter bar
- * adds now) after the conditions, and how the tickets show now.
+ * own under *Mine*, the parts of the query knobas can test as its conditions
+ * (`copy`, the source's own reading of its query, #1208), Jira's columns as
+ * its own, and the rest of the Jira view's setup. With `showing`, *Save as a
+ * view* on a Jira view: no name yet, `extra` (what the filter bar adds now)
+ * after the conditions, and how the tickets show now.
  */
 export function draftJiraCopy(
   view: TicketView,
   jira: JiraSource,
+  copy: QueryTranslation,
   extra = "",
   showing?: Showing,
 ): { draft: TicketViewDraft; from: CopiedFrom } {
-  const copy = translateJira(jira);
-  const query = [copy.query, extra.trim()].filter((part) => part !== "").join(" ");
+  const query = [translationText(copy), extra.trim()].filter((part) => part !== "").join(" ");
   const draft: TicketViewDraft = { ...draftOf(view), group: "Mine", query };
   if (showing !== undefined) {
     Object.assign(draft, {
@@ -189,7 +209,7 @@ export function draftJiraCopy(
       list_sort: sameSort(showing.sort, DEFAULT_SORT) ? null : showing.sort,
     });
   }
-  return { draft, from: { kind: jira.kind, name: view.name, left: copy.left } };
+  return { draft, from: { kind: jira.kind, name: view.name, left: copy.left_out } };
 }
 
 /** What *+ New view* starts from (R-3.12): no conditions, one column per status, the defaults. */

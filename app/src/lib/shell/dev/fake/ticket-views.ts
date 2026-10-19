@@ -1,6 +1,6 @@
 /**
  * `?fake-ipc`: Ticket views (#812): `ticket_views`, `save_ticket_view` and
- * `delete_ticket_view` (and #878's `hide_jira_view` and `open_jira_view`),
+ * `delete_ticket_view` (and #878's `hide_jira_view` and `open_jira_view`, and #1208's `translate_ticket_view`),
  * over a session-long list seeded with prototype-6's own
  * views (its `views` array), each as search text in the grammar the real
  * command reads.
@@ -17,6 +17,7 @@
  * here are wider than the real ones would be. *Blocked* is `has:blocker`.
  */
 import type { LaneColumn, LaneField, MiniBoardCard, MiniBoardLane, SourceStatuses } from "../../../ipc/entity";
+import type { QueryKey, QueryTranslation } from "../../../ipc/search";
 import { laneOf } from "../../../tf/tickets/tickets";
 import type { Handler } from "../fake-tauri";
 import { fakeTicketCount, fakeTicketKeys } from "./corpus";
@@ -126,6 +127,8 @@ const VIEWS: View[] = [
 interface FakeJira {
   ref: string;
   member: (key: string) => boolean;
+  /** `translate_ticket_view` (#1208): the Jira adapter's reading of its query, written out as it answers. */
+  copy: QueryTranslation;
   source: {
     kind: "board" | "filter";
     board_type: string | null;
@@ -151,12 +154,14 @@ function jiraBoard(
   columns: View["columns"],
   lanes: string,
   member: (key: string) => boolean,
+  copy: QueryTranslation,
   extra: { sub?: string; sprint?: string; outside?: { project: string; count: number } } = {},
 ) {
   const ref = `jira:board-${id}`;
   JIRA.push({
     ref,
     member,
+    copy,
     source: {
       kind: "board",
       board_type: type,
@@ -176,11 +181,12 @@ function jiraBoard(
 }
 
 /** prototype-6's favourite filters (its `JF`, #878): a list each under *Jira filters*. */
-function jiraFilter(id: number, name: string, jql: string, member: (key: string) => boolean) {
+function jiraFilter(id: number, name: string, jql: string, member: (key: string) => boolean, copy: QueryTranslation) {
   const ref = `jira:filter-${id}`;
   JIRA.push({
     ref,
     member,
+    copy,
     source: {
       kind: "filter",
       board_type: null,
@@ -196,27 +202,46 @@ function jiraFilter(id: number, name: string, jql: string, member: (key: string)
   });
   VIEWS.push({ ...seeded(`jira-filter-${id}`, name, "Jira filters", ""), jira_ref: ref });
 }
+/** A condition, and a translation, as `knobas_source::query` spells them. */
+const is = (key: QueryKey, ...values: string[]) => ({ key, negated: false, values });
+const copied = (conditions: QueryTranslation["conditions"], kept: number, ...left: [string, string][]): QueryTranslation => ({
+  conditions,
+  kept,
+  left_out: left.map(([clause, reason]) => ({ clause, reason })),
+});
 jiraBoard(14, "PAY board", "scrum", "project = PAY ORDER BY Rank ASC",
   [col("To Do", ["To Do"]), col("Doing", ["In Progress"]), col("Review", ["In Review"], 4), col("Done", ["Done"])],
-  "epic", (key) => key.startsWith("PAY-"), { sprint: "Sprint 34" });
+  "epic", (key) => key.startsWith("PAY-"), copied([is("project", "PAY"), is("sprint", "current")], 2), { sprint: "Sprint 34" });
 jiraBoard(21, "Payments and Ops flow", "kanban", "project in (PAY, OPS) AND labels != tech-debt ORDER BY Rank ASC",
   [col("Ready", ["To Do"]), col("In flight", ["In Progress", "In Review"], 6), col("Shipped", ["Done"])],
-  "assignee", (key) => /^(PAY|OPS)-/.test(key), { sub: "fixVersion in unreleasedVersions() OR fixVersion is EMPTY" });
+  "assignee", (key) => /^(PAY|OPS)-/.test(key),
+  copied([is("project", "PAY", "OPS")], 1,
+    ["labels != tech-debt", "knobas would also keep the tickets with no label"],
+    ["fixVersion in unreleasedVersions() OR fixVersion is EMPTY", "knobas does not sync fix versions"]),
+  { sub: "fixVersion in unreleasedVersions() OR fixVersion is EMPTY" });
 jiraBoard(31, "Customs sprint board", "scrum", "project = CUS ORDER BY Rank ASC",
   [col("To Do", ["To Do"]), col("In Progress", ["In Progress"]), col("Done", ["Done"])],
-  "none", (key) => key.startsWith("CUS-"), { sprint: "CUS sprint 12" });
+  "none", (key) => key.startsWith("CUS-"), copied([is("project", "CUS"), is("sprint", "current")], 2), { sprint: "CUS sprint 12" });
 jiraBoard(40, "Platform on-call", "kanban", "project in (OPS, WEB) AND component = on-call ORDER BY priority DESC",
   [col("Open", ["To Do"]), col("Working", ["In Progress", "In Review"], 3), col("Closed", ["Done"])],
-  "priority", (key) => key.startsWith("OPS-"), { outside: { project: "WEB", count: 9 } });
-jiraBoard(52, "Tracking", "kanban", "project = TRK ORDER BY Rank ASC", [], "none", (key) => key.startsWith("TRK-"));
+  "priority", (key) => key.startsWith("OPS-"),
+  copied([is("project", "OPS", "WEB")], 1, ["component = on-call", "knobas does not sync components"]),
+  { outside: { project: "WEB", count: 9 } });
+jiraBoard(52, "Tracking", "kanban", "project = TRK ORDER BY Rank ASC", [], "none", (key) => key.startsWith("TRK-"),
+  copied([is("project", "TRK")], 1));
 jiraFilter(10230, "My open bugs everywhere", "assignee = currentUser() AND issuetype = Bug AND resolution = Unresolved",
-  (key) => keyNumber(key) % 5 === 0);
+  (key) => keyNumber(key) % 5 === 0,
+  copied([is("assignee", "me"), is("issuetype", "Bug")], 2, ["resolution = Unresolved", "knobas does not sync resolutions"]));
 jiraFilter(10231, "High priority, not done", "priority = High AND statusCategory != Done ORDER BY updated DESC",
-  (key) => keyNumber(key) % 3 === 0);
+  (key) => keyNumber(key) % 3 === 0,
+  copied([is("priority", "High")], 1, ["statusCategory != Done", "knobas does not sync status categories"]));
 jiraFilter(10244, "Blocked in PAY", 'project = PAY AND issueFunction in linkedIssuesOf("status != Done", "is blocked by")',
-  (key) => key.startsWith("PAY-") && keyNumber(key) % 7 === 0);
+  (key) => key.startsWith("PAY-") && keyNumber(key) % 7 === 0,
+  copied([is("project", "PAY")], 1,
+    ['issueFunction in linkedIssuesOf("status != Done", "is blocked by")', "a ScriptRunner function, only Jira can answer it"]));
 jiraFilter(10251, "Resolved this week", "project in (PAY, OPS) AND resolved >= -7d",
-  (key) => /^(PAY|OPS)-/.test(key) && keyNumber(key) % 4 === 0);
+  (key) => /^(PAY|OPS)-/.test(key) && keyNumber(key) % 4 === 0,
+  copied([is("project", "PAY", "OPS")], 1, ["resolved >= -7d", "knobas has no condition for resolved"]));
 VIEWS.forEach((view, position) => (view.position = position));
 
 const jiraOf = (ref: string | null) => JIRA.find((jira) => jira.ref === ref) ?? null;
@@ -323,6 +348,14 @@ export function handlers(): Record<string, Handler> {
         throw { code: "invalid", message: `${view.id} is not a Jira view: only a Jira view hides from the list; delete your own`, source_id: null };
       jira.source.hidden = args["hidden"] === true;
       return null;
+    },
+    // #1208: the Jira adapter's reading, as `translate_ticket_view` answers it.
+    translate_ticket_view: (args) => {
+      const view = VIEWS.find((each) => each.id === args["id"]);
+      if (!view) throw { code: "not_found", message: `no ticket view is called ${String(args["id"])}`, source_id: null };
+      const jira = jiraOf(view.jira_ref);
+      if (!jira) throw { code: "invalid", message: `${view.id} is a view of your own`, source_id: null };
+      return jira.copy;
     },
     open_jira_view: (args) => {
       const view = VIEWS.find((each) => each.id === args["id"]);

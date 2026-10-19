@@ -19,8 +19,9 @@ async fn pool() -> sqlx::PgPool {
     knobas_db::migrate::run(&pool).await.unwrap();
     sqlx::query(
         "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
-         values ('jira', 'jira', 'Jira', 'http://x', 'Pat', '{\"username\": \"mara.lindqvist\"}')
+         values ('jira', 'jira', 'Jira', 'http://x', 'pat', '{\"username\": \"mara.lindqvist\"}')
          on conflict (id) do update set kind = excluded.kind, enabled = true,
+                                         auth_kind = excluded.auth_kind,
                                          config = excluded.config",
     )
     .execute(&pool)
@@ -421,4 +422,79 @@ async fn a_jira_view_counts_its_tickets_in_projects_the_source_does_not_sync() {
         let jira = listed(&pool, &id).await.unwrap().jira.unwrap();
         assert_eq!(jira.unsynced, [], "{config} leaves no project out");
     }
+}
+
+/// #1208: *Make an editable copy* asks the saved view's own source to read its
+/// query, with the payload the source emitted; the Jira adapter answers JQL.
+#[tokio::test]
+async fn make_an_editable_copy_asks_the_saved_views_source_to_translate_its_query() {
+    let pool = pool().await;
+    let p = project();
+    let (id, _) = board(&pool, &p, &[]).await;
+    let secrets: std::sync::Arc<dyn knobas_secrets::SecretStore> =
+        std::sync::Arc::new(knobas_secrets::MemoryStore::new());
+    secrets
+        .put(
+            &knobas_secrets::KeychainAccount::source("jira"),
+            &knobas_secrets::Secret::just(knobas_source::AuthMethod::Pat, "a-token"),
+        )
+        .unwrap();
+    let registry = knobas_app::sources::Registry::builtin();
+
+    let copy = ticket_views::translate(&pool, &secrets, &registry, &id)
+        .await
+        .expect("the read answers")
+        .expect("Jira translates its views' JQL");
+    assert_eq!(
+        serde_json::to_value(copy).unwrap(),
+        json!({
+            "conditions": [{ "key": "project", "negated": false, "values": [p] }],
+            "kept": 1,
+            "left_out": [],
+        })
+    );
+
+    // A view of a source whose adapter answers no translation: no copy.
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ('views-mock', 'mock', 'Mock', '', 'none', '{}')
+         on conflict (id) do nothing",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mock_ref = format!("views-mock:{}", p.to_lowercase());
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'jira_view', 'M')")
+        .bind(&mock_ref)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+         values ($1, 'views-mock', 'jira_view', 'M', 'M', '{\"jql\": \"project = PAY\"}', now())",
+    )
+    .bind(&mock_ref)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mut draft = own_draft(format!("Mock {p}"));
+    draft.jira_ref = Some(mock_ref);
+    let mock_view = ticket_views::save(&pool, draft).await.unwrap();
+    let none = ticket_views::translate(&pool, &secrets, &registry, &mock_view.id)
+        .await
+        .expect("the read answers");
+    assert_eq!(none, None);
+
+    // A view of your own has no source query; no view is no view.
+    let own = ticket_views::save(&pool, own_draft(format!("Own {p}")))
+        .await
+        .unwrap();
+    let refused = ticket_views::translate(&pool, &secrets, &registry, &own.id)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, IpcErrorCode::Invalid, "{refused:?}");
+    let missing = ticket_views::translate(&pool, &secrets, &registry, "no-such-view-1208")
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code, IpcErrorCode::NotFound, "{missing:?}");
 }

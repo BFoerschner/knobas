@@ -16,7 +16,7 @@ import type {
   Reached,
   StateChip,
 } from "../../ipc/entity";
-import type { TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
+import type { QueryTranslation, TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TicketsPage, { forgetTicketsSession, type TicketsPorts } from "./TicketsPage.svelte";
@@ -121,6 +121,8 @@ interface Harness {
   hidden: [string, boolean][];
   /** Every `open_jira_view` (#878). */
   opened: string[];
+  /** Every `translate_ticket_view` (#1208). */
+  translated: string[];
   /** The mirror rows a reach or a context can hold. */
   rows: EntityRow[];
   /** What each ticket reaches (`job_reach`), by entity id. */
@@ -196,6 +198,7 @@ function harness(
     deleted: [],
     hidden: [],
     opened: [],
+    translated: [],
     rows: [...AROUND_ROWS],
     reach: {},
     members: {},
@@ -225,6 +228,10 @@ function harness(
         const row = h.views.find((each) => each.id === id);
         if (row?.jira) row.jira = { ...row.jira, hidden };
         return Promise.resolve();
+      },
+      translateView: (id) => {
+        h.translated.push(id);
+        return Promise.resolve(null);
       },
       openView: (id) => {
         h.opened.push(id);
@@ -1260,7 +1267,15 @@ const FLOW_COLUMNS = [
   { name: "Shipped", statuses: ["Done"], limit: null },
 ];
 
+/** What the Jira adapter answers for *Payments and Ops flow*'s query (its own tests hold the reading, #1208). */
+const FLOW_COPY: QueryTranslation = {
+  conditions: [{ key: "project", negated: false, values: ["PAY", "OPS"] }],
+  kept: 1,
+  left_out: [{ clause: "fixVersion is EMPTY", reason: "knobas does not sync fix versions" }],
+};
+
 /** A Jira board view, and a harness whose board answers it under Jira's columns, recording each read. */
+
 function jiraHarness(over: Partial<NonNullable<TicketViewRow["jira"]>> = {}): {
   h: Harness;
   jiraReads: (string | null)[];
@@ -1286,6 +1301,12 @@ function jiraHarness(over: Partial<NonNullable<TicketViewRow["jira"]>> = {}): {
       },
     }),
   ]);
+  // The Jira source claims `translate_query`, and answers as the adapter does (#1208).
+  sourceRoles.take([{ id: "jira", roles: [{ role: "ticket-system", reads: ["reachable_transitions", "translate_query"] }] }]);
+  h.ports.translateView = (id) => {
+    h.translated.push(id);
+    return Promise.resolve(FLOW_COPY);
+  };
   const jiraReads: (string | null)[] = [];
   const plain = h.ports.board;
   h.ports.board = async (perColumn, query, jiraView) => {
@@ -1364,6 +1385,7 @@ test("Make an editable copy opens New view on your own copy: the JQL it could te
   expect(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe("Payments and Ops flow");
   expect(fromLine()).toBe(COPIED);
   expect(searchLine().textContent).toBe("project:PAY project:OPS");
+  expect(h.translated).toEqual(["jira-board-21"]);
   expect(dialog()!.textContent).toContain("Kept in knobas. Jira never sees it.");
   // Jira's columns come along, now the reader's to change.
   expect([...dialog()!.querySelectorAll<HTMLInputElement>('input[aria-label="Column name"]')].map((i) => [i.value, i.disabled])).toEqual([
@@ -1404,6 +1426,48 @@ test("View settings on a Jira view says how much a copy keeps and offers Make an
   await settle();
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(fromLine()).toBe(COPIED);
+});
+
+test("a saved view from a source without translate_query offers no editable copy, and its view still shows (#1208)", async () => {
+  const { h } = jiraHarness();
+  sourceRoles.take([{ id: "jira", roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }] }]);
+  await open(h, null, "jira-board-21");
+  expect(columns().map((column) => column.head)).toEqual(["Ready 12", "In flight 1 of 6", "Shipped 5"]);
+
+  menuOf("Payments and Ops flow").click();
+  flushSync();
+  const items = [...target.querySelectorAll("[role=menuitem]")].map((b) => b.textContent!.replace(/\s+/g, " ").trim());
+  expect(items).toEqual([
+    "View settingslanes, cards and list columns",
+    "Hide from the listit keeps syncing, so you can show it again",
+  ]);
+  menuOf("Payments and Ops flow").click();
+  flushSync();
+  expect([...target.querySelectorAll("button")].some((b) => b.textContent === "Save as a view")).toBe(false);
+
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  await settle();
+  const text = dialog()!.textContent!.replace(/\s+/g, " ");
+  expect(text).toContain("To change which tickets it holds, change it in Jira.");
+  expect(text).not.toContain("copy");
+  expect([...dialog()!.querySelectorAll("button")].some((b) => b.textContent === "Make an editable copy")).toBe(false);
+  expect(h.translated).toEqual([]);
+});
+
+test("Make an editable copy asks the view's source to read its query, and a source that answers none opens nothing (#1208)", async () => {
+  const { h } = jiraHarness();
+  h.ports.translateView = (id) => {
+    h.translated.push(id);
+    return Promise.resolve(null);
+  };
+  await open(h, null, "jira-board-21");
+  menuOf("Payments and Ops flow").click();
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>("[role=menuitem]")].find((b) => b.textContent!.startsWith("Make an editable copy"))!.click();
+  await settle();
+  expect(h.translated).toEqual(["jira-board-21"]);
+  expect(dialog()).toBeNull();
+  expect(toasts.items.at(-1)!.text).toBe("Payments and Ops flow cannot be copied: its source does not translate its query");
 });
 
 test("Save as a view on a Jira view is a copy too: the JQL it could test, then the chips and words, no name yet", async () => {

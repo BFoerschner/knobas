@@ -263,6 +263,23 @@ pub async fn hide_jira_view(
     crate::ticket_views::hide(&lifecycle.pool()?, &id, hidden).await
 }
 
+/// *Make an editable copy* of a saved view (#1208): its query read into the
+/// search grammar by its source, live. `None` for a source that translates
+/// no query. See [`crate::ticket_views::translate`].
+///
+/// # Errors
+///
+/// `not_ready` before bring-up, and whatever
+/// [`crate::ticket_views::translate`] refuses with.
+#[tauri::command]
+pub async fn translate_ticket_view<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+) -> Result<Option<knobas_source::query::Translation>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::ticket_views::translate(&state.pool, &state.secrets, state.registry.as_ref(), &id).await
+}
+
 /// A ticket view was opened: a Jira view stops saying *new* (#878, R-3.20).
 ///
 /// # Errors

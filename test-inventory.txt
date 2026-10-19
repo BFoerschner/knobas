@@ -852,6 +852,7 @@ knobas-app	test/it	jira_views_ipc::a_jira_view_hides_and_shows_again_and_keeps_i
 knobas-app	test/it	jira_views_ipc::a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws
 knobas-app	test/it	jira_views_ipc::a_jira_view_whose_mirror_was_purged_is_not_listed
 knobas-app	test/it	jira_views_ipc::a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns
+knobas-app	test/it	jira_views_ipc::make_an_editable_copy_asks_the_saved_views_source_to_translate_its_query
 knobas-app	test/it	jira_views_ipc::opening_a_new_jira_view_takes_its_new_mark_away
 knobas-app	test/it	jira_views_ipc::view_settings_keep_what_jira_decides_and_a_jira_view_is_not_deleted
 knobas-app	test/it	job_ipc::a_missing_or_unreadable_estimate_is_none
@@ -2287,6 +2288,7 @@ knobas-source	lib/knobas_source	instance::tests::debug_redacts_the_secret
 knobas-source	lib/knobas_source	instance::tests::rejects_everything_else
 knobas-source	lib/knobas_source	instance::tests::round_trips_as_plain_json
 knobas-source	lib/knobas_source	pipeline::tests::settings_without_the_later_fields_read_as_empty
+knobas-source	lib/knobas_source	query::tests::a_translation_crosses_as_plain_json_with_the_grammar_s_keys
 knobas-source	lib/knobas_source	role::data::tests::a_custom_role_and_no_claim_check_nothing
 knobas-source	lib/knobas_source	role::data::tests::a_field_every_record_leaves_null_is_not_a_miss
 knobas-source	lib/knobas_source	role::data::tests::a_misspelled_key_no_record_resolves_is_a_miss_naming_the_path
@@ -3024,6 +3026,18 @@ knobas-source-jira	lib/knobas_source_jira	time::tests::refuses_what_it_cannot_re
 knobas-source-jira	lib/knobas_source_jira	time::tests::rendering_a_literal_never_shifts_the_query_forward
 knobas-source-jira	lib/knobas_source_jira	time::tests::renders_a_jql_literal_in_the_servers_zone
 knobas-source-jira	lib/knobas_source_jira	time::tests::the_query_floor_is_the_start_of_the_rendered_minute
+knobas-source-jira	lib/knobas_source_jira	translate::tests::a_scrum_board_s_active_sprint_is_a_condition_as_jira_adds_it_to_the_board_s_query
+knobas-source-jira	lib/knobas_source_jira	translate::tests::a_second_clause_on_the_same_field_and_sign_is_left_out_knobas_would_read_the_two_as_either
+knobas-source-jira	lib/knobas_source_jira	translate::tests::an_and_inside_parentheses_or_quotes_does_not_split_the_clause
+knobas-source-jira	lib/knobas_source_jira	translate::tests::an_empty_query_keeps_nothing_and_leaves_nothing_out
+knobas-source-jira	lib/knobas_source_jira	translate::tests::an_or_inside_parentheses_stays_in_its_own_part
+knobas-source-jira	lib/knobas_source_jira	translate::tests::an_or_outside_parentheses_makes_the_whole_query_one_part_as_jql_binds_and_tighter
+knobas-source-jira	lib/knobas_source_jira	translate::tests::an_or_over_a_field_knobas_does_not_sync_names_the_field
+knobas-source-jira	lib/knobas_source_jira	translate::tests::conditions_keep_the_query_s_order_and_order_by_is_not_a_part
+knobas-source-jira	lib/knobas_source_jira	translate::tests::each_clause_knobas_can_test_reads_as_its_condition
+knobas-source-jira	lib/knobas_source_jira	translate::tests::each_clause_knobas_leaves_out_says_why
+knobas-source-jira	lib/knobas_source_jira	translate::tests::the_favourite_filter_keeps_its_project_and_leaves_out_the_fix_version_saying_why
+knobas-source-jira	lib/knobas_source_jira	translate::tests::the_kanban_board_keeps_both_projects_and_leaves_out_jira_s_default_sub_filter
 knobas-source-jira	lib/knobas_source_jira	views::tests::a_board_deleted_in_jira_is_delivered_as_gone_at_the_next_sync
 knobas-source-jira	lib/knobas_source_jira	views::tests::a_board_this_account_cannot_read_is_left_out
 knobas-source-jira	lib/knobas_source_jira	views::tests::a_board_whose_keys_changed_is_delivered_again
@@ -3780,10 +3794,12 @@ knobas-wasm-host	lib/knobas_wasm_host	net::tests::a_reader_that_pauses_longer_th
 knobas-wasm-host	lib/knobas_wasm_host	redact::tests::a_body_without_the_secret_passes_unchanged
 knobas-wasm-host	lib/knobas_wasm_host	redact::tests::a_header_holding_the_secret_is_dropped
 knobas-wasm-host	lib/knobas_wasm_host	redact::tests::a_spelling_split_across_chunks_is_redacted
+knobas-wasm-host	lib/knobas_wasm_host	tests::the_optional_read_is_found_on_any_1_x_that_exports_it_and_on_nothing_else
 knobas-wasm-host	test/it	host::a_component_built_against_a_newer_minor_version_is_refused_at_load
 knobas-wasm-host	test/it	host::a_component_built_against_another_major_version_is_refused_at_load
 knobas-wasm-host	test/it	host::a_component_that_exports_no_source_is_refused_at_load
 knobas-wasm-host	test/it	host::a_core_module_is_not_a_component
+knobas-wasm-host	test/it	host::a_saved_view_s_query_crosses_to_the_component_and_its_translation_back
 knobas-wasm-host	test/it	host::a_sink_error_the_component_swallows_still_fails_the_sync
 knobas-wasm-host	test/it	host::a_sync_emits_the_fixed_corpus_and_resumes_from_its_cursor
 knobas-wasm-host	test/it	host::an_instance_of_another_kind_is_refused

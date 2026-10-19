@@ -30,6 +30,7 @@ pub mod diff;
 pub mod docs;
 pub mod instance;
 pub mod pipeline;
+pub mod query;
 pub mod role;
 pub mod run;
 pub mod view;
@@ -1533,6 +1534,24 @@ pub trait Source: Send + Sync {
         path: &str,
     ) -> Result<Option<run::ArtifactPreview>, SourceError> {
         let _ = (entity, path);
+        Ok(None)
+    }
+    /// A saved view's query read into knobas' search grammar (#1208,
+    /// ADR-0029): the conditions knobas can test and the parts left out, each
+    /// with its reason, for *Make an editable copy*. `view` is the saved
+    /// view's payload as this adapter emitted it (a kind declaring
+    /// [`Frame::SavedView`](knobas_core::payload::Frame::SavedView)), so the
+    /// source's query language stays inside the adapter.
+    ///
+    /// `Ok(None)` is **this adapter translates no query**, and is the
+    /// default: such a source offers no editable copy, and its saved views
+    /// still show. An adapter that answers it claims the ticket-system read
+    /// [`role::TRANSLATE_QUERY`]. Pure: it reads nothing from the source.
+    async fn translate_query(
+        &self,
+        view: &serde_json::Value,
+    ) -> Result<Option<query::Translation>, SourceError> {
+        let _ = view;
         Ok(None)
     }
     /// Stream `target` of run `entity` into `sink` with the stored credential

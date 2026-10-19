@@ -37,7 +37,8 @@
   *+ New view*, *Edit view*, *Save as a view* (the text the bar sends now,
   with how the tickets show) and *Duplicate* open the view editor (#814);
   on a Jira view, *Save as a view* and *Make an editable copy* open it on a
-  copy of your own, from the JQL parts knobas can test (#880);
+  copy of your own, from the parts of its query knobas can test, as its
+  source reads them (#880, #1208), and only where the source translates it;
   *Delete*, in the ⋯ menus and the editor, a toast's *Undo* takes back.
 -->
 <script lang="ts" module>
@@ -47,7 +48,13 @@
     LanesAsked,
     MiniBoard,
   } from "../../ipc/entity";
-  import type { FilterSuggestions, TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
+  import type {
+    FilterSuggestions,
+    QueryTranslation,
+    TicketView,
+    TicketViewDraft,
+    TicketViewRow,
+  } from "../../ipc/search";
   import type { ReachPorts } from "../job/sections";
   import type { LaneField, ListSort } from "./tickets";
 
@@ -83,6 +90,8 @@
     hideView: (id: string, hidden: boolean) => Promise<void>;
     /** A Jira view was opened: it stops saying *new* (#878). */
     openView: (id: string) => Promise<void>;
+    /** A Jira view's query as its source reads it, for *Make an editable copy* (#1208). */
+    translateView: (id: string) => Promise<QueryTranslation | null>;
   }
 
   /** A board with nothing on it, new each time, as `$state` may take it: what no claimer, and no answer yet, draw. */
@@ -137,6 +146,7 @@
     openJiraView,
     saveTicketView,
     ticketViews,
+    translateTicketView,
   } from "../../ipc/search";
   import { openExternal } from "../../shell/open-external";
   import { push } from "../../shell/toasts.svelte";
@@ -148,7 +158,7 @@
   import { reachTally } from "../job/sections";
   import { jobHash } from "../route";
   import { sourceHash } from "../settings/settings";
-  import { sourceRoles, TICKET_SYSTEM } from "../roles.svelte";
+  import { sourceRoles, TICKET_SYSTEM, TRANSLATE_QUERY } from "../roles.svelte";
   import JiraSourceLine from "./JiraSourceLine.svelte";
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
@@ -211,6 +221,7 @@
       deleteView: deleteTicketView,
       hideView: hideJiraView,
       openView: openJiraView,
+      translateView: translateTicketView,
     },
     viewId = null,
     typingPause = 90,
@@ -231,20 +242,58 @@
   /** *Find a view*'s words. */
   let find = $state("");
   /** The view editor's starting point and the view it edits, or `null` while it is closed. */
-  let drafting = $state<{ draft: TicketViewDraft; editing: TicketViewRow | null; from?: CopiedFrom } | null>(null);
+  let drafting = $state<{
+    draft: TicketViewDraft;
+    editing: TicketViewRow | null;
+    from?: CopiedFrom;
+    /** View settings on a Jira view: its source's reading of the query, once it answers (#1208). */
+    copy?: QueryTranslation | null;
+  } | null>(null);
 
   function newView(draft: TicketViewDraft) {
     drafting = { draft, editing: null };
   }
 
-  /** *Duplicate*; on a Jira view, *Make an editable copy* (#880, R-3.25). */
-  function copyView(row: TicketViewRow) {
-    if (row.jira === null) newView(draftCopy(row));
-    else drafting = { ...draftJiraCopy(row, row.jira), editing: null };
+  /**
+   * Whether a Jira view offers *Make an editable copy* (#1208): its source
+   * claims `translate_query`, the ticket system's read that turns the
+   * source's query into conditions. The shell reads no query language.
+   */
+  function offersCopy(row: TicketViewRow): boolean {
+    return row.jira_ref !== null && sourceRoles.answers(TICKET_SYSTEM, jiraSourceId(row.jira_ref), TRANSLATE_QUERY);
+  }
+
+  /** The source's reading of a Jira view's query, or `null` with a toast saying why there is none. */
+  async function translation(row: TicketViewRow): Promise<QueryTranslation | null> {
+    try {
+      const copy = await ports.translateView(row.id);
+      if (copy === null) push({ text: `${row.name} cannot be copied: its source does not translate its query`, tone: "err" });
+      return copy;
+    } catch (error) {
+      push({ text: `${row.name} was not copied: ${messageOf(error)}`, tone: "err" });
+      return null;
+    }
+  }
+
+  /** *Duplicate*; on a Jira view, *Make an editable copy* (#880, R-3.25), from its source's reading (#1208). */
+  async function copyView(row: TicketViewRow, known: QueryTranslation | null = null) {
+    if (row.jira === null) return newView(draftCopy(row));
+    const jira = row.jira;
+    const copy = known ?? (await translation(row));
+    if (copy !== null) drafting = { ...draftJiraCopy(row, jira, copy), editing: null };
   }
 
   function editView(row: TicketViewRow) {
-    drafting = { draft: draftEdit(row), editing: row };
+    const opened = { draft: draftEdit(row), editing: row, copy: null };
+    drafting = opened;
+    if (row.jira === null || !offersCopy(row)) return;
+    // *A copy keeps …* waits for the source's answer; a failed one leaves the line out.
+    ports.translateView(row.id).then(
+      (copy) => {
+        if (drafting?.editing === row) drafting.copy = copy;
+      },
+      () => {},
+    );
   }
 
   /** *Delete view* in the editor: closes it, then deletes as the ⋯ menu does. */
@@ -511,9 +560,11 @@
    * tickets show. On a Jira view (#880), a copy: the JQL parts knobas can
    * test, then what the bar adds.
    */
-  function saveAsView() {
+  async function saveAsView() {
     if (view?.jira) {
-      drafting = { ...draftJiraCopy(view, view.jira, toQuery({ ...config, base: "" }, filter), showing), editing: null };
+      const [row, jira, extra, now] = [view, view.jira, toQuery({ ...config, base: "" }, filter), showing];
+      const copy = await translation(row);
+      if (copy !== null) drafting = { ...draftJiraCopy(row, jira, copy, extra, now), editing: null };
     } else newView(draftFromFilter(view ?? null, toQuery(config, filter), showing));
   }
 
@@ -772,6 +823,7 @@
             <ViewMenu
               name={row.name}
               jira={row.jira?.kind ?? null}
+              copies={offersCopy(row)}
               onedit={() => editView(row)}
               onduplicate={() => copyView(row)}
               ondelete={() => remove(row)}
@@ -837,6 +889,7 @@
         <ViewMenu
           name="this view"
           jira={view.jira?.kind ?? null}
+          copies={offersCopy(view)}
           className="tf-btn tf-sm tf-ghost"
           onedit={() => editView(view)}
           onduplicate={() => copyView(view)}
@@ -882,7 +935,10 @@
       {/if}
     {/snippet}
     {#snippet saveButton()}
-      <button type="button" class="tf-btn tf-sm tf-ghost tf-vw-savef" onclick={saveAsView}>Save as a view</button>
+      <!-- On a Jira view it is a copy, so a source that translates no query offers none (#1208). -->
+      {#if !view?.jira || offersCopy(view)}
+        <button type="button" class="tf-btn tf-sm tf-ghost tf-vw-savef" onclick={() => void saveAsView()}>Save as a view</button>
+      {/if}
     {/snippet}
 
     {#if viewId !== null && views !== null && view === undefined}
@@ -1028,7 +1084,8 @@
       parents={suggested?.parents ?? []}
       jira={editing?.jira ?? null}
       copiedFrom={drafting.from ?? null}
-      oncopy={editing?.jira ? () => copyView(editing) : undefined}
+      copy={drafting.copy ?? null}
+      oncopy={editing?.jira && offersCopy(editing) ? () => void copyView(editing, drafting?.copy ?? null) : undefined}
       board={(perColumn, query) => readBoard(perColumn, query, editing?.jira ? editing.jira_ref : null)}
       onsave={save}
       ondelete={editing === null ? undefined : deleteFromEditor}

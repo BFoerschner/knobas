@@ -29,6 +29,7 @@
     JiraSource,
     ListColumn,
     ParentSuggestion,
+    QueryTranslation,
     TicketViewDraft,
     ViewLanes,
   } from "../../ipc/search";
@@ -52,8 +53,7 @@
   } from "./editor";
   import { columnName, LANE_FIELDS, splitLanes, when } from "./tickets";
   import { counted } from "../counted";
-  import { translateJira } from "./jql";
-  import { drawnJiraColumns, LIST_COLUMN_ORDER, type CopiedFrom } from "./views";
+  import { copyKeeps, drawnJiraColumns, LIST_COLUMN_ORDER, type CopiedFrom } from "./views";
 
   let {
     draft,
@@ -69,7 +69,13 @@
     jira = null,
     copiedFrom = null,
     oncopy,
+    copy = null,
   }: {
+    /**
+     * The saved view's query as its source reads it (#1208), for *A copy
+     * keeps …*; `null` until it answers, and for a source that does not.
+     */
+    copy?: QueryTranslation | null;
     /** A copy of a Jira view (#880): where it came from and the JQL parts it left out. */
     copiedFrom?: CopiedFrom | null;
     /** *Make an editable copy*, offered in a Jira view's settings (#880). */
@@ -132,12 +138,9 @@
     return `Jira decides, from the ${what}`;
   });
   /** How much of a Jira view's query a copy would keep (#880). */
-  const copyKeeps = $derived.by(() => {
-    if (fromJira === null) return "";
-    const copy = translateJira(fromJira);
-    return copy.left.length === 0
-      ? "A copy keeps every part of the query."
-      : `A copy keeps ${copy.kept} of ${copy.kept + copy.left.length} parts of the query.`;
+  const keepsLine = $derived.by(() => {
+    if (fromJira === null || copy === null) return "";
+    return copyKeeps(copy);
   });
   const uid = $props.id();
 
@@ -369,7 +372,11 @@
                 sprint when this one closes.{/if}
             </p>
             <pre class="tf-vw-jql">{fromJira.jql}{#if fromJira.sub_query}{"\n"}{fromJira.sub_query}{/if}</pre>
-            <p class="tf-dim">To change which tickets it holds, change it in Jira, or make your own copy. {copyKeeps}</p>
+            <!-- A source that does not translate its query (#1208) offers no copy, so the line does not either. -->
+            <p class="tf-dim">
+              {#if oncopy}To change which tickets it holds, change it in Jira, or make your own copy. {keepsLine}{:else}To
+                change which tickets it holds, change it in Jira.{/if}
+            </p>
             {#if oncopy}
               <div class="tf-vw-btns">
                 <button type="button" class="tf-btn tf-sm" onclick={oncopy}>Make an editable copy</button>

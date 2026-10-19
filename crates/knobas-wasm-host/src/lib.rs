@@ -2,11 +2,11 @@
 //! wasmtime, is one more [`Source`].
 //!
 //! An external adapter is one WASM component built against the WIT world in
-//! `wit/adapter.wit`, `knobas:adapter@1.1.0`. [`WasmAdapter::load`] compiles
+//! `wit/adapter.wit`, `knobas:adapter@1.2.0`. [`WasmAdapter::load`] compiles
 //! it, refuses one built against a version this knobas cannot host, and
-//! reads its descriptor. A 1.0.0 component is hosted too: what 1.1.0 added
-//! is an import it does not use and an export (`downloads`) the host looks
-//! up as optional. [`WasmAdapter::build`] turns a configured instance
+//! reads its descriptor. A 1.0.0 or 1.1.0 component is hosted too: what the
+//! later minors added is an import it does not use and exports (`downloads`
+//! in 1.1.0, `query` in 1.2.0) the host looks up as optional. [`WasmAdapter::build`] turns a configured instance
 //! into a `Box<dyn Source>`, which forwards each trait call across the
 //! interface. The sync engine, the write queue, IPC and the shell see that
 //! and nothing else.
@@ -51,6 +51,8 @@ pub use source::WasmSource;
 
 mod bindings {
     wasmtime::component::bindgen!({
+        // `hosted`, not `adapter`: the optional reads stay out of the static
+        // bindings, so a component without them links (#1208).
         world: "hosted",
         path: "wit",
         imports: { default: async },
@@ -68,7 +70,7 @@ pub const PACKAGE: &str = "knobas:adapter";
 /// newer than this one is hosted; every other is refused at load.
 pub const INTERFACE_VERSION: Version = Version {
     major: 1,
-    minor: 1,
+    minor: 2,
     patch: 0,
 };
 
@@ -77,6 +79,32 @@ const SOURCE_EXPORT: &str = "knobas:adapter/source";
 
 /// The optional interface a 1.1.0 component exports `download` in.
 const DOWNLOADS_EXPORT: &str = "knobas:adapter/downloads";
+
+/// The optional interface a 1.2.0 component exports `translate-query` in
+/// (#1208).
+const QUERY_EXPORT: &str = "knobas:adapter/query";
+
+/// The function `name` of the optional interface `interface` (without its
+/// version), or `None` when the component does not export the interface:
+/// how the host finds an optional read (#1205, #1208). The lookup names the
+/// host's version, and wasmtime's semver-compatible lookup finds the
+/// interface a component built against any 1.x exports. An interface without
+/// the function is refused.
+pub(crate) fn optional_export(
+    component: &Component,
+    interface: &str,
+    name: &str,
+) -> Result<Option<ComponentExportIndex>, LoadError> {
+    let Some(instance) =
+        component.get_export_index(None, &format!("{interface}@{INTERFACE_VERSION}"))
+    else {
+        return Ok(None);
+    };
+    component
+        .get_export_index(Some(&instance), name)
+        .map(Some)
+        .ok_or_else(|| LoadError::Link(format!("{interface} exports no {name}")))
+}
 
 /// A semver `major.minor.patch`, as a component's export names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +178,8 @@ struct Inner {
     download: Option<ComponentExportIndex>,
     version: Version,
     template: SourceDescriptor,
+    /// `query.translate-query`, when the component exports it (1.2.0, #1208).
+    translate_query: Option<ComponentExportIndex>,
 }
 
 impl std::fmt::Debug for WasmAdapter {
@@ -214,15 +244,8 @@ impl WasmAdapter {
             .instantiate_pre(&component)
             .and_then(bindings::HostedPre::new)
             .map_err(|e| LoadError::Link(format!("{e:#}")))?;
-        let download = component
-            .get_export_index(None, format!("{DOWNLOADS_EXPORT}@{INTERFACE_VERSION}"))
-            .map(|downloads| component.get_export_index(Some(&downloads), "download"))
-            .map(|download| {
-                download.ok_or_else(|| {
-                    LoadError::Link(format!("{DOWNLOADS_EXPORT} exports no download"))
-                })
-            })
-            .transpose()?;
+        let download = optional_export(&component, DOWNLOADS_EXPORT, "download")?;
+        let translate_query = optional_export(&component, QUERY_EXPORT, "translate-query")?;
         let mut adapter = Self {
             inner: Arc::new(Inner {
                 engine,
@@ -230,6 +253,7 @@ impl WasmAdapter {
                 download,
                 version,
                 template: placeholder_descriptor(),
+                translate_query,
             }),
             hosts: Arc::from([]),
             limits: limits::Limits::default(),
@@ -549,4 +573,79 @@ pub fn load_fixture() -> WasmAdapter {
             })
         })
         .clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A component exporting `interface` with one function `function`, or
+    /// with none when `interface` is `None`; `knobas:adapter/source@1.0.0`
+    /// beside it either way.
+    fn component(interface: Option<&str>, function: &str) -> Component {
+        let optional = interface.map_or(String::new(), |name| {
+            format!(
+                r#"(core module $m (func (export "f")))
+                   (core instance $i (instantiate $m))
+                   (func $f (canon lift (core func $i "f")))
+                   (instance $q (export "{function}" (func $f)))
+                   (export "{name}" (instance $q))"#
+            )
+        });
+        let text = format!(
+            r#"(component
+                 (instance $source)
+                 (export "knobas:adapter/source@1.0.0" (instance $source))
+                 {optional})"#
+        );
+        Component::new(&Engine::default(), wat::parse_str(text).unwrap()).unwrap()
+    }
+
+    fn translates(interface: Option<&str>) -> bool {
+        optional_export(
+            &component(interface, "translate-query"),
+            QUERY_EXPORT,
+            "translate-query",
+        )
+        .unwrap()
+        .is_some()
+    }
+
+    #[test]
+    fn the_optional_read_is_found_on_any_1_x_that_exports_it_and_on_nothing_else() {
+        assert!(translates(Some("knobas:adapter/query@1.2.0")));
+        assert!(
+            translates(Some("knobas:adapter/query@1.4.2")),
+            "a newer 1.x"
+        );
+        assert!(!translates(None), "a 1.0.0 component has no query");
+        assert!(
+            !translates(Some("knobas:adapter/query@2.0.0")),
+            "another major"
+        );
+        assert!(
+            !translates(Some("knobas:adapter/queries@1.2.0")),
+            "another interface"
+        );
+    }
+
+    #[test]
+    fn a_1_1_0_component_s_download_is_found_by_the_1_2_0_host() {
+        let built = component(Some("knobas:adapter/downloads@1.1.0"), "download");
+        assert!(
+            optional_export(&built, DOWNLOADS_EXPORT, "download")
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn an_optional_interface_without_its_function_is_refused() {
+        let built = component(Some("knobas:adapter/query@1.2.0"), "translate");
+        let error = optional_export(&built, QUERY_EXPORT, "translate-query").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            LoadError::Link("knobas:adapter/query exports no translate-query".into()).to_string()
+        );
+    }
 }
