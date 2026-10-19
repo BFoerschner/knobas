@@ -3587,7 +3587,6 @@ knobas-sync	lib/knobas_sync	tests::a_full_batch_is_written_while_the_adapter_is_
 knobas-sync	lib/knobas_sync	tests::a_source_id_must_be_usable_as_a_namespace
 knobas-sync	lib/knobas_sync	tests::the_report_shape_matches_its_typescript_mirror
 knobas-sync	lib/knobas_sync	write_queue::tests::a_refusal_and_a_blip_are_told_apart_by_status
-knobas-sync	lib/knobas_sync	write_queue::tests::every_op_points_at_the_entity_it_names
 knobas-sync	test/it	alerts::a_flap_between_two_polls_is_invisible
 knobas-sync	test/it	alerts::a_monitor_already_down_when_the_alert_table_is_empty_opens_one
 knobas-sync	test/it	alerts::a_monitor_over_the_threshold_opens_a_warn_alert
@@ -3774,6 +3773,7 @@ knobas-sync	test/it	write_queue::a_pull_request_opened_after_a_withdrawal_leaves
 knobas-sync	test/it	write_queue::a_refused_write_is_reported_and_never_retried
 knobas-sync	test/it	write_queue::a_row_that_settled_some_other_way_is_not_called_withdrawn
 knobas-sync	test/it	write_queue::a_source_action_is_held_sent_and_refused_as_a_typed_write_is
+knobas-sync	test/it	write_queue::a_source_action_left_in_doubt_is_held_or_disclosed
 knobas-sync	test/it	write_queue::a_source_with_no_credential_keeps_the_write
 knobas-sync	test/it	write_queue::a_target_that_changed_holds_the_write_and_one_that_did_not_does_not
 knobas-sync	test/it	write_queue::a_ticket_created_after_the_user_withdrew_it_is_recorded_without_one
@@ -3784,7 +3784,6 @@ knobas-sync	test/it	write_queue::a_write_the_source_refuses_on_repeat_waits_rath
 knobas-sync	test/it	write_queue::an_edited_held_write_sends_what_the_user_wrote
 knobas-sync	test/it	write_queue::an_undecodable_write_is_refused_rather_than_held
 knobas-sync	test/it	write_queue::an_undeliverable_write_is_kept_and_flushes_when_the_source_returns
-knobas-sync	test/it	write_queue::every_write_op_says_whether_a_withdrawal_can_leave_one
 knobas-sync	test/it	write_queue::one_entitys_writes_keep_their_order_without_blocking_another
 knobas-sync	test/it	write_queue::two_comments_back_to_back_on_one_pull_request_both_go_in_order
 knobas-sync	test/it	write_queue::two_flushes_of_one_source_deliver_a_write_once

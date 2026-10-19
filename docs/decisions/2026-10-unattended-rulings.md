@@ -7177,3 +7177,34 @@ The merge-manager's rulings (Opus):
   whether Confluence DC accepts Bearer, and only `confluence-live` can witness that (its revoked-PAT
   test signs in with the seeded PAT first). `knobas-http`'s table pins the header each spelling
   produces. *Reversing:* one test.
+
+### #1308: implementer's rulings (Opus)
+
+- **Where the target is read.** *Fork:* keep a target match in sync under another name, read the
+  field by serialising the op, or give `WriteOp` a `target()` that reads the field
+  `delivery().target` names. *Ruling:* `WriteOp::target()` in `knobas-source`, beside
+  `delivery()`. Its `entity` arm has no wildcard, so a new variant still has to say whether it
+  carries one. A delivery naming a field the variant lacks answers `""`, which no `EntityRef`
+  parses, so the queue refuses the write instead of panicking in the flush loop. The battery's
+  target test now also asserts `target()` reads the named field. The app's two `target_entity`
+  callers move to it, because the function is gone. *Reversing:* low.
+- **`attempt` projects against the decoded op's target, not the row's `entity_id`.** *Fork:* keep
+  parsing `entity_id` or read `op.target()`. *Ruling:* `op.target()`, as the ticket's "the target
+  it projects" asks. The two are equal for every row `queue` writes, and the app's `amend` refuses
+  a repointed edit. The entity parse now runs after the decode, so a row that is both undecodable
+  and unparseable is refused as undecodable. *Reversing:* low.
+- **The relocated arguments.** `UNCLAIMED_OPS`'s doc (why `create_branch` and
+  `create_pull_request` leave nothing unclaimed, why `create_monitor` and `source_action` can)
+  moved to `unclaimed`'s doc, and `resend_is_harmless`'s doc moved to `attempt`'s, where the rule
+  is now applied. *Reversing:* n/a.
+- **The probe set goes with the roster test.** Sync's `write_op_probes` fed only
+  `every_write_op_says_whether_a_withdrawal_can_leave_one`, so both are deleted. This closes the
+  gap #1307 handed on: the remaining probe set is the battery's `known_write_ops`, and the
+  compiler forces that one. *Reversing:* n/a.
+- **A source action's doubt gets a harness test.** With the roster test gone, a mutant giving
+  `source_action` `can_leave_unclaimed: false` survived the whole harness.
+  `a_source_action_left_in_doubt_is_held_or_disclosed` drives both counts: held when it got no
+  answer, disclosed when it lands after a withdrawal. Both mutants die. *Reversing:* n/a.
+- **The shared helper.** `queue`, `amend` and `attempt` repeated shape, state lookup and
+  projection; they now call one private `project_now`. `attempt` passes `op.identifier()` where it
+  passed the row's `op` column, and the two are equal by construction. *Reversing:* low.
