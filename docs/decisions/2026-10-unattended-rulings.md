@@ -7091,3 +7091,55 @@ The merge-manager's rulings (Opus):
   `create_page` → `parent` and `commit_file` → `repo` match `target_entity`; `create_branch` and
   `create_pull_request` → `related`, `create_page` → `documents` match `link_on_arrival`.
   *Reversing:* n/a.
+## #1294: the entity list answers a role (Opus implementer, 2026-10-19)
+
+- **The scope rides on the two lists every statement binds.** *Fork:* add the fillers (and the
+  role's kinds) as new parameters to the six entity-list statements, or fold them into `$1`
+  (sources) and `$2` (kinds) in Rust before binding. *Ruling:* fold. *Reasoning:* the result is
+  the same predicate (the fillers among the named sources, the role's kinds among the named
+  kinds), bound as a text array with "null means unscoped" as the ticket asks, and every statement
+  takes it with no SQL change, so the plan test (`read_plans.rs`) and the planner's use of `$1` in
+  `LIVE_LATEST`'s `named` CTE are untouched. A role sets `Some` of the list even when it is empty,
+  so a role nobody fills reads nothing rather than everything; the mutant that sent an empty list
+  as `NULL` dies in `a_role_intersects_the_named_sources_and_kinds`. *Reversing:* low (two
+  parameters per statement).
+- **A built-in role's kinds include its optional kinds.** *Fork:* "its minimum's kinds" as
+  `Minimum::kinds` alone, or with `optional_kinds`. *Ruling:* both. *Reasoning:* the optional kinds
+  are the role's too (a ticket system's saved views, ADR-0029, #1207), and a custom role's kinds
+  are defined as those that belong to no built-in role the source claims, so a saved view must
+  count as the ticket system's or a Jira that also claimed a custom role would draw its views
+  there. No surface reads the ticket system through the entity list with no kinds today.
+  *Reversing:* low (one `chain`).
+- **The role's kinds are one list for all its fillers.** *Fork:* bind `(source, kind)` pairs, or
+  the union of the fillers' role kinds. *Ruling:* the union. *Reasoning:* the ticket binds a list
+  as `sources` is bound; a custom role has fillers of one adapter, so its union is exact, and for a
+  built-in role a filler's row of a kind another filler declares on the role's frame is the only
+  leak, which no adapter has. *Reversing:* medium (a pairs parameter in six statements).
+- **The registry is injected beside the command's.** *Fork:* add a registry argument to
+  `list_entities_inner` (54 callers), or keep it and add `list_entities_with_registry`.
+  *Ruling:* the latter; `list_entities_inner` and the command answer a role from
+  `Registry::builtin()`, the registry `declared_paths` already reads for the same command.
+  *Reasoning:* existing callers stay as they were; the role tests need a registry with a custom
+  role, which nothing compiled in claims. *Reversing:* low.
+- **The ticket's "compiled-in mock claims nothing" is stale.** *Fork:* the criterion names the
+  compiled-in mock as the non-claimer, but it claims all five roles since #1229 and #1240
+  (`sources_crud.rs` pins that). *Ruling:* the built-in mock is the filler; the non-claimer is a
+  Jira source asked for CI (Jira claims the ticket system alone), and the custom role comes from a
+  test registry. The criterion's intent (a source that does not claim the role is left out) is
+  tested. The same sentence is in spec #1293's Testing Decisions, which the follow-ups read.
+  *Reversing:* n/a.
+- **A custom role's kinds are read from `entity_kinds`.** *Fork:* "the kinds its adapter emits"
+  from the descriptor's `entity_kinds` or its `payload_paths`. *Ruling:* `entity_kinds`, the
+  descriptor's own list of what `sync` emits; `payload_paths` names only kinds with declared
+  paths. *Reversing:* low.
+- **The fake's role helper is handed the sources, not imported.** *Fork:* `fake/corpus.ts`
+  importing `FIXTURE_SOURCES` from `fake/sources.ts`, or `sources.ts` registering them. *Ruling:*
+  register (`ROLE_CLAIMERS`, as `CODE_FACTS` is filled). *Reasoning:* `sources.ts` reads `CORPUS`
+  as it loads, so the cycle would throw on whichever module the eager glob loads first.
+  *Reversing:* low.
+- **The ADR-0029 and Role amendments are already on `main`.** #1333 committed both, verbatim as
+  spec #1293's Further Notes give them, so this PR carries no change to either file.
+  *Reversing:* n/a.
+- **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the ticket
+  names them, the read's interface in the app crate's integration binary (`entity_role.rs`), the
+  mirror test and the fake-feature test. *Reversing:* n/a.
