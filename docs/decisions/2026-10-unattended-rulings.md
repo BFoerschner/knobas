@@ -8078,4 +8078,23 @@ reserved-steps rule. The entry is `docs/contract/10.8/1326-the-entity-barrel-is-
   declares", the opposite of the field (`true` for a custom key). The generated JSDoc would have
   carried the inversion, so it is fixed in the same change.
 - **No §10.8 entry.** #1325's entry books `generated/assets.ts` for this ticket, and no command,
-  argument or wire shape changed.
+  argument or wire shape changed. *Superseded by the merge-manager's ruling below.*
+
+### #1328 at merge (merge-manager on Opus, 2026-10-20)
+
+- **The shared entity types, after #1367.** #1326 (PR #1367) landed first. *Ruling:* the rebase
+  keeps main's `generated/entity.ts`, `ipc_mirror.rs` entity roots and the entity derives and docs
+  on `ActivityRow`, `LinkEntry`, `LinkRow`, `LinkEnd` and `Tone`; this PR keeps only its assets
+  derives, and the regenerated files equal the committed ones. The first ruling above is spent:
+  this PR derives no entity type. *Reversing:* n/a.
+- **A §10.8 entry after all.** *Fork:* rely on #1325's booking, or add an entry. *Ruling:* add
+  `docs/contract/10.8/1328-the-assets-barrel-is-generated.md`. *Reasoning:* #1325's booking covers
+  the file, but the switch also changes what the frozen IPC module declares (three renamed types,
+  nineteen `Extract` aliases, one hand-written type kept, 21 fixture tests gone), and #1326 recorded
+  the same facts for its barrel; the entry names the two crates that gain a derive. *Reversing:*
+  delete one file and rerun `just contract-index`.
+- **`Origin` and `RuleClass` variant docs.** *Fork:* move them into the enums' docs here, now that
+  #1326 is merged, or leave them. *Ruling:* leave them; `backlog` follow-up #1370. *Reasoning:*
+  they are entity-barrel types and this ticket is the assets barrel; `RuleClass`'s meanings already
+  reach the TypeScript through `LinkRow.rule_class`'s field doc, `Origin`'s do not. *Reversing:*
+  #1370 does it.
