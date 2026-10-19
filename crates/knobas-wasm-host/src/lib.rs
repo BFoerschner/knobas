@@ -2,15 +2,18 @@
 //! wasmtime, is one more [`Source`].
 //!
 //! An external adapter is one WASM component built against the WIT world in
-//! `wit/adapter.wit`, `knobas:adapter@1.0.0`. [`WasmAdapter::load`] compiles
+//! `wit/adapter.wit`, `knobas:adapter@1.1.0`. [`WasmAdapter::load`] compiles
 //! it, refuses one built against a version this knobas cannot host, and
-//! reads its descriptor. [`WasmAdapter::build`] turns a configured instance
+//! reads its descriptor. A 1.0.0 component is hosted too: what 1.1.0 added
+//! is an import it does not use and an export (`downloads`) the host looks
+//! up as optional. [`WasmAdapter::build`] turns a configured instance
 //! into a `Box<dyn Source>`, which forwards each trait call across the
 //! interface. The sync engine, the write queue, IPC and the shell see that
 //! and nothing else.
 //!
 //! **What the component is given.** Its own `instance` record, which holds
-//! no credential; the `sink` for a sync's items; `log`; WASI 0.2 with
+//! no credential; the `sink` for a sync's items; the `download-sink` for a
+//! download's bytes (#1205); `log`; WASI 0.2 with
 //! nothing in it: no directory, no environment, no argument, and the
 //! context's defaults refuse every socket and name lookup; and `wasi:http`
 //! 0.2's outgoing handler, held to the hosts its manifest declares, with the
@@ -30,7 +33,9 @@ use std::sync::Arc;
 
 use knobas_source::instance::SourceInstance;
 use knobas_source::{Source, SourceDescriptor, SourceError};
-use wasmtime::component::{Component, Linker, ResourceTable, types::ComponentItem};
+use wasmtime::component::{
+    Component, ComponentExportIndex, Linker, ResourceTable, types::ComponentItem,
+};
 use wasmtime::{Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
@@ -46,7 +51,7 @@ pub use source::WasmSource;
 
 mod bindings {
     wasmtime::component::bindgen!({
-        world: "adapter",
+        world: "hosted",
         path: "wit",
         imports: { default: async },
         exports: { default: async },
@@ -63,12 +68,15 @@ pub const PACKAGE: &str = "knobas:adapter";
 /// newer than this one is hosted; every other is refused at load.
 pub const INTERFACE_VERSION: Version = Version {
     major: 1,
-    minor: 0,
+    minor: 1,
     patch: 0,
 };
 
 /// The interface the component exports, without its version.
 const SOURCE_EXPORT: &str = "knobas:adapter/source";
+
+/// The optional interface a 1.1.0 component exports `download` in.
+const DOWNLOADS_EXPORT: &str = "knobas:adapter/downloads";
 
 /// A semver `major.minor.patch`, as a component's export names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,9 +99,6 @@ impl Version {
 
     /// Whether a component built against `self` can run on this host.
     #[must_use]
-    // At 1.0.0 the minor comparison is `== 0`; written as `<=` because it is
-    // the rule, and the rule holds once the host's minor grows.
-    #[allow(clippy::absurd_extreme_comparisons)]
     pub fn is_hosted(self) -> bool {
         self.major == INTERFACE_VERSION.major && self.minor <= INTERFACE_VERSION.minor
     }
@@ -140,7 +145,9 @@ pub struct WasmAdapter {
 
 struct Inner {
     engine: Engine,
-    pre: bindings::AdapterPre<HostState>,
+    pre: bindings::HostedPre<HostState>,
+    /// `downloads.download`, when the component exports it (1.1.0).
+    download: Option<ComponentExportIndex>,
     version: Version,
     template: SourceDescriptor,
 }
@@ -198,19 +205,29 @@ impl WasmAdapter {
             .map_err(|e| LoadError::Link(format!("{e:#}")))?;
         wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)
             .map_err(|e| LoadError::Link(format!("{e:#}")))?;
-        bindings::Adapter::add_to_linker::<_, wasmtime::component::HasSelf<_>>(
+        bindings::Hosted::add_to_linker::<_, wasmtime::component::HasSelf<_>>(
             &mut linker,
             |state| state,
         )
         .map_err(|e| LoadError::Link(format!("{e:#}")))?;
         let pre = linker
             .instantiate_pre(&component)
-            .and_then(bindings::AdapterPre::new)
+            .and_then(bindings::HostedPre::new)
             .map_err(|e| LoadError::Link(format!("{e:#}")))?;
+        let download = component
+            .get_export_index(None, format!("{DOWNLOADS_EXPORT}@{INTERFACE_VERSION}"))
+            .map(|downloads| component.get_export_index(Some(&downloads), "download"))
+            .map(|download| {
+                download.ok_or_else(|| {
+                    LoadError::Link(format!("{DOWNLOADS_EXPORT} exports no download"))
+                })
+            })
+            .transpose()?;
         let mut adapter = Self {
             inner: Arc::new(Inner {
                 engine,
                 pre,
+                download,
                 version,
                 template: placeholder_descriptor(),
             }),
@@ -228,6 +245,9 @@ impl WasmAdapter {
         Arc::get_mut(&mut adapter.inner)
             .expect("nothing else holds the adapter yet")
             .template = template;
+        if adapter.inner.download.is_some() {
+            block_on(source::check_download(&adapter)).map_err(LoadError::Link)?;
+        }
         Ok(adapter)
     }
 
@@ -263,6 +283,13 @@ impl WasmAdapter {
     #[must_use]
     pub fn kind(&self) -> &str {
         &self.inner.template.adapter_kind
+    }
+
+    /// Whether the component exports `download` (1.1.0); a source of one
+    /// that does not keeps no runs to download.
+    #[must_use]
+    pub fn downloads(&self) -> bool {
+        self.inner.download.is_some()
     }
 
     /// The interface version the component is built against.
@@ -412,6 +439,7 @@ pub(crate) struct HostState {
     table: ResourceTable,
     memory: limits::MemoryCap,
     sink: source::SinkSlot,
+    download: source::DownloadSlot,
     /// The instance id, for the component's log lines.
     source_id: String,
 }
@@ -433,6 +461,7 @@ impl HostState {
             table: ResourceTable::new(),
             memory: limits::MemoryCap::new(limits),
             sink,
+            download: source::DownloadSlot::none(),
             source_id,
         }
     }
@@ -490,15 +519,34 @@ pub fn fixture_component() -> std::path::PathBuf {
     )
 }
 
+/// The fixture built against the frozen 1.0.0 world, which `just
+/// wasm-fixture` keeps beside [`fixture_component`] (#1205).
+#[cfg(feature = "test-util")]
+#[must_use]
+pub fn fixture_component_v1_0() -> std::path::PathBuf {
+    let current = fixture_component();
+    current.with_file_name("knobas_wasm_fixture_v1_0.wasm")
+}
+
 /// The fixture component, loaded; panics naming the recipe that builds it.
+///
+/// Compiled once per test binary and cloned after: a compile is most of
+/// what a test of the fixture costs, and a clone shares nothing a call can
+/// change (each call has a store of its own).
 #[cfg(feature = "test-util")]
 #[must_use]
 pub fn load_fixture() -> WasmAdapter {
-    let path = fixture_component();
-    WasmAdapter::load(&path).unwrap_or_else(|e| {
-        panic!(
-            "the fixture component at {} does not load ({e}); `just wasm-fixture` builds it",
-            path.display()
-        )
-    })
+    static LOADED: std::sync::OnceLock<WasmAdapter> = std::sync::OnceLock::new();
+    LOADED
+        .get_or_init(|| {
+            let path = fixture_component();
+            WasmAdapter::load(&path).unwrap_or_else(|e| {
+                panic!(
+                    "the fixture component at {} does not load ({e}); `just wasm-fixture` \
+                     builds it",
+                    path.display()
+                )
+            })
+        })
+        .clone()
 }

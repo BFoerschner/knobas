@@ -54,7 +54,10 @@ async fn the_fixture_component_s_items_reach_the_mirror_and_search_finds_them() 
     let run = knobas_sync::run_from_stored_cursor(&mut conn, &pool, source.as_ref())
         .await
         .unwrap();
-    assert_eq!(run.upserted, 3, "the fixture serves three surveys");
+    assert_eq!(
+        run.upserted, 5,
+        "the fixture serves three surveys, a pipeline and a run"
+    );
 
     let (kind, title): (String, String) =
         sqlx::query_as("select kind, title from sync.item where entity_id = $1")

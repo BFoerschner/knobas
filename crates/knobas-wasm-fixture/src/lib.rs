@@ -1,23 +1,29 @@
 //! The fixture external adapter (issue #1198, ADR-0028).
 //!
 //! A test adapter built to a WASM component against
-//! `knobas:adapter@1.0.0`. It serves three surveys and nothing else, so that
-//! the host can be tested with the contract battery and through the sync
-//! engine into the mirror without a real product behind it. No external
+//! `knobas:adapter@1.1.0`. It serves three surveys, and a pipeline with one
+//! run ([`builds`], #1205), so that the host can be tested with the contract
+//! battery, every live read, and through the sync engine into the mirror,
+//! without a real product behind it. No external
 //! adapter ships with knobas; this is what the host is tested with.
 //!
 //! * **The corpus** is [`SURVEYS`]. Every survey carries the word `quaywright`
 //!   in its body, a token nothing else in knobas' fixtures spells, so a
 //!   search for it finds these and only these.
-//! * **The cursor** is the number of surveys already emitted, as a decimal
-//!   string. A full sync emits all three and returns `"3"`; a sync from
-//!   `"3"` emits nothing and returns `"3"`, as the battery's clause 2 asks.
+//! * **The cursor** is the number of items already emitted, as a decimal
+//!   string: the surveys, then the pipeline, then the run. A full sync emits
+//!   all five and returns `"5"`; a sync from `"5"` emits nothing and returns
+//!   `"5"`, as the battery's clause 2 asks.
 //! * **The config** is `{"fault": "none" | "unauthorized" | "unreachable"}`,
 //!   the battery's `Fault`. A faulted fixture fails `test_connection` and
 //!   `sync` with the mapped error. A config it cannot read fails every call
 //!   with a protocol error naming it.
-//! * **The role** is the custom role [`ROLE`], and a survey's view is two
-//!   blocks: who surveyed it, and its body (#1202).
+//! * **The roles** are the custom role [`ROLE`], whose survey's view is two
+//!   blocks: who surveyed it, and its body (#1202); and CI, for the Builds
+//!   frame, with every optional read (#1205).
+//! * **Built with `--features v1_0`** it is the same adapter against the
+//!   frozen 1.0.0 world (`wit-1.0.0/`), which has no `downloads`: what the
+//!   host's hold on 1.0.0 components is tested with.
 //! * **`"fault": "swallow_sink"`** is a misbehaving adapter: it ignores what
 //!   `sink.item` answers and returns its cursor anyway, so the host's own
 //!   hold on a refused item is witnessed.
@@ -29,10 +35,14 @@
 //!   handed (its instance record, every hop's status, headers and body, the
 //!   error that ended the walk) as JSON: in `detail` when the walk ended on
 //!   a response, in an `Unreachable` error when it did not (#1203).
-//!   `"first_byte_ms"` and `"post_mib"` bend that request ([`fetch::Options`]). `mirror`
-//!   and `username` are config keys it declares and never reads, for a
-//!   manifest's host template and the host's basic auth.
+//!   `"first_byte_ms"` and `"post_mib"` bend that request
+//!   ([`fetch::Options`]). `mirror` and `username` are config keys it
+//!   declares and never reads, for a manifest's host template and the host's
+//!   basic auth.
+//! * **`"download_mib"`** is how many MiB a download of every artifact
+//!   streams (default 1).
 
+mod builds;
 mod fetch;
 
 use exports::knobas::adapter::source::{Guest, GuestAdapter};
@@ -41,9 +51,16 @@ use knobas::adapter::types::{
     ConnectionInfo, Fault as WitFault, Instance, RunChainStep, SourceError, SyncItem, WriteReceipt,
 };
 
+#[cfg(not(feature = "v1_0"))]
 wit_bindgen::generate!({
     world: "adapter",
     path: "../knobas-wasm-host/wit",
+});
+
+#[cfg(feature = "v1_0")]
+wit_bindgen::generate!({
+    world: "adapter",
+    path: "wit-1.0.0",
 });
 
 /// The adapter kind this fixture is. A source's id is its own.
@@ -102,6 +119,9 @@ pub struct Adapter {
     fetch_options: fetch::Options,
     /// The instance record as the host handed it over, for the fetch answer.
     received: serde_json::Value,
+    /// The MiB a download of every artifact streams.
+    #[cfg_attr(feature = "v1_0", allow(dead_code))]
+    download_mib: u64,
 }
 
 fn protocol(message: String) -> SourceError {
@@ -123,6 +143,7 @@ fn read_fault(config: &str) -> Result<Fault, String> {
             "fetch",
             "first_byte_ms",
             "post_mib",
+            "download_mib",
             "mirror",
             "username",
         ]
@@ -179,6 +200,60 @@ impl Adapter {
         }
     }
 
+    /// A frame item: the pipeline, or a run of it.
+    fn frame_item(
+        &self,
+        key: &str,
+        kind: &str,
+        title: &str,
+        payload: serde_json::Value,
+    ) -> SyncItem {
+        SyncItem {
+            entity: format!("{}:{key}", self.id),
+            kind: kind.into(),
+            title: title.into(),
+            body_text: String::new(),
+            author: None,
+            updated_at: Some("2026-10-18T09:04:00Z".into()),
+            payload: payload.to_string(),
+            web_url: None,
+            deleted: false,
+        }
+    }
+
+    /// Every item, in the order the cursor counts them.
+    fn corpus(&self) -> Vec<SyncItem> {
+        let mut items: Vec<SyncItem> = SURVEYS.iter().map(|s| self.survey(*s)).collect();
+        items.push(self.frame_item(
+            builds::PIPELINE,
+            "pipeline",
+            "Crane telemetry",
+            builds::pipeline_payload(),
+        ));
+        items.push(self.run(builds::RUN, "42"));
+        items
+    }
+
+    fn run(&self, key: &str, number: &str) -> SyncItem {
+        self.frame_item(
+            key,
+            "run",
+            &format!("Crane telemetry #{number}"),
+            builds::run_payload(key, number),
+        )
+    }
+
+    /// The key of `entity` when it is one of this source's, else `None`.
+    fn key<'a>(&self, entity: &'a str) -> Option<&'a str> {
+        entity.strip_prefix(&self.id)?.strip_prefix(':')
+    }
+
+    /// Whether `entity` is the fixture's run: every run read answers it
+    /// alone, and `None` for anything else.
+    fn is_run(&self, entity: &str) -> bool {
+        self.key(entity) == Some(builds::RUN)
+    }
+
     fn no_workflow(&self) -> SourceError {
         protocol(format!(
             "the {KIND} adapter has no workflow: source {:?} offers no transitions",
@@ -219,6 +294,7 @@ impl GuestAdapter for Adapter {
             fault: read_fault(&instance.config),
             fetch,
             fetch_options,
+            download_mib: read("download_mib").unwrap_or(1),
             received: serde_json::json!({
                 "id": instance.id,
                 "kind": instance.kind,
@@ -250,7 +326,7 @@ impl GuestAdapter for Adapter {
                 "plural": "Surveys",
                 "monogram": "SV",
                 "full_sync_exhaustive": true,
-            }],
+            }, builds::kinds()[0], builds::kinds()[1]],
             "config_schema": {
                 "type": "object",
                 "properties": {
@@ -258,13 +334,14 @@ impl GuestAdapter for Adapter {
                     "fetch": { "type": "string" },
                     "first_byte_ms": { "type": "integer" },
                     "post_mib": { "type": "integer" },
+                    "download_mib": { "type": "integer" },
                     "mirror": { "type": "string" },
                     "username": { "type": "string" },
                 },
                 "additionalProperties": false,
             },
-            "payload_paths": [],
-            "roles": [{ "role": ROLE, "reads": [] }],
+            "payload_paths": builds::payload_paths(),
+            "roles": [{ "role": ROLE, "reads": [] }, builds::role()],
         })
         .to_string()
     }
@@ -307,17 +384,18 @@ impl GuestAdapter for Adapter {
             Some(c) => c
                 .parse::<usize>()
                 .ok()
-                .filter(|n| *n <= SURVEYS.len())
+                .filter(|n| *n <= self.corpus().len())
                 .ok_or_else(|| protocol(format!("cursor {c:?} is not one the fixture wrote")))?,
         };
         let swallow = matches!(self.fault, Ok(Fault::SwallowSink));
-        for survey in &SURVEYS[from..] {
-            match sink::item(&self.survey(*survey)) {
+        let corpus = self.corpus();
+        for item in &corpus[from..] {
+            match sink::item(item) {
                 Err(_) if swallow => {}
                 answer => answer?,
             }
         }
-        Ok(SURVEYS.len().to_string())
+        Ok(corpus.len().to_string())
     }
 
     fn write(&self, op: String) -> Result<WriteReceipt, SourceError> {
@@ -333,12 +411,17 @@ impl GuestAdapter for Adapter {
     /// A survey's block view, the custom role's whole surface (ADR-0029):
     /// the surveyor as a fact and the body as text. `None` for an entity
     /// that is not one of the fixture's surveys.
-    fn view(
-        &self,
-        entity: String,
-        _section: Option<String>,
-    ) -> Result<Option<String>, SourceError> {
-        let key = entity.strip_prefix(&format!("{}:", self.id));
+    /// A survey's block view, the custom role's whole surface (ADR-0029):
+    /// the surveyor as a fact and the body as text. The run's is
+    /// [`builds::view`]. `None` for the pipeline, and for an entity that is
+    /// not the fixture's.
+    fn view(&self, entity: String, section: Option<String>) -> Result<Option<String>, SourceError> {
+        if self.is_run(&entity) {
+            return builds::view(section.as_deref())
+                .map(|view| Some(view.to_string()))
+                .ok_or_else(|| protocol(format!("the run's view has no section {section:?}")));
+        }
+        let key = self.key(&entity);
         let Some((_, title, body)) = SURVEYS.iter().find(|(k, _, _)| Some(*k) == key) else {
             return Ok(None);
         };
@@ -362,50 +445,141 @@ impl GuestAdapter for Adapter {
         ))
     }
 
-    fn pipeline_settings(&self, _entity: String) -> Result<Option<String>, SourceError> {
-        Ok(None)
+    fn pipeline_settings(&self, entity: String) -> Result<Option<String>, SourceError> {
+        if self.key(&entity) != Some(builds::PIPELINE) {
+            return Err(protocol(format!("{entity} is not the fixture's pipeline")));
+        }
+        Ok(Some(builds::pipeline_settings().to_string()))
     }
 
+    /// One run older than the sync's window, `run-0`, before `run-1`.
     fn older_runs(
         &self,
-        _entity: String,
-        _before: String,
-        _count: u32,
+        entity: String,
+        before: String,
+        count: u32,
     ) -> Result<Option<Vec<SyncItem>>, SourceError> {
-        Ok(None)
+        if self.key(&entity) != Some(builds::PIPELINE) {
+            return Err(protocol(format!("{entity} is not the fixture's pipeline")));
+        }
+        let older = (self.is_run(&before) && count > 0)
+            .then(|| self.run(builds::OLDER_RUN, "41"))
+            .into_iter()
+            .collect();
+        Ok(Some(older))
     }
 
-    fn run_chain(&self, _run: String) -> Result<Option<Vec<RunChainStep>>, SourceError> {
-        Ok(None)
+    /// The run's pipeline is in no chain.
+    fn run_chain(&self, run: String) -> Result<Option<Vec<RunChainStep>>, SourceError> {
+        self.the_run(&run)?;
+        Ok(Some(Vec::new()))
     }
 
     fn run_log(
         &self,
-        _entity: String,
-        _from: Option<u64>,
-        _count: u32,
+        entity: String,
+        from: Option<u64>,
+        count: u32,
     ) -> Result<Option<String>, SourceError> {
-        Ok(None)
+        self.the_run(&entity)?;
+        Ok(Some(builds::run_log(from, count).to_string()))
     }
 
-    fn run_tests(&self, _entity: String) -> Result<Option<String>, SourceError> {
-        Ok(None)
+    fn run_tests(&self, entity: String) -> Result<Option<String>, SourceError> {
+        self.the_run(&entity)?;
+        Ok(Some(builds::run_tests().to_string()))
     }
 
-    fn test_history(&self, _entity: String, _test: String) -> Result<Option<String>, SourceError> {
-        Ok(None)
+    fn test_history(&self, entity: String, _test: String) -> Result<Option<String>, SourceError> {
+        self.the_run(&entity)?;
+        Ok(Some(builds::test_history().to_string()))
     }
 
-    fn run_artifacts(&self, _entity: String, _path: String) -> Result<Option<String>, SourceError> {
-        Ok(None)
+    fn run_artifacts(&self, entity: String, path: String) -> Result<Option<String>, SourceError> {
+        self.the_run(&entity)?;
+        builds::run_artifacts(&path)
+            .map(|entries| Some(entries.to_string()))
+            .ok_or_else(|| protocol(format!("the run has no artifact folder {path:?}")))
     }
 
     fn artifact_preview(
         &self,
-        _entity: String,
-        _path: String,
+        entity: String,
+        path: String,
     ) -> Result<Option<String>, SourceError> {
-        Ok(None)
+        self.the_run(&entity)?;
+        let text = builds::artifact_text(&path)
+            .ok_or_else(|| protocol(format!("the run has no artifact file {path:?}")))?;
+        Ok(Some(
+            serde_json::json!({ "text": text, "truncated": false }).to_string(),
+        ))
+    }
+}
+
+impl Adapter {
+    /// `Ok` for the fixture's run; a protocol error naming anything else.
+    fn the_run(&self, entity: &str) -> Result<(), SourceError> {
+        if self.is_run(entity) {
+            Ok(())
+        } else {
+            Err(protocol(format!("{entity} is not a run of the fixture")))
+        }
+    }
+
+    /// `Source::download` (1.1.0): the target's bytes into `download-sink`,
+    /// one [`builds::CHUNK`] at a time.
+    #[cfg(not(feature = "v1_0"))]
+    fn download(&self, entity: &str, target: &str) -> Result<bool, SourceError> {
+        use knobas::adapter::download_sink;
+        self.the_run(entity)?;
+        let target: serde_json::Value = serde_json::from_str(target)
+            .map_err(|e| protocol(format!("the download target is not JSON: {e}")))?;
+        let path = target["path"].as_str().unwrap_or_default();
+        let (name, bytes): (String, Box<dyn Iterator<Item = Vec<u8>>>) = match target["kind"]
+            .as_str()
+        {
+            Some("log") => {
+                let text: String = builds::LOG
+                    .iter()
+                    .map(|(_, l, _)| format!("{l}\n"))
+                    .collect();
+                (
+                    "run-42.log".into(),
+                    Box::new(std::iter::once(text.into_bytes())),
+                )
+            }
+            Some("file") => {
+                let text = builds::artifact_text(path)
+                    .ok_or_else(|| protocol(format!("the run has no artifact file {path:?}")))?;
+                let name = path.rsplit('/').next().unwrap_or(path).to_owned();
+                (name, Box::new(std::iter::once(text.as_bytes().to_vec())))
+            }
+            Some("folder" | "all") => {
+                let chunks = self.download_mib * (1 << 20) / builds::CHUNK as u64;
+                let chunk = vec![b'q'; builds::CHUNK];
+                (
+                    "artifacts.zip".into(),
+                    Box::new((0..chunks).map(move |_| chunk.clone())),
+                )
+            }
+            _ => {
+                return Err(protocol(format!(
+                    "the download target {target} is not one the fixture knows"
+                )));
+            }
+        };
+        download_sink::start(&name)?;
+        for chunk in bytes {
+            download_sink::write(&chunk)?;
+        }
+        Ok(true)
+    }
+}
+
+#[cfg(not(feature = "v1_0"))]
+impl exports::knobas::adapter::downloads::Guest for Fixture {
+    fn download(instance: Instance, entity: String, target: String) -> Result<bool, SourceError> {
+        <Adapter as GuestAdapter>::new(instance).download(&entity, &target)
     }
 }
 

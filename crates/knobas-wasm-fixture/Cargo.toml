@@ -28,3 +28,9 @@ wit-bindgen = { version = "=0.62.0", default-features = false, features = ["macr
 # The guest half of `wasi:http` 0.2, for the fixture's one network read
 # (#1203). Pinned to the copy Rust's own std for `wasm32-wasip2` resolves.
 wasip2 = "=1.0.4"
+
+[features]
+# The same fixture built against the frozen 1.0.0 world (`wit-1.0.0/`), with
+# no `downloads`: `just wasm-fixture` builds it too, for the host's hold on
+# 1.0.0 components (#1205).
+v1_0 = []

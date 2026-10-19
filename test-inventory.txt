@@ -3798,3 +3798,9 @@ knobas-wasm-host	test/it	network::a_redirect_to_an_undeclared_host_is_refused
 knobas-wasm-host	test/it	network::a_request_to_an_undeclared_host_is_refused_before_it_leaves
 knobas-wasm-host	test/it	network::basic_auth_reaches_the_instance_and_never_the_component
 knobas-wasm-host	test/it	network::the_secret_is_in_nothing_the_component_receives
+knobas-wasm-host	test/it	reads::a_component_built_against_1_0_0_is_still_hosted
+knobas-wasm-host	test/it	reads::a_download_the_sink_refuses_fails_with_the_sink_s_error
+knobas-wasm-host	test/it	reads::a_large_download_streams_without_the_component_holding_it_whole
+knobas-wasm-host	test/it	reads::a_run_s_log_and_one_artifact_download_through_the_host_s_sink
+knobas-wasm-host	test/it	reads::every_run_and_pipeline_read_answers_across_the_boundary
+knobas-wasm-host	test/it	reads::the_run_s_deferred_sections_carry_the_diff_and_the_tree

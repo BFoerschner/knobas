@@ -1,0 +1,192 @@
+/// The interface an external adapter implements (ADR-0028, issue #1198).
+///
+/// A transcription of the `Source` trait and its `Sink` in
+/// `crates/knobas-source/src/lib.rs`. A knobas release hosts one major
+/// version of this package; a minor version only adds (a new optional read,
+/// a new block type), and every change is a §10.8 entry in
+/// `docs/contract.md`, like any frozen surface.
+///
+/// **How the SPI's types cross.** The types the host branches on are WIT
+/// records and variants here: the instance, a sync item, the connection
+/// info, a write receipt, a run-chain step and the error. Every other SPI type -- the
+/// descriptor, a write op, a source view, the pipeline and run reads --
+/// crosses as its serde JSON (`type json`), exactly as `serde_json` writes
+/// the Rust type in `knobas-source`. That serde form is itself frozen and
+/// round-trip tested there, and it is what spec §3a made the SPI's types for:
+/// plain data that can leave the process without a contract change. Each
+/// such parameter or result names the Rust type whose JSON it is.
+package knobas:adapter@1.0.0;
+
+interface types {
+    /// The serde JSON of the `knobas-source` type its use names.
+    type json = string;
+
+    /// `knobas_source::Cursor`: an opaque incremental-sync position.
+    type cursor = string;
+
+    /// A failure that came from a response, or the adapter's own, with the
+    /// HTTP status it came from when there was one.
+    record fault {
+        status: option<u16>,
+        message: string,
+    }
+
+    /// `SourceError::Moved`: the version the source holds now, and the
+    /// target's text at that version.
+    record moved {
+        base: string,
+        current: string,
+    }
+
+    /// `knobas_source::SourceError`, variant for variant.
+    variant source-error {
+        unauthorized(option<u16>),
+        unreachable(string),
+        unconfirmed(fault),
+        protocol(fault),
+        sink(string),
+        moved(moved),
+    }
+
+    /// `knobas_source::instance::SourceInstance` without its credentials.
+    ///
+    /// The component never sees the secret or the account (ADR-0028): the
+    /// host attaches them to the requests it sends for it.
+    record instance {
+        id: string,
+        kind: string,
+        display-name: string,
+        base-url: string,
+        /// `source_config.config`, the object the descriptor's
+        /// `config_schema` describes.
+        config: json,
+    }
+
+    /// `knobas_source::SyncItem`.
+    record sync-item {
+        /// An `EntityRef` in string form, `<namespace>:<key>`.
+        entity: string,
+        kind: string,
+        title: string,
+        body-text: string,
+        author: option<string>,
+        /// RFC 3339.
+        updated-at: option<string>,
+        /// The raw source record.
+        payload: json,
+        web-url: option<string>,
+        deleted: bool,
+    }
+
+    /// `knobas_source::ConnectionInfo`.
+    record connection-info {
+        account: option<string>,
+        server-version: option<string>,
+        /// RFC 3339.
+        secret-expires-at: option<string>,
+        detail: option<string>,
+        discovered: list<tuple<string, string>>,
+    }
+
+    /// `knobas_source::pipeline::RunChainStep`: a step of a chain and its run.
+    /// A record, not JSON, because the run is a sync item and the Rust type
+    /// has no serde form of its own.
+    record run-chain-step {
+        /// The step's pipeline, an `EntityRef` in string form.
+        pipeline: string,
+        name: string,
+        run: option<sync-item>,
+    }
+
+    /// `knobas_source::WriteReceipt`.
+    record write-receipt {
+        remote-id: option<string>,
+    }
+}
+
+/// Where a syncing adapter hands its items: `knobas_source::Sink`.
+interface sink {
+    use types.{sync-item, source-error};
+
+    /// Accept one item, or fail the sync. An error is the sink's, and the
+    /// adapter returns it from `sync` as it came.
+    item: func(item: sync-item) -> result<_, source-error>;
+}
+
+/// Lines into knobas' own log.
+interface log {
+    enum level {
+        trace,
+        debug,
+        info,
+        warn,
+        error,
+    }
+
+    log: func(level: level, message: string);
+}
+
+/// `knobas_source::Source`, one method per function, in the trait's order.
+interface source {
+    use types.{json, cursor, source-error, instance, sync-item, connection-info, write-receipt, run-chain-step};
+
+    /// One configured source instance. The host makes one for each call, so
+    /// an adapter keeps no state between calls but what its cursor carries.
+    resource adapter {
+        constructor(instance: instance);
+
+        /// `SourceDescriptor` as JSON.
+        descriptor: func() -> json;
+
+        test-connection: func() -> result<connection-info, source-error>;
+
+        /// Push every item changed since `cursor` through `sink.item`, then
+        /// return the new cursor (`none` is a full sync).
+        sync: func(cursor: option<cursor>) -> result<cursor, source-error>;
+
+        /// `op` is a `WriteOp` as JSON.
+        write: func(op: json) -> result<write-receipt, source-error>;
+
+        reachable-transitions: func(entity: string) -> result<list<string>, source-error>;
+
+        /// A `view::SourceView` as JSON, or `none` for a kind this adapter
+        /// draws no view for.
+        view: func(entity: string, section: option<string>) -> result<option<json>, source-error>;
+
+        /// A `pipeline::PipelineSettings` as JSON.
+        pipeline-settings: func(entity: string) -> result<option<json>, source-error>;
+
+        older-runs: func(entity: string, before: string, count: u32) -> result<option<list<sync-item>>, source-error>;
+
+        run-chain: func(run: string) -> result<option<list<run-chain-step>>, source-error>;
+
+        /// A `run::RunLog` as JSON.
+        run-log: func(entity: string, %from: option<u64>, count: u32) -> result<option<json>, source-error>;
+
+        /// A `run::RunTests` as JSON.
+        run-tests: func(entity: string) -> result<option<json>, source-error>;
+
+        /// A list of `run::TestOutcome` as JSON.
+        test-history: func(entity: string, test: string) -> result<option<json>, source-error>;
+
+        /// A list of `run::ArtifactEntry` as JSON.
+        run-artifacts: func(entity: string, path: string) -> result<option<json>, source-error>;
+
+        /// A `run::ArtifactPreview` as JSON.
+        artifact-preview: func(entity: string, path: string) -> result<option<json>, source-error>;
+    }
+}
+
+/// What an external adapter is: it exports `source` and may call `sink` and
+/// `log`. Nothing else is granted beyond WASI with nothing in it (no
+/// directory, no environment, no socket) and `wasi:http` 0.2's outgoing
+/// handler, which the host holds to the hosts the adapter's manifest
+/// declares and attaches the source's credential to (#1203).
+///
+/// `download` is not here yet: its stream is a host-owned stream, which #1205
+/// adds as a minor version.
+world adapter {
+    import sink;
+    import log;
+    export source;
+}

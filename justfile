@@ -620,7 +620,14 @@ fmt:
 # (`rust-toolchain.toml` lists it), so nothing is installed outside the repo's
 # pin. Release, because wasmtime compiles the component again on every load
 # and a smaller one compiles faster; `test` runs this first.
+#
+# Twice: first against the frozen 1.0.0 world (`--features v1_0`, kept beside
+# as `knobas_wasm_fixture_v1_0.wasm`, #1205), for the host's hold on 1.0.0
+# components, then the current one. The second build relinks the fixture
+# alone.
 wasm-fixture:
+    env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet --features v1_0
+    cp target/wasm32-wasip2/release/knobas_wasm_fixture.wasm target/wasm32-wasip2/release/knobas_wasm_fixture_v1_0.wasm
     env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet
 
 # The gate's lint pass. PKGS narrows it to the given cargo package selection
