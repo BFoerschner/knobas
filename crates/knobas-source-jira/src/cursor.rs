@@ -19,14 +19,16 @@
 //! An entry carries both and they do different jobs, which is why neither can
 //! be dropped:
 //!
-//! * **`h`** -- [`crate::fingerprint`] of the raw `/search` record -- is what
+//! * **`h`** -- [`knobas_source::fingerprint`] of the raw `/search` record -- is what
 //!   [`JiraCursor::already_delivered`] matches on. It replaced `u` in that role
 //!   in cursor version 2. `/search` reports `updated` to the *second* while an
 //!   issue changes to the millisecond, so two changes inside one second shared
 //!   a `(key, updated)` pair: with a run in between them, the second change was
 //!   dropped before the sink and lost for ever, because `updated` never moves
-//!   again on its own. Measured on Jira DC 10.3.24; `crate::fingerprint`'s own docs
-//!   carry the numbers and the everyday sequence that reaches it.
+//!   again on its own. Measured on Jira DC 10.3.24 (#345): `GET issue/{key}`
+//!   reports `22:54:59.036` where `/search` reports `22:54:59.000` for the same
+//!   instant, and a comment through knobas followed within the second by a
+//!   reassignment in Jira reaches it, because every landed write syncs.
 //! * **`u`** is what [`JiraCursor::advanced`] filters the set on, so it holds
 //!   the overlap window and nothing more. A fingerprint carries no date, so without
 //!   `u` there would be nothing to bound the set by and it would grow until the
@@ -104,7 +106,7 @@ pub(crate) struct Seen {
     pub k: String,
     /// Its `fields.updated`, which bounds the set to the overlap window.
     pub u: DateTime<Utc>,
-    /// [`crate::fingerprint`] of the raw record -- the identity.
+    /// [`knobas_source::fingerprint`] of the raw record -- the identity.
     pub h: String,
 }
 
@@ -269,7 +271,7 @@ mod tests {
 
     /// One record the way a run reports it: key, `updated`, fingerprint.
     ///
-    /// The fingerprint stands in for [`crate::fingerprint::of`] over that issue's raw
+    /// The fingerprint stands in for [`knobas_source::fingerprint::of`] over that issue's raw
     /// record. Derived from the key alone, so two *different* issues differ and
     /// two reports of the same **unchanged** issue agree -- which is the case
     /// every test here but [`a_record_that_changed_within_one_second_is_not_the_one_already_delivered`]

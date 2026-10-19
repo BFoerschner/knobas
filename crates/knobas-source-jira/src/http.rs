@@ -24,16 +24,21 @@
 //! rather than a JSON document. That reading is handed to `knobas-http` as a
 //! [`knobas_http::BodyMessage`] (ADR-0004) and runs where the body still
 //! exists; it used to be a rewrite of the finished message afterwards, which
-//! could only ever recover what the excerpt had already kept.
+//! could only ever recover what the excerpt had already kept. Also Jira's:
+//! the contract a body of the wrong shape is measured against ([`SHAPE`]); the
+//! excerpt of that body is the transport's (#877, #1313).
 //!
-//! Confining every mention of `knobas-http` to this one file is on purpose: a
-//! change requested from the orchestrator then costs one file to apply, not a
-//! sweep across the crate.
+//! There is no Jira client type. The rest of the crate holds the transport's
+//! [`HttpClient`], re-exported from here, and reaches the wire through
+//! [`get_json`] and [`post_json`], which only name the excerpt and the
+//! once-sent write. Confining every mention of `knobas-http` to this one file
+//! is on purpose: a change requested from the orchestrator then costs one file
+//! to apply, not a sweep across the crate.
 
-use knobas_http::{Auth, CredentialRules, HttpClient, HttpConfig, Method, TokenSpelling};
+use knobas_http::{Auth, BodyExcerpt, CredentialRules, HttpConfig, Method, TokenSpelling};
 use knobas_source::{AuthMethod, SourceError};
 
-pub(crate) use knobas_http::credential;
+pub(crate) use knobas_http::{HttpClient, credential};
 
 /// Which [`Auth`] each configured method means for Jira Data Center, and what
 /// a source that cannot authenticate reads as. The mapping itself, and the
@@ -54,111 +59,86 @@ pub(crate) const CREDENTIAL_RULES: CredentialRules = CredentialRules {
     },
 };
 
-/// One Jira instance's HTTP access.
+/// What a Jira read whose body is not the documented shape says it should have
+/// been, with the body's start beside it (#877): "did not answer with the
+/// shape" says nothing a person can act on without it. The excerpt is the
+/// transport's ([`knobas_http::HttpClient::get_json_with`], #1313).
+pub(crate) const SHAPE: BodyExcerpt = BodyExcerpt {
+    contract: "the Jira REST v2 contract",
+};
+
+/// The client for one configured source.
 ///
-/// A thin wrapper and nothing more: it exists so that the rest of the crate
-/// names Jira paths and Jira parameters, and so the `errorMessages` rewrite
-/// happens in exactly one place.
-#[derive(Debug)]
-pub(crate) struct JiraHttp {
-    client: HttpClient,
+/// # Errors
+///
+/// [`SourceError::Protocol`] if the base URL is not an http(s) URL or the
+/// client cannot be built -- both are configuration failures, and both
+/// surface when the source is saved rather than mid-sync.
+pub(crate) fn client(
+    base_url: &str,
+    cfg: &crate::JiraConfig,
+    auth: Auth,
+) -> Result<HttpClient, SourceError> {
+    HttpClient::new(HttpConfig {
+        base_url: base_url.trim().to_owned(),
+        adapter_kind: crate::ADAPTER_KIND.to_owned(),
+        adapter_version: crate::ADAPTER_VERSION.to_owned(),
+        auth,
+        requests_per_second: cfg.rate_per_sec,
+        burst: cfg.rate_burst,
+        connect_timeout: std::time::Duration::from_secs(cfg.connect_timeout_secs),
+        request_timeout: std::time::Duration::from_secs(cfg.request_timeout_secs),
+        body_message: Some(error_envelope),
+        forbidden: None,
+    })
 }
 
-impl JiraHttp {
-    /// Build the client for one configured source.
-    ///
-    /// # Errors
-    ///
-    /// [`SourceError::Protocol`] if the base URL is not an http(s) URL or the
-    /// client cannot be built -- both are configuration failures, and both
-    /// surface when the source is saved rather than mid-sync.
-    pub(crate) fn new(
-        base_url: &str,
-        cfg: &crate::JiraConfig,
-        auth: Auth,
-    ) -> Result<Self, SourceError> {
-        let client = HttpClient::new(HttpConfig {
-            base_url: base_url.trim().to_owned(),
-            adapter_kind: crate::ADAPTER_KIND.to_owned(),
-            adapter_version: crate::ADAPTER_VERSION.to_owned(),
-            auth,
-            requests_per_second: cfg.rate_per_sec,
-            burst: cfg.rate_burst,
-            connect_timeout: std::time::Duration::from_secs(cfg.connect_timeout_secs),
-            request_timeout: std::time::Duration::from_secs(cfg.request_timeout_secs),
-            body_message: Some(error_envelope),
-            forbidden: None,
-        })?;
-        Ok(Self { client })
-    }
+/// `GET <base>/<path>?<query>`, decoded as `T`, with [`SHAPE`]'s excerpt.
+///
+/// `path` is always one of the endpoints the WADL declares, and `query`
+/// carries only parameters that endpoint declares -- `knobas-mockd` records
+/// anything else as a violation. The values are owned because every one of
+/// them is computed (`startAt`, a rendered JQL string, a joined field list).
+///
+/// # Errors
+///
+/// The [`SourceError`] the failure maps to, with Jira's own words in the
+/// message where it sent any (see [`error_envelope`]).
+pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(
+    http: &HttpClient,
+    path: &str,
+    query: &[(&str, String)],
+) -> Result<T, SourceError> {
+    http.get_json_with(path, query, Some(SHAPE)).await
+}
 
-    /// `GET <base>/<path>?<query>`, decoded as `T`.
-    ///
-    /// `path` is always one of the six endpoints the WADL declares for M1, and
-    /// `query` carries only parameters that endpoint declares -- `knobas-mockd`
-    /// records anything else as a violation.
-    ///
-    /// The query values are owned because every one of them is computed
-    /// (`startAt`, a rendered JQL string, a joined field list); borrowing would
-    /// only move the temporaries to the call sites.
-    ///
-    /// # Errors
-    ///
-    /// The [`SourceError`] the failure maps to, with Jira's own words in the
-    /// message where it sent any (see [`error_envelope`]).
-    pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-        query: &[(&str, String)],
-    ) -> Result<T, SourceError> {
-        let request = self.client.request(Method::GET, path).query(query);
-        let response = self.client.send(request).await?;
-        let body = response.text().await.map_err(|error| {
-            SourceError::protocol(format!("{path}: the answer's body broke off: {error}"))
-        })?;
-        // The body's start rides in the message: "did not answer with the
-        // shape" says nothing a person can act on without it (#877).
-        serde_json::from_str::<T>(&body).map_err(|error| {
-            let start: String = body.chars().take(300).collect();
-            SourceError::protocol(format!(
-                "{path} did not answer with the shape the Jira REST v2 contract documents: \
-                 {error}; it began {start:?}"
-            ))
-        })
-    }
-
-    /// `POST <base>/<path>` with `body` as JSON, keeping the response.
-    ///
-    /// M2's write-back (issue #43). The response is handed back rather than
-    /// decoded here because the three writes answer three different ways: a
-    /// transition is **204 with no body**, a comment is 201 with the created
-    /// comment, and a create is 201 with `{id, key, self}`. A helper that
-    /// insisted on JSON would have to invent a body for the first.
-    ///
-    /// **Sent once, never retried by the transport** (#1122). A comment, a
-    /// create and a worklog are each done again if they arrive twice, and a
-    /// POST that timed out may have landed. A transition is mostly refused
-    /// the second time (the issue has moved and no longer offers it), but not
-    /// on a workflow whose transition loops back to its own status, so it
-    /// goes once too. A failure comes back as the write's error, and the
-    /// write queue decides whether to send it again.
-    ///
-    /// # Errors
-    ///
-    /// The [`SourceError`] the failure maps to, with Jira's own words in the
-    /// message where it sent any (see [`error_envelope`]).
-    pub(crate) async fn post_json(
-        &self,
-        path: &str,
-        body: &serde_json::Value,
-    ) -> Result<knobas_http::Response, SourceError> {
-        let request = self
-            .client
-            .request(Method::POST, path)
-            .json(body)
-            .no_retry();
-        self.client.send(request).await
-    }
+/// `POST <base>/<path>` with `body` as JSON, keeping the response.
+///
+/// M2's write-back (issue #43). The response is handed back rather than
+/// decoded here because the three writes answer three different ways: a
+/// transition is **204 with no body**, a comment is 201 with the created
+/// comment, and a create is 201 with `{id, key, self}`. A helper that
+/// insisted on JSON would have to invent a body for the first.
+///
+/// **Sent once, never retried by the transport** (#1122). A comment, a
+/// create and a worklog are each done again if they arrive twice, and a
+/// POST that timed out may have landed. A transition is mostly refused
+/// the second time (the issue has moved and no longer offers it), but not
+/// on a workflow whose transition loops back to its own status, so it
+/// goes once too. A failure comes back as the write's error, and the
+/// write queue decides whether to send it again.
+///
+/// # Errors
+///
+/// The [`SourceError`] the failure maps to, with Jira's own words in the
+/// message where it sent any (see [`error_envelope`]).
+pub(crate) async fn post_json(
+    http: &HttpClient,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<knobas_http::Response, SourceError> {
+    http.send(http.request(Method::POST, path).json(body).no_retry())
+        .await
 }
 
 /// The sentence inside Jira's error envelope, for `knobas-http` to build the
@@ -236,7 +216,7 @@ mod tests {
         let shown = format!("{:?}", a_credential());
         assert!(!shown.contains(SECRET), "{shown}");
 
-        let http = JiraHttp::new(
+        let http = client(
             "https://jira.tidewater.example",
             &crate::JiraConfig::default(),
             a_credential(),
@@ -331,24 +311,68 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         drop(listener);
-        let http = JiraHttp::new(
+        let http = client(
             &format!("http://127.0.0.1:{port}"),
             &crate::JiraConfig::default(),
             a_credential(),
         )
         .unwrap();
-        let got = http
-            .get_json::<serde_json::Value>("rest/api/2/serverInfo", &[])
+        let got = get_json::<serde_json::Value>(&http, "rest/api/2/serverInfo", &[])
             .await
             .unwrap_err();
         assert!(matches!(got, SourceError::Unreachable(_)), "{got:?}");
+    }
+
+    /// #877's message, word for word now that the transport builds it
+    /// (#1313): a 200 that is not Jira's JSON -- an SSO proxy's login page --
+    /// names the path, the documented contract, the decode error and the
+    /// body's first 300 characters.
+    #[tokio::test]
+    async fn a_body_that_is_not_jiras_shape_names_its_start() {
+        let page = format!("<html>{}</html>", "x".repeat(400));
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let answer = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\
+             Connection: close\r\n\r\n{page}",
+            page.len()
+        );
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            for socket in listener.incoming() {
+                let Ok(mut socket) = socket else { return };
+                let mut buf = [0_u8; 8192];
+                let _ = socket.read(&mut buf);
+                let _ = socket.write_all(answer.as_bytes());
+            }
+        });
+        let http = client(
+            &format!("http://{addr}"),
+            &crate::JiraConfig::default(),
+            a_credential(),
+        )
+        .unwrap();
+
+        let got = get_json::<serde_json::Value>(&http, "rest/api/2/serverInfo", &[])
+            .await
+            .unwrap_err();
+        let start = format!("<html>{}", "x".repeat(294));
+        assert!(
+            matches!(&got, SourceError::Protocol { message, .. }
+            if *message == format!(
+                "rest/api/2/serverInfo did not answer with the shape the Jira REST v2 \
+                 contract documents: expected value at line 1 column 1; it began \
+                 {start:?}"
+            )),
+            "{got:?}"
+        );
     }
 
     /// A base URL the user mistyped must fail when the source is saved, not
     /// mid-sync, and it must name the string it could not read.
     #[test]
     fn a_base_url_that_is_not_a_url_is_refused() {
-        let e = JiraHttp::new(
+        let e = client(
             "jira.example.com",
             &crate::JiraConfig::default(),
             a_credential(),

@@ -2186,3 +2186,42 @@ async fn a_refusal_that_ends_a_full_sync_names_the_repository() {
         sink.0
     );
 }
+
+/// The wiremock records the sync tests serve fingerprint as they did before
+/// #1314 moved the algorithm from this crate into `knobas_source::fingerprint`.
+/// The literals are what Gitea's own copy gave them, run on that copy. A value
+/// that moves here would re-deliver every record on a watermark once after the
+/// upgrade. The pull request's own framing is pinned beside it, in
+/// `fingerprint::tests::a_pull_request_keeps_its_fingerprint`.
+#[test]
+fn fixture_records_keep_their_fingerprints() {
+    use knobas_source::fingerprint::of;
+    assert_eq!(
+        of(&support::repo(
+            "tidewater",
+            "ledger",
+            "2026-08-20T09:00:00Z"
+        )),
+        "3eb927492dea51d3"
+    );
+    assert_eq!(
+        of(&support::issue(
+            142,
+            "SEPA retry",
+            "open",
+            &[],
+            "2026-08-22T10:20:00Z"
+        )),
+        "2ee6d50c1dc29971"
+    );
+    assert_eq!(
+        of(&support::pull(
+            146,
+            "Retry the retry",
+            "",
+            "2026-08-22T15:00:00Z",
+            0
+        )),
+        "eaaed275a3f42593"
+    );
+}

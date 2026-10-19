@@ -25,7 +25,6 @@ mod config;
 mod cursor;
 mod descriptor;
 mod discover;
-mod fingerprint;
 mod http;
 mod jql;
 mod map;

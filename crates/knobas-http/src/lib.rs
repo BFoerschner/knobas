@@ -29,7 +29,9 @@
 //!   [`ForbiddenReading`](classify::ForbiddenReading) (issue #722).
 //! * **One place a failing body is read**: the caller's
 //!   [`BodyMessage`](classify::BodyMessage), consulted inside the attempt loop
-//!   both sends share, where the body still exists.
+//!   both sends share, where the body still exists. A body that arrives but
+//!   is not the shape asked for names its own start when the caller passes a
+//!   [`BodyExcerpt`] to [`HttpClient::get_json_with`] (#877, #1313).
 //! * **One credential mapping** ([`credential`]): an adapter states its
 //!   [`CredentialRules`] and gets the same refusals, in the same order, as
 //!   every other (issue #1310).
@@ -546,6 +548,71 @@ impl HttpClient {
             .await
             .map_err(|error| SourceError::protocol(format!("decoding {path}: {error}")))
     }
+
+    /// GET a JSON document, with the body's start in the message when it is
+    /// not the shape `T` asked for and `excerpt` says so (#877, #1313).
+    ///
+    /// With `excerpt` at `None` this is [`HttpClient::get_json`], message for
+    /// message. With it set, a body that does not decode as `T` reads
+    /// `<path> did not answer with the shape <contract> documents: <serde
+    /// error>; it began "<the first BODY_EXCERPT_CHARS characters>"`, and a
+    /// body that breaks off reads `<path>: the answer's body broke off:
+    /// <error>`. A failing status is [`status_error`]'s either way: its body
+    /// already reaches the message there, read by the caller's
+    /// [`BodyMessage`] where it has one.
+    ///
+    /// `query` is anything [`Request::query`] takes, so a caller whose values
+    /// are computed can hand over owned `String`s.
+    ///
+    /// # Errors
+    ///
+    /// As [`HttpClient::get_json`].
+    pub async fn get_json_with<T, Q>(
+        &self,
+        path: &str,
+        query: &Q,
+        excerpt: Option<BodyExcerpt>,
+    ) -> Result<T, SourceError>
+    where
+        T: serde::de::DeserializeOwned,
+        Q: serde::Serialize + ?Sized,
+    {
+        let response = self
+            .send(self.request(Method::GET, path).query(query))
+            .await?;
+        let Some(BodyExcerpt { contract }) = excerpt else {
+            return response
+                .json::<T>()
+                .await
+                .map_err(|error| SourceError::protocol(format!("decoding {path}: {error}")));
+        };
+        let body = response.text().await.map_err(|error| {
+            SourceError::protocol(format!("{path}: the answer's body broke off: {error}"))
+        })?;
+        serde_json::from_str::<T>(&body).map_err(|error| {
+            let start: String = body.chars().take(BODY_EXCERPT_CHARS).collect();
+            SourceError::protocol(format!(
+                "{path} did not answer with the shape {contract} documents: {error}; it began \
+                 {start:?}"
+            ))
+        })
+    }
+}
+
+/// How many characters of a body [`HttpClient::get_json_with`] quotes when it
+/// is not the shape asked for: Jira's bound since #877.
+///
+/// Not [`classify::BODY_EXCERPT`], which bounds a *failing status's* body, in
+/// bytes. Each keeps the bound its message had before it moved here.
+pub const BODY_EXCERPT_CHARS: usize = 300;
+
+/// The option that puts a body's start into [`HttpClient::get_json_with`]'s
+/// message when the body is not the shape asked for (#877, #1313).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BodyExcerpt {
+    /// Whose documentation the shape is, read into the message as "the shape
+    /// `<contract>` documents", e.g. `"the Jira REST v2 contract"`.
+    pub contract: &'static str,
 }
 
 /// What one attempt's timeout covers.

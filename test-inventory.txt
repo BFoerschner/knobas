@@ -1767,6 +1767,7 @@ knobas-http	lib/knobas_http	retry::tests::a_broken_request_or_a_broken_server_is
 knobas-http	lib/knobas_http	retry::tests::a_busy_server_is_tried_again
 knobas-http	lib/knobas_http	retry::tests::the_delay_doubles_and_never_wraps
 knobas-http	test/transport	a_bad_base_url_is_refused_up_front
+knobas-http	test/transport	a_body_that_is_not_the_shape_asked_for_names_its_start_when_asked
 knobas-http	test/transport	a_configured_method_maps_to_one_credential_or_one_refusal
 knobas-http	test/transport	a_deterministic_failure_is_asked_once
 knobas-http	test/transport	a_dribbled_body_outlasts_the_request_timeout
@@ -1791,6 +1792,7 @@ knobas-http	test/transport	each_auth_variant_has_its_own_wire_spelling
 knobas-http	test/transport	every_attempt_waits_for_the_rate_limiter
 knobas-http	test/transport	retry_after_is_waited_out_before_the_retry
 knobas-http	test/transport	the_callers_reading_of_a_failing_body_reaches_the_message
+knobas-http	test/transport	the_excerpt_leaves_a_failing_status_and_a_good_body_alone
 knobas-mockd	lib/knobas_mockd	tc_fields::tests::an_unbalanced_expression_is_refused
 knobas-mockd	lib/knobas_mockd	tc_fields::tests::an_unknown_name_is_reported_by_name
 knobas-mockd	lib/knobas_mockd	tc_fields::tests::long_is_everything_and_the_other_presets_are_refused
@@ -2308,6 +2310,13 @@ knobas-source	lib/knobas_source	docs::tests::indexed_text_reads_back_its_section
 knobas-source	lib/knobas_source	docs::tests::text_with_no_marks_is_one_lead
 knobas-source	lib/knobas_source	docs::tests::the_fill_in_pass_reaches_inlines_inside_lists_tables_and_panels
 knobas-source	lib/knobas_source	docs::tests::the_marks_are_not_whitespace_so_a_tidy_pass_keeps_them
+knobas-source	lib/knobas_source	fingerprint::tests::a_boundary_cannot_be_forged_by_the_content_around_it
+knobas-source	lib/knobas_source	fingerprint::tests::a_changed_field_changes_the_fingerprint_even_with_updated_untouched
+knobas-source	lib/knobas_source	fingerprint::tests::an_absent_field_and_an_empty_one_are_different_records
+knobas-source	lib/knobas_source	fingerprint::tests::every_fixture_record_keeps_the_fingerprint_it_had
+knobas-source	lib/knobas_source	fingerprint::tests::key_order_cannot_reach_the_fingerprint_however_the_map_is_built
+knobas-source	lib/knobas_source	fingerprint::tests::the_same_record_fingerprints_the_same_whatever_order_its_keys_arrived_in
+knobas-source	lib/knobas_source	fingerprint::tests::the_type_is_part_of_the_record
 knobas-source	lib/knobas_source	instance::tests::accepts_the_ids_the_contract_names
 knobas-source	lib/knobas_source	instance::tests::debug_redacts_the_secret
 knobas-source	lib/knobas_source	instance::tests::rejects_everything_else
@@ -2565,12 +2574,9 @@ knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::an_unusable_cursor_me
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::empty_fields_are_omitted
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::every_watermark_survives_the_round_trip
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::serialisation_is_stable
-knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_boundary_cannot_be_forged_by_the_content_around_it
-knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_known_record_keeps_its_fingerprint
-knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_merge_inside_the_second_changes_the_fingerprint
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_pull_request_is_fingerprinted_without_the_repositories_it_embeds
+knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_pull_request_keeps_its_fingerprint
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::an_embedded_user_signing_in_does_not_move_the_fingerprint
-knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::key_order_does_not_reach_the_fingerprint
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::a_branch_named_like_a_sha_is_still_a_branch
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::an_issue_is_never_read_as_a_pull_request
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::branch_names_may_contain_the_separators
@@ -2698,6 +2704,7 @@ knobas-source-gitea	test/it	sync::branch_listings_are_paged
 knobas-source-gitea	test/it	sync::commits_are_not_re_walked_while_the_branch_head_stands_still
 knobas-source-gitea	test/it	sync::discussion_can_be_left_out_of_the_index
 knobas-source-gitea	test/it	sync::every_repository_refusing_us_raises
+knobas-source-gitea	test/it	sync::fixture_records_keep_their_fingerprints
 knobas-source-gitea	test/it	sync::teams_gitea_will_not_list_name_none_and_the_run_goes_on
 knobas-source-gitea	test/it	sync::the_commit_budget_bounds_the_mirror
 knobas-source-gitea	test/it	sync::the_owner_filter_ignores_case
@@ -2963,14 +2970,9 @@ knobas-source-jira	lib/knobas_source_jira	discover::tests::the_name_fallback_nev
 knobas-source-jira	lib/knobas_source_jira	discover::tests::the_plugin_key_beats_the_display_name
 knobas-source-jira	lib/knobas_source_jira	discover::tests::the_sprint_field_is_the_one_with_the_greenhopper_key
 knobas-source-jira	lib/knobas_source_jira	discover::tests::the_sprint_name_fallback_takes_only_a_custom_field_with_no_plugin_key
-knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::a_boundary_cannot_be_forged_by_the_content_around_it
-knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::a_changed_field_changes_the_fingerprint_even_with_updated_untouched
-knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::an_absent_field_and_an_empty_one_are_different_records
-knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::key_order_cannot_reach_the_fingerprint_however_the_map_is_built
-knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::the_same_record_fingerprints_the_same_whatever_order_its_keys_arrived_in
-knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::the_type_is_part_of_the_record
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_base_url_that_is_not_a_url_is_refused
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_body_that_is_not_jiras_envelope_is_read_as_nothing
+knobas-source-jira	lib/knobas_source_jira	http::tests::a_body_that_is_not_jiras_shape_names_its_start
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_refusal_keeps_its_class_whatever_the_body_says
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_refused_connection_is_unreachable
 knobas-source-jira	lib/knobas_source_jira	http::tests::debug_never_prints_the_secret
@@ -3028,6 +3030,7 @@ knobas-source-jira	lib/knobas_source_jira	sync::tests::an_unreadable_cursor_fall
 knobas-source-jira	lib/knobas_source_jira	sync::tests::completes_a_truncated_comment_container
 knobas-source-jira	lib/knobas_source_jira	sync::tests::completion_pages_the_comment_endpoint_too
 knobas-source-jira	lib/knobas_source_jira	sync::tests::fetches_comments_when_the_container_is_absent
+knobas-source-jira	lib/knobas_source_jira	sync::tests::golden_records_keep_their_fingerprints
 knobas-source-jira	lib/knobas_source_jira	sync::tests::leaves_a_complete_container_alone
 knobas-source-jira	lib/knobas_source_jira	sync::tests::one_new_issue_then_an_idle_poll_settles
 knobas-source-jira	lib/knobas_source_jira	sync::tests::pages_with_start_at_until_the_total_is_reached

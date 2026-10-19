@@ -68,7 +68,7 @@ pub(crate) struct RepoCursor {
     /// The `updated_at` the repository entity was last emitted with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo_updated_at: Option<DateTime<Utc>>,
-    /// [`crate::fingerprint`] of the repository record last emitted (#764):
+    /// [`knobas_source::fingerprint`] of the repository record last emitted (#764):
     /// an edit inside the second the previous run read it leaves
     /// `repo_updated_at` where it was, and this is what still sees it.
     /// Absent in a cursor from before #764, which re-emits the repository
@@ -79,7 +79,7 @@ pub(crate) struct RepoCursor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pulls_updated_to: Option<DateTime<Utc>>,
     /// The pull requests sitting exactly on that instant, already delivered:
-    /// number -> [`crate::fingerprint`] of the record as delivered.
+    /// number -> [`crate::fingerprint::of_pull`] of the record as delivered.
     ///
     /// Gitea's timestamps have one-second resolution, so a strict `>` boundary
     /// would drop a pull request updated in the same second as the newest one.
