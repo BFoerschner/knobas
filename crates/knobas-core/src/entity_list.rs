@@ -126,13 +126,11 @@ pub fn entity_row(row: &sqlx::postgres::PgRow) -> Result<EntityRow, sqlx::Error>
 /// Both lists are *unfiltered when empty*, which is why they are bound as
 /// `NULL` rather than as an empty array: `= any('{}')` matches nothing, and a
 /// room whose filter said "no sources in particular" would come back empty.
-///
-/// Deserialize only: a filter is something the frontend *sends*. Its
-/// TypeScript is generated from this struct (#1326), so a field added here is
-/// a field the shell's type has; the `Serialize` behind `test-util` that let
-/// the hand-written mirror's suite round-trip it went with that suite.
-///
 /// Do not "helpfully" send every known id instead of an empty list.
+///
+/// Deserialize only: a filter is something the frontend *sends*, and its
+/// TypeScript is generated from this struct (#1326), so a field added here is
+/// a field the shell's type has without a round trip to prove it.
 #[derive(Debug, Clone, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct EntityFilter {
