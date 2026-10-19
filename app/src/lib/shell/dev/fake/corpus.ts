@@ -367,6 +367,14 @@ export function mirrorRow(entry: (typeof CORPUS)[number]) {
  * in.
  */
 function miniBoard(args: Record<string, unknown>) {
+  // Asked for a role, the board is its fillers' (#1299), as the command's:
+  // a role nobody fills is an empty board, never every source's.
+  const role = args["role"];
+  if (typeof role === "string") {
+    const fillers = fakeRoleScope(role).sources;
+    if (fillers.length === 0) return { columns: [], sources: [], lanes: [], more_lanes: 0 };
+    return miniBoard({ ...args, role: null, sources: fillers });
+  }
   const perColumn = (args["perColumn"] as number | null | undefined) ?? null;
   const lanes = (args["lanes"] as LaneField | null | undefined) ?? null;
   // A Jira view's board (#877): the whole board under the same words, cut

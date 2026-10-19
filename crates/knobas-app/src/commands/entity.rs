@@ -5273,6 +5273,41 @@ mod tests {
         );
     }
 
+    /// `mini_board` takes a role and no source list (#1299), and `entity.ts`
+    /// sends exactly that: a `sources` left on the mirror would be dropped by
+    /// Tauri unread, and the board would quietly answer every source. Read
+    /// off both sources, as the saved-view test above reads them.
+    #[test]
+    fn mini_board_takes_the_role_the_mirror_sends() {
+        let own = include_str!("entity.rs");
+        let signature = own
+            .split_once(concat!("pub async fn ", "mini_board(")) // split, or it finds this line
+            .and_then(|(_, rest)| rest.split_once(") ->"))
+            .map(|(arguments, _)| arguments)
+            .expect("mini_board's signature");
+        assert!(
+            signature.contains("role: Option<String>,"),
+            "mini_board takes no `role`: {signature}"
+        );
+        assert!(
+            !signature.contains("sources"),
+            "mini_board still takes `sources`: {signature}"
+        );
+        let sent = MIRROR
+            .split_once("invoke<MiniBoard>(\"mini_board\", {")
+            .and_then(|(_, rest)| rest.split_once("});"))
+            .map(|(arguments, _)| arguments)
+            .expect("entity.ts invokes mini_board");
+        assert!(
+            sent.contains("role: "),
+            "entity.ts sends mini_board no `role`: {sent}"
+        );
+        assert!(
+            !sent.contains("sources"),
+            "entity.ts still sends mini_board `sources`: {sent}"
+        );
+    }
+
     /// §3a, as a resolution rather than as a claim.
     ///
     /// The whole promise is *"a new source's items get grouped, chipped and
@@ -5672,12 +5707,14 @@ fn announce_context<R: tauri::Runtime>(
 
 /// The Tickets tile's mini board (ADR-0009, spec #175).
 ///
-/// Scoped like every other tile in a room, by the same two dimensions the
-/// switcher's rooms carry: `ctx_id` is a stored room's context, `sources` a
-/// derived room's source list -- empty for *All work* -- and exactly one of
-/// them ever narrows. The grouping, the column order and the two payload reads
-/// all live in [`knobas_core::mini_board`]; there is nothing for this seam to
-/// add, so it adds nothing, the same as [`context_members`].
+/// `role` (#1299, ADR-0029 as amended on 2026-10-19) narrows the board to
+/// the sources that fill that role (`sources::crud::fillers`), read per call:
+/// the Tickets page asks for the ticket system's. Its columns and counts are
+/// then the fillers' alone; a role nobody fills is an empty board, read.
+/// Omitted, every source's tickets are on it. `ctx_id` is a stored room's
+/// context and `project` a project key; every narrowing given intersects.
+/// The grouping, the column order and the two payload reads all live in
+/// [`knobas_core::mini_board`]; this seam adds only the role's fillers.
 ///
 /// # Errors
 ///
@@ -5712,7 +5749,7 @@ fn announce_context<R: tauri::Runtime>(
 pub async fn mini_board(
     lifecycle: State<'_, Lifecycle>,
     ctx_id: Option<String>,
-    sources: Vec<String>,
+    role: Option<String>,
     project: Option<String>,
     per_column: Option<u32>,
     query: Option<String>,
@@ -5732,7 +5769,7 @@ pub async fn mini_board(
         &pool,
         Room {
             ctx_id: ctx_id.as_deref(),
-            sources: &sources,
+            role: role.as_deref(),
             project: project.as_deref(),
         },
         per_column,
@@ -5742,11 +5779,13 @@ pub async fn mini_board(
     .await
 }
 
-/// A room's three dimensions, as [`mini_board`] takes them.
+/// A board's three dimensions, as [`mini_board`] takes them.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Room<'a> {
     pub ctx_id: Option<&'a str>,
-    pub sources: &'a [String],
+    /// The role whose fillers the board is read over (#1299); `None` reads
+    /// every source.
+    pub role: Option<&'a str>,
     pub project: Option<&'a str>,
 }
 
@@ -5761,7 +5800,7 @@ pub struct Room<'a> {
 pub async fn mini_board_inner(
     pool: &PgPool,
     ctx_id: Option<&str>,
-    sources: &[String],
+    role: Option<&str>,
     project: Option<&str>,
     per_column: Option<u32>,
     query: Option<&str>,
@@ -5770,7 +5809,7 @@ pub async fn mini_board_inner(
         pool,
         Room {
             ctx_id,
-            sources,
+            role,
             project,
         },
         per_column,
@@ -5794,9 +5833,31 @@ pub async fn mini_board_laned(
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let Room {
         ctx_id,
-        sources,
+        role,
         project,
     } = room;
+    // The role's fillers (#1299). The core reads an empty source list as
+    // every source, so a role nobody fills answers here, with nothing on it.
+    let sources = match role {
+        Some(role) => {
+            let fillers = crate::sources::crud::fillers(
+                pool,
+                &crate::sources::Registry::builtin(),
+                role,
+            )
+            .await?;
+            if fillers.is_empty() {
+                return Ok(knobas_core::mini_board::MiniBoard {
+                    columns: Vec::new(),
+                    sources: Vec::new(),
+                    lanes: Vec::new(),
+                    more_lanes: 0,
+                });
+            }
+            fillers
+        }
+        None => Vec::new(),
+    };
     let declarations = declared_paths(pool).await?;
     let only = match query.map(str::trim).filter(|query| !query.is_empty()) {
         Some(query) => {
@@ -5814,7 +5875,7 @@ pub async fn mini_board_laned(
         pool,
         knobas_core::mini_board::Scope {
             ctx_id,
-            sources,
+            sources: &sources,
             project,
             only: only.as_deref(),
             identity: &identity,

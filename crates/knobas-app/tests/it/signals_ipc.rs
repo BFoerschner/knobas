@@ -153,7 +153,7 @@ async fn link(pool: &sqlx::PgPool, from: &str, to: &str, relation: &str, confirm
 }
 
 async fn cards(pool: &sqlx::PgPool, query: &str) -> Vec<MiniBoardCard> {
-    let board = mini_board_inner(pool, None, &[], None, None, Some(query))
+    let board = mini_board_inner(pool, None, None, None, None, Some(query))
         .await
         .unwrap();
     let mut cards: Vec<MiniBoardCard> = board.columns.into_iter().flat_map(|c| c.cards).collect();

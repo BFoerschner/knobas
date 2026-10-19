@@ -1290,7 +1290,8 @@ async fn a_gitea_issue_is_on_the_tickets_board_beside_a_jira_ticket() {
     sync(&state, GITEA).await;
 
     // What Tickets reads: the sources whose claims name the ticket system,
-    // and whose records filled it (#1199).
+    // and whose records filled it (#1199), which the board answers for the
+    // role (#1299).
     let claimers: Vec<String> =
         knobas_app::sources::crud::list(&state.pool, state.registry.as_ref())
             .await
@@ -1307,7 +1308,7 @@ async fn a_gitea_issue_is_on_the_tickets_board_beside_a_jira_ticket() {
     let board = knobas_app::commands::entity::mini_board_inner(
         &state.pool,
         None,
-        &claimers,
+        Some(knobas_source::role::TICKET_SYSTEM),
         None,
         Some(500),
         None,
