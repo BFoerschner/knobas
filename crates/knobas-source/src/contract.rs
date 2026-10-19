@@ -628,6 +628,17 @@ async fn check_views(s: &dyn crate::Source, items: &[crate::SyncItem]) {
 /// mutation sweep cannot see it; `accepts_an_adapter_that_answers_the_read`
 /// pins it with an adapter whose read panics if reached.
 ///
+/// **A read-only ticket system refuses too** (#1225). The ticket-system
+/// minimum requires the `reachable_transitions` read and leaves the
+/// `transition` write optional (ADR-0029), so a ticket system without the
+/// write claims the read and answers it with this refusal: a source that
+/// cannot move a ticket has no moves to offer, and the shell draws *Move to
+/// …* absent under ADR-0020's rule. The claim is the read's place in the
+/// role's interface; the refusal is the answer a source without the write
+/// gives. `accepts_a_read_only_ticket_system_that_refuses_its_transitions_read`
+/// and `rejects_a_read_only_ticket_system_that_answers_its_transitions_read`
+/// pin the agreement.
+///
 /// The refusal must name the adapter because a message that did not would
 /// leave a reader with "protocol error" and no way to tell which of a
 /// four-source room said it -- the same argument clause 5's "it must say which
@@ -641,7 +652,8 @@ async fn check_reachable_transitions(s: &dyn crate::Source, d: &crate::SourceDes
     let Err(crate::SourceError::Protocol { message, .. }) = &refused else {
         panic!(
             "an adapter that does not declare the \"transition\" write op has no workflow to \
-             read, so reachable_transitions must be refused with SourceError::Protocol, got \
+             read, so reachable_transitions must be refused with SourceError::Protocol (a ticket \
+             system that does not declare it claims the read and refuses it: #1225), got \
              {refused:?}"
         );
     };
@@ -837,6 +849,9 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         /// A whole number: an estimate in seconds (#816), a comment count
         /// (#894), a page's place among its siblings (#953).
         Integer,
+        /// Any JSON number: a monitor's response time in milliseconds
+        /// (#1224), which Uptime Kuma reports with a fraction.
+        Number,
         /// An ISO 8601 instant, basic or extended: when a run started or
         /// finished (#848), as `parse_instant` reads one.
         Instant,
@@ -853,6 +868,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 Wanted::Integer => value
                     .as_i64()
                     .is_some_and(|n| n.unsigned_abs() < 1_000_000_000_000_000_000),
+                Wanted::Number => value.is_number(),
                 Wanted::Instant => value
                     .as_str()
                     .is_some_and(|t| knobas_core::payload::parse_instant(t).is_some()),
@@ -865,6 +881,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 Wanted::Flag => "boolean",
                 Wanted::List => "array",
                 Wanted::Integer => "whole number",
+                Wanted::Number => "number",
                 Wanted::Instant => "ISO 8601 instant",
             }
         }
@@ -910,7 +927,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 29] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 31] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -940,6 +957,8 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::MONITOR_TYPE, &paths.monitor_type, Wanted::Text),
             (field::OPENED, &paths.opened, Wanted::Instant),
             (field::MERGED_AT, &paths.merged_at, Wanted::Instant),
+            (field::RESPONSE_TIME, &paths.response_time, Wanted::Number),
+            (field::BASE, &paths.base, Wanted::Text),
         ];
         // The list fields: who a review is asked of, the commits a build ran
         // on (#710), a ticket's labels and its sprints' states (#811), a
@@ -1476,6 +1495,12 @@ mod tests {
         /// Declares the agent a run ran on at a key its records do not have
         /// (`agnt`, #1004).
         AgentAtAMissingKey,
+        /// Declares a response time (#1224) at the ticket's `key`, a string:
+        /// a reading must be a number.
+        ResponseTimeThatIsNoNumber,
+        /// Declares the branch a pull request is opened into (#1227) at a
+        /// key its records do not have (`bse`).
+        BaseAtAMissingKey,
         /// Declares what a run is doing now at a key its records do not
         /// have (`stage`), on records with no `started`: runs not in flight,
         /// so the absent key is the source saying nothing (#1004).
@@ -1491,8 +1516,13 @@ mod tests {
         /// Names an address to clone from, and claims no code host (#1197).
         ClonesWithoutACodeHostClaim,
         /// Claims the ticket-system role over tickets that declare every
-        /// path it needs, and the read: conforming (#1193).
+        /// path it needs, and the read: conforming (#1193). It declares no
+        /// `transition`, so it is a read-only ticket system and answers the
+        /// read it claims with a refusal by name (#1225).
         ClaimsTicketSystem,
+        /// The same read-only ticket system, answering the transitions read
+        /// with a list of moves it cannot make (#1225).
+        ClaimsTicketSystemAndAnswersTheTransitionRead,
         /// The same claim over tickets that declare no priority (#1193).
         ClaimsTicketSystemWithoutPriority,
         /// Claims CI over a pipeline and a run kind declaring their paths,
@@ -1587,6 +1617,7 @@ mod tests {
                             vec![RoleClaim::new(CODE_HOST, [])]
                         }
                         Behavior::ClaimsTicketSystem
+                        | Behavior::ClaimsTicketSystemAndAnswersTheTransitionRead
                         | Behavior::ClaimsTicketSystemWithoutPriority => {
                             vec![RoleClaim::new(TICKET_SYSTEM, ["reachable_transitions"])]
                         }
@@ -1849,6 +1880,14 @@ mod tests {
                             }],
                             ..good
                         }],
+                        Behavior::ResponseTimeThatIsNoNumber => vec![KindPaths {
+                            response_time: vec![PayloadPath::of(["key"])],
+                            ..good
+                        }],
+                        Behavior::BaseAtAMissingKey => vec![KindPaths {
+                            base: vec![PayloadPath::of(["bse"])],
+                            ..good
+                        }],
                         Behavior::AgentAtAMissingKey => vec![KindPaths {
                             agent: vec![PayloadPath::of(["agnt"])],
                             ..good
@@ -1865,7 +1904,10 @@ mod tests {
                             finished: vec![PayloadPath::of(["finished"])],
                             ..good
                         }],
-                        Behavior::ClaimsTicketSystem => vec![ticket_system(true)],
+                        Behavior::ClaimsTicketSystem
+                        | Behavior::ClaimsTicketSystemAndAnswersTheTransitionRead => {
+                            vec![ticket_system(true)]
+                        }
                         Behavior::ClaimsTicketSystemWithoutPriority => vec![ticket_system(false)],
                         Behavior::ClaimsCi | Behavior::ClaimsCiWithoutRunLog => {
                             use knobas_core::payload::Frame;
@@ -2119,7 +2161,10 @@ mod tests {
                 Behavior::DeclaresTransition => {
                     unreachable!("battery must not read the workflow of an adapter that has one")
                 }
-                Behavior::AnswersTheTransitionRead => Ok(vec!["In Progress".into()]),
+                Behavior::AnswersTheTransitionRead
+                | Behavior::ClaimsTicketSystemAndAnswersTheTransitionRead => {
+                    Ok(vec!["In Progress".into()])
+                }
                 Behavior::RefusesTheReadAnonymously => {
                     Err(SourceError::protocol("no workflow here"))
                 }
@@ -2581,6 +2626,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_a_response_time_that_is_no_number() {
+        rejects(
+            Behavior::ResponseTimeThatIsNoNumber,
+            "declares response_time of kind \"ticket\" at [\"key\"], which leads to a string",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_base_at_a_key_no_record_has() {
+        rejects(
+            Behavior::BaseAtAMissingKey,
+            "declares base of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    #[tokio::test]
     async fn rejects_a_started_time_that_is_no_instant() {
         rejects(
             Behavior::StartedThatIsNoInstant,
@@ -2740,6 +2803,25 @@ mod tests {
         rejects(
             Behavior::RefusesTheReadAnonymously,
             "must name the adapter that has no workflow",
+        )
+        .await;
+    }
+
+    /// The ticket-system minimum and clause 8 agree (#1225): a ticket system
+    /// that declares no `transition` claims the required read and answers it
+    /// with a refusal by name, and one answering it with moves is refused.
+    #[tokio::test]
+    async fn accepts_a_read_only_ticket_system_that_refuses_its_transitions_read() {
+        run(Behavior::ClaimsTicketSystem)
+            .await
+            .expect("a read-only ticket system refuses the read it claims");
+    }
+
+    #[tokio::test]
+    async fn rejects_a_read_only_ticket_system_that_answers_its_transitions_read() {
+        rejects(
+            Behavior::ClaimsTicketSystemAndAnswersTheTransitionRead,
+            "a ticket system that does not declare it claims the read and refuses it",
         )
         .await;
     }

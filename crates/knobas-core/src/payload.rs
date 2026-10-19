@@ -458,6 +458,21 @@ pub struct KindPaths {
     /// candidate for it.
     #[serde(default)]
     pub merged_at: Vec<PayloadPath>,
+    /// How long a monitor's last check took, **in milliseconds** (#1224):
+    /// Uptime Kuma's `response_time_ms`, as its `map` writes it. A JSON
+    /// number, read by [`resolve_number`]; what knobas' samples are taken
+    /// from beside the state, and what the Monitors tab draws. Milliseconds
+    /// and nothing else, as [`estimate`](Self::estimate) is seconds. Empty for
+    /// every kind that is not a monitor, and a miss is a check with no
+    /// reading.
+    #[serde(default)]
+    pub response_time: Vec<PayloadPath>,
+    /// The branch a pull request is opened **into**, by the name the
+    /// branch's own record is titled with, as [`head`](Self::head) is the one
+    /// it is opened from (#1227): Gitea's `base.ref`. Empty for every kind
+    /// that is not a proposal.
+    #[serde(default)]
+    pub base: Vec<PayloadPath>,
 }
 
 /// How a run was started, in the shell's words (#961).
@@ -641,6 +656,8 @@ pub mod field {
     pub const MONITOR_TYPE: &str = "monitor_type";
     pub const OPENED: &str = "opened";
     pub const MERGED_AT: &str = "merged_at";
+    pub const RESPONSE_TIME: &str = "response_time";
+    pub const BASE: &str = "base";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -687,6 +704,8 @@ pub mod field {
         MONITOR_TYPE,
         OPENED,
         MERGED_AT,
+        RESPONSE_TIME,
+        BASE,
     ];
 }
 
@@ -922,6 +941,19 @@ pub fn resolve_string(payload: &serde_json::Value, candidates: &[PayloadPath]) -
     candidates.iter().find_map(|path| {
         let text = at(payload, path)?.as_str()?.trim();
         (!text.is_empty()).then(|| text.to_owned())
+    })
+}
+
+/// The first candidate that lands on a usable JSON **number** (#1224): finite
+/// and not negative, so Uptime Kuma's `-1` for a check that did not answer is
+/// a miss and never a reading. A string spelling a number (`"13"`) is passed
+/// over, as [`resolve_flag`] passes over the word `"true"`: reading it would be
+/// knobas deciding what a word means.
+#[must_use]
+pub fn resolve_number(payload: &serde_json::Value, candidates: &[PayloadPath]) -> Option<f64> {
+    candidates.iter().find_map(|path| {
+        let n = at(payload, path)?.as_f64()?;
+        (n.is_finite() && n >= 0.0).then_some(n)
     })
 }
 
@@ -1705,6 +1737,27 @@ mod tests {
         expected.push("system_name");
         expected.sort_unstable();
         assert_eq!(keys, expected);
+    }
+
+    /// A monitor's response time (#1224) is the first candidate that lands on
+    /// a finite JSON number; a string, a null, an absent key or a negative
+    /// reading is a miss, and the next candidate is tried.
+    #[test]
+    fn a_number_is_the_first_candidate_that_lands_on_one() {
+        let at = |key: &str| PayloadPath::of([key]);
+        let paths = [at("ms"), at("fallback")];
+        let of = |v: serde_json::Value| resolve_number(&v, &paths);
+        assert_eq!(of(serde_json::json!({ "ms": 13.5 })), Some(13.5));
+        assert_eq!(of(serde_json::json!({ "ms": 0 })), Some(0.0));
+        assert_eq!(
+            of(serde_json::json!({ "ms": "13", "fallback": 7 })),
+            Some(7.0),
+            "a string is passed over for the next candidate"
+        );
+        assert_eq!(of(serde_json::json!({ "ms": null })), None);
+        assert_eq!(of(serde_json::json!({ "ms": -1 })), None, "Kuma's sentinel");
+        assert_eq!(of(serde_json::json!({})), None);
+        assert_eq!(resolve_number(&serde_json::json!({ "ms": 13 }), &[]), None);
     }
 
     /// A kind's place in the Builds frame (#848) travels as a lowercase word,

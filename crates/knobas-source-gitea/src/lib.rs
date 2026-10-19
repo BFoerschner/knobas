@@ -400,6 +400,9 @@ fn payload_paths() -> Vec<KindPaths> {
             parent: repo(&["base", "repo"]),
             state: pr_state(),
             head: vec![PayloadPath::of(["head", "ref"])],
+            // The branch it is opened into (#1227), as `head` names the one it
+            // is opened from: what the code-host minimum requires of both.
+            base: vec![PayloadPath::of(["base", "ref"])],
             commit: vec![PayloadPath::of(["head", "sha"])],
             head_repo: vec![PayloadPath::of(["head", "repo", "full_name"])],
             opened: vec![PayloadPath::of(["created_at"])],
@@ -660,6 +663,19 @@ mod tests {
         assert_eq!(declared(KIND_COMMIT), repo(&["repository"]));
         assert_eq!(declared(KIND_PR), repo(&["base", "repo"]));
         assert!(declared(KIND_REPO).is_empty());
+    }
+
+    /// A pull request names both its ends by branch name (#1227): the head it
+    /// is opened from and the base it is opened into, Gitea's own `ref`s.
+    #[test]
+    fn a_pull_request_declares_its_head_and_base_branch() {
+        let pr = descriptor_template()
+            .payload_paths
+            .into_iter()
+            .find(|paths| paths.kind == KIND_PR)
+            .expect("a pull request declares its paths");
+        assert_eq!(pr.head, vec![PayloadPath::of(["head", "ref"])]);
+        assert_eq!(pr.base, vec![PayloadPath::of(["base", "ref"])]);
     }
 
     /// The whole descriptor crosses the IPC bridge as plain data (spec §3a).
