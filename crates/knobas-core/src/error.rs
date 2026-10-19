@@ -37,6 +37,12 @@ pub enum CoreError {
     #[error("one of the link's endpoints has no entity")]
     EndpointMissing,
 
+    /// A read was asked for something it cannot answer as asked: the
+    /// request is wrong, not the data. The entity list's tile order with the
+    /// withdrawn, or a window too wide to bind (#1317).
+    #[error("{0}")]
+    Invalid(String),
+
     /// Any other database failure.
     ///
     /// `#[source]`, not `#[from]`: the conversion is hand-written below so it

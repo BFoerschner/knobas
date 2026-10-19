@@ -3,6 +3,12 @@ name = "knobas-core"
 edition.workspace = true
 version.workspace = true
 
+[features]
+# Derives `Serialize` on `entity_list::EntityFilter` and `EntityOrder`, the
+# inputs `knobas-app`'s mirror test round-trips (#1317). Turned on by that
+# crate's `test-util`; off in every production build.
+test-util = []
+
 [dependencies]
 chrono.workspace = true
 # The SPI's shared types, re-exported as `payload`, `entity` and `tone`

@@ -12,7 +12,7 @@ import type { BuildParameter, QueuedWrite, ReviewSide, Trigger, WriteOpPayload, 
 import type { DayWindow } from "./time";
 
 /**
- * One line in a room — `knobas_app::commands::entity::EntityRow`.
+ * One line in a room — `knobas_core::entity_list::EntityRow`.
  *
  * Deliberately not the whole mirror row: `body_text` and `payload` belong to
  * the detail view, and a tile that fetched them would pull the corpus into the

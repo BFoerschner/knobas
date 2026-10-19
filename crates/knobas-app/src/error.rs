@@ -128,7 +128,9 @@ impl From<knobas_core::CoreError> for IpcError {
             knobas_core::CoreError::Duplicate => Self::conflict(error),
             // A bad *request*, not a missing thing: both ends of the ask
             // resolve, the combination is what cannot be honoured.
-            knobas_core::CoreError::AnchorIsAContext => Self::invalid(error),
+            knobas_core::CoreError::AnchorIsAContext | knobas_core::CoreError::Invalid(_) => {
+                Self::invalid(error)
+            }
             knobas_core::CoreError::LinkNotFound(_)
             // An endpoint with no mirror row is the same "no such thing" as a
             // link id nothing carries: the entity has not synced yet, which is

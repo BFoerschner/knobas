@@ -2,6 +2,7 @@ pub mod activity;
 pub mod asset;
 pub mod checkout;
 pub mod context;
+pub mod entity_list;
 mod error;
 pub mod evidence;
 pub mod inbox;

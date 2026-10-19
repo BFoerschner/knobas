@@ -8,9 +8,9 @@
 //! holds.
 
 use knobas_app::commands::entity::{
-    EntityFilter, EntityOrder, create_link_inner, get_entity_inner, list_entities_inner,
-    promote_context_inner,
+    create_link_inner, get_entity_inner, list_entities_inner, promote_context_inner,
 };
+use knobas_core::entity_list::{EntityFilter, EntityOrder};
 
 async fn pool() -> sqlx::PgPool {
     let pool = knobas_db::test_util::test_pool().await;

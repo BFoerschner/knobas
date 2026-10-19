@@ -6,7 +6,8 @@
 //! file), and every source below is named with a run-unique suffix, so each
 //! test asserts on exactly the sources it configured.
 
-use knobas_app::commands::entity::{EntityFilter, EntityOrder, list_entities_with_registry};
+use knobas_app::commands::entity::list_entities_with_registry;
+use knobas_core::entity_list::{EntityFilter, EntityOrder};
 use knobas_source::role::RoleClaim;
 use knobas_source::{KindInfo, SourceDescriptor};
 use sqlx::PgPool;

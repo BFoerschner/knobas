@@ -15,7 +15,9 @@ version.workspace = true
 # `cargo build`, in `tauri build`, and in the `clippy --lib` half of the gate,
 # which turns "a stream used the test constructor in a command" from something a
 # reviewer has to notice into a compile error.
-test-util = []
+# It turns on knobas-core's own, which derives `Serialize` on the entity
+# list's filter for the mirror's round trip (#1317).
+test-util = ["knobas-core/test-util"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
