@@ -11,8 +11,8 @@ use knobas_source::role::RoleClaim;
 use knobas_source::{KindInfo, SourceDescriptor};
 use sqlx::PgPool;
 
-/// The adapter kind of the custom-role fixture: it claims the ticket system
-/// and a role of its own, and emits tickets and surveys.
+/// The adapter kind of the custom-role fixture: it claims the ticket system,
+/// CI and a role of its own, and emits tickets, pipelines and surveys.
 const CUSTOM: &str = "role_desk";
 /// Its custom role, namespaced to it.
 const DESK: &str = "role_desk:survey-desk";
@@ -46,14 +46,21 @@ impl knobas_sync::scheduler::AdapterRegistry for WithCustom {
                     knobas_source::role::TICKET_SYSTEM,
                     ["reachable_transitions"],
                 ),
+                RoleClaim::new(knobas_source::role::CI, ["run_log"]),
                 RoleClaim::new(DESK, []),
             ],
             source_actions: Vec::new(),
             clone_from: Vec::new(),
             write_ops: Vec::new(),
-            entity_kinds: vec![kind("ticket"), kind("survey")],
+            entity_kinds: vec![kind("ticket"), kind("pipeline"), kind("survey")],
             config_schema: serde_json::json!({}),
-            payload_paths: Vec::new(),
+            // Its pipelines are CI's though the entity list leaves them out
+            // of CI's kinds (#1344), so they are no kind of its custom role.
+            payload_paths: vec![knobas_source::KindPaths {
+                kind: "pipeline".to_owned(),
+                frame: Some(knobas_source::Frame::Pipeline),
+                ..knobas_source::KindPaths::default()
+            }],
         });
         all
     }
@@ -188,9 +195,9 @@ fn pairs(rows: &[(&String, &str)]) -> Vec<(String, String)> {
 /// A filler's rows come back; a claimer with a miss, a source whose adapter
 /// does not claim the role, a removed source's leftovers and a source whose
 /// adapter is not installed are left out. With no kinds named the read is
-/// the role's kinds: CI's are the frame kinds its fillers declare (the
-/// mock's `pipeline` and its run kind `build`), so the filler's ticket is
-/// not drawn.
+/// the role's kinds: CI's are the run kinds its fillers declare (the mock's
+/// `build`; its `pipeline` is the `pipelines` read's, #1344), so the
+/// filler's ticket and pipeline are not drawn.
 #[tokio::test]
 async fn a_role_reads_its_fillers_and_its_kinds_and_nothing_else() {
     let pool = pool().await;
@@ -218,7 +225,7 @@ async fn a_role_reads_its_fillers_and_its_kinds_and_nothing_else() {
     assert_eq!(read(&pool, &unscoped, &all).await.len(), 15);
     assert_eq!(
         read(&pool, &asking(knobas_source::role::CI), &all).await,
-        pairs(&[(&filler, "build"), (&filler, "pipeline")]),
+        pairs(&[(&filler, "build")]),
     );
     // The miss takes one surface away and nothing else (ADR-0028): the
     // source still fills the ticket system.
@@ -267,7 +274,7 @@ async fn a_role_intersects_the_named_sources_and_kinds() {
     };
     assert_eq!(
         read(&pool, &named, &all).await,
-        pairs(&[(&one, "build"), (&one, "pipeline")]),
+        pairs(&[(&one, "build")]),
         "the fillers among the named sources: jira is named and fills nothing here"
     );
 
@@ -329,14 +336,15 @@ async fn an_unknown_role_is_an_empty_page() {
 }
 
 /// A custom role reads its adapter's kinds that belong to no built-in role
-/// the source claims: the desk's surveys, not its tickets.
+/// the source claims: the desk's surveys, not its tickets nor its CI
+/// pipelines, which the entity list reads for no role (#1344).
 #[tokio::test]
 async fn a_custom_role_reads_its_adapters_other_kinds() {
     let pool = pool().await;
     let desk = configured(&pool, CUSTOM).await;
     let mock = configured(&pool, "mock").await;
     for source in [&desk, &mock] {
-        holding(&pool, source, &["ticket", "survey"]).await;
+        holding(&pool, source, &["ticket", "pipeline", "survey"]).await;
     }
     assert_eq!(
         read(&pool, &asking(DESK), &[&desk, &mock]).await,
@@ -474,4 +482,41 @@ async fn the_pipelines_read_is_the_ci_fillers() {
         .map(|row| (row.source_id.as_str(), row.name.as_str(), row.recent.len()))
         .collect();
     assert_eq!(ours, vec![(filler.as_str(), "Deploy", 1)]);
+}
+
+/// **A pipeline a ticket reaches is not a row of the job's Builds section**
+/// (#1344). The section asks for the CI role with no kinds, in the
+/// latest-per-parent order, scoped by the ticket's reach; CI's kinds on the
+/// entity list are the run kinds its fillers declare, so the ticket's linked
+/// pipeline is left out and its run is drawn. Named, the pipeline kind is
+/// none of CI's here: a pipeline is the `pipelines` read's.
+#[tokio::test]
+async fn a_reached_pipeline_is_not_read_for_ci() {
+    let pool = pool().await;
+    let filler = configured(&pool, "mock").await;
+    holding(&pool, &filler, &["ticket"]).await;
+    pipeline_with_a_run(&pool, &filler, "Deploy").await;
+    let ticket = format!("{filler}:ticket");
+    for reached in [
+        format!("{filler}:pipeline:Deploy"),
+        format!("{filler}:build:Deploy-1"),
+    ] {
+        knobas_app::commands::entity::create_link_inner(&pool, &ticket, &reached, None, None)
+            .await
+            .unwrap();
+    }
+    let builds = EntityFilter {
+        order: EntityOrder::LatestPerParent,
+        reach: Some(ticket.clone()),
+        ..asking(knobas_source::role::CI)
+    };
+    assert_eq!(
+        read(&pool, &builds, &[&filler]).await,
+        pairs(&[(&filler, "build")]),
+    );
+    let pipelines = EntityFilter {
+        kinds: vec!["pipeline".to_owned()],
+        ..builds
+    };
+    assert_eq!(read(&pool, &pipelines, &[&filler]).await, Vec::new());
 }

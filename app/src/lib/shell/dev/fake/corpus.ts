@@ -785,7 +785,11 @@ export function fakeRoleScope(role: string): { sources: string[]; kinds: string[
   );
   const kinds = fillers.flatMap((source) => {
     const minimum = ROLE_MINIMUMS[role];
-    if (minimum) return minimumKinds(minimum, source);
+    if (minimum) {
+      // A pipeline is the `pipelines` read's, not the entity list's (#1344).
+      const pipelines = source.payload_paths.filter((paths) => paths.frame === "pipeline").map((paths) => paths.kind);
+      return minimumKinds(minimum, source).filter((kind) => !pipelines.includes(kind));
+    }
     const builtin = new Set(
       source.roles.flatMap((claim) => {
         const other = ROLE_MINIMUMS[claim.role];

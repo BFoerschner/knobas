@@ -7,6 +7,7 @@ import { expect, test, vi } from "vitest";
 import type { AdHocBlock, DayBlock, OpenStretch } from "../../ipc/time";
 import { dayRows, offerRuns } from "../../tf/time/day-view";
 import { demoHandlers } from "./fake-tauri";
+import { fakeRoleScope } from "./fake/corpus";
 import { FIXTURE_SOURCES } from "./fake/sources";
 
 const MODULES = import.meta.glob<{ handlers?: unknown }>("./fake/*.ts", { eager: true });
@@ -293,6 +294,9 @@ test("list_entities asked for a role reads its fillers' rows of its kinds, and a
   // CI is TeamCity's, and its kinds are the frames its adapter declares: the
   // corpus holds its runs (its pipelines are `builds.ts`'s own read).
   expect(pairs(read("ci"))).toEqual(["teamcity/build"]);
+  // CI's scope is its run kinds: TeamCity's `build_config`, declared on the
+  // pipeline frame, is the pipelines read's, not the entity list's (#1344).
+  expect(fakeRoleScope("ci")).toEqual({ sources: ["teamcity"], kinds: ["build"] });
   // The code host is the mock's, of the code host's kinds only.
   const code = pairs(read("code-host"));
   expect(code.length).toBeGreaterThan(0);
