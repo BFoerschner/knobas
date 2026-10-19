@@ -12,7 +12,8 @@
   complete }` per role, in claim order. A required path misses on the two questions clause 6 asks
   of every declared path, asked the same way over the corpus: a value of the wrong shape, or no
   record of the kind resolving the field while some record has an object without the path's next
-  key. A kind no record was of is not judged (`complete` is false). A custom role has no minimum
+  key. An absent `Field::Parent` is no miss (Jira leaves `fields.parent` out of a ticket with no
+  parent; PR #1239 merge-manager); its wrong shape is. A kind no record was of is not judged (`complete` is false). A custom role has no minimum
   and is not judged. `RoleMiss { role, kind, field, path }`, `path` the declared segments joined
   by `.`, serde plain. `contract::fills_its_roles(&dyn Source)` runs it over a full sync and
   panics unless every claimed role is filled with every kind present: the live suites call it

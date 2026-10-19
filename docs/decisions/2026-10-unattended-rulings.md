@@ -5969,3 +5969,19 @@ The implementer's rulings:
   built-in on the testenv corpus, rather than a battery clause: clause 6 already refuses every miss
   this check can find, so a battery clause would be a check no mutant could reach, and the battery
   must tolerate an empty kind on an arbitrary instance where this must not. **Reversing:** low.
+
+The merge-manager's rulings (PR #1239, on Opus):
+
+- **An absent parent is not a miss.** Jira leaves `fields.parent` (and knobas's `epic`) out of a
+  ticket with no parent, so under the implementer's rule a first sync of a project with no epics
+  or sub-tasks found a missing key, no record resolving it, and took Tickets away from the source.
+  A `Field::Parent` now misses only on a wrong shape; `Field::ParentOf` (a branch's repo) and every
+  other field keep both questions. **Reversing:** low (`Need::absent_is_none` in `role::data`).
+- **A role once filled stays filled, even if a later sync regresses.** ADR-0028 runs the data
+  checks "on the first sync of each source", and criterion 4 asks only that a missed role fill
+  again. Re-judging a filled role on incremental runs would judge a corpus of a few records. An
+  adapter update does not reset it either: ADR-0028 gives an update the static checks only.
+  **Reversing:** low (`role_check::wanted`), plus a reset on adapter update if wanted.
+- **One `list_sources` per finished run is kept.** With five concurrent runs (#1189) that is at
+  most five list reads per round of syncs, each one grouped count over `sync.item` plus a query
+  per source, the same read a source-health event already costs. **Reversing:** one line.

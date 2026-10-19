@@ -14,7 +14,11 @@
 //! * **a missing key**: no record of the kind resolved the field, and some
 //!   record has an object where the path's next key would sit without that
 //!   key (see [`names_a_missing_key`]). An unassigned ticket's `null` is the
-//!   source saying nothing, not a miss.
+//!   source saying nothing, not a miss. Neither is an absent [`Field::Parent`]:
+//!   Jira leaves `fields.parent` out of a ticket with no parent, so a project
+//!   with no epics or sub-tasks would otherwise lose its Tickets surface. A
+//!   parent's wrong shape is still a miss, and so is a missing
+//!   [`Field::ParentOf`] (a branch always has its repo).
 //!
 //! A kind the records hold none of is not judged: there is no evidence, and
 //! the verdict says which kinds it saw so the caller can tell "passed" from
@@ -98,6 +102,9 @@ struct Need {
     field: &'static str,
     shape: Shape,
     candidates: Vec<PayloadPath>,
+    /// An absent key is the record having none (a ticket with no parent),
+    /// never a misnamed path.
+    absent_is_none: bool,
     resolved: bool,
     wrong: Option<String>,
     missing: Option<String>,
@@ -200,6 +207,7 @@ impl DataCheck {
                         field: field.name(),
                         shape,
                         candidates,
+                        absent_is_none: matches!(field, Field::Parent),
                         resolved: false,
                         wrong: None,
                         missing: None,
@@ -238,7 +246,10 @@ impl DataCheck {
                     } else if need.wrong.is_none() {
                         need.wrong = Some(dotted(path));
                     }
-                } else if need.missing.is_none() && names_a_missing_key(payload, path) {
+                } else if !need.absent_is_none
+                    && need.missing.is_none()
+                    && names_a_missing_key(payload, path)
+                {
                     need.missing = Some(dotted(path));
                 }
             }
@@ -397,17 +408,42 @@ mod tests {
     #[test]
     fn one_record_that_resolves_settles_the_kind() {
         let d = tickets(&["fields", "priority", "name"]);
+        let mut untyped = ticket(Value::Null);
+        untyped["fields"]
+            .as_object_mut()
+            .unwrap()
+            .remove("issuetype");
+        let [v] = verdicts(&d, &[untyped.clone(), ticket(Value::Null)])
+            .try_into()
+            .unwrap();
+        assert_eq!(v.miss, None);
+        let [alone] = verdicts(&d, &[untyped]).try_into().unwrap();
+        assert_eq!(
+            alone.miss.map(|m| m.path),
+            Some("fields.issuetype.name".to_owned())
+        );
+    }
+
+    /// Jira leaves `fields.parent` out of a ticket with no parent: a project
+    /// with no epics or sub-tasks still fills the role. A parent of the wrong
+    /// shape is still a miss.
+    #[test]
+    fn a_parent_no_record_has_is_not_a_miss_but_a_wrong_one_is() {
+        let d = tickets(&["fields", "priority", "name"]);
         let mut parentless = ticket(Value::Null);
         parentless["fields"]
             .as_object_mut()
             .unwrap()
             .remove("parent");
-        let [v] = verdicts(&d, &[parentless.clone(), ticket(Value::Null)])
+        let [v] = verdicts(&d, &[parentless.clone(), parentless])
             .try_into()
             .unwrap();
         assert_eq!(v.miss, None);
-        let [alone] = verdicts(&d, &[parentless]).try_into().unwrap();
-        assert_eq!(alone.miss.map(|m| m.path), Some("fields.parent".to_owned()));
+        assert!(v.complete);
+        let mut wrong = ticket(Value::Null);
+        wrong["fields"]["parent"] = json!("PAY-1");
+        let [w] = verdicts(&d, &[wrong]).try_into().unwrap();
+        assert_eq!(w.miss.map(|m| m.path), Some("fields.parent".to_owned()));
     }
 
     #[test]
