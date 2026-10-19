@@ -7666,3 +7666,29 @@ The merge-manager's rulings on #1315 (Opus):
   on the last allowed page ends rather than caps, Confluence's cap message wins over an absolute
   link at the cap as before, and the Jira and Confluence messages are byte-identical.
   *Reversing:* n/a.
+
+## #1320: a job reader owns the job page's reads (Opus implementer, 2026-10-19)
+
+- **A factory per mount, no module singleton,** as #1319 ruled for the board reader: the ports
+  are the page's props and its tests hand in their own. *Reversing:* one export.
+- **A move rereads the ticket and its transitions.** *Fork:* the ticket says the page "calls a
+  reread after each" write and that "a reread after a transition touches the detail and
+  transitions only", and spec #1304's story 9 says the same; before this, a move reread nothing
+  (the mount test said so). *Ruling:* `move` calls `rereadDetail(id)` once the write is queued.
+  The mirror does not change until the queue sends, so the reread answers what is already drawn:
+  one `get_entity` and one `reachable_transitions` more per move, nothing visible. *Reversing:*
+  one line in `TfJob.svelte`.
+- **A link changed rereads the transitions too.** `relink` read the ticket alone; it is now
+  `rereadDetail()`, the one detail reread the ticket names, which also reads the transitions. The
+  answer is the same; one more read per link or unlink. *Reversing:* a flag on `rereadDetail`.
+- **The drawer and the dialogs stay the page's.** The reset list had `drawer` and `linking` in it;
+  they are what the page draws, not reads, so the page's own effect on the address closes them
+  and the reader resets every read slot. *Reversing:* n/a.
+- **The clone-finished recheck is `rereadCheckout()`,** called from the page's effect on
+  `clones.finished`: the reader holds no `$effect`, so it is built and tested with no component
+  around it. *Reversing:* move the effect in and give the reader an owner.
+- **`sources`, `health` and `sync` are not reset on open,** exactly as before: each job reads
+  them again and they were never in the reset list. *Reversing:* add them to `fresh()`.
+- **Seams, chosen without a person to confirm them:** the ones the ticket names, the reader's
+  operations and slots on fake ports that hold a ticket's reads until released
+  (`job-reader.test.svelte.ts`). *Reversing:* n/a.
