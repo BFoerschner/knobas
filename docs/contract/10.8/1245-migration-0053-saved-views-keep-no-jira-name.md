@@ -38,6 +38,9 @@
   (the new names, none of the old, no constraint or index naming Jira) and
   `zero_fifty_three_keeps_the_saved_views_an_install_already_had` (rows written under `0044`'s
   names read back under `0053`'s), `crates/knobas-app/src/ticket_views.rs`' mirror test (the two
-  command names and the `saved_view` key in `search.ts`), and every existing Jira-views test
+  command names in `search.ts` and in the handler barrel, and the `saved_view` key),
+  `commands::entity`'s `mini_board_takes_the_saved_view_the_mirror_sends` (the Rust argument
+  and the key `entity.ts` sends), `fake-tauri.test.ts` (the fake answers a saved view by
+  `savedView`), and every existing Jira-views test
   (`crates/knobas-sync/tests/it/jira_views.rs`, `crates/knobas-app/tests/it/jira_views_ipc.rs`),
   unchanged but for the names.
