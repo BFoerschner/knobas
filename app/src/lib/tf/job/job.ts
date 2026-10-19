@@ -229,8 +229,9 @@ const NOTES_HASH = "#/settings/notes";
  * anything else its item page, `#/item/<id>`, which draws the source's block
  * view (a custom role's item, #1201, ADR-0029). Never Code: a kind that is not code does
  * not belong there (#1094). Every surface opens a kind through this one rule
- * (#1101). A kind in `runKinds` (the CI role's `run` frame, from the adapters'
- * claims, #1256) is a run whatever its id, so it opens Builds' run page.
+ * (#1101), except that only a caller passing `runKinds` (the CI role's `run`
+ * frame from the adapters' claims, #1256) opens a run of another kind than
+ * `build` on Builds' run page; without it such a kind opens its item page.
  */
 export function itemHash(row: Pick<EntityRow, "entity_id" | "kind">, runKinds: readonly string[] = []): string {
   const id = encodeURIComponent(row.entity_id);
