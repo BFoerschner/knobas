@@ -257,7 +257,7 @@ pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
 
 /// Per Jira view among `views`: how many of the tickets Jira put on it the
 /// mirror holds live, and where it comes from (#877). A view whose
-/// `saved_view` names no Jira view is absent, and is counted by its text like
+/// `saved_view` names no saved view is absent, and is counted by its text like
 /// any other.
 async fn jira_sources(
     pool: &PgPool,
@@ -449,7 +449,8 @@ pub async fn open(pool: &PgPool, id: &str) -> Result<(), IpcError> {
     Ok(())
 }
 
-/// The view `id` names if it is a Jira view (#877), as stored.
+/// The view `id` names if it shows a saved view, such as a Jira view (#877,
+/// #1245), as stored.
 async fn saved_view_row(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     id: &str,
@@ -560,13 +561,13 @@ pub async fn save(pool: &PgPool, mut draft: TicketViewDraft) -> Result<TicketVie
     // tickets and the columns are Jira's, so the stored ones stand whatever
     // the draft says.
     if let Some(id) = &draft.id
-        && let Some(jira) = saved_view_row(&mut tx, id).await?
+        && let Some(stored) = saved_view_row(&mut tx, id).await?
     {
-        draft.name = jira.name;
-        draft.group = jira.group;
-        draft.query = jira.query;
-        draft.columns = jira.columns;
-        draft.saved_view = jira.saved_view;
+        draft.name = stored.name;
+        draft.group = stored.group;
+        draft.query = stored.query;
+        draft.columns = stored.columns;
+        draft.saved_view = stored.saved_view;
     }
     let id = match &draft.id {
         Some(id) => id.clone(),

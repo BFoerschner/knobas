@@ -406,7 +406,7 @@ export interface TicketView {
   list_columns: ListColumn[];
   /** `null` is newest first. */
   list_sort: ListSort | null;
-  /** The Jira board or filter a Jira view shows (#877); `null` on your own. */
+  /** The saved view (a board or filter, `sync.saved_view`'s id) a view from a ticket system shows (#877, #1245); `null` on your own. */
   saved_view: string | null;
 }
 
@@ -449,12 +449,12 @@ export interface UnsyncedTickets {
   count: number;
 }
 
-/** *Hide from the list* (`true`) or *Show* (`false`) a Jira view (#878). */
+/** *Hide from the list* (`true`) or *Show* (`false`) a saved view, such as a Jira view (#878, #1245). */
 export function hideSavedView(id: string, hidden: boolean): Promise<void> {
   return invoke<void>("hide_saved_view", { id, hidden });
 }
 
-/** A view was opened: a Jira view stops saying *new* (#878). */
+/** A view was opened: a saved view, such as a Jira view, stops saying *new* (#878, #1245). */
 export function openSavedView(id: string): Promise<void> {
   return invoke<void>("open_saved_view", { id });
 }

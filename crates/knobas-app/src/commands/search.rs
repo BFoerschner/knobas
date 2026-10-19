@@ -247,7 +247,7 @@ pub async fn delete_ticket_view(
     crate::ticket_views::delete(&lifecycle.pool()?, &id).await
 }
 
-/// *Hide from the list* (`hidden: true`) or *Show* a Jira view (#878,
+/// *Hide from the list* (`hidden: true`) or *Show* a saved view, such as a Jira view (#878, #1245,
 /// R-3.25); it keeps syncing either way.
 ///
 /// # Errors
@@ -280,7 +280,8 @@ pub async fn translate_ticket_view<R: tauri::Runtime>(
     crate::ticket_views::translate(&state.pool, &state.secrets, state.registry.as_ref(), &id).await
 }
 
-/// A ticket view was opened: a Jira view stops saying *new* (#878, R-3.20).
+/// A ticket view was opened: a saved view, such as a Jira view, stops saying
+/// *new* (#878, #1245, R-3.20).
 ///
 /// # Errors
 ///

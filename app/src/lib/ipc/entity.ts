@@ -2092,7 +2092,7 @@ export interface LanesAsked {
  * to be able to say "nothing here" without saying "this broke".
  *
  * `savedView` (#877) names a saved view (its `saved_view`, #1245): the board is then the
- * tickets Jira put on it, in Jira's order, under the view's own columns —
+ * tickets its source put on it, in the source's order, under the view's own columns —
  * each column's `status` is the column's name — and the room scope is not
  * read.
  *

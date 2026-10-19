@@ -5748,15 +5748,16 @@ pub async fn mini_board_laned(
     .await?)
 }
 
-/// A Jira view's board (#877, R-3.21, R-3.24): the live tickets Jira put on
-/// the view (`sync.saved_view_member`), narrowed by `query` like
-/// [`mini_board_inner`], **in Jira's order**, under the view's own columns --
-/// each holding the tickets whose status is one of its statuses, empty ones
-/// included, as on the Jira board. A status on no column does not show. A
-/// view with no columns keeps one column per status. `per_column` cuts each
-/// column after its first cards in Jira's order; `total` counts them all.
+/// A saved view's board, such as a Jira view's (#877, #1245, R-3.21, R-3.24):
+/// the live tickets the source put on the view (`sync.saved_view_member`),
+/// narrowed by `query` like [`mini_board_inner`], **in the source's order**,
+/// under the view's own columns -- each holding the tickets whose status is
+/// one of its statuses, empty ones included, as on the source's board. A
+/// status on no column does not show. A view with no columns keeps one column
+/// per status. `per_column` cuts each column after its first cards in that
+/// order; `total` counts them all.
 ///
-/// Keys Jira returned that knobas does not mirror (a project the source
+/// Keys the source returned that knobas does not mirror (a project the source
 /// does not sync) are not on the board; they stay in the member table.
 ///
 /// # Errors
@@ -5774,7 +5775,7 @@ pub async fn saved_view_board(
 
 /// [`saved_view_board`] in lanes (#939): the whole view put in lanes after it
 /// is read ([`knobas_core::mini_board::in_lanes`]), each lane's column in
-/// Jira's order and capped at `per_column`.
+/// the source's order and capped at `per_column`.
 ///
 /// # Errors
 ///
