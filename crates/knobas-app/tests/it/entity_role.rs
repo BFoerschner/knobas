@@ -25,7 +25,7 @@ struct WithCustom;
 
 impl knobas_sync::scheduler::AdapterRegistry for WithCustom {
     fn descriptors(&self) -> Vec<SourceDescriptor> {
-        let mut all = knobas_app::sources::Registry::builtin().templates();
+        let mut all = knobas_app::sources::Registry::for_process().templates();
         let kind = |id: &str| KindInfo {
             id: id.to_owned(),
             label: id.to_owned(),
@@ -70,7 +70,7 @@ impl knobas_sync::scheduler::AdapterRegistry for WithCustom {
         &self,
         instance: knobas_source::instance::SourceInstance,
     ) -> Result<Box<dyn knobas_source::Source>, knobas_source::SourceError> {
-        knobas_app::sources::Registry::builtin().build(instance)
+        knobas_app::sources::Registry::for_process().build(instance)
     }
 }
 

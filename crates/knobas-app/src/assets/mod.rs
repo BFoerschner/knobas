@@ -2081,7 +2081,7 @@ const ROSTER_ASSETS: &str = "select m.id as monitor_id, a.id, a.name, a.type_id,
 pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> {
     let fillers = crate::sources::crud::fillers(
         pool,
-        &crate::sources::Registry::builtin(),
+        &crate::sources::Registry::for_process(),
         knobas_source::role::MONITORING,
     )
     .await?;
@@ -2100,7 +2100,7 @@ pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> 
         .collect::<Result<_, _>>()?;
     // Where each source keeps a monitor's reading (#1224).
     let declarations =
-        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::builtin()).await?;
+        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process()).await?;
 
     let mut samples: HashMap<String, Vec<MonitorSample>> = HashMap::new();
     for sample in sqlx::query(ROSTER_SAMPLES)

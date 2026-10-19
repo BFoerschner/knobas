@@ -7,6 +7,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
+use knobas_sync::scheduler::AdapterRegistry;
 use tauri::Manager;
 
 use crate::{AppState, IpcError, Profile};
@@ -66,6 +67,10 @@ pub struct Lifecycle {
     /// `Arc`, and not a `OnceLock`: a failed bring-up can be retried, so this
     /// slot is written more than once over a process's life.
     app: Mutex<Option<Arc<AppState>>>,
+    /// The adapter registry every read takes, as the trait object (#1321).
+    /// Here rather than on `AppState`, because the reads that answer before
+    /// the database is up (the Add-source form's adapter list) need it too.
+    registry: Arc<dyn AdapterRegistry>,
 }
 
 impl Default for Lifecycle {
@@ -75,13 +80,30 @@ impl Default for Lifecycle {
 }
 
 impl Lifecycle {
-    /// A lifecycle that has not started anything yet.
+    /// A lifecycle that has not started anything yet, over the process's
+    /// registry ([`Registry::for_process`](crate::sources::Registry::for_process)):
+    /// the list bring-up fills with the installed external adapters and the
+    /// sources state shares.
     #[must_use]
     pub fn new() -> Self {
+        Self::with_registry(Arc::new(crate::sources::Registry::for_process()))
+    }
+
+    /// [`new`](Self::new), over `registry` instead of the process's: what a
+    /// test gives a command to witness it against adapters it controls.
+    #[must_use]
+    pub fn with_registry(registry: Arc<dyn AdapterRegistry>) -> Self {
         Self {
             db: Mutex::new(DbState::Starting { detail: None }),
             app: Mutex::new(None),
+            registry,
         }
+    }
+
+    /// The adapter registry. Answers before bring-up: it needs no database.
+    #[must_use]
+    pub fn registry(&self) -> &dyn AdapterRegistry {
+        self.registry.as_ref()
     }
 
     /// Where bring-up has got to.

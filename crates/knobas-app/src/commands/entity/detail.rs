@@ -317,7 +317,7 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
 /// time.
 fn kind_info_for(adapter_kind: Option<&str>, kind: &str) -> Option<knobas_source::KindInfo> {
     let adapter_kind = adapter_kind?;
-    crate::sources::Registry::builtin()
+    crate::sources::Registry::for_process()
         .templates()
         .into_iter()
         .find(|template| template.adapter_kind == adapter_kind)?
@@ -356,7 +356,7 @@ mod tests {
     /// and no monogram to invent).
     #[test]
     fn a_declared_kind_resolves_to_the_adapters_own_metadata() {
-        let mock = crate::sources::Registry::builtin()
+        let mock = crate::sources::Registry::for_process()
             .templates()
             .into_iter()
             .find(|template| template.adapter_kind == "mock")
@@ -397,7 +397,7 @@ mod tests {
     /// per-adapter table §3a exists to avoid, built by accident.
     #[test]
     fn two_adapters_declaring_one_kind_do_not_fight() {
-        let templates = crate::sources::Registry::builtin().templates();
+        let templates = crate::sources::Registry::for_process().templates();
         let declaring: Vec<&knobas_source::SourceDescriptor> = templates
             .iter()
             .filter(|template| template.entity_kinds.iter().any(|info| info.id == "ticket"))

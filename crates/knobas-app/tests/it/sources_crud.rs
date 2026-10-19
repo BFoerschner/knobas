@@ -25,7 +25,7 @@ struct RefusingRegistry(fn() -> SourceError);
 
 impl AdapterRegistry for RefusingRegistry {
     fn descriptors(&self) -> Vec<SourceDescriptor> {
-        Registry::builtin().descriptors()
+        Registry::for_process().descriptors()
     }
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         Ok(Box::new(Refusing {
@@ -99,7 +99,7 @@ struct DiscoveringRegistry;
 
 impl AdapterRegistry for DiscoveringRegistry {
     fn descriptors(&self) -> Vec<SourceDescriptor> {
-        Registry::builtin().descriptors()
+        Registry::for_process().descriptors()
     }
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         Ok(Box::new(Discovering { id: instance.id }))
@@ -184,7 +184,7 @@ async fn fixture() -> Fixture {
     Fixture {
         pool,
         secrets: Arc::new(MemoryStore::new()),
-        registry: Registry::builtin(),
+        registry: Registry::for_process(),
         // `crud-<hex>` -- lowercase, dashes, under 32 characters, which is what
         // `validate_instance_id` allows.
         id: format!("crud-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]),
@@ -1409,7 +1409,7 @@ fn the_claim() -> knobas_source::role::RoleClaim {
 
 impl AdapterRegistry for ClaimingRegistry {
     fn descriptors(&self) -> Vec<SourceDescriptor> {
-        Registry::builtin()
+        Registry::for_process()
             .descriptors()
             .into_iter()
             .map(|template| {
@@ -1425,7 +1425,7 @@ impl AdapterRegistry for ClaimingRegistry {
             .collect()
     }
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
-        Registry::builtin().build(instance)
+        Registry::for_process().build(instance)
     }
 }
 

@@ -176,7 +176,7 @@ async fn a_clone_lands_in_the_root_under_the_repository_name() {
 
     let answer = start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &Clones::global(),
         seen.clone(),
         &id,
@@ -238,7 +238,7 @@ async fn an_existing_clone_of_the_repository_is_adopted() {
 
     let answer = start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &Clones::global(),
         seen.clone(),
         &id,
@@ -280,7 +280,7 @@ async fn a_clone_that_did_not_finish_is_not_adopted() {
 
     let error = start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &id,
@@ -317,7 +317,7 @@ async fn a_folder_that_is_not_a_clone_of_it_is_refused_and_left_alone() {
 
         let error = start_admitting(
             &pool,
-            &Registry::builtin(),
+            &Registry::for_process(),
             &Clones::global(),
             Arc::new(Seen::default()),
             &id,
@@ -353,7 +353,7 @@ async fn a_name_outside_the_pattern_is_refused_before_anything_is_made() {
 
         let error = start_admitting(
             &pool,
-            &Registry::builtin(),
+            &Registry::for_process(),
             &Clones::global(),
             Arc::new(Seen::default()),
             &id,
@@ -383,7 +383,7 @@ async fn the_app_clones_over_https_and_ssh_only() {
 
     let error = start(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &id,
@@ -427,7 +427,7 @@ struct WithForge;
 
 impl knobas_sync::scheduler::AdapterRegistry for WithForge {
     fn descriptors(&self) -> Vec<knobas_source::SourceDescriptor> {
-        let mut all = Registry::builtin().descriptors();
+        let mut all = Registry::for_process().descriptors();
         let mut forge = all
             .iter()
             .find(|d| d.adapter_kind == "gitea")
@@ -495,7 +495,7 @@ async fn a_repository_clones_only_with_a_root_set_and_from_an_address_its_adapte
     let gitea = repo(&pool, "gitea", &base, "tidewater/x").await;
     let error = start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &gitea,
@@ -517,7 +517,7 @@ async fn a_repository_clones_only_with_a_root_set_and_from_an_address_its_adapte
     let mock = repo(&pool, "jira", &base, "tidewater/x").await;
     let error = start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &mock,
@@ -555,7 +555,7 @@ async fn a_repository_clones_only_with_a_root_set_and_from_an_address_its_adapte
     let gone = repo(&pool, "nowhere", &base, "tidewater/x").await;
     let error = start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &gone,
@@ -582,7 +582,7 @@ async fn a_failed_clone_says_gits_last_line_and_leaves_nothing() {
 
     start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &Clones::global(),
         seen.clone(),
         &id,
@@ -636,7 +636,7 @@ async fn stopping_kills_git_and_removes_the_half_made_folder() {
 
     start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &clones,
         seen.clone(),
         &id,
@@ -650,7 +650,7 @@ async fn stopping_kills_git_and_removes_the_half_made_folder() {
     assert_eq!(
         start_admitting(
             &pool,
-            &Registry::builtin(),
+            &Registry::for_process(),
             &clones,
             seen.clone(),
             &id,
@@ -700,7 +700,7 @@ async fn two_starts_at_once_start_one_clone() {
     let (_dir, root) = root(&pool).await;
     let seen = Arc::new(Seen::default());
     let clones = Clones::global();
-    let registry = Registry::builtin();
+    let registry = Registry::for_process();
 
     let (a, b) = tokio::join!(
         start_admitting(&pool, &registry, &clones, seen.clone(), &id, &["http"]),
@@ -735,7 +735,7 @@ async fn a_folder_another_repository_is_cloning_into_is_refused() {
 
     start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &clones,
         seen.clone(),
         &first,
@@ -745,7 +745,7 @@ async fn a_folder_another_repository_is_cloning_into_is_refused() {
     .unwrap();
     let error = start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &clones,
         seen.clone(),
         &second,

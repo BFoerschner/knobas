@@ -470,7 +470,7 @@ async fn make_an_editable_copy_asks_the_saved_views_source_to_translate_its_quer
             &knobas_secrets::Secret::just(knobas_source::AuthMethod::Pat, "a-token"),
         )
         .unwrap();
-    let registry = knobas_app::sources::Registry::builtin();
+    let registry = knobas_app::sources::Registry::for_process();
 
     let copy = ticket_views::translate(&pool, &secrets, &registry, &id)
         .await

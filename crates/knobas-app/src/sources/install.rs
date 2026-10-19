@@ -273,7 +273,7 @@ pub async fn install_for_profile(
 ) -> Result<InstalledAdapter, InstallError> {
     install_from(
         pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &store_dir(profile_dir),
         &Endpoints::default(),
         input,

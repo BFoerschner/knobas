@@ -144,7 +144,7 @@ pub async fn mini_board_laned(
     let sources = match role {
         Some(role) => {
             let fillers =
-                crate::sources::crud::fillers(pool, &crate::sources::Registry::builtin(), role)
+                crate::sources::crud::fillers(pool, &crate::sources::Registry::for_process(), role)
                     .await?;
             if fillers.is_empty() {
                 return Ok(knobas_core::mini_board::MiniBoard {

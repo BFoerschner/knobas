@@ -2247,7 +2247,7 @@ async fn note_edited(pool: &PgPool, title: &str, at: DateTime<Utc>, saves: usize
 }
 
 fn registry() -> knobas_app::sources::Registry {
-    knobas_app::sources::Registry::builtin()
+    knobas_app::sources::Registry::for_process()
 }
 
 async fn draft_of(pool: &PgPool, entity: &str) -> Option<knobas_app::time::worklog::Draft> {

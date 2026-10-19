@@ -44,7 +44,7 @@ struct Answering;
 
 impl knobas_sync::scheduler::AdapterRegistry for Answering {
     fn descriptors(&self) -> Vec<knobas_source::SourceDescriptor> {
-        knobas_app::sources::Registry::builtin().descriptors()
+        knobas_app::sources::Registry::for_process().descriptors()
     }
     fn build(
         &self,
@@ -76,7 +76,7 @@ impl Answers {
 impl Source for Answers {
     fn descriptor(&self) -> knobas_source::SourceDescriptor {
         use knobas_sync::scheduler::AdapterRegistry as _;
-        let mut d = knobas_app::sources::Registry::builtin()
+        let mut d = knobas_app::sources::Registry::for_process()
             .descriptors()
             .into_iter()
             .find(|d| d.adapter_kind == "teamcity")

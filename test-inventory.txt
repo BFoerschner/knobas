@@ -242,6 +242,7 @@ knobas-app	lib/knobas_app	sources::registry::tests::a_built_in_kind_is_taken
 knobas-app	lib/knobas_app	sources::registry::tests::a_clone_made_before_an_install_builds_the_installed_adapter
 knobas-app	lib/knobas_app	sources::registry::tests::a_source_of_an_adapter_refused_at_load_fails_with_the_reason
 knobas-app	lib/knobas_app	sources::registry::tests::an_external_adapter_joins_the_templates_once
+knobas-app	lib/knobas_app	sources::registry::tests::the_trait_object_answers_the_docs_projection_and_writes
 knobas-app	lib/knobas_app	sources::remote::tests::a_forge_release_download_asks_its_own_api_under_its_path_prefix
 knobas-app	lib/knobas_app	sources::remote::tests::a_github_release_download_asks_github_s_api
 knobas-app	lib/knobas_app	sources::remote::tests::a_github_repository_url_is_a_repository_with_or_without_its_git_suffix
@@ -873,6 +874,7 @@ knobas-app	test/it	ipc::demo_load_is_refused_outside_the_demo_profile
 knobas-app	test/it	ipc::demo_load_passes_the_guard_in_the_demo_profile
 knobas-app	test/it	ipc::every_sources_command_is_registered_and_reachable
 knobas-app	test/it	ipc::frontend_ready_replays_the_current_state
+knobas-app	test/it	ipc::list_adapters_serves_the_lifecycles_registry
 knobas-app	test/it	ipc::sync_now_answers_before_the_run_and_reports_it_on_the_event
 knobas-app	test/it	ipc::the_optional_channel_is_not_a_decodable_argument
 knobas-app	test/it	ipc::the_same_command_gets_through_once_the_database_is_up

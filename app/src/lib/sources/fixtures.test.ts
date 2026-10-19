@@ -13,7 +13,7 @@
  *
  * **It is built, in `crates/knobas-app/tests/it/config_schema_mirror.rs` (#135).**
  * That file parses each `as const` literal here into a `serde_json::Value` and
- * compares it against `Registry::builtin().descriptors()`, so `maximum`
+ * compares it against `Registry::for_process().descriptors()`, so `maximum`
  * arrives with the `const` already resolved and the check tells drift from a
  * legitimate change. Neither file replaces the other, and neither should be
  * deleted for duplicating the other: what follows here is the half that one

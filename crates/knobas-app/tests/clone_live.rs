@@ -132,7 +132,7 @@ async fn a_seeded_repository_clones_and_the_scan_finds_it() {
 
     let answer = start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &Clones::global(),
         seen.clone(),
         &id,
@@ -168,7 +168,7 @@ async fn a_seeded_repository_clones_and_the_scan_finds_it() {
     assert_eq!(
         start_admitting(
             &pool,
-            &Registry::builtin(),
+            &Registry::for_process(),
             &Clones::global(),
             Arc::new(Seen::default()),
             &id,
@@ -189,7 +189,7 @@ async fn the_app_itself_refuses_the_testenv_address() {
 
     let error = start(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &id,
@@ -212,7 +212,7 @@ async fn an_existing_folder_that_is_not_a_clone_is_refused() {
 
     let error = start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &id,
@@ -243,7 +243,7 @@ async fn a_bad_name_is_refused() {
 
     let error = start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &id,
@@ -270,7 +270,7 @@ async fn stopping_a_clone_leaves_nothing_behind() {
 
     start_admitting(
         &pool,
-        &Registry::builtin(),
+        &Registry::for_process(),
         &clones,
         seen.clone(),
         &id,

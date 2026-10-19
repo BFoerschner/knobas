@@ -79,7 +79,7 @@ async fn seed(pool: &PgPool, builds: i32) {
 }
 
 async fn declarations(pool: &PgPool) -> knobas_core::payload::Declarations {
-    knobas_app::sources::paths::declared_paths(pool, &knobas_app::sources::Registry::builtin())
+    knobas_app::sources::paths::declared_paths(pool, &knobas_app::sources::Registry::for_process())
         .await
         .unwrap()
 }

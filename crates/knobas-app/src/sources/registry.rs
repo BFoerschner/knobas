@@ -19,7 +19,7 @@
 //! [`WasmAdapter`] builds a `dyn Source` as a row does, and the rest of
 //! knobas cannot tell the two apart. They are the installed ones (#1202):
 //! bring-up loads each row of `knobas.external_adapter` into
-//! [`Registry::builtin`]'s list (`sources::install::load_installed`), and an
+//! [`Registry::for_process`]'s list (`sources::install::load_installed`), and an
 //! install adds to it while the app runs. Every clone of a registry shares
 //! its list, so the scheduler's copy sees an adapter installed after it
 //! started.
@@ -151,10 +151,16 @@ impl KindTaken {
 }
 
 impl Registry {
-    /// The compiled-in table and every external adapter this process has
-    /// loaded or installed: one list for the process, which bring-up fills.
+    /// The process's registry: the compiled-in table **and** every external
+    /// adapter this process has loaded or installed. One list for the
+    /// process, which bring-up fills and an install adds to; every call
+    /// returns a clone sharing it.
+    ///
+    /// Reached from bring-up and from [`Lifecycle`](crate::Lifecycle)'s
+    /// default. A read takes the lifecycle's registry as `&dyn
+    /// AdapterRegistry` instead, so a test can give it one of its own.
     #[must_use]
-    pub fn builtin() -> Registry {
+    pub fn for_process() -> Registry {
         static PROCESS: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
         PROCESS.get_or_init(Registry::default).clone()
     }
@@ -292,13 +298,11 @@ impl Registry {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// One descriptor **template** per compiled-in kind.
+    /// One descriptor **template** per compiled-in kind, then one per
+    /// loaded external adapter.
     ///
-    /// Also reachable as [`AdapterRegistry::descriptors`]; kept as an inherent
-    /// method because `list_adapters` is the one caller that has no
-    /// `SourcesState` to reach a trait object through -- it answers before
-    /// bring-up, which is what lets the Add-source form be drawn on a cold
-    /// start.
+    /// Also reachable as [`descriptors`](knobas_sync::scheduler::AdapterRegistry::descriptors), which is what a
+    /// read takes.
     #[must_use]
     pub fn templates(&self) -> Vec<SourceDescriptor> {
         ADAPTERS
@@ -331,6 +335,14 @@ impl Registry {
 impl knobas_sync::scheduler::AdapterRegistry for Registry {
     fn descriptors(&self) -> Vec<SourceDescriptor> {
         self.templates()
+    }
+
+    fn doc_projection(&self, kind: &str) -> Option<knobas_source::docs::DocProjection> {
+        Registry::doc_projection(self, kind)
+    }
+
+    fn doc_writes(&self, kind: &str) -> Option<knobas_source::docs::DocWrites> {
+        Registry::doc_writes(self, kind)
     }
 
     /// Build an instance, routing on [`SourceInstance::kind`].
@@ -411,6 +423,18 @@ mod tests {
             panic!("a refused adapter must not build");
         };
         assert!(error.to_string().contains("its hash changed"), "{error}");
+    }
+
+    /// A read holding the registry as the trait object reaches the Docs
+    /// projection and writes the concrete table answers (#1321).
+    #[test]
+    fn the_trait_object_answers_the_docs_projection_and_writes() {
+        use knobas_sync::scheduler::AdapterRegistry;
+        let registry: &dyn AdapterRegistry = &Registry::default();
+        assert!(registry.doc_projection("confluence").is_some());
+        assert!(registry.doc_writes("confluence").is_some());
+        assert!(registry.doc_projection("jira").is_none());
+        assert!(registry.doc_writes("mock").is_none());
     }
 
     #[test]

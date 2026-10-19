@@ -7749,3 +7749,33 @@ The merge-manager's rulings on #1317 and #1318 (Opus):
 - **The §10.8 amendment, tightened** to match the diff: it now names `RoleScope`, `RawRun` and
   `RunRow::read`, the run-columns macro, `declared_paths` left in `list.rs`, the two caller-visible
   changes above, `CoreError::Invalid` and core's `test-util`. *Reversing:* n/a.
+## #1321: the lifecycle carries the registry as the trait object (Opus implementer, 2026-10-19)
+
+- **The trait's growth is the Docs projection and writes. It gets no second `templates()`.**
+  *Fork:* the ticket says the trait "gains the templates (kinds, declared paths, views, write ops
+  per adapter kind) beside `descriptors()`". `descriptors()` already returns exactly what
+  `Registry::templates()` returns: one template per kind, with its paths, roles and write ops.
+  The reads still held on to the concrete type for `doc_projection` and `doc_writes`, which the
+  Docs reader's seven reads call. *Ruling:* add those two to the trait as provided methods
+  defaulting to `None`. A `templates()` on the trait would be a second name for `descriptors()`.
+  The defaults leave every existing test registry compiling unchanged, and no test registry draws
+  pages. *Reversing:* one trait method per name, and the fakes implement it.
+- **The new name is `Registry::for_process()`.** *Fork:* the ticket asks for a name that says the
+  list is the process's and includes installed external adapters. *Ruling:* `for_process`. Its
+  doc says what the list holds. "Process list" reads as `ps`, and spelling out "builtin and
+  installed" in the name would have to change if the list ever holds a third kind of adapter.
+  *Reversing:* a rename.
+- **Bring-up still loads into the concrete registry, and the sources state keeps its own `Arc`
+  over the same list.** *Fork:* "bring-up fills that same one" could mean that `start` takes the
+  lifecycle's trait object. *Ruling:* no. Loading an installed adapter needs `Registry::add`,
+  which the trait does not have. `start` loads into `Registry::for_process()`, which
+  `Lifecycle::new()` also wraps, and every clone shares one list. So the lifecycle, the
+  scheduler and `SourcesState` see one list without the trait gaining a write. A lifecycle built
+  over a test registry does not get bring-up's loads, and no test needs it to. *Reversing:* a
+  `BringUp` field fed from the lifecycle.
+- **The integration test lives in `tests/it/ipc.rs`.** It sits beside the existing
+  `list_adapters` cold-start check, which now manages a fresh `Lifecycle`, the way the app does
+  before `setup`, where before it managed no state at all. *Reversing:* n/a.
+- **Seams, chosen without a person to confirm them:** the integration binary's mock-app invoke
+  of `list_adapters`, as the ticket names it, and a unit test over `&dyn AdapterRegistry` for
+  the trait growth. *Reversing:* n/a.

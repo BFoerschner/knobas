@@ -592,7 +592,7 @@ async fn engine(
         knobas_sync::scheduler::Scheduler::start(knobas_sync::scheduler::SchedulerDeps {
             pool: state.pool.clone(),
             connections: Arc::new(live_digest::Connections(state.connector.clone())),
-            registry: Arc::new(knobas_app::sources::Registry::builtin()),
+            registry: Arc::new(knobas_app::sources::Registry::for_process()),
             secrets: Arc::clone(&secrets),
             events: Arc::new(live_digest::Quiet),
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
@@ -603,7 +603,7 @@ async fn engine(
         pool: state.pool.clone(),
         scheduler,
         secrets,
-        registry: Arc::new(knobas_app::sources::Registry::builtin()),
+        registry: Arc::new(knobas_app::sources::Registry::for_process()),
     }
 }
 

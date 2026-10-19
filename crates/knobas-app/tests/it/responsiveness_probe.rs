@@ -359,7 +359,7 @@ async fn room(
     project: Option<&str>,
     runs: u64,
 ) {
-    let registry = Registry::builtin();
+    let registry = Registry::for_process();
     let declarations = knobas_app::sources::paths::declared_paths(pool, &registry)
         .await
         .unwrap();
@@ -518,7 +518,7 @@ async fn seed(
         )
         .await
         .unwrap();
-        let source = Registry::builtin()
+        let source = Registry::for_process()
             .build(knobas_source::instance::SourceInstance {
                 id: "gitea".into(),
                 kind: "gitea".into(),
@@ -830,7 +830,7 @@ async fn what_the_reader_waits_on() {
     println!("RP | interaction | read | cold ms | warm median ms | warm max ms | bytes");
 
     // -- opening the app -----------------------------------------------------
-    let registry = Registry::builtin();
+    let registry = Registry::for_process();
     let now = chrono::Utc::now();
     let boot = "open app";
     time(boot, "list_sources", runs, || {
@@ -1199,14 +1199,14 @@ struct Sending;
 
 impl AdapterRegistry for Sending {
     fn descriptors(&self) -> Vec<SourceDescriptor> {
-        Registry::builtin().descriptors()
+        Registry::for_process().descriptors()
     }
 
     fn build(
         &self,
         instance: knobas_source::instance::SourceInstance,
     ) -> Result<Box<dyn Source>, SourceError> {
-        let template = Registry::builtin()
+        let template = Registry::for_process()
             .descriptors()
             .into_iter()
             .find(|d| d.adapter_kind == instance.kind)
@@ -1485,7 +1485,7 @@ async fn writes(
     .await;
 
     // -- the inbox: an answer and the re-read it used to wait on
-    let registry_builtin = Registry::builtin();
+    let registry_builtin = Registry::for_process();
     let now = chrono::Utc::now();
     let reread = || async {
         inbox_items_inner(

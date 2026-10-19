@@ -543,7 +543,7 @@ async fn tickets_of(
         return Ok(Vec::new());
     }
     let declarations =
-        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::builtin()).await?;
+        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process()).await?;
     let groups: Vec<i32> = rules.iter().map(|(n, _)| *n).collect();
     let kinds: Vec<&str> = rules.iter().map(|(_, rule)| rule.kind.as_str()).collect();
     let values: Vec<&str> = rules.iter().map(|(_, rule)| rule.value.as_str()).collect();
@@ -601,7 +601,7 @@ async fn read(
         .fetch_all(pool)
         .await?;
     let declarations =
-        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::builtin()).await?;
+        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process()).await?;
     let declarations = declarations.as_param();
     let rules = sqlx::query(
         "select r.set_id, r.kind, r.value,
@@ -813,7 +813,7 @@ pub async fn preview_pattern(
         .map(|(id, _)| (kind.to_owned(), id))
         .collect();
     let declarations =
-        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::builtin()).await?;
+        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process()).await?;
     Ok(PatternPreview {
         count,
         matches: member_rows(pool, &declarations.as_param(), &wanted).await?,

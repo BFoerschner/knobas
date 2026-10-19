@@ -2,7 +2,7 @@
 //! call: `get_entity` for the card's fields, `promote_context` and the
 //! membership-scoped `list_entities` for the section, over the embedded
 //! PostgreSQL with the declarations the compiled-in Jira adapter makes
-//! (`Registry::builtin`), never a copy of them.
+//! (`Registry::for_process`), never a copy of them.
 //!
 //! This file's database is its own (#572); each test uses a key nothing else
 //! holds.

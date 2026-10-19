@@ -141,7 +141,7 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
     if analyzed {
         sqlx::query("analyze").execute(&pool).await.unwrap();
     }
-    let declarations = knobas_app::sources::paths::declared_paths(&pool, &Registry::builtin())
+    let declarations = knobas_app::sources::paths::declared_paths(&pool, &Registry::for_process())
         .await
         .unwrap();
     (pool, declarations)

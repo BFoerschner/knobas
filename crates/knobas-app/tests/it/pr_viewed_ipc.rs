@@ -1,7 +1,7 @@
 //! *Viewed* on a pull request's files (#842, R-8.17): knobas-local, kept by
 //! pull request and the head commit its source declares, through the two
 //! commands *Files changed* calls, over the embedded PostgreSQL with the
-//! declarations the compiled-in Gitea adapter makes (`Registry::builtin`).
+//! declarations the compiled-in Gitea adapter makes (`Registry::for_process`).
 //!
 //! Each test configures a Gitea source of its own, so its pull requests are
 //! told apart from anything else in this database.

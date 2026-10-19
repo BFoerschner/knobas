@@ -107,7 +107,7 @@ type Row = (String, String, Option<String>);
 
 async fn walked(pool: &PgPool, sources: &[&str]) -> Vec<Row> {
     let declarations =
-        knobas_app::sources::paths::declared_paths(pool, &knobas_app::sources::Registry::builtin())
+        knobas_app::sources::paths::declared_paths(pool, &knobas_app::sources::Registry::for_process())
             .await
             .unwrap();
     let rows: Vec<Row> = sqlx::query_as(WALK)
