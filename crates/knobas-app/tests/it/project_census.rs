@@ -116,7 +116,7 @@ async fn walked(pool: &PgPool, sources: &[&str]) -> Vec<Row> {
 
 /// What `list_projects` answers for `sources`, after checking it is the walk.
 async fn census(pool: &PgPool, sources: &[&str], step: &str) -> Vec<Row> {
-    let read: Vec<Row> = list_projects_inner(pool)
+    let read: Vec<Row> = list_projects_inner(pool, &knobas_app::sources::Registry::for_process())
         .await
         .unwrap()
         .into_iter()

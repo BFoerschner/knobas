@@ -391,7 +391,7 @@ pub async fn read(
         });
     }
 
-    for pipeline in crate::commands::entity::pipelines_inner(pool).await? {
+    for pipeline in crate::commands::entity::pipelines_inner(pool, registry).await? {
         let newest = pipeline.recent.into_iter().next().and_then(|run| run.state);
         items.push(DepItem {
             id: pipeline.entity_id,

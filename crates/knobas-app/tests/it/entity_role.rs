@@ -458,9 +458,12 @@ async fn the_pipelines_read_is_the_ci_fillers() {
         .await
         .unwrap();
 
-    let listed = knobas_app::commands::entity::pipelines_inner(&pool)
-        .await
-        .unwrap();
+    let listed = knobas_app::commands::entity::pipelines_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+    )
+    .await
+    .unwrap();
     let ours: Vec<(&str, &str, usize)> = listed
         .iter()
         .filter(|row| all.contains(&&row.source_id))
@@ -557,6 +560,7 @@ async fn the_ticket_board_reads_the_roles_fillers() {
 
     let board = knobas_app::commands::entity::mini_board_inner(
         &pool,
+        &knobas_app::sources::Registry::for_process(),
         None,
         Some(knobas_source::role::TICKET_SYSTEM),
         None,
@@ -597,6 +601,7 @@ async fn a_role_nobody_fills_is_an_empty_board() {
     ticket_in(&pool, &source, "T-1", "To Do").await;
     let board = knobas_app::commands::entity::mini_board_inner(
         &pool,
+        &knobas_app::sources::Registry::for_process(),
         None,
         Some("role_nobody:fills-this"),
         None,

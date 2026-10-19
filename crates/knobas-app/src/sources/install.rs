@@ -260,20 +260,21 @@ async fn install_origin(
     })
 }
 
-/// The `install_adapter` command's body: install into the process registry
-/// (the one the scheduler's copy shares), storing under `profile_dir`.
+/// The `install_adapter` command's body: install into `registry` (the sources
+/// state's, which the scheduler shares), storing under `profile_dir`.
 ///
 /// # Errors
 ///
 /// As [`install_from`].
 pub async fn install_for_profile(
     pool: &PgPool,
+    registry: &Registry,
     profile_dir: &Path,
     input: &str,
 ) -> Result<InstalledAdapter, InstallError> {
     install_from(
         pool,
-        &Registry::for_process(),
+        registry,
         &store_dir(profile_dir),
         &Endpoints::default(),
         input,

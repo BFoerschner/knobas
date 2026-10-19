@@ -17,15 +17,13 @@ pub(super) use knobas_core::builds::{PINS_SETTING, PipelineRow, RunRow};
 /// # Errors
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
-pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError> {
-    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
+pub async fn pipelines_inner(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+) -> Result<Vec<PipelineRow>, IpcError> {
+    let declarations = declared_paths(pool, registry).await?;
     let identity = identity_of(pool).await?;
-    let fillers = crate::sources::crud::fillers(
-        pool,
-        &crate::sources::Registry::for_process(),
-        knobas_source::role::CI,
-    )
-    .await?;
+    let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::CI).await?;
     let mut pipelines =
         knobas_core::builds::pipelines(pool, &declarations, &identity, &fillers).await?;
     // The list reads the mirror only: a sha two repositories share links
@@ -48,10 +46,11 @@ pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError
 /// `commit_id` here. [`pipeline_runs_live_inner`] is what the command answers.
 pub async fn pipeline_runs_inner(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     pipeline_id: &str,
     limit: Option<u32>,
 ) -> Result<Vec<RunRow>, IpcError> {
-    runs_of_pipeline(pool, None, pipeline_id, limit).await
+    runs_of_pipeline(pool, registry, None, pipeline_id, limit).await
 }
 
 /// One pipeline's runs as [`pipeline_runs_inner`] reads them, with a sha two
@@ -69,19 +68,27 @@ pub async fn pipeline_runs_live_inner(
     pipeline_id: &str,
     limit: Option<u32>,
 ) -> Result<Vec<RunRow>, IpcError> {
-    runs_of_pipeline(pool, Some((secrets, registry)), pipeline_id, limit).await
+    runs_of_pipeline(
+        pool,
+        registry,
+        Some((secrets, registry)),
+        pipeline_id,
+        limit,
+    )
+    .await
 }
 
 /// What both `pipeline_runs` readings share; `live` is whether a shared sha
 /// may be resolved through the pipeline's settings.
 async fn runs_of_pipeline(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     live: Option<LiveReads<'_>>,
     pipeline_id: &str,
     limit: Option<u32>,
 ) -> Result<Vec<RunRow>, IpcError> {
     let entity = EntityRef::parse(pipeline_id).map_err(IpcError::invalid)?;
-    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
+    let declarations = declared_paths(pool, registry).await?;
     let identity = identity_of(pool).await?;
     let Some(mut runs) =
         knobas_core::builds::pipeline_runs(pool, &declarations, &identity, &entity, limit).await?
@@ -784,7 +791,7 @@ pub async fn download_run_file<R: tauri::Runtime>(
 #[tauri::command]
 pub async fn pipelines(lifecycle: State<'_, Lifecycle>) -> Result<Vec<PipelineRow>, IpcError> {
     let pool = lifecycle.pool()?;
-    pipelines_inner(&pool).await
+    pipelines_inner(&pool, lifecycle.registry()).await
 }
 
 /// One pipeline's runs (#848).
@@ -813,7 +820,7 @@ pub async fn pipeline_runs<R: tauri::Runtime>(
             )
             .await
         }
-        Err(_) => pipeline_runs_inner(&pool, &pipeline_id, limit).await,
+        Err(_) => pipeline_runs_inner(&pool, lifecycle.registry(), &pipeline_id, limit).await,
     }
 }
 
@@ -1079,6 +1086,7 @@ select pipeline, kind, value, origin from reasons order by pipeline, ord, value
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
 pub async fn job_pipelines_inner(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     ticket_id: &str,
 ) -> Result<Vec<JobPipeline>, IpcError> {
     let reached = knobas_core::reach::reach(pool, ticket_id).await?;
@@ -1092,7 +1100,7 @@ pub async fn job_pipelines_inner(
             knobas_core::reach::Origin::LinkSet { .. } => "link_set",
         })
         .collect();
-    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
+    let declarations = declared_paths(pool, registry).await?;
     let rows: Vec<(String, String, String, Option<String>)> = sqlx::query_as(JOB_PIPELINES)
         .bind(declarations.as_param())
         .bind(&ids)
@@ -1147,5 +1155,5 @@ pub async fn job_pipelines(
     entity_id: String,
 ) -> Result<Vec<JobPipeline>, IpcError> {
     let pool = lifecycle.pool()?;
-    job_pipelines_inner(&pool, &entity_id).await
+    job_pipelines_inner(&pool, lifecycle.registry(), &entity_id).await
 }

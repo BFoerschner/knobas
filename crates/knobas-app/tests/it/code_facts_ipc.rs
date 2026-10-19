@@ -98,9 +98,13 @@ async fn a_repository_reads_its_declared_language_and_teams() {
     )
     .await;
 
-    let facts = code_facts_inner(&pool, &[payout.clone(), runbooks.clone()])
-        .await
-        .unwrap();
+    let facts = code_facts_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &[payout.clone(), runbooks.clone()],
+    )
+    .await
+    .unwrap();
     assert_eq!(of(&facts, &payout).language.as_deref(), Some("Rust"));
     assert_eq!(of(&facts, &payout).teams, vec!["Payments", "Platform"]);
     assert_eq!(of(&facts, &runbooks).language, None);
@@ -147,6 +151,7 @@ async fn an_author_is_mine_when_it_is_the_sources_configured_username() {
 
     let facts = code_facts_inner(
         &pool,
+        &knobas_app::sources::Registry::for_process(),
         &[
             mine.clone(),
             theirs.clone(),

@@ -590,13 +590,16 @@ async fn a_teamcity_project_survives_its_builds_through_its_configurations() {
         // `list_projects` itself: it stores the running binary's
         // declarations on its way in, and the census reads what the database
         // resolved from them (#759).
-        knobas_app::commands::entity::list_projects_inner(&pool)
-            .await
-            .unwrap()
-            .into_iter()
-            .filter(|project| project.source_id == id)
-            .map(|project| project.key)
-            .collect::<std::collections::BTreeSet<String>>()
+        knobas_app::commands::entity::list_projects_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|project| project.source_id == id)
+        .map(|project| project.key)
+        .collect::<std::collections::BTreeSet<String>>()
     };
     let through_builds = census().await;
     assert!(

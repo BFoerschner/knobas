@@ -231,6 +231,7 @@ async fn the_mini_board_command_narrows_by_a_query_and_marks_my_tickets() {
 
     let board = mini_board_inner(
         &pool,
+        &knobas_app::sources::Registry::for_process(),
         None,
         None,
         None,
@@ -249,9 +250,17 @@ async fn the_mini_board_command_narrows_by_a_query_and_marks_my_tickets() {
     assert_eq!(card(&mine).issue_type.as_deref(), Some("Bug"));
     assert_eq!(card(&mine).assignee.as_deref(), Some("mara.lindqvist"));
 
-    let blank = mini_board_inner(&pool, None, None, None, None, Some("  "))
-        .await
-        .unwrap();
+    let blank = mini_board_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        None,
+        None,
+        None,
+        None,
+        Some("  "),
+    )
+    .await
+    .unwrap();
     let all: Vec<&str> = blank
         .columns
         .iter()

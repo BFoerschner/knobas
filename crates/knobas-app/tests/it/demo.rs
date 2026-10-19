@@ -468,9 +468,12 @@ async fn the_demo_corpus_shows_exactly_the_three_projects_its_fixture_names() {
     // project is that adapter's own declaration, not a path this file spells.
     // `list_projects` stores them on its way in and reads what the database
     // resolved from them (#759).
-    let census = knobas_app::commands::entity::list_projects_inner(&pool)
-        .await
-        .expect("the census the switcher's project rooms are built from");
+    let census = knobas_app::commands::entity::list_projects_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+    )
+    .await
+    .expect("the census the switcher's project rooms are built from");
     let shown: Vec<(String, Option<String>)> = census
         .into_iter()
         .filter(|project| project.source_id == "mock")

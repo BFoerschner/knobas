@@ -41,11 +41,13 @@ pub struct Installs {
 }
 
 impl Installs {
-    /// The process registry, the profile's store, GitHub itself.
+    /// `registry` (the sources state's, see
+    /// [`SourcesState::installable`](super::SourcesState::installable)), the
+    /// profile's store, GitHub itself.
     #[must_use]
-    pub fn for_profile(profile_dir: &Path) -> Self {
+    pub fn for_profile(registry: Registry, profile_dir: &Path) -> Self {
         Self {
-            registry: Registry::for_process(),
+            registry,
             store: install::store_dir(profile_dir),
             endpoints: Endpoints::default(),
         }

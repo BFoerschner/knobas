@@ -53,9 +53,10 @@ select i.entity_id, i.author, coalesce(i.author = me.me, false) as mine,
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
 pub async fn code_facts_inner(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     entity_ids: &[String],
 ) -> Result<Vec<CodeFacts>, IpcError> {
-    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
+    let declarations = declared_paths(pool, registry).await?;
     let rows = sqlx::query(CODE_FACTS)
         .bind(entity_ids)
         .bind(declarations.as_param())
@@ -86,7 +87,7 @@ pub async fn code_facts(
     entity_ids: Vec<String>,
 ) -> Result<Vec<CodeFacts>, IpcError> {
     let pool = lifecycle.pool()?;
-    code_facts_inner(&pool, &entity_ids).await
+    code_facts_inner(&pool, lifecycle.registry(), &entity_ids).await
 }
 
 // -- the URL a paste names --------------------------------------------------

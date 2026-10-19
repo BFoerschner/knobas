@@ -179,7 +179,13 @@ async fn a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link() {
     run(&pool, &tc, 4, "Elsewhere", "feature/PAY-1-x-other", "ccc").await;
     run(&pool, &tc, 5, "Elsewhere", "main", "ddd").await;
 
-    let all = job_pipelines_inner(&pool, &ticket).await.unwrap();
+    let all = job_pipelines_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &ticket,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         reasons(&all, &on_branch),
         Some(serde_json::json!([{ "kind": "branch", "branch": "feature/PAY-1-x" }]))
@@ -215,7 +221,12 @@ async fn a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link() {
         serde_json::json!({ "key": "PAY-9" }),
     )
     .await;
-    assert!(job_pipelines_inner(&pool, &lone).await.unwrap().is_empty());
+    assert!(
+        job_pipelines_inner(&pool, &knobas_app::sources::Registry::for_process(), &lone)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// A sub-task shows its parent ticket's pipelines (R-7.3), labelled with the
@@ -243,7 +254,9 @@ async fn a_sub_task_shows_the_pipelines_its_parent_links() {
     let linked = config(&pool, &tc, "ParentLinked").await;
     draw(&pool, &parent, &linked).await;
 
-    let all = job_pipelines_inner(&pool, &child).await.unwrap();
+    let all = job_pipelines_inner(&pool, &knobas_app::sources::Registry::for_process(), &child)
+        .await
+        .unwrap();
     assert_eq!(
         reasons(&all, &linked),
         Some(serde_json::json!([{
