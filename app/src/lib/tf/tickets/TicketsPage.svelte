@@ -704,8 +704,9 @@
       })
       .catch(() => {});
     // What the job's sections would show, through the job-reach read: no
-    // context is needed, and none is promoted to draw this (#1030).
-    void reachTally(ports, id).then((tally) => {
+    // context is needed, and none is promoted to draw this (#1030). The
+    // adapters' claims route a run to its page (#1256), so they are read too.
+    void Promise.all([reachTally(ports, id), kindRegistry.load()]).then(([tally]) => {
       if (!dead) around = aroundLines(tally, runKindsOf(kindRegistry));
     });
     return () => (dead = true);

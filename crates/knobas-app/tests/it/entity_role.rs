@@ -402,3 +402,76 @@ async fn every_statement_reads_the_scope() {
         }
     }
 }
+
+/// One pipeline `id` of `source`, as the mock's Builds frame reads one
+/// (`name`, `id`), with one run of it.
+async fn pipeline_with_a_run(pool: &PgPool, source: &str, id: &str) {
+    for (kind, entity, payload) in [
+        (
+            "pipeline",
+            format!("{source}:pipeline:{id}"),
+            serde_json::json!({ "id": id, "name": id }),
+        ),
+        (
+            "build",
+            format!("{source}:build:{id}-1"),
+            serde_json::json!({ "pipeline": id, "number": "1", "status": "success" }),
+        ),
+    ] {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $1)")
+            .bind(&entity)
+            .bind(kind)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1, $2, $3, $1, '', $4)",
+        )
+        .bind(&entity)
+        .bind(source)
+        .bind(kind)
+        .bind(payload)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+/// **The pipelines read is CI's** (#1295): it narrows itself to the CI
+/// role's fillers, with no argument. A filler's pipelines come back with
+/// their runs; a claimer whose records missed a CI path, a source whose
+/// adapter does not claim CI, a source whose adapter is not installed and a
+/// removed source's leftovers are left out, though every one of them holds
+/// a live pipeline and run.
+#[tokio::test]
+async fn the_pipelines_read_is_the_ci_fillers() {
+    let pool = pool().await;
+    let filler = configured(&pool, "mock").await;
+    let with_miss = configured(&pool, "mock").await;
+    let not_claiming = configured(&pool, "jira").await;
+    let uninstalled = configured(&pool, "role_nowhere").await;
+    let removed = configured(&pool, "mock").await;
+    let all = [&filler, &with_miss, &not_claiming, &uninstalled, &removed];
+    for source in all {
+        pipeline_with_a_run(&pool, source, "Deploy").await;
+    }
+    missed(&pool, &with_miss, knobas_source::role::CI).await;
+    // The miss is CI's alone: a miss of another role takes nothing from Builds.
+    missed(&pool, &filler, knobas_source::role::WIKI).await;
+    sqlx::query("delete from knobas.source_config where id = $1")
+        .bind(&removed)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let listed = knobas_app::commands::entity::pipelines_inner(&pool)
+        .await
+        .unwrap();
+    let ours: Vec<(&str, &str, usize)> = listed
+        .iter()
+        .filter(|row| all.contains(&&row.source_id))
+        .map(|row| (row.source_id.as_str(), row.name.as_str(), row.recent.len()))
+        .collect();
+    assert_eq!(ours, vec![(filler.as_str(), "Deploy", 1)]);
+}

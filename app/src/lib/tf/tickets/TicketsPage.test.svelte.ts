@@ -275,8 +275,14 @@ function harness(
             : filter.context !== null
               ? new Set(h.members[filter.context] ?? [])
               : new Set(h.rows.map((row) => row.entity_id));
+        // Asked for CI with no kinds, the mirror reads the run kinds CI's
+        // fillers declare (#1295); here, the fixture's builds.
+        const roleKinds = filter.role === "ci" ? ["build"] : null;
         const rows = h.rows.filter(
-          (row) => ids.has(row.entity_id) && (filter.kinds.length === 0 || filter.kinds.includes(row.kind)),
+          (row) =>
+            ids.has(row.entity_id) &&
+            (filter.kinds.length === 0 || filter.kinds.includes(row.kind)) &&
+            (roleKinds === null || roleKinds.includes(row.kind)),
         );
         return Promise.resolve({ rows, total: rows.length, tally: null, groups: null });
       },
@@ -547,6 +553,10 @@ test("Around this ticket counts what the ticket reaches, with no context stored 
   h.reach["jira:PAY-1"] = [own(PR), own(BUILD_FAILED)];
   await open(h);
   expect(around()).toEqual(["Code1 pull request", "Builds1 build, 1 failing or down"]);
+  // Builds is counted as the job reads it: asked for the CI role, naming no kinds (#1295).
+  const builds = h.lists.filter((filter) => filter.order === "latest_per_parent");
+  expect(builds).toHaveLength(1);
+  expect(builds[0]).toMatchObject({ role: "ci", kinds: [], reach: "jira:PAY-1" });
 });
 
 test("Around this ticket counts a parent's link the reach brings in and the context's membership does not", async () => {

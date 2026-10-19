@@ -7208,3 +7208,50 @@ The merge-manager's rulings (Opus):
 - **The shared helper.** `queue`, `amend` and `attempt` repeated shape, state lookup and
   projection; they now call one private `project_now`. `attempt` passes `op.identifier()` where it
   passed the row's `op` column, and the two are equal by construction. *Reversing:* low.
+## #1295: Builds reads its own role (Opus implementer, 2026-10-19)
+
+- **The pipelines read narrows in its statement.** *Fork:* filter the rows in Rust after the
+  read, narrow the declarations bound as `$1` to the fillers, or bind the fillers as a new `$3`.
+  *Ruling:* `$3`, a text array of `sources::crud::fillers(…, CI)`, tested on the `pipeline` arm
+  only (`i.source_id = any($3)`). *Reasoning:* the spec binds fillers as a text array the way
+  `sources` is bound. Narrowing `$1` would also change what `with_commits` reads for the shared-sha
+  link. A run is drawn only under a drawn pipeline of its own source, so the run arm needs no
+  second test. The registry is `Registry::builtin()`, the one `declared_paths` already reads for
+  this command. *Reversing:* low.
+- **Dependencies' pipelines narrow with it.** `assets::dependencies` reads its pipelines through
+  `pipelines_inner` so that "the two views cannot disagree", so a CI miss now takes a source's
+  pipelines off Dependencies too. Kept: that sentence is the reason the read is shared.
+  *Reversing:* low.
+- **The job's sections mark which ones ask the mirror.** *Fork:* send `role` from all four
+  sections now, or only from Builds. *Ruling:* only Builds (`SectionRead.sendsRole`); Code, Pages and
+  Monitors keep `sourceRoles.keep` until #1296–#1298 flip their own flag. `sectionReads(registry)`
+  becomes the constant `SECTION_READS`, since no read takes kinds from the registry any more.
+  *Reasoning:* the dispatch keeps this ticket to Builds. *Reversing:* low.
+- **The adapters' claims still load on the job and the preview.** The registry routes a run of
+  another kind than `build` to its page (#1256), so the job still calls `registry.load()`, but no
+  longer waits for it before reading Builds. `reachTally` drops its `registry` option, and the
+  Tickets preview loads `kindRegistry` beside the tally for `aroundLines`' routing.
+  *Reversing:* low.
+- **The Builds page test keeps one `sourceRoles.take`.** *Fork:* the ticket says the page tests
+  stop stubbing the role module, but a page test with no claims cannot tell a page that keeps rows
+  by the claims from one that does not, since an unread list keeps everything. *Ruling:* the test
+  hands the role module claims that would drop TeamCity and asserts every pipeline the read
+  answers is drawn. The mutant that restored `sourceRoles.keep(CI, …)` dies there. `take` stays in
+  the role module after #1300. *Reversing:* n/a.
+- **Builds with no kinds also reads CI's pipeline kinds.** The ticket says Builds sends no kinds.
+  The entity list's CI kinds are the pipeline and run kinds (§10.8's #1294 entry), so a pipeline a
+  ticket reaches now shows in the job's Builds section and counts in the preview. I did what the
+  ticket says and filed the conflict with story 14 as #1344 (`ready-for-agent`).
+  *Reversing:* per #1344.
+- **No §10.8 entry.** #1294's entry already records the narrowed meaning of `pipelines` for this
+  ticket ("each records nothing more here"). This PR adds no argument, command, module or
+  migration. *Reversing:* n/a.
+- **Seams, chosen without a person to confirm them:** the ones the ticket names: `pipelines_inner`
+  in `entity_role.rs` (same binary and fixtures as #1294), the fake-feature test, and the Builds,
+  job and Tickets page tests. *Reversing:* n/a.
+- **The link-set editor's pipeline candidates narrow too** (merge-manager on Opus, PR #1345).
+  *Fork:* keep `sets/ports.ts`' `candidates("pipeline")` on every source's pipelines, or let it
+  take the narrowed `pipelines` read. *Ruling:* it takes the narrowed read, unchanged. *Reasoning:*
+  §10.8's #1294 entry changes the meaning of `pipelines` itself, not of the Builds page, and a
+  link set's pipeline members are CI rows; a source that fills no CI role offers none, as it draws
+  none on Builds. *Reversing:* low (read the candidates from `list_entities` without a role).

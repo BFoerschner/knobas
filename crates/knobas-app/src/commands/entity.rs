@@ -1447,7 +1447,9 @@ macro_rules! run_columns {
 /// as a jsonb array newest first. A run sits under the pipeline of its own
 /// source whose declared `pipeline` equals its own; a pipeline whose name or
 /// identity misses is not drawn. Runs are ordered by the source's own
-/// timestamp, newest first.
+/// timestamp, newest first. `$3` is the CI role's fillers (#1295): a
+/// pipeline of any other source is not drawn, and a run is drawn only under
+/// a drawn pipeline.
 const PIPELINES: &str = concat!(
     "with ",
     frame_kinds_cte!(),
@@ -1472,7 +1474,7 @@ p as (
     from frames f
     join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
     left join knobas.source_config c on c.id = i.source_id
-   where f.frame = 'pipeline'
+   where f.frame = 'pipeline' and i.source_id = any($3::text[])
 ),
 pins as (
   select jsonb_array_elements_text(value) as id
@@ -1590,7 +1592,12 @@ impl RunRow {
     }
 }
 
-/// Every pipeline the configured sources declare, for the Builds list.
+/// Every pipeline the sources filling the CI role declare, for the Builds
+/// list. The read is CI's by definition, so it narrows itself to the role's
+/// fillers (`sources::crud::fillers`, #1295, ADR-0029 as amended on
+/// 2026-10-19) with no argument: a source whose records missed a CI path,
+/// one whose adapter claims no CI, one whose adapter is not installed and
+/// the items a removed source left behind draw no pipeline here.
 ///
 /// # Errors
 ///
@@ -1598,9 +1605,16 @@ impl RunRow {
 pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError> {
     let declarations = declared_paths(pool).await?;
     let identity = identity_of(pool).await?;
+    let fillers = crate::sources::crud::fillers(
+        pool,
+        &crate::sources::Registry::builtin(),
+        knobas_source::role::CI,
+    )
+    .await?;
     let rows = sqlx::query(PIPELINES)
         .bind(declarations.as_param())
         .bind(PIPELINE_RECENT)
+        .bind(&fillers)
         .fetch_all(pool)
         .await?;
     let mut pipelines: Vec<PipelineRow> = rows

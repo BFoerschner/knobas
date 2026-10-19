@@ -30,6 +30,10 @@ import type {
   Setting,
 } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
+import { fakeRoleScope } from "./corpus";
+
+/** The role `pipelines` is read for, as `knobas_source::role::CI` spells it. */
+const CI_ROLE = "ci";
 
 const SOURCE = "teamcity";
 /** The fixture's TeamCity, as `fake/sources.ts` names it. */
@@ -653,7 +657,11 @@ export function handlers(): Record<string, Handler> {
       presets.set(id, kept);
       return null;
     },
-    pipelines: () => fakePipelines(),
+    // CI's read by definition, so it narrows itself to the role's fillers, as the server's does (#1295).
+    pipelines: () => {
+      const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
+      return fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id));
+    },
     set_pipeline_pinned: (args) => {
       const id = String(args["pipelineId"] ?? "");
       if (args["pinned"] === true) pins.add(id);
