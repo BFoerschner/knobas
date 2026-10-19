@@ -2967,6 +2967,7 @@ knobas-source-jira	lib/knobas_source_jira	http::tests::a_body_that_is_not_jiras_
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_refusal_keeps_its_class_whatever_the_body_says
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_refused_connection_is_unreachable
 knobas-source-jira	lib/knobas_source_jira	http::tests::debug_never_prints_the_secret
+knobas-source-jira	lib/knobas_source_jira	http::tests::the_credential_rules_speak_exactly_what_the_form_offers
 knobas-source-jira	lib/knobas_source_jira	http::tests::the_jira_error_envelope_becomes_the_message
 knobas-source-jira	lib/knobas_source_jira	jql::tests::a_configured_filter_is_parenthesised
 knobas-source-jira	lib/knobas_source_jira	jql::tests::a_full_sync_is_scoped_and_ordered

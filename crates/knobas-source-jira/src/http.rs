@@ -216,6 +216,18 @@ mod tests {
             .expect("a PAT is enough")
     }
 
+    /// The Add-source form is generated from the descriptor's `auth_methods`
+    /// (spec §3a), and the transport refuses any method the rules leave out.
+    /// The two lists drifting apart either offers a method that is then
+    /// refused, or accepts one nobody can choose.
+    #[test]
+    fn the_credential_rules_speak_exactly_what_the_form_offers() {
+        assert_eq!(
+            CREDENTIAL_RULES.methods,
+            crate::descriptor_template().auth_methods.as_slice()
+        );
+    }
+
     /// Spec §14: the secret is never displayed. `Debug` is the leak that gets
     /// forgotten -- a `dbg!` on the client, or a `#[derive(Debug)]` on a struct
     /// holding it, would put a PAT in a log line or a bug report.

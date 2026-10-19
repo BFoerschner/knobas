@@ -6996,3 +6996,24 @@ The merge-manager's rulings (Opus):
   transport's table. The Jira-specific wording now has no Jira-side test. The transport's table
   pins a literal copy of Jira's rules, and `just jira-live` runs a correctly configured source
   only. *Reversing:* one table row per adapter in its own crate.
+
+The merge-manager's rulings (Opus):
+
+- **The judging order in `credential.rs` stands.** *Fork:* the implementer asked whether no
+  method, then an unlisted method or `OAuth`, then a missing username, then the secret is the
+  right order. *Ruling:* it is the order all five adapter copies use today (Jira, Confluence and
+  TeamCity through `scheme`, Gitea and Kuma through their `match`), so moving any adapter onto it
+  changes no refusal. *Reversing:* n/a.
+- **Naming #1313 and #1315 by behaviour in the §10.8 entry is enough.** *Fork:* name them now, or
+  write their signatures in advance. *Ruling:* the ticket asks for them to be named in advance,
+  and a signature written before its ticket's design would be a guess that the follow-up then has
+  to amend anyway. Each follow-up adds its signatures in an `Amendment` line. *Reversing:* cheap.
+- **Jira's rules get one Jira-side test, for the method list; the wording stays unpinned.**
+  *Fork:* with the seven tests gone, nothing reads `knobas-source-jira`'s `CREDENTIAL_RULES`.
+  *Ruling:* add `http::tests::the_credential_rules_speak_exactly_what_the_form_offers`, which
+  checks the rules' `methods` against `descriptor_template().auth_methods`. If those two drift,
+  the form offers a method that is then refused. A mutant adding `ApiToken` to Jira's rules is
+  killed. A typo in the two sentences is still caught only by reading. Pinning the sentences
+  would copy them into a test, which is what the ticket's deletion removed. *Reversing:* one test.
+- **The transport table's Kuma rules use Kuma's real refusal sentence.** The table's doc says each
+  row is a literal from the copy it replaces, and the Kuma stand-in was not. *Reversing:* n/a.

@@ -975,7 +975,12 @@ fn a_configured_method_maps_to_one_credential_or_one_refusal() {
         methods: &[ApiToken],
         unconfigured: "this Uptime Kuma source has no authentication method configured; choose \
                        an API key",
-        unsupported: |method| format!("{method:?} is not Kuma's"),
+        unsupported: |method| {
+            format!(
+                "{method:?} authentication is not supported for Uptime Kuma; /metrics takes an \
+                 API key, sent as HTTP Basic with an empty username"
+            )
+        },
     };
     // Rules that list every method, OAuth included, which has no wire form.
     const EVERY: CredentialRules = CredentialRules {
@@ -1015,7 +1020,7 @@ fn a_configured_method_maps_to_one_credential_or_one_refusal() {
         (&JIRA,  Some(OAuth),        Some("mara"), Some("t"),  jira_unsupported(OAuth)),
         (&JIRA,  Some(ApiToken),     Some("mara"), Some("t"),  jira_unsupported(ApiToken)),
         (&GITEA, Some(UserPassword), Some("mara"), Some("t"),  protocol("gitea: UserPassword authentication is not supported; this adapter authenticates with a personal access token")),
-        (&KUMA,  Some(Pat),          None,         Some("k"),  protocol("Pat is not Kuma's")),
+        (&KUMA,  Some(Pat),          None,         Some("k"),  protocol("Pat authentication is not supported for Uptime Kuma; /metrics takes an API key, sent as HTTP Basic with an empty username")),
         (&EVERY, Some(OAuth),        Some("mara"), Some("t"),  protocol("OAuth has no wire form")),
         // Refusal three: a misconfigured source -- no method, or user +
         // password with no username.
