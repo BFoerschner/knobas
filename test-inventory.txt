@@ -406,6 +406,7 @@ knobas-app	test/it	assets_ipc::a_paused_monitor_stays_on_the_roster_with_its_sam
 knobas-app	test/it	assets_ipc::a_preview_writes_nothing_at_all
 knobas-app	test/it	assets_ipc::a_producer_that_declares_no_origin_key_matches_by_id_and_nothing_else
 knobas-app	test/it	assets_ipc::a_producer_this_build_does_not_know_is_refused_by_name
+knobas-app	test/it	assets_ipc::a_reading_is_drawn_only_where_its_source_declares_one
 knobas-app	test/it	assets_ipc::a_recreated_container_keeps_its_asset
 knobas-app	test/it	assets_ipc::a_refused_token_is_unauthorized_and_not_an_internal_fault
 knobas-app	test/it	assets_ipc::a_rename_is_its_own_line_and_moves_the_entity_title
@@ -1354,6 +1355,7 @@ knobas-core	lib/knobas_core	payload::tests::a_kind_that_declares_nothing_misses
 knobas-core	lib/knobas_core	payload::tests::a_list_keeps_the_usable_strings_and_drops_the_rest
 knobas-core	lib/knobas_core	payload::tests::a_list_that_is_not_an_array_yields_nothing
 knobas-core	lib/knobas_core	payload::tests::a_miss_is_a_miss_however_the_source_spelled_it
+knobas-core	lib/knobas_core	payload::tests::a_number_is_the_first_candidate_that_lands_on_one
 knobas-core	lib/knobas_core	payload::tests::a_trigger_reads_the_source_word_through_its_map
 knobas-core	lib/knobas_core	payload::tests::a_value_that_is_not_a_usable_string_is_passed_over
 knobas-core	lib/knobas_core	payload::tests::an_instant_reads_in_the_basic_and_the_extended_spelling
@@ -2187,6 +2189,7 @@ knobas-source	lib/knobas_source	contract::tests::accepts_a_declared_source_actio
 knobas-source	lib/knobas_source	contract::tests::accepts_a_declared_write_op_without_calling_write
 knobas-source	lib/knobas_source	contract::tests::accepts_a_later_candidate_an_earlier_one_resolves_for
 knobas-source	lib/knobas_source	contract::tests::accepts_a_parent_name_an_earlier_name_resolves_for
+knobas-source	lib/knobas_source	contract::tests::accepts_a_read_only_ticket_system_that_refuses_its_transitions_read
 knobas-source	lib/knobas_source	contract::tests::accepts_a_started_by_absent_from_runs_nobody_started
 knobas-source	lib/knobas_source	contract::tests::accepts_a_ticket_system_claim_its_tickets_fill
 knobas-source	lib/knobas_source	contract::tests::accepts_a_wrong_declaration_for_a_kind_the_corpus_never_populates
@@ -2194,6 +2197,7 @@ knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_answers
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_draws_no_view
 knobas-source	lib/knobas_source	contract::tests::every_role_write_is_a_known_write_op
 knobas-source	lib/knobas_source	contract::tests::no_role_names_the_source_action
+knobas-source	lib/knobas_source	contract::tests::rejects_a_base_at_a_key_no_record_has
 knobas-source	lib/knobas_source	contract::tests::rejects_a_blank_source_id
 knobas-source	lib/knobas_source	contract::tests::rejects_a_ci_claim_without_the_run_log_read
 knobas-source	lib/knobas_source	contract::tests::rejects_a_clone_address_without_a_code_host_claim
@@ -2217,7 +2221,9 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_path_into_an_object_t
 knobas-source	lib/knobas_source	contract::tests::rejects_a_path_misspelled_before_its_last_segment
 knobas-source	lib/knobas_source	contract::tests::rejects_a_path_that_lands_on_an_object
 knobas-source	lib/knobas_source	contract::tests::rejects_a_pipeline_with_no_name_path
+knobas-source	lib/knobas_source	contract::tests::rejects_a_read_only_ticket_system_that_answers_its_transitions_read
 knobas-source	lib/knobas_source	contract::tests::rejects_a_refusal_that_does_not_name_the_adapter
+knobas-source	lib/knobas_source	contract::tests::rejects_a_response_time_that_is_no_number
 knobas-source	lib/knobas_source	contract::tests::rejects_a_reviewer_entry_key_the_elements_do_not_carry
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_action_declared_twice
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_id_knobas_keeps_for_itself
@@ -2294,6 +2300,7 @@ knobas-source	lib/knobas_source	role::data::tests::a_field_every_record_leaves_n
 knobas-source	lib/knobas_source	role::data::tests::a_misspelled_key_no_record_resolves_is_a_miss_naming_the_path
 knobas-source	lib/knobas_source	role::data::tests::a_parent_no_record_has_is_not_a_miss_but_a_wrong_one_is
 knobas-source	lib/knobas_source	role::data::tests::a_path_one_segment_short_is_a_wrong_shape_and_a_miss
+knobas-source	lib/knobas_source	role::data::tests::a_response_time_that_is_no_number_is_a_miss_and_a_null_is_not
 knobas-source	lib/knobas_source	role::data::tests::one_record_that_resolves_settles_the_kind
 knobas-source	lib/knobas_source	role::data::tests::records_of_no_required_kind_are_no_evidence
 knobas-source	lib/knobas_source	role::data::tests::records_that_resolve_every_required_path_fill_the_role
@@ -2302,6 +2309,8 @@ knobas-source	lib/knobas_source	role::tests::a_claim_round_trips_and_a_descripto
 knobas-source	lib/knobas_source	role::tests::a_code_host_answers_its_clone_urls_from_a_typed_address
 knobas-source	lib/knobas_source	role::tests::a_code_host_that_fills_its_role_passes
 knobas-source	lib/knobas_source	role::tests::a_custom_role_is_namespaced_to_its_adapter_and_has_no_reads
+knobas-source	lib/knobas_source	role::tests::a_monitor_needs_its_state_and_its_response_time
+knobas-source	lib/knobas_source	role::tests::a_pull_request_that_declares_no_base_misses_the_base
 knobas-source	lib/knobas_source	role::tests::a_read_the_role_does_not_have_is_refused_by_name
 knobas-source	lib/knobas_source	role::tests::a_role_claimed_twice_is_refused
 knobas-source	lib/knobas_source	role::tests::each_required_read_is_needed
@@ -2587,6 +2596,7 @@ knobas-source-gitea	lib/knobas_source_gitea	sync::tests::only_a_repository_scope
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_default_branch_gets_the_budget_first
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_watermark_keeps_every_key_on_the_instant_it_stands_on
 knobas-source-gitea	lib/knobas_source_gitea	tests::a_branch_pr_and_commit_declare_their_repo_as_parent
+knobas-source-gitea	lib/knobas_source_gitea	tests::a_pull_request_declares_its_head_and_base_branch
 knobas-source-gitea	lib/knobas_source_gitea	tests::a_pull_request_draws_merged_open_or_closed
 knobas-source-gitea	lib/knobas_source_gitea	tests::exactly_the_unbudgeted_code_host_kinds_are_exhaustive_and_the_ticket_is_not
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_claims_the_code_host_and_ticket_system_roles_and_fills_them
@@ -3534,10 +3544,11 @@ knobas-sync	lib/knobas_sync	run_log::tests::the_wire_spellings_are_the_stored_sp
 knobas-sync	lib/knobas_sync	samples::tests::a_reading_is_rounded_and_the_threshold_reads_the_rounded_number
 knobas-sync	lib/knobas_sync	samples::tests::a_setting_out_of_range_is_brought_back_into_it
 knobas-sync	lib/knobas_sync	samples::tests::a_slow_up_monitor_is_warn_and_a_quick_one_is_up
-knobas-sync	lib/knobas_sync	samples::tests::a_source_with_no_monitor_kind_has_no_state_paths
+knobas-sync	lib/knobas_sync	samples::tests::a_source_with_no_monitor_kind_has_no_monitor_paths
 knobas-sync	lib/knobas_sync	samples::tests::every_unusable_shape_is_a_miss
 knobas-sync	lib/knobas_sync	samples::tests::only_an_up_monitor_becomes_warn
 knobas-sync	lib/knobas_sync	samples::tests::the_declared_path_is_what_is_read
+knobas-sync	lib/knobas_sync	samples::tests::the_declared_response_time_is_what_is_read
 knobas-sync	lib/knobas_sync	samples::tests::the_state_words_are_the_ones_the_column_accepts
 knobas-sync	lib/knobas_sync	scheduler::tests::a_failed_existence_check_purges_rather_than_skipping
 knobas-sync	lib/knobas_sync	scheduler::tests::an_emits_identity_comes_from_its_run_and_its_countdown_from_the_source
