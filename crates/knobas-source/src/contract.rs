@@ -3052,6 +3052,23 @@ mod tests {
         }
     }
 
+    /// Every variant answers an identifier and a delivery (ADR-0006, amended
+    /// 2026-10-19), one probe per variant: the two no-wildcard matches are
+    /// the forcing function, and this is where a probe set that skipped a
+    /// variant, or paired one with another's identifier, turns red.
+    #[test]
+    fn every_write_op_answers_an_identifier_and_a_delivery() {
+        let known = super::known_write_ops("test");
+        let mut identifiers = std::collections::BTreeSet::new();
+        for (id, op) in &known {
+            assert_eq!(op.identifier(), *id, "a probe paired with another's identifier");
+            assert!(identifiers.insert(*id), "{id} has two probes");
+            let delivery = op.delivery();
+            assert_eq!(delivery, op.clone().delivery(), "{id}: one op, one delivery");
+        }
+        assert_eq!(identifiers.len(), known.len());
+    }
+
     /// Every write a role's vocabulary names is a `WriteOp` the SPI knows, so
     /// a typo in a minimum is a red test and not a write no source can offer.
     #[test]

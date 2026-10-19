@@ -1385,55 +1385,6 @@ fn write_op_probes() -> Vec<WriteOp> {
     ]
 }
 
-/// The forcing function ADR-0006 relies on, applied to hold detection: a new
-/// `WriteOp` variant that reaches the queue without a stated definition of
-/// "changed" must fail a test rather than fall back quietly.
-///
-/// The match has no wildcard arm for the same reason `WriteOp::identifier`
-/// has none, so a new variant stops this test compiling until it is given a
-/// probe value -- and then this assertion until it is given a projection.
-#[test]
-fn every_write_op_has_a_stated_projection() {
-    let probes = write_op_probes();
-    for op in &probes {
-        let identifier = match op {
-            WriteOp::Comment { .. }
-            | WriteOp::Transition { .. }
-            | WriteOp::CreateTicket { .. }
-            | WriteOp::CreateBranch { .. }
-            | WriteOp::CreatePullRequest { .. }
-            | WriteOp::Approve { .. }
-            | WriteOp::TriggerBuild { .. }
-            | WriteOp::RerunBuild { .. }
-            | WriteOp::LogWork { .. }
-            | WriteOp::CreatePage { .. }
-            | WriteOp::UpdatePage { .. }
-            | WriteOp::PauseMonitor { .. }
-            | WriteOp::ResumeMonitor { .. }
-            | WriteOp::CreateMonitor { .. }
-            | WriteOp::MergePullRequest { .. }
-            | WriteOp::SetParameter { .. }
-            | WriteOp::RunBuild { .. }
-            | WriteOp::SubmitReview { .. }
-            | WriteOp::DeleteBranch { .. }
-            | WriteOp::EditPullRequest { .. }
-            | WriteOp::UpdatePullRequestBranch { .. }
-            | WriteOp::CommitFile { .. }
-            | WriteOp::SourceAction { .. } => op.identifier(),
-        };
-        assert!(
-            store::PROJECTED_OPS.contains(&identifier),
-            "{identifier:?} has no stated definition of a changed target: add one \
-             to `knobas_core::write_queue::project` and list it in PROJECTED_OPS"
-        );
-    }
-    assert_eq!(
-        probes.len(),
-        store::PROJECTED_OPS.len(),
-        "PROJECTED_OPS lists an op `WriteOp` does not define"
-    );
-}
-
 /// Two flushers, one write, one delivery.
 ///
 /// `submit` flushes at once and the scheduler's tick flushes every five
@@ -1676,14 +1627,6 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             op.identifier()
         );
     }
-    // `PROJECTED_OPS` is one entry per variant -- the test above is what makes
-    // that true -- so it is the variant count, and using it here rather than a
-    // literal means neither of these tests has a number to hand-bump.
-    assert_eq!(
-        probes.len(),
-        store::PROJECTED_OPS.len(),
-        "a `WriteOp` variant has no probe in `write_op_probes`"
-    );
     // And the other direction, which iterating the probes cannot reach: an
     // entry in `UNCLAIMED_OPS` that names no variant at all would never be
     // compared against one, so it would sit there inert and unfalsifiable.

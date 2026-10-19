@@ -39,6 +39,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use knobas_core::activity;
+use knobas_core::delivery::Projection;
 use knobas_core::entity::EntityRef;
 use knobas_core::payload::StatePath;
 use knobas_core::write_queue::{self as store, QueuedWrite, WaitReason, WriteState};
@@ -135,8 +136,8 @@ const ACTOR: &str = "user";
 /// one a colleague made" (`unclaimed`, below), and a title is not an address
 /// the way a head branch is.
 ///
-/// Stated as a list for [`PROJECTED_OPS`](store::PROJECTED_OPS)'s reason, and
-/// guarded the same way: `every_write_op_says_whether_a_withdrawal_can_leave_one`
+/// Stated as a list, and guarded by
+/// `every_write_op_says_whether_a_withdrawal_can_leave_one`, which
 /// matches on `WriteOp` with no wildcard arm, so growing the enum stops that
 /// test compiling until somebody writes down the answer for the new variant.
 /// **`create_monitor` is in the list, and the receipt is not what decides
@@ -399,11 +400,12 @@ pub async fn queue(
         FlushError::NotConfigured(e.to_string())
     })?;
     let identifier = op.identifier().to_owned();
+    let shape = op.delivery().projection;
     let target = store::target_of(&deps.pool, &entity).await?;
     let payload =
         serde_json::to_value(&op).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
-    let state = declared_state(deps, &entity, &identifier, target.as_ref()).await?;
-    let snapshot = store::project(&identifier, &payload, target.as_ref(), &state);
+    let state = declared_state(deps, &entity, shape, target.as_ref()).await?;
+    let snapshot = store::project(&identifier, shape, &payload, target.as_ref(), &state);
 
     let queued = store::queue(
         &deps.pool,
@@ -572,8 +574,9 @@ pub async fn amend(
     let target = store::target_of(&deps.pool, &entity).await?;
     let payload =
         serde_json::to_value(&op).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
-    let state = declared_state(deps, &entity, op.identifier(), target.as_ref()).await?;
-    let snapshot = store::project(op.identifier(), &payload, target.as_ref(), &state);
+    let shape = op.delivery().projection;
+    let state = declared_state(deps, &entity, shape, target.as_ref()).await?;
+    let snapshot = store::project(op.identifier(), shape, &payload, target.as_ref(), &state);
 
     let Some(amended) = store::amend(&deps.pool, id, payload, snapshot).await? else {
         return Ok(None);
@@ -607,7 +610,7 @@ pub async fn discard(deps: &SchedulerDeps, id: i64) -> Result<Option<QueuedWrite
 
 /// The state paths the target's source declares for the target's kind
 /// (`KindPaths::state`, #666), for the ops whose hold reads them
-/// ([`store::reads_declared_state`]): an `edit_pull_request` that closes or
+/// ([`Projection::reads_declared_state`]): an `edit_pull_request` that closes or
 /// reopens holds on the declared state rather than the whole record (#706),
 /// and a comment, an approval or a review holds on nothing else (#752).
 /// Empty for every other op, for a target that is gone, and for a source
@@ -620,10 +623,10 @@ pub async fn discard(deps: &SchedulerDeps, id: i64) -> Result<Option<QueuedWrite
 async fn declared_state(
     deps: &SchedulerDeps,
     entity: &EntityRef,
-    op: &str,
+    shape: Projection,
     target: Option<&store::Target>,
 ) -> Result<Vec<StatePath>, FlushError> {
-    let Some(target) = target.filter(|_| store::reads_declared_state(op)) else {
+    let Some(target) = target.filter(|_| shape.reads_declared_state()) else {
         return Ok(Vec::new());
     };
     let Some(source) = config::get(&deps.pool, &entity.namespace).await? else {
@@ -660,18 +663,8 @@ async fn attempt(
         }
     };
 
-    // Hold detection: the target as it stands *now*, against the snapshot
-    // taken when the write was queued.
-    let target = store::target_of(&deps.pool, &entity).await?;
-    let state = declared_state(deps, &entity, &write.op, target.as_ref()).await?;
-    let current = store::project(&write.op, &write.payload, target.as_ref(), &state);
-    if current != write.target_snapshot {
-        if let Some(held) = store::hold(&deps.pool, write.id, current).await? {
-            announce(deps, "held", &held).await;
-        }
-        return Ok(false);
-    }
-
+    // Decoded before hold detection, which reads the op's stated shape: a
+    // row nothing decodes is refused at once rather than held first.
     let op: WriteOp = match serde_json::from_value(write.payload.clone()) {
         Ok(op) => op,
         Err(error) => {
@@ -679,6 +672,19 @@ async fn attempt(
             return Ok(false);
         }
     };
+
+    // Hold detection: the target as it stands *now*, against the snapshot
+    // taken when the write was queued.
+    let shape = op.delivery().projection;
+    let target = store::target_of(&deps.pool, &entity).await?;
+    let state = declared_state(deps, &entity, shape, target.as_ref()).await?;
+    let current = store::project(&write.op, shape, &write.payload, target.as_ref(), &state);
+    if current != write.target_snapshot {
+        if let Some(held) = store::hold(&deps.pool, write.id, current).await? {
+            announce(deps, "held", &held).await;
+        }
+        return Ok(false);
+    }
 
     // ---------------------------------------------------------------------
     // The one call to `Source::write` in knobas. Everything above decides

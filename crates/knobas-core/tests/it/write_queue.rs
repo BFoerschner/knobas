@@ -9,6 +9,7 @@
 //! restart, a changed target produces a held write, a held write never flushes
 //! on its own -- never the shape of an internal state machine.
 
+use knobas_core::delivery::Projection;
 use knobas_core::entity::EntityRef;
 use knobas_core::write_queue::{self as wq, WriteState};
 use uuid::Uuid;
@@ -65,6 +66,7 @@ async fn queue_comment(pool: &sqlx::PgPool, entity: &EntityRef, body: &str) -> w
         pool,
         entity,
         "comment",
+        Projection::DeclaredState,
         serde_json::json!({ "Comment": { "entity": entity.to_string(), "body": body } }),
     )
     .await
@@ -82,6 +84,7 @@ async fn queue_transition(
         pool,
         entity,
         "transition",
+        Projection::WHOLE,
         serde_json::json!({ "Transition": { "entity": entity.to_string(), "status": status } }),
     )
     .await
@@ -91,10 +94,12 @@ async fn queue_op(
     pool: &sqlx::PgPool,
     entity: &EntityRef,
     op: &str,
+    shape: Projection,
     payload: serde_json::Value,
 ) -> wq::QueuedWrite {
     let snapshot = wq::project(
         op,
+        shape,
         &payload,
         wq::target_of(pool, entity).await.unwrap().as_ref(),
         &[],
@@ -134,6 +139,7 @@ async fn a_queued_write_survives_a_restart() {
         found.target_snapshot,
         wq::project(
             "transition",
+            Projection::WHOLE,
             &found.payload,
             wq::target_of(&restarted, &ticket).await.unwrap().as_ref(),
             &[]
@@ -469,6 +475,7 @@ async fn a_write_survives_its_target_being_withdrawn() {
     assert_eq!(still_there.state, WriteState::Pending);
     let now = wq::project(
         "comment",
+        Projection::DeclaredState,
         &serde_json::Value::Null,
         wq::target_of(&pool, &ticket).await.unwrap().as_ref(),
         &[],
@@ -524,7 +531,13 @@ async fn a_write_against_a_disabled_source_says_so_until_the_source_is_back() {
     wq::hold(
         &pool,
         write.id,
-        wq::project("comment", &serde_json::Value::Null, None, &[]),
+        wq::project(
+            "comment",
+            Projection::DeclaredState,
+            &serde_json::Value::Null,
+            None,
+            &[],
+        ),
     )
     .await
     .unwrap()
@@ -569,6 +582,7 @@ async fn a_write_held_for_a_changed_target_does_not_claim_the_source_is_off() {
     .await;
     let moved = wq::project(
         "transition",
+        Projection::WHOLE,
         &write.payload,
         wq::target_of(&pool, &ticket).await.unwrap().as_ref(),
         &[],

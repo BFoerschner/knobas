@@ -84,9 +84,9 @@
 //! An item's actions are `knobas_source::WriteOp` identifiers
 //! ([`Category::candidate_ops`]), dispatched through the write queue. **The
 //! inbox introduces no write path of its own**, which is why this module names
-//! ops as strings and knows nothing else about them -- `knobas-source` depends
-//! on this crate, not the other way round, exactly as
-//! [`crate::write_queue::PROJECTED_OPS`] does. Which of the candidates a
+//! ops as strings and knows nothing else about them: this crate cannot see
+//! `WriteOp`, which is why [`crate::write_queue::project`] is handed a
+//! shape rather than an op. Which of the candidates a
 //! *particular* source can actually perform is decided where the descriptors
 //! are, in `knobas_app::inbox`: an action the source does not declare is never
 //! offered.
