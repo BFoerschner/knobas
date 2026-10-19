@@ -6616,3 +6616,30 @@ The merge-manager's rulings (Opus):
   file-system status and exits 0. A queue entry another waiter removed between the glob and the
   `stat` raised an arithmetic error before #1274; reading it as epoch 0 marks it dead.
   **Reversing:** low.
+## #1245: the saved-view tables and commands take the role's names (Opus implementer)
+
+- **The words.** *Fork:* which role words replace the Jira names. *Ruling:* `saved_view`
+  throughout, the word #1207 gave the frame: `sync.saved_view`, `sync.saved_view_member`,
+  `knobas.ticket_view.saved_view` (the column and the IPC field), `hide_saved_view`,
+  `open_saved_view`, and `mini_board`'s `saved_view` (`savedView` on the wire). The column is
+  `saved_view` rather than `saved_view_ref`: it holds the saved view's entity id the way
+  `mini_board`'s argument does, and the two now read alike. *Reasoning:* one word for one thing
+  across the frame, the tables, the column and the commands; ADR-0029 calls them *saved views*.
+  *Reversing:* medium (another migration and §10.8 entry).
+- **What is not renamed.** *Fork:* the ticket names five things; other Jira names sit beside
+  them. *Ruling:* only the ticket's list, plus what must follow it (the constraints and index on
+  the two tables, the public helpers `saved_view_board{,_laned}`, the TS mirrors and local names
+  that carried the renamed field). Jira's item kind `jira_view` stays (it is the adapter's own
+  kind); the test files `jira_views.rs` / `jira_views_ipc.rs` stay (they test Jira's views, and
+  the criterion names them so); `TicketViewRow.jira` / `JiraSource` stay and are follow-up
+  #1273 (`backlog`). *Reasoning:* the ticket is the contract; a wider DTO rename is its own §10.8
+  change. *Reversing:* low.
+- **Every constraint, found in the catalog.** *Fork:* name the renamed constraints one by one, or
+  rename whatever starts `jira_view`. *Ruling:* a `do` block renames every constraint on the two
+  tables whose name starts `jira_view`; Postgres 18 names each not-null constraint
+  (`jira_view_name_not_null`, …), which a hand list missed on the first run. The schema test
+  holds that no constraint or index on the tables says `jira`. *Reversing:* low.
+- **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the schema
+  (two `schema.rs` tests: names, and an existing install's rows kept), the IPC bodies (the
+  existing Jira-views tests in `knobas-sync` and `knobas-app`), and the TS mirror test in
+  `ticket_views.rs` plus the vitest suites the rename reaches. *Reversing:* n/a.
