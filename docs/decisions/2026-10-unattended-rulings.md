@@ -8628,3 +8628,10 @@ taken afresh from `time.ts` at f9fc1bf1.
   know, and only then, so a status lagging an ended run cannot loop. Witnessed by "a watch that
   finds nothing while the run's id arrives asks again for that run (#1384)", red before the fix.
   *Reversing:* the re-check in `watch()` in `TfSourcePage.svelte`.
+
+## #1391 -- one walk-recording test sink
+
+- **Fork:** the copies differ: most keep `items` as a `Vec`, three count them in a `usize`, the Kuma one also records how many readings had arrived at each item. *Ruling:* one `knobas_source::contract::Walking` with all three fields (`items`, `readings`, `readings_before_item`); the counting callers read `items.len()`. *Reasoning:* the superset costs nothing where unused and keeps every assertion as it was. *Reversing:* split the struct; one file plus the callers.
+- **Fork:** `Handed` and `RefusesTheSecond` in `crates/knobas-wasm-host/tests/it/walk.rs` also implement `walked`. *Ruling:* left as they are. *Reasoning:* `Handed` records items and readings as one merged, formatted list (and the second wraps it with a refusal); that is a different record, not a copy. *Reversing:* none needed.
+- **Fork (merge-manager, Opus):** the four live suites' own files changed (their inline sinks replaced) and none was run. *Ruling:* no live re-run. *Reasoning:* the sink only observes; the assertions on `readings` are untouched and the item counts became `items.len()` / `!items.is_empty()` of the same values, so nothing a suite witnesses changed, and no adapter, engine or `knobas-source` trait code changed. *Reversing:* run `just gitea-live` (and the JVM suites) on `main`.
+- **Merge-manager confirms** both rulings above: the superset struct (only Kuma reads `readings_before_item`, and its test still witnesses the order) and leaving `Handed` / `RefusesTheSecond` alone.

@@ -107,7 +107,7 @@
 
 mod live_env;
 
-use knobas_source::contract::{Fault, VecSink, battery};
+use knobas_source::contract::{Fault, VecSink, Walking, battery};
 use knobas_source::{SourceError, SyncItem};
 use live_env::{Env, Litter, env, full, of_kind};
 
@@ -5590,22 +5590,6 @@ async fn a_ticket_is_filed_moved_and_commented_on_through_its_writes() {
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_run_reports_its_walk_over_the_real_repositories_even_when_unchanged() {
-    #[derive(Default)]
-    struct Walking {
-        items: usize,
-        readings: Vec<(u64, Option<u64>, String)>,
-    }
-    #[async_trait::async_trait]
-    impl knobas_source::Sink for Walking {
-        async fn item(&mut self, _item: SyncItem) -> Result<(), SourceError> {
-            self.items += 1;
-            Ok(())
-        }
-        async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
-            self.readings.push((done, of, unit.to_owned()));
-        }
-    }
-
     let env = env();
     let source = env.source(serde_json::json!({ "repos": env.quiet_repos() }));
     let of_two: Vec<_> = (0..=2)
@@ -5621,10 +5605,13 @@ async fn a_run_reports_its_walk_over_the_real_repositories_even_when_unchanged()
         .expect("unchanged sync");
     println!(
         "walk: full run {} items {:?}; unchanged run {} items {:?}",
-        first.items, first.readings, unchanged.items, unchanged.readings
+        first.items.len(),
+        first.readings,
+        unchanged.items.len(),
+        unchanged.readings
     );
-    assert!(first.items > 0);
+    assert!(!first.items.is_empty());
     assert_eq!(first.readings, of_two);
-    assert_eq!(unchanged.items, 0);
+    assert_eq!(unchanged.items.len(), 0);
     assert_eq!(unchanged.readings, of_two);
 }

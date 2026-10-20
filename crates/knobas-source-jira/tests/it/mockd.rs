@@ -18,7 +18,7 @@
 //!   watermark is rendered in the server's zone.
 
 use knobas_mockd::{MockFault, MockServer, ViolationKind, spawn_mock_jira};
-use knobas_source::contract::{Fault, VecSink, battery};
+use knobas_source::contract::{Fault, VecSink, Walking, battery};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceError, WriteOp};
 
@@ -195,25 +195,6 @@ async fn pages_across_more_than_one_response() {
     assert!(a.len() > 2, "the fixture must not fit in one 2-issue page");
     assert_eq!(a, b, "paging must not change which issues arrive");
     jira.assert_no_violations();
-}
-
-/// Keeps the items and every walk reading, in the order they came (#1381).
-#[derive(Default)]
-struct Walking {
-    items: Vec<knobas_source::SyncItem>,
-    readings: Vec<(u64, Option<u64>, String)>,
-}
-
-#[async_trait::async_trait]
-impl knobas_source::Sink for Walking {
-    async fn item(&mut self, item: knobas_source::SyncItem) -> Result<(), SourceError> {
-        self.items.push(item);
-        Ok(())
-    }
-
-    async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
-        self.readings.push((done, of, unit.to_owned()));
-    }
 }
 
 /// The run reports its walk over the search's own total: before each issue and

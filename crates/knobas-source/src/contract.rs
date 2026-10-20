@@ -28,6 +28,31 @@ impl crate::Sink for VecSink {
     }
 }
 
+/// An in-memory [`Sink`](crate::Sink) that keeps the items and every
+/// [`walked`](crate::Sink::walked) reading, in the order they arrived.
+///
+/// `readings_before_item[i]` is how many readings had arrived when item `i`
+/// did, so a test can say where in the walk an item came, not only that it did.
+#[derive(Default)]
+pub struct Walking {
+    pub items: Vec<crate::SyncItem>,
+    pub readings: Vec<(u64, Option<u64>, String)>,
+    pub readings_before_item: Vec<usize>,
+}
+
+#[async_trait::async_trait]
+impl crate::Sink for Walking {
+    async fn item(&mut self, item: crate::SyncItem) -> Result<(), crate::SourceError> {
+        self.readings_before_item.push(self.readings.len());
+        self.items.push(item);
+        Ok(())
+    }
+
+    async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+        self.readings.push((done, of, unit.to_owned()));
+    }
+}
+
 /// A sink that rejects the very first item, so the battery can check that an
 /// adapter propagates the failure instead of syncing on regardless.
 struct FailingSink;

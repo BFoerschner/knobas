@@ -120,7 +120,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use knobas_source::contract::{Fault, VecSink, battery};
+use knobas_source::contract::{Fault, VecSink, Walking, battery};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceError, SyncItem};
 
@@ -3218,22 +3218,6 @@ async fn fills_every_role_it_claims_on_the_seeded_corpus() {
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
 async fn a_run_reports_its_walk_over_the_real_search_total() {
-    #[derive(Default)]
-    struct Walking {
-        items: usize,
-        readings: Vec<(u64, Option<u64>, String)>,
-    }
-    #[async_trait::async_trait]
-    impl knobas_source::Sink for Walking {
-        async fn item(&mut self, _item: SyncItem) -> Result<(), SourceError> {
-            self.items += 1;
-            Ok(())
-        }
-        async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
-            self.readings.push((done, of, unit.to_owned()));
-        }
-    }
-
     let seeded = seeded();
     seeded.clear_leftovers().await;
     let source = seeded.source(serde_json::json!({}));
@@ -3246,11 +3230,11 @@ async fn a_run_reports_its_walk_over_the_real_search_total() {
         .expect("idle sync");
     println!(
         "walk: full run {} items, {} readings, first {:?}, last {:?}; idle run {} items, last {:?}",
-        first.items,
+        first.items.len(),
         first.readings.len(),
         first.readings.first(),
         first.readings.last(),
-        idle.items,
+        idle.items.len(),
         idle.readings.last()
     );
     let total = seeded.seeded_keys().len() as u64;

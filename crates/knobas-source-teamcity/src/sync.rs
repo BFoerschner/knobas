@@ -924,7 +924,7 @@ fn in_scope_build(cfg: &TeamCityConfig, tree: &ProjectTree, b: &Build) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use knobas_source::contract::VecSink;
+    use knobas_source::contract::{VecSink, Walking};
     use std::sync::Mutex;
 
     /// The base URL these runs are configured with. Deliberately **not** the
@@ -1519,17 +1519,6 @@ mod tests {
     /// once, so the bar closes at 0 of 0 (#1382).
     #[tokio::test]
     async fn an_incremental_run_that_lists_no_build_reports_an_empty_walk() {
-        #[derive(Default)]
-        struct Walking(Vec<(u64, Option<u64>, String)>);
-        #[async_trait::async_trait]
-        impl Sink for Walking {
-            async fn item(&mut self, _item: SyncItem) -> Result<(), SourceError> {
-                Ok(())
-            }
-            async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
-                self.0.push((done, of, unit.to_owned()));
-            }
-        }
         let rest = FakeRest::new(
             vec![build_type("Ledger_Deploy_Staging", "Ledger")],
             vec![build(412, "Ledger_Deploy_Staging", "Ledger", "finished")],
@@ -1547,7 +1536,7 @@ mod tests {
         )
         .await
         .expect("run");
-        assert_eq!(walking.0, vec![(0, Some(0), "builds".to_owned())]);
+        assert_eq!(walking.readings, vec![(0, Some(0), "builds".to_owned())]);
     }
 
     /// Contract battery clause 2, at the level where it is decided.

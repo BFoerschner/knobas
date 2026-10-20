@@ -713,7 +713,7 @@ fn ids_to_reread<'s>(
 mod tests {
     use super::*;
     use knobas_source::SyncItem;
-    use knobas_source::contract::VecSink;
+    use knobas_source::contract::{VecSink, Walking};
     use serde_json::{Value, json};
     use std::sync::Mutex;
 
@@ -1944,25 +1944,6 @@ mod tests {
     }
 
     // -- the run's walk (#1381) -------------------------------------------------
-
-    /// Keeps the items and every walk reading, in the order they came.
-    #[derive(Default)]
-    struct Walking {
-        items: Vec<SyncItem>,
-        readings: Vec<(u64, Option<u64>, String)>,
-    }
-
-    #[async_trait::async_trait]
-    impl Sink for Walking {
-        async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
-            self.items.push(item);
-            Ok(())
-        }
-
-        async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
-            self.readings.push((done, of, unit.to_owned()));
-        }
-    }
 
     async fn walk_of(fake: &Fake, cursor: Option<String>) -> (Walking, String) {
         let mut sink = Walking::default();

@@ -30,7 +30,7 @@
 //! actually saw rather than a bare assertion.
 
 use knobas_mockd::{MockFault, MockServer, TcStatus, spawn_mock_teamcity};
-use knobas_source::contract::{Fault, VecSink, battery};
+use knobas_source::contract::{Fault, VecSink, Walking, battery};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceError, SyncItem};
 
@@ -1361,25 +1361,6 @@ async fn a_trigger_against_an_unreachable_server_waits_rather_than_being_refused
         matches!(failed, Err(SourceError::Unreachable(_))),
         "{failed:?}"
     );
-}
-
-/// Keeps the items and every walk reading, in the order they came (#1382).
-#[derive(Default)]
-struct Walking {
-    items: Vec<SyncItem>,
-    readings: Vec<(u64, Option<u64>, String)>,
-}
-
-#[async_trait::async_trait]
-impl knobas_source::Sink for Walking {
-    async fn item(&mut self, item: SyncItem) -> Result<(), knobas_source::SourceError> {
-        self.items.push(item);
-        Ok(())
-    }
-
-    async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
-        self.readings.push((done, of, unit.to_owned()));
-    }
 }
 
 /// A full sync reports its walk over the configurations the scope resolved,
