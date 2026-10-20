@@ -1,7 +1,7 @@
 //! The fixture external adapter (issue #1198, ADR-0028).
 //!
 //! A test adapter built to a WASM component against
-//! `knobas:adapter@1.2.0`. It serves three surveys, and a pipeline with one
+//! `knobas:adapter@1.3.0`. It serves three surveys, and a pipeline with one
 //! run ([`builds`], #1205), so that the host can be tested with the contract
 //! battery, every live read, and through the sync engine into the mirror,
 //! without a real product behind it. No external
@@ -22,8 +22,13 @@
 //!   blocks: who surveyed it, and its body (#1202); and CI, for the Builds
 //!   frame, with every optional read (#1205).
 //! * **Built with `--features v1_0`** it is the same adapter against the
-//!   frozen 1.0.0 world (`wit-1.0.0/`), which has no `downloads` or `query`: what the
-//!   host's hold on 1.0.0 components is tested with.
+//!   frozen 1.0.0 world (`wit-1.0.0/`), which has no `downloads`, `query` or
+//!   `sink.walked`: what the host's hold on 1.0.0 components is tested with.
+//! * **The walk** (1.3.0, #1380): the outer unit is the item itself, as the
+//!   mock's is. A sync reports `walked` before each item it hands and once
+//!   after the last, `of` the items this run hands (`"items"`), so a sync
+//!   from a cursor that hands nothing still reports `0 of 0`. The 1.0.0
+//!   build reports nothing.
 //! * **`"fault": "swallow_sink"`** is a misbehaving adapter: it ignores what
 //!   `sink.item` answers and returns its cursor anyway, so the host's own
 //!   hold on a refused item is witnessed.
@@ -287,6 +292,15 @@ impl Adapter {
     }
 }
 
+/// `sink.walked`, which 1.3.0 added (#1380); the 1.0.0 build has none and
+/// reports nothing.
+fn walked(done: u64, of: u64) {
+    #[cfg(not(feature = "v1_0"))]
+    sink::walked(done, Some(of), "items");
+    #[cfg(feature = "v1_0")]
+    let _ = (done, of);
+}
+
 /// The SPI's item as the WIT world carries it: the entity as `ns:key`, the
 /// instant as RFC 3339, the payload as its JSON text.
 fn wit_item(item: knobas_source::SyncItem) -> SyncItem {
@@ -445,12 +459,16 @@ impl GuestAdapter for Adapter {
         };
         let swallow = matches!(self.fault, Ok(Fault::SwallowSink));
         let corpus = self.corpus();
-        for item in &corpus[from..] {
+        let walk = &corpus[from..];
+        let of = walk.len() as u64;
+        for (done, item) in (0u64..).zip(walk) {
+            walked(done, of);
             match sink::item(item) {
                 Err(_) if swallow => {}
                 answer => answer?,
             }
         }
+        walked(of, of);
         Ok(corpus.len().to_string())
     }
 

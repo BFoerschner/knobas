@@ -204,7 +204,7 @@ async fn a_download_the_sink_refuses_fails_with_the_sink_s_error() {
 
 /// A component built against 1.0.0 still links and syncs, keeps no runs to
 /// download and translates no query: what 1.1.0 and 1.2.0 added is optional
-/// to it.
+/// to it. That it reports no walk (1.3.0) is `walk.rs`'s.
 #[tokio::test]
 async fn a_component_built_against_1_0_0_is_still_hosted() {
     let path = knobas_wasm_host::fixture_component_v1_0();
