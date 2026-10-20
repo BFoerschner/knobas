@@ -76,21 +76,34 @@ use crate::IpcError;
 /// The reason names knobas' own rule and has to be readable beside the ticket
 /// it explains ("linked to this page", "the room you were in"), which is
 /// wording that belongs with the layout it sits in; what the backend owes is
-/// the fact of *which* rule fired, and that is one closed vocabulary the
-/// mirror pins as a union.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// the fact of *which* rule fired, and that is one closed vocabulary.
+///
+/// The dialog draws a sentence per member, and that is the whole of what this
+/// union is for: a suggestion whose reason is not on screen is a guess the
+/// reader can only trust or ignore.
+///
+/// - `linked_to_target`: rule one -- a confirmed link from the block's target
+///   to this ticket.
+/// - `context_anchor`: rule two -- this ticket anchors the stored context the
+///   block ran in.
+/// - `last_logged`: rule three -- this ticket is the last one logged to on the
+///   block's day.
+///
+/// The rules are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/time.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "time.ts")]
 pub enum SuggestionRule {
-    /// Rule one: a confirmed link from the block's target to this ticket.
     LinkedToTarget,
-    /// Rule two: this ticket anchors the stored context the block ran in.
     ContextAnchor,
-    /// Rule three: this ticket is the last one logged to on the block's day.
     LastLogged,
 }
 
 /// A ticket the ad-hoc dialog offers, and the rule that produced it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct Suggestion {
     pub entity_id: String,
     /// What the mirror calls it, or `null`.
@@ -117,7 +130,8 @@ pub struct Suggestion {
 /// One field, and the block's id is deliberately **not** echoed back: the
 /// caller passed it in and still holds it, so a copy on the way out would be a
 /// value with no reader and a promise of a guard nothing makes.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct AdHocBlock {
     pub suggestion: Option<Suggestion>,
 }

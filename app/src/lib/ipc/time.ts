@@ -1,9 +1,13 @@
 /**
  * The timer and its blocks — `crates/knobas-app/src/commands/time.rs`.
  *
- * Hand-written, and pinned to the Rust by tests in that module which
- * `include_str!` this file: a field, a union member or a command name added on
- * one side only fails `cargo test`, not merely `svelte-check`.
+ * The types are generated from the Rust (`./generated/time.ts`, contract
+ * §2.6 as amended by #1325, switched by #1330): a field is explained in its
+ * Rust doc comment and nowhere else. The `invoke` functions stay hand-written,
+ * pinned to the Rust by tests in that module which `include_str!` this file,
+ * and so do {@link ReaderDay} and {@link LoggedWork}, which group arguments
+ * this file spreads into its calls rather than anything that crosses the
+ * bridge whole.
  *
  * A §10.8-ratified module pair, on the backup module's precedent (issue #278).
  * **Every** time command belongs here — the block, worklog, draft, day and
@@ -17,78 +21,49 @@
  * thing to keep in step with the first.
  */
 import { invoke } from "@tauri-apps/api/core";
+import type {
+  AdHocBlock,
+  Block,
+  DayBlock,
+  DayRecord,
+  DayWindow,
+  Draft,
+  PlannedWorklog,
+  RunningTimer,
+  TimerTarget,
+  Week,
+  Worklog,
+} from "./generated/time";
 
-/**
- * A timer on something knobas has an id for — a ticket, page, note, repo or
- * asset.
- *
- * A **stored context is never one of these** (`CONTEXT.md`, *timer target*): a
- * context is a set, and time on a set has nowhere to go. `start_timer` refuses
- * a `ctx:` id with `invalid`, and the picker never offers one.
- */
-export interface EntityTarget {
-  kind: "entity";
-  /** `"<namespace>:<key>"` — `knobas_core::entity::EntityRef`. */
-  entity_id: string;
-}
+export type {
+  AdHocBlock,
+  Block,
+  BlockKind,
+  Candidate,
+  CandidateSource,
+  DayBlock,
+  DayRecord,
+  DayWindow,
+  Draft,
+  OpenStretch,
+  PlannedWorklog,
+  RunningTimer,
+  Suggestion,
+  SuggestionRule,
+  TimerTarget,
+  Week,
+  WeekCell,
+  WeekRow,
+  Worklog,
+} from "./generated/time";
 
-/** A timer on work with no entity behind it — "DB config for the migration". */
-export interface LabelTarget {
-  kind: "label";
-  /** Trimmed by the backend, and never empty. */
-  label: string;
-}
+// One name per arm of the target union, for a caller that holds one arm.
+// Picked out of the generated union, so an arm has one declaration.
 
-/**
- * What a timer, and therefore a block, is attributed to — `time::TimerTarget`.
- *
- * Exactly one of the two, which is why it is a discriminated union rather than
- * an object with two optional fields: the schema says exactly-one
- * (`timer_target_chk`), the Rust enum says it, and this says it too.
- */
-export type TimerTarget = EntityTarget | LabelTarget;
-
-/**
- * How a block came to exist — `time::BlockKind`.
- *
- * `"passive"` is knobas' own guess at what was open (#282) and is never logged
- * anywhere on its own. Assigning one through {@link updateBlock} makes it
- * `"manual"`; nothing turns a manual block back.
- */
-export type BlockKind = "manual" | "passive";
-
-/** The timer that is running — `time::RunningTimer`. */
-export interface RunningTimer {
-  target: TimerTarget;
-  /** RFC 3339, UTC. What the strip's elapsed reading counts from. */
-  started_at: string;
-  /**
-   * The last moment knobas was known to be alive, RFC 3339, UTC.
-   *
-   * Nothing draws this. It is the stamp a stranded timer's block is closed at
-   * when knobas starts again.
-   */
-  last_heartbeat: string;
-}
-
-/** One stretch of time knobas owns — `time::Block`. */
-export interface Block {
-  id: number;
-  /** RFC 3339, UTC. */
-  started_at: string;
-  /** RFC 3339, UTC. */
-  ended_at: string;
-  target: TimerTarget;
-  kind: BlockKind;
-  /**
-   * *Ended when knobas closed* — the block was closed by the relaunch sweep at
-   * the last heartbeat, not by anybody pressing stop. The day review offers
-   * *Extend to now* on these (#279).
-   */
-  ended_by_relaunch: boolean;
-  /** The worklog this block was logged into (#280); `null` until then. */
-  worklog_id: number | null;
-}
+/** {@link TimerTarget}'s `entity` arm. */
+export type EntityTarget = Extract<TimerTarget, { kind: "entity" }>;
+/** {@link TimerTarget}'s `label` arm. */
+export type LabelTarget = Extract<TimerTarget, { kind: "label" }>;
 
 /** The timer that is running, or `null`. */
 export function currentTimer(): Promise<RunningTimer | null> {
@@ -141,64 +116,6 @@ export function stopTimer(): Promise<Block | null> {
  */
 export function timerHeartbeat(foreground: TimerTarget | null): Promise<RunningTimer | null> {
   return invoke<RunningTimer | null>("timer_heartbeat", { foreground });
-}
-
-/**
- * One block as the day review draws it — `time::day::DayBlock`.
- *
- * The title is beside the block rather than inside it, and the split is the
- * point: a block is knobas' own durable record, and the title is the mirror's
- * *current* opinion of a row that may since have been renamed or purged. A
- * block whose entity is gone still says how long it was and what it was on.
- */
-export interface DayBlock {
-  block: Block;
-  /**
-   * What the mirror calls the target, or `null`.
-   *
-   * `null` for a label block — there is no entity — and for an entity the
-   * mirror has never held, has purged, or holds under a blank title. One
-   * question for the view, with one answer: show the id instead.
-   */
-  title: string | null;
-}
-
-/**
- * One day as the day review reads it — `time::day::DayRecord`.
- *
- * A record rather than the bare list this read used to answer with, because
- * one thing is true of the **day** and not of any block on it: whether knobas
- * still has the observations for it (#337).
- */
-export interface DayRecord {
-  /** The blocks overlapping the day, earliest first. */
-  blocks: DayBlock[];
-  /**
-   * Whether the day reaches back past what retention has swept.
-   *
-   * knobas keeps a month of observations, and `#/time/<date>` takes any date,
-   * so a day older than that draws exactly the strip a day nobody had the app
-   * open on draws. This is what tells the two apart.
-   *
-   * Passive blocks the day was already offered are still drawn: retention took
-   * the evidence, not the record made from it while the evidence was there. It
-   * says the strip cannot be added to, never that what is on it is untrue.
-   */
-  past_horizon: boolean;
-  /**
-   * The day's open stretches (#901): focused time no block, no dismissed
-   * offer and not the running timer claims, earliest first. Their sum is the
-   * week's "no target, app open" number for the day. Empty past the horizon.
-   */
-  open: OpenStretch[];
-}
-
-/** One stretch of focused time nothing claims — `time::day::OpenStretch`. */
-export interface OpenStretch {
-  /** RFC 3339. */
-  started_at: string;
-  /** RFC 3339. */
-  ended_at: string;
 }
 
 /**
@@ -266,87 +183,6 @@ export function deleteBlock(id: number): Promise<void> {
  */
 export function dismissBlock(id: number): Promise<void> {
   return invoke<void>("dismiss_block", { id });
-}
-
-/**
- * Where a worklog-draft candidate was seen — `worklog::CandidateSource`.
- *
- * Four sources because each fact is read from the table it already lives in
- * (#409): the mirror, the reader's activity lines, the write queue's comments,
- * and notes by their `updated_at`.
- */
-export type CandidateSource = "mirror" | "activity" | "write" | "note";
-
-/**
- * One thing knobas saw the reader do inside a draft's interval —
- * `worklog::Candidate`.
- *
- * A proposal, not a record: the draft draws these as checkboxes and the
- * comment is the {@link bullet}s of the ticked ones, joined with newlines.
- * **Do not compose a bullet here** — the wording is the backend's, so that
- * every worklog knobas has ever sent is spelled one way.
- */
-export interface Candidate {
-  /**
-   * Stable within a draft — `"item:jira:PAY-231"`, `"activity:4211"`,
-   * `"write:97"`, or a note's own `"note:<uuid>"`.
-   */
-  id: string;
-  source: CandidateSource;
-  /** RFC 3339, UTC. */
-  at: string;
-  entity_id: string | null;
-  /** The line this candidate contributes to the comment, verbatim. */
-  bullet: string;
-}
-
-/** What stopping the timer on a ticket offers — `worklog::Draft`. */
-export interface Draft {
-  entity_id: string;
-  /** `"2026-09-03"`, the reader's own day. */
-  day: string;
-  /** RFC 3339, UTC — the first block's start. */
-  started_at: string;
-  /**
-   * RFC 3339, UTC — the last block's end.
-   *
-   * **Not `started_at` plus {@link seconds}.** The difference between the two
-   * is the gaps between the day's blocks, which is exactly what is *not*
-   * logged.
-   */
-  ended_at: string;
-  /** The time about to be logged: the blocks' durations added up. */
-  seconds: number;
-  /** The closed blocks this draft is made of, oldest first. */
-  block_ids: number[];
-  /**
-   * RFC 3339, UTC — when the running timer started, if it runs on this ticket
-   * and started on this day (#896). Its stretch is counted up to the moment
-   * the draft was read: in {@link seconds}, and as {@link ended_at}. `null`
-   * when the clock is elsewhere or stopped.
-   */
-  running_since: string | null;
-  candidates: Candidate[];
-  /** The comment as generated from every candidate. Editable, down to empty. */
-  comment: string;
-}
-
-/** knobas' copy of a worklog it has sent, or is still sending — `worklog::Worklog`. */
-export interface Worklog {
-  id: number;
-  entity_id: string;
-  /** RFC 3339, UTC. */
-  started_at: string;
-  seconds: number;
-  comment: string;
-  /** The blocks it was made of. They carry its id and are read-only now. */
-  block_ids: number[];
-  /** The write that carries it; read its state with `pendingWrites`. */
-  write_queue_id: number | null;
-  /** What Jira called it — `null` while the write is still owed. */
-  remote_id: string | null;
-  /** RFC 3339, UTC. */
-  created_at: string;
 }
 
 /**
@@ -470,44 +306,6 @@ export function setPassiveAttribution(enabled: boolean): Promise<boolean> {
 }
 
 /**
- * Which rule produced an ad-hoc block's suggestion — `suggest::SuggestionRule`.
- *
- * The dialog draws a sentence per member, and that is the whole of what this
- * union is for: a suggestion whose reason is not on screen is a guess the
- * reader can only trust or ignore.
- */
-export type SuggestionRule = "linked_to_target" | "context_anchor" | "last_logged";
-
-/** The ticket *Log an ad-hoc block* offers, and why — `suggest::Suggestion`. */
-export interface Suggestion {
-  entity_id: string;
-  /**
-   * What the mirror calls it, or `null` — for an entity it has never held, has
-   * purged, or holds under a blank title. One question, one answer: show the
-   * id instead. The rule {@link DayBlock.title} states.
-   */
-  title: string | null;
-  rule: SuggestionRule;
-}
-
-/**
- * What stopping the timer on a page, a note, a repo or a label offers —
- * `suggest::AdHocBlock`.
- *
- * **Two absences, and they mean different things.** {@link adHocBlock}
- * answering `null` is *this block is on a ticket*, and the worklog draft is
- * what opens. This shape with `suggestion: null` is *the dialog opens and
- * knobas has nothing to suggest* — no rule fired, and *Keep local* is the
- * default.
- *
- * One field: the caller passed the block id in and still holds it, so an echo
- * of it here would be a value with no reader.
- */
-export interface AdHocBlock {
-  suggestion: Suggestion | null;
-}
-
-/**
  * What *Log an ad-hoc block* should show for a block, or `null` because that
  * block is not an ad-hoc one.
  *
@@ -529,127 +327,6 @@ export function adHocBlock(blockId: number, when: ReaderDay): Promise<AdHocBlock
     day: when.day,
     offsetMinutes: when.offsetMinutes,
   });
-}
-
-/**
- * One of the reader's days, as the week timesheet asks for it —
- * `week::DayWindow`.
- *
- * Both halves travel together because neither side can derive the other: the
- * backend queries on the instants and keys the cell on the date, and it must
- * not do the timezone arithmetic itself. `weekWindows` in `lib/time/week.ts`
- * is what builds these — one `Date` per local midnight, so a week containing a
- * daylight-saving change is still seven correct windows rather than seven
- * equal ones.
- */
-export interface DayWindow {
-  /** `"2026-08-24"`, in the reader's own reckoning. */
-  day: string;
-  /** RFC 3339, UTC — the reader's local midnight. */
-  from: string;
-  /** RFC 3339, UTC — the next local midnight. Half-open. */
-  to: string;
-}
-
-/**
- * One target's numbers on one day, in **seconds** — `week::WeekCell`.
- *
- * Seconds on the wire and minutes on the screen. `CONTEXT.md`'s timesheet is
- * minute-granular with no rounding, and rounding once in the view on a number
- * that never lost precision is what keeps a week's total equal to the total of
- * its days.
- */
-export interface WeekCell {
-  /**
-   * The day's **manual** blocks on this target, added up — and on the
-   * no-target row, the focused time no block covered.
-   *
-   * Passive blocks are not in it: tracked time is what the reader said their
-   * day was, which is the same rule the day review's heading states.
-   */
-  tracked_seconds: number;
-  /**
-   * The day's **passive** blocks on this target — what knobas is offering.
-   *
-   * Beside {@link tracked_seconds} rather than inside it, and present rather
-   * than dropped: the day strip above draws these blocks and says "*N*
-   * offered" beside its own tracked total, so a week that left them out would
-   * disagree with it about the same afternoon. Nothing logs one until a person
-   * assigns it, so it pays into no other number here.
-   */
-  offered_seconds: number;
-  /**
-   * Worklog seconds whose write is `pending` or `sent`.
-   *
-   * **A pending worklog counts as logged** (spec #272 story 39): the number is
-   * about what the reader did, not about sync timing.
-   */
-  logged_seconds: number;
-  /**
-   * Worklog seconds whose write is waiting on a person — `held`, `refused`,
-   * `discarded`, or a copy whose queue row is gone.
-   *
-   * Shown as *held* rather than folded into either neighbour: the blocks under
-   * it already carry a worklog id, so *Log all* will not offer them again, and
-   * drawing it as unlogged would invite logging one afternoon twice.
-   */
-  held_seconds: number;
-  /** `tracked - logged - held`, floored at zero. */
-  unlogged_seconds: number;
-}
-
-/** One row of the timesheet — `week::WeekRow`. */
-export interface WeekRow {
-  /**
-   * The target, or `null` for the **"no target, app open"** row.
-   *
-   * That row is focused time no block covers, so that the week's total is
-   * honest (spec story 41). It has no target and therefore nothing to log:
-   * *Log all* never sees it. It is present only when there is something to
-   * say — a week knobas was shut for has no such row at all, which is how
-   * "the app was closed" reads differently from "the app was open and idle".
-   */
-  target: TimerTarget | null;
-  /** What the mirror calls the target, or `null` — the `DayBlock` split. */
-  title: string | null;
-  /** One cell per day in {@link Week.days}, in that order. */
-  cells: WeekCell[];
-}
-
-/** The week, as the timesheet draws it — `week::Week`. */
-export interface Week {
-  /** `"2026-08-24"` … — the column headings, in the order asked for. */
-  days: string[];
-  /** Targets first in title order, then the no-target row if it has one. */
-  rows: WeekRow[];
-  /**
-   * Which of {@link Week.days} knobas has no observations for, in the same
-   * order (#337).
-   *
-   * One entry per day rather than one flag for the week, because a week that
-   * straddles the horizon is the ordinary case: `week::vet` bounds a
-   * timesheet's column *count* and says nothing about where its windows sit.
-   *
-   * It is on the week and not on the "no target, app open" row because that
-   * row is dropped when it has nothing to say — and a week entirely past the
-   * horizon is precisely the week with no such row and the most to explain.
-   */
-  past_horizon: boolean[];
-}
-
-/** One worklog *Log all* would create — `week::PlannedWorklog`. */
-export interface PlannedWorklog {
-  /** `"2026-08-24"` — the day this worklog is for. */
-  day: string;
-  entity_id: string;
-  /** The mirror's title for it, or `null`. For the reader to recognise. */
-  title: string | null;
-  /** RFC 3339, UTC — the first covered block's start. */
-  started_at: string;
-  /** The covered blocks' durations added up, gaps excluded. */
-  seconds: number;
-  /** How many blocks it concatenates. */
-  blocks: number;
 }
 
 /**

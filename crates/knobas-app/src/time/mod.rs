@@ -122,13 +122,28 @@ const SWEEPER: &str = "knobas";
 /// thing the type says instead of a thing every reader has to check -- the
 /// database says it too (`timer_target_chk`), and the two agreeing is what
 /// makes the check a backstop rather than the only guard.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// - `entity`: a ticket, page, note, repo or asset -- something knobas has an
+///   id for. **A stored context is never one** (`CONTEXT.md`, *timer target*):
+///   a context is a set, and time on a set has nowhere to go. `start_timer`
+///   refuses a `ctx:` id with `invalid`, and the picker never offers one.
+/// - `label`: "DB config for the migration" -- work with no entity behind it.
+///
+/// The halves are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/time.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export_to = "time.ts")]
 pub enum TimerTarget {
-    /// A ticket, page, note, repo or asset, by its entity id.
-    Entity { entity_id: String },
-    /// "DB config for the migration" -- work with no entity behind it.
-    Label { label: String },
+    Entity {
+        /// `"<namespace>:<key>"` -- `knobas_core::entity::EntityRef`.
+        entity_id: String,
+    },
+    Label {
+        /// Trimmed by the backend, and never empty.
+        label: String,
+    },
 }
 
 impl TimerTarget {
@@ -150,18 +165,25 @@ impl TimerTarget {
 }
 
 /// How a block came to exist. Mirrors `block_kind_chk` in migration `0013`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// - `manual`: the timer made it -- `CONTEXT.md`'s wording, and deliberately
+///   not "a person started and stopped it": [`close_stranded`] writes a
+///   `manual` block that nobody stopped. [`Block::ended_by_relaunch`] is what
+///   tells those two apart; the kind says only where the block came from.
+/// - `passive`: passive attribution recorded what was open (#282) -- knobas'
+///   own guess, and never logged anywhere on its own. Written only by
+///   [`passive::materialize`], and turned into `manual` the moment a person
+///   assigns it (`update_block`) -- nothing else in the crate writes this
+///   word, and nothing at all writes it back.
+///
+/// The kinds are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/time.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "time.ts")]
 pub enum BlockKind {
-    /// The timer made it -- `CONTEXT.md`'s wording, and deliberately not "a
-    /// person started and stopped it": [`close_stranded`] writes a `Manual`
-    /// block that nobody stopped. [`Block::ended_by_relaunch`] is what tells
-    /// those two apart; the kind says only where the block came from.
     Manual,
-    /// Passive attribution recorded what was open (#282). Written only by
-    /// [`passive::materialize`], and turned into [`Manual`](Self::Manual) the
-    /// moment a person assigns it -- nothing else in the crate writes this
-    /// word, and nothing at all writes it back.
     Passive,
 }
 
@@ -192,12 +214,16 @@ impl BlockKind {
 }
 
 /// The timer as it is running right now.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct RunningTimer {
     pub target: TimerTarget,
+    /// RFC 3339, UTC. What the strip's elapsed reading counts from.
     pub started_at: DateTime<Utc>,
-    /// The last moment knobas was known to be alive. The strip does not draw
-    /// it; [`close_stranded`] is what it is for.
+    /// The last moment knobas was known to be alive, RFC 3339, UTC.
+    ///
+    /// Nothing draws this. It is the stamp a stranded timer's block is closed
+    /// at when knobas starts again -- [`close_stranded`] is what it is for.
     pub last_heartbeat: DateTime<Utc>,
 }
 
@@ -223,17 +249,21 @@ pub struct TimerStopped {
 }
 
 /// One stretch of time knobas owns -- `CONTEXT.md`'s **block**.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "time.ts")]
 pub struct Block {
     pub id: i64,
+    /// RFC 3339, UTC.
     pub started_at: DateTime<Utc>,
+    /// RFC 3339, UTC.
     pub ended_at: DateTime<Utc>,
     pub target: TimerTarget,
     pub kind: BlockKind,
-    /// *Ended when knobas closed* -- the day review's *Extend to now* (#279).
+    /// *Ended when knobas closed* -- the block was closed by the relaunch
+    /// sweep at the last heartbeat, not by anybody pressing stop. The day
+    /// review offers *Extend to now* on these (#279).
     pub ended_by_relaunch: bool,
-    /// The worklog this block was logged into (#280). Always `None` here:
-    /// nothing in #278 writes a worklog.
+    /// The worklog this block was logged into (#280); `null` until then.
     pub worklog_id: Option<i64>,
 }
 
@@ -722,10 +752,10 @@ mod tests {
         assert_eq!(refusal.code, crate::IpcErrorCode::Invalid);
     }
 
-    /// The wire spelling of the target, which the mirror and the picker both
-    /// depend on. Pinned here as well as by `commands::time`'s mirror tests
-    /// -- which check the TypeScript against it -- because this is where the
-    /// `#[serde]` attributes that decide the spelling actually live.
+    /// The wire spelling of the target, which the generated TypeScript and
+    /// the picker both depend on. The TypeScript is generated from the same `#[serde]`
+    /// attributes (`app/src/lib/ipc/generated/time.ts`); this pins the JSON
+    /// those attributes produce, which is what crosses the bridge.
     #[test]
     fn a_target_is_tagged_by_which_half_it_is() {
         assert_eq!(

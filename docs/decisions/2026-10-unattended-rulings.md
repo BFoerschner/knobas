@@ -8263,3 +8263,51 @@ identity on all 34 names against `search.ts` at 1187a8d5, two control mutations 
   (#1328's and #1327's rulings), to say none gains a dependency, and to record the two narrow
   types' pins and the Jira test. The implementer's last line above (a `run_log.rs` reference
   left for #1327) is moot: #1327 removed it. *Reversing:* docs only.
+
+## #1330: the time barrel is generated (Opus implementer, 2026-10-20)
+
+- **`ReaderDay` and `LoggedWork` stay hand-written.** *Fork:* give them Rust structs to derive
+  from, or keep them in the barrel. *Ruling:* keep them. *Reasoning:* no Rust type has their
+  shape; `worklogDraft`, `logWork` and `adHocBlock` spread their fields into camelCase command
+  arguments, so neither crosses the bridge whole. #1326 keeps `LanesAsked` and #1328 keeps
+  `ImportProducer` by hand for the same reason. *Reversing:* n/a.
+- **Per-arm names.** `EntityTarget` and `LabelTarget` become `Extract<TimerTarget, { kind }>`
+  aliases, #1328's ruling for its nineteen arm names: `lib/tf/foreground.ts` imports them, and
+  an alias picked out of the generated union is not a second declaration of its shape.
+  *Reversing:* delete an alias once nothing imports it.
+- **`CandidateSource`'s derive.** *Fork:* add `ts_rs::TS` to `closed_vocabulary!`'s own derive
+  list, or pass it in through the enum attributes the macro already forwards. *Ruling:* pass it
+  in. *Reasoning:* #1327 passed `AuthState`'s derive in the same way, and a derive in the macro
+  would make every closed vocabulary a `ts-rs` type whether it crosses the bridge or not.
+  *Reversing:* move the two attribute lines into the macro.
+- **Which tests are fixture pins.** Deleted: the twenty tests in `commands::time` that read type
+  text out of the barrel (`*_typescript_mirror`, `the_mirror_declares_the_target_as_a_union_of_its_two_halves`,
+  `a_day_review_row_with_no_title_still_carries_the_key`) and their helpers. Kept: the invoke-name
+  and argument-name pins, `the_shells_context_namespace_is_the_one_the_backend_refuses` (it pins a
+  constant in `lib/shell/timer.ts`, not a barrel type) and
+  `the_draft_quotes_adr_0012s_sentence_verbatim`. `time`'s own
+  `a_target_is_tagged_by_which_half_it_is` stays and its doc no longer points at the deleted tests.
+- **A stale Rust doc corrected.** `Block::worklog_id` read "Always `None` here: nothing in #278
+  writes a worklog"; #280 has written them since. The generated JSDoc would have carried it, so
+  it now says what the TypeScript said: `null` until the block is logged.
+- **A §10.8 entry.** `docs/contract/10.8/1330-the-time-barrel-is-generated.md`, on #1328's
+  merge-manager ruling that every barrel switch owes one. *Reversing:* delete one file and rerun
+  `just contract-index`.
+
+### #1330: merge-manager on Opus, 2026-10-20
+
+Deep pass on the head rebased over #1371 (search barrel, 14814fce); `ipc_mirror.rs`'s roots and
+the §10.8 index kept both sides, and the regenerated `generated/time.ts` is unchanged. The
+witness re-run there: the 80-line `Type.field: type` dump of the barrel is identical to one
+taken afresh from `time.ts` at f9fc1bf1.
+
+- **The deleted `commands::time` tests.** *Ruling:* all twenty are fixture pins. Each serialized
+  a Rust value and checked it against type text read out of the barrel, which the generator now
+  writes from the same serde attributes. `a_day_review_row_with_no_title_still_carries_the_key`
+  is one too: `title` coming over as `null` and not missing is the generated `string | null`
+  (no `?`), and a `skip_serializing_if` would change that file and fail `just ipc-mirror`.
+  #1368's edit to that file was a doc comment on a deleted test, so nothing of its intent is
+  lost. *Reversing:* `git revert` of the deletions.
+- **The §10.8 entry.** *Ruling:* matches the diff; amended to name #1329's search barrel among
+  the switches before it and to say the merge-manager checked it on the merge head.
+  *Reversing:* docs only.
