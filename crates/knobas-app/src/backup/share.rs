@@ -102,8 +102,8 @@
 /// The defaults are the spec's: links, assets, contexts and sources on; notes
 /// and time off. The shell sends every toggle; the backend still decodes a
 /// payload that leaves some out (`#[serde(default)]`), giving the ratified
-/// answer for the rest, so a knobas built before a future part still decodes
-/// a payload that names it.
+/// answer for the rest; and a knobas built before a future part still
+/// decodes a payload that names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(default)]
 #[ts(export_to = "backup.ts")]

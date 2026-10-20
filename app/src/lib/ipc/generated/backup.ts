@@ -90,8 +90,8 @@ archives: Array<ArchiveFile>, };
  * The defaults are the spec's: links, assets, contexts and sources on; notes
  * and time off. The shell sends every toggle; the backend still decodes a
  * payload that leaves some out (`#[serde(default)]`), giving the ratified
- * answer for the rest, so a knobas built before a future part still decodes
- * a payload that names it.
+ * answer for the rest; and a knobas built before a future part still
+ * decodes a payload that names it.
  */
 export type ShareParts = { 
 /**

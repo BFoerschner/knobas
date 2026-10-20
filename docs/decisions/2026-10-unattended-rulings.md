@@ -8331,3 +8331,11 @@ taken afresh from `time.ts` at f9fc1bf1.
 - **A §10.8 entry.** Added, on #1328's merge-time ruling: `1331-the-backup-barrel-is-generated.md`
   names the one crate gaining a derive (`knobas-app`). *Reversing:* delete one file and rerun
   `just contract-index`.
+- **Merge-manager review (Opus, 2026-10-20).** *Fork:* uphold the implementer's required
+  `ShareParts` fields, or mark them optional. *Ruling:* upheld. *Reasoning:* #1325's §2.6 table
+  maps `#[serde(default)]` to a required field, and the one caller (`TfBackupSection.svelte`'s
+  `exportShare`) spreads all nine toggles; optional fields would let a future caller rely on a
+  decode-side default the dialog never needs. One doc fix: the `ShareParts` type doc said a
+  knobas built before a future part decodes its payload *because* of `serde(default)`; that
+  follows from accepting unknown fields, so the sentence now joins the two with "and".
+  *Reversing:* `#[ts(optional)]` per field.
