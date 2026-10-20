@@ -8190,3 +8190,76 @@ types, identical to the hand-written `sources.ts` at 7a96c634.
   `knobas_core::payload`, the re-export), to list the five crates gaining a derive and the one
   gaining a dependency (#1328's ruling), and to record the `transparent` note and #1372.
   *Reversing:* docs only.
+## #1329: the search barrel is generated (Opus implementer, 2026-10-20)
+
+Reserved for Björn, ruled by implementer on Opus (the §10.8 entry), under the 2026-10-18
+reserved-steps rule. The entry is `docs/contract/10.8/1329-the-search-barrel-is-generated.md`.
+
+- **`CredentialHealth` is the sources barrel's, and #1327 was in flight.** *Fork:* `LauncherHome`
+  reaches `knobas_sync::CredentialHealth`; wait for #1327, spell the field with `#[ts(type)]`
+  (an import the generator cannot write), or derive it here. *Ruling:* work on a commit holding
+  #1327's `knobas-sync/Cargo.toml` and `health.rs` byte for byte, and drop it at the rebase.
+  #1327 merged first, so this PR does not touch `knobas-sync`. *Reversing:* n/a.
+- **Two Rust `EntityRow`s, one TypeScript type.** *Fork:* the search crate's `EntityRow` derives
+  `TS` for `SearchHit`'s flatten; export it too, under another name, or type `LauncherHome::recent`
+  with the room's. *Ruling:* `#[ts(as = "Vec<knobas_core::entity_list::EntityRow>")]`, as the
+  hand-written mirror imported entity.ts's; the flatten inlines the search crate's fields, so it
+  is never exported. *Reasoning:* the wire is one shape, pinned by
+  `the_two_entity_rows_are_one_wire_shape`. *Reversing:* export it as `SearchEntityRow`.
+- **The ticket views' string vocabularies.** *Ruling:* #1326's pattern: an enum per list, never
+  built, used through `#[ts(as = …)]`, pinned to its list by `the_vocabulary_unions_are_the_lists`;
+  `Layout` and `SortDirection` inlined because the mirror spelled them inline. *Reasoning:* typing
+  the fields would change what a bad word decodes to (a serde error instead of the save's own
+  sentence). *Reversing:* type the fields with the enums.
+- **`SavedViewSource::kind` and `::sprint`.** *Fork:* no Rust list backs `"board" | "filter"`,
+  and `sprint` is a `serde_json::Value`. *Ruling:* `SavedViewKind` and `ActiveSprint`, never
+  built, inlined, departing from #1325's `#[ts(type = "unknown")]` for a `serde_json::Value`.
+  *Reasoning:* the shell's types were narrower than the Rust; widening them to
+  `string` and `unknown` would change what the shell compiles against, which this ticket must
+  not. The kind's list is the `case` in `knobas_sync::saved_views`' projection, and the sprint's
+  shape is the adapter's payload; no test compares either with its type. *Reversing:* `#[ts(type = "string")]` and `unknown`, and fix the callers.
+- **Which pins are "the barrel's".** Every test that read `search.ts` for type text:
+  `knobas_search::types`' two, `commands::search`'s two, and the type half of
+  `ticket_views::the_views_and_their_mirror_agree`. The half that checks the barrel invokes the
+  five view commands and `lib.rs` registers the two #1245 renamed stays, renamed
+  `the_view_commands_are_invoked_by_their_names`. `the_two_entity_rows_are_one_wire_shape` stays:
+  it compares two Rust wires, not a mirror.
+- **Docs moved and how.** Every TypeScript doc rule the Rust lacked moved onto the Rust:
+  `owner:`/`by:` naming authors, `Segment`'s `{segment.text}`-never-`{@html}` rule, RFC 3339 on
+  `updated_at`/`synced_at`, the path line's `owner/repo` and its one SQL expression, the smart
+  list's one-shape rule (#506 story 57) and that a refused list does not open, #768 on the
+  `under:` read, `*At most*` on a column's limit, #1208 on the query types. Variant
+  docs moved into the enums' docs (`FilterDimension`, `FilterAnswer`, `Key`). A type's pointer to
+  its own Rust path did not move: the generated file is that type.
+- **`just search-perf` not run.** `crates/knobas-search/src/{types,lists}.rs` changed by derives
+  and doc comments only; no statement, bind or query moved. The reference to the deleted
+  `the_hit_shape_matches_its_typescript_mirror` in `knobas-sync`'s `run_log.rs` is left for #1327,
+  which deletes the test that cites it.
+
+### #1329, merge-manager on Opus (2026-10-20)
+
+Deep pass on the head rebased over #1368 and #1369. The witness re-run there: `tsc --strict`
+identity on all 34 names against `search.ts` at 1187a8d5, two control mutations failing
+(`ActiveSprint.end_date` loses `| null`; `SavedViewSource.kind` loses `"filter"`).
+
+- **`SavedViewKind`, narrower than the Rust `String`.** *Ruling:* kept. *Reasoning:* it matches
+  every value the Rust can emit: the projection's `case` writes only `board` or `filter`, and
+  `jira_view_ref_kind_chk` (migration 0044) refuses anything else, so a third kind needs a
+  migration, which §10.8 books. That constraint is the pin. *Reversing:* `#[ts(type = "string")]`.
+- **`ActiveSprint` instead of `unknown`.** *Ruling:* kept, plus a pin. *Reasoning:* it matches
+  the only emitter (the Jira adapter's `{"id": u64, "name", "end_date": Option<String>}`) and is
+  the type the shell compiled against before, so this ticket keeps it. But `sync.saved_view`
+  passes any JSON object through, and nothing tied the adapter's keys to the type: the Jira
+  test checked `name` alone. It now asserts the whole object; renaming `end_date` in the adapter
+  fails it (checked). Another adapter emitting a different sprint object would still be typed
+  wrongly; none does today. *Reversing:* `unknown`, and narrow in the shell.
+- **The `LauncherHome::recent` survivor.** *Ruling:* equivalent, as the implementer says. Both
+  `EntityRow`s serialize to one shape, and `the_two_entity_rows_are_one_wire_shape` fails if
+  they part. *Reversing:* n/a.
+- **`just search-perf`.** *Ruling:* not owed. Every changed line in `knobas-search/src` and
+  `knobas-source/src/query.rs` that is not a doc comment is a `derive` gaining `ts_rs::TS`, a
+  `#[ts(...)]` attribute, or a deleted mirror test. *Reversing:* n/a.
+- **The §10.8 entry.** *Ruling:* amended to list the crates gaining a derive by crate name
+  (#1328's and #1327's rulings), to say none gains a dependency, and to record the two narrow
+  types' pins and the Jira test. The implementer's last line above (a `run_log.rs` reference
+  left for #1327) is moot: #1327 removed it. *Reversing:* docs only.

@@ -343,14 +343,22 @@ impl BuiltinList {
 }
 
 /// One entry of the launcher board's smart-list rail (interfaces §2.4).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+///
+/// Built-in and saved lists are **one shape** (#506, story 57): both are
+/// opened by `list:<id>`, both carry a count and a change badge, and
+/// [`Self::saved`] is the only thing that tells them apart.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct SmartListSummary {
+    /// Stable id; also what `list:<id>` in the box names.
     pub id: String,
     pub label: String,
+    /// How many items are in the list right now.
     pub count: i64,
     /// Something in this list is newer than the last time it was opened.
     pub changed: bool,
-    /// Display text: the list's blurb, or the reason it is empty.
+    /// Display text: the list's blurb, the reason it is empty, or -- for a
+    /// saved list -- the query it stands for.
     pub description: String,
     /// Whether somebody saved this list, rather than knobas shipping it
     /// (#506).
@@ -368,7 +376,7 @@ pub struct SmartListSummary {
     /// [`Self::count`] is `0` and [`Self::changed`] `false` on such a row --
     /// not because the list is empty, but because nothing was asked -- and
     /// [`Self::description`] carries [`crate::saved::NEEDS_ATTENTION`] and the
-    /// reason.
+    /// reason, the rule that refused it. The row does not open.
     pub needs_attention: bool,
 }
 

@@ -9,7 +9,8 @@ use chrono::{DateTime, Utc};
 
 /// What the launcher asks for: the raw box text, plus whatever the UI already
 /// knows (chips the user clicked).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct SearchQuery {
     /// Exactly what is in the box, prefixes and all. **The backend parses it**
     /// -- see the module docs.
@@ -19,14 +20,15 @@ pub struct SearchQuery {
 }
 
 /// The filters a query is narrowed by, whether typed inline or clicked.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct SearchFilters {
     pub sources: Vec<String>,
     pub kinds: Vec<String>,
     pub updated_within_days: Option<u32>,
     pub mine: bool,
-    /// The people the query **named** -- `@jonas`, `author:jonas`, or an
-    /// author chip (ruling **E-Q1**).
+    /// The people the query **named** -- `@jonas`, `author:jonas`, `owner:`,
+    /// `by:`, or an author chip (ruling **E-Q1**).
     ///
     /// A username as the source spells it, matched exactly, because that is
     /// what `sync.item.author` holds and what `mine` already matches against.
@@ -50,10 +52,9 @@ pub struct SearchFilters {
     /// field that was **added** to a frozen struct (§10.8): a caller written
     /// against the four-field shape sends no `authors`, and refusing its query
     /// outright is a worse answer than reading the absence as "named nobody".
-    /// The mirror declares it required, so the launcher always sends it and
-    /// `the_response_shape_matches_its_typescript_mirror` keeps that true --
-    /// the default is the wire being permissive, not the frontend being
-    /// allowed to forget.
+    /// The generated TypeScript declares it required, so the launcher always
+    /// sends it -- the default is the wire being permissive, not the frontend
+    /// being allowed to forget.
     #[serde(default)]
     pub authors: Vec<String>,
 }
@@ -72,7 +73,8 @@ impl SearchFilters {
 
 /// What the backend made of the raw text -- echoed back so the UI renders the
 /// chips it inferred rather than guessing at the same grammar twice.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct ParsedQuery {
     /// The search terms with the grammar stripped out.
     pub text: String,
@@ -84,7 +86,8 @@ pub struct ParsedQuery {
 }
 
 /// The launcher's prefixes (§4): `>` `#` `@` `/` `t ` `note:` `list:` `asset:` `?`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum Prefix {
     Action,
@@ -99,7 +102,8 @@ pub enum Prefix {
 }
 
 /// One answered query.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct SearchResponse {
     pub interpreted: ParsedQuery,
     pub groups: Vec<ResultGroup>,
@@ -121,8 +125,8 @@ pub struct SearchResponse {
     /// `#[serde(default)]` for the same reason [`SearchFilters::authors`]
     /// carries it: this field was **added** to a frozen struct (§10.8), and a
     /// peer that sends no `coverage` means "nothing to report" rather than a
-    /// response worth refusing. The mirror declares it required, so the backend
-    /// always sends it.
+    /// response worth refusing. The generated TypeScript declares it required,
+    /// and the backend always sends it.
     #[serde(default)]
     pub coverage: Vec<FilterCoverage>,
 }
@@ -133,7 +137,8 @@ pub struct SearchResponse {
 /// the query actually filtered on it. Issue #141 scopes the behaviour to
 /// [`FilterDimension::Author`]; the list shape is what makes a second dimension
 /// an addition rather than a reshape.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct FilterCoverage {
     pub dimension: FilterDimension,
     /// Every source that put rows in this query's corpus, **ordered by id** --
@@ -155,24 +160,32 @@ pub struct FilterCoverage {
 /// closed, so a UI that branches on it cannot be handed a word nobody defined.
 /// Two variants since #595; a further dimension appends one (#141's entry in
 /// §10.8).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// - `author` (since #141): `@jonas`, `author:jonas`, an author chip, or
+///   `@me` -- everything that ends up in the one `author = any(...)`
+///   predicate.
+/// - `under` (ADR-0018, #595): `under:<name>`. Answered by a source some live
+///   item of which names a parent (measured on the corpus since #642); a
+///   source whose corpus names none -- an Uptime Kuma, whose metrics have no
+///   grouping, or a classic Jira with no Epic Link field configured -- has
+///   nothing the filter can match, and an empty `under:` there is not an
+///   empty repo. The second dimension #141's list shape was built for: an
+///   entry and a variant, nothing existing moved.
+///
+/// The variants are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/search.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum FilterDimension {
-    /// `@jonas`, `author:jonas`, an author chip, or `@me` -- everything that
-    /// ends up in the one `author = any(...)` predicate.
     Author,
-    /// `under:<name>` (ADR-0018, #595). Answered by a source some live item of
-    /// which names a parent (measured on the corpus since #642); a source whose
-    /// corpus names none -- an Uptime Kuma, whose metrics have no grouping, or
-    /// a classic Jira with no Epic Link field configured -- has nothing the
-    /// filter can match, and an empty `under:` there is not an empty repo. The
-    /// second dimension #141's list shape was built for: an entry and a
-    /// variant, nothing existing moved.
     Under,
 }
 
 /// One source, and what it could do with the dimension it is listed under.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct SourceAnswer {
     /// The configured instance id, which is also `SearchHit.source_id`.
     pub source_id: String,
@@ -196,22 +209,28 @@ pub struct SourceAnswer {
 /// [`FilterCoverage::sources`] instead: whatever it is missing from the
 /// results, the filter is not the reason, and a verdict on it would explain the
 /// wrong absence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// - `answered`: the source's corpus carries values this dimension matches
+///   on, so an empty result for it means nobody matched -- for `author:`,
+///   *nobody by that name*.
+/// - `no_values`: the source put rows in this query's corpus and **not one of
+///   them** carries such a value -- *this source cannot be asked*. Measured on
+///   the corpus, not declared about the source: this is why issue #141 was
+///   ruled onto the response rather than onto the descriptor.
+///
+/// Documented here and not on each variant for [`FilterDimension`]'s reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum FilterAnswer {
-    /// The source's corpus carries values this dimension matches on, so an
-    /// empty result for it means nobody matched.
     Answered,
-    /// The source put rows in this query's corpus and **not one of them**
-    /// carries such a value. Measured on the corpus, not declared about the
-    /// source: this is why issue #141 was ruled onto the response rather than
-    /// onto the descriptor.
     NoValues,
 }
 
 /// Results of one entity kind, with the display metadata the launcher renders
 /// from (§3a: never a hardcoded kind list).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct ResultGroup {
     pub kind: String,
     pub label: String,
@@ -223,23 +242,32 @@ pub struct ResultGroup {
 }
 
 /// The identity of one result -- everything a row needs before its excerpt.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+///
+/// Its fields cross inlined into every [`SearchHit`] (`#[serde(flatten)]`),
+/// and the launcher board's `recent` rows cross as the room's
+/// `knobas_core::entity_list::EntityRow`, which has the same wire shape.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct EntityRow {
     pub entity_id: String,
     pub kind: String,
     pub source_id: String,
     pub title: String,
-    /// When the source says the item changed; `None` if it never said.
+    /// When the source says the item changed, an RFC 3339 timestamp; `None`
+    /// if the source never dated the item.
     pub updated_at: Option<DateTime<Utc>>,
-    /// When knobas last saw it -- the per-row provenance §4 requires
-    /// ("synced 4 min ago").
+    /// When knobas last saw it, an RFC 3339 timestamp -- the per-row
+    /// provenance §4 requires ("synced 4 min ago").
     pub synced_at: DateTime<Utc>,
     /// Where this row sits **inside its source**, as one line -- a Confluence
     /// page's ancestor path, `Engineering \u{203a} Payments` (#284, ratified
     /// as a contract §10.8 exception under that ticket's criterion 5).
     ///
     /// Since #596 it is the **parent chain** the row's kind declares
-    /// (ADR-0018), drawn by `knobas_core::path_line_read!`; a page's chain is
+    /// (ADR-0018) -- `owner/repo` for a Gitea branch, pull request or commit
+    /// -- drawn by one SQL expression, `knobas_core::path_line_read!`, so the
+    /// launcher row and the detail panel cannot disagree about what a path
+    /// is. A page's chain is
     /// its `ancestors`, which Confluence declares (#599, and #646 retired the
     /// undeclared ancestor read). `None` for every row whose kind declares no
     /// parent or whose declared parent misses: the ADR-0007 **miss**, so a
@@ -262,7 +290,8 @@ pub struct EntityRow {
 }
 
 /// One result: a row, its rank, and the excerpt with the match marked.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct SearchHit {
     #[serde(flatten)]
     pub row: EntityRow,
@@ -272,261 +301,15 @@ pub struct SearchHit {
 
 /// A run of excerpt text, and whether it is part of the match.
 ///
-/// **`text` is raw source text** -- whatever a person typed into a ticket,
-/// `<script>` included. Render it as text; the highlighting is the `hit` flag,
-/// never markup inside the string (roadmap §4 gotcha 7).
+/// **XSS-unsafe: `text` is raw source text** -- whatever a person typed into
+/// a ticket, `<script>` included. Render it as text (`{segment.text}`), never
+/// with `{@html}`; the highlighting is the `hit` flag, and no markup crosses
+/// the bridge (roadmap §4 gotcha 7).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "search.ts")]
 pub struct Segment {
     pub text: String,
     pub hit: bool,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The lines between `export interface <name> {` and its closing brace.
-    ///
-    /// The mirror is one file holding eight interfaces and two functions, so a
-    /// search that is not scoped to a declaration is not a search for that
-    /// declaration -- see [`declares`].
-    fn interface_body<'a>(mirror: &'a str, name: &str) -> &'a str {
-        let header = format!("export interface {name} {{");
-        let start = mirror
-            .find(&header)
-            .unwrap_or_else(|| panic!("`{header}` is not in app/src/lib/ipc/search.ts"))
-            + header.len();
-        let rest = &mirror[start..];
-        let end = rest
-            .find("\n}")
-            .unwrap_or_else(|| panic!("`interface {name}` is never closed"));
-        &rest[..end]
-    }
-
-    /// Whether `body` **declares** `key` -- a line whose first token is `key:`.
-    ///
-    /// Not `contains`, and not over the whole file. Both halves are
-    /// load-bearing, and these tests had neither until a mutation proved it:
-    /// deleting `authors: string[];` from `interface SearchFilters` left every
-    /// assertion below green, because `mirror.contains("authors:")` was
-    /// satisfied by the `authors: []` inside `noFilters()`'s body sixty lines
-    /// further down. A doc comment inside the block does the same for the
-    /// field it documents.
-    ///
-    /// This is verbatim the failure `crates/knobas-app/src/commands/search.rs`
-    /// records finding and fixing in its own mirror test, with the same two
-    /// helpers. It was fixed there and left standing here; the negative
-    /// controls below are what stop a slice quietly ceasing to slice.
-    fn declares(body: &str, key: &str) -> bool {
-        body.lines()
-            .any(|line| line.trim_start().starts_with(&format!("{key}:")))
-    }
-
-    /// Every key one hit puts on the wire, in the spelling
-    /// `app/src/lib/ipc/search.ts` declares -- and **no `row`**.
-    ///
-    /// This mirror is the one that needs pinning most, because it is the only
-    /// one that is not a literal transcription: `SearchHit.row` carries
-    /// `#[serde(flatten)]`, so `EntityRow`'s fields appear inline and the
-    /// TypeScript declares them inline too. Nothing but this test connects the
-    /// two. Drop the attribute and the wire grows a nested `row` object while
-    /// both files still compile, both still look right, and every hit in the
-    /// launcher renders blank.
-    ///
-    /// Stream E owns this crate from the contract PR on, which is exactly why
-    /// the shape is pinned before it is handed over.
-    #[test]
-    fn the_hit_shape_matches_its_typescript_mirror() {
-        let mirror = include_str!("../../../app/src/lib/ipc/search.ts");
-        let hit = SearchHit {
-            row: EntityRow {
-                entity_id: "mock:PAY-231".to_owned(),
-                kind: "ticket".to_owned(),
-                source_id: "mock".to_owned(),
-                title: "Retry failed SEPA payouts".to_owned(),
-                updated_at: None,
-                synced_at: chrono::Utc::now(),
-                // #284: a value and not `None`, because `path` is the field
-                // this test exists to catch -- an `Option` left `None` here
-                // would still serialize as `"path": null` and pass, but a
-                // reviewer reading the fixture would not see that the launcher
-                // row now carries one.
-                path: Some("Engineering \u{203a} Payments".to_owned()),
-                // #666: a value for `state`'s reason, as for `path`.
-                state: Some(knobas_core::payload::StateChip {
-                    text: "merged".to_owned(),
-                    tone: knobas_core::tone::Tone::Ok,
-                }),
-            },
-            rank: 0.5,
-            snippet: vec![Segment {
-                text: "SEPA".to_owned(),
-                hit: true,
-            }],
-        };
-
-        let wire = serde_json::to_value(&hit).expect("a hit serializes");
-        let object = wire.as_object().expect("a hit is a JSON object");
-        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
-        keys.sort_unstable();
-        assert_eq!(
-            keys,
-            [
-                "entity_id",
-                "kind",
-                "path",
-                "rank",
-                "snippet",
-                "source_id",
-                "state",
-                "synced_at",
-                "title",
-                "updated_at",
-            ],
-            "the flatten put something unexpected on the wire"
-        );
-
-        let body = interface_body(mirror, "SearchHit");
-        // The negative control: `hits` is a `ResultGroup` field declared eight
-        // lines below this interface's closing brace, so a slice that reaches
-        // it is not a slice.
-        assert!(
-            !declares(body, "hits"),
-            "the SearchHit slice reaches ResultGroup.hits, so it is searching \
-             more than the declaration:\n{body}"
-        );
-
-        for key in &keys {
-            assert!(
-                declares(body, key),
-                "`interface SearchHit` in app/src/lib/ipc/search.ts does not \
-                 declare `{key}`, which the Rust type puts on the wire:\n{body}"
-            );
-        }
-        assert!(
-            !declares(body, "row"),
-            "the TS mirror declares a nested `row`, but `#[serde(flatten)]` inlines it"
-        );
-    }
-
-    /// The rest of the response, one level down: a renamed field here is a
-    /// group that renders with no monogram or a total that reads `undefined`.
-    #[test]
-    fn the_response_shape_matches_its_typescript_mirror() {
-        let mirror = include_str!("../../../app/src/lib/ipc/search.ts");
-        let response = SearchResponse {
-            interpreted: ParsedQuery {
-                text: "sepa".to_owned(),
-                prefix: Some(Prefix::Ticket),
-                filters: SearchFilters::default(),
-                unknown_tokens: vec!["nope".to_owned()],
-            },
-            groups: vec![ResultGroup {
-                kind: "ticket".to_owned(),
-                label: "Ticket".to_owned(),
-                plural: "Tickets".to_owned(),
-                monogram: "TI".to_owned(),
-                total: 1,
-                hits: Vec::new(),
-            }],
-            total: 1,
-            took_ms: 3,
-            // Populated rather than left empty, or the three shapes below are
-            // never on the wire for this test to slice against -- an empty
-            // `coverage` would let the whole #141 addition be deleted from the
-            // mirror with this assertion still green.
-            coverage: vec![FilterCoverage {
-                dimension: FilterDimension::Author,
-                sources: vec![SourceAnswer {
-                    source_id: "teamcity".to_owned(),
-                    display_name: "Buildserver".to_owned(),
-                    answer: FilterAnswer::NoValues,
-                }],
-            }],
-        };
-
-        let wire = serde_json::to_value(&response).expect("a response serializes");
-
-        // The negative control, on the slice the mutation escaped through:
-        // `text` is a `ParsedQuery` field twenty lines below `SearchFilters`'
-        // closing brace, and `authors` also appears in `noFilters()`'s body
-        // further down again. A `SearchFilters` slice that reaches either is
-        // not a slice, and a rearrangement that did not fix it would look
-        // identical from here.
-        let filters_body = interface_body(mirror, "SearchFilters");
-        assert!(
-            !declares(filters_body, "text"),
-            "the SearchFilters slice reaches ParsedQuery.text, so it is \
-             searching more than the declaration:\n{filters_body}"
-        );
-
-        for (path, value) in [
-            ("SearchResponse", &wire),
-            ("ParsedQuery", &wire["interpreted"]),
-            ("SearchFilters", &wire["interpreted"]["filters"]),
-            ("ResultGroup", &wire["groups"][0]),
-            ("FilterCoverage", &wire["coverage"][0]),
-            ("SourceAnswer", &wire["coverage"][0]["sources"][0]),
-        ] {
-            let body = interface_body(mirror, path);
-            for key in value
-                .as_object()
-                .unwrap_or_else(|| panic!("{path} is a JSON object"))
-                .keys()
-            {
-                assert!(
-                    declares(body, key),
-                    "`interface {path}` in app/src/lib/ipc/search.ts does not \
-                     declare `{key}`, which the Rust type puts on the wire:\n{body}"
-                );
-            }
-        }
-
-        // The prefix vocabulary is a TS union, so each spelling must be there.
-        for prefix in [
-            Prefix::Action,
-            Prefix::Ticket,
-            Prefix::Person,
-            Prefix::Source,
-            Prefix::Time,
-            Prefix::Note,
-            Prefix::List,
-            Prefix::Asset,
-            Prefix::Help,
-        ] {
-            let wire = serde_json::to_string(&prefix).expect("a prefix serializes");
-            assert!(
-                mirror.contains(&wire),
-                "{wire} is missing from app/src/lib/ipc/search.ts"
-            );
-        }
-
-        // The two #141 vocabularies are TS unions for the same reason, and the
-        // one that matters is `FilterAnswer`: the UI branches on it, and a
-        // spelling only one side knows is a branch that never runs.
-        for answer in [FilterAnswer::Answered, FilterAnswer::NoValues] {
-            let wire = serde_json::to_string(&answer).expect("an answer serializes");
-            assert!(
-                mirror.contains(&wire),
-                "{wire} is missing from app/src/lib/ipc/search.ts"
-            );
-        }
-        // Read off the union's own line rather than the whole file: `"under"`
-        // is a word the mirror's comments use, so `contains` would pass with
-        // the member deleted (#595).
-        let union = mirror
-            .lines()
-            .find(|line| line.starts_with("export type FilterDimension ="))
-            .expect("app/src/lib/ipc/search.ts declares the FilterDimension union");
-        for dimension in [FilterDimension::Author, FilterDimension::Under] {
-            let wire = serde_json::to_string(&dimension).expect("a dimension serializes");
-            assert!(
-                union.contains(&wire),
-                "{wire} is missing from the FilterDimension union: {union}"
-            );
-        }
-    }
 }
 
 /// The values the query box suggests after `kind:`, `source:` and `under:`
@@ -537,10 +320,11 @@ mod tests {
 /// of, the enabled sources that have a live row, and the parents the
 /// mirror and the estate declare. The kinds and sources are read once per
 /// launcher opening and narrowed by the box; the parents are asked again per
-/// keystroke of an `under:` value, by prefix (#761).
+/// keystroke of an `under:` value, by prefix (#761) and alone (#768).
 /// Free-text keys (`author:`, `updated:`) get no suggestions and have no list
 /// here.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct FilterSuggestions {
     /// Every kind with at least one row in the launcher's corpora, by id.
     pub kinds: Vec<KindSuggestion>,
@@ -564,7 +348,8 @@ pub struct FilterSuggestions {
 }
 
 /// One value a ticket key can take (#811).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct FieldSuggestion {
     /// The key as the grammar spells it, without the colon: `status`.
     pub key: String,
@@ -575,7 +360,8 @@ pub struct FieldSuggestion {
 }
 
 /// One kind `kind:` can name.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct KindSuggestion {
     /// The kind id, which is what the box completes `kind:` with.
     pub kind: String,
@@ -584,7 +370,8 @@ pub struct KindSuggestion {
 }
 
 /// One source `source:` can name.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct SourceSuggestion {
     /// The instance id, which is what the box completes `source:` with: an
     /// exact id resolves to that instance and nothing else.
@@ -594,7 +381,8 @@ pub struct SourceSuggestion {
 }
 
 /// One name `under:` can scope by (ADR-0018).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct ParentSuggestion {
     /// The name the parent answers to, as its source spells it.
     pub name: String,

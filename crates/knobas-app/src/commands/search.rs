@@ -38,9 +38,16 @@ use crate::{IpcError, Lifecycle};
 ///
 /// [`LauncherBoard`]: knobas_search::LauncherBoard
 /// [`CredentialHealth`]: knobas_sync::CredentialHealth
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct LauncherHome {
     pub smart_lists: Vec<knobas_search::SmartListSummary>,
+    /// `knobas_search::EntityRow`, a *different Rust struct* from
+    /// `knobas_core::entity_list::EntityRow` with the same eight fields on
+    /// the wire. The shell has one type for both, the room's, which is the
+    /// truth about the JSON; `the_two_entity_rows_are_one_wire_shape` fails
+    /// if the two ever stop agreeing.
+    #[ts(as = "Vec<knobas_core::entity_list::EntityRow>")]
     pub recent: Vec<knobas_search::EntityRow>,
     /// Stream F's credential health, read straight from `knobas.source_config`
     /// -- **not** a second copy of the type (interfaces §2.2, open question
@@ -507,228 +514,15 @@ pub async fn delete_smart_list_inner(
 mod tests {
     use super::*;
 
-    /// The wire keys of the two DTOs this module owns, in the spelling
-    /// `app/src/lib/ipc/search.ts` declares.
-    ///
-    /// The mirror is hand-written, so nothing but this connects the two: a
-    /// renamed field compiles on both sides and renders `undefined` in the
-    /// launcher. The expected list is taken from `serde_json` rather than
-    /// written out, so it is the **wire** that is compared against the mirror,
-    /// not a third copy of the field names that could drift from both.
-    ///
-    /// # The search has to be scoped, and for one round it was not
-    ///
-    /// This asserted `mirror.contains("sources:")` against the **whole file** —
-    /// 150 lines and six interfaces. `sources:` was therefore satisfied by
-    /// `SearchFilters.sources` a hundred lines away, `id:` by `entity_id:`, and
-    /// `label:` by `ResultGroup.label`. Review round 1 proved the consequence
-    /// twice: deleting `sources: CredentialHealth[];` from `LauncherHome` left
-    /// this test green, and renaming the field to `source_health` on the
-    /// TypeScript side alone — consumers and fixtures included, which is what a
-    /// real rename looks like — passed this test, `svelte-check` with 0 errors
-    /// and all 222 frontend tests, while `Board.svelte` read `undefined` at run
-    /// time. That is verbatim the failure the paragraph above claims to
-    /// prevent.
-    ///
-    /// So the search is scoped to the declaration and matched against a
-    /// *declaration line* rather than against any occurrence of the text.
-    /// [`declares`] is what makes a doc comment inside the block unable to
-    /// stand in for the field it documents, and the negative control below is
-    /// what makes the slice unable to quietly stop slicing.
-    #[test]
-    fn the_launcher_home_shape_matches_its_typescript_mirror() {
-        let mirror = include_str!("../../../../app/src/lib/ipc/search.ts");
-        let home = interface_body(mirror, "LauncherHome");
-        let summary = interface_body(mirror, "SmartListSummary");
-
-        // The negative control. `SearchFilters.kinds` is declared in this file
-        // and is not a `LauncherHome` field, so a slice that still reaches it
-        // is not a slice -- which is exactly the state this test was in, and a
-        // rearrangement that did not fix it would look identical from here.
-        assert!(
-            !declares(home, "kinds"),
-            "the LauncherHome slice still reaches SearchFilters.kinds, so it \
-             is searching more than the declaration:\n{home}"
-        );
-
-        let value = LauncherHome {
-            smart_lists: vec![knobas_search::SmartListSummary {
-                id: "mine".to_owned(),
-                label: "My items".to_owned(),
-                count: 3,
-                changed: true,
-                description: "Yours.".to_owned(),
-                saved: false,
-                needs_attention: false,
-            }],
-            recent: Vec::new(),
-            sources: Vec::new(),
-            pending_writes: 0,
-            notes_shown: true,
-        };
-
-        let wire = serde_json::to_value(&value).expect("LauncherHome serializes");
-        let mut keys: Vec<&str> = wire
-            .as_object()
-            .expect("an object")
-            .keys()
-            .map(String::as_str)
-            .collect();
-        keys.sort_unstable();
-        assert_eq!(
-            keys,
-            [
-                "notes_shown",
-                "pending_writes",
-                "recent",
-                "smart_lists",
-                "sources"
-            ]
-        );
-        for key in &keys {
-            assert!(
-                declares(home, key),
-                "`interface LauncherHome` in app/src/lib/ipc/search.ts does \
-                 not declare `{key}`, which the Rust type puts on the wire:\
-                 \n{home}"
-            );
-        }
-
-        let list = &wire["smart_lists"][0];
-        let mut list_keys: Vec<&str> = list
-            .as_object()
-            .expect("an object")
-            .keys()
-            .map(String::as_str)
-            .collect();
-        list_keys.sort_unstable();
-        assert_eq!(
-            list_keys,
-            [
-                "changed",
-                "count",
-                "description",
-                "id",
-                "label",
-                "needs_attention",
-                "saved"
-            ]
-        );
-        for key in &list_keys {
-            assert!(
-                declares(summary, key),
-                "`interface SmartListSummary` in app/src/lib/ipc/search.ts \
-                 does not declare `{key}`, which the Rust type puts on the \
-                 wire:\n{summary}"
-            );
-        }
-    }
-
-    /// The query box's suggestion lists (#601) and their three element types,
-    /// against the hand-written mirror -- the wire's keys, from `serde_json`,
-    /// each found as a declaration line inside its own interface.
-    #[test]
-    fn the_filter_suggestions_shape_matches_its_typescript_mirror() {
-        let mirror = include_str!("../../../../app/src/lib/ipc/search.ts");
-        let value = knobas_search::FilterSuggestions {
-            kinds: vec![knobas_search::KindSuggestion {
-                kind: "repo".to_owned(),
-                label: "Repo".to_owned(),
-            }],
-            sources: vec![knobas_search::SourceSuggestion {
-                id: "gitea".to_owned(),
-                display_name: "Gitea".to_owned(),
-            }],
-            parents: vec![knobas_search::ParentSuggestion {
-                name: "payout-service".to_owned(),
-                kind: "repo".to_owned(),
-            }],
-            fields: vec![knobas_search::FieldSuggestion {
-                key: "project".to_owned(),
-                value: "PAY".to_owned(),
-                detail: "Payments".to_owned(),
-            }],
-        };
-        let wire = serde_json::to_value(&value).expect("FilterSuggestions serializes");
-        for (interface, object, expected) in [
-            (
-                "FilterSuggestions",
-                &wire,
-                &["fields", "kinds", "parents", "sources"][..],
-            ),
-            (
-                "FieldSuggestion",
-                &wire["fields"][0],
-                &["detail", "key", "value"][..],
-            ),
-            ("KindSuggestion", &wire["kinds"][0], &["kind", "label"][..]),
-            (
-                "SourceSuggestion",
-                &wire["sources"][0],
-                &["display_name", "id"][..],
-            ),
-            (
-                "ParentSuggestion",
-                &wire["parents"][0],
-                &["kind", "name"][..],
-            ),
-        ] {
-            let body = interface_body(mirror, interface);
-            let mut keys: Vec<&str> = object
-                .as_object()
-                .expect("an object")
-                .keys()
-                .map(String::as_str)
-                .collect();
-            keys.sort_unstable();
-            assert_eq!(keys, expected, "{interface}");
-            for key in &keys {
-                assert!(
-                    declares(body, key),
-                    "`interface {interface}` in app/src/lib/ipc/search.ts does \
-                     not declare `{key}`, which the Rust type puts on the wire:\
-                     \n{body}"
-                );
-            }
-        }
-    }
-
-    /// The body of `export interface <name> { … }` in the mirror.
-    ///
-    /// Panics rather than returning an empty slice when the interface is not
-    /// there: a rename on the TypeScript side that this could not find would
-    /// otherwise turn every assertion above into a vacuous one.
-    fn interface_body<'a>(mirror: &'a str, name: &str) -> &'a str {
-        let header = format!("export interface {name} {{");
-        let start = mirror
-            .find(&header)
-            .unwrap_or_else(|| panic!("`{header}` is not in app/src/lib/ipc/search.ts"))
-            + header.len();
-        let rest = &mirror[start..];
-        let end = rest
-            .find("\n}")
-            .unwrap_or_else(|| panic!("`interface {name}` is never closed"));
-        &rest[..end]
-    }
-
-    /// Whether `body` **declares** `key` — a line whose first token is `key:`.
-    ///
-    /// Not `contains`. A doc comment inside the block would satisfy a
-    /// substring search for the field it documents, so the field could be
-    /// deleted and its comment left behind and nothing here would notice.
-    fn declares(body: &str, key: &str) -> bool {
-        body.lines()
-            .any(|line| line.trim_start().starts_with(&format!("{key}:")))
-    }
-
     /// `LauncherHome.recent` and a room's rows are **one** TypeScript type over
     /// **two** Rust structs, so the two have to keep agreeing.
     ///
     /// `knobas_search::EntityRow` (stream E's, the search corpus) and
     /// `knobas_core::entity_list::EntityRow` (stream D's, a room line) were
-    /// declared independently and serialize identically. `app/src/lib/ipc/
-    /// search.ts` imports D's declaration rather than repeating it, which is
-    /// only honest while that holds -- and neither struct is declared from the
+    /// declared independently and serialize identically. The generated
+    /// `LauncherHome` types `recent` with the room's declaration
+    /// (`#[ts(as = ...)]`, #1329) rather than a second one, which is only
+    /// honest while that holds -- and neither struct is declared from the
     /// other, so nothing but this notices the day one of them gains a field.
     ///
     /// **`path` is carried with a value, not left `None`** (#284). Both
@@ -772,7 +566,7 @@ mod tests {
         assert_eq!(
             search, room,
             "the two EntityRow structs no longer share a wire shape, so \
-             app/src/lib/ipc/search.ts must stop importing entity.ts's"
+             `LauncherHome::recent` must stop borrowing the room's TypeScript type"
         );
         assert_eq!(
             search["path"], "Engineering \u{203a} Payments",

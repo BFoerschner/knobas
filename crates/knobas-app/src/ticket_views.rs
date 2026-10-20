@@ -40,24 +40,132 @@ pub const SORT_DIRECTIONS: &[&str] = &["ascending", "descending"];
 
 use crate::slug::is_slug;
 
+// The vocabularies above as the generated TypeScript's unions (#1329). The
+// wire carries each as a string, checked against its list by the save; these
+// enums are never built and only name the union a field is typed with.
+// `the_vocabulary_unions_are_the_lists` pins each to its list.
+
+/// [`LAYOUTS`]: a ticket board or a list. Inlined where it is used.
+#[derive(ts_rs::TS)]
+#[ts(export_to = "search.ts", rename_all = "snake_case")]
+pub enum Layout {
+    Board,
+    List,
+}
+
+/// [`LANES`]: what a ticket board's lanes split by (R-3.5).
+#[derive(ts_rs::TS)]
+#[ts(
+    export_to = "search.ts",
+    rename = "ViewLanes",
+    rename_all = "snake_case"
+)]
+pub enum Lanes {
+    None,
+    Epic,
+    Assignee,
+    Priority,
+    Issuetype,
+    Label,
+}
+
+/// [`CARD_FIELDS`]: what a card can show (R-3.16).
+#[derive(ts_rs::TS)]
+#[ts(export_to = "search.ts", rename_all = "snake_case")]
+pub enum CardField {
+    Type,
+    Signals,
+    Comments,
+    Assignee,
+    Epic,
+    Labels,
+}
+
+/// [`LIST_COLUMNS`]: the list's columns (R-3.16); `key` is always one.
+#[derive(ts_rs::TS)]
+#[ts(export_to = "search.ts", rename_all = "snake_case")]
+pub enum ListColumn {
+    Key,
+    Summary,
+    Status,
+    Priority,
+    Signals,
+    Assignee,
+    Updated,
+    Epic,
+    Labels,
+}
+
+/// [`SORT_COLUMNS`]: what a list header sorts by (R-3.6).
+#[derive(ts_rs::TS)]
+#[ts(
+    export_to = "search.ts",
+    rename = "ViewSortColumn",
+    rename_all = "snake_case"
+)]
+pub enum SortColumn {
+    Key,
+    Summary,
+    Status,
+    Priority,
+    Assignee,
+    Updated,
+}
+
+/// [`SORT_DIRECTIONS`]: a sort's two directions. Inlined where it is used.
+#[derive(ts_rs::TS)]
+#[ts(export_to = "search.ts", rename_all = "snake_case")]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+/// [`SavedViewSource::kind`]: a board or a filter. Never built, like the
+/// enums above; the list is the projection in `knobas_sync::saved_views`,
+/// which writes `filter` for a filter and `board` for anything else.
+/// Inlined where it is used.
+#[derive(ts_rs::TS)]
+#[ts(export_to = "search.ts", rename_all = "snake_case")]
+pub enum SavedViewKind {
+    Board,
+    Filter,
+}
+
+/// [`SavedViewSource::sprint`] as the shell reads it: the adapter's payload
+/// passed through as JSON, `{"id", "name", "end_date"}`. Never built; it
+/// only types the field in the generated TypeScript. Inlined where it is used.
+#[derive(ts_rs::TS)]
+#[ts(export_to = "search.ts")]
+pub struct ActiveSprint {
+    pub id: i64,
+    pub name: String,
+    pub end_date: Option<String>,
+}
+
 /// One ticket board column: its name, the statuses on it, and an optional
 /// *At most* (R-3.15).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct ViewColumn {
     pub name: String,
     pub statuses: Vec<String>,
+    /// *At most*, or `None`.
     pub limit: Option<u32>,
 }
 
 /// The list's header sort (R-3.6).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct ListSort {
+    #[ts(as = "SortColumn")]
     pub column: String,
+    #[ts(as = "SortDirection", inline)]
     pub direction: String,
 }
 
 /// One ticket view as stored.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct TicketView {
     /// A slug: `#/tickets/<id>` opens the view.
     pub id: String,
@@ -69,11 +177,15 @@ pub struct TicketView {
     /// The conditions as search text, exactly as saved; empty is every ticket.
     pub query: String,
     /// `board` or `list`.
+    #[ts(as = "Layout", inline)]
     pub layout: String,
     /// The board's columns; empty is one column per status.
     pub columns: Vec<ViewColumn>,
+    #[ts(as = "Lanes")]
     pub lanes: String,
+    #[ts(as = "Vec<CardField>")]
     pub card_fields: Vec<String>,
+    #[ts(as = "Vec<ListColumn>")]
     pub list_columns: Vec<String>,
     /// `None` is newest first.
     pub list_sort: Option<ListSort>,
@@ -85,7 +197,8 @@ pub struct TicketView {
 
 /// What `save_ticket_view` takes: a view, with the id and position left to
 /// the save when it is a new one.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct TicketViewDraft {
     /// `None` makes a new view with an id from its name; an id saves over that
     /// view, or puts a deleted one back (*Undo*).
@@ -95,17 +208,22 @@ pub struct TicketViewDraft {
     /// `None` keeps a saved view where it is and puts a new one last.
     pub position: Option<i32>,
     pub query: String,
+    #[ts(as = "Layout", inline)]
     pub layout: String,
     pub columns: Vec<ViewColumn>,
+    #[ts(as = "Lanes")]
     pub lanes: String,
+    #[ts(as = "Vec<CardField>")]
     pub card_fields: Vec<String>,
+    #[ts(as = "Vec<ListColumn>")]
     pub list_columns: Vec<String>,
     pub list_sort: Option<ListSort>,
     pub saved_view: Option<String>,
 }
 
 /// One row of the views pane: the view, and what its text reads as today.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct TicketViewRow {
     #[serde(flatten)]
     pub view: TicketView,
@@ -122,9 +240,11 @@ pub struct TicketViewRow {
 /// What a ticket system says about one of its saved views (#877, #1273,
 /// `sync.saved_view`): enough for the views pane and *View settings* to say
 /// where it comes from.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
 pub struct SavedViewSource {
     /// `board` or `filter`.
+    #[ts(as = "SavedViewKind", inline)]
     pub kind: String,
     /// `scrum`, `kanban` or `simple` for a board; `None` for a filter.
     pub board_type: Option<String>,
@@ -135,6 +255,7 @@ pub struct SavedViewSource {
     /// A Kanban board's sub-filter, or `None`.
     pub sub_query: Option<String>,
     /// A Scrum board's active sprint, `{"id", "name", "end_date"}`, or `None`.
+    #[ts(as = "Option<ActiveSprint>", inline)]
     pub sprint: Option<serde_json::Value>,
     /// When the last sync read it (RFC 3339).
     pub last_read: chrono::DateTime<chrono::Utc>,
@@ -155,7 +276,8 @@ pub struct SavedViewSource {
 
 /// How many tickets on a saved view are in one project the source does not
 /// sync (#879, R-3.23).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts", rename = "UnsyncedTickets")]
 pub struct Unsynced {
     /// The project key, read off the ticket key (`WEB-5` → `WEB`).
     pub project: String,
@@ -800,131 +922,25 @@ mod tests {
         }
     }
 
-    /// The wire shape and its hand-written mirror (`app/src/lib/ipc/search.ts`)
-    /// name the same fields and the same three commands.
+    /// The barrel (`app/src/lib/ipc/search.ts`) invokes the view commands by
+    /// their names, and the handler barrel registers the two #1245 renamed:
+    /// a command is addressed by a string, so a barrel line left on an old
+    /// name is a button Tauri answers with "command not found".
     #[test]
-    fn the_views_and_their_mirror_agree() {
+    fn the_view_commands_are_invoked_by_their_names() {
         let mirror = include_str!("../../../app/src/lib/ipc/search.ts");
-        let view = TicketView {
-            id: String::new(),
-            name: String::new(),
-            group: String::new(),
-            position: 0,
-            query: String::new(),
-            layout: String::new(),
-            columns: vec![ViewColumn {
-                name: String::new(),
-                statuses: vec![],
-                limit: None,
-            }],
-            lanes: String::new(),
-            card_fields: vec![],
-            list_columns: vec![],
-            list_sort: Some(ListSort {
-                column: String::new(),
-                direction: String::new(),
-            }),
-            saved_view: None,
-        };
-        let row = serde_json::to_value(TicketViewRow {
-            view: view.clone(),
-            count: None,
-            unreadable: None,
-            saved_view_source: Some(SavedViewSource {
-                kind: String::new(),
-                board_type: None,
-                source_query: String::new(),
-                sub_query: None,
-                sprint: None,
-                last_read: chrono::DateTime::UNIX_EPOCH,
-                web_url: None,
-                hidden: false,
-                new: false,
-                unsynced: vec![Unsynced {
-                    project: String::new(),
-                    count: 0,
-                }],
-            }),
-        })
-        .unwrap();
-        let draft = serde_json::to_value(draft()).unwrap();
-        let keys = |value: &serde_json::Value| -> Vec<String> {
-            value.as_object().unwrap().keys().cloned().collect()
-        };
-        for key in keys(&row)
-            .iter()
-            .chain(&keys(&row["columns"][0]))
-            .chain(&keys(&row["list_sort"]))
-            .chain(&keys(&row["saved_view_source"]))
-            .chain(&keys(&row["saved_view_source"]["unsynced"][0]))
-            .chain(&keys(&draft))
-        {
+        for command in [
+            "ticket_views",
+            "save_ticket_view",
+            "delete_ticket_view",
+            "hide_saved_view",
+            "open_saved_view",
+        ] {
             assert!(
-                mirror.contains(&format!("  {key}:")) || mirror.contains(&format!("  {key}?:")),
-                "{key} is not mirrored"
+                mirror.contains(&format!("\"{command}\"")),
+                "{command} is not invoked by the barrel"
             );
         }
-        for name in [
-            "export interface TicketView {",
-            "export interface TicketViewRow extends TicketView {",
-            "export interface TicketViewDraft {",
-            "export interface ViewColumn {",
-            "export interface ListSort {",
-            "export interface SavedViewSource {",
-            "export interface UnsyncedTickets {",
-            "\"ticket_views\"",
-            "\"save_ticket_view\"",
-            "\"delete_ticket_view\"",
-            "\"hide_saved_view\"",
-            "\"open_saved_view\"",
-        ] {
-            assert!(mirror.contains(name), "{name} is not in the mirror");
-        }
-        // The other direction for the row's saved-view facts (#1273): the
-        // fields the mirror declares are exactly the ones the wire sends, so
-        // a field left on its old name in `search.ts` fails here rather than
-        // reading `undefined` in the shell. Equal sets, not "each declared
-        // field is sent": a body this parse reads as empty must fail too.
-        let own = |sent: &serde_json::Value, inherited: &serde_json::Value| {
-            let mut fields = keys(sent);
-            fields.retain(|key| inherited.get(key).is_none());
-            fields.sort();
-            fields
-        };
-        let flattened = serde_json::to_value(&view).unwrap();
-        for (interface, sent) in [
-            (
-                "export interface TicketViewRow extends TicketView {",
-                own(&row, &flattened),
-            ),
-            (
-                "export interface SavedViewSource {",
-                own(&row["saved_view_source"], &serde_json::json!({})),
-            ),
-        ] {
-            let at = mirror
-                .find(interface)
-                .unwrap_or_else(|| panic!("{interface} is not in the mirror"));
-            let body = &mirror[at + interface.len()..];
-            let body = &body[..body
-                .find("\n}")
-                .unwrap_or_else(|| panic!("{interface} never closes"))];
-            let mut declared: Vec<String> = body
-                .lines()
-                .filter_map(|line| line.strip_prefix("  ")?.split_once(':'))
-                .map(|(field, _)| field)
-                .filter(|field| !field.starts_with(['/', '*', ' ']))
-                .map(|field| field.trim_end_matches('?').to_owned())
-                .collect();
-            declared.sort();
-            assert_eq!(
-                declared, sent,
-                "{interface} and the wire name different fields"
-            );
-        }
-        // Registered under the names the mirror invokes (#1245): a command is
-        // addressed by a string, so a barrel line left on the old name is a
-        // button Tauri answers with "command not found".
         let barrel = include_str!("lib.rs");
         for command in ["hide_saved_view", "open_saved_view"] {
             assert!(
@@ -932,22 +948,31 @@ mod tests {
                 "{command} is not in the handler barrel"
             );
         }
-        for (words, mirrored) in [
-            (LANES, "export type ViewLanes"),
-            (CARD_FIELDS, "export type CardField"),
-            (LIST_COLUMNS, "export type ListColumn"),
-            (SORT_COLUMNS, "export type ViewSortColumn"),
+    }
+
+    /// Each union the generated TypeScript declares for a display vocabulary
+    /// (#1329) is exactly its list: a word added to the list alone would
+    /// reach the shell as one its types do not have, and one added to the
+    /// enum alone would be offered and then refused by the save.
+    #[test]
+    fn the_vocabulary_unions_are_the_lists() {
+        let union = |words: &[&str]| {
+            words
+                .iter()
+                .map(|word| format!("\"{word}\""))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
+        let cfg = ts_rs::Config::new();
+        for (generated, list) in [
+            (<Layout as ts_rs::TS>::inline(&cfg), LAYOUTS),
+            (<Lanes as ts_rs::TS>::inline(&cfg), LANES),
+            (<CardField as ts_rs::TS>::inline(&cfg), CARD_FIELDS),
+            (<ListColumn as ts_rs::TS>::inline(&cfg), LIST_COLUMNS),
+            (<SortColumn as ts_rs::TS>::inline(&cfg), SORT_COLUMNS),
+            (<SortDirection as ts_rs::TS>::inline(&cfg), SORT_DIRECTIONS),
         ] {
-            let at = mirror
-                .find(mirrored)
-                .unwrap_or_else(|| panic!("{mirrored} is not in the mirror"));
-            let line = &mirror[at..at + mirror[at..].find(';').unwrap()];
-            for word in words {
-                assert!(
-                    line.contains(&format!("\"{word}\"")),
-                    "{mirrored} lacks {word}: {line}"
-                );
-            }
+            assert_eq!(generated, union(list));
         }
     }
 }
