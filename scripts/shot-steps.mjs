@@ -15,6 +15,9 @@
 //       binding sees an input event). The text cannot hold ` + ` or ` > `.
 //     `key:<combo>` presses one key: `key:Meta+k`, `key:Escape`, `key:Enter`, `key:j`,
 //       `key:Shift+Tab`. Modifiers Meta, Control, Alt, Shift; a bare character also types.
+//     `select:<name>=<option>` picks the option whose text (or value) is <option> in the first
+//       enabled select whose aria-label or label text is <name>; `select:testid=<id>=<option>`.
+//       Headless Chrome on macOS will not change a select from a key press.
 //     `wait:<ms>` pauses, for a debounce or an animation.
 //     `scroll:<px>` scrolls the page's largest scrolling element by <px> (negative goes up);
 //       `scroll:testid=<id>` scrolls that element into view.
@@ -157,6 +160,26 @@ try {
       return true;
     })()`;
   };
+  const selectJs = (arg) => {
+    const byId = arg.startsWith("testid=");
+    const rest = byId ? arg.slice(7) : arg;
+    const at = rest.indexOf("=");
+    const want = JSON.stringify(rest.slice(0, at));
+    const option = JSON.stringify(rest.slice(at + 1));
+    return `(() => {
+      const want = ${want}, option = ${option};
+      const all = [...document.querySelectorAll("select")].filter((x) => !x.disabled);
+      const labelled = (x) => [x.getAttribute("aria-label"), ...[...(x.labels ?? [])].map((l) => l.textContent)]
+        .some((text) => text?.trim() === want);
+      const el = ${byId} ? all.find((x) => x.getAttribute("data-testid") === want) : all.find(labelled);
+      const pick = el && [...el.options].find((o) => o.textContent.trim() === option || o.value === option);
+      if (!pick) return false;
+      el.value = pick.value;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`;
+  };
   const scrollJs = (arg) => {
     if (arg.startsWith("testid=")) {
       return `(() => {
@@ -196,6 +219,13 @@ try {
           if (!hit) await sleep(250);
         }
         if (!hit) done(1, `shot: step '${step}' found no enabled element on #/${path}`);
+      } else if (verb === "select" && arg.slice(arg.startsWith("testid=") ? 7 : 0).includes("=")) {
+        let hit = false;
+        for (let i = 0; i < 20 && !hit; i++) {
+          hit = await evaluate(selectJs(arg));
+          if (!hit) await sleep(250);
+        }
+        if (!hit) done(1, `shot: step '${step}' found no such select and option on #/${path}`);
       } else if (verb === "type") {
         await send("Input.insertText", { text: arg });
       } else if (verb === "key") {
@@ -208,7 +238,7 @@ try {
       } else if (verb === "scroll" && (/^-?\d+$/.test(arg) || arg.startsWith("testid="))) {
         if (!(await evaluate(scrollJs(arg)))) done(1, `shot: step '${step}' found nothing to scroll on #/${path}`);
       } else {
-        done(1, `shot: unknown step '${step}' (known: click:<name>, focus:<name>, type:<text>, key:<combo>, wait:<ms>, scroll:<px>, scroll:testid=<id>)`);
+        done(1, `shot: unknown step '${step}' (known: click:<name>, focus:<name>, type:<text>, key:<combo>, select:<name>=<option>, wait:<ms>, scroll:<px>, scroll:testid=<id>)`);
       }
       await sleep(500);
     }

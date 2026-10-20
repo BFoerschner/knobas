@@ -12,6 +12,7 @@
 #            'R + focus:Name + type:x'  focus a field by label or placeholder, type into it
 #            'R + key:Meta+k + type:PAY' press a key (Meta/Control/Alt/Shift+<key>), type
 #            'R + wait:800 + scroll:600' pause; scroll the largest scroller (or testid=x)
+#            'R + select:Every=1 hour'  pick a <select> option by its label and text
 #          (an item with a dim description matches on its leading label: click:Import…;
 #          a query may lead a step route: '?fake-clone-percent=40#/repo/x/files + click:Clone')
 #          e.g. '#/job/PAY-231 > #/builds', '#/repo/x/branches + click:New branch…',
@@ -68,7 +69,11 @@ for route in "$@"; do
   case $route in
     *' > '*|*' + '*)
       stepped=1
-      file="$out/$(printf '%s' "$route" | sed 's/#\/\{0,1\}//g; s/ [>+] /--/g; s/click://g' | tr -c 'A-Za-z0-9._-\n' '_' | cut -c1-120).png" ;;
+      name=$(printf '%s' "$route" | sed 's/#\/\{0,1\}//g; s/ [>+] /--/g; s/click://g' | tr -c 'A-Za-z0-9._-\n' '_')
+      # Cut at 120, with the route's checksum when cut: two long routes that
+      # share their first 120 characters overwrote each other's image (#1396).
+      [ "${#name}" -le 120 ] || name="${name:0:111}-$(printf '%s' "$route" | cksum | awk '{ printf "%08x", $1 }')"
+      file="$out/$name.png" ;;
   esac
   if [ -n "$stepped" ]; then
       # the query went into `extra`; the steps script gets the route after the first `#`
