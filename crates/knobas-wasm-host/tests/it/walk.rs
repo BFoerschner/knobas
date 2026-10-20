@@ -190,3 +190,46 @@ async fn a_1_0_0_component_still_installs_syncs_and_reports_no_walk() {
     let last = messages.last().expect("a writing sample");
     assert_eq!((last.phase, last.items), (SyncPhase::Writing, 5));
 }
+
+/// Takes the first item, refuses the second, and records what it was handed
+/// as [`Handed`] does: the refused item is not recorded.
+#[derive(Default)]
+struct RefusesTheSecond(Handed, usize);
+
+#[async_trait::async_trait]
+impl Sink for RefusesTheSecond {
+    async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
+        self.1 += 1;
+        if self.1 == 2 {
+            return Err(SourceError::Sink("the mirror is full".into()));
+        }
+        self.0.item(item).await
+    }
+
+    async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+        self.0.walked(done, of, unit).await;
+    }
+}
+
+/// The §10.8 amendment's "after the sync's sink refused an item, [a reading]
+/// is dropped": the `swallow_sink` fixture walks on past the refusal, and the
+/// engine's sink hears nothing of it.
+#[tokio::test]
+async fn a_reading_after_the_sink_refused_an_item_is_dropped() {
+    let adapter = install(&knobas_wasm_host::fixture_component(), "1.3.0");
+    let mut config = instance();
+    config.config = serde_json::json!({ "fault": "swallow_sink" });
+    let source = adapter.build(config).expect("the fixture builds");
+
+    let mut sink = RefusesTheSecond::default();
+    let answer = source.sync(None, &mut sink).await;
+    assert!(
+        matches!(&answer, Err(SourceError::Sink(m)) if m == "the mirror is full"),
+        "{answer:?}"
+    );
+    assert_eq!(
+        sink.0.0,
+        ["0/5 items", "surveys:survey-1", "1/5 items"],
+        "nothing after the refused second item"
+    );
+}
