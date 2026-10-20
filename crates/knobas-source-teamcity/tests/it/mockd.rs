@@ -1362,3 +1362,72 @@ async fn a_trigger_against_an_unreachable_server_waits_rather_than_being_refused
         "{failed:?}"
     );
 }
+
+/// Keeps the items and every walk reading, in the order they came (#1382).
+#[derive(Default)]
+struct Walking {
+    items: Vec<SyncItem>,
+    readings: Vec<(u64, Option<u64>, String)>,
+}
+
+#[async_trait::async_trait]
+impl knobas_source::Sink for Walking {
+    async fn item(&mut self, item: SyncItem) -> Result<(), knobas_source::SourceError> {
+        self.items.push(item);
+        Ok(())
+    }
+
+    async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+        self.readings.push((done, of, unit.to_owned()));
+    }
+}
+
+/// A full sync reports its walk over the configurations the scope resolved,
+/// 0 to N; an incremental run that pushes no item reports its walk over the
+/// builds it listed (here the fixture's running build, out of scope), so the
+/// bar still moves (#1378, #1382).
+#[tokio::test]
+async fn a_run_reports_its_walk_over_configurations_then_over_listed_builds() {
+    let server = spawn_mock_teamcity().await;
+    let quiet = quiet_build_type();
+    let source = adapter(
+        &server.base_url(),
+        serde_json::json!({ "build_type_ids": [quiet] }),
+    );
+    let configs = |done| (done, Some(1), "build configurations".to_owned());
+
+    let mut first = Walking::default();
+    let cursor = source.sync(None, &mut first).await.expect("full sync");
+    assert!(!first.items.is_empty());
+    assert_eq!(first.readings, vec![configs(0), configs(1)]);
+
+    // Unscoped, the total is the whole project tree's configurations.
+    let all = adapter(&server.base_url(), serde_json::json!({}));
+    let mut every = Walking::default();
+    all.sync(None, &mut every).await.expect("unscoped sync");
+    let n = every
+        .items
+        .iter()
+        .filter(|i| i.entity.key.starts_with("buildType:"))
+        .count() as u64;
+    assert!(n > 1, "the fixture has several configurations");
+    let expected: Vec<_> = (0..=n)
+        .map(|d| (d, Some(n), "build configurations".to_owned()))
+        .collect();
+    assert_eq!(every.readings, expected);
+
+    let mut idle = Walking::default();
+    source
+        .sync(Some(cursor), &mut idle)
+        .await
+        .expect("incremental sync");
+    assert!(idle.items.is_empty(), "emitted {:?}", keys(&idle.items));
+    let listed = idle.readings.last().expect("the walk is reported").1;
+    let of = listed.expect("the listed count is known");
+    assert!(of >= 1, "the running build was listed");
+    let expected: Vec<_> = (0..=of)
+        .map(|d| (d, Some(of), "builds".to_owned()))
+        .collect();
+    assert_eq!(idle.readings, expected);
+    server.assert_no_violations();
+}

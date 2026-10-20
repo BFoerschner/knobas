@@ -8437,3 +8437,16 @@ taken afresh from `time.ts` at f9fc1bf1.
   ticket and the parent spec name three `Option` fields on `SyncProgress`, and the follow-ups are
   cut against that shape. The test sinks are local to their crates' test binaries. *Reversing:* a
   refactor after #1384 lands.
+
+## #1382 — TeamCity reports its walk
+
+- **What the incremental walk counts.** *Fork:* the builds the run listed (in-flight plus finished,
+  deduplicated by id, in or out of scope), or only those it emits. *Ruling:* the listed ones, unit
+  `builds`; the full sync reports `build configurations`. *Reasoning:* the ticket says "against the
+  count it listed", and a run whose listed builds are all out of scope must still move the bar.
+  *Reversing:* the `observed` count in `sync.rs`.
+- **Empty listing.** *Ruling:* an incremental run that lists nothing reports one closing `0 of 0
+  builds`, like Gitea's empty selection. *Reversing:* one `if`.
+- **Where the reading sits.** *Ruling:* the incremental readings go in the scope-and-map loop, not
+  the emit loop, because the emit loop also pushes configurations the count does not cover.
+  *Reversing:* move the calls.
