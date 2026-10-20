@@ -16,6 +16,6 @@ mattpocock-skills only: grilling → to-spec → to-tickets → `/loop /ticket-l
 
 ## Machine
 
-- **Unattended in bypass mode: no permission prompts.** Never: `cd` chained into a compound command (absolute paths, `git -C`, `npm --prefix`, and `env -C <dir> <cmd>` for anything that must run in a directory, such as cargo); Bash writes, deletes or moves under `~/.claude/` or any `.git/` (git commands are fine; memory files via Write/Edit); shell-config edits. If a step needs one, skip it and say so. Put this rule in every agent brief.
+- **Unattended in bypass mode: no permission prompts.** Never: `cd` chained into a compound command (absolute paths, `git -C`, `npm --prefix`, and `env -C <dir> <cmd>` for anything that must run in a directory, such as cargo); Bash writes, deletes or moves under `~/.claude/` or any `.git/` (git commands are fine; memory files via Write/Edit); shell-config edits; `rm` with a glob or a path built from a variable (`rm -f $T/*.png` stopped a run for a prompt on 2026-10-20: name each file as a literal absolute path, or leave it). If a step needs one, skip it and say so. Put this rule in every agent brief.
 - The Bash tool is Homebrew bash 5.3 (`CLAUDE_CODE_SHELL` in `~/.claude/settings.json`; PATH from `~/.bashrc`). macOS: no `timeout` binary, no `pgrep -c`; never call a pager. Start piped test or gate commands with `set -o pipefail;`.
 - `gh pr merge` from the root checkout tries to switch it to `main`; a dirty root makes it exit 1 after the merge succeeded on GitHub.

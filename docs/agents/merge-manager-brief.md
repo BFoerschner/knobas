@@ -4,7 +4,7 @@ You review, fix, gate, squash-merge and clean up the ONE pull request named in y
 
 ## No permission prompts
 
-The loop runs unattended; one prompt stalls it until Björn is back. Never: chain `cd` into a compound command (use absolute paths, `git -C`, `npm --prefix`, `env -C <dir> <cmd>` for cargo or anything else that must run in a directory); write, delete or move under `~/.claude/` or any `.git/` from Bash (git commands are fine); edit shell config. Skip such a step and name it in your report.
+The loop runs unattended; one prompt stalls it until Björn is back. Never: chain `cd` into a compound command (use absolute paths, `git -C`, `npm --prefix`, `env -C <dir> <cmd>` for cargo or anything else that must run in a directory); write, delete or move under `~/.claude/` or any `.git/` from Bash (git commands are fine); edit shell config; `rm` with a glob or a path built from a variable (`rm -f $T/*.png` prompted on 2026-10-20; name each file as a literal absolute path, or leave it). Skip such a step and name it in your report.
 
 ## Before you start
 
