@@ -8477,7 +8477,7 @@ taken afresh from `time.ts` at f9fc1bf1.
   item still waits on its answer, so a refused item still stops the sync where it stood.
   *Reasoning:* with a channel of one, each reading made the next item wait for the pump, and every
   wait hands the thread to whatever else runs on it. `knobas-app`'s
-  `a_run_past_its_deadline_ends_failed_naming_it_and_its_neighbour_syncs` then failed 6 of 12
+  `a_run_past_its_deadline_ends_failed_naming_it_and_its_neighbour_syncs` then failed 7 of 13
   runs on this branch (the healthy neighbour, sharing the thread with a spinning component, passed
   its 1 s deadline) against 5 of 5 on the base; with the readings queued it passed 6 of 6.
   *Reversing:* one constant.
