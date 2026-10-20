@@ -5583,3 +5583,46 @@ async fn a_ticket_is_filed_moved_and_commented_on_through_its_writes() {
     clear_test_issues(&http, &env, &auth).await;
     println!("{id} filed, closed, reopened and commented on");
 }
+
+/// The walk reading against the real server (#1379): over the two quiet
+/// repositories, a full run and then an unchanged one each report 0, 1, 2 of 2
+/// `repositories`, and the unchanged one pushes no item while it does.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_run_reports_its_walk_over_the_real_repositories_even_when_unchanged() {
+    #[derive(Default)]
+    struct Walking {
+        items: usize,
+        readings: Vec<(u64, Option<u64>, String)>,
+    }
+    #[async_trait::async_trait]
+    impl knobas_source::Sink for Walking {
+        async fn item(&mut self, _item: SyncItem) -> Result<(), SourceError> {
+            self.items += 1;
+            Ok(())
+        }
+        async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+            self.readings.push((done, of, unit.to_owned()));
+        }
+    }
+
+    let env = env();
+    let source = env.source(serde_json::json!({ "repos": env.quiet_repos() }));
+    let of_two: Vec<_> = (0..=2).map(|done| (done, Some(2), "repositories".to_owned())).collect();
+
+    let mut first = Walking::default();
+    let cursor = source.sync(None, &mut first).await.expect("full sync");
+    let mut unchanged = Walking::default();
+    source
+        .sync(Some(cursor), &mut unchanged)
+        .await
+        .expect("unchanged sync");
+    println!(
+        "walk: full run {} items {:?}; unchanged run {} items {:?}",
+        first.items, first.readings, unchanged.items, unchanged.readings
+    );
+    assert!(first.items > 0);
+    assert_eq!(first.readings, of_two);
+    assert_eq!(unchanged.items, 0);
+    assert_eq!(unchanged.readings, of_two);
+}
