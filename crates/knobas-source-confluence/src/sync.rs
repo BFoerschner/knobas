@@ -299,7 +299,7 @@ impl SyncRun<'_> {
         // would keep the old place for good. Swept before, the same drag only
         // shows up as a difference on the next run, which re-reads the page.
         let swept = match previous {
-            Some(_) => Some(self.positions_sweep().await?),
+            Some(_) => Some(self.positions_sweep(sink).await?),
             None => None,
         };
 
@@ -324,12 +324,21 @@ impl SyncRun<'_> {
         // `totalSize` where the API reports one and over nothing otherwise.
         // The latest page's figure wins, so a total that moved under the run
         // is the one drawn; it never reads below `walked`.
+        //
+        // On an incremental run the sweep's rows come first (#1389): the walk
+        // counts on from them, over both totals, so the bar the sweep filled
+        // is the one the walk finishes rather than a second one from zero.
+        let swept_rows = swept.as_ref().map_or(0, |s| s.len() as u64);
+        let reading = |walked: u64, of: Option<u64>| {
+            (swept_rows + walked, of.map(|n| swept_rows + n.max(walked)))
+        };
         let mut walked: u64 = 0;
         let mut of: Option<u64> = None;
         while let Some(page) = walk.next_page().await? {
             of = page.total_size.or(of);
             for mut raw in page.results {
-                sink.walked(walked, of.map(|n| n.max(walked)), PAGES).await;
+                let (done, of) = reading(walked, of);
+                sink.walked(done, of, PAGES).await;
                 walked += 1;
                 let version = raw.content.version.as_ref();
                 let number = version.and_then(|v| v.number);
@@ -369,7 +378,8 @@ impl SyncRun<'_> {
 
         // Once after the last page, so a run that pushes nothing still ends
         // its bar at the end.
-        sink.walked(walked, of.map(|n| n.max(walked)), PAGES).await;
+        let (done, of) = reading(walked, of);
+        sink.walked(done, of, PAGES).await;
 
         emitted += self
             .mentions(
@@ -460,7 +470,16 @@ impl SyncRun<'_> {
     /// account may read (`rest/api/audit` is an administrator's). So the
     /// bound on a reorder reaching the Docs tree is one sync interval, and the
     /// price is `ceil(pages / 200)` body-less requests per incremental run.
-    async fn positions_sweep(&self) -> Result<Vec<(String, Option<i64>)>, SourceError> {
+    ///
+    /// **It is the first part of the run's walk reading** (#1389): a reading
+    /// of `pages` before each row, over the result's `totalSize` like the
+    /// page walk's, so a large space shows the bar moving through the sweep
+    /// and not only through the window after it. The page walk counts on
+    /// from the rows swept here.
+    async fn positions_sweep(
+        &self,
+        sink: &mut (dyn Sink + Send),
+    ) -> Result<Vec<(String, Option<i64>)>, SourceError> {
         let cql = build_positions_cql(self.cfg);
         let mut swept = Vec::new();
         let mut walk = Walk::new(
@@ -470,8 +489,12 @@ impl SyncRun<'_> {
             POSITIONS_EXPAND,
             "positions",
         );
+        let mut of: Option<u64> = None;
         while let Some(page) = walk.next_page().await? {
+            of = page.total_size.or(of);
             for raw in &page.results {
+                let done = swept.len() as u64;
+                sink.walked(done, of.map(|n| n.max(done)), PAGES).await;
                 swept.push((raw.content.id.clone(), map::position_of(&raw.raw)));
             }
         }
@@ -1985,17 +2008,64 @@ mod tests {
     }
 
     /// A server that reports no `totalSize` is read without a total: the
-    /// count moves, `of` stays `None`, and the walk is unchanged.
+    /// count moves, `of` stays `None`, and the walk is unchanged. On an
+    /// incremental run the count runs on through the sweep into the window
+    /// one step at a time (#1389).
     #[tokio::test]
     async fn a_run_over_a_server_with_no_total_size_reports_the_count_alone() {
         let fake = Fake::new(a_corpus());
-        let (run, _) = walk_of(&fake, None).await;
-        assert_eq!(run.items.len(), 5);
-        assert_eq!(
-            run.readings,
-            (0..=5)
+        let count_to = |last| {
+            (0..=last)
                 .map(|done| (done, None, "pages".to_owned()))
                 .collect::<Vec<_>>()
+        };
+        let (run, cursor) = walk_of(&fake, None).await;
+        assert_eq!(run.items.len(), 5);
+        assert_eq!(run.readings, count_to(5));
+
+        let (idle, _) = walk_of(&fake, Some(cursor)).await;
+        let last = idle.readings.last().expect("the idle run reports").0;
+        assert!(last > 5, "the five swept pages, then the window: {last}");
+        assert_eq!(idle.readings, count_to(last));
+    }
+
+    /// An incremental run over a space larger than one sweep request (#1389)
+    /// reports the positions sweep and the page walk as one walk of `pages`:
+    /// the sweep's rows over its `totalSize`, then the window's rows on top,
+    /// over both totals. The count never goes back and the unit never
+    /// changes, so the bar the sweep fills is the one the walk finishes.
+    #[tokio::test]
+    async fn the_positions_sweep_moves_the_reading_and_the_walk_carries_on_from_it() {
+        // 450 pages an hour apart: three sweep requests of 200, and a window
+        // (the watermark less two minutes) that holds only the newest page.
+        let space: Vec<Value> = (0..450)
+            .map(|i| {
+                let when = format!("2026-08-{:02}T{:02}:00:00.000Z", 1 + i / 24, i % 24);
+                page(&format!("{}", 1000 + i), "p", &when, 1)
+            })
+            .collect();
+        let mut fake = Fake::new(space);
+        fake.reports_total = true;
+        let (_, cursor) = walk_of(&fake, None).await;
+        let before = fake.calls().len();
+
+        let (idle, _) = walk_of(&fake, Some(cursor)).await;
+
+        let sweeps = fake.calls()[before..]
+            .iter()
+            .filter(|c| c.contains(&format!("limit={SWEEP_PAGE_SIZE}")))
+            .count();
+        assert_eq!(
+            sweeps, 2,
+            "the sweep follows two links past its first request"
+        );
+        assert!(idle.items.is_empty());
+        let pages = |done, of| (done, Some(of), "pages".to_owned());
+        let mut expected: Vec<_> = (0..450).map(|done| pages(done, 450)).collect();
+        expected.extend([pages(450, 451), pages(451, 451)]);
+        assert_eq!(
+            idle.readings, expected,
+            "0..450 of 450 through the sweep, then the window's one page on top"
         );
     }
 

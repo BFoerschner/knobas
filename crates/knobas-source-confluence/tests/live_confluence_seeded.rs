@@ -1774,12 +1774,14 @@ async fn a_run_reports_its_walk_over_the_real_pages() {
         .await
         .expect("idle sync");
     println!(
-        "walk: full run {} items, {} readings, first {:?}, last {:?}; idle run {} items, last {:?}",
+        "walk: full run {} items, {} readings, first {:?}, last {:?}; idle run {} items, {} readings, first {:?}, last {:?}",
         first.items,
         first.readings.len(),
         first.readings.first(),
         first.readings.last(),
         idle.items,
+        idle.readings.len(),
+        idle.readings.first(),
         idle.readings.last()
     );
     let (done, of, unit) = first.readings.last().cloned().expect("readings");
@@ -1794,6 +1796,22 @@ async fn a_run_reports_its_walk_over_the_real_pages() {
         "0 to N of the whole result's N on every reading, or of nothing on every one"
     );
     assert_eq!(idle.items, 0);
-    let (_, _, idle_unit) = idle.readings.last().cloned().expect("the idle run reports");
+    // The idle run sweeps every page's place first and reports it (#1389):
+    // one count of `pages` from 0 through the sweep and on through the
+    // window, never going back, and ending at its own total.
+    let (idle_done, idle_of, idle_unit) =
+        idle.readings.last().cloned().expect("the idle run reports");
     assert_eq!(idle_unit, "pages");
+    assert!(
+        idle_done > done,
+        "the sweep's {done} pages, then the window on top: {idle_done}"
+    );
+    assert_eq!(idle_of, of.map(|_| idle_done), "it ends at its own total");
+    let counts: Vec<u64> = idle.readings.iter().map(|r| r.0).collect();
+    assert_eq!(
+        counts,
+        (0..=idle_done).collect::<Vec<_>>(),
+        "one step at a time"
+    );
+    assert!(idle.readings.iter().all(|r| r.2 == "pages"));
 }
