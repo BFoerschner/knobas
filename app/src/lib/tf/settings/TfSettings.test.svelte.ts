@@ -9,7 +9,14 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { TicketViewRow } from "../../ipc/search";
-import type { AdapterStatus, CredentialHealth, SourceSummary, SyncRunRow } from "../../ipc/sources";
+import type {
+  AdapterStatus,
+  CredentialHealth,
+  SourceSummary,
+  SourceSyncStatus,
+  SyncProgress,
+  SyncRunRow,
+} from "../../ipc/sources";
 import { JIRA_SCHEMA } from "../../sources/fixtures";
 import { createLayers } from "../layers.svelte";
 import type { SettingsPorts } from "./ports";
@@ -137,6 +144,7 @@ function ports(over: Partial<SettingsPorts> = {}): SettingsPorts {
       }),
     ),
     syncNow: vi.fn(() => Promise.resolve(42)),
+    watchSync: vi.fn(() => Promise.resolve(null)),
     syncAll: vi.fn(() => Promise.resolve([1, 2])),
     addSource: vi.fn(() => Promise.reject(new Error("not in this test"))),
     installAdapter: vi.fn(() => Promise.reject(new Error("not in this test"))),
@@ -972,4 +980,131 @@ test("an uninstall that fails part-way reloads the sources it may have removed (
   await settle();
   expect(p.listInstalledAdapters).toHaveBeenCalledTimes(2);
   expect(p.listSources).toHaveBeenCalledTimes(2);
+});
+
+// ---- The run in flight on a source's page (#1384) ----
+
+/** `jira`'s status while run `runId` goes, as `sync_status` and `sync:state` say it. */
+function runningStatus(runId: number): SourceSyncStatus {
+  return {
+    source_id: "jira",
+    running: true,
+    run_id: runId,
+    started_at: AGO(2),
+    last_finished_at: AGO(4),
+    last_outcome: "ok",
+    next_run_at: null,
+    backoff_until: null,
+    last_changed: null,
+  };
+}
+
+/** One message on a watched run's channel. */
+function progress(runId: number, over: Partial<SyncProgress>): SyncProgress {
+  return { run_id: runId, source_id: "jira", phase: "fetching", items: 0, elapsed_ms: 0, message: null, ...over };
+}
+
+/** The page's progress reading, or `null` when none is drawn. */
+function runReading(): string | null {
+  return target.querySelector(".tf-stg-run p")?.textContent?.replace(/\s+/g, " ").trim() ?? null;
+}
+
+/** The Result column of *Sync runs*, newest first. */
+function runResults(): string[] {
+  const section = [...target.querySelectorAll("section")].find((el) => el.querySelector("h2")?.textContent === "Sync runs");
+  return [...(section?.querySelectorAll("tbody tr td:nth-child(3)") ?? [])].map((td) => td.textContent ?? "");
+}
+
+/** `watch_sync` as a stand-in: every channel the page hands it, and the run it answers. */
+function watching(answer: number | null) {
+  const channels: ((message: SyncProgress) => void)[] = [];
+  const watchSync = vi.fn((_: string, onmessage: (message: SyncProgress) => void) => {
+    channels.push(onmessage);
+    return Promise.resolve(answer);
+  });
+  return { channels, watchSync };
+}
+
+test("a source's page opened mid-run draws the walk, and the run's row fills in when it ends (#1384)", async () => {
+  const runs: SyncRunRow[] = [
+    { ...SOURCES[0]!.last_run!, id: 7, trigger: "schedule", started_at: AGO(2), finished_at: null, outcome: null, upserted: 0 },
+    SOURCES[0]!.last_run!,
+  ];
+  const { channels, watchSync } = watching(7);
+  await open(
+    ["source", "jira"],
+    ports({
+      syncStatus: vi.fn(() => Promise.resolve([runningStatus(7)])),
+      listSyncRuns: vi.fn(() => Promise.resolve(runs.map((run) => ({ ...run })))),
+      watchSync,
+    }),
+  );
+  expect(watchSync).toHaveBeenCalledTimes(1);
+  expect(watchSync.mock.calls[0]?.[0]).toBe("jira");
+  expect(button("Sync now").disabled).toBe(true);
+  expect(runResults()[0]).toBe("Running…");
+
+  channels[0]!(progress(7, { items: 1240, elapsed_ms: 83_000, walked: 120, of: 300, unit: "repositories" }));
+  await settle();
+  expect(runReading()).toBe("120 of 300 repositories · 1,240 items · 83 s");
+  const bar = target.querySelector<HTMLProgressElement>(".tf-stg-run progress")!;
+  expect([bar.max, bar.value]).toEqual([300, 120]);
+
+  // A message without a reading keeps the last one: the writing phase sends none.
+  channels[0]!(progress(7, { phase: "writing", items: 1302, elapsed_ms: 91_400 }));
+  await settle();
+  expect(runReading()).toBe("120 of 300 repositories · 1,302 items · 91 s");
+
+  // The ending: the reading goes, and the runs are read again with the row filled in.
+  runs[0] = { ...runs[0]!, finished_at: AGO(0), outcome: "ok", upserted: 1302 };
+  channels[0]!(progress(7, { phase: "finished", items: 1302, elapsed_ms: 95_000 }));
+  await settle();
+  expect(runReading()).toBeNull();
+  expect(runResults()[0]).toBe("1,302 updated");
+});
+
+test("a run that starts while the page is open is watched, and leaving the page stops listening (#1384)", async () => {
+  let syncState: ((event: { payload: unknown }) => void) | null = null;
+  const { channels, watchSync } = watching(8);
+  const p = ports({
+    watchSync,
+    listen: vi.fn((event: string, handler: (event: { payload: unknown }) => void) => {
+      if (event === "sync:state") syncState = handler;
+      return Promise.resolve(() => {});
+    }),
+  });
+  const props = $state({
+    rest: ["source", "jira"],
+    job: null,
+    ready: true,
+    ports: p,
+    health: createHealthStub(),
+    layers: createLayers(),
+    now: () => NOW,
+  });
+  view = mount(TfSettings, { target, props });
+  await settle();
+  expect(watchSync, "an idle source is not watched").not.toHaveBeenCalled();
+  expect(runReading()).toBeNull();
+
+  syncState!({ payload: runningStatus(8) });
+  await settle();
+  expect(watchSync).toHaveBeenCalledTimes(1);
+  channels[0]!(progress(8, { items: 3, elapsed_ms: 1_000, walked: 1, of: 4, unit: "projects" }));
+  await settle();
+  expect(runReading()).toBe("1 of 4 projects · 3 items · 1 s");
+
+  // Leave for the list and come back: the page that left hears nothing more,
+  // and the page that came back watches the run again on a channel of its own.
+  props.rest = [];
+  await settle();
+  props.rest = ["source", "jira"];
+  await settle();
+  expect(watchSync).toHaveBeenCalledTimes(2);
+  channels[0]!(progress(8, { items: 999, elapsed_ms: 2_000, walked: 3, of: 4, unit: "projects" }));
+  await settle();
+  expect(runReading() ?? "", "the left page's channel still reaches the page").not.toContain("999");
+  channels[1]!(progress(8, { items: 5, elapsed_ms: 2_000, walked: 2, of: 4, unit: "projects" }));
+  await settle();
+  expect(runReading()).toBe("2 of 4 projects · 5 items · 2 s");
 });

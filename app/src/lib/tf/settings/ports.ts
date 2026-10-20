@@ -2,8 +2,10 @@
  * The commands Settings reads and writes, injectable so a component test
  * needs no Tauri bridge: `SettingsPorts` for Sources and a source's page
  * (#830), `SectionPorts` for the other sections (#831). Every one of them
- * already exists: neither ticket adds a command.
+ * already existed, but for `watch_sync`, which #1384 added for the run in
+ * flight on a source's page.
  */
+import { Channel } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
 import { appStatus, type AppStatus } from "../../ipc/app";
@@ -58,6 +60,7 @@ import {
   syncStatus,
   testSource,
   updateSource,
+  watchSync,
   type ConnectionReport,
   type DbStats,
   type InstalledAdapter,
@@ -71,6 +74,7 @@ import {
   type SourcePatch,
   type SourceSummary,
   type SourceSyncStatus,
+  type SyncProgress,
   type SyncRunRow,
 } from "../../ipc/sources";
 
@@ -85,6 +89,12 @@ export interface SettingsPorts {
   setSourceSecret: (id: string, secret: SecretInput) => Promise<CredentialHealth>;
   testSource: (draft: SourceDraft) => Promise<ConnectionReport>;
   syncNow: (sourceId: string) => Promise<number>;
+  /**
+   * Watch the source's run in flight (#1384): `onmessage` hears its progress
+   * and its ending; resolves with its id, or `null` when none is in flight.
+   * The channel is built here, so a component test needs no Tauri bridge.
+   */
+  watchSync: (sourceId: string, onmessage: (message: SyncProgress) => void) => Promise<number | null>;
   syncAll: () => Promise<number[]>;
   /** *Add a source* (#903): the secret and the row in one call, as `AddSource` sends it. */
   addSource: (input: NewSource) => Promise<SourceSummary>;
@@ -118,6 +128,11 @@ export const realSettingsPorts: SettingsPorts = {
   setSourceSecret: (id, secret) => setSourceSecret(id, secret),
   testSource: (draft) => testSource(draft),
   syncNow: (sourceId) => syncNow(sourceId),
+  watchSync: (sourceId, onmessage) => {
+    const channel = new Channel<SyncProgress>();
+    channel.onmessage = onmessage;
+    return watchSync(sourceId, channel);
+  },
   syncAll: () => syncAll(),
   addSource: (input) => addSource(input),
   installAdapter: (manifest) => installAdapter(manifest),

@@ -18,6 +18,10 @@
   - **Boards and filters** (#878), for an adapter whose schema declares the
     section: which Jira boards and favourite filters come in, and every Jira
     view with *Hide* / *Show* (`TfBoardsAndFilters.svelte`).
+  - **The run in flight** (#1384): while one goes, its walk and its count
+    under the header, read from the channel `watch_sync` attaches. The page
+    attaches when it opens on a running source and when `sync:state` says a
+    run started, and stops listening when it leaves.
   - **Sync runs**: the source's last runs.
   - **Maintenance**: *Backfill* (`backfill_source`) and *Remove…*, which asks
     whether to keep what the source synced.
@@ -27,7 +31,7 @@
   adapter whose schema declares it. Nothing here names an adapter.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type {
@@ -37,6 +41,7 @@
     SourcePatch,
     SourceSummary,
     SourceSyncStatus,
+    SyncProgress,
     SyncRunRow,
   } from "../../ipc/sources";
   import { accountHalfDone, accountOf, ACCOUNT_INCOMPLETE } from "../../sources/account";
@@ -57,12 +62,14 @@
     declaresUser,
     intervalOptions,
     intervalWords,
+    runProgressWords,
     runRow,
     secretWord,
     sourceLine,
     sourceState,
     userOf,
     type ListAddition,
+    type Walk,
   } from "./settings";
   import TfDialog from "./TfDialog.svelte";
 
@@ -253,10 +260,84 @@
     }
   }
 
+  // ---- The run in flight (#1384) ----
+  /** The watched run's latest count and clock, or `null` when none is drawn. */
+  let live = $state<{ items: number; elapsedMs: number } | null>(null);
+  /**
+   * Its latest walk reading. A message without one keeps it: the scheduler's
+   * own messages and the `writing` sample carry none.
+   */
+  let walk = $state<Walk | null>(null);
+  /** The bar's maximum: the walk's total, when there is one to draw. */
+  const walkOf = $derived(walk?.of !== undefined && walk.of > 0 ? walk.of : undefined);
+  /** Moves when a watched run ends, so the runs are read again. */
+  let ended = $state(0);
+
+  /**
+   * The run being watched, if any: what `watch_sync` answered (`null` while it
+   * has not), and how to stop hearing it. Not state: nothing draws it.
+   */
+  let watched: { run: number | null; drop: () => void } | null = null;
+
+  function unwatch() {
+    watched?.drop();
+    watched = null;
+  }
+
+  async function watch() {
+    unwatch();
+    let heard = true;
+    const mine = { run: null as number | null, drop: () => (heard = false) };
+    watched = mine;
+    const hear = (message: SyncProgress) => {
+      if (!heard) return;
+      live = { items: message.items, elapsedMs: message.elapsed_ms };
+      if (message.walked !== undefined) {
+        walk = { walked: message.walked, of: message.of, unit: message.unit ?? "" };
+      }
+      if (message.phase === "finished" || message.phase === "failed") {
+        live = null;
+        walk = null;
+        ended += 1;
+        if (watched === mine) unwatch();
+      }
+    };
+    try {
+      mine.run = await ports.watchSync(source.id, hear);
+    } catch {
+      // The page still has `sync:state` and the disabled *Sync now*; a run it
+      // cannot watch is a run it draws as before.
+      mine.run = null;
+    }
+    // Nothing in flight: let the next `sync:state` attach afresh.
+    if (mine.run === null && watched === mine) unwatch();
+  }
+
+  /** The run `sync:state` says is going: its id, `null` before one is known, `undefined` when idle. */
+  const runningId = $derived(status?.running === true ? status.run_id : undefined);
+  $effect(() => {
+    const run = runningId;
+    untrack(() => {
+      if (run === undefined) {
+        // Idle again: whatever the channel still owes, the run is over.
+        unwatch();
+        live = null;
+        walk = null;
+        return;
+      }
+      // Already watching it, or already asking: the second status of one run
+      // (a local start, then its event) attaches once.
+      if (watched !== null && (run === null || watched.run === null || watched.run === run)) return;
+      void watch();
+    });
+  });
+  onDestroy(unwatch);
+
   // ---- Sync runs ----
   let runs = $state<SyncRunRow[] | null>(null);
   $effect(() => {
     void finished;
+    void ended;
     let dead = false;
     ports
       .listSyncRuns(source.id, 8)
@@ -341,6 +422,21 @@
     <button class="tf-btn" disabled={status?.running === true} onclick={() => void syncNow()}>Sync now</button>
   </div>
 </header>
+
+{#if live !== null}
+  <div class="tf-stg-run" role="status">
+    <!--
+      Two elements rather than one with an `undefined` value, as the wizard
+      draws it: a `<progress>` once given a value stays determinate.
+    -->
+    {#if walkOf === undefined}
+      <progress></progress>
+    {:else}
+      <progress max={walkOf} value={walk?.walked}></progress>
+    {/if}
+    <p>{runProgressWords(live.items, live.elapsedMs, walk)}</p>
+  </div>
+{/if}
 
 {#if alert !== null}
   <div class="tf-stg-alert" role="alert">
