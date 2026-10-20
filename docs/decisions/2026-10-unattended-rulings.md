@@ -8499,3 +8499,12 @@ taken afresh from `time.ts` at f9fc1bf1.
   is witnessed for 1.0.0 and inferred for 1.1.0 and 1.2.0, whose `sink` is the same as 1.0.0's.
   *Reasoning:* the entry claimed 1.0.0 to 1.2.0 without saying which one a test holds.
   *Reversing:* the sentence.
+---
+
+## #1381 — Where the Confluence walk is pinned, and what its numerator counts
+
+Ruled 2026-10-20 by the implementer (Sonnet), PR for #1381.
+
+**The fork (1):** the ticket asks for a Confluence test "in the Confluence crate's integration binary". The crate has no `tests/it` binary: it has never had a mock (ADR-0013), its API trait is crate-private, and `tests/live_confluence_seeded.rs` is the one top-level test file. **Ruling:** the offline pin is two unit tests in `src/sync.rs` over the existing `Fake` (with and without `totalSize`), plus one parse test in `src/model.rs` for the wire name, plus a `--ignored` live test in `live_confluence_seeded.rs` that `just atlassian-live` runs against the real server. **Reasoning:** an integration binary would need a stub HTTP server the crate has no dependency for, to re-test what the `Fake` already stands in for. **Cost of reversing:** low; the tests move to a new `tests/it` binary when one exists.
+
+**The fork (2):** what the walk reading's numerator counts. **Ruling:** issues (Jira) and pages (Confluence) the walk has got through, delivered or skipped as already delivered, so an incremental run's overlap window moves the bar and an idle run ends it at its own total. The reading precedes each unit and follows the last. Jira's `of` never reads below `done` (the live `total` can shrink under a run); Confluence's `of` is the latest page's `totalSize`, `None` when no page carried one. The mention walk, a second pass over a different query, reports nothing. **Reasoning:** the bar is for the main walk; a second `pages` count would reset it. **Cost of reversing:** one line per adapter.
