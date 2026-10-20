@@ -255,12 +255,8 @@ pub(crate) async fn execute(
     // already reported its walk over the configurations above.
     let builds_of = count(observed.len());
     let reports_builds = previous.is_some();
-    if reports_builds && observed.is_empty() {
-        sink.walked(0, Some(0), BUILDS).await;
-    }
     for (done, b) in (0u64..).zip(observed.values()) {
-        if reports_builds {
-            sink.walked(done, Some(builds_of), BUILDS).await;
+        XX            sink.walked(done, Some(builds_of), BUILDS).await;
         }
         let in_scope = in_scope_build(cfg, tree.as_ref().unwrap_or(&no_tree), &b.rec);
         if StateFilter::Finished.matches(b.rec.state.as_deref()) {
@@ -289,8 +285,7 @@ pub(crate) async fn execute(
         }
         builds.push(map::build_item(source_id, base_url, &b.raw, &b.rec));
     }
-    if reports_builds && !observed.is_empty() {
-        sink.walked(builds_of, Some(builds_of), BUILDS).await;
+    XX        sink.walked(builds_of, Some(builds_of), BUILDS).await;
     }
 
     // 6. The configurations of the builds that moved. Fetched from the same
@@ -1516,6 +1511,41 @@ mod tests {
                 "the in-flight poll must not carry {dimension}: {poll}"
             );
         }
+    }
+
+    /// An incremental run that lists nothing still reports its (empty) walk
+    /// once, so the bar closes at 0 of 0 (#1382).
+    #[tokio::test]
+    async fn an_incremental_run_that_lists_no_build_reports_an_empty_walk() {
+        #[derive(Default)]
+        struct Walking(Vec<(u64, Option<u64>, String)>);
+        #[async_trait::async_trait]
+        impl Sink for Walking {
+            async fn item(&mut self, _item: SyncItem) -> Result<(), SourceError> {
+                Ok(())
+            }
+            async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+                self.0.push((done, of, unit.to_owned()));
+            }
+        }
+        let rest = FakeRest::new(
+            vec![build_type("Ledger_Deploy_Staging", "Ledger")],
+            vec![build(412, "Ledger_Deploy_Staging", "Ledger", "finished")],
+        );
+        let cfg = TeamCityConfig::default();
+        let (_, first) = run(&rest, &cfg, None).await;
+        let mut walking = Walking::default();
+        execute(
+            "teamcity",
+            TEST_BASE_URL,
+            &cfg,
+            &rest,
+            Some(first),
+            &mut walking,
+        )
+        .await
+        .expect("run");
+        assert_eq!(walking.0, vec![(0, Some(0), "builds".to_owned())]);
     }
 
     /// Contract battery clause 2, at the level where it is decided.
