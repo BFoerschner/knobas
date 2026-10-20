@@ -8628,3 +8628,8 @@ taken afresh from `time.ts` at f9fc1bf1.
   know, and only then, so a status lagging an ended run cannot loop. Witnessed by "a watch that
   finds nothing while the run's id arrives asks again for that run (#1384)", red before the fix.
   *Reversing:* the re-check in `watch()` in `TfSourcePage.svelte`.
+
+## #1391 -- one walk-recording test sink
+
+- **Fork:** the copies differ: most keep `items` as a `Vec`, three count them in a `usize`, the Kuma one also records how many readings had arrived at each item. *Ruling:* one `knobas_source::contract::Walking` with all three fields (`items`, `readings`, `readings_before_item`); the counting callers read `items.len()`. *Reasoning:* the superset costs nothing where unused and keeps every assertion as it was. *Reversing:* split the struct; one file plus the callers.
+- **Fork:** `Handed` and `RefusesTheSecond` in `crates/knobas-wasm-host/tests/it/walk.rs` also implement `walked`. *Ruling:* left as they are. *Reasoning:* `Handed` records items and readings as one merged, formatted list (and the second wraps it with a refusal); that is a different record, not a copy. *Reversing:* none needed.
