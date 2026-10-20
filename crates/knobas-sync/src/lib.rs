@@ -40,8 +40,6 @@ pub mod analyze;
 pub mod attach;
 pub mod config;
 pub mod health;
-#[cfg(any(test, feature = "test-util"))]
-pub mod mirror;
 pub mod progress;
 pub mod role_check;
 pub mod run_log;

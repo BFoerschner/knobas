@@ -147,10 +147,11 @@ crates/knobas-app/src/commands/sources.rs F   sources CRUD, secrets, sync, diagn
 crates/knobas-app/src/commands/search.rs  E   launcher, smart lists
 crates/knobas-app/src/commands/entity.rs  D   entity/room reads, activity
 crates/knobas-app/src/lib.rs              orchestrator  (generate_handler! list, event constants)
-app/src/lib/ipc/{app,sources,search,entity}.ts   the stream that owns the Rust command
+app/src/lib/ipc/{app,sources,search,entity}.ts   the stream that owns the Rust command (its `invoke` functions, by hand)
+app/src/lib/ipc/generated/<barrel>.ts     nobody  (the barrel's types, generated from the Rust by `ts-rs`, §2.6)
 app/src/lib/ipc/index.ts                  orchestrator  (re-export barrel)
 ```
-The two orchestrator-owned lists are append-only; a rebase conflict there is one line.
+The two orchestrator-owned lists are append-only; a rebase conflict there is one line. A generated file is never edited by hand: a type changes in Rust and is regenerated.
 
 ### 2.1 App lifecycle — stream D
 
@@ -365,7 +366,7 @@ pub struct SourceRef { pub id: String, pub display_name: String, pub adapter_kin
 
 ### 2.6 TS mirrors (`app/src/lib/ipc/*.ts`)
 
-~~Mirrors stay hand-written (M0 rationale: `tauri-specta` is still an RC).~~ Amended by #1325 (2026-10-19, `docs/contract/10.8/1325-the-ipc-mirror-is-generated.md`): a barrel's **types** are generated from its Rust types by `ts-rs` into `app/src/lib/ipc/generated/<barrel>.ts`, barrel by barrel, and `just check` fails on a stale one; the `invoke` functions stay hand-written. Mechanical mapping: `DateTime<Utc>` → `string` (RFC 3339), `Option<T>` → `T | null`, `i64/u64/f32` → `number`, `serde_json::Value` → `unknown`, `#[serde(flatten)]` → inlined fields, snake_case enums → string unions, tagged enums → discriminated unions. The function surface:
+~~Mirrors stay hand-written (M0 rationale: `tauri-specta` is still an RC).~~ Amended by #1325 (2026-10-19, `docs/contract/10.8/1325-the-ipc-mirror-is-generated.md`): every barrel's **types** are generated from its Rust types by `ts-rs` into `app/src/lib/ipc/generated/<barrel>.ts` (all seven switched by #1331, the shape-assertion module retired by #1332), and `just check` fails on a stale one; the barrel re-exports them, and its `invoke` functions stay hand-written. A Rust test reads a barrel for the commands it invokes and the argument keys it sends, never for a type's shape. Mechanical mapping: `DateTime<Utc>` → `string` (RFC 3339), `Option<T>` → `T | null`, `i64/u64/f32` → `number`, `serde_json::Value` → `unknown`, `#[serde(flatten)]` → inlined fields, snake_case enums → string unions, tagged enums → discriminated unions. The function surface:
 
 ```ts
 // app.ts

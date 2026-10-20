@@ -223,30 +223,6 @@ mod tests {
         );
     }
 
-    /// Every code the enum has, in the spelling `app/src/lib/ipc/index.ts`
-    /// declares. A code added on one side only is a branch the frontend can
-    /// never take.
-    #[test]
-    fn every_code_has_its_snake_case_spelling() {
-        use IpcErrorCode::*;
-        for (code, wire) in [
-            (Unauthorized, "unauthorized"),
-            (Unreachable, "unreachable"),
-            (NotFound, "not_found"),
-            (Conflict, "conflict"),
-            (Invalid, "invalid"),
-            (NotReady, "not_ready"),
-            (Internal, "internal"),
-        ] {
-            assert_eq!(serde_json::to_value(code).unwrap(), serde_json::json!(wire));
-            let mirror = include_str!("../../../app/src/lib/ipc/index.ts");
-            assert!(
-                mirror.contains(&format!("\"{wire}\"")),
-                "{wire} missing from the TS mirror"
-            );
-        }
-    }
-
     /// A 401 mid-sync is the one error the UI must act on, so it may not
     /// collapse into `internal` on the way across the bridge.
     #[test]

@@ -4,9 +4,8 @@
  * one place.
  *
  * The `invoke` functions are written by hand. The types are generated from
- * the Rust by `ts-rs` into `./generated/`, barrel by barrel (contract §2.6 as
- * amended by #1325); a barrel not yet switched still declares its own. Either
- * way what is declared is exactly the serde output of the Rust types:
+ * the Rust by `ts-rs` into `./generated/` (contract §2.6 as amended by #1325),
+ * so what is declared is exactly the serde output of the Rust types:
  * `DateTime<Utc>` → `string` (RFC 3339), `Option<T>` → `T | null`,
  * `i64`/`u64`/`f32` → `number`,
  * `serde_json::Value` → `unknown`, `#[serde(flatten)]` → inlined fields,
@@ -56,15 +55,9 @@ export const EVENTS = {
   cloneProgress: "clone:progress",
 } as const;
 
-/** Why a command failed — `knobas_app::IpcErrorCode`. */
-export type IpcErrorCode =
-  | "unauthorized"
-  | "unreachable"
-  | "not_found"
-  | "conflict"
-  | "invalid"
-  | "not_ready"
-  | "internal";
+// Why a command failed: `knobas_app::IpcErrorCode`. Generated, and exported by
+// the sources barrel above, because `ConnectionReport.code` reaches it (#1372).
+import type { IpcErrorCode } from "./sources";
 
 /** What every command rejects with — `knobas_app::IpcError`. */
 export interface IpcError {
