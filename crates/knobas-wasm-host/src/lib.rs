@@ -7,10 +7,10 @@
 //! reads its descriptor. A 1.0.0, 1.1.0 or 1.2.0 component is hosted too: what
 //! the later minors added is an import it does not use (`download-sink` in
 //! 1.1.0, `sink.walked` in 1.3.0) and exports (`downloads` in 1.1.0, `query`
-//! in 1.2.0) the host looks up as optional. [`WasmAdapter::build`] turns a configured instance
-//! into a `Box<dyn Source>`, which forwards each trait call across the
-//! interface. The sync engine, the write queue, IPC and the shell see that
-//! and nothing else.
+//! in 1.2.0) the host looks up as optional. [`WasmAdapter::build`] turns a
+//! configured instance into a `Box<dyn Source>`, which forwards each trait
+//! call across the interface. The sync engine, the write queue, IPC and the
+//! shell see that and nothing else.
 //!
 //! **What the component is given.** Its own `instance` record, which holds
 //! no credential; the `sink` for a sync's items; the `download-sink` for a

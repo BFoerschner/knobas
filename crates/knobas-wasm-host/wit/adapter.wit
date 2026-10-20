@@ -234,8 +234,8 @@ interface query {
 /// What the host binds of every 1.x component: the 1.0.0 world, and the
 /// imports later minors add, which a component that does not use them never
 /// imports (`download-sink` in 1.1.0, `sink.walked` in 1.3.0: a function the
-/// host provides and an earlier component's `sink` import does not name). `downloads` (1.1.0) and `query` (1.2.0) are looked up apart, as
-/// optional.
+/// host provides and an earlier component's `sink` import does not name).
+/// `downloads` (1.1.0) and `query` (1.2.0) are looked up apart, as optional.
 world hosted {
     import sink;
     import log;

@@ -60,4 +60,6 @@
   1.3.0 build reports `items`, of the items the run hands, before each and once after the last;
   its 1.0.0 build reports nothing. Witnessed by `knobas-wasm-host`'s `tests/it/walk.rs`, which
   installs each build under a manifest and syncs it through the engine's progress decorator. No
-  migration, no event, no command, no IPC field, no new module in `commands/` or `ipc/`.
+  migration, no event, no command, no IPC field, no new module in `commands/` or `ipc/`. This
+  supersedes *Who reports today* above for a WASM component: one built against 1.3.0 reports
+  what it calls `walked` with.

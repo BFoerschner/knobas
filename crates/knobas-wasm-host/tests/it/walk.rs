@@ -136,7 +136,10 @@ async fn a_1_3_0_component_s_walk_reaches_the_engine_s_progress_sink() {
         .iter()
         .rfind(|m| m.phase == SyncPhase::Fetching)
         .expect("a final fetching sample");
-    assert_eq!((fetched.items, reading(fetched)), (5, (Some(5), Some(5), Some("items"))));
+    assert_eq!(
+        (fetched.items, reading(fetched)),
+        (5, (Some(5), Some(5), Some("items")))
+    );
     let writing = messages.last().expect("a writing sample");
     assert_eq!(writing.phase, SyncPhase::Writing);
     assert_eq!(reading(writing), (Some(5), Some(5), Some("items")));
@@ -146,12 +149,21 @@ async fn a_1_3_0_component_s_walk_reaches_the_engine_s_progress_sink() {
     let (handed, _) = observed_sync(source.as_ref(), Some("3")).await;
     assert_eq!(
         handed,
-        ["0/2 items", "surveys:pipeline-1", "1/2 items", "surveys:run-1", "2/2 items"]
+        [
+            "0/2 items",
+            "surveys:pipeline-1",
+            "1/2 items",
+            "surveys:run-1",
+            "2/2 items"
+        ]
     );
     let (handed, messages) = observed_sync(source.as_ref(), Some("5")).await;
     assert_eq!(handed, ["0/0 items"]);
     let last = messages.last().expect("a writing sample");
-    assert_eq!((last.items, reading(last)), (0, (Some(0), Some(0), Some("items"))));
+    assert_eq!(
+        (last.items, reading(last)),
+        (0, (Some(0), Some(0), Some("items")))
+    );
 }
 
 #[tokio::test]
