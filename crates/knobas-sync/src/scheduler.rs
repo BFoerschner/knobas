@@ -1523,8 +1523,7 @@ impl Scheduler {
     pub async fn watch(&self, source_id: &str, progress: Arc<dyn ProgressSink>) -> Option<i64> {
         let claims = self.inner.claims.lock().await;
         let entry = claims.runs.get(source_id)?;
-        (entry.watchers.attach(Some(progress)) == Attach::Joined)
-            .then(|| entry.watchers.run_id())
+        (entry.watchers.attach(Some(progress)) == Attach::Joined).then(|| entry.watchers.run_id())
     }
 
     /// Trigger every enabled source that does not need a human, id order.

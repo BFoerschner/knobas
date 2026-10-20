@@ -1410,7 +1410,10 @@ fn a_command_through_the_real_pipeline_is_timed_by_name() {
 #[tokio::test(flavor = "multi_thread")]
 async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
     let db = knobas_db::test_util::scratch_database("watch_sync_joins").await;
-    let pool = db.pool(5).await.expect("a pool onto this test's own database");
+    let pool = db
+        .pool(5)
+        .await
+        .expect("a pool onto this test's own database");
     knobas_app::sources::demo::demo_load_inner(&pool)
         .await
         .unwrap();
@@ -1427,7 +1430,10 @@ async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
     let channel = {
         let heard = std::sync::Arc::clone(&heard);
         Channel::<SyncProgress>::new(move |body| {
-            heard.lock().unwrap().push(body.deserialize().expect("a SyncProgress"));
+            heard
+                .lock()
+                .unwrap()
+                .push(body.deserialize().expect("a SyncProgress"));
             Ok(())
         })
     };
@@ -1467,7 +1473,10 @@ async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
     .await
     .expect("watch_sync answers while a run goes");
     assert_eq!(joined, Some(run_id), "the page joins the run in flight");
-    assert!(heard.lock().unwrap().is_empty(), "the idle call enrolled the channel");
+    assert!(
+        heard.lock().unwrap().is_empty(),
+        "the idle call enrolled the channel"
+    );
 
     holder.rollback().await.unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -1486,7 +1495,9 @@ async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
         "a message about another run reached the channel: {heard:?}"
     );
     assert!(
-        heard.iter().any(|message| message.phase == SyncPhase::Fetching && message.walked.is_some()),
+        heard
+            .iter()
+            .any(|message| message.phase == SyncPhase::Fetching && message.walked.is_some()),
         "the run's own progress, the mock's walk, did not reach the channel: {heard:?}"
     );
     assert_eq!(
@@ -1496,12 +1507,9 @@ async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
     );
 
     // Over: idle again, and the ending is not served a second time.
-    let after = knobas_app::commands::sources::watch_sync(
-        app.handle().clone(),
-        "mock".to_owned(),
-        channel,
-    )
-    .await
-    .expect("watch_sync answers after the run");
+    let after =
+        knobas_app::commands::sources::watch_sync(app.handle().clone(), "mock".to_owned(), channel)
+            .await
+            .expect("watch_sync answers after the run");
     assert_eq!(after, None, "a run that has ended is not joined");
 }
