@@ -91,10 +91,15 @@ export interface SettingsPorts {
   syncNow: (sourceId: string) => Promise<number>;
   /**
    * Watch the source's run in flight (#1384): `onmessage` hears its progress
-   * and its ending; resolves with its id, or `null` when none is in flight.
-   * The channel is built here, so a component test needs no Tauri bridge.
+   * and its ending until `stop` aborts; resolves with its id, or `null` when
+   * none is in flight. The channel is built here, so a component test needs
+   * no Tauri bridge.
    */
-  watchSync: (sourceId: string, onmessage: (message: SyncProgress) => void) => Promise<number | null>;
+  watchSync: (
+    sourceId: string,
+    onmessage: (message: SyncProgress) => void,
+    stop: AbortSignal,
+  ) => Promise<number | null>;
   syncAll: () => Promise<number[]>;
   /** *Add a source* (#903): the secret and the row in one call, as `AddSource` sends it. */
   addSource: (input: NewSource) => Promise<SourceSummary>;
@@ -128,9 +133,14 @@ export const realSettingsPorts: SettingsPorts = {
   setSourceSecret: (id, secret) => setSourceSecret(id, secret),
   testSource: (draft) => testSource(draft),
   syncNow: (sourceId) => syncNow(sourceId),
-  watchSync: (sourceId, onmessage) => {
+  watchSync: (sourceId, onmessage, stop) => {
     const channel = new Channel<SyncProgress>();
     channel.onmessage = onmessage;
+    // Tauri keeps a channel's callback registered for as long as the window
+    // lives, so a page that left would otherwise stay reachable through it.
+    // The backend sink stays enrolled until the run ends; what it sends after
+    // this lands nowhere.
+    stop.addEventListener("abort", () => (channel.onmessage = () => {}), { once: true });
     return watchSync(sourceId, channel);
   },
   syncAll: () => syncAll(),

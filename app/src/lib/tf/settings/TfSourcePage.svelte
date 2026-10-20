@@ -275,22 +275,21 @@
 
   /**
    * The run being watched, if any: what `watch_sync` answered (`null` while it
-   * has not), and how to stop hearing it. Not state: nothing draws it.
+   * has not), and the signal that drops its channel. Not state: nothing draws it.
    */
-  let watched: { run: number | null; drop: () => void } | null = null;
+  let watched: { run: number | null; stop: AbortController } | null = null;
 
   function unwatch() {
-    watched?.drop();
+    watched?.stop.abort();
     watched = null;
   }
 
   async function watch() {
     unwatch();
-    let heard = true;
-    const mine = { run: null as number | null, drop: () => (heard = false) };
+    const mine = { run: null as number | null, stop: new AbortController() };
     watched = mine;
     const hear = (message: SyncProgress) => {
-      if (!heard) return;
+      if (mine.stop.signal.aborted) return;
       live = { items: message.items, elapsedMs: message.elapsed_ms };
       if (message.walked !== undefined) {
         walk = { walked: message.walked, of: message.of, unit: message.unit ?? "" };
@@ -303,7 +302,7 @@
       }
     };
     try {
-      mine.run = await ports.watchSync(source.id, hear);
+      mine.run = await ports.watchSync(source.id, hear, mine.stop.signal);
     } catch {
       // The page still has `sync:state` and the disabled *Sync now*; a run it
       // cannot watch is a run it draws as before.

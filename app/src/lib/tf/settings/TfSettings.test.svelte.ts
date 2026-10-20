@@ -1015,14 +1015,16 @@ function runResults(): string[] {
   return [...(section?.querySelectorAll("tbody tr td:nth-child(3)") ?? [])].map((td) => td.textContent ?? "");
 }
 
-/** `watch_sync` as a stand-in: every channel the page hands it, and the run it answers. */
+/** `watch_sync` as a stand-in: every channel and stop signal the page hands it, and the run it answers. */
 function watching(answer: number | null) {
   const channels: ((message: SyncProgress) => void)[] = [];
-  const watchSync = vi.fn((_: string, onmessage: (message: SyncProgress) => void) => {
+  const stops: AbortSignal[] = [];
+  const watchSync = vi.fn((_: string, onmessage: (message: SyncProgress) => void, stop: AbortSignal) => {
     channels.push(onmessage);
+    stops.push(stop);
     return Promise.resolve(answer);
   });
-  return { channels, watchSync };
+  return { channels, stops, watchSync };
 }
 
 test("a source's page opened mid-run draws the walk, and the run's row fills in when it ends (#1384)", async () => {
@@ -1030,7 +1032,7 @@ test("a source's page opened mid-run draws the walk, and the run's row fills in 
     { ...SOURCES[0]!.last_run!, id: 7, trigger: "schedule", started_at: AGO(2), finished_at: null, outcome: null, upserted: 0 },
     SOURCES[0]!.last_run!,
   ];
-  const { channels, watchSync } = watching(7);
+  const { channels, stops, watchSync } = watching(7);
   await open(
     ["source", "jira"],
     ports({
@@ -1061,11 +1063,12 @@ test("a source's page opened mid-run draws the walk, and the run's row fills in 
   await settle();
   expect(runReading()).toBeNull();
   expect(runResults()[0]).toBe("1,302 updated");
+  expect(stops[0]?.aborted, "the ended run's channel is still listened to").toBe(true);
 });
 
 test("a run that starts while the page is open is watched, and leaving the page stops listening (#1384)", async () => {
   let syncState: ((event: { payload: unknown }) => void) | null = null;
-  const { channels, watchSync } = watching(8);
+  const { channels, stops, watchSync } = watching(8);
   const p = ports({
     watchSync,
     listen: vi.fn((event: string, handler: (event: { payload: unknown }) => void) => {
@@ -1098,6 +1101,7 @@ test("a run that starts while the page is open is watched, and leaving the page 
   // and the page that came back watches the run again on a channel of its own.
   props.rest = [];
   await settle();
+  expect(stops[0]?.aborted, "the page left and still listens to the run").toBe(true);
   props.rest = ["source", "jira"];
   await settle();
   expect(watchSync).toHaveBeenCalledTimes(2);
@@ -1107,4 +1111,5 @@ test("a run that starts while the page is open is watched, and leaving the page 
   channels[1]!(progress(8, { items: 5, elapsed_ms: 2_000, walked: 2, of: 4, unit: "projects" }));
   await settle();
   expect(runReading()).toBe("2 of 4 projects · 5 items · 2 s");
+  expect(stops[1]?.aborted).toBe(false);
 });

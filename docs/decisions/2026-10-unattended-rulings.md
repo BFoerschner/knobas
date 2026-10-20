@@ -8584,9 +8584,10 @@ taken afresh from `time.ts` at f9fc1bf1.
   settings page must not sync. `watch` leaves the first-sync claim alone, since watching is not
   asking about the first sync. *Reversing:* one method.
 - **No detach command.** *Fork:* add `unwatch_sync` so a page that leaves takes its channel out of
-  the run, or let the channel ride to the run's ending. *Ruling:* no command; the page stops
-  listening (its handler drops every later message), and the backend sink stays enrolled until
-  the run ends. *Reasoning:* the enrolment is bounded by the run, `ChannelSink` already ignores a
+  the run, or let the channel ride to the run's ending. *Ruling:* no command; the page aborts a
+  signal it handed the port, which swaps the channel's `onmessage` for a no-op so the page that
+  left is no longer reachable through Tauri's callback table, and the backend sink stays enrolled
+  until the run ends. *Reasoning:* the enrolment is bounded by the run, `ChannelSink` already ignores a
   closed channel, and a second command is a second frozen surface for a few hundred bytes per
   message until the run ends. *Reversing:* one command plus a remove on `Watchers`.
 - **Which statuses attach.** *Ruling:* the page attaches when its status says running, keyed on
