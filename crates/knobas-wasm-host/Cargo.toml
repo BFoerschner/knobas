@@ -27,7 +27,7 @@ serde_json.workspace = true
 sha2 = "0.10"
 thiserror.workspace = true
 # The sink pump: `sync` runs the component and hands its items to the engine's
-# sink at once, through a channel of one, so a sink failure reaches the
+# sink at once, one item at a time, so a sink failure reaches the
 # component as the answer to the item it refused.
 # `net`: the external adapters' name lookup, guarded (#1244).
 tokio = { workspace = true, features = ["net", "sync"] }

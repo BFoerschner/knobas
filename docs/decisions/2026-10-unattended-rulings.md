@@ -8472,4 +8472,13 @@ taken afresh from `time.ts` at f9fc1bf1.
   dev-dependency of `knobas-wasm-host`. *Reasoning:* the criterion is "arrives at the engine's
   progress sink"; a recording `Sink` alone would stop one hop short. No cycle: `knobas-sync` does
   not depend on the host. *Reversing:* drop the dev-dependency and assert on the recording sink.
+- **The sync channel's capacity.** *Fork:* keep the pump's channel of one, or let readings queue
+  beside the one item in flight. *Ruling:* one item plus 16 readings (`READINGS_IN_FLIGHT`); the
+  item still waits on its answer, so a refused item still stops the sync where it stood.
+  *Reasoning:* with a channel of one, each reading made the next item wait for the pump, and every
+  wait hands the thread to whatever else runs on it. `knobas-app`'s
+  `a_run_past_its_deadline_ends_failed_naming_it_and_its_neighbour_syncs` then failed 6 of 12
+  runs on this branch (the healthy neighbour, sharing the thread with a spinning component, passed
+  its 1 s deadline) against 5 of 5 on the base; with the readings queued it passed 6 of 6.
+  *Reversing:* one constant.
 - **Reserved steps.** None in this ticket; the contract sign-off is the parent's (#1379's ruling).

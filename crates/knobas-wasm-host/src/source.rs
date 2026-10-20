@@ -12,6 +12,9 @@ use wasmtime::component::ResourceAny;
 use crate::bindings::knobas::adapter::{download_sink, log, sink};
 use crate::{HostState, WasmAdapter, bindings, convert, limits, net, new_store, wit};
 
+/// How many walk readings the sync's channel holds beside its one item.
+const READINGS_IN_FLIGHT: usize = 16;
+
 /// What the component hands the engine's sink during a sync, in order.
 enum Emit {
     /// One item, with the channel the sink's answer goes back on.
@@ -358,9 +361,14 @@ impl Source for WasmSource {
         cursor: Option<Cursor>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
-        // A channel of one: the component waits on each item until the sink
-        // has answered it, so a refused item stops the sync where it stood.
-        let (items, mut received) = mpsc::channel::<Emit>(1);
+        // The component waits on each item until the sink has answered it, so
+        // a refused item stops the sync where it stood; one item is in flight
+        // at a time. The channel holds walk readings beside it (#1380), so a
+        // reading does not make the next item wait for the pump: every wait
+        // hands the thread to whatever else runs on it, a neighbour's
+        // component included, and with a channel of one a 1.3.0 sync took
+        // twice the waits a 1.2.0 one did.
+        let (items, mut received) = mpsc::channel::<Emit>(READINGS_IN_FLIGHT + 1);
         let run = async {
             let slot = SinkSlot {
                 items: Some(items),
