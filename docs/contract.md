@@ -366,7 +366,7 @@ pub struct SourceRef { pub id: String, pub display_name: String, pub adapter_kin
 
 ### 2.6 TS mirrors (`app/src/lib/ipc/*.ts`)
 
-~~Mirrors stay hand-written (M0 rationale: `tauri-specta` is still an RC).~~ Amended by #1325 (2026-10-19, `docs/contract/10.8/1325-the-ipc-mirror-is-generated.md`): every barrel's **types** are generated from its Rust types by `ts-rs` into `app/src/lib/ipc/generated/<barrel>.ts` (all seven switched by #1331, the shape-assertion module retired by #1332), and `just check` fails on a stale one; the barrel re-exports them, and its `invoke` functions stay hand-written. A Rust test reads a barrel for the commands it invokes and the argument keys it sends, never for a type's shape. Mechanical mapping: `DateTime<Utc>` → `string` (RFC 3339), `Option<T>` → `T | null`, `i64/u64/f32` → `number`, `serde_json::Value` → `unknown`, `#[serde(flatten)]` → inlined fields, snake_case enums → string unions, tagged enums → discriminated unions. The function surface:
+~~Mirrors stay hand-written (M0 rationale: `tauri-specta` is still an RC).~~ Amended by #1325 (2026-10-19, `docs/contract/10.8/1325-the-ipc-mirror-is-generated.md`): every barrel's **types** are generated from its Rust types by `ts-rs` into `app/src/lib/ipc/generated/<barrel>.ts` (the last of the seven switched by #1331, the shape-assertion module retired by #1332), and `just check` fails on a stale one; the barrel re-exports them, and its `invoke` functions stay hand-written. Mechanical mapping: `DateTime<Utc>` → `string` (RFC 3339), `Option<T>` → `T | null`, `i64/u64/f32` → `number`, `serde_json::Value` → `unknown`, `#[serde(flatten)]` → inlined fields, snake_case enums → string unions, tagged enums → discriminated unions. The function surface:
 
 ```ts
 // app.ts

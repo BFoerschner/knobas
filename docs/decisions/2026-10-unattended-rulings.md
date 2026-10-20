@@ -8339,6 +8339,7 @@ taken afresh from `time.ts` at f9fc1bf1.
   knobas built before a future part decodes its payload *because* of `serde(default)`; that
   follows from accepting unknown fields, so the sentence now joins the two with "and".
   *Reversing:* `#[ts(optional)]` per field.
+
 ## #1332 and #1372: the mirror's assertion module retires, `IpcErrorCode` is declared once (Opus implementer, 2026-10-20)
 
 - **What `every_declared_phase_is_actually_emitted` pins now.** *Fork:* delete it as a shape
@@ -8372,3 +8373,12 @@ taken afresh from `time.ts` at f9fc1bf1.
   barrel line), barrels append-only (unchanged, plus "never edited by hand" for the generated
   files). *Reasoning:* `docs/contract.md` outside §10.8 is frozen; the later barrels and the
   `entity/` directory are booked in their own §10.8 entries. *Reversing:* docs only.
+- **§2.6's sentence "A Rust test reads a barrel for the commands it invokes and the argument keys
+  it sends, never for a type's shape" (merge-manager on Opus).** *Fork:* keep it, or trim it from
+  §2.6 and leave the record to the §10.8 entry. *Ruling:* trimmed. *Reasoning:* #1332's second
+  criterion names three facts (types generated, `invoke` by hand, barrels append-only) and this
+  is a fourth, a rule for future tests in a frozen section; as written it is also incomplete,
+  since the `EVENTS` pin and the `IMPORT_PRODUCERS` read are barrel reads that are neither
+  commands nor argument keys. The entry already lists which barrel reads remain and why. The
+  same edit makes "(all seven switched by #1331 …)" read "(the last of the seven switched by
+  #1331 …)", since #1331 switched one barrel. *Reversing:* one sentence, docs only.

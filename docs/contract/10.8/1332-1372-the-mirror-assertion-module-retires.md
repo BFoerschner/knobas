@@ -32,6 +32,5 @@
   line, `app/src/lib/ipc/generated/<barrel>.ts`, owned by nobody; the barrel line says it holds
   the `invoke` functions, by hand; and the append-only sentence gains "A generated file is never
   edited by hand: a type changes in Rust and is regenerated." §2.6 says every barrel's types are
-  generated, names #1331 and #1332, and says a Rust test reads a barrel for its commands and
-  argument keys, never for a type's shape. No barrel ticket changed a detail of #1325's entry
+  generated, that the barrel re-exports them, and names #1331 and #1332. No barrel ticket changed a detail of #1325's entry
   that its own entry does not already record, so no existing entry gains an amendment line.
