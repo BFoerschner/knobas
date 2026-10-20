@@ -8293,3 +8293,21 @@ identity on all 34 names against `search.ts` at 1187a8d5, two control mutations 
 - **A §10.8 entry.** `docs/contract/10.8/1330-the-time-barrel-is-generated.md`, on #1328's
   merge-manager ruling that every barrel switch owes one. *Reversing:* delete one file and rerun
   `just contract-index`.
+
+### #1330: merge-manager on Opus, 2026-10-20
+
+Deep pass on the head rebased over #1371 (search barrel, 14814fce); `ipc_mirror.rs`'s roots and
+the §10.8 index kept both sides, and the regenerated `generated/time.ts` is unchanged. The
+witness re-run there: the 80-line `Type.field: type` dump of the barrel is identical to one
+taken afresh from `time.ts` at f9fc1bf1.
+
+- **The deleted `commands::time` tests.** *Ruling:* all twenty are fixture pins. Each serialized
+  a Rust value and checked it against type text read out of the barrel, which the generator now
+  writes from the same serde attributes. `a_day_review_row_with_no_title_still_carries_the_key`
+  is one too: `title` coming over as `null` and not missing is the generated `string | null`
+  (no `?`), and a `skip_serializing_if` would change that file and fail `just ipc-mirror`.
+  #1368's edit to that file was a doc comment on a deleted test, so nothing of its intent is
+  lost. *Reversing:* `git revert` of the deletions.
+- **The §10.8 entry.** *Ruling:* matches the diff; amended to name #1329's search barrel among
+  the switches before it and to say the merge-manager checked it on the merge head.
+  *Reversing:* docs only.
