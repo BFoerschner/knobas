@@ -473,10 +473,10 @@
               total (#1379): `items` grows and nothing knows where it stops,
               and a bar that invented a total would be a lie that moves.
 
-              …and indeterminate is now the only thing it is (#156). `phase` and
-              `stepIndex` are assigned in the same channel callback, so step 2
-              never renders with `finished` true and the filled branch of each
-              ternary is dead. Left rather than simplified for the same reason
+              The `finished` branch of the first element's ternaries is dead
+              (#156): `phase` and `stepIndex` are assigned in the same channel
+              callback, so step 2 never renders with `finished` true. The walk
+              (#1379) is the one way this bar fills. Left rather than simplified for the same reason
               as `itemsReading` above: it is the same one question about the
               same surface, and it is Björn's.
             -->

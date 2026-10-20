@@ -11,7 +11,7 @@
   does nothing.
 
   ```rust
-  async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {}
+  async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) { let _ = (done, of, unit); }
   ```
 
   An adapter calls it as its outer walk advances, before each unit and once after the last: `done`
