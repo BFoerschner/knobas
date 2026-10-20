@@ -8,12 +8,76 @@
 //     item whose accessible name or text is <name> (failing that, whose first child
 //     element's text is, so an item with a dim description matches); `click:testid=<id>` takes a
 //     data-testid. Waits up to 5 s; a miss exits 1 naming the step.
+//   The other steps (#1396), for what a click cannot reach:
+//     `focus:<name>` focuses the first enabled input, textarea, select or contenteditable
+//       whose aria-label, placeholder or label text is <name>; `focus:testid=<id>`. Waits as click does.
+//     `type:<text>` inserts <text> into the focused element (Input.insertText, so a
+//       binding sees an input event). The text cannot hold ` + ` or ` > `.
+//     `key:<combo>` presses one key: `key:Meta+k`, `key:Escape`, `key:Enter`, `key:j`,
+//       `key:Shift+Tab`. Modifiers Meta, Control, Alt, Shift; a bare character also types.
+//     `wait:<ms>` pauses, for a debounce or an animation.
+//     `scroll:<px>` scrolls the page's largest scrolling element by <px> (negative goes up);
+//       `scroll:testid=<id>` scrolls that element into view.
+//   SHOT_FULL=1 grows the viewport to the tallest scrolling element's content before the
+//   capture (at most 8000 px), so a long page is one image.
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 const [port, debug, profile, size, theme, file, spec, extra = ""] = process.argv.slice(2);
 const [width, height] = size.split(",").map(Number);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The keys a `key:` step can name beyond one character: [key, code, keyCode, text].
+const NAMED_KEYS = {
+  Enter: ["Enter", "Enter", 13, "\r"],
+  Escape: ["Escape", "Escape", 27],
+  Tab: ["Tab", "Tab", 9],
+  Backspace: ["Backspace", "Backspace", 8],
+  Delete: ["Delete", "Delete", 46],
+  Space: [" ", "Space", 32, " "],
+  ArrowUp: ["ArrowUp", "ArrowUp", 38],
+  ArrowDown: ["ArrowDown", "ArrowDown", 40],
+  ArrowLeft: ["ArrowLeft", "ArrowLeft", 37],
+  ArrowRight: ["ArrowRight", "ArrowRight", 39],
+  Home: ["Home", "Home", 36],
+  End: ["End", "End", 35],
+  PageUp: ["PageUp", "PageUp", 33],
+  PageDown: ["PageDown", "PageDown", 34],
+};
+// One printable character's physical key, for those that are not a letter or a digit.
+const PUNCTUATION = {
+  "/": ["Slash", 191], "?": ["Slash", 191], "[": ["BracketLeft", 219], "]": ["BracketRight", 221],
+  ",": ["Comma", 188], ".": ["Period", 190], ";": ["Semicolon", 186], "-": ["Minus", 189],
+  "=": ["Equal", 187], ">": ["Period", 190], "#": ["Digit3", 51], "@": ["Digit2", 50],
+};
+const MODIFIERS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
+// `Meta+k` as the parameters of a CDP key event (the type is added by the caller), or
+// null for a key this table does not know. A key with no modifier but Shift carries its
+// text, so a bare `key:j` types into a focused field as well as reaching a key handler.
+const keyPress = (combo) => {
+  const parts = combo.split("+");
+  const name = parts.pop();
+  let modifiers = 0;
+  for (const m of parts) {
+    if (!(m in MODIFIERS)) return null;
+    modifiers |= MODIFIERS[m];
+  }
+  let key, code, keyCode, text;
+  if (name in NAMED_KEYS) {
+    [key, code, keyCode, text] = NAMED_KEYS[name];
+  } else if (name.length === 1) {
+    key = modifiers & MODIFIERS.Shift ? name.toUpperCase() : name;
+    const upper = name.toUpperCase();
+    if (/[A-Z]/.test(upper)) [code, keyCode] = [`Key${upper}`, upper.charCodeAt(0)];
+    else if (/[0-9]/.test(name)) [code, keyCode] = [`Digit${name}`, name.charCodeAt(0)];
+    else if (name in PUNCTUATION) [code, keyCode] = PUNCTUATION[name];
+    else return null;
+    text = key;
+  } else {
+    return null;
+  }
+  const typing = (modifiers & ~MODIFIERS.Shift) === 0;
+  return { key, code, windowsVirtualKeyCode: keyCode, modifiers, ...(typing && text ? { text, unmodifiedText: text } : {}) };
+};
 const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, `--window-size=${size}`];
 if (theme === "dark") flags.push("--blink-settings=preferredColorScheme=0");
 if (theme === "light") flags.push("--blink-settings=preferredColorScheme=1");
@@ -73,6 +137,42 @@ try {
       return true;
     })()`;
   };
+  // The elements that scroll, the document's own scroller first.
+  const scrollers = `() => [document.scrollingElement, ...document.querySelectorAll("*")].filter((x) => {
+    if (!x || x.scrollHeight <= x.clientHeight + 1) return false;
+    return x === document.scrollingElement || /auto|scroll/.test(getComputedStyle(x).overflowY);
+  })`;
+  const focusJs = (name) => {
+    const byId = name.startsWith("testid=");
+    const want = JSON.stringify(byId ? name.slice(7) : name);
+    return `(() => {
+      const want = ${want};
+      const all = [...document.querySelectorAll("input, textarea, select, [contenteditable=true], [contenteditable='']")]
+        .filter((x) => !x.disabled && x.getAttribute("aria-disabled") !== "true");
+      const labelled = (x) => [x.getAttribute("aria-label"), x.getAttribute("placeholder"), ...[...(x.labels ?? [])].map((l) => l.textContent)]
+        .some((text) => text?.trim() === want);
+      const el = ${byId} ? all.find((x) => x.getAttribute("data-testid") === want) : all.find(labelled);
+      if (!el) return false;
+      el.focus();
+      return true;
+    })()`;
+  };
+  const scrollJs = (arg) => {
+    if (arg.startsWith("testid=")) {
+      return `(() => {
+        const el = [...document.querySelectorAll("[data-testid]")].find((x) => x.getAttribute("data-testid") === ${JSON.stringify(arg.slice(7))});
+        if (!el) return false;
+        el.scrollIntoView({ block: "start" });
+        return true;
+      })()`;
+    }
+    return `(() => {
+      const largest = (${scrollers})().sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0];
+      if (!largest) return false;
+      largest.scrollBy(0, ${Number(arg)});
+      return true;
+    })()`;
+  };
   let first = true;
   for (const segment of spec.split(" > ")) {
     const [route, ...steps] = segment.split(" + ").map((s) => s.trim());
@@ -86,18 +186,45 @@ try {
       await sleep(1500);
     }
     for (const step of steps) {
-      if (!step.startsWith("click:")) done(1, `shot: unknown step '${step}' (known: click:<name>, click:testid=<id>)`);
-      const name = step.slice(6);
-      let hit = false;
-      for (let i = 0; i < 20 && !hit; i++) {
-        hit = await evaluate(clickJs(name));
-        if (!hit) await sleep(250);
+      const colon = step.indexOf(":");
+      const verb = colon < 0 ? step : step.slice(0, colon);
+      const arg = step.slice(colon + 1);
+      if (verb === "click" || verb === "focus") {
+        let hit = false;
+        for (let i = 0; i < 20 && !hit; i++) {
+          hit = await evaluate(verb === "click" ? clickJs(arg) : focusJs(arg));
+          if (!hit) await sleep(250);
+        }
+        if (!hit) done(1, `shot: step '${step}' found no enabled element on #/${path}`);
+      } else if (verb === "type") {
+        await send("Input.insertText", { text: arg });
+      } else if (verb === "key") {
+        const press = keyPress(arg);
+        if (!press) done(1, `shot: step '${step}' names no key this script knows`);
+        await send("Input.dispatchKeyEvent", { ...press, type: press.text ? "keyDown" : "rawKeyDown" });
+        await send("Input.dispatchKeyEvent", { ...press, type: "keyUp", text: undefined });
+      } else if (verb === "wait" && /^\d+$/.test(arg)) {
+        await sleep(Number(arg));
+      } else if (verb === "scroll" && (/^-?\d+$/.test(arg) || arg.startsWith("testid="))) {
+        if (!(await evaluate(scrollJs(arg)))) done(1, `shot: step '${step}' found nothing to scroll on #/${path}`);
+      } else {
+        done(1, `shot: unknown step '${step}' (known: click:<name>, focus:<name>, type:<text>, key:<combo>, wait:<ms>, scroll:<px>, scroll:testid=<id>)`);
       }
-      if (!hit) done(1, `shot: step '${step}' found no enabled element on #/${path}`);
       await sleep(500);
     }
   }
   await sleep(600);
+  if (process.env.SHOT_FULL === "1") {
+    // Grown in turns: a taller viewport can lay out more (a virtual list), which
+    // may overflow again.
+    for (let i = 0, grown = height; i < 3; i++) {
+      const overflow = await evaluate(`(${scrollers})().reduce((most, x) => Math.max(most, x.scrollHeight - x.clientHeight), 0)`);
+      if (!(overflow > 0) || grown >= 8000) break;
+      grown = Math.min(8000, grown + overflow);
+      await send("Emulation.setDeviceMetricsOverride", { width, height: grown, deviceScaleFactor: 1, mobile: false });
+      await sleep(800);
+    }
+  }
   const { result } = await send("Page.captureScreenshot", { format: "png" });
   writeFileSync(file, Buffer.from(result.data, "base64"));
   done(0);

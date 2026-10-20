@@ -577,3 +577,13 @@ test("link sets on the job (#867): each set that applies with its first matching
   expect(sub.parent?.links.length).toBeGreaterThan(0);
   expect(read("mock:NOPE-1")).toEqual({ sets: [], parent: null });
 });
+
+test("boot: ?fake-first-run holds app_status on the wizard until complete_first_run, and without it there is no wizard (#1396)", () => {
+  type Status = { first_run: boolean; source_count: number };
+  const h = demoHandlers(new URLSearchParams("fake-first-run")) as Calls;
+  expect(h["app_status"]!({}) as Status).toMatchObject({ first_run: true, source_count: 0 });
+  expect(h["app_status"]!({}) as Status).toMatchObject({ first_run: true, source_count: 0 });
+  h["complete_first_run"]!({});
+  expect(h["app_status"]!({}) as Status).toMatchObject({ first_run: false, source_count: 1 });
+  expect((demoHandlers() as Calls)["app_status"]!({}) as Status).toMatchObject({ first_run: false, source_count: 1 });
+});
