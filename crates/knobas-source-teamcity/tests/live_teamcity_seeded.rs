@@ -100,7 +100,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use knobas_source::contract::{Fault, VecSink, battery};
+use knobas_source::contract::{Fault, VecSink, Walking, battery};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceError, SyncItem};
 
@@ -4072,22 +4072,6 @@ async fn fills_every_role_it_claims_on_the_seeded_corpus() {
 #[tokio::test]
 #[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
 async fn a_run_reports_its_walk_over_the_real_configurations_and_listed_builds() {
-    #[derive(Default)]
-    struct Walking {
-        items: Vec<SyncItem>,
-        readings: Vec<(u64, Option<u64>, String)>,
-    }
-    #[async_trait::async_trait]
-    impl knobas_source::Sink for Walking {
-        async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
-            self.items.push(item);
-            Ok(())
-        }
-        async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
-            self.readings.push((done, of, unit.to_owned()));
-        }
-    }
-
     let seeded = seeded();
     seeded.clear_leftovers().await;
     let source = seeded.source(serde_json::json!({}));

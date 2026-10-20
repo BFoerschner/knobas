@@ -6,7 +6,7 @@
 //! which is what the acceptance criteria are measured against.
 
 use crate::support::{Fake, KEY, METRICS, adapter, adapter_with_account, dead_url};
-use knobas_source::contract::{Fault, VecSink, battery};
+use knobas_source::contract::{Fault, VecSink, Walking, battery};
 
 #[tokio::test]
 async fn passes_the_contract_battery() {
@@ -359,31 +359,6 @@ async fn the_declared_ops_are_the_spis_own_identifiers() {
 async fn fills_every_role_it_claims() {
     let fake = Fake::start().await;
     knobas_source::contract::fills_its_roles(&*adapter(fake.base_url(), KEY)).await;
-}
-
-/// Keeps the items and every walk reading, in the order they came (#1383),
-/// and how many readings had arrived when each item did.
-#[derive(Default)]
-struct Walking {
-    items: Vec<knobas_source::SyncItem>,
-    readings: Vec<(u64, Option<u64>, String)>,
-    readings_before_item: Vec<usize>,
-}
-
-#[async_trait::async_trait]
-impl knobas_source::Sink for Walking {
-    async fn item(
-        &mut self,
-        item: knobas_source::SyncItem,
-    ) -> Result<(), knobas_source::SourceError> {
-        self.readings_before_item.push(self.readings.len());
-        self.items.push(item);
-        Ok(())
-    }
-
-    async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
-        self.readings.push((done, of, unit.to_owned()));
-    }
 }
 
 /// A run over N monitors reports 0 to N in `monitors`, whether it emits the

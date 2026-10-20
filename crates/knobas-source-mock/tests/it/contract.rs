@@ -6,7 +6,7 @@
 //! is the dataset every mockup was drawn against, so a silent edit to it would
 //! quietly desynchronise the app from the design it is being built to match.
 
-use knobas_source::contract::{Fault, VecSink, battery};
+use knobas_source::contract::{Fault, VecSink, Walking, battery};
 use knobas_source::{Capability, Source, SourceError, WriteOp};
 use knobas_source_mock::MockSource;
 
@@ -1056,22 +1056,6 @@ async fn a_page_opens_as_the_headings_and_comments_its_record_holds() {
 /// that needs no server.
 #[tokio::test]
 async fn a_full_sync_reports_its_walk_over_the_fixture_items() {
-    #[derive(Default)]
-    struct Walking {
-        items: usize,
-        readings: Vec<(u64, Option<u64>, String)>,
-    }
-    #[async_trait::async_trait]
-    impl knobas_source::Sink for Walking {
-        async fn item(&mut self, _item: knobas_source::SyncItem) -> Result<(), SourceError> {
-            self.items += 1;
-            Ok(())
-        }
-        async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
-            self.readings.push((done, of, unit.to_owned()));
-        }
-    }
-
     let n = u64::try_from(corpus_size(knobas_source_mock::fixture())).expect("fits");
     let mut sink = Walking::default();
     MockSource::new()
@@ -1082,5 +1066,5 @@ async fn a_full_sync_reports_its_walk_over_the_fixture_items() {
         .map(|done| (done, Some(n), "items".to_owned()))
         .collect();
     assert_eq!(sink.readings, expected);
-    assert_eq!(u64::try_from(sink.items).expect("fits"), n);
+    assert_eq!(u64::try_from(sink.items.len()).expect("fits"), n);
 }

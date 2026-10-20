@@ -1,7 +1,7 @@
 //! What one run emits, and what it leaves behind in the cursor.
 
 use crate::support::{self, Fake, PAGE, State, TOKEN, branch, instance, source};
-use knobas_source::contract::VecSink;
+use knobas_source::contract::{VecSink, Walking};
 use knobas_source::{Source, SourceError, SyncItem};
 
 async fn full(source: &dyn Source) -> (Vec<SyncItem>, String) {
@@ -2224,25 +2224,6 @@ fn fixture_records_keep_their_fingerprints() {
         )),
         "eaaed275a3f42593"
     );
-}
-
-/// Keeps the items and every walk reading, in the order they came (#1379).
-#[derive(Default)]
-struct Walking {
-    items: Vec<SyncItem>,
-    readings: Vec<(u64, Option<u64>, String)>,
-}
-
-#[async_trait::async_trait]
-impl knobas_source::Sink for Walking {
-    async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
-        self.items.push(item);
-        Ok(())
-    }
-
-    async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
-        self.readings.push((done, of, unit.to_owned()));
-    }
 }
 
 /// The run reports its walk over the repositories it selected: before each

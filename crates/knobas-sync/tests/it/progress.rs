@@ -5,6 +5,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use knobas_source::contract::Walking;
 use knobas_source::{
     Capability, ConnectionInfo, Cursor, KindInfo, Sink, Source, SourceDescriptor, SourceError,
     SyncItem, WriteOp,
@@ -362,27 +363,15 @@ async fn a_walk_reading_reaches_the_progress_sink_on_the_item_throttle() {
 /// it on to the sink it wraps rather than swallowing it.
 #[tokio::test]
 async fn the_mocks_walk_reaches_the_progress_sink_and_the_wrapped_sink() {
-    #[derive(Default)]
-    struct Readings(Vec<(u64, Option<u64>, String)>);
-    #[async_trait::async_trait]
-    impl Sink for Readings {
-        async fn item(&mut self, _item: SyncItem) -> Result<(), SourceError> {
-            Ok(())
-        }
-        async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
-            self.0.push((done, of, unit.to_owned()));
-        }
-    }
-
     let recorder = Arc::new(Recorder::default());
     let sink: Arc<dyn ProgressSink> = recorder.clone();
     let inner = MockSource::new();
     let observed = Observed::new(&inner, 8, Instant::now(), sink);
-    let mut wrapped = Readings::default();
+    let mut wrapped = Walking::default();
     observed.sync(None, &mut wrapped).await.unwrap();
 
     let (done, of, _) = wrapped
-        .0
+        .readings
         .last()
         .cloned()
         .expect("the wrapped sink heard the walk");
