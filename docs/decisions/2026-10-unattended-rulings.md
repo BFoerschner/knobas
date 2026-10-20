@@ -8566,5 +8566,6 @@ taken afresh from `time.ts` at f9fc1bf1.
   shape that keeps one bar moving forward without touching `Sink`, the engine, the wizard or the
   §10.8 entry. Both passes read pages, so "pages" is still true, although a page in the window
   counts twice. An idle run now ends at "s + k of s + k pages" instead of "k of k". The mention
-  walk and the re-read of moved pages still report nothing. *Reversing:* drop the sweep's reading
+  walk and the re-read of moved pages still report nothing. This carries out the reversal the
+  #1381 merge-manager named ("a reading in `positions_sweep`"). *Reversing:* drop the sweep's reading
   and the `swept_rows` offset in `SyncRun::run`; one function each.

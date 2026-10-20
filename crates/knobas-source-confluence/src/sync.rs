@@ -337,8 +337,8 @@ impl SyncRun<'_> {
         while let Some(page) = walk.next_page().await? {
             of = page.total_size.or(of);
             for mut raw in page.results {
-                let (done, of) = reading(walked, of);
-                sink.walked(done, of, PAGES).await;
+                let (done, shown_of) = reading(walked, of);
+                sink.walked(done, shown_of, PAGES).await;
                 walked += 1;
                 let version = raw.content.version.as_ref();
                 let number = version.and_then(|v| v.number);
@@ -378,8 +378,8 @@ impl SyncRun<'_> {
 
         // Once after the last page, so a run that pushes nothing still ends
         // its bar at the end.
-        let (done, of) = reading(walked, of);
-        sink.walked(done, of, PAGES).await;
+        let (done, shown_of) = reading(walked, of);
+        sink.walked(done, shown_of, PAGES).await;
 
         emitted += self
             .mentions(
@@ -2051,14 +2051,12 @@ mod tests {
 
         let (idle, _) = walk_of(&fake, Some(cursor)).await;
 
+        // The sweep's query is the only one ordered by creation.
         let sweeps = fake.calls()[before..]
             .iter()
-            .filter(|c| c.contains(&format!("limit={SWEEP_PAGE_SIZE}")))
+            .filter(|c| c.contains("created"))
             .count();
-        assert_eq!(
-            sweeps, 2,
-            "the sweep follows two links past its first request"
-        );
+        assert_eq!(sweeps, 3, "the sweep reads 450 pages in three requests");
         assert!(idle.items.is_empty());
         let pages = |done, of| (done, Some(of), "pages".to_owned());
         let mut expected: Vec<_> = (0..450).map(|done| pages(done, 450)).collect();
