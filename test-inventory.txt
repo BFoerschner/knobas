@@ -3773,3 +3773,6 @@ knobas-wasm-host	test/it	reads::a_large_download_streams_without_the_component_h
 knobas-wasm-host	test/it	reads::a_run_s_log_and_one_artifact_download_through_the_host_s_sink
 knobas-wasm-host	test/it	reads::every_run_and_pipeline_read_answers_across_the_boundary
 knobas-wasm-host	test/it	reads::the_run_s_deferred_sections_carry_the_diff_and_the_tree
+knobas-wasm-host	test/it	walk::a_1_0_0_component_still_installs_syncs_and_reports_no_walk
+knobas-wasm-host	test/it	walk::a_1_3_0_component_s_walk_reaches_the_engine_s_progress_sink
+knobas-wasm-host	test/it	walk::a_reading_after_the_sink_refused_an_item_is_dropped

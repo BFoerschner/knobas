@@ -12,9 +12,20 @@ use wasmtime::component::ResourceAny;
 use crate::bindings::knobas::adapter::{download_sink, log, sink};
 use crate::{HostState, WasmAdapter, bindings, convert, limits, net, new_store, wit};
 
-/// One item on its way from the component to the engine's sink, with the
-/// channel the sink's answer goes back on.
-type Emit = (SyncItem, oneshot::Sender<Result<(), SourceError>>);
+/// How many walk readings the sync's channel holds beside its one item.
+const READINGS_IN_FLIGHT: usize = 16;
+
+/// What the component hands the engine's sink during a sync, in order.
+enum Emit {
+    /// One item, with the channel the sink's answer goes back on.
+    Item(SyncItem, oneshot::Sender<Result<(), SourceError>>),
+    /// A walk reading (1.3.0, #1380), which has no answer.
+    Walked {
+        done: u64,
+        of: Option<u64>,
+        unit: String,
+    },
+}
 
 /// The sink a call's store holds: a channel to the engine's sink while a
 /// sync runs, and none for every other call.
@@ -144,13 +155,25 @@ impl sink::Host for HostState {
         };
         let (answer, answered) = oneshot::channel();
         let gone = || SourceError::Sink("the sync's sink is gone".into());
-        if items.send((item, answer)).await.is_err() {
+        if items.send(Emit::Item(item, answer)).await.is_err() {
             return Err(self.sink.fail(gone()));
         }
         match answered.await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(error)) => Err(self.sink.fail(error)),
             Err(_) => Err(self.sink.fail(gone())),
+        }
+    }
+
+    /// Handed on in order with the items. Ignored outside a sync and once
+    /// the sync has failed: a reading cannot fail a sync, and one after a
+    /// refusal describes a run that is over.
+    async fn walked(&mut self, done: u64, of: Option<u64>, unit: String) {
+        if self.sink.failure.is_some() {
+            return;
+        }
+        if let Some(items) = &self.sink.items {
+            let _ = items.send(Emit::Walked { done, of, unit }).await;
         }
     }
 }
@@ -338,9 +361,14 @@ impl Source for WasmSource {
         cursor: Option<Cursor>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
-        // A channel of one: the component waits on each item until the sink
-        // has answered it, so a refused item stops the sync where it stood.
-        let (items, mut received) = mpsc::channel::<Emit>(1);
+        // The component waits on each item until the sink has answered it, so
+        // a refused item stops the sync where it stood; one item is in flight
+        // at a time. The channel holds walk readings beside it (#1380), so a
+        // reading does not make the next item wait for the pump: every wait
+        // hands the thread to whatever else runs on it, a neighbour's
+        // component included, and with a channel of one a 1.3.0 sync took
+        // twice the waits a 1.2.0 one did.
+        let (items, mut received) = mpsc::channel::<Emit>(READINGS_IN_FLIGHT + 1);
         let run = async {
             let slot = SinkSlot {
                 items: Some(items),
@@ -368,8 +396,13 @@ impl Source for WasmSource {
             }
         };
         let pump = async {
-            while let Some((item, answer)) = received.recv().await {
-                let _ = answer.send(sink.item(item).await);
+            while let Some(emit) = received.recv().await {
+                match emit {
+                    Emit::Item(item, answer) => {
+                        let _ = answer.send(sink.item(item).await);
+                    }
+                    Emit::Walked { done, of, unit } => sink.walked(done, of, &unit).await,
+                }
             }
         };
         // The deadline holds the whole sync, the sink's time included: a

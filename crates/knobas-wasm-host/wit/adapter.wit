@@ -15,7 +15,7 @@
 /// round-trip tested there, and it is what spec §3a made the SPI's types for:
 /// plain data that can leave the process without a contract change. Each
 /// such parameter or result names the Rust type whose JSON it is.
-package knobas:adapter@1.2.0;
+package knobas:adapter@1.3.0;
 
 interface types {
     /// The serde JSON of the `knobas-source` type its use names.
@@ -111,6 +111,15 @@ interface sink {
     /// Accept one item, or fail the sync. An error is the sink's, and the
     /// adapter returns it from `sync` as it came.
     item: func(item: sync-item) -> result<_, source-error>;
+
+    /// How far the run's outer walk has got (1.3.0, #1380):
+    /// `Sink::walked`. `done` units of `of`, `none` when the adapter cannot
+    /// know the total; `unit` a plural noun the UI prints as is
+    /// ("repositories"). Called before each unit and once after the last, so
+    /// a run that hands no item still moves a progress bar. A reading, not
+    /// an item: it returns nothing and cannot fail the sync. A component
+    /// built against an earlier 1.x does not import it, and reports nothing.
+    walked: func(done: u64, of: option<u64>, unit: string);
 }
 
 /// Where a download's bytes go: `knobas_source::run::DownloadSink`, owned by
@@ -224,8 +233,9 @@ interface query {
 
 /// What the host binds of every 1.x component: the 1.0.0 world, and the
 /// imports later minors add, which a component that does not use them never
-/// imports. `downloads` (1.1.0) and `query` (1.2.0) are looked up apart, as
-/// optional.
+/// imports (`download-sink` in 1.1.0, `sink.walked` in 1.3.0: a function the
+/// host provides and an earlier component's `sink` import does not name).
+/// `downloads` (1.1.0) and `query` (1.2.0) are looked up apart, as optional.
 world hosted {
     import sink;
     import log;
@@ -241,7 +251,7 @@ world hosted {
 /// (#1203).
 ///
 /// 1.1.0 added `download-sink` and `downloads` (#1205); 1.2.0 added `query`
-/// (#1208).
+/// (#1208); 1.3.0 added `sink.walked` (#1380).
 world adapter {
     include hosted;
     export downloads;

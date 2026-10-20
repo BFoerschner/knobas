@@ -3425,6 +3425,7 @@ dependencies = [
  "http-body-util",
  "knobas-core",
  "knobas-source",
+ "knobas-sync",
  "knobas-wasm-host",
  "reqwest",
  "serde",

@@ -8450,3 +8450,52 @@ taken afresh from `time.ts` at f9fc1bf1.
 - **Where the reading sits.** *Ruling:* the incremental readings go in the scope-and-map loop, not
   the emit loop, because the emit loop also pushes configurations the count does not cover.
   *Reversing:* move the calls.
+## #1380: a WASM adapter reports its walk, `knobas:adapter@1.3.0` (Opus implementer, 2026-10-20)
+
+- **Where the function goes.** *Fork:* a function on the existing `sink` interface, or an
+  interface of its own looked up as optional, as `downloads` and `query` were. *Ruling:* on `sink`,
+  as the spec and the ticket name it. *Reasoning:* `downloads` and `query` are exports, which the
+  host has to look up on the component; `walked` is an import the host provides. A 1.0.0 to 1.2.0
+  component's `sink` import names only `item`, and wasmtime links it against the 1.3.0 instance,
+  which provides more: `walk.rs` witnesses the 1.0.0 build installing and syncing.
+  *Reversing:* move the function to its own interface and bump the minor again.
+- **A reading the host cannot use.** *Ruling:* a call outside a sync, or after the sink refused
+  an item, is dropped without an error. *Reasoning:* the function cannot fail (it returns nothing,
+  as `Sink::walked` does), and after a refusal the run is over; reporting it would draw progress
+  on a failed run. *Reversing:* one `if` in `sink::Host::walked`.
+- **What the fixture counts.** *Fork:* its position in the whole corpus, or the items this run
+  hands. *Ruling:* the items this run hands, from 0, so a sync from cursor `"3"` reads 0 to 2 of 2
+  and one from `"5"` reads `0 of 0`. *Reasoning:* the bar shows this run's walk, as the mock's and
+  Gitea's do. *Reversing:* one offset in the fixture's `sync`.
+- **Where the reading is witnessed.** *Ruling:* the host's tests sync through
+  `knobas_sync::progress::Observed`, the engine's real decorator, which makes `knobas-sync` a
+  dev-dependency of `knobas-wasm-host`. *Reasoning:* the criterion is "arrives at the engine's
+  progress sink"; a recording `Sink` alone would stop one hop short. No cycle: `knobas-sync` does
+  not depend on the host. *Reversing:* drop the dev-dependency and assert on the recording sink.
+- **The sync channel's capacity.** *Fork:* keep the pump's channel of one, or let readings queue
+  beside the one item in flight. *Ruling:* one item plus 16 readings (`READINGS_IN_FLIGHT`); the
+  item still waits on its answer, so a refused item still stops the sync where it stood.
+  *Reasoning:* with a channel of one, each reading made the next item wait for the pump, and every
+  wait hands the thread to whatever else runs on it. `knobas-app`'s
+  `a_run_past_its_deadline_ends_failed_naming_it_and_its_neighbour_syncs` then failed 7 of 13
+  runs on this branch (the healthy neighbour, sharing the thread with a spinning component, passed
+  its 1 s deadline), where the base passed 5 of 5; with the readings queued it passed 6 of 6.
+  *Reversing:* one constant.
+- **Reserved steps.** None in this ticket; the contract sign-off is the parent's (#1379's ruling).
+- **Merge-manager on Opus: sign-off on the WIT amendment.** *Fork:* treat the 1.3.0 minor as
+  covered by #1379's sign-off, or rule it here. *Ruling:* signed off, here. *Reasoning:* the
+  amendment is its own frozen-surface change (ADR-0028: a minor is a §10.8 entry), so it gets its
+  own line. The deep pass found it additive and matching the diff: one function on `sink`, which
+  an earlier component's narrower `sink` import does not name and still links against; the
+  version gate moved by one minor and still refuses 1.4.0 and 2.0.0. Björn said on 2026-10-20
+  that Opus may amend without him. *Reversing:* drop the function and the minor.
+- **Merge-manager: the failure guard gets a witness.** *Fork:* leave "dropped after a refusal"
+  unwitnessed, as the PR said no mutant could reach it, or add a test. *Ruling:* added
+  `walk::a_reading_after_the_sink_refused_an_item_is_dropped` (the `swallow_sink` fixture into a
+  sink that refuses the second item and records readings); removing the guard fails it.
+  *Reasoning:* the amendment states the behaviour, so a test should hold it. *Reversing:* delete
+  the test.
+- **Merge-manager: the amendment names its witness.** *Ruling:* it now says the earlier-minor link
+  is witnessed for 1.0.0 and inferred for 1.1.0 and 1.2.0, whose `sink` is the same as 1.0.0's.
+  *Reasoning:* the entry claimed 1.0.0 to 1.2.0 without saying which one a test holds.
+  *Reversing:* the sentence.
