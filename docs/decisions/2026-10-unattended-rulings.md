@@ -8425,3 +8425,15 @@ taken afresh from `time.ts` at f9fc1bf1.
 - **No screenshot.** The fake IPC answers `sync_now_with_progress` with a run id and sends no
   progress message, so `just shot` cannot draw the bar mid-run. Teaching the fake to stream is out
   of scope; the component test witnesses the drawing.
+- **Merge-manager on Opus: the sign-off ruling stands.** *Fork:* confirm the implementer's
+  sign-off on the amendment or hold the PR. *Ruling:* confirmed. *Reasoning:* the deep pass found
+  the §10.8 entry matches the diff. `walked` has a do-nothing default; the one wrapping sink
+  (`Counting`) forwards it, and no other decorator sits between an adapter and the engine's sink.
+  The fields are absent on the wire when nothing reports, and the names are the ones the parent
+  spec and #1380–#1384 use. Björn said on 2026-10-20 that Opus may amend without him.
+  *Reversing:* as above.
+- **Merge-manager: the two reviewer suggestions stay unapplied** (one reading type in place of three
+  fields; one shared test sink in place of four copies). *Ruling:* unapplied. *Reasoning:* the
+  ticket and the parent spec name three `Option` fields on `SyncProgress`, and the follow-ups are
+  cut against that shape. The test sinks are local to their crates' test binaries. *Reversing:* a
+  refactor after #1384 lands.
