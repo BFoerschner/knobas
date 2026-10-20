@@ -229,29 +229,27 @@ impl Source for KumaSource {
                 .map(|item| (item.entity.key.as_str(), item.title.as_str(), &item.payload)),
         );
 
-        // The walk reading (#1383): over the monitors the document answered.
-        let of = u64::try_from(items.len()).unwrap_or(u64::MAX);
         let previous = cursor.as_deref().and_then(Position::parse);
-        if let (Some(raw), Some(before)) = (cursor.as_ref(), previous.as_ref())
-            && *before == current
-        {
+        let unchanged = previous.as_ref() == Some(&current);
+
+        // The walk reading (#1383): over the monitors the document answered,
+        // the same walk whether or not the run emits, so a run that pushes
+        // nothing still moves the bar from 0 to N. Tombstones are not counted.
+        let of = u64::try_from(items.len()).unwrap_or(u64::MAX);
+        for (done, item) in (0u64..).zip(items) {
+            sink.walked(done, Some(of), MONITORS).await;
+            if !unchanged {
+                sink.item(item).await?;
+            }
+        }
+        sink.walked(of, Some(of), MONITORS).await;
+
+        if unchanged && let Some(raw) = cursor {
             // The cursor the caller handed in, byte for byte, rather than a
             // re-encoding of an equal position: the engine compares the two
             // strings to decide whether the run is worth an activity line.
-            // The walk is still reported (#1383): a run that emits nothing
-            // moves the bar from 0 to N all the same.
-            for done in 0..of {
-                sink.walked(done, Some(of), MONITORS).await;
-            }
-            sink.walked(of, Some(of), MONITORS).await;
-            return Ok(raw.clone());
+            return Ok(raw);
         }
-
-        for (done, item) in (0u64..).zip(items) {
-            sink.walked(done, Some(of), MONITORS).await;
-            sink.item(item).await?;
-        }
-        sink.walked(of, Some(of), MONITORS).await;
         if let Some(before) = previous.as_ref() {
             for (id, name) in before.vanished(&current) {
                 sink.item(map::tombstone(&self.id, id, name)).await?;
