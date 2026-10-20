@@ -35,7 +35,8 @@ use chrono::{DateTime, Datelike, Duration, NaiveDateTime, TimeZone, Timelike, Ut
 /// `Deserialize` because [`set_backup_schedule`](crate::commands::backup) takes
 /// one from the settings dialog (issue #69); `Serialize` because it is stored as JSON in
 /// `knobas.setting` and read back by [`backup_status`](crate::commands::backup).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "backup.ts")]
 pub struct BackupSchedule {
     /// Whether the nightly export runs at all. *Export now* works either way.
     pub enabled: bool,

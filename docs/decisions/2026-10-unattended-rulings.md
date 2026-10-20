@@ -8311,3 +8311,31 @@ taken afresh from `time.ts` at f9fc1bf1.
 - **The §10.8 entry.** *Ruling:* matches the diff; amended to name #1329's search barrel among
   the switches before it and to say the merge-manager checked it on the merge head.
   *Reversing:* docs only.
+## #1331: the backup barrel is generated (Opus implementer, 2026-10-20)
+
+- **`shareDefaults` stays hand-written.** *Fork:* generate the defaults from `ShareParts::default()`
+  or keep the barrel's constant. *Ruling:* keep it. *Reasoning:* the generator emits types, not
+  values; the constant is a value the barrel declares, as #1328's `IMPORT_PRODUCERS` is.
+  `backup::share`'s `the_defaults_are_the_ratified_ones` holds the Rust side. *Reversing:* n/a.
+- **`ShareParts`' fields stay required in TypeScript.** *Fork:* mark them optional because the
+  struct is `#[serde(default)]`, or keep them required. *Ruling:* required, as the hand-written
+  interface had them; ts-rs 12.0.1 ignores a struct-level `serde(default)`, so no attribute is
+  needed. *Reasoning:* the shell always sends all nine, and the ticket asks for shape identity.
+  *Reversing:* `#[ts(optional)]` per field.
+- **Which tests are fixture pins.** Deleted: the four `commands::backup` tests that compared
+  serialised key sets with key names read out of `backup.ts`. Their other assertions are held
+  elsewhere: the ratified share defaults and the parts' decoding (partial and all nine keys) by
+  `backup::share`'s tests, the schedule's decoding from the dialog's JSON by
+  `tests/it/backup_ipc.rs::every_backup_command_is_registered_and_its_arguments_decode`. Kept:
+  `the_mirror_invokes_the_commands_by_their_registered_names`. *Reversing:* restore from git.
+- **A §10.8 entry.** Added, on #1328's merge-time ruling: `1331-the-backup-barrel-is-generated.md`
+  names the one crate gaining a derive (`knobas-app`). *Reversing:* delete one file and rerun
+  `just contract-index`.
+- **Merge-manager review (Opus, 2026-10-20).** *Fork:* uphold the implementer's required
+  `ShareParts` fields, or mark them optional. *Ruling:* upheld. *Reasoning:* #1325's §2.6 table
+  maps `#[serde(default)]` to a required field, and the one caller (`TfBackupSection.svelte`'s
+  `exportShare`) spreads all nine toggles; optional fields would let a future caller rely on a
+  decode-side default the dialog never needs. One doc fix: the `ShareParts` type doc said a
+  knobas built before a future part decodes its payload *because* of `serde(default)`; that
+  follows from accepting unknown fields, so the sentence now joins the two with "and".
+  *Reversing:* `#[ts(optional)]` per field.

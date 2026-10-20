@@ -1,9 +1,11 @@
 /**
  * Backup export and restore — `crates/knobas-app/src/commands/backup.rs`.
  *
- * Hand-written, and pinned to the Rust by tests in that module which
- * `include_str!` this file: a field or a command name added on one side only
- * fails `cargo test`, not merely `svelte-check`.
+ * The types are generated from the Rust (`./generated/backup.ts`, contract
+ * §2.6 as amended by #1325, switched by #1331): a field is explained in its
+ * Rust doc comment and nowhere else. The `invoke` functions stay hand-written,
+ * pinned to the Rust by a test in that module which `include_str!`s this file.
+ * {@link shareDefaults} stays hand-written too: it is a value, not a type.
  *
  * A backup is everything in the `knobas` schema, notes included; the synced
  * mirror is left out because it re-syncs (design §16.12, ratified).
@@ -13,80 +15,9 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-/** The nightly export schedule — `backup::policy::BackupSchedule`. */
-export interface BackupSchedule {
-  /** Whether the nightly export runs. *Export now* works either way. */
-  enabled: boolean;
-  /** Local hour, 0–23. */
-  hour: number;
-  /** Local minute, 0–59. */
-  minute: number;
-  /** How many archives to keep; the oldest beyond this are deleted. */
-  keep: number;
-}
+import type { BackupRecord, BackupSchedule, BackupStatus, ShareParts } from "./generated/backup";
 
-/** One successful export — `backup::BackupRecord`. */
-export interface BackupRecord {
-  /** RFC 3339, UTC. */
-  taken_at: string;
-  /** The file name inside {@link BackupStatus.directory}, not a path. */
-  file: string;
-  bytes: number;
-}
-
-/**
- * Which parts a share export carries — `backup::share::ShareParts`.
- *
- * A backup is everything knobas owns; a **share export** is the same archive
- * restricted to the parts a colleague should get. Links, assets, contexts and
- * sources are on by default; notes and time are off, because a colleague
- * reading a link map has no use for somebody's notes or hours.
- *
- * `knobas.setting` is in no part, so a share export never carries the sharer's
- * schedule, first-run state or preferences — see the Rust module's docs for
- * why "the time settings" could not be one of them.
- */
-export interface ShareParts {
-  /** Links, and the entity rows their ends name. */
-  links: boolean;
-  /** Assets and the routes they expose. */
-  assets: boolean;
-  /** Contexts, and what each is anchored to. */
-  contexts: boolean;
-  /** Off by default. */
-  notes: boolean;
-  /** The timer, its blocks, the worklogs and the observations. Off by default. */
-  time: boolean;
-  /** Source configurations. No secret is in one — credentials live in the OS keychain. */
-  sources: boolean;
-  /**
-   * The launcher searches somebody saved as smart lists (#507).
-   *
-   * On by default, with links: a saved list is a query over the link map, not
-   * a private note about it. The built-in lists are code and are rows nowhere,
-   * so the share dialog offers **no toggle** for this part until a saved list
-   * exists — and sends it off while there is none, so the archive of a knobas
-   * nobody has saved a list on carries no list table at all.
-   *
-   * The query crosses exactly as it was typed: nothing on either side of an
-   * archive rewrites a stored query to a newer grammar.
-   */
-  smart_lists: boolean;
-  /**
-   * The ticket views somebody made (#812). On by default, beside smart lists:
-   * a view is a query and a layout. The dialog offers its toggle only once a
-   * view exists and sends it off while there is none, as with smart lists.
-   * The text crosses exactly as it was saved.
-   */
-  ticket_views: boolean;
-  /**
-   * The link sets somebody made (#870): each set, its members and patterns,
-   * and its rules. On by default, beside ticket views. The dialog offers its
-   * toggle only once a set exists and sends it off while there is none, as
-   * with smart lists. *Hide here* is one reader's choice and stays behind.
-   */
-  link_sets: boolean;
-}
+export type { ArchiveFile, BackupRecord, BackupSchedule, BackupStatus, ShareParts } from "./generated/backup";
 
 /** The ratified defaults, so a caller can start from them and toggle. */
 export const shareDefaults: ShareParts = {
@@ -100,32 +31,6 @@ export const shareDefaults: ShareParts = {
   ticket_views: true,
   link_sets: true,
 };
-
-/** One archive on disk — `backup::ArchiveFile`. */
-export interface ArchiveFile {
-  file: string;
-  bytes: number;
-  /**
-   * Whether this is a share export rather than a nightly backup.
-   *
-   * The name carries it too (`knobas-share-…`), and this is what the section
-   * lists on: the naming rule belongs to `backup::policy`, and a frontend
-   * that parsed the file name would be a second place to keep it right.
-   */
-  share: boolean;
-}
-
-/** Everything the backup settings dialog (#69) draws — `backup::BackupStatus`. */
-export interface BackupStatus {
-  schedule: BackupSchedule;
-  /** Absolute path of the directory the archives live in. */
-  directory: string;
-  last: BackupRecord | null;
-  /** `null` when the schedule is off. */
-  next_due_at: string | null;
-  /** What is on disk right now, newest first. */
-  archives: ArchiveFile[];
-}
 
 /** The schedule, the last export, and what is on disk. */
 export function backupStatus(): Promise<BackupStatus> {
