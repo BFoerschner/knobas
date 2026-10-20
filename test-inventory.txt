@@ -133,7 +133,6 @@ knobas-app	lib/knobas_app	downloads::tests::a_suggested_name_is_only_ever_a_name
 knobas-app	lib/knobas_app	downloads::tests::a_taken_name_is_numbered_before_its_extension
 knobas-app	lib/knobas_app	error::tests::a_failed_run_keeps_the_source_it_belongs_to
 knobas-app	lib/knobas_app	error::tests::a_link_endpoint_that_is_not_in_the_mirror_is_not_found
-knobas-app	lib/knobas_app	error::tests::every_code_has_its_snake_case_spelling
 knobas-app	lib/knobas_app	error::tests::serializes_as_the_frontend_reads_it
 knobas-app	lib/knobas_app	error::tests::source_faults_keep_their_kind
 knobas-app	lib/knobas_app	error::tests::store_errors_convert
@@ -3447,18 +3446,6 @@ knobas-sync	lib/knobas_sync	config::tests::the_states_the_schedule_excludes_are_
 knobas-sync	lib/knobas_sync	health::tests::the_five_states_are_the_five_the_check_constraint_allows
 knobas-sync	lib/knobas_sync	health::tests::the_states_are_exactly_what_the_migration_allows
 knobas-sync	lib/knobas_sync	health::tests::the_wire_spelling_is_the_stored_spelling
-knobas-sync	lib/knobas_sync	mirror::tests::a_field_only_another_interface_declares_is_not_found
-knobas-sync	lib/knobas_sync	mirror::tests::a_matching_shape_passes
-knobas-sync	lib/knobas_sync	mirror::tests::a_typescript_only_field_is_caught_too
-knobas-sync	lib/knobas_sync	mirror::tests::a_union_is_read_across_however_many_lines_it_spans
-knobas-sync	lib/knobas_sync	mirror::tests::a_union_the_mirror_does_not_declare_is_a_failure_not_an_empty_list
-knobas-sync	lib/knobas_sync	mirror::tests::an_inline_union_is_read_across_lines_and_past_prose
-knobas-sync	lib/knobas_sync	mirror::tests::an_inline_union_on_a_field_that_is_not_there_is_a_failure
-knobas-sync	lib/knobas_sync	mirror::tests::an_interface_the_mirror_does_not_declare_is_a_failure_not_a_pass
-knobas-sync	lib/knobas_sync	mirror::tests::an_unterminated_inline_union_is_a_failure_not_a_silent_truncation
-knobas-sync	lib/knobas_sync	mirror::tests::declared_fields_reads_the_optional_marker_and_skips_prose_and_nesting
-knobas-sync	lib/knobas_sync	mirror::tests::the_body_is_brace_matched_and_stops_at_the_interface_it_names
-knobas-sync	lib/knobas_sync	mirror::tests::the_expected_list_is_a_third_witness
 knobas-sync	lib/knobas_sync	run_log::tests::a_failure_is_classified_by_what_the_adapter_said
 knobas-sync	lib/knobas_sync	run_log::tests::a_run_is_open_until_it_is_finished
 knobas-sync	lib/knobas_sync	run_log::tests::a_stored_value_round_trips_and_an_unrecognised_one_degrades_safely

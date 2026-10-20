@@ -1029,14 +1029,20 @@ async fn a_running_state_names_its_own_run_not_another_open_one() {
 /// Driven through `Scheduler::trigger`, because the terminal message is the
 /// ticker's: a test that drove only `execute_run` could not see
 /// `Finished`/`Failed` at all, which is how the zero survived. The expected set
-/// is read out of the TypeScript union rather than listed here -- a list this
-/// test owns is a list this test can quietly shrink.
+/// is the union the generator emits for `SyncPhase`, asked of `ts_rs` in this
+/// process rather than listed here -- a list this test owns is a list this test
+/// can quietly shrink -- and rather than read out of the generated file, which
+/// is the same text one `just ipc-mirror` later (#1332).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn every_declared_phase_is_actually_emitted() {
     let _serial = serially().await;
-    let declared = knobas_sync::mirror::declared_union(
-        include_str!("../../../app/src/lib/ipc/generated/sources.ts"),
-        "SyncPhase",
+    let declared: Vec<String> = <SyncPhase as ts_rs::TS>::inline(&ts_rs::Config::new())
+        .split('|')
+        .map(|member| member.trim().trim_matches('"').to_owned())
+        .collect();
+    assert!(
+        declared.len() > 1 && declared.iter().all(|m| !m.is_empty() && !m.contains(' ')),
+        "SyncPhase's TypeScript is no longer a string union: {declared:?}"
     );
 
     // A healthy run and a failing one: `Finished` and `Failed` are mutually

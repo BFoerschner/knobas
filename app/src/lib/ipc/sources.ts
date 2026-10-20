@@ -49,6 +49,7 @@ export type {
   DbStats,
   Frame,
   InstalledAdapter,
+  IpcErrorCode,
   KindPaths,
   ListPath,
   MergeStyle,

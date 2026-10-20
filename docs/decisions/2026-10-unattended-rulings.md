@@ -8339,3 +8339,46 @@ taken afresh from `time.ts` at f9fc1bf1.
   knobas built before a future part decodes its payload *because* of `serde(default)`; that
   follows from accepting unknown fields, so the sentence now joins the two with "and".
   *Reversing:* `#[ts(optional)]` per field.
+
+## #1332 and #1372: the mirror's assertion module retires, `IpcErrorCode` is declared once (Opus implementer, 2026-10-20)
+
+- **What `every_declared_phase_is_actually_emitted` pins now.** *Fork:* delete it as a shape
+  fixture, list the phases in Rust, or keep reading the generated union. *Ruling:* keep the test,
+  and take the expected set from `<SyncPhase as ts_rs::TS>::inline(&Config::new())`. *Reasoning:*
+  it is a behaviour test (every phase a real run can send is sent), not a shape fixture; a list
+  the test owns is a list it can shrink, which its doc names as the trap; the generator's answer
+  is the generated file's union without reading the file, so the test no longer needs
+  `knobas_sync::mirror` or an `include_str!` of a barrel. *Reversing:* one expression.
+- **Which `include_str!` of a barrel is a shape fixture.** *Ruling:* only `error.rs`'s pin on
+  `index.ts`'s `IpcErrorCode` text; deleted whole, because its other half (each code's serde
+  spelling, against a list the test owns) pins the shape the generator now carries. The
+  handler-list, argument-key, `EVENTS` and `IMPORT_PRODUCERS` reads stay: they read hand-written
+  code or values, not types. *Reversing:* restore from git.
+- **Where `index.ts` gets the generated `IpcErrorCode`.** *Fork:* `export type … from
+  "./generated/sources"` in `index.ts` (the ticket's example), or re-export it from the sources
+  barrel and import it from there. *Ruling:* the sources barrel. *Reasoning:* #1325's entry says
+  `index.ts` re-exports the barrels, not the `generated/` folder; going through the barrel keeps
+  that true, so no existing ledger entry needs an amendment line, and `export * from "./sources"`
+  already re-exports the name. *Reversing:* two lines.
+- **The non-append edit to `index.ts`.** Granted by the orchestrator in the dispatch; recorded in
+  `docs/contract/10.8/1332-1372-the-mirror-assertion-module-retires.md`. The header comment's
+  "barrel by barrel" clause goes in the same edit, as #1325 edited that header. *Reversing:*
+  restore the union.
+- **The `test-util` feature of `knobas-sync`.** *Ruling:* deleted with the module, since it gated
+  nothing else, with the two dev-dependency lines that enabled it. *Reversing:* re-add the
+  feature and the two dev-dependency lines.
+- **How much of §2's layout block changes.** *Fork:* bring the whole block up to date (seven
+  barrels, `commands/entity/`), or only what the ticket names. *Ruling:* only the ticket's three
+  facts: types generated (a `generated/<barrel>.ts` line), `invoke` functions by hand (on the
+  barrel line), barrels append-only (unchanged, plus "never edited by hand" for the generated
+  files). *Reasoning:* `docs/contract.md` outside §10.8 is frozen; the later barrels and the
+  `entity/` directory are booked in their own §10.8 entries. *Reversing:* docs only.
+- **§2.6's sentence "A Rust test reads a barrel for the commands it invokes and the argument keys
+  it sends, never for a type's shape" (merge-manager on Opus).** *Fork:* keep it, or trim it from
+  §2.6 and leave the record to the §10.8 entry. *Ruling:* trimmed. *Reasoning:* #1332's second
+  criterion names three facts (types generated, `invoke` by hand, barrels append-only) and this
+  is a fourth, a rule for future tests in a frozen section; as written it is also incomplete,
+  since the `EVENTS` pin and the `IMPORT_PRODUCERS` read are barrel reads that are neither
+  commands nor argument keys. The entry already lists which barrel reads remain and why. The
+  same edit makes "(all seven switched by #1331 …)" read "(the last of the seven switched by
+  #1331 …)", since #1331 switched one barrel. *Reversing:* one sentence, docs only.
