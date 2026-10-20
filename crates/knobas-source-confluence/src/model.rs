@@ -345,6 +345,17 @@ mod tests {
         .expect("a content record")
     }
 
+    /// `totalSize` is the one total the envelope may carry, read for the
+    /// progress reading alone (#1381); a page without it has none.
+    #[test]
+    fn the_envelope_reads_total_size_where_the_server_reports_one() {
+        let counted: ContentPage =
+            serde_json::from_value(json!({ "results": [], "size": 0, "totalSize": 41 })).unwrap();
+        assert_eq!(counted.total_size, Some(41));
+        let bare: ContentPage = serde_json::from_value(json!({ "results": [] })).unwrap();
+        assert_eq!(bare.total_size, None);
+    }
+
     /// A search page reports `size` and a next link, never a total, so the
     /// walk is link-driven. The envelope is asserted with both halves present
     /// and both absent, because the absent case is the last page.

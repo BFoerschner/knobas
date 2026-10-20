@@ -2349,6 +2349,7 @@ knobas-source-confluence	lib/knobas_source_confluence	model::tests::comments_can
 knobas-source-confluence	lib/knobas_source_confluence	model::tests::setting_comments_rewrites_the_payload_at_confluences_own_path
 knobas-source-confluence	lib/knobas_source_confluence	model::tests::the_current_user_response_names_the_account
 knobas-source-confluence	lib/knobas_source_confluence	model::tests::the_envelope_is_a_next_link_and_never_a_total
+knobas-source-confluence	lib/knobas_source_confluence	model::tests::the_envelope_reads_total_size_where_the_server_reports_one
 knobas-source-confluence	lib/knobas_source_confluence	model::tests::unknown_fields_do_not_break_parsing
 knobas-source-confluence	lib/knobas_source_confluence	source::tests::a_base_url_that_is_not_a_url_is_refused
 knobas-source-confluence	lib/knobas_source_confluence	source::tests::a_built_source_describes_the_instance_not_the_template
