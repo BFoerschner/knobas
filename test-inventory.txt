@@ -3102,6 +3102,7 @@ knobas-source-kuma	lib/knobas_source_kuma	source::tests::the_roster_note_counts_
 knobas-source-kuma	test/it	contract::a_full_sync_mirrors_every_monitor_with_its_state
 knobas-source-kuma	test/it	contract::a_monitor_that_stops_being_published_is_tombstoned
 knobas-source-kuma	test/it	contract::a_refused_key_is_unauthorized_and_says_which_status
+knobas-source-kuma	test/it	contract::a_run_reports_its_walk_over_the_monitors_even_when_it_emits_nothing
 knobas-source-kuma	test/it	contract::a_state_change_re_emits_the_roster_and_moves_the_cursor
 knobas-source-kuma	test/it	contract::an_account_is_what_turns_the_write_ops_on
 knobas-source-kuma	test/it	contract::every_write_is_refused_by_name_without_an_account

@@ -8532,3 +8532,12 @@ taken afresh from `time.ts` at f9fc1bf1.
   200 results a request with a light expand, about 30 requests for 6,000 pages. Giving it its own
   reading would mean a second `pages` count that resets the bar. *Reversing:* a reading in
   `positions_sweep`.
+
+## #1383 — Uptime Kuma reports its walk
+
+- **Which session the test fakes.** *Fork:* the ticket says "fake socket session", but `Source::sync` reads
+  one `GET /metrics`; the socket session carries writes only. *Ruling:* the test runs against the
+  existing wiremock `/metrics` fake in the Kuma crate's `it` binary. *Reversing:* none, the reading
+  sits in `sync`.
+- **Idle run.** *Ruling:* an unchanged document reports 0 to N `monitors` without emitting, then
+  returns the cursor byte for byte. Tombstones are not counted. *Reversing:* one loop in `source.rs`.
