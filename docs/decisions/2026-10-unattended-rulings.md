@@ -8382,3 +8382,58 @@ taken afresh from `time.ts` at f9fc1bf1.
   commands nor argument keys. The entry already lists which barrel reads remain and why. The
   same edit makes "(all seven switched by #1331 …)" read "(the last of the seven switched by
   #1331 …)", since #1331 switched one barrel. *Reversing:* one sentence, docs only.
+
+## #1379: the run reports its walk and the wizard draws it (Opus implementer, 2026-10-20)
+
+- **Reserved for Björn, ruled by implementer on Opus: sign-off on the contract amendment.**
+  *Fork:* sign off on `Sink::walked` and the three `SyncProgress` fields as booked in
+  `docs/contract/10.8/1379-the-run-reports-its-walk.md`, or hold the PR. *Ruling:* signed off.
+  *Reasoning:* both are additive. The `Sink` method has a do-nothing default, so no existing sink
+  or adapter changes; the fields are absent on the wire when nobody reports, so no reader of
+  `SyncProgress` changes. It is the surface #1378 decided on (Björn, 2026-10-20) and #1380–#1384
+  build on it as written. *Reversing:* drop the method and the fields; the follow-ups would have to
+  be re-cut.
+- **The field names.** *Fork:* the ticket describes the fields as "done, total, unit"; the parent
+  spec names them `walked`, `of`, `unit`. *Ruling:* `walked`, `of`, `unit`. *Reasoning:* the
+  ticket describes, the spec names, and the five follow-ups were cut from the spec. The `Sink`
+  method's arguments keep the spec's `done`, `of`, `unit`. *Reversing:* a rename across the
+  engine, the mirror and the wizard, before any follow-up lands.
+- **Absent or `null`.** *Fork:* `Option` fields serialised as `null` (as `message` is), or skipped
+  when `None` and optional in TypeScript. *Ruling:* skipped (`skip_serializing_if`,
+  `#[serde(default)]`, `#[ts(optional)]`). *Reasoning:* the ticket's first criterion says
+  "absent"; an optional field leaves every hand-written `SyncProgress` literal in the frontend
+  (tests, fakes) valid. *Reversing:* three attribute lines and a regenerated mirror.
+- **Which throttle a reading rides.** *Fork:* the item path's time clock only (250 ms), or that
+  and its every-250-items count. *Ruling:* the clock only. The first reading goes out at once,
+  since the clock starts one throttle in the past. *Reasoning:* the count rule exists so a burst of
+  items between ticks is not lost; a reading is a single latest value that the next tick or the
+  final `fetching` sample carries anyway, and a unit is often hundreds of requests, so a reading
+  every 250 units would rarely fire. *Reversing:* one condition in `Counting::walked`.
+- **What the wizard does with a message that has no reading.** *Ruling:* keeps the last reading
+  until a new sync starts. *Reasoning:* only the engine's decorator sends readings; the scheduler's
+  `started` and ending messages never do, and a failure panel should still say how far the walk
+  got. *Reversing:* one `if` in `FirstRun.svelte`.
+- **A total of zero.** *Ruling:* the bar stays indeterminate (`of > 0` to draw a maximum).
+  *Reasoning:* `<progress max="0">` is invalid and falls back to 1. *Reversing:* one comparison.
+- **Number format.** *Fork:* the ticket's sample reading "1,240 items · 83 s", or the wizard's
+  existing "40 items · 0.9 s". *Ruling:* the existing format, with the walk in plain digits:
+  "120 of 300 repositories · 0 items · 8.3 s". *Reasoning:* the sample illustrates the order of
+  the parts; changing how items and seconds print is not this ticket's work and would move
+  assertions it does not own. *Reversing:* a formatter in the reading line.
+- **What the mock counts.** *Ruling:* every item it pushes, the opt-in tombstone included; a run
+  already at the current cursor pushes nothing and reports nothing. *Reversing:* one line.
+- **No screenshot.** The fake IPC answers `sync_now_with_progress` with a run id and sends no
+  progress message, so `just shot` cannot draw the bar mid-run. Teaching the fake to stream is out
+  of scope; the component test witnesses the drawing.
+- **Merge-manager on Opus: the sign-off ruling stands.** *Fork:* confirm the implementer's
+  sign-off on the amendment or hold the PR. *Ruling:* confirmed. *Reasoning:* the deep pass found
+  the §10.8 entry matches the diff. `walked` has a do-nothing default; the one wrapping sink
+  (`Counting`) forwards it, and no other decorator sits between an adapter and the engine's sink.
+  The fields are absent on the wire when nothing reports, and the names are the ones the parent
+  spec and #1380–#1384 use. Björn said on 2026-10-20 that Opus may amend without him.
+  *Reversing:* as above.
+- **Merge-manager: the two reviewer suggestions stay unapplied** (one reading type in place of three
+  fields; one shared test sink in place of four copies). *Ruling:* unapplied. *Reasoning:* the
+  ticket and the parent spec name three `Option` fields on `SyncProgress`, and the follow-ups are
+  cut against that shape. The test sinks are local to their crates' test binaries. *Reversing:* a
+  refactor after #1384 lands.

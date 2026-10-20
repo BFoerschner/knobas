@@ -265,6 +265,135 @@ async fn a_refused_item_does_not_count_as_progress() {
     );
 }
 
+/// An adapter that walks `n` units and pushes nothing: the run #1378 was
+/// about, 300 unchanged repositories and zero items.
+struct Walker(u64);
+
+#[async_trait::async_trait]
+impl Source for Walker {
+    async fn view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        Flood(0).view(entity, section).await
+    }
+    fn descriptor(&self) -> SourceDescriptor {
+        Flood(0).descriptor()
+    }
+    async fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
+        Ok(ConnectionInfo::default())
+    }
+    async fn sync(
+        &self,
+        _c: Option<Cursor>,
+        sink: &mut (dyn Sink + Send),
+    ) -> Result<Cursor, SourceError> {
+        for done in 0..=self.0 {
+            sink.walked(done, Some(self.0), "repositories").await;
+        }
+        Ok("done".into())
+    }
+    async fn write(&self, op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
+        Flood(0).write(op).await
+    }
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        Flood(0).reachable_transitions(entity).await
+    }
+}
+
+fn reading(r: &SyncProgress) -> (Option<u64>, Option<u64>, Option<&str>) {
+    (r.walked, r.of, r.unit.as_deref())
+}
+
+/// An adapter that never reports its walk produces messages with the three
+/// reading fields absent, on the wire too, so the wizard's bar stays
+/// indeterminate as before (#1379).
+#[tokio::test]
+async fn an_adapter_that_never_reports_its_walk_sends_no_reading() {
+    let recorder = Arc::new(Recorder::default());
+    let sink: Arc<dyn ProgressSink> = recorder.clone();
+    let inner = Flood(3);
+    let observed = Observed::new(&inner, 5, Instant::now(), sink);
+    observed.sync(None, &mut Counting::default()).await.unwrap();
+
+    let reports = recorder.seen();
+    assert!(!reports.is_empty());
+    assert!(reports.iter().all(|r| reading(r) == (None, None, None)));
+    let wire = serde_json::to_value(&reports[0]).unwrap();
+    for field in ["walked", "of", "unit"] {
+        assert!(wire.get(field).is_none(), "{field} is on the wire: {wire}");
+    }
+}
+
+/// A run that pushes nothing still moves the bar: the first reading goes out
+/// at once, later ones on the item throttle rather than one message per call,
+/// and the final `Fetching` sample carries the last reading (#1378, #1379).
+#[tokio::test]
+async fn a_walk_reading_reaches_the_progress_sink_on_the_item_throttle() {
+    let recorder = Arc::new(Recorder::default());
+    let sink: Arc<dyn ProgressSink> = recorder.clone();
+    let inner = Walker(5_000);
+    let observed = Observed::new(&inner, 6, Instant::now(), sink);
+    observed.sync(None, &mut Counting::default()).await.unwrap();
+
+    let reports = recorder.seen();
+    assert!(
+        reports.len() < 100,
+        "5001 readings must not produce 5001 messages, got {}",
+        reports.len()
+    );
+    assert_eq!(
+        reading(&reports[0]),
+        (Some(0), Some(5_000), Some("repositories"))
+    );
+    let (last, fetching) = reports.split_last().expect("some progress");
+    assert_eq!(last.phase, SyncPhase::Writing);
+    let final_fetching = fetching.last().expect("a final fetching sample");
+    assert_eq!(final_fetching.phase, SyncPhase::Fetching);
+    assert_eq!(
+        reading(final_fetching),
+        (Some(5_000), Some(5_000), Some("repositories"))
+    );
+    assert!(reports.iter().all(|r| r.items == 0));
+}
+
+/// The mock's reading arrives through the decorator, and the decorator hands
+/// it on to the sink it wraps rather than swallowing it.
+#[tokio::test]
+async fn the_mocks_walk_reaches_the_progress_sink_and_the_wrapped_sink() {
+    #[derive(Default)]
+    struct Readings(Vec<(u64, Option<u64>, String)>);
+    #[async_trait::async_trait]
+    impl Sink for Readings {
+        async fn item(&mut self, _item: SyncItem) -> Result<(), SourceError> {
+            Ok(())
+        }
+        async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+            self.0.push((done, of, unit.to_owned()));
+        }
+    }
+
+    let recorder = Arc::new(Recorder::default());
+    let sink: Arc<dyn ProgressSink> = recorder.clone();
+    let inner = MockSource::new();
+    let observed = Observed::new(&inner, 8, Instant::now(), sink);
+    let mut wrapped = Readings::default();
+    observed.sync(None, &mut wrapped).await.unwrap();
+
+    let (done, of, _) = wrapped
+        .0
+        .last()
+        .cloned()
+        .expect("the wrapped sink heard the walk");
+    assert_eq!(Some(done), of);
+    let reports = recorder.seen();
+    assert_eq!(reading(&reports[0]), (Some(0), of, Some("items")));
+    let final_fetching = &reports[reports.len() - 2];
+    assert_eq!(final_fetching.phase, SyncPhase::Fetching);
+    assert_eq!(reading(final_fetching), (Some(done), of, Some("items")));
+}
+
 #[test]
 fn the_phases_cross_the_bridge_as_snake_case() {
     for (phase, name) in [
@@ -307,6 +436,9 @@ fn a_message(phase: SyncPhase) -> SyncProgress {
         items: 3,
         elapsed_ms: 12,
         message: None,
+        walked: None,
+        of: None,
+        unit: None,
     }
 }
 

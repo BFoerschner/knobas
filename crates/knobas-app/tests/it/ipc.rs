@@ -162,6 +162,9 @@ mod shapes {
                 items: 0,
                 elapsed_ms: 0,
                 message: None,
+                walked: None,
+                of: None,
+                unit: None,
             })
             .map_err(|error| error.to_string())?;
         Ok(progress.id())

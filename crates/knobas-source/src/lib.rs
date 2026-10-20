@@ -1882,6 +1882,21 @@ pub trait Sink {
     /// Returning [`SourceError::Sink`] is how a sink applies back-pressure or
     /// aborts: the adapter must propagate it with `?` and stop syncing.
     async fn item(&mut self, item: SyncItem) -> Result<(), SourceError>;
+
+    /// Say how far the run's outer walk has got: `done` units of `of`, where
+    /// `of` is `None` when the adapter cannot know the total, and `unit` is a
+    /// plural noun the UI prints as is ("repositories"). Issue #1379.
+    ///
+    /// An adapter calls it before each unit and once after the last, so a run
+    /// that pushes no item still moves a progress bar. It is a reading, not an
+    /// item: it cannot fail the sync, and an adapter that never calls it
+    /// changes nothing -- the engine reports its items as before.
+    ///
+    /// The default does nothing, so [`contract::VecSink`] and every sink that
+    /// predates it need no change. A sink that wraps another forwards it.
+    async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+        let _ = (done, of, unit);
+    }
 }
 
 #[cfg(test)]

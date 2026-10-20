@@ -2225,3 +2225,55 @@ fn fixture_records_keep_their_fingerprints() {
         "eaaed275a3f42593"
     );
 }
+
+/// Keeps the items and every walk reading, in the order they came (#1379).
+#[derive(Default)]
+struct Walking {
+    items: Vec<SyncItem>,
+    readings: Vec<(u64, Option<u64>, String)>,
+}
+
+#[async_trait::async_trait]
+impl knobas_source::Sink for Walking {
+    async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
+        self.items.push(item);
+        Ok(())
+    }
+
+    async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+        self.readings.push((done, of, unit.to_owned()));
+    }
+}
+
+/// The run reports its walk over the repositories it selected: before each
+/// one and once after the last, so an unchanged run that pushes no item still
+/// moves the bar from 0 to N (#1378, #1379).
+#[tokio::test]
+async fn a_run_reports_its_walk_over_the_selected_repositories_even_when_it_pushes_nothing() {
+    let fake = Fake::start(&State::tidewater().with_elsewhere()).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let two = |done| (done, Some(2), "repositories".to_owned());
+
+    let mut first = Walking::default();
+    let cursor = source.sync(None, &mut first).await.expect("full sync");
+    assert!(!first.items.is_empty());
+    assert_eq!(first.readings, vec![two(0), two(1), two(2)]);
+
+    let mut idle = Walking::default();
+    source
+        .sync(Some(cursor), &mut idle)
+        .await
+        .expect("idle sync");
+    assert!(idle.items.is_empty(), "idle run emitted {:?}", idle.items);
+    assert_eq!(idle.readings, vec![two(0), two(1), two(2)]);
+
+    // The total is the selection, not the instance: the owner filter leaves one.
+    let filtered = support::source(
+        fake.base_url(),
+        serde_json::json!({ "owners": ["tidewater"] }),
+    );
+    let mut one = Walking::default();
+    filtered.sync(None, &mut one).await.expect("filtered sync");
+    let of_one = |done| (done, Some(1), "repositories".to_owned());
+    assert_eq!(one.readings, vec![of_one(0), of_one(1)]);
+}

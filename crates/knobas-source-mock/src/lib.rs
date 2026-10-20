@@ -1296,18 +1296,25 @@ impl Source for MockSource {
         if cursor.as_deref() == Some(CURSOR) {
             return Ok(CURSOR.to_owned());
         }
-        for it in items(&self.id) {
+        let mut fixture = items(&self.id);
+        if self.tombstone {
+            // Last, and still inside the sync: a deletion is an item like any
+            // other, carrying the last-known title so the UI can render what
+            // vanished.
+            fixture.push(tombstoned_item(&self.id));
+        }
+        // The walk reading (#1379): the mock's outer unit is the item itself,
+        // reported before each one and once after the last, so the demo load
+        // draws a determinate bar too.
+        let of = u64::try_from(fixture.len()).unwrap_or(u64::MAX);
+        for (done, it) in (0u64..).zip(fixture) {
+            sink.walked(done, Some(of), "items").await;
             // Not the adapter's failure to swallow: a sink that rejected an
             // item wants the sync abandoned, not the remaining items pushed at
             // it and a fresh cursor handed back over the gap.
             sink.item(it).await?;
         }
-        if self.tombstone {
-            // Last, and still inside the sync: a deletion is an item like any
-            // other, carrying the last-known title so the UI can render what
-            // vanished.
-            sink.item(tombstoned_item(&self.id)).await?;
-        }
+        sink.walked(of, Some(of), "items").await;
         Ok(CURSOR.to_owned())
     }
 

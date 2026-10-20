@@ -320,6 +320,9 @@ fn carry_skipped_forward(previous: &GiteaCursor, skipped: &[String], next: &mut 
     }
 }
 
+/// The unit of the walk reading: the UI prints "120 of 300 repositories".
+const REPOSITORIES: &str = "repositories";
+
 pub(crate) async fn run(
     source: &crate::GiteaSource,
     cursor: Option<Cursor>,
@@ -364,7 +367,12 @@ pub(crate) async fn run(
     // having no branch memory, can tombstone nothing deleted in between.
     carry_skipped_forward(&previous, &skipped, &mut next);
 
-    for selected in &walk {
+    // The walk reading (#1379): before each repository and once after the
+    // last, over the selection just made, so an unchanged run that pushes no
+    // item still moves the bar. A `usize` always fits a `u64` here.
+    let of = u64::try_from(walk.len()).unwrap_or(u64::MAX);
+    for (done, selected) in (0u64..).zip(&walk) {
+        sink.walked(done, Some(of), REPOSITORIES).await;
         let before = previous.repo(&selected.full_name);
         let mut after = before.clone();
         match sync_repo(source, selected, &before, &mut after, sink, &mut emitted).await {
@@ -410,6 +418,8 @@ pub(crate) async fn run(
             }
         }
     }
+
+    sink.walked(of, Some(of), REPOSITORIES).await;
 
     // One repository refusing us is a fact about that repository. *Every*
     // repository refusing us is a fact about the token's scope, and reporting
