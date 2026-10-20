@@ -1,6 +1,6 @@
 - **The mirror's assertion module retires and `IpcErrorCode` is declared once: §2, §2.6 and one
   non-append edit to `app/src/lib/ipc/index.ts`, issues #1332 and #1372 (2026-10-20).** Parent
-  spec #1306, its last work after the six barrel switches (#1326 to #1331). No migration, no
+  spec #1306, its last work after #1325's app barrel and the six switches #1326 to #1331. No migration, no
   event, no `WriteOp`, nothing under `crates/knobas-source/src/**` or `crates/knobas-http/**`, no
   command added, removed or renamed, no argument changed, no field added, removed or renamed, no
   wire shape changed, nothing added to `lib.rs`'s handler list. Ratified by the implementer on

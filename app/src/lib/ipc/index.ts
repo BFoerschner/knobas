@@ -25,6 +25,10 @@ export * from "./sources";
 export * from "./time";
 export * from "./assets";
 
+// `IpcError.code`'s type: `knobas_app::IpcErrorCode`, generated, and exported by
+// the sources barrel because `ConnectionReport.code` reaches it (#1372).
+import type { IpcErrorCode } from "./sources";
+
 /**
  * Tauri event names — the mirror of `knobas_app::events`, pinned by a Rust
  * test that reads this file.
@@ -54,10 +58,6 @@ export const EVENTS = {
    */
   cloneProgress: "clone:progress",
 } as const;
-
-// Why a command failed: `knobas_app::IpcErrorCode`. Generated, and exported by
-// the sources barrel above, because `ConnectionReport.code` reaches it (#1372).
-import type { IpcErrorCode } from "./sources";
 
 /** What every command rejects with — `knobas_app::IpcError`. */
 export interface IpcError {

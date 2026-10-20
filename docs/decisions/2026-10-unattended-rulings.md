@@ -8364,8 +8364,8 @@ taken afresh from `time.ts` at f9fc1bf1.
   "barrel by barrel" clause goes in the same edit, as #1325 edited that header. *Reversing:*
   restore the union.
 - **The `test-util` feature of `knobas-sync`.** *Ruling:* deleted with the module, since it gated
-  nothing else, with the two dev-dependency lines that enabled it. *Reversing:* re-add three
-  lines.
+  nothing else, with the two dev-dependency lines that enabled it. *Reversing:* re-add the
+  feature and the two dev-dependency lines.
 - **How much of §2's layout block changes.** *Fork:* bring the whole block up to date (seven
   barrels, `commands/entity/`), or only what the ticket names. *Ruling:* only the ticket's three
   facts: types generated (a `generated/<barrel>.ts` line), `invoke` functions by hand (on the
