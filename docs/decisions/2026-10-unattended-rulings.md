@@ -8499,3 +8499,36 @@ taken afresh from `time.ts` at f9fc1bf1.
   is witnessed for 1.0.0 and inferred for 1.1.0 and 1.2.0, whose `sink` is the same as 1.0.0's.
   *Reasoning:* the entry claimed 1.0.0 to 1.2.0 without saying which one a test holds.
   *Reversing:* the sentence.
+
+## #1381: Jira and Confluence report their walk (Sonnet implementer, Opus merge-manager, 2026-10-20)
+
+- **Where the Confluence reading is pinned.** *Fork:* the ticket asks for a test "in the
+  Confluence crate's integration binary", and the crate has none: it has never had a mock
+  (ADR-0013), its API trait is crate-private, and `tests/live_confluence_seeded.rs` is its one
+  test file. *Ruling:* two unit tests in `src/sync.rs` over the existing `Fake` (with and without
+  `totalSize`, over 2-result pages, an idle run included), a wire-name test in `src/model.rs`, and
+  a `--ignored` live test that `just atlassian-live` runs. *Reasoning:* a `tests/it` binary would
+  need a stub HTTP server the crate has no dependency for, to re-test what the `Fake` stands in
+  for. *Reversing:* low; the tests move when a binary exists.
+- **What the numerator counts.** *Ruling:* issues (Jira) and pages (Confluence) the walk got
+  through, delivered or skipped as already delivered, so the overlap window of an incremental run
+  moves the bar and an idle run ends it at its own total. A reading comes before each unit and one
+  after the last. Jira's `of` never reads below `done`, because the live `total` can shrink under a
+  run. Confluence's `of` is the latest page's `totalSize`, and `None` when no page carried one. The
+  mention walk, a second pass over a different query, reports nothing. *Reasoning:* the bar is
+  for the main walk; a second `pages` count would reset it. *Reversing:* one line per adapter.
+- **Merge-manager on Opus: both rulings confirmed.** *Reasoning:* the unit tests drive the real
+  `SyncRun` over several result pages and pin 0..=N of N, `None` without a total, and the idle
+  run; that is the criterion's intent. They cannot pin the server's meaning of `totalSize`, and the
+  live test could not either, because the default `page_size` (50) put all seven seeded pages in
+  one result page, where the whole count and this page's count agree, and the clamp to `done`
+  would have hidden the difference by the last reading. *Fix:* the live test now walks 2-result
+  pages and asserts the whole series 0..=N of N, so a per-page `totalSize` fails it on the first
+  reading. *Reversing:* none needed.
+- **Merge-manager: the positions sweep stays unreported.** *Fork:* an incremental run sweeps every
+  page's position (#1138) before the reported walk, so an idle run on a large space shows no
+  reading during that sweep. *Ruling:* left as is, backlog follow-up #1389. *Reasoning:* the
+  ticket names one unit, the CQL result's pages, and its idle criterion is met. The sweep reads
+  200 results a request with a light expand, about 30 requests for 6,000 pages. Giving it its own
+  reading would mean a second `pages` count that resets the bar. *Reversing:* a reading in
+  `positions_sweep`.

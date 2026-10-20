@@ -3211,3 +3211,53 @@ async fn fills_every_role_it_claims_on_the_seeded_corpus() {
     });
     knobas_source::contract::fills_its_roles(&*seeded.source(configured)).await;
 }
+
+/// The walk reading against the real server (#1381): a full run over both
+/// seeded projects reports 0 to N of N `issues`, N being the search's own
+/// total, and an unchanged run after it still reports to the end.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn a_run_reports_its_walk_over_the_real_search_total() {
+    #[derive(Default)]
+    struct Walking {
+        items: usize,
+        readings: Vec<(u64, Option<u64>, String)>,
+    }
+    #[async_trait::async_trait]
+    impl knobas_source::Sink for Walking {
+        async fn item(&mut self, _item: SyncItem) -> Result<(), SourceError> {
+            self.items += 1;
+            Ok(())
+        }
+        async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+            self.readings.push((done, of, unit.to_owned()));
+        }
+    }
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let source = seeded.source(serde_json::json!({}));
+    let mut first = Walking::default();
+    let cursor = source.sync(None, &mut first).await.expect("full sync");
+    let mut idle = Walking::default();
+    source
+        .sync(Some(cursor), &mut idle)
+        .await
+        .expect("idle sync");
+    println!(
+        "walk: full run {} items, {} readings, first {:?}, last {:?}; idle run {} items, last {:?}",
+        first.items,
+        first.readings.len(),
+        first.readings.first(),
+        first.readings.last(),
+        idle.items,
+        idle.readings.last()
+    );
+    let total = seeded.seeded_keys().len() as u64;
+    let expected: Vec<_> = (0..=total)
+        .map(|done| (done, Some(total), "issues".to_owned()))
+        .collect();
+    assert_eq!(first.readings, expected);
+    let (done, of, unit) = idle.readings.last().cloned().expect("the idle run reports");
+    assert_eq!((of, unit.as_str()), (Some(done), "issues"));
+}
