@@ -1,6 +1,6 @@
 - **The backup barrel's types are generated: the IPC surface, issue #1331 (2026-10-20).** Parent
   spec #1306, a switching ticket after #1325's app barrel, #1326's entity barrel, #1328's assets
-  barrel, #1327's sources barrel and #1329's search barrel. No migration, no event, no `WriteOp`, nothing under
+  barrel, #1327's sources barrel, #1329's search barrel and #1330's time barrel. No migration, no event, no `WriteOp`, nothing under
   `crates/knobas-source/src/**` or `crates/knobas-http/**`, no command added, removed or renamed,
   no argument changed, no field added, removed or renamed, no serde attribute changed, no wire
   shape changed, nothing added to either append-only barrel (`app/src/lib/ipc/index.ts` and
