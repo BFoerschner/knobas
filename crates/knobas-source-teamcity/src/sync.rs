@@ -85,6 +85,18 @@ const MAX_BUILDS_PER_QUERY: u32 = 1_000;
 /// run, never a build -- see [`ceiling`].
 const CEILING_PROBE: u32 = PAGE;
 
+/// The unit of a full sync's walk reading: the UI prints "3 of 40 build
+/// configurations".
+const BUILD_CONFIGURATIONS: &str = "build configurations";
+
+/// The unit of an incremental run's walk reading: the builds it listed.
+const BUILDS: &str = "builds";
+
+/// A count as the SPI's `u64`; a `usize` always fits here.
+fn count(n: usize) -> u64 {
+    u64::try_from(n).unwrap_or(u64::MAX)
+}
+
 pub(crate) async fn execute(
     source_id: &str,
     base_url: &str,
@@ -155,7 +167,11 @@ pub(crate) async fn execute(
             }
             let ids: Vec<String> = configs.keys().cloned().collect();
             let mut out = Vec::new();
-            for id in ids {
+            // The walk reading (#1382): before each configuration's builds are
+            // read and once after the last, over the scope just resolved.
+            let of = count(ids.len());
+            for (done, id) in (0u64..).zip(ids) {
+                sink.walked(done, Some(of), BUILD_CONFIGURATIONS).await;
                 // The one query in the run that is a **window** rather than
                 // a set: `builds_per_config` is the newest N this full sync
                 // wants, so a page filled to it is the answer and a
@@ -196,6 +212,7 @@ pub(crate) async fn execute(
                     .items,
                 );
             }
+            sink.walked(of, Some(of), BUILD_CONFIGURATIONS).await;
             out
         }
         // Build ids are server-wide and monotonic, so one query covers every
@@ -233,7 +250,18 @@ pub(crate) async fn execute(
     let mut touched: BTreeSet<String> = BTreeSet::new();
     let mut max_finished: Option<i64> = None;
     let mut min_unfinished: Option<i64> = None;
-    for b in observed.values() {
+    // An incremental run walks the builds it listed rather than configurations
+    // (#1382), so a run that pushes nothing still moves the bar. A full sync
+    // already reported its walk over the configurations above.
+    let builds_of = count(observed.len());
+    let reports_builds = previous.is_some();
+    if reports_builds && observed.is_empty() {
+        sink.walked(0, Some(0), BUILDS).await;
+    }
+    for (done, b) in (0u64..).zip(observed.values()) {
+        if reports_builds {
+            sink.walked(done, Some(builds_of), BUILDS).await;
+        }
         let in_scope = in_scope_build(cfg, tree.as_ref().unwrap_or(&no_tree), &b.rec);
         if StateFilter::Finished.matches(b.rec.state.as_deref()) {
             // Counted whether or not it is in scope. A finished build outside
@@ -260,6 +288,9 @@ pub(crate) async fn execute(
             touched.insert(id.to_owned());
         }
         builds.push(map::build_item(source_id, base_url, &b.raw, &b.rec));
+    }
+    if reports_builds && !observed.is_empty() {
+        sink.walked(builds_of, Some(builds_of), BUILDS).await;
     }
 
     // 6. The configurations of the builds that moved. Fetched from the same
