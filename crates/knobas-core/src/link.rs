@@ -95,27 +95,23 @@ crate::closed_vocabulary! {
     /// Stored as lowercase text in `knobas.link.origin`, whose
     /// `link_origin_chk` (migration 0003) allows exactly these spellings --
     /// and `ALL` is what the test that pins the two together walks.
+    ///
+    /// What each variant means is on [`LinkRow::origin`], because the
+    /// generated TypeScript inlines this enum and drops its docs.
+    ///
+    /// `implied` is **not** the asset-in-a-context case this example used to
+    /// give. Spec #427 ruled that membership is computed rather than stored --
+    /// *"the implied membership of an asset linked to a member ticket is
+    /// computed, not stored, as the ADR requires"* -- so `context::member_ids`
+    /// answers it from the link the user drew and no row of this origin is
+    /// written for it (ADR-0008, amended by #434).
     #[derive(ts_rs::TS)]
     #[ts(export_to = "entity.ts")]
     pub enum Origin {
-        /// Drawn by the user.
         Manual => "manual",
-        /// Proposed by knobas and confirmed by the user.
         Suggested => "suggested",
-        /// Restored from an export.
         Imported => "imported",
-        /// Mirrored from a relation the source system already states.
         Source => "source",
-        /// Drawn by knobas as a consequence of what the user wrote: a note's
-        /// `[[ref]]` links are the population (`crate::note`'s `reconcile_refs`,
-        /// which owns every row of this origin).
-        ///
-        /// **Not** the asset-in-a-context case this example used to give.
-        /// Spec #427 ruled that membership is computed rather than stored --
-        /// *"the implied membership of an asset linked to a member ticket is
-        /// computed, not stored, as the ADR requires"* -- so `context::member_ids`
-        /// answers it from the link the user drew and no row of this origin is
-        /// written for it (ADR-0008, amended by #434).
         Implied => "implied",
     }
 }
@@ -225,6 +221,15 @@ pub struct LinkRow {
     /// curated list and the inverse-label lookup on this spelling; capitalize
     /// for display from the whole string.
     pub relation: String,
+    /// Where the link came from:
+    ///
+    /// - `manual`: Drawn by the user.
+    /// - `suggested`: Proposed by knobas and confirmed by the user.
+    /// - `imported`: Restored from an export.
+    /// - `source`: Mirrored from a relation the source system already states.
+    /// - `implied`: Drawn by knobas as a consequence of what the user wrote: a
+    ///   note's `[[ref]]` links are the population (`crate::note`'s
+    ///   `reconcile_refs`, which owns every row of this origin).
     #[ts(inline)]
     pub origin: Origin,
     /// Why the link exists, in the user's own words -- `None` unless one was
