@@ -8569,3 +8569,42 @@ taken afresh from `time.ts` at f9fc1bf1.
   walk and the re-read of moved pages still report nothing. This carries out the reversal the
   #1381 merge-manager named ("a reading in `positions_sweep`"). *Reversing:* drop the sweep's reading
   and the `swept_rows` offset in `SyncRun::run`; one function each.
+## #1384: the source's settings page shows the walk during a scheduled run (Opus implementer, 2026-10-20)
+
+- **Reserved for Björn, ruled by implementer on Opus: sign-off on the §10.8 entry.** *Ruling:*
+  signed off. `docs/contract/10.8/1384-watch-sync-joins-the-run-in-flight.md` books one command,
+  appended to the handler list, its TypeScript function in the existing `sources` barrel, and the
+  fake's answer; nothing else frozen moves. *Reasoning:* the command is additive and the entry
+  matches the diff. Björn said on 2026-10-20 that Opus may amend without him. *Reversing:* remove
+  the command, its function and the entry.
+- **Where the join lives.** *Fork:* call `Scheduler::trigger` with a sink (it joins a run in
+  flight) or add a method that only joins. *Ruling:* `Scheduler::watch(source_id, sink) ->
+  Option<i64>`, which takes the `runs` lock and calls `Watchers::attach`. *Reasoning:* `trigger`
+  starts a run on an idle source, and the ticket says an idle source answers nothing; opening a
+  settings page must not sync. `watch` leaves the first-sync claim alone, since watching is not
+  asking about the first sync. *Reversing:* one method.
+- **No detach command.** *Fork:* add `unwatch_sync` so a page that leaves takes its channel out of
+  the run, or let the channel ride to the run's ending. *Ruling:* no command; the page stops
+  listening (its handler drops every later message), and the backend sink stays enrolled until
+  the run ends. *Reasoning:* the enrolment is bounded by the run, `ChannelSink` already ignores a
+  closed channel, and a second command is a second frozen surface for a few hundred bytes per
+  message until the run ends. *Reversing:* one command plus a remove on `Watchers`.
+- **Which statuses attach.** *Ruling:* the page attaches when its status says running, keyed on
+  the status's run id, and skips a second attach while it is already watching or asking. A local
+  *Sync now* marks the source running with no run id; if `watch_sync` lands before the trigger and
+  answers `null`, the `sync:state` that follows (with the id) attaches. When the status goes idle
+  the page drops the channel and the reading, whether or not the channel's ending arrived first.
+  *Reasoning:* the two statuses of one run should attach once, and a lost ending should not leave
+  a stale bar. *Reversing:* the effect in `TfSourcePage.svelte`.
+- **The reading's form.** *Fork:* the wizard's `<phase> · … · 83.0 s` or the ticket's
+  `120 of 300 repositories · 1,240 items · 83 s`. *Ruling:* the ticket's, with en-GB grouping as
+  the page's run rows use and whole seconds (`runProgressWords` in `settings.ts`). *Reasoning:*
+  the ticket quotes the line. *Reversing:* one function.
+- **The Sync runs row fills in on the channel's ending too.** *Ruling:* the ending re-reads the
+  runs, alongside the existing re-read on the terminal `sync:state`. *Reasoning:* the component
+  test feeds the channel only, and the ending is the run's own word that it is over.
+  *Reversing:* drop `ended` from the runs effect.
+- **The fake IPC.** *Ruling:* `watch_sync` answers `null`; no fixture source runs, and the fake
+  bridge sends nothing on a channel, so `just shot` cannot draw the page mid-run. The look is
+  handed to the milestone review. *Reversing:* a running fixture source plus channel delivery in
+  `fake-tauri.ts`.
