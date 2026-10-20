@@ -216,6 +216,9 @@ impl<'a> Walk<'a> {
     }
 }
 
+/// The unit of the walk reading: the UI prints "120 of 300 pages".
+const PAGES: &str = "pages";
+
 pub(crate) struct SyncRun<'a> {
     pub api: &'a (dyn ConfluenceApi + 'a),
     pub cfg: &'a ConfluenceConfig,
@@ -317,8 +320,17 @@ impl SyncRun<'_> {
         let mut walked_positions = Positions::new();
 
         let mut walk = Walk::new(self.api, &cql, self.cfg.page_size, EXPAND, "results");
+        // The walk reading (#1381): pages got through, over the result's
+        // `totalSize` where the API reports one and over nothing otherwise.
+        // The latest page's figure wins, so a total that moved under the run
+        // is the one drawn; it never reads below `walked`.
+        let mut walked: u64 = 0;
+        let mut of: Option<u64> = None;
         while let Some(page) = walk.next_page().await? {
+            of = page.total_size.or(of);
             for mut raw in page.results {
+                sink.walked(walked, of.map(|n| n.max(walked)), PAGES).await;
+                walked += 1;
                 let version = raw.content.version.as_ref();
                 let number = version.and_then(|v| v.number);
                 let when = version
@@ -354,6 +366,10 @@ impl SyncRun<'_> {
                 }
             }
         }
+
+        // Once after the last page, so a run that pushes nothing still ends
+        // its bar at the end.
+        sink.walked(walked, of.map(|n| n.max(walked)), PAGES).await;
 
         emitted += self
             .mentions(
@@ -722,6 +738,9 @@ mod tests {
         users: std::collections::BTreeMap<String, Value>,
         /// Set to fail every user lookup with this instead.
         user_fault: Option<SourceError>,
+        /// Answer every search page with the result's `totalSize`, the way a
+        /// server that reports one does (#1381).
+        reports_total: bool,
     }
 
     impl Fake {
@@ -737,7 +756,22 @@ mod tests {
                 reorder_on_mention: Mutex::new(None),
                 users: std::collections::BTreeMap::new(),
                 user_fault: None,
+                reports_total: false,
             }
+        }
+
+        /// The page envelope, carrying `totalSize` when this fake reports one.
+        fn with_total(
+            &self,
+            mut page: crate::model::ContentPage,
+            cql: &str,
+            expand: &str,
+        ) -> crate::model::ContentPage {
+            if self.reports_total {
+                let all = self.matching(cql, expand, 0, usize::MAX).0.len();
+                page.total_size = Some(all as u64);
+            }
+            page
         }
 
         /// The records `mention = currentUser()` will answer with.
@@ -882,9 +916,10 @@ mod tests {
                 }
             }
             let (rows, more) = self.matching(cql, expand, 0, limit as usize);
-            Ok(envelope(
-                rows,
-                more.then(|| next_link(cql, expand, limit, limit)),
+            Ok(self.with_total(
+                envelope(rows, more.then(|| next_link(cql, expand, limit, limit))),
+                cql,
+                expand,
             ))
         }
 
@@ -913,9 +948,10 @@ mod tests {
                 u32::try_from(start + limit).unwrap_or(u32::MAX),
                 u32::try_from(limit).unwrap_or(u32::MAX),
             );
-            Ok(envelope(
-                rows,
-                more.then(|| next_link(&cql, &expand, start, limit)),
+            Ok(self.with_total(
+                envelope(rows, more.then(|| next_link(&cql, &expand, start, limit))),
+                &cql,
+                &expand,
             ))
         }
 
@@ -1882,6 +1918,85 @@ mod tests {
             "{got:?}"
         );
         assert!(sink.0.is_empty());
+    }
+
+    // -- the run's walk (#1381) -------------------------------------------------
+
+    /// Keeps the items and every walk reading, in the order they came.
+    #[derive(Default)]
+    struct Walking {
+        items: Vec<SyncItem>,
+        readings: Vec<(u64, Option<u64>, String)>,
+    }
+
+    #[async_trait::async_trait]
+    impl Sink for Walking {
+        async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
+            self.items.push(item);
+            Ok(())
+        }
+
+        async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+            self.readings.push((done, of, unit.to_owned()));
+        }
+    }
+
+    async fn walk_of(fake: &Fake, cursor: Option<String>) -> (Walking, String) {
+        let mut sink = Walking::default();
+        let next = SyncRun {
+            api: fake,
+            cfg: &cfg(json!({ "page_size": 2 })),
+            source_id: "confluence",
+            base_url: "http://127.0.0.1:8090",
+        }
+        .run(cursor, &mut sink)
+        .await
+        .expect("the run succeeds");
+        (sink, next)
+    }
+
+    /// Where the API reports `totalSize`, the run reports `n of N pages` over
+    /// it, before each page and once after the last -- across several result
+    /// pages, and still to the end when an incremental run pushes nothing.
+    #[tokio::test]
+    async fn a_run_reports_its_walk_over_the_total_size_even_when_it_pushes_nothing() {
+        let mut fake = Fake::new(a_corpus());
+        fake.reports_total = true;
+        let of_five = |done| (done, Some(5), "pages".to_owned());
+
+        let (first, cursor) = walk_of(&fake, None).await;
+        assert_eq!(first.items.len(), 5);
+        assert_eq!(
+            first.readings,
+            (0..=5).map(of_five).collect::<Vec<_>>(),
+            "0 to N, one reading per page and one after the last"
+        );
+
+        let (idle, _) = walk_of(&fake, Some(cursor)).await;
+        assert!(
+            idle.items.is_empty(),
+            "idle run emitted {}",
+            idle.items.len()
+        );
+        let last = idle.readings.last().expect("the idle run still reports");
+        assert_eq!(last.1, Some(last.0), "the idle walk ends at its own total");
+        assert_eq!(last.2, "pages");
+        assert!(idle.readings.len() >= 2, "{:?}", idle.readings);
+    }
+
+    /// A server that reports no `totalSize` is read without a total: the
+    /// count moves, `of` stays `None`, and the walk is unchanged.
+    #[tokio::test]
+    async fn a_run_over_a_server_with_no_total_size_reports_the_count_alone() {
+        let fake = Fake::new(a_corpus());
+        let (run, _) = walk_of(&fake, None).await;
+        assert_eq!(run.items.len(), 5);
+        assert_eq!(
+            run.readings,
+            (0..=5)
+                .map(|done| (done, None, "pages".to_owned()))
+                .collect::<Vec<_>>()
+        );
     }
 
     // -- who a mention names (#953) -------------------------------------------

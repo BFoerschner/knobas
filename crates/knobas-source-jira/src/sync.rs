@@ -130,6 +130,9 @@ comment,worklog";
 /// which is what the message says.
 const MAX_PAGES: u32 = 5_000;
 
+/// The unit of the walk reading: the UI prints "120 of 300 issues".
+const ISSUES: &str = "issues";
+
 pub(crate) struct SyncRun<'a> {
     pub api: &'a (dyn JiraApi + 'a),
     pub cfg: &'a JiraConfig,
@@ -164,6 +167,9 @@ impl SyncRun<'_> {
         });
         // The last page's own total, which the refusal quotes.
         let mut total = 0;
+        // Issues the walk has got through, delivered or skipped: the walk
+        // reading's numerator (#1381).
+        let mut walked: u64 = 0;
         loop {
             let page: SearchPage = match walk.next().await? {
                 Walked::Page(page) => page,
@@ -183,6 +189,12 @@ impl SyncRun<'_> {
             };
             total = page.total;
             for mut raw in page.issues {
+                // Before each issue, over the search's own total, so an
+                // incremental run that pushes nothing still moves the bar.
+                // A total that shrank under the run never reads below `done`.
+                sink.walked(walked, Some(u64::from(total).max(walked)), ISSUES)
+                    .await;
+                walked += 1;
                 let updated = raw
                     .issue
                     .fields
@@ -224,6 +236,10 @@ impl SyncRun<'_> {
                 }
             }
         }
+
+        // Once after the last issue (#1381).
+        sink.walked(walked, Some(u64::from(total).max(walked)), ISSUES)
+            .await;
 
         // The Jira views (#877), after the issues: their keys are the issues'
         // keys, and a view read first would name tickets this run had not yet

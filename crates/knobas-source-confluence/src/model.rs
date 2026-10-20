@@ -20,14 +20,20 @@ use serde_json::Value;
 /// `GET /rest/api/content/{id}/child/comment` -- one envelope for both,
 /// because Confluence uses one.
 ///
-/// **There is no `total`.** A content search reports `size` (how many are in
-/// *this* page) and, when there are more, a `_links.next`. So the walk is
-/// "follow the link until there is none", never "count up to a total" -- and
-/// an adapter that invented a total from `size` would stop after one page.
+/// **The walk never counts up to a total.** A content search reports `size`
+/// (how many are in *this* page) and, when there are more, a `_links.next`. So
+/// the walk is "follow the link until there is none" -- and an adapter that
+/// invented a total from `size` would stop after one page. The result's
+/// `totalSize`, where the API reports one, is read for the progress reading
+/// alone (#1381) and ends nothing.
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct ContentPage {
     #[serde(default)]
     pub results: Vec<RawContent>,
+    /// The whole result's size, when the API says so. Absent on a Data Center
+    /// that does not report one.
+    #[serde(default, rename = "totalSize")]
+    pub total_size: Option<u64>,
     #[serde(default, rename = "_links")]
     pub links: PageLinks,
 }

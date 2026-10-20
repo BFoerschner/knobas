@@ -197,6 +197,60 @@ async fn pages_across_more_than_one_response() {
     jira.assert_no_violations();
 }
 
+/// Keeps the items and every walk reading, in the order they came (#1381).
+#[derive(Default)]
+struct Walking {
+    items: Vec<knobas_source::SyncItem>,
+    readings: Vec<(u64, Option<u64>, String)>,
+}
+
+#[async_trait::async_trait]
+impl knobas_source::Sink for Walking {
+    async fn item(&mut self, item: knobas_source::SyncItem) -> Result<(), SourceError> {
+        self.items.push(item);
+        Ok(())
+    }
+
+    async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+        self.readings.push((done, of, unit.to_owned()));
+    }
+}
+
+/// The run reports its walk over the search's own total: before each issue and
+/// once after the last, across several pages, and to the end when an
+/// incremental run pushes nothing (#1378, #1381).
+#[tokio::test]
+async fn a_run_reports_its_walk_over_the_search_total_even_when_it_pushes_nothing() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({ "page_size": 2 }));
+
+    let mut first = Walking::default();
+    let cursor = source.sync(None, &mut first).await.expect("full sync");
+    // The fixture's seven issues over 2-issue pages: 0 to 7 of 7.
+    assert_eq!(first.items.len(), 7);
+    assert_eq!(
+        first.readings,
+        (0..=7)
+            .map(|done| (done, Some(7), "issues".to_owned()))
+            .collect::<Vec<_>>()
+    );
+
+    let mut idle = Walking::default();
+    source
+        .sync(Some(cursor), &mut idle)
+        .await
+        .expect("idle sync");
+    assert!(
+        idle.items.is_empty(),
+        "idle run emitted {}",
+        idle.items.len()
+    );
+    let (done, of, unit) = idle.readings.last().cloned().expect("the idle run reports");
+    assert_eq!(of, Some(done), "the idle walk ends at its own total");
+    assert_eq!(unit, "issues");
+    jira.assert_no_violations();
+}
+
 /// Exit criterion: `touch_issue` ⇒ the next incremental returns exactly that
 /// issue and the watermark advances.
 #[tokio::test]
