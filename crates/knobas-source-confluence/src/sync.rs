@@ -761,7 +761,7 @@ mod tests {
         }
 
         /// The page envelope, carrying `totalSize` when this fake reports one.
-        fn with_total(
+        fn envelope_with_reported_total(
             &self,
             mut page: crate::model::ContentPage,
             cql: &str,
@@ -916,7 +916,7 @@ mod tests {
                 }
             }
             let (rows, more) = self.matching(cql, expand, 0, limit as usize);
-            Ok(self.with_total(
+            Ok(self.envelope_with_reported_total(
                 envelope(rows, more.then(|| next_link(cql, expand, limit, limit))),
                 cql,
                 expand,
@@ -948,7 +948,7 @@ mod tests {
                 u32::try_from(start + limit).unwrap_or(u32::MAX),
                 u32::try_from(limit).unwrap_or(u32::MAX),
             );
-            Ok(self.with_total(
+            Ok(self.envelope_with_reported_total(
                 envelope(rows, more.then(|| next_link(&cql, &expand, start, limit))),
                 &cql,
                 &expand,

@@ -165,7 +165,8 @@ impl SyncRun<'_> {
         let mut walk = PageWalk::new(Offset, MAX_PAGES, |start_at| {
             self.api.search(&jql, start_at, self.cfg.page_size, &fields)
         });
-        // The last page's own total, which the refusal quotes.
+        // The last page's own total, which the refusal quotes and the walk
+        // reading draws against (#1381).
         let mut total = 0;
         // Issues the walk has got through, delivered or skipped: the walk
         // reading's numerator (#1381).

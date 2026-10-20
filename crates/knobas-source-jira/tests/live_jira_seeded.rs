@@ -3218,6 +3218,7 @@ async fn fills_every_role_it_claims_on_the_seeded_corpus() {
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
 async fn a_run_reports_its_walk_over_the_real_search_total() {
+    #[derive(Default)]
     struct Walking {
         items: usize,
         readings: Vec<(u64, Option<u64>, String)>,
@@ -3236,15 +3237,9 @@ async fn a_run_reports_its_walk_over_the_real_search_total() {
     let seeded = seeded();
     seeded.clear_leftovers().await;
     let source = seeded.source(serde_json::json!({}));
-    let mut first = Walking {
-        items: 0,
-        readings: Vec::new(),
-    };
+    let mut first = Walking::default();
     let cursor = source.sync(None, &mut first).await.expect("full sync");
-    let mut idle = Walking {
-        items: 0,
-        readings: Vec::new(),
-    };
+    let mut idle = Walking::default();
     source
         .sync(Some(cursor), &mut idle)
         .await

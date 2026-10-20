@@ -1738,9 +1738,14 @@ async fn fills_every_role_it_claims_on_the_seeded_corpus() {
 /// page of the space as `pages`, with the total where this Confluence reports
 /// `totalSize` and without it where it does not. What the real server does is
 /// printed, because the adapter cannot know which it will meet.
+///
+/// Over 2-result pages, so a `totalSize` that counted only *this* page (the
+/// envelope's `size`) reads below the whole space on the first reading, which
+/// the clamp to `done` would otherwise hide by the last.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn a_run_reports_its_walk_over_the_real_pages() {
+    #[derive(Default)]
     struct Walking {
         items: usize,
         readings: Vec<(u64, Option<u64>, String)>,
@@ -1758,16 +1763,12 @@ async fn a_run_reports_its_walk_over_the_real_pages() {
 
     let seeded = seeded();
     seeded.clear_leftovers().await;
-    let source = seeded.source(seeded.scoped());
-    let mut first = Walking {
-        items: 0,
-        readings: Vec::new(),
-    };
+    let mut paged = seeded.scoped();
+    paged["page_size"] = serde_json::json!(2);
+    let source = seeded.source(paged);
+    let mut first = Walking::default();
     let cursor = source.sync(None, &mut first).await.expect("full sync");
-    let mut idle = Walking {
-        items: 0,
-        readings: Vec::new(),
-    };
+    let mut idle = Walking::default();
     source
         .sync(Some(cursor), &mut idle)
         .await
@@ -1784,8 +1785,14 @@ async fn a_run_reports_its_walk_over_the_real_pages() {
     let (done, of, unit) = first.readings.last().cloned().expect("readings");
     assert_eq!(unit, "pages");
     assert!(done > 0, "the seeded space has pages");
-    assert!(of.is_none() || of == Some(done), "{of:?} of {done}");
-    assert!(first.readings.iter().all(|(_, _, u)| u == "pages"));
+    assert!(done > 2, "the space spans more than one result page");
+    let expected: Vec<_> = (0..=done)
+        .map(|n| (n, of.map(|_| done), "pages".to_owned()))
+        .collect();
+    assert_eq!(
+        first.readings, expected,
+        "0 to N of the whole result's N on every reading, or of nothing on every one"
+    );
     assert_eq!(idle.items, 0);
     let (_, _, idle_unit) = idle.readings.last().cloned().expect("the idle run reports");
     assert_eq!(idle_unit, "pages");
