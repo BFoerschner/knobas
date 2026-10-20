@@ -1327,7 +1327,23 @@ run_id: number, source_id: string, phase: SyncPhase,
 /**
  * Items pushed so far this run.
  */
-items: number, elapsed_ms: number, message: string | null, };
+items: number, elapsed_ms: number, message: string | null, 
+/**
+ * How many units of its outer walk the run has done (#1379): the latest
+ * `Sink::walked` reading. Absent when the adapter never reported one,
+ * and then `of` and `unit` are absent too.
+ */
+walked?: number, 
+/**
+ * How many units the walk has, when the adapter knows. With it the bar
+ * is determinate; without it, indeterminate.
+ */
+of?: number, 
+/**
+ * The walk's unit, a plural noun printed as is: "120 of 300
+ * repositories".
+ */
+unit?: string, };
 
 /**
  * What one run wrote.

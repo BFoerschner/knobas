@@ -487,6 +487,9 @@ fn report(
         items,
         elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         message,
+        walked: None,
+        of: None,
+        unit: None,
     });
 }
 
@@ -526,6 +529,9 @@ fn ending(
         items,
         elapsed_ms,
         message: error,
+        walked: None,
+        of: None,
+        unit: None,
     }
 }
 

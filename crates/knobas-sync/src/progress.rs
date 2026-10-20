@@ -41,6 +41,22 @@ pub struct SyncProgress {
     pub items: u64,
     pub elapsed_ms: u64,
     pub message: Option<String>,
+    /// How many units of its outer walk the run has done (#1379): the latest
+    /// `Sink::walked` reading. Absent when the adapter never reported one,
+    /// and then `of` and `unit` are absent too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub walked: Option<u64>,
+    /// How many units the walk has, when the adapter knows. With it the bar
+    /// is determinate; without it, indeterminate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub of: Option<u64>,
+    /// The walk's unit, a plural noun printed as is: "120 of 300
+    /// repositories".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub unit: Option<String>,
 }
 
 /// Where a run is.
@@ -345,6 +361,7 @@ impl Source for Observed<'_> {
             // learn the run started.
             reported_at: std::time::Instant::now() - THROTTLE,
             seen: 0,
+            reading: None,
             run_id: self.run_id,
             source_id,
             started: self.started,
@@ -353,7 +370,8 @@ impl Source for Observed<'_> {
         let result = self.inner.sync(cursor, &mut counting).await;
         // One final `Fetching` either way, so the bar reaches the count the run
         // actually pushed instead of stopping at the last throttled sample --
-        // and so a run that pushed nothing still says so.
+        // and so a run that pushed nothing still says so. It carries the last
+        // walk reading for the same reason.
         counting.emit();
 
         // **`Writing` here, and only on success, because here is where it
@@ -399,6 +417,8 @@ struct Counting<'s> {
     inner: &'s mut (dyn Sink + Send),
     reported_at: std::time::Instant,
     seen: u64,
+    /// The latest walk reading, `(done, of, unit)`; every message carries it.
+    reading: Option<(u64, Option<u64>, String)>,
     run_id: i64,
     source_id: String,
     started: std::time::Instant,
@@ -413,6 +433,10 @@ impl Counting<'_> {
 
     /// Report `phase` with the count so far.
     fn phase(&self, phase: SyncPhase) {
+        let (walked, of, unit) = match &self.reading {
+            Some((done, of, unit)) => (Some(*done), *of, Some(unit.clone())),
+            None => (None, None, None),
+        };
         self.sink.report(SyncProgress {
             run_id: self.run_id,
             source_id: self.source_id.clone(),
@@ -420,6 +444,9 @@ impl Counting<'_> {
             items: self.seen,
             elapsed_ms: u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
             message: None,
+            walked,
+            of,
+            unit,
         });
     }
 }
@@ -436,5 +463,17 @@ impl Sink for Counting<'_> {
             self.emit();
         }
         Ok(())
+    }
+
+    /// Kept as the latest reading and reported on the item path's clock, so
+    /// a run that pushes nothing moves the bar no more often than one that
+    /// pushes. The first reading goes out at once (`reported_at` starts one
+    /// throttle in the past). Handed on to the wrapped sink too.
+    async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+        self.inner.walked(done, of, unit).await;
+        self.reading = Some((done, of, unit.to_owned()));
+        if self.reported_at.elapsed() >= THROTTLE {
+            self.emit();
+        }
     }
 }
