@@ -69,8 +69,8 @@
     sourceState,
     userOf,
     type ListAddition,
-    type Walk,
   } from "./settings";
+  import { walkAfter, walkMax, type Walk } from "../../sources/walk";
   import TfDialog from "./TfDialog.svelte";
 
   let {
@@ -261,15 +261,9 @@
   }
 
   // ---- The run in flight (#1384) ----
-  /** The watched run's latest count and clock, or `null` when none is drawn. */
-  let live = $state<{ items: number; elapsedMs: number } | null>(null);
-  /**
-   * Its latest walk reading. A message without one keeps it: the scheduler's
-   * own messages and the `writing` sample carry none.
-   */
-  let walk = $state<Walk | null>(null);
-  /** The bar's maximum: the walk's total, when there is one to draw. */
-  const walkOf = $derived(walk?.of !== undefined && walk.of > 0 ? walk.of : undefined);
+  /** The watched run's latest count, clock and walk, or `null` when none is drawn. */
+  let live = $state<{ items: number; elapsedMs: number; walk: Walk | null } | null>(null);
+  const walkOf = $derived(walkMax(live?.walk ?? null));
   /** Moves when a watched run ends, so the runs are read again. */
   let ended = $state(0);
 
@@ -290,13 +284,9 @@
     watched = mine;
     const hear = (message: SyncProgress) => {
       if (mine.stop.signal.aborted) return;
-      live = { items: message.items, elapsedMs: message.elapsed_ms };
-      if (message.walked !== undefined) {
-        walk = { walked: message.walked, of: message.of, unit: message.unit ?? "" };
-      }
+      live = { items: message.items, elapsedMs: message.elapsed_ms, walk: walkAfter(live?.walk ?? null, message) };
       if (message.phase === "finished" || message.phase === "failed") {
         live = null;
-        walk = null;
         ended += 1;
         if (watched === mine) unwatch();
       }
@@ -321,7 +311,6 @@
         // Idle again: whatever the channel still owes, the run is over.
         unwatch();
         live = null;
-        walk = null;
         return;
       }
       // Already watching it, or already asking: the second status of one run
@@ -431,9 +420,9 @@
     {#if walkOf === undefined}
       <progress></progress>
     {:else}
-      <progress max={walkOf} value={walk?.walked}></progress>
+      <progress max={walkOf} value={live.walk?.walked}></progress>
     {/if}
-    <p>{runProgressWords(live.items, live.elapsedMs, walk)}</p>
+    <p>{runProgressWords(live.items, live.elapsedMs, live.walk)}</p>
   </div>
 {/if}
 

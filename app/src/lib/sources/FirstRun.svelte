@@ -84,6 +84,7 @@
 -->
 <script lang="ts">
   import { Channel } from "@tauri-apps/api/core";
+  import { walkAfter, walkMax, type Walk } from "./walk";
 
   import { ipcErrorMessage } from "../ipc";
   import { completeFirstRun } from "../ipc/app";
@@ -141,15 +142,9 @@
    */
   let corpus = $state<number | null | undefined>(undefined);
   let elapsed = $state(0);
-  /**
-   * The latest walk reading, or `null` before the run reported one. A message
-   * without a reading keeps it: only the engine's progress decorator sends
-   * one, and the scheduler's own messages (the start, the ending) carry none,
-   * so a failure still shows how far the walk got.
-   */
-  let walk = $state<{ walked: number; of: number | undefined; unit: string } | null>(null);
-  /** The bar's maximum: the walk's total, when there is one to draw. */
-  const walkOf = $derived(walk?.of !== undefined && walk.of > 0 ? walk.of : undefined);
+  /** The latest walk reading (`walkAfter`), or `null` before the run reported one. */
+  let walk = $state<Walk | null>(null);
+  const walkOf = $derived(walkMax(walk));
   /** `120 of 300 repositories · `, or `7 pages · ` with no total, or nothing. */
   const walkReading = $derived(
     walk === null ? "" : `${walk.walked}${walk.of === undefined ? "" : ` of ${walk.of}`} ${walk.unit} · `,
@@ -297,9 +292,7 @@
         phase = message.phase;
         items = message.items;
         elapsed = message.elapsed_ms;
-        if (message.walked !== undefined) {
-          walk = { walked: message.walked, of: message.of, unit: message.unit ?? "" };
-        }
+        walk = walkAfter(walk, message);
         if (message.phase === "finished") {
           // The run is over, so the mirror is whatever it now is — including
           // when this wizard was handed a run that had already finished and

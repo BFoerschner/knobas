@@ -10,6 +10,7 @@ import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, Syn
 import { ago } from "../../shell/time";
 import { CI, CODE_HOST, MONITORING, TICKET_SYSTEM, WIKI } from "../roles.svelte";
 import { IDENTITY_FIELD } from "../../sources/new-source";
+import type { Walk } from "../../sources/walk";
 
 /** A section of Settings, in prototype-6's order (`STG`). */
 export type SettingsSection =
@@ -274,14 +275,6 @@ export function tookWords(ms: number): string {
   if (secs < 60) return `${secs} s`;
   const rest = secs % 60;
   return rest === 0 ? `${Math.floor(secs / 60)} min` : `${Math.floor(secs / 60)} min ${rest} s`;
-}
-
-/** The latest reading of a run's outer walk (#1379): *120 of 300 repositories*. */
-export interface Walk {
-  walked: number;
-  /** Absent when the adapter does not know the total. */
-  of: number | undefined;
-  unit: string;
 }
 
 /**
