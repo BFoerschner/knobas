@@ -227,6 +227,7 @@ fn invoke_managing(
             knobas_app::commands::sources::list_sync_runs,
             knobas_app::commands::sources::db_stats,
             knobas_app::commands::sources::reindex_fts,
+            knobas_app::commands::sources::watch_sync,
             shapes::without_progress,
             shapes::with_progress
         ])
@@ -376,6 +377,10 @@ fn every_sources_command_is_registered_and_reachable() {
         ),
         ("db_stats", serde_json::json!({})),
         ("reindex_fts", serde_json::json!({})),
+        (
+            "watch_sync",
+            serde_json::json!({ "sourceId": "mock", "progress": "__CHANNEL__:1" }),
+        ),
     ] {
         let rejection = invoke(cmd, args).expect_err("no SourcesState is managed");
         assert!(
@@ -1381,4 +1386,122 @@ fn a_command_through_the_real_pipeline_is_timed_by_name() {
         );
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+}
+
+// ---------------------------------------------------------------------------
+// 8. `watch_sync` joins the run in flight (#1384).
+// ---------------------------------------------------------------------------
+
+/// The source's settings page joins a run it did not start: `watch_sync`
+/// enrols the page's channel in the run in flight and answers its id, and the
+/// channel then hears the run out, ending included. On an idle source it
+/// answers nothing and the channel hears nothing.
+///
+/// The run is held in flight by the test itself: the source's advisory lock,
+/// taken on a connection of the test's own, is what every run of `mock` waits
+/// on before it reads a thing. So "in flight" is a fact here, not a race the
+/// fast mock adapter would win.
+///
+/// The command is called as the function `generate_handler!` dispatches to,
+/// with a `Channel` whose far end is this test: a mock webview has no
+/// JavaScript to hear a channel sent through the pipeline. That the name is
+/// registered and its arguments decode is
+/// [`every_sources_command_is_registered_and_reachable`]'s.
+#[tokio::test(flavor = "multi_thread")]
+async fn watch_sync_joins_the_run_in_flight_and_hears_its_ending() {
+    let db = knobas_db::test_util::scratch_database("watch_sync_joins").await;
+    let pool = db.pool(5).await.expect("a pool onto this test's own database");
+    knobas_app::sources::demo::demo_load_inner(&pool)
+        .await
+        .unwrap();
+
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("mock app");
+    app.manage(ready_over(pool.clone()));
+    let state = sources_state(&app, db, pool.clone());
+    let scheduler = state.scheduler.clone();
+    app.manage(state);
+
+    let heard: std::sync::Arc<std::sync::Mutex<Vec<SyncProgress>>> = Default::default();
+    let channel = {
+        let heard = std::sync::Arc::clone(&heard);
+        Channel::<SyncProgress>::new(move |body| {
+            heard.lock().unwrap().push(body.deserialize().expect("a SyncProgress"));
+            Ok(())
+        })
+    };
+    let ended = |heard: &[SyncProgress]| {
+        heard
+            .iter()
+            .any(|message| matches!(message.phase, SyncPhase::Finished | SyncPhase::Failed))
+    };
+
+    // Idle: nothing to join, nothing heard.
+    let idle = knobas_app::commands::sources::watch_sync(
+        app.handle().clone(),
+        "mock".to_owned(),
+        channel.clone(),
+    )
+    .await
+    .expect("watch_sync answers on an idle source");
+    assert_eq!(idle, None, "an idle source has no run to join");
+
+    // Hold the run before it reads anything.
+    let mut holder = pool.begin().await.unwrap();
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind("mock")
+        .execute(&mut *holder)
+        .await
+        .unwrap();
+    // A backfill, so the mock walks its whole fixture again: an incremental
+    // run after the demo load finds nothing past the cursor and reports no
+    // walk, which would leave the progress half of the claim unwitnessed.
+    let run_id = scheduler.backfill("mock").await.expect("a run starts");
+
+    let joined = knobas_app::commands::sources::watch_sync(
+        app.handle().clone(),
+        "mock".to_owned(),
+        channel.clone(),
+    )
+    .await
+    .expect("watch_sync answers while a run goes");
+    assert_eq!(joined, Some(run_id), "the page joins the run in flight");
+    assert!(heard.lock().unwrap().is_empty(), "the idle call enrolled the channel");
+
+    holder.rollback().await.unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !ended(&heard.lock().unwrap()) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no ending reached the channel: {:?}",
+            heard.lock().unwrap()
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+
+    let heard = heard.lock().unwrap().clone();
+    assert!(
+        heard.iter().all(|message| message.run_id == run_id),
+        "a message about another run reached the channel: {heard:?}"
+    );
+    assert!(
+        heard.iter().any(|message| message.phase == SyncPhase::Fetching && message.walked.is_some()),
+        "the run's own progress, the mock's walk, did not reach the channel: {heard:?}"
+    );
+    assert_eq!(
+        heard.last().map(|message| message.phase),
+        Some(SyncPhase::Finished),
+        "the ending is the last thing the channel hears: {heard:?}"
+    );
+
+    // Over: idle again, and the ending is not served a second time.
+    let after = knobas_app::commands::sources::watch_sync(
+        app.handle().clone(),
+        "mock".to_owned(),
+        channel,
+    )
+    .await
+    .expect("watch_sync answers after the run");
+    assert_eq!(after, None, "a run that has ended is not joined");
 }

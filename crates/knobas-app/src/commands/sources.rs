@@ -471,6 +471,34 @@ pub async fn sync_now_with_progress<R: tauri::Runtime>(
         .map_err(|error| to_ipc(&error.into(), Some(&source_id)))
 }
 
+/// Watch the source's run in flight on `progress`, whoever started it (#1384).
+///
+/// Per-item progress goes on a channel and nowhere else, and only a caller
+/// that started or joined a run has one: the source's settings page, opened
+/// on a scheduled run, had nothing but `sync:state`. This attaches the channel
+/// to the run in flight the way [`sync_now_with_progress`]'s second call joins
+/// one, and answers its run id; the channel then hears the run's remaining
+/// progress and its ending. On an idle source it answers `null`, starts
+/// nothing and sends nothing.
+///
+/// There is no detach: the channel is enrolled until the run ends, and a page
+/// that leaves stops listening to it. A closed channel never fails the run.
+///
+/// # Errors
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the engine is starting or
+/// stopping.
+#[tauri::command]
+pub async fn watch_sync<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    source_id: String,
+    progress: tauri::ipc::Channel<knobas_sync::SyncProgress>,
+) -> Result<Option<i64>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let sink = std::sync::Arc::new(crate::sources::progress::ChannelSink::new(progress))
+        as std::sync::Arc<dyn knobas_sync::ProgressSink>;
+    Ok(state.scheduler.watch(&source_id, sink).await)
+}
+
 /// **Backfill** one source: re-read it from the top and rewrite every mirrored
 /// item, ignoring the position it has stored.
 ///

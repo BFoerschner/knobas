@@ -1509,6 +1509,24 @@ impl Scheduler {
             .map(Triggered::run_id)
     }
 
+    /// Enrol `progress` in the source's run in flight, and answer that run's
+    /// id; `None`, enrolling nobody, when no run is in flight (#1384).
+    ///
+    /// The same join [`trigger`](Self::trigger) makes for a second caller,
+    /// without the trigger: a page that opens on a source mid-run asks to
+    /// watch, not for work, so an idle source stays idle. Under the `runs`
+    /// lock and through [`Watchers::attach`], so the sink either hears the
+    /// run's remaining progress and its ending or is told there is none: a run
+    /// that ended a microsecond earlier answers `None` and sends nothing. The
+    /// first-sync claim is left alone; watching is not asking about the first
+    /// sync.
+    pub async fn watch(&self, source_id: &str, progress: Arc<dyn ProgressSink>) -> Option<i64> {
+        let claims = self.inner.claims.lock().await;
+        let entry = claims.runs.get(source_id)?;
+        (entry.watchers.attach(Some(progress)) == Attach::Joined)
+            .then(|| entry.watchers.run_id())
+    }
+
     /// Trigger every enabled source that does not need a human, id order.
     ///
     /// # Errors
