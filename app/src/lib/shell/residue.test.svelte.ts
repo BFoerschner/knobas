@@ -498,6 +498,7 @@ function settingsPorts() {
     setSourceSecret: () => new Promise<never>(() => {}),
     testSource: () => new Promise<never>(() => {}),
     syncNow: () => deferred(1),
+    watchSync: () => deferred(null),
     syncAll: () => deferred([]),
     addSource: () => new Promise<never>(() => {}),
     installAdapter: () => new Promise<never>(() => {}),

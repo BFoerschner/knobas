@@ -225,6 +225,21 @@ export function syncNowWithProgress(
 }
 
 /**
+ * Watch the source's run in flight on `progress`, whoever started it (#1384).
+ * Resolves with that run's id, after which the channel hears the run's
+ * remaining progress and its ending; resolves with `null` on an idle source,
+ * which starts nothing and sends nothing.
+ *
+ * This is how a page that did not start a run draws it: per-item progress
+ * goes on a channel and nowhere else, so a page that opens on a scheduled run
+ * joins it here. There is no detach: the channel is enrolled until the run
+ * ends, and a page that leaves stops listening to it.
+ */
+export function watchSync(sourceId: string, progress: Channel<SyncProgress>): Promise<number | null> {
+  return invoke<number | null>("watch_sync", { sourceId, progress });
+}
+
+/**
  * **Backfill** one source: re-read it from the top and rewrite every mirrored
  * item, ignoring the position it has stored. Same shape as {@link syncNow} —
  * the run id resolves immediately and the run is watched on

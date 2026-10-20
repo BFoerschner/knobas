@@ -607,6 +607,9 @@ pub fn run() {
             commands::sources::check_adapter_updates,
             commands::sources::update_adapter,
             commands::sources::uninstall_adapter,
+            // #1384's join of the run in flight for a source's settings page,
+            // appended at the foot: the list is append-only (§10.8).
+            commands::sources::watch_sync,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

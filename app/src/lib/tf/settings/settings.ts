@@ -10,6 +10,7 @@ import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, Syn
 import { ago } from "../../shell/time";
 import { CI, CODE_HOST, MONITORING, TICKET_SYSTEM, WIKI } from "../roles.svelte";
 import { IDENTITY_FIELD } from "../../sources/new-source";
+import type { Walk } from "../../sources/walk";
 
 /** A section of Settings, in prototype-6's order (`STG`). */
 export type SettingsSection =
@@ -274,6 +275,20 @@ export function tookWords(ms: number): string {
   if (secs < 60) return `${secs} s`;
   const rest = secs % 60;
   return rest === 0 ? `${Math.floor(secs / 60)} min` : `${Math.floor(secs / 60)} min ${rest} s`;
+}
+
+/**
+ * A watched run's line (#1384), the wizard's reading on a source's page:
+ * *120 of 300 repositories · 1,240 items · 83 s*, without the walk until the
+ * run reports one and without the total when the adapter has none.
+ */
+export function runProgressWords(items: number, elapsedMs: number, walk: Walk | null): string {
+  const parts = [`${items.toLocaleString("en-GB")} items`, `${Math.round(elapsedMs / 1000)} s`];
+  if (walk !== null) {
+    const of = walk.of === undefined ? "" : ` of ${walk.of.toLocaleString("en-GB")}`;
+    parts.unshift(`${walk.walked.toLocaleString("en-GB")}${of} ${walk.unit}`.trimEnd());
+  }
+  return parts.join(" · ");
 }
 
 /** Why a run happened, where it says more than *updated*. */

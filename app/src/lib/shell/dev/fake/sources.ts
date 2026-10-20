@@ -425,6 +425,9 @@ export function handlers(): Record<string, Handler> {
     db_stats: () => FIXTURE_DB_STATS,
     sync_now: () => 91,
     sync_now_with_progress: () => 91,
+    // No fixture source is running (`fakeStatus`), so there is no run to join
+    // and the channel hears nothing, as on an idle source (#1384).
+    watch_sync: () => null,
     sync_all: () => FIXTURE_SOURCES.map((_, index) => 91 + index),
     reindex_fts: () => null,
     delete_source: () => null,

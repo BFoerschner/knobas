@@ -55,6 +55,7 @@ const sourcePorts: SettingsPorts = {
   setSourceSecret: () => Promise.reject(new Error("unused")),
   testSource: () => Promise.reject(new Error("unused")),
   syncNow: () => Promise.resolve(0),
+  watchSync: () => Promise.resolve(null),
   syncAll: () => Promise.resolve([]),
   addSource: () => Promise.reject(new Error("unused")),
   installAdapter: () => Promise.reject(new Error("unused")),
