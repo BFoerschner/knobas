@@ -256,7 +256,8 @@ pub(crate) async fn execute(
     let builds_of = count(observed.len());
     let reports_builds = previous.is_some();
     for (done, b) in (0u64..).zip(observed.values()) {
-        XX            sink.walked(done, Some(builds_of), BUILDS).await;
+        if reports_builds {
+            sink.walked(done, Some(builds_of), BUILDS).await;
         }
         let in_scope = in_scope_build(cfg, tree.as_ref().unwrap_or(&no_tree), &b.rec);
         if StateFilter::Finished.matches(b.rec.state.as_deref()) {
@@ -285,7 +286,8 @@ pub(crate) async fn execute(
         }
         builds.push(map::build_item(source_id, base_url, &b.raw, &b.rec));
     }
-    XX        sink.walked(builds_of, Some(builds_of), BUILDS).await;
+    if reports_builds {
+        sink.walked(builds_of, Some(builds_of), BUILDS).await;
     }
 
     // 6. The configurations of the builds that moved. Fetched from the same
