@@ -8450,3 +8450,26 @@ taken afresh from `time.ts` at f9fc1bf1.
 - **Where the reading sits.** *Ruling:* the incremental readings go in the scope-and-map loop, not
   the emit loop, because the emit loop also pushes configurations the count does not cover.
   *Reversing:* move the calls.
+## #1380: a WASM adapter reports its walk, `knobas:adapter@1.3.0` (Opus implementer, 2026-10-20)
+
+- **Where the function goes.** *Fork:* a function on the existing `sink` interface, or an
+  interface of its own looked up as optional, as `downloads` and `query` were. *Ruling:* on `sink`,
+  as the spec and the ticket name it. *Reasoning:* `downloads` and `query` are exports, which the
+  host has to look up on the component; `walked` is an import the host provides. A 1.0.0 to 1.2.0
+  component's `sink` import names only `item`, and wasmtime links it against the 1.3.0 instance,
+  which provides more: `walk.rs` witnesses the 1.0.0 build installing and syncing.
+  *Reversing:* move the function to its own interface and bump the minor again.
+- **A reading the host cannot use.** *Ruling:* a call outside a sync, or after the sink refused
+  an item, is dropped without an error. *Reasoning:* the function cannot fail (it returns nothing,
+  as `Sink::walked` does), and after a refusal the run is over; reporting it would draw progress
+  on a failed run. *Reversing:* one `if` in `sink::Host::walked`.
+- **What the fixture counts.** *Fork:* its position in the whole corpus, or the items this run
+  hands. *Ruling:* the items this run hands, from 0, so a sync from cursor `"3"` reads 0 to 2 of 2
+  and one from `"5"` reads `0 of 0`. *Reasoning:* the bar shows this run's walk, as the mock's and
+  Gitea's do. *Reversing:* one offset in the fixture's `sync`.
+- **Where the reading is witnessed.** *Ruling:* the host's tests sync through
+  `knobas_sync::progress::Observed`, the engine's real decorator, which makes `knobas-sync` a
+  dev-dependency of `knobas-wasm-host`. *Reasoning:* the criterion is "arrives at the engine's
+  progress sink"; a recording `Sink` alone would stop one hop short. No cycle: `knobas-sync` does
+  not depend on the host. *Reversing:* drop the dev-dependency and assert on the recording sink.
+- **Reserved steps.** None in this ticket; the contract sign-off is the parent's (#1379's ruling).

@@ -42,3 +42,22 @@
   **Who reports today.** Gitea: `repositories`, of the selection `select_repos` made. The mock:
   `items`, of its fixture (the tombstone included when it is on). Every other adapter, and every
   WASM component, reports nothing until its own ticket.
+
+  **Amendment (#1380, 2026-10-20): the WIT minor, `knobas:adapter@1.3.0`.** Additive in
+  `crates/knobas-wasm-host/wit/adapter.wit`, per ADR-0028. The package moves from 1.2.0 to 1.3.0,
+  and the `sink` interface gains one function, `Sink::walked` with the same meaning:
+
+  ```wit
+  walked: func(done: u64, of: option<u64>, unit: string);
+  ```
+
+  It returns nothing and cannot fail a sync. The host hands each reading to the engine's sink in
+  order with the items; one called outside a sync, or after the sync's sink refused an item, is
+  dropped. `INTERFACE_VERSION` is 1.3.0, so the host hosts every 1.x up to 1.3.0 and install and
+  load still refuse a component or manifest above it (the refusal now reads "up to 1.3.0"). A
+  component built against 1.0.0 to 1.2.0 imports `sink` without `walked`, links against the 1.3.0
+  `sink` through wasmtime's semver-compatible lookup, and reports nothing. The fixture adapter's
+  1.3.0 build reports `items`, of the items the run hands, before each and once after the last;
+  its 1.0.0 build reports nothing. Witnessed by `knobas-wasm-host`'s `tests/it/walk.rs`, which
+  installs each build under a manifest and syncs it through the engine's progress decorator. No
+  migration, no event, no command, no IPC field, no new module in `commands/` or `ipc/`.
