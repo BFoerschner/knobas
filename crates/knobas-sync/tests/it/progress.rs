@@ -343,7 +343,10 @@ async fn a_walk_reading_reaches_the_progress_sink_on_the_item_throttle() {
         "5001 readings must not produce 5001 messages, got {}",
         reports.len()
     );
-    assert_eq!(reading(&reports[0]), (Some(0), Some(5_000), Some("repositories")));
+    assert_eq!(
+        reading(&reports[0]),
+        (Some(0), Some(5_000), Some("repositories"))
+    );
     let (last, fetching) = reports.split_last().expect("some progress");
     assert_eq!(last.phase, SyncPhase::Writing);
     let final_fetching = fetching.last().expect("a final fetching sample");
@@ -378,7 +381,11 @@ async fn the_mocks_walk_reaches_the_progress_sink_and_the_wrapped_sink() {
     let mut wrapped = Readings::default();
     observed.sync(None, &mut wrapped).await.unwrap();
 
-    let (done, of, _) = wrapped.0.last().cloned().expect("the wrapped sink heard the walk");
+    let (done, of, _) = wrapped
+        .0
+        .last()
+        .cloned()
+        .expect("the wrapped sink heard the walk");
     assert_eq!(Some(done), of);
     let reports = recorder.seen();
     assert_eq!(reading(&reports[0]), (Some(0), of, Some("items")));

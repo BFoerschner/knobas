@@ -2268,7 +2268,10 @@ async fn a_run_reports_its_walk_over_the_selected_repositories_even_when_it_push
     assert_eq!(idle.readings, vec![two(0), two(1), two(2)]);
 
     // The total is the selection, not the instance: the owner filter leaves one.
-    let filtered = support::source(fake.base_url(), serde_json::json!({ "owners": ["tidewater"] }));
+    let filtered = support::source(
+        fake.base_url(),
+        serde_json::json!({ "owners": ["tidewater"] }),
+    );
     let mut one = Walking::default();
     filtered.sync(None, &mut one).await.expect("filtered sync");
     let of_one = |done| (done, Some(1), "repositories".to_owned());

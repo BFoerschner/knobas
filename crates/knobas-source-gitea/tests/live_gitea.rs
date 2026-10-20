@@ -5608,7 +5608,9 @@ async fn a_run_reports_its_walk_over_the_real_repositories_even_when_unchanged()
 
     let env = env();
     let source = env.source(serde_json::json!({ "repos": env.quiet_repos() }));
-    let of_two: Vec<_> = (0..=2).map(|done| (done, Some(2), "repositories".to_owned())).collect();
+    let of_two: Vec<_> = (0..=2)
+        .map(|done| (done, Some(2), "repositories".to_owned()))
+        .collect();
 
     let mut first = Walking::default();
     let cursor = source.sync(None, &mut first).await.expect("full sync");

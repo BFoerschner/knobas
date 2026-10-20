@@ -1074,8 +1074,13 @@ async fn a_full_sync_reports_its_walk_over_the_fixture_items() {
 
     let n = u64::try_from(corpus_size(knobas_source_mock::fixture())).expect("fits");
     let mut sink = Walking::default();
-    MockSource::new().sync(None, &mut sink).await.expect("full sync");
-    let expected: Vec<_> = (0..=n).map(|done| (done, Some(n), "items".to_owned())).collect();
+    MockSource::new()
+        .sync(None, &mut sink)
+        .await
+        .expect("full sync");
+    let expected: Vec<_> = (0..=n)
+        .map(|done| (done, Some(n), "items".to_owned()))
+        .collect();
     assert_eq!(sink.readings, expected);
     assert_eq!(u64::try_from(sink.items).expect("fits"), n);
 }
