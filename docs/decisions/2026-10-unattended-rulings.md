@@ -8551,3 +8551,21 @@ taken afresh from `time.ts` at f9fc1bf1.
   either way, and two loops could drift. *Reversing:* split the loop again.
 - **Merge-manager: the copied `Walking` test sink.** *Ruling:* kept, as #1379 ruled; the refactor
   to one shared sink is #1391 (`backlog`). *Reversing:* none.
+## #1389: Confluence's positions sweep reports its walk (Opus implementer, 2026-10-20)
+
+- **How the sweep reads without resetting the bar.** *Fork:* the engine keeps only the latest
+  `Sink::walked` reading and the wizard draws `walked`/`of`/`unit` as given (`Counting` in
+  `crates/knobas-sync/src/progress.rs`, `FirstRun.svelte`), so any reading the sweep gives is
+  replaced by the walk's first. A sweep counting its own `pages` to N, then the walk starting
+  again at "0 of k pages", empties a full bar. A distinct unit ("page places") does the same and
+  also ends an idle run on the window's small count. *Ruling:* one walk of `pages`. The sweep
+  reports a reading before each row, over the sweep result's `totalSize`. The page walk counts on
+  from the rows swept and adds them to its own total: "s + w of s + N". The count only moves
+  forward and the unit stays the same. When the walk starts, the total grows by the window's size,
+  so the bar dips by k/(s+k), which is small next to the sweep. *Reasoning:* this is the only
+  shape that keeps one bar moving forward without touching `Sink`, the engine, the wizard or the
+  §10.8 entry. Both passes read pages, so "pages" is still true, although a page in the window
+  counts twice. An idle run now ends at "s + k of s + k pages" instead of "k of k". The mention
+  walk and the re-read of moved pages still report nothing. This carries out the reversal the
+  #1381 merge-manager named ("a reading in `positions_sweep`"). *Reversing:* drop the sweep's reading
+  and the `swept_rows` offset in `SyncRun::run`; one function each.
