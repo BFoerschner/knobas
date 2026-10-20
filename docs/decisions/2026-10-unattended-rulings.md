@@ -8532,3 +8532,22 @@ taken afresh from `time.ts` at f9fc1bf1.
   200 results a request with a light expand, about 30 requests for 6,000 pages. Giving it its own
   reading would mean a second `pages` count that resets the bar. *Reversing:* a reading in
   `positions_sweep`.
+
+## #1383 — Uptime Kuma reports its walk
+
+- **Which session the test fakes.** *Fork:* the ticket says "fake socket session", but `Source::sync` reads
+  one `GET /metrics`; the socket session carries writes only. *Ruling:* the test runs against the
+  existing wiremock `/metrics` fake in the Kuma crate's `it` binary. *Reasoning:* the ticket's
+  wording misnames the read path; its intent (N is the monitor list the run read) is met, and
+  there is no socket read to fake. No follow-up: nothing in code or docs is left to change once
+  the ticket closes. *Reversing:* none, the reading sits in `sync`.
+- **Idle run.** *Fork:* an unchanged document emits nothing; report the walk or stay silent.
+  *Ruling:* it reports 0 to N `monitors`, then returns the cursor byte for byte. Tombstones are
+  not counted. *Reasoning:* the ticket's second criterion asks for exactly this, and a tombstone is
+  a monitor gone from the list, not one of its N. *Reversing:* gate the walk on `!unchanged`.
+- **Merge-manager: one walk for both paths.** *Fork:* the idle path reported 0..N in a loop of its
+  own. *Ruling:* one loop reports the walk and gates only the emission on an unchanged cursor; the
+  test now also pins each reading arriving before its monitor. *Reasoning:* the walk is the same
+  either way, and two loops could drift. *Reversing:* split the loop again.
+- **Merge-manager: the copied `Walking` test sink.** *Ruling:* kept, as #1379 ruled; the refactor
+  to one shared sink is #1391 (`backlog`). *Reversing:* none.

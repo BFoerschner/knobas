@@ -360,3 +360,54 @@ async fn fills_every_role_it_claims() {
     let fake = Fake::start().await;
     knobas_source::contract::fills_its_roles(&*adapter(fake.base_url(), KEY)).await;
 }
+
+/// Keeps the items and every walk reading, in the order they came (#1383),
+/// and how many readings had arrived when each item did.
+#[derive(Default)]
+struct Walking {
+    items: Vec<knobas_source::SyncItem>,
+    readings: Vec<(u64, Option<u64>, String)>,
+    readings_before_item: Vec<usize>,
+}
+
+#[async_trait::async_trait]
+impl knobas_source::Sink for Walking {
+    async fn item(
+        &mut self,
+        item: knobas_source::SyncItem,
+    ) -> Result<(), knobas_source::SourceError> {
+        self.readings_before_item.push(self.readings.len());
+        self.items.push(item);
+        Ok(())
+    }
+
+    async fn walked(&mut self, done: u64, of: Option<u64>, unit: &str) {
+        self.readings.push((done, of, unit.to_owned()));
+    }
+}
+
+/// A run over N monitors reports 0 to N in `monitors`, whether it emits the
+/// roster or, on an unchanged document, nothing at all (#1378, #1383).
+#[tokio::test]
+async fn a_run_reports_its_walk_over_the_monitors_even_when_it_emits_nothing() {
+    let fake = Fake::start().await;
+    let source = adapter(fake.base_url(), KEY);
+    let expected: Vec<_> = (0..=6)
+        .map(|d| (d, Some(6), "monitors".to_owned()))
+        .collect();
+
+    let mut first = Walking::default();
+    let cursor = source.sync(None, &mut first).await.unwrap();
+    assert_eq!(first.items.len(), 6);
+    assert_eq!(first.readings, expected);
+    assert_eq!(
+        first.readings_before_item,
+        [1, 2, 3, 4, 5, 6],
+        "each monitor's reading arrives before the monitor"
+    );
+
+    let mut idle = Walking::default();
+    source.sync(Some(cursor), &mut idle).await.unwrap();
+    assert!(idle.items.is_empty(), "an unchanged document emits nothing");
+    assert_eq!(idle.readings, expected);
+}
