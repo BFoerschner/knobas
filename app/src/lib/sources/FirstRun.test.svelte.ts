@@ -265,6 +265,33 @@ test("progress from the channel is rendered per phase and item count", async () 
   expect(button("Retry")).toBeUndefined();
 });
 
+test("a walk reading draws a determinate bar and names its unit (#1379)", async () => {
+  render({ source: summary() });
+  button("Next")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  button("Start the first sync")!.click();
+  await settle();
+  const bar = () => target.querySelector<HTMLProgressElement>(".progress progress")!;
+
+  // No reading yet: indeterminate, as for an adapter that never reports one.
+  progress({ phase: "fetching", items: 40, elapsed_ms: 900 });
+  expect(bar().hasAttribute("value")).toBe(false);
+  expect(text()).not.toMatch(/ of /);
+
+  // An unchanged run: items stay at zero and the walk still moves the bar.
+  progress({ phase: "fetching", items: 0, elapsed_ms: 8300, walked: 120, of: 300, unit: "repositories" });
+  expect(bar().max).toBe(300);
+  expect(bar().value).toBe(120);
+  expect(text()).toContain("120 of 300 repositories · 0 items · 8.3 s");
+
+  // A walk with no known total keeps the bar indeterminate but still reads.
+  progress({ phase: "fetching", items: 3, elapsed_ms: 9000, walked: 7, unit: "pages" });
+  expect(bar().hasAttribute("value")).toBe(false);
+  expect(text()).toContain("7 pages · 3 items");
+});
+
 test("a real source's finished run lands on the DONE step (#156)", async () => {
   // `stepIndex = 3` used to be assigned in exactly one place, `loadDemo`. A real
   // source finished at step 2 and was offered a bare *Finish*, so the sentence

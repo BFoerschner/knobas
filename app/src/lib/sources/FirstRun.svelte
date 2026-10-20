@@ -73,8 +73,14 @@
   A native `<progress>`, and no `style="width: …"`. `style-src 'self'` drops an
   inline style attribute in a bundle and honours it under `just dev`, so a
   computed bar would work all through development and be flat in the shipped
-  app. There is no total until a run ends, so the element is indeterminate
-  while fetching and the item counter carries the news.
+  app. Items have no total until a run ends, so the bar never draws them.
+
+  It draws the run's **walk** instead (#1379): an adapter that reports how many
+  units of its outer walk are done, and of how many, gets `<progress max={of}
+  value={walked}>` and a reading that names the unit — *120 of 300
+  repositories · 0 items · 8.3 s*. That is what moves while an unchanged run
+  pushes nothing, the case a customer read as stuck (#1378). An adapter that
+  reports no total, or no walk at all, keeps the indeterminate bar.
 -->
 <script lang="ts">
   import { Channel } from "@tauri-apps/api/core";
@@ -135,6 +141,19 @@
    */
   let corpus = $state<number | null | undefined>(undefined);
   let elapsed = $state(0);
+  /**
+   * The latest walk reading, or `null` before the run reported one. A message
+   * without a reading keeps it: only the engine's progress decorator sends
+   * one, and the scheduler's own messages (the start, the ending) carry none,
+   * so a failure still shows how far the walk got.
+   */
+  let walk = $state<{ walked: number; of: number | undefined; unit: string } | null>(null);
+  /** The bar's maximum: the walk's total, when there is one to draw. */
+  const walkOf = $derived(walk?.of !== undefined && walk.of > 0 ? walk.of : undefined);
+  /** `120 of 300 repositories · `, or `7 pages · ` with no total, or nothing. */
+  const walkReading = $derived(
+    walk === null ? "" : `${walk.walked}${walk.of === undefined ? "" : ` of ${walk.of}`} ${walk.unit} · `,
+  );
   let failure = $state<string | null>(null);
   let starting = $state(false);
   let finishing = $state(false);
@@ -264,6 +283,7 @@
     starting = true;
     phase = "started";
     items = 0;
+    walk = null;
     corpus = undefined;
     failure = null;
 
@@ -277,6 +297,9 @@
         phase = message.phase;
         items = message.items;
         elapsed = message.elapsed_ms;
+        if (message.walked !== undefined) {
+          walk = { walked: message.walked, of: message.of, unit: message.unit ?? "" };
+        }
         if (message.phase === "finished") {
           // The run is over, so the mirror is whatever it now is — including
           // when this wizard was handed a run that had already finished and
@@ -446,9 +469,9 @@
         {:else}
           <div class="progress">
             <!--
-              Indeterminate while it runs: there is no total until the run ends
-              (`items` grows and nothing knows where it stops), and a bar that
-              invented one would be a lie that moves.
+              Indeterminate while it runs unless the run reports a walk with a
+              total (#1379): `items` grows and nothing knows where it stops,
+              and a bar that invented a total would be a lie that moves.
 
               …and indeterminate is now the only thing it is (#156). `phase` and
               `stepIndex` are assigned in the same channel callback, so step 2
@@ -457,10 +480,19 @@
               as `itemsReading` above: it is the same one question about the
               same surface, and it is Björn's.
             -->
-            <progress max={finished ? 1 : undefined} value={finished ? 1 : undefined}></progress>
+            <!--
+              Two elements rather than one with an `undefined` value: a
+              `<progress>` that was once given a value stays determinate when
+              the value is taken away again.
+            -->
+            {#if finished || walkOf === undefined}
+              <progress max={finished ? 1 : undefined} value={finished ? 1 : undefined}></progress>
+            {:else}
+              <progress max={walkOf} value={walk?.walked}></progress>
+            {/if}
             <p class="reading">
               <b>{failed ? "failed" : (phase ?? "starting")}</b>
-              · {itemsReading} · {(elapsed / 1000).toFixed(1)} s
+              · {walkReading}{itemsReading} · {(elapsed / 1000).toFixed(1)} s
             </p>
           </div>
 
