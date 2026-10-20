@@ -8499,7 +8499,7 @@ taken afresh from `time.ts` at f9fc1bf1.
   is witnessed for 1.0.0 and inferred for 1.1.0 and 1.2.0, whose `sink` is the same as 1.0.0's.
   *Reasoning:* the entry claimed 1.0.0 to 1.2.0 without saying which one a test holds.
   *Reversing:* the sentence.
----
+
 ## #1381: Jira and Confluence report their walk (Sonnet implementer, Opus merge-manager, 2026-10-20)
 
 - **Where the Confluence reading is pinned.** *Fork:* the ticket asks for a test "in the
