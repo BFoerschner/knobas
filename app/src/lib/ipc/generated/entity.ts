@@ -1857,7 +1857,19 @@ export type LinkRow = { id: string, from_id: string, to_id: string,
  * curated list and the inverse-label lookup on this spelling; capitalize
  * for display from the whole string.
  */
-relation: string, origin: "manual" | "suggested" | "imported" | "source" | "implied", 
+relation: string, 
+/**
+ * Where the link came from:
+ *
+ * - `manual`: Drawn by the user.
+ * - `suggested`: Proposed by knobas and confirmed by the user.
+ * - `imported`: Restored from an export.
+ * - `source`: Mirrored from a relation the source system already states.
+ * - `implied`: Drawn by knobas as a consequence of what the user wrote: a
+ *   note's `[[ref]]` links are the population (`crate::note`'s
+ *   `reconcile_refs`, which owns every row of this origin).
+ */
+origin: "manual" | "suggested" | "imported" | "source" | "implied", 
 /**
  * Why the link exists, in the user's own words -- `None` unless one was
  * given.
