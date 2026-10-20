@@ -8609,3 +8609,22 @@ taken afresh from `time.ts` at f9fc1bf1.
   bridge sends nothing on a channel, so `just shot` cannot draw the page mid-run. The look is
   handed to the milestone review. *Reversing:* a running fixture source plus channel delivery in
   `fake-tauri.ts`.
+
+### #1384: merge-manager on Opus, 2026-10-20
+
+- **Reserved for Björn, the §10.8 sign-off: the implementer's ruling confirmed.** *Reasoning:* the
+  deep pass found the entry true to the diff line by line: the signature, the append at the foot of
+  the handler list, `Scheduler::watch` under the claims lock through `Watchers::attach`, `null` for
+  an idle or unknown source, the first-sync claim untouched, `not_ready` as the only error, no
+  generated type, the fake's `null`. *Reversing:* as the implementer's ruling.
+- **No detach command: confirmed.** *Reasoning:* the enrolment ends with the run, and a second
+  command would freeze a second surface for nothing a person sees. *Reversing:* as above.
+- **A watch whose answer comes back after the status named a new run asks again.** *Fork:* leave
+  the effect's skip ("already asking") as it was, or re-check the status when the answer lands.
+  *Ruling:* re-check. A local *Sync now* marks the source running with no id and the page asks at
+  once; if `watch_sync` reaches the scheduler before the trigger it answers `null`, and when the
+  `sync:state` carrying the id arrives before that answer, the effect skipped it and nothing
+  attached for the whole run. Now the page asks again when the status names a run the ask did not
+  know, and only then, so a status lagging an ended run cannot loop. Witnessed by "a watch that
+  finds nothing while the run's id arrives asks again for that run (#1384)", red before the fix.
+  *Reversing:* the re-check in `watch()` in `TfSourcePage.svelte`.

@@ -1113,3 +1113,51 @@ test("a run that starts while the page is open is watched, and leaving the page 
   expect(runReading()).toBe("2 of 4 projects · 5 items · 2 s");
   expect(stops[1]?.aborted).toBe(false);
 });
+
+test("a watch that finds nothing while the run's id arrives asks again for that run (#1384)", async () => {
+  // A local *Sync now* marks the source running with no id; the page asks
+  // before the trigger lands, and `sync:state` with the id arrives before the
+  // empty answer does. The page must ask again for the run the event named.
+  let syncState: ((event: { payload: unknown }) => void) | null = null;
+  const answers: ((run: number | null) => void)[] = [];
+  const watchSync = vi.fn(
+    () =>
+      new Promise<number | null>((resolve) => {
+        answers.push(resolve);
+      }),
+  );
+  const p = ports({
+    watchSync,
+    listen: vi.fn((event: string, handler: (event: { payload: unknown }) => void) => {
+      if (event === "sync:state") syncState = handler;
+      return Promise.resolve(() => {});
+    }),
+  });
+  view = mount(TfSettings, {
+    target,
+    props: {
+      rest: ["source", "jira"],
+      job: null,
+      ready: true,
+      ports: p,
+      health: createHealthStub(),
+      layers: createLayers(),
+      now: () => NOW,
+    },
+  });
+  await settle();
+
+  syncState!({ payload: { ...runningStatus(9), run_id: null } });
+  await settle();
+  expect(watchSync).toHaveBeenCalledTimes(1);
+  syncState!({ payload: runningStatus(9) });
+  await settle();
+  expect(watchSync, "the event's status attached a second time while the first ask was out").toHaveBeenCalledTimes(1);
+
+  answers[0]!(null);
+  await settle();
+  expect(watchSync, "run 9 is going and nobody watches it").toHaveBeenCalledTimes(2);
+  answers[1]!(9);
+  await settle();
+  expect(watchSync).toHaveBeenCalledTimes(2);
+});

@@ -280,6 +280,8 @@
 
   async function watch() {
     unwatch();
+    /** The run the status named when this ask went out. */
+    const asked = runningId;
     const mine = { run: null as number | null, stop: new AbortController() };
     watched = mine;
     const hear = (message: SyncProgress) => {
@@ -298,8 +300,19 @@
       // cannot watch is a run it draws as before.
       mine.run = null;
     }
+    if (watched !== mine) return;
+    // The status named another run while the ask was out (a local *Sync now*
+    // asks before its trigger lands, and the event with the id can beat the
+    // empty answer): the effect skipped it, so ask again for that run. Only
+    // for a run this ask did not know, so a status that lags an ended run
+    // does not loop.
+    const now = runningId;
+    if (typeof now === "number" && now !== asked && now !== mine.run) {
+      void watch();
+      return;
+    }
     // Nothing in flight: let the next `sync:state` attach afresh.
-    if (mine.run === null && watched === mine) unwatch();
+    if (mine.run === null) unwatch();
   }
 
   /** The run `sync:state` says is going: its id, `null` before one is known, `undefined` when idle. */
