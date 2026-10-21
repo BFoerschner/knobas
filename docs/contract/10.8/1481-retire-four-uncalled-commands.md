@@ -3,6 +3,8 @@
   `create_context`, with the `CheckoutCommand` DTO.** No frontend file outside the dev fake, the
   generated mirror and tests called any of them. A retirement, not an addition: nothing is added
   to either barrel, and no file is added to or removed from `commands/` or `app/src/lib/ipc/`.
+  The handler list is append-only (§10.8's frozen list); its four deleted lines are the exception
+  this entry ratifies.
 
   **What it supersedes.** The entry files are not edited; these parts of them no longer hold:
 
@@ -41,5 +43,7 @@
   profile}.rs` unchanged. No other uncalled command is removed: `detect_suggestions` is #1485's.
 
   Pinned by `fake-tauri.test.ts`'s census (every command the fake answers is one the barrel
-  invokes, and the reverse), `ipc_mirror` (the generated barrel is current), and `checkout_ipc.rs`,
-  whose opening tests now write the list with `set_applications` where they used #501's write.
+  invokes, and every barrel command is answered or on its `UNANSWERED` record), `ipc_mirror` (the
+  generated barrel is current), and `checkout_ipc.rs`, whose opening tests now write the list
+  with `set_applications` where they used #501's write. The rulings are in
+  `docs/decisions/2026-10-unattended-rulings.md` under `## #1481`.

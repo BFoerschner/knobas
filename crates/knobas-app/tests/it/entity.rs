@@ -3642,9 +3642,7 @@ async fn a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one(
 #[tokio::test]
 async fn a_born_link_survives_the_notes_first_autosave() {
     let pool = seeded().await;
-    use knobas_app::commands::entity::{
-        NoteLinkInput, create_note_inner, save_note_inner,
-    };
+    use knobas_app::commands::entity::{NoteLinkInput, create_note_inner, save_note_inner};
 
     let ctx = knobas_core::context::create_adhoc(&pool, &format!("Capture {}", unique()))
         .await

@@ -2763,8 +2763,9 @@ async fn a_note_created_and_deleted_inside_the_interval_is_no_candidate_at_all()
 /// An ad-hoc context's birth wrote `created` on its own `ctx:<uuid>`
 /// (`create_context`, retired by #1481; the log keeps the lines it wrote), and
 /// it has no second reader the way a note does: drop it and a draft loses the
-/// only signal it carries for a context the reader made while the clock ran. So it is still a candidate, from the activity
-/// read, with the bullet it has always had.
+/// only signal it carries for a context the reader made while the clock ran.
+/// So it is still a candidate, from the activity read, with the bullet it has
+/// always had.
 ///
 /// That bullet says the context's uuid, which is the shape #409 dislikes and
 /// which this ticket did **not** set out to fix -- it is pinned here as what

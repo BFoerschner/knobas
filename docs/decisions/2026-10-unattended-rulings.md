@@ -10669,7 +10669,8 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 
 - **Sign-off on the §10.8 entry** (`docs/contract/10.8/1481-retire-four-uncalled-commands.md`).
   *Ruling:* signed off. The entry adds nothing to the frozen surface and only removes from it.
-  Every removed name had no caller, which the census test and the barrel grep show. The entries it
+  Every removed name had no caller outside the fake, the mirror and tests (the ticket's grep, run
+  again on this tree), and the census holds the fake and the barrel to each other. The entries it
   supersedes (#47, #499, #501, #844–846) are named and left unedited, per §10.8's single-writer
   rule. *Reasoning:* Björn delegated the pick at triage, and the one thing a retirement can break is
   a caller, which the census rules out. *Reversing:* medium, revert the PR.
