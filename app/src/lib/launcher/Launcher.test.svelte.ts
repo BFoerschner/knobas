@@ -539,6 +539,64 @@ test("the board strip reads the live health, not the copy the board arrived with
 });
 
 /**
+ * The recent rows read the same live health as the strip above them (#1420).
+ *
+ * They used to be handed `home.sources`, the copy the board arrived with, so a
+ * 401 the live store had already cleared left the strip and stayed on a recent
+ * row as *sign in again* until the next opening. The board's copy here still
+ * remembers the 401 and the live store says the source is fine; both the strip
+ * and the row must read the store. The `synced` line is the positive control:
+ * a row that drew no provenance at all would pass the negative half.
+ */
+test("the recent rows read the live health, as the strip above them does", async () => {
+  open({
+    sources: [
+      {
+        source_id: "gitea",
+        state: "ok",
+        checked_at: "2026-08-25T12:00:00Z",
+        detail: null,
+        secret_expires_at: null,
+      },
+    ],
+    ports: {
+      search: async () => response(),
+      launcherHome: async (): Promise<LauncherHome> => ({
+        ...HOME,
+        recent: [
+          {
+            entity_id: "gitea:build-7",
+            kind: "build",
+            source_id: "gitea",
+            title: "payments main #7",
+            updated_at: null,
+            synced_at: "2026-08-25T11:58:00Z",
+            path: null,
+            state: null,
+          },
+        ],
+        sources: [
+          {
+            source_id: "gitea",
+            state: "unauthorized",
+            checked_at: "2026-08-25T11:00:00Z",
+            detail: "401 from Gitea",
+            secret_expires_at: null,
+          },
+        ],
+      }),
+    },
+  });
+  await settle();
+
+  const strip = [...target.querySelectorAll(".strip .src")];
+  expect(strip.length, "the strip did not render at all").toBe(1);
+  expect(strip[0]!.className).not.toContain("fail");
+  const ages = [...target.querySelectorAll(".sy")].map((el) => el.textContent?.trim());
+  expect(ages).toEqual(["synced 2 min ago"]);
+});
+
+/**
  * The board's third section (spec §4: the empty box shows source health beside
  * the lists). Not selectable — a reading, not a destination — so nothing else
  * in this file would notice if it stopped being drawn.

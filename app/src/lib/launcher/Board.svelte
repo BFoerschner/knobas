@@ -53,7 +53,8 @@
      * strip are drawn from the live store, and two copies is two chances for
      * the strip and a result row's badge to say different things about the
      * same source — which is the divergence #27's review found and this PR
-     * claimed to have closed.
+     * claimed to have closed. The recent rows below the strip read it too
+     * (#1420); nothing on the board reads `home.sources`.
      */
     sources: CredentialHealth[];
     rows: LauncherRow[];
@@ -305,7 +306,7 @@
       syncedAt={item.synced_at}
       path={item.path}
       state={item.state}
-      sources={home.sources}
+      {sources}
       {now}
       id={optionId(index)}
       selected={index === selected}
