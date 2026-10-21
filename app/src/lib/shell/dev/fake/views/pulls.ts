@@ -207,9 +207,9 @@ function view142(): SourceView {
           type: "entities",
           title: "Checks",
           rows: [
-            check("Payout_IntegrationTests #1187", "failure", "err", "41 passed, 1 failed · 2 h ago", "mock:Payout_IntegrationTests#1187"),
-            check("Payout_Build #1188", "pending", "info", "step 3 of 5 · 6 min ago", "mock:Payout_Build#1188"),
-            check("Payout_Lint #904", "success", "ok", "7 min ago", "mock:Payout_Lint#904"),
+            check("Payout_IntegrationTests #1187", "failure", "err", "41 passed, 1 failed · 2 h ago", "teamcity:build:Payout_IntegrationTests-1187"),
+            check("Payout_Build #1188", "pending", "info", "step 3 of 5 · 6 min ago", "teamcity:build:Payout_Build-1188"),
+            check("Payout_Lint #904", "success", "ok", "7 min ago", "teamcity:build:Payout_Lint-904"),
           ],
         },
         { type: "text", text: DESCRIPTION_142, markdown: true },

@@ -227,7 +227,8 @@ export const CORPUS: {
   // The page shares enough of PAY-231's vocabulary to clear `similar_text`'s
   // floor of five stems, so the `similarity` proposal below is one the real
   // detector would make of this pair rather than a badge painted on for QA.
-  row("mock:ENG-SEPA", "page", "SEPA retry design", "2026-08-20T15:30:00Z", "priya", {
+  row("confluence:sepa", "page", "SEPA retry design", "2026-08-20T15:30:00Z", "priya", {
+    source: "confluence",
     space: "ENG",
     id: "ENG-SEPA",
     section: "Payments",

@@ -587,3 +587,38 @@ test("boot: ?fake-first-run holds app_status on the wizard until complete_first_
   expect(h["app_status"]!({}) as Status).toMatchObject({ first_run: false, source_count: 1 });
   expect((demoHandlers() as Calls)["app_status"]!({}) as Status).toMatchObject({ first_run: false, source_count: 1 });
 });
+
+// -- cross-references between modules ---------------------------------------
+
+/** Every run the Builds fixture answers, across its pipelines. */
+function fixtureRunIds(h: Calls): Set<string> {
+  const pipelines = h["pipelines"]!({}) as { entity_id: string }[];
+  return new Set(pipelines.flatMap((p) => (h["pipeline_runs"]!({ pipelineId: p.entity_id }) as { entity_id: string }[]).map((r) => r.entity_id)));
+}
+
+test("every inbox row opens an item the fixture holds: its page through docs_page, its build among the pipelines' runs", () => {
+  const h = demoHandlers() as Calls;
+  const items = (["stream", "snoozed"] as const).flatMap(
+    (shelf) => (h["inbox_items"]!({ shelf }) as { item: { entity_id: string | null; kind: string | null } }[]).map((entry) => entry.item),
+  );
+  const pages = items.filter((item) => item.kind === "page");
+  const builds = items.filter((item) => item.kind === "build");
+  expect(pages.length).toBeGreaterThan(0);
+  expect(builds.length).toBeGreaterThan(0);
+  for (const page of pages) expect(() => h["docs_page"]!({ entityId: page.entity_id }), `${page.entity_id} opens nothing`).not.toThrow();
+  const runs = fixtureRunIds(h);
+  for (const build of builds) expect(runs, `${build.entity_id} is no run of the Builds fixture`).toContain(build.entity_id);
+});
+
+test("everything PAY-231's job reaches opens in the fixture: its pages through docs_page, its builds among the pipelines' runs", () => {
+  const h = demoHandlers() as Calls;
+  const reach = JSON.stringify(h["job_reach"]!({ entityId: "mock:PAY-231" }));
+  const rows = [...reach.matchAll(/"entity_id":"([^"]+)","kind":"(page|build)"/g)].map((m) => ({ id: m[1]!, kind: m[2]! }));
+  expect(rows.some((row) => row.kind === "page")).toBe(true);
+  expect(rows.some((row) => row.kind === "build")).toBe(true);
+  const runs = fixtureRunIds(h);
+  for (const row of rows) {
+    if (row.kind === "page") expect(() => h["docs_page"]!({ entityId: row.id }), `${row.id} opens nothing`).not.toThrow();
+    else expect(runs, `${row.id} is no run of the Builds fixture`).toContain(row.id);
+  }
+});

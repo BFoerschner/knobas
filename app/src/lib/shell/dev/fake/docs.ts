@@ -250,6 +250,7 @@ interface FakePage {
 const NAMED: Record<string, string> = {
   "SEPA payout retry design": "confluence:sepa",
   "Manual review queue": "confluence:manual-review",
+  "PSP error codes": "confluence:psp-codes",
 };
 
 const PAGES: FakePage[] = [];
