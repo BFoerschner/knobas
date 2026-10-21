@@ -6,7 +6,7 @@
  * Instants are local, for `day.test.ts`'s reason.
  */
 import { flushSync, mount, tick, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AdHocBlock, Block, DayBlock, OpenStretch, RunningTimer, TimerTarget } from "../../ipc/time";
 import { toasts } from "../../shell/toasts.svelte";
@@ -82,6 +82,7 @@ function render(
     offers?: Record<number, AdHocBlock | null>;
     clock?: Date;
     stripWidth?: number;
+    refuseDelete?: boolean;
   } = {},
 ) {
   const offers = over.offers ?? OFFERS;
@@ -125,6 +126,7 @@ function render(
           return Promise.resolve(made);
         },
         deleteBlock: (id: number) => {
+          if (over.refuseDelete) return Promise.reject(new Error("no such block"));
           deletes.push(id);
           listed = listed.filter((candidate) => candidate.block.id !== id);
           return Promise.resolve();
@@ -284,11 +286,74 @@ test("Edit moves a block and Delete block removes it, and Esc closes the dialog 
   expect(sent.updates).toEqual([[3, at(9, 30), at(11, 50), { kind: "entity", entity_id: "jira:PAY-231" }]]);
   expect(sent.layers.open).toHaveLength(0);
 
-  button(row("unlogged"), "Edit").click();
-  flushSync();
-  button(target, "Delete block").click();
-  await settle();
-  expect(sent.deletes).toEqual([3]);
+});
+
+/**
+ * *Delete block* is held for the toast's life and only then sent (#1429, the
+ * #835 pattern), so *Undo* cancels a write that never happened and the block
+ * keeps its id, context and worklog mark.
+ */
+test("Delete block hides the block at once and sends the delete when the toast's Undo has had its time", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const sent = render();
+    await settle();
+    button(row("unlogged"), "Edit").click();
+    flushSync();
+    button(target, "Delete block").click();
+    await settle();
+    expect(sent.layers.open).toHaveLength(0);
+    expect(rows()).toEqual(["logged", "offered", "open", "label"]);
+    const toast = toasts.items.at(-1)!;
+    expect([toast.text, toast.action?.label]).toEqual(["Deleted the block", "Undo"]);
+    expect(sent.deletes).toEqual([]);
+    vi.advanceTimersByTime(6_500);
+    await settle();
+    expect(sent.deletes).toEqual([3]);
+    expect(rows()).toEqual(["logged", "offered", "open", "label"]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("Undo on the delete toast puts the block back and no delete is ever sent", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const sent = render();
+    await settle();
+    button(row("unlogged"), "Edit").click();
+    flushSync();
+    button(target, "Delete block").click();
+    await settle();
+    expect(rows()).not.toContain("unlogged");
+    toasts.items.at(-1)!.action!.run();
+    await settle();
+    expect(rows()).toEqual(["logged", "offered", "unlogged", "open", "label"]);
+    expect(target.querySelectorAll(".tf-tm-strip .tf-tm-manual")).toHaveLength(1);
+    vi.advanceTimersByTime(60_000);
+    await settle();
+    expect(sent.deletes).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a held delete the backend refuses brings the block back and says why", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    render({ refuseDelete: true });
+    await settle();
+    button(row("unlogged"), "Edit").click();
+    flushSync();
+    button(target, "Delete block").click();
+    await settle();
+    vi.advanceTimersByTime(6_500);
+    await settle();
+    expect(rows()).toContain("unlogged");
+    expect(toasts.items.at(-1)).toMatchObject({ text: "no such block", tone: "err" });
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("an open stretch is a dashed open row, and the open figure is the sum of the open rows", async () => {

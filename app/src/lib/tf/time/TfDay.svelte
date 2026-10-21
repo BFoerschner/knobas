@@ -165,6 +165,8 @@
       if (mine !== issued) return;
       loaded = answer;
       failure = null;
+      // A delete that has been sent is in this answer now, or refused and back.
+      held = held.filter((hold) => !hold.sent);
     } catch (cause) {
       if (mine !== issued) return;
       failure = ipcErrorMessage(cause);
@@ -174,6 +176,13 @@
   // The running timer's start is read too: a stop turns the running row into
   // a block, and the day has to read it back.
   const runningSince = $derived(timer.current?.started_at ?? null);
+
+  /**
+   * Blocks *Delete block* took and has not written yet (#1429): off the day at
+   * once, sent when the toast's *Undo* has had its time. `sent` once the write
+   * has landed, so the next read, which no longer has the block, lets it go.
+   */
+  let held = $state<{ id: number; sent: boolean }[]>([]);
   $effect(() => {
     revision;
     runningSince;
@@ -186,7 +195,7 @@
       ? []
       : dayRows({
           day: key,
-          blocks: ready.blocks,
+          blocks: ready.blocks.filter((entry) => !held.some((hold) => hold.id === entry.block.id)),
           offers: ready.offers,
           open: ready.open,
           running: timer.current,
@@ -338,6 +347,9 @@
     else await load(key);
   }
 
+  /** How long *Undo* is offered on *Delete block*, and so how long the delete waits: the toast's life. */
+  const UNDO_MS = 6500;
+
   const entity = (entityId: string): TimerTarget => ({ kind: "entity", entity_id: entityId });
 
   /** *Add to <ticket>* on an offered block, *Log to <ticket>* on a label block. */
@@ -422,11 +434,43 @@
     void write(() => io.dismissBlock(block.block.id), "Dismissed. knobas will not offer it again.");
   }
 
+  /**
+   * *Delete block* (#1429): the block leaves the day at once and the delete is
+   * held for the toast's life, then sent; *Undo* cancels a write that never
+   * happened, so the block keeps its id, its context and its worklog mark (the
+   * #835 pattern). The timer outlives the view, as the Proposed links view's
+   * do, so leaving the day does not lose the delete; closing the window inside
+   * those seconds does, and the block is simply there next time.
+   */
   function remove() {
     const current = dialog;
     if (current === null || current.mode !== "edit" || current.row.block === null) return;
     const id = current.row.block.block.id;
-    void write(() => io.deleteBlock(id), "Deleted the block");
+    dialog = null;
+    refusal = null;
+    held = [...held, { id, sent: false }];
+    const release = () => (held = held.filter((hold) => hold.id !== id));
+    const timer = setTimeout(async () => {
+      try {
+        await io.deleteBlock(id);
+        held = held.map((hold) => (hold.id === id ? { ...hold, sent: true } : hold));
+      } catch (error) {
+        release();
+        push({ text: ipcErrorMessage(error), tone: "err" });
+      }
+      await reread();
+    }, UNDO_MS);
+    push({
+      text: "Deleted the block",
+      ms: UNDO_MS,
+      action: {
+        label: "Undo",
+        run: () => {
+          clearTimeout(timer);
+          release();
+        },
+      },
+    });
   }
 
   function open(next: NonNullable<typeof dialog>) {
