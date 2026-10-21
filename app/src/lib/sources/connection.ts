@@ -49,6 +49,10 @@ export function connectionNote(report: ConnectionReport): string | null {
  * click filled, that clause reads "‹id› found and set". A note about a value
  * already in the field (or a saved source's, which nothing fills) is the
  * report's own.
+ *
+ * The match is the adapter's literal sentence: `epic_link_note` in
+ * `crates/knobas-source-jira/src/source.rs`, pinned there by its unit test. Reword
+ * one and the other, and the fake in `shell/dev/fake/sources.ts`, move together.
  */
 export function noteAfterFill(note: string | null, filled: Record<string, string>): string | null {
   if (note === null) return null;
