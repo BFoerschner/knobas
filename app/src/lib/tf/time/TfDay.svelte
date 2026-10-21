@@ -36,7 +36,17 @@
   import { clockReading, dayBounds, dayKey, dayLabel, shiftDay } from "../../time/day";
   import { atClock, clockOf, offsetMinutes } from "../../time/draft";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
-  import { dayFigures, dayRows, hm, offerRuns, place, stripWindow, type DayRow, type OfferRun } from "./day-view";
+  import {
+    dayFigures,
+    dayRows,
+    fitLabel,
+    hm,
+    offerRuns,
+    place,
+    stripWindow,
+    type DayRow,
+    type OfferRun,
+  } from "./day-view";
   import TfBlockDialog, { type BlockForm } from "./TfBlockDialog.svelte";
 
   interface DayPorts {
@@ -60,6 +70,8 @@
     ports,
     now = () => new Date(),
     layers = sharedLayers,
+    stripWidth,
+    measureLabel,
   }: {
     /** Whether the database answers yet: nothing is read before it does. */
     databaseReady?: boolean;
@@ -79,6 +91,10 @@
     ports?: Partial<DayPorts>;
     now?: () => Date;
     layers?: Layers;
+    /** How wide the strip is in pixels: what a caller says, or what the element measures. */
+    stripWidth?: () => number;
+    /** How wide a strip label draws, `plain` for a label target's sans face; the canvas by default. */
+    measureLabel?: (text: string, plain: boolean) => number;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -192,6 +208,60 @@
   const hours = $derived(Array.from({ length: frame.to - frame.from + 1 }, (_, index) => frame.from + index));
   const nowAt = $derived(key === today ? place(key, frame, clock.toISOString(), clock.toISOString()).left : null);
   const noRecord = $derived(ready !== null && ready.pastHorizon && ready.blocks.length === 0);
+
+  // ---- strip labels (#1429) ----
+
+  let stripEl = $state<SVGSVGElement | null>(null);
+  let measured = $state(0);
+  const stripPx = $derived(stripWidth === undefined ? measured : stripWidth());
+
+  /**
+   * Measure the strip as it changes size. A `ResizeObserver` where there is
+   * one, which the window has; jsdom has none, and a test says the width
+   * through `stripWidth`, so there it falls back on the window's resizes.
+   */
+  $effect(() => {
+    const element = stripEl;
+    if (element === null || stripWidth !== undefined) return;
+    const measure = () => {
+      measured = element.getBoundingClientRect().width;
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  });
+
+  let ink: CanvasRenderingContext2D | null | undefined;
+  /**
+   * A label's drawn width, in the face `time.css` gives a strip label: 600 at
+   * `--t-2xs`, mono for an entity's key and sans for a label. With no canvas
+   * nothing can be measured, and an unmeasured label is not drawn.
+   */
+  function drawnWidth(text: string, plain: boolean): number {
+    if (measureLabel !== undefined) return measureLabel(text, plain);
+    if (stripEl === null) return Infinity;
+    ink ??= document.createElement("canvas").getContext("2d");
+    if (ink === null) return Infinity;
+    const style = getComputedStyle(stripEl);
+    const face = style.getPropertyValue(plain ? "--sans" : "--mono").trim();
+    ink.font = `600 ${style.getPropertyValue("--t-2xs").trim()} ${face}`;
+    return ink.measureText(text).width;
+  }
+
+  /** Six pixels of padding at each end of a block, as `x="6"` starts the text. */
+  const LABEL_PAD = 12;
+  function stripLabel(row: DayRow, widthPct: number): string | null {
+    if (row.target === null) return null;
+    const room = (widthPct / 100) * stripPx - LABEL_PAD;
+    if (room <= 0) return null;
+    const plain = row.target.kind === "label";
+    return fitLabel(targetReading(row.target), room, (text) => drawnWidth(text, plain));
+  }
 
   let selected = $state<string | null>(null);
   function select(row: DayRow) {
@@ -405,7 +475,7 @@
     </p>
   {/if}
 
-  <svg class="tf-tm-strip" width="100%" height="84" role="group" aria-label="The day's blocks">
+  <svg class="tf-tm-strip" width="100%" height="84" role="group" aria-label="The day's blocks" bind:this={stripEl}>
     <defs>
       <pattern id="tf-tm-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
         <rect class="tf-tm-hatch" width="5" height="10" />
@@ -419,6 +489,7 @@
     {/each}
     {#each rows as row (row.key)}
       {@const at = place(key, frame, row.from, row.to)}
+      {@const label = stripLabel(row, at.width)}
       <svg
         class="tf-tm-b {STRIP_CLASS[row.state]} {selected === row.key ? 'tf-on' : ''}"
         x="{at.left}%"
@@ -437,11 +508,17 @@
           }
         }}
       >
-        <title>{span(row)}</title>
+        <title>{span(row)}{row.target ? `, ${targetReading(row.target)}` : ""}</title>
         <rect width="100%" height="100%" rx="4" />
-        <svg width="100%" height="100%" aria-hidden="true">
-          <text class={row.target?.kind === "label" ? "tf-tm-plain" : ""} x="6" y="50%" dominant-baseline="central">{row.target ? targetReading(row.target) : ""}</text>
-        </svg>
+        {#if label !== null}
+          <text
+            class={row.target?.kind === "label" ? "tf-tm-plain" : ""}
+            x="6"
+            y="50%"
+            dominant-baseline="central"
+            aria-hidden="true">{label}</text
+          >
+        {/if}
       </svg>
     {/each}
     {#if nowAt !== null}

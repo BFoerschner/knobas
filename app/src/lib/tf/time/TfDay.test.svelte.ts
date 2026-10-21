@@ -81,6 +81,7 @@ function render(
     job?: { key: string; entityId: string } | null;
     offers?: Record<number, AdHocBlock | null>;
     clock?: Date;
+    stripWidth?: number;
   } = {},
 ) {
   const offers = over.offers ?? OFFERS;
@@ -102,6 +103,10 @@ function render(
       ontimer: () => (stops += 1),
       onlog: (entityId: string, day: string) => logs.push([entityId, day]),
       now: () => over.clock ?? NOW,
+      // Six hundred pixels wide and seven a character, unless a test says otherwise:
+      // jsdom lays nothing out and measures no text.
+      stripWidth: () => over.stripWidth ?? 600,
+      measureLabel: (text: string) => text.length * 7,
       layers,
       ports: {
         dayBlocks: () => Promise.resolve({ blocks: listed, past_horizon: over.pastHorizon ?? false, open }),
@@ -221,6 +226,23 @@ test("after 18:00 the strip widens to hold now, and the now line is where the cl
   // 19:43 is 703 of 720 minutes into 08:00 to 20:00.
   expect(now.getAttribute("x")).toBe("97.64%");
   expect(squash(now.querySelector("title")?.textContent)).toBe("Now, 19:43");
+});
+
+test("a strip label that does not fit its block ends in an ellipsis, one with no room is dropped, and the title is whole (#1429)", async () => {
+  render();
+  await settle();
+  const strip = (cls: string) => target.querySelector(`.tf-tm-strip .${cls}`)!;
+  const label = (cls: string) => strip(cls).querySelector("text")?.textContent ?? null;
+  // 09:40 to 11:50 is 130 of 600 px, less the label's padding: PAY-231 fits whole.
+  expect(label("tf-tm-manual")).toBe("PAY-231");
+  // 13:10 to 13:58 is 48 px, 36 of them for text: five characters with the ellipsis.
+  expect(label("tf-tm-label")).toBe("Stan…");
+  expect(squash(strip("tf-tm-label").querySelector("title")?.textContent)).toBe("13:10 to 13:58, Standup and planning");
+  // 09:25 to 09:40 is 15 px: no room for a character and the ellipsis.
+  expect(strip("tf-tm-passive").querySelector("text")).toBeNull();
+  expect(squash(strip("tf-tm-passive").querySelector("title")?.textContent)).toBe("09:25 to 09:40, payments#139");
+  // No nested <svg> clips a label at the block's edge any more.
+  expect(target.querySelectorAll(".tf-tm-b svg")).toHaveLength(0);
 });
 
 test("Add to <ticket> gives an offered block to the ticket it is linked to", async () => {

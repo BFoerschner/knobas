@@ -291,6 +291,22 @@ export function place(
   return { left: round(left), width: round(pct(toIso) - left) };
 }
 
+/**
+ * A block's label as it fits `room` pixels (#1429): whole, or cut with "…" at
+ * the block's edge as prototype-6's `text-overflow: ellipsis` draws it, or
+ * `null` when not one character and the ellipsis fit. A cut that ends on a
+ * space drops the space. `measure` is the drawn width of a string.
+ */
+export function fitLabel(label: string, room: number, measure: (text: string) => number): string | null {
+  if (label === "") return null;
+  if (measure(label) <= room) return label;
+  for (let keep = label.length - 1; keep > 0; keep -= 1) {
+    const head = label.slice(0, keep).trimEnd();
+    if (head !== "" && measure(`${head}…`) <= room) return `${head}…`;
+  }
+  return null;
+}
+
 /** Percentages to two places, so an attribute does not carry float noise. */
 function round(value: number): number {
   return Math.round(value * 100) / 100;

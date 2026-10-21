@@ -9,7 +9,7 @@
 import { expect, test } from "vitest";
 
 import type { AdHocBlock, Block, DayBlock, RunningTimer } from "../../ipc/time";
-import { dayFigures, dayRows, hm, offerRuns, place, stripWindow, type DayInput, type DayRow } from "./day-view";
+import { dayFigures, dayRows, fitLabel, hm, offerRuns, place, stripWindow, type DayInput, type DayRow } from "./day-view";
 
 const DAY = "2026-08-22";
 
@@ -193,6 +193,21 @@ test("on today the window widens by whole hours to hold now, as it does for a la
   expect(stripWindow(DAY, late, clock(19, 43))).toEqual({ from: 8, to: 22 });
   // On any other day there is no now to hold.
   expect(stripWindow(DAY, none, null)).toEqual({ from: 8, to: 18 });
+});
+
+// #1429: a label that does not fit its block ends in "…", and one with no room for a
+// character and the ellipsis is dropped. Seven pixels a character, as a mono face draws.
+test("a strip label is whole when it fits, shortened with an ellipsis when not, and dropped below one character", () => {
+  const seven = (text: string) => text.length * 7;
+  expect(fitLabel("PAY-231", 49, seven)).toBe("PAY-231");
+  expect(fitLabel("PAY-231", 48, seven)).toBe("PAY-2…");
+  expect(fitLabel("Standup and planning", 70, seven)).toBe("Standup a…");
+  // A cut that lands after a space does not leave the space before the ellipsis.
+  expect(fitLabel("Standup and planning", 63, seven)).toBe("Standup…");
+  expect(fitLabel("PAY-231", 14, seven)).toBe("P…");
+  expect(fitLabel("PAY-231", 13, seven)).toBeNull();
+  expect(fitLabel("PAY-231", 0, seven)).toBeNull();
+  expect(fitLabel("", 100, seven)).toBeNull();
 });
 
 test("a row is placed by its share of the window, in percent", () => {
