@@ -208,6 +208,31 @@ test("Log sends the work for the reader's day and answers logged", async () => {
   expect(onlogged).toHaveBeenCalledWith(WORKLOG);
 });
 
+const ODD: Draft = { ...DRAFT, seconds: 163 };
+
+test("a 163 s draft reads Log 2m and sends 120 s, never the 163", async () => {
+  const { sent, outcomes } = render({ draft: ODD });
+  button("Log 2m to PAY-231")!.click();
+  await vi.waitFor(() => expect(outcomes).toEqual(["logged"]));
+  expect(sent[0]!.seconds).toBe(120);
+});
+
+test("a 163 s draft whose minutes are edited to 5 sends 300 s", async () => {
+  const { sent, outcomes } = render({ draft: ODD });
+  const field = target.querySelector<HTMLInputElement>('input[aria-label="Minutes"]')!;
+  field.value = "5";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Log 5m to PAY-231")!.click();
+  await vi.waitFor(() => expect(outcomes).toEqual(["logged"]));
+  expect(sent[0]!.seconds).toBe(300);
+});
+
+test("a draft under a minute floors to 0m and cannot be sent", () => {
+  render({ draft: { ...DRAFT, seconds: 59 } });
+  expect(button("Log 0m to PAY-231")!.disabled).toBe(true);
+});
+
 test("Log stops the clock before it sends, so the running stretch is a block log_work can find", async () => {
   const { order, outcomes } = render();
   button("Log 2h 44m to PAY-231")!.click();

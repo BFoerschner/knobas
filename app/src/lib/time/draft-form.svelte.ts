@@ -39,7 +39,7 @@ export class DraftForm {
     this.draft = draft;
     this.ticked = new Set(draft.candidates.map((c) => c.id));
     this.typed = draft.comment;
-    this.minutes = Math.round(draft.seconds / 60);
+    this.minutes = Math.max(0, Math.floor(draft.seconds / 60));
     this.began = clockOf(draft.started_at);
   }
 
@@ -62,11 +62,13 @@ export class DraftForm {
     return this.edited ? this.typed : this.generated;
   }
 
-  /** An untouched field sends the blocks' own sum, to the second. */
+  /**
+   * Whole minutes, in seconds: what the button says is what is sent, floored
+   * from the blocks' sum and never rounded up (CONTEXT.md, *Timesheet*). The
+   * leftover seconds stay unlogged.
+   */
   get seconds(): number {
-    return this.minutes === Math.round(this.draft.seconds / 60)
-      ? this.draft.seconds
-      : Math.max(0, Math.round(this.minutes * 60));
+    return Math.max(0, Math.floor(this.minutes)) * 60;
   }
 
   /** `2h 30m`, `45m`: the reading on the button. */

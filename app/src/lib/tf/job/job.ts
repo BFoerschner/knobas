@@ -150,13 +150,14 @@ export function blockerEntries(detail: Pick<EntityDetail, "row" | "links">): Blo
 }
 
 /**
- * A duration as prototype-6 writes one: `7h 30m`, `45m`, `3h`.
+ * A duration as prototype-6 writes one: `7h 30m`, `45m`, `3h`. Whole minutes,
+ * floored, as the timesheet counts them (CONTEXT.md, *Timesheet*).
  *
  * Minutes, never decimal hours, and never days: how long a working day is
  * belongs to the source's settings, which knobas does not read.
  */
 export function hm(seconds: number): string {
-  const minutes = Math.round(seconds / 60);
+  const minutes = Math.max(0, Math.floor(seconds / 60));
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   if (hours === 0) return `${rest}m`;
@@ -210,11 +211,10 @@ export function weekReading(week: Week, entityId: string, today: string): WeekRe
 
 /** The line under *Time this week*. */
 export function weekLine(reading: WeekReading): string {
-  if (reading.logged === 0 && reading.unlogged === 0) return "Nothing yet";
   const parts: string[] = [];
-  if (reading.logged > 0) parts.push(`${hm(reading.logged)} logged`);
-  if (reading.unlogged > 0) parts.push(`${hm(reading.unlogged)} to log`);
-  return parts.join(", ");
+  if (reading.logged >= 60) parts.push(`${hm(reading.logged)} logged`);
+  if (reading.unlogged >= 60) parts.push(`${hm(reading.unlogged)} to log`);
+  return parts.length === 0 ? "Nothing yet" : parts.join(", ");
 }
 
 /** The kinds the Code section draws, in the words of R-4.7. */

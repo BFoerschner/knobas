@@ -163,6 +163,15 @@ test("logs only the ticked rows, with their edited comments, at the time the wee
   expect(done).toEqual([{ made: [expect.anything(), expect.anything()], failure: null }]);
 });
 
+test("a day with 163 s unlogged sends 120 s, and a day under a minute sends nothing", async () => {
+  const odd = { ...planned("2026-08-20", "jira:PAY-231", 0), seconds: 163 };
+  const tiny = { ...planned("2026-08-21", "jira:PAY-231", 0), seconds: 59 };
+  const { logged } = await render({ fresh: [odd, tiny] });
+  send().click();
+  await settle();
+  expect(logged.map(([, when, work]) => [when.day, work.seconds])).toEqual([["2026-08-20", 120]]);
+});
+
 test("a row the week no longer offers when sent is skipped, not logged twice", async () => {
   const { logged } = await render({ fresh: [PLAN[0]!, PLAN[2]!] });
   send().click();
