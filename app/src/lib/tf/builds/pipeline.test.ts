@@ -17,15 +17,21 @@ import {
   jobBranchFor,
   keptRuns,
   longest,
+  markQueuedRun,
   pipelineWord,
+  QUEUED_RUN,
+  queuedRunRows,
   resultOf,
+  runLanded,
   staleLine,
+  syncWith,
   tabHash,
   tabOf,
   triggerDetail,
   triggerLabel,
   triggersSentence,
 } from "./pipeline";
+import { forgetQueued, queuedMarks, type Mark } from "../queued.svelte";
 
 function run(no: number, tone: "ok" | "err" | "info", extra: Partial<RunRow> = {}): RunRow {
   return {
@@ -257,4 +263,60 @@ test("the warn line: a failing sign-in with its fix, a failed sync without one, 
   });
   expect(staleLine(pipeline, health("ok"), sync("ok"), now)).toBeNull();
   expect(staleLine({ ...pipeline, source_id: "other" }, health("unauthorized"), sync("error"), now)).toBeNull();
+});
+
+// -- runs queued this session (#1449) -------------------------------------------
+
+const mark = (write: number, branch: string, base: string | null): Mark => ({ write, kind: "run", text: branch, base });
+
+test("a queued run is a queued row on its branch, the default branch where it named none, newest first", () => {
+  const rows = queuedRunRows([mark(4, "feature/x", "teamcity:build:9"), mark(5, "", "teamcity:build:9")], "main");
+  expect(rows.map((r) => [r.entity_id, r.branch, r.number, r.state?.text, triggerLabel(r)])).toEqual([
+    ["queued:5", "main", null, "queued", "you"],
+    ["queued:4", "feature/x", null, "queued", "you"],
+  ]);
+  expect(rows.every((r) => r.started === null && r.finished === null)).toBe(true);
+});
+
+test("a read holds a queued run once a run newer than the newest held then, started by a person, is on its branch", () => {
+  const held = [run(10, "ok"), run(9, "ok")];
+  const queued = mark(4, "feature/x", "teamcity:build:10");
+  // Nothing newer: still queued.
+  expect(runLanded(held)(queued)).toBe(false);
+  // A newer run a change started, or one on another branch, is not it.
+  expect(runLanded([run(11, "ok", { branch: "feature/x", trigger: "change" }), ...held])(queued)).toBe(false);
+  expect(runLanded([run(11, "ok", { branch: "main", trigger: "person" }), ...held])(queued)).toBe(false);
+  // A newer run on its branch, by a person or saying nothing of how: it.
+  expect(runLanded([run(11, "info", { branch: "refs/heads/feature/x", trigger: "person" }), ...held])(queued)).toBe(true);
+  expect(runLanded([run(11, "info", { branch: "feature/x" }), ...held])(queued)).toBe(true);
+  // Queued on the default branch, whose name the page may not know: a newer run on any branch.
+  expect(runLanded([run(11, "info", { branch: "release" }), ...held])(mark(4, "", "teamcity:build:10"))).toBe(true);
+  // Queued on an empty pipeline: every run read is newer.
+  expect(runLanded(held)(mark(4, "main", null))).toBe(true);
+});
+
+test("each newer run holds one queued run, the oldest first", () => {
+  const first = mark(4, "main", "teamcity:build:10");
+  const second = mark(5, "main", "teamcity:build:10");
+  const landed = runLanded([run(11, "info"), run(10, "ok")]);
+  expect([first, second].filter(landed)).toEqual([first]);
+});
+
+test("a sync status heard takes its source's place, or joins the list", () => {
+  const status = (source_id: string, running: boolean) => ({ source_id, running }) as SourceSyncStatus;
+  const rows = [status("teamcity", true), status("gitea", false)];
+  expect(syncWith(rows, status("teamcity", false))).toEqual([status("teamcity", false), status("gitea", false)]);
+  expect(syncWith(rows, status("jira", false))).toEqual([...rows, status("jira", false)]);
+});
+
+test("a run queued before the page's read arrives is based on the pipeline's own recent runs", () => {
+  const follower = { follow: () => () => {} };
+  const pipeline = { entity_id: "teamcity:buildType:X", name: "X", recent: [run(7, "ok"), run(6, "ok")] };
+  markQueuedRun(pipeline, { id: 3 }, null, null, follower);
+  markQueuedRun(pipeline, { id: 4 }, "feature/x", [run(8, "ok")], follower);
+  expect(queuedMarks("teamcity:buildType:X", QUEUED_RUN)).toEqual([
+    { write: 3, kind: QUEUED_RUN, text: "", base: "teamcity:build:7" },
+    { write: 4, kind: QUEUED_RUN, text: "feature/x", base: "teamcity:build:8" },
+  ]);
+  forgetQueued();
 });

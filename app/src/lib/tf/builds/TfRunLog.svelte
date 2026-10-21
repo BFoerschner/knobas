@@ -41,6 +41,7 @@
     failed,
     ports,
     openStep = null,
+    rereads = 0,
   }: {
     runId: string;
     /** The run has not finished: its last step is running. */
@@ -50,6 +51,8 @@
     ports: Pick<RunPorts, "log" | "download">;
     /** The step to open at, from a click on the steps bar; `seq` tells two clicks on one step apart. */
     openStep?: { step: number; seq: number } | null;
+    /** Bumped when the page reads the run again (#1450): the log is read again, the reader's place kept. */
+    rereads?: number;
   } = $props();
 
   let log = $state<RunLog | null>(null);
@@ -66,21 +69,35 @@
 
   $effect(() => {
     const id = runId;
-    const mine = ++token;
     untrack(() => {
       log = null;
       readFailed = null;
       toggled = {};
     });
+    read(id);
+  });
+
+  /** A read again keeps what is drawn, and a failed one keeps the last log. */
+  let first = true;
+  $effect(() => {
+    void rereads;
+    if (first) return void (first = false);
+    untrack(() => read(runId));
+  });
+
+  function read(id: string) {
+    const mine = ++token;
     ports.log(id).then(
       (answer) => {
-        if (mine === token) log = answer;
+        if (mine !== token) return;
+        log = answer;
+        readFailed = null;
       },
       (cause: unknown) => {
-        if (mine === token) readFailed = ipcErrorMessage(cause);
+        if (mine === token && log === null) readFailed = ipcErrorMessage(cause);
       },
     );
-  });
+  }
 
   /** The `seq` of the last step opened from the bar, so a click opens it once. */
   let lastSeq = 0;

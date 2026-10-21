@@ -13,7 +13,9 @@ import type { QueuedWrite, SourceDescriptor, SourceSummary, WriteOpPayload } fro
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
+import { forgetQueued, markQueued, queuedMarks } from "../queued.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
+import { QUEUED_RUN } from "./pipeline";
 import TfPipeline from "./TfPipeline.svelte";
 
 let target: HTMLElement;
@@ -30,6 +32,7 @@ afterEach(() => {
   page = null;
   target.remove();
   forgetFilters();
+  forgetQueued();
 });
 
 async function settle() {
@@ -148,6 +151,14 @@ interface Drawn {
   pinned: number;
   writes: WriteOpPayload[];
   olderAsked: string[];
+  /** How many times the runs were read. */
+  reads: number;
+  /** Fire `sync:state` as the shell hears it; `null` once the page stopped listening. */
+  sync: ((payload: unknown) => void) | null;
+  /** What the next runs read answers. */
+  next: RunRow[] | Error | Promise<RunRow[]>;
+  /** Open another pipeline in the same page. */
+  goPipeline: (pipeline: PipelineRow) => void;
   /** Move the page to another address under the pipeline, as a tab click does. */
   go: (rest: string[]) => void;
 }
@@ -158,7 +169,7 @@ function draw(
   overrides: Partial<PipelinePorts> = {},
   older: RunRow[][] = [[run(1150, "ok", daysAgo(9, 9))], []],
 ): Drawn {
-  const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [], go: () => {} };
+  const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [], reads: 0, sync: null, next: RUNS, go: () => {}, goPipeline: () => {} };
   const ports: PipelinePorts = {
     older: (_id, before) => {
       drawn.olderAsked.push(before);
@@ -179,11 +190,30 @@ function draw(
     deletePreset: () => Promise.resolve(),
     repoBranches: () => Promise.resolve(["main", "feature/PAY-231-sepa-retry", "release/1.9"]),
     runParameters: () => Promise.resolve([]),
+    listen: (event, handler) => {
+      if (event !== "sync:state") return Promise.resolve(() => {});
+      const fire = (payload: unknown) => handler({ payload });
+      drawn.sync = fire;
+      return Promise.resolve(() => {
+        if (drawn.sync === fire) drawn.sync = null;
+      });
+    },
+    follower: () => ({ follow: () => () => {} }),
     ...overrides,
   };
-  const props = $state({ pipeline: PIPELINE, rest, job, runs: () => Promise.resolve(RUNS), onpin: () => (drawn.pinned += 1), ports });
+  const runs = () => {
+    drawn.reads += 1;
+    const next = drawn.next;
+    return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
+  };
+  const props = $state({ pipeline: PIPELINE, rest, job, runs, onpin: () => (drawn.pinned += 1), ports });
   drawn.go = (next) => {
     props.rest = next;
+    flushSync();
+  };
+  drawn.goPipeline = (next) => {
+    props.pipeline = next;
+    props.rest = [next.entity_id];
     flushSync();
   };
   page = mount(TfPipeline, { target, props });
@@ -359,6 +389,219 @@ test("leaving Runs once its runs are drawn neither throws nor stops the page (#1
   drawn.go([PIPELINE.entity_id]);
   await settle();
   expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs");
+});
+
+// -- a sync finishing reads again (#1450) ---------------------------------------
+
+/** A `sync:state` payload for `source`. */
+const synced = (source: string, running = false) => ({
+  source_id: source,
+  running,
+  run_id: running ? 7 : null,
+  started_at: null,
+  last_finished_at: new Date().toISOString(),
+  last_outcome: running ? null : "ok",
+  next_run_at: null,
+  backoff_until: null,
+});
+
+/** The first run as the mirror held it in flight, then finished. */
+const RUNNING: RunRow[] = [run(1188, "ok", today(0, 30), { finished: null, duration_seconds: null, state: { text: "running", tone: "info" } }), ...RUNS];
+const FINISHED: RunRow[] = [run(1188, "ok", today(0, 30), { duration_seconds: 300 }), ...RUNS];
+
+const firstRow = () => target.querySelector(".tf-runs tbody tr")!;
+
+test("a sync of the pipeline's source finishing reads the runs again: a running run draws its result", async () => {
+  const drawn = draw();
+  drawn.next = RUNNING;
+  await settle();
+  expect(firstRow().textContent).toContain("running");
+  expect(drawn.reads).toBe(1);
+
+  drawn.next = FINISHED;
+  drawn.sync!(synced("teamcity", true));
+  await settle();
+  expect(drawn.reads, "a sync still running reads nothing").toBe(1);
+
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(drawn.reads).toBe(2);
+  expect(firstRow().textContent).toContain("#1188");
+  expect(firstRow().textContent).toContain("5 m");
+  expect(firstRow().textContent).not.toContain("running");
+});
+
+test("a sync of another source reads nothing", async () => {
+  const drawn = draw();
+  await settle();
+  drawn.sync!(synced("gitea"));
+  await settle();
+  expect(drawn.reads).toBe(1);
+});
+
+test("a read again keeps the entered filter and the tab; a failed one keeps the runs and says so", async () => {
+  const drawn = draw();
+  drawn.next = RUNNING;
+  await settle();
+  const input = target.querySelector<HTMLInputElement>(".tf-runbar input")!;
+  input.value = "1188";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  drawn.next = FINISHED;
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(target.querySelector<HTMLInputElement>(".tf-runbar input")!.value).toBe("1188");
+  const rows = [...target.querySelectorAll(".tf-runs tbody tr")];
+  expect(rows).toHaveLength(1);
+  expect(rows[0]!.textContent).not.toContain("running");
+
+  drawn.go([PIPELINE.entity_id, "params"]);
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(drawn.reads).toBe(3);
+  expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toBe("Parameters");
+
+  drawn.go([PIPELINE.entity_id]);
+  drawn.next = Object.assign(new Error("connection refused"), { code: "unreachable" });
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(target.textContent).toContain("Runs could not be read");
+  expect(target.querySelectorAll(".tf-runs tbody tr")).toHaveLength(1);
+  expect(target.querySelectorAll(".tf-bars a"), "the chart stays").toHaveLength(30);
+});
+
+test("of two reads again, the later one's answer stands even when the earlier one answers last", async () => {
+  const drawn = draw();
+  await settle();
+  let answerFirst: (rows: RunRow[]) => void = () => {};
+  drawn.next = new Promise<RunRow[]>((resolve) => (answerFirst = resolve));
+  drawn.sync!(synced("teamcity"));
+  drawn.next = FINISHED;
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  answerFirst(RUNNING);
+  await settle();
+  expect(firstRow().textContent).toContain("#1188");
+  expect(firstRow().textContent).not.toContain("running");
+});
+
+test("the page stops listening when it goes", async () => {
+  const drawn = draw();
+  await settle();
+  expect(drawn.sync).not.toBeNull();
+  unmount(page!);
+  page = null;
+  expect(drawn.sync).toBeNull();
+});
+
+// -- runs queued on the run page (#1449) ------------------------------------------
+
+const runNos = () => [...target.querySelectorAll(".tf-runs tbody tr .tf-run-no")].map((td) => td.querySelector("b")?.textContent);
+
+test("a run queued on the run page is one queued row at the top; another pipeline draws none for it", async () => {
+  markQueued(PIPELINE.entity_id, QUEUED_RUN, "feature/PAY-231-sepa-retry", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
+  const drawn = draw();
+  await settle();
+  expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
+  expect(firstRow().textContent).toContain("feature/PAY-231-sepa-retry");
+  expect(firstRow().textContent).toContain("waiting");
+  expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs 35");
+
+  drawn.goPipeline({ ...PIPELINE, entity_id: "teamcity:buildType:Payout_Build", name: "Payout_Build" });
+  await settle();
+  expect(runNos()).not.toContain("queued");
+});
+
+test("the queued row goes once a read holds the run, and is never drawn beside it", async () => {
+  markQueued(PIPELINE.entity_id, QUEUED_RUN, "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
+  const drawn = draw();
+  await settle();
+  expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
+
+  // A sync that has not brought it yet keeps it queued.
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
+
+  drawn.next = [run(1188, "ok", today(0, 30), { finished: null, duration_seconds: null, trigger: "person", started_by_me: true }), ...RUNS];
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(runNos().slice(0, 2)).toEqual(["#1188", "#1187"]);
+  expect(queuedMarks(PIPELINE.entity_id, QUEUED_RUN)).toEqual([]);
+  expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs 35");
+});
+
+test("Run on keeps its queued row through a visit elsewhere, and the queue refusing it takes it away", async () => {
+  const heard: ((row: QueuedWrite | undefined) => void)[] = [];
+  const drawn = draw(undefined, "PAY-231", { follower: () => ({ follow: (_id, hear) => (heard.push(hear), () => {}) }) });
+  await settle();
+  button("Run on feature/PAY-231-sepa-retry")!.click();
+  await settle();
+  expect(runNos()[0]).toBe("queued");
+  drawn.goPipeline({ ...PIPELINE, entity_id: "teamcity:buildType:Payout_Build", name: "Payout_Build" });
+  await settle();
+  drawn.goPipeline(PIPELINE);
+  await settle();
+  expect(runNos()[0], "the read holds no new run yet").toBe("queued");
+
+  heard[0]!({ id: 41, state: "refused", detail: "no such branch" } as QueuedWrite);
+  flushSync();
+  expect(runNos()[0]).toBe("#1187");
+  expect(toasts.items.at(-1)?.text).toBe("Run of Payout_IntegrationTests was refused: no such branch");
+});
+
+// -- the run rows against prototype-6 (#1452) ------------------------------------
+
+test("a click anywhere on a run row opens the run; its Log link and Run again… do their own", async () => {
+  location.hash = "#/builds";
+  draw();
+  await settle();
+  const row = firstRow() as HTMLTableRowElement;
+  row.querySelector<HTMLElement>(".tf-run-br")!.click();
+  expect(location.hash).toBe("#/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3A1187");
+
+  location.hash = "#/builds";
+  [...row.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Run again…")!.click();
+  await settle();
+  expect(location.hash).toBe("#/builds");
+  expect(target.querySelector('[role="dialog"]')).not.toBeNull();
+});
+
+test("a click on a queued row opens nothing: there is no run yet", async () => {
+  location.hash = "#/builds";
+  markQueued(PIPELINE.entity_id, QUEUED_RUN, "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
+  draw();
+  await settle();
+  (firstRow() as HTMLElement).querySelector<HTMLElement>(".tf-run-br")!.click();
+  expect(location.hash).toBe("#/builds");
+  expect(firstRow().classList.contains("tf-row")).toBe(false);
+});
+
+test("the run number stays the keyboard's link to the run", async () => {
+  draw();
+  await settle();
+  const link = firstRow().querySelector<HTMLAnchorElement>(".tf-run-no a")!;
+  expect(link.getAttribute("href")).toBe("#/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3A1187");
+  expect(link.tabIndex).toBe(0);
+});
+
+test("every day's table lays its columns out the same, so they line up down the page", async () => {
+  draw();
+  await settle();
+  const tables = [...target.querySelectorAll<HTMLTableElement>(".tf-runs table")];
+  expect(tables.length).toBeGreaterThanOrEqual(3);
+  const layout = (table: HTMLTableElement) => [table.className, ...[...table.querySelectorAll("colgroup col")].map((col) => col.className)];
+  expect(layout(tables[0]!)).toEqual([
+    "tf-tbl tf-runtbl",
+    "tf-run-no",
+    "tf-run-br",
+    "tf-run-trig",
+    "tf-run-tests",
+    "tf-run-dur",
+    "tf-run-at",
+    "tf-run-acts",
+  ]);
+  for (const table of tables) expect(layout(table)).toEqual(layout(tables[0]!));
 });
 
 /** A select whose default it does not offer, a checkbox, a secret and a plain spec (#1447). */

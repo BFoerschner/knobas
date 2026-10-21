@@ -36,11 +36,25 @@
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
+  import { settleQueued } from "../queued.svelte";
   import { commitHash, fileHash } from "../repo/repo";
   import { when } from "../tickets/tickets";
   import { duration, pipelineHash, runTone } from "./builds";
-  import { chipTone, defaultBranch, jobBranchFor, pipelineSource, queuedRunWhat, resultWord, staleLine, triggerLabel } from "./pipeline";
-  import { RUN_BRIDGE, type RunPorts } from "./pipeline-ports";
+  import {
+    chipTone,
+    defaultBranch,
+    jobBranchFor,
+    markQueuedRun,
+    pipelineSource,
+    queuedRunWhat,
+    resultWord,
+    runBranch,
+    runLanded,
+    staleLine,
+    syncWith,
+    triggerLabel,
+  } from "./pipeline";
+  import { RUN_BRIDGE, listenSynced, type RunPorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
   import TfRunChain from "./TfRunChain.svelte";
   import TfRunArtifacts from "./TfRunArtifacts.svelte";
@@ -111,6 +125,8 @@
   let openStep = $state<{ step: number; seq: number } | null>(null);
   let openSeq = 0;
   let token = 0;
+  /** How many times the page has read the run again after a sync (#1450): the open tab reads again on each. */
+  let rereads = $state(0);
 
   $effect(() => {
     const wanted = { pipelineId, runId };
@@ -129,12 +145,20 @@
     log = null;
     void findRun(pipe, id, mine);
     void readLog(id, mine);
+    readView(id, mine);
+    readSettings(pipe, mine);
+  }
+
+  /** The run's view, and its first failed test where the view counts failures; a failed read keeps the last view. */
+  function readView(id: string, mine: number) {
     ports.view(id).then(
       (answer) => {
         if (mine !== token) return;
         view = answer;
         viewRead = true;
+        viewFailed = null;
         if ((sectionOf(answer, "tests")?.count ?? 0) > 0) readFailure(id, mine);
+        else failure = null;
       },
       (cause: unknown) => {
         if (mine !== token) return;
@@ -142,6 +166,9 @@
         viewRead = true;
       },
     );
+  }
+
+  function readSettings(pipe: string, mine: number) {
     ports.settings(pipe).then(
       (answer) => {
         if (mine === token) settings = answer;
@@ -159,11 +186,40 @@
         if (older.length === 0) break;
         rows = [...rows, ...older];
       }
-      if (mine === token) held = rows;
+      if (mine !== token) return;
+      settleQueued(pipe, runLanded(rows));
+      held = rows;
+      runsFailed = null;
     } catch (cause) {
       if (mine === token) runsFailed = ipcErrorMessage(cause);
     }
   }
+
+  /**
+   * A sync of the run's source finished (#1450): the run, its view, its log
+   * and the open tab again, over what is drawn. The tab, its filter and an
+   * open dialog stay; a failed read keeps the last answer and says so.
+   */
+  function reread(pipe: string, id: string) {
+    // A new token: a read again answering after a later one is dropped.
+    const mine = ++token;
+    void findRun(pipe, id, mine);
+    void readLog(id, mine);
+    readView(id, mine);
+    // The first settings read, if still out, answers under the old token.
+    if (settings === null) readSettings(pipe, mine);
+    rereads += 1;
+  }
+
+  $effect(() => {
+    const wanted = { pipelineId, runId };
+    return listenSynced(
+      ports,
+      pipeline.source_id,
+      (row) => (sync = syncWith(sync, row)),
+      () => reread(wanted.pipelineId, wanted.runId),
+    );
+  });
 
   function readLog(id: string, mine: number): Promise<RunLog | null> {
     const read = ports.log(id);
@@ -258,10 +314,15 @@
 
   // -- the writes ---------------------------------------------------------------
 
-  /** *Re-run* and *Run again…*: queued at once, and the toast says so (R-9.8). */
+  /**
+   * *Re-run* and *Run again…*: queued at once, and the toast says so (R-9.8).
+   * The page draws no queued row of its own (#853); the pipeline page draws
+   * it at the top of its runs until a read holds it (#1449).
+   */
   async function queue(request: RunRequest) {
     try {
-      await ports.submitWrite(request.payload);
+      const write = await ports.submitWrite(request.payload);
+      markQueuedRun(pipeline, write, runBranch(request.payload), held, ports.follower());
       toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline));
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -305,7 +366,7 @@
   { name: run?.number != null ? `#${run.number}` : "Run" },
 ])}
 
-{#if runsFailed !== null}
+{#if runsFailed !== null && held === null}
   <div class="tf-empty"><p>Runs could not be read: {runsFailed}</p></div>
 {:else if held === null}
   <p class="tf-dim tf-runs">Reading the run…</p>
@@ -374,6 +435,9 @@
       {#if stale.fix !== null}<a href={stale.fix.href}>{stale.fix.words}</a>{/if}
     </div>
   {/if}
+  {#if runsFailed !== null}
+    <p class="tf-dim tf-runs">Runs could not be read: {runsFailed}</p>
+  {/if}
 
   <nav class="tf-tabs" aria-label="Run">
     {#each RUN_TABS as entry (entry.id)}
@@ -428,7 +492,7 @@
               <dd>{tookLine(run, previous)}</dd>
             </dl>
           </section>
-          <TfRunChain {runId} branch={run.branch} />
+          <TfRunChain {runId} branch={run.branch} {rereads} />
           <section class="tf-panel" aria-label="Artifacts">
             <header>
               <h3>Artifacts</h3>
@@ -495,11 +559,11 @@
         {/if}
       {/if}
     {:else if tab === "log"}
-      <TfRunLog {runId} {inFlight} {failed} ports={logPorts} {openStep} />
+      <TfRunLog {runId} {inFlight} {failed} ports={logPorts} {openStep} {rereads} />
     {:else if tab === "tests"}
-      <TfRunTests {runId} branch={run.branch} logHref={runTabHash(pipelineId, runId, "log")} {ports} />
+      <TfRunTests {runId} branch={run.branch} logHref={runTabHash(pipelineId, runId, "log")} {ports} {rereads} />
     {:else if tab === "artifacts"}
-      <TfRunArtifacts {runId} sourceName={pipeline.source_name} {ports} />
+      <TfRunArtifacts {runId} sourceName={pipeline.source_name} {ports} {rereads} />
     {/if}
   </div>
 

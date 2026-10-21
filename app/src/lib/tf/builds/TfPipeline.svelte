@@ -34,9 +34,10 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
+  import { queuedMarks, settleQueued } from "../queued.svelte";
   import { duration, runHash, runTone, shortTime } from "./builds";
   import { chainSentence } from "./chain";
-  import { BRIDGE, type PipelinePorts } from "./pipeline-ports";
+  import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
   import { fieldsOf, type RunRequest } from "./run-dialog";
   import TfRunDialog from "./TfRunDialog.svelte";
   import {
@@ -60,12 +61,17 @@
     jobBranchFor,
     keptRuns,
     longest,
+    markQueuedRun,
     pipelineWord,
     pipelineSource,
+    QUEUED_RUN,
+    queuedRunRows,
     queuedRunWhat,
     resultWord,
+    runBranch,
+    runLanded,
     staleLine,
-    startedHere,
+    syncWith,
     tabHash,
     tabOf,
     triggerDetail,
@@ -100,8 +106,6 @@
 
   let held = $state<RunRow[] | null>(null);
   let failed = $state<string | null>(null);
-  /** Runs started here, drawn as queued until the next read holds them (R-9.8). */
-  let started = $state<RunRow[]>([]);
   let settings = $state<PipelineSettings | null>(null);
   let settingsFailed = $state<string | null>(null);
   let settingsRead = $state(false);
@@ -124,7 +128,6 @@
     const mine = ++token;
     held = null;
     failed = null;
-    started = [];
     settings = null;
     settingsFailed = null;
     settingsRead = false;
@@ -132,7 +135,9 @@
     olderFailed = null;
     readRuns(wanted).then(
       (rows) => {
-        if (mine === token) held = rows;
+        if (mine !== token) return;
+        settleQueued(wanted, runLanded(rows));
+        held = rows;
       },
       (cause: unknown) => {
         if (mine === token) failed = ipcErrorMessage(cause);
@@ -151,6 +156,41 @@
       },
     );
   }
+
+  /** Bumped on every read again, so an older one answering late is dropped. */
+  let rereads = 0;
+
+  /**
+   * A sync of the pipeline's source finished (#1450): the runs again, older
+   * pages kept, the reader's filter, tab and dialog untouched. A failed read
+   * keeps the runs it had and says so.
+   */
+  function reread(wanted: string) {
+    const mine = token;
+    const seq = ++rereads;
+    const current = () => mine === token && seq === rereads;
+    readRuns(wanted).then(
+      (rows) => {
+        if (!current()) return;
+        settleQueued(wanted, runLanded(rows));
+        failed = null;
+        held = appendOlder(rows, held ?? []);
+      },
+      (cause: unknown) => {
+        if (current()) failed = ipcErrorMessage(cause);
+      },
+    );
+  }
+
+  $effect(() => {
+    const wanted = id;
+    return listenSynced(
+      ports,
+      pipeline.source_id,
+      (row) => (sync = syncWith(sync, row)),
+      () => reread(wanted),
+    );
+  });
 
   // Facts about the sources, read once: the word, the warn line.
   onMount(() => {
@@ -171,6 +211,11 @@
     );
   });
 
+  /**
+   * Runs queued this session, here or on a run page, drawn *queued* until a
+   * read holds them (R-9.8, #1449); the queue holding or refusing one drops it.
+   */
+  const started = $derived(queuedRunRows(queuedMarks(id, QUEUED_RUN), defaultBranch(settings)));
   const all = $derived(held === null ? null : [...started, ...held]);
 
   async function more() {
@@ -221,39 +266,17 @@
   /** *Run on <branch>*: one run on the queue, drawn queued at once (R-9.8). */
   function runOn(branch: string | null) {
     const words = branch ?? fallback ?? "the default branch";
-    void queue({ RunBuild: { entity: id, branch, parameters: [] } }, branch ?? fallback, `On ${words}, defaults`);
+    void queue({ RunBuild: { entity: id, branch, parameters: [] } }, `On ${words}, defaults`);
   }
 
   /**
    * Queue a run and draw it *queued* at the top at once (R-9.8). The toast
    * names it by the dialog's line, as prototype-6's `startRun` does.
    */
-  async function queue(payload: WriteOpPayload, branch: string | null, summary: string): Promise<boolean> {
+  async function queue(payload: WriteOpPayload, summary: string): Promise<boolean> {
     try {
-      const queued = await ports.submitWrite(payload);
-      started = [
-        {
-          entity_id: startedHere(queued.id),
-          number: null,
-          state: { text: "queued", tone: "info" },
-          branch,
-          started: null,
-          finished: null,
-          duration_seconds: null,
-          updated_at: new Date().toISOString(),
-          web_url: null,
-          // The reader queued it: *you*, as prototype-6's `startRun` draws it.
-          trigger: "person",
-          started_by: null,
-          started_by_me: true,
-          revision: null,
-          commit_id: null,
-          agent: null,
-          current_step: null,
-          tests: null,
-        },
-        ...started,
-      ];
+      const write = await ports.submitWrite(payload);
+      markQueuedRun(pipeline, write, runBranch(payload), held, ports.follower());
       toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline));
       return true;
     } catch (cause) {
@@ -271,8 +294,7 @@
 
   async function onrun(request: RunRequest) {
     dialog = null;
-    const branch = "RunBuild" in request.payload ? (request.payload.RunBuild.branch ?? fallback) : fallback;
-    if (!(await queue(request.payload, branch, request.summary)) || request.preset === null) return;
+    if (!(await queue(request.payload, request.summary)) || request.preset === null) return;
     try {
       await ports.savePreset(request.preset);
     } catch (cause) {
@@ -326,6 +348,19 @@
         ),
   );
   const days = $derived(byDay(kept));
+
+  /**
+   * A click anywhere on a run row opens the run (R-9.6, prototype-6's
+   * `tr.row`, #1452); the number stays the keyboard's link. A link or button
+   * in the row does its own, a selection of the row's words is not a click,
+   * and a queued row has no run yet.
+   */
+  function openRow(event: MouseEvent, run: RunRow) {
+    if (isStartedHere(run)) return;
+    if ((event.target as Element | null)?.closest("a, button, input, select, label")) return;
+    if ((window.getSelection()?.toString() ?? "") !== "") return;
+    location.hash = runHash(id, run.entity_id);
+  }
 
   // -- parameters tab --------------------------------------------------------
 
@@ -404,7 +439,8 @@
 
 {#if failed !== null}
   <p class="tf-dim tf-runs">Runs could not be read: {failed}</p>
-{:else if all !== null && all.length > 0}
+{/if}
+{#if all !== null && all.length > 0}
   <div class="tf-hist">
     <div class="tf-chart">
       <svg
@@ -465,11 +501,17 @@
     {/if}
     {#each days as day (day.label)}
       <h3 class="tf-dayh">{day.label}</h3>
-      <table class="tf-tbl" aria-label={`Runs, ${day.label}`}>
+      <table class="tf-tbl tf-runtbl" aria-label={`Runs, ${day.label}`}>
+        <!-- One width per column on every day's table, so they line up down the page (#1452). -->
+        <colgroup
+          ><col class="tf-run-no" /><col class="tf-run-br" /><col class="tf-run-trig" /><col class="tf-run-tests" /><col
+            class="tf-run-dur"
+          /><col class="tf-run-at" /><col class="tf-run-acts" /></colgroup
+        >
         <tbody>
           {#each day.runs as run (run.entity_id)}
             {@const tone = runTone(run)}
-            <tr>
+            <tr class:tf-row={!isStartedHere(run)} onclick={(event) => openRow(event, run)}>
               <td class="tf-nowrap tf-run-no">
                 {#if isStartedHere(run)}
                   <b>queued</b>
