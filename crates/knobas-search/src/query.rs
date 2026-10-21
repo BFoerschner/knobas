@@ -5,7 +5,7 @@
 //! the token markers (`/source` `@person` `#ticket`) and the inline
 //! `key:value` filters. One grammar, one implementation -- the frontend
 //! renders the chips this returns instead of parsing the same string a second
-//! time, and M4's saved searches parse through the same door.
+//! time, and saved searches parse through the same door.
 //!
 //! No sqlx in this module and no `async`: a grammar is a string function, and
 //! keeping it one is what lets the whole table below be a unit test.
@@ -13,9 +13,9 @@
 //! # What the grammar does *not* do
 //!
 //! It never guesses. A `/alias` that resolves to nothing, an `updated:` it
-//! cannot read, an `env:` that has no home until M4 -- each is reported in
-//! [`ParsedQuery::unknown_tokens`] so the launcher can grey it out with a
-//! reason. The alternative, demoting an unrecognised filter to a search word,
+//! cannot read, an `env:` or `health:` no ticket has given a home yet -- each
+//! is reported, not honoured, in [`ParsedQuery::unknown_tokens`] so the
+//! launcher can grey it out with a reason. The alternative, demoting an unrecognised filter to a search word,
 //! quietly changes the result set in a way nobody on screen can see.
 
 use knobas_core::payload::Declarations;
@@ -755,8 +755,8 @@ fn apply_key_value(
                 parsed.names.push(value);
             }
         }
-        // The estate's own keys. They have no home before M4, and demoting
-        // them to search words would quietly widen the result set.
+        // The estate's own keys. No ticket has given them a home yet, and
+        // demoting them to search words would quietly widen the result set.
         "env" | "health" => parsed.unknown(token),
         _ => return false,
     }
