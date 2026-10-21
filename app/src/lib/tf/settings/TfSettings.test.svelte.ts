@@ -157,6 +157,7 @@ function ports(over: Partial<SettingsPorts> = {}): SettingsPorts {
     listen: vi.fn(() => Promise.resolve(() => {})),
     ticketViews: vi.fn(() => Promise.resolve(JIRA_VIEWS.map((row) => ({ ...row })))),
     hideSavedView: vi.fn(() => Promise.resolve()),
+    appStatus: vi.fn(() => Promise.resolve({ secrets_in_memory: false })),
     ...over,
   };
 }
@@ -830,6 +831,31 @@ test("a failing credential is said on top, and Re-enter password stores the new 
   expect(health.patched.at(-1)).toMatchObject({ source_id: "teamcity", state: "ok" });
   expect(p.syncNow).toHaveBeenCalledWith("teamcity");
   expect(target.querySelector('[role="dialog"]')).toBeNull();
+});
+
+/** The credential row's line, and the Re-enter dialog's note under it. */
+async function storedLines(secretsInMemory: boolean): Promise<{ row: string; note: string }> {
+  await open(["source", "teamcity"], ports({ appStatus: vi.fn(() => Promise.resolve({ secrets_in_memory: secretsInMemory })) }));
+  const row = [...target.querySelectorAll(".tf-stg-row")].find((el) => el.querySelector(".tf-stg-l")?.textContent === "Password");
+  const line = row?.querySelector(".tf-stg-c > span")?.textContent ?? "";
+  button("Re-enter password").click();
+  flushSync();
+  const note = [...target.querySelectorAll('[role="dialog"] .tf-dlg-note')].map((el) => el.textContent ?? "").join(" ");
+  return { row: line, note };
+}
+
+test("a source's credential is said to be in the system keychain off a Mac (#1585)", async () => {
+  const { row, note } = await storedLines(false);
+  // jsdom's user agent names no Mac; on one the line reads "the macOS keychain".
+  expect(row).toBe("Stored in the system keychain");
+  expect(note).toContain("Stored in the system keychain. Writes waiting for TeamCity go out once it signs in.");
+});
+
+test("under the memory secret store a source's credential is said to be kept for this session only (#1585)", async () => {
+  const { row, note } = await storedLines(true);
+  expect(row).toBe("Stored for this session only");
+  expect(note).toContain("Stored for this session only. Writes waiting for TeamCity go out once it signs in.");
+  expect(note).not.toContain("keychain");
 });
 
 /** Open Add a source over these adapters (Jira's descriptor from `ports()` is the template). */

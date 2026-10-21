@@ -115,6 +115,8 @@ export interface SettingsPorts {
   ticketViews: () => Promise<TicketViewRow[]>;
   /** *Hide* or *Show* a Jira view (#878). */
   hideSavedView: (id: string, hidden: boolean) => Promise<void>;
+  /** Whether credentials live in memory for this session only (#1585): a source's credential row. */
+  appStatus: () => Promise<Pick<AppStatus, "secrets_in_memory">>;
 }
 
 /**
@@ -153,6 +155,7 @@ export const realSettingsPorts: SettingsPorts = {
   listen: (event, handler) => tauriListen(event, handler),
   ticketViews: () => ticketViews(),
   hideSavedView: (id, hidden) => hideSavedView(id, hidden),
+  appStatus: () => appStatus(),
 };
 
 /**

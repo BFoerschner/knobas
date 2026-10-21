@@ -66,6 +66,7 @@ const sourcePorts: SettingsPorts = {
   listen: () => Promise.resolve(() => {}),
   ticketViews: () => Promise.resolve([]),
   hideSavedView: () => Promise.resolve(),
+  appStatus: () => Promise.resolve({ secrets_in_memory: false }),
 };
 
 function sectionPorts(over: Partial<SectionPorts> = {}) {

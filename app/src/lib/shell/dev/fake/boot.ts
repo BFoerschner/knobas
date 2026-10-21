@@ -1,7 +1,8 @@
 /**
  * `?fake-ipc`: The boot screen and the first run: `app_status` (held on one state by
  * `?fake-db=starting|migrating|failed`, and on the wizard by `?fake-first-run`) and
- * the wizard's two writes.
+ * the wizard's two writes. `?fake-secret-store=memory` answers as a process under
+ * `KNOBAS_SECRET_STORE=memory` does: credentials for this session only (#1585).
  */
 import type { Handler } from "../fake-tauri";
 
@@ -11,6 +12,7 @@ const DEMO_STATUS = {
   demo: true,
   source_count: 1,
   app_version: "0.1.0-fixture",
+  secrets_in_memory: false,
 };
 
 /**
@@ -44,6 +46,7 @@ export function handlers(params: URLSearchParams): Record<string, Handler> {
       db: fakeDbState(params),
       ...DEMO_STATUS,
       ...(firstRun ? { first_run: true, source_count: 0 } : {}),
+      ...(params.get("fake-secret-store") === "memory" ? { secrets_in_memory: true } : {}),
     }),
     frontend_ready: () => null,
     retry_database: () => null,

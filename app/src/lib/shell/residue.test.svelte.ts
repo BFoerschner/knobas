@@ -483,6 +483,7 @@ function settingsPorts() {
     listen: (event: string, handler: (event: { payload: unknown }) => void) => mockedListen(event, handler),
     ticketViews: () => deferred([]),
     hideSavedView: () => deferred(undefined),
+    appStatus: () => deferred({ secrets_in_memory: false }),
   };
 }
 

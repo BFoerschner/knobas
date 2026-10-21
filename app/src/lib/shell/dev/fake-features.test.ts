@@ -603,6 +603,14 @@ test("boot: ?fake-first-run holds app_status on the wizard until complete_first_
   expect((demoHandlers() as Calls)["app_status"]!({}) as Status).toMatchObject({ first_run: false, source_count: 1 });
 });
 
+test("boot: ?fake-secret-store=memory answers credentials for this session only, and without it the keychain (#1585)", () => {
+  type Status = { secrets_in_memory: boolean };
+  expect((demoHandlers(new URLSearchParams("fake-secret-store=memory")) as Calls)["app_status"]!({}) as Status).toMatchObject({
+    secrets_in_memory: true,
+  });
+  expect((demoHandlers() as Calls)["app_status"]!({}) as Status).toMatchObject({ secrets_in_memory: false });
+});
+
 // -- cross-references between modules ---------------------------------------
 
 /** Every run the Builds fixture answers, across its pipelines. */
