@@ -246,9 +246,13 @@ async fn requests_that_do_not_wait_coalesce_into_one_more_pass() {
     let pass = SuggestionPass::new(gated.clone(), Duration::from_secs(60));
 
     pass.request();
-    while gated.opened.load(Ordering::SeqCst) == 0 {
-        tokio::task::yield_now().await;
-    }
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while gated.opened.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("a request with no pass running starts one");
     for _ in 0..9 {
         pass.request();
     }
