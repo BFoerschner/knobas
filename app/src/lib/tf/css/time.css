@@ -30,7 +30,7 @@
 .tf-tm-b.tf-tm-run rect { fill: var(--card); stroke: var(--card-2); } .tf-tm-b.tf-tm-run text { fill: var(--card-ink); }
 .tf-tm-b.tf-tm-label rect { fill: var(--sheet-2); stroke: var(--ink-2); } .tf-tm-b.tf-tm-label text { fill: var(--ink); }
 .tf-tm-b.tf-tm-passive rect { fill: url(#tf-tm-hatch); stroke: var(--info); } .tf-tm-b.tf-tm-passive text { fill: var(--info); }
-.tf-tm-b.tf-tm-gap rect { fill: transparent; stroke: var(--ink-2); stroke-dasharray: 4 3; }
+.tf-tm-b.tf-tm-gap rect { fill: transparent; stroke: var(--ink-2); stroke-dasharray: 4 3; } .tf-tm-b.tf-tm-gap text { fill: var(--ink); }
 .tf-tm-hatch { fill: var(--info-bg); }
 /* After the states, so the ring wins over each state's own edge. */
 .tf-tm-b:focus-visible rect, .tf-tm-b.tf-on rect { stroke: var(--focus); stroke-width: 2; }
