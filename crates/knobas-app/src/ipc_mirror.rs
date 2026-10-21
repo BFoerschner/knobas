@@ -214,7 +214,6 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::assets::Environment::export_all(cfg)?;
     crate::assets::AssetRow::export_all(cfg)?;
     crate::assets::AssetProperty::export_all(cfg)?;
-    crate::assets::MemberAsset::export_all(cfg)?;
     crate::assets::Visibility::export_all(cfg)?;
     crate::assets::RouteRow::export_all(cfg)?;
     crate::assets::RouteDetail::export_all(cfg)?;

@@ -4,13 +4,40 @@
  */
 import type { LinkEntry, LinkRow } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
-import { FAKE_ACTIVITY } from "./activity";
 import { CORPUS, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
 import { runView } from "./builds";
 import { pullView } from "./views/pulls";
 import { repoView } from "./views/repos";
+
+/** A handful of log lines, so the History panel has something to draw. */
+const FAKE_ACTIVITY = [
+  {
+    id: 3,
+    at: "2026-08-22T14:30:00Z",
+    actor: "sync:mock",
+    verb: "synced",
+    entity_id: "mock:PAY-231",
+    detail: { upserted: 9 },
+  },
+  {
+    id: 2,
+    at: "2026-08-22T11:49:00Z",
+    actor: "user",
+    verb: "opened",
+    entity_id: "mock:PAY-231",
+    detail: {},
+  },
+  {
+    id: 1,
+    at: "2026-08-22T08:10:00Z",
+    actor: "sync:mock",
+    verb: "synced",
+    entity_id: "mock:INC-1",
+    detail: { upserted: 1 },
+  },
+];
 
 /**
  * `resolve_url` (#496): what a pasted link names, over this fixture's corpus.

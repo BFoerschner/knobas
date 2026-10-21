@@ -58,26 +58,6 @@ pub async fn promote_context_inner(
     Ok(promoted)
 }
 
-/// Who is in this context, by the fixed rule (§16.11, ADR-0008).
-///
-/// The per-context inbox filter ("3 here") intersects the inbox stream with
-/// this set on the frontend, so the badge and the list it filters are drawn
-/// from the same rows by construction.
-///
-/// # Errors
-///
-/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
-/// database is still coming up, [`Internal`](crate::IpcErrorCode::Internal)
-/// for a query failure.
-#[tauri::command]
-pub async fn context_members(
-    lifecycle: State<'_, Lifecycle>,
-    ctx_id: String,
-) -> Result<Vec<String>, IpcError> {
-    let pool = lifecycle.pool()?;
-    Ok(knobas_core::context::member_ids(&pool, &ctx_id).await?)
-}
-
 /// What a ticket reaches (#817, R-2.8, R-2.9): each entity once, with the
 /// first step of its path and where the path came from -- the ticket's own
 /// links, or its parent's (R-7.3). `knobas_core::reach` is the walk; a job's

@@ -1,20 +1,17 @@
 /**
- * `?fake-ipc`: Stored contexts (#47): list, members and promote, and a room's
- * Assets tile. The store itself lives in `corpus.ts`, which `list_entities`
- * reads it from.
+ * `?fake-ipc`: Stored contexts (#47): list and promote. The store itself lives
+ * in `corpus.ts`, which `list_entities` reads it from.
  */
 import type { Handler } from "../fake-tauri";
-import { CORPUS, FAKE_CONTEXTS, fakeContext, fakeMembers } from "./corpus";
+import { CORPUS, FAKE_CONTEXTS, fakeContext } from "./corpus";
 
 /** This feature's commands. */
 export function handlers(): Record<string, Handler> {
   return {
     // Contexts (#47). Stateful within the session, so *Promote* can be walked
-    // in QA; membership is empty because the fixture has no link graph, and
-    // `list_entities` answers a context scope with an empty page for the same
-    // reason.
+    // in QA; `list_entities` answers a context scope with an empty page
+    // because the fixture has no link graph.
     list_contexts: () => FAKE_CONTEXTS.slice(),
-    context_members: (args) => fakeMembers(String(args["ctxId"] ?? "")),
     promote_context: (args) => {
       const anchor = String(args["entityId"] ?? "");
       const existing = FAKE_CONTEXTS.find((row) => row.anchor_id === anchor);
@@ -27,11 +24,5 @@ export function handlers(): Record<string, Handler> {
       FAKE_CONTEXTS.unshift(row);
       return row;
     },
-    // The room's Assets tile (#434). Empty: the fixture has no link graph, so
-    // a room's assets are not resolved here. (`FAKE_CONTEXT_ASSETS` feeds only
-    // the *Open alerts on my jobs* smart list, #1503.) A stored room under
-    // `?fake-ipc` therefore draws the tile's empty state rather than a red
-    // "command not found".
-    context_assets: () => [],
   };
 }

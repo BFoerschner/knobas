@@ -11,7 +11,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ActionItemTicket,
-  ActivityRow,
   ArtifactEntry,
   ArtifactPreview,
   CaptureContext,
@@ -260,17 +259,6 @@ export function listEntities(
   offset: number,
 ): Promise<EntityPage> {
   return invoke<EntityPage>("list_entities", { filter, limit, offset });
-}
-
-/**
- * The `limit` most recent activity lines, newest first.
- *
- * `entityId` scopes the read to one entity's history (the detail view's
- * History panel); omitting it is the global stream the status bar reads. A
- * malformed id rejects with `invalid`, not `internal`.
- */
-export function recentActivity(limit: number, entityId?: string): Promise<ActivityRow[]> {
-  return invoke<ActivityRow[]>("recent_activity", { limit, entityId });
 }
 
 /**
@@ -859,20 +847,6 @@ export function promoteContext(entityId: string): Promise<ContextRow> {
 }
 
 /**
- * Who is in a context — `context_members`, by the fixed rule (§16.11,
- * ADR-0008): explicit adds and the anchor (an epic's tickets count through
- * their source-recorded parent), their direct links, one hop out, and — since
- * #434 — every asset held by one of those, at any depth.
- *
- * An unknown context has no members rather than an error. The per-context
- * inbox filter ("3 here") intersects the inbox stream with this set, so the
- * badge and the rows it stands for come from the same stream by construction.
- */
-export function contextMembers(ctxId: string): Promise<string[]> {
-  return invoke<string[]>("context_members", { ctxId });
-}
-
-/**
  * What a ticket reaches — `job_reach` (#817, R-2.8): its context's walk,
  * down only from a VM, proxy or host, plus its parent's own links behind
  * {@link parentLinks}. An id nothing answers to reaches nothing.
@@ -947,15 +921,6 @@ export function miniBoard(
     lanes: lanes?.by ?? null,
     lanesFirst: lanes?.first ?? null,
   });
-}
-
-/**
- * The statuses one source's live ticket corpus shows, in the board's order —
- * `source_statuses` (#760). The ticket detail's fallback offer when the
- * workflow cannot be read ({@link reachableTransitions}); asked only then.
- */
-export function sourceStatuses(sourceId: string): Promise<string[]> {
-  return invoke<string[]>("source_statuses", { sourceId });
 }
 
 /**

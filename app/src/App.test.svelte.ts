@@ -133,7 +133,6 @@ vi.mock("./lib/ipc/entity", () => ({
   unlink: () => Promise.reject(new Error("no unlink in this test")),
   listContexts: () => Promise.resolve([]),
   listProjects: () => Promise.resolve([]),
-  contextMembers: () => Promise.resolve([]),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   listEntities: () => Promise.resolve({ rows: [], total: 0 }),
   entityView: () => Promise.resolve(null),
@@ -150,7 +149,6 @@ vi.mock("./lib/ipc/entity", () => ({
     entityAnswer?.row.entity_id === entityId
       ? Promise.resolve(entityAnswer)
       : Promise.reject({ code: "not_found", message: "no such entity" }),
-  recentActivity: () => Promise.resolve([]),
   miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
   // The share export's link-set tick, read when Settings › Backup and export draws (#1469).
   linkSets: () => Promise.resolve([]),

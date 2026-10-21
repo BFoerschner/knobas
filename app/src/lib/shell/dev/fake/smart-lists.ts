@@ -272,11 +272,12 @@ function fakeJobAlerts(): string[] {
 }
 
 /**
- * `smart_list_items`: one list's rows, in the shape a search answers in --
- * which is the whole point of a smart list on this side of the wire, and what
- * lets the launcher render one with the component it renders results with.
+ * One list's rows, `search`'s answer to `list:<id>`, in the shape a search
+ * answers in -- which is the whole point of a smart list on this side of the
+ * wire, and what lets the launcher render one with the component it renders
+ * results with.
  *
- * An unknown id is refused the way the real command refuses it, so a typo in
+ * An unknown id is refused the way the real search refuses it, so a typo in
  * `list:` under `?fake-ipc` looks like a typo and not like an empty list.
  *
  * **The order is the fixture's, not the statement's** -- the last of the
@@ -343,7 +344,6 @@ export function fakeSmartListItems(args: Record<string, unknown>) {
 export function handlers(): Record<string, Handler> {
   return {
     smart_lists: () => fakeSmartLists(),
-    smart_list_items: (args) => fakeSmartListItems(args),
     // *Save as list* and the two writes that keep the rail tidy (#506).
     // **Fixture-only**: the rows live in a module array, not in a database,
     // and what they certify is the panel -- the rail drawing a saved row

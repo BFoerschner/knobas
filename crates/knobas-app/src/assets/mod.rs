@@ -6,7 +6,9 @@
 //! Six of the fifteen landed with #428; `asset_types` joined them with #429,
 //! when the create dialog gave the built-in table a reader, `context_assets`
 //! with #434 and `source_assets` with #435, when the room's Assets tile did,
-//! the four route commands with #432, and the Import's pair with #439.
+//! the four route commands with #432, and the Import's pair with #439. The
+//! two tile reads retired with #1578: the rooms UI that drew them went with
+//! #1087.
 //!
 //! `commands/assets.rs` is a set of shims over this module; every decision
 //! lives here, with tests, because a `#[tauri::command]` cannot be called from
@@ -76,10 +78,9 @@
 //! An asset is a member of a context through its **ancestors**: ADR-0008's
 //! ratified clause, expanded over `parent_id` and never over links, inside
 //! `knobas_core::context::member_ids`' one statement. This module owns no part
-//! of that rule -- [`in_context`] asks for the answer and reads the assets
-//! among the ids it gets back, so the room's Assets tile, the per-context
-//! inbox filter and the tray's proposal scope are one walk and cannot
-//! disagree.
+//! of that rule, so every reader of a context's members, the scope on
+//! `list_entities` and the tray's proposal scope among them, is one walk and
+//! they cannot disagree.
 //!
 //! # Routes, read from both ends (#432)
 //!
@@ -199,26 +200,20 @@
 //!
 //! # What this module deliberately does not do yet
 //!
-//! The create/edit surface (#429), the keyboard walk and spines (#430), the
-//! routes above, and the Assets tile in every kind of room (#434, #435) have
-//! landed: [`in_context`] serves a *stored* room and [`monitored_by`] a
-//! *source* room, while *All work*'s top level is [`tree`] with no parent and
-//! a project room reads nothing at all -- the frontend rule that picks among
-//! the four is `app/src/lib/shell/assets-tile.ts`. A route is **not moved
-//! between exposing assets** -- there is no `move_route` -- because a route is
-//! the address *of* the thing that answers it: re-exposing one somewhere else
-//! is a different route with a different history, which is a delete and a
-//! create. The wires story 31 draws between a route row and its target are
-//! #433's.
+//! The create/edit surface (#429), the keyboard walk and spines (#430) and
+//! the routes above have landed. A route is **not moved between exposing
+//! assets** -- there is no `move_route` -- because a route is the address *of*
+//! the thing that answers it: re-exposing one somewhere else is a different
+//! route with a different history, which is a delete and a create. The
+//! wires story 31 draws between a route row and its target are #433's.
 //!
-//! Monitors arrived with #442's Kuma adapter, so [`monitored_by`] fills a
-//! source room and [`AssetDetail::monitoring`] fills the pane's *monitoring*
-//! section (#445). Story 37's other half landed with #444: [`ROLLUP`] takes
-//! the newest sample of every monitor attached to an asset, so a container is
-//! red because a monitor on it is red and not only because somebody rated it --
-//! and a paused monitor colours nothing, which is story 38. [`open_alerts`] is
-//! the estate's own list of what is wrong, one read that the top strip counts
-//! and the Assets view draws. The **ack** on an alert is #446's, with the
+//! Monitors arrived with #442's Kuma adapter, so [`AssetDetail::monitoring`]
+//! fills the pane's *monitoring* section (#445). Story 37's other half landed
+//! with #444: [`ROLLUP`] takes the newest sample of every monitor attached to
+//! an asset, so a container is red because a monitor on it is red and not
+//! only because somebody rated it -- and a paused monitor colours nothing,
+//! which is story 38. [`open_alerts`] is the estate's own list of what is
+//! wrong, one read that the top strip counts and the Assets view draws. The **ack** on an alert is #446's, with the
 //! inbox category it clears; the Monitors tab's cards are #449's. Story 70's
 //! *Create monitor for this asset* is #453's: [`AssetDetail::monitor_targets`]
 //! is how the pane knows whether to offer one, filled by
@@ -267,7 +262,7 @@ pub const ROUTE_NAMESPACE: &str = "route";
 ///
 /// A pane, not an audit log: the reader wants the recent story of this asset,
 /// and a scroll of five hundred lines is a different surface. The whole stream
-/// stays readable through `recent_activity`.
+/// stays readable through `knobas_core::activity::recent`.
 const HISTORY_LIMIT: i64 = 50;
 
 /// What separates one ancestor's name from the next in `path_text`.
@@ -281,8 +276,8 @@ const PATH_SEPARATOR: &str = " / ";
 
 /// The relation a monitor is attached to an asset with (spec #427, story 67).
 ///
-/// Spelled here because [`monitored_by_source`] reads it and there is nothing
-/// else on this side of the bridge that knows the word: the relation
+/// Spelled here because [`ROLLUP`] and the monitor roster read it and there is
+/// nothing else on this side of the bridge that knows the word: the relation
 /// vocabulary is a *rendering* decision and lives in
 /// `app/src/lib/detail/relations.ts`, which is where `monitored-by` is given
 /// its two readings. The two spellings are pinned together by
@@ -309,8 +304,8 @@ const DEPENDENCY_RELATIONS: [&str; 2] = [DEPENDS_ON, RUNS_ON];
 
 /// The `knobas.entity.kind` a mirrored Uptime Kuma check carries.
 ///
-/// Written before anything emitted it, so that a source room's tile would fill
-/// with no change to this module the day the adapter landed -- which is what
+/// Written before anything emitted it, so that the reads here would fill with
+/// no change to this module the day the adapter landed -- which is what
 /// happened in #442. It is one of `knobas_core::entity::RESERVED_NAMESPACES`
 /// for the separate reason that `monitor:` ids are knobas' to give.
 const MONITOR_KIND: &str = "monitor";
@@ -1026,9 +1021,9 @@ pub struct UptimeRatio {
 
 /// One asset a monitor is attached to.
 ///
-/// Not a [`MemberAsset`]: a roster row needs a name, an address and a path,
-/// and a tile's row carries a whole [`AssetRow`] with a health rollup behind
-/// it -- a read per asset per monitor for facts this column does not draw.
+/// Not an [`AssetRow`]: a roster row needs a name, an address and a path, and
+/// an [`AssetRow`] carries a health rollup behind it -- a read per asset per
+/// monitor for facts this column does not draw.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "assets.ts")]
 pub struct MonitoredAsset {
@@ -1128,7 +1123,7 @@ pub struct AlertAsset {
     pub id: String,
     pub name: String,
     /// Its ancestors, outermost first, or `null` at the top of the estate --
-    /// [`MemberAsset::path`]'s field and its spelling.
+    /// [`DependsOnRow::path`]'s field and its spelling.
     pub path: Option<String>,
 }
 
@@ -1368,13 +1363,12 @@ pub enum RouteEdit {
 /// structural and the reason it is repeated here in prose. `path_text` is left
 /// out of **these three** -- the launcher reads it through the corpus and no
 /// *Miller column* draws it, so selecting it on every column of a walk would
-/// be bytes nobody asked for. The two **tile** statements, [`MEMBER_ASSETS`]
-/// (#434) and [`MONITORED_ASSETS`] (#435), do select it, and that is the whole
-/// reason they are statements of their own rather than two more of these: a
-/// room's Assets tile is a flat list of assets from anywhere in the estate, so
-/// where each one sits is the column that makes it readable.
+/// be bytes nobody asked for. The reads that list assets from anywhere in the
+/// estate, [`ROSTER_ASSETS`] and [`ALERT_ASSETS`], select it in statements of
+/// their own, because where each one sits is the column that makes such a list
+/// readable.
 ///
-/// Five statements rather than one spliced constant: the SQL audit this repo
+/// Three statements rather than one spliced constant: the SQL audit this repo
 /// runs is over literal text, and a statement assembled from fragments is one
 /// a reader cannot check by reading.
 const CHILDREN: &str = "select a.id, a.parent_id, a.type_id, a.name, a.status, a.environment,
@@ -1674,7 +1668,7 @@ const ROUTE_ONE: &str = "select r.id, r.asset_id, r.target_id, r.name, r.url,
 ///
 /// The relation and the kind are **bound** (`$2`, `$3`) rather than written
 /// into the text, so [`MONITORED_BY`] and [`MONITOR_KIND`] have one spelling
-/// in this crate -- [`MONITORED_ASSETS`]' arrangement.
+/// in this crate.
 ///
 /// `depth` is what separates the two answers. The anchor row is the asset
 /// itself at depth 0, so `health`'s `min` sees the asset's own severity and
@@ -2153,7 +2147,7 @@ const ROSTER_SAMPLES: &str = "select entity_id, taken_at, state
 /// of the join rather than drawing the asset as its own monitor's asset.
 ///
 /// `$1` is the monitor ids and `$2` the relation ([`MONITORED_BY`]), bound
-/// rather than written into the text, which is [`MONITORED_ASSETS`]' rule.
+/// rather than written into the text, which is [`ROLLUP`]'s rule.
 const ROSTER_ASSETS: &str = "select m.id as monitor_id, a.id, a.name, a.type_id,
                                     nullif(a.path_text, '') as path
   from unnest($1::text[]) as m(id)
@@ -2750,194 +2744,12 @@ pub fn properties_of(type_id: &str, stored: &serde_json::Value) -> Vec<AssetProp
     out
 }
 
-/// One asset in a room's Assets tile: the row every other read answers with,
-/// plus where it sits (#434).
-///
-/// **A carrier rather than a field on [`AssetRow`]**, and the reason is the
-/// rule the three column statements above state: `path_text` is left out of a
-/// Miller walk because no column draws it, and putting it on the row would put
-/// it on every column of every walk to serve one tile. The pair here is the
-/// same move [`Written`] makes -- the thing, and the one extra fact this
-/// caller needs about it -- so the tile reads `asset.name` and `path` and
-/// nothing in this module keeps a second copy of a type table or a rollup.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
-#[ts(export_to = "assets.ts")]
-pub struct MemberAsset {
-    pub asset: AssetRow,
-    /// The ancestors' names, outermost first, `" / "` between them; `null` for
-    /// an asset at the top of the estate.
-    ///
-    /// Read off `knobas.asset.path_text`, the column the store maintains on
-    /// create, rename and move -- not a recursive read per row, which is what
-    /// a tile of twenty assets would otherwise cost.
-    pub path: Option<String>,
-}
-
-/// The member assets themselves, by id.
-///
-/// Which ids those are is [`knobas_core::context::member_ids`]'s answer and is
-/// **not re-derived here** -- see [`in_context`]. The `order by` is a stable
-/// floor under the sort that follows it, not the order the tile draws.
-const MEMBER_ASSETS: &str = "select a.id, a.parent_id, a.type_id, a.name, a.status, a.environment,
-            a.owner, nullif(a.path_text, '') as path,
-            exists (select 1 from knobas.asset c where c.parent_id = a.id) as has_children
-       from knobas.asset a
-      where a.id = any($1::text[])
-      order by a.name asc, a.id asc";
-
-/// The assets a **source**'s monitors are attached to (spec #427 story 44).
-///
-/// [`MEMBER_ASSETS`]' columns over a different `where`, and a statement of its
-/// own for the reason all five are: a whole literal a reader checks by
-/// reading.
-/// `$1` is the source id, `$2` the relation ([`MONITORED_BY`]) and `$3` the
-/// kind ([`MONITOR_KIND`]) -- bound rather than written into the text, so each
-/// word has one spelling in this crate.
-///
-/// An `exists` rather than a join: an asset carrying two monitors is one row
-/// of a tile, and a join would draw it twice.
-const MONITORED_ASSETS: &str =
-    "select a.id, a.parent_id, a.type_id, a.name, a.status, a.environment,
-            a.owner, nullif(a.path_text, '') as path,
-            exists (select 1 from knobas.asset c where c.parent_id = a.id) as has_children
-       from knobas.asset a
-      where exists (
-            select 1 from knobas.confirmed_link l
-              join sync.live_item i
-                on i.entity_id = case when l.from_id = a.id then l.to_id else l.from_id end
-             where (l.from_id = a.id or l.to_id = a.id)
-               and l.relation = $2
-               and i.source_id = $1
-               and i.kind = $3
-      )
-      order by a.name asc, a.id asc";
-
-/// The assets a stored room's Assets tile draws: the context's member assets,
-/// worst health first (spec #427 story 41, issue #434).
-///
-/// **One walk, not two.** The membership rule is
-/// [`knobas_core::context::member_ids`]'s and this read asks it for the
-/// answer, then reads the assets among the ids it gave back. Nothing here
-/// re-states seed / direct / hop / held: a second copy of that statement is
-/// exactly what would let the tile, the per-context inbox filter and the
-/// tray's proposal scope come to different answers about who is here, and
-/// ADR-0008's "one rule, one statement, one battery" is the line this keeps.
-/// Assets reach that answer through their ancestors, so an asset's whole
-/// subtree is in the list when the asset is.
-///
-/// **Worst first** (the mockup's `signal-miller.html:1832`, `rank`): a tile is
-/// twenty rows in a box eight rows tall, and a `down` asset fifteenth is a
-/// tile that has not said the one thing it exists to say. The order is
-/// `health` -- the *effective* health, so a healthy VM holding a dead
-/// container sorts up with the dead one -- then name, then id, so two assets
-/// that are equally well and equally named still draw in a fixed order.
-///
-/// **No `limit`, deliberately**, where `Tile.svelte`'s list tiles window at
-/// fifty and print the unpaged total beside them. There is no total to print
-/// here: `member_ids` answers with a whole set and counting it is reading it,
-/// so a windowed read would either say "50" and be wrong or cost a second
-/// statement to say otherwise. ADR-0008 grants that *"membership can be
-/// wide"*, and the honest shape for a wide answer in a box eight rows tall is
-/// the whole list, worst first, in a tile that scrolls.
-///
-/// An unknown or archived `ctx_id` answers with no assets rather than an
-/// error, which is [`knobas_core::context::member_ids`]' own behaviour and the
-/// honest answer for a reader scoping a view.
-///
-/// # Errors
-///
-/// [`IpcError`] if a read fails.
-pub async fn in_context(pool: &PgPool, ctx_id: &str) -> Result<Vec<MemberAsset>, IpcError> {
-    let members = knobas_core::context::member_ids(pool, ctx_id).await?;
-    if members.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let rows = sqlx::query(MEMBER_ASSETS)
-        .bind(&members)
-        .fetch_all(pool)
-        .await?;
-    tile_rows(pool, &rows).await
-}
-
-/// The assets a **source** room's Assets tile draws: everything this source's
-/// monitors are attached to, worst health first (spec #427 story 44, issue
-/// #435).
-///
-/// **A `monitored-by` link to an item of this source, and nothing else.** The
-/// rule spec #427 states is *"a source room lists assets with a monitored-by
-/// link to that source's monitors"*, and every clause of it is in
-/// [`MONITORED_ASSETS`]: the relation, the source, and `kind = 'monitor'` --
-/// which is what keeps a Jira room from listing the assets its *tickets*
-/// happen to be linked to.
-///
-/// **Written before there was a monitor to find**, as the real statement
-/// rather than an empty `Vec`, on the argument that the difference is not
-/// visible from the tile and is the whole difference between a room that fills
-/// itself the day the adapter lands and a room somebody has to remember to
-/// come back to. #442's adapter landed and it did.
-///
-/// **Not membership's rule.** A monitor watches the thing it was pointed at;
-/// that a VM holds the container somebody is monitoring does not make the VM
-/// monitored, so there is no ancestor expansion here and
-/// [`knobas_core::context::member_ids`] is not consulted. What rolls up the
-/// tree is *health*, which every row carries already.
-///
-/// # Errors
-///
-/// [`IpcError`] if the read fails.
-pub async fn monitored_by(pool: &PgPool, source_id: &str) -> Result<Vec<MemberAsset>, IpcError> {
-    let rows = sqlx::query(MONITORED_ASSETS)
-        .bind(source_id)
-        .bind(MONITORED_BY)
-        .bind(MONITOR_KIND)
-        .fetch_all(pool)
-        .await?;
-    tile_rows(pool, &rows).await
-}
-
-/// The rows of a tile's read, hydrated and put in the order a tile draws them.
-///
-/// One helper for both tile reads rather than a copy each: the *ordering* is
-/// the tile's and not one room kind's, and two copies of a three-key sort are
-/// two chances for a room to be ordered differently from the room beside it.
-///
-/// `severity` is smaller-is-worse, so this is an ascending sort and the worst
-/// row is first. The statement cannot do it: `health` is the rollup's answer
-/// and the rollup is a read of its own.
-async fn tile_rows(
-    pool: &PgPool,
-    rows: &[sqlx::postgres::PgRow],
-) -> Result<Vec<MemberAsset>, IpcError> {
-    let assets = rows_of(pool, rows).await?;
-    let mut out: Vec<MemberAsset> = rows
-        .iter()
-        .zip(assets)
-        .map(|(row, asset)| {
-            Ok(MemberAsset {
-                asset,
-                path: row.try_get("path")?,
-            })
-        })
-        .collect::<Result<Vec<_>, IpcError>>()?;
-    out.sort_by(|left, right| {
-        left.asset
-            .health
-            .severity()
-            .cmp(&right.asset.health.severity())
-            .then_with(|| left.asset.name.cmp(&right.asset.name))
-            .then_with(|| left.asset.id.cmp(&right.asset.id))
-    });
-    Ok(out)
-}
-
 /// One line of the *Depends on this* panel: an asset that breaks, where it
 /// sits, and why it is on the list (#505).
 ///
-/// A carrier rather than fields on [`AssetRow`], [`MemberAsset`]'s reason
-/// exactly -- `path_text` is not on a Miller column's read and `relation` is
-/// true of this *answer* and not of the asset, which is on somebody else's
-/// list under a different word.
+/// A carrier rather than fields on [`AssetRow`]: `path_text` is not on a
+/// Miller column's read, and `relation` is true of this *answer* and not of
+/// the asset, which is on somebody else's list under a different word.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "assets.ts")]
 pub struct DependsOnRow {
@@ -2946,7 +2758,7 @@ pub struct DependsOnRow {
     /// an asset at the top of the estate.
     ///
     /// Story 54's *"each dependent's path in the tree"*, read off
-    /// `knobas.asset.path_text` the way [`MemberAsset::path`] is.
+    /// `knobas.asset.path_text`.
     pub path: Option<String>,
     /// The relation it came through -- [`DEPENDS_ON`] or [`RUNS_ON`] -- and
     /// **`null` when it came through containment**.
@@ -3283,8 +3095,8 @@ pub async fn ack_alert(
 
 /// The assets each of a set of monitors is attached to, by name.
 ///
-/// [`MONITORED_ASSETS`]' rule read from the other end -- the same relation and
-/// the same either-direction link -- and over the *link* alone, without
+/// [`ROSTER_ASSETS`]' rule -- the same relation and the same either-direction
+/// link -- and over the *link* alone, without
 /// `sync.live_item`: [`OPEN_ALERTS`]' note says why an alert outlives the
 /// mirror row, and an alert whose asset went missing from the list would be
 /// worse than one drawn with no asset on it.
@@ -7227,8 +7039,8 @@ mod tests {
     /// mirror row it arrives as is `kuma:<id>` and the namespace is the
     /// source's. What the reservation buys is that no *source* may call itself
     /// `monitor` and write its items where monitors live -- which is what
-    /// makes [`MONITORED_ASSETS`]' `kind` clause a statement about Kuma's
-    /// checks rather than about whatever a source happened to name itself.
+    /// makes the `kind` clause of [`ROLLUP`] a statement about Kuma's checks
+    /// rather than about whatever a source happened to name itself.
     #[test]
     fn the_monitor_kind_is_a_word_knobas_keeps_for_itself() {
         assert!(knobas_core::entity::is_reserved_namespace(MONITOR_KIND));

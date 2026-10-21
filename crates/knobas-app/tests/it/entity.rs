@@ -7,7 +7,7 @@
 
 use knobas_app::commands::entity::{
     DEFAULT_RELATION, create_link_inner, get_entity_inner, list_entities_inner,
-    list_projects_inner, recent_activity_inner, unlink_inner,
+    list_projects_inner, unlink_inner,
 };
 use knobas_app::sources::Registry;
 use knobas_core::entity_list::{EntityFilter, EntityOrder};
@@ -1247,7 +1247,7 @@ async fn activity_can_be_scoped_to_one_entity() {
             .unwrap();
     }
 
-    let scoped = recent_activity_inner(&pool, 200, Some(&mine))
+    let scoped = knobas_core::activity::recent(&pool, 200, Some(&mine))
         .await
         .unwrap();
     assert_eq!(
@@ -1262,7 +1262,9 @@ async fn activity_can_be_scoped_to_one_entity() {
         "a scoped read returns only that entity's lines"
     );
 
-    let global = recent_activity_inner(&pool, 500, None).await.unwrap();
+    let global = knobas_core::activity::recent(&pool, 500, None)
+        .await
+        .unwrap();
     assert_eq!(
         global.iter().filter(|r| r.verb == verb).count(),
         2,
@@ -2623,8 +2625,8 @@ async fn the_tile_orders_refuse_the_withdrawn() {
 //
 // The seam is the command layer, driven over the migrated test pool: a link is
 // *made* through `create_link_inner` and *observed* through `get_entity_inner`
-// and `recent_activity_inner` -- three different commands, so nothing here can
-// pass by agreeing with itself. Nothing asserts SQL, store internals, or a
+// and `knobas_core::activity::recent` -- three different reads, so nothing
+// here can pass by agreeing with itself. Nothing asserts SQL, store internals, or a
 // count of the whole table: the corpus is shared by every test in this file.
 
 /// Two run-unique entities that are in the mirror, which is what a link needs
@@ -2992,10 +2994,10 @@ async fn unlinking_keeps_the_row_and_the_pair_can_be_linked_again() {
 /// Every mutation leaves exactly one activity line, on the end the link was
 /// drawn from, naming the other end, the relation and the link.
 ///
-/// Read back through `recent_activity_inner` *and* through the entity detail's
-/// own history, because those are the two surfaces that draw it (§12.1, §2a) --
-/// and counted with `== 1`, scoped by a verb nobody else in this file writes,
-/// so a second row would fail rather than pass unnoticed.
+/// Read back through `knobas_core::activity::recent` *and* through the entity
+/// detail's own history (§12.1, §2a) -- and counted with `== 1`, scoped by a
+/// verb nobody else in this file writes, so a second row would fail rather
+/// than pass unnoticed.
 #[tokio::test]
 async fn each_link_mutation_writes_one_activity_line_on_the_from_end() {
     let pool = seeded().await;
@@ -3027,7 +3029,7 @@ async fn each_link_mutation_writes_one_activity_line_on_the_from_end() {
 
     // The row the command hands back is the row in the log, not a copy of its
     // own arguments: found by id through a different command.
-    let logged = recent_activity_inner(&pool, 200, Some(&from_ref))
+    let logged = knobas_core::activity::recent(&pool, 200, Some(&from_ref))
         .await
         .unwrap();
     let mine: Vec<_> = logged
@@ -3051,7 +3053,7 @@ async fn each_link_mutation_writes_one_activity_line_on_the_from_end() {
     // The known v1 limitation, asserted rather than assumed: the to-end's
     // history does not carry the line. Its links panel still shows the link.
     assert!(
-        !recent_activity_inner(&pool, 200, Some(&to_ref))
+        !knobas_core::activity::recent(&pool, 200, Some(&to_ref))
             .await
             .unwrap()
             .iter()
@@ -3080,7 +3082,7 @@ async fn each_link_mutation_writes_one_activity_line_on_the_from_end() {
         "the unlink wrote its own line rather than reporting the link's"
     );
     assert_eq!(
-        recent_activity_inner(&pool, 200, Some(&from_ref))
+        knobas_core::activity::recent(&pool, 200, Some(&from_ref))
             .await
             .unwrap()
             .iter()
@@ -3752,7 +3754,7 @@ async fn a_notes_birth_is_one_line_and_a_withdrawn_born_link_pairs_with_it() {
     );
 
     let note_ref = knobas_core::entity::EntityRef::parse(&born.note.id).unwrap();
-    let lines = recent_activity_inner(&pool, 200, Some(&note_ref))
+    let lines = knobas_core::activity::recent(&pool, 200, Some(&note_ref))
         .await
         .unwrap();
     assert_eq!(
@@ -3876,7 +3878,7 @@ async fn saving_a_note_writes_no_activity_line_however_much_it_reconciles() {
         .await
         .unwrap();
     let note_ref = knobas_core::entity::EntityRef::parse(&born.note.id).unwrap();
-    let after_birth: Vec<i64> = recent_activity_inner(&pool, 200, Some(&note_ref))
+    let after_birth: Vec<i64> = knobas_core::activity::recent(&pool, 200, Some(&note_ref))
         .await
         .unwrap()
         .iter()
@@ -3911,7 +3913,7 @@ async fn saving_a_note_writes_no_activity_line_however_much_it_reconciles() {
         "the second save withdrew one link and drew another: {still:?}"
     );
 
-    let after_saves: Vec<i64> = recent_activity_inner(&pool, 200, Some(&note_ref))
+    let after_saves: Vec<i64> = knobas_core::activity::recent(&pool, 200, Some(&note_ref))
         .await
         .unwrap()
         .iter()
@@ -3961,7 +3963,7 @@ async fn deleting_a_note_writes_one_deleted_line_on_the_address_that_survives() 
 
     assert!(delete_note_inner(&pool, &born.note.id).await.unwrap());
 
-    let lines = recent_activity_inner(&pool, 200, Some(&note_ref))
+    let lines = knobas_core::activity::recent(&pool, 200, Some(&note_ref))
         .await
         .unwrap();
     let verbs: Vec<&str> = lines.iter().map(|row| row.verb.as_str()).collect();
@@ -3988,7 +3990,7 @@ async fn deleting_a_note_writes_one_deleted_line_on_the_address_that_survives() 
     // nothing -- the same rule `unlink_inner` follows.
     assert!(!delete_note_inner(&pool, &born.note.id).await.unwrap());
     assert_eq!(
-        recent_activity_inner(&pool, 200, Some(&note_ref))
+        knobas_core::activity::recent(&pool, 200, Some(&note_ref))
             .await
             .unwrap()
             .len(),
@@ -4026,7 +4028,7 @@ async fn a_birth_line_is_written_even_when_no_born_link_could_be_drawn() {
     assert!(born.links.is_empty(), "{:?}", born.links);
 
     let note_ref = knobas_core::entity::EntityRef::parse(&born.note.id).unwrap();
-    let lines = recent_activity_inner(&pool, 200, Some(&note_ref))
+    let lines = knobas_core::activity::recent(&pool, 200, Some(&note_ref))
         .await
         .unwrap();
     assert_eq!(lines.len(), 1, "{lines:?}");

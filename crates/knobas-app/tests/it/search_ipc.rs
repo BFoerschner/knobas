@@ -17,8 +17,7 @@ use knobas_app::IpcErrorCode;
 use knobas_app::assets::ESTATE_FILE_PRODUCER;
 use knobas_app::commands::search::{
     create_smart_list_inner, delete_smart_list_inner, filter_suggestions_inner,
-    launcher_home_inner, rename_smart_list_inner, search_inner, smart_list_items_inner,
-    smart_lists_inner,
+    launcher_home_inner, rename_smart_list_inner, search_inner, smart_lists_inner,
 };
 use knobas_app::sources::Registry;
 use knobas_search::{SearchFilters, SearchQuery};
@@ -97,6 +96,20 @@ fn query(raw: &str) -> SearchQuery {
         limit: 20,
         filters: SearchFilters::default(),
     }
+}
+
+/// Open a smart list the way the launcher does: by searching for `list:<id>`.
+async fn open_list(
+    pool: &sqlx::PgPool,
+    id: &str,
+    limit: u32,
+) -> Result<knobas_search::SearchResponse, knobas_app::IpcError> {
+    let open = SearchQuery {
+        raw: format!("list:{id}"),
+        limit,
+        filters: SearchFilters::default(),
+    };
+    search_inner(pool, &Registry::for_process(), open).await
 }
 
 /// The field names are the contract.
@@ -191,9 +204,7 @@ async fn no_markup_reaches_the_wire_in_a_snippet() {
 async fn errors_carry_a_code_the_frontend_can_branch_on() {
     let pool = pool().await;
 
-    let unknown = smart_list_items_inner(&pool, &Registry::for_process(), "nope", 10)
-        .await
-        .unwrap_err();
+    let unknown = open_list(&pool, "nope", 10).await.unwrap_err();
     assert_eq!(unknown.code, IpcErrorCode::NotFound, "{unknown:?}");
     assert!(unknown.message.contains("nope"), "{unknown:?}");
 
@@ -360,9 +371,7 @@ async fn a_smart_list_answers_in_the_search_shape() {
     let pool = pool().await;
     seed(&pool, "list").await;
 
-    let response = smart_list_items_inner(&pool, &Registry::for_process(), "just-synced", 20)
-        .await
-        .unwrap();
+    let response = open_list(&pool, "just-synced", 20).await.unwrap();
     let v = serde_json::to_value(&response).unwrap();
 
     assert_eq!(v["interpreted"]["prefix"], "list", "{v}");
@@ -1015,7 +1024,7 @@ async fn list_count(pool: &sqlx::PgPool, id: &str) -> i64 {
 
 /// Every asset id one list answers with, in the order it answers.
 async fn list_rows(pool: &sqlx::PgPool, id: &str) -> Vec<String> {
-    smart_list_items_inner(pool, &Registry::for_process(), id, 200)
+    open_list(pool, id, 200)
         .await
         .expect("the list's rows")
         .groups
@@ -1260,7 +1269,7 @@ async fn a_certificate_reading_that_is_not_a_number_is_a_miss_and_not_a_failure(
 ///
 /// One test over all three, because what is under test is the mechanism they
 /// share: `SUMMARY_SQL`'s per-list stamp against the one `knobas.setting` row,
-/// and `smart_list_items` writing that row as it answers. The stamps are
+/// and opening a list (`list:<id>`) writing that row. The stamps are
 /// **three different expressions** -- an asset's own `updated_at`, an alert's
 /// `opened_at`, a monitor's `synced_at` -- so a list whose stamp did not exist
 /// would never badge and one whose stamp was somebody else's would never clear.
@@ -1286,9 +1295,7 @@ async fn every_estate_list_badges_until_it_is_opened() {
             before.contains(&id.to_owned()),
             "{id} holds something and has never been opened: {before:?}"
         );
-        smart_list_items_inner(&pool, &Registry::for_process(), id, 20)
-            .await
-            .expect("opening the list");
+        open_list(&pool, id, 20).await.expect("opening the list");
     }
 
     let after = badged(pool).await;
@@ -1469,7 +1476,7 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
 
     // Opening it: the rows the count promised, and the *saved query's* own
     // interpretation -- which is what draws the chip row above the results.
-    let opened = smart_list_items_inner(&pool, &Registry::for_process(), &made.id, 20)
+    let opened = open_list(&pool, &made.id, 20)
         .await
         .expect("the saved list opens");
     let v = serde_json::to_value(&opened).unwrap();
@@ -1584,7 +1591,7 @@ async fn a_saved_lists_count_is_the_number_of_rows_it_answers_with() {
         let made = create_smart_list_inner(&pool, &Registry::for_process(), name, &raw)
             .await
             .unwrap_or_else(|error| panic!("{name}: {error:?}"));
-        let opened = smart_list_items_inner(&pool, &Registry::for_process(), &made.id, 200)
+        let opened = open_list(&pool, &made.id, 200)
             .await
             .unwrap_or_else(|error| panic!("{name}: {error:?}"));
         assert_eq!(
@@ -1634,7 +1641,7 @@ async fn a_saved_lists_badge_lights_when_the_corpus_moves_and_clears_when_it_is_
         "it holds something and has never been opened"
     );
 
-    smart_list_items_inner(&pool, &Registry::for_process(), &made.id, 20)
+    open_list(&pool, &made.id, 20)
         .await
         .expect("opening it clears the badge");
     assert!(
@@ -1769,7 +1776,7 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
 
     // Typing `list:<id>` for one answers with the reason, not with an empty
     // page: a refusal a reader can act on beats a list that looks empty.
-    let refused = smart_list_items_inner(&pool, &Registry::for_process(), "legacy-palette", 20)
+    let refused = open_list(&pool, "legacy-palette", 20)
         .await
         .expect_err("a list that cannot run cannot be opened");
     assert_eq!(refused.code, IpcErrorCode::Invalid);
@@ -1808,9 +1815,7 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
 
     // Opened once, so the seen-stamp exists and the rename can be shown not to
     // have lost it.
-    smart_list_items_inner(&pool, &Registry::for_process(), &made.id, 20)
-        .await
-        .expect("opens");
+    open_list(&pool, &made.id, 20).await.expect("opens");
 
     rename_smart_list_inner(&pool, &Registry::for_process(), &made.id, "  SEPA  ")
         .await
@@ -1864,7 +1869,7 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
         "nothing saved is left"
     );
     assert_eq!(
-        smart_list_items_inner(&pool, &Registry::for_process(), &made.id, 20)
+        open_list(&pool, &made.id, 20)
             .await
             .expect_err("it is gone")
             .code,
@@ -1959,7 +1964,7 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
         .expect("saved");
     assert_eq!(clash.id, "mine-2");
     // The proof is what `list:mine` opens, not what the generator returned.
-    let built_in = smart_list_items_inner(&pool, &Registry::for_process(), "mine", 20)
+    let built_in = open_list(&pool, "mine", 20)
         .await
         .expect("the built-in still answers");
     assert!(

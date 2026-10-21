@@ -672,7 +672,7 @@ test("the fixture's launcher board draws the seven built-ins, with the estate's 
 
   // And the rows behind the counts: assets, with the count the rail promised.
   for (const id of ["not-monitored", "alerts-in-context", "certs-expiring"]) {
-    const response = handlers["smart_list_items"]!({ id, limit: 20 }) as {
+    const response = handlers["search"]!({ query: { raw: `list:${id}`, filters: {} } }) as {
       total: number;
       groups: { kind: string; total: number; hits: { entity_id: string; kind: string }[] }[];
     };
@@ -685,7 +685,7 @@ test("the fixture's launcher board draws the seven built-ins, with the estate's 
   }
 
   // A list nobody ships is refused, not answered with nothing.
-  expect(() => handlers["smart_list_items"]!({ id: "nope", limit: 20 })).toThrow();
+  expect(() => handlers["search"]!({ query: { raw: "list:nope", filters: {} } })).toThrow();
 });
 
 /**
@@ -709,7 +709,7 @@ test("the fixture's expiring certificates are the roster rows under thirty days"
   );
   expect(expiring.size, "a roster with no certificate cannot show this list").toBeGreaterThan(0);
 
-  const rows = handlers["smart_list_items"]!({ id: "certs-expiring", limit: 20 }) as {
+  const rows = handlers["search"]!({ query: { raw: "list:certs-expiring", filters: {} } }) as {
     groups: { hits: { entity_id: string }[] }[];
   };
   expect(new Set(rows.groups[0]!.hits.map((hit) => hit.entity_id))).toEqual(expiring);
@@ -818,11 +818,6 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
     surface: "The merge follow that closes a started ticket",
     witnesses: ["crates/knobas-app/tests/it/start_work.rs"],
     commands: ["follow_merges"],
-  },
-  {
-    surface: "A source's assets",
-    witnesses: ["crates/knobas-app/tests/it/assets_ipc.rs"],
-    commands: ["source_assets"],
   },
 ];
 

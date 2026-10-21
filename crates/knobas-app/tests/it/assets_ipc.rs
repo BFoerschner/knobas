@@ -1468,33 +1468,8 @@ async fn a_column_row_reports_its_effective_health_and_what_is_wrong_inside() {
 }
 
 // ---------------------------------------------------------------------------
-// Assets in a room (#434)
+// A mirrored ticket, for the link tests below
 // ---------------------------------------------------------------------------
-
-/// An ad-hoc context and an explicit *Add to context* -- which is an ordinary
-/// confirmed link, spec §5a.
-async fn context_holding(pool: &PgPool, title: &str, member: &str) -> String {
-    let ctx = knobas_core::context::create_adhoc(pool, title)
-        .await
-        .expect("the context");
-    add(pool, &ctx.id, member).await;
-    ctx.id
-}
-
-/// A confirmed link between two entities, drawn by hand.
-async fn add(pool: &PgPool, from: &str, to: &str) {
-    knobas_core::link::create(
-        pool,
-        &knobas_core::entity::EntityRef::parse(from).expect("a ref"),
-        &knobas_core::entity::EntityRef::parse(to).expect("a ref"),
-        "related",
-        knobas_core::link::Origin::Manual,
-        None,
-        "user",
-    )
-    .await
-    .expect("the link");
-}
 
 /// A mirrored ticket: the entity row a link needs and the `sync.item` row that
 /// makes it a live one.
@@ -1516,132 +1491,6 @@ async fn ticket(pool: &PgPool, key: &str) -> String {
     .await
     .expect("the mirror row");
     id
-}
-
-/// What the tile draws, in the order it draws it: `(name, path)`.
-async fn tile(pool: &PgPool, ctx: &str) -> Vec<(String, Option<String>)> {
-    assets::in_context(pool, ctx)
-        .await
-        .expect("the tile's read")
-        .into_iter()
-        .map(|row| (row.asset.name, row.path))
-        .collect()
-}
-
-/// Story 41 and story 48 at the tile: a VM added to a context brings what it
-/// holds, each row carries the path it sits at, and the worst row is first.
-///
-/// `two_branches` is the fixture because the claim needs a **sibling subtree**
-/// to leave alone: a single chain cannot tell "the members are this VM's
-/// descendants" from "the members are every asset in the estate".
-///
-/// The order is the assertion a name-only sort fails: `postgres` is
-/// alphabetically first and is drawn **last**, because it is the only one of
-/// the three that is well. The two `down` rows are separated by name, which is
-/// the tiebreak, and `vm-db-01` is `down` only through what it holds -- so a
-/// sort over the asset's *own* status would put it elsewhere.
-#[tokio::test]
-async fn a_stored_rooms_tile_lists_the_member_assets_with_their_path_worst_first() {
-    let pool = pool("assets-in-context").await;
-    let estate = two_branches(&pool).await;
-    edit_one(
-        &pool,
-        &estate.redis.id,
-        AssetEdit::Status {
-            value: AssetStatus::Down,
-        },
-    )
-    .await;
-    edit_one(
-        &pool,
-        &estate.postgres.id,
-        AssetEdit::Status {
-            value: AssetStatus::Up,
-        },
-    )
-    .await;
-
-    let ctx = context_holding(&pool, "payments stack", &estate.db.id).await;
-
-    assert_eq!(
-        tile(&pool, &ctx).await,
-        vec![
-            ("redis".to_owned(), Some("hel1 / vm-db-01".to_owned())),
-            ("vm-db-01".to_owned(), Some("hel1".to_owned())),
-            ("postgres".to_owned(), Some("hel1 / vm-db-01".to_owned())),
-        ]
-    );
-
-    // The far edges: the site *above* the VM is not brought in, and neither is
-    // the other branch -- membership counts through ancestors, not through
-    // whatever else the estate holds.
-    let drawn: Vec<String> = tile(&pool, &ctx)
-        .await
-        .into_iter()
-        .map(|(name, _)| name)
-        .collect();
-    for absent in [&estate.site, &estate.app, &estate.nginx] {
-        assert!(
-            !drawn.contains(&absent.name),
-            "{} is outside the rule: {drawn:?}",
-            absent.name
-        );
-    }
-}
-
-/// Story 42: *"linking an asset to a ticket adds the asset to that ticket's
-/// contexts"*, which is what makes the tile fill itself -- and it is
-/// **computed**, per spec #427, so the link the reader draws is the only row
-/// written and removing it empties the tile again.
-#[tokio::test]
-async fn linking_an_asset_to_a_member_ticket_fills_the_tile_and_unlinking_empties_it() {
-    let pool = pool("assets-implied").await;
-    let estate = two_branches(&pool).await;
-    let ticket = ticket(&pool, "PAY-1").await;
-    let ctx = context_holding(&pool, "payout retries", &ticket).await;
-
-    assert_eq!(tile(&pool, &ctx).await, vec![], "no asset is linked yet");
-
-    let link = knobas_core::link::create(
-        &pool,
-        &knobas_core::entity::EntityRef::parse(&ticket).expect("a ref"),
-        &knobas_core::entity::EntityRef::parse(&estate.db.id).expect("a ref"),
-        "runs-on",
-        knobas_core::link::Origin::Manual,
-        None,
-        "user",
-    )
-    .await
-    .expect("the link");
-
-    assert_eq!(
-        tile(&pool, &ctx)
-            .await
-            .into_iter()
-            .map(|(name, _)| name)
-            .collect::<Vec<_>>(),
-        vec!["postgres", "redis", "vm-db-01"],
-        "the VM and both containers it holds"
-    );
-
-    knobas_core::link::unlink(&pool, link.id)
-        .await
-        .expect("unlink");
-    assert_eq!(
-        tile(&pool, &ctx).await,
-        vec![],
-        "and the tile empties again"
-    );
-}
-
-/// An address can outlive the thing it names, so a room whose context is gone
-/// draws an empty tile rather than an error -- `context::member_ids`' own
-/// behaviour, carried through.
-#[tokio::test]
-async fn a_context_that_is_not_there_draws_an_empty_tile() {
-    let pool = pool("assets-no-context").await;
-    two_branches(&pool).await;
-    assert_eq!(tile(&pool, "ctx:gone").await, vec![]);
 }
 
 // ---------------------------------------------------------------------------
@@ -2703,103 +2552,6 @@ async fn a_paused_monitor_stays_in_the_section_with_no_state_and_no_link() {
     assert!(pane.monitoring[0].web_url.is_none());
 }
 
-/// Story 44: a source room's tile lists the assets **that source's monitors**
-/// are attached to, and nothing else.
-///
-/// Three near misses are in the fixture, because each is a clause of the rule
-/// and a read that dropped any one of them would still list `postgres`: a
-/// monitor of a *different* source, an item of the right source that is not a
-/// monitor, and a `related` link to the right monitor. The container's holder
-/// is the fourth: attachment does not roll up the tree the way membership
-/// does, so `vm-db-01` is absent though it holds the monitored container.
-#[tokio::test]
-async fn a_source_rooms_tile_lists_the_assets_its_own_monitors_watch() {
-    let pool = pool("assets-monitored-by").await;
-    let estate = two_branches(&pool).await;
-
-    let kuma = monitor(&pool, "kuma", "1").await;
-    let elsewhere = monitor(&pool, "kuma2", "1").await;
-    let not_a_monitor = ticket(&pool, "PAY-9").await;
-
-    link_as(&pool, &estate.postgres.id, &kuma, "monitored-by").await;
-    link_as(&pool, &estate.redis.id, &elsewhere, "monitored-by").await;
-    link_as(&pool, &estate.app.id, &not_a_monitor, "monitored-by").await;
-    link_as(&pool, &estate.nginx.id, &kuma, "related").await;
-
-    assert_eq!(
-        assets::monitored_by(&pool, "kuma")
-            .await
-            .expect("the tile's read")
-            .into_iter()
-            .map(|row| (row.asset.name, row.path))
-            .collect::<Vec<_>>(),
-        vec![("postgres".to_owned(), Some("hel1 / vm-db-01".to_owned()))],
-        "the monitored container, with the path a flat list needs"
-    );
-
-    assert_eq!(
-        assets::monitored_by(&pool, "kuma2")
-            .await
-            .expect("the tile's read")
-            .into_iter()
-            .map(|row| row.asset.name)
-            .collect::<Vec<_>>(),
-        vec!["redis".to_owned()],
-        "each source's room lists its own monitors' assets"
-    );
-
-    assert_eq!(
-        assets::monitored_by(&pool, "jira")
-            .await
-            .expect("the tile's read")
-            .len(),
-        0,
-        "a source with no monitors has an empty tile, not an error -- which is \
-         every source until M4.1"
-    );
-}
-
-/// Worst first, the same order the stored room's tile draws in, because the
-/// order is the tile's and not one room kind's.
-#[tokio::test]
-async fn a_source_rooms_tile_draws_its_worst_asset_first() {
-    let pool = pool("assets-monitored-order").await;
-    let estate = two_branches(&pool).await;
-    let kuma = monitor(&pool, "kuma", "1").await;
-
-    for asset in [&estate.postgres, &estate.redis, &estate.app] {
-        link_as(&pool, &asset.id, &kuma, "monitored-by").await;
-    }
-    edit_one(
-        &pool,
-        &estate.redis.id,
-        AssetEdit::Status {
-            value: AssetStatus::Down,
-        },
-    )
-    .await;
-    edit_one(
-        &pool,
-        &estate.postgres.id,
-        AssetEdit::Status {
-            value: AssetStatus::Up,
-        },
-    )
-    .await;
-    // `vm-app-02` is well itself and holds a container nobody has rated, so it
-    // sorts between the two -- and it is alphabetically *last*, which is what
-    // a name-only sort would get wrong.
-    assert_eq!(
-        assets::monitored_by(&pool, "kuma")
-            .await
-            .expect("the tile's read")
-            .into_iter()
-            .map(|row| row.asset.name)
-            .collect::<Vec<_>>(),
-        vec!["redis", "postgres", "vm-app-02"]
-    );
-}
-
 // ---------------------------------------------------------------------------
 // Health takes the monitors, and the estate shows the alerts (#444)
 // ---------------------------------------------------------------------------
@@ -3043,8 +2795,7 @@ async fn the_rollup_takes_the_worst_of_an_assets_status_and_its_monitors() {
 /// that is not a monitor, colours nothing.
 ///
 /// Two clauses, and a read that dropped either would still colour the VM:
-/// `MONITORED_ASSETS` states the same pair from the other end and #445's pane
-/// test spells out why they are two conditions rather than one.
+/// #445's pane test spells out why they are two conditions rather than one.
 #[tokio::test]
 async fn only_a_monitored_by_link_to_a_monitor_colours_an_asset() {
     let pool = pool("assets-health-near-miss").await;
@@ -4703,12 +4454,10 @@ fn invoke_over(
             knobas_app::commands::assets::move_asset,
             knobas_app::commands::assets::delete_asset,
             knobas_app::commands::assets::asset_types,
-            knobas_app::commands::assets::context_assets,
             knobas_app::commands::assets::get_route,
             knobas_app::commands::assets::create_route,
             knobas_app::commands::assets::edit_route,
             knobas_app::commands::assets::delete_route,
-            knobas_app::commands::assets::source_assets,
             knobas_app::commands::assets::preview_estate_import,
             knobas_app::commands::assets::apply_estate_import,
             knobas_app::commands::assets::monitoring_settings,
@@ -4859,7 +4608,6 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
             "delete_asset",
             serde_json::json!({ "assetId": "asset:7f2c" }),
         ),
-        ("context_assets", serde_json::json!({ "ctxId": "ctx:7f2c" })),
         ("get_route", serde_json::json!({ "routeId": "route:9a1b" })),
         (
             "create_route",
@@ -4902,7 +4650,6 @@ fn every_asset_command_is_registered_and_its_arguments_decode() {
             "delete_route",
             serde_json::json!({ "routeId": "route:9a1b" }),
         ),
-        ("source_assets", serde_json::json!({ "sourceId": "kuma" })),
         (
             "preview_estate_import",
             serde_json::json!({ "file": ESTATE_FILE, "producer": ESTATE_FILE_PRODUCER }),

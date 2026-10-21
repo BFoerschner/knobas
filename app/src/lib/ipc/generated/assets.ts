@@ -23,7 +23,7 @@ export type AlertAsset = {
 id: string, name: string, 
 /**
  * Its ancestors, outermost first, or `null` at the top of the estate --
- * [`MemberAsset::path`]'s field and its spelling.
+ * [`DependsOnRow::path`]'s field and its spelling.
  */
 path: string | null, };
 
@@ -631,10 +631,9 @@ export type Dependencies = { layers: Array<DepLayer>, kinds: Array<DepKind>, ite
  * One line of the *Depends on this* panel: an asset that breaks, where it
  * sits, and why it is on the list (#505).
  *
- * A carrier rather than fields on [`AssetRow`], [`MemberAsset`]'s reason
- * exactly -- `path_text` is not on a Miller column's read and `relation` is
- * true of this *answer* and not of the asset, which is on somebody else's
- * list under a different word.
+ * A carrier rather than fields on [`AssetRow`]: `path_text` is not on a
+ * Miller column's read, and `relation` is true of this *answer* and not of
+ * the asset, which is on somebody else's list under a different word.
  */
 export type DependsOnRow = { asset: AssetRow, 
 /**
@@ -642,7 +641,7 @@ export type DependsOnRow = { asset: AssetRow,
  * an asset at the top of the estate.
  *
  * Story 54's *"each dependent's path in the tree"*, read off
- * `knobas.asset.path_text` the way [`MemberAsset::path`] is.
+ * `knobas.asset.path_text`.
  */
 path: string | null, 
 /**
@@ -867,29 +866,6 @@ parent: string | null, };
  * What a view keeps for one layer.
  */
 export type LayerInView = { hidden: boolean, folded: boolean, group: DepGroup, };
-
-/**
- * One asset in a room's Assets tile: the row every other read answers with,
- * plus where it sits (#434).
- *
- * **A carrier rather than a field on [`AssetRow`]**, and the reason is the
- * rule the three column statements above state: `path_text` is left out of a
- * Miller walk because no column draws it, and putting it on the row would put
- * it on every column of every walk to serve one tile. The pair here is the
- * same move [`Written`] makes -- the thing, and the one extra fact this
- * caller needs about it -- so the tile reads `asset.name` and `path` and
- * nothing in this module keeps a second copy of a type table or a rollup.
- */
-export type MemberAsset = { asset: AssetRow, 
-/**
- * The ancestors' names, outermost first, `" / "` between them; `null` for
- * an asset at the top of the estate.
- *
- * Read off `knobas.asset.path_text`, the column the store maintains on
- * create, rename and move -- not a recursive read per row, which is what
- * a tile of twenty assets would otherwise cost.
- */
-path: string | null, };
 
 /**
  * One `monitored-by` link an apply would draw.
@@ -1128,9 +1104,9 @@ entity: string, };
 /**
  * One asset a monitor is attached to.
  *
- * Not a [`MemberAsset`]: a roster row needs a name, an address and a path,
- * and a tile's row carries a whole [`AssetRow`] with a health rollup behind
- * it -- a read per asset per monitor for facts this column does not draw.
+ * Not an [`AssetRow`]: a roster row needs a name, an address and a path, and
+ * an [`AssetRow`] carries a health rollup behind it -- a read per asset per
+ * monitor for facts this column does not draw.
  */
 export type MonitoredAsset = { 
 /**
