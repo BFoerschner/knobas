@@ -610,6 +610,7 @@ knobas-app	test/it	docs_ipc::a_parent_loop_is_cut_and_both_pages_sit_at_the_top
 knobas-app	test/it	docs_ipc::a_search_finds_pages_with_every_word_and_says_where_the_snippet_is
 knobas-app	test/it	docs_ipc::a_section_edit_is_the_whole_body_against_the_version_read
 knobas-app	test/it	docs_ipc::children_are_in_the_sources_order_and_by_title_where_it_has_none
+knobas-app	test/it	docs_ipc::export_numbers_a_taken_name_and_leaves_the_file_there
 knobas-app	test/it	docs_ipc::export_writes_the_page_as_markdown
 knobas-app	test/it	docs_ipc::for_you_is_the_pages_that_mention_the_reader
 knobas-app	test/it	docs_ipc::moving_the_notes_queues_one_page_each_under_the_parent
