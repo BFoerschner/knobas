@@ -306,7 +306,7 @@ async function setAndClone(root = "~/code") {
 test("after Set and clone, Clone after Stop starts again without asking for the root (#1442)", async () => {
   await setAndClone("/Users/mara/src");
   expect(calls.clone).toHaveLength(1);
-  emit({ entity_id: REPO, path: "/Users/mara/src/payout-service", state: "progress", percent: 40 });
+  emit({ entity_id: REPO, path: "/Users/mara/src/payout-service", state: "progress", phase: "receiving", percent: 40 });
   flushSync();
   button("Stop", target).click();
   await settle();
