@@ -832,7 +832,7 @@
       const fromBox = from.getBoundingClientRect();
       // A route row scrolled out of the pane, or below the window, draws
       // nothing: a line leaving an edge would start at a row the reader cannot
-      // see (CONTEXT.md, **Wire**).
+      // see (#1460).
       if (laid && (fromBox.bottom < seenTop + 2 || fromBox.top > seenBottom - 2)) continue;
 
       const toBox = to.getBoundingClientRect();
@@ -984,8 +984,8 @@
    *   places with keys of their own: the pane, which is full of buttons
    *   (*Held by*, *Holds*, a history) whose activation `Enter` would
    *   otherwise swallow; and the search box, whose arrows walk its offers.
-   *   Everywhere else in the Tree — a column row, a spine, the strip itself —
-   *   the arrows are the walk's.
+   *   Everywhere else in the Tree — a column row, a spine, the column strip
+   *   itself — the arrows are the walk's.
    */
   const KEEPS_ITS_OWN_KEYS = ".pane, .find";
 
