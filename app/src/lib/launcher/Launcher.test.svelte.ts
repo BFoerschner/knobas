@@ -655,17 +655,27 @@ test("the strip marks a source whose last run ended in an error, as the source p
     last_changed: null,
   });
   open({
-    sources: [health("jira"), health("teamcity")],
-    runs: [run("jira", "ok"), run("teamcity", "error")],
+    sources: [
+      health("jira"),
+      health("teamcity"),
+      { ...health("gitea"), state: "unreachable", detail: "connection refused" },
+    ],
+    runs: [run("jira", "ok"), run("teamcity", "error"), run("gitea", "ok")],
   });
   await settle();
 
   const lines = [...target.querySelectorAll(".tf-ln-src")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
-  expect(lines).toEqual(["JI jira checked 1 h ago", "TE teamcity Failed 30 min ago"]);
+  expect(lines).toEqual([
+    "JI jira checked 1 h ago",
+    "TE teamcity Failed 30 min ago",
+    "GI gitea connection refused",
+  ]);
   // Warn, not the credential's err: the credential is fine.
   expect(target.querySelectorAll(".tf-ln-src.tf-ln-warn")).toHaveLength(1);
   expect(target.querySelector(".tf-ln-src.tf-ln-warn")?.textContent).toContain("teamcity");
-  expect(target.querySelectorAll(".tf-ln-src.tf-ln-fail")).toHaveLength(0);
+  // A credential reading still wins, in its own tone and words.
+  expect(target.querySelector(".tf-ln-src.tf-ln-fail")?.textContent).toContain("gitea");
+  expect(target.querySelectorAll(".tf-ln-src.tf-ln-fail.tf-ln-warn")).toHaveLength(0);
 });
 
 test("Enter on a row navigates to its address and closes the overlay", async () => {

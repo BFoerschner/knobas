@@ -10909,3 +10909,17 @@ Ruled 2026-10-21 by the implementer (Sonnet).
   field is additive and `#[serde(default)]` on both sides of the WIT (`convert`'s test decodes a
   component without it), `adapter.wit` is unchanged, and the entry now matches the diff.
   *Reversing:* a follow-up removing the field and the step.
+
+## #1581 — how the launcher strip reads a source's last run
+
+Ruled 2026-10-21 by the implementer (Sonnet).
+
+**The fork:** the strip holds credential health only. The run's outcome reaches it how, in which words, and for which sources.
+
+**Ruling:** `App.svelte`'s `dialogs` snippet is handed the shell's `sync` rows (`TfShell` already holds them from `sync_status` and `sync:state`), and passes them as `runs` through `Launcher` to `Board`. The strip calls `sourceState` (the source page's reading) per source. A credential state `isActionable` flags keeps its err tone and detail; otherwise a warn reading (a failed run) draws the warn tone with the reading's text (*Failed 30 min ago*). Nothing else of `sourceState`'s output is used: the board knows neither `enabled` nor the role misses, so it passes `enabled: true` and no misses. No IPC change.
+
+**Reasoning:** one reading, no second table of words. `SourceSyncStatus` carries no error text, so the note is the page's *Failed … ago*, not the run's error.
+
+**Cost of reversing:** the snippet argument, one prop and the strip's derivation.
+
+**Known gap:** a paused source whose last run errored is flagged on the strip but reads *Paused* on the page.
