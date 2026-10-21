@@ -37,8 +37,8 @@
     /** What the toast says was queued (`close PR #142`, `book repair on Quay crane 4 inspection`). */
     what: string;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
-    /** Called once the write is queued. */
-    onqueued: () => void;
+    /** Called once the write is queued, for a page that marks it (the pull request's chip). */
+    onqueued?: () => void;
     onclose: () => void;
   } = $props();
 
@@ -64,7 +64,7 @@
     try {
       await submitWrite(payload);
       toastQueued(what);
-      onqueued();
+      onqueued?.();
       onclose();
     } catch (cause) {
       push({ text: `Could not queue the write: ${ipcErrorMessage(cause)}`, tone: "err" });

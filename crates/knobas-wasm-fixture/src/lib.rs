@@ -497,7 +497,9 @@ impl GuestAdapter for Adapter {
         match parsed {
             WriteOp::SourceAction { entity, id, .. }
                 if id == BOOK_REPAIR
-                    && SURVEYS.iter().any(|(k, _, _)| Some(*k) == self.key(&entity)) =>
+                    && SURVEYS
+                        .iter()
+                        .any(|(k, _, _)| Some(*k) == self.key(&entity)) =>
             {
                 Ok(WriteReceipt { remote_id: None })
             }

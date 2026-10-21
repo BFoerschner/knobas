@@ -177,12 +177,9 @@
   <!-- The breadcrumb names the kind (#1408): the title is the header's. -->
   {#if failed !== null}
     <TfCrumbs {job} name="Item" />
-  {:else if detail !== null}
-    <TfCrumbs {job} name={kindLabel} />
-  {/if}
-  {#if failed !== null}
     <div class="tf-empty"><p class="tf-cfail">Could not read {id}: {failed}</p></div>
   {:else if detail !== null}
+    <TfCrumbs {job} name={kindLabel} />
     <header class="tf-fhead">
       <div>
         <h1>{detail.row.title}</h1>
@@ -242,7 +239,6 @@
     title="{name} on {detail.row.title}"
     what="{name.toLowerCase()} on {detail.row.title}"
     submitWrite={ports.submitWrite}
-    onqueued={() => {}}
     onclose={() => (shown = null)}
   />
 {/if}

@@ -115,21 +115,29 @@ async fn the_run_s_deferred_sections_carry_the_diff_and_the_tree() {
 /// refuses an id it does not declare. The item page draws this action.
 #[tokio::test]
 async fn a_survey_s_view_offers_its_declared_source_action_and_the_fixture_performs_it() {
-    use knobas_source::WriteOp;
+    use knobas_source::{SOURCE_ACTION, WriteOp};
     let source = build(&load_fixture(), serde_json::json!({}));
     let declared = source.descriptor();
     assert_eq!(declared.source_actions, ["book_repair"]);
-    assert_eq!(declared.write_ops, [knobas_source::SOURCE_ACTION]);
+    assert_eq!(declared.write_ops, [SOURCE_ACTION]);
 
-    let view = source.view("surveys:survey-1", None).await.unwrap().unwrap();
+    let view = source
+        .view("surveys:survey-1", None)
+        .await
+        .unwrap()
+        .unwrap();
     let [action] = &view.actions[..] else {
         panic!("a survey's view offers one action: {:?}", view.actions);
     };
-    assert_eq!(action.write_op, knobas_source::SOURCE_ACTION);
+    assert_eq!(action.write_op, SOURCE_ACTION);
     assert_eq!(action.values["id"], "book_repair");
     assert_eq!(action.label, "Book repair…");
     assert_eq!(
-        action.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+        action
+            .fields
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect::<Vec<_>>(),
         ["day"]
     );
 
@@ -141,7 +149,10 @@ async fn a_survey_s_view_offers_its_declared_source_action_and_the_fixture_perfo
             fields: fields.clone(),
         })
         .await;
-    assert!(booked.is_ok(), "the declared action is performed: {booked:?}");
+    assert!(
+        booked.is_ok(),
+        "the declared action is performed: {booked:?}"
+    );
     let refused = source
         .write(WriteOp::SourceAction {
             entity: "surveys:survey-1".to_owned(),
