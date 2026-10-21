@@ -2,7 +2,7 @@
   The first-run wizard — spec §14a: *"initialize the database → add the first
   source (the §3 flow) → initial sync with progress → land in the launcher."*
 
-  Four panels over the mockup's `.steps` breadcrumb, and **DONE is the terminal
+  Four panels under a step breadcrumb, and **DONE is the terminal
   one for a real source and a demo load alike** (#156, ruled 2026-08-29). It was
   not always: `stepIndex = 3` was assigned only in `loadDemo`, so a real first
   sync ended at step 2 offering a bare *Finish*, and the sentence below —
@@ -13,14 +13,25 @@
   and what the reader gains is the sentence and the ⌘K pointer. A *failed*
   ending stays at step 2, where *Retry* and *Skip for now* are.
 
-  **Known deviation from task 20 step 3.** The brief asks for the Add-source
-  flow "embedded inline rather than in a modal; a modal over an otherwise empty
-  window is a dialog with nothing behind it". It is reused here exactly as the
-  sources view mounts it — `AddSource` *is* a `Modal` and has no inline mode —
-  so step 2 does open a dialog over the wizard. Recorded rather than papered
-  over: the reasons the brief gives are about how it looks, and giving
-  `AddSource` a second presentation is a change to a component the sources view
-  also owns. Not attempted inside this PR's review round.
+  ## The ticket-first look (#1400)
+
+  A full view in the `.tf` scope, drawn with `tf.css` (`css/first-run.css`):
+  the page title, a *First run* chip, the step breadcrumb in sentence case,
+  `tf-btn` buttons. The shell is not mounted while the wizard has the window,
+  so the wizard is its own `.tf` root and answers `Esc` for its dialog itself.
+
+  *Connect a real system* opens **the dialog Settings opens**, `TfAddSource`,
+  with the ports Settings gives it, so *Install an adapter* (ADR-0028) is here
+  too and there is one add-source flow (#1399). It is a dialog over the
+  wizard, as the rooms `AddSource` was: task 20 step 3 asked for the flow
+  inline, and that deviation stands, recorded rather than papered over.
+
+  ## A way out (#1399)
+
+  Spec §14a's reason for the wizard is guidance, not a gate. *Set up later in
+  Settings* on the Source step records completion as *Finish* does and lands
+  on Settings › Sources, so a reader with no built-in source or no credential
+  yet is not held here on every launch.
 
   ## Why completion comes off the channel
 
@@ -82,6 +93,11 @@
   pushes nothing, the case a customer read as stuck (#1378). An adapter that
   reports no total, or no walk at all, keeps the indeterminate bar.
 -->
+<script lang="ts" module>
+  /** Where the shell lands once the wizard hands it back. */
+  export type FirstRunLanding = "tickets" | "sources";
+</script>
+
 <script lang="ts">
   import { Channel } from "@tauri-apps/api/core";
   import { walkAfter, walkMax, type Walk } from "./walk";
@@ -97,12 +113,16 @@
     type SyncPhase,
     type SyncProgress,
   } from "../ipc/sources";
-  import AddSource from "./AddSource.svelte";
+  import { layers as sharedLayers, type Layers } from "../tf/layers.svelte";
+  import { realSettingsPorts, type SettingsPorts } from "../tf/settings/ports";
+  import TfAddSource from "../tf/settings/TfAddSource.svelte";
 
   let {
     demo = false,
     source: initialSource = null,
     health = sharedHealth,
+    ports = realSettingsPorts,
+    layers = sharedLayers,
     onfinish,
   }: {
     /** The `--demo` profile (P13), which is offered the Tidewater fixture. */
@@ -115,8 +135,16 @@
      * default, the way `SourcesView` takes it.
      */
     health?: Health;
-    /** Hand the shell back. The wizard has recorded completion by then. */
-    onfinish: () => void;
+    /** What *Add a source* reads and writes: the ports Settings gives it. */
+    ports?: Pick<SettingsPorts, "listAdapters" | "testSource" | "addSource" | "installAdapter">;
+    /** The layer stack the dialog registers with, so `Esc` can close it. */
+    layers?: Layers;
+    /**
+     * Hand the shell back. The wizard has recorded completion by then.
+     * `tickets` is §14a's landing; `sources` is Settings › Sources, for a
+     * reader who set up later (#1399).
+     */
+    onfinish: (landing: FirstRunLanding) => void;
   } = $props();
 
   const STEPS = ["Database", "Source", "First sync", "Done"] as const;
@@ -361,12 +389,12 @@
   /**
    * Record completion and hand the shell back.
    *
-   * *Skip* takes this path too, and deliberately: the source is configured and
+   * *Skip* and *Set up later in Settings* (#1399) take this path too, and deliberately: the source is configured and
    * the sync can be retried from the sources view, so not recording completion
    * would show the wizard again on the next launch over a knobas that is
    * already set up.
    */
-  async function finish() {
+  async function finish(landing: FirstRunLanding) {
     if (finishing) return;
     finishing = true;
     try {
@@ -379,221 +407,215 @@
     } finally {
       finishing = false;
     }
-    onfinish();
+    onfinish(landing);
+  }
+
+  /**
+   * `Esc` over the wizard. The shell's ladder (`tf/escape.ts`) is not mounted
+   * while the wizard has the window, so this is its rung 1 and nothing more:
+   * close the topmost dialog. With none open, `Esc` does nothing, as on
+   * Tickets.
+   */
+  function onkeydown(event: KeyboardEvent) {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    const open = layers.open;
+    const index = open.map((layer) => layer.kind).lastIndexOf("dialog");
+    if (index === -1) return;
+    event.preventDefault();
+    open[index]?.close();
   }
 </script>
 
-<div class="view firstrun">
-  <div class="room-bar">
-    <h1>Welcome to knobas</h1>
-    <span class="kind">first run</span>
-  </div>
+<svelte:window {onkeydown} />
 
-  <div class="view-b">
-    <div class="panel">
-      <div class="steps">
-        {#each STEPS as label, index (label)}
-          <span class={index === stepIndex ? "on" : index < stepIndex ? "done" : ""}>{label}</span>
-        {/each}
-      </div>
-
-      {#if stepIndex === 0}
-        <p class="lead">
-          The database is up, migrated and ready — knobas started it for you, on its own port, in
-          its own data directory. Nothing else on this machine was touched.
-        </p>
-        <p class="note">
-          Next: point knobas at a system you work in. It mirrors what it finds locally, so search
-          and the rooms work without a network round trip.
-        </p>
-        <div class="acts"><button class="btn pri" onclick={() => (stepIndex = 1)}>Next</button></div>
-      {:else if stepIndex === 1}
-        {#if source}
-          <p class="lead">
-            <b>{source.display_name}</b> is configured. knobas has not synced it yet.
-          </p>
-          <div class="acts">
-            <button class="btn" onclick={() => (adding = true)}>Add another</button>
-            <button class="btn pri" onclick={() => (stepIndex = 2)}>Next</button>
-          </div>
-        {:else}
-          <p class="lead">Add the first source.</p>
-          <div class="modules">
-            {#if demo}
-              <!--
-                First, because it is what a person opening a demo build came
-                for. Absent outside the demo profile: P13 keeps demo data and a
-                real corpus in separate profiles, so the button that would mix
-                them is not drawn rather than drawn and refused.
-              -->
-              <button class="mod" disabled={starting} onclick={() => void loadDemo()}>
-                <span class="nm">Load the Tidewater dataset</span>
-                <!--
-                  Both halves, since #440: the button loads the Tidewater work
-                  *and* imports `testenv/estate.json`, so a subtitle
-                  that enumerates one of them undercounts what the press does.
-                  The name keeps naming the work, which is what a person
-                  opening a demo build came for.
-                -->
-                <span class="sub">33 fixture items · a 23-asset estate · no network, no credential</span>
-              </button>
-            {/if}
-            <button class="mod" onclick={() => (adding = true)}>
-              <span class="nm">Connect a real system</span>
-              <span class="sub">Jira, Gitea, TeamCity · the §3 add-source flow</span>
-            </button>
-          </div>
-          {#if failure}
-            <p class="fail">{failure}</p>
-          {/if}
-        {/if}
-      {:else if stepIndex === 2}
-        <p class="lead">
-          knobas will read everything <b>{source?.display_name}</b> will give it. The first run is
-          the slow one; after this it only asks for what changed.
-        </p>
-
-        {#if phase === null}
-          <div class="acts">
-            <button class="btn pri" disabled={starting} onclick={() => void sync()}>
-              Start the first sync
-            </button>
-          </div>
-        {:else}
-          <div class="progress">
-            <!--
-              Indeterminate while it runs unless the run reports a walk with a
-              total (#1379): `items` grows and nothing knows where it stops,
-              and a bar that invented a total would be a lie that moves.
-
-              The `finished` branch of the first element's ternaries is dead
-              (#156): `phase` and `stepIndex` are assigned in the same channel
-              callback, so step 2 never renders with `finished` true. It is
-              left rather than simplified for the same reason as
-              `itemsReading` above: it is the same one question about the same
-              surface, and it is Björn's. The walk (#1379) is the one way this
-              bar fills.
-            -->
-            <!--
-              Two elements rather than one with an `undefined` value: a
-              `<progress>` that was once given a value stays determinate when
-              the value is taken away again.
-            -->
-            {#if finished || walkOf === undefined}
-              <progress max={finished ? 1 : undefined} value={finished ? 1 : undefined}></progress>
-            {:else}
-              <progress max={walkOf} value={walk?.walked}></progress>
-            {/if}
-            <p class="reading">
-              <b>{failed ? "failed" : (phase ?? "starting")}</b>
-              · {walkReading}{itemsReading} · {(elapsed / 1000).toFixed(1)} s
-            </p>
-          </div>
-
-          {#if failure}
-            <!-- Text: this line came from a source system (gotcha 7). -->
-            <p class="fail">{failure}</p>
-          {/if}
-
-          <div class="acts">
-            <!--
-              Failure only. A run that ended `finished` is on the DONE panel by
-              the time this renders (#156), so the *Finish* branch that used to
-              sit here was unreachable — and an unreachable branch on this exact
-              surface is what three pieces of work tripped over.
-            -->
-            {#if failed}
-              <button class="btn pri" disabled={starting} onclick={() => void sync()}>Retry</button>
-              <button class="btn" disabled={finishing} onclick={() => void finish()}>
-                Skip for now
-              </button>
-            {/if}
-          </div>
-        {/if}
-      {:else}
-        <p class="lead">
-          <!--
-            The success is claimed because the run's ending said so; the count
-            is only claimed when there is one (#137).
-          -->
-          knobas mirrored {#if mirrored === null}your items{:else}<b>{mirrored}</b> items{/if}. Press
-          <kbd>⌘K</kbd> to search everything you just synced.
-        </p>
-        <div class="acts">
-          <button class="btn pri" disabled={finishing} onclick={() => void finish()}>Finish</button>
+<div class="tf tf-fr-root">
+  <main class="tf-main">
+    <div class="tf-full tf-fr">
+      <header class="tf-fhead">
+        <div class="tf-fr-title">
+          <h1>Welcome to knobas</h1>
+          <span class="tf-chip">First run</span>
         </div>
-      {/if}
+      </header>
+
+      <div class="tf-fr-body">
+        <ol class="tf-fr-steps" aria-label="Setup">
+          {#each STEPS as label, index (label)}
+            <li class:tf-fr-done={index < stepIndex} aria-current={index === stepIndex ? "step" : undefined}>
+              {label}
+            </li>
+          {/each}
+        </ol>
+
+        {#if stepIndex === 0}
+          <p class="tf-fr-lead">
+            The database is up, migrated and ready — knobas started it for you, on its own port, in
+            its own data directory. Nothing else on this machine was touched.
+          </p>
+          <p class="tf-fr-note">
+            Next: point knobas at a system you work in. It mirrors what it finds locally, so search
+            and every page work without a network round trip.
+          </p>
+          <div class="tf-fr-acts">
+            <button class="tf-btn tf-primary" onclick={() => (stepIndex = 1)}>Next</button>
+          </div>
+        {:else if stepIndex === 1}
+          {#if source}
+            <p class="tf-fr-lead">
+              <b>{source.display_name}</b> is configured. knobas has not synced it yet.
+            </p>
+            <div class="tf-fr-acts">
+              <button class="tf-btn" onclick={() => (adding = true)}>Add another</button>
+              <button class="tf-btn tf-primary" onclick={() => (stepIndex = 2)}>Next</button>
+              {@render later()}
+            </div>
+          {:else}
+            <p class="tf-fr-lead">Add the first source.</p>
+            <div class="tf-fr-mods">
+              {#if demo}
+                <!--
+                  First, because it is what a person opening a demo build came
+                  for. Absent outside the demo profile: P13 keeps demo data and a
+                  real corpus in separate profiles, so the button that would mix
+                  them is not drawn rather than drawn and refused.
+                -->
+                <button class="tf-fr-mod" disabled={starting} onclick={() => void loadDemo()}>
+                  <span class="tf-fr-name">Load the Tidewater dataset</span>
+                  <!--
+                    Both halves, since #440: the button loads the Tidewater work
+                    *and* imports `testenv/estate.json`, so a subtitle
+                    that enumerates one of them undercounts what the press does.
+                    The name keeps naming the work, which is what a person
+                    opening a demo build came for.
+                  -->
+                  <small>33 fixture items · a 23-asset estate · no network, no credential</small>
+                </button>
+              {/if}
+              <button class="tf-fr-mod" onclick={() => (adding = true)}>
+                <span class="tf-fr-name">Connect a real system</span>
+                <!--
+                  The roles knobas has a surface for (CONTEXT.md, *Role*), not
+                  a list of adapters: it stays true when an external adapter
+                  is installed, and needs no read (#1401).
+                -->
+                <small>A ticket system, code host, CI, wiki or monitoring</small>
+              </button>
+            </div>
+            {#if failure}
+              <p class="tf-fail tf-fr-fail">{failure}</p>
+            {/if}
+            <div class="tf-fr-acts">{@render later()}</div>
+          {/if}
+        {:else if stepIndex === 2}
+          <p class="tf-fr-lead">
+            knobas will read everything <b>{source?.display_name}</b> will give it. The first run is
+            the slow one; after this it only asks for what changed.
+          </p>
+
+          {#if phase === null}
+            <div class="tf-fr-acts">
+              <button class="tf-btn tf-primary" disabled={starting} onclick={() => void sync()}>
+                Start the first sync
+              </button>
+            </div>
+          {:else}
+            <div class="tf-fr-progress">
+              <!--
+                Indeterminate while it runs unless the run reports a walk with a
+                total (#1379): `items` grows and nothing knows where it stops,
+                and a bar that invented a total would be a lie that moves.
+
+                The `finished` branch of the first element's ternaries is dead
+                (#156): `phase` and `stepIndex` are assigned in the same channel
+                callback, so step 2 never renders with `finished` true. It is
+                left rather than simplified for the same reason as
+                `itemsReading` above: it is the same one question about the same
+                surface, and it is Björn's. The walk (#1379) is the one way this
+                bar fills.
+              -->
+              <!--
+                Two elements rather than one with an `undefined` value: a
+                `<progress>` that was once given a value stays determinate when
+                the value is taken away again.
+              -->
+              {#if finished || walkOf === undefined}
+                <progress max={finished ? 1 : undefined} value={finished ? 1 : undefined}></progress>
+              {:else}
+                <progress max={walkOf} value={walk?.walked}></progress>
+              {/if}
+              <p class="tf-fr-reading">
+                <b>{failed ? "failed" : (phase ?? "starting")}</b>
+                · {walkReading}{itemsReading} · {(elapsed / 1000).toFixed(1)} s
+              </p>
+            </div>
+
+            {#if failure}
+              <!-- Text: this line came from a source system (gotcha 7). -->
+              <p class="tf-fail tf-fr-fail">{failure}</p>
+            {/if}
+
+            <div class="tf-fr-acts">
+              <!--
+                Failure only. A run that ended `finished` is on the DONE panel by
+                the time this renders (#156), so the *Finish* branch that used to
+                sit here was unreachable — and an unreachable branch on this exact
+                surface is what three pieces of work tripped over.
+              -->
+              {#if failed}
+                <button class="tf-btn tf-primary" disabled={starting} onclick={() => void sync()}>Retry</button>
+                <button class="tf-btn" disabled={finishing} onclick={() => void finish("tickets")}>
+                  Skip for now
+                </button>
+              {/if}
+            </div>
+          {/if}
+        {:else}
+          <p class="tf-fr-lead">
+            <!--
+              The success is claimed because the run's ending said so; the count
+              is only claimed when there is one (#137).
+            -->
+            knobas mirrored {#if mirrored === null}your items{:else}<b>{mirrored}</b> items{/if}. Press
+            <kbd>⌘K</kbd> to search everything you just synced.
+          </p>
+          <div class="tf-fr-acts">
+            <button class="tf-btn tf-primary" disabled={finishing} onclick={() => void finish("tickets")}>
+              Finish
+            </button>
+          </div>
+        {/if}
+      </div>
     </div>
-  </div>
+  </main>
+
+  {#if adding}
+    <TfAddSource
+      {ports}
+      {layers}
+      onclose={() => (adding = false)}
+      onsaved={(added) => {
+        adding = false;
+        source = added;
+        stepIndex = 2;
+        // `add_source` emits no `source:health`, and the shell's seed already
+        // ran against a database that had no sources in it. Without this the
+        // wizard finishes onto a shell that has never heard of the source it
+        // just configured: no monogram in the status bar, and — on the
+        // *Skip* path, where no sync follows to change `auth_state` — nothing
+        // that would ever tell it.
+        health.patch(added.health);
+      }}
+    />
+  {/if}
 </div>
 
-{#if adding}
-  <AddSource
-    onclose={() => (adding = false)}
-    onsaved={(added) => {
-      adding = false;
-      source = added;
-      stepIndex = 2;
-      // `add_source` emits no `source:health`, and the shell's seed already
-      // ran against a database that had no sources in it. Without this the
-      // wizard finishes onto a shell that has never heard of the source it
-      // just configured: no monogram in the strip, no room tab, and — on the
-      // *Skip* path, where no sync follows to change `auth_state` — nothing
-      // that would ever tell it.
-      health.patch(added.health);
-    }}
-  />
-{/if}
-
-<style>
-  .panel {
-    max-width: 640px;
-    padding: 28px 14px;
-    margin: 0 auto;
-  }
-
-  .lead {
-    font-size: 13px;
-    line-height: 1.6;
-  }
-
-  .note,
-  .reading {
-    margin-top: 8px;
-    font: 400 11.5px/1.6 var(--mono);
-    color: var(--muted);
-  }
-
-  .fail {
-    margin-top: 10px;
-    font: 400 11.5px/1.6 var(--mono);
-    color: var(--fail);
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .acts {
-    display: flex;
-    gap: 6px;
-    margin-top: 16px;
-  }
-
-  .modules {
-    grid-template-columns: 1fr;
-    margin-top: 14px;
-  }
-
-  .mod {
-    grid-template-columns: 1fr;
-  }
-
-  .progress {
-    margin-top: 16px;
-  }
-
-  progress {
-    width: 100%;
-    height: 4px;
-    accent-color: var(--text);
-  }
-</style>
+<!--
+  *Set up later in Settings* (#1399): the way out of the Source step. It
+  records completion exactly as *Finish* does, so the next launch opens the
+  shell, and lands on Settings › Sources, where adding a source lives.
+-->
+{#snippet later()}
+  <button class="tf-btn tf-ghost" disabled={finishing} onclick={() => void finish("sources")}>
+    Set up later in Settings
+  </button>
+{/snippet}

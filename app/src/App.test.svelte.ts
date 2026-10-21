@@ -271,7 +271,7 @@ function press(label: string): void {
   const button = buttons.find(
     (candidate) =>
       candidate.textContent?.trim() === label ||
-      candidate.querySelector(".nm")?.textContent?.trim() === label,
+      candidate.querySelector(".nm, .tf-fr-name")?.textContent?.trim() === label,
   );
   if (!button) {
     throw new Error(
@@ -565,8 +565,8 @@ test("finishing the wizard lands on Tickets with the launcher open, and the new 
   location.hash = "#/settings";
 
   app = mount(App, { target, props: {} });
-  await until(() => target.querySelector(".firstrun") !== null, "the wizard never took the window");
-  expect(target.querySelector(".tf"), "the wizard takes the whole window").toBeNull();
+  await until(() => target.querySelector(".tf-fr") !== null, "the wizard never took the window");
+  expect(target.querySelector(".tf-top"), "the wizard takes the whole window").toBeNull();
 
   healthRows = [row("mock", "ok")];
   press("Next");
@@ -577,13 +577,46 @@ test("finishing the wizard lands on Tickets with the launcher open, and the new 
   );
   press("Finish");
 
-  await until(() => target.querySelector(".tf") !== null, "the shell never drew after the wizard");
+  await until(() => target.querySelector(".tf-top") !== null, "the shell never drew after the wizard");
   expect(location.hash).toBe("#/tickets");
   await until(
     () => target.querySelector('[role="dialog"][aria-label="Search and actions"]') !== null,
     "the launcher never opened over the landing",
   );
   await until(() => health.get("mock") !== null, "the wizard's source never reached the health store");
+});
+
+/**
+ * **A way out of the Source step** (#1399): *Set up later in Settings* records
+ * completion as *Finish* does and lands on Settings › Sources, where adding a
+ * source lives, with no launcher over it. The next launch, whose `app_status`
+ * then says `first_run: false`, opens the shell and no wizard.
+ */
+test("Set up later in Settings lands on Settings › Sources, and the next launch has no wizard", async () => {
+  dbReady = true;
+  firstRun = true;
+  location.hash = "#/tickets";
+
+  app = mount(App, { target, props: {} });
+  await until(() => target.querySelector(".tf-fr") !== null, "the wizard never took the window");
+  press("Next");
+  press("Set up later in Settings");
+
+  await until(() => target.querySelector(".tf-top") !== null, "the shell never drew after the wizard");
+  expect(location.hash).toBe("#/settings/sources");
+  await until(
+    () => target.querySelector(".tf-stg-h h1")?.textContent?.trim() === "Sources",
+    "Settings › Sources never drew",
+  );
+  expect(target.querySelector('[role="dialog"][aria-label="Search and actions"]')).toBeNull();
+
+  unmount(app);
+  app = undefined;
+  // What `complete_first_run` wrote, read back on the next launch.
+  firstRun = false;
+  app = mount(App, { target, props: {} });
+  await until(() => target.querySelector(".tf-top") !== null, "the shell never drew on the next launch");
+  expect(target.querySelector(".tf-fr")).toBeNull();
 });
 
 /**

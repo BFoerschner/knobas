@@ -441,7 +441,6 @@ const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ImportDialog = (await import("../assets/ImportDialog.svelte")).default;
 const TfImport = (await import("../tf/deps/TfImport.svelte")).default;
-const AddSource = (await import("../sources/AddSource.svelte")).default;
 const FirstRun = (await import("../sources/FirstRun.svelte")).default;
 const { createInbox } = await import("../inbox/inbox.svelte");
 
@@ -2086,13 +2085,6 @@ const CASES: Case[] = [
           onclose: () => {},
         },
       }),
-    }),
-  },
-  {
-    name: "AddSource",
-    source: "lib/sources/AddSource.svelte",
-    open: (target) => ({
-      app: mount(AddSource, { target, props: { onclose: () => {}, onsaved: () => {} } }),
     }),
   },
   {

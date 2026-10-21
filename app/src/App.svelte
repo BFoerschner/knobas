@@ -18,7 +18,7 @@
   import { push } from "./lib/shell/toasts.svelte";
   import { followWrite } from "./lib/shell/follow-write";
   import AdHocBlockDialog from "./lib/time/AdHocBlock.svelte";
-  import FirstRun from "./lib/sources/FirstRun.svelte";
+  import FirstRun, { type FirstRunLanding } from "./lib/sources/FirstRun.svelte";
   import { EVENTS, ipcErrorMessage } from "./lib/ipc";
   import { adHocBlock, worklogDraft, type AdHocBlock, type Block, type Worklog } from "./lib/ipc/time";
   import { recordCaptureContext } from "./lib/ipc/entity";
@@ -260,12 +260,20 @@
   let completedFirstRun = $state(false);
   const firstRun = $derived(!completedFirstRun && (lifecycle.status?.first_run ?? false));
 
-  /** §14a's landing: Tickets, with the launcher open over it. */
-  function onFirstRunDone() {
+  /**
+   * §14a's landing: Tickets, with the launcher open over it. A reader who set
+   * up later (#1399) lands on Settings › Sources instead, where adding a
+   * source lives, with nothing over it.
+   */
+  function onFirstRunDone(landing: FirstRunLanding) {
     completedFirstRun = true;
     // The wizard added a source, and neither `add_source` nor `demo_load`
     // emits `source:health`.
     void health.reseed();
+    if (landing === "sources") {
+      location.hash = "#/settings/sources";
+      return;
+    }
     location.hash = HOME;
     launcherOpen = true;
   }

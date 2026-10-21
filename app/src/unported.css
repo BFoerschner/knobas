@@ -4,10 +4,10 @@
   The rooms UI and its stylesheet, `app.css`, went in #881. What is left here
   are the rules of that sheet that a surviving component still reaches: the
   launcher, the ⌘T picker, the ad-hoc dialog, the write queue, the asset tree
-  (`#/assets`) and its dialogs, the first-run wizard and Add source, and the
-  capture window. Every rule whose class only the rooms UI drew went with it.
-  A component ported to `tf.css` takes its rules out of here; when nothing
-  reads this file it goes too.
+  (`#/assets`) and its dialogs, and the capture window. Every rule whose
+  class only the rooms UI drew went with it. A component ported to `tf.css`
+  takes its rules out of here (the first-run wizard and the rooms *Add a
+  source* did with #1400); when nothing reads this file it goes too.
 
   **The palette is the design system's.** The tokens live on `:root` in
   `lib/tf/tf.css` and follow the theme there; the old names these rules and
@@ -52,7 +52,7 @@
 .tb-btn .k{font-size:12px}
 .mg{display:inline-flex;align-items:center;justify-content:center;width:22px;height:16px;border:1px solid var(--hair2);border-radius:2px;font:500 10px/1 var(--mono);color:var(--muted);letter-spacing:.04em;flex:none}
 
-/* ---- a view's header bar: the asset tree and the wizard ---- */
+/* ---- a view's header bar: the asset tree ---- */
 .room-bar{display:flex;align-items:center;gap:10px;height:40px;padding:0 14px;border-bottom:1px solid var(--hair);overflow:hidden}
 .room-bar h1{font:600 22px/1.2 var(--disp);display:flex;align-items:baseline;gap:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .room-bar h1 .k{font:500 14px var(--mono);color:var(--muted)}
@@ -62,7 +62,6 @@
 .empty .btn{margin-top:8px}
 .view{height:100%;display:grid;grid-template-rows:auto 1fr;min-height:0;min-width:0}
 .view>*{min-width:0}
-.view-b{overflow:auto;min-height:0}
 .view .room-bar h1{font-size:22px}
 
 /* ---- rows: the link dialog and the links panel ---- */
@@ -122,7 +121,7 @@ textarea.inp{height:auto;min-height:64px;padding:6px 8px;resize:vertical;line-he
 .pill:hover{background:var(--raised)}
 kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);border-radius:2px;padding:1px 4px;white-space:nowrap}
 
-/* ---- the wizard and Add source ---- */
+/* ---- the rooms sources row: the launcher's board and the asset tree still carry `.src` ---- */
 .src{display:grid;grid-template-columns:34px 186px 1fr 200px 224px 152px;gap:12px;align-items:start;padding:10px 14px 10px 10px;min-height:46px;border-bottom:1px solid var(--hair);font-size:12px}
 .src .nm{font-weight:500;display:block}
 .src>span{min-width:0}
@@ -130,24 +129,6 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
 .src .url{font:400 11px var(--mono);color:var(--muted)}
 .src .st{display:block;font:400 11.5px var(--mono)}
 .src.err{background:var(--err-bg)}
-.modules{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-.mod{text-align:left;padding:8px 10px;border:1px solid var(--hair2);border-radius:2px;display:grid;grid-template-columns:26px 1fr;gap:8px;align-items:center}
-.mod:hover{background:var(--raised)}
-.mod.on{border-color:var(--text)}
-.mod .nm{font-weight:500;font-size:12px;display:block}
-.mod .sub{font:400 10px var(--mono);color:var(--faint);display:block}
-.mod:hover .sub{color:var(--muted)}
-.steps{display:flex;gap:14px;margin-bottom:12px}
-.steps span{font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint)}
-.steps span.on{color:var(--text)}
-.steps span.done{color:var(--muted)}
-.radios{display:grid;gap:4px}
-.radios label{display:flex;gap:8px;align-items:center;padding:6px 8px;border:1px solid var(--hair);border-radius:2px;cursor:pointer;font-size:12px}
-.radios label.off{opacity:.45;cursor:default}
-.radios input{accent-color:var(--text)}
-.test-res{font:400 12px var(--mono);padding:8px 10px;background:var(--bg);border:1px solid var(--hair);border-radius:2px;margin-top:8px}
-/* The connection note (#326): the result line's type, quieter, hung beneath it. */
-.test-note{font:400 11px var(--mono);color:var(--muted);padding:0 10px;margin-top:4px}
 
 /* ---- overlays ---- */
 @keyframes fade{from{opacity:0}}
@@ -163,8 +144,6 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
 .dlg-f .l{margin-right:auto;font:400 11px var(--mono);color:var(--faint);white-space:nowrap}
 .form{display:grid;grid-template-columns:140px 1fr;gap:10px 12px;align-items:center}
 .form .l{font:400 11px var(--mono);color:var(--muted)}
-.form .chk{display:flex;gap:8px;align-items:center;font-size:12px}
-.form .chk input{accent-color:var(--text)}
 .x{width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border-radius:2px;color:var(--muted)}
 .x:hover{background:var(--raised);color:var(--text)}
 .x svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}

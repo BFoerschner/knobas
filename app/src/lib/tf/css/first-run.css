@@ -1,0 +1,26 @@
+/* ---------- the first-run wizard (#1400): spec §14a in the tf scope ----------
+   The wizard has the whole window and no top or status bar, so the root is one
+   row. The step breadcrumb is sentence case in Archivo, drawn the way the tabs
+   mark the current one; nothing here is mono, since nothing on it is a code value. */
+.tf-fr-root { grid-template-rows: minmax(0, 1fr); }
+.tf-fr-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tf-fr-body { width: 100%; max-width: 680px; padding: 4px 22px 22px; display: flex; flex-direction: column; gap: 12px; }
+.tf-fr-steps { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-fr-steps li { padding-bottom: 3px; border-bottom: 2px solid transparent; }
+.tf-fr-steps li.tf-fr-done { color: var(--ink); }
+.tf-fr-steps li[aria-current="step"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+.tf-fr-lead { line-height: 1.55; max-width: 70ch; }
+.tf-fr-note { font-size: var(--t-sm); color: var(--ink-2); line-height: 1.55; max-width: 70ch; }
+.tf-fr-mods { display: grid; gap: 8px; }
+.tf-fr-mod {
+  display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 12px;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); cursor: pointer;
+}
+.tf-fr-mod:hover { border-color: var(--ink-2); }
+.tf-fr-mod[disabled] { opacity: .55; cursor: not-allowed; }
+.tf-fr-name { font-weight: 600; }
+.tf-fr-mod small { font-size: var(--t-xs); color: var(--ink-2); }
+.tf-fr-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.tf-fr-progress progress { width: 100%; height: 4px; accent-color: var(--ink); }
+.tf-fr-reading { margin-top: 6px; font-size: var(--t-sm); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-fr-fail { white-space: pre-wrap; overflow-wrap: anywhere; }

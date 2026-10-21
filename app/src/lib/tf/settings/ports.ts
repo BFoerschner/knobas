@@ -101,7 +101,7 @@ export interface SettingsPorts {
     stop: AbortSignal,
   ) => Promise<number | null>;
   syncAll: () => Promise<number[]>;
-  /** *Add a source* (#903): the secret and the row in one call, as `AddSource` sends it. */
+  /** *Add a source* (#903): the secret and the row in one call, as the rooms `AddSource` sent it. */
   addSource: (input: NewSource) => Promise<SourceSummary>;
   /** *Install an adapter* in Add a source (#1202): a local `knobas-adapter.json`. */
   installAdapter: (manifest: string) => Promise<InstalledAdapter>;
