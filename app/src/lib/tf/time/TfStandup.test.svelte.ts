@@ -6,7 +6,7 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { DigestLine, Protocol, PublishTarget, StandupDigest } from "../../ipc/entity";
+import type { DigestLine, LinkEnd, LinkEntry, Protocol, PublishTarget, StandupDigest } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
 import { createLayers } from "../layers.svelte";
 import TfStandup from "./TfStandup.svelte";
@@ -29,8 +29,30 @@ const BODY = [
   "## Action items",
   "",
   "- [ ] Decide the manual-review SLA",
+  "- [ ] Update the on-call runbook (Tomasz Wójcik)",
   "",
 ].join("\n");
+
+/** The `related` link the backend draws from the protocol to a ticket it filed for an item (#779). */
+function ticketLink(entityId: string, title: string, over: Partial<LinkEnd> = {}): LinkEntry {
+  return {
+    link: {
+      id: `link:${entityId}`,
+      from_id: "note:p",
+      to_id: entityId,
+      relation: "related",
+      origin: "manual",
+      note: null,
+      created_by: "knobas",
+      created_at: "",
+      confirmed_at: "",
+      rule: null,
+      rule_class: null,
+      reason: null,
+    },
+    other: { entity_id: entityId, kind: "ticket", title, deleted_at: null, ...over },
+  };
+}
 
 function line(over: Partial<DigestLine>): DigestLine {
   return {
@@ -84,13 +106,32 @@ async function settle() {
   flushSync();
 }
 
-function open(over: { stored?: PublishTarget | null; publication?: Protocol["publication"] } = {}) {
-  const calls: { saved: string[]; published: (PublishTarget | undefined)[]; copied: string[]; tickets: unknown[][] } = {
+function open(
+  over: {
+    stored?: PublishTarget | null;
+    publication?: Protocol["publication"];
+    /** The protocol note's links, as the backend holds them; a landed create draws one into it. */
+    links?: LinkEntry[];
+    /** The day the address names (`#/time/standup/<date>`). */
+    date?: string;
+  } = {},
+) {
+  const calls: {
+    saved: string[];
+    published: (PublishTarget | undefined)[];
+    copied: string[];
+    tickets: unknown[][];
+    days: string[];
+    digests: string[];
+  } = {
     saved: [],
     published: [],
     copied: [],
     tickets: [],
+    days: [],
+    digests: [],
   };
+  const links = over.links ?? [];
   const hears = new Map<number, (row: QueuedWrite | undefined) => void>();
   let body = BODY;
   const protocol = (publication: Protocol["publication"] = over.publication ?? null): Protocol => ({
@@ -103,12 +144,23 @@ function open(over: { stored?: PublishTarget | null; publication?: Protocol["pub
     target,
     props: {
       now: () => NOW,
+      date: over.date,
       saveAfterMs: 0,
       layers: createLayers(),
       ports: {
-        standupDigest: async () => DIGEST,
-        standupProtocol: async () => protocol(),
-        getNote: async () => ({ note: { id: "note:p", title: `Standup ${DAY}`, body_md: body, created_at: "", updated_at: "" }, refs: [], links: [] }),
+        standupDigest: async (today: { day: string }) => {
+          calls.digests.push(today.day);
+          return DIGEST;
+        },
+        standupProtocol: async (day: string) => {
+          calls.days.push(day);
+          return protocol();
+        },
+        getNote: async () => ({
+          note: { id: "note:p", title: `Standup ${DAY}`, body_md: body, created_at: "", updated_at: "" },
+          refs: [],
+          links: [...links],
+        }),
         saveNote: async (_id: string, _title: string, text: string) => {
           body = text;
           calls.saved.push(text);
@@ -129,7 +181,12 @@ function open(over: { stored?: PublishTarget | null; publication?: Protocol["pub
           calls.tickets.push(args);
           return { write_id: 9, state: "pending", detail: null, ticket_entity_id: null, linked: false };
         },
-        actionItemTicket: async () => ({ write_id: 9, state: "sent", detail: null, ticket_entity_id: "jira:OPS-131", linked: true }),
+        actionItemTicket: async () => {
+          // Landed: the backend draws the protocol's link to the ticket it found by the item's words.
+          const made = calls.tickets.at(-1)!;
+          if (!links.some((entry) => entry.other.entity_id === "jira:OPS-131")) links.push(ticketLink("jira:OPS-131", String(made[3])));
+          return { write_id: 9, state: "sent", detail: null, ticket_entity_id: "jira:OPS-131", linked: true };
+        },
         follower: { follow: (id: number, hear: (row: QueuedWrite | undefined) => void) => (hears.set(id, hear), () => hears.delete(id)) },
         copy: async (text: string) => {
           calls.copied.push(text);
@@ -256,4 +313,80 @@ test("a published protocol links its page", async () => {
   await settle();
   const link = [...target.querySelectorAll("a")].find((found) => found.textContent?.trim() === "Published");
   expect(link?.getAttribute("href")).toBe("#/page/wiki%3A901");
+});
+
+test("an item whose ticket the protocol already links shows its key and status, and no Create ticket (#1433)", async () => {
+  open({ links: [ticketLink("jira:OPS-131", "Update the on-call runbook (Tomasz Wójcik)")] });
+  await settle();
+  const rows = [...target.querySelectorAll(".tf-su-ai")];
+  expect(rows).toHaveLength(2);
+  // The item with no link keeps its button.
+  expect(rows[0]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket");
+  // The linked one reads the ticket's key and status, as a create that landed in this session does.
+  expect(rows[1]!.querySelector("button")).toBeNull();
+  expect(rows[1]!.querySelector("a")?.getAttribute("href")).toBe("#/job/OPS-131");
+  expect(rows[1]!.querySelector("a")?.textContent).toBe("OPS-131");
+  expect(rows[1]!.querySelector(".tf-chip")?.textContent).toBe("To Do");
+});
+
+test("only a ticket titled exactly as the item answers for it: another kind, another title or a withdrawn ticket does not (#1433)", async () => {
+  open({
+    links: [
+      ticketLink("wiki:77", "Update the on-call runbook (Tomasz Wójcik)", { kind: "page" }),
+      ticketLink("jira:OPS-9", "Update the on-call runbook"),
+      ticketLink("jira:OPS-10", "Decide the manual-review SLA", { deleted_at: "2026-08-20T10:00:00Z" }),
+    ],
+  });
+  await settle();
+  const buttons = [...target.querySelectorAll(".tf-su-ai button")].map((found) => found.textContent?.trim());
+  expect(buttons).toEqual(["Create ticket", "Create ticket"]);
+  expect(target.querySelector(".tf-su-ai a")).toBeNull();
+});
+
+test("after a create, leaving the tab and coming back shows the ticket's key, not Create ticket (#1433)", async () => {
+  const links: LinkEntry[] = [];
+  const { hears } = open({ links });
+  await settle();
+  button("Create ticket").click();
+  await settle();
+  const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
+  select.value = "jira:OPS";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find((found) => found.textContent?.trim() === "Create ticket")!.click();
+  await settle();
+  hears.get(9)!(undefined);
+  await settle();
+  expect(target.querySelector(".tf-su-ai a")?.textContent).toBe("OPS-131");
+
+  unmount(view!);
+  view = null;
+  open({ links });
+  await settle();
+  const first = target.querySelector(".tf-su-ai")!;
+  expect(first.querySelector("button")).toBeNull();
+  expect(first.querySelector("a")?.textContent).toBe("OPS-131");
+  expect(first.querySelector(".tf-chip")?.textContent).toBe("To Do");
+});
+
+for (const [name, field] of [
+  ["+ Add someone", "Who else was there"],
+  ["+ Add an action item", "New action item"],
+] as const) {
+  test(`${name} puts the cursor in its field even while a notes box holds it (#1511)`, async () => {
+    open();
+    await settle();
+    target.querySelector<HTMLTextAreaElement>(".tf-su-pn textarea")!.focus();
+    button(name).click();
+    await settle();
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(field);
+  });
+}
+
+test("a date in the address opens that day's protocol and digest, not today's (#1504)", async () => {
+  const { calls } = open({ date: "2026-08-03" });
+  await settle();
+  expect(calls.days).toEqual(["2026-08-03"]);
+  expect(calls.digests).toEqual(["2026-08-03"]);
+  expect(target.querySelector(".tf-su-day")?.textContent).toBe("Monday 3 August");
 });
