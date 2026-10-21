@@ -138,7 +138,7 @@ async fn corpus(label: &str) -> PgPool {
 }
 
 async fn resolved(pool: &PgPool, url: &str) -> Option<UrlMatch> {
-    resolve_url_inner(pool, url)
+    resolve_url_inner(pool, &knobas_app::sources::Registry::for_process(), url)
         .await
         .expect("a resolvable URL is not a refusal")
 }
@@ -400,9 +400,13 @@ async fn something_that_is_not_a_web_url_is_refused_rather_than_missed() {
         "jira.example/browse/PAY-231",
         "",
     ] {
-        let error = resolve_url_inner(&pool, not_a_url)
-            .await
-            .expect_err("not a web URL");
+        let error = resolve_url_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            not_a_url,
+        )
+        .await
+        .expect_err("not a web URL");
         assert_eq!(
             code(&error),
             IpcErrorCode::Invalid,
@@ -486,6 +490,7 @@ async fn the_resolvers_statement_reaches_the_expression_index() {
     let plan: Vec<String> =
         sqlx::query_scalar(sqlx::AssertSqlSafe(format!("explain {RESOLVE_URL}")))
             .bind("https://jira.example/browse/PAY-231")
+            .bind(serde_json::json!([]))
             .fetch_all(&mut *tx)
             .await
             .expect("a plan");
@@ -612,4 +617,191 @@ fn resolve_url_is_registered_and_its_argument_decodes() {
         "a call with no url must be refused while its arguments are decoded, not reach the \
          body: {missing}"
     );
+}
+
+// -- the other forms a source serves a page under (#1475) ---------------------
+
+/// A configured source, as Add source leaves it: the base URL its forms are
+/// read under.
+async fn configure(pool: &PgPool, id: &str, adapter_kind: &str, base_url: &str) {
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ($1, $2, $1, $3, 'pat')",
+    )
+    .bind(id)
+    .bind(adapter_kind)
+    .bind(base_url)
+    .execute(pool)
+    .await
+    .expect("the source row");
+}
+
+/// A Confluence page as Data Center 9 reports it: stored under its
+/// `/spaces/…/pages/<id>/<title>` address, with the record its forms read.
+async fn mirror_page(pool: &PgPool, source_id: &str, base_url: &str, id: &str, tiny: &str) {
+    let entity_id = format!("{source_id}:{id}");
+    mirror(
+        pool,
+        &entity_id,
+        "page",
+        source_id,
+        &format!("{base_url}/spaces/ENG/pages/{id}/SEPA+payout+retry+design"),
+    )
+    .await;
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(&entity_id)
+        .bind(serde_json::json!({
+            "id": id,
+            "title": "SEPA payout retry design",
+            "space": { "key": "ENG" },
+            "_links": { "tinyui": tiny },
+        }))
+        .execute(pool)
+        .await
+        .expect("the page's record");
+}
+
+/// The audit's three pastes (#1475): the stored form, the `pageId=` form, the
+/// `/display/` form and the tiny link all open the one page; a Gitea
+/// repository, which declares no forms, still opens by its stored address.
+#[tokio::test]
+async fn a_confluence_page_opens_from_each_form_confluence_serves_it_under() {
+    let pool = pool("url_forms_confluence").await;
+    let base = "http://127.0.0.1:8090";
+    configure(&pool, "confluence", "confluence", base).await;
+    mirror_page(&pool, "confluence", base, "360458", "/x/CoAF").await;
+    configure(&pool, "gitea", "gitea", "https://gitea.example").await;
+    mirror(
+        &pool,
+        "gitea:acme/payments-svc",
+        "repo",
+        "gitea",
+        "https://gitea.example/acme/payments-svc",
+    )
+    .await;
+
+    let page = Some(("confluence:360458".to_owned(), "page".to_owned()));
+    for url in [
+        "http://127.0.0.1:8090/spaces/ENG/pages/360458/SEPA+payout+retry+design",
+        "http://127.0.0.1:8090/pages/viewpage.action?pageId=360458",
+        "http://127.0.0.1:8090/display/ENG/SEPA+payout+retry+design",
+        "http://127.0.0.1:8090/x/CoAF",
+        // The base is compared under the stored-address rule: a shouted host
+        // and a fragment are the same page.
+        "HTTP://127.0.0.1:8090/pages/viewpage.action?pageId=360458#comment-4",
+    ] {
+        assert_eq!(pair(resolved(&pool, url).await), page, "{url}");
+    }
+    assert_eq!(
+        pair(resolved(&pool, "https://gitea.example/acme/payments-svc").await),
+        Some(("gitea:acme/payments-svc".to_owned(), "repo".to_owned()))
+    );
+}
+
+/// A form names a page by its record, under its own source's base URL: an
+/// unknown id, another instance's host and another space all miss.
+#[tokio::test]
+async fn a_form_misses_another_page_and_another_instance() {
+    let pool = pool("url_forms_miss").await;
+    configure(&pool, "confluence", "confluence", "http://127.0.0.1:8090/").await;
+    mirror_page(
+        &pool,
+        "confluence",
+        "http://127.0.0.1:8090",
+        "360458",
+        "/x/CoAF",
+    )
+    .await;
+    configure(
+        &pool,
+        "confluence-eu",
+        "confluence",
+        "https://wiki.eu.example/confluence",
+    )
+    .await;
+    mirror_page(
+        &pool,
+        "confluence-eu",
+        "https://wiki.eu.example/confluence",
+        "777",
+        "/x/CQM",
+    )
+    .await;
+
+    for url in [
+        "http://127.0.0.1:8090/pages/viewpage.action?pageId=999",
+        "http://127.0.0.1:8090/display/OPS/SEPA+payout+retry+design",
+        "http://127.0.0.1:8090/x/CQM",
+        "https://wiki.eu.example/pages/viewpage.action?pageId=777",
+        "https://other.example/pages/viewpage.action?pageId=360458",
+    ] {
+        assert_eq!(pair(resolved(&pool, url).await), None, "{url}");
+    }
+    // Each instance answers its own page under its own base, context path and all.
+    assert_eq!(
+        pair(resolved(&pool, "https://wiki.eu.example/confluence/x/CQM").await),
+        Some(("confluence-eu:777".to_owned(), "page".to_owned()))
+    );
+    assert_eq!(
+        pair(
+            resolved(
+                &pool,
+                "http://127.0.0.1:8090/pages/viewpage.action?pageId=360458"
+            )
+            .await
+        ),
+        Some(("confluence:360458".to_owned(), "page".to_owned()))
+    );
+}
+
+/// The stored address wins over a form, so an address that is one item's own
+/// and reads as another's form answers the item it is stored with.
+#[tokio::test]
+async fn the_stored_address_wins_over_a_form() {
+    let pool = pool("url_forms_order").await;
+    let base = "http://127.0.0.1:8090";
+    configure(&pool, "confluence", "confluence", base).await;
+    // `confluence:9` is stored under what reads as page 2's id form. It sorts
+    // after `confluence:2`, so an order by id alone would answer the other.
+    mirror(
+        &pool,
+        "confluence:9",
+        "page",
+        "confluence",
+        "http://127.0.0.1:8090/pages/viewpage.action?pageId=2",
+    )
+    .await;
+    mirror_page(&pool, "confluence", base, "2", "/x/Ag").await;
+
+    assert_eq!(
+        pair(
+            resolved(
+                &pool,
+                "http://127.0.0.1:8090/pages/viewpage.action?pageId=2"
+            )
+            .await
+        ),
+        Some(("confluence:9".to_owned(), "page".to_owned()))
+    );
+}
+
+/// A reading that holds no values would match every item of its kind under
+/// its source; the statement skips it. `UrlForm::read` never makes one, so
+/// the guard is driven through the statement itself.
+#[tokio::test]
+async fn a_reading_with_no_values_names_nothing() {
+    let pool = pool("url_forms_no_values").await;
+    let base = "http://127.0.0.1:8090";
+    configure(&pool, "confluence", "confluence", base).await;
+    mirror_page(&pool, "confluence", base, "360458", "/x/CoAF").await;
+
+    let found: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
+        .bind("http://127.0.0.1:8090/anything")
+        .bind(serde_json::json!([
+            { "adapter_kind": "confluence", "base": base, "kind": "page", "fields": [] }
+        ]))
+        .fetch_optional(&pool)
+        .await
+        .expect("the statement runs");
+    assert_eq!(found, None);
 }

@@ -13,7 +13,7 @@ use knobas_sync::config::{self, AuthKind, CredentialHealth, InsertConfig, PatchC
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
 
-use crate::commands::entity::RESOLVE_URL;
+use crate::commands::entity::{RESOLVE_URL, no_form_readings};
 
 use super::{
     ConnectionReport, NewSource, SecretInput, SourceDraft, SourcePatch, SourceSummary, SourcesError,
@@ -846,6 +846,7 @@ pub async fn pipeline_settings(
             };
             let found: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
                 .bind(&page)
+                .bind(no_form_readings())
                 .fetch_optional(pool)
                 .await?;
             repository.entity_id = found
@@ -922,6 +923,7 @@ pub async fn pipeline_commits(
             };
             let hit: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
                 .bind(&page)
+                .bind(no_form_readings())
                 .fetch_optional(pool)
                 .await?;
             if let Some((commit, kind)) = hit
@@ -1043,6 +1045,7 @@ async fn resolve_commit_hints(
             };
             let found: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
                 .bind(&page)
+                .bind(no_form_readings())
                 .fetch_optional(pool)
                 .await?;
             row.entity_id = found.map(|(entity_id, _kind)| entity_id);

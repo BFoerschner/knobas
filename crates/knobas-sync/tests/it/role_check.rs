@@ -74,6 +74,7 @@ impl Source for Tickets {
             roles: vec![RoleClaim::new(TICKET_SYSTEM, ["reachable_transitions"])],
             source_actions: Vec::new(),
             clone_from: Vec::new(),
+            url_forms: Vec::new(),
         }
     }
 

@@ -1598,7 +1598,11 @@ test("a pasted link the mirror does not hold offers the browser instead", async 
   // button hands over: the raw one, not the normalised one the resolver used.
   await search(`${PASTED}#comment-42`);
 
-  expect(target.textContent).toContain("Not in the mirror");
+  // The address as pasted is what missed, not the page (#1475): the source
+  // may serve it under a form this adapter does not declare.
+  expect(target.querySelector(".tf-ln-miss")?.textContent).toContain(
+    "Not in the mirror as this address; it may be stored under another form.",
+  );
   // The mirror's own word, and not a synonym `CONTEXT.md`'s **Mirror** entry
   // says to avoid. The whole overlay now, not just the panel: #518 took the
   // forbidden word off the footnote, the empty-result line and the reading
@@ -2909,4 +2913,92 @@ test("two sources' PAY-231: each row names its source before its age, a unique k
   press("Enter");
   await settle();
   expect(onnavigate).toHaveBeenCalledWith("#/job/jira%3APAY-231");
+});
+
+// ── Reopening selects the kept query (#1480) ───────────────────────────────
+
+/** Close by the ×, which leaves the session's query in place (Esc empties it first). */
+function closeByX() {
+  target.querySelector<HTMLButtonElement>('.tf-ln-q button[aria-label="Close"]')!.click();
+  flushSync();
+}
+
+/** ⌘K, as the window hears it. */
+async function reopen() {
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }));
+  flushSync();
+  await settle();
+}
+
+test("⌘K reopens on the kept query with the whole of it selected", async () => {
+  open();
+  await settle();
+  await search("PAY-231");
+  closeByX();
+  expect(target.querySelector(".tf-launch"), "the × closed the overlay").toBeNull();
+  await reopen();
+
+  const input = target.querySelector("input")!;
+  expect(input.value, "the session keeps what was searched for").toBe("PAY-231");
+  expect(document.activeElement).toBe(input);
+  expect(input.selectionStart).toBe(0);
+  expect(input.selectionEnd).toBe("PAY-231".length);
+});
+
+test("typing after a reopen replaces the kept query instead of appending to it", async () => {
+  open();
+  await settle();
+  await search("PAY-231");
+  closeByX();
+  await reopen();
+
+  // Typing replaces whatever is selected; jsdom does not insert text for a
+  // keydown, so the test does what the WebView does with a keystroke.
+  const input = target.querySelector("input")!;
+  input.setRangeText("x", input.selectionStart!, input.selectionEnd!, "end");
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+
+  expect(input.value).toBe("x");
+});
+
+test("an empty box opens with the caret in it and nothing to select", async () => {
+  open();
+  await settle();
+  const input = target.querySelector("input")!;
+  expect(document.activeElement).toBe(input);
+  expect(input.selectionStart).toBe(0);
+  expect(input.selectionEnd).toBe(0);
+});
+
+/**
+ * The re-focus after a click on a row keeps the caret where it was. Witnessed
+ * through a row whose click leaves the box's text alone (Rename, then Esc out
+ * of the name): a row that sets the box's text moves the caret to its end on
+ * the value write whatever the re-focus did, and could not tell the two apart.
+ * Blanks keep the board, and its rail, on screen.
+ */
+test("a click on a row re-focuses the box without selecting its text", async () => {
+  openSaved();
+  await settle();
+  const input = target.querySelector("input")!;
+  input.value = "   ";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  input.setSelectionRange(1, 1);
+
+  [...target.querySelectorAll<HTMLButtonElement>("button.tf-ln-mini")]
+    .find((button) => button.textContent?.trim() === "Rename")!
+    .click();
+  flushSync();
+  await settle();
+  const field = target.querySelector<HTMLInputElement>("input.tf-ln-ren")!;
+  field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  flushSync();
+  await settle();
+
+  expect(document.activeElement, "focus is back in the box").toBe(input);
+  expect(input.value).toBe("   ");
+  expect(input.selectionStart).toBe(1);
+  expect(input.selectionEnd).toBe(1);
 });

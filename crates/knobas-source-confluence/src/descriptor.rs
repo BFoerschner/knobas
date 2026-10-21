@@ -55,6 +55,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // first, and the one that makes a new page last.
         source_actions: Vec::new(),
         clone_from: Vec::new(),
+        url_forms: url_forms(),
         write_ops: vec![
             "comment".to_owned(),
             "update_page".to_owned(),
@@ -84,6 +85,46 @@ pub fn descriptor_template() -> SourceDescriptor {
         config_schema: config_schema(),
         payload_paths: payload_paths(),
     }
+}
+
+/// The other addresses Confluence serves a page under (#1475), beside the one
+/// the sync stores: `_links.webui`, which Data Center 9 spells
+/// `/spaces/ENG/pages/360458/SEPA+payout+retry+design`.
+///
+/// * `/pages/viewpage.action?pageId=360458` -- the page's content id, which
+///   is the record's own `id` (and the entity key, [`crate::map`]).
+/// * `/display/ENG/SEPA+payout+retry+design` -- the space key and the title,
+///   the form Data Center 7 and 8 report and 9 still serves.
+/// * `/x/CoAF` -- the tiny link, which every content record carries at
+///   `_links.tinyui` as Confluence spells it. Matched against that rather
+///   than decoded from the id: the encoding is Confluence's, and a link
+///   knobas composed would be a guess (P5).
+///
+/// A page renamed since the last sync answers its old `/display/` title until
+/// the next run; the other two do not move with a rename.
+fn url_forms() -> Vec<knobas_source::url_forms::UrlForm> {
+    use knobas_source::PayloadPath;
+    use knobas_source::url_forms::UrlForm;
+    vec![
+        UrlForm::of(
+            crate::KIND_PAGE,
+            "/pages/viewpage.action?pageId={}",
+            [PayloadPath::of(["id"])],
+        ),
+        UrlForm::of(
+            crate::KIND_PAGE,
+            "/display/{}/{}",
+            [
+                PayloadPath::of(["space", "key"]),
+                PayloadPath::of(["title"]),
+            ],
+        ),
+        UrlForm::of(
+            crate::KIND_PAGE,
+            "{*}",
+            [PayloadPath::of(["_links", "tinyui"])],
+        ),
+    ]
 }
 
 /// Where a Confluence page keeps what knobas reads (#277, ADR-0007).
@@ -424,5 +465,72 @@ mod tests {
         let roles: Vec<&str> = d.roles.iter().map(|c| c.role.as_str()).collect();
         assert_eq!(roles, [knobas_source::role::WIKI]);
         assert_eq!(knobas_source::role::check(&d), Ok(()));
+    }
+
+    /// A page record as Data Center 9 answers a content search, trimmed to
+    /// what the forms read.
+    fn sepa_page() -> serde_json::Value {
+        serde_json::json!({
+            "id": "360458",
+            "type": "page",
+            "title": "SEPA payout retry design",
+            "space": { "key": "ENG", "name": "Engineering" },
+            "_links": {
+                "webui": "/spaces/ENG/pages/360458/SEPA+payout+retry+design",
+                "tinyui": "/x/CoAF"
+            }
+        })
+    }
+
+    /// Whether `url` names `payload` under `base` by one of the declared
+    /// forms: the resolver's question, asked of a record instead of the mirror.
+    fn names(url: &str, base: &str, payload: &serde_json::Value) -> bool {
+        descriptor_template().url_forms.iter().any(|form| {
+            form.read(url).iter().any(|reading| {
+                reading.base == base
+                    && reading.kind == crate::KIND_PAGE
+                    && reading.fields.iter().all(|field| {
+                        knobas_core::payload::at(payload, &field.path)
+                            .and_then(serde_json::Value::as_str)
+                            == Some(field.value.as_str())
+                    })
+            })
+        })
+    }
+
+    /// The three forms the audit pasted and Confluence serves (#1475), each
+    /// naming the page, under a base with a context path and without one.
+    #[test]
+    fn a_page_is_named_by_its_id_its_space_and_title_and_its_tiny_link() {
+        let page = sepa_page();
+        for base in ["http://127.0.0.1:8090", "https://wiki.example/confluence"] {
+            for form in [
+                "/pages/viewpage.action?pageId=360458",
+                "/display/ENG/SEPA+payout+retry+design",
+                "/x/CoAF",
+            ] {
+                assert!(names(&format!("{base}{form}"), base, &page), "{base}{form}");
+            }
+        }
+        assert_eq!(
+            knobas_source::url_forms::check(&descriptor_template()),
+            Ok(())
+        );
+    }
+
+    /// Another page's id, another space, another tiny link: none names this
+    /// page, so a form is a match on the record and not on the shape alone.
+    #[test]
+    fn another_pages_address_does_not_name_this_one() {
+        let page = sepa_page();
+        let base = "http://127.0.0.1:8090";
+        for url in [
+            "/pages/viewpage.action?pageId=360459",
+            "/display/OPS/SEPA+payout+retry+design",
+            "/display/ENG/SEPA+payout+retry",
+            "/x/CoAG",
+        ] {
+            assert!(!names(&format!("{base}{url}"), base, &page), "{url}");
+        }
     }
 }

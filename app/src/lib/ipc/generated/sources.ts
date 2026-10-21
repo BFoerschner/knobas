@@ -1104,7 +1104,22 @@ source_actions: Array<string>,
  * `#[serde(default)]`, so a descriptor from a peer that predates this
  * decodes as an adapter that names no address to clone from.
  */
-clone_from: Array<CloneFrom>, };
+clone_from: Array<CloneFrom>, 
+/**
+ * The other forms of address the source serves an item's page under,
+ * beside the one it reports as [`SyncItem::web_url`] (#1475, spec #491's
+ * *"a descriptor slot with its own entry"*). The paste resolver reads a
+ * pasted address as each form and opens the item whose payload holds
+ * the values it names; it never fetches, and it never knows which
+ * adapter declared what ([`url_forms`] says how a form reads).
+ * [`url_forms::check`] holds each to its rules (contract battery clause
+ * 12).
+ *
+ * `#[serde(default)]`, so a descriptor from a peer that predates this
+ * -- an external adapter's JSON among them -- decodes as an adapter
+ * whose items open by their stored address alone.
+ */
+url_forms: Array<UrlForm>, };
 
 /**
  * An unsaved (or saved) source to test a connection for.
@@ -1516,6 +1531,45 @@ export type UpdateCheck = { "state": "current" } | { "state": "available", tag: 
  * type's and a field's doc but not a variant's (#1325).
  */
 export type UpdateStyle = "merge" | "rebase";
+
+/**
+ * One more form an item's page is served under, beside the `web_url` the
+ * adapter reports.
+ *
+ * `template` is the address **after the source's base URL**, starting with
+ * `/`: literal text, with `{}` for one value and at most one `{*}`, last, for
+ * the rest of the address. `{*}` alone is the whole address after the base,
+ * its `/` included: a payload that keeps a relative address (Confluence's
+ * tiny link, `/x/CoAF`) is matched by it. `fields[i]` is where the item's payload holds the
+ * value of the template's `i`-th placeholder.
+ *
+ * * `{}` ends at the next `/`, `?`, `&` or `#`, and its text is
+ *   form-decoded before it is compared (`%2B` is `+`, `+` is a space): a
+ *   Confluence title in a `/display/` link is spelled that way.
+ * * `{*}` is the rest of the address, fragment aside, compared as written:
+ *   it stands for a stored *address* (Confluence's `_links.tinyui`), and an
+ *   address compared to an address is not decoded.
+ *
+ * After the template the pasted address may go on only with a query
+ * (`?…`, `&…`) or a trailing `/`: `…?pageId=360458&focusedCommentId=7` is
+ * still the page.
+ *
+ * The contract battery holds a declaration to [`check`].
+ */
+export type UrlForm = { 
+/**
+ * The entity kind of the items this form names; one of the descriptor's
+ * `entity_kinds`.
+ */
+kind: string, 
+/**
+ * The address after the base URL, e.g. `/pages/viewpage.action?pageId={}`.
+ */
+template: string, 
+/**
+ * Where the payload holds each placeholder's value, in template order.
+ */
+fields: Array<PayloadPath>, };
 
 /**
  * Why a pending write has not gone yet.

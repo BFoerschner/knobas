@@ -84,6 +84,7 @@ impl Source for Boards {
             roles: Vec::new(),
             source_actions: Vec::new(),
             clone_from: Vec::new(),
+            url_forms: Vec::new(),
             write_ops: Vec::new(),
             entity_kinds: vec![kind("ticket"), kind(views)],
             config_schema: json!({ "type": "object", "properties": {} }),

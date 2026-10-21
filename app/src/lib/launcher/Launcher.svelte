@@ -489,7 +489,9 @@
   $effect(() => {
     if (open) {
       void session.loadHome();
-      void tick().then(() => box?.focus());
+      // Selected, not cleared: the session keeps the last query on purpose,
+      // and selecting it is what lets typing replace it (#1480).
+      void tick().then(() => box?.focus({ select: true }));
     } else {
       session.dispose();
     }
@@ -797,7 +799,11 @@
             <p class="tf-ln-none">Looking up the link…</p>
           {:else}
             <div class="tf-ln-miss">
-              <p class="tf-ln-none">Not in the mirror</p>
+              <!--
+                The pasted URL missed, not necessarily the item (#1475): a
+                source serves a page under more URLs than its adapter declares.
+              -->
+              <p class="tf-ln-none">Not in the mirror as this address; it may be stored under another form.</p>
               <p class="tf-ln-none tf-ln-raw">{session.url}</p>
               <button class="tf-ln-opt" onclick={() => session.url && void openTheMiss(session.url)}>
                 <span class="tf-ln-nm">Open in browser</span>

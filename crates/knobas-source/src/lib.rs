@@ -34,6 +34,7 @@ pub mod pipeline;
 pub mod query;
 pub mod role;
 pub mod run;
+pub mod url_forms;
 pub mod view;
 
 /// The sync-interval floor an adapter declares unless it says otherwise, and
@@ -209,6 +210,20 @@ pub struct SourceDescriptor {
     /// decodes as an adapter that names no address to clone from.
     #[serde(default)]
     pub clone_from: Vec<clone_urls::CloneFrom>,
+    /// The other forms of address the source serves an item's page under,
+    /// beside the one it reports as [`SyncItem::web_url`] (#1475, spec #491's
+    /// *"a descriptor slot with its own entry"*). The paste resolver reads a
+    /// pasted address as each form and opens the item whose payload holds
+    /// the values it names; it never fetches, and it never knows which
+    /// adapter declared what ([`url_forms`] says how a form reads).
+    /// [`url_forms::check`] holds each to its rules (contract battery clause
+    /// 12).
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// -- an external adapter's JSON among them -- decodes as an adapter
+    /// whose items open by their stored address alone.
+    #[serde(default)]
+    pub url_forms: Vec<url_forms::UrlForm>,
 }
 
 // The declaration types themselves live in `knobas-spi-types`, not here: the
@@ -1916,6 +1931,7 @@ mod tests {
             roles: Vec::new(),
             source_actions: Vec::new(),
             clone_from: Vec::new(),
+            url_forms: Vec::new(),
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -1970,6 +1986,7 @@ mod tests {
             roles: Vec::new(),
             source_actions: Vec::new(),
             clone_from: Vec::new(),
+            url_forms: Vec::new(),
             ..a_descriptor()
         };
         let mut wire = serde_json::to_value(&declared).unwrap();
@@ -1982,6 +1999,29 @@ mod tests {
             .remove("min_sync_interval_secs");
         let older: SourceDescriptor = serde_json::from_value(wire).unwrap();
         assert_eq!(older.min_sync_interval_secs, 60);
+    }
+
+    /// An external adapter's descriptor crosses the WIT boundary as this
+    /// JSON (#1475): one that declares forms keeps them, and one built before
+    /// the slot existed, which sends no `url_forms` key, still decodes, as an
+    /// adapter whose items open by their stored address alone.
+    #[test]
+    fn url_forms_round_trip_and_a_descriptor_without_them_still_decodes() {
+        let declared = SourceDescriptor {
+            url_forms: vec![url_forms::UrlForm::of(
+                "ticket",
+                "/browse/{}",
+                [PayloadPath::of(["key"])],
+            )],
+            ..a_descriptor()
+        };
+        let mut wire = serde_json::to_value(&declared).unwrap();
+        let back: SourceDescriptor = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(back.url_forms, declared.url_forms);
+
+        wire.as_object_mut().unwrap().remove("url_forms");
+        let older: SourceDescriptor = serde_json::from_value(wire).unwrap();
+        assert!(older.url_forms.is_empty());
     }
 
     /// Spec §3a: every type crossing the SPI is plain serde data, so an adapter

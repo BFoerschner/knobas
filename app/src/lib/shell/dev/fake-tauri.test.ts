@@ -1222,3 +1222,22 @@ test("the fixture's search answers > as the backend does: the text after the mar
   }
   expect(() => search("sepa >")).toThrow();
 });
+
+test("the fixture's resolve_url opens the SEPA page from the forms Confluence declares, not only its stored address (#1475)", () => {
+  const resolve = demoHandlers()["resolve_url"]!;
+  const page = { entity_id: "confluence:sepa", kind: "page" };
+  for (const url of [
+    "http://127.0.0.1:5399/confluence/pages/viewpage.action?pageId=sepa",
+    "http://127.0.0.1:5399/confluence/display/ENG/SEPA+retry+design",
+    "http://127.0.0.1:5399/confluence/display/ENG/SEPA%20retry%20design#comment-3",
+  ]) {
+    expect(resolve({ url }), url).toEqual(page);
+  }
+  for (const url of [
+    "http://127.0.0.1:5399/confluence/pages/viewpage.action?pageId=nope",
+    "http://127.0.0.1:5399/confluence/display/OPS/SEPA+retry+design",
+    "http://other.example/confluence/pages/viewpage.action?pageId=sepa",
+  ]) {
+    expect(resolve({ url }), url).toBeNull();
+  }
+});

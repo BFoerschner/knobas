@@ -425,6 +425,7 @@ impl GuestAdapter for Adapter {
             ],
             source_actions: vec![BOOK_REPAIR.into()],
             clone_from: Vec::new(),
+            url_forms: Vec::new(),
         };
         serde_json::to_string(&descriptor).expect("a descriptor serializes")
     }
