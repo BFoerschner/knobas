@@ -11036,3 +11036,59 @@ set.
   /rest/pat/latest/tokens, which is outside this adapter's endpoint set") are still true and stay
   as they are, so no live suite is owed. `docs/contract.md` still says "PAT expiry countdown"
   (§1, line 53, and §7's P4); it is frozen, and the wording is history there. *Reversing:* n/a.
+
+## #1571: a failed sign-in is an inbox item of its own, routed by its own switch (Opus implementer, 2026-10-21)
+
+- **What a failed sign-in is.** *Ruling:* `auth_state` is `unauthorized` or `missing_secret` on an
+  enabled source. *Reasoning:* the dispatch asked for the shell's `signInFails` definition, and the
+  scheduler skips the same two states. `unreachable` is retried on its own and `unknown` vouches for
+  nothing. A disabled source is excluded, as for a credential expiry. *Reversing:* one `in` list.
+- **The lifecycle.** *Fork:* how often the item is raised, and what clears it. *Ruling:* once per
+  **episode**, where an episode is the run of consecutive failing verdicts. The item is dated at
+  the episode's first verdict, so a retry rejected again (or a rejection becoming a missing secret)
+  neither moves the row nor brings back an item marked done. **Any** verdict that is not a failure
+  ends the episode, and the item leaves by construction. That includes `unreachable` and `unknown`,
+  not only `ok`. The next failure is a new episode, and it comes back past the old *done*.
+  *Reasoning:* the item then exists exactly while the status strip, the Builds warn line and the
+  queued-write toast say the sign-in fails, so no surface contradicts another. *Cost:* an
+  `unreachable` verdict between two rejections makes two episodes, so a *done* answered in the
+  first does not hide the second. *Reversing:* the trigger's first branch.
+- **Where the episode's start lives.** *Fork:* date the item at `auth_checked_at` (no migration),
+  add a column that `set_health` writes, or add a column a trigger keeps. *Ruling:* the column
+  `auth_failing_since` with a trigger (migration `0055`, §10.8 entry
+  `1571-migration-0055-auth-failing-since.md`). *Reasoning:* `auth_checked_at` moves on every
+  verdict, so a retry would undo a *done*, and that is once per attempt, not once per episode.
+  The trigger keeps the column for every writer of `auth_state` (`set_health`, the restore's
+  `missing_secret`, a raw `update`), so no future writer can forget it. `knobas-sync`'s
+  `config.rs`, where #1513 is working, is untouched, and the rule's read of the health columns
+  is a statement of its own in `knobas_core::inbox`. *Reversing:* medium (a migration dropping
+  the column and the function, and a §10.8 entry).
+- **The category and its key.** *Ruling:* `failed_sign_in`, keyed `failed_sign_in:<source id>`,
+  after `credential_expiry` in `Category::ALL`. *Reasoning:* the name parallels `failed_build`.
+  The subject is the source, as for an expiry, because no entity is involved. Placing it next to
+  the expiry puts the two source-level switches side by side. *Reversing:* a rename is a §10.8 entry
+  plus a rewrite of stored `inbox_state` keys.
+- **The switch.** *Fork:* a new switch, or a rename pass over the existing one. *Ruling:* a new
+  switch, labelled *A source cannot sign in*, off by default. The `credential_expiry` switch keeps
+  #1439's *A source's credential is about to expire*. *Reasoning:* the label is prototype-6's own
+  wording, which #1439 removed from the expiry switch because no rejected sign-in fired that
+  category. With its own category, the label now names what fires it. Off by default is story 71's
+  rule for every kind. *Reversing:* one string and one test line.
+- **What the row says and does.** *Ruling:* the reason is `the <name> sign-in was rejected` or
+  `no credential is stored for <name>`, without the server's detail. The kind word is *Sign-in*,
+  with no kind chip (a credential expiry has none either). The row gets the err dot. It offers no
+  source action. *Open source* goes to the source's page in Settings, where *Re-enter* is, and a
+  desktop notification's click goes to the same address. *Reasoning:* the two failures ask for the
+  same act but get different prompts on the source's page. The detail belongs to that page.
+  *Reversing:* low.
+- **The inbox re-reads on `source:health`.** *Ruling:* added to the store's subscriptions beside
+  `activity:new` and `sync:state`. *Reasoning:* *Test connection* and *Re-enter* settle a verdict
+  with no run behind them, so the item would appear or leave only on the next sync. *Reversing:*
+  one array entry.
+- **A second episode in one session is not announced again.** *Ruling:* unchanged notifier.
+  *Reasoning:* the glossary's **Desktop notification** is once per item per session, keyed by
+  `<category>:<subject>`. The inbox row comes back for the new episode, and #447 accepted the
+  same trade for a monitor that goes down twice. *Reversing:* a per-episode key, which would
+  change the key format.
+- **No step of the ticket is reserved for Björn.** The §10.8 entries are ratified under the
+  2026-10-18 reserved-steps rule, as #1285's were.

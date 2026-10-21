@@ -306,6 +306,28 @@ test("a desktop notification carries the entity's address and its click navigate
 });
 
 /**
+ * A failed sign-in (#1571) is routed by its own switch: off, the same item is
+ * silent while the switched-on credential expiry beside it speaks; on, it
+ * speaks, and its click opens the source's page, where *Re-enter* is.
+ */
+test("a failed sign-in notifies under its own switch and opens its source's page", async () => {
+  const off = bench();
+  await off.primed(["credential_expiry"]);
+  off.store.saw([entry("failed_sign_in", "teamcity", null), entry("credential_expiry", "gitea", null)]);
+  expect(off.calls.sent.map((notification) => notification.title)).toEqual(["Title of gitea"]);
+
+  const on = bench();
+  cleanup = on.store.start();
+  await on.primed(["failed_sign_in"]);
+  const teamcity = entry("failed_sign_in", "teamcity", null);
+  teamcity.item.source_id = "teamcity";
+  on.store.saw([teamcity]);
+  expect(on.calls.sent.map((notification) => notification.title)).toEqual(["Title of teamcity"]);
+  on.click(on.calls.sent[0]!);
+  expect(on.calls.navigated).toEqual(["#/settings/source/teamcity"]);
+});
+
+/**
  * A credential expiry has no entity: its subject is a source, so its door is
  * that source's page in Settings, as the inbox row's *Open source* is (#1085).
  */
@@ -335,6 +357,7 @@ test("every notification address has a place in the ticket-first shell", () => {
     "new_assignment",
     "mention",
     "credential_expiry",
+    "failed_sign_in",
     "alert",
   ];
   for (const category of categories) {

@@ -223,9 +223,15 @@ test("Notifications: a switch per inbox kind over the notifier's store, and a te
     "A build you started or care about failed",
     "A ticket is assigned to you",
     "A source's credential is about to expire",
+    "A source cannot sign in",
     "A monitor goes down",
   ]);
-  expect(target.textContent).not.toContain("A source cannot sign in");
+  // Prototype-6's words for a failed sign-in, which #1439 took off the
+  // expiry's switch because no rejected sign-in fired it; since #1571 one does,
+  // under its own switch.
+  switchFor("A source cannot sign in").click();
+  await settle();
+  expect(store.choose).toHaveBeenCalledWith("failed_sign_in", true);
   switchFor("You are mentioned").click();
   await settle();
   expect(store.choose).toHaveBeenCalledWith("mention", false);

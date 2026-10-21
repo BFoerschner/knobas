@@ -21,9 +21,13 @@ const KIND: Record<InboxCategory, string> = {
   new_assignment: "Assignment",
   alert: "Monitor",
   credential_expiry: "Credential",
+  failed_sign_in: "Sign-in",
 };
 
-/** The kind chips, in prototype-6's order. A credential expiry has none. */
+/**
+ * The kind chips, in prototype-6's order. A credential expiry has none, and
+ * neither has a failed sign-in (#1571): both are about a source, not work.
+ */
 export const KIND_CHIPS = ["Review", "Mention", "Build", "Assignment", "Monitor"] as const;
 
 /**
@@ -77,9 +81,9 @@ export function sentence(item: Pick<InboxItem, "category" | "reason" | "title">)
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** A failure is drawn with an err dot (a failed build, a monitor down). */
+/** A failure is drawn with an err dot (a failed build, a monitor down, a refused sign-in). */
 export function failed(item: Pick<InboxItem, "category">): boolean {
-  return item.category === "failed_build" || item.category === "alert";
+  return item.category === "failed_build" || item.category === "alert" || item.category === "failed_sign_in";
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -114,7 +118,8 @@ export interface Opener {
  * `itemHash`), worded by what it opens as prototype-6 words it.
  */
 export function opener(item: Pick<InboxItem, "category" | "entity_id" | "kind" | "source_id">): Opener | null {
-  if (item.category === "credential_expiry") {
+  // Both are about the source itself, whose page holds *Re-enter* (#1571).
+  if (item.category === "credential_expiry" || item.category === "failed_sign_in") {
     return { label: "Open source", href: `#/settings/source/${encodeURIComponent(item.source_id)}` };
   }
   if (item.category === "alert") return { label: "Open monitor", href: "#/monitors" };

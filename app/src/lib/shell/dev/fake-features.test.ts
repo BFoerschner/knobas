@@ -50,6 +50,18 @@ test("the inbox: snooze moves a row to the other shelf, done removes it, the cou
   expect(() => h["complete_inbox_item"]!({ itemKey: "nope" })).toThrow();
 });
 
+test("the inbox's failed sign-ins are the fixture's sources whose sign-in fails", () => {
+  const h = demoHandlers() as Calls;
+  const stream = h["inbox_items"]!({ shelf: "stream" }) as { item: { key: string; reason: string; occurred_at: string } }[];
+  const signIns = stream.filter((entry) => entry.item.key.startsWith("failed_sign_in:"));
+  expect(signIns.map((entry) => [entry.item.key, entry.item.reason])).toEqual([
+    ["failed_sign_in:teamcity", "the Tidewater TeamCity sign-in was rejected"],
+    ["failed_sign_in:kuma", "no credential is stored for Uptime Kuma"],
+  ]);
+  const times = stream.map((entry) => entry.item.occurred_at);
+  expect(times, "still newest first").toEqual(times.slice().sort().reverse());
+});
+
 test("the week and Log all: the label and passive blocks are never planned, and logging empties the plan", () => {
   const h = demoHandlers() as Calls;
   const today = new Date();

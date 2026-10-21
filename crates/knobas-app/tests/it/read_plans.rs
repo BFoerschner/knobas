@@ -40,8 +40,9 @@ const SMALL: &[&str] = &[
 ];
 
 /// The inbox rules whose whole statement #778 and #785 reshaped. Not here,
-/// and why: `credential_expiry` and `alert`, unchanged. They read the
-/// configured sources and the open alerts, a handful of rows each.
+/// and why: `credential_expiry` and `alert`, unchanged, and `failed_sign_in`
+/// (#1571), new. They read the configured sources and the open alerts, a
+/// handful of rows each.
 ///
 /// `failed_build` joined in #785: its newer green build of the same
 /// configuration was a walk of every build of the kind per failed build

@@ -28,7 +28,11 @@
  *   `approve` and `comment` on a review request, `comment` on a mention,
  *   `rerun_build` on a failed build, none on an assignment or an alert.
  * - A credential expiry has `entity_id: null`, as in the backend.
- * - `notification_kinds` starts with all six on, as prototype-6's Notifications
+ * - A failed sign-in (#1571) is one row per fixture source whose sign-in fails
+ *   (`FIXTURE_SOURCES`: TeamCity's 401 and Kuma's missing token), in the
+ *   backend's words, so the inbox and the source strip tell one story. Not in
+ *   prototype-6, which predates the category.
+ * - `notification_kinds` starts with all seven on, as prototype-6's Notifications
  *   page draws it; the backend's default is none ("every kind is off by
  *   default"), so a screenshot of the empty state needs the toggles clicked off.
  * - *Done* removes a row for the session, and a snooze moves it to the
@@ -36,8 +40,11 @@
  */
 import type { Handler } from "../fake-tauri";
 import { CORPUS } from "./corpus";
+import { signInFails } from "../../health.svelte";
 import { fakeOpenAlerts } from "./monitors";
+import { FIXTURE_SOURCES } from "./sources";
 import type { InboxCategory, InboxEntry, InboxShelf } from "../../../ipc/entity";
+import type { AuthState } from "../../../ipc/sources";
 
 const KINDS: InboxCategory[] = [
   "review_request",
@@ -45,6 +52,7 @@ const KINDS: InboxCategory[] = [
   "failed_build",
   "new_assignment",
   "credential_expiry",
+  "failed_sign_in",
   "alert",
 ];
 
@@ -83,8 +91,28 @@ function entry(
   };
 }
 
-/** The stream, newest first (prototype-6's order). */
+/**
+ * The fixture's failed sign-ins, as `knobas_core::inbox`'s `failed_sign_in!`
+ * words them: one per source whose state is `unauthorized` or `missing_secret`.
+ */
+function signIns(): InboxEntry[] {
+  return FIXTURE_SOURCES.flatMap((source, index) => {
+    const state = source.health.state as AuthState;
+    if (!signInFails(state)) return [];
+    const name = source.display_name;
+    const reason = state === "missing_secret" ? `no credential is stored for ${name}` : `the ${name} sign-in was rejected`;
+    const minutes = 40 + index * 60;
+    return [entry(`failed_sign_in:${source.id}`, "failed_sign_in", source.id, null, null, name, reason, minutes, [])];
+  });
+}
+
+/** The stream, newest first (prototype-6's order, with the failed sign-ins dated in). */
 function stream(): InboxEntry[] {
+  return [...signIns(), ...prototype()].sort((a, b) => b.item.occurred_at.localeCompare(a.item.occurred_at));
+}
+
+/** Prototype-6's rows, newest first. */
+function prototype(): InboxEntry[] {
   return [
     entry("review_request:mock:payout-service#150", "review_request", "mock", "mock:payout-service#150", "pr",
       "Payout CSV export", "jonas asked for your review", 10, ["approve", "comment"]),

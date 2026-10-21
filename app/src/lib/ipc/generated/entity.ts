@@ -1415,7 +1415,7 @@ export type Hunk = {
 header: string, lines: Array<DiffLine>, };
 
 /**
- * The six kinds of demand the inbox distinguishes.
+ * The seven kinds of demand the inbox distinguishes.
  *
  * Serialized as its stored spelling, which is also the first half of every
  * [`InboxItem::key`]. **Not a database vocabulary**: no column holds a
@@ -1429,6 +1429,8 @@ header: string, lines: Array<DiffLine>, };
  * - `failed_build`: A build on your work went red.
  * - `new_assignment`: Work arrived: a ticket somebody else pointed at you.
  * - `credential_expiry`: A credential knobas holds stops working soon.
+ * - `failed_sign_in`: A source refuses knobas' sign-in, or knobas holds no
+ *   credential for it, so it takes nothing until somebody acts.
  * - `alert`: A monitor watching something in the estate is down or slow, and a
  *   context holds the asset it watches.
  *
@@ -1436,7 +1438,7 @@ header: string, lines: Array<DiffLine>, };
  * makes a total `switch` over it fail `svelte-check` rather than fall through
  * to a label nobody notices.
  */
-export type InboxCategory = "review_request" | "mention" | "failed_build" | "new_assignment" | "credential_expiry" | "alert";
+export type InboxCategory = "review_request" | "mention" | "failed_build" | "new_assignment" | "credential_expiry" | "failed_sign_in" | "alert";
 
 /**
  * One line of the stream, with the actions this source can really perform.
@@ -1479,7 +1481,8 @@ export type InboxItem = {
  * the interface hands back when the user answers.
  *
  * Stable across syncs: the category is a fixed word and the subject is an
- * entity id (or a source id, for a credential expiry). The shell never
+ * entity id (or a source id, for a credential expiry or a failed
+ * sign-in). The shell never
  * composes one: it hands back the string it was given, to
  * `snooze_inbox_item` and `complete_inbox_item`.
  */
@@ -1495,10 +1498,10 @@ category: InboxCategory,
  */
 source_id: string, 
 /**
- * The entity to open. `None` only for credential expiry, whose subject is
- * a source and not an entity: the inbox is a way in, not a dead end
- * (story 8), and the one item with no entity behind it says so by
- * carrying none rather than by pointing somewhere wrong.
+ * The entity to open. `None` only for credential expiry and a failed
+ * sign-in, whose subject is a source and not an entity: the inbox is a
+ * way in, not a dead end (story 8), and an item with no entity behind it
+ * says so by carrying none rather than by pointing somewhere wrong.
  *
  * An item with no entity has no *Open*, and that is honest rather than
  * incomplete.

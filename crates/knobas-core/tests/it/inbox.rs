@@ -1995,3 +1995,150 @@ async fn the_inbox_statements_are_never_kept_as_prepared_statements() {
         "an inbox statement was kept, and goes generic on its sixth run"
     );
 }
+
+// -- the seventh rule: a failed sign-in, once per episode (#1571) ------------
+
+/// Record a credential verdict as the one writer does: `auth_state` and
+/// `auth_checked_at` move together (`knobas_sync::config::set_health`). The
+/// episode's start is not written here -- migration `0055`'s trigger keeps it.
+async fn verdict(pool: &PgPool, id: &str, state: &str) {
+    sqlx::query(
+        "update knobas.source_config
+            set auth_state = $2, auth_checked_at = now()
+          where id = $1",
+    )
+    .bind(id)
+    .bind(state)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// The failed sign-in rule, alone.
+async fn sign_ins(pool: &PgPool) -> Vec<inbox::InboxItem> {
+    let rule = inbox::rule(Category::FailedSignIn).expect("a rule for failed sign-ins");
+    inbox::items_from(pool, rule, &me(), now(), Shelf::Stream, &declarations())
+        .await
+        .unwrap()
+}
+
+/// A sign-in fails when the credential was rejected or none is stored -- the
+/// shell's `signInFails` -- and in no other state. The negatives are the three
+/// states that are not a failed sign-in (`ok`, `unreachable`, which is retried
+/// on its own, and `unknown`) and a rejected source the user switched off.
+#[tokio::test]
+async fn a_rejected_or_missing_credential_is_an_item_and_nothing_else_is() {
+    let pool = &scratch().await;
+    for (id, state, enabled) in [
+        ("rejected", "unauthorized", true),
+        ("absent", "missing_secret", true),
+        ("fine", "ok", true),
+        ("down", "unreachable", true),
+        ("untested", "unknown", true),
+        ("off", "unauthorized", false),
+    ] {
+        source(pool, id, None, enabled).await;
+        verdict(pool, id, state).await;
+    }
+
+    let mut keys = keys(&sign_ins(pool).await);
+    keys.sort();
+    assert_eq!(
+        keys,
+        vec![
+            "failed_sign_in:absent".to_owned(),
+            "failed_sign_in:rejected".to_owned()
+        ]
+    );
+}
+
+/// What the row says: the source, no entity, and which of the two failures it
+/// is -- a rejected credential and a missing one ask for the same act but are
+/// different sentences, as the sources view's two prompts are.
+#[tokio::test]
+async fn a_failed_sign_in_names_its_source_and_says_which_failure_it_is() {
+    let pool = &scratch().await;
+    source(pool, "teamcity", None, true).await;
+    verdict(pool, "teamcity", "unauthorized").await;
+    source(pool, "kuma", None, true).await;
+    verdict(pool, "kuma", "missing_secret").await;
+
+    let items = sign_ins(pool).await;
+    let rejected = items
+        .iter()
+        .find(|i| i.source_id == "teamcity")
+        .expect("teamcity");
+    assert_eq!(rejected.category, Category::FailedSignIn);
+    assert_eq!(rejected.entity_id, None);
+    assert_eq!(rejected.kind, None);
+    assert_eq!(rejected.title, "teamcity");
+    assert_eq!(rejected.reason, "the teamcity sign-in was rejected");
+    let absent = items.iter().find(|i| i.source_id == "kuma").expect("kuma");
+    assert_eq!(absent.reason, "no credential is stored for kuma");
+}
+
+/// **Once per episode.** An episode is the run of consecutive failing
+/// verdicts; the item is dated at its first, so a second rejection inside it
+/// (a retry, *Test connection*) neither moves the row nor brings back an item
+/// the reader marked done -- and a rejection changing into a missing secret is
+/// the same episode. A verdict that is not a failure ends it and takes the
+/// item with it by construction; the next failure is a new episode and comes
+/// back past the old *done*.
+#[tokio::test]
+async fn a_failed_sign_in_is_raised_once_per_episode() {
+    let pool = &scratch().await;
+    source(pool, "jira", None, true).await;
+    verdict(pool, "jira", "unauthorized").await;
+
+    let first = sign_ins(pool).await;
+    assert_eq!(keys(&first), vec!["failed_sign_in:jira".to_owned()]);
+    let began = first[0].occurred_at;
+
+    verdict(pool, "jira", "unauthorized").await;
+    verdict(pool, "jira", "missing_secret").await;
+    let same = sign_ins(pool).await;
+    assert_eq!(
+        same[0].occurred_at, began,
+        "a repeated failure is the same episode, dated at its start"
+    );
+
+    inbox::complete(pool, "failed_sign_in:jira", began)
+        .await
+        .unwrap();
+    verdict(pool, "jira", "unauthorized").await;
+    assert!(
+        sign_ins(pool).await.is_empty(),
+        "done holds for the rest of the episode"
+    );
+
+    verdict(pool, "jira", "ok").await;
+    assert!(sign_ins(pool).await.is_empty(), "a working sign-in ends it");
+
+    verdict(pool, "jira", "unauthorized").await;
+    let again = sign_ins(pool).await;
+    assert_eq!(keys(&again), vec!["failed_sign_in:jira".to_owned()]);
+    assert!(
+        again[0].occurred_at > began,
+        "the next failure is a new episode, past the old done"
+    );
+}
+
+/// An item, not a nag: an episode that is still failing and was never answered
+/// stays on the stream, and leaves it the moment the credential works, with no
+/// answer from the reader -- the derived inbox's promise (#45, story 17).
+#[tokio::test]
+async fn a_failed_sign_in_leaves_when_the_sign_in_works_again() {
+    let pool = &scratch().await;
+    source(pool, "gitea", None, true).await;
+    verdict(pool, "gitea", "missing_secret").await;
+    assert_eq!(stream(pool).await.len(), 1);
+
+    verdict(pool, "gitea", "ok").await;
+    assert!(stream(pool).await.is_empty());
+    assert_eq!(
+        inbox::count(pool, &me(), now(), &declarations())
+            .await
+            .unwrap(),
+        0
+    );
+}

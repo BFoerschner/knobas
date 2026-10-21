@@ -72,6 +72,17 @@ describe("a row's sentence", () => {
     });
     expect(sentence(credential)).toBe("The Jira credential expires on Monday 7 Sep 2026");
   });
+
+  test("a failed sign-in reads as the backend's reason, capitalised, with its source named once", () => {
+    const signIn = item({
+      category: "failed_sign_in",
+      entity_id: null,
+      kind: null,
+      title: "Tidewater TeamCity",
+      reason: "the Tidewater TeamCity sign-in was rejected",
+    });
+    expect(sentence(signIn)).toBe("The Tidewater TeamCity sign-in was rejected");
+  });
 });
 
 test("the kind word is the chip's word for each category", () => {
@@ -81,6 +92,7 @@ test("the kind word is the chip's word for each category", () => {
   expect(kindOf("new_assignment")).toBe("Assignment");
   expect(kindOf("alert")).toBe("Monitor");
   expect(kindOf("credential_expiry")).toBe("Credential");
+  expect(kindOf("failed_sign_in")).toBe("Sign-in");
 });
 
 describe("the time column", () => {
@@ -135,6 +147,12 @@ describe("where a row opens", () => {
     expect(branch).toEqual({ label: "Open", href: "#/branch/gitea%3Ax%2Fpay%40refs%2Fheads%2Fmain" });
     expect(commit).toEqual({ label: "Open", href: "#/commit/gitea%3Ax%2Fpay%409f2c1ab" });
     for (const { href } of [branch, commit]) expect(pageFor(parseTfHash(href)), href).toBe(codeRowPage);
+  });
+  test("a failed sign-in opens its source's settings, where Re-enter is", () => {
+    expect(opener(item({ category: "failed_sign_in", source_id: "teamcity", entity_id: null, kind: null }))).toEqual({
+      label: "Open source",
+      href: "#/settings/source/teamcity",
+    });
   });
   test("a credential expiry opens its source's settings", () => {
     expect(opener(item({ category: "credential_expiry", source_id: "jira", entity_id: null, kind: null }))).toEqual({

@@ -448,8 +448,8 @@ mod tests {
         assert!(offer(Category::FailedBuild, None).is_empty());
     }
 
-    /// The two categories with no write op are empty whatever the source
-    /// declares. Both absences are decisions -- see `Category::candidate_ops`.
+    /// The categories with no write op are empty whatever the source
+    /// declares. Every absence is a decision -- see `Category::candidate_ops`.
     #[test]
     fn the_categories_with_no_write_op_offer_nothing_from_any_source() {
         let generous = ops(&[
@@ -461,6 +461,7 @@ mod tests {
         ]);
         assert!(offer(Category::NewAssignment, Some(&generous)).is_empty());
         assert!(offer(Category::CredentialExpiry, Some(&generous)).is_empty());
+        assert!(offer(Category::FailedSignIn, Some(&generous)).is_empty());
     }
 
     /// The interface's copy of the window matches the backend's (#1086).

@@ -281,9 +281,39 @@ test("the subject of a key is everything after the first colon", () => {
 });
 
 /**
- * The inbox re-reads on `activity:new` and `sync:state`, three statements a
- * read, and a *Sync all* is a burst of both (#753): while a read is in
- * flight, the burst makes one more read after it, not one per event.
+ * A credential verdict moves the inbox (#1571): a failed sign-in is an item, and
+ * *Test connection* or *Re-enter* settles a verdict with no run behind it, so
+ * no `sync:state` would ever say so.
+ */
+test("the inbox re-reads when a source's credential health moves", async () => {
+  const handlers = new Map<string, () => void>();
+  let reads = 0;
+  const store = createInbox({
+    inboxItems: () => Promise.resolve([]),
+    inboxCount: () => {
+      reads += 1;
+      return Promise.resolve(0);
+    },
+    snoozeInboxItem: () => Promise.resolve(),
+    completeInboxItem: () => Promise.resolve(),
+    ackAlert: () => Promise.resolve(),
+    listen: (event, handler) => {
+      handlers.set(event, handler);
+      return Promise.resolve(() => {});
+    },
+  });
+  const stop = store.start();
+  await vi.waitFor(() => expect(handlers.has("source:health")).toBe(true));
+  handlers.get("source:health")!();
+  await vi.waitFor(() => expect(reads).toBe(1));
+  stop();
+});
+
+/**
+ * The inbox re-reads on `activity:new`, `sync:state` and `source:health`, at
+ * three statements a read, and a *Sync all* is a burst of events (#753): while
+ * a read is in flight, the burst makes one more read after it, not one per
+ * event.
  */
 test("a burst of events during a read makes one more read, not one per event", async () => {
   const handlers: (() => void)[] = [];
@@ -304,7 +334,7 @@ test("a burst of events during a read makes one more read, not one per event", a
     },
   });
   const stop = store.start();
-  await vi.waitFor(() => expect(handlers).toHaveLength(2));
+  await vi.waitFor(() => expect(handlers).toHaveLength(3));
 
   for (let n = 0; n < 6; n++) for (const handler of handlers) handler();
   expect(reads).toBe(1);
