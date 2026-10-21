@@ -32,7 +32,7 @@
  *   (`FIXTURE_SOURCES`: TeamCity's 401 and Kuma's missing token), in the
  *   backend's words, so the inbox and the source strip tell one story. Not in
  *   prototype-6, which predates the category.
- * - `notification_kinds` starts with all six on, as prototype-6's Notifications
+ * - `notification_kinds` starts with all seven on, as prototype-6's Notifications
  *   page draws it; the backend's default is none ("every kind is off by
  *   default"), so a screenshot of the empty state needs the toggles clicked off.
  * - *Done* removes a row for the session, and a snooze moves it to the
@@ -40,9 +40,11 @@
  */
 import type { Handler } from "../fake-tauri";
 import { CORPUS } from "./corpus";
+import { signInFails } from "../../health.svelte";
 import { fakeOpenAlerts } from "./monitors";
 import { FIXTURE_SOURCES } from "./sources";
 import type { InboxCategory, InboxEntry, InboxShelf } from "../../../ipc/entity";
+import type { AuthState } from "../../../ipc/sources";
 
 const KINDS: InboxCategory[] = [
   "review_request",
@@ -94,12 +96,13 @@ function entry(
  * words them: one per source whose state is `unauthorized` or `missing_secret`.
  */
 function signIns(): InboxEntry[] {
-  return FIXTURE_SOURCES.flatMap((source, at) => {
-    const state = source.health.state;
-    if (state !== "unauthorized" && state !== "missing_secret") return [];
+  return FIXTURE_SOURCES.flatMap((source, index) => {
+    const state = source.health.state as AuthState;
+    if (!signInFails(state)) return [];
     const name = source.display_name;
     const reason = state === "missing_secret" ? `no credential is stored for ${name}` : `the ${name} sign-in was rejected`;
-    return [entry(`failed_sign_in:${source.id}`, "failed_sign_in", source.id, null, null, name, reason, 40 + at * 60, [])];
+    const minutes = 40 + index * 60;
+    return [entry(`failed_sign_in:${source.id}`, "failed_sign_in", source.id, null, null, name, reason, minutes, [])];
   });
 }
 

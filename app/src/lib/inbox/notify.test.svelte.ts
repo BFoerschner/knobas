@@ -319,10 +319,12 @@ test("a failed sign-in notifies under its own switch and opens its source's page
   const on = bench();
   cleanup = on.store.start();
   await on.primed(["failed_sign_in"]);
-  on.store.saw([entry("failed_sign_in", "teamcity", null)]);
+  const teamcity = entry("failed_sign_in", "teamcity", null);
+  teamcity.item.source_id = "teamcity";
+  on.store.saw([teamcity]);
   expect(on.calls.sent.map((notification) => notification.title)).toEqual(["Title of teamcity"]);
   on.click(on.calls.sent[0]!);
-  expect(on.calls.navigated, "the bench's every item is on gitea").toEqual(["#/settings/source/gitea"]);
+  expect(on.calls.navigated).toEqual(["#/settings/source/teamcity"]);
 });
 
 /**

@@ -242,7 +242,8 @@ pub struct InboxItem {
     /// the interface hands back when the user answers.
     ///
     /// Stable across syncs: the category is a fixed word and the subject is an
-    /// entity id (or a source id, for a credential expiry or a failed sign-in). The shell never
+    /// entity id (or a source id, for a credential expiry or a failed
+    /// sign-in). The shell never
     /// composes one: it hands back the string it was given, to
     /// `snooze_inbox_item` and `complete_inbox_item`.
     pub key: String,
@@ -254,9 +255,9 @@ pub struct InboxItem {
     /// the entity namespace.
     pub source_id: String,
     /// The entity to open. `None` only for credential expiry and a failed
-    /// sign-in, whose subject is a source and not an entity: the inbox is a way in, not a dead end
-    /// (story 8), and the one item with no entity behind it says so by
-    /// carrying none rather than by pointing somewhere wrong.
+    /// sign-in, whose subject is a source and not an entity: the inbox is a
+    /// way in, not a dead end (story 8), and an item with no entity behind it
+    /// says so by carrying none rather than by pointing somewhere wrong.
     ///
     /// An item with no entity has no *Open*, and that is honest rather than
     /// incomplete.
@@ -660,9 +661,10 @@ macro_rules! credential_expiry {
 /// it holds. A verdict that is not a failure nulls the column and ends the
 /// episode; the rule stops firing and the item leaves by construction. The
 /// next failure dates a new episode past the old *done*, so it comes back.
-/// The `coalesce` onto `auth_checked_at` and then the clock is for a row the
-/// trigger never saw, which `0055`'s backfill leaves none of; a null
-/// `occurred_at` would fail the whole stream's decode.
+/// The `coalesce` onto `auth_checked_at` and then the clock is for a failing
+/// row with no start recorded, which a data-only restore of an archive taken
+/// before `0055` can leave until the restore's own verdict fires the trigger;
+/// a null `occurred_at` would fail the whole stream's decode.
 ///
 /// **What it says.** Which of the two it is, because they are different
 /// prompts on the source's page (*Re-enter* after a rejection, *no token

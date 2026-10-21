@@ -20,11 +20,11 @@
  * The inbox is derived from the mirror, so it moves when the mirror moves and
  * when the user answers something. Both already have signals: `sync:state`
  * fires when a run finishes and `activity:new` fires on every queue transition
- * and on every inbox answer. A failed sign-in (#1571) is read off a source's
- * credential health, which *Test connection* or *Re-enter* can move with no run
- * behind it, so `source:health` is the third. A third channel would be a third thing to keep in
+ * and on every inbox answer. A new channel would be one more thing to keep in
  * step, which is the argument `commands::sources::pending_writes` records for
- * the write queue.
+ * the write queue. A failed sign-in (#1571) is read off a source's credential
+ * health, which *Test connection* or *Re-enter* can move with no run behind
+ * it, so the store also re-reads on the existing `source:health`.
  */
 import { listen as tauriListen } from "@tauri-apps/api/event";
 

@@ -449,7 +449,7 @@ mod tests {
     }
 
     /// The categories with no write op are empty whatever the source
-    /// declares. Both absences are decisions -- see `Category::candidate_ops`.
+    /// declares. Every absence is a decision -- see `Category::candidate_ops`.
     #[test]
     fn the_categories_with_no_write_op_offer_nothing_from_any_source() {
         let generous = ops(&[

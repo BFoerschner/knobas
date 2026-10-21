@@ -310,9 +310,10 @@ test("the inbox re-reads when a source's credential health moves", async () => {
 });
 
 /**
- * The inbox re-reads on `activity:new`, `sync:state` and `source:health`, three statements a
- * read, and a *Sync all* is a burst of both (#753): while a read is in
- * flight, the burst makes one more read after it, not one per event.
+ * The inbox re-reads on `activity:new`, `sync:state` and `source:health`, at
+ * three statements a read, and a *Sync all* is a burst of events (#753): while
+ * a read is in flight, the burst makes one more read after it, not one per
+ * event.
  */
 test("a burst of events during a read makes one more read, not one per event", async () => {
   const handlers: (() => void)[] = [];
