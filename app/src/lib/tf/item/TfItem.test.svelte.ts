@@ -6,7 +6,9 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { EntityDetail, SourceView } from "../../ipc/entity";
+import type { EntityDetail, SourceView, ViewAction } from "../../ipc/entity";
+import type { WriteOpPayload } from "../../ipc/sources";
+import { toasts } from "../../shell/toasts.svelte";
 import TfItem, { type ItemPorts } from "./TfItem.svelte";
 
 const ID = "surveys:survey-1";
@@ -51,12 +53,34 @@ const SURVEY_VIEW: SourceView = {
   actions: [],
 };
 
+/**
+ * The fixture's source action on a survey (#1407): a write outside every
+ * role's vocabulary, its id fixed, one field the source asks for.
+ */
+const BOOK_REPAIR: ViewAction = {
+  write_op: "source_action",
+  label: "Book repair…",
+  fields: [{ name: "day", label: "Day", kind: { type: "text", suggestions: [] }, value: null, required: true, placeholder: null }],
+  confirm: "Book a repair crew for this survey's finding?",
+  primary: false,
+  danger: false,
+  entity: null,
+  values: { id: "book_repair" },
+  disabled: null,
+  with_settings: false,
+  line_comments: "none",
+};
+
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
+/** What the page handed the write queue. */
+let writes: WriteOpPayload[] = [];
 
 beforeEach(() => {
   target = document.createElement("div");
   document.body.appendChild(target);
+  writes = [];
+  toasts.items = [];
 });
 
 afterEach(() => {
@@ -70,10 +94,26 @@ async function settle() {
   flushSync();
 }
 
-async function open(ports: ItemPorts, id = ID) {
-  page = mount(TfItem, { target, props: { id, ready: true, ports } });
+/** The page's reads as given; its writes land in {@link writes}. */
+async function open(reads: Omit<ItemPorts, "submitWrite">, id = ID, job: string | null = null) {
+  const ports: ItemPorts = {
+    ...reads,
+    submitWrite: (payload) => {
+      writes.push(payload);
+      return Promise.resolve({ id: 1 } as Awaited<ReturnType<ItemPorts["submitWrite"]>>);
+    },
+  };
+  page = mount(TfItem, { target, props: { id, ready: true, job, ports } });
   await settle();
 }
+
+/** The survey's view with `actions` as its toolbar and `extra` blocks in its section. */
+function surveyView(actions: ViewAction[], extra: SourceView["sections"][number]["blocks"] = []): SourceView {
+  const [survey] = SURVEY_VIEW.sections;
+  return { sections: [{ ...survey!, blocks: [...survey!.blocks, ...extra] }], actions };
+}
+
+const toolbar = () => [...target.querySelectorAll(".tf-fhead .tf-acts button")].map((button) => button.textContent?.trim());
 
 test("an item opens the block view its source answers: its facts and its text", async () => {
   const asked: [string, string | null][] = [];
@@ -149,4 +189,75 @@ test("an id the mirror does not hold says so", async () => {
   }, "surveys:gone");
 
   expect(target.querySelector(".tf-cfail")?.textContent).toBe("Could not read surveys:gone: surveys:gone is not in the mirror");
+});
+
+test("a view's source action is drawn as the page's toolbar, named as the source names it (#1407)", async () => {
+  await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(surveyView([BOOK_REPAIR])) });
+
+  expect(toolbar()).toEqual(["Book repair"]);
+});
+
+test("a view with no actions draws no toolbar", async () => {
+  await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(SURVEY_VIEW) });
+
+  expect(toolbar()).toEqual([]);
+});
+
+test("pressing a source action opens its dialog and queues one SourceAction against the item, with the Queued toast (#1407)", async () => {
+  await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(surveyView([BOOK_REPAIR])) });
+
+  target.querySelector<HTMLButtonElement>(".tf-fhead .tf-acts button")!.click();
+  flushSync();
+  const dialog = document.querySelector(".tf-dialog")!;
+  expect(dialog.textContent).toContain("Book a repair crew for this survey's finding?");
+  const day = dialog.querySelector<HTMLInputElement>("input[type=text]")!;
+  day.value = "Tuesday";
+  day.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  const footer = [...dialog.querySelectorAll<HTMLButtonElement>("footer button")];
+  expect(footer.map((button) => button.textContent?.trim())).toEqual(["Cancel", "Book repair"]);
+  footer[1]!.click();
+  await settle();
+
+  expect(writes).toEqual([{ SourceAction: { entity: ID, id: "book_repair", fields: { day: "Tuesday" } } }]);
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+  expect(toasts.items.at(-1)?.text).toBe("Queued: book repair on Quay crane 4 inspection. Sends with the next sync.");
+});
+
+test("an actions block is drawn in place as the same buttons, not named as another role's (#1407)", async () => {
+  await open({
+    getEntity: () => Promise.resolve(detail()),
+    entityView: () => Promise.resolve(surveyView([], [{ type: "actions", actions: [BOOK_REPAIR] }])),
+  });
+
+  expect(toolbar()).toEqual([]);
+  const section = target.querySelector("section")!;
+  const inPlace = [...section.querySelectorAll("button")].map((button) => button.textContent?.trim());
+  expect(inPlace).toEqual(["Book repair"]);
+  expect(target.textContent).not.toContain("drawn on its role's page");
+
+  section.querySelector("button")!.click();
+  flushSync();
+  expect(document.querySelector(".tf-dialog")?.textContent).toContain("Book a repair crew for this survey's finding?");
+});
+
+test("a block of another role's type is still named, not drawn", async () => {
+  await open({
+    getEntity: () => Promise.resolve(detail()),
+    entityView: () => Promise.resolve(surveyView([], [{ type: "diff", files: [], truncated: false, commentable: null, gone: [] }])),
+  });
+
+  expect(target.textContent).toContain("A diff block is drawn on its role's page, not here.");
+});
+
+test("a source action the source draws disabled says why and opens nothing", async () => {
+  const refused: ViewAction = { ...BOOK_REPAIR, disabled: "No crew is free this week." };
+  await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(surveyView([refused])) });
+
+  const button = target.querySelector<HTMLButtonElement>(".tf-fhead .tf-acts button")!;
+  expect(button.getAttribute("aria-disabled")).toBe("true");
+  expect(button.title).toBe("No crew is free this week.");
+  button.click();
+  flushSync();
+  expect(document.querySelector(".tf-dialog")).toBeNull();
 });
