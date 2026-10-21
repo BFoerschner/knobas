@@ -95,7 +95,7 @@
     tabCounts,
     type PrTab,
   } from "./pr";
-  import { askAgain, markQueued, queuedMark, queuedMarks, settleQueued, takeAgain, type Mark } from "../queued.svelte";
+  import { askAgain, markQueued, queuedMark, queuedMarks, sameWords, settleQueued, takeAgain, type Mark } from "../queued.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfPrFiles from "./TfPrFiles.svelte";
@@ -338,7 +338,7 @@
 
   /** Whether the read in `answer` shows `mark` landed. */
   function landedIn(answer: SourceView, mark: Mark): boolean {
-    if (mark.kind === "comment") return conversationOf(answer).some((message) => message.body.trim() === mark.text.trim());
+    if (mark.kind === "comment") return conversationOf(answer).some((message) => sameWords(message.body, mark.text));
     const state = headerOf(answer).state?.text ?? null;
     return STATE_READ.includes(mark.kind) && state !== null && mark.base !== null && state !== mark.base;
   }
@@ -581,7 +581,7 @@
                 </article>
               {/each}
               {#each pendingComments as body, n (n)}
-                <article class="tf-msg">
+                <article class="tf-msg tf-queued">
                   <span class="tf-av tf-me" aria-hidden="true">{initials(me)}</span>
                   <div class="tf-msg-body">
                     <div class="tf-who"><b>You</b><span class="tf-chip tf-info">queued</span></div>

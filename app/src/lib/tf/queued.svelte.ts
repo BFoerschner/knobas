@@ -116,6 +116,12 @@ export function settleQueued(entity: string, landed: (mark: Mark) => boolean): v
   drop(entity, landed);
 }
 
+/** Whether a read's words are a queued comment's: the same words, whatever the source did to the spaces. */
+export function sameWords(read: string, queued: string): boolean {
+  const words = (text: string) => text.replace(/\s+/g, " ").trim();
+  return words(read) === words(queued);
+}
+
 /** *Edit and resend*: ask the page of `entity` to reopen its `kind` with `value`. */
 export function askAgain(entity: string, kind: string, value: unknown): void {
   asked[askKey(entity, kind)] = value;

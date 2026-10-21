@@ -9,7 +9,9 @@
   blue. The rules are `conversation.ts`'s; this draws them.
 
   The comment box at the end queues a `Comment` write (BUILT): the box clears
-  on queue, and the comment joins the thread when a sync mirrors it.
+  on queue, and the comment is drawn at the end of the thread at once, muted
+  and marked *queued* (#1424), until a read of the thread holds its words.
+  *Edit and resend* on a held or refused one puts its words back in the box.
 -->
 <script lang="ts">
   import type { Thread } from "../../ipc/entity";
@@ -17,11 +19,14 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { takeAgain } from "../queued.svelte";
   import { initials } from "../tickets/tickets";
   import { CHANGES, MENTIONS, NEW, changeLine, drawThread, firstName, mentionRuns, since, stamp } from "./conversation";
 
   let {
     jobKey,
+    entityId,
+    queued = [],
     thread,
     lastVisit,
     failure,
@@ -29,6 +34,10 @@
     oncomment,
   }: {
     jobKey: string;
+    /** The ticket's entity id, which *Edit and resend* names. */
+    entityId: string;
+    /** The comments queued here that the thread does not hold yet (#1424). */
+    queued?: string[];
     /** `null` while the read is out. */
     thread: Thread | null;
     /** When the reader last opened this job before now; `null` for never. */
@@ -50,6 +59,15 @@
   let expanded = $state(false);
   let draft = $state("");
   let sending = $state(false);
+  let box = $state<HTMLTextAreaElement | null>(null);
+
+  // *Edit and resend* on a held or refused comment: its words back in the box.
+  $effect(() => {
+    const again = takeAgain(entityId, "comment");
+    if (again === null) return;
+    draft = again;
+    box?.focus();
+  });
 
   const people = $derived([...new Set((thread?.comments ?? []).map((c) => c.author).filter((a): a is string => a !== null))]);
   const config = $derived<FilterConfig>({
@@ -120,12 +138,21 @@
         </article>
       {/if}
     {/each}
-    {#if drawn.entries.length === 0}
+    {#if drawn.entries.length === 0 && queued.length === 0}
       <div class="tf-empty">{thread.comments.length === 0 ? "No comments yet." : "No comments match."}</div>
     {/if}
   {/if}
+  {#each queued as body, n (n)}
+    <article class="tf-msg tf-queued">
+      <span class="tf-av tf-me" aria-hidden="true">{initials(thread?.me[0] ?? null)}</span>
+      <div class="tf-msg-body">
+        <div class="tf-who"><b>You</b><span class="tf-chip tf-info">queued</span></div>
+        <p>{body}</p>
+      </div>
+    </article>
+  {/each}
   <div class="tf-compose">
-    <textarea bind:value={draft} placeholder="Comment on {jobKey}" aria-label="Comment on {jobKey}"></textarea>
+    <textarea bind:this={box} bind:value={draft} placeholder="Comment on {jobKey}" aria-label="Comment on {jobKey}"></textarea>
     <div class="tf-acts">
       <button type="button" class="tf-btn tf-primary" disabled={draft.trim() === "" || sending} onclick={() => void send()}>Comment</button>
     </div>

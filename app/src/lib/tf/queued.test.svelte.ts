@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { QueuedWrite } from "../ipc/sources";
 import type { Hear, WriteFollower } from "../shell/follow-write";
 import { toasts } from "../shell/toasts.svelte";
-import { askAgain, forgetQueued, markQueued, queuedMark, queuedMarks, settleQueued, takeAgain } from "./queued.svelte";
+import { askAgain, forgetQueued, markQueued, queuedMark, queuedMarks, sameWords, settleQueued, takeAgain } from "./queued.svelte";
 
 /** A follower the test speaks for: `hear(id, row)` is the queue's next read of write `id`. */
 function fakeFollower() {
@@ -110,4 +110,9 @@ test("forgetting stops every follow", () => {
   forgetQueued();
   expect(hears.has(4)).toBe(false);
   expect(queuedMarks("jira:PAY-231")).toEqual([]);
+});
+
+test("a read holds a comment's words whatever it did to the spaces, and only those words", () => {
+  expect(sameWords("Looking at\n the jitter now ", "Looking at the jitter now")).toBe(true);
+  expect(sameWords("Looking at the jitter", "Looking at the jitter now")).toBe(false);
 });

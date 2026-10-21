@@ -6,6 +6,8 @@
 .tf-convo-bar { margin: -18px -22px 0; }
 .tf-convo { display: flex; flex-direction: column; gap: 10px; max-width: 820px; }
 .tf-msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
+/* A comment on its way (#1424): muted until the thread holds it. */
+.tf-msg.tf-queued .tf-msg-body p { color: var(--muted); }
 .tf-msg-body { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 12px; }
 .tf-msg-body p { white-space: pre-line; overflow-wrap: anywhere; }
 .tf-who { font-size: var(--t-sm); color: var(--ink-2); margin-bottom: 2px; display: flex; gap: 8px; align-items: center; }
