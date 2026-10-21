@@ -58,8 +58,10 @@
 //! the build is really gone rather than assuming so. What a *killed* run left
 //! behind is cleared by the next run: [`Seeded::clear_leftovers`] removes
 //! every build whose id is not in `seed-state.json`, canceling it first if it
-//! is still queued or running, and every test that asserts an exact set calls
-//! it before taking its baseline. Recovery from a dirty environment is "run
+//! is still queued or running (page after page, until one holds none), then
+//! deletes every project the seed does not own with its configurations
+//! (#1560), and every test that asserts an exact set or creates a project or
+//! configuration calls it before taking its baseline. Recovery from a dirty environment is "run
 //! the suite again". After a green run the server holds exactly the seeded
 //! builds -- the plain-seed state -- and nothing else.
 //!
@@ -478,55 +480,156 @@ impl Seeded {
     /// the remedy rather than failing three tests on unrelated-looking diffs.
     async fn clear_leftovers(&self) {
         let seeded = self.seeded_ids();
+        // One page holds 100 builds, and a run that was killed repeatedly
+        // leaves more than that (#1560: 98 per test, 1,425 over a run), so
+        // the listing is repeated until a page holds nothing the seed did not
+        // make. A page that still holds leftovers after the previous one was
+        // cleared is a removal that did not take, which `remove`'s failures
+        // report on the way, so the loop cannot spin on one.
+        let mut cleared = 0usize;
+        loop {
+            let (status, body) = self
+                .get(
+                    "app/rest/builds?locator=defaultFilter:false,count:100\
+                     &fields=count,build(id,state)",
+                )
+                .await;
+            assert_eq!(status, 200, "{body}");
+            let rows: Vec<(i64, String)> = body["build"]
+                .as_array()
+                .map(|rows| {
+                    rows.iter()
+                        .map(|b| (id_of(b), b["state"].as_str().unwrap_or_default().to_owned()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let held: Vec<i64> = rows
+                .iter()
+                .filter(|(id, state)| seeded.contains(id) && state != "finished")
+                .map(|(id, _)| *id)
+                .collect();
+            assert!(
+                held.is_empty(),
+                "seeded build(s) {held:?} are still in flight -- `./seed --teamcity --running` and \
+                 this suite are mutually exclusive on one environment: a running build is \
+                 re-emitted on every run by design, so nothing here that asserts an exact set or \
+                 an idle run can be measured beside it. Cancel it (testenv/README.md, *The \
+                 running build is opt-in*) or wait for it to finish, then run the suite again."
+            );
+            let left: Vec<i64> = rows
+                .iter()
+                .filter(|(id, _)| !seeded.contains(id))
+                .map(|(id, _)| *id)
+                .collect();
+            if left.is_empty() {
+                break;
+            }
+            println!(
+                "live suite: clearing {} leftover build(s) from a run that was killed rather \
+                 than failed: {left:?}",
+                left.len()
+            );
+            let failures = remove(&self.http, &self.url, &self.token, &left).await;
+            assert!(
+                failures.is_empty(),
+                "the leftovers of an earlier run could not be cleared, so this run would \
+                 measure a corpus that is not the seed's: {}",
+                failures.join("; ")
+            );
+            cleared += left.len();
+        }
+        if cleared > 0 {
+            assert_eq!(
+                self.build_ids("defaultFilter:false,count:100").await,
+                self.seeded_ids_newest_first(),
+                "after the leftovers are cleared the server holds exactly the seeded builds"
+            );
+        }
+        self.clear_stray_projects().await;
+    }
+
+    /// The projects the seed owns, by id: the project of every configuration
+    /// it recorded (a configuration id is `<project>_<name>`, the seed's own
+    /// `project_of`), and the chain's.
+    fn owned_projects(&self) -> std::collections::BTreeSet<String> {
+        let mut configs: Vec<&str> = self
+            .seed
+            .builds
+            .iter()
+            .map(|b| b.build_type.as_str())
+            .collect();
+        configs.extend(self.seed.settings.iter().map(|s| s.build_type.as_str()));
+        configs.extend(self.seed.changes.iter().map(|c| c.build_type.as_str()));
+        let mut owned: std::collections::BTreeSet<String> = configs
+            .into_iter()
+            .filter_map(|id| id.split('_').next())
+            .map(str::to_owned)
+            .collect();
+        owned.extend(self.seed.chain.iter().map(|c| c.project.clone()));
+        owned.insert("_Root".to_owned());
+        owned
+    }
+
+    /// Delete every project the seed does not own, with its configurations and
+    /// builds (#1560: ~94 `Witness_Alpha_Cfg…` configurations a branch left
+    /// behind reached the licence's limit, so `POST app/rest/buildTypes`
+    /// answered 403, and made the exact-set assertions see 97 configurations
+    /// where they expect 3). Runs after the leftover builds are gone, so
+    /// nothing in a stray project is in flight. A nested project of an owned
+    /// one that a killed run left (`KnobasNested849`) goes the same way; the
+    /// owned projects themselves are never touched.
+    async fn clear_stray_projects(&self) {
         let (status, body) = self
-            .get("app/rest/builds?locator=defaultFilter:false,count:100&fields=count,build(id,state)")
+            .get("app/rest/projects?fields=project(id,parentProjectId)")
             .await;
         assert_eq!(status, 200, "{body}");
-        let rows: Vec<(i64, String)> = body["build"]
+        let owned = self.owned_projects();
+        let stray: Vec<String> = body["project"]
             .as_array()
             .map(|rows| {
                 rows.iter()
-                    .map(|b| (id_of(b), b["state"].as_str().unwrap_or_default().to_owned()))
+                    .filter_map(|p| p["id"].as_str())
+                    .filter(|id| !owned.contains(*id))
+                    .map(str::to_owned)
                     .collect()
             })
             .unwrap_or_default();
-        let held: Vec<i64> = rows
-            .iter()
-            .filter(|(id, state)| seeded.contains(id) && state != "finished")
-            .map(|(id, _)| *id)
-            .collect();
-        assert!(
-            held.is_empty(),
-            "seeded build(s) {held:?} are still in flight -- `./seed --teamcity --running` and \
-             this suite are mutually exclusive on one environment: a running build is re-emitted \
-             on every run by design, so nothing here that asserts an exact set or an idle run \
-             can be measured beside it. Cancel it (testenv/README.md, *The running build is \
-             opt-in*) or wait for it to finish, then run the suite again."
-        );
-        let left: Vec<i64> = rows
-            .iter()
-            .filter(|(id, _)| !seeded.contains(id))
-            .map(|(id, _)| *id)
-            .collect();
-        if left.is_empty() {
+        if stray.is_empty() {
             return;
         }
         println!(
-            "live suite: clearing {} leftover build(s) from a run that was killed rather than \
-             failed: {left:?}",
-            left.len()
+            "live suite: deleting {} project(s) the seed does not own: {stray:?}",
+            stray.len()
         );
-        let failures = remove(&self.http, &self.url, &self.token, &left).await;
+        for id in &stray {
+            // Deleting a project deletes the ones inside it, so a nested stray
+            // is already gone by the time its own turn comes: a 404 is done.
+            // A project with thousands of builds takes longer than a read.
+            let response = self
+                .http
+                .delete(format!("{}/app/rest/projects/id:{id}", self.url))
+                .bearer_auth(&self.token)
+                .timeout(CLEANUP_BUDGET)
+                .send()
+                .await
+                .unwrap_or_else(|e| panic!("DELETE project {id}: {e}"));
+            let status = response.status().as_u16();
+            assert!(
+                (200..300).contains(&status) || status == 404,
+                "a project the seed does not own could not be deleted: {id} -> {status}: {}",
+                response.text().await.unwrap_or_default()
+            );
+        }
+        let (status, body) = self.get("app/rest/projects?fields=project(id)").await;
+        assert_eq!(status, 200, "{body}");
+        let mut now: Vec<&str> = body["project"]
+            .as_array()
+            .map(|rows| rows.iter().filter_map(|p| p["id"].as_str()).collect())
+            .unwrap_or_default();
+        now.retain(|id| !owned.contains(*id));
         assert!(
-            failures.is_empty(),
-            "the leftovers of an earlier run could not be cleared, so this run would measure a \
-             corpus that is not the seed's: {}",
-            failures.join("; ")
-        );
-        assert_eq!(
-            self.build_ids("defaultFilter:false,count:100").await,
-            self.seeded_ids_newest_first(),
-            "after the leftovers are cleared the server holds exactly the seeded builds"
+            now.is_empty(),
+            "after the stray projects are deleted the server holds only the seed's: {now:?}"
         );
     }
 }
@@ -3182,6 +3285,62 @@ async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_
     drop((busy, waiting, ours));
 }
 
+/// **The cleanup keeps the fixture the seed's** (#1560): a project the seed
+/// does not own, with a configuration in it, is gone after `clear_leftovers`,
+/// and the seed's own projects are still there. Nothing else witnesses the
+/// project half of the guard, since a clean server has no stray to delete. A
+/// run killed between the create and the check leaves the stray for the next
+/// run's guard, which is the thing under test.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_project_the_seed_does_not_own_is_deleted_by_the_cleanup() {
+    const STRAY: &str = "KnobasStray1560";
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let post = |path: &str, body: serde_json::Value| {
+        seeded
+            .http
+            .post(format!("{}/{path}", seeded.url))
+            .bearer_auth(&seeded.token)
+            .header("Accept", "application/json")
+            .json(&body)
+            .send()
+    };
+    let r = post(
+        "app/rest/projects",
+        serde_json::json!({ "id": STRAY, "name": STRAY, "parentProject": { "id": "_Root" } }),
+    )
+    .await
+    .expect("create the stray project");
+    assert!(r.status().is_success(), "create {STRAY}: {}", r.status());
+    let r = post(
+        "app/rest/buildTypes",
+        serde_json::json!({
+            "id": format!("{STRAY}_Cfg"), "name": "Cfg", "project": { "id": STRAY }
+        }),
+    )
+    .await
+    .expect("create a configuration in the stray");
+    assert!(
+        r.status().is_success(),
+        "create the configuration: {}",
+        r.status()
+    );
+
+    seeded.clear_leftovers().await;
+
+    let (status, _) = seeded.get(&format!("app/rest/projects/id:{STRAY}")).await;
+    assert_eq!(status, 404, "the stray project is gone");
+    let (status, _) = seeded
+        .get(&format!("app/rest/buildTypes/id:{STRAY}_Cfg"))
+        .await;
+    assert_eq!(status, 404, "and its configuration with it");
+    for owned in seeded.owned_projects().iter().filter(|p| *p != "_Root") {
+        let (status, body) = seeded.get(&format!("app/rest/projects/id:{owned}")).await;
+        assert_eq!(status, 200, "the seed's project {owned} is kept: {body}");
+    }
+}
+
 /// The nested project [`a_configured_project_takes_in_its_nested_projects_and_writes_their_path`]
 /// makes under the seeded `Payout`, deleted again when the guard drops --
 /// passing or panicking alike, [`Queued`]'s way. Deleting the outer project
@@ -3282,6 +3441,7 @@ impl Drop for NestedProject {
 #[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
 async fn a_configured_project_takes_in_its_nested_projects_and_writes_their_path() {
     let seeded = seeded();
+    seeded.clear_leftovers().await;
     let _nested = NestedProject::new(&seeded).await;
     let (items, _) = full(&*seeded.source(serde_json::json!({ "project_ids": ["Payout"] }))).await;
     let declared = knobas_source_teamcity::descriptor_template().payload_paths;
@@ -3666,6 +3826,7 @@ async fn a_chain_names_its_steps_and_each_runs_build_on_the_branch() {
     const FEATURE: &str = "feature/PAY-231-sepa-retry";
     const FIX: &str = "fix/PAY-228-partial-refund-drift";
     let seeded = seeded();
+    seeded.clear_leftovers().await;
     let _chain = ChainProject::new(&seeded).await;
     let source = seeded.source(serde_json::json!({}));
     let pipeline = |step: &str| format!("teamcity:buildType:{CHAIN}_{step}");

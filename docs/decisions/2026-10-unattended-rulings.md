@@ -10307,3 +10307,25 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   *Reasoning:* that is how the real Kuma always behaves; a fake that answers a login nobody could have
   heard is a claim about Kuma the container contradicts. On the old code every session test runs out
   its budget. *Reversing:* low.
+## #1560: Live fixture: seeded TeamCity holds ~94 Witness_Alpha configurations (Sonnet implementer, 2026-10-21)
+
+- **Where the stray projects are removed** (delegated, "for triage"). *Ruling:* in the suite's
+  `clear_leftovers`, the existing cleanup guard, not in `seed-teamcity.sh` and not by hand.
+  After the leftover builds, it deletes every project whose id is not one the seed owns (the project
+  of each configuration `seed-state.json` records, plus the chain's), with its configurations; a
+  stray nested project of an owned one (`KnobasNested849`) goes the same way. *Reasoning:* the
+  suite is what asserts "exactly the seeded set", it already calls the guard before each baseline,
+  and a guard that runs on every test keeps the fixture clean whatever left the stray; a seed-only
+  fix runs once per bring-up, and a hand deletion leaves the next stray to break the suite again.
+  The two tests that create a project or configuration (`NestedProject`, `ChainProject`) now call
+  the guard first, since the licence limit bites them before any baseline. *Reversing:* low.
+- **Builds paged.** *Ruling:* `clear_leftovers` repeats its 100-build listing until a page holds no
+  build the seed did not make, so more than one page of leftovers no longer fails every test.
+  *Reversing:* low.
+- **Agents the fixture does not own** (found on the first live run). *Ruling:* `seed-teamcity.sh`
+  deauthorises every authorised agent but `knobas-agent`. Two containers from the `issue-690`
+  worktree's compose (`knobas-teamcity-agent-2`, `-3`) had been running for 25 h and were
+  authorised, so the change witness's builds (remade by every seed run) ran on `knobas-agent-2`
+  and `the_seeded_records_fill_the_builds_frame` failed "ran on the one agent". *Reasoning:* the
+  suite certifies one agent; a stray container is outside the repo, so the seed makes it
+  harmless instead of stopping what another worktree owns. *Reversing:* low, one seed step.

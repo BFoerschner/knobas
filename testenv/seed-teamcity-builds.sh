@@ -732,8 +732,15 @@ ensure_change_witness() {
     _head=$(printf '%s' "$GITEA_BODY" | jq -r '.commit.id // empty' 2>/dev/null || true)
     rest GET "/app/rest/builds/id:$_b?fields=state"
     _bs=$REST_STATUS
+    # Both builds ran on the fixture's one agent (#1560): a pair that ran on
+    # an agent another worktree's compose registered is made again.
+    _ag=1
+    for _x in "$_b" "$_a"; do
+      rest GET "/app/rest/builds/id:$_x?fields=agent(name)"
+      [ "$(printf '%s' "$REST_BODY" | jq -r '.agent.name // empty' 2>/dev/null)" = "knobas-agent" ] || _ag=0
+    done
     rest GET "/app/rest/changes?locator=build:(id:$_a)&fields=change(version)"
-    if [ "$_head" = "$_sha" ] && [ "$_bs" = "200" ] && [ "$REST_STATUS" = "200" ] \
+    if [ "$_ag" = 1 ] && [ "$_head" = "$_sha" ] && [ "$_bs" = "200" ] && [ "$REST_STATUS" = "200" ] \
        && [ "$(printf '%s' "$REST_BODY" | jq -r '[.change[]?.version] | join(",")')" = "$_sha" ]; then
       say "the change witness is there: build id $_a on $CHANGE_BRANCH lists $_sha (after build id $_b)"
       CHANGES_JSON=$_rec
