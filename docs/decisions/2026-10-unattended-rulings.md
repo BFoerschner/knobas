@@ -10724,3 +10724,14 @@ Björn delegated four picks at triage (2026-10-21); two more came up while build
   unchanged. *Reasoning:* the ticket asks for `click:`'s resolution, and rows that open on a
   double-click (`TicketsPage`'s `<tr>`) have no name or test id. The brief forbids adding a
   label to the app to reach one. *Reversing:* low, one branch in `findJs`.
+- **How the driver's commands are given.** *Ruling:* a steps file of bash that `live-shot.sh`
+  sources after the window is up, with `shot`, `press`, `focus`, `click-at`, `type`, `key` and
+  `settle` defined as functions. *Reasoning:* a step can then read the product's `./seed --env`
+  (`type "$KNOBAS_GITEA_TOKEN"`), which a step passed on the command line cannot, because the
+  product only comes up inside the run. *Reversing:* low.
+- **The witness, four runs.** *Ruling:* the slot was used for four `just live-shot` runs, all
+  in the foreground and one after another. The first three found driver bugs: the web view was
+  blank when the window appeared, a field sat below the dialog's fold, and an `Id` typed after
+  ⌘A came out capitalised (the steps file now keeps the default id). Each bug was fixed in the
+  driver, not the app. *Reasoning:* the brief says to fix the driver when it cannot find an
+  element, and only a run shows that the fix works. *Reversing:* none; this records what ran.
