@@ -92,6 +92,35 @@ export function demandOf(state: WriteState): Demand {
 }
 
 /**
+ * The held or refused write each waiting write is stuck behind (#1473), by the
+ * waiting write's id.
+ *
+ * One item's writes go in queue order: `knobas_core::write_queue::due` offers
+ * an entity's oldest open write and nothing for an entity whose oldest is held
+ * or refused. So a pending write with an earlier held or refused write on the
+ * same item does not go on its own; it goes once that one is sent or
+ * discarded. The blocker is the oldest such write, the one `due` stops on.
+ *
+ * Read off what every row already carries (`entity_id`, the queue-order `id`,
+ * `state`); a waiting write with no entry here waits only on its source.
+ */
+export function blockers<Row extends Pick<QueuedWrite, "id" | "entity_id" | "state">>(rows: readonly Row[]): Map<number, Row> {
+  const stalled = new Map<string, Row>();
+  for (const row of rows) {
+    if (demandOf(row.state) !== "decide") continue;
+    const oldest = stalled.get(row.entity_id);
+    if (oldest === undefined || row.id < oldest.id) stalled.set(row.entity_id, row);
+  }
+  const found = new Map<number, Row>();
+  for (const row of rows) {
+    if (demandOf(row.state) !== "waiting") continue;
+    const blocker = stalled.get(row.entity_id);
+    if (blocker !== undefined && blocker.id < row.id) found.set(row.id, blocker);
+  }
+  return found;
+}
+
+/**
  * One side of the two-versions comparison, in a shape a template can render.
  *
  * A snapshot is `knobas_core::write_queue::project`'s output, and its shape is
@@ -346,6 +375,9 @@ export interface WritePart {
   code?: true;
 }
 
+/** What `writeWords` reads off a row: the op, its target, and for a page edit the page it was made against. */
+export type WordedRow = Pick<QueuedWrite, "op" | "entity_id" | "payload"> & { target_snapshot?: unknown };
+
 /**
  * What a queued write does, in words (#1425): *Comment on PAY-231*, *1 h
  * worklog on PAY-228*, *Pause monitor Payments API*.
@@ -357,12 +389,12 @@ export interface WritePart {
  * the heading says what kind of thing it is (*Pause a monitor*). A payload
  * this build cannot read says *A write*, or *A write to* the target's name.
  *
- * The page edit names the page, not the section: the payload carries the
- * whole page's storage format, and the section would have to be guessed
- * from a diff.
+ * A page edit names the section it changes, *Edit section “Context” of
+ * SEPA payout retry design*, where {@link editedSection} finds exactly one;
+ * otherwise it names the page.
  */
 export function writeWords(
-  row: Pick<QueuedWrite, "op" | "entity_id" | "payload">,
+  row: WordedRow,
   name: (entityId: string) => string | null,
 ): WritePart[] {
   const bag = (typeof row.payload === "object" && row.payload !== null ? row.payload : {}) as Record<string, Record<string, unknown> | undefined>;
@@ -424,8 +456,13 @@ export function writeWords(
       }
       case "CreatePage":
         return quoted("New page", "title");
-      case "UpdatePage":
-        return titled("Edit page", "Edit a page");
+      case "UpdatePage": {
+        const body = str("body");
+        const section = body === null ? null : editedSection(row.target_snapshot, body);
+        if (section === null) return titled("Edit page", "Edit a page");
+        const title = name(target);
+        return [{ text: `Edit section “${section}” of ${title ?? "a page"}` }];
+      }
       case "PauseMonitor":
         return titled("Pause monitor", "Pause a monitor");
       case "ResumeMonitor":
@@ -461,13 +498,80 @@ export function writeWords(
  * Whether a row's heading names its target by a looked-up title, so the panel
  * knows which rows to ask a name for: `writeWords` asks for one or it does not.
  */
-export function namedByTitle(row: Pick<QueuedWrite, "op" | "entity_id" | "payload">): boolean {
+export function namedByTitle(row: WordedRow): boolean {
   let asked = false;
   writeWords(row, () => {
     asked = true;
     return null;
   });
   return asked;
+}
+
+/**
+ * The heading of the one section a queued page edit changes (#1520), or
+ * `null` when it cannot say which.
+ *
+ * `UpdatePage` carries the page's **whole** storage format: *Save section*
+ * replaces one section's body and keeps everything outside it byte for byte
+ * (`DocWrites::edit_section`). So the queued body and the page it was made
+ * against differ in one stretch, found by their common start and end, and the
+ * section is the heading that stretch follows. The page it was made against
+ * is the queue-time snapshot's mirrored record, the whole-record projection
+ * `knobas_core::write_queue::project` gives this op.
+ *
+ * A payload read outside an adapter (ADR-0007), confined to this function:
+ * the record's `body.storage.value` and its `<h1>`–`<h6>` headings, as the
+ * Confluence adapter keeps them. Every level, because the adapter's section
+ * split (`spans` in `knobas-source-confluence`'s `blocks.rs`) starts a section
+ * at every level, so the heading named is the one *Save section* edited under.
+ * Until the wiki role declares where a page's sections live (ADR-0007's
+ * destination), another wiki source's record misses here. It **misses to the page name**, never to
+ * another section: no snapshot, another op's, no storage body, no difference,
+ * a difference before the first heading, or one that touches a heading or
+ * spans two sections all answer `null`, and the row says *Edit page …* as it
+ * did before. Pinned by "a page edit names the page when no one section is
+ * the change".
+ */
+export function editedSection(snapshot: unknown, body: string): string | null {
+  if (typeof snapshot !== "object" || snapshot === null) return null;
+  const bag = snapshot as { op?: unknown; payload?: { body?: { storage?: { value?: unknown } } } | null };
+  if (bag.op !== "update_page") return null;
+  const base = bag.payload?.body?.storage?.value;
+  if (typeof base !== "string" || base === body) return null;
+
+  let from = 0;
+  while (from < base.length && from < body.length && base[from] === body[from]) from += 1;
+  let back = 0;
+  while (back < base.length - from && back < body.length - from && base[base.length - 1 - back] === body[body.length - 1 - back]) back += 1;
+  const changedTo = base.length - back;
+
+  const heading = /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1\s*>/gi;
+  let owner: { end: number; text: string } | null = null;
+  for (const match of base.matchAll(heading)) {
+    const start = match.index;
+    const end = start + match[0].length;
+    if (end <= from) owner = { end, text: match[2]! };
+    // A heading that starts inside the change, or straddles its start: the
+    // change is not one section's body.
+    else if (start < changedTo) return null;
+  }
+  // A heading the edit adds.
+  if (/<h[1-6]\b/i.test(body.slice(from, body.length - back))) return null;
+  if (owner === null) return null;
+  const text = decodeEntities(owner.text.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
+  return text === "" ? null : text;
+}
+
+/** The character references a heading's storage format spells, as characters. */
+function decodeEntities(text: string): string {
+  const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+  return text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (whole, ref: string) => {
+    if (ref[0] === "#") {
+      const code = ref[1] === "x" || ref[1] === "X" ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10);
+      return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+    }
+    return named[ref.toLowerCase()] ?? whole;
+  });
 }
 
 /** `"Comment"`, `"LogWork"`, … -- the keys of the `WriteOp` payload union. */

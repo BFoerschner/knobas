@@ -1,5 +1,6 @@
 /**
- * `?fake-ipc`: The write queue (#42): one held write, one refused, one waiting, and a refused worklog (#828).
+ * `?fake-ipc`: The write queue (#42): one held write, one refused, one waiting, a refused worklog (#828),
+ * and a monitor pause refused with a second pause waiting behind it (#1473).
  */
 import type { Handler } from "../fake-tauri";
 
@@ -34,10 +35,56 @@ const HELD_WORKLOG = {
   source_enabled: true,
 };
 
+/** The monitor both pauses target: a PAY-231 monitor the mirror knows by name. */
+const PAUSED_MONITOR = "mock:payouts-stage-health";
+
+/**
+ * The live pass's case (#1473): a monitor pause the source refused, and a
+ * second pause on the same monitor queued after it. One item's writes go in
+ * order, so the second waits for the first to be sent or discarded, and the
+ * panel says so rather than promising it goes on its own.
+ */
+const BLOCKED_PAUSES = [
+  {
+    id: 33,
+    source_id: "mock",
+    entity_id: PAUSED_MONITOR,
+    op: "pause_monitor",
+    payload: { PauseMonitor: { entity: PAUSED_MONITOR } },
+    target_snapshot: { op: "pause_monitor", live: true },
+    state: "refused",
+    wait_reason: null,
+    detail: "the monitor is in a maintenance window and cannot be paused",
+    queued_at: "2026-08-25T11:30:00Z",
+    attempted_at: "2026-08-25T11:31:00Z",
+    attempts: 1,
+    held_snapshot: null,
+    settled_at: null,
+    source_enabled: true,
+  },
+  {
+    id: 34,
+    source_id: "mock",
+    entity_id: PAUSED_MONITOR,
+    op: "pause_monitor",
+    payload: { PauseMonitor: { entity: PAUSED_MONITOR } },
+    target_snapshot: { op: "pause_monitor", live: true },
+    state: "pending",
+    wait_reason: null,
+    detail: null,
+    queued_at: "2026-08-25T11:48:00Z",
+    attempted_at: null,
+    attempts: 0,
+    held_snapshot: null,
+    settled_at: null,
+    source_enabled: true,
+  },
+];
+
 /**
  * The write queue a QA pass sees: one write held on a changed target, one the
- * source refused, one still waiting on a server that did not answer, and the
- * Week tab's refused worklog.
+ * source refused, one still waiting on a server that did not answer, the
+ * Week tab's refused worklog, and the two pauses of `BLOCKED_PAUSES`.
  *
  * The held row's two snapshots differ by a reply, which is exactly what
  * `knobas_core::write_queue::project` holds a comment against -- so the
@@ -112,6 +159,7 @@ export const FIXTURE_QUEUE = [
     source_enabled: true,
   },
   HELD_WORKLOG,
+  ...BLOCKED_PAUSES,
 ];
 
 /** This feature's commands. */

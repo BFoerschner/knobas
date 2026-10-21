@@ -39,6 +39,7 @@
   import { patience } from "./patience.svelte";
   import { ago } from "./time";
   import {
+    blockers,
     demandOf,
     editableBody,
     movedFile,
@@ -90,6 +91,20 @@
 
   const decisions = $derived(queue.rows.filter((row) => demandOf(row.state) === "decide"));
   const waiting = $derived(queue.rows.filter((row) => demandOf(row.state) === "waiting"));
+  /** The held or refused write each waiting write is stuck behind (#1473). */
+  const blockedBy = $derived(blockers(queue.rows));
+  /**
+   * The Waiting group's line: the promise that these go on their own holds
+   * only for a write nothing above holds up.
+   */
+  const waitingNote = $derived.by(() => {
+    const blocked = waiting.filter((row) => blockedBy.has(row.id)).length;
+    if (blocked === 0) return "These go on their own as soon as their source can take them.";
+    if (blocked === waiting.length) {
+      return "These wait for a write above that needs your decision. Each goes once that write is sent or discarded.";
+    }
+    return "Unless a row says it waits for a write above, these go on their own as soon as their source can take them.";
+  });
 
   /** Titles looked up so far, by entity id; each id is asked once. */
   let names = $state<Record<string, string>>({});
@@ -110,6 +125,12 @@
 
   /** Why a pending write has not gone, in the reader's words rather than the wire's. */
   function waitingBecause(row: QueuedWrite): string {
+    // First: one item's writes go in order, so nothing else moves this write
+    // until the one above is sent or discarded, source or no source (#1473).
+    const blocker = blockedBy.get(row.id);
+    if (blocker !== undefined) {
+      return blocker.state === "held" ? "Waits for the held write above." : "Waits for the refused write above.";
+    }
     // Before the per-attempt reasons: the scheduler never flushes a disabled
     // source, so whatever the last attempt said, nothing will move until the
     // source is back on — and "not tried yet" forever would be this surface
@@ -360,7 +381,7 @@
           Waiting
           <span class="tf-wq-n">{waiting.length}</span>
         </h3>
-        <p class="tf-wq-note">These go on their own as soon as their source can take them.</p>
+        <p class="tf-wq-note">{waitingNote}</p>
         {#each waiting as row (row.id)}
           {@const body = editableBody(row.payload)}
           <article class="tf-wq-row tf-wq-pending">

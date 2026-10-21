@@ -9289,3 +9289,57 @@ stays reachable and no component is added. Hiding counts costs the Inbox and Mon
 901 and 1240 px; the pages carry the same numbers. At 1440 px and above nothing changes.
 
 **Cost of reversing:** replace the band with a *More* component; one stylesheet block and one test.
+
+## #1473: a write behind a stalled one names its blocker (Opus implementer, 2026-10-21)
+
+- **Delegated pick: no *Discard both*.** *Fork:* a second control on the blocker's row that
+  discards it and the writes behind it, or name the blocker only. *Ruling:* name the blocker only,
+  as recommended. *Reasoning:* the blocker's own *Discard* already releases the write behind it,
+  which then goes on its own; a bulk discard needs its own confirm path (a worklog's withdrawal
+  asks), and it would withdraw a write the reader may still want. *Reversing:* one button and a
+  confirm on the decisions row.
+- **The blocker is the item's oldest held or refused write earlier than the waiting one**, the one
+  `knobas_core::write_queue::due` stops on (`blockers` in `write-queue.svelte.ts`). *Reversing:* low.
+- **The blocker reason comes first,** before "Its source is turned off": while the write above
+  stands, re-enabling the source would not send this one either.
+- **The Waiting group's line has three readings.** None blocked: unchanged ("These go on their own
+  as soon as their source can take them."). All blocked: "These wait for a write above that needs
+  your decision. Each goes once that write is sent or discarded." Some blocked: "Unless a row says
+  it waits for a write above, these go on their own as soon as their source can take them."
+  *Reversing:* three strings.
+- **The fixture gains a refused pause and a second pause behind it** on `mock:payouts-stage-health`,
+  so the bar now reads *2 queued writes · 4 need you*; no driver or test clicked the old label.
+
+## #1474: the write queue panel closes on navigation (Opus implementer, 2026-10-21)
+
+- **Esc was already fixed by #1425's port.** On `TfDialog` the panel registers on the layer
+  stack, so `escStep` closes it as rung 1. This ticket adds the tests and the route-change close.
+- **The close is an effect in `TfShell`** that clears `writeQueuePanel.open` when the address
+  changes, any change, a legacy redirect's `replaceState` included. The panel itself does not know
+  the route. *Reversing:* one effect.
+- **Other rooms-UI modals outside the layer stack** (the ticket's out-of-scope note) are filed as a
+  follow-up, #1527, not fixed here.
+
+## #1520: a queued page edit names its section (Opus implementer, 2026-10-21)
+
+- **Fork:** diff the queued body against the mirrored page, carry the heading in `UpdatePage` (a
+  frozen `WriteOp` change: §10.8 entry, ADR-0006), or rule the page name enough. *Ruling:* the
+  client-side diff, falling back to the page name. *Reasoning:* *Save section* keeps everything
+  outside the section byte for byte (`DocWrites::edit_section`), so the queued body and the
+  queue-time snapshot's mirrored record (`target_snapshot.payload`, the whole-record projection
+  `update_page` gets) differ in one stretch. Its common start and end find the stretch, and the
+  heading before it names the section. No IPC or `WriteOp` change.
+- **`page-sections.ts` is gone** (the rooms UI's removal, #1087); the section split now lives in
+  the adapter. `editedSection` reads the storage format's `<h1>`–`<h6>` headings itself, as an
+  ADR-0007 payload read: one function, gated on an `update_page` snapshot like `pageVersion`, and it
+  misses to the page name (no snapshot or storage body, no difference, a change before the first
+  heading, a change touching or adding or removing a heading, two sections). The miss direction is
+  pinned by a test. *Reversing:* drop the `UpdatePage` branch back to `titled(...)`.
+- **The `UpdatePage` doc comment still names `page-sections.ts`;** filed as #1528 (`backlog`).
+- **Every heading level counts,** as the adapter's split does (`spans` in
+  `knobas-source-confluence`), so the name is the heading *Save section* edited under, the one the
+  Docs toast names. `CONTEXT.md`'s **Section** says levels one to three; that pre-existing
+  disagreement between glossary and adapter is filed as #1531 (`backlog`), and `editedSection`
+  follows whichever way it is settled.
+- **The words:** *Edit section “Context” of SEPA payout retry design*, as #1425 asked and as the
+  Docs toast says; *… of a page* until the title is known.
