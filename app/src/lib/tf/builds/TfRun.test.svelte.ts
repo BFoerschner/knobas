@@ -651,7 +651,7 @@ const LANDED: RunRow[] = RUNS.map((r) =>
 test("a sync of the run's source finishing reads the run again: a running run draws its result", async () => {
   const views: string[] = [];
   const drawn = draw("teamcity:build:1188", undefined, {
-    view: (id, section) => (views.push(section ?? ""), Promise.resolve(viewOf(views.length === 1))),
+    view: (_id, section) => (views.push(section ?? ""), Promise.resolve(viewOf(views.length === 1))),
   });
   await settle();
   expect(button("Stop")).toBeDefined();

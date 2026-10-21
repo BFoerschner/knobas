@@ -41,7 +41,7 @@ export const QUEUED_RUN = "run";
 /** The runs queued this session and not yet read back, as queued rows, newest first. */
 export function queuedRunRows(marks: readonly Mark[], fallback: string | null): RunRow[] {
   return marks
-    .map((mark, at) => ({
+    .map((mark, at): RunRow => ({
       entity_id: startedHere(mark.write ?? -1 - at),
       number: null,
       state: { text: "queued", tone: "info" },
@@ -52,7 +52,7 @@ export function queuedRunRows(marks: readonly Mark[], fallback: string | null): 
       updated_at: null,
       web_url: null,
       // The reader queued it: *you*, as prototype-6's `startRun` draws it.
-      trigger: "person" as const,
+      trigger: "person",
       started_by: null,
       started_by_me: true,
       revision: null,
