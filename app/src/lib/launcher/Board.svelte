@@ -165,7 +165,7 @@
     armed !== null && home.smart_lists[selected]?.id === armed ? armed : null,
   );
 
-  /** One line per source: what it is, and whether knobas can still read it. */
+  /** One line per source: what it is, whether knobas can still read it, and whether its last run failed. */
   const strip = $derived(
     sources.map((source) => {
       const actionable = isActionable(source.state);
