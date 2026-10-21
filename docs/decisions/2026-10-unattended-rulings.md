@@ -10416,3 +10416,11 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 **Ruling:** no check is added here. A form that `check` refuses gives no reading (`UrlForm::read` calls the same rules), a form that names a kind the adapter does not emit matches no item, and a reading is joined only to its own adapter kind's sources. So a malformed external declaration can only miss. It cannot name another adapter's item, and it cannot make install fail. Refusing it at install would turn a harmless miss into a broken adapter.
 
 **Cost of reversing:** low; one call in `check_descriptor` and a `Refusal` variant.
+
+### The narrow Confluence live run is not re-run on the merge head
+
+**The fork:** the dispatch asked for one re-run of `a_pasted_address_opens_its_page_in_every_form_confluence_serves` on the merge head, because the resolver's `$2` is now built differently from how it was built on `1a9f44cb`, where the live run passed. The run queued on the JVM lock and took it after 128 s, once #1560's seeded TeamCity run released it. `live_guard` then refused, because TeamCity was still up with no holder. The dispatch rules out touching TeamCity.
+
+**Ruling:** merge on the live run from `1a9f44cb`. Since that head, the path the test drives changed in two ways. `$2` is now built from a `FormReading` struct with `#[serde(flatten)]` in place of `json!`, and the JSON keys are the same. The SQL column alias is now `via_form`. The gated `url_resolve` tests drive both through `Registry::for_process()`, which holds the real Confluence descriptor, and through the real statement on Postgres. The Confluence descriptor and the live test changed only by `cargo fmt`. So what only the live run can witness has not changed since it passed: a real record holds `id`, `space.key`, `title` and `_links.tinyui`, and the server serves each form.
+
+**Cost of reversing:** low. Once TeamCity is down, run the narrow test on `main`: `live_session confluence` and then the one `cargo test --exact`.
