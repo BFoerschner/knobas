@@ -467,9 +467,15 @@ async fn an_unreachable_source_backs_off_along_the_ladder() {
 #[tokio::test]
 async fn an_error_run_clears_a_stale_unreachable_and_an_unreachable_run_sets_it_again() {
     let h = harness(AuthKind::Method(AuthMethod::Pat), true).await;
-    config::set_health(&h.deps.pool, &h.id, AuthState::Unreachable, Some("dns"), None)
-        .await
-        .unwrap();
+    config::set_health(
+        &h.deps.pool,
+        &h.id,
+        AuthState::Unreachable,
+        Some("dns"),
+        None,
+    )
+    .await
+    .unwrap();
     *h.registry.protocol.lock().unwrap() = true;
 
     let (row, _) = one_run(&h, SyncTrigger::Schedule).await;
@@ -487,7 +493,11 @@ async fn an_error_run_clears_a_stale_unreachable_and_an_unreachable_run_sets_it_
     );
     {
         let healths = h.events.healths.lock().unwrap();
-        assert_eq!(healths.len(), 1, "unreachable -> unknown is one health change");
+        assert_eq!(
+            healths.len(),
+            1,
+            "unreachable -> unknown is one health change"
+        );
         assert_eq!(healths[0].state, AuthState::Unknown);
     }
 
