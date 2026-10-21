@@ -28,6 +28,7 @@
     rows,
     selected,
     renaming,
+    optionId,
     now,
     onopen,
     onhover,
@@ -66,6 +67,8 @@
      * for the input to be open.
      */
     renaming: string | null;
+    /** The element id of the option at a flat-list index (#1411). */
+    optionId: (index: number) => string;
     now?: Date | undefined;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
@@ -82,6 +85,20 @@
     onrename: (id: string, label: string | null) => void;
     ondelete: (id: string) => void;
   } = $props();
+
+  /**
+   * The rename field takes focus and selects the name as it opens (#1412), so
+   * what is typed next replaces the name.
+   *
+   * An action rather than `autofocus`: Svelte honours that attribute only
+   * while nothing but the body has focus, and the query box holds focus for
+   * as long as the launcher is open, so the attribute never fired and the
+   * typed name went into the query instead.
+   */
+  function takeFocus(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
 
   const reading = $derived(readingProp ?? { phase: "ready" as const, error: null, retry: () => {} });
 
@@ -158,11 +175,10 @@
         commits, and Enter is the only thing that commits: a name half-typed
         when the reader clicked away is not a name they chose.
       -->
-      <!-- svelte-ignore a11y_autofocus -->
       <input
         class="ren"
         type="text"
-        autofocus
+        use:takeFocus
         value={list.label}
         aria-label="Rename {list.label}"
         onkeydown={(event) => {
@@ -182,6 +198,7 @@
       />
     {:else}
       <button
+        id={optionId(i)}
         class="sl"
         role="option"
         aria-selected={i === selected}
@@ -290,6 +307,7 @@
       state={item.state}
       sources={home.sources}
       {now}
+      id={optionId(index)}
       selected={index === selected}
       onopen={() => onopen(row)}
       onhover={() => onhover(index)}

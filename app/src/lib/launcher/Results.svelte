@@ -19,6 +19,7 @@
     response,
     rows,
     selected,
+    optionId,
     sources,
     now,
     onopen,
@@ -28,6 +29,8 @@
     /** The flat selectable list, so an index means the same thing everywhere. */
     rows: LauncherRow[];
     selected: number;
+    /** The element id of the option at a flat-list index (#1411). */
+    optionId: (index: number) => string;
     sources: CredentialHealth[];
     now?: Date | undefined;
     onopen: (row: LauncherRow) => void;
@@ -108,6 +111,7 @@
         snippet={hit.snippet}
         {sources}
         {now}
+        id={optionId(index)}
         selected={index === selected}
         onopen={() => onopen(row)}
         onhover={() => onhover(index)}

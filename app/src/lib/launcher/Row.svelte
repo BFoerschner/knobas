@@ -31,6 +31,7 @@
     state = null,
     snippet = [],
     sources,
+    id,
     selected,
     now,
     onopen,
@@ -66,6 +67,8 @@
     /** The matched excerpt, already split. Empty for a list or board row. */
     snippet?: Segment[];
     sources: CredentialHealth[];
+    /** The option's element id, which the listbox names while it is active (#1411). */
+    id: string;
     selected: boolean;
     now?: Date | undefined;
     onopen: () => void;
@@ -81,6 +84,7 @@
 </script>
 
 <button
+  {id}
   class="res"
   class:on={selected}
   role="option"

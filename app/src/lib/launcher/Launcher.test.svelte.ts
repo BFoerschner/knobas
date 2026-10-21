@@ -8,6 +8,9 @@
  * is the backend's, that `Esc` unwinds one rung at a time and does not reach
  * the shell, and that `Tab` steals nothing.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -216,6 +219,8 @@ afterEach(() => {
   if (app) unmount(app);
   app = undefined;
   target.remove();
+  // `recordScrolls()` stubs it; jsdom has none of its own.
+  Reflect.deleteProperty(Element.prototype, "scrollIntoView");
 });
 
 test("the box takes focus and keeps it while the overlay is open", async () => {
@@ -2289,4 +2294,267 @@ test("a rejected search shows the reason, never 'Nothing in the mirror matches'"
   await settle();
   expect(target.textContent).toContain("index is rebuilding");
   expect(target.textContent).not.toContain("Nothing in the mirror matches");
+});
+
+// ── The selected row stays on screen (#1411) ─────────────────────────────────────
+
+/**
+ * Every `scrollIntoView` the launcher asked for, with the element and the
+ * options. jsdom draws nothing and has no `scrollIntoView`, so the stub is the
+ * only witness; the screenshot in #1411's PR is the other one.
+ */
+function recordScrolls() {
+  const calls: { el: Element; options: ScrollIntoViewOptions | boolean | undefined }[] = [];
+  Element.prototype.scrollIntoView = function (this: Element, options?: ScrollIntoViewOptions | boolean) {
+    calls.push({ el: this, options });
+  };
+  return calls;
+}
+
+/** The board with its saved lists, as the rename and chain tests need it. */
+function openSaved() {
+  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+}
+
+/** The results listbox's options in flat-list order. */
+function resultOptions(): Element[] {
+  return [...target.querySelectorAll('[aria-label="Results"] [role="option"]')];
+}
+
+test("the arrows scroll the newly active row into view, and only as far as it needs", async () => {
+  openSaved();
+  await settle();
+  const scrolls = recordScrolls();
+
+  press("ArrowDown");
+  press("ArrowDown");
+  const rows = resultOptions();
+  expect(scrolls.at(-1)?.el).toBe(rows[2]);
+  expect(scrolls.at(-1)?.options).toEqual({ block: "nearest" });
+
+  press("ArrowUp");
+  expect(scrolls.at(-1)?.el).toBe(rows[1]);
+  expect(scrolls.at(-1)?.options).toEqual({ block: "nearest" });
+});
+
+test("the results listbox names the active option, and names nothing with no row", async () => {
+  openSaved();
+  await settle();
+  const listbox = target.querySelector('[role="listbox"][aria-label="Results"]')!;
+  const named = () => listbox.getAttribute("aria-activedescendant");
+  const active = () => target.querySelector('[aria-label="Results"] [aria-selected="true"]');
+
+  expect(named()).toBeTruthy();
+  expect(named()).toBe(active()?.id);
+  for (const key of ["ArrowDown", "ArrowDown", "ArrowUp"]) {
+    press(key);
+    expect(named(), key).toBe(active()?.id);
+  }
+  // Every option has an id of its own, so the name points at exactly one row.
+  const ids = resultOptions().map((el) => el.id);
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(ids.every((id) => id !== "")).toBe(true);
+
+  unmount(app!);
+  app = undefined;
+  open({
+    ports: {
+      launcherHome: async () => ({ ...HOME, smart_lists: [], recent: [] }),
+      search: async () => response(),
+    },
+  });
+  await settle();
+  expect(
+    target.querySelector('[role="listbox"][aria-label="Results"]')!.hasAttribute("aria-activedescendant"),
+  ).toBe(false);
+});
+
+test("a list being renamed has no option, so the listbox names none", async () => {
+  openSaved();
+  await settle();
+  press("ArrowDown");
+  press("Tab");
+  press("Enter");
+  const listbox = target.querySelector('[role="listbox"][aria-label="Results"]')!;
+  expect(target.querySelector("input.ren")).not.toBeNull();
+  expect(listbox.hasAttribute("aria-activedescendant")).toBe(false);
+});
+
+test("the Tab chain's active row is scrolled into view and named by its listbox", async () => {
+  openSaved();
+  await settle();
+  press("ArrowDown");
+  const scrolls = recordScrolls();
+  press("Tab");
+  const chain = target.querySelector('[role="listbox"][aria-label="Actions on the selected result"]')!;
+  const rows = [...chain.querySelectorAll('[role="option"]')];
+  expect(rows).toHaveLength(2);
+  expect(chain.getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
+  expect(scrolls.at(-1)).toEqual({ el: rows[0], options: { block: "nearest" } });
+
+  press("ArrowDown");
+  expect(chain.getAttribute("aria-activedescendant")).toBe(rows[1]!.id);
+  expect(scrolls.at(-1)).toEqual({ el: rows[1], options: { block: "nearest" } });
+
+  press("ArrowUp");
+  expect(chain.getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
+  expect(scrolls.at(-1)).toEqual({ el: rows[0], options: { block: "nearest" } });
+});
+
+test("typing resets the selection to the first row, and that row is scrolled back into view", async () => {
+  open();
+  await settle();
+  press("ArrowDown");
+  press("ArrowDown");
+  const scrolls = recordScrolls();
+  await typeInto("sepa");
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  const first = resultOptions()[0];
+  expect(first?.textContent).toContain("Retry failed SEPA payouts");
+  expect(scrolls.at(-1)).toEqual({ el: first, options: { block: "nearest" } });
+
+  // A new answer with the first row already selected brings it back too.
+  scrolls.length = 0;
+  await typeInto("sepa payouts");
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  expect(scrolls.at(-1)).toEqual({ el: resultOptions()[0], options: { block: "nearest" } });
+});
+
+/** The `>` palette, open with every action: the answer says the prefix is `>`. */
+async function openPalette() {
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async () =>
+        response({ interpreted: { ...response().interpreted, prefix: "action", text: "" }, groups: [] }),
+    },
+  });
+  await settle();
+  await search(">");
+  expect(target.querySelector('[aria-label="Results"] .secl')?.textContent).toContain("Go to");
+}
+
+test("the palette's rows are followed as well", async () => {
+  await openPalette();
+  const scrolls = recordScrolls();
+  press("ArrowDown");
+  const rows = resultOptions();
+  expect(rows.length).toBeGreaterThan(1);
+  expect(scrolls.at(-1)).toEqual({ el: rows[1], options: { block: "nearest" } });
+  expect(
+    target.querySelector('[role="listbox"][aria-label="Results"]')!.getAttribute("aria-activedescendant"),
+  ).toBe(rows[1]!.id);
+});
+
+// ── Rename takes the focus it needs (#1412) ────────────────────────────────
+
+/** The name field, focused, with its whole text selected. */
+function expectRenameFocused() {
+  const field = target.querySelector<HTMLInputElement>("input.ren");
+  expect(field, "the rename field is open").not.toBeNull();
+  expect(document.activeElement, "focus is in the name field, not the query box").toBe(field);
+  expect(field!.selectionStart).toBe(0);
+  expect(field!.selectionEnd).toBe("SEPA retries".length);
+}
+
+test("Rename from the Tab chain focuses the name field with the name selected", async () => {
+  openSaved();
+  await settle();
+  press("ArrowDown");
+  press("Tab");
+  press("Enter");
+  await settle();
+  expectRenameFocused();
+});
+
+test("the row's Rename button focuses the name field with the name selected", async () => {
+  openSaved();
+  await settle();
+  [...target.querySelectorAll<HTMLButtonElement>("button.mini")]
+    .find((button) => button.textContent?.trim() === "Rename")!
+    .click();
+  flushSync();
+  await settle();
+  expectRenameFocused();
+});
+
+test("what is typed after the chain's Rename goes into the name, not the query", async () => {
+  const renamed = vi.fn(async () => {});
+  open({
+    ports: { launcherHome: async () => SAVED_HOME, search: async () => response(), renameSmartList: renamed },
+  });
+  await settle();
+  press("ArrowDown");
+  press("Tab");
+  press("Enter");
+  await settle();
+
+  // Typing is whatever holds focus receiving the text; jsdom does not insert
+  // it for a keydown, so the test writes into the focused element.
+  const focused = document.activeElement as HTMLInputElement;
+  focused.value = "X";
+  focused.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+
+  const query = target.querySelector<HTMLInputElement>("input:not(.ren)")!;
+  expect(query.value, "the query box is untouched").toBe("");
+  expect(target.querySelector<HTMLInputElement>("input.ren")!.value).toBe("X");
+  expect(railRows(), "the board is still drawn").toHaveLength(3);
+
+  focused.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  flushSync();
+  await settle();
+  expect(renamed).toHaveBeenCalledWith("sepa-retries", "X");
+});
+
+// ── The chain rows and the suggestions keep their own layout (#1414) ───────
+
+/**
+ * The launcher's own stylesheet, put into the document so jsdom computes the
+ * cascade the WebView would. Svelte's scoping adds the same one class to
+ * every selector, so the order between two of these rules is the order with
+ * the scope in place.
+ */
+function launcherStyles(): HTMLStyleElement {
+  const source = readFileSync(join(process.cwd(), "src/lib/launcher/Launcher.svelte"), "utf8");
+  const css = /<style>([\s\S]*)<\/style>/.exec(source)?.[1];
+  expect(css, "Launcher.svelte has a stylesheet").toBeTruthy();
+  const style = document.createElement("style");
+  style.textContent = css!;
+  document.head.append(style);
+  return style;
+}
+
+test("a value suggestion draws inline, a chain row spans one column, and a prefix row keeps two", async () => {
+  const style = launcherStyles();
+  try {
+    await openPalette();
+    const prefix = target.querySelector<HTMLElement>('[aria-label="Results"] .pfx');
+    expect(prefix, "the palette draws prefix rows").not.toBeNull();
+    expect(getComputedStyle(prefix!).display).toBe("grid");
+    expect(getComputedStyle(prefix!).gridTemplateColumns).toBe("160px 1fr");
+
+    unmount(app!);
+    app = undefined;
+    openSuggesting();
+    await settle();
+    await typeInto("kind:");
+    const suggestion = target.querySelector<HTMLElement>('[aria-label="Suggestions"] [role="option"]')!;
+    expect(suggestion.classList.contains("pfx"), "the suggestion is a prefix row underneath").toBe(true);
+    expect(getComputedStyle(suggestion).display).toBe("flex");
+
+    unmount(app!);
+    app = undefined;
+    openSaved();
+    await settle();
+    press("ArrowDown");
+    press("Tab");
+    const chainRow = target.querySelector<HTMLElement>(".chain [role='option']")!;
+    expect(chainRow.classList.contains("pfx"), "the chain row is a prefix row underneath").toBe(true);
+    expect(getComputedStyle(chainRow).gridTemplateColumns).toBe("1fr");
+  } finally {
+    style.remove();
+  }
 });

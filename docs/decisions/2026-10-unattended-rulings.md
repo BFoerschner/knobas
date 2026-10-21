@@ -9002,3 +9002,44 @@ Ruled 2026-10-21 (delegated by Björn at triage).
 - **Before the read answers, no crumb; a failed read names it *Item*.** *Reasoning:* drawing a
   placeholder name that flips to the kind's label a moment later is a flicker; a page that could not
   read its item still needs the *Back Esc* hint. *Reversing:* low.
+## #1411: the launcher's cursor stays on screen (Opus implementer, 2026-10-21)
+## #1411: the launcher's selected row stays on screen (Opus implementer, 2026-10-21)
+
+- **What an option's id is keyed on.** *Fork:* the row's id or its index in the flat list.
+  *Ruling:* the index, `<$props.id()>-opt-<n>` for results and `-chain-<n>` for the Tab chain.
+  *Reasoning:* the index is what `session.selected` already is, so the listbox names the option
+  without a lookup, and a row id such as `confluence:ENG:SEPA design` contains a space, which is not
+  valid in an element id. *Reversing:* one helper in `Launcher.svelte`.
+- **A hover also scrolls.** *Fork:* scroll only on the arrow keys, or on every change of the
+  selected row. *Ruling:* every change, as the ticket says. A hovered row is already on screen, so
+  `block: "nearest"` leaves it in place; a row cut off at the edge moves just far enough to show in
+  full. The ticket's "hover stays as it is" is about which row hover selects, and that is unchanged.
+  *Reversing:* gate the effect on a keyboard flag.
+- **When the listbox names nothing.** *Fork:* the ticket says the attribute is absent "with nothing
+  selected", but the session always holds an index. *Ruling:* `aria-activedescendant` is absent when
+  there is no current row, when a failed read draws its reason in place of rows, and while the
+  current saved list is being renamed. *Reasoning:* in each of those states no option element exists
+  for the index, and naming a missing id is worse than naming none. A list being renamed is drawn as
+  a text field. *Reversing:* one `$derived` in `Launcher.svelte`.
+
+## #1412: Rename focuses the name field (Opus implementer, 2026-10-21)
+
+- **Effect or action.** *Fork:* a bound input focused from an `$effect`, or a `use:` action.
+  *Ruling:* a `use:takeFocus` action that calls `focus()` and `select()` on the input as it mounts,
+  in place of `autofocus`. *Reasoning:* the ticket allows either. The input exists only while it is
+  being renamed, so mounting it and starting the rename are the same moment, and an action needs no
+  binding or effect. *Reversing:* swap the action for a bound input and an `$effect`.
+- **The standup dialog** (the ticket asked for a check; a finding, not a fork): the latent problem is real. With
+  a notes box focused, pressing *+ Add someone* leaves focus in the notes box: WKWebView does not
+  focus a clicked button, so `autofocus` never fires. Filed as #1511 and left unfixed here, as the
+  ticket says.
+
+## #1414: the chain rows and value suggestions keep their own layout (Opus implementer, 2026-10-21)
+
+- **Fix shape** (delegated). *Ruling:* raise the specificity to `.pfx.sug` and `.pfx.chain-a`, as
+  recommended. *Reasoning:* the fix survives any later reordering of the stylesheet. Moving the rules
+  below `.pfx` would break again the next time someone sorts them. The same rules' `gap: 0` and
+  `border-bottom: 0` now apply as well, as they were written to. *Reversing:* two selectors.
+- **Where it lands** (delegated). *Ruling:* in one PR with #1411 and #1412, as recommended, and
+  before #1500, so #1500's Tab-chain screenshot does not show the squeeze. *Reversing:* none
+  needed.
