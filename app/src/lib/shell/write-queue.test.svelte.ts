@@ -412,6 +412,8 @@ test("a page edit names the page when no one section is the change", () => {
     ["the words before the first heading", pageEdit(PAGE.replace("How payouts retry.", "How payouts are retried."))],
     ["a heading added", pageEdit(PAGE.replace("Nightly batch.", "Nightly batch.</p><h2>Ledger</h2><p>Drift."))],
     ["a heading's own words", pageEdit(PAGE.replace("<h2>Context</h2>", "<h2>Background</h2>"))],
+    ["a later heading's own words", pageEdit(PAGE.replace("Risks &amp; limits", "Risks"))],
+    ["a heading removed", pageEdit(PAGE.replace("<h2><strong>Risks &amp; limits</strong></h2>", ""))],
     ["no snapshot", pageEdit(PAGE.replace("Nightly", "Daily"), null)],
     ["a snapshot with no storage body", pageEdit(PAGE.replace("Nightly", "Daily"), { op: "update_page", live: true, payload: { body: "plain" } })],
     ["another op's snapshot", pageEdit(PAGE.replace("Nightly", "Daily"), { op: "comment", live: true, payload: { body: { storage: { value: PAGE } } } })],
