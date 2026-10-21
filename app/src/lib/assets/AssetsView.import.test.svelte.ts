@@ -357,14 +357,6 @@ test("the pane lists the monitor names an import kept", async () => {
   expect(target.querySelector(".watch")).toBeNull();
 });
 
-/**
- * The acceptance criterion, at the dialog: choosing a file **previews** — it
- * does not import — and the answer is drawn in its three groups.
- *
- * The count in every heading is the preview's own, so a view that drew the
- * headings and dropped the lists would fail here, and so would one that put
- * a group's entries under another group's name.
- */
 test("Import opens a dialog on the layer stack, and its close shuts it (#1527)", async () => {
   render();
   await settle();
@@ -380,6 +372,14 @@ test("Import opens a dialog on the layer stack, and its close shuts it (#1527)",
   expect(layers.open).toEqual([]);
 });
 
+/**
+ * The acceptance criterion, at the dialog: choosing a file **previews** — it
+ * does not import — and the answer is drawn in its three groups.
+ *
+ * The count in every heading is the preview's own, so a view that drew the
+ * headings and dropped the lists would fail here, and so would one that put
+ * a group's entries under another group's name.
+ */
 test("choosing a file previews it and draws the three groups", async () => {
   const calls = render();
   await settle();

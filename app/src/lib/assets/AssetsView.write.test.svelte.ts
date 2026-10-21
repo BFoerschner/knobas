@@ -994,16 +994,6 @@ test("a type table that will not load is said out loud, not left as a dead plus"
 });
 
 /**
- * **A dialog does not outlive the selection it was opened on.**
- *
- * *Move to…* and the delete confirmation both name the selected asset and act
- * on it, so one still standing after the address moved would offer to move or
- * delete something other than the thing it names. The address can move while a
- * dialog is up without anybody clicking past the scrim — a launcher hit, a
- * notification's deep link — which is what `router.go` stands in for here, and
- * a headless walk of this branch is where it was found.
- */
-/**
  * The tree's dialogs are rooms-UI `Modal`s under the ticket-first shell, and
  * each sits on the shell's layer stack while open (#1527): the stack's close,
  * which the window's `Esc` calls when focus is outside the dialog, shuts it,
@@ -1021,7 +1011,7 @@ test.each([
 
   click(opener);
   expect(target.querySelector('[role="dialog"]')).not.toBeNull();
-  button(inside);
+  expect(button(inside).closest('[role="dialog"]'), "the opener's dialog, not another").not.toBeNull();
   expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
 
   layers.open[0]!.close();
@@ -1030,6 +1020,16 @@ test.each([
   expect(layers.open).toEqual([]);
 });
 
+/**
+ * **A dialog does not outlive the selection it was opened on.**
+ *
+ * *Move to…* and the delete confirmation both name the selected asset and act
+ * on it, so one still standing after the address moved would offer to move or
+ * delete something other than the thing it names. The address can move while a
+ * dialog is up without anybody clicking past the scrim — a launcher hit, a
+ * notification's deep link — which is what `router.go` stands in for here, and
+ * a headless walk of this branch is where it was found.
+ */
 test("an open dialog closes when the address names another asset", async () => {
   const store = estate(seed());
   const { router } = render("#/asset/asset:postgres", store);

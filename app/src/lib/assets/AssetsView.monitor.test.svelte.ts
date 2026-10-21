@@ -259,16 +259,6 @@ test("a pane with no monitor target draws no create", async () => {
   expect(text()).not.toContain("Create monitor");
 });
 
-/**
- * **The headline**: the form opens prefilled, and *Create* records the name
- * and then queues the write — in that order.
- *
- * The order is the design (`MonitorDialog`'s header): the name is what
- * attaches the monitor when the next poll mirrors it, so a create whose write
- * landed with no name recorded would be a monitor watching this asset that
- * knobas joined to nothing. It is asserted as an order and not as two facts,
- * because two facts hold whichever way round they happened.
- */
 test("Create monitor opens a dialog on the layer stack, and its close shuts it (#1527)", async () => {
   render(estate([KUMA]));
   await vi.waitFor(() => expect(names()).toContain("Create monitor for this asset"));
@@ -283,6 +273,16 @@ test("Create monitor opens a dialog on the layer stack, and its close shuts it (
   expect(layers.open).toEqual([]);
 });
 
+/**
+ * **The headline**: the form opens prefilled, and *Create* records the name
+ * and then queues the write — in that order.
+ *
+ * The order is the design (`MonitorDialog`'s header): the name is what
+ * attaches the monitor when the next poll mirrors it, so a create whose write
+ * landed with no name recorded would be a monitor watching this asset that
+ * knobas joined to nothing. It is asserted as an order and not as two facts,
+ * because two facts hold whichever way round they happened.
+ */
 test("create records the name first and then queues the write", async () => {
   const store = estate([KUMA]);
   const order: string[] = [];
