@@ -19,8 +19,8 @@
   import type { ViewAction } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import { actionPayload, initialValues } from "../../detail/view/actions";
+  import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
-  import { toastQueued } from "../repo/queued.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { mergeReasons, type ReadyLine } from "./pr";
 
@@ -43,8 +43,11 @@
     name: string;
     head: string | null;
     base: string | null;
-    /** The source's name, which the warn box says blocks the merge. */
-    source: string;
+    /**
+     * The pull request's source: its name is what the warn box says blocks the
+     * merge, and the merge's toast names it when its sign-in fails.
+     */
+    source: WriteSource | null;
     /** *Ready to merge?*'s lines. */
     ready: readonly ReadyLine[];
     /** The key of the ticket knobas links the pull request to, or `null`. */
@@ -81,7 +84,7 @@
     busy = true;
     try {
       await submitWrite(payload);
-      toastQueued(`merge ${name}`);
+      toastQueued(`merge ${name}`, source);
       onqueued();
       onclose();
     } catch (cause) {
@@ -109,7 +112,7 @@
         </div>
       {:else}
         <div class="tf-banner tf-warn tf-dbanner tf-prm-blocked" role="note">
-          {source} blocks this merge:
+          {source?.display_name ?? "The source"} blocks this merge:
           {#each reasons as reason, n (n)}<span>{reason}</span>{/each}
         </div>
       {/if}

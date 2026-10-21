@@ -16,11 +16,12 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
+  import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { lineDiff } from "../code/line-diff";
   import TfDiff from "../code/TfDiff.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { markCommit, markMade, toastQueued } from "./queued.svelte";
+  import { markCommit, markMade } from "./queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { commitPrefill, compareHash, fileHash } from "./repo";
 
@@ -35,6 +36,7 @@
     job,
     checkoutBranch,
     ports,
+    source = null,
     onclose,
   }: {
     repoId: string;
@@ -52,6 +54,8 @@
     /** The branch the local checkout is on, `null` without one. */
     checkoutBranch: string | null;
     ports: Pick<RepoPorts, "submitWrite">;
+    /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
+    source?: WriteSource | null;
     onclose: () => void;
   } = $props();
 
@@ -79,7 +83,7 @@
       await ports.submitWrite({
         CommitFile: { repo: repoId, branch, new_branch: onto, path, content: after, message: message.trim(), base_sha: baseSha },
       });
-      toastQueued(onto === null ? `commit ${path} to ${branch}` : `commit ${path} to ${onto}, then open a PR`);
+      toastQueued(onto === null ? `commit ${path} to ${branch}` : `commit ${path} to ${onto}, then open a PR`, source);
       onclose();
       if (onto === null) {
         markCommit(repoId, branch, path, { message: message.trim(), base: baseSha });

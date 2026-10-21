@@ -1,7 +1,7 @@
 /**
  * The one toast a queued write raises (#1438, R-15.1): "Queued: <what>." with
  * *Show queue*, and "<Source> sign-in is failing, so it waits there." while
- * the source's credential needs the reader. Never "Sends with the next sync":
+ * the source's credential needs the reader. Never a promise of the next sync:
  * a write goes the moment it is queued, paused sync or not.
  */
 import { beforeEach, expect, test } from "vitest";

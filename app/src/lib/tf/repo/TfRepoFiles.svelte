@@ -25,6 +25,7 @@
 
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutView, TreeEntry, ViewBlock, ViewSection } from "../../ipc/entity";
+  import type { WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { queuedCommit } from "./queued.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
@@ -36,6 +37,7 @@
 
   let {
     ports,
+    source = null,
     repoId,
     at,
     branch,
@@ -48,6 +50,8 @@
     title = "",
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite">;
+    /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
+    source?: WriteSource | null;
     repoId: string;
     /** The entity the tree is read at: the repository, or the branch picked. */
     at: string;
@@ -339,6 +343,7 @@
     {job}
     {checkoutBranch}
     {ports}
+    {source}
     onclose={() => (committing = false)}
   />
 {/if}

@@ -6,9 +6,10 @@
  *
  * with *Show queue*. The second sentence is R-15.1's: a write to a source whose
  * credential the reader has to fix says so, because it will not go until they
- * do. There is no "Sends with the next sync": `submit_write` queues and
- * flushes the source at once, so a write goes in a second, and pausing a
- * source's sync does not hold it back (#860–#862, ruled again on #1438).
+ * do. Nothing promises the next sync, as prototype-6 did: `submit_write`
+ * queues and flushes the source at once, so a write goes in a second, and
+ * pausing a source's sync does not hold it back (#860–#862, ruled again on
+ * #1438).
  *
  * The credential is read from the shell's live health store, the one the
  * status bar draws, so the toast and the bar agree about which source fails.
@@ -36,14 +37,15 @@ export function queuedText(what: string, failing: string | null): string {
 
 /**
  * Raise the toast for a write just queued to `source`, in the button's words
- * (`what`, without a closing full stop). `null` for a page that cannot name
- * the source: the toast then says what was queued and nothing about sign-in.
+ * (`what`, without a closing full stop). `null` or `undefined` for a page
+ * that cannot name the source (a detail read before it carried one): the
+ * toast then says what was queued and nothing about sign-in.
  */
-export function toastQueued(what: string, source: WriteSource | null, store: Pick<Health, "get"> = health): number {
-  const state = source === null ? undefined : store.get(source.id)?.state;
-  const failing = source !== null && state !== undefined && SIGN_IN_FAILS[state] === true;
+export function toastQueued(what: string, source: WriteSource | null | undefined, store: Pick<Health, "get"> = health): number {
+  const state = source ? store.get(source.id)?.state : undefined;
+  const failing = source && state !== undefined && SIGN_IN_FAILS[state] === true ? source : null;
   return push({
-    text: queuedText(what, failing ? source.display_name || source.id : null),
+    text: queuedText(what, failing === null ? null : failing.display_name || failing.id),
     action: { label: "Show queue", run: openWriteQueue },
   });
 }

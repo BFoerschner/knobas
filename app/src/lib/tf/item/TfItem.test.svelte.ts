@@ -222,7 +222,7 @@ test("pressing a source action opens its dialog and queues one SourceAction agai
 
   expect(writes).toEqual([{ SourceAction: { entity: ID, id: "book_repair", fields: { day: "Tuesday" } } }]);
   expect(document.querySelector(".tf-dialog")).toBeNull();
-  expect(toasts.items.at(-1)?.text).toBe("Queued: book repair on Quay crane 4 inspection. Sends with the next sync.");
+  expect(toasts.items.at(-1)?.text).toBe("Queued: book repair on Quay crane 4 inspection.");
 });
 
 test("an actions block is drawn in place as the same buttons, not named as another role's (#1407)", async () => {

@@ -22,6 +22,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import type { CodeFacts, ViewRow } from "../../ipc/entity";
+  import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -29,15 +30,18 @@
   import Marked from "../filter/Marked.svelte";
   import { itemHash } from "../job/job";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { isDeleteQueued, madeNotListed, markDeleted, toastQueued } from "./queued.svelte";
+  import { isDeleteQueued, madeNotListed, markDeleted } from "./queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { branchStanding, compareHash, viewRows, visibleBranches, type BranchRow, type BranchStanding } from "./repo";
 
   let {
     ports,
+    source = null,
     repoId,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "codeFacts">;
+    /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
+    source?: WriteSource | null;
     repoId: string;
   } = $props();
 
@@ -146,7 +150,7 @@
     try {
       await ports.submitWrite({ DeleteBranch: { entity: row.entityId } });
       markDeleted(repoId, row.name);
-      toastQueued(`delete branch ${row.name}`);
+      toastQueued(`delete branch ${row.name}`, source);
       deleting = null;
     } catch (cause) {
       push({ text: `Could not queue the delete: ${ipcErrorMessage(cause)}`, tone: "err" });

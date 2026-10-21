@@ -36,6 +36,7 @@
     SourceView,
   } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+  import type { WriteSource } from "../../shell/queued-toast";
   import type { OpenJobPorts } from "../job/open-jobs";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
@@ -147,6 +148,8 @@
   const LIMIT = 1000;
 
   let repo = $state<EntityRow | null>(null);
+  /** The repository's source: where its writes go, named in their toasts. */
+  let source = $state<WriteSource | null>(null);
   let failed = $state<string | null>(null);
   /** `null` while the *Branches* section has not answered. */
   let branches = $state<BranchOption[] | null>(null);
@@ -161,6 +164,7 @@
     const id = repoId;
     let live = true;
     repo = null;
+    source = null;
     failed = null;
     branches = null;
     checkout = undefined;
@@ -177,6 +181,7 @@
       (detail) => {
         if (!live) return;
         repo = detail.row;
+        source = detail.source;
         const filter: EntityFilter = {
           sources: [detail.row.source_id],
           kinds: ["pr"],
@@ -376,15 +381,17 @@
           checkoutBranch={checkout?.tree?.status === "read" ? checkout.tree.branch : null}
           {checkout}
           title={repo?.title ?? ""}
+          {source}
         />
       {:else if route.tab === "commits" && route.commit !== null}
         <TfRepoCommit {ports} {repoId} commitId={route.commit} {now} onNewBranch={(from) => (newBranch = { from })} />
       {:else if route.tab === "branches"}
-        <TfRepoBranches {ports} {repoId} />
+        <TfRepoBranches {ports} {repoId} {source} />
       {:else if route.tab === "compare"}
         <TfRepoCompare
           {ports}
           {repoId}
+          {source}
           branches={branches}
           head={route.branch ?? proposed}
           defaultBranch={defaultBranch?.name ?? null}
@@ -402,6 +409,7 @@
   <TfNewBranch
     {repoId}
     repoName={repo?.title ?? repoId}
+    {source}
     branches={(branches ?? []).map((option) => option.name)}
     from={newBranch.from}
     {job}

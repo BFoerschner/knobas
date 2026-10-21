@@ -15,9 +15,9 @@
   import { ipcErrorMessage } from "../ipc";
   import type { ViewAction } from "../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../ipc/sources";
+  import { toastQueued, type WriteSource } from "../shell/queued-toast";
   import { push } from "../shell/toasts.svelte";
   import { actionName, actionPayload, answeredAsDrawn, initialValues, missingFields } from "../detail/view/actions";
-  import { toastQueued } from "./repo/queued.svelte";
   import TfDialog from "./settings/TfDialog.svelte";
 
   let {
@@ -25,6 +25,7 @@
     entityId,
     title,
     what,
+    source = null,
     submitWrite,
     onqueued,
     onclose,
@@ -36,6 +37,8 @@
     title: string;
     /** What the toast says was queued (`close PR #142`, `book repair on Quay crane 4 inspection`). */
     what: string;
+    /** The entity's source: where the write goes, named in its toast when its sign-in fails. */
+    source?: WriteSource | null;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     /** Called once the write is queued, for a page that marks it (the pull request's chip). */
     onqueued?: () => void;
@@ -63,7 +66,7 @@
     busy = true;
     try {
       await submitWrite(payload);
-      toastQueued(what);
+      toastQueued(what, source);
       onqueued?.();
       onclose();
     } catch (cause) {

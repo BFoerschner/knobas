@@ -21,6 +21,8 @@ import type {
 } from "../../ipc/entity";
 import type { WriteOpPayload } from "../../ipc/sources";
 import { createPendingComments, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
+import { health } from "../../shell/health.svelte";
+import { toasts } from "../../shell/toasts.svelte";
 import { forgetPrQueued } from "./queued.svelte";
 import TfPr, { type PrPorts } from "./TfPr.svelte";
 
@@ -207,6 +209,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  health.replace([]);
   if (view) unmount(view);
   view = null;
   target.remove();
@@ -427,6 +430,8 @@ test("Conversation: each entry's who, when and verdict, then a comment queued an
   expect(writes).toEqual([{ Comment: { entity: PR, body: "Thanks, looks good." } }]);
   expect(messages()[2]).toBe("MA Youqueued Thanks, looks good.");
   expect(box.value).toBe("");
+  expect(toasts.items.at(-1)!.text).toBe("Queued: comment on PR #142.");
+  expect(toasts.items.at(-1)!.action?.label).toBe("Show queue");
 });
 
 test("a source that offers no comment draws no comment box", async () => {
@@ -662,4 +667,14 @@ test("a merge commit sends no message, and a pull request linked to no ticket dr
   dialogButton("Merge").click();
   await settle();
   expect(writes).toEqual([{ MergePullRequest: { entity: PR, style: "merge", delete_branch: true } }]);
+});
+
+test("a merge while the pull request's source fails its sign-in says it waits there", async () => {
+  health.patch({ source_id: "gitea", state: "unauthorized", checked_at: null, detail: null, secret_expires_at: null });
+  await draw([PR], ports({ getEntity: async () => linked(), pr: prView([COMMENT, EDIT, mergeAction(null)]) }));
+  button("Merge…")!.click();
+  flushSync();
+  dialogButton("Merge").click();
+  await settle();
+  expect(toasts.items.at(-1)!.text).toBe("Queued: merge PR #142. Gitea sign-in is failing, so it waits there.");
 });

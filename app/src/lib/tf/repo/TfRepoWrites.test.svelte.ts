@@ -12,6 +12,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { EntityDetail, EntityRow, SourceView, ViewAction, ViewBlock, ViewRow } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import { forgetQueued } from "./queued.svelte";
@@ -162,6 +163,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  health.replace([]);
   if (view) unmount(view);
   view = null;
   target.remove();
@@ -171,7 +173,12 @@ afterEach(() => {
 function ports(over: Partial<RepoPorts> = {}): RepoPorts {
   return {
     getEntity: async (id) => {
-      if (id === REPO) return { row: row(REPO, "repo", "tidewater/payout-service"), author: null } as unknown as EntityDetail;
+      if (id === REPO)
+        return {
+          row: row(REPO, "repo", "tidewater/payout-service"),
+          source: { id: "gitea", display_name: "Gitea" },
+          author: null,
+        } as unknown as EntityDetail;
       if (id === "gitea:PAY-231")
         return {
           row: row(id, "ticket", "Retry failed SEPA payouts"),
@@ -344,7 +351,19 @@ test("Delete… on a branch with unmerged commits warns what is lost, the open P
   expect(dialog()).toBeNull();
   expect(text(rowOf("feature/").querySelector(".tf-chip.tf-warn"))).toBe("delete queued");
   expect(button("Delete…", rowOf("feature/"))).toBeUndefined();
-  expect(toasts.items.at(-1)!.text).toBe("Queued: delete branch feature/PAY-231-sepa-retry. Sends with the next sync.");
+  expect(toasts.items.at(-1)!.text).toBe("Queued: delete branch feature/PAY-231-sepa-retry.");
+});
+
+test("Delete… while the repository's source fails its sign-in says the delete waits there", async () => {
+  health.patch({ source_id: "gitea", state: "missing_secret", checked_at: null, detail: null, secret_expires_at: null });
+  await draw([REPO, "branches"]);
+  button("Delete…", rowOf("feature/"))!.click();
+  flushSync();
+  button("Delete branch", dialog()!)!.click();
+  await settle();
+  expect(toasts.items.at(-1)!.text).toBe(
+    "Queued: delete branch feature/PAY-231-sepa-retry. Gitea sign-in is failing, so it waits there.",
+  );
 });
 
 test("Delete… on a merged branch says nothing is lost", async () => {
@@ -381,7 +400,7 @@ test("New branch… is prefilled from the job, offers every branch to start from
   expect(writes).toEqual([{ CreateBranch: { entity: REPO, name: "feature/PAY-231-backoff", from_ref: "main" } }]);
   // Drawn queued at once, until the listing holds it.
   expect(text(rowOf("feature/PAY-231-backoff"))).toContain("queued");
-  expect(toasts.items.at(-1)!.text).toBe("Queued: create branch feature/PAY-231-backoff in tidewater/payout-service. Sends with the next sync.");
+  expect(toasts.items.at(-1)!.text).toBe("Queued: create branch feature/PAY-231-backoff in tidewater/payout-service.");
 });
 
 test("New branch… offers Link to <job>, ticked, and asks for the branch to be linked to the job's ticket (#984)", async () => {
@@ -483,7 +502,7 @@ test("the compare page proposes Into and From, the change and its commits, and q
     { CreatePullRequest: { entity: REPO, title: "Instant SEPA spike", body: "", head: "spike/sepa-instant", base: "main" } },
   ]);
   expect(location.hash).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/prs");
-  expect(toasts.items.at(-1)!.text).toBe("Queued: open PR Instant SEPA spike. Sends with the next sync.");
+  expect(toasts.items.at(-1)!.text).toBe("Queued: open PR Instant SEPA spike.");
 });
 
 test("From changes the address; a branch holding a key proposes its ticket's title and description", async () => {
@@ -599,7 +618,7 @@ test("the commit dialog shows the diff and a message with the job key, and queue
     },
   ]);
   expect(location.hash).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/files/README.md");
-  expect(toasts.items.at(-1)!.text).toBe("Queued: commit README.md to main. Sends with the next sync.");
+  expect(toasts.items.at(-1)!.text).toBe("Queued: commit README.md to main.");
   unmount(view!);
   view = null;
 
@@ -635,7 +654,7 @@ test("a commit to a new branch names it and goes on to the compare page", async 
     },
   ]);
   expect(location.hash).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/compare/fix%2FPAY-231-readme-line");
-  expect(toasts.items.at(-1)!.text).toBe("Queued: commit README.md to fix/PAY-231-readme-line, then open a PR. Sends with the next sync.");
+  expect(toasts.items.at(-1)!.text).toBe("Queued: commit README.md to fix/PAY-231-readme-line, then open a PR.");
 });
 
 test("the commit dialog warns when the checkout is on the branch the commit goes to", async () => {
