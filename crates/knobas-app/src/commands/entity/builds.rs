@@ -229,7 +229,14 @@ fn run_of_item(
     item: &knobas_source::SyncItem,
 ) -> Option<RunRow> {
     use knobas_core::payload::{
-        Frame, resolve_list, resolve_state, resolve_string, resolve_trigger,
+        Frame, PayloadPath, at, resolve_list, resolve_state, resolve_string, resolve_trigger,
+    };
+    // A count as `declared_integer!` reads one in the mirror: the first
+    // candidate that lands on a JSON integer.
+    let count = |paths: &[PayloadPath]| {
+        paths
+            .iter()
+            .find_map(|path| at(&item.payload, path)?.as_i64())
     };
     let paths = declarations.get(&item.entity.namespace, &item.kind)?;
     if paths.frame != Some(Frame::Run) {
@@ -250,6 +257,9 @@ fn run_of_item(
             started_by: resolve_string(payload, &paths.started_by),
             agent: resolve_string(payload, &paths.agent),
             current_step: resolve_string(payload, &paths.current_step),
+            tests_failed: count(&paths.tests_failed),
+            tests_passed: count(&paths.tests_passed),
+            tests_ignored: count(&paths.tests_ignored),
             revision: resolve_list(payload, &paths.revision).into_iter().next(),
         },
         identity,

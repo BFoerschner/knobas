@@ -10161,3 +10161,81 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   `reveal-item-in-dir` stays ungranted, as the capability file's description asks.
 - **No §10.8 entry and no sign-off.** The capability file is not a frozen surface and no command
   was added.
+
+## #1447: Change… on a fixed list is a select (Opus implementer, 2026-10-21)
+
+**The fork:** *Change…* on a parameter whose spec is a fixed list draws a select of the list, or keeps prototype-6's free text prompt.
+
+**Ruling:** a select, the Run… dialog's own control. Its options are what `fieldsOf` gives the dialog, so a default the list does not offer comes first and the pipeline's current value can stay. A text or secret parameter keeps its input. The Kind column reads `RunField.kindWord`, a new field `fieldsOf` fills: *one of a, b* from the spec's own values (an unlisted default is not named there), *password* for a secret, *text* otherwise. *, inherited* is still appended to a parameter that is not a secret, as it was before.
+
+**Reasoning:** the ticket recommends the select. It is the only option that stops a mistyped value from being queued as a `SetParameter` write. The kind word goes on `fieldsOf` rather than a copy in the tab, as the brief asks, and the dialog never reads it.
+
+**Cost of reversing:** low. A text prompt again is one `{#if}` arm in `TfPipeline.svelte`.
+
+## #1448: a run's test summary is declared, and a version bump backfills it (Opus implementer, 2026-10-21)
+
+**The fork:** declare the test counts on the run kind, which reverses the #961/#947 "not declared" ruling, or strike the test summary from R-9.6 and ADR-0022.
+
+**Ruling:** declare them. This reverses #961/#947 (its §10.8 entry now carries an amendment saying so). ADR-0022 is in force and lists the summary among a run's declared fields; R-9.6 and prototype-6 both draw it; #848 deferred it only because of fixture cost. `KindPaths` gains `tests_failed`, `tests_passed` and `tests_ignored`, and `RunRow` gains one `tests: Option<TestSummary>`. The name `RunTests` already belongs to `run_tests`' answer (#855).
+
+**Further picks inside the ruling:**
+
+- *Backfill, not migration.* TeamCity's cursor goes to version 2. A stored version-1 position reads as unknown, so the next run is a full sync, and the engine does not sweep it because it holds a position. A migration could only have cleared the position, which makes the run a sweeping first sync, or rewritten the same version number in SQL on a single-writer surface. A build older than `builds_per_config` keeps no counts until a later read answers it.
+- *mockd serves what the seeded server serves.* That is `failed: 1, passed: 0, ignored: 0` on 1187 and nothing on any other build (deviation 19), because the seeded step reports one test. ADR-0013 and the crate header freeze mockd ("not a deviation"), but the ticket asks for mockd's dataset to carry the counts, and without a known `testOccurrences` key `BUILD_FIELDS` is an `UnknownField` 400 on every mockd test. Deviation 18 (#1004, merge-manager ruling) is the precedent. The fixture log's `41 passed` is story text that neither server counts. The fake IPC carries prototype-6's 41/42.
+- *Row copy.* Prototype-6's `tests-mini`: *N failed, M passed* with the failed part in err tone, and the failed part left out at zero (*42 passed*). *, K ignored* shows above zero, as the ticket asks.
+- *`rest::TestCounts` stays as it is.* The mirrored counts are read through declared paths on the raw payload, as `agent` is, and nothing would read a wider `TestCounts`. The Tests tab keeps reading its failed count from the build view.
+- *Battery.* An absent count is evidence only beside another count that reads. Asked for by name, TeamCity serves all three counts, zeros included, and no `testOccurrences` on a build that ran no tests (measured on teamcity.jetbrains.com 2026.2.1).
+
+**Reasoning:** each pick matches what the real server serves and what the frozen shapes already do (`current_step`'s excuse, the cursor's own "bump when the meaning changes" rule).
+
+**Cost of reversing:** medium. Striking the summary means removing three `KindPaths` fields, one `RunRow` field and a table cell, with a §10.8 entry. Leaving the cursor at version 2 costs nothing.
+
+### Reserved for Björn, ruled by implementer on Opus: sign-off before merge (#1448)
+
+**The step:** the ticket's last criterion asks for "Björn's sign-off before merge" on the frozen-surface change.
+
+**Ruling:** signed off, on this evidence: the §10.8 entry matches the diff (three `KindPaths` fields, one `RunRow` field, the cursor version, mockd deviation 19, and no migration, command or module); the adapter, battery, app and component tests are green. On the PR's live runs, `just teamcity-live` passed 12 of 12. In `just teamcity-live-seeded`, 1187 read 1/0/0 and the battery passed on the seeded server; its 5 failures come from the fixture break filed as #1560 (stray configurations on the seeded server) and touch nothing this PR changed. Confirmed by the merge-manager on Opus (below).
+
+## #1447, #1448: merge review of #1558 (Opus merge-manager, 2026-10-21)
+
+### Reserved for Björn, ruled by merge-manager on Opus: sign-off before merge (#1448), confirmed
+
+**The step:** the implementer ruled the sign-off and left it to the merge-manager to confirm.
+
+**Ruling:** confirmed. The deep pass found the frozen surface as the §10.8 entry describes it, with one gap now closed (next ruling). A stored version-1 TeamCity position parses as unknown, so the adapter is handed `Some(cursor)` and still runs a full sync over each configuration's window; `knobas-sync` sweeps only a cursor-less, non-backfill run (`CursorSource::may_sweep` plus the cursor-less check in `run_locked`), so the upgrade run tombstones nothing. The battery's excuse is per record and only where none of the three counts reads, the same shape as `current_step`'s. `RunRow` and `KindPaths` are regenerated, not hand-edited. The seeded live run's five failures are all exact-set or configuration-limit failures from #1560; the two tests this PR changes passed there.
+
+**Cost of reversing:** low before release; the cursor bump is the only part that cannot be taken back without another bump.
+
+### The §10.8 entry names `generated/sources.ts`
+
+**The fork:** the entry listed `KindPaths`' three fields but not that they reach the IPC through `SourceDescriptor.payload_paths`, which the regenerated `app/src/lib/ipc/generated/sources.ts` shows.
+
+**Ruling:** one sentence added to `docs/contract/10.8/1448-run-test-summary.md`, so the entry matches the diff.
+
+**Cost of reversing:** none.
+
+### #961/#947's "not declared" reversal stands
+
+**Ruling:** upheld. The ticket delegated exactly this fork and recommended declaring; ADR-0022 lists the test summary among a run's declared fields, and #848 deferred it on fixture cost only. The #961/#947 entry carries the amendment.
+
+### mockd deviation 19 stands
+
+**Ruling:** upheld against ADR-0013's freeze. Without a `testOccurrences` key mockd answers `BUILD_FIELDS` with an `UnknownField` 400 and every mockd test breaks; it serves only what the seeded server serves (1187 `1/0/0`, nothing elsewhere), which the seeded live run printed. Deviation 18 (#1004) is the same case.
+
+**Cost of reversing:** low, but only together with dropping the field from `BUILD_FIELDS`.
+
+### The backfill reaches the window, not every mirrored build
+
+**The fork:** the ticket asks for counts on "every build the mirror holds"; the version bump re-reads each configuration's `builds_per_config` window.
+
+**Ruling:** accepted. A mirrored build older than the window draws no summary until a later read answers it, and `older_pipeline_runs`, which reads the source live, has the counts. Re-reading every mirrored build by id would cost a request per old build on every TeamCity source at upgrade, for rows that new builds push out of view.
+
+**Cost of reversing:** medium: a one-off by-id walk over the mirror's builds.
+
+### *, inherited* after a fixed list's kind word: kept, follow-up #1564
+
+**The fork:** an inherited select reads *one of staging, prod-dryrun, inherited*, which looks like a third value.
+
+**Ruling:** kept for this PR, because the ticket says *inherited* "stays drawn as it is today"; #1564 (`backlog`) carries the wording, since no fixture has an inherited select.
+
+**Cost of reversing:** low, one template line.

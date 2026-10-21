@@ -193,7 +193,18 @@ function runRow(config: string, no: number, st: Latest["st"], branch: string, st
     web_url: queued ? null : `https://ci.tidewater.example/buildConfiguration/${config}/${no}`,
     ...startOf(config, no),
     ...ranOn(config, no, st),
+    tests: testsOf(config, st),
   };
+}
+
+/**
+ * A fixture run's test summary (#1448): prototype-6's, where a configuration
+ * named for its tests ran 42, one of them failing on a failed run. Every
+ * other configuration, and a run not yet finished, ran none.
+ */
+function testsOf(config: string, st: Latest["st"]): RunRow["tests"] {
+  if (!config.includes("Test") || (st !== "success" && st !== "failed")) return null;
+  return st === "failed" ? { failed: 1, passed: 41, ignored: 0 } : { failed: 0, passed: 42, ignored: 0 };
 }
 
 /**

@@ -70,6 +70,22 @@ pub struct RunRow {
     /// What it is doing now, in the source's words: the declared
     /// `current_step` (#1004). Only a run in flight has one.
     pub current_step: Option<String>,
+    /// Its test summary (#1448, R-9.6): the declared `tests_failed`,
+    /// `tests_passed` and `tests_ignored`. `None` for a run that ran no
+    /// tests, which declares none of the three.
+    pub tests: Option<TestSummary>,
+}
+
+/// A run's test summary (#1448): how many tests failed, passed and were
+/// ignored. A count the run's record leaves out while another reads is
+/// zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct TestSummary {
+    pub failed: i64,
+    pub passed: i64,
+    pub ignored: i64,
 }
 
 /// One pipeline in the Builds list (R-9.4a, #848).
@@ -155,7 +171,13 @@ macro_rules! run_columns {
             crate::declared_string!("$1", "agent"),
             " as agent, ",
             crate::declared_string!("$1", "current_step"),
-            " as current_step, (select l.value from ",
+            " as current_step, ",
+            crate::declared_integer!("$1", "tests_failed"),
+            " as tests_failed, ",
+            crate::declared_integer!("$1", "tests_passed"),
+            " as tests_passed, ",
+            crate::declared_integer!("$1", "tests_ignored"),
+            " as tests_ignored, (select l.value from ",
             crate::declared_list!("$1", "revision"),
             " l limit 1) as revision"
         )
@@ -219,6 +241,8 @@ select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path
                    'updated_at', r.item_updated_at, 'web_url', r.web_url,
                    'trigger', r.trig, 'started_by', r.started_by,
                    'agent', r.agent, 'current_step', r.current_step,
+                   'tests_failed', r.tests_failed, 'tests_passed', r.tests_passed,
+                   'tests_ignored', r.tests_ignored,
                    'revision', r.revision) order by r.rn)
                    from r
                   where r.source_id = p.source_id and r.pkey = p.pkey and r.rn <= $2),
@@ -277,6 +301,9 @@ pub struct RawRun {
     pub started_by: Option<String>,
     pub agent: Option<String>,
     pub current_step: Option<String>,
+    pub tests_failed: Option<i64>,
+    pub tests_passed: Option<i64>,
+    pub tests_ignored: Option<i64>,
     pub revision: Option<String>,
 }
 
@@ -299,6 +326,14 @@ impl RunRow {
             commit_id: None,
             agent: raw.agent,
             current_step: raw.current_step,
+            tests: (raw.tests_failed.is_some()
+                || raw.tests_passed.is_some()
+                || raw.tests_ignored.is_some())
+            .then(|| TestSummary {
+                failed: raw.tests_failed.unwrap_or(0),
+                passed: raw.tests_passed.unwrap_or(0),
+                ignored: raw.tests_ignored.unwrap_or(0),
+            }),
             entity_id: raw.entity_id,
             number: raw.number,
             state: raw.state,
@@ -444,6 +479,9 @@ pub async fn pipeline_runs(
                         started_by: row.get("started_by"),
                         agent: row.get("agent"),
                         current_step: row.get("current_step"),
+                        tests_failed: row.get("tests_failed"),
+                        tests_passed: row.get("tests_passed"),
+                        tests_ignored: row.get("tests_ignored"),
                         revision: row.get("revision"),
                     },
                     identity,

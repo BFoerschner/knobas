@@ -490,6 +490,25 @@ agent: Array<PayloadPath>,
  */
 current_step: Array<PayloadPath>, 
 /**
+ * How many of a run's tests failed (#1448, R-9.6): a whole JSON number,
+ * TeamCity's `testOccurrences.failed`. With
+ * [`tests_passed`](Self::tests_passed) and
+ * [`tests_ignored`](Self::tests_ignored) it is the run's test summary
+ * (*1 failed, 41 passed*). A run that ran no tests misses all three;
+ * TeamCity then serves no `testOccurrences` at all.
+ */
+tests_failed: Array<PayloadPath>, 
+/**
+ * How many of a run's tests passed (#1448): TeamCity's
+ * `testOccurrences.passed`. Read as [`tests_failed`](Self::tests_failed).
+ */
+tests_passed: Array<PayloadPath>, 
+/**
+ * How many of a run's tests were ignored (#1448): TeamCity's
+ * `testOccurrences.ignored`. Read as [`tests_failed`](Self::tests_failed).
+ */
+tests_ignored: Array<PayloadPath>, 
+/**
  * The language a repository is written in, in the source's own word
  * (#966, R-8.1): Gitea's `language`, which it works out from the
  * default branch's files. Gitea writes `""` for a repository it found

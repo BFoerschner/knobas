@@ -1464,7 +1464,7 @@ mod tests {
         assert!(keys.contains(&"build:412".to_owned()));
         // 1188 is still running: the watermark must stay below it, or 1188
         // would be unreachable by `sinceBuild` once it finishes.
-        assert_eq!(cursor, r#"{"v":1,"since_build_id":1187}"#);
+        assert_eq!(cursor, r#"{"v":2,"since_build_id":1187}"#);
         // The whole request budget of a full sync, in order: the ceiling,
         // then ONE in-flight poll -- no repeated `state` dimension, and
         // nothing outside the locator grammar -- and only then the
@@ -1539,6 +1539,39 @@ mod tests {
         assert_eq!(walking.readings, vec![(0, Some(0), "builds".to_owned())]);
     }
 
+    /// The backfill for the test counts (#1448): a position written before
+    /// `BUILD_FIELDS` named `testOccurrences` reads as unknown, so the next
+    /// run is a full sync and hands every build in the window back with its
+    /// counts. An incremental run would not: `sinceBuild` re-reads only
+    /// what finished since, and a widened `fields=` changes nothing upstream.
+    #[tokio::test]
+    async fn a_position_from_before_the_test_counts_is_read_again_from_the_top() {
+        let mut tested = build(412, "Ledger_Deploy_Staging", "Ledger", "finished");
+        tested["testOccurrences"] = serde_json::json!({ "failed": 1, "passed": 41, "ignored": 2 });
+        let rest = FakeRest::new(
+            vec![build_type("Ledger_Deploy_Staging", "Ledger")],
+            vec![tested],
+        );
+        let cfg = TeamCityConfig::default();
+        let (items, cursor) = run(
+            &rest,
+            &cfg,
+            Some(r#"{"v":1,"since_build_id":412}"#.to_owned()),
+        )
+        .await;
+        let build = items
+            .iter()
+            .find(|i| i.entity.key == "build:412")
+            .expect("the build the old position had already passed is emitted again");
+        assert_eq!(
+            build.payload["testOccurrences"],
+            serde_json::json!({ "failed": 1, "passed": 41, "ignored": 2 })
+        );
+        assert_eq!(cursor, r#"{"v":2,"since_build_id":412}"#);
+        let (again, _) = run(&rest, &cfg, Some(cursor)).await;
+        assert!(again.is_empty(), "the new position is incremental again");
+    }
+
     /// Contract battery clause 2, at the level where it is decided.
     #[tokio::test]
     async fn an_idle_incremental_run_emits_nothing_and_returns_the_same_cursor() {
@@ -1548,7 +1581,7 @@ mod tests {
         );
         let cfg = TeamCityConfig::default();
         let (_, first) = run(&rest, &cfg, None).await;
-        assert_eq!(first, r#"{"v":1,"since_build_id":412}"#);
+        assert_eq!(first, r#"{"v":2,"since_build_id":412}"#);
         let (items, second) = run(&rest, &cfg, Some(first.clone())).await;
         assert!(items.is_empty());
         assert_eq!(second, first, "byte-identical, not merely equivalent");
@@ -1607,7 +1640,7 @@ mod tests {
             ["buildType:Ledger_Deploy_Staging", "build:500"],
             "exactly the new build, and its configuration"
         );
-        assert_eq!(second, r#"{"v":1,"since_build_id":500}"#);
+        assert_eq!(second, r#"{"v":2,"since_build_id":500}"#);
     }
 
     /// The reason the watermark is clamped: ids are handed out when a build is
@@ -1624,7 +1657,7 @@ mod tests {
         );
         let cfg = TeamCityConfig::default();
         let (_, first) = run(&rest, &cfg, None).await;
-        assert_eq!(first, r#"{"v":1,"since_build_id":1149}"#);
+        assert_eq!(first, r#"{"v":2,"since_build_id":1149}"#);
 
         let rest = FakeRest::new(
             vec![build_type("Payout_Build", "Payout")],
@@ -1638,7 +1671,7 @@ mod tests {
             keys(&items).contains(&"build:1150".to_owned()),
             "the late finisher"
         );
-        assert_eq!(second, r#"{"v":1,"since_build_id":1200}"#);
+        assert_eq!(second, r#"{"v":2,"since_build_id":1200}"#);
     }
 
     #[tokio::test]
@@ -1799,7 +1832,7 @@ mod tests {
         let (items, first) = run(&rest, &cfg, None).await;
         assert_eq!(keys(&items), ["buildType:Payout_Build", "build:200"]);
         assert_eq!(
-            first, r#"{"v":1,"since_build_id":200}"#,
+            first, r#"{"v":2,"since_build_id":200}"#,
             "a foreign running build must not clamp the watermark"
         );
 
@@ -1823,7 +1856,7 @@ mod tests {
         let (items, second) = run(&rest, &cfg, Some(first)).await;
         assert_eq!(keys(&items), ["buildType:Payout_Build", "build:300"]);
         assert_eq!(
-            second, r#"{"v":1,"since_build_id":400}"#,
+            second, r#"{"v":2,"since_build_id":400}"#,
             "400 is foreign and finished: the run saw it and will never want it again, so \
              leaving the watermark at 300 would re-fetch it on every poll for good"
         );
@@ -1843,7 +1876,7 @@ mod tests {
         let cfg = TeamCityConfig::from_json(&serde_json::json!({ "project_ids": ["Payout"] }))
             .expect("config");
         let (_, cursor) = run(&rest, &cfg, None).await;
-        assert_eq!(cursor, r#"{"v":1,"since_build_id":99}"#);
+        assert_eq!(cursor, r#"{"v":2,"since_build_id":99}"#);
     }
 
     /// A configuration two builds share is emitted once, not twice.
@@ -1916,7 +1949,7 @@ mod tests {
             TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
-            Some(r#"{"v":1,"since_build_id":0}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":0}"#.to_owned()),
             &mut sink,
         )
         .await
@@ -1959,11 +1992,11 @@ mod tests {
         let (items, cursor) = run(
             &rest,
             &TeamCityConfig::default(),
-            Some(r#"{"v":1,"since_build_id":0}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":0}"#.to_owned()),
         )
         .await;
         assert_eq!(items.len(), 1_001, "1000 builds and their configuration");
-        assert_eq!(cursor, r#"{"v":1,"since_build_id":1000}"#);
+        assert_eq!(cursor, r#"{"v":2,"since_build_id":1000}"#);
     }
 
     /// The widening walks past a full page rather than stopping at it, which
@@ -1977,7 +2010,7 @@ mod tests {
         let (items, cursor) = run(
             &rest,
             &TeamCityConfig::default(),
-            Some(r#"{"v":1,"since_build_id":0}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":0}"#.to_owned()),
         )
         .await;
         assert_eq!(
@@ -1985,7 +2018,7 @@ mod tests {
             250,
             "every build, not the first page of them"
         );
-        assert_eq!(cursor, r#"{"v":1,"since_build_id":250}"#);
+        assert_eq!(cursor, r#"{"v":2,"since_build_id":250}"#);
     }
 
     /// One incremental run from build 0 against a server that serves at most
@@ -2004,7 +2037,7 @@ mod tests {
             TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
-            Some(r#"{"v":1,"since_build_id":0}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":0}"#.to_owned()),
             &mut sink,
         )
         .await
@@ -2158,7 +2191,7 @@ mod tests {
         let (items, cursor) = run(
             &rest,
             &TeamCityConfig::default(),
-            Some(r#"{"v":1,"since_build_id":0}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":0}"#.to_owned()),
         )
         .await;
         assert_eq!(
@@ -2167,7 +2200,7 @@ mod tests {
             "every build: a page of 100 out of 250 is full, and full is not the end whatever \
              the server did or did not say about a next page"
         );
-        assert_eq!(cursor, r#"{"v":1,"since_build_id":250}"#);
+        assert_eq!(cursor, r#"{"v":2,"since_build_id":250}"#);
     }
 
     /// The one walk with no `count:` to widen: `/app/rest/buildTypes` is asked
@@ -2233,7 +2266,7 @@ mod tests {
 
         let (_, cursor) = run(&rest, &TeamCityConfig::default(), None).await;
         assert_eq!(
-            cursor, r#"{"v":1,"since_build_id":0}"#,
+            cursor, r#"{"v":2,"since_build_id":0}"#,
             "build 1 is still running, so the watermark must sit below it -- a poll truncated at \
              100 would see only ids 51..150 and settle at 50"
         );
@@ -2413,7 +2446,7 @@ mod tests {
             TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
-            Some(r#"{"v":1,"since_build_id":400}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":400}"#.to_owned()),
             &mut sink,
         )
         .await
@@ -2456,7 +2489,7 @@ mod tests {
             TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
-            Some(r#"{"v":1,"since_build_id":400}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":400}"#.to_owned()),
             &mut sink,
         )
         .await
@@ -2473,7 +2506,7 @@ mod tests {
             "the two queries both saw build 500; it is one item, not two: {keys:?}"
         );
         assert_eq!(
-            cursor, r#"{"v":1,"since_build_id":600}"#,
+            cursor, r#"{"v":2,"since_build_id":600}"#,
             "500 was emitted, so the watermark is free to pass it"
         );
     }
@@ -2520,7 +2553,7 @@ mod tests {
         let cfg = TeamCityConfig::default();
         let (_, first) = run(&rest, &cfg, None).await;
         assert_eq!(
-            first, r#"{"v":1,"since_build_id":6520204}"#,
+            first, r#"{"v":2,"since_build_id":6520204}"#,
             "the ceiling is the highest id the page witnessed, not the id that happened to be \
              printed first"
         );
@@ -2546,7 +2579,7 @@ mod tests {
             ["buildType:Payout_Build", "build:6520300"],
             "the run carries on and emits the new build rather than refusing"
         );
-        assert_eq!(second, r#"{"v":1,"since_build_id":6520300}"#);
+        assert_eq!(second, r#"{"v":2,"since_build_id":6520300}"#);
     }
 
     /// The ordering guard is deleted, and this is the case it used to refuse.
@@ -2568,7 +2601,7 @@ mod tests {
     async fn an_oldest_first_server_syncs_rather_than_being_refused() {
         let cfg = TeamCityConfig::default();
         let (newest_first, expected_cursor) = run(&tidewater(), &cfg, None).await;
-        assert_eq!(expected_cursor, r#"{"v":1,"since_build_id":1187}"#);
+        assert_eq!(expected_cursor, r#"{"v":2,"since_build_id":1187}"#);
 
         let rest = tidewater().ascending();
         let (items, cursor) = run(&rest, &cfg, None).await;
@@ -2640,7 +2673,7 @@ mod tests {
         );
         let (items, cursor) = run(&rest, &TeamCityConfig::default(), None).await;
         assert_eq!(keys(&items), ["buildType:Payout_Build", "build:412"]);
-        assert_eq!(cursor, r#"{"v":1,"since_build_id":412}"#);
+        assert_eq!(cursor, r#"{"v":2,"since_build_id":412}"#);
     }
 
     /// A server whose opening pages cannot reach the top of its own id space.
@@ -2681,7 +2714,7 @@ mod tests {
             TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
-            Some(r#"{"v":1,"since_build_id":5000}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":5000}"#.to_owned()),
             &mut sink,
         )
         .await
@@ -2724,7 +2757,7 @@ mod tests {
     #[tokio::test]
     async fn a_watermark_the_pages_did_not_show_is_confirmed_by_id_and_the_run_proceeds() {
         let rest = a_page_that_cannot_reach_the_top(Some(5_000));
-        let cursor_in = r#"{"v":1,"since_build_id":5000}"#.to_owned();
+        let cursor_in = r#"{"v":2,"since_build_id":5000}"#.to_owned();
         let (items, cursor) = run(&rest, &TeamCityConfig::default(), Some(cursor_in.clone())).await;
         assert!(items.is_empty(), "nothing has finished since build 5000");
         assert_eq!(
@@ -2796,13 +2829,13 @@ mod tests {
             TEST_BASE_URL,
             &TeamCityConfig::default(),
             &rest,
-            Some(r#"{"v":1,"since_build_id":900}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":900}"#.to_owned()),
             &mut sink,
         )
         .await
         .expect("run");
         assert_eq!(
-            cursor, r#"{"v":1,"since_build_id":1000}"#,
+            cursor, r#"{"v":2,"since_build_id":1000}"#,
             "1000 was the newest build in existence when the run opened; 1100 was queued after \
              the poll and is still running, so the watermark may not pass 1000 or `sinceBuild` \
              will never offer 1100 again"
@@ -2851,7 +2884,7 @@ mod tests {
             TEST_BASE_URL,
             &cfg,
             &rest,
-            Some(r#"{"v":1,"since_build_id":900}"#.to_owned()),
+            Some(r#"{"v":2,"since_build_id":900}"#.to_owned()),
             &mut sink,
         )
         .await
@@ -2862,7 +2895,7 @@ mod tests {
             "1100 is foreign and is not emitted"
         );
         assert_eq!(
-            cursor, r#"{"v":1,"since_build_id":1100}"#,
+            cursor, r#"{"v":2,"since_build_id":1100}"#,
             "1100 existed when the run opened, so the ceiling is 1100 and the foreign build it \
              saw finish is free to move the watermark"
         );
@@ -2899,7 +2932,7 @@ mod tests {
         );
         let (_, cursor) = run(&rest, &TeamCityConfig::default(), None).await;
         assert_eq!(
-            cursor, r#"{"v":1,"since_build_id":1100}"#,
+            cursor, r#"{"v":2,"since_build_id":1100}"#,
             "1100 is canceled and the default filter hides it; a probe that took the default \
              would witness 1000 and pin the watermark there"
         );
@@ -2941,7 +2974,7 @@ mod tests {
             .expect("the running build is mirrored before anyone knows how it ends");
         assert!(running.body_text.contains("running"), "{running:?}");
         assert_eq!(
-            cursor, r#"{"v":1,"since_build_id":400}"#,
+            cursor, r#"{"v":2,"since_build_id":400}"#,
             "the watermark is clamped under the running build"
         );
 
@@ -2975,7 +3008,7 @@ mod tests {
             healed.body_text
         );
         assert_eq!(
-            cursor, r#"{"v":1,"since_build_id":500}"#,
+            cursor, r#"{"v":2,"since_build_id":500}"#,
             "and nothing holds the watermark back any more"
         );
     }
@@ -3075,7 +3108,7 @@ mod tests {
             ],
             "every finished build in the configuration, whichever way it ended"
         );
-        assert_eq!(cursor, r#"{"v":1,"since_build_id":402}"#);
+        assert_eq!(cursor, r#"{"v":2,"since_build_id":402}"#);
         assert!(
             items
                 .iter()
@@ -3117,7 +3150,7 @@ mod tests {
             ],
             "a finished build on a feature branch is mirrored like one on the default branch"
         );
-        assert_eq!(cursor, r#"{"v":1,"since_build_id":1187}"#);
+        assert_eq!(cursor, r#"{"v":2,"since_build_id":1187}"#);
         assert!(
             rest.calls()
                 .iter()
@@ -3140,7 +3173,7 @@ mod tests {
             vec![build(400, "Payout_IntegrationTests", "Payout", "finished")],
         );
         let (_, cursor) = run(&before, &cfg, None).await;
-        assert_eq!(cursor, r#"{"v":1,"since_build_id":400}"#);
+        assert_eq!(cursor, r#"{"v":2,"since_build_id":400}"#);
 
         let after = FakeRest::new(
             vec![build_type("Payout_IntegrationTests", "Payout")],
@@ -3155,7 +3188,7 @@ mod tests {
             ["buildType:Payout_IntegrationTests", "build:401"],
             "the feature-branch build that finished since the last run"
         );
-        assert_eq!(moved, r#"{"v":1,"since_build_id":401}"#);
+        assert_eq!(moved, r#"{"v":2,"since_build_id":401}"#);
         assert!(
             after
                 .calls()
@@ -3187,7 +3220,7 @@ mod tests {
             ["buildType:Payout_Build", "build:400", "build:1188"]
         );
         assert_eq!(
-            cursor, r#"{"v":1,"since_build_id":400}"#,
+            cursor, r#"{"v":2,"since_build_id":400}"#,
             "the running build holds the watermark below itself"
         );
         let poll = rest
@@ -3234,7 +3267,7 @@ mod tests {
             "neither personal build reaches the mirror, finished or running"
         );
         assert_eq!(
-            cursor, r#"{"v":1,"since_build_id":400}"#,
+            cursor, r#"{"v":2,"since_build_id":400}"#,
             "and nothing about a build that is not in the mirror moves the watermark: 700 \
              finished, and the run neither emitted it nor counted it"
         );

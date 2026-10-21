@@ -12,9 +12,11 @@
     result, each a link to its run with its facts as the tip; *Passed*,
     *Usual duration*, *Last passing*.
   - **Tabs**: *Runs* (the filter bar, runs by day, each with result, branch
-    and the job's chip, duration bar, start, *Log* and *Run again…*; older
+    and the job's chip, how it started, its test summary (*1 failed, 41
+    passed*, #1448), duration bar, start, *Log* and *Run again…*; older
     runs asked of the source when the end scrolls into view), *Parameters*
-    (each default with *Change…* through the write queue), *Triggers*.
+    (each default with the kind its spec gives and *Change…* through the
+    write queue, a select for a fixed list), *Triggers*.
 
   *Run…* and *Run again…* open the Run… dialog (#852, `TfRunDialog`). *Pin* writes through the list's pins (#849, `onpin`). A run started here shows as
   *queued* at once, never as started (R-9.8).
@@ -35,7 +37,7 @@
   import { duration, runHash, runTone, shortTime } from "./builds";
   import { chainSentence } from "./chain";
   import { BRIDGE, type PipelinePorts } from "./pipeline-ports";
-  import type { RunRequest } from "./run-dialog";
+  import { fieldsOf, type RunRequest } from "./run-dialog";
   import TfRunDialog from "./TfRunDialog.svelte";
   import {
     BAR_STEP,
@@ -248,6 +250,7 @@
           commit_id: null,
           agent: null,
           current_step: null,
+          tests: null,
         },
         ...started,
       ];
@@ -328,7 +331,16 @@
 
   let editing = $state<string | null>(null);
   let draft = $state("");
+  /** Each parameter's field as the Run… dialog asks it (#1447): its kind and, for a fixed list, the options. */
+  const fields = $derived(new Map(fieldsOf(settings).map((field) => [field.name, field])));
   let queuedValues = $state<Record<string, string>>({});
+
+  /** Escape leaves the edit, and goes no further (the page's own Escape goes back). */
+  function cancelOnEscape(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    editing = null;
+  }
 
   function change(setting: Setting) {
     editing = setting.name;
@@ -472,6 +484,10 @@
                   >{/if}</td
               >
               <td class="tf-dim tf-run-trig"><Marked text={triggerLabel(run)} typed={filter.text} /></td>
+              <td class="tf-nowrap tf-run-tests"
+                >{#if run.tests !== null}{#if run.tests.failed > 0}<span class="tf-tests-failed">{run.tests.failed} failed</span>,{" "}{/if}{run.tests
+                    .passed} passed{#if run.tests.ignored > 0}, {run.tests.ignored} ignored{/if}{/if}</td
+              >
               <td class="tf-nowrap tf-num tf-run-dur">
                 {#if run.duration_seconds !== null}
                   <svg class="tf-durbar" width={DURBAR_WIDTH} height="4" aria-hidden="true"
@@ -528,20 +544,28 @@
         <thead><tr><th>Parameter</th><th>Default</th><th>Kind</th><th></th></tr></thead>
         <tbody>
           {#each settings.parameters as setting (setting.name)}
+            {@const field = fields.get(setting.name)}
             <tr>
               <td class="tf-mono">{setting.name}</td>
               <td class="tf-mono">
-                {#if editing === setting.name}
+                {#if editing === setting.name && field?.kind.type === "select"}
+                  <select
+                    aria-label={`New default for ${setting.name}`}
+                    bind:value={draft}
+                    onkeydown={cancelOnEscape}
+                  >
+                    {#each field.kind.options as option (option.value)}
+                      <option value={option.value}>{option.label ?? option.value}</option>
+                    {/each}
+                  </select>
+                {:else if editing === setting.name}
                   <input
                     type={setting.secret ? "password" : "text"}
                     aria-label={`New default for ${setting.name}`}
                     bind:value={draft}
                     onkeydown={(event) => {
                       if (event.key === "Enter") void save(setting);
-                      if (event.key === "Escape") {
-                        event.stopPropagation();
-                        editing = null;
-                      }
+                      cancelOnEscape(event);
                     }}
                   />
                 {:else if setting.secret}
@@ -551,7 +575,7 @@
                 {/if}
                 {#if setting.name in queuedValues}<span class="tf-chip tf-info">queued</span>{/if}
               </td>
-              <td class="tf-dim">{setting.secret ? "password" : setting.inherited ? "text, inherited" : "text"}</td>
+              <td class="tf-dim">{field?.kindWord ?? "text"}{!setting.secret && setting.inherited ? ", inherited" : ""}</td>
               <td class="tf-nowrap">
                 {#if editing === setting.name}
                   <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => void save(setting)}>Save</button>

@@ -33,6 +33,7 @@ function run(no: number | null, tone: "ok" | "err" | "run" | "q"): RunRow {
     commit_id: null,
     agent: null,
     current_step: null,
+    tests: null,
   };
 }
 

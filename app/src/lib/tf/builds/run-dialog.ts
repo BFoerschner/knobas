@@ -18,6 +18,12 @@ export interface RunField {
   /** What empty means, or another word from the source about the value. */
   hint: string | null;
   kind: FieldKind;
+  /**
+   * The kind in words, as the pipeline's Parameters tab names it (#1447,
+   * R-9.6): *one of a, b* for a fixed list (the spec's own values, without
+   * an unlisted default), *password* for a secret, else *text*.
+   */
+  kindWord: string;
   /** The value every run starts from; empty for a secret. */
   default: string;
   /** A password: drawn as one, never prefilled, sent only when typed. */
@@ -55,6 +61,11 @@ export function fieldsOf(settings: PipelineSettings | null): RunField[] {
         ],
       };
     }
+    const kindWord = parameter.secret
+      ? "password"
+      : kind.type === "select"
+        ? `one of ${kind.options.map((option) => option.value).join(", ")}`
+        : "text";
     // A default the list does not offer (a value set before the spec was) is
     // offered first, so the field can hold what the pipeline holds.
     if (kind.type === "select" && !kind.options.some((option) => option.value === fallback)) {
@@ -65,6 +76,7 @@ export function fieldsOf(settings: PipelineSettings | null): RunField[] {
       label: spec?.label ?? null,
       hint: spec?.hint ?? parameter.description,
       kind,
+      kindWord,
       default: fallback,
       secret: parameter.secret,
     };

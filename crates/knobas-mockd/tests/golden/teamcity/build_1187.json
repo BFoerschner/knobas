@@ -26,6 +26,11 @@
   "state": "finished",
   "status": "FAILURE",
   "statusText": "test sepa::retry::gives_up_after_max_attempts ... FAILED",
+  "testOccurrences": {
+    "failed": 1,
+    "ignored": 0,
+    "passed": 0
+  },
   "triggered": {
     "date": "20260822T101000+0000",
     "type": "vcs"

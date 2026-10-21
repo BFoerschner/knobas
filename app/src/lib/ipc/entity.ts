@@ -239,6 +239,7 @@ export type {
   TableCell,
   TestOutcome,
   TestStatus,
+  TestSummary,
   Thread,
   ThreadChange,
   ThreadComment,

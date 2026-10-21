@@ -3011,7 +3011,13 @@ agent: string | null,
  * What it is doing now, in the source's words: the declared
  * `current_step` (#1004). Only a run in flight has one.
  */
-current_step: string | null, };
+current_step: string | null, 
+/**
+ * Its test summary (#1448, R-9.6): the declared `tests_failed`,
+ * `tests_passed` and `tests_ignored`. `None` for a run that ran no
+ * tests, which declares none of the three.
+ */
+tests: TestSummary | null, };
 
 /**
  * One test of a run.
@@ -3380,6 +3386,13 @@ run: string, number: string | null, branch: string | null, status: TestStatus, }
  * How a test came out.
  */
 export type TestStatus = "failed" | "passed" | "ignored";
+
+/**
+ * A run's test summary (#1448): how many tests failed, passed and were
+ * ignored. A count the run's record leaves out while another reads is
+ * zero.
+ */
+export type TestSummary = { failed: number, passed: number, ignored: number, };
 
 /**
  * A ticket's thread, oldest first.

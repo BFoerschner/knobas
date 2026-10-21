@@ -96,6 +96,10 @@ pub(crate) const PROJECT_FIELDS: &str = "count,nextHref,project(id,name,parentPr
 /// **`agent(name)`** (#1004): the declared `agent`, the machine the build ran
 /// on, by name and nothing else. `running-info(currentStageText)` was already
 /// here and is now also the declared `current_step`.
+///
+/// **`testOccurrences(failed,passed,ignored)`** (#1448): the declared test
+/// counts, the summary a run row draws. Named, not left to TeamCity's
+/// default, so a zero is served as `0` rather than left out.
 pub(crate) const BUILD_FIELDS: &str = concat!(
     "count,nextHref,build(id,number,buildTypeId,state,status,statusText,branchName,",
     "queuedDate,startDate,finishDate,",
@@ -103,6 +107,7 @@ pub(crate) const BUILD_FIELDS: &str = concat!(
     "running-info(percentageComplete,currentStageText),",
     "triggered(type,user(username)),",
     "agent(name),",
+    "testOccurrences(failed,passed,ignored),",
     "revisions(revision(version)))"
 );
 
@@ -1129,6 +1134,8 @@ mod tests {
             // The declared `agent` and `current_step` (#1004).
             "agent(name)",
             "running-info(percentageComplete,currentStageText)",
+            // The declared test counts (#1448).
+            "testOccurrences(failed,passed,ignored)",
             // The declared `revision` (#710): without it every build's
             // revision is a miss, and no commit's detail draws a build.
             "revisions(revision(version))",

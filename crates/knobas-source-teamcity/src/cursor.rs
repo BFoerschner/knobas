@@ -1,4 +1,5 @@
-//! The incremental position: `{"v":1,"since_build_id":N}` (interfaces §4.2).
+//! The incremental position: `{"v":2,"since_build_id":N}` (interfaces §4.2;
+//! version 2 since #1448).
 //!
 //! Opaque to everything outside this crate, versioned so a later shape change
 //! is detectable, and byte-stable so an idle run can hand back exactly what it
@@ -6,7 +7,14 @@
 
 /// Bump when the envelope's meaning changes; every stored cursor then reads as
 /// "unknown" and the next run is a full sync.
-const VERSION: u32 = 1;
+///
+/// **2 since #1448**, the run's test counts. The shape is unchanged. A
+/// version-1 position was written before `BUILD_FIELDS` asked for
+/// `testOccurrences`, so it reads as unknown, and the next run is a full sync
+/// that re-reads each configuration's `builds_per_config` window with the
+/// counts: a backfill (CONTEXT.md). A build older than the window keeps none.
+/// The engine holds a position for that run, so it does not sweep.
+const VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CursorState {
@@ -147,8 +155,8 @@ mod tests {
     /// "exactly" is compared as a string by the contract battery.
     #[test]
     fn the_envelope_is_the_documented_shape() {
-        assert_eq!(render(new(412)), r#"{"v":1,"since_build_id":412}"#);
-        assert_eq!(render(new(0)), r#"{"v":1,"since_build_id":0}"#);
+        assert_eq!(render(new(412)), r#"{"v":2,"since_build_id":412}"#);
+        assert_eq!(render(new(0)), r#"{"v":2,"since_build_id":0}"#);
         assert_eq!(parse(&render(new(412))), Some(new(412)));
     }
 
@@ -157,13 +165,15 @@ mod tests {
     /// everything is the recovery.
     #[test]
     fn an_unknown_cursor_asks_for_a_full_sync() {
-        assert_eq!(parse(r#"{"v":2,"since_build_id":412}"#), None);
+        assert_eq!(parse(r#"{"v":3,"since_build_id":412}"#), None);
+        // Written before the test counts (#1448): read again from the top.
+        assert_eq!(parse(r#"{"v":1,"since_build_id":412}"#), None);
         assert_eq!(parse("tidewater-v1"), None);
         assert_eq!(parse(""), None);
         assert_eq!(parse(r#"{"since_build_id":412}"#), None);
         // Another adapter's envelope: same `v`, different payload.
         assert_eq!(
-            parse(r#"{"v":1,"updated_at":"2026-08-22T10:00:00Z"}"#),
+            parse(r#"{"v":2,"updated_at":"2026-08-22T10:00:00Z"}"#),
             None
         );
     }

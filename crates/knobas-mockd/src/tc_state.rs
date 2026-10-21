@@ -29,6 +29,7 @@
 //! | buildType `description` | `None`: the dataset describes no configuration, and mockd does not invent prose any more than it invents a triggerer. `MockState::describe_build_type` is how a test that needs one gets one. |
 //! | `triggered` | the fixture's `triggered_by` resolved through `fixture().person`: `type: "user"` with that person's `username`/`name`, or `type: "vcs"` and no `user` where the fixture names nobody. |
 //! | `agent` | `name: "knobas-agent"` on every build that is not queued and did not fail to start (crate deviation 18): the test environment's one agent. |
+//! | `testOccurrences` | `failed: 1, passed: 0, ignored: 0` on a failed build whose `log` names a `test <name> ... FAILED` (1187), absent on every other build (crate deviation 19): what the seeded server's step reports. |
 //! | `canceled` / `failedToStart` | `false`: the dataset has no vocabulary for either, and a mock that invented one would put a cancellation into every test that reads the fixture. [`MockState::cancel_build`](crate::state::MockState::cancel_build) and [`MockState::fail_build_to_start`](crate::state::MockState::fail_build_to_start) are how a test gets one. |
 //! | `defaultBranch` | [`is_default_branch`] of the fixture's `branch`: `main` is the default branch of every configuration (the VCS roots `testenv/seed-teamcity-builds.sh` creates say `refs/heads/main`), so 412 is a default-branch build and 1187/1188 on `feature/PAY-231-sepa-retry` are not. What TeamCity's default filter reads (issue #266). |
 
@@ -152,6 +153,12 @@ pub struct TcBuild {
     /// builds unless `branch:default:any` (or `defaultFilter:false`) is on it
     /// -- measured on a TeamCity we own, 2026-09-02 (issue #266).
     pub default_branch: bool,
+    /// How many failed tests the build reports (#1448, crate deviation 19):
+    /// one, on a failed build whose log names a `test <name> ... FAILED`,
+    /// and `None` on a build that reports no tests. What the seeded server's
+    /// step reports (`testenv/seed-teamcity-builds.sh`): the one test the log
+    /// names, and no passed or ignored test.
+    pub failed_tests: Option<u64>,
 }
 
 /// The build configurations the fixture's builds refer to, ascending by id.
@@ -228,6 +235,12 @@ fn transcribe(b: &knobas_source_mock::Build) -> TcBuild {
         canceled: false,
         failed_to_start: false,
         default_branch: is_default_branch(&b.branch),
+        failed_tests: (b.status == "failed"
+            && b.log.as_deref().is_some_and(|log| {
+                log.lines()
+                    .any(|line| line.starts_with("test ") && line.ends_with(" ... FAILED"))
+            }))
+        .then_some(1),
     }
 }
 

@@ -141,6 +141,8 @@
 .tf-runs .tf-run-no a { color: inherit; text-decoration: none; margin-right: 6px; }
 .tf-runs .tf-run-br { font-size: var(--t-xs); }
 .tf-runs .tf-run-trig { font-size: var(--t-sm); }
+.tf-runs .tf-run-tests { font-size: var(--t-sm); }
+.tf-runs .tf-tests-failed { color: var(--err); font-weight: 600; }
 @media (max-width: 900px) {
   .tf-bv { grid-template-columns: 1fr; height: auto; }
   .tf-pl { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 50vh; }

@@ -872,7 +872,8 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         /// The array a list path opens.
         List,
         /// A whole number: an estimate in seconds (#816), a comment count
-        /// (#894), a page's place among its siblings (#953).
+        /// (#894), a page's place among its siblings (#953), a run's test
+        /// counts (#1448).
         Integer,
         /// Any JSON number: a monitor's response time in milliseconds
         /// (#1224), which Uptime Kuma reports with a fraction.
@@ -952,7 +953,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 31] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 34] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -977,6 +978,9 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::STARTED_BY, &paths.started_by, Wanted::Text),
             (field::AGENT, &paths.agent, Wanted::Text),
             (field::CURRENT_STEP, &paths.current_step, Wanted::Text),
+            (field::TESTS_FAILED, &paths.tests_failed, Wanted::Integer),
+            (field::TESTS_PASSED, &paths.tests_passed, Wanted::Integer),
+            (field::TESTS_IGNORED, &paths.tests_ignored, Wanted::Integer),
             (field::LANGUAGE, &paths.language, Wanted::Text),
             (field::OWNER, &paths.owner, Wanted::Text),
             (field::MONITOR_TYPE, &paths.monitor_type, Wanted::Text),
@@ -1049,6 +1053,24 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         // with no build running at all has no evidence either way.
         let in_flight = resolve_string(&item.payload, &paths.started).is_some()
             && resolve_string(&item.payload, &paths.finished).is_none();
+        // A run that ran no tests has no test summary (#1448): TeamCity
+        // serves no `testOccurrences` on such a build, so an absent count is
+        // the source saying nothing, unless one of the run's other counts
+        // reads. Then the summary is there, and a count missing from it is a
+        // misspelled path.
+        let tests = [
+            field::TESTS_FAILED,
+            field::TESTS_PASSED,
+            field::TESTS_IGNORED,
+        ];
+        let ran_tests = [
+            &paths.tests_failed,
+            &paths.tests_passed,
+            &paths.tests_ignored,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|path| at(&item.payload, path).is_some());
         for (name, candidates, wanted) in scalars {
             let seen = evidence.entry((&item.kind, name)).or_default();
             let judged = seen.names_a_missing_key;
@@ -1057,6 +1079,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             }
             if (name == field::STARTED_BY && nobody_started)
                 || (name == field::CURRENT_STEP && !in_flight)
+                || (tests.contains(&name) && !ran_tests)
             {
                 seen.names_a_missing_key = judged;
             }
@@ -1541,6 +1564,16 @@ mod tests {
         /// finished: runs in flight, so the absent key is a misspelled path
         /// (#1004).
         CurrentStepOnRunsInFlight,
+        /// Declares a run's three test counts at keys its records do not
+        /// have (`tests.*`), on records with no test summary at all: runs
+        /// that ran no tests, so the absent keys are the source saying
+        /// nothing (#1448). Conforming.
+        TestCountsOnRunsWithoutTests,
+        /// Declares `tests_failed` where the records have a count and
+        /// `tests_passed` at a key beside it they do not (`pased`): the
+        /// summary is there, so the missing count is a misspelled path
+        /// (#1448).
+        TestCountMissingFromASummary,
         /// Claims the code-host role, emitting only tickets: no `repo` kind
         /// (#1193).
         ClaimsCodeHostWithoutItsKinds,
@@ -1939,6 +1972,17 @@ mod tests {
                             finished: vec![PayloadPath::of(["finished"])],
                             ..good
                         }],
+                        Behavior::TestCountsOnRunsWithoutTests => vec![KindPaths {
+                            tests_failed: vec![PayloadPath::of(["tests", "failed"])],
+                            tests_passed: vec![PayloadPath::of(["tests", "passed"])],
+                            tests_ignored: vec![PayloadPath::of(["tests", "ignored"])],
+                            ..good
+                        }],
+                        Behavior::TestCountMissingFromASummary => vec![KindPaths {
+                            tests_failed: vec![PayloadPath::of(["tests", "failed"])],
+                            tests_passed: vec![PayloadPath::of(["tests", "pased"])],
+                            ..good
+                        }],
                         Behavior::ClaimsTicketSystem
                         | Behavior::ClaimsTicketSystemAndAnswersTheTransitionRead => {
                             vec![ticket_system(true)]
@@ -2088,6 +2132,12 @@ mod tests {
                             }
                             Behavior::ResponseTimeWithAFraction => {
                                 payload["response_time_ms"] = serde_json::json!(13.5);
+                            }
+                            // A run that ran tests (#1448), as TeamCity
+                            // serves its summary: every count, zeros too.
+                            Behavior::TestCountMissingFromASummary => {
+                                payload["tests"] =
+                                    serde_json::json!({ "failed": 1, "passed": 41, "ignored": 0 });
                             }
                             // A finished run, which is doing nothing now.
                             Behavior::CurrentStepOnRunsNotInFlight => {
@@ -2638,6 +2688,26 @@ mod tests {
         rejects(
             Behavior::AgentAtAMissingKey,
             "declares agent of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    /// A run that ran no tests has no summary (#1448): TeamCity serves no
+    /// `testOccurrences` on such a build, so its absence is not judged.
+    #[tokio::test]
+    async fn accepts_test_counts_absent_from_runs_without_tests() {
+        run(Behavior::TestCountsOnRunsWithoutTests)
+            .await
+            .expect("a run that ran no tests has no test summary");
+    }
+
+    /// The excuse is the summary's, not the declaration's (#1448): where one
+    /// count reads, a count missing beside it is a misspelled path.
+    #[tokio::test]
+    async fn rejects_a_test_count_missing_from_a_summary_that_reads() {
+        rejects(
+            Behavior::TestCountMissingFromASummary,
+            "declares tests_passed of kind \"ticket\" at a path no item of that kind resolves",
         )
         .await;
     }

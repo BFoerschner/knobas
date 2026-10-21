@@ -370,7 +370,7 @@ async fn a_scoped_full_sync_lands_under_the_documented_key_forms() {
     }
 
     let state: serde_json::Value = serde_json::from_str(&cursor).expect("the cursor is JSON");
-    assert_eq!(state.get("v").and_then(serde_json::Value::as_u64), Some(1));
+    assert_eq!(state.get("v").and_then(serde_json::Value::as_u64), Some(2));
     let watermark = state
         .get("since_build_id")
         .and_then(serde_json::Value::as_i64)
@@ -416,7 +416,7 @@ async fn a_watermark_at_the_top_of_a_page_does_not_wedge_the_next_run() {
     let mut sink = VecSink(Vec::new());
     let cursor = source
         .sync(
-            Some(format!(r#"{{"v":1,"since_build_id":{watermark}}}"#)),
+            Some(format!(r#"{{"v":2,"since_build_id":{watermark}}}"#)),
             &mut sink,
         )
         .await

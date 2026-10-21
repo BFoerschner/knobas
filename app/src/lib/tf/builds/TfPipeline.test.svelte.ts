@@ -64,6 +64,7 @@ function run(no: number, tone: "ok" | "err", started: string, extra: Partial<Run
     commit_id: null,
     agent: null,
     current_step: null,
+    tests: null,
     ...extra,
   };
 }
@@ -74,8 +75,15 @@ const RUNS: RunRow[] = [
     duration_seconds: 252,
     trigger: "change",
     revision: "a41f2c0e9b8d7c6a",
+    tests: { failed: 1, passed: 41, ignored: 0 },
   }),
-  run(1186, "ok", daysAgo(1, 18), { duration_seconds: 241, trigger: "person", started_by: "mara", started_by_me: true }),
+  run(1186, "ok", daysAgo(1, 18), {
+    duration_seconds: 241,
+    trigger: "person",
+    started_by: "mara",
+    started_by_me: true,
+    tests: { failed: 0, passed: 42, ignored: 2 },
+  }),
   run(1185, "err", daysAgo(1, 17), { branch: "feature/PAY-231-sepa-retry", duration_seconds: 268 }),
   ...Array.from({ length: 31 }, (_, i) => run(1184 - i, "ok", daysAgo(3, 12), { duration_seconds: 200 + i })),
 ];
@@ -291,6 +299,20 @@ test("each run says how it was started; Started by me keeps the reader's; the wo
   expect(rows().map((r) => r.querySelector(".tf-run-no b")?.textContent)).toEqual(["#1187"]);
 });
 
+test("a run's test summary sits between how it started and its duration, the failed count in err tone; a run without tests draws none", async () => {
+  draw();
+  await settle();
+  const rows = [...target.querySelectorAll(".tf-runs tbody tr")];
+  const cell = (row: Element) => row.querySelector(".tf-run-tests");
+  expect(cell(rows[0]!)?.previousElementSibling?.classList.contains("tf-run-trig")).toBe(true);
+  expect(cell(rows[0]!)?.nextElementSibling?.classList.contains("tf-run-dur")).toBe(true);
+  expect(cell(rows[0]!)?.textContent).toBe("1 failed, 41 passed");
+  expect(cell(rows[0]!)?.querySelector(".tf-tests-failed")?.textContent).toBe("1 failed");
+  expect(cell(rows[1]!)?.textContent).toBe("42 passed, 2 ignored");
+  expect(cell(rows[1]!)?.querySelector(".tf-tests-failed")).toBeNull();
+  expect(cell(rows[2]!)?.textContent).toBe("");
+});
+
 test("older runs are asked of the source from the oldest run held, appended, until it answers none", async () => {
   const drawn = draw();
   await settle();
@@ -339,26 +361,74 @@ test("leaving Runs once its runs are drawn neither throws nor stops the page (#1
   expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs");
 });
 
-test("Parameters: each default with its kind; Change… queues the new default against the old one; a secret is never drawn", async () => {
-  const drawn = draw([PIPELINE.entity_id, "params"]);
+/** A select whose default it does not offer, a checkbox, a secret and a plain spec (#1447). */
+const KINDS: PipelineSettings = {
+  ...SETTINGS,
+  parameters: [
+    { name: "env", value: "qa", inherited: false, secret: false, editable: true, description: null },
+    { name: "dry.run", value: "false", inherited: false, secret: false, editable: true, description: null },
+    { name: "deploy.token", value: "", inherited: true, secret: true, editable: true, description: null },
+    { name: "test.filter", value: "", inherited: true, secret: false, editable: true, description: null },
+  ],
+  parameter_specs: [
+    SETTINGS.parameter_specs[0]!,
+    { name: "dry.run", label: null, hint: null, kind: { type: "checkbox", checked: "true", unchecked: "false" } },
+    { name: "test.filter", label: null, hint: null, kind: { type: "text" } },
+  ],
+};
+
+const paramRows = () => [...target.querySelectorAll("table[aria-label='Parameters'] tbody tr")];
+
+test("Parameters: each default with the kind its spec gives; a secret is never drawn", async () => {
+  draw([PIPELINE.entity_id, "params"], "PAY-231", { settings: () => Promise.resolve(KINDS) });
   await settle();
-  const rows = [...target.querySelectorAll("table[aria-label='Parameters'] tbody tr")];
-  expect(rows.map((r) => r.querySelector("td")?.textContent)).toEqual(["env", "deploy.token"]);
-  expect(rows[1]!.textContent).toContain("(hidden)");
+  const rows = paramRows();
+  expect(rows.map((r) => r.querySelector("td")?.textContent)).toEqual(["env", "dry.run", "deploy.token", "test.filter"]);
+  expect(rows.map((r) => r.querySelectorAll("td")[2]?.textContent)).toEqual([
+    "one of staging, prod-dryrun",
+    "one of false, true",
+    "password",
+    "text, inherited",
+  ]);
+  expect(rows[2]!.textContent).toContain("(hidden)");
+});
+
+test("Change… on a fixed list draws a select of it, the unlisted default first; the pick queues against the old default", async () => {
+  const drawn = draw([PIPELINE.entity_id, "params"], "PAY-231", { settings: () => Promise.resolve(KINDS) });
+  await settle();
+  const rows = paramRows();
   rows[0]!.querySelector<HTMLButtonElement>("button")!.click();
   flushSync();
-  const input = target.querySelector<HTMLInputElement>("input[aria-label='New default for env']")!;
-  input.value = "prod-dryrun";
-  input.dispatchEvent(new Event("input", { bubbles: true }));
+  expect(target.querySelector("input[aria-label='New default for env']")).toBeNull();
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='New default for env']")!;
+  expect([...select.options].map((o) => o.value)).toEqual(["qa", "staging", "prod-dryrun"]);
+  expect(select.value).toBe("qa");
+  select.value = "prod-dryrun";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
   button("Save")!.click();
   await settle();
-  expect(drawn.writes).toEqual([
-    { SetParameter: { entity: PIPELINE.entity_id, name: "env", value: "prod-dryrun", base: "staging" } },
-  ]);
+  expect(drawn.writes).toEqual([{ SetParameter: { entity: PIPELINE.entity_id, name: "env", value: "prod-dryrun", base: "qa" } }]);
   expect(rows[0]!.textContent).toContain("prod-dryrun");
   expect(rows[0]!.textContent).toContain("queued");
   expect(toasts.items.at(-1)?.text).toBe(`Queued: set env on ${PIPELINE.name}.`);
   expect(toasts.items.at(-1)?.action?.label).toBe("Show queue");
+});
+
+test("Change… on a text parameter keeps the text input; a secret's is a password", async () => {
+  const drawn = draw([PIPELINE.entity_id, "params"], "PAY-231", { settings: () => Promise.resolve(KINDS) });
+  await settle();
+  paramRows()[3]!.querySelector<HTMLButtonElement>("button")!.click();
+  flushSync();
+  const input = target.querySelector<HTMLInputElement>("input[aria-label='New default for test.filter']")!;
+  expect(input.type).toBe("text");
+  input.value = "sepa::retry";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  button("Save")!.click();
+  await settle();
+  expect(drawn.writes).toEqual([{ SetParameter: { entity: PIPELINE.entity_id, name: "test.filter", value: "sepa::retry", base: "" } }]);
+  paramRows()[2]!.querySelector<HTMLButtonElement>("button")!.click();
+  flushSync();
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='New default for deploy.token']")!.type).toBe("password");
 });
 
 test("Change… while the source's sign-in fails says the new default waits there", async () => {
@@ -367,9 +437,9 @@ test("Change… while the source's sign-in fails says the new default waits ther
   await settle();
   target.querySelector<HTMLButtonElement>("table[aria-label='Parameters'] tbody tr button")!.click();
   flushSync();
-  const input = target.querySelector<HTMLInputElement>("input[aria-label='New default for env']")!;
-  input.value = "prod-dryrun";
-  input.dispatchEvent(new Event("input", { bubbles: true }));
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='New default for env']")!;
+  select.value = "prod-dryrun";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
   button("Save")!.click();
   await settle();
   expect(toasts.items.at(-1)?.text).toBe(

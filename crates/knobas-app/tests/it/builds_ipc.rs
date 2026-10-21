@@ -673,6 +673,7 @@ impl knobas_source::Source for Answers {
                     "state": "finished", "status": "FAILURE", "branchName": "main",
                     "startDate": "20260801T100000+0000", "finishDate": "20260801T100400+0000",
                     "triggered": { "type": "user", "user": { "username": "older-run-starter" } },
+                    "testOccurrences": { "failed": 1, "passed": 41, "ignored": 2 },
                     "revisions": { "revision": [{ "version": "91fe0c2b" }, { "version": "ffff" }] }
                 }),
             ),
@@ -750,6 +751,17 @@ async fn older_runs_are_the_sources_answer_read_through_the_run_declarations() {
         (older[1].trigger, older[1].started_by.as_deref()),
         (None, None)
     );
+    // Its test summary, as a mirrored run reads it (#1448); a run that ran
+    // no tests has none.
+    assert_eq!(
+        failed.tests,
+        Some(knobas_core::builds::TestSummary {
+            failed: 1,
+            passed: 41,
+            ignored: 2
+        })
+    );
+    assert_eq!(older[1].tests, None);
 
     let capped =
         older_pipeline_runs_inner(&pool, &no_secrets(), &Answering, &tests, &oldest, Some(1))
@@ -1043,6 +1055,75 @@ async fn runs_carry_their_agent_what_they_do_now_and_their_mirrored_commit() {
         recent, from_runs,
         "the list reads a run as the pipeline does"
     );
+}
+
+/// **A run's test summary** (#1448, R-9.6): the declared `tests_failed`,
+/// `tests_passed` and `tests_ignored`, on the pipeline's runs and the list's.
+/// A run that ran no tests has no summary; a summary TeamCity served with a
+/// zero reads the zero.
+#[tokio::test]
+async fn runs_carry_their_test_summary_and_a_run_without_tests_none() {
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let tests = configuration(&pool, &tc, "Payout_IntegrationTests", "Integration Tests").await;
+    let run = |id: i64, more: serde_json::Value| {
+        let mut run = serde_json::json!({
+            "id": id, "number": id.to_string(), "buildTypeId": "Payout_IntegrationTests",
+            "state": "finished", "status": "FAILURE", "branchName": "main",
+            "startDate": "20260821T100000+0000", "finishDate": "20260821T100412+0000"
+        });
+        run.as_object_mut()
+            .unwrap()
+            .extend(more.as_object().unwrap().clone());
+        run
+    };
+    for (id, updated, more) in [
+        (
+            1,
+            "2026-08-21T03:00:00Z",
+            serde_json::json!({ "testOccurrences": { "failed": 1, "passed": 41, "ignored": 2 } }),
+        ),
+        (
+            2,
+            "2026-08-21T02:00:00Z",
+            serde_json::json!({ "testOccurrences": { "failed": 0, "passed": 55, "ignored": 0 } }),
+        ),
+        (3, "2026-08-21T01:00:00Z", serde_json::json!({})),
+    ] {
+        item(
+            &pool,
+            &format!("{tc}:build:{id}"),
+            &tc,
+            "build",
+            updated,
+            run(id, more),
+        )
+        .await;
+    }
+    let summary = |failed, passed, ignored| {
+        Some(knobas_core::builds::TestSummary {
+            failed,
+            passed,
+            ignored,
+        })
+    };
+
+    let runs = pipeline_runs_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &tests,
+        None,
+    )
+    .await
+    .unwrap();
+    let seen: Vec<_> = runs.iter().map(|r| r.tests).collect();
+    assert_eq!(seen, [summary(1, 41, 2), summary(0, 55, 0), None]);
+    let listed = pipelines_inner(&pool, &knobas_app::sources::Registry::for_process())
+        .await
+        .unwrap();
+    let row = listed.iter().find(|p| p.entity_id == tests).unwrap();
+    let recent: Vec<_> = row.recent.iter().map(|r| r.tests).collect();
+    assert_eq!(recent, seen, "the list reads a run as the pipeline does");
 }
 
 /// **A sha two mirrored repositories share** (#1144): a fork or a mirror on a
