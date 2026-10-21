@@ -290,9 +290,15 @@ impl Refusal {
                 Prefix::Time => "`t` is not a search.",
                 Prefix::Action => "`>` is not a search.",
                 Prefix::Help => "`?` is not a search.",
-                // `empty_corpus` admits only the three above; a prefix that
-                // joins it is named generically rather than wrongly.
-                _ => "That prefix is not a search.",
+                // `empty_corpus` admits only the three above. Listed rather
+                // than a wildcard, so a prefix added to `Prefix` is a compile
+                // error here and someone decides its sentence.
+                Prefix::Ticket
+                | Prefix::Person
+                | Prefix::Source
+                | Prefix::Note
+                | Prefix::List
+                | Prefix::Asset => "That prefix is not a search.",
             }
             .to_owned(),
             _ => {
@@ -371,7 +377,11 @@ pub fn plan(raw: &str, vocab: &Vocabulary) -> Result<Runnable, Refusal> {
     // where "this prefix names no corpus at all" is decided, and a prefix that
     // leaves it -- as `note:` did with #46 and `asset:` with #436 -- must stop
     // making saved lists need attention on the same commit.
-    if let Some(prefix) = parsed.query.prefix.filter(|p| crate::empty_corpus(Some(*p))) {
+    if let Some(prefix) = parsed
+        .query
+        .prefix
+        .filter(|p| crate::empty_corpus(Some(*p)))
+    {
         return Err(Refusal::NotASearch(prefix));
     }
 

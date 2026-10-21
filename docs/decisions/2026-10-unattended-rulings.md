@@ -9216,8 +9216,8 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   *`t` is not a search.*, but `NotASearch` is also what `> palette` and `?` get from `saved::plan`,
   and they would then be told about a `t` they never typed. *Ruling:* `Refusal::NotASearch` carries
   the prefix it refused, and `Refusal::on_create` names it: *`t` is not a search.*, *`>` is not a
-  search.*, *`?` is not a search.* (*That prefix is not a search.* for a prefix `empty_corpus` may
-  admit later). `Refusal::description()` ignores the field and its text is unchanged. *Reasoning:*
+  search.*, *`?` is not a search.* (*That prefix is not a search.* for the others, listed without a
+  wildcard so a new prefix is a compile error there). `Refusal::description()` ignores the field and its text is unchanged. *Reasoning:*
   the `t` sentence is the one the ticket specifies, and following it literally for `>` and `?` would
   repeat the bug the ticket fixes (a sentence that does not fit the case). The box never offers the
   control on `>` or `?`, so only a direct caller ever sees those two. *Reversing:* drop the field
@@ -9236,7 +9236,7 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   this ticket removes. The test now asserts that the refusal carries neither the heading nor
   "Delete it", and that every refusal is distinct.
 
-## #1418: the board previews the inbox and gives today's time (Opus implementer, 2026-10-21)
+## #1418: the launcher board previews the inbox and gives today's time (Opus implementer, 2026-10-21)
 
 - **Build or strike** (delegated). *Ruling:* build, as recommended. Both reads already exist in the
   shell.
@@ -9254,8 +9254,8 @@ Ruled 2026-10-21 (delegated by Björn at triage).
 - **Rows or pictures.** *Fork:* the criteria say *pressing* opens. The launcher is driven from the
   keyboard. *Ruling:* the inbox lines and the day are rows of the board's one flat list (`rows.ts`
   kinds `inbox` and `today`), after the smart lists and before the recent items, so `↑`/`↓` reach
-  them and `Enter` opens them. Neither has a `Tab` chain. *Reasoning:* a board block the arrows
-  skip is a dead end in a keyboard surface. *Reversing:* drop the two kinds from `flatten` and draw
+  them and `Enter` opens them. Neither has a `Tab` chain. *Reasoning:* a launcher-board block the
+  arrows skip is a dead end in a keyboard surface. *Reversing:* drop the two kinds from `flatten` and draw
   plain buttons.
 - **Where an inbox line goes.** The Inbox page's own opener (`tf/inbox/inbox.ts::opener`), which
   is the item's view, the source's settings for a credential expiry, or Monitors for an alert. A line

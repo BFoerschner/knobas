@@ -127,8 +127,8 @@
     rows.flatMap((row, index) => (row.kind === "today" ? [{ row, today: row.today, index }] : []))[0],
   );
 
-  /** Recent rows start after the lists, the inbox and the day in the flat selectable list. */
-  const recentFrom = $derived(home.smart_lists.length + inboxRows.length + (todayRow ? 1 : 0));
+  /** Where the recent rows start in the flat list; `rows.ts` decides the order. */
+  const recentFrom = $derived(rows.findIndex((row) => row.kind === "recent"));
 
   /**
    * The saved list whose *Delete* has been pressed once.

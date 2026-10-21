@@ -244,9 +244,13 @@ export class Session {
    * two that draw as results and that `saved::create` still refuses: an opened
    * list (`list:`, a list of a list) and a worklog query (`t `), #1413.
    *
-   * **And it is not a second copy of the prefix table** (ruling P2): both the
-   * mode and the prefix are read off the *backend's own interpretation* of the
-   * query, the same field `modeOf` reads for `?` and `>`.
+   * **Ruling P2 holds for the parse, not for the rule.** Both the mode and the
+   * prefix are read off the *backend's own interpretation* of the query (the
+   * same field `modeOf` reads for `?` and `>`), so no prefix is recognised
+   * here. The rule that a list or a worklog query cannot be saved is
+   * `saved::plan`'s, and these two names are the cases of it the box can
+   * reach; a prefix `plan` starts refusing is refused by name until it is
+   * added here.
    */
   get canSave(): boolean {
     const prefix = this.response?.interpreted.prefix;

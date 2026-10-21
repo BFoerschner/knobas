@@ -26,7 +26,6 @@ export interface InboxPreview {
   items: InboxItem[];
 }
 
-/** How many inbox items the board draws (#1418). */
 export const INBOX_PREVIEW = 3;
 
 /** Today's time as the board gives it (#1418): two of the Day view's figures, in whole minutes. */

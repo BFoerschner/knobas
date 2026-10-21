@@ -502,6 +502,11 @@
     document.getElementById(id)?.scrollIntoView?.({ block: "nearest" });
   }
 
+  /** The shell's inbox and today's time, as rows of the board (#1418). */
+  $effect.pre(() => {
+    session.extras = { inbox: inbox ?? null, today: today ?? null };
+  });
+
   /**
    * The `>` palette: navigation plus whatever the shell appended, narrowed by
    * what has been typed after the marker.
@@ -510,11 +515,6 @@
    * already stripped — rather than against the raw box, which still has the
    * marker in it (ruling P2 again: the frontend does not strip grammar).
    */
-  /** The shell's inbox and today's time, as rows of the board (#1418). */
-  $effect.pre(() => {
-    session.extras = { inbox: inbox ?? null, today: today ?? null };
-  });
-
   $effect(() => {
     const typed = session.response?.interpreted.text ?? "";
     session.actions = filterActions([...navigationActions(), ...actions], typed);
