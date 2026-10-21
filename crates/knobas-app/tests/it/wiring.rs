@@ -329,11 +329,6 @@ fn the_stranded_timer_sweep_runs_before_the_database_is_announced_ready() {
     );
 }
 
-/// Rust source with its comments removed, string literals intact.
-///
-/// The file this scans documents the plugin in prose right next to the call,
-/// so a raw-text scan would be satisfied by the documentation rather than by
-/// the code -- which is how a lint stops catching things.
 /// One suggestion pass in the running app (#1485): bring-up builds it once
 /// and hands the same handle to the scheduler (`sources::start`, which
 /// requests a pass after every OK run) and to `AppState` (whose
@@ -371,6 +366,11 @@ fn bring_up_builds_one_suggestion_pass_for_the_scheduler_and_the_app_state() {
     );
 }
 
+/// Rust source with its comments removed, string literals intact.
+///
+/// The file this scans documents the plugin in prose right next to the call,
+/// so a raw-text scan would be satisfied by the documentation rather than by
+/// the code -- which is how a lint stops catching things.
 fn strip_comments(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
     let mut chars = source.chars().peekable();

@@ -273,11 +273,10 @@ async fn requests_that_do_not_wait_coalesce_into_one_more_pass() {
         "ten requests, two passes"
     );
     assert_eq!(pass.passes(), 2);
-    let proposed: i64 = sqlx::query_scalar("select count(*) from knobas.proposed_link")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert!(proposed > 0, "the passes nobody waited for still proposed");
+    assert!(
+        proposed(&pool).await > 0,
+        "the passes nobody waited for still proposed"
+    );
 }
 
 /// A mock source added under `config`, the engine brought up the way the app
@@ -322,19 +321,18 @@ fn sync_through_bring_up(
             let secrets: Arc<dyn knobas_secrets::SecretStore> =
                 Arc::new(knobas_secrets::MemoryStore::new());
             let registry = knobas_app::sources::Registry::default();
-            let input: knobas_app::sources::NewSource =
-                serde_json::from_value(serde_json::json!({
-                    "id": "mock",
-                    "adapter_kind": "mock",
-                    "display_name": "Tidewater",
-                    "base_url": "https://mock.example.invalid",
-                    "auth_kind": "Pat",
-                    "config": config,
-                    "secret": { "value": "a token the mock never sees" },
-                    "sync_interval_secs": 900,
-                    "enabled": true,
-                }))
-                .unwrap();
+            let input: knobas_app::sources::NewSource = serde_json::from_value(serde_json::json!({
+                "id": "mock",
+                "adapter_kind": "mock",
+                "display_name": "Tidewater",
+                "base_url": "https://mock.example.invalid",
+                "auth_kind": "Pat",
+                "config": config,
+                "secret": { "value": "a token the mock never sees" },
+                "sync_interval_secs": 900,
+                "enabled": true,
+            }))
+            .unwrap();
             knobas_app::sources::crud::add(&pool, &secrets, &registry, input)
                 .await
                 .expect("the mock source is added");
@@ -393,8 +391,7 @@ async fn proposed(pool: &PgPool) -> i64 {
 /// scheduler's own.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sync_that_ends_ok_proposes_links_without_anyone_asking() {
-    let (pool, pass, outcome) =
-        sync_through_bring_up("pass_after_sync_ok", serde_json::json!({}));
+    let (pool, pass, outcome) = sync_through_bring_up("pass_after_sync_ok", serde_json::json!({}));
     assert_eq!(outcome, Some(knobas_sync::SyncOutcome::Ok));
     assert!(
         proposed(&pool).await > 0,
@@ -479,5 +476,9 @@ async fn only_the_emit_that_ends_a_run_ok_requests_a_pass() {
     })
     .await
     .expect("a run that ended OK requests a pass");
-    assert_eq!(forwarded.load(Ordering::SeqCst), 5, "every event is passed on");
+    assert_eq!(
+        forwarded.load(Ordering::SeqCst),
+        5,
+        "every event is passed on"
+    );
 }

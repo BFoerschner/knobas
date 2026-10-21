@@ -93,7 +93,8 @@ struct Queue {
 struct Finished {
     answers_through: u64,
     outcome: Result<u64, IpcError>,
-    /// How many passes have finished, failed ones included.
+    /// How many passes have finished, failed ones included; one that
+    /// stopped part-way ([`Stopped`]) is not counted.
     passes: u64,
 }
 
@@ -167,7 +168,7 @@ impl SuggestionPass {
     }
 
     /// How many passes have finished since this pass was made, failed ones
-    /// included.
+    /// included. One that stopped part-way (a panic) is not counted.
     #[must_use]
     pub fn passes(&self) -> u64 {
         self.inner.finished.borrow().passes
