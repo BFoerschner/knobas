@@ -124,6 +124,7 @@ fn descriptor(id: &str, kind: &str, write_ops: &[String]) -> SourceDescriptor {
         roles: Vec::new(),
         source_actions: Vec::new(),
         clone_from: Vec::new(),
+        url_forms: Vec::new(),
         write_ops: write_ops.to_vec(),
         entity_kinds: vec![KindInfo {
             id: "pr".to_owned(),

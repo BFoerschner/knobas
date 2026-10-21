@@ -104,6 +104,7 @@ mod tests {
                     roles: Vec::new(),
                     source_actions: Vec::new(),
                     clone_from: Vec::new(),
+                    url_forms: Vec::new(),
                     write_ops: Vec::new(),
                     entity_kinds: Vec::new(),
                     config_schema: serde_json::json!({}),

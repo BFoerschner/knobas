@@ -50,6 +50,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // refuse it rather than a comment saying they would.
         source_actions: Vec::new(),
         clone_from: Vec::new(),
+        url_forms: Vec::new(),
         write_ops: vec![
             WRITE_OP_COMMENT.to_owned(),
             WRITE_OP_TRANSITION.to_owned(),

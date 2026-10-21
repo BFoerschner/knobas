@@ -287,6 +287,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // base URL a person typed, which is what *Clone* built from before
         // the read existed (ADR-0023).
         clone_from: vec![knobas_source::clone_urls::CloneFrom::BaseUrl],
+        url_forms: Vec::new(),
         // Each kind carries its own `full_sync_exhaustive` -- see
         // `entity_kinds`, which is where the 2026-08-25 budget ruling and
         // ADR-0003 meet.

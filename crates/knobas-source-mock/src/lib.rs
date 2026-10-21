@@ -1171,6 +1171,7 @@ impl Source for MockSource {
             // The demo source has an empty base URL, so this names no address
             // and a clone is built from each repository's own page, as before.
             clone_from: vec![knobas_source::clone_urls::CloneFrom::BaseUrl],
+            url_forms: Vec::new(),
             write_ops: vec!["comment".to_owned()],
             // The UI renders this source's launcher groups and chips from these
             // alone, so every kind `sync` emits is declared here.

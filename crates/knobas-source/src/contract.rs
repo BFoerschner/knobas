@@ -469,6 +469,11 @@ where
     // 11. Source actions (#1194, ADR-0029): declared exactly when
     //     `source_action` is, each id once, and one not declared is refused.
     check_source_actions(&*s, &d).await;
+    // 12. Web-address forms (#1475): each names a declared kind and reads as
+    //     the paste resolver needs it to -- see `url_forms::check`.
+    if let Err(error) = crate::url_forms::check(&d) {
+        panic!("descriptor.url_forms: {error}");
+    }
 }
 
 /// Clause 11: the source actions an adapter declares are the ones it
@@ -1730,6 +1735,7 @@ mod tests {
                     }
                     _ => Vec::new(),
                 },
+                url_forms: Vec::new(),
                 entity_kinds: {
                     let kind = |id: &str, label: &str, monogram: &str| KindInfo {
                         id: id.to_owned(),

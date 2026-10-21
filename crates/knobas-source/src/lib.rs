@@ -34,6 +34,7 @@ pub mod pipeline;
 pub mod query;
 pub mod role;
 pub mod run;
+pub mod url_forms;
 pub mod view;
 
 /// The sync-interval floor an adapter declares unless it says otherwise, and
@@ -209,6 +210,20 @@ pub struct SourceDescriptor {
     /// decodes as an adapter that names no address to clone from.
     #[serde(default)]
     pub clone_from: Vec<clone_urls::CloneFrom>,
+    /// The other forms of address the source serves an item's page under,
+    /// beside the one it reports as [`SyncItem::web_url`] (#1475, spec #491's
+    /// *"a descriptor slot with its own entry"*). The paste resolver reads a
+    /// pasted address as each form and opens the item whose payload holds
+    /// the values it names; it never fetches, and it never knows which
+    /// adapter declared what ([`url_forms`] says how a form reads).
+    /// [`url_forms::check`] holds each to its rules (contract battery clause
+    /// 12).
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// -- an external adapter's JSON among them -- decodes as an adapter
+    /// whose items open by their stored address alone.
+    #[serde(default)]
+    pub url_forms: Vec<url_forms::UrlForm>,
 }
 
 // The declaration types themselves live in `knobas-spi-types`, not here: the
@@ -1916,6 +1931,7 @@ mod tests {
             roles: Vec::new(),
             source_actions: Vec::new(),
             clone_from: Vec::new(),
+            url_forms: Vec::new(),
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -1970,6 +1986,7 @@ mod tests {
             roles: Vec::new(),
             source_actions: Vec::new(),
             clone_from: Vec::new(),
+            url_forms: Vec::new(),
             ..a_descriptor()
         };
         let mut wire = serde_json::to_value(&declared).unwrap();
