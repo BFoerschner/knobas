@@ -11,15 +11,17 @@
   (the default), a text field, or nothing focusable at all.
 -->
 <script lang="ts">
+  import type { Layers } from "../tf/layers.svelte";
   import Modal from "./Modal.svelte";
 
   let {
     onclose,
     content = "button",
-  }: { onclose: () => void; content?: "button" | "input" | "none" } = $props();
+    layers,
+  }: { onclose: () => void; content?: "button" | "input" | "none"; layers?: Layers } = $props();
 </script>
 
-<Modal title="Add source" subtitle="Step 1 of 5" {onclose}>
+<Modal title="Add source" subtitle="Step 1 of 5" {onclose} {layers}>
   {#snippet body()}
     {#if content === "button"}
       <button class="btn">Test connection</button>

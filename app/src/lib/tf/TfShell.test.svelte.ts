@@ -10,6 +10,7 @@ import type { CredentialHealth, RoleClaim, SourceSyncStatus } from "../ipc/sourc
 import type { RunningTimer } from "../ipc/time";
 import { writeQueuePanel, type WriteQueue } from "../shell/write-queue.svelte";
 import { push, toasts } from "../shell/toasts.svelte";
+import Modal from "../shell/Modal.fixture.svelte";
 import { createBadges } from "./badges.svelte";
 import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
@@ -616,6 +617,47 @@ test("a dialog opened over the write queue panel closes first on Esc, then the p
     expect(layers.open).toEqual([]);
     expect(location.hash).toBe("#/job/PAY-231");
   });
+});
+
+/**
+ * A rooms-UI `Modal` under this shell (the asset tree's dialogs, #1527) is a
+ * layer like a `TfDialog`: with focus outside it, the window's `Esc` closes it
+ * and the page stays, and history does not move while it is up (#1086).
+ */
+test("Esc on the window closes a Modal and leaves the page; history waits for it (#1527)", async () => {
+  const nav = { back: vi.fn(), forward: vi.fn() };
+  const layers = createLayers();
+  start({ nav, layers });
+  await at("#/job/PAY-231");
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  let modal: ReturnType<typeof mount> | null = null;
+  const onclose = vi.fn(() => {
+    if (modal !== null) unmount(modal);
+    modal = null;
+  });
+  try {
+    modal = mount(Modal, { target: host, props: { onclose, layers } });
+    flushSync();
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    press("[", { metaKey: true });
+    window.dispatchEvent(new MouseEvent("mouseup", { button: 3, bubbles: true, cancelable: true }));
+    expect(nav.back, "history stays put under the dialog").not.toHaveBeenCalled();
+
+    press("Escape");
+    await settle();
+    expect(onclose).toHaveBeenCalledOnce();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(layers.open).toEqual([]);
+    expect(location.hash).toBe("#/job/PAY-231");
+
+    press("[", { metaKey: true });
+    expect(nav.back, "and moves again once it is gone").toHaveBeenCalledOnce();
+  } finally {
+    if (modal !== null) unmount(modal);
+    host.remove();
+  }
 });
 
 /**
