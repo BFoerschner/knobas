@@ -36,7 +36,7 @@
 
 <script lang="ts">
   import { ipcErrorMessage, isIpcError } from "../../ipc";
-  import { repoOfRow, underRepoHash } from "../repo/repo";
+  import { repoOfRow, underRepoHash, type UnderRepoKind } from "../repo/repo";
 
   let {
     head,
@@ -44,14 +44,14 @@
     ready,
     ports = BRIDGE,
   }: {
-    head: "branch" | "commit";
+    head: UnderRepoKind;
     id: string;
     ready: boolean;
     ports?: CodeRowPorts;
   } = $props();
 
   /** Nothing yet (or on its way), no such entity, one under no repository the mirror holds, or a failed read. */
-  let read = $state<{ missing: true } | { homeless: string } | { failed: string } | null>(null);
+  let read = $state<{ missing: true } | { unplaced: string } | { failed: string } | null>(null);
 
   $effect(() => {
     if (!ready) return;
@@ -84,7 +84,7 @@
               ).rows;
         if (!live) return;
         const repo = repoOfRow(row, repos);
-        if (repo === null) read = { homeless: row.title };
+        if (repo === null) read = { unplaced: row.title };
         else ports.replace(underRepoHash(kind, row.entity_id, repo.entity_id));
       } catch (cause) {
         if (live) read = isIpcError(cause) && cause.code === "not_found" ? { missing: true } : { failed: ipcErrorMessage(cause) };
@@ -107,7 +107,7 @@
   <div class="tf-empty"><p class="tf-cfail">Could not read {id}: {read.failed}</p></div>
 {:else}
   <div class="tf-empty">
-    <p>{read.homeless} is not under a repository in the mirror.</p>
+    <p>{read.unplaced} is not under a repository in the mirror.</p>
     <a class="tf-btn" href="#/code">Go to Code</a>
   </div>
 {/if}

@@ -4,10 +4,11 @@
  * them. Under the shell's breadcrumb, lighting Code, while it reads.
  */
 import { definePage } from "../page-entry";
+import type { UnderRepoKind } from "../repo/repo";
 import type { TfRoute } from "../route";
 import TfCodeRow from "./TfCodeRow.svelte";
 
-type CodeRowRoute = Extract<TfRoute, { view: "full" }> & { section: "code"; head: "branch" | "commit" };
+type CodeRowRoute = Extract<TfRoute, { view: "full" }> & { section: "code"; head: UnderRepoKind };
 
 export const page = definePage({
   matches: (route): route is CodeRowRoute =>

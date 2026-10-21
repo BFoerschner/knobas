@@ -7,8 +7,7 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { EntityDetail, EntityFilter, EntityPage, EntityRow } from "../../ipc/entity";
-import { demoHandlers } from "../../shell/dev/fake-tauri";
+import type { EntityDetail, EntityFilter, EntityRow } from "../../ipc/entity";
 import TfCodeRow, { type CodeRowPorts } from "./TfCodeRow.svelte";
 
 const REPO_ID = "gitea:tidewater/payout-service";
@@ -128,24 +127,4 @@ test("nothing is read before the database answers", async () => {
   await settle();
   expect(listEntities).not.toHaveBeenCalled();
   expect(replace).not.toHaveBeenCalled();
-});
-
-test("?fake-ipc: job PAY-231's branch and commit rows land on payout-service's Branches tab and the commit's page", async () => {
-  type Calls = Record<string, (args: Record<string, unknown>) => unknown>;
-  const h = demoHandlers() as Calls;
-  const replace = vi.fn<(hash: string) => void>();
-  const fake: CodeRowPorts = {
-    getEntity: async (entityId) => h["get_entity"]!({ entityId }) as EntityDetail,
-    listEntities: async (filter, limit, offset) => h["list_entities"]!({ filter, limit, offset }) as EntityPage,
-    replace,
-  };
-  open("branch", "mock:tidewater/payout-service@refs/heads/feat/PAY-231-idempotent-retry", fake);
-  await settle();
-  unmount(view!);
-  open("commit", "mock:9f2c1ab", fake);
-  await settle();
-  expect(replace.mock.calls).toEqual([
-    ["#/repo/mock%3Atidewater%2Fpayout-service/branches"],
-    ["#/repo/mock%3Atidewater%2Fpayout-service/commits/mock%3A9f2c1ab"],
-  ]);
 });

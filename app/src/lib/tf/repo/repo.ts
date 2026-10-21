@@ -129,12 +129,15 @@ export function repoOfRow(row: Pick<EntityRow, "source_id" | "path">, repos: rea
   return repos.find((repo) => repo.kind === "repo" && repo.source_id === row.source_id && repo.title === row.path) ?? null;
 }
 
+/** The two kinds whose addresses send the reader to their repository page (#1440). */
+export type UnderRepoKind = "branch" | "commit";
+
 /**
  * Where a branch or commit opens under its repository (#1440): a branch the
  * Branches tab (R-8.1, "a job's branch rows open that tab"), a commit its own
  * page under Commits (R-8.7).
  */
-export function underRepoHash(kind: "branch" | "commit", entityId: string, repoId: string): string {
+export function underRepoHash(kind: UnderRepoKind, entityId: string, repoId: string): string {
   return kind === "branch" ? repoHash(repoId, "branches") : commitHash(repoId, entityId);
 }
 
