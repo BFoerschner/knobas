@@ -8856,9 +8856,10 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   source page already uses. *Reversing:* low.
 - **The run dialog's banner too.** "starts once you re-enter the password" was the same fixed
   string on the Pipeline and Run pages' dialog, in reach of the same stale line, so its prop
-  carries the noun (`reenter`, replacing the `signInFailing` boolean). *Reversing:* one prop.
-- **One helper over `secretWord`.** `reenterWords(auth)` writes *Re-enter password* / *Re-enter
-  token* from `secretWord`, so the noun still has one source. `secretWord` takes `undefined` as
+  carries the noun (`secretNoun`, replacing the `signInFailing` boolean). *Reversing:* one prop.
+- **Two helpers over `secretWord`.** `secretNoun(auth)` is its word inside a sentence and
+  `reenterWords(auth)` writes *Re-enter password* / *Re-enter token* from it, so the noun still has
+  one source; the Pipeline and Run links take their words from `staleLine` too. `secretWord` takes `undefined` as
   `null` (Password): a row whose kind is not known (the status bar before the source list
   answers) reads as today. The status module's `SourceReading.failed` becomes `fix`, the link's
   words or `null`. *Reversing:* low.
