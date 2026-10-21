@@ -871,6 +871,7 @@ knobas-app	test/it	registry_reads_ipc::the_detail_reads_its_kind_info_from_the_l
 knobas-app	test/it	registry_reads_ipc::the_entity_list_reads_the_lifecycles_declarations
 knobas-app	test/it	registry_reads_ipc::the_inbox_reads_the_lifecycles_declared_paths
 knobas-app	test/it	registry_reads_ipc::the_post_write_read_takes_the_registry_it_is_given
+knobas-app	test/it	responsiveness_probe::a_refused_gitea_token_names_the_seed
 knobas-app	test/it	responsiveness_probe::fixed_keys::every_fixed_key_exists_at_the_smallest_supported_size
 knobas-app	test/it	responsiveness_probe::fixed_keys::the_default_size_keeps_the_start_work_tickets_it_always_had
 knobas-app	test/it	responsiveness_probe::what_the_reader_waits_on

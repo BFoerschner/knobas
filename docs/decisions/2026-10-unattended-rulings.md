@@ -8756,3 +8756,20 @@ vocabulary half of #1427.
   `tf.css`'s header describes), so the boot screen now reads nothing from that sheet, and the
   sheet's header stops naming it. The two scoped rules restate `.tf .tf-mono` and `.tf
   :focus-visible`, which is the price of not wrapping in `.tf`. *Reversing:* low.
+---
+
+## #1377 — where the Gitea token probe lives
+
+Ruled 2026-10-21 (delegated by Björn at triage).
+
+- **Pick (a): `./seed --env` probes the token on every call.** *Fork:* (a) `--env` probes, or (b) only
+  the recipes that hand the token to a test probe, through a shared helper. *Ruling:* (a), reusing
+  `gitea-token.sh`'s probe (now `gitea_token_status`, which `gitea_seed_token` also calls) through
+  `gitea_token_require`. A non-200 answer, or none, exits `--env` non-zero before it prints a line,
+  naming the token, the status and `./seed`. *Reasoning:* `responsiveness-probe`, `gitea-live` and
+  every other consumer are covered in one place; the cost is one `GET /api/v1/user` per eval. It
+  reverses no earlier ruling; it applies #552 ("the seed owes the red") without re-minting from a print.
+  *Reversing:* low: delete the call in `print_env`, and add the helper to the two recipes.
+- **`eval "$(./seed --env)"` swallows the exit status**, so the `responsiveness-probe` recipe and
+  `live_session` now capture the output first (`seed_env=$(...) || exit 1`) and eval that. *Reversing:* low.
+- **A Gitea that does not answer is refused too** (HTTP 000), as the ticket says "anything but 200".

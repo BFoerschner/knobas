@@ -533,10 +533,35 @@ async fn seed(
                 }),
             })
             .unwrap();
-        knobas_sync::run_once(pool, source.as_ref(), None)
-            .await
-            .unwrap();
+        let synced = knobas_sync::run_once(pool, source.as_ref(), None).await;
+        if let Err(error) = synced {
+            panic!("{}", gitea_sync_failure(&error));
+        }
     }
+}
+
+/// What the seeding sync's failure says. A token the seeded Gitea no longer
+/// accepts is the fixture's refusal, and `./seed` is the remedy (#1377); any
+/// other failure is quoted whole.
+fn gitea_sync_failure(error: &knobas_sync::SyncError) -> String {
+    match error {
+        knobas_sync::SyncError::Source(SourceError::Unauthorized { status }) => format!(
+            "the fixture's Gitea token is refused (HTTP {}): run ./seed from testenv/ \
+             to mint a new one, then retry",
+            status.map_or_else(|| "unknown".to_owned(), |s| s.to_string())
+        ),
+        other => format!("seeding sync of the Gitea fixture failed: {other:?}"),
+    }
+}
+
+#[test]
+fn a_refused_gitea_token_names_the_seed() {
+    let refused = knobas_sync::SyncError::Source(SourceError::Unauthorized { status: Some(401) });
+    let said = gitea_sync_failure(&refused);
+    assert!(said.contains("token is refused"), "{said}");
+    assert!(said.contains("401") && said.contains("./seed"), "{said}");
+    let other = knobas_sync::SyncError::Source(SourceError::Unreachable("down".into()));
+    assert!(!gitea_sync_failure(&other).contains("./seed"));
 }
 
 /// `RP_ANALYZED=0` reads against tables the planner has no statistics for:

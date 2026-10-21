@@ -24,6 +24,8 @@ set -eu
 cd "$(dirname "$0")"
 
 STATE=seed-state.json
+# shellcheck source=testenv/gitea-token.sh
+. ./gitea-token.sh
 KEY_FILE=kuma-api-key
 # The published port docker-compose.yml gives Uptime Kuma, in one place: both
 # printers below hand it to a suite, and two copies is one to forget.
@@ -43,6 +45,8 @@ print_env() {
   # Only a state that holds a Gitea block: a Confluence-only session writes one
   # without it, and `jq -r` would print the literal `null` for each field (#982).
   if [ "$(jq -r 'has("gitea")' "$STATE")" = "true" ]; then
+    # A token the instance refuses is no environment to hand a suite (#1377).
+    gitea_token_require "$(jq -r '.gitea.url' "$STATE")/api/v1" "$(jq -r '.gitea.token' "$STATE")" || exit 1
     echo "export KNOBAS_GITEA_URL=$(jq -r '.gitea.url' "$STATE")"
     echo "export KNOBAS_GITEA_TOKEN=$(jq -r '.gitea.token' "$STATE")"
     echo "export KNOBAS_GITEA_OWNER=$(jq -r '.gitea.org' "$STATE")"

@@ -1302,7 +1302,12 @@ responsiveness-probe:
              "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     }
     # The seeded Gitea's address and token, when there is a seed to read.
-    if [ -r testenv/seed-state.json ]; then eval "$(cd testenv && ./seed --env)"; fi
+    # Captured first: `eval "$(...)"` would swallow a refused token's exit
+    # (#1377), and cargo must not start on a token Gitea answers 401 to.
+    if [ -r testenv/seed-state.json ]; then
+        seed_env=$(cd testenv && ./seed --env) || exit 1
+        eval "$seed_env"
+    fi
     mark before
     status=0
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test it responsiveness_probe \
