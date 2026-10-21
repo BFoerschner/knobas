@@ -27,6 +27,7 @@ function descriptor(adapterKind: string, kinds: SourceDescriptor["entity_kinds"]
     roles: [],
     source_actions: [],
     clone_from: [],
+    url_forms: [],
     write_ops: [],
     payload_paths: [],
     entity_kinds: kinds,

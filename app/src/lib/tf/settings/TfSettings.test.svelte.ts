@@ -116,6 +116,7 @@ function ports(over: Partial<SettingsPorts> = {}): SettingsPorts {
           roles: [],
           source_actions: [],
           clone_from: [],
+          url_forms: [],
           write_ops: [],
           entity_kinds: [ticket],
           config_schema: JIRA_SCHEMA,
@@ -565,6 +566,7 @@ const SURVEYS = {
   },
   payload_paths: [],
   clone_from: [],
+  url_forms: [],
 };
 
 /** What `install_adapter` answers for [`SURVEYS`]'s manifest. */
@@ -964,6 +966,7 @@ function floored(kind: string, name: string, floor: number) {
     roles: [],
     source_actions: [],
     clone_from: [],
+    url_forms: [],
     write_ops: [],
     entity_kinds: [ticket],
     config_schema: { type: "object", properties: {} },

@@ -117,7 +117,8 @@ pub struct UrlMatch {
     pub kind: String,
 }
 
-/// The one statement that reads `sync.item.web_url` (#496).
+/// The one statement that reads `sync.item.web_url` (#496), and the forms
+/// an adapter declares beside it (#1475).
 ///
 /// **`sync.item`, not `sync.live_item`**, and for the two reasons
 /// [`DETAIL`] reaches past that view as well: a withdrawn entity still opens
@@ -129,35 +130,102 @@ pub struct UrlMatch {
 /// answer than *Not in the mirror*, which would send the reader to the
 /// browser to discover the same thing.
 ///
-/// Both sides of the comparison go through `web_url_normalized!` -- the
-/// stored column and the pasted parameter -- so there is exactly one rule and
-/// it cannot be applied to one side only. `crates/knobas-core/src/web_url.rs`
-/// carries the rule and the reasoning; migration `0023` carries the index.
-///
+/// **Two arms, one read.** The first is the stored address: both sides of
+/// the comparison go through `web_url_normalized!` -- the stored column and
+/// the pasted parameter -- so there is exactly one rule and it cannot be
+/// applied to one side only. `crates/knobas-core/src/web_url.rs` carries the
+/// rule and the reasoning; migration `0023` carries the index.
 /// `where i.web_url is not null` is the index's own predicate, repeated so the
-/// planner may use the partial index. `order by i.entity_id limit 1`: nothing
-/// stops two mirrored items reporting one address, and an ambiguous paste
-/// must answer the same entity on every run rather than whichever row the
-/// plan reached first.
+/// planner may use the partial index.
+///
+/// The second is `$2`, the pasted address read as each declared
+/// [`UrlForm`](knobas_source::url_forms::UrlForm) ([`form_readings`]): a base
+/// URL, an adapter kind, an entity kind and the payload values the item must
+/// hold. The base is held to a configured source's `base_url` under the same
+/// rule as the first arm, so a form never needs a second spelling of it; the
+/// values are compared with `#>>` on that source's items of that kind. A
+/// reading with no values is skipped rather than allowed to name every item.
+///
+/// `order by form, entity_id limit 1`: the stored address wins over a form,
+/// and nothing stops two mirrored items reporting one address, so an
+/// ambiguous paste must answer the same entity on every run rather than
+/// whichever row the plan reached first.
+///
+/// `$2` is `[]` for a caller that wants the stored address alone.
 pub const RESOLVE_URL: &str = concat!(
-    "select i.entity_id, i.kind
-       from sync.item i
-      where i.web_url is not null
-        and ",
+    "select found.entity_id, found.kind
+       from (
+         select i.entity_id, i.kind, 0 as form
+           from sync.item i
+          where i.web_url is not null
+            and ",
     knobas_core::web_url_normalized!("i.web_url"),
     " = ",
     knobas_core::web_url_normalized!("$1::text"),
     "
-      order by i.entity_id
+         union all
+         select i.entity_id, i.kind, 1 as form
+           from jsonb_to_recordset($2::jsonb)
+                  as r(adapter_kind text, base text, kind text, fields jsonb)
+           join knobas.source_config s
+             on s.kind = r.adapter_kind
+            and ",
+    knobas_core::web_url_normalized!("s.base_url"),
+    " = ",
+    knobas_core::web_url_normalized!("r.base"),
+    "
+           join sync.item i
+             on i.source_id = s.id
+            and i.kind = r.kind
+          where jsonb_array_length(r.fields) > 0
+            and not exists (
+                  select 1
+                    from jsonb_to_recordset(r.fields) as f(path text[], value text)
+                   where i.payload #>> f.path is distinct from f.value)
+       ) found
+      order by found.form, found.entity_id
       limit 1"
 );
+
+/// `$2` of [`RESOLVE_URL`] for a caller that resolves the stored address
+/// alone.
+pub(crate) fn no_form_readings() -> sqlx::types::Json<serde_json::Value> {
+    sqlx::types::Json(serde_json::Value::Array(Vec::new()))
+}
+
+/// `url` read as every form every adapter declares, as `$2` of
+/// [`RESOLVE_URL`]: no adapter is named here, and no form is applied
+/// anywhere but in that statement.
+pub(crate) fn form_readings(
+    registry: &dyn AdapterRegistry,
+    url: &str,
+) -> sqlx::types::Json<serde_json::Value> {
+    let readings: Vec<serde_json::Value> = registry
+        .descriptors()
+        .iter()
+        .flat_map(|descriptor| {
+            descriptor.url_forms.iter().flat_map(move |form| {
+                form.read(url).into_iter().map(move |reading| {
+                    serde_json::json!({
+                        "adapter_kind": descriptor.adapter_kind,
+                        "base": reading.base,
+                        "kind": reading.kind,
+                        "fields": reading.fields,
+                    })
+                })
+            })
+        })
+        .collect();
+    sqlx::types::Json(serde_json::Value::Array(readings))
+}
 
 /// The entity a URL names, or `None` -- *"a URL in, an entity reference or a
 /// miss out"* (spec #491).
 ///
 /// **Never a fetch from a source** (spec #491 story 16): a
 /// paste while the tunnel is down is a miss and not a hang, so this is one
-/// read on the local mirror and nothing else.
+/// read on the local mirror and nothing else. `registry` is where the
+/// declared forms come from (#1475); it is read in memory.
 ///
 /// # Errors
 ///
@@ -170,7 +238,11 @@ pub const RESOLVE_URL: &str = concat!(
 /// guard rather than a path.
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
-pub async fn resolve_url_inner(pool: &PgPool, url: &str) -> Result<Option<UrlMatch>, IpcError> {
+pub async fn resolve_url_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    url: &str,
+) -> Result<Option<UrlMatch>, IpcError> {
     if !is_web_url(url) {
         return Err(IpcError::invalid(format!(
             "{url:?} is not an http or https URL"
@@ -179,6 +251,7 @@ pub async fn resolve_url_inner(pool: &PgPool, url: &str) -> Result<Option<UrlMat
 
     let row = sqlx::query(RESOLVE_URL)
         .bind(url)
+        .bind(form_readings(registry, url))
         .fetch_optional(pool)
         .await?;
 
@@ -214,7 +287,7 @@ pub async fn resolve_url(
     url: String,
 ) -> Result<Option<UrlMatch>, IpcError> {
     let pool = lifecycle.pool()?;
-    resolve_url_inner(&pool, &url).await
+    resolve_url_inner(&pool, lifecycle.registry(), &url).await
 }
 
 /// The `limit` most recent activity lines, globally or for one entity.
