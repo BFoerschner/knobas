@@ -3,7 +3,7 @@
  * toggle, the badges, the timer chip and the status bar, against a shell
  * mounted with stand-ins for every store and read.
  */
-import { flushSync, mount, tick, unmount } from "svelte";
+import { createRawSnippet, flushSync, mount, tick, unmount, type Snippet } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { CredentialHealth, RoleClaim, SourceSyncStatus } from "../ipc/sources";
@@ -186,6 +186,7 @@ function start(
     listen?: TfShellPorts["listen"];
     counts?: WriteQueue["counts"];
     jobPorts?: JobPorts;
+    dialogs?: Snippet<[SourceSyncStatus[]]>;
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -227,6 +228,7 @@ function start(
       onstarttimer: over.onstarttimer ?? (() => {}),
       jobPorts: over.jobPorts ?? JOB_PORTS,
       nav: over.nav ?? { back: () => {}, forward: () => {} },
+      ...(over.dialogs ? { dialogs: over.dialogs } : {}),
     },
   });
   flushSync();
@@ -977,4 +979,17 @@ test("a window opened on #/standup draws Time", async () => {
   expect(location.hash).toBe("#/time/standup");
   expect(target.textContent).not.toContain("Nothing lives at");
   expect(current()).toContain("Time");
+});
+
+/** The launcher reads its sources' last runs from the shell's own (#1581): the `dialogs` snippet is handed them. */
+test("the dialogs snippet receives the sources' run statuses the shell holds (#1581)", async () => {
+  let runs: () => SourceSyncStatus[] = () => [];
+  const dialogs = createRawSnippet((given: () => SourceSyncStatus[]) => {
+    runs = given;
+    return { render: () => "<i data-runs></i>" };
+  });
+  start({ dialogs });
+  await settle();
+  expect(target.querySelector("[data-runs]")).not.toBeNull();
+  expect(runs().map((row) => `${row.source_id}:${row.last_outcome}`)).toEqual(["jira:ok"]);
 });
