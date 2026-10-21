@@ -10239,3 +10239,14 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 **Ruling:** kept for this PR, because the ticket says *inherited* "stays drawn as it is today"; #1564 (`backlog`) carries the wording, since no fixture has an inherited select.
 
 **Cost of reversing:** low, one template line.
+## #1479: Test connection fills Epic Link and still says not configured (Sonnet implementer, 2026-10-21)
+
+- **Where the sentence is decided** (delegated). *Ruling:* pick (a), the dialog rewords. `fillFound`
+  now returns what it wrote, by key; the add-source dialog keeps that for the last test and
+  `noteAfterFill` (`sources/connection.ts`) turns "‹id› found but not configured: ..." into
+  "‹id› found and set" where ‹id› is a value that click filled. *Reasoning:* the adapter's note was
+  built for a saved source's *Test* (#598, #640) and stays exact there; only the dialog knows it
+  wrote the id. A field already filled leaves nothing in the returned map, so the report's own note
+  shows. The wizard mounts the same `TfAddSource`, so it gets the fix too. The adapter and the
+  report's `discovered` are untouched: no live run owed. *Reversing:* low, one helper and one
+  state variable.

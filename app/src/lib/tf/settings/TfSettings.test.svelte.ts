@@ -853,6 +853,59 @@ test("Test connection tests what is stored and says what it found", async () => 
   expect(target.querySelector(".tf-stg-note")?.textContent).toContain("Found when tested: Connected as mara · 9.12.4 · 214 ms");
 });
 
+const GAP_REPORT = {
+  ok: true,
+  account: "mara",
+  server_version: "9.12.4",
+  secret_expires_at: null,
+  error: null,
+  code: null,
+  elapsed_ms: 214,
+  detail: "Epic Link customfield_10101 found but not configured: epic membership is not mirrored",
+  discovered: { epic_link_field: "customfield_10101" },
+};
+
+async function testInAddDialog(prefillEpic: string | null) {
+  const p = ports({ testSource: vi.fn(() => Promise.resolve(GAP_REPORT)) });
+  await open([], p);
+  button("+ Add a source").click();
+  await settle();
+  dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
+  flushSync();
+  type("#tf-add-address", "https://jira2.tidewater.example");
+  type("#tf-add-secret", "hunter2");
+  if (prefillEpic !== null) type("#tf-add-cfg-epic_link_field", prefillEpic);
+  dialogButton("Test connection").click();
+  await settle();
+  return p;
+}
+
+test("Add a source: a filled Epic Link reads found and set, not found but not configured (#1479)", async () => {
+  await testInAddDialog(null);
+  const text = dialog().querySelector('[role="status"]')!.textContent!;
+  expect(text).toContain("Epic Link customfield_10101 found and set");
+  expect(text).not.toContain("not configured");
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-cfg-epic_link_field")!.value).toBe("customfield_10101");
+  // A second test keeps one id: nothing is written into a field that has one.
+  dialogButton("Test connection").click();
+  await settle();
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-cfg-epic_link_field")!.value).toBe("customfield_10101");
+});
+
+test("Add a source: an Epic Link typed before the test leaves the report's own note (#1479)", async () => {
+  await testInAddDialog("customfield_77");
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-cfg-epic_link_field")!.value).toBe("customfield_77");
+  expect(dialog().querySelector('[role="status"]')!.textContent).toContain("found but not configured");
+});
+
+test("a saved source's Test keeps found but not configured (#1479)", async () => {
+  const p = ports({ testSource: vi.fn(() => Promise.resolve(GAP_REPORT)) });
+  await open(["source", "jira"], p);
+  button("Test connection").click();
+  await settle();
+  expect(target.querySelector(".tf-stg-note")?.textContent).toContain("found but not configured");
+});
+
 test("a source's page shows its runs, and Checkouts draws its own section", async () => {
   await open(["source", "teamcity"]);
   expect(target.querySelector(".tf-tbl tbody td.tf-stg-errt")?.textContent).toBe(

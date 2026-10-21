@@ -30,7 +30,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { AuthMethod, ConnectionReport, SourceDescriptor, SourceSummary } from "../../ipc/sources";
   import { ACCOUNT_INCOMPLETE, accountHalfDone, accountOf } from "../../sources/account";
-  import { connectionLine, connectionNote, failedReport } from "../../sources/connection";
+  import { connectionLine, connectionNote, failedReport, noteAfterFill } from "../../sources/connection";
   import { defaultValues, validate } from "../../sources/schema-form";
   import type { Layers } from "../layers.svelte";
   import type { SettingsPorts } from "./ports";
@@ -63,6 +63,8 @@
   let accountPassword = $state("");
   let configValues = $state<Record<string, unknown>>({});
   let report = $state<ConnectionReport | null>(null);
+  /** What the last passing test wrote into the form, by field key (#1479). */
+  let filled = $state<Record<string, string>>({});
   /** The draft the passing test was of; *Add source* waits for it to match. */
   let tested = $state<string | null>(null);
   let testing = $state(false);
@@ -175,6 +177,7 @@
     if (!chosen || !authKind || !ready) return;
     testing = true;
     report = null;
+    filled = {};
     try {
       report = await ports.testSource({
         source_id: null,
@@ -185,7 +188,7 @@
         secret: { value: secret, account },
       });
       if (report.ok) {
-        fillFound(config.fields, configValues, report.account, report.discovered);
+        filled = fillFound(config.fields, configValues, report.account, report.discovered);
         // Read after the fill: the filled values are part of what was tested.
         tested = draft;
       }
@@ -300,7 +303,7 @@
       </p>
       {#if accountHalf}<p class="tf-dlg-note tf-stg-errt">{ACCOUNT_INCOMPLETE}</p>{/if}
       {#if report !== null}
-        {@const note = connectionNote(report)}
+        {@const note = noteAfterFill(connectionNote(report), filled)}
         <!-- Text: `error` is a line an upstream server wrote. -->
         <p class="tf-dlg-note {report.ok ? '' : 'tf-stg-errt'}" role="status">
           {connectionLine(report)}{note ? `. ${note}` : ""}
