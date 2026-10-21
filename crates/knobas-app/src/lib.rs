@@ -282,6 +282,7 @@ pub fn run() {
             let profile = Profile::from_args(std::env::args(), &handle.path().app_data_dir()?);
             tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
             handle.manage(profile);
+            handle.manage(sources::SecretStoreKind::from_env());
             handle.manage(Lifecycle::new());
             // The desktop notification sender and its waiter registry (#339),
             // over the real backend and the real event bridge. Managed here

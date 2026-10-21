@@ -1020,6 +1020,7 @@ fn app_status_answers_before_the_database_does() {
             vec![knobas_app::DEMO_FLAG.to_owned()],
             std::path::Path::new("/tmp/knobas-test"),
         ));
+        app.manage(knobas_app::sources::SecretStoreKind::Keychain);
     })
     .expect("app_status must answer with no database at all")
     .deserialize::<serde_json::Value>()
@@ -1034,6 +1035,7 @@ fn app_status_answers_before_the_database_does() {
         "the boot screen renders this verbatim"
     );
     assert_eq!(status["demo"], serde_json::json!(true));
+    assert_eq!(status["secrets_in_memory"], serde_json::json!(false));
     // Not "0 sources": nothing has been counted, and claiming a count nobody
     // took is how a first-run wizard fires at somebody's real corpus.
     assert_eq!(status["source_count"], serde_json::json!(0));
@@ -1044,6 +1046,26 @@ fn app_status_answers_before_the_database_does() {
             .is_some_and(|v| !v.is_empty()),
         "the failure screen offers this line to copy: {status}"
     );
+}
+
+/// Under `KNOBAS_SECRET_STORE=memory` a credential lives for the process only,
+/// and `app_status` says so: a source's page must not claim the keychain
+/// holds it (#1585).
+#[test]
+fn app_status_says_when_credentials_live_in_memory() {
+    let status = invoke_managing("app_status", serde_json::json!({}), |app| {
+        app.manage(knobas_app::Lifecycle::new());
+        app.manage(knobas_app::Profile::from_args(
+            Vec::<String>::new(),
+            std::path::Path::new("/tmp/knobas-test"),
+        ));
+        app.manage(knobas_app::sources::SecretStoreKind::Memory);
+    })
+    .expect("app_status answers")
+    .deserialize::<serde_json::Value>()
+    .expect("an AppStatus came back");
+
+    assert_eq!(status["secrets_in_memory"], serde_json::json!(true));
 }
 
 /// `frontend_ready` replays the current state onto `db:state`.
@@ -1364,6 +1386,7 @@ fn a_command_through_the_real_pipeline_is_timed_by_name() {
                 Vec::<String>::new(),
                 std::path::Path::new("/tmp/knobas-test"),
             ));
+            app.manage(knobas_app::sources::SecretStoreKind::Keychain);
         });
     }
     let live = dir.path().join("knobas.log");
