@@ -290,6 +290,64 @@ test("with no clones root, Clone asks where clones go, prefilled ~/code, saves i
   expect(document.querySelector("[role='dialog']")).toBeNull();
 });
 
+async function setAndClone(root = "~/code") {
+  await draw(view(null, null));
+  button("Clone", target).click();
+  await settle();
+  const dialog = document.querySelector("[role='dialog']")!;
+  const field = dialog.querySelector<HTMLInputElement>("#tf-crt")!;
+  field.value = root;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Set and clone", dialog).click();
+  await settle();
+}
+
+test("after Set and clone, Clone after Stop starts again without asking for the root (#1442)", async () => {
+  await setAndClone("/Users/mara/src");
+  expect(calls.clone).toHaveLength(1);
+  emit({ entity_id: REPO, path: "/Users/mara/src/payout-service", state: "progress", percent: 40 });
+  flushSync();
+  button("Stop", target).click();
+  await settle();
+  expect(button("Clone", target).getAttribute("title")).toBe("Clones into /Users/mara/src/payout-service");
+  button("Clone", target).click();
+  await settle();
+  expect(document.querySelector("[role='dialog']")).toBeNull();
+  expect(calls.clone.filter(([, stop]) => !stop)).toHaveLength(2);
+  expect(calls.roots).toEqual(["/Users/mara/src"]);
+});
+
+test("after Set and clone, Try again after a failure starts without asking for the root (#1442)", async () => {
+  await setAndClone();
+  emit({ entity_id: REPO, path: "/Users/mara/code/payout-service", state: "failed", reason: "boom", cause: "other", removed: true });
+  flushSync();
+  button("Try again", target).click();
+  await settle();
+  expect(document.querySelector("[role='dialog']")).toBeNull();
+  expect(calls.clone.filter(([, stop]) => !stop)).toHaveLength(2);
+});
+
+test("Stop after Set and clone names the root just entered, not the clone folder (#1442)", async () => {
+  await setAndClone("/Users/mara/src");
+  button("Stop", target).click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toContain(
+    "Stopped cloning payout-service. Nothing was left in /Users/mara/src.",
+  );
+});
+
+test("with no root, Cancel in the root dialog starts nothing (#1442)", async () => {
+  await draw(view(null, null));
+  button("Clone", target).click();
+  await settle();
+  button("Cancel", document.querySelector("[role='dialog']")!).click();
+  await settle();
+  expect(document.querySelector("[role='dialog']")).toBeNull();
+  expect(calls.clone).toEqual([]);
+  expect(calls.roots).toEqual([]);
+});
+
 // -- Add an application, Manage applications (#844, R-8.23) -------------------
 
 function type(field: HTMLInputElement, value: string) {

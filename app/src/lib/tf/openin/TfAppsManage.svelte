@@ -51,7 +51,7 @@
 {#if editing === null}
   <TfDialog title="Applications for Open in…" {onclose} {layers}>
     {#snippet body()}
-      <p class="tf-dsub">The first button opens the default. The others are one click away under ▾. Saved in Settings › Checkouts.</p>
+      <p class="tf-dsub">Open in… ▾ lists these, the default first. Pick the default with the round button; ↑ orders the rest. Saved in Settings › Checkouts.</p>
       <div class="tf-applist">
         {#each list as app, index (app.id)}
           <div class="tf-approw">

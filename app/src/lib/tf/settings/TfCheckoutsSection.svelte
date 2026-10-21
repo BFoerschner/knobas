@@ -65,7 +65,7 @@
         <button class="tf-btn tf-sm tf-primary" onclick={() => void saveTyped()}>Save</button>
         <button class="tf-btn tf-sm tf-ghost" onclick={() => (editingRoot = false)}>Cancel</button>
       {:else}
-        <span class="tf-mono">{settings.clones_root ?? "Not set"}</span>
+        {#if settings.clones_root !== null}<span class="tf-mono">{settings.clones_root}</span>{:else}<span class="tf-dim">Not set</span>{/if}
         <button class="tf-btn tf-sm" onclick={() => ((typed = settings.clones_root ?? "~/code"), (editingRoot = true))}>Change…</button>
       {/if}
     </div>
@@ -87,7 +87,7 @@
   <div class="tf-stg-sec">
     <h2>Open in…</h2>
     <p class="tf-stg-p">
-      The first one is the default for <b>Open</b>. <span class="tf-mono">{"{path}"}</span> is the checkout,
+      The default is listed first in Open in… and runs on <b>Enter</b>. <span class="tf-mono">{"{path}"}</span> is the checkout,
       <span class="tf-mono">{"{file}"}</span> and <span class="tf-mono">{"{line}"}</span> the file you have open.
     </p>
     <table class="tf-tbl">
@@ -96,8 +96,8 @@
         {#each settings.applications as app (app.id)}
           <tr>
             <td><b>{app.name}</b>{#if app.id === settings.default_application}{" "}<span class="tf-chip">default</span>{/if}</td>
-            <td class="tf-mono tf-small">{app.command}</td>
-            <td class="tf-mono tf-small">{#if app.file_command}{app.file_command}{:else}<span class="tf-dim">opens the checkout</span>{/if}</td>
+            <td class="tf-small"><span class="tf-mono">{app.command}</span></td>
+            <td class="tf-small">{#if app.file_command}<span class="tf-mono">{app.file_command}</span>{:else}<span class="tf-dim">opens the checkout</span>{/if}</td>
             <td class="tf-right">
               {#if app.id !== settings.default_application}
                 <button class="tf-btn tf-sm tf-ghost" onclick={() => void makeDefault(app.id)}>Make default</button>
