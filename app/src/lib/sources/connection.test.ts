@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { ConnectionReport } from "../ipc/sources";
-import { connectionLine, connectionNote, failedReport } from "./connection";
+import { connectionLine, connectionNote, failedReport, noteAfterFill } from "./connection";
 
 function report(over: Partial<ConnectionReport> = {}): ConnectionReport {
   return {
@@ -54,4 +54,19 @@ test("a rejection becomes a failed report carrying the message and the code", ()
   const plain = failedReport(new Error("bridge missing"));
   expect(connectionLine(plain)).toBe("bridge missing");
   expect(plain.code).toBeNull();
+});
+
+const GAP = "Epic Link customfield_10101 found but not configured: epic membership is not mirrored";
+
+test("a note about a value this click filled reads found and set (#1479)", () => {
+  expect(noteAfterFill(GAP, { epic_link_field: "customfield_10101" })).toBe("Epic Link customfield_10101 found and set");
+});
+
+test("a note about a value nothing filled is the report's own (#1479)", () => {
+  expect(noteAfterFill(GAP, {})).toBe(GAP);
+  expect(noteAfterFill(GAP, { username: "mara" })).toBe(GAP);
+  expect(noteAfterFill("Epic Link customfield_10101", { epic_link_field: "customfield_10101" })).toBe(
+    "Epic Link customfield_10101",
+  );
+  expect(noteAfterFill(null, { epic_link_field: "x" })).toBeNull();
 });

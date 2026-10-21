@@ -39,6 +39,29 @@ export function connectionNote(report: ConnectionReport): string | null {
 }
 
 /**
+ * The note for a dialog whose *Test connection* has just filled fields (#1479).
+ *
+ * The adapter words its note from the draft it was handed: a discovered id the
+ * draft did not carry reads "‹id› found but not configured: ...", which is the
+ * warning a saved source's *Test* needs (#598, #640). In the Add-source dialog
+ * the same click then writes that id into the empty field, so the warning is
+ * stale the moment it is drawn. Where the report's note names a value this
+ * click filled, that clause reads "‹id› found and set". A note about a value
+ * already in the field (or a saved source's, which nothing fills) is the
+ * report's own.
+ */
+export function noteAfterFill(note: string | null, filled: Record<string, string>): string | null {
+  if (note === null) return null;
+  let out = note;
+  for (const value of new Set(Object.values(filled))) {
+    const at = out.indexOf(`${value} found but not configured`);
+    if (at < 0) continue;
+    out = `${out.slice(0, at)}${value} found and set`;
+  }
+  return out;
+}
+
+/**
  * A `test_source` that **rejected**, as a report -- so the surface draws it
  * the way it draws `ok: false`: the message as the line, the code kept for
  * the one branch on it (`unauthorized` is what offers *Re-enter*). A saved

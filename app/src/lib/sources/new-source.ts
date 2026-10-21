@@ -68,13 +68,17 @@ export const IDENTITY_FIELD = "username";
  * the server's own spelling, never normalised: author matching is
  * case-sensitive. A key naming a property the adapter does not declare fills
  * nothing, and an absent account is not a failure.
+ *
+ * Returns the value written into each field it filled, by key, so a surface can
+ * tell what its note is about from what it just set (`noteAfterFill`).
  */
 export function fillFound(
   fields: SchemaField[],
   values: Record<string, unknown>,
   account: string | null,
   discovered: Record<string, string> | null | undefined,
-): void {
+): Record<string, string> {
+  const filled: Record<string, string> = {};
   const found: Record<string, string> = { ...(discovered ?? {}) };
   if (account !== null && account !== "") found[IDENTITY_FIELD] = account;
   for (const [key, value] of Object.entries(found)) {
@@ -84,5 +88,7 @@ export function fillFound(
     const current = values[key];
     if (typeof current === "string" && current.trim() !== "") continue;
     values[key] = value;
+    filled[key] = value;
   }
+  return filled;
 }
