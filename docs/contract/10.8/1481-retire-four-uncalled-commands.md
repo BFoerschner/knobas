@@ -14,12 +14,14 @@
     clone (#1442) and `checkout_settings` go through, stays.
   - #501's `checkout_commands() -> Vec<OpenCommandView>` and `set_checkout_command(action,
     template)`, with `OpenCommandView` (mirrored as `CheckoutCommand`), and #844–846's bullet that
-    kept the two "as a view over the list". That bullet's reversal clause ("retire both once the
-    rooms UI goes") is met: #881 removed the rooms UI, and the desktop witness's open-in-editor
-    driver writes the list through Settings › Checkouts and Open in… (`checkout_settings`,
-    `set_checkout_applications`). #501's three stored templates (`checkout.command.vscode`,
-    `.jetbrains`, `.terminal`) are still read over the shipped list until a list is saved, so a
-    database that holds one keeps it; nothing writes those keys any more.
+    kept the two "as a view over the list". #844's ruling that kept them
+    (`docs/decisions/2026-10-unattended-rulings.md`) names its reversal, "retire both once the
+    rooms UI goes", and that is met: #881 removed the rooms UI, and the desktop witness's
+    open-in-editor driver writes the list through Settings › Checkouts and Open in…
+    (`checkout_settings`, `set_checkout_applications`). #501's three stored templates
+    (`checkout.command.vscode`, `.jetbrains`, `.terminal`) are still read over the shipped list
+    until a list is saved, so a database that holds one keeps it; nothing writes those keys any
+    more.
   - #47's `create_context(title) -> ContextRow`, the ad-hoc mint, which #881 left uncalled and the
     2026-10-21 grilling (#1427) left "until a cleanup pass". Stored ad-hoc contexts are still read
     (`list_contexts`, `context_members`, the scope on `list_entities`), and `promote_context`

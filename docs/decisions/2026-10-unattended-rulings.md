@@ -10674,3 +10674,16 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   supersedes (#47, #499, #501, #844–846) are named and left unedited, per §10.8's single-writer
   rule. *Reasoning:* Björn delegated the pick at triage, and the one thing a retirement can break is
   a caller, which the census rules out. *Reversing:* medium, revert the PR.
+- **Confirmed by merge-manager on Opus (2026-10-21).** *Ruling:* the sign-off stands. §10.8 asks
+  for one new entry file and no edit to an existing one; `git diff --name-status` shows one `A`
+  row, and the superseded parts of #47, #499, #501 and #844–846 are named in it. The handler list's
+  append-only rule exists so parallel PRs rebase to one-line conflicts; four deleted lines keep that
+  property, and #1275's rename already removed lines from it. A repo-wide grep (app, crates, the
+  WASM host, testenv, scripts) finds no caller of the four names. One wording fix: the entry now
+  attributes the reversal clause to #844's ruling, where it is written, not to the #844–846 entry's
+  bullet. *Reversing:* medium, revert the PR.
+- **`create_context` in this PR (merge-manager on Opus).** *Ruling:* confirmed. #1502's body says
+  the command "stays" only as a statement of its own scope ("nothing in this ticket touches Rust");
+  its criteria touch the Tickets view, `requirements.md`, a ruling line and a screenshot, none of
+  which this PR changes, and its fixture can seed `FAKE_CONTEXTS` without the retired fake handler.
+  A comment on #1502 says the command is gone. *Reversing:* medium.
