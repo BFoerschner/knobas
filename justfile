@@ -526,7 +526,8 @@ shell:
 # merge-tail lock's (issue #1274): a holder whose PR just merged keeps the lock
 # until it releases, a holder dead past the grace period is taken over by one
 # waiter, `take` is re-entrant and `assert` names the holder -- against a stub
-# `gh` and a private TMPDIR, about 15 s.
+# `gh` and a private TMPDIR, about 15 s. And the gate scope's (issue #1543): a
+# head that changes only an app file a testenv script pins answers `full`.
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/bash-guard-test.sh
@@ -536,6 +537,7 @@ witness-unit:
     scripts/test-prefix-guard-test.sh
     scripts/test-prefix-guard.sh
     scripts/merge-tail-lock-test.sh
+    scripts/gate-scope-test.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh
     testenv/seed-env-test.sh

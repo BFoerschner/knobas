@@ -10438,3 +10438,31 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   member and `inbox_state` key, so a frozen-surface change needing its §10.8 entry); the status strip
   stays the place that says a sign-in fails until then. *Reasoning:* the ticket's recommendation;
   building it is out of scope here. *Reversing:* none, it is a ticket.
+
+## #1482: stale mockups, doc, gate prose and release line (Sonnet implementer, 2026-10-21)
+
+- **The mockups index builder.** *Ruling:* delete `mockups/build-index.mjs`. *Reasoning:* it builds
+  `mockups/round-N/index.html` from `shared/{paradigms,designs}`, none of which exists; the round-N
+  scheme is history (`2026-10-19-memory-archive.md`). Retargeting at `ticket-first/` would index six
+  hand-named prototypes. *Reversing:* low, `git show` brings it back.
+- **The frontend package manifest.** *Ruling:* `app/package.json` and its lock file go from 0.1.0 to
+  2.0.0. *Reasoning:* "the manifests say 2.0.0" is then true of all three; nothing reads the
+  field. *Reversing:* low.
+- **Left as history.** `docs/specs/2026-08-23-knobas-design.md` (lines 10, 24, 369-370) still names
+  round-3 and the playground. *Ruling:* untouched: the spec is the dated design record and these lines
+  say what its mockups were. The acceptance grep therefore prints those four lines, which a correct
+  implementation cannot clear without rewriting the spec. *Reversing:* low.
+
+## #1543: a pinned app file takes the full gate (Sonnet implementer, 2026-10-21)
+
+- **Where the pin check runs.** *Ruling:* `scripts/gate-scope.sh` answers `full` for any changed
+  path (or path under a directory) that a `testenv/*.sh` script names as `app/...`; `check-front`
+  is untouched. *Reasoning:* `just check-front` keeps running exactly what it ran, and the rule sits
+  beside the `include_str!` one it mirrors. The cost is that a head touching a pinned file (the
+  notes settings, `tf/`, the capture window, `QueryBox.svelte`) pays the full gate, which is what
+  those two reds showed it needs. Adding `witness-unit` to `check-front` would also run twelve
+  unrelated shell tests on every frontend head. A comment in a testenv script that names an app
+  path also counts: the safe direction. *Reversing:* low, one block in the script.
+- **Its test.** *Ruling:* `scripts/gate-scope-test.sh`, in `witness-unit`, builds a scratch repo and
+  checks a pinned file and a file under a pinned directory answer `full`, an unpinned app file
+  and a prose file answer `front`. *Reversing:* low.
