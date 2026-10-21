@@ -9829,6 +9829,11 @@ unchanged.
   the box takes `Tab` (and Shift+Tab) for the action chain, and the trap would otherwise move focus
   from the box to the dialog's last control on Shift+Tab. Every other dialog is unchanged (none
   prevents `Tab`).
+- **No focus ring on the box.** The design system draws a 2 px `--focus` ring on whatever has focus;
+  the ticket asks for prototype-6's input with no rectangular focus box. *Ruling:* the ticket's,
+  for this one field: it holds focus for as long as the launcher is open (rows are walked with the
+  arrows, never focused), and the ink bar beside it and the text caret mark it. Every other control
+  in the launcher keeps the ring. *Reversing:* drop one rule.
 - **What the shell's dialog adds.** On `TfDialog` the launcher registers on the shell's layer
   stack, so the history keys and the mouse's back button do nothing while it is open (#1086's rule
   for every dialog), and focus returns to what opened it when it closes. Its own `Esc` ladder still

@@ -24,6 +24,8 @@
   flex: 1; min-width: 120px; padding: 16px 0 16px 15px; font-size: var(--t-xl); color: var(--ink); background: var(--sheet);
   border: 0; outline: none;
 }
+/* No ring on the box (#1422, prototype-6's `outline:none`): it holds focus for as long as the dialog is
+   open, and the ink bar beside it and the text caret mark it. */
 .tf .tf-ln-q input:focus-visible { outline: none; }
 .tf .tf-ln-q input::placeholder { color: var(--ink-2); }
 .tf-ln-foot { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -93,22 +95,15 @@
 .tf-ln-sy { text-align: right; }
 .tf-ln-sy.tf-ln-fail { color: var(--err); }
 .tf-ln-k { font-family: var(--mono); font-size: var(--t-xs); color: var(--ink-2); margin-right: 6px; }
-.tf-ln-pa {
-  display: block; font-family: var(--mono); font-size: var(--t-2xs); line-height: 1.35; margin-top: 1px; color: var(--ink-2);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+/* The path and the excerpt are second lines under the title; the excerpt is the reason the row matched. */
+.tf-ln-pa, .tf-ln-sn {
+  display: block; line-height: 1.35; margin-top: 1px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* The excerpt is a second line: prose, the reason the row matched. */
-.tf-ln-sn {
-  display: block; font-size: var(--t-xs); line-height: 1.35; margin-top: 1px; color: var(--ink-2);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.tf-ln-sn mark { background: var(--mark); color: var(--ink); border-radius: 2px; }
-/* An item's state (#666), the adapter's tone on the shell's chip. */
+.tf-ln-pa { font-family: var(--mono); font-size: var(--t-2xs); }
+.tf-ln-sn { font-size: var(--t-xs); }
+.tf-ln-sn mark { background: var(--mark); color: var(--ink); border-radius: 3px; }
+/* An item's state (#666): the shell's chip in the adapter's tone (`.tf-chip.tf-ok` and its siblings). */
 .tf-chip.tf-state { margin-left: 6px; vertical-align: 1px; }
-.tf-chip.tf-state[data-tone="ok"] { background: var(--ok-bg); color: var(--ok); }
-.tf-chip.tf-state[data-tone="warn"] { background: var(--warn-bg); color: var(--warn); }
-.tf-chip.tf-state[data-tone="err"] { background: var(--err-bg); color: var(--err); }
-.tf-chip.tf-state[data-tone="info"] { background: var(--info-bg); color: var(--info); }
 
 /* An author or under: search a source cannot answer (#141): a fact about the corpus, not a fault. */
 .tf-ln-gap {
@@ -129,16 +124,16 @@
 .tf-ln-sl small { display: block; font-size: var(--t-xs); line-height: 1.35; color: var(--ink-2); margin-top: 2px; }
 .tf-ln-c { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tf-ln-c.tf-ln-chg, .tf-ln-c.tf-ln-warn { color: var(--warn); }
-.tf-ln-dot { margin-left: 4px; font-size: 9px; }
+.tf-ln-dot { margin-left: 4px; font-size: var(--t-2xs); }
 .tf-ln-att, .tf-ln-sl small.tf-ln-att, .tf-ln-errdot { color: var(--err); }
-.tf-ln-errdot { font-size: 9px; }
+.tf-ln-errdot { font-size: var(--t-2xs); }
 /* The rename field, sized like the row it replaces so the list does not jump. */
 .tf .tf-ln-ren {
   flex: 1; min-width: 0; margin: 4px 18px; padding: 3px 7px; font-size: var(--t-sm); color: var(--ink);
   background: var(--paper); border: 1px solid var(--rule); border-radius: 4px;
 }
 .tf-ln-own { display: flex; align-items: center; gap: 4px; padding-right: 18px; }
-.tf .tf-ln-mini { font-size: var(--t-2xs); color: var(--ink-2); padding: 1px 7px; border: 1px solid var(--rule); border-radius: 3px; }
+.tf .tf-ln-mini { font-size: var(--t-2xs); color: var(--ink-2); padding: 1px 7px; border: 1px solid var(--rule); border-radius: 4px; }
 .tf .tf-ln-mini:hover { color: var(--ink); border-color: var(--ink-2); }
 .tf .tf-ln-mini.tf-ln-del:hover, .tf .tf-ln-mini.tf-ln-armed { color: var(--err); border-color: var(--err); }
 

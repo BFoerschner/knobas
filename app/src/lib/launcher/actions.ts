@@ -54,8 +54,9 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
 /**
  * Spec §4's navigation menu (#1417): the top bar's sections in `NAV` order,
  * then Settings and its sections in the order its own navigation draws them.
- * Every address comes from the module that owns it, so a section the shell
- * gains is a row here without a second list to keep.
+ * Every address and name comes from the module that owns it; each row's
+ * detail line is a `Record` keyed by the section, so a section the shell
+ * gains does not compile until it has one here.
  *
  * *Job* is left out: its address needs a ticket key, and the palette has
  * none. *Diagnostics* has no address at all (interfaces §2.3 puts the sync
