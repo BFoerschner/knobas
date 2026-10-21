@@ -7,15 +7,22 @@
   this stylesheet does not style. What a native dialog *gives* is focus
   trapping, Escape and focus restore, so those three are written out below and
   tested; nothing else about `showModal` was wanted.
+
+  It sits on the ticket-first shell's layer stack while open, as `TfDialog`
+  does (#1527): the window's `Esc` closes it when focus is outside it, rather
+  than navigating the page behind, and history stays put under it (#1086).
 -->
 <script lang="ts">
-  import type { Snippet } from "svelte";
+  import { untrack, type Snippet } from "svelte";
+
+  import { layers as sharedLayers, type Layers } from "../tf/layers.svelte";
 
   let {
     title,
     subtitle,
     wide = false,
     onclose,
+    layers = sharedLayers,
     body,
     footer,
   }: {
@@ -24,6 +31,8 @@
     /** `.dlg.wide` — the 820 px variant the add-source flow uses. */
     wide?: boolean;
     onclose: () => void;
+    /** The stack the shell's `Esc` and history read; tests hand in their own. */
+    layers?: Layers;
     body?: Snippet;
     footer?: Snippet;
   } = $props();
@@ -47,11 +56,14 @@
     // closes the reader must be back on the control that opened it, not at the
     // top of the document.
     const restoreTo = document.activeElement;
+    // Untracked: `add` reads the stack it writes, and this effect must run once.
+    const off = untrack(() => layers.add({ kind: "dialog", close: () => onclose() }));
     // The body's first control, not the dialog's: the header's Close comes
     // first in document order, and a reader who opened a dialog to type would
     // type into nothing (#1431). Close only when the body offers nothing.
     (dialog?.querySelector<HTMLElement>(`.dlg-b :is(${FOCUSABLE})`) ?? focusable()[0])?.focus();
     return () => {
+      untrack(off);
       if (restoreTo instanceof HTMLElement && document.contains(restoreTo)) {
         restoreTo.focus();
       }

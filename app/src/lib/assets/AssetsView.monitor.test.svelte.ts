@@ -27,6 +27,7 @@ import type {
 } from "../ipc/assets";
 import type { WriteOpPayload } from "../ipc/sources";
 import { createRouter } from "../shell/router.svelte";
+import { layers } from "../tf/layers.svelte";
 import AssetsView from "./AssetsView.svelte";
 
 const NOW = new Date(2026, 8, 7, 12, 0, 0, 0);
@@ -256,6 +257,20 @@ test("a pane with no monitor target draws no create", async () => {
 
   expect(names()).not.toContain("Create monitor for this asset");
   expect(text()).not.toContain("Create monitor");
+});
+
+test("Create monitor opens a dialog on the layer stack, and its close shuts it (#1527)", async () => {
+  render(estate([KUMA]));
+  await vi.waitFor(() => expect(names()).toContain("Create monitor for this asset"));
+  click("Create monitor for this asset");
+  expect(text()).toContain("In Uptime Kuma");
+
+  // On the shell's layer stack while open, so the window's `Esc` closes it (#1527).
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+  layers.open[0]!.close();
+  flushSync();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(layers.open).toEqual([]);
 });
 
 /**

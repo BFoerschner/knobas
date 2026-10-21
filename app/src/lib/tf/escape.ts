@@ -20,9 +20,11 @@
  * its breadcrumb still says *Back* beside `Esc`; a key the page names should
  * do what it names, and Tickets is where the ladder ends anyway.
  *
- * Pure: the shell describes what is open and acts on the answer. Dialogs that
- * already handle their own `Esc` (`Modal.svelte`, the launcher) stop the
- * event before it reaches the shell, so they are rung 1 without being here.
+ * Pure: the shell describes what is open and acts on the answer. Every dialog
+ * registers on the layer stack (`TfDialog`, and the rooms UI's `Modal` the
+ * asset tree still draws, #1527), so rung 1 sees it even when focus is
+ * outside it. `Modal` also answers an `Esc` pressed inside it and stops the
+ * event, so that press never reaches the shell.
  */
 import { jobHash, type TfRoute } from "./route";
 

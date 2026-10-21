@@ -8,6 +8,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { expect, test, vi } from "vitest";
 
+import { createLayers } from "../tf/layers.svelte";
 import Modal from "./Modal.fixture.svelte";
 
 /** An opener button, focused, as a real caller would have. */
@@ -151,5 +152,27 @@ test("with nothing focusable in its body, focus goes to Close", () => {
 
   unmount(app);
   behind.remove();
+  target.remove();
+});
+
+/**
+ * Under the ticket-first shell the window's `Esc` closes the topmost layer, and
+ * history stays put while a dialog is up (#1086). A modal the stack cannot see
+ * is skipped by both: `Esc` with focus outside it navigated the page behind
+ * (#1527).
+ */
+test("sits on the layer stack while open, and the stack's close is its own", () => {
+  const layers = createLayers();
+  const onclose = vi.fn();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose, layers } });
+  flushSync();
+
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+  layers.open[0]!.close();
+  expect(onclose).toHaveBeenCalledOnce();
+
+  unmount(app);
+  expect(layers.open).toEqual([]);
   target.remove();
 });

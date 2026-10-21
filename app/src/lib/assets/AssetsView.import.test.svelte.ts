@@ -30,6 +30,7 @@ import type {
 } from "../ipc/assets";
 import type { IpcError } from "../ipc";
 import { createRouter } from "../shell/router.svelte";
+import { layers } from "../tf/layers.svelte";
 
 const { default: AssetsView } = await import("./AssetsView.svelte");
 
@@ -354,6 +355,21 @@ test("the pane lists the monitor names an import kept", async () => {
   ).toEqual(["gitea", "jira (tunnel)"]);
   // Nothing is attached, so there is no *Monitoring* section over it (#445).
   expect(target.querySelector(".watch")).toBeNull();
+});
+
+test("Import opens a dialog on the layer stack, and its close shuts it (#1527)", async () => {
+  render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+  expect(target.querySelector('input[type="file"]')).not.toBeNull();
+
+  // On the shell's layer stack while open, so the window's `Esc` closes it (#1527).
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+  layers.open[0]!.close();
+  flushSync();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(layers.open).toEqual([]);
 });
 
 /**
