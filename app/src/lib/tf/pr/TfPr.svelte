@@ -93,7 +93,7 @@
     type PrTab,
   } from "./pr";
   import { markComment, markQueued, pendingComments as pendingOf, queuedChips } from "./queued.svelte";
-  import TfPrAction from "./TfPrAction.svelte";
+  import TfEntityAction from "../TfEntityAction.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfPrFiles from "./TfPrFiles.svelte";
   import TfPrMerge from "./TfPrMerge.svelte";
@@ -588,9 +588,9 @@
 
 {#if shown !== null && prId !== null}
   {@const write = shown}
-  <TfPrAction
+  <TfEntityAction
     action={write.action}
-    {prId}
+    entityId={prId}
     title="{write.label} {name}"
     what="{write.phrase} {name}"
     submitWrite={ports.submitWrite}
