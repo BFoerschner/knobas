@@ -13,6 +13,7 @@ import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ip
 import { signInFails } from "../../shell/health.svelte";
 import type { WriteSource } from "../../shell/queued-toast";
 import { matchesAll } from "../filter/filter";
+import type { Mark } from "../queued.svelte";
 import { age } from "../job/job";
 import { reenterWords, secretNoun } from "../settings/settings";
 import { duration, pipelineHash, runTone, shortTime } from "./builds";
@@ -28,6 +29,65 @@ export function startedHere(writeId: number): string {
 /** Whether a row is a run started from this page and not yet read back. */
 export function isStartedHere(run: RunRow): boolean {
   return run.entity_id.startsWith("queued:");
+}
+
+/**
+ * The kind of mark a queued run is on its pipeline (#1449, `queued.svelte.ts`):
+ * its text the branch it was queued on (`""` for the default), its base the
+ * newest run the page held as it was queued.
+ */
+export const QUEUED_RUN = "run";
+
+/** The runs queued this session and not yet read back, as queued rows, newest first. */
+export function queuedRunRows(marks: readonly Mark[], fallback: string | null): RunRow[] {
+  return marks
+    .map((mark, at) => ({
+      entity_id: startedHere(mark.write ?? -1 - at),
+      number: null,
+      state: { text: "queued", tone: "info" },
+      branch: mark.text !== "" ? mark.text : fallback,
+      started: null,
+      finished: null,
+      duration_seconds: null,
+      updated_at: null,
+      web_url: null,
+      // The reader queued it: *you*, as prototype-6's `startRun` draws it.
+      trigger: "person" as const,
+      started_by: null,
+      started_by_me: true,
+      revision: null,
+      commit_id: null,
+      agent: null,
+      current_step: null,
+      tests: null,
+    }))
+    .reverse();
+}
+
+/**
+ * Which queued runs a read holds (#1449), for `settleQueued`: a run newer
+ * than the newest the page held as it was queued, on its branch (any, for
+ * one queued on the default), that no change or schedule started. Each such
+ * run holds one queued run, the oldest first, so two queued and one read
+ * back leaves one queued row.
+ */
+export function runLanded(rows: readonly RunRow[]): (mark: Mark) => boolean {
+  const taken = new Set<string>();
+  return (mark) => {
+    const at = mark.base === null ? -1 : rows.findIndex((row) => row.entity_id === mark.base);
+    const newer = at < 0 ? rows : rows.slice(0, at);
+    const held = [...newer].reverse().find(
+      (row) =>
+        !taken.has(row.entity_id) &&
+        !isStartedHere(row) &&
+        row.trigger !== "change" &&
+        row.trigger !== "schedule" &&
+        (mark.text === "" || row.branch === null || branchName(row.branch) === branchName(mark.text)),
+    );
+    if (held === undefined) return false;
+    taken.add(held.entity_id);
+    return true;
+  };
 }
 
 /** How many runs the history chart draws (R-9.4). */

@@ -36,10 +36,22 @@
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
+  import { markQueued, settleQueued } from "../queued.svelte";
   import { commitHash, fileHash } from "../repo/repo";
   import { when } from "../tickets/tickets";
   import { duration, pipelineHash, runTone } from "./builds";
-  import { chipTone, defaultBranch, jobBranchFor, pipelineSource, queuedRunWhat, resultWord, staleLine, triggerLabel } from "./pipeline";
+  import {
+    QUEUED_RUN,
+    chipTone,
+    defaultBranch,
+    jobBranchFor,
+    pipelineSource,
+    queuedRunWhat,
+    resultWord,
+    runLanded,
+    staleLine,
+    triggerLabel,
+  } from "./pipeline";
   import { RUN_BRIDGE, type RunPorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
   import TfRunChain from "./TfRunChain.svelte";
@@ -162,6 +174,7 @@
         rows = [...rows, ...older];
       }
       if (mine !== token) return;
+      settleQueued(pipe, runLanded(rows));
       held = rows;
       runsFailed = null;
     } catch (cause) {
@@ -306,10 +319,22 @@
 
   // -- the writes ---------------------------------------------------------------
 
-  /** *Re-run* and *Run again…*: queued at once, and the toast says so (R-9.8). */
+  /**
+   * *Re-run* and *Run again…*: queued at once, and the toast says so (R-9.8).
+   * The page draws no queued row of its own (#853); the pipeline page draws
+   * it at the top of its runs until a read holds it (#1449).
+   */
   async function queue(request: RunRequest) {
     try {
-      await ports.submitWrite(request.payload);
+      const write = await ports.submitWrite(request.payload);
+      const branch = "RunBuild" in request.payload ? request.payload.RunBuild.branch : null;
+      markQueued(pipelineId, QUEUED_RUN, branch ?? "", {
+        write,
+        base: held?.[0]?.entity_id ?? null,
+        many: true,
+        following: { name: `Run of ${pipeline.name}` },
+        follower: ports.follower(),
+      });
       toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline));
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });

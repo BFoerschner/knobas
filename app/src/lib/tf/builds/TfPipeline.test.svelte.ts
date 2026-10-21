@@ -13,7 +13,7 @@ import type { QueuedWrite, SourceDescriptor, SourceSummary, WriteOpPayload } fro
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
-import { forgetQueued } from "../queued.svelte";
+import { forgetQueued, markQueued, queuedMarks } from "../queued.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
 import TfPipeline from "./TfPipeline.svelte";
 
@@ -156,6 +156,8 @@ interface Drawn {
   sync: ((payload: unknown) => void) | null;
   /** What the next runs read answers. */
   next: RunRow[] | Error;
+  /** Open another pipeline in the same page. */
+  goPipeline: (pipeline: PipelineRow) => void;
   /** Move the page to another address under the pipeline, as a tab click does. */
   go: (rest: string[]) => void;
 }
@@ -166,7 +168,7 @@ function draw(
   overrides: Partial<PipelinePorts> = {},
   older: RunRow[][] = [[run(1150, "ok", daysAgo(9, 9))], []],
 ): Drawn {
-  const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [], reads: 0, sync: null, next: RUNS, go: () => {} };
+  const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [], reads: 0, sync: null, next: RUNS, go: () => {}, goPipeline: () => {} };
   const ports: PipelinePorts = {
     older: (_id, before) => {
       drawn.olderAsked.push(before);
@@ -205,6 +207,11 @@ function draw(
   const props = $state({ pipeline: PIPELINE, rest, job, runs, onpin: () => (drawn.pinned += 1), ports });
   drawn.go = (next) => {
     props.rest = next;
+    flushSync();
+  };
+  drawn.goPipeline = (next) => {
+    props.pipeline = next;
+    props.rest = [next.entity_id];
     flushSync();
   };
   page = mount(TfPipeline, { target, props });
@@ -468,6 +475,62 @@ test("the page stops listening when it goes", async () => {
   unmount(page!);
   page = null;
   expect(drawn.sync).toBeNull();
+});
+
+// -- runs queued on the run page (#1449) ------------------------------------------
+
+const runNos = () => [...target.querySelectorAll(".tf-runs tbody tr .tf-run-no")].map((td) => td.querySelector("b")?.textContent);
+
+test("a run queued on the run page is one queued row at the top; another pipeline draws none for it", async () => {
+  markQueued(PIPELINE.entity_id, "run", "feature/PAY-231-sepa-retry", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
+  const drawn = draw();
+  await settle();
+  expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
+  expect(firstRow().textContent).toContain("feature/PAY-231-sepa-retry");
+  expect(firstRow().textContent).toContain("waiting");
+  expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs 35");
+
+  drawn.goPipeline({ ...PIPELINE, entity_id: "teamcity:buildType:Payout_Build", name: "Payout_Build" });
+  await settle();
+  expect(runNos()).not.toContain("queued");
+});
+
+test("the queued row goes once a read holds the run, and is never drawn beside it", async () => {
+  markQueued(PIPELINE.entity_id, "run", "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
+  const drawn = draw();
+  await settle();
+  expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
+
+  // A sync that has not brought it yet keeps it queued.
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
+
+  drawn.next = [run(1188, "ok", today(0, 30), { finished: null, duration_seconds: null, trigger: "person", started_by_me: true }), ...RUNS];
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(runNos().slice(0, 2)).toEqual(["#1188", "#1187"]);
+  expect(queuedMarks(PIPELINE.entity_id, "run")).toEqual([]);
+  expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs 35");
+});
+
+test("Run on keeps its queued row through a visit elsewhere, and the queue refusing it takes it away", async () => {
+  const heard: ((row: QueuedWrite | undefined) => void)[] = [];
+  const drawn = draw(undefined, "PAY-231", { follower: () => ({ follow: (_id, hear) => (heard.push(hear), () => {}) }) });
+  await settle();
+  button("Run on feature/PAY-231-sepa-retry")!.click();
+  await settle();
+  expect(runNos()[0]).toBe("queued");
+  drawn.goPipeline({ ...PIPELINE, entity_id: "teamcity:buildType:Payout_Build", name: "Payout_Build" });
+  await settle();
+  drawn.goPipeline(PIPELINE);
+  await settle();
+  expect(runNos()[0], "the read holds no new run yet").toBe("queued");
+
+  heard[0]!({ id: 41, state: "refused", detail: "no such branch" } as QueuedWrite);
+  flushSync();
+  expect(runNos()[0]).toBe("#1187");
+  expect(toasts.items.at(-1)?.text).toBe("Run of Payout_IntegrationTests was refused: no such branch");
 });
 
 /** A select whose default it does not offer, a checkbox, a secret and a plain spec (#1447). */

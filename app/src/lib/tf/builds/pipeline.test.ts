@@ -18,7 +18,9 @@ import {
   keptRuns,
   longest,
   pipelineWord,
+  queuedRunRows,
   resultOf,
+  runLanded,
   staleLine,
   tabHash,
   tabOf,
@@ -26,6 +28,7 @@ import {
   triggerLabel,
   triggersSentence,
 } from "./pipeline";
+import type { Mark } from "../queued.svelte";
 
 function run(no: number, tone: "ok" | "err" | "info", extra: Partial<RunRow> = {}): RunRow {
   return {
@@ -257,4 +260,41 @@ test("the warn line: a failing sign-in with its fix, a failed sync without one, 
   });
   expect(staleLine(pipeline, health("ok"), sync("ok"), now)).toBeNull();
   expect(staleLine({ ...pipeline, source_id: "other" }, health("unauthorized"), sync("error"), now)).toBeNull();
+});
+
+// -- runs queued this session (#1449) -------------------------------------------
+
+const mark = (write: number, branch: string, base: string | null): Mark => ({ write, kind: "run", text: branch, base });
+
+test("a queued run is a queued row on its branch, the default branch where it named none, newest first", () => {
+  const rows = queuedRunRows([mark(4, "feature/x", "teamcity:build:9"), mark(5, "", "teamcity:build:9")], "main");
+  expect(rows.map((r) => [r.entity_id, r.branch, r.number, r.state?.text, triggerLabel(r)])).toEqual([
+    ["queued:5", "main", null, "queued", "you"],
+    ["queued:4", "feature/x", null, "queued", "you"],
+  ]);
+  expect(rows.every((r) => r.started === null && r.finished === null)).toBe(true);
+});
+
+test("a read holds a queued run once a run newer than the newest held then, started by a person, is on its branch", () => {
+  const held = [run(10, "ok"), run(9, "ok")];
+  const queued = mark(4, "feature/x", "teamcity:build:10");
+  // Nothing newer: still queued.
+  expect(runLanded(held)(queued)).toBe(false);
+  // A newer run a change started, or one on another branch, is not it.
+  expect(runLanded([run(11, "ok", { branch: "feature/x", trigger: "change" }), ...held])(queued)).toBe(false);
+  expect(runLanded([run(11, "ok", { branch: "main", trigger: "person" }), ...held])(queued)).toBe(false);
+  // A newer run on its branch, by a person or saying nothing of how: it.
+  expect(runLanded([run(11, "info", { branch: "refs/heads/feature/x", trigger: "person" }), ...held])(queued)).toBe(true);
+  expect(runLanded([run(11, "info", { branch: "feature/x" }), ...held])(queued)).toBe(true);
+  // Queued on the default branch, whose name the page may not know: a newer run on any branch.
+  expect(runLanded([run(11, "info", { branch: "release" }), ...held])(mark(4, "", "teamcity:build:10"))).toBe(true);
+  // Queued on an empty pipeline: every run read is newer.
+  expect(runLanded(held)(mark(4, "main", null))).toBe(true);
+});
+
+test("each newer run holds one queued run, the oldest first", () => {
+  const first = mark(4, "main", "teamcity:build:10");
+  const second = mark(5, "main", "teamcity:build:10");
+  const landed = runLanded([run(11, "info"), run(10, "ok")]);
+  expect([first, second].filter(landed)).toEqual([first]);
 });

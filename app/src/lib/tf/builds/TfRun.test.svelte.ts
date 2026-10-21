@@ -9,7 +9,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { DownloadTarget, PipelineRow, RunLog, PipelineSettings, RunRow, SourceView } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
-import { forgetQueued } from "../queued.svelte";
+import { forgetQueued, queuedMarks } from "../queued.svelte";
 import type { RunPorts } from "./pipeline-ports";
 import TfRun from "./TfRun.svelte";
 
@@ -725,4 +725,29 @@ test("the Log tab draws the log read again, and the steps bar follows it", async
   await settle();
   expect(target.querySelector(".tf-runbody")?.textContent).toContain("Process exited with code 101");
   expect(segments()).toHaveLength(3);
+});
+
+// -- a run queued here shows on the pipeline page (#1449) -----------------------
+
+test("Re-run leaves the run queued on its pipeline, from the newest run held, and draws no queued row here", async () => {
+  draw();
+  await settle();
+  button("Re-run")!.click();
+  await settle();
+  expect(queuedMarks(PIPE, "run")).toEqual([{ write: 9, kind: "run", text: FEATURE, base: "teamcity:build:1188" }]);
+  expect(target.textContent).not.toContain("queued");
+});
+
+test("Run in Run again with changes… leaves the run queued on its pipeline too, the default branch as none", async () => {
+  draw();
+  await settle();
+  button("Run again with changes…")!.click();
+  await settle();
+  const branch = target.querySelector<HTMLInputElement>('.tf-run-dialog input[id^="tf-run-branch-"]')!;
+  branch.value = "main";
+  branch.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-run-dialog button")].find((b) => b.textContent?.trim() === "Run")!.click();
+  await settle();
+  expect(queuedMarks(PIPE, "run")).toEqual([{ write: 9, kind: "run", text: "", base: "teamcity:build:1188" }]);
 });

@@ -34,6 +34,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
+  import { markQueued, queuedMarks, settleQueued } from "../queued.svelte";
   import { duration, runHash, runTone, shortTime } from "./builds";
   import { chainSentence } from "./chain";
   import { BRIDGE, type PipelinePorts } from "./pipeline-ports";
@@ -62,10 +63,12 @@
     longest,
     pipelineWord,
     pipelineSource,
+    QUEUED_RUN,
+    queuedRunRows,
     queuedRunWhat,
     resultWord,
+    runLanded,
     staleLine,
-    startedHere,
     tabHash,
     tabOf,
     triggerDetail,
@@ -100,8 +103,6 @@
 
   let held = $state<RunRow[] | null>(null);
   let failed = $state<string | null>(null);
-  /** Runs started here, drawn as queued until the next read holds them (R-9.8). */
-  let started = $state<RunRow[]>([]);
   let settings = $state<PipelineSettings | null>(null);
   let settingsFailed = $state<string | null>(null);
   let settingsRead = $state(false);
@@ -124,7 +125,6 @@
     const mine = ++token;
     held = null;
     failed = null;
-    started = [];
     settings = null;
     settingsFailed = null;
     settingsRead = false;
@@ -132,7 +132,9 @@
     olderFailed = null;
     readRuns(wanted).then(
       (rows) => {
-        if (mine === token) held = rows;
+        if (mine !== token) return;
+        settleQueued(wanted, runLanded(rows));
+        held = rows;
       },
       (cause: unknown) => {
         if (mine === token) failed = ipcErrorMessage(cause);
@@ -162,6 +164,7 @@
     readRuns(wanted).then(
       (rows) => {
         if (mine !== token) return;
+        settleQueued(wanted, runLanded(rows));
         failed = null;
         held = appendOlder(rows, held ?? []);
       },
@@ -210,6 +213,11 @@
     );
   });
 
+  /**
+   * Runs queued this session, here or on a run page, drawn *queued* until a
+   * read holds them (R-9.8, #1449); the queue holding or refusing one drops it.
+   */
+  const started = $derived(queuedRunRows(queuedMarks(id, QUEUED_RUN), defaultBranch(settings)));
   const all = $derived(held === null ? null : [...started, ...held]);
 
   async function more() {
@@ -269,30 +277,14 @@
    */
   async function queue(payload: WriteOpPayload, branch: string | null, summary: string): Promise<boolean> {
     try {
-      const queued = await ports.submitWrite(payload);
-      started = [
-        {
-          entity_id: startedHere(queued.id),
-          number: null,
-          state: { text: "queued", tone: "info" },
-          branch,
-          started: null,
-          finished: null,
-          duration_seconds: null,
-          updated_at: new Date().toISOString(),
-          web_url: null,
-          // The reader queued it: *you*, as prototype-6's `startRun` draws it.
-          trigger: "person",
-          started_by: null,
-          started_by_me: true,
-          revision: null,
-          commit_id: null,
-          agent: null,
-          current_step: null,
-          tests: null,
-        },
-        ...started,
-      ];
+      const write = await ports.submitWrite(payload);
+      markQueued(id, QUEUED_RUN, branch ?? "", {
+        write,
+        base: held?.[0]?.entity_id ?? null,
+        many: true,
+        following: { name: `Run of ${pipeline.name}` },
+        follower: ports.follower(),
+      });
       toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline));
       return true;
     } catch (cause) {
