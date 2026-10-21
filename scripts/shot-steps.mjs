@@ -98,12 +98,24 @@ const keyPress = (combo) => {
 const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, `--window-size=${size}`];
 if (theme === "dark") flags.push("--blink-settings=preferredColorScheme=0");
 if (theme === "light") flags.push("--blink-settings=preferredColorScheme=1");
-const chrome = spawn("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", [...flags, "about:blank"], { stdio: "ignore" });
+const chrome = spawn("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", [...flags, "about:blank"], { stdio: "ignore", detached: true });
+// Chrome leads its own process group, so one SIGKILL reaches its helpers too; a plain
+// SIGTERM to the main process left a browser running after a failing step (#1603).
+// Every exit path goes through here: done(), a signal, the process's own exit.
+const closeChrome = () => {
+  try {
+    process.kill(-chrome.pid, "SIGKILL");
+  } catch {
+    chrome.kill("SIGKILL");
+  }
+};
 const done = (code, msg) => {
   if (msg) console.error(msg);
-  chrome.kill();
+  closeChrome();
   process.exit(code);
 };
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => done(1, `shot: ${sig}`));
+process.on("exit", closeChrome);
 try {
   let page = null;
   for (let i = 0; i < 60 && !page; i++) {

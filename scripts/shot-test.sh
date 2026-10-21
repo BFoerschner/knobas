@@ -94,5 +94,15 @@ for verb in hover dblclick back forward; do
     fi
 done
 
+# No browser the cases above started is left (#1603): each carried a profile
+# directory under $fixture, so a Chrome naming it is a leak.
+left=
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    left=$(pgrep -fl -- "--user-data-dir=$fixture" || true)
+    [ -z "$left" ] && break
+    sleep 0.5
+done
+[ -z "$left" ] || { fail "a Chrome the steps started is still running: $left"; pkill -f -- "--user-data-dir=$fixture" || true; }
+
 if [ "$failures" -gt 0 ]; then echo "shot-test: $failures failure(s)" >&2; exit 1; fi
 echo "shot-test: ok"
