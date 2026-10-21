@@ -2073,6 +2073,21 @@ test("kind: opens the kinds that exist, and typing narrows them", async () => {
   expect(offered()).toEqual(["repo · Repository"]);
 });
 
+/**
+ * #1515: the detail is set off by a space on each side of its dot, and the
+ * space before the dot is the detail's own. The option is a flex row, where
+ * the whitespace between the value and the detail is not drawn, so the
+ * option's whole `textContent` (and `offered()`, which collapses it) holds a
+ * space the reader never sees. The detail's own text is what is drawn.
+ */
+test("a value suggestion's detail carries the space before its dot", async () => {
+  openSuggesting();
+  await settle();
+  await typeInto("kind:re");
+  const option = target.querySelector('[aria-label="Suggestions"] [role="option"]');
+  expect(option?.querySelector(".s")?.textContent).toBe(" · Repository");
+});
+
 test("source: opens the configured sources by id, with the name the sources list shows", async () => {
   openSuggesting();
   await settle();

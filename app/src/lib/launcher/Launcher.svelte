@@ -761,7 +761,8 @@
               onmouseenter={() => (suggestionPicked = index)}
             >
               <span class="nm">{suggestion.value}</span>
-              {#if suggestion.detail}<span class="s"> · {suggestion.detail}</span>{/if}
+              <!-- The separator is an expression: Svelte trims an element's leading space (#1515). -->
+              {#if suggestion.detail}<span class="s">{" · "}{suggestion.detail}</span>{/if}
             </button>
           {/each}
         </div>
