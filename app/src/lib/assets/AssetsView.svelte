@@ -2178,13 +2178,13 @@
 
           The routes come **beneath the list and outside the count**, which is
           `CONTEXT.md`'s own arrangement: *"Routes whose target is the asset
-          are listed beneath as reachable via routes that would break and not
-          counted"*, so that the number is about assets. They are drawn as
-          plain rows rather than through the `routeRow` snippet above,
-          deliberately: that row carries the `data-wire` end the wire
-          measurement reads (#433), and every route here is already in
-          *Reachable via* with one — a second copy of the same key would
-          measure a wire twice.
+          or anything in that list are listed beneath as reachable via routes
+          that would break and not counted"* (#1553), so that the number is
+          about assets. They are drawn as plain rows rather than through the
+          `routeRow` snippet above, deliberately: that row carries the
+          `data-wire` end the wire measurement reads (#433), and a route here
+          landing on the asset or inside it is already in *Reachable via* with
+          one — a second copy of the same key would measure a wire twice.
         -->
         <section class="grp breaks">
           <h3 class="lab">

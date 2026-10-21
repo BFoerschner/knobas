@@ -678,12 +678,14 @@ export type DependsOnThis = {
  */
 assets: Array<DependsOnRow>, 
 /**
- * The routes that land on the asset, listed beneath and **not counted**
- * (story 52, so that the number is about assets).
+ * The routes that land on the asset or on any asset in
+ * [`assets`](Self::assets), listed beneath and **not counted** (story 52,
+ * so that the number is about assets; widened by #1553). Each row's
+ * `target_id` says which of them it lands on.
  *
  * Not folded into [`assets`](Self::assets): a route is not an asset, and
- * the assets whose routes these are keep working -- what stops is the way
- * in.
+ * what it adds to the answer is the way in that stops, not a thing that
+ * stops.
  */
 routes: Array<RouteRow>, };
 
