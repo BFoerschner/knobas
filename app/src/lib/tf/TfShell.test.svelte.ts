@@ -667,3 +667,40 @@ test("an item opened from a job draws the breadcrumb: the job's key, the kind's 
   await settle();
   expect(location.hash).toBe("#/job/PAY-231");
 });
+
+// #1415: a window opened on an old address (a bookmark, a notification) lands
+// on the mapped page; the rewrite must not depend on a listener added later.
+/** The window's first address: no `hashchange` is queued, as when a window opens on a bookmark. */
+async function openedOn(hash: string) {
+  // `beforeEach` set the hash, and jsdom delivers that `hashchange` a task later: let it pass before mounting.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  history.replaceState(null, "", hash);
+}
+const current = () => target.querySelector(".tf-nav a[aria-current='page']")?.textContent?.trim() ?? "";
+
+test("a window opened on #/ctx/all draws Tickets and rewrites the address", async () => {
+  await openedOn("#/ctx/all");
+  start();
+  await settle();
+  expect(location.hash).toBe("#/tickets");
+  expect(target.textContent).not.toContain("Nothing lives at");
+  expect(current()).toContain("Tickets");
+});
+
+test("a window opened on #/start-work/<key> draws that job", async () => {
+  await openedOn("#/start-work/PAY-231");
+  start();
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231");
+  expect(target.textContent).not.toContain("Nothing lives at");
+  expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent).toBe("PAY-231");
+});
+
+test("a window opened on #/standup draws Time", async () => {
+  await openedOn("#/standup");
+  start();
+  await settle();
+  expect(location.hash).toBe("#/time/standup");
+  expect(target.textContent).not.toContain("Nothing lives at");
+  expect(current()).toContain("Time");
+});
