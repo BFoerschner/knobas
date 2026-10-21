@@ -22,10 +22,19 @@ import { openWriteQueue } from "./write-queue.svelte";
 /** The source a write goes to: its id, to read its credential, and its name, to say it. */
 export type WriteSource = Pick<SourceSummary, "id" | "display_name">;
 
+/** The name of `source` when its sign-in fails, else `null`. */
+function failingName(source: WriteSource | null | undefined, store: Pick<Health, "get">): string | null {
+  return source && signInFails(store.get(source.id)?.state) ? source.display_name || source.id : null;
+}
+
 /** "Queued: <what>.", and the sign-in sentence when `failing` names the source whose sign-in fails. */
 function queuedText(what: string, failing: string | null): string {
-  const queued = `Queued: ${what}.`;
-  return failing === null ? queued : `${queued} ${failing} sign-in is failing, so it waits there.`;
+  return withSignIn(`Queued: ${what}.`, failing);
+}
+
+/** `text`, and the sign-in sentence when `failing` names the source whose sign-in fails. */
+function withSignIn(text: string, failing: string | null): string {
+  return failing === null ? text : `${text} ${failing} sign-in is failing, so it waits there.`;
 }
 
 /**
@@ -35,9 +44,30 @@ function queuedText(what: string, failing: string | null): string {
  * toast then says what was queued and nothing about sign-in.
  */
 export function toastQueued(what: string, source: WriteSource | null | undefined, store: Pick<Health, "get"> = health): void {
-  const failing = source && signInFails(store.get(source.id)?.state) ? source : null;
+  const failing = failingName(source, store);
   push({
-    text: queuedText(what, failing === null ? null : failing.display_name || failing.id),
+    text: queuedText(what, failing),
+    action: { label: "Show queue", run: openWriteQueue },
+  });
+}
+
+/**
+ * The toast *Run all steps* raises on the Start work stepper (#1426), in
+ * prototype-6's words: "Started work on PAY-240. 3 writes queued." with
+ * *Show queue*, "1 write queued." for one, and no count when nothing was
+ * queued (every step skipped or already there). The sign-in sentence follows
+ * the count, as on every other queued write, and only when something waits.
+ */
+export function toastStarted(key: string, queued: number, source: WriteSource | null | undefined, store: Pick<Health, "get"> = health): void {
+  const started = `Started work on ${key}.`;
+  if (queued <= 0) {
+    push({ text: started });
+    return;
+  }
+  const failing = failingName(source, store);
+  const count = `${started} ${queued === 1 ? "1 write" : `${queued} writes`} queued.`;
+  push({
+    text: withSignIn(count, failing),
     action: { label: "Show queue", run: openWriteQueue },
   });
 }

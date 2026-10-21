@@ -9745,3 +9745,18 @@ unchanged.
 **The fork:** none beyond the ticket. The mono class moved from the table cells onto a span around the command text; *Not set* and *opens the checkout* are dim sans spans, so the cell text and columns are unchanged.
 
 **Cost of reversing:** low, one component.
+---
+
+## #1426: Start work toast and Step by step (Sonnet implementer, 2026-10-21)
+
+
+- **Drop *Step by step*, or build a per-step *Run*.** *Ruling:* drop it, the recommended pick. The
+  backend's start-work command runs the whole flow, so a per-step run would be an IPC addition;
+  the stepper's footer now reads "A failed step can be retried, skipped or amended." beside *Run
+  all steps*. No frozen surface, no sign-off. Reverses no earlier ruling (#779 only has the
+  stepper run in the background). *Reversing:* low, a per-step run is a new ticket.
+- **One helper, a second entry point.** *Fork:* #1438's `toastQueued` says "Queued: <what>.", and
+  this toast must read "Started work on KEY. N writes queued." *Ruling:* `toastStarted` joins
+  `queued-toast.ts`, so the action (*Show queue*) and the failing sign-in sentence are the same
+  code; the sign-in sentence follows the count and only when N > 0. N counts the flow's steps
+  whose outcome is `queued` after the run. *Reversing:* low.

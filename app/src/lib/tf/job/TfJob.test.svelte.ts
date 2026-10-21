@@ -24,6 +24,7 @@ import type { RunningTimer, Week } from "../../ipc/time";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { page as codeRowPage } from "../code-row/page";
+import { writeQueuePanel } from "../../shell/write-queue.svelte";
 import { forgetFilters, sessionFilter } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
 import { createApps } from "../openin/apps.svelte";
@@ -971,6 +972,56 @@ test("Run all steps starts the timer as step 5, through the shell's start, which
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Run all steps")!.click();
   await settle();
   expect(order).toEqual([`start ${ID} after run: true`]);
+});
+
+/** Run all steps on PAY-231 with a flow that ends as `after`; the toasts it raised. */
+async function runWith(after: StartWorkStep["outcome"][]) {
+  open("PAY-231", {
+    ports: ports({
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
+      startWork: {
+        flow: () => Promise.resolve(flow(["pending", "pending", "pending", "pending"])),
+        run: () => Promise.resolve(flow(after)),
+        retry: () => Promise.resolve([]),
+        skip: () => Promise.resolve([]),
+        amend: () => Promise.resolve([]),
+      },
+    }),
+  });
+  await settle();
+  toasts.items.length = 0;
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Run all steps")!.click();
+  await settle();
+  return toasts.items;
+}
+
+test("Run all steps says how many writes it queued, with Show queue (#1426)", async () => {
+  const items = await runWith(["queued", "queued", "queued", "pending"]);
+  const started = items.find((toast) => toast.text.startsWith("Started work on"))!;
+  expect(started.text).toBe("Started work on PAY-231. 3 writes queued.");
+  expect(started.action?.label).toBe("Show queue");
+  started.action!.run();
+  expect(writeQueuePanel.open).toBe(true);
+});
+
+test("Run all steps with one queued step says '1 write queued.', with none no count (#1426)", async () => {
+  expect((await runWith(["succeeded", "queued", "pending", "pending"])).map((toast) => toast.text)).toContain(
+    "Started work on PAY-231. 1 write queued.",
+  );
+  unmount(job!);
+  job = null;
+  const items = await runWith(["succeeded", "succeeded", "skipped", "succeeded"]);
+  const started = items.find((toast) => toast.text.startsWith("Started work on"))!;
+  expect(started.text).toBe("Started work on PAY-231.");
+  expect(started.action).toBeUndefined();
+});
+
+test("the stepper draws no Step by step and promises no per-step run (#1426)", async () => {
+  const items = await runWith(["queued", "pending", "pending", "pending"]);
+  expect([...target.querySelectorAll("button")].map((b) => b.textContent)).not.toContain("Step by step");
+  expect(target.querySelector(".tf-steps")!.textContent).toContain("A failed step can be retried, skipped or amended.");
+  expect(items.map((toast) => toast.text).join(" ")).not.toContain("Each step can also run on its own");
 });
 
 test("a To Do ticket of somebody else's, or mine in progress, shows no Start work", async () => {

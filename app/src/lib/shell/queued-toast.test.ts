@@ -8,7 +8,7 @@ import { beforeEach, expect, test } from "vitest";
 
 import type { AuthState, CredentialHealth } from "../ipc/sources";
 import { createHealth } from "./health.svelte";
-import { toastQueued } from "./queued-toast";
+import { toastQueued, toastStarted } from "./queued-toast";
 import { toasts } from "./toasts.svelte";
 import { writeQueuePanel } from "./write-queue.svelte";
 
@@ -69,4 +69,11 @@ test("no toast promises the next sync", () => {
     toastQueued("merge PR #142", TEAMCITY, storeWith(state));
   }
   expect(toasts.items.every((toast) => !toast.text.includes("next sync"))).toBe(true);
+});
+
+test("Start work's toast adds the sign-in sentence only when something waits (#1426)", () => {
+  toastStarted("PAY-240", 2, TEAMCITY, storeWith("unauthorized"));
+  expect(toasts.items.at(-1)!.text).toBe("Started work on PAY-240. 2 writes queued. TeamCity sign-in is failing, so it waits there.");
+  toastStarted("PAY-240", 0, TEAMCITY, storeWith("unauthorized"));
+  expect(toasts.items.at(-1)!.text).toBe("Started work on PAY-240.");
 });
