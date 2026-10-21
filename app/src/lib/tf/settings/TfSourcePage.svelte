@@ -573,7 +573,8 @@
         onclick={() =>
           void update(
             { enabled: !source.enabled },
-            source.enabled ? "Paused. Nothing syncs until you turn it on." : `${name} syncs again.`,
+            // A write is sent the moment it is queued, paused or not (#1438): the pause holds the sync, not what the reader sends.
+            source.enabled ? "Paused. Nothing syncs until you turn it on; writes you make still go." : `${name} syncs again.`,
           )}><i></i></button>
     </div>
   </div>
