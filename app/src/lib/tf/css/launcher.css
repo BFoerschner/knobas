@@ -144,6 +144,8 @@
 .tf-ln-sid { color: var(--ink); font-weight: 600; }
 .tf-ln-src.tf-ln-fail, .tf-ln-src.tf-ln-fail .tf-ln-sid, .tf-ln-src.tf-ln-fail .tf-ln-mg { color: var(--err); }
 .tf-ln-src.tf-ln-fail .tf-ln-mg { border-color: var(--err); }
+.tf-ln-src.tf-ln-warn, .tf-ln-src.tf-ln-warn .tf-ln-sid, .tf-ln-src.tf-ln-warn .tf-ln-mg { color: var(--warn); }
+.tf-ln-src.tf-ln-warn .tf-ln-mg { border-color: var(--warn); }
 
 /* The `?` card: each token inserts itself. */
 .tf-ln-help { display: grid; gap: 1px; padding: 4px 0; }

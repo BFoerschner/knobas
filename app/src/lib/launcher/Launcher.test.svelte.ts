@@ -22,7 +22,7 @@ import type {
   Segment,
 } from "../ipc";
 import type { InboxItem } from "../ipc/entity";
-import type { CredentialHealth } from "../ipc/sources";
+import type { CredentialHealth, SourceSyncStatus } from "../ipc/sources";
 import Launcher from "./Launcher.svelte";
 
 const NOW = new Date("2026-08-25T12:00:00Z");
@@ -633,6 +633,39 @@ test("the board shows one line per source, and says which one needs attention", 
   // Only the broken one is marked, and `ok` is not "needs attention".
   expect(target.querySelectorAll(".tf-ln-src.tf-ln-fail")).toHaveLength(1);
   expect(target.querySelector(".tf-ln-src.tf-ln-fail")?.textContent).toContain("gitea");
+});
+
+test("the strip marks a source whose last run ended in an error, as the source page reads it (#1581)", async () => {
+  const health = (source_id: string): CredentialHealth => ({
+    source_id,
+    state: "ok",
+    checked_at: "2026-08-25T11:00:00Z",
+    detail: null,
+    secret_expires_at: null,
+  });
+  const run = (source_id: string, last_outcome: "ok" | "error"): SourceSyncStatus => ({
+    source_id,
+    running: false,
+    run_id: 1,
+    started_at: null,
+    last_finished_at: "2026-08-25T11:30:00Z",
+    last_outcome,
+    next_run_at: null,
+    backoff_until: null,
+    last_changed: null,
+  });
+  open({
+    sources: [health("jira"), health("teamcity")],
+    runs: [run("jira", "ok"), run("teamcity", "error")],
+  });
+  await settle();
+
+  const lines = [...target.querySelectorAll(".tf-ln-src")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
+  expect(lines).toEqual(["JI jira checked 1 h ago", "TE teamcity Failed 30 min ago"]);
+  // Warn, not the credential's err: the credential is fine.
+  expect(target.querySelectorAll(".tf-ln-src.tf-ln-warn")).toHaveLength(1);
+  expect(target.querySelector(".tf-ln-src.tf-ln-warn")?.textContent).toContain("teamcity");
+  expect(target.querySelectorAll(".tf-ln-src.tf-ln-fail")).toHaveLength(0);
 });
 
 test("Enter on a row navigates to its address and closes the overlay", async () => {
