@@ -1148,11 +1148,12 @@ test("a picked status is drawn muted with queued until the detail's status moves
   await settle();
   expect(statusShown()).toEqual(["In Review", true, "queued"]);
 
+  // The status moved, here past the picked one (somebody closed it): the mark goes.
   unmount(job!);
-  status = "In Review";
+  status = "Done";
   open("PAY-231", { ports: moving() });
   await settle();
-  expect(statusShown()).toEqual(["In Review", false, null]);
+  expect(statusShown()).toEqual(["Done", false, null]);
 
   // Moved back in Jira by somebody else: the old move is not drawn again.
   unmount(job!);
