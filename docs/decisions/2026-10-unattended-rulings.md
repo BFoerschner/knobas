@@ -9422,3 +9422,16 @@ sources hold) too.
   route grammar: `#/job/<source>:<key>` is the entity-id form the route already read, and
   `#/job/<source>/<key>` would have read as key `<source>`, tab `<key>`. *Reversing:* low: drop the
   field and the done rule's card branch.
+
+## #1437: the snooze date field commits on a press or Enter (Sonnet implementer, 2026-10-21)
+
+- **Fork:** how an invalid picked date shows. *Ruling:* the *Snooze* button beside the field is
+  disabled while `pickedMorning` returns `null`, and *Pick a day after today* appears once the field
+  holds a value. Enter and the button both re-validate, so a disabled button is a hint, not the
+  guard. *Reversing:* drop the `disabled` and the message; the validation stays.
+- **Fork:** `pickedMorning` also rejects a rolled-over day (31 Feb) and a month or day out of range.
+  The ticket lists empty, malformed, year below 1000 and not after today; an overflow date would
+  otherwise land on a different day than the one typed. *Reversing:* delete the `getMonth` check.
+- **Equivalent mutants:** the `year < 1000` guard and the `setFullYear` choice cannot be told apart
+  from the past-day rule by any input, since every such year is already past. Both stay as the
+  ticket specifies; the unit test pins `0002-11-02` and `0999-01-01` as `null`.
