@@ -10322,3 +10322,10 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 - **Builds paged.** *Ruling:* `clear_leftovers` repeats its 100-build listing until a page holds no
   build the seed did not make, so more than one page of leftovers no longer fails every test.
   *Reversing:* low.
+- **Agents the fixture does not own** (found on the first live run). *Ruling:* `seed-teamcity.sh`
+  deauthorises every authorised agent but `knobas-agent`. Two containers from the `issue-690`
+  worktree's compose (`knobas-teamcity-agent-2`, `-3`) had been running for 25 h and were
+  authorised, so the change witness's builds (remade by every seed run) ran on `knobas-agent-2`
+  and `the_seeded_records_fill_the_builds_frame` failed "ran on the one agent". *Reasoning:* the
+  suite certifies one agent; a stray container is outside the repo, so the seed makes it
+  harmless instead of stopping what another worktree owns. *Reversing:* low, one seed step.

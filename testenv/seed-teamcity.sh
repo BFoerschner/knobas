@@ -515,6 +515,27 @@ else
   say "no agent is disabled"
 fi
 
+# 6. Agents the fixture does not own (#1560). The suite certifies a server with
+#    ONE agent, `knobas-agent`: every seeded build names it, and a build that
+#    ran on `knobas-agent-2` (a container another worktree's compose left
+#    running beside this one, which registered and was authorised) fails
+#    "ran on the one agent". Deauthorise every authorised agent but ours; the
+#    container may stay up, an unauthorised agent takes no build.
+rest GET "/app/rest/agents?locator=authorized:true&fields=agent(id,name)"
+[ "$REST_STATUS" = "200" ] || die "listing authorised agents answered $REST_STATUS"
+_extra=$(printf '%s' "$REST_BODY" | jq -r --arg n "$AGENT_NAME" '.agent[]? | select(.name != $n) | "\(.id)\t\(.name)"')
+if [ -n "$_extra" ]; then
+  printf '%s\n' "$_extra" | while IFS="$(printf '\t')" read -r _aid _aname; do
+    _authorized=$(curl -sS --max-time 60 -H "Authorization: Bearer $TOKEN" -X PUT \
+                       -H 'Content-Type: text/plain' -H 'Accept: text/plain' --data 'false' \
+                       "$TC_URL/app/rest/agents/id:$_aid/authorized") || die "deauthorising agent $_aname failed"
+    [ "$_authorized" = "false" ] || die "PUT agents/id:$_aid/authorized answered '$_authorized'"
+    say "deauthorised agent $_aname (id $_aid): the fixture has one agent, $AGENT_NAME"
+  done
+else
+  say "no agent but $AGENT_NAME is authorised"
+fi
+
 # Still as the bearer of $TOKEN: this is the version the token can see.
 # Merged over the block's existing keys rather than replacing it, because
 # seed-teamcity-builds.sh keeps `teamcity.builds` in the same block.
