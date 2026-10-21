@@ -1,5 +1,5 @@
 /**
- * `?fake-ipc`: Stored contexts (#47): list, members, create and promote, and a room's
+ * `?fake-ipc`: Stored contexts (#47): list, members and promote, and a room's
  * Assets tile. The store itself lives in `corpus.ts`, which `list_entities`
  * reads it from.
  */
@@ -9,17 +9,12 @@ import { CORPUS, FAKE_CONTEXTS, fakeContext, fakeMembers } from "./corpus";
 /** This feature's commands. */
 export function handlers(): Record<string, Handler> {
   return {
-    // Contexts (#47). Stateful within the session, so the new-context tab and
-    // *Promote* can be walked in QA; membership is empty because the fixture
-    // has no link graph, and `list_entities` answers a context scope with an
-    // empty page for the same reason.
+    // Contexts (#47). Stateful within the session, so *Promote* can be walked
+    // in QA; membership is empty because the fixture has no link graph, and
+    // `list_entities` answers a context scope with an empty page for the same
+    // reason.
     list_contexts: () => FAKE_CONTEXTS.slice(),
     context_members: (args) => fakeMembers(String(args["ctxId"] ?? "")),
-    create_context: (args) => {
-      const row = fakeContext("adhoc", String(args["title"] ?? "Untitled"), null);
-      FAKE_CONTEXTS.unshift(row);
-      return row;
-    },
     promote_context: (args) => {
       const anchor = String(args["entityId"] ?? "");
       const existing = FAKE_CONTEXTS.find((row) => row.anchor_id === anchor);

@@ -10626,3 +10626,64 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 - **Config only, or with #1419's shell listener** (delegated). *Ruling:* config only: `FilterConfig.hint`
   (default on); `false` draws no `<kbd>` and registers no `/` listener. #1419 stays its own ticket.
   *Reversing:* low.
+## #1481: four uncalled IPC commands retire (Opus implementer, 2026-10-21)
+
+- **Wire or delete.** *Ruling:* delete `clones_root`, `checkout_commands` and
+  `set_checkout_command`, as #844's ruling "#501's `checkout_commands` and `set_checkout_command`
+  stay, as a view over the list" says to under its own reversal clause ("retire both once the rooms
+  UI goes"). *Reasoning:* #881 removed the rooms UI, the open-in-editor desktop-witness driver writes
+  the list through Settings › Checkouts and Open in…, and the root reaches the app on
+  `checkout_settings` and every `CheckoutView`. This carries out #844's clause and does not reverse
+  that ruling. *Reversing:* medium: the commands come back from git, plus a §10.8 entry.
+- **`create_context` joins.** *Ruling:* yes. Nothing outside the fake, the generated mirror and
+  tests called it. The grilling of 2026-10-21 (#1427) left it uncalled "until a cleanup pass", and
+  this is that pass. #1502 says the command "stays as an uncalled command under #881's ruling that
+  removing uncalled commands is a separate decision". This ruling is that separate decision, and
+  #1502 touches no Rust, so the two do not collide. *Reasoning:* the brief's recommendation; an
+  uncalled write command is the kind of thing a later reader wires by mistake. *Reversing:* medium,
+  as above.
+- **How far the deletion reaches.** *Ruling:* past the shims, into the code only they used:
+  `OpenCommandView` (TS `CheckoutCommand`), `checkout::commands`, `checkout::set_command` and
+  `create_context_inner`. The tests that used `set_command` as setup write the list with
+  `set_applications` instead, and the ones that used `create_context_inner` mint with
+  `knobas_core::context::create_adhoc`. *Kept:* the read of #501's three legacy template keys,
+  because a database may still hold one; `checkout::clones_root`, which the scan, the clone and
+  `checkout_settings` read; `create_adhoc`, because stored ad-hoc contexts are still read.
+  *Reversing:* low.
+- **The worklog pin on a context's `created` line** (`time_ipc.rs`, #561). *Ruling:* kept. The test
+  writes the line `create_context` used to write, in its shape, directly to the activity log.
+  *Reasoning:* nothing writes it now, but the log keeps the lines it wrote, and the draft still has
+  to offer them. *Reversing:* low, delete the test.
+- **The `clones_root` acceptance grep.** *Ruling:* ticked with a note. It cannot pass on a correct
+  implementation: `set_clones_root`, `CheckoutSettings.clones_root`, `CheckoutView.clones_root` and
+  `checkout::clones_root` all stay. The other three names (and `create_context`) print nothing.
+  Wording follow-up #1579. *Reversing:* n/a.
+- **`mockups/shared/capabilities.md`** still lists `create_context` as BUILT. *Ruling:* left alone.
+  It is a sheet dated 2026-10-14 that describes the rooms UI #881 removed, and fixing one row would
+  make a stale sheet look current. *Reversing:* low.
+- **Other uncalled commands** the sweep found (`context_assets`, `source_assets`,
+  `recent_activity`, `context_members`, `source_statuses`, `smart_list_items`). *Ruling:* listed and
+  not removed, as the ticket says; backlog follow-up #1578. `detect_suggestions` is #1485's.
+
+### Reserved for Björn, ruled by implementer on Opus
+
+- **Sign-off on the §10.8 entry** (`docs/contract/10.8/1481-retire-four-uncalled-commands.md`).
+  *Ruling:* signed off. The entry adds nothing to the frozen surface and only removes from it.
+  Every removed name had no caller outside the fake, the mirror and tests (the ticket's grep, run
+  again on this tree), and the census holds the fake and the barrel to each other. The entries it
+  supersedes (#47, #499, #501, #844–846) are named and left unedited, per §10.8's single-writer
+  rule. *Reasoning:* Björn delegated the pick at triage, and the one thing a retirement can break is
+  a caller, which the census rules out. *Reversing:* medium, revert the PR.
+- **Confirmed by merge-manager on Opus (2026-10-21).** *Ruling:* the sign-off stands. §10.8 asks
+  for one new entry file and no edit to an existing one; `git diff --name-status` shows one `A`
+  row, and the superseded parts of #47, #499, #501 and #844–846 are named in it. The handler list's
+  append-only rule exists so parallel PRs rebase to one-line conflicts; four deleted lines keep that
+  property, and #1275's rename already removed lines from it. A repo-wide grep (app, crates, the
+  WASM host, testenv, scripts) finds no caller of the four names. One wording fix: the entry now
+  attributes the reversal clause to #844's ruling, where it is written, not to the #844–846 entry's
+  bullet. *Reversing:* medium, revert the PR.
+- **`create_context` in this PR (merge-manager on Opus).** *Ruling:* confirmed. #1502's body says
+  the command "stays" only as a statement of its own scope ("nothing in this ticket touches Rust");
+  its criteria touch the Tickets view, `requirements.md`, a ruling line and a screenshot, none of
+  which this PR changes, and its fixture can seed `FAKE_CONTEXTS` without the retired fake handler.
+  A comment on #1502 says the command is gone. *Reversing:* medium.

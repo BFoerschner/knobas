@@ -134,12 +134,10 @@ vi.mock("./lib/ipc/entity", () => ({
   listContexts: () => Promise.resolve([]),
   listProjects: () => Promise.resolve([]),
   contextMembers: () => Promise.resolve([]),
-  createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   listEntities: () => Promise.resolve({ rows: [], total: 0 }),
   entityView: () => Promise.resolve(null),
   // The job page's other reads (#886): refused, so it draws the ticket and nothing more.
-  checkoutCommands: () => Promise.reject(new Error("no checkoutCommands in this test")),
   createLink: () => Promise.reject(new Error("no createLink in this test")),
   entityCheckout: () => Promise.reject(new Error("no entityCheckout in this test")),
   entityThread: () => Promise.reject(new Error("no entityThread in this test")),

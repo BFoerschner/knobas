@@ -7,6 +7,8 @@ use super::*;
 // In this module rather than one of their own: §10.8 freezes the `commands/`
 // + `ipc/` module layout ("no new module"), and contexts are the entity
 // stream's own objects — linkable, listable, and read by the same surfaces.
+// #1481 retired the ad-hoc mint: nothing called it after #881 took the rooms
+// UI away. A context is born by `promote_context`.
 
 /// The switcher's list: every unarchived context, newest first.
 ///
@@ -21,26 +23,6 @@ pub async fn list_contexts(
 ) -> Result<Vec<knobas_core::context::ContextRow>, IpcError> {
     let pool = lifecycle.pool()?;
     Ok(knobas_core::context::list(&pool).await?)
-}
-
-/// Create an ad-hoc context from a label.
-///
-/// # Errors
-///
-/// [`Invalid`](crate::IpcErrorCode::Invalid) if the label is blank -- a room
-/// with no name is not addressable by a person;
-/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
-pub async fn create_context_inner(
-    pool: &PgPool,
-    title: &str,
-) -> Result<knobas_core::context::ContextRow, IpcError> {
-    let title = title.trim();
-    if title.is_empty() {
-        return Err(IpcError::invalid("a context needs a label"));
-    }
-    let row = knobas_core::context::create_adhoc(pool, title).await?;
-    record(pool, "created", &row).await?;
-    Ok(row)
 }
 
 /// Promote an entity to a context of its own (spec §7).
@@ -162,25 +144,6 @@ async fn record(
     }
     knobas_core::activity::record(pool, ACTOR, verb, Some(&entity), detail).await?;
     Ok(())
-}
-
-/// Create an ad-hoc context, and announce the switcher has a new room.
-///
-/// # Errors
-///
-/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
-/// database is still coming up, and whatever [`create_context_inner`] refuses
-/// with.
-#[tauri::command]
-pub async fn create_context<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    lifecycle: State<'_, Lifecycle>,
-    title: String,
-) -> Result<knobas_core::context::ContextRow, IpcError> {
-    let pool = lifecycle.pool()?;
-    let row = create_context_inner(&pool, &title).await?;
-    announce_context(&app, &row);
-    Ok(row)
 }
 
 /// Promote an entity to a context, and announce it.

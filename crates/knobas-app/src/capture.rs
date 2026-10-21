@@ -26,7 +26,7 @@
 //!    error to. The settings section draws that one field either way, which is
 //!    what the ticket means by *"a shortcut the OS refuses to register is
 //!    reported in settings"*. **The alternative was refusing the write** the
-//!    way `set_checkout_command` refuses an unusable template; it is rejected
+//!    way `set_checkout_applications` refuses an unusable command; it is rejected
 //!    because it can only ever cover half the population -- a combination
 //!    Alfred grabbed after it was stored has no write to refuse -- and two
 //!    mechanisms for one sentence is how a settings pane comes to have two
@@ -340,9 +340,10 @@ pub async fn set_shown(
 /// Store the capture shortcut, or clear it with a blank one, and register what
 /// was stored while notes are shown (#832; hidden, it is kept and not held).
 ///
-/// Answers the fresh view rather than nothing, which is `set_checkout_command`'s
-/// rule and for its reason: the field draws what is **stored**, so a write that
-/// normalised or could not register its value says so in the same round trip.
+/// Answers the fresh view rather than nothing, which is
+/// `set_checkout_applications`' rule and for its reason: the field draws what
+/// is **stored**, so a write that normalised or could not register its value
+/// says so in the same round trip.
 ///
 /// # Errors
 ///

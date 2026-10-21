@@ -29,8 +29,8 @@ use knobas_app::checkout::open::{APPLICATIONS_KEY, GitFound, legacy_key, open};
 use knobas_app::checkout::uncommitted::DiffRead;
 use knobas_app::checkout::working_tree::TreeRead;
 use knobas_app::checkout::{
-    CheckoutView, FoundBy, Run, clones_root, commands, local_changes, set_applications,
-    set_clones_root, set_command, set_override, settings, view,
+    CheckoutView, FoundBy, Run, clones_root, local_changes, set_applications, set_clones_root,
+    set_override, settings, view,
 };
 use knobas_core::checkout::open::{Draft, shipped};
 use sqlx::PgPool;
@@ -871,16 +871,21 @@ async fn scanned(pool: &PgPool) -> (Repo, tempfile::TempDir, PathBuf, PathBuf, t
 
 /// The whole feature, end to end: a clones root, a scan, an application, and
 /// a real process that is handed the path the scan found -- and nothing else.
-/// Named by #501's id through #501's own write, and as the default.
+/// Named by its id, and as the default.
 #[cfg(unix)]
 #[tokio::test]
 async fn opening_a_checkout_runs_the_application_with_the_scanned_path() {
     let pool = pool().await;
     let (repo, root, stub, record, _workshop) = scanned(&pool).await;
-    set_command(
+    set_applications(
         &pool,
-        "vscode",
-        Some(&format!("{} --wait {{path}}", stub.display())),
+        &[app(
+            Some("vscode"),
+            "VS Code",
+            &format!("{} --wait {{path}}", stub.display()),
+            None,
+        )],
+        None,
     )
     .await
     .unwrap();
@@ -902,7 +907,7 @@ async fn opening_a_checkout_runs_the_application_with_the_scanned_path() {
     assert_eq!(recorded(&record).await, expected);
     assert_eq!(argv[1..], expected, "the answer is the argv it started");
 
-    // No application named is the default, which VS Code is out of the box.
+    // No application named is the default, which a list's first entry is.
     fs::remove_file(&record).unwrap();
     open(&pool, &repo.id, Run::Application(None), None, None)
         .await
@@ -964,10 +969,15 @@ async fn a_branch_opens_its_repositorys_checkout() {
     let pool = pool().await;
     let (repo, root, stub, record, _workshop) = scanned(&pool).await;
     let branch = branch_of(&pool, &repo, "feature/PAY-231-sepa-retry").await;
-    set_command(
+    set_applications(
         &pool,
-        "vscode",
-        Some(&format!("{} {{path}}", stub.display())),
+        &[app(
+            Some("vscode"),
+            "VS Code",
+            &format!("{} {{path}}", stub.display()),
+            None,
+        )],
+        None,
     )
     .await
     .unwrap();
@@ -1120,12 +1130,6 @@ async fn a_command_that_cannot_be_run_is_refused_where_it_is_typed() {
         .expect_err("an application has a name");
     assert_eq!(error.code, IpcErrorCode::Invalid);
 
-    let error = set_command(&pool, "emacs", Some("emacs {path}"))
-        .await
-        .expect_err("emacs is not an application");
-    assert_eq!(error.code, IpcErrorCode::Invalid);
-    assert!(error.message.contains("emacs"), "{}", error.message);
-
     assert_eq!(
         settings(&pool).await.unwrap(),
         before,
@@ -1252,36 +1256,6 @@ async fn the_shipped_list_with_501s_templates_is_the_list_until_one_is_saved() {
             .as_deref(),
         Some("terminal")
     );
-}
-
-/// #501's settings write, over the list: a stored command wins, and clearing
-/// it puts back the one this platform ships.
-#[cfg(target_os = "macos")]
-#[tokio::test]
-async fn a_stored_command_wins_and_clearing_gives_the_shipped_one_back() {
-    let pool = pool().await;
-    let before = commands(&pool).await.unwrap();
-    let ids: Vec<&str> = before.iter().map(|c| c.action.as_str()).collect();
-    assert_eq!(ids, ["vscode", "terminal", "fork", "jetbrains"]);
-    assert!(before.iter().all(|command| command.is_default));
-    assert_eq!(before[0].label, "Open in VS Code");
-
-    set_command(&pool, "vscode", Some("  code --new-window {path}  "))
-        .await
-        .unwrap();
-    let after = commands(&pool).await.unwrap();
-    assert_eq!(
-        after[0].template.as_deref(),
-        Some("code --new-window {path}")
-    );
-    assert!(!after[0].is_default);
-    assert!(
-        after[1..].iter().all(|c| c.is_default),
-        "only that one moved"
-    );
-
-    set_command(&pool, "vscode", None).await.unwrap();
-    assert_eq!(commands(&pool).await.unwrap(), before);
 }
 
 /// *Where should clones go?* offers `~/code`; nothing knobas runs expands a

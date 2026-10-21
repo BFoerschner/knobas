@@ -52,7 +52,6 @@ vi.mock("../ipc/entity", () => ({
     ]),
   contextMembers: (ctxId: string) =>
     record(`members ${ctxId}`, ctxId === "ctx:pay" ? ["gitea:acme/payouts#144"] : []),
-  createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   inboxItems: (shelf: InboxShelf) =>
     record(`items ${shelf}`, shelf === "stream" ? stream : snoozed),

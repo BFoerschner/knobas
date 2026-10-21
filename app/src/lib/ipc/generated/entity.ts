@@ -299,33 +299,6 @@ id: string | null, name: string, command: string,
 file_command: string | null, };
 
 /**
- * One application as #501's checkout panel draws it: a button.
- *
- * Since #844 a view over the *Open in…* list (`checkout_settings`): one row
- * per application. `is_default` says whether the command is the one this
- * platform ships for that id, so the rooms settings field can offer to go back
- * to it.
- */
-export type CheckoutCommand = { 
-/**
- * The application's id: what `open_checkout` takes.
- */
-action: string, 
-/**
- * What the button says: "Open in VS Code".
- */
-label: string, 
-/**
- * The command. Always set: an application has one.
- */
-template: string | null, 
-/**
- * Whether the command is the one this platform ships for this id, so
- * the rooms settings field can offer to go back to it.
- */
-is_default: boolean, };
-
-/**
  * How a checkout was arrived at, or that it was not.
  *
  * - `override`: A path this repository's override carries. Set by hand, and it

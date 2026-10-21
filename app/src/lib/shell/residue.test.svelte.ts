@@ -112,18 +112,6 @@ const CHECKOUT = {
   tree: null,
 };
 
-/** What `checkout_commands` answers for both checkout cases (#501). */
-const OPEN_COMMANDS = [
-  {
-    action: "vscode",
-    label: "Open in VS Code",
-    template: 'open -a "Visual Studio Code" {path}',
-    is_default: true,
-  },
-  { action: "jetbrains", label: "Open in JetBrains", template: null, is_default: true },
-  { action: "terminal", label: "Open terminal here", template: "open -a Terminal {path}", is_default: true },
-];
-
 const NOTE = {
   note: {
     id: "note:7f2c",
@@ -175,7 +163,6 @@ vi.mock("../ipc/entity", () => ({
   // (#209). Empty here: this file is not about which rooms exist.
   listProjects: () => Promise.resolve([]),
   contextMembers: () => Promise.resolve([]),
-  createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   listEntities: () => deferred(PAGE),
   // What a ticket reaches (#817): the Tickets preview's default ports name it (#1030).
@@ -228,13 +215,7 @@ vi.mock("../ipc/entity", () => ({
   // is the case that matters, because the panel's effect *is* that read.
   entityCheckout: () => deferred(CHECKOUT),
   setCheckoutOverride: () => deferred(CHECKOUT),
-  clonesRoot: () => deferred("/Users/mara/src"),
   setClonesRoot: () => deferred(undefined),
-  // The open commands (#501): a second read in the panel's effect and in the
-  // section's, deferred for the same reason -- both must be able to answer
-  // after their component is gone.
-  checkoutCommands: () => deferred(OPEN_COMMANDS),
-  setCheckoutCommand: () => deferred(OPEN_COMMANDS),
   openCheckout: () => deferred(undefined),
 }));
 
@@ -1022,7 +1003,6 @@ const CASES: Case[] = [
             reachableTransitions: () => deferred([]),
             submitWrite: () => new Promise(() => {}),
             entityCheckout: () => new Promise(() => {}),
-            checkoutCommands: () => deferred([]),
             openCheckout: () => deferred(undefined),
             weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
             visitEntity: () => deferred(null),

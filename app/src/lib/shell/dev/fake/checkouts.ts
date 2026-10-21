@@ -250,32 +250,6 @@ function fakeSetApps(drafts: unknown, defaultId: unknown) {
   return fakeSettings();
 }
 
-/** `checkout_commands` (#501), over the list. */
-function fakeCommands() {
-  return fakeApps.map((app) => ({
-    action: app.id,
-    label: `Open in ${app.name}`,
-    template: app.command,
-    is_default: SHIPPED.some((known) => known.id === app.id && known.command === app.command),
-  }));
-}
-
-/** `set_checkout_command` (#501), over the list. */
-function fakeSetCommand(action: string, template: unknown) {
-  const app = fakeApps.find((one) => one.id === action);
-  if (!app) throw { code: "invalid", message: `'${action}' is not something knobas opens a checkout with`, source_id: null };
-  const value = typeof template === "string" ? template.trim() : "";
-  if (value === "") {
-    const shipped = SHIPPED.find((known) => known.id === action);
-    if (!shipped) throw { code: "invalid", message: `${app.name} has no command on this platform to go back to`, source_id: null };
-    app.command = shipped.command;
-  } else {
-    refuse(value, `'${value}'`);
-    app.command = value;
-  }
-  return fakeCommands();
-}
-
 /** A command split into words, quotes grouping only, as the backend splits it. */
 function words(command: string): string[] {
   return [...command.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((match) => match[1] ?? match[2] ?? match[3] ?? "");
@@ -385,15 +359,12 @@ export function handlers(): Record<string, Handler> {
     // Checkouts (#499). The fixture has no filesystem, so what stands in for
     // the scan is `FAKE_SCANNED`, what a clone made (`fakeCloned`) and the
     // overrides this file keeps.
-    clones_root: () => fakeClonesRoot,
     set_clones_root: (args) => {
       const path = args["path"];
       fakeClonesRoot = typeof path === "string" && path.trim() !== "" ? path.trim().replace(/^~(?=\/|$)/, "/Users/mara") : null;
       return null;
     },
     entity_checkout: (args) => fakeCheckout(String(args["entityId"] ?? "")),
-    checkout_commands: () => fakeCommands(),
-    set_checkout_command: (args) => fakeSetCommand(String(args["action"] ?? ""), args["template"]),
     open_checkout: (args) => fakeOpen(args),
     checkout_settings: () => fakeSettings(),
     set_checkout_applications: (args) => fakeSetApps(args["applications"], args["defaultApplication"]),

@@ -10,8 +10,7 @@
 //! per run and assertions are set membership, never absolute totals.
 
 use knobas_app::commands::entity::{
-    create_context_inner, create_link_inner, list_entities_inner, promote_context_inner,
-    room_suggestions_inner,
+    create_link_inner, list_entities_inner, promote_context_inner, room_suggestions_inner,
 };
 use knobas_app::sources::Registry;
 use knobas_app::{IpcError, IpcErrorCode};
@@ -75,13 +74,6 @@ fn scoped_to(ctx: &str) -> EntityFilter {
 
 fn code(error: &IpcError) -> IpcErrorCode {
     error.code
-}
-
-#[tokio::test]
-async fn a_blank_label_is_refused_as_invalid() {
-    let pool = pool().await;
-    let refused = create_context_inner(&pool, "   ").await.unwrap_err();
-    assert_eq!(code(&refused), IpcErrorCode::Invalid);
 }
 
 #[tokio::test]

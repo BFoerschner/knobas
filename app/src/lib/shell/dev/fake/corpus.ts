@@ -337,8 +337,8 @@ function row(
   };
 }
 
-/** The stored contexts the fixture session holds. Starts empty on purpose:
- * the new-context flow is what a QA pass wants to see working. */
+/** The stored contexts the fixture session holds. Starts empty; *Promote*
+ * adds to it. */
 export const FAKE_CONTEXTS: {
   id: string;
   kind: string;
