@@ -329,6 +329,43 @@ fn the_stranded_timer_sweep_runs_before_the_database_is_announced_ready() {
     );
 }
 
+/// One suggestion pass in the running app (#1485): bring-up builds it once
+/// and hands the same handle to the scheduler (`sources::start`, which
+/// requests a pass after every OK run) and to `AppState` (whose
+/// `detect_suggestions` runs one now). A second construction would be a second
+/// queue, and two passes at once are what #745 ended.
+///
+/// Read from the source, like the sweep above: `spawn_bring_up` needs a Tauri
+/// app and a real server. `tests/it/suggestion_pass.rs` shows `bring_up`
+/// requests the pass it is handed.
+#[test]
+fn bring_up_builds_one_suggestion_pass_for_the_scheduler_and_the_app_state() {
+    let code = strip_comments(include_str!("../../src/lib.rs"));
+    let start = code
+        .find("fn spawn_bring_up")
+        .expect("bring-up is where the app's state is built");
+    let end = start
+        + code[start..]
+            .find("fn set_db_state")
+            .expect("bring-up ends before `set_db_state`");
+    let body = &code[start..end];
+
+    assert_eq!(
+        body.matches("SuggestionPass::").count(),
+        1,
+        "bring-up builds the suggestion pass exactly once"
+    );
+    assert!(
+        body.contains("sources::start(&handle, &db, suggestions.clone())"),
+        "the scheduler is handed the pass bring-up built"
+    );
+    let installed = &body[body.find("AppState {").expect("bring-up installs AppState")..];
+    assert!(
+        installed.contains("suggestions,"),
+        "AppState holds the pass bring-up built, not one of its own"
+    );
+}
+
 /// Rust source with its comments removed, string literals intact.
 ///
 /// The file this scans documents the plugin in prose right next to the call,

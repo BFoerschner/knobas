@@ -182,7 +182,12 @@ fn suggestion_id(link_id: &str) -> Result<Uuid, IpcError> {
         .map_err(|_| IpcError::invalid(format!("{link_id} is not a link id")))
 }
 
-/// Run a detection pass over the mirror.
+/// Run a detection pass over the mirror, now, and answer what it wrote.
+///
+/// The manual *run a pass now*: no surface calls it since the room's tray went
+/// (#881). Passes happen without it, because the sync scheduler requests one
+/// after every run that ends OK (`suggestion_pass::SuggestOnSync`, #1485);
+/// this waits on the same pass and queue.
 ///
 /// # Errors
 ///

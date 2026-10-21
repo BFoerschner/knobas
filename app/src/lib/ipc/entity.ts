@@ -542,8 +542,10 @@ export function deleteNote(noteId: string): Promise<boolean> {
  *
  * Idempotent and cheap to repeat: a pass over an unchanged mirror writes
  * nothing, and a pass after a sync writes only what the new items justify and
- * resurrects nothing that was dismissed. This is what makes detection something
- * a surface calls rather than something the user asks for.
+ * resurrects nothing that was dismissed.
+ *
+ * Nothing in the frontend calls it: the sync scheduler requests a pass after
+ * every run that ends OK (#1485). This is the manual *run a pass now*.
  *
  * One pass at a time, on a connection of its own (#745): a call made while a
  * pass runs resolves when the *next* pass does, and that one pass answers

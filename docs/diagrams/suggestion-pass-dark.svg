@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- knobas suggestion-pass (dark). Hand-authored SVG, checked against the code at main 3c3bb715 (2026-10-14). Edit both themes together. -->
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="590" viewBox="0 0 1200 590" role="img" aria-label="Suggestion pass: a finished sync run makes the room's tray call detect_suggestions; a queue coalesces requests into at most one running pass plus one owed; the pass runs seven rules on its own connection and inserts unconfirmed rows into knobas.link; the tray reads proposed_link and accept or dismiss updates the same row and writes an activity line.">
+<!-- knobas suggestion-pass (dark). Hand-authored SVG, checked against the code at main b2a6da08 (2026-10-21). Edit both themes together. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="590" viewBox="0 0 1200 590" role="img" aria-label="Suggestion pass: a sync run that ends OK makes the scheduler request a pass, without waiting; the detect_suggestions command asks for one and waits; a queue coalesces requests into at most one running pass plus one owed; the pass runs seven rules on its own connection and inserts unconfirmed rows into knobas.link; the window reads proposed_link and accept or dismiss updates the same row and writes an activity line.">
   <defs>
     <marker id="ch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -34,27 +34,22 @@
   <rect class="bx" x="20" y="60" width="160" height="70" rx="3"/>
   <text class="t" x="34" y="82">Sync run ends</text>
   <text class="mf" x="34" y="98">knobas-sync</text>
-  <text class="s" x="34" y="118">any outcome, failed too</text>
+  <text class="s" x="34" y="118">a pass on outcome Ok only</text>
 
-  <line class="ar" x1="180" y1="95" x2="248" y2="95" marker-end="url(#ch)"/>
-  <text class="lb" x="214" y="80" text-anchor="middle">sync:state</text>
-  <text class="lb" x="214" y="112" text-anchor="middle">ended</text>
+  <line class="ar" x1="180" y1="95" x2="578" y2="95" marker-end="url(#ch)"/>
+  <text class="lb" x="379" y="88" text-anchor="middle">SuggestOnSync: request()</text>
+  <text class="lb" x="379" y="112" text-anchor="middle">on sync:state ended Ok, no wait</text>
 
-  <rect class="bx" x="250" y="60" width="200" height="70" rx="3"/>
-  <text class="t" x="264" y="82">Suggestion tray</text>
-  <text class="mf" x="264" y="98">SuggestionTray.svelte</text>
-  <text class="s" x="264" y="118">one per room</text>
-
-  <line class="ar" x1="450" y1="95" x2="578" y2="95" marker-end="url(#ch)"/>
-  <text class="lb" x="514" y="88" text-anchor="middle">invoke</text>
-  <text class="lb" x="514" y="112" text-anchor="middle">detect_suggestions</text>
+  <line class="ar" x1="470" y1="150" x2="578" y2="150" marker-end="url(#ch)"/>
+  <text class="lb" x="464" y="146" text-anchor="end">detect_suggestions</text>
+  <text class="lb" x="464" y="162" text-anchor="end">manual, waits</text>
 
   <rect class="bx2" x="580" y="60" width="230" height="110" rx="3"/>
   <text class="t" x="594" y="82">SuggestionPass queue</text>
   <text class="mf" x="594" y="98">Mutex&lt;Queue&gt; + watch channel</text>
   <text class="s" x="594" y="120">≤ 1 running, ≤ 1 owed</text>
   <text class="s" x="594" y="138">N calls during a pass → 1 more</text>
-  <text class="s" x="594" y="156">caller waits for its ticket</text>
+  <text class="s" x="594" y="156">one queue for both callers</text>
 
   <line class="ar" x1="810" y1="95" x2="908" y2="95" marker-end="url(#ch)"/>
   <text class="lb" x="859" y="88" text-anchor="middle">spawn</text>
@@ -64,7 +59,7 @@
   <text class="t" x="924" y="82">Pass</text>
   <text class="mf" x="924" y="98">own PgConnection, not a pool</text>
   <text class="s" x="924" y="120">statement_timeout 120 s</text>
-  <text class="s" x="924" y="138">timeout: pass stops, tray shows a note</text>
+  <text class="s" x="924" y="138">timeout: pass stops and logs it</text>
   <text class="s" x="924" y="156">committed batches stay</text>
 
   <!-- rules -->
@@ -106,12 +101,10 @@
   <text class="s" x="914" y="560">batches ≤ 100, halved on timeout</text>
 
   <!-- answer loop -->
-  <line class="ar" x1="350" y1="130" x2="350" y2="248" marker-end="url(#ch)"/>
-  <text class="lb" x="358" y="194">your click</text>
 
   <rect class="bx" x="250" y="250" width="200" height="96" rx="3"/>
   <text class="t" x="264" y="270">Accept / Dismiss</text>
-  <text class="mf" x="264" y="285">on the UI pool</text>
+  <text class="mf" x="264" y="285">Proposed links, UI pool</text>
   <text class="s" x="264" y="306">Accept: confirmed_at = now()</text>
   <text class="s" x="264" y="324">Dismiss: deleted_at = now()</text>
   <text class="s" x="264" y="340">same row, rule kept</text>
@@ -123,14 +116,10 @@
   <text class="s" x="34" y="306">accepted · dismissed</text>
   <text class="s" x="34" y="324">then activity:new</text>
 
-  <path class="ar" d="M100,250 L100,180 L290,180 L290,132" marker-end="url(#ch)"/>
-  <text class="lb" x="108" y="172">re-read</text>
 
   <path class="ar" d="M350,346 L350,540 L578,540" marker-end="url(#ch)"/>
   <text class="lb" x="410" y="533" text-anchor="middle">update</text>
 
-  <path class="ar" d="M578,500 L470,500 L470,132" marker-end="url(#ch)"/>
+  <path class="ar" d="M578,500 L470,500 L470,320 L452,320" marker-end="url(#ch)"/>
   <text class="lb" x="524" y="493" text-anchor="middle">reads proposed</text>
-  <text class="lb" x="524" y="514" text-anchor="middle">≤ 50 per room</text>
-  <text class="lb" x="524" y="528" text-anchor="middle">≤ 3 per item</text>
 </svg>

@@ -1019,7 +1019,11 @@ knobas-app	test/it	status_move::the_read_offers_the_workflow_and_a_source_withou
 knobas-app	test/it	suggestion_pass::a_pass_past_its_statement_timeout_is_cancelled_and_the_next_one_finishes
 knobas-app	test/it	suggestion_pass::a_pass_runs_while_the_ui_pool_is_exhausted
 knobas-app	test/it	suggestion_pass::a_pass_that_panics_answers_its_requests_and_the_next_one_runs
+knobas-app	test/it	suggestion_pass::a_sync_that_ends_ok_proposes_links_without_anyone_asking
+knobas-app	test/it	suggestion_pass::a_sync_that_fails_requests_no_pass
+knobas-app	test/it	suggestion_pass::only_the_emit_that_ends_a_run_ok_requests_a_pass
 knobas-app	test/it	suggestion_pass::requests_during_a_pass_coalesce_into_one_more_pass
+knobas-app	test/it	suggestion_pass::requests_that_do_not_wait_coalesce_into_one_more_pass
 knobas-app	test/it	suggestions_ipc::a_bad_suggestion_id_is_invalid_and_an_unknown_one_is_not_found
 knobas-app	test/it	suggestions_ipc::a_pass_over_the_demo_corpus_proposes_suggestions_a_reader_can_judge
 knobas-app	test/it	suggestions_ipc::accepting_moves_a_proposal_into_the_panel_and_records_it
@@ -1154,6 +1158,7 @@ knobas-app	test/it	week_ipc::discarding_a_queued_worklog_gives_the_afternoon_bac
 knobas-app	test/it	week_ipc::log_all_makes_one_worklog_per_day_and_ticket
 knobas-app	test/it	week_ipc::log_all_touches_neither_a_passive_block_nor_a_label_one
 knobas-app	test/it	week_ipc::the_no_target_row_tells_app_open_from_app_closed_and_from_claimed_time
+knobas-app	test/it	wiring::bring_up_builds_one_suggestion_pass_for_the_scheduler_and_the_app_state
 knobas-app	test/it	wiring::each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge
 knobas-app	test/it	wiring::every_command_is_in_the_handler_list
 knobas-app	test/it	wiring::no_grant_reaches_further_than_the_app_does

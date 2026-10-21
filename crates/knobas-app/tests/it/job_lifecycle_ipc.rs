@@ -307,6 +307,7 @@ async fn bring_up_archives_the_contexts_of_jobs_already_done_and_a_second_does_n
         tokio::task::block_in_place(move || {
             tauri::async_runtime::block_on(async move {
                 let deps = knobas_app::sources::BringUp {
+                    suggestions: knobas_app::suggestion_pass::SuggestionPass::beside(&pool),
                     sync_pool: connector.pool(2).await.unwrap(),
                     pool,
                     connections: connector,

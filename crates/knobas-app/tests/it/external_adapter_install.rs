@@ -544,6 +544,7 @@ async fn bring_up_loads_the_installed_adapters_before_the_scheduler_starts() {
     let handle = app.handle().clone();
     let sync_pool = connector.pool(2).await.unwrap();
     let deps = knobas_app::sources::BringUp {
+        suggestions: knobas_app::suggestion_pass::SuggestionPass::beside(&pool),
         pool,
         sync_pool,
         connections: connector,
