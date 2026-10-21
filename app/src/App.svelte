@@ -154,7 +154,7 @@
     timeRevision += 1;
     const key = targetReading({ kind: "entity", entity_id: logged.entity_id });
     push({
-      text: `Queued: log ${hoursAndMinutes(Math.round(logged.seconds / 60))} to ${key}.`,
+      text: `Queued: log ${hoursAndMinutes(Math.floor(logged.seconds / 60))} to ${key}.`,
       action: { label: "Show queue", run: openWriteQueue },
     });
     if (logged.write_queue_id !== null) followWrite({ id: logged.write_queue_id }, { name: "Worklog" });

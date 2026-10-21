@@ -145,11 +145,14 @@
       for (const row of ticked) {
         const now = fresh.get(id(row.plan));
         if (now === undefined) continue;
+        // Whole minutes, floored: the preview's seconds may carry a remainder.
+        const seconds = minutesOf(now.seconds) * 60;
+        if (seconds === 0) continue;
         try {
           made.push(
             await io.logWork(now.entity_id, when(now.day), {
               startedAt: now.started_at,
-              seconds: now.seconds,
+              seconds,
               comment: row.comment,
             }),
           );
