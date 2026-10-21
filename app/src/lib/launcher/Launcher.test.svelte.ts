@@ -2410,6 +2410,13 @@ test("typing resets the cursor to the first row, and that row is scrolled back i
   const first = options()[0];
   expect(first?.textContent).toContain("Retry failed SEPA payouts");
   expect(scrolls.at(-1)).toEqual({ el: first, options: { block: "nearest" } });
+
+  // A new answer with the cursor already on the first row brings it back too.
+  scrolls.length = 0;
+  await typeInto("sepa payouts");
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  expect(scrolls.at(-1)).toEqual({ el: options()[0], options: { block: "nearest" } });
 });
 
 /** The `>` palette, open with every action: the answer says the prefix is `>`. */
