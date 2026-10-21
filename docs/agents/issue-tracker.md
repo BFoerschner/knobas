@@ -42,6 +42,10 @@ An acceptance grep for a retired name must not match the names that stay (#1579:
 the call site does (`invoke<…>("clones_root"`, `commands::entity::clones_root,`), never as a bare
 word that surviving names contain.
 
+A screenshot criterion that pins the launcher's state after a close uses the × route
+(`… + click:Close + key:Meta+k`) or two `Esc` presses: one `Esc` empties a non-empty box and keeps the
+launcher open (#1567).
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_

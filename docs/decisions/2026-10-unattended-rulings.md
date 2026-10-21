@@ -10351,6 +10351,11 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 - **The screenshot route.** `Esc` with text in the box empties it first (one rung per press), so the
   ticket's `type:PAY + key:Escape + key:Meta+k` reopens nothing and shows an empty box. The shot
   closes with the × instead, which keeps the query; see the PR.
+- **The corrected reading (#1567, 2026-10-21).** *Ruling:* the route `'#/tickets + key:Meta+k +
+  type:PAY + key:Escape + key:Meta+k'` cannot show the kept query selected: the launcher's `Esc`
+  empties the box first, so the reopen draws an empty box. The route that shows it closes by the ×:
+  `'#/tickets + key:Meta+k + type:PAY + click:Close + key:Meta+k'` (or `Esc` twice). *Reasoning:*
+  wording only; the code was right. The closed issue's body is left as written. *Reversing:* none.
 
 ## #1475: a pasted address opens its item in any form its source declares (Opus implementer, 2026-10-21)
 
