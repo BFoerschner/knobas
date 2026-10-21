@@ -335,6 +335,13 @@
   const fields = $derived(new Map(fieldsOf(settings).map((field) => [field.name, field])));
   let queuedValues = $state<Record<string, string>>({});
 
+  /** Escape leaves the edit, and goes no further (the page's own Escape goes back). */
+  function cancelOnEscape(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    editing = null;
+  }
+
   function change(setting: Setting) {
     editing = setting.name;
     draft = setting.secret ? "" : setting.value;
@@ -545,12 +552,7 @@
                   <select
                     aria-label={`New default for ${setting.name}`}
                     bind:value={draft}
-                    onkeydown={(event) => {
-                      if (event.key === "Escape") {
-                        event.stopPropagation();
-                        editing = null;
-                      }
-                    }}
+                    onkeydown={cancelOnEscape}
                   >
                     {#each field.kind.options as option (option.value)}
                       <option value={option.value}>{option.label ?? option.value}</option>
@@ -563,10 +565,7 @@
                     bind:value={draft}
                     onkeydown={(event) => {
                       if (event.key === "Enter") void save(setting);
-                      if (event.key === "Escape") {
-                        event.stopPropagation();
-                        editing = null;
-                      }
+                      cancelOnEscape(event);
                     }}
                   />
                 {:else if setting.secret}

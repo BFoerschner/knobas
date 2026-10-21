@@ -61,7 +61,7 @@
   agent (#1004), its steps (`run_log`'s steps, #854, #1003) and its test summary (`run_tests`,
   #855).
 
-  **Amended by #1448 (2026-10-21):** the test summary is declared after all, as
+  Amendment (#1448, 2026-10-21): the test summary is declared after all, as
   `tests_failed`, `tests_passed` and `tests_ignored`
   (`contract/10.8/1448-run-test-summary.md`). ADR-0022 lists it among a run's declared fields,
-  and #848 had deferred it on fixture cost, not on design.
+  and #848 had deferred it only because of fixture cost.

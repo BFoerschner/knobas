@@ -229,14 +229,14 @@ fn run_of_item(
     item: &knobas_source::SyncItem,
 ) -> Option<RunRow> {
     use knobas_core::payload::{
-        Frame, resolve_list, resolve_number, resolve_state, resolve_string, resolve_trigger,
+        Frame, PayloadPath, at, resolve_list, resolve_state, resolve_string, resolve_trigger,
     };
-    // A count as `declared_integer!` reads one in the mirror: a whole number.
-    #[allow(clippy::cast_possible_truncation)]
-    let count = |paths: &[knobas_core::payload::PayloadPath]| {
-        resolve_number(&item.payload, paths)
-            .filter(|n| n.fract() == 0.0 && *n < 1e18)
-            .map(|n| n as i64)
+    // A count as `declared_integer!` reads one in the mirror: the first
+    // candidate that lands on a JSON integer.
+    let count = |paths: &[PayloadPath]| {
+        paths
+            .iter()
+            .find_map(|path| at(&item.payload, path)?.as_i64())
     };
     let paths = declarations.get(&item.entity.namespace, &item.kind)?;
     if paths.frame != Some(Frame::Run) {

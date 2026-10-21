@@ -370,7 +370,7 @@ async fn a_scoped_full_sync_lands_under_the_documented_key_forms() {
     }
 
     let state: serde_json::Value = serde_json::from_str(&cursor).expect("the cursor is JSON");
-    assert_eq!(state.get("v").and_then(serde_json::Value::as_u64), Some(1));
+    assert_eq!(state.get("v").and_then(serde_json::Value::as_u64), Some(2));
     let watermark = state
         .get("since_build_id")
         .and_then(serde_json::Value::as_i64)

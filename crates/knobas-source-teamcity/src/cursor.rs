@@ -8,12 +8,12 @@
 /// Bump when the envelope's meaning changes; every stored cursor then reads as
 /// "unknown" and the next run is a full sync.
 ///
-/// **2 since #1448**, the run's test counts. The shape did not change; what
-/// a position promises did: every build below it was mirrored with
-/// `testOccurrences`. A version-1 position was written before `BUILD_FIELDS`
-/// asked for them, so it reads as unknown and the next run is the full sync
-/// that re-reads the window with them, a backfill (CONTEXT.md). The engine
-/// holds a position for that run, so it does not sweep.
+/// **2 since #1448**, the run's test counts. The shape is unchanged. A
+/// version-1 position was written before `BUILD_FIELDS` asked for
+/// `testOccurrences`, so it reads as unknown, and the next run is a full sync
+/// that re-reads each configuration's `builds_per_config` window with the
+/// counts: a backfill (CONTEXT.md). A build older than the window keeps none.
+/// The engine holds a position for that run, so it does not sweep.
 const VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

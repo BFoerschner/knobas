@@ -1539,10 +1539,10 @@ mod tests {
         assert_eq!(walking.readings, vec![(0, Some(0), "builds".to_owned())]);
     }
 
-    /// The backfill for the test counts (#1448): a position a build before
-    /// `BUILD_FIELDS` named `testOccurrences` wrote reads as unknown, so the
-    /// next run is a full sync and hands every build in the window back with
-    /// its counts. An incremental run would not: `sinceBuild` re-reads only
+    /// The backfill for the test counts (#1448): a position written before
+    /// `BUILD_FIELDS` named `testOccurrences` reads as unknown, so the next
+    /// run is a full sync and hands every build in the window back with its
+    /// counts. An incremental run would not: `sinceBuild` re-reads only
     /// what finished since, and a widened `fields=` changes nothing upstream.
     #[tokio::test]
     async fn a_position_from_before_the_test_counts_is_read_again_from_the_top() {
