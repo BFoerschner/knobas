@@ -9443,3 +9443,64 @@ sources hold) too.
   ticket says "four-digit year". *Reversing:* put `{4,}` back; one unit assertion goes with it.
 - **Equivalent mutants** (`year < 1000` dropped, years < 100 mapped to 19xx): accepted as equivalent
   while `now` is after year 1000; the past-day rule catches every such year.
+
+## #1433: the Standup reads an action item's ticket back from the protocol's links (Opus implementer, 2026-10-21)
+
+- **No "→ OPS-131" in the protocol bullet** (delegated). *Ruling:* not now, as recommended.
+  *Reasoning:* the `related` link the backend draws already stores the pair; writing the key into
+  the body would change the note and its published page, which the ticket rules out of scope.
+  *Reversing:* one edit in `fileTicket` and the body rule.
+- **A create queued but not sent at reload shows *Create ticket* until it lands** (delegated).
+  *Ruling:* accept the gap, as recommended. *Reasoning:* the write queue shows the queued create,
+  and reading pending `create_ticket` writes by title would be a second matching rule for a few
+  seconds of exposure. *Reversing:* read `pending_writes` on open and match by title.
+- **This reverses the #829 ruling "A ticket filed for an action item is known for the session
+  only".** That ruling said storing the pair needed a backend change; the link has stored it since
+  #779, so the tab reads it on open. *Reversing:* drop `readLinked`.
+- **What answers for an item.** A link whose other end is a ticket, not withdrawn
+  (`deleted_at` null), titled exactly as the item's words trimmed, the match `ticket_titled` made
+  when it drew the link (`standup-view.ts` `itemTickets`). The relation is not checked: any link
+  to a ticket so titled is the same ticket. A withdrawn ticket answers for nothing, so its item
+  offers *Create ticket* again. This session's newest create wins over a link. *Reversing:* low.
+- **The fixture's first action item links `mock:OPS-131`,** a ticket added to the corpus titled by
+  the item's words, as prototype-6 draws it. The mock adapter declares no state, so under
+  `?fake-ipc` the item draws the key without a status chip, as a create that lands in-session does
+  there. *Reversing:* one corpus row and one born link.
+
+## #1511: the Standup's add fields take focus as they mount (Opus implementer, 2026-10-21)
+
+- **A local `takeFocus` action, not a shared module.** *Fork:* lift Board.svelte's `takeFocus`
+  into a shared action or repeat it. *Ruling:* repeat it in `TfStandup` (focus only; the field is
+  empty, so no `select()`). *Reasoning:* three lines in two components; a shared module is worth it
+  at a third. *Reversing:* low.
+- **No screenshot.** Where the cursor sits is not drawn in a still. The component test is the
+  witness.
+
+## #1504: the note page and protocol addresses (Opus implementer, 2026-10-21)
+
+- **The hidden redirect lives in the page, not in the address.** *Fork:* make `entityAddress`
+  read the notes switch, or let every producer emit `#/note/<id>` and have the page send the
+  reader on. *Ruling:* the page reads `capture_shortcut` first and replaces the address with
+  `#/settings/notes` while notes hide. *Reasoning:* `entityAddress` stays pure and has one answer;
+  an old bookmark, a link panel and the capture window land right in both states. A setting that
+  cannot be read does not hide a note the reader asked for. *Reversing:* `tf/note/TfNote.svelte`.
+- **The protocol rule runs in two places that share one function.** `standup/protocol.ts`
+  `protocolDayOf` reads `Standup YYYY-MM-DD` (a date the calendar has, as a `NaiveDate` must be).
+  `itemHash` uses it when a producer holds the title (a launcher hit, a recent row, a digest line,
+  the note page's own refs and links); the note page uses it after its read for producers that
+  hold only the id (*Open in knobas*, a link panel). Both replace, not push. *Reversing:* low.
+- **What the page draws.** A resolved ref is a link reading its target's title; an unresolved one
+  stays the text as written; a withdrawn target is named, struck, not linked. A link row reads
+  "Captured in", "Related to" (`readingFor`) and its other end; a context end (`ctx`) is named, not
+  linked, since #1427 ruled no page for a context; a withdrawn end likewise. A note `get_note`
+  calls `not_found` reads the shell's *Nothing lives at …*. *Reversing:* low.
+- **"Came from" is `history.length > 1`.** After *Delete*, the page goes back when the window has
+  an address to go back to, else replaces with `#/settings/notes`. *Reasoning:* the shell keeps no
+  history of its own; a forward entry can make the length overcount, and the miss lands on a page
+  that exists. *Reversing:* low.
+- **`#/time/standup/<date>` reads that day's digest as well as its protocol,** and the Time header
+  names the day. A segment that is not a date is today's Standup. The tab is keyed by the date, so
+  another date is a fresh mount. *Reversing:* low.
+- **Fixture.** `note:retry-backoff` is seeded so the page has a note under `?fake-notes-shown`,
+  and `delete_note` is answered (it was out of the walk's reach while notes were hidden).
+  *Reversing:* fixture only.
