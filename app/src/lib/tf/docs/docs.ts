@@ -90,6 +90,17 @@ export function spaceOfPage(tree: DocsTree, entityId: string): DocSpace | undefi
   return tree.spaces.find((s) => s.pages.some((p) => p.entity_id === entityId));
 }
 
+/**
+ * For you, narrowed to a space: its key and its source, since two sources can
+ * share a key (#1556). An item's source is the head of its `<source>:<id>`.
+ * No space leaves the list whole.
+ */
+export function forYouIn(items: DocForYou[], space: SpaceRef | undefined): DocForYou[] {
+  if (space === undefined) return items;
+  const { source_id: source, key } = space;
+  return items.filter((f) => f.space_key === key && f.entity_id.startsWith(`${source}:`));
+}
+
 /** A space as its source and key name it. */
 type SpaceRef = { source_id: string; key: string };
 
