@@ -7,6 +7,12 @@
   refused write never moves on its own, and the bar is the one lasting way
   into the queue.
 
+  It never scrolls and never draws past its right edge (#1410). The healthy
+  readings share one run that takes the width left over and shrinks first,
+  cut with an ellipsis; its title carries every reading's words. *Sources*,
+  each failed credential with its *Re-enter password*, and the queue control
+  sit outside that run and never shrink.
+
   Drawn from what the shell hands it; the readings are `status.ts`'s.
 -->
 <script lang="ts">
@@ -27,19 +33,22 @@
   } = $props();
 
   const label = $derived(queueLabel(pending, decisions));
+  const healthy = $derived(readings.filter((reading) => reading.fix === null));
+  const failed = $derived(readings.filter((reading) => reading.fix !== null));
 </script>
 
 <footer class="tf-status">
   <a class="tf-sources" href="#/settings">Sources</a>
-  {#each readings as reading (reading.id)}
-    {#if reading.fix !== null}
-      <span class="tf-bad">
-        {reading.text}
-        <a href="#/settings/source/{encodeURIComponent(reading.id)}">{reading.fix}</a>
-      </span>
-    {:else}
-      <span>{reading.text}</span>
-    {/if}
+  {#if healthy.length > 0}
+    <span class="tf-healthy" title={healthy.map((reading) => reading.text).join(" · ")}>
+      {#each healthy as reading (reading.id)}<span>{reading.text}</span>{/each}
+    </span>
+  {/if}
+  {#each failed as reading (reading.id)}
+    <span class="tf-bad">
+      {reading.text}
+      <a href="#/settings/source/{encodeURIComponent(reading.id)}">{reading.fix}</a>
+    </span>
   {/each}
   <span class="tf-queue">
     {#if pending > 0 || decisions > 0}

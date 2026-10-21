@@ -48,8 +48,15 @@
 /* ---------- status bar ---------- */
 .tf-status {
   display: flex; gap: 18px; align-items: center; padding: 5px 14px; font-size: var(--t-xs); color: var(--ink-2);
-  background: var(--sheet); border-top: 1px solid var(--rule); overflow-x: auto; white-space: nowrap;
+  background: var(--sheet); border-top: 1px solid var(--rule); overflow: hidden; white-space: nowrap;
 }
+/*
+  Pin and ellipsis (#1410): everything but the healthy run keeps its width;
+  the run takes what is left and is cut at its end.
+*/
+.tf-status > * { flex: none; }
+.tf-status > .tf-healthy { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-status .tf-healthy > span + span { margin-left: 18px; }
 .tf-status .tf-bad { color: var(--err); font-weight: 600; }
 .tf-status button, .tf-status a {
   border: 0; background: none; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; color: inherit;

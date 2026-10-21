@@ -510,6 +510,31 @@ test("the queued-writes count opens the queue list (R-1.5)", async () => {
   }
 });
 
+/**
+ * The bar fits its width (#1410): the healthy readings share one run that
+ * shrinks with an ellipsis, and its title keeps every word. A failed
+ * credential and the queue control sit outside it, so they never shrink.
+ */
+test("only the healthy readings shrink; a failed credential and the queue stay whole", async () => {
+  start({
+    sources: [
+      { id: "jira", display_name: "Jira" },
+      { id: "teamcity", display_name: "TeamCity" },
+      { id: "gitea", display_name: "Gitea" },
+    ],
+  });
+  await settle();
+  const bar = target.querySelector(".tf-status")!;
+  const run = bar.querySelector<HTMLElement>(".tf-healthy")!;
+  expect(run.textContent).toContain("Jira synced 4 min ago");
+  expect(run.textContent).toContain("Gitea not synced yet");
+  expect(run.title).toBe("Jira synced 4 min ago · Gitea not synced yet");
+  expect(run.querySelector(".tf-bad")).toBeNull();
+  expect(run.querySelector(".tf-queued")).toBeNull();
+  expect(bar.querySelector(".tf-bad")?.textContent).toContain("Re-enter password");
+  expect(bar.querySelector(".tf-queued")).not.toBeNull();
+});
+
 /** The bar's queue control (#1409): what waits, and what needs the reader. */
 function queueControl(): HTMLButtonElement | null {
   return target.querySelector<HTMLButtonElement>(".tf-status button.tf-queued");
