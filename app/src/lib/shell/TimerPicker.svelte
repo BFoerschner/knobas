@@ -7,9 +7,14 @@
   * **an ad-hoc label** — free text, first in the dialog and focused on open,
     because this is the case the picker exists for: "DB config for the
     migration" is as legal a target as a ticket, and a person who pressed ⌘T
-    from an empty room usually has a sentence rather than an id;
+    with nothing open usually has a sentence rather than an id;
   * **something recent** — the entities knobas last saw, so a reader who *does*
-    have a ticket in mind does not have to retype its key.
+    have a ticket in mind does not have to retype its key. Each is drawn by its
+    key (`targetReading`, `PAY-231`), never the source-prefixed id (#1432).
+
+  It draws as a ticket-first dialog (`TfDialog`, #1432), mounted in the shell's
+  `dialogs` so `.tf`'s rules reach it; `TfDialog` puts focus in the label field
+  on open (#1431) and registers the picker as rung 1 of the `Esc` ladder.
 
   ## The estate is a third list, read a different way
 
@@ -45,8 +50,9 @@
   import type { EntityRow } from "../ipc/entity";
   import { search as realSearch, type SearchQuery, type SearchResponse } from "../ipc/search";
   import type { TimerTarget } from "../ipc/time";
-  import Modal from "./Modal.svelte";
-  import { candidateOf, legalCandidates, type TargetCandidate } from "./timer";
+  import { layers as sharedLayers, type Layers } from "../tf/layers.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
+  import { candidateOf, legalCandidates, targetReading, type TargetCandidate } from "./timer";
 
   /**
    * How many assets the picker offers.
@@ -63,6 +69,7 @@
     onclose,
     recent,
     estate,
+    layers = sharedLayers,
   }: {
     /** The target the reader chose. Starting it is the shell's. */
     onpick: (target: TimerTarget) => void;
@@ -85,6 +92,8 @@
      * this the estate's list rather than a second launcher board.
      */
     estate?: (query: SearchQuery) => Promise<SearchResponse>;
+    /** The shell's layer stack, which `Esc` closes from; a test builds its own. */
+    layers?: Layers;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -95,8 +104,10 @@
   // svelte-ignore state_referenced_locally
   const readEstate = estate ?? realSearch;
 
-  /** Unique per instance, so two dialogs cannot share a label's `for`. */
-  const labelId = `timer-label-${Math.random().toString(36).slice(2, 9)}`;
+  /** Unique per instance, so two dialogs cannot share a label's `for` or a form's id. */
+  const uid = $props.id();
+  const labelId = `tf-tm-label-${uid}`;
+  const formId = `tf-tm-pick-${uid}`;
 
   let label = $state("");
   let candidates = $state<TargetCandidate[]>([]);
@@ -170,64 +181,42 @@
   }
 </script>
 
-<Modal title="What is the time on?" subtitle="⌘T" center {onclose}>
+<TfDialog title="What is the time on?" {onclose} {layers}>
   {#snippet body()}
-    <form class="pick" onsubmit={submit}>
-      <div class="fld">
-        <label class="l" for={labelId}>A label</label>
-        <input
-          class="inp"
-          id={labelId}
-          type="text"
-          autocomplete="off"
-          bind:value={label}
-          placeholder="DB config for the migration"
-        />
-      </div>
-      <button class="btn pri" type="submit" disabled={labelTarget === null}>Start</button>
+    <form class="tf-formgrid" id={formId} onsubmit={submit}>
+      <label for={labelId}>A label</label>
+      <input id={labelId} type="text" autocomplete="off" bind:value={label} placeholder="DB config for the migration" />
     </form>
 
     {#if candidates.length > 0}
-      <p class="lab recent-head">…or something recent</p>
-      <ul class="recent">
+      <div class="tf-pane-h">…or something recent</div>
+      <div class="tf-picklist tf-tm-recents">
         {#each candidates as candidate (candidate.entityId)}
-          <li>
-            <button
-              class="row"
-              type="button"
-              onclick={() => onpick({ kind: "entity", entity_id: candidate.entityId })}
-            >
-              <span class="t">{candidate.title}</span>
-              <span class="k">{candidate.entityId}</span>
-            </button>
-          </li>
+          <button type="button" onclick={() => onpick({ kind: "entity", entity_id: candidate.entityId })}>
+            <span>{candidate.title}</span>
+            <span class="tf-mono tf-dim">{targetReading({ kind: "entity", entity_id: candidate.entityId })}</span>
+          </button>
         {/each}
-      </ul>
+      </div>
     {/if}
 
     {#if assets.length > 0}
-      <p class="lab recent-head">…or an asset</p>
-      <ul class="recent estate">
+      <div class="tf-pane-h">…or an asset</div>
+      <div class="tf-picklist tf-tm-assets">
         {#each assets as candidate (candidate.entityId)}
-          <li>
-            <button
-              class="row"
-              type="button"
-              onclick={() => onpick({ kind: "entity", entity_id: candidate.entityId })}
-            >
-              <span class="t">{candidate.title}</span>
-              <!--
-                Where it sits, not its id: `asset:<uuid>` names nothing a
-                reader knows, and the path is what tells two containers of the
-                same name apart. A root asset sits nowhere and gets no line.
-              -->
-              {#if candidate.path}
-                <span class="k">{candidate.path}</span>
-              {/if}
-            </button>
-          </li>
+          <button type="button" onclick={() => onpick({ kind: "entity", entity_id: candidate.entityId })}>
+            <span>{candidate.title}</span>
+            <!--
+              Where it sits, not its id: `asset:<uuid>` names nothing a
+              reader knows, and the path is what tells two containers of the
+              same name apart. A root asset sits nowhere and gets no line.
+            -->
+            {#if candidate.path}
+              <span class="tf-mono tf-dim">{candidate.path}</span>
+            {/if}
+          </button>
         {/each}
-      </ul>
+      </div>
     {/if}
 
     {#if candidates.length === 0 && failed}
@@ -236,65 +225,12 @@
         reader who expected their recents deserves to know why they are not
         there instead of concluding knobas has forgotten them.
       -->
-      <p class="lab recent-head">Recent items could not be read. A label still works.</p>
+      <p class="tf-dim">Recent items could not be read. A label still works.</p>
     {/if}
   {/snippet}
-</Modal>
 
-<style>
-  .pick {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: end;
-    gap: 8px;
-  }
-
-  .fld .l {
-    display: block;
-    font: 500 10px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--faint);
-    margin-bottom: 4px;
-  }
-
-  .recent-head {
-    margin: 14px 0 6px;
-  }
-
-  .recent {
-    display: grid;
-    gap: 2px;
-  }
-
-  .recent .row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: center;
-    column-gap: 8px;
-    width: 100%;
-    height: var(--row);
-    padding: 0 8px;
-    border: 1px solid transparent;
-    border-radius: 2px;
-    text-align: left;
-    background: transparent;
-    color: var(--text);
-  }
-
-  .recent .row:hover {
-    background: var(--raised);
-    border-color: var(--hair2);
-  }
-
-  .recent .t {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .recent .k {
-    font: 500 11px var(--mono);
-    color: var(--faint);
-  }
-</style>
+  {#snippet footer()}
+    <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button type="submit" class="tf-btn tf-primary" form={formId} disabled={labelTarget === null}>Start</button>
+  {/snippet}
+</TfDialog>

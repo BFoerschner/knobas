@@ -3,11 +3,11 @@
 
   The rooms UI and its stylesheet, `app.css`, went in #881. What is left here
   are the rules of that sheet that a surviving component still reaches: the
-  launcher, the ⌘T picker, the ad-hoc dialog, the asset tree
+  launcher, the asset tree
   (`#/assets`) and its dialogs, and the capture window. Every rule whose
   class only the rooms UI drew went with it. A component ported to `tf.css`
   takes its rules out of here (the first-run wizard and the rooms *Add a
-  source* did with #1400, the write queue with #1425); when nothing reads
+  source* did with #1400, the write queue with #1425, the ⌘T picker and the ad-hoc dialog with #1432); when nothing reads
   this file it goes too.
 
   **The palette is the design system's.** The tokens live on `:root` in
@@ -38,7 +38,6 @@
 .hidden{display:none!important}
 /* Visually hidden, present to the accessibility tree (#258). */
 .vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
-.spacer{flex:1}
 
 /* ---- the asset tree's tabs and toolbar ---- */
 .tabs{display:flex;gap:2px;min-width:0;overflow:hidden}
@@ -98,8 +97,6 @@
 .btn.pri{background:var(--text);color:var(--bg);border-color:var(--text)}
 .btn.pri:hover{background:var(--ink-2);border-color:var(--ink-2)}
 .btn.sm{height:20px;padding:0 6px;font-size:11px}
-.btn.ghost{border-color:transparent;color:var(--muted)}
-.btn.ghost:hover{color:var(--text);background:var(--raised)}
 .btn.danger{color:var(--fail);border-color:var(--fail)}
 .btn:disabled{opacity:.4;cursor:default}
 .btn[aria-disabled="true"]{opacity:.4;cursor:default}
@@ -130,7 +127,6 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
 /* ---- overlays ---- */
 @keyframes fade{from{opacity:0}}
 .scrim{position:fixed;inset:0;background:rgba(21,23,26,.72);z-index:40;display:flex;align-items:flex-start;justify-content:center;padding-top:80px}
-.scrim.center{align-items:center;padding-top:0}
 .dlg{background:var(--panel);border:1px solid var(--hair2);border-radius:2px;width:560px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;animation:fade .12s}
 .dlg.wide{width:820px}
 .dlg-h{display:flex;align-items:center;gap:10px;height:40px;padding:0 10px 0 14px;border-bottom:1px solid var(--hair);flex:none}
