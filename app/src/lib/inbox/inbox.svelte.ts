@@ -363,12 +363,29 @@ export function snoozePresets(now: Date, deadline?: Date | null): SnoozePreset[]
 
 /**
  * The day a date input produced (`2026-08-24`), at 09:00 local -- the
- * presets' own convention -- or `null` for an empty or partial value.
+ * presets' own convention -- or `null` for an empty or malformed value, a
+ * year below 1000 (a half-typed year) or a day that is not strictly after
+ * `now`'s day (a past `until` puts the item straight back in the stream).
  */
-export function pickedMorning(value: string): Date | null {
-  const [y, m, d] = value.split("-").map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d, 9, 0, 0, 0);
+export function pickedMorning(value: string, now: Date = new Date()): Date | null {
+  const match = /^(\d{4,})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const [y, m, d] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  if (y < 1000 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  // `new Date(y, ...)` maps years 0-99 to 1900-1999; setFullYear keeps them literal.
+  const at = new Date(2000, 0, 1, 9, 0, 0, 0);
+  at.setFullYear(y, m - 1, d);
+  if (at.getMonth() !== m - 1) return null; // 31 Feb rolled over
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const day = new Date(at.getFullYear(), at.getMonth(), at.getDate());
+  return day.getTime() > today.getTime() ? at : null;
+}
+
+/** Local `YYYY-MM-DD` of the day after `now`: the date field's `min` hint. */
+export function tomorrowValue(now: Date): string {
+  const t = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
 }
 
 /** 09:00 local, `days` after the day `from` falls on. */

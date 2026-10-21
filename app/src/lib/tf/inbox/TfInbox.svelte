@@ -27,7 +27,7 @@
   } from "../../ipc/entity";
   import { listSources, type QueuedWrite, type WriteOpPayload } from "../../ipc/sources";
   import { ACTION_FORMS } from "../../inbox/actions";
-  import { inbox as sharedInbox, pickedMorning, snoozePresets, type Inbox } from "../../inbox/inbox.svelte";
+  import { inbox as sharedInbox, pickedMorning, snoozePresets, tomorrowValue, type Inbox } from "../../inbox/inbox.svelte";
   import { followWrite } from "../../shell/follow-write";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
@@ -171,10 +171,13 @@
   }
 
   /** A date the picker produced, at 09:00 local, as the presets are. */
-  function fromPicker(entry: InboxEntry, value: string) {
-    const at = pickedMorning(value);
+  function fromPicker(entry: InboxEntry) {
+    const at = pickedMorning(pickedValue, now);
     if (at !== null) snooze(entry, at);
   }
+
+  /** What the open row's date field holds; only a press or Enter commits it (#1437). */
+  let pickedValue = $state("");
 
   /** Each button's word: a source op's is its form's (`ACTION_FORMS`), knobas' own are here. */
   const LABEL: Record<string, string> = { ack: "Ack", snooze: "Snooze", done: "Done" };
@@ -183,7 +186,10 @@
   function press(entry: InboxEntry, action: string) {
     if (action === "rerun_build") void rerun(entry);
     else if (action === "ack") ack(entry);
-    else if (action === "snooze") snoozing = snoozing === entry.item.key ? null : entry.item.key;
+    else if (action === "snooze") {
+      pickedValue = "";
+      snoozing = snoozing === entry.item.key ? null : entry.item.key;
+    }
     else if (action === "done") void inbox.complete(entry.item.key);
   }
 </script>
@@ -236,8 +242,21 @@
             <input
               type="date"
               aria-label="Snooze until a date"
-              onchange={(event) => fromPicker(entry, event.currentTarget.value)}
+              min={tomorrowValue(now)}
+              bind:value={pickedValue}
+              onkeydown={(event) => {
+                if (event.key === "Enter") fromPicker(entry);
+              }}
             />
+            <button
+              type="button"
+              class="tf-btn tf-sm"
+              disabled={pickedMorning(pickedValue, now) === null}
+              onclick={() => fromPicker(entry)}>Snooze</button
+            >
+            {#if pickedValue !== "" && pickedMorning(pickedValue, now) === null}
+              <span class="tf-dim">Pick a day after today</span>
+            {/if}
             <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (snoozing = null)}>Cancel</button>
           </div>
         {/if}
