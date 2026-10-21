@@ -2,7 +2,7 @@
 //! backoff the scheduler obeys.
 //!
 //! Spec §3: one configuration per source, a per-source sync schedule, and
-//! credential health (PAT expiry countdown, 401 detection). The secret itself
+//! credential health (credential expiry countdown, 401 detection). The secret itself
 //! is **never** here -- interfaces §3 puts it in the OS keychain, keyed by the
 //! source id, and this module has no field that could hold one.
 //!

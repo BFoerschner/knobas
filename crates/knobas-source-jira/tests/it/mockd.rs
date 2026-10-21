@@ -726,7 +726,8 @@ async fn test_connection_reports_the_account_and_the_server() {
         info.discovered.is_empty(),
         "nothing to discover here: {info:?}"
     );
-    // PAT expiry needs /rest/pat/latest/tokens, which is outside M1's endpoints.
+    // PAT expiry is only in /rest/pat/latest/tokens, outside the endpoint set,
+    // and that listing cannot say which token is in use (#1513).
     assert!(info.secret_expires_at.is_none());
     assert_only_the_field_probe(&jira);
 }

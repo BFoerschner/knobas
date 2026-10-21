@@ -53,8 +53,8 @@ pub struct CredentialHealth {
     /// One line of detail for the sources view -- the server's own message
     /// where there is one. Never a secret.
     pub detail: Option<String>,
-    /// When the credential expires, if the source says. Feeds §3's PAT expiry
-    /// countdown.
+    /// When the credential expires, if the source says. Feeds §3's credential
+    /// expiry countdown.
     pub secret_expires_at: Option<DateTime<Utc>>,
 }
 

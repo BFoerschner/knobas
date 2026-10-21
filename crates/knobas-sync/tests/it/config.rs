@@ -178,8 +178,8 @@ async fn health_is_written_every_time_and_reported_as_changed_only_when_it_moved
 }
 
 /// A connection test that learned nothing about expiry must not erase what an
-/// earlier one learned -- the PAT countdown in §3 would blink out on the next
-/// ordinary sync.
+/// earlier one learned -- the credential expiry countdown in §3 would blink
+/// out on the next ordinary sync.
 #[tokio::test]
 async fn a_verdict_that_says_nothing_about_expiry_keeps_what_was_known() {
     let pool = pool().await;

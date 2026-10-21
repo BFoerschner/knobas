@@ -243,8 +243,8 @@ pub use knobas_spi_types::tone::Tone;
 ///
 /// Every field is optional and an adapter fills only what its API actually
 /// exposes: the Add-source flow renders what it got and says nothing about
-/// what it did not (§3 "Credential health: PAT expiry countdown"). A source
-/// whose API has no "who am I" endpoint is not a broken source.
+/// what it did not (§3 "Credential health: credential expiry countdown").
+/// A source whose API has no "who am I" endpoint is not a broken source.
 ///
 /// Plain serde data, like everything else crossing this SPI (§3a).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -257,7 +257,9 @@ pub struct ConnectionInfo {
     /// that follows a dialect mismatch (`flavor: datacenter|cloud`).
     pub server_version: Option<String>,
     /// When the credential that just worked stops working, if the source will
-    /// say. Feeds the PAT expiry countdown and `source_config.secret_expires_at`.
+    /// say. Feeds the credential expiry countdown and
+    /// `source_config.secret_expires_at`. No built-in adapter fills it (#1513):
+    /// none of their sources says when the credential in use expires.
     pub secret_expires_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Anything else worth putting on screen in one line.
     pub detail: Option<String>,

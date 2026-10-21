@@ -231,10 +231,12 @@ impl Source for JiraSource {
         Ok(ConnectionInfo {
             account: me.name.or(me.display_name),
             server_version: server.version,
-            // Jira DC does publish PAT expiry, but only through
-            // /rest/pat/latest/tokens, which is outside M1's endpoint set (it
-            // is not in mockd's Jira subset). The credential-health strip shows
-            // the countdown as soon as that endpoint is added.
+            // Jira DC publishes PAT expiry only in /rest/pat/latest/tokens,
+            // which is outside this adapter's endpoint set and would not be
+            // enough inside it: the listing holds every token of the account,
+            // and no field says which one authenticated this request (and a
+            // password has no expiry at all). Picking a row would be a guess,
+            // so nothing is reported (#1513's ruling).
             secret_expires_at: None,
             // The connection note: only what nothing else on the report says.
             // The deployment type and version used to prefix this;
