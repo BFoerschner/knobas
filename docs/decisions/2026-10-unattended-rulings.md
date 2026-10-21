@@ -9318,7 +9318,7 @@ stays reachable and no component is added. Hiding counts costs the Inbox and Mon
   changes, any change, a legacy redirect's `replaceState` included. The panel itself does not know
   the route. *Reversing:* one effect.
 - **Other rooms-UI modals outside the layer stack** (the ticket's out-of-scope note) are filed as a
-  follow-up, not fixed here.
+  follow-up, #1527, not fixed here.
 
 ## #1520: a queued page edit names its section (Opus implementer, 2026-10-21)
 
@@ -9335,5 +9335,6 @@ stays reachable and no component is added. Hiding counts costs the Inbox and Mon
   misses to the page name (no snapshot or storage body, no difference, a change before the first
   heading, a change touching or adding or removing a heading, two sections). The miss direction is
   pinned by a test. *Reversing:* drop the `UpdatePage` branch back to `titled(...)`.
+- **The `UpdatePage` doc comment still names `page-sections.ts`;** filed as #1528 (`backlog`).
 - **The words:** *Edit section “Context” of SEPA payout retry design*, as #1425 asked and as the
   Docs toast says; *… of a page* until the title is known.
