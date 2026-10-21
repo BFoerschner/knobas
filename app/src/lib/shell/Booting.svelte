@@ -34,26 +34,32 @@
     {#if db.state === "failed"}
       <h1>knobas cannot start its database</h1>
       <!-- Text, always: the message is whatever PostgreSQL or the OS said. -->
-      <p class="mono fail">{db.message}</p>
-      <p class="mono faint">
-        knobas {version} · profile {demo ? "demo" : "default"}
-      </p>
+      <p class="boot-mono boot-fail">{db.message}</p>
+      <p>knobas {version} · profile {demo ? "demo" : "default"}</p>
       <div class="acts">
-        <button class="btn pri" onclick={onretry}>Retry</button>
+        <button class="tf-btn tf-primary" onclick={onretry}>Retry</button>
       </div>
     {:else if db.state === "migrating"}
       <h1>Bringing the schema up to date</h1>
-      <p class="mono muted">This takes a moment the first time after an update.</p>
+      <p>This takes a moment the first time after an update.</p>
     {:else}
       <h1>Starting the local database</h1>
       {#if detail}
-        <p class="mono muted">{detail}</p>
+        <p>{detail}</p>
       {/if}
     {/if}
   </div>
 </div>
 
 <style>
+  /*
+    The design system's look, drawn outside the shell (#1402). This renders before
+    `TfShell` mounts and is not wrapped in `.tf`: the app's tests take a `.tf`
+    in the document to mean "the shell drew". The tokens are on `:root` and
+    `.tf-btn` is unscoped, so neither needs the wrapper; what `.tf` would have
+    given (its paper, its focus ring) is set here. The class names are the
+    component's own: `unported.css` styles bare `.mono` and `.fail` globally.
+  */
   .boot {
     display: flex;
     align-items: center;
@@ -65,7 +71,8 @@
       `100vh` is exactly the window.
     */
     height: 100vh;
-    background: var(--bg);
+    background: var(--paper);
+    color: var(--ink);
   }
 
   .boot-b {
@@ -73,15 +80,20 @@
     padding: 0 24px;
   }
 
+  /* The page title step. */
   .boot-b h1 {
-    font: 600 26px/1.2 var(--disp);
-    letter-spacing: 0.01em;
+    font-size: var(--t-3xl);
+    line-height: 1.15;
+    font-weight: 700;
+    font-variation-settings: "wdth" 85;
   }
 
+  /* Archivo, the row step, secondary ink: these are sentences, not code. */
   .boot-b p {
     margin-top: 10px;
-    font-size: 12px;
-    line-height: 1.6;
+    font-size: var(--t-sm);
+    line-height: 1.45;
+    color: var(--ink-2);
     /*
       The failure message is a raw error string with no line breaks of its own
       and often a long path in it. Wrapping it is what keeps it inside the
@@ -90,9 +102,25 @@
     overflow-wrap: anywhere;
   }
 
+  /* The one code value here: whatever PostgreSQL or the OS said. */
+  .boot-mono {
+    font-family: var(--mono);
+    font-size: 0.9em;
+  }
+
+  .boot-fail {
+    color: var(--err);
+  }
+
   .acts {
     margin-top: 16px;
     display: flex;
     gap: 6px;
+  }
+
+  .acts :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 3px;
   }
 </style>

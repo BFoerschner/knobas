@@ -8736,3 +8736,23 @@ vocabulary half of #1427.
   already names protocols, and that tab is where they are drawn and edited. *Reversing:* low.
 - **The switch's promise is reworded** in R-13a.6 and D10: "On, notes are back in search and open on
   their own page, and the capture shortcut works again". *Reversing:* a string.
+
+## #1402: boot screen on the design system (Opus implementer, 2026-10-21)
+
+- **No `.tf` wrapper.** *Fork:* wrap the boot screen in `.tf`, or reach `.tf-btn` without it.
+  *Ruling:* without it. `.tf-btn` is unscoped in `css/chrome.css` and the tokens are on `:root`;
+  the component sets what `.tf` would have given (paper, ink, the 2px `--focus` ring at offset 2).
+  *Reasoning:* `App.test.svelte.ts` waits for `.tf` in the document to mean "the shell drew"; a
+  boot screen carrying it would let those waits pass during boot. *Reversing:* add the class and an
+  override of its grid; the App tests then need another marker.
+- **All three sentences in `--ink-2`, the version line too.** *Fork:* the ticket allows "the fainter
+  ink token" for the version line. *Ruling:* `--ink-2`. *Reasoning:* the design system has no text
+  ink fainter than `--ink-2`; `--muted` is a state tone ("unknown, no data") and the spec forbids a
+  lighter grey for text. *Reversing:* one declaration.
+- **The failure message's mono and error ink are the component's own classes.** *Fork:* keep the
+  bare `.mono`/`.fail` classes `unported.css` styles globally, or name the component's own.
+  *Ruling:* `boot-mono` (JetBrains Mono at .9em, as `.tf-mono`) and `boot-fail` (`--err`), scoped.
+  *Reasoning:* a bare name the unported sheet defines leaks its rule onto the element (the wall
+  `tf.css`'s header describes), so the boot screen now reads nothing from that sheet, and the
+  sheet's header stops naming it. The two scoped rules restate `.tf .tf-mono` and `.tf
+  :focus-visible`, which is the price of not wrapping in `.tf`. *Reversing:* low.
