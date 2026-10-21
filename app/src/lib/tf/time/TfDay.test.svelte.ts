@@ -333,8 +333,11 @@ test("Delete block hides the block at once and sends the delete when the toast's
     expect(rows()).toEqual(["logged", "offered", "open", "label"]);
     const toast = toasts.items.at(-1)!;
     expect([toast.text, toast.action?.label]).toEqual(["Deleted the block", "Undo"]);
+    // Held for the toast's whole life, and sent as it ends.
+    vi.advanceTimersByTime(6_499);
+    await settle();
     expect(sent.deletes).toEqual([]);
-    vi.advanceTimersByTime(6_500);
+    vi.advanceTimersByTime(1);
     await settle();
     expect(sent.deletes).toEqual([3]);
     expect(rows()).toEqual(["logged", "offered", "open", "label"]);
