@@ -210,6 +210,7 @@ STUB
 chmod +x "$shared/bin/curl"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$shared/testenv/seed-gitea.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$shared/testenv/seed"
+chmod +x "$shared/testenv/seed-gitea.sh" "$shared/testenv/seed"
 # The TeamCity seed is where the other worktree's Gitea run turns up.
 cat >"$shared/testenv/seed-teamcity.sh" <<SEED
 #!/usr/bin/env bash
