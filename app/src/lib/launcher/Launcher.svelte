@@ -565,9 +565,9 @@
     switch (row.kind) {
       // A ticket whose key another source's row holds opens by its source (#1476).
       case "hit":
-        return entityAddress(row.hit.kind, row.hit.entity_id, sharesKey(session.response?.groups.flatMap((g) => g.hits) ?? [])(row.hit));
+        return entityAddress(row.hit.kind, row.hit.entity_id, sharesKey(session.response?.groups.flatMap((g) => g.hits) ?? [])(row.hit), row.hit.title);
       case "recent":
-        return entityAddress(row.row.kind, row.row.entity_id, sharesKey(session.home?.recent ?? [])(row.row));
+        return entityAddress(row.row.kind, row.row.entity_id, sharesKey(session.home?.recent ?? [])(row.row), row.row.title);
       case "action":
         return row.action.hash;
       // The Inbox page's own link for the line, and the Inbox page for a line

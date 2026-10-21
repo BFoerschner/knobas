@@ -332,6 +332,6 @@ test("a note and a route in the drawer open their own addresses, not Tickets (#1
   flushSync();
   const hrefs = (title: string) =>
     [...document.querySelectorAll<HTMLAnchorElement>("[aria-label='Connections'] a")].find((a) => squash(a) === title)?.getAttribute("href");
-  expect(hrefs("Call the bank")).toBe("#/settings/notes");
+  expect(hrefs("Call the bank")).toBe("#/note/note%3A0f2c1a");
   expect(hrefs("POST /payouts")).toBe("#/route/route%3A9a1b");
 });

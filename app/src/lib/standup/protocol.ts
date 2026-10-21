@@ -129,3 +129,24 @@ export function publishableSources(
 export function presumedSource(sources: readonly PublishableSource[]): string | null {
   return sources.length === 1 ? sources[0]!.id : null;
 }
+
+const PROTOCOL_TITLE = /^Standup (\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * The day a protocol note's title names, `YYYY-MM-DD`, or `null` for any other
+ * note (#1504).
+ *
+ * The backend's rule, `knobas_app::protocol::title_of` (`Standup 2026-09-03`),
+ * read backwards: that title is the whole of a protocol's identity, matched
+ * exactly by its get-or-create, so a note so titled *is* that day's protocol
+ * and opens Time › Standup at its date. A date the calendar does not have
+ * (`2026-02-30`) is no `NaiveDate` and so names no protocol.
+ */
+export function protocolDayOf(title: string): string | null {
+  const match = PROTOCOL_TITLE.exec(title);
+  if (!match) return null;
+  const [, year, month, day] = match.map(Number) as [number, number, number, number];
+  const at = new Date(Date.UTC(year, month - 1, day));
+  if (at.getUTCFullYear() !== year || at.getUTCMonth() !== month - 1 || at.getUTCDate() !== day) return null;
+  return title.slice("Standup ".length);
+}

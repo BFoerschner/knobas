@@ -165,7 +165,7 @@
   <div class="tf-stg-row">
     <div class="tf-stg-l">
       Show notes and quick capture<small
-        >Off by default in this release. On, notes are back in search and the capture shortcut works again.</small
+        >Off by default in this release. On, notes are back in search and open on their own page, and the capture shortcut works again.</small
       >
     </div>
     <div class="tf-stg-c">

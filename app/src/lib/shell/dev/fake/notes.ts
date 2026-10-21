@@ -1,5 +1,6 @@
 /**
- * `?fake-ipc`: Notes (#46): create, read and save, stateful within the session.
+ * `?fake-ipc`: Notes (#46): create, read, save and delete, stateful within the
+ * session; one note is there from the start (#1504).
  */
 import type { LinkEnd, NoteLinkInput } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
@@ -56,8 +57,37 @@ function createNote(args: Record<string, unknown>) {
  * protocol, #829), which then reads and saves through `get_note` and
  * `save_note` like any other. **Fixture only.**
  */
-export function seedNote(id: string, title: string, bodyMd: string): void {
-  if (!NOTES.has(id)) NOTES.set(id, { title, body_md: bodyMd, created_at: SYNCED_AT, born: [] });
+export function seedNote(id: string, title: string, bodyMd: string, born: NoteLinkInput[] = []): void {
+  if (!NOTES.has(id)) NOTES.set(id, { title, body_md: bodyMd, created_at: SYNCED_AT, born });
+}
+
+/**
+ * The one note this fixture holds from the start (#1504), so the note page
+ * has something to draw under `?fake-notes-shown`: two `[[refs]]` the corpus
+ * resolves and one it does not, the `captured-from` link a capture is born
+ * with (its `captured-in` names a context, and this fixture's start with
+ * none), and a page linked by hand.
+ */
+export const FIXTURE_NOTE_ID = "note:retry-backoff";
+seedNote(
+  FIXTURE_NOTE_ID,
+  "Retry backoff, thinking aloud",
+  [
+    "The retry window in [[mock:PAY-231]] has to be idempotent before the scheduler goes back on.",
+    "",
+    "- jittered backoff, capped at 6 attempts",
+    "- the 409 from the second bank: [[mock:PAY-228]] fixes it",
+    "- ask about [[mock:PAY-999]] on Monday",
+  ].join("\n"),
+  [
+    { target_id: "mock:PAY-231", relation: "captured-from" },
+    { target_id: "confluence:sepa", relation: "related" },
+  ],
+);
+
+/** `delete_note`: the body goes; `false` when there was nothing left to delete, as the command answers. */
+function deleteNote(args: Record<string, unknown>) {
+  return NOTES.delete(String(args["noteId"] ?? ""));
 }
 
 /** `get_note`. A note this session did not write is a `not_found`, as it is. */
@@ -175,5 +205,6 @@ export function handlers(): Record<string, Handler> {
     create_note: (args) => createNote(args),
     get_note: (args) => getNote(args),
     save_note: (args) => saveNote(args),
+    delete_note: (args) => deleteNote(args),
   };
 }

@@ -15,8 +15,16 @@ test("a ticket whose key another source holds opens at its source's address (#14
   expect(entityAddress("pr", "gitea:acme/svc#142", true)).toBe("#/pr/gitea%3Aacme%2Fsvc%23142");
 });
 
-test("a note opens Settings › Notes and capture, the one place notes are drawn (D10)", () => {
-  expect(entityAddress("note", "note:0f2c1a")).toBe("#/settings/notes");
+test("a note opens its own page, which sends the reader to Settings › Notes while notes hide (#1504, D10)", () => {
+  expect(entityAddress("note", "note:0f2c1a")).toBe("#/note/note%3A0f2c1a");
+  expect(parseTfHash("#/note/note%3A0f2c1a")).toEqual({ view: "note", id: "note:0f2c1a" });
+});
+
+test("a note titled by the protocol rule opens Time › Standup at its date (#1504)", () => {
+  expect(entityAddress("note", "note:7a1", false, "Standup 2026-09-03")).toBe("#/time/standup/2026-09-03");
+  expect(entityAddress("note", "note:7a1", false, "Standup notes")).toBe("#/note/note%3A7a1");
+  // The rule is a note's: a ticket that happens to be so titled is still a ticket.
+  expect(entityAddress("ticket", "jira:PAY-1", false, "Standup 2026-09-03")).toBe("#/job/PAY-1");
 });
 
 test("a Jira view opens its ticket view, by the projection's slug (#1094)", () => {
@@ -41,7 +49,6 @@ test("every address entityAddress produces has a place in the new shell", () => 
 
 test("a rooms-UI detail address is read as the entity it names", () => {
   expect(legacyAddress("#/ticket/jira:PAY-231")).toEqual({ go: "#/job/PAY-231" });
-  expect(legacyAddress("#/note/note:0f2c1a")).toEqual({ go: "#/settings/notes" });
   expect(legacyAddress("#/build/teamcity%3A77")).toEqual({ go: "#/build/teamcity%3A77" });
 });
 

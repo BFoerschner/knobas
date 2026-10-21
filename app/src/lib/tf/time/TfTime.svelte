@@ -2,7 +2,8 @@
   The Time view (#827, R-13.4): its header with *Log all…*, the three tabs,
   and the tab the address names. `#/time` and `#/time/<date>` are the Day;
   `#/time/week` and `#/time/week/<date>` the Week (#828); `#/time/standup` the
-  Standup (#829).
+  Standup (#829), and `#/time/standup/<date>` that day's protocol (#1504),
+  which is where a protocol note opens.
 
   *Log all…* previews the week on screen: the Week's, or the week the Day's
   date falls in (#828). The worklogs it queues are followed here, so one that
@@ -52,6 +53,7 @@
   );
   const day = $derived(rest[0] !== undefined && DATE.test(rest[0]) ? rest[0] : null);
   const week = $derived(rest[0] === "week" && rest[1] !== undefined && DATE.test(rest[1]) ? rest[1] : null);
+  const standup = $derived(rest[0] === "standup" && rest[1] !== undefined && DATE.test(rest[1]) ? rest[1] : null);
 
   /** The week *Log all…* previews: the one on screen. */
   let logAll = $state<ReturnType<typeof weekWindows> | null>(null);
@@ -85,7 +87,7 @@
     <h1>Time</h1>
     <div class="tf-sub">
       {tab === "standup"
-        ? `Your standup for ${protocolDay(dayKey(new Date()))}, from what knobas saw since your last working day.`
+        ? `Your standup for ${protocolDay(standup ?? dayKey(new Date()))}, from what knobas saw since your last working day.`
         : "What you tracked, what knobas saw while you worked, and what is still to log to Jira."}
     </div>
   </div>
@@ -104,7 +106,10 @@
   {:else if tab === "week"}
     <TfWeek databaseReady={ready} {week} {timer} {revision} />
   {:else}
-    <TfStandup databaseReady={ready} />
+    <!-- Keyed: the tab reads its day once, so another date is a fresh protocol. -->
+    {#key standup}
+      <TfStandup databaseReady={ready} date={standup} />
+    {/key}
   {/if}
 </div>
 {#if logAll !== null}

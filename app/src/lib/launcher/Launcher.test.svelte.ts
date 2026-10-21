@@ -1349,6 +1349,41 @@ test("Enter on a Jira view opens that view in Tickets, never Code (#1094)", asyn
 });
 
 /**
+ * #1504: while notes are shown a note hit opens its own page, and a note the
+ * standup protocol rule names ("Standup 2026-09-03", the backend's own example)
+ * opens Time › Standup at its date.
+ */
+test("Enter on a note opens its page, and on a protocol note the Standup at its date (#1504)", async () => {
+  for (const [title, address] of [
+    ["Standup 2026-09-03", "#/time/standup/2026-09-03"],
+    ["Retry backoff, thinking aloud", "#/note/note%3A7a1"],
+  ] as const) {
+    const onnavigate = vi.fn();
+    const notes = {
+      groups: [
+        {
+          kind: "note",
+          label: "Note",
+          plural: "Notes",
+          monogram: "NO",
+          total: 1,
+          hits: [hit({ entity_id: "note:7a1", kind: "note", source_id: "knobas", title })],
+        },
+      ],
+      total: 1,
+    };
+    open({ onnavigate, ports: { search: async () => response(notes), launcherHome: async () => HOME } });
+    await settle();
+    await search("standup");
+    press("Enter");
+    await settle();
+    expect(onnavigate, title).toHaveBeenCalledWith(address);
+    unmount(app!);
+    app = undefined;
+  }
+});
+
+/**
  * Every hit whose kind declares a parent arrives with the parent chain on its
  * `path` (#596), and the launcher draws whatever path a hit carries — no kind
  * is named here, so a later adapter's parent needs no launcher code. Two

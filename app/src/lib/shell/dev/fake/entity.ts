@@ -43,8 +43,7 @@ function resolveUrl(args: Record<string, unknown>) {
  * the retry design page documents it), so the job card's connections have rows. A link
  * made by `create_link` is `manual` and one `unlink` removes goes from both
  * ends at once, as the real graph is undirected. Reload and it is the seed
- * again. `delete_note` is not answered: notes are hidden from the new shell
- * (D10).
+ * again. `delete_note` is `notes.ts`' (#1504).
  */
 let nextLink = 1;
 function linkRow(from_id: string, to_id: string, relation: string, origin: LinkRow["origin"], note: string | null): LinkRow {

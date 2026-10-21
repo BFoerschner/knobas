@@ -217,9 +217,9 @@
       stops.push(notifications.start());
       // The capture window's *Open in knobas* (#503). Not awaited: an awaited
       // listen here would push the lifecycle's own subscription past a
-      // teardown (measured 2026-09-08, `residue`). A note has no view of its
-      // own while notes hide (D10), so it opens Settings › Notes and capture
-      // (#1085); the payload is the note's id.
+      // teardown (measured 2026-09-08, `residue`). The note opens on its own
+      // page (#1504), which sends the reader to Settings › Notes and capture
+      // while notes hide (D10, #1085); the payload is the note's id.
       void listen<string>(EVENTS.captureOpenNote, (event) => {
         navigate(entityAddress("note", event.payload));
       }).then((off) => {

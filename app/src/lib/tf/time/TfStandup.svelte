@@ -16,7 +16,14 @@
   panel did; the published page is made from that body.
 
   A publish and a ticket answer once their write is queued (#779) and are
-  followed on the queue until they land, as in `ProtocolPanel`.
+  followed on the queue until they land, as in `ProtocolPanel`. A ticket that
+  landed before this tab opened is read back from the protocol's links (#1433):
+  the backend links the note to the ticket it found by the item's words, so an
+  item whose words a linked ticket carries shows that ticket, not *Create
+  ticket*.
+
+  `date` is the day the address names (`#/time/standup/<date>`, #1504), today
+  without one.
 -->
 <script lang="ts">
   import { onDestroy } from "svelte";
@@ -33,6 +40,7 @@
     standupDigest as realStandupDigest,
     standupProtocol as realStandupProtocol,
     standupPublishTarget as realPublishTarget,
+    type LinkEntry,
     type Project,
     type Protocol,
     type PublishTarget,
@@ -52,6 +60,7 @@
   import {
     digestText,
     alertSince,
+    itemTickets,
     lineHash,
     lineKey,
     ownerOf,
@@ -87,6 +96,7 @@
     databaseReady = true,
     ports,
     now = () => new Date(),
+    date = null,
     saveAfterMs = 700,
     layers = sharedLayers,
   }: {
@@ -94,6 +104,8 @@
     databaseReady?: boolean;
     ports?: Partial<StandupPorts>;
     now?: () => Date;
+    /** The protocol's day from the address, `YYYY-MM-DD`; today when absent. */
+    date?: string | null;
     /** How long a pause counts as "stopped typing", the rooms panel's. */
     saveAfterMs?: number;
     layers?: Layers;
@@ -121,7 +133,8 @@
   };
 
   // svelte-ignore state_referenced_locally
-  const day = dayKey(now());
+  // Read once: the Time view keys this tab by its day, so another date is another mount.
+  const day = date ?? dayKey(now());
 
   // -- the digest -------------------------------------------------------------
 
@@ -178,6 +191,7 @@
       drafts = { ...read.notes };
       failure = null;
       followPublication();
+      void readLinked(note.links, read.items);
     } catch (cause) {
       failure = ipcErrorMessage(cause);
     } finally {
@@ -259,6 +273,16 @@
     else if (adding === "item") edit(withActionItem(bodyMd, addText));
     adding = null;
     addText = "";
+  }
+
+  /**
+   * The add field takes the cursor as it mounts (#1511). Not `autofocus`:
+   * Svelte honours that only while nothing but the body has focus, and WebKit
+   * leaves focus in a notes box when *+ Add someone* is clicked, so the name
+   * went into the notes.
+   */
+  function takeFocus(node: HTMLInputElement) {
+    node.focus();
   }
 
   /** Enter adds what was typed; Esc drops it without closing the view. */
@@ -453,7 +477,28 @@
     filed = filed.map((made) => (made.writeId === writeId ? { ...made, ticket, status } : made));
   }
 
-  const filedFor = (text: string) => [...filed].reverse().find((made) => made.text === text) ?? null;
+  /** The tickets the protocol already links for an item (#1433), each with its status once read. */
+  let linked = $state<{ text: string; ticket: string; status: string | null }[]>([]);
+
+  async function readLinked(links: LinkEntry[], items: readonly { text: string }[]) {
+    const found = itemTickets(links, items);
+    linked = found.map((match) => ({ ...match, status: null }));
+    await Promise.all(
+      found.map(async ({ ticket }) => {
+        let status: string | null = null;
+        try {
+          status = (await io.getEntity(ticket)).row.state?.text ?? null;
+        } catch {
+          return;
+        }
+        linked = linked.map((known) => (known.ticket === ticket ? { ...known, status } : known));
+      }),
+    );
+  }
+
+  /** This session's newest create for the item's words, else the ticket the protocol links for them. */
+  const filedFor = (text: string) =>
+    [...filed].reverse().find((made) => made.text === text) ?? linked.find((known) => known.text === text) ?? null;
 </script>
 
 <div class="tf-su">
@@ -537,12 +582,11 @@
           </button>
         {/each}
         {#if adding === "person"}
-          <!-- svelte-ignore a11y_autofocus -->
           <input
             class="tf-su-add"
             aria-label="Who else was there"
             placeholder="Name"
-            autofocus
+            use:takeFocus
             bind:value={addText}
             onkeydown={addKey}
             onblur={finishAdding}
@@ -578,12 +622,11 @@
         </div>
       {/each}
       {#if adding === "item"}
-        <!-- svelte-ignore a11y_autofocus -->
         <input
           class="tf-su-add tf-su-wide"
           aria-label="New action item"
           placeholder="New action item"
-          autofocus
+          use:takeFocus
           bind:value={addText}
           onkeydown={addKey}
           onblur={finishAdding}

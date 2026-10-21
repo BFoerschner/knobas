@@ -22,7 +22,7 @@
  * A section emptied of bullets gets the template's empty bullet back, so the
  * body keeps the shape a new protocol has.
  */
-import type { DigestLine, StandupDigest } from "../../ipc/entity";
+import type { DigestLine, LinkEntry, StandupDigest } from "../../ipc/entity";
 import { actionItems, bullet, type ActionItem } from "../../standup/protocol";
 import { clockReading, dayLabel } from "../../time/day";
 import { itemHash, keyOf } from "../job/job";
@@ -152,6 +152,24 @@ function noteOf(text: string, attendees: readonly string[]): [string, string] | 
   return attendees.includes(name) ? [name, text.slice(colon + 1).trim()] : null;
 }
 
+/**
+ * The tickets a protocol's links already name for its action items (#1433):
+ * a link whose other end is a ticket, not withdrawn, titled exactly as the
+ * item's words. That is the match the backend made when it drew the link
+ * (`standup.rs`' `ticket_titled`): the create titles the ticket with the
+ * item's words, trimmed, and the link is drawn to the ticket so titled.
+ */
+export function itemTickets(
+  links: readonly LinkEntry[],
+  items: readonly { text: string }[],
+): { text: string; ticket: string }[] {
+  const tickets = links.filter((entry) => entry.other.kind === "ticket" && entry.other.deleted_at === null);
+  return items.flatMap(({ text }) => {
+    const found = tickets.find((entry) => entry.other.title === text.trim());
+    return found ? [{ text, ticket: found.other.entity_id }] : [];
+  });
+}
+
 /** The three sections out of a protocol body. */
 export function readProtocol(body: string): ProtocolForm {
   const attendees = bulletsUnder(body, ATTENDEES);
@@ -195,10 +213,10 @@ export function withActionItem(body: string, text: string): string {
  * Where a digest line opens in the new shell, or `null` for the one line with
  * nothing behind it (a running timer on a label). A page opens Docs.
  */
-export function lineHash(line: Pick<DigestLine, "entity_id" | "kind">): string | null {
+export function lineHash(line: Pick<DigestLine, "entity_id" | "kind" | "title">): string | null {
   if (line.entity_id === null) return null;
   if (line.kind === "page") return `#/page/${encodeURIComponent(line.entity_id)}`;
-  return itemHash({ entity_id: line.entity_id, kind: line.kind ?? "" });
+  return itemHash({ entity_id: line.entity_id, kind: line.kind ?? "", title: line.title });
 }
 
 /** The ticket key a line leads with, or `null` for anything not a ticket. */

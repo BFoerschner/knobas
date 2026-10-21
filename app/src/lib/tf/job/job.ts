@@ -25,6 +25,7 @@ export interface SourceFacts {
 import type { Week } from "../../ipc/time";
 import type { AuthMethod, RoleClaim } from "../../ipc/sources";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
+import { protocolDayOf } from "../../standup/protocol";
 import { CI, claims } from "../roles.svelte";
 import { reenterWords, secretNoun } from "../settings/settings";
 
@@ -259,9 +260,6 @@ export function jiraViewSlug(entityId: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** Where Settings shows the notes and the capture shortcut (D10). */
-const NOTES_HASH = "#/settings/notes";
-
 /**
  * The run kind a row is routed by while the adapters' claims are not known:
  * the built-in CI adapter's, so a registry that failed to read routes what it
@@ -290,16 +288,17 @@ export function runKindsOf(registry: Pick<KindRegistry, "frameKinds">): readonly
  * shell, never a panel. The address carries the entity id, because a pull
  * request's number is unique only inside its repository. A kind with no view
  * of its own opens the section that lists it: a Jira view its ticket view, a
- * build configuration Builds, a route Dependencies' asset tree, a note
- * Settings › Notes (the one place notes are drawn while they hide, D10),
- * anything else its item page, `#/item/<id>`, which draws the source's block
+ * build configuration Builds, a route Dependencies' asset tree, a note its
+ * own page (`#/note/<id>`, #1504, which sends the reader to Settings › Notes
+ * while notes hide, D10) or, titled by the standup protocol rule, Time ›
+ * Standup at its date, anything else its item page, `#/item/<id>`, which draws the source's block
  * view (a custom role's item, #1201, ADR-0029). Never Code: a kind that is not code does
  * not belong there (#1094). Every surface opens a kind through this one rule
  * (#1101), and that includes a run of another kind than `build`: `runKinds`
  * (the CI role's `run` frame from the adapters' claims, #1256) defaults to the
  * shared registry's, so no caller can leave it unasked (#1278).
  */
-export function itemHash(row: Pick<EntityRow, "entity_id" | "kind">, runKinds: readonly string[] = runKindsOf(kindRegistry)): string {
+export function itemHash(row: Pick<EntityRow, "entity_id" | "kind"> & { title?: string | undefined }, runKinds: readonly string[] = runKindsOf(kindRegistry)): string {
   const id = encodeURIComponent(row.entity_id);
   if (runKinds.includes(row.kind)) return `#/build/${id}`;
   switch (row.kind) {
@@ -327,8 +326,11 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind">, runKinds: r
       return "#/builds";
     case "route":
       return `#/route/${id}`;
-    case "note":
-      return NOTES_HASH;
+    case "note": {
+      // A protocol is a note its title names (#1504); the title is its whole identity.
+      const day = row.title === undefined ? null : protocolDayOf(row.title);
+      return day === null ? `#/note/${id}` : `#/time/standup/${day}`;
+    }
     default:
       // A kind no surface draws, such as a custom role's (#1201, ADR-0029).
       return `#/item/${id}`;

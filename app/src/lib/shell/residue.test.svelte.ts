@@ -407,6 +407,7 @@ const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
 const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
 const TfItem = (await import("../tf/item/TfItem.svelte")).default;
+const TfNote = (await import("../tf/note/TfNote.svelte")).default;
 const { createPendingComments } = await import("../detail/view/pending-comments.svelte");
 const TfMonitors = (await import("../tf/monitors/TfMonitors.svelte")).default;
 const TfDeps = (await import("../tf/deps/TfDeps.svelte")).default;
@@ -1388,6 +1389,34 @@ const CASES: Case[] = [
             submitWrite: () => deferred({} as never),
             prViewedFiles: () => deferred([]),
             setPrFileViewed: () => deferred([]),
+          },
+        },
+      }),
+    }),
+  },
+  // A note's page (#1504): the setting and the note, answering late.
+  {
+    name: "TfNote",
+    source: "lib/tf/note/TfNote.svelte",
+    open: (target) => ({
+      app: mount(TfNote, {
+        target,
+        props: {
+          id: "note:7a1",
+          ready: true,
+          job: null,
+          ports: {
+            notesShown: () => deferred(true),
+            getNote: () =>
+              deferred({
+                note: { id: "note:7a1", title: "Retry backoff", body_md: "Jitter it.", created_at: "", updated_at: "" },
+                refs: [],
+                links: [],
+              }),
+            deleteNote: () => deferred(true),
+            replace: () => {},
+            canGoBack: () => false,
+            back: () => {},
           },
         },
       }),

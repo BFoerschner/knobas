@@ -1,0 +1,5 @@
+/* ---------- A note's read-only page (#1504) ---------- */
+/* The body as it was typed: its line breaks and indents are the reader's. */
+.tf-note-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--t-sm); }
+/* A ref or a link whose end was withdrawn upstream: named, not opened. */
+.tf-note-gone { color: var(--ink-2); text-decoration: line-through; }
