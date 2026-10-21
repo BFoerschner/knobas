@@ -5,6 +5,9 @@
 //! connections for minutes. These pin the three properties that ended that:
 //! requests coalesce, a pass takes no UI connection, and a statement that runs
 //! past the pass's limit is cancelled and reported rather than waited out.
+//!
+//! And since #1485, who asks: the sync scheduler, after every run that ends
+//! OK, on the one pass bring-up built, without waiting for it.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -226,4 +229,251 @@ async fn a_pass_that_panics_answers_its_requests_and_the_next_one_runs() {
         written > 0,
         "the next pass ran and proposed the corpus' pairs"
     );
+}
+
+/// A request that does not wait (#1485), the sync scheduler's: `request`
+/// returns while the pass it started is still parked, and the nine that
+/// arrive during that pass cost one more pass between them, as `run`'s do.
+#[tokio::test]
+async fn requests_that_do_not_wait_coalesce_into_one_more_pass() {
+    let (connector, pool) = scratch("pass_request", 2).await;
+    corpus(&pool, 20).await;
+    let gated = Arc::new(Gated {
+        connector,
+        opened: AtomicUsize::new(0),
+        gate: Semaphore::new(0),
+    });
+    let pass = SuggestionPass::new(gated.clone(), Duration::from_secs(60));
+
+    pass.request();
+    while gated.opened.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+    for _ in 0..9 {
+        pass.request();
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        gated.opened.load(Ordering::SeqCst),
+        1,
+        "a request during a pass must not start a second one beside it"
+    );
+
+    gated.gate.add_permits(100);
+    tokio::time::timeout(Duration::from_secs(20), pass.idle())
+        .await
+        .expect("every request is answered");
+    assert_eq!(
+        gated.opened.load(Ordering::SeqCst),
+        2,
+        "ten requests, two passes"
+    );
+    assert_eq!(pass.passes(), 2);
+    let proposed: i64 = sqlx::query_scalar("select count(*) from knobas.proposed_link")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(proposed > 0, "the passes nobody waited for still proposed");
+}
+
+/// A mock source added under `config`, the engine brought up the way the app
+/// does (`sources::bring_up`) and handed `pass`, and one manual sync of it run
+/// to its end. Answers once the run has ended and every pass its ending
+/// requested has finished, with the outcome the run recorded.
+///
+/// Nothing here calls `detect_suggestions`: whatever pass runs is one the
+/// scheduler asked for.
+fn sync_through_bring_up(
+    label: &str,
+    config: serde_json::Value,
+) -> (PgPool, SuggestionPass, Option<knobas_sync::SyncOutcome>) {
+    use knobas_sync::SyncTrigger;
+    use knobas_sync::progress::{ProgressSink, SyncPhase, SyncProgress};
+
+    struct Ending(std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>);
+    impl ProgressSink for Ending {
+        fn report(&self, progress: SyncProgress) {
+            if !matches!(progress.phase, SyncPhase::Finished | SyncPhase::Failed) {
+                return;
+            }
+            if let Some(done) = self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+            {
+                let _ = done.send(());
+            }
+        }
+    }
+
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("a mock app");
+    let handle = app.handle().clone();
+    // `block_in_place` first: `block_on` from inside the test's runtime panics.
+    tokio::task::block_in_place(|| {
+        tauri::async_runtime::block_on(async move {
+            let (connector, pool) = scratch(label, 2).await;
+            let secrets: Arc<dyn knobas_secrets::SecretStore> =
+                Arc::new(knobas_secrets::MemoryStore::new());
+            let registry = knobas_app::sources::Registry::default();
+            let input: knobas_app::sources::NewSource =
+                serde_json::from_value(serde_json::json!({
+                    "id": "mock",
+                    "adapter_kind": "mock",
+                    "display_name": "Tidewater",
+                    "base_url": "https://mock.example.invalid",
+                    "auth_kind": "Pat",
+                    "config": config,
+                    "secret": { "value": "a token the mock never sees" },
+                    "sync_interval_secs": 900,
+                    "enabled": true,
+                }))
+                .unwrap();
+            knobas_app::sources::crud::add(&pool, &secrets, &registry, input)
+                .await
+                .expect("the mock source is added");
+
+            let pass = SuggestionPass::beside(&pool);
+            let store = tempfile::tempdir().unwrap();
+            let state = knobas_app::sources::bring_up(
+                &handle,
+                knobas_app::sources::BringUp {
+                    pool: pool.clone(),
+                    sync_pool: connector.pool(2).await.unwrap(),
+                    connections: connector,
+                    secrets,
+                    registry,
+                    store: store.path().to_path_buf(),
+                    suggestions: pass.clone(),
+                },
+            )
+            .await
+            .expect("bring-up over the scratch database");
+
+            let (done, ended) = tokio::sync::oneshot::channel();
+            state
+                .scheduler
+                .trigger(
+                    "mock",
+                    SyncTrigger::Manual,
+                    Some(Arc::new(Ending(std::sync::Mutex::new(Some(done))))),
+                )
+                .await
+                .expect("the run starts");
+            ended.await.expect("the run reports its ending");
+            tokio::time::timeout(Duration::from_secs(60), pass.idle())
+                .await
+                .expect("the pass the run's ending requested finishes");
+            let outcome = knobas_sync::scheduler::status_for(&pool, "mock")
+                .await
+                .unwrap()
+                .and_then(|status| status.last_outcome);
+            state.scheduler.shutdown().await;
+            (pool, pass, outcome)
+        })
+    })
+}
+
+async fn proposed(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("select count(*) from knobas.proposed_link")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// The audit's finding (#1485): with the room tray gone nothing asked for a
+/// pass, and Proposed links never grew. A sync run that ends OK now asks, on
+/// the pass bring-up was handed -- the one `AppState` holds, never one of the
+/// scheduler's own.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_that_ends_ok_proposes_links_without_anyone_asking() {
+    let (pool, pass, outcome) =
+        sync_through_bring_up("pass_after_sync_ok", serde_json::json!({}));
+    assert_eq!(outcome, Some(knobas_sync::SyncOutcome::Ok));
+    assert!(
+        proposed(&pool).await > 0,
+        "the Tidewater corpus the run brought in matches the rules, and no \
+         pass proposed anything"
+    );
+    assert!(
+        pass.passes() >= 1,
+        "the pass that ran is not the one bring-up was handed, so `AppState`'s \
+         `detect_suggestions` would run beside a second one"
+    );
+}
+
+/// A run that fails changed nothing a rule could match: it asks for no pass.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_that_fails_requests_no_pass() {
+    let (pool, pass, outcome) = sync_through_bring_up(
+        "pass_after_sync_failed",
+        serde_json::json!({ "fault": "unreachable" }),
+    );
+    assert!(
+        outcome.is_some_and(|outcome| outcome != knobas_sync::SyncOutcome::Ok),
+        "the faulted mock's run must fail for this test to mean anything: {outcome:?}"
+    );
+    assert_eq!(pass.passes(), 0, "a failed run requested a pass");
+    assert_eq!(proposed(&pool).await, 0);
+}
+
+/// What the scheduler's events request, event by event: only the emit that
+/// ends a run OK. The emit that starts a run carries the *previous* run's
+/// outcome, so a source whose last run was OK must not request a pass each
+/// time it starts one. Every event reaches the events it wraps.
+#[tokio::test]
+async fn only_the_emit_that_ends_a_run_ok_requests_a_pass() {
+    use knobas_app::suggestion_pass::SuggestOnSync;
+    use knobas_sync::scheduler::SyncEvents;
+    use knobas_sync::{SourceSyncStatus, SyncOutcome};
+
+    struct Counted(Arc<AtomicUsize>);
+    impl SyncEvents for Counted {
+        fn sync_state(&self, _status: SourceSyncStatus) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+        fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
+        fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
+    }
+
+    let (connector, _pool) = scratch("pass_on_sync_events", 1).await;
+    let gated = Arc::new(Gated {
+        connector,
+        opened: AtomicUsize::new(0),
+        gate: Semaphore::new(0),
+    });
+    let forwarded = Arc::new(AtomicUsize::new(0));
+    let events = SuggestOnSync::new(
+        Counted(Arc::clone(&forwarded)),
+        SuggestionPass::new(gated.clone(), Duration::from_secs(60)),
+    );
+
+    let mut starting = SourceSyncStatus::started("jira", 2);
+    starting.last_outcome = Some(SyncOutcome::Ok);
+    events.sync_state(starting);
+    for outcome in [
+        SyncOutcome::Error,
+        SyncOutcome::Unreachable,
+        SyncOutcome::Unauthorized,
+    ] {
+        events.sync_state(SourceSyncStatus::finished("jira", 2, outcome));
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        gated.opened.load(Ordering::SeqCst),
+        0,
+        "a run starting, or one that failed, requested a pass"
+    );
+
+    events.sync_state(SourceSyncStatus::finished("jira", 3, SyncOutcome::Ok));
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while gated.opened.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("a run that ended OK requests a pass");
+    assert_eq!(forwarded.load(Ordering::SeqCst), 5, "every event is passed on");
 }

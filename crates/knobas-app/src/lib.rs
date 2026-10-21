@@ -709,7 +709,16 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             // engine is part of "the database is up" as far as the frontend is
             // concerned, and a window that reacted to `ready` by calling
             // `sync_status` must not race the scheduler into existence.
-            sources::start(&handle, &db).await?;
+            //
+            // The suggestion pass is built here, once, and the same handle
+            // goes to the scheduler (which requests a pass after every OK
+            // run) and to `AppState` (whose `detect_suggestions` runs one
+            // now): two would mean two passes at once (#745, #1485).
+            let suggestions = suggestion_pass::SuggestionPass::new(
+                std::sync::Arc::new(sources::DbConnections(db.connector())),
+                suggestion_pass::PASS_STATEMENT_TIMEOUT,
+            );
+            sources::start(&handle, &db, suggestions.clone()).await?;
             // Beside the sync scheduler, not inside it: a backup is not a
             // source (see `backup`'s module docs).
             backup::start(&handle, &db);
@@ -730,18 +739,15 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             {
                 tracing::error!(%error, "the capture shortcut could not be read");
             }
-            Ok::<_, Box<dyn std::error::Error>>(db)
+            Ok::<_, Box<dyn std::error::Error>>((db, suggestions))
         }
         .await;
 
         match outcome {
-            Ok(db) => {
+            Ok((db, suggestions)) => {
                 handle.state::<Lifecycle>().install(AppState {
                     pool: db.pool().clone(),
-                    suggestions: suggestion_pass::SuggestionPass::new(
-                        std::sync::Arc::new(sources::DbConnections(db.connector())),
-                        suggestion_pass::PASS_STATEMENT_TIMEOUT,
-                    ),
+                    suggestions,
                     db: Mutex::new(Some(db)),
                 });
                 // Installed *before* the state moves to `ready`: a frontend

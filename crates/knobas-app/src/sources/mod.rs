@@ -473,9 +473,13 @@ pub fn to_ipc(error: &SourcesError, source_id: Option<&str>) -> crate::IpcError 
 /// [`SourcesError::Db`] if the installed adapters cannot be read or the
 /// scheduler's startup reconciliation fails. Both mean the
 /// database is not usable, which the caller reports as a failed bring-up.
+///
+/// `suggestions` is the process's one suggestion pass, which the caller also
+/// gives `AppState` (#1485): the scheduler requests it after every OK run.
 pub async fn start<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &knobas_db::EmbeddedDb,
+    suggestions: crate::suggestion_pass::SuggestionPass,
 ) -> Result<(), SourcesError> {
     // Its own pool for the scheduler's bookkeeping; the runs themselves take a
     // connection each from the connector, outside every pool (§10.6(c)).
@@ -491,6 +495,7 @@ pub async fn start<R: tauri::Runtime>(
             secrets: secret_store(&profile),
             registry: process.clone(),
             store: install::store_dir(&profile.dir),
+            suggestions,
         },
     )
     .await?;
@@ -535,6 +540,10 @@ pub struct BringUp {
     pub registry: Registry,
     /// The installed adapters' artifact store ([`install::store_dir`]).
     pub store: std::path::PathBuf,
+    /// The process's one suggestion pass, requested after every run that
+    /// ends OK ([`SuggestOnSync`](crate::suggestion_pass::SuggestOnSync),
+    /// #1485). The same handle `AppState` holds, never one of its own.
+    pub suggestions: crate::suggestion_pass::SuggestionPass,
 }
 
 /// [`start`]'s body below the database handle: load the installed external
@@ -561,11 +570,15 @@ pub async fn bring_up<R: tauri::Runtime>(
         connections: Arc::new(DbConnections(deps.connections)),
         registry: Arc::clone(&registry),
         secrets: Arc::clone(&deps.secrets),
-        // The owed links of #1050 resolved after every run (`ArrivalLinks`).
-        events: Arc::new(write_queue::ArrivalLinks::new(
-            TauriEvents::new(app.clone()),
-            deps.pool.clone(),
-            Arc::clone(&registry),
+        // The owed links of #1050 resolved after every run (`ArrivalLinks`),
+        // and a suggestion pass requested after every OK one (#1485).
+        events: Arc::new(crate::suggestion_pass::SuggestOnSync::new(
+            write_queue::ArrivalLinks::new(
+                TauriEvents::new(app.clone()),
+                deps.pool.clone(),
+                Arc::clone(&registry),
+            ),
+            deps.suggestions,
         )),
         timing: SchedulerTiming::default(),
     })
@@ -608,7 +621,10 @@ async fn archive_done_contexts(pool: &PgPool, registry: &Registry) {
 /// It exists because `start` needs an `EmbeddedDb` -- the thing that hands out
 /// connections outside every pool -- and `tests/it/ipc.rs` has a `test_pool`, not
 /// a database handle. Everything else is the real thing: the real registry, the
-/// real `TauriEvents`, real runs on real dedicated connections. Behind
+/// real `TauriEvents`, real runs on real dedicated connections. Except the
+/// suggestion pass after an OK run (#1485): a pass reads the whole mirror and
+/// proposes into it, and these tests share one database, so a run here
+/// requests none. `bring_up` is the path that carries it. Behind
 /// `test-util` for the reason `AppState::over_pool` is: a production caller
 /// would get a scheduler whose pool nothing owns.
 ///

@@ -1,6 +1,16 @@
 //! The suggestion detection pass: one at a time, on a connection of its own
 //! (#745).
 //!
+//! **Who asks for one.** The sync scheduler, whenever a run ends OK
+//! ([`SuggestOnSync`], #1485), without waiting for it; and the
+//! `detect_suggestions` command, the manual *run a pass now*, which waits
+//! for the pass that answers it. Both through the process's one
+//! [`SuggestionPass`], built once at start-up and handed to the scheduler and
+//! to `AppState` alike: a second one would run a second pass beside the
+//! first, the thing this module exists to stop. Until #881 the room's tray
+//! was the caller, on every finished sync; with the tray gone nothing asked,
+//! and no suggestion was made until #1485 gave the request to the scheduler.
+//!
 //! Until #745 every finished sync made the tray call `detect_suggestions`,
 //! which ran [`knobas_core::suggest::detect`] on the **UI pool**, with nothing
 //! stopping the next call while earlier ones ran and no statement timeout.
@@ -29,13 +39,14 @@
 //! The others: `similar_text` (`knobas_core::suggest`) compares only what
 //! changed since it last compared it, so a pass with nothing new costs a read;
 //! the app's pool carries a statement timeout of its own
-//! (`knobas_db::embedded::UI_STATEMENT_TIMEOUT`); and the tray asks for a pass
-//! only when a sync run finishes, never on a room switch.
+//! (`knobas_db::embedded::UI_STATEMENT_TIMEOUT`); and a pass is asked for
+//! only when a sync run finishes, never on a room switch (the scheduler asks
+//! now, the tray did then).
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use knobas_sync::scheduler::RunConnections;
+use knobas_sync::scheduler::{RunConnections, SyncEvents};
 use tokio::sync::watch;
 
 use crate::IpcError;
@@ -82,6 +93,8 @@ struct Queue {
 struct Finished {
     answers_through: u64,
     outcome: Result<u64, IpcError>,
+    /// How many passes have finished, failed ones included.
+    passes: u64,
 }
 
 /// Connections opened with a pool's options and owned by nobody but the pass.
@@ -103,6 +116,7 @@ impl SuggestionPass {
         let (finished, _) = watch::channel(Finished {
             answers_through: 0,
             outcome: Ok(0),
+            passes: 0,
         });
         Self {
             inner: Arc::new(Inner {
@@ -134,15 +148,7 @@ impl SuggestionPass {
     /// failed, a statement timeout included.
     pub async fn run(&self) -> Result<u64, IpcError> {
         let mut finished = self.inner.finished.subscribe();
-        let ticket = {
-            let mut queue = self.lock();
-            queue.requested += 1;
-            if !queue.running {
-                queue.running = true;
-                tokio::spawn(Arc::clone(&self.inner).drive());
-            }
-            queue.requested
-        };
+        let ticket = self.enqueue();
         let answer = finished
             .wait_for(|done| done.answers_through >= ticket)
             .await
@@ -150,11 +156,90 @@ impl SuggestionPass {
         answer.outcome.clone()
     }
 
+    /// Ask for a pass, and do not wait for it (#1485): what the sync
+    /// scheduler does when a run ends OK ([`SuggestOnSync`]).
+    ///
+    /// The same queue as [`run`](Self::run): starts a pass if none is
+    /// running, otherwise joins the one owed behind it. What the pass
+    /// proposes, or why it failed, goes to the log and nowhere else.
+    pub fn request(&self) {
+        self.enqueue();
+    }
+
+    /// How many passes have finished since this pass was made, failed ones
+    /// included.
+    #[must_use]
+    pub fn passes(&self) -> u64 {
+        self.inner.finished.borrow().passes
+    }
+
+    /// Wait until every request made before this call is answered.
+    pub async fn idle(&self) {
+        let ticket = self.lock().requested;
+        let mut finished = self.inner.finished.subscribe();
+        // The sender lives in `inner`, which `self` holds: it cannot close.
+        let _ = finished
+            .wait_for(|done| done.answers_through >= ticket)
+            .await;
+    }
+
+    /// Number a request, start a pass if none is running, and answer the
+    /// request's number: the pass that answers it is the first to finish
+    /// with `answers_through` at or past it.
+    fn enqueue(&self) -> u64 {
+        let mut queue = self.lock();
+        queue.requested += 1;
+        if !queue.running {
+            queue.running = true;
+            tokio::spawn(Arc::clone(&self.inner).drive());
+        }
+        queue.requested
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Queue> {
         self.inner
             .queue
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// The scheduler's events, and after every run that ends OK a suggestion
+/// pass requested (#1485), the way the scheduler requests an `ANALYZE` pass
+/// (`knobas_sync::analyze`). Wraps the events `sources::bring_up` hands the
+/// scheduler, as `ArrivalLinks` does; every event is passed on unchanged.
+///
+/// Keyed on the `sync:state` that ends a run, which `settle` emits once the
+/// run's transaction has committed, and on its own outcome: a failed or
+/// cancelled run changed nothing a rule could match. The emit that *starts*
+/// a run carries the previous run's outcome and requests nothing.
+///
+/// The request does not wait, so the run's ending never waits on a pass.
+pub struct SuggestOnSync<E> {
+    inner: E,
+    pass: SuggestionPass,
+}
+
+impl<E> SuggestOnSync<E> {
+    /// `inner`'s events, and passes requested on `pass`: the process's one
+    /// pass, the one `AppState` holds.
+    pub fn new(inner: E, pass: SuggestionPass) -> SuggestOnSync<E> {
+        SuggestOnSync { inner, pass }
+    }
+}
+
+impl<E: SyncEvents> SyncEvents for SuggestOnSync<E> {
+    fn sync_state(&self, status: knobas_sync::SourceSyncStatus) {
+        if !status.running && status.last_outcome == Some(knobas_sync::SyncOutcome::Ok) {
+            self.pass.request();
+        }
+        self.inner.sync_state(status);
+    }
+    fn source_health(&self, health: knobas_sync::CredentialHealth) {
+        self.inner.source_health(health);
+    }
+    fn activity_new(&self, row: knobas_core::activity::ActivityRow) {
+        self.inner.activity_new(row);
     }
 }
 
@@ -180,9 +265,12 @@ impl Inner {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .answered = answers_through;
-            self.finished.send_replace(Finished {
-                answers_through,
-                outcome,
+            self.finished.send_modify(|finished| {
+                *finished = Finished {
+                    answers_through,
+                    outcome,
+                    passes: finished.passes + 1,
+                };
             });
         }
     }
@@ -204,7 +292,10 @@ impl Inner {
         let _ = conn.close().await;
         match outcome {
             Ok(written) => {
-                tracing::debug!(
+                // `info`, not `debug` (#1485): at most one pass per sync run
+                // that ends OK, as loud as that run's own `sync started`, and
+                // the line that says passes happen at all.
+                tracing::info!(
                     written,
                     ms = started.elapsed().as_millis(),
                     "suggestion pass finished"
@@ -260,11 +351,14 @@ impl Drop for Stopped {
             queue.requested
         };
         tracing::error!("the suggestion pass stopped part-way; the next request starts a new one");
-        self.inner.finished.send_replace(Finished {
-            answers_through,
-            outcome: Err(IpcError::internal(
-                "the suggestion pass stopped part-way; the next sync starts a new one",
-            )),
+        self.inner.finished.send_modify(|finished| {
+            *finished = Finished {
+                answers_through,
+                outcome: Err(IpcError::internal(
+                    "the suggestion pass stopped part-way; the next sync starts a new one",
+                )),
+                passes: finished.passes,
+            };
         });
     }
 }

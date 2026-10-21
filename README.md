@@ -36,13 +36,14 @@ out or applies itself.
   <img alt="Write queue states: a submitted write is pending; it becomes sent if the target is unchanged, held if the target changed in the mirror, or refused if the source rejects it; held and refused writes return to pending only when a person acts." src="docs/diagrams/write-queue-light.svg">
 </picture>
 
-The suggestion pass proposes links and never confirms one. The room's tray
-starts a pass when a sync run ends. Each pass runs on its own connection, and
-calls that arrive during a pass share the next one.
+The suggestion pass proposes links and never confirms one. The sync scheduler
+requests a pass whenever a sync run ends OK, and does not wait for it; the
+`detect_suggestions` command runs one by hand. Each pass runs on its own
+connection, and requests that arrive during a pass share the next one.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/suggestion-pass-dark.svg">
-  <img alt="Suggestion pass: a finished sync run makes the room's tray call detect_suggestions; a queue coalesces requests into at most one running pass plus one owed; the pass runs seven rules on its own connection and inserts unconfirmed rows into knobas.link; accept or dismiss updates the same row and writes an activity line." src="docs/diagrams/suggestion-pass-light.svg">
+  <img alt="Suggestion pass: a sync run that ends OK makes the scheduler request a pass, without waiting; the detect_suggestions command asks for one and waits; a queue coalesces requests into at most one running pass plus one owed; the pass runs seven rules on its own connection and inserts unconfirmed rows into knobas.link; accept or dismiss updates the same row and writes an activity line." src="docs/diagrams/suggestion-pass-light.svg">
 </picture>
 
 The diagrams are hand-written SVG, one file per theme, checked against the code
