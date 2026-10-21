@@ -11160,6 +11160,7 @@ set.
   witnessed by each file's tree test. #141's and #448's entries mention `smart_list_items` and
   `context_assets` only in passing, describing those commands; nothing there needs to hold, so
   the entry need not name them. *Reversing:* medium, revert the PR.
+
 ## #1585: a source's page names the store its credential is in (Opus implementer, 2026-10-21)
 
 - **How does the frontend learn the store?** *Fork:* the ticket offers telling the frontend which

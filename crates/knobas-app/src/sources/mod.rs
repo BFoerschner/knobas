@@ -704,15 +704,27 @@ pub fn shutdown(app: &tauri::AppHandle) {
 }
 
 #[cfg(test)]
-mod secret_store_kind_tests {
+mod tests {
     use super::SecretStoreKind;
 
     #[test]
     fn memory_in_any_case_is_the_memory_store_and_anything_else_the_keychain() {
-        assert_eq!(SecretStoreKind::from_value(Some("memory")), SecretStoreKind::Memory);
-        assert_eq!(SecretStoreKind::from_value(Some("MEMORY")), SecretStoreKind::Memory);
+        assert_eq!(
+            SecretStoreKind::from_value(Some("memory")),
+            SecretStoreKind::Memory
+        );
+        assert_eq!(
+            SecretStoreKind::from_value(Some("MEMORY")),
+            SecretStoreKind::Memory
+        );
         assert_eq!(SecretStoreKind::from_value(None), SecretStoreKind::Keychain);
-        assert_eq!(SecretStoreKind::from_value(Some("keychain")), SecretStoreKind::Keychain);
-        assert_eq!(SecretStoreKind::from_value(Some("")), SecretStoreKind::Keychain);
+        assert_eq!(
+            SecretStoreKind::from_value(Some("keychain")),
+            SecretStoreKind::Keychain
+        );
+        assert_eq!(
+            SecretStoreKind::from_value(Some("")),
+            SecretStoreKind::Keychain
+        );
     }
 }

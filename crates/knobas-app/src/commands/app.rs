@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use knobas_sync::scheduler::AdapterRegistry;
 use tauri::Manager;
 
+use crate::sources::SecretStoreKind;
 use crate::{AppState, IpcError, Profile};
 
 /// How far the database has got.
@@ -228,8 +229,7 @@ pub fn ping() -> &'static str {
 pub async fn app_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppStatus {
     let db = app.state::<Lifecycle>().get();
     let demo = app.state::<Profile>().demo;
-    let secrets_in_memory =
-        *app.state::<crate::sources::SecretStoreKind>() == crate::sources::SecretStoreKind::Memory;
+    let secrets_in_memory = *app.state::<SecretStoreKind>() == SecretStoreKind::Memory;
     let app_version = app.package_info().version.to_string();
 
     // Counted live rather than cached, so adding a source is reflected without
