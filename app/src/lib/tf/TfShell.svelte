@@ -132,7 +132,8 @@
   /** Put `next` in place of the address the reader is on, without a step back to it. */
   function replaceHash(next: string) {
     history.replaceState(history.state, "", next);
-    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    // The state itself, not a `hashchange`: on the first pass the listener (an `onMount`) is not there yet.
+    hash = next;
   }
 
   /**
