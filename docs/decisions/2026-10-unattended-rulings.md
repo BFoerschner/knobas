@@ -10424,3 +10424,17 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 **Ruling:** merge on the live run from `1a9f44cb`. Since that head, the path the test drives changed in two ways. `$2` is now built from a `FormReading` struct with `#[serde(flatten)]` in place of `json!`, and the JSON keys are the same. The SQL column alias is now `via_form`. The gated `url_resolve` tests drive both through `Registry::for_process()`, which holds the real Confluence descriptor, and through the real statement on Postgres. The Confluence descriptor and the live test changed only by `cargo fmt`. So what only the live run can witness has not changed since it passed: a real record holds `id`, `space.key`, `title` and `_links.tinyui`, and the server serves each form.
 
 **Cost of reversing:** low. Once TeamCity is down, run the narrow test on `main`: `live_session confluence` and then the one `cargo test --exact`.
+
+## #1439: Settings › Notifications: the `credential_expiry` switch is labelled by what fires it (Sonnet implementer, 2026-10-21)
+
+- **The label.** *Ruling:* the switch reads "A source's credential is about to expire". This reverses
+  #831's label line ("A source cannot sign in", prototype-6's words): the label named a condition the
+  category never fires on, since the core inbox raises it 14 days before a stored `secret_expires_at`
+  and a rejected credential makes no item. Order, defaults, the category key and the write are
+  unchanged. *Reversing:* low, one string and one test line.
+- **No secondary line.** *Ruling:* none added. The Notifications section draws a bare switch per
+  kind with no help line, and the ticket asks for one only "if the section has one". *Reversing:* low.
+- **The failed-sign-in inbox item.** *Ruling:* filed as its own `backlog` ticket (#1571) (new `InboxCategory`
+  member and `inbox_state` key, so a frozen-surface change needing its §10.8 entry); the status strip
+  stays the place that says a sign-in fails until then. *Reasoning:* the ticket's recommendation;
+  building it is out of scope here. *Reversing:* none, it is a ticket.

@@ -222,9 +222,10 @@ test("Notifications: a switch per inbox kind over the notifier's store, and a te
     "You are mentioned",
     "A build you started or care about failed",
     "A ticket is assigned to you",
-    "A source cannot sign in",
+    "A source's credential is about to expire",
     "A monitor goes down",
   ]);
+  expect(target.textContent).not.toContain("A source cannot sign in");
   switchFor("You are mentioned").click();
   await settle();
   expect(store.choose).toHaveBeenCalledWith("mention", false);
