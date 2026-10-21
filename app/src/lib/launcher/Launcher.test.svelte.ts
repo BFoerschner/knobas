@@ -2967,17 +2967,34 @@ test("an empty box opens with the caret in it and nothing to select", async () =
   expect(input.selectionEnd).toBe(0);
 });
 
-test("a click on a row re-focuses the box without selecting what it put there", async () => {
+/**
+ * The re-focus after a click on a row keeps the caret where it was. Witnessed
+ * through a row whose click leaves the box's text alone (Rename, then Esc out
+ * of the name): a row that sets the box's text moves the caret to its end on
+ * the value write whatever the re-focus did, and could not tell the two apart.
+ * Blanks keep the board, and its rail, on screen.
+ */
+test("a click on a row re-focuses the box without selecting its text", async () => {
   openSaved();
   await settle();
-  railRows()[0]!.open!.click();
+  const input = target.querySelector("input")!;
+  input.value = "   ";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  input.setSelectionRange(1, 1);
+
+  [...target.querySelectorAll<HTMLButtonElement>("button.tf-ln-mini")]
+    .find((button) => button.textContent?.trim() === "Rename")!
+    .click();
+  flushSync();
+  await settle();
+  const field = target.querySelector<HTMLInputElement>("input.tf-ln-ren")!;
+  field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
   flushSync();
   await settle();
 
-  const input = target.querySelector("input")!;
-  expect(input.value).toBe("list:mine");
-  expect(document.activeElement).toBe(input);
-  // The caret where setting the value left it: at the end, nothing selected.
-  expect(input.selectionStart).toBe("list:mine".length);
-  expect(input.selectionEnd).toBe("list:mine".length);
+  expect(document.activeElement, "focus is back in the box").toBe(input);
+  expect(input.value).toBe("   ");
+  expect(input.selectionStart).toBe(1);
+  expect(input.selectionEnd).toBe(1);
 });
