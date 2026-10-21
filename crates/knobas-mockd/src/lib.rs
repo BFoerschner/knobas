@@ -254,6 +254,16 @@
 //!     queued and did not fail to start, which is what the seeded server
 //!     serves. Unlike a triggerer (deviation 12) an agent is no person and is
 //!     indexed nowhere, so naming one invents nothing a search would find.
+//! 19. **A failed build whose log names a failing test reports that one test
+//!     (#1448).** The dataset gives a build no test counts, and the declared
+//!     run fields `tests_failed`, `tests_passed` and `tests_ignored` need
+//!     `BUILD_FIELDS` to ask for `testOccurrences(failed,passed,ignored)`,
+//!     which would otherwise be an `UnknownField` 400. mockd serves what the
+//!     seeded server serves: `failed: 1, passed: 0, ignored: 0` on 1187,
+//!     whose log names `sepa::retry::gives_up_after_max_attempts` and whose
+//!     seeded step reports that test and no other, and no `testOccurrences`
+//!     on a build that ran none. The log's own `41 passed` is the story's
+//!     line, not what either server counts.
 //!
 //! ## The shared credentials
 //!

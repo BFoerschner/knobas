@@ -417,6 +417,12 @@ fn build_json(b: &TcBuild, base: &str, s: &MockState, types: &[TcBuildType]) -> 
         // test environment's server has, by its fixed name. A build on the
         // queue or one that failed to start never had one.
         "agent": (!queued && !b.failed_to_start).then(|| json!({ "name": AGENT_NAME })),
+        // The run's test counts (#1448, crate deviation 19), as the seeded
+        // server serves them when `fields=` names all three: zeros included,
+        // and no key at all on a build that ran no tests.
+        "testOccurrences": b
+            .failed_tests
+            .map(|failed| json!({ "failed": failed, "passed": 0, "ignored": 0 })),
         // The commits a build ran on (#710), none: the dataset gives no build
         // a commit, and a sha invented here would match no mirrored commit
         // anyway. An empty list, the shape of a build with no VCS root.

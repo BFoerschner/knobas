@@ -1511,7 +1511,7 @@ async fn the_feature_branch_build_is_served_by_both_item_producing_locators() {
     );
     let (items, cursor) = sync_from(
         &*seeded.scoped_to(&QUIET_CONFIGURATIONS),
-        Some(r#"{"v":1,"since_build_id":0}"#.to_owned()),
+        Some(r#"{"v":2,"since_build_id":0}"#.to_owned()),
     )
     .await;
     let mut seen: Vec<i64> = of_kind(&items, "build")

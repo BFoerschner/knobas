@@ -141,6 +141,11 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// `running-info.currentStageText`, which TeamCity serves only while the
 /// build runs.
 ///
+/// **A run's test summary** (#1448) is `testOccurrences.failed`, `.passed`
+/// and `.ignored`. Asked for by name, TeamCity serves all three on a build
+/// that ran tests, zeros included, and no `testOccurrences` on one that ran
+/// none.
+///
 /// **A pipeline's chain of groups** (#849) is its `projectPath`, which the
 /// sync writes beside the record from `/app/rest/projects`
 /// (`crate::projects`): every project from below the root down to the
@@ -191,6 +196,9 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             started_by: vec![PayloadPath::of(["triggered", "user", "username"])],
             agent: vec![PayloadPath::of(["agent", "name"])],
             current_step: vec![PayloadPath::of(["running-info", "currentStageText"])],
+            tests_failed: vec![PayloadPath::of(["testOccurrences", "failed"])],
+            tests_passed: vec![PayloadPath::of(["testOccurrences", "passed"])],
+            tests_ignored: vec![PayloadPath::of(["testOccurrences", "ignored"])],
             ..KindPaths::default()
         },
         KindPaths {
@@ -534,6 +542,39 @@ mod tests {
             .find(|p| p.kind == KIND_BUILD_CONFIG)
             .unwrap();
         assert!(config.agent.is_empty() && config.current_step.is_empty());
+    }
+
+    /// A build's test summary (#1448, R-9.6), off `testOccurrences(failed,
+    /// passed,ignored)` as `BUILD_FIELDS` asks for it. TeamCity serves all
+    /// three, zeros included, on a build that ran tests, and no
+    /// `testOccurrences` at all on one that ran none (measured on
+    /// teamcity.jetbrains.com, 2026.2.1, 2026-10-21); a configuration declares
+    /// none.
+    #[test]
+    fn a_build_carries_its_test_counts_and_one_without_tests_none() {
+        use knobas_core::payload::resolve_number;
+        let declared = descriptor_template().payload_paths;
+        let run = declared.iter().find(|p| p.kind == KIND_BUILD).unwrap();
+        let tested = serde_json::json!({
+            "id": 7, "state": "finished",
+            "testOccurrences": { "failed": 1, "passed": 41, "ignored": 2 }
+        });
+        assert_eq!(resolve_number(&tested, &run.tests_failed), Some(1.0));
+        assert_eq!(resolve_number(&tested, &run.tests_passed), Some(41.0));
+        assert_eq!(resolve_number(&tested, &run.tests_ignored), Some(2.0));
+        let untested = serde_json::json!({ "id": 8, "state": "finished" });
+        assert_eq!(resolve_number(&untested, &run.tests_failed), None);
+        assert_eq!(resolve_number(&untested, &run.tests_passed), None);
+        assert_eq!(resolve_number(&untested, &run.tests_ignored), None);
+        let config = declared
+            .iter()
+            .find(|p| p.kind == KIND_BUILD_CONFIG)
+            .unwrap();
+        assert!(
+            config.tests_failed.is_empty()
+                && config.tests_passed.is_empty()
+                && config.tests_ignored.is_empty()
+        );
     }
 
     /// A build ran on every revision it lists (#710): one sha per VCS root,

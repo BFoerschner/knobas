@@ -416,7 +416,7 @@ async fn a_watermark_at_the_top_of_a_page_does_not_wedge_the_next_run() {
     let mut sink = VecSink(Vec::new());
     let cursor = source
         .sync(
-            Some(format!(r#"{{"v":1,"since_build_id":{watermark}}}"#)),
+            Some(format!(r#"{{"v":2,"since_build_id":{watermark}}}"#)),
             &mut sink,
         )
         .await
