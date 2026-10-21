@@ -10194,4 +10194,48 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 
 **The step:** the ticket's last criterion asks for "Björn's sign-off before merge" on the frozen-surface change.
 
-**Ruling:** signed off, on this evidence: the §10.8 entry matches the diff (three `KindPaths` fields, one `RunRow` field, the cursor version, mockd deviation 19, and no migration, command or module); the adapter, battery, app and component tests are green. On the PR's live runs, `just teamcity-live` passed 12 of 12. In `just teamcity-live-seeded`, 1187 read 1/0/0 and the battery passed on the seeded server; its 5 failures come from the fixture break filed as #1560 (stray configurations on the seeded server) and touch nothing this PR changed. The merge-manager confirms the sign-off.
+**Ruling:** signed off, on this evidence: the §10.8 entry matches the diff (three `KindPaths` fields, one `RunRow` field, the cursor version, mockd deviation 19, and no migration, command or module); the adapter, battery, app and component tests are green. On the PR's live runs, `just teamcity-live` passed 12 of 12. In `just teamcity-live-seeded`, 1187 read 1/0/0 and the battery passed on the seeded server; its 5 failures come from the fixture break filed as #1560 (stray configurations on the seeded server) and touch nothing this PR changed. Confirmed by the merge-manager on Opus (below).
+
+## #1447, #1448: merge review of #1558 (Opus merge-manager, 2026-10-21)
+
+### Reserved for Björn, ruled by merge-manager on Opus: sign-off before merge (#1448), confirmed
+
+**The step:** the implementer ruled the sign-off and left it to the merge-manager to confirm.
+
+**Ruling:** confirmed. The deep pass found the frozen surface as the §10.8 entry describes it, with one gap now closed (next ruling). A stored version-1 TeamCity position parses as unknown, so the adapter is handed `Some(cursor)` and still runs a full sync over each configuration's window; `knobas-sync` sweeps only a cursor-less, non-backfill run (`CursorSource::may_sweep` plus the cursor-less check in `run_locked`), so the upgrade run tombstones nothing. The battery's excuse is per record and only where none of the three counts reads, the same shape as `current_step`'s. `RunRow` and `KindPaths` are regenerated, not hand-edited. The seeded live run's five failures are all exact-set or configuration-limit failures from #1560; the two tests this PR changes passed there.
+
+**Cost of reversing:** low before release; the cursor bump is the only part that cannot be taken back without another bump.
+
+### The §10.8 entry names `generated/sources.ts`
+
+**The fork:** the entry listed `KindPaths`' three fields but not that they reach the IPC through `SourceDescriptor.payload_paths`, which the regenerated `app/src/lib/ipc/generated/sources.ts` shows.
+
+**Ruling:** one sentence added to `docs/contract/10.8/1448-run-test-summary.md`, so the entry matches the diff.
+
+**Cost of reversing:** none.
+
+### #961/#947's "not declared" reversal stands
+
+**Ruling:** upheld. The ticket delegated exactly this fork and recommended declaring; ADR-0022 lists the test summary among a run's declared fields, and #848 deferred it on fixture cost only. The #961/#947 entry carries the amendment.
+
+### mockd deviation 19 stands
+
+**Ruling:** upheld against ADR-0013's freeze. Without a `testOccurrences` key mockd answers `BUILD_FIELDS` with an `UnknownField` 400 and every mockd test breaks; it serves only what the seeded server serves (1187 `1/0/0`, nothing elsewhere), which the seeded live run printed. Deviation 18 (#1004) is the same case.
+
+**Cost of reversing:** low, but only together with dropping the field from `BUILD_FIELDS`.
+
+### The backfill reaches the window, not every mirrored build
+
+**The fork:** the ticket asks for counts on "every build the mirror holds"; the version bump re-reads each configuration's `builds_per_config` window.
+
+**Ruling:** accepted. A mirrored build older than the window draws no summary until a later read answers it, and `older_pipeline_runs`, which reads the source live, has the counts. Re-reading every mirrored build by id would cost a request per old build on every TeamCity source at upgrade, for rows that new builds push out of view.
+
+**Cost of reversing:** medium: a one-off by-id walk over the mirror's builds.
+
+### *, inherited* after a fixed list's kind word: kept, follow-up #1564
+
+**The fork:** an inherited select reads *one of staging, prod-dryrun, inherited*, which looks like a third value.
+
+**Ruling:** kept for this PR, because the ticket says *inherited* "stays drawn as it is today"; #1564 (`backlog`) carries the wording, since no fixture has an inherited select.
+
+**Cost of reversing:** low, one template line.

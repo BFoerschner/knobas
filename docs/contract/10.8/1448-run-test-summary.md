@@ -7,7 +7,9 @@
 
   **The declarations** (`knobas_spi_types::payload`, re-exported by `knobas_core::payload` and
   `knobas_source`). `KindPaths` gains three fields, all `#[serde(default)]`, so an older peer's
-  descriptor decodes as declaring none:
+  descriptor decodes as declaring none. `KindPaths` is on the IPC as `SourceDescriptor`'s
+  `payload_paths`, so the three fields are also regenerated into
+  `app/src/lib/ipc/generated/sources.ts`:
 
   1. `tests_failed: Vec<PayloadPath>` (`field::TESTS_FAILED`)
   2. `tests_passed: Vec<PayloadPath>` (`field::TESTS_PASSED`)
