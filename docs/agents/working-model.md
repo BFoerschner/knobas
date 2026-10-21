@@ -39,7 +39,7 @@ Implementation now runs ticket-driven:
   success, so every recipe now refuses to start without its gate variables (#351, table in
   `testenv/README.md`, *The live recipes*).
 - **`just search-perf` is that list's one non-live recipe (#556).** It is the launcher's perf gate —
-  the five `#[ignore]`d benchmarks in `crates/knobas-search/tests/perf.rs` and the sixth of the same
+  the six `#[ignore]`d benchmarks in `crates/knobas-search/tests/perf.rs` and the seventh of the same
   class in `tests/coverage.rs` — and until #556 it was run by a person typing the file's own cargo
   line. It sits *beside* `just check` and never inside it, for the reason the file gives: every
   assertion is wall-clock against a fixed budget, and inside a gate that runs two at a time it would
@@ -54,7 +54,7 @@ Implementation now runs ticket-driven:
   the machine, which is the *"read the counts"* rule above applied to itself: under `--ignored` a
   benchmark that lost its `#[ignore]`, was renamed, or fell out of the recipe's target list is not a
   failure — libtest prints `0 passed; 0 failed` and cargo exits 0 — so the recipe adds up the
-  harness's own `test result:` lines and exits 1 when the total is not the six it pins. Read the two
+  harness's own `test result:` lines and exits 1 when the total is not the seven it pins. Read the two
   load lines before you quote anything between them. Whether a transcript is a *reading* is the #533 re-run
   standard's question, and the standard is quoted rather than paraphrased here
   (`docs/decisions/2026-09-v1-5-unattended-rulings.md`, `## #533`): *"its numbers count only under

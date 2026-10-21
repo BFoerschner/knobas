@@ -35,6 +35,13 @@ Two rules, both cheap:
 Recorded 2026-08-28 after a review of #50 recommended adding an acceptance criterion to #52 that #52
 already had, and the recommendation was posted there before anyone read #52.
 
+## Acceptance greps
+
+An acceptance grep for a retired name must not match the names that stay (#1579: #1481's grep for
+`clones_root` also hit `set_clones_root` and the wire fields, so it could not pass). Spell the name as
+the call site does (`invoke<…>("clones_root"`, `commands::entity::clones_root,`), never as a bare
+word that surviving names contain.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
