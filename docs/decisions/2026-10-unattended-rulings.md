@@ -8890,3 +8890,46 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   on the fixture's reserved host. Aside: the unscoped `list_sync_runs` has run id 93 twice
   (Confluence's last run and the in-flight one); every caller scopes it by source, so it never
   reaches a page, and nothing is filed. *Reversing:* n/a.
+
+## #1406: Settings re-reads the adapter descriptors (Opus implementer, 2026-10-21)
+
+- **Delegated pick: a callback and a read of its own, not the `installs` counter.** *Fork:* bump
+  `installs` from *Update* and *Uninstall* too, so one counter re-reads both lists, or give
+  *Installed adapters* an `onchanged` and Settings a `loadAdapters()` behind its own `latestRead`.
+  *Ruling:* the second. *Reasoning:* `installs` also re-reads `list_installed_adapters`, and the
+  section already holds the row *Update* answered and drops the one it uninstalled; a second read
+  of the same rows would race them. *Reversing:* low.
+- ***Add a source* re-reads on Cancel as well as on *Add source*.** An install in the dialog adds a
+  descriptor whether or not a source follows, and the dialog does not say which. One
+  `list_adapters` per close. *Reversing:* low.
+- **The fake's `add_source` stores its row.** The row joins `list_sources` with its own health,
+  config, interval, kinds and claims, not the spread mock's; a second source with the same id is
+  refused with `conflict`, as the backend refuses it. `delete_source` still answers without
+  removing anything. *Reversing:* drop the push.
+- **The Update criterion is witnessed on the page opened next.** *Installed adapters* is drawn only
+  on the Sources list, so no source page is open while *Update* is pressed. The test updates, opens
+  the page without remounting, and finds the new field. *Reversing:* n/a.
+- **The Uninstall criterion cannot fail on the old code.** *Add a source* reads `list_adapters`
+  itself when it opens, so its radios drop the adapter either way, and an uninstall removes every
+  source of that kind, so no page is left to be handed the stale descriptor. The re-read is done
+  for consistency, and its mutant survives. *Reversing:* n/a.
+
+## #1499: the credential expiry countdown on the page and the row (Opus implementer, 2026-10-21)
+
+- **Delegated pick: the row's countdown is a second line under the state.** *Fork:* the state
+  column's text replaced by "Credential expires in N days", or kept with the countdown beneath.
+  *Ruling:* beneath, in its own tone (amber in `--warn`, expired in `--err`), and also beside
+  *Sign-in failed*. *Reasoning:* "Synced 4 min ago" stays true while the token runs out, and an
+  expired token next to a refused sign-in explains it. *Reversing:* one `{#if}`.
+- **On the page, the countdown sits after "Stored in …" and before *Re-enter…*, at the small size.**
+  Plain is `--ink-2`, so a 41-day token reads as a fact, not a warning. An expiry drawn beside
+  "None stored" would be shown too, since the ticket says draw it whenever the source reports one.
+  *Reversing:* low.
+- **The tone-to-class table is `EXPIRY_CLASS` in `settings.ts`**, shared by the page and the row;
+  `.tf-stg-warnt` is new, beside `.tf-stg-errt`. *Reversing:* low.
+- **The fixture's expiry is computed once at load: eight days from then.** A page left open for a
+  day reads one day out of date, which no screenshot or test sees. *Reversing:* n/a.
+- **Aside, filed as #1513 (backlog):** no built-in adapter reports `secret_expires_at` (the Jira and
+  Confluence sources note that PAT expiry needs `/rest/pat/latest/tokens`, outside their
+  endpoints), so live, only an external adapter draws this countdown; the Rust doc comments that
+  quote §3's old "PAT expiry countdown" are left for a pass that runs cargo.
