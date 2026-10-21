@@ -1,7 +1,7 @@
 /**
  * Credential health, live — one fact, one home.
  *
- * Spec §3: *"Credential health: PAT expiry countdown, 401 detection →*
+ * Spec §3: *"Credential health: credential expiry countdown, 401 detection →*
  * Re-enter password*"*. Three surfaces draw it — the top strip's monograms,
  * the sources view's rows, and the launcher's per-row provenance — and before
  * this module they drew it from two independent copies: `launcher_home.sources`
@@ -383,7 +383,7 @@ export function createHealth(ports?: HealthPorts): Health {
  */
 export const health = createHealth();
 
-/** A PAT expiry reading: what to say, and how alarmed to look saying it. */
+/** A credential expiry reading: what to say, and how alarmed to look saying it. */
 export interface ExpiryNote {
   text: string;
   tone: "plain" | "amber" | "fail";
@@ -394,13 +394,18 @@ export interface ExpiryNote {
  *
  * Long enough that there is a working week in which to rotate the token
  * before the sync stops, short enough that the countdown is not permanently
- * amber on a 90-day PAT — a warning that is always on is a warning nobody
+ * amber on a 90-day token — a warning that is always on is a warning nobody
  * reads.
  */
 const AMBER_DAYS = 14;
 
 /**
- * The PAT expiry countdown — spec §3.
+ * The credential expiry countdown — spec §3.
+ *
+ * It names no credential: "expires in 12 days" sits on the source page's
+ * Token or Password row, whose label is the noun, and the Sources row puts
+ * "Credential" in front (#1499). A token source is never told about a
+ * password (#1405).
  *
  * `null` for a source whose credential has no expiry, or whose server will not
  * say: the great majority of sources, and a line saying "expires: unknown" on
@@ -416,14 +421,14 @@ export function expiryNote(iso: string | null | undefined, now: Date = new Date(
   if (Number.isNaN(at.getTime())) return null;
 
   const ms = at.getTime() - now.getTime();
-  if (ms <= 0) return { text: "PAT expired", tone: "fail" };
+  if (ms <= 0) return { text: "expired", tone: "fail" };
 
   // Rounded up: with 30 hours left, "in 1 day" is true and "in 1 day" rounded
   // down would read "in 1 day" as well — but with 6 hours left, rounding down
   // gives "in 0 days", which is either wrong or alarming for the wrong reason.
   const days = Math.ceil(ms / 86_400_000);
   return {
-    text: `PAT expires in ${days} ${days === 1 ? "day" : "days"}`,
+    text: `expires in ${days} ${days === 1 ? "day" : "days"}`,
     tone: days <= AMBER_DAYS ? "amber" : "plain",
   };
 }

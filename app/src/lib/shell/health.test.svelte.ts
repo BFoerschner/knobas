@@ -556,27 +556,32 @@ test("a source with no reading at all is not actionable", () => {
 
 const NOW = new Date("2026-08-22T00:00:00Z");
 
-test("a PAT expiring in 12 days reads amber; in 41 days it reads plain", () => {
+test("a credential expiring in 12 days reads amber; in 41 days it reads plain", () => {
   expect(expiryNote("2026-09-03T00:00:00Z", NOW)).toEqual({
-    text: "PAT expires in 12 days",
+    text: "expires in 12 days",
     tone: "amber",
   });
   expect(expiryNote("2026-10-02T00:00:00Z", NOW)).toEqual({
-    text: "PAT expires in 41 days",
+    text: "expires in 41 days",
     tone: "plain",
   });
   expect(expiryNote(null, NOW)).toBeNull();
 });
 
+test("amber starts at 14 days, plain at 15 (#1499)", () => {
+  expect(expiryNote("2026-09-05T00:00:00Z", NOW)).toEqual({ text: "expires in 14 days", tone: "amber" });
+  expect(expiryNote("2026-09-06T00:00:00Z", NOW)).toEqual({ text: "expires in 15 days", tone: "plain" });
+});
+
 test("an already-expired secret reads failed, not '-3 days'", () => {
-  expect(expiryNote("2026-08-19T00:00:00Z", NOW)).toEqual({ text: "PAT expired", tone: "fail" });
+  expect(expiryNote("2026-08-19T00:00:00Z", NOW)).toEqual({ text: "expired", tone: "fail" });
   // The boundary itself: a secret that expires this instant has expired.
-  expect(expiryNote("2026-08-22T00:00:00Z", NOW)).toEqual({ text: "PAT expired", tone: "fail" });
+  expect(expiryNote("2026-08-22T00:00:00Z", NOW)).toEqual({ text: "expired", tone: "fail" });
 });
 
 test("the last day is singular and amber, not '1 days'", () => {
   expect(expiryNote("2026-08-23T00:00:00Z", NOW)).toEqual({
-    text: "PAT expires in 1 day",
+    text: "expires in 1 day",
     tone: "amber",
   });
 });
