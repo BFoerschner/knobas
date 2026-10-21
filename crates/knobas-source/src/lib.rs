@@ -259,7 +259,7 @@ pub struct ConnectionInfo {
     /// When the credential that just worked stops working, if the source will
     /// say. Feeds the credential expiry countdown and
     /// `source_config.secret_expires_at`. No built-in adapter fills it (#1513):
-    /// none of their sources says when the credential in use expires.
+    /// none of their sources says when *the credential in use* expires.
     pub secret_expires_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Anything else worth putting on screen in one line.
     pub detail: Option<String>,

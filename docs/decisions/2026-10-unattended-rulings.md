@@ -11021,7 +11021,8 @@ set.
   *Reversing:* medium. A §4.2 read-endpoint row and a §10.8 entry per adapter, mockd's Jira
   subset, and `just jira-live`/`just confluence-live`/`just teamcity-live`. The live suites'
   `secret_expires_at == None` assertions would flip.
-- **Rejected: report the expiry when the listing holds exactly one token.** With Bearer auth and
+- **Rejected: report the expiry when the listing holds exactly one token.** *Fork:* a narrower
+  read of the same listings. *Ruling:* no. *Reasoning:* with Bearer auth and
   one listed token, that token must be the one in use, so the date would be honest. But it goes
   silent as soon as the account holds a second token for another tool, which is the usual case.
   No run here has measured whether a PAT may list tokens at all (the live suite lists them with
@@ -11033,4 +11034,5 @@ set.
   The Jira and Confluence notes that said "the countdown shows as soon as that endpoint is added"
   now give the reason it would not. The live suites' assertion messages ("PAT expiry needs
   /rest/pat/latest/tokens, which is outside this adapter's endpoint set") are still true and stay
-  as they are, so no live suite is owed. *Reversing:* n/a.
+  as they are, so no live suite is owed. `docs/contract.md` still says "PAT expiry countdown"
+  (§1, line 53, and §7's P4); it is frozen, and the wording is history there. *Reversing:* n/a.
