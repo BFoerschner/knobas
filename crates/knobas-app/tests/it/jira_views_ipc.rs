@@ -222,6 +222,21 @@ async fn a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns() 
         ],
         "Jira's order inside a column of two statuses, an empty column kept, a status on no column not drawn"
     );
+    // #1423: the column is the view's name; each card carries its own status.
+    let statuses: Vec<(String, Option<String>)> = board
+        .columns
+        .iter()
+        .flat_map(|c| c.cards.iter().map(|card| (card.key.clone(), card.status.clone())))
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            (format!("{p}-3"), Some("To Do".into())),
+            (format!("{p}-1"), Some("In Review".into())),
+            (format!("{p}-2"), Some("In Progress".into())),
+        ],
+        "a card under *Doing* reads its own status, never the column's name"
+    );
 
     let capped = saved_view_board(
         &pool,

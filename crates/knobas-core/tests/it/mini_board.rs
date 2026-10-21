@@ -300,6 +300,10 @@ async fn a_ticket_with_no_recognizable_status_lands_in_the_terminal_group() {
         "every unreadable status belongs in the one terminal group"
     );
     assert!(
+        board.columns[0].cards.iter().all(|card| card.status.is_none()),
+        "a card in the terminal group carries no status either (#1423)"
+    );
+    assert!(
         offered(&board, SOURCE).is_empty(),
         "the terminal group is not a status anything can be moved to"
     );
@@ -452,6 +456,16 @@ async fn identically_spelled_statuses_from_two_sources_share_a_column() {
         columns(&board),
         vec![(Some("In Progress"), vec!["OPS-50", "PAY-50"])],
         "one status, one column, whichever source spelled it"
+    );
+    let carried: Vec<Option<&str>> = board.columns[0]
+        .cards
+        .iter()
+        .map(|card| card.status.as_deref())
+        .collect();
+    assert_eq!(
+        carried,
+        [Some("In Progress"), Some("In Progress")],
+        "each card carries the status it stands in (#1423)"
     );
     let sources: Vec<&str> = board.sources.iter().map(|s| s.source_id.as_str()).collect();
     assert_eq!(

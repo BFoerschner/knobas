@@ -203,7 +203,8 @@ pub async fn mini_board_laned(
 /// under the view's own columns -- each holding the tickets whose status is
 /// one of its statuses, empty ones included, as on the source's board. A
 /// status on no column does not show. A view with no columns keeps one column
-/// per status. `per_column` cuts each column after its first cards in that
+/// per status. A column's `status` is the view column's name; each card
+/// carries its own status (#1423). `per_column` cuts each column after its first cards in that
 /// order; `total` counts them all.
 ///
 /// Keys the source returned that knobas does not mirror (a project the source

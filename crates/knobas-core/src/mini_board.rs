@@ -494,6 +494,10 @@ pub struct MiniBoardColumn {
     /// group: tickets whose mirrored record carries no status this read
     /// recognizes. The words on screen for that group are the shell's ("No
     /// status"); what crosses the bridge is the absence itself.
+    ///
+    /// On a saved view's board (a Jira view's, #877) it is the view
+    /// column's **name**, which gathers several statuses: read a ticket's
+    /// status from [`MiniBoardCard::status`], never from here (#1423).
     pub status: Option<String>,
     /// Newest first: all of them, or the newest of them where the read was
     /// capped ([`read_capped`]).
@@ -518,6 +522,11 @@ pub struct MiniBoardCard {
     /// namespace.
     pub key: String,
     pub title: String,
+    /// The ticket's own status, in the source's words (#1423): the status
+    /// it stands in on [`read_scoped`]'s board, carried on the card because
+    /// a saved view's column gathers several statuses under the view's name
+    /// ([`MiniBoardColumn::status`]). `None` for the terminal group.
+    pub status: Option<String>,
     /// `None` where the record carries no readable priority; see
     /// [`priority_read!`].
     ///
@@ -843,6 +852,7 @@ pub async fn read_scoped(
             entity_id: row.entity_id,
             source_id: row.source_id,
             title: row.title,
+            status: row.status,
             priority: row.priority,
             issue_type: row.issue_type,
             mine: row.assignee.as_deref().is_some_and(|assignee| {
@@ -1116,6 +1126,7 @@ mod tests {
             source_id: "jira".to_owned(),
             key: key.to_owned(),
             title: key.to_owned(),
+            status: None,
             priority: None,
             issue_type: None,
             assignee: assignee.map(str::to_owned),
