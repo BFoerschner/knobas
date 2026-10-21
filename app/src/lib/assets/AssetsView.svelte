@@ -2227,7 +2227,7 @@
             <p class="lab via">Reachable via routes that would break</p>
             <ul class="lst">
               {#each dependsOn.routes as route (route.id)}
-                <li>
+                <li class="rt">
                   <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
                   <span class="faint mono">{route.url}</span>
                 </li>
@@ -3078,6 +3078,27 @@
     grid-template-columns: auto 1fr;
     gap: 0 8px;
     margin-bottom: 5px;
+  }
+
+  /* A route's line is a name and its URL. A button centres its text, so a
+     name too long for the column wrapped centred and pushed the URL right
+     (#1606): the name is left-aligned, and the URL wraps beneath it when the
+     two do not fit one line. */
+  .breaks .lst li.rt {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 8px;
+  }
+
+  .breaks .lst li.rt .link {
+    text-align: left;
+  }
+
+  .breaks .lst li.rt .mono {
+    flex: 0 0 auto;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    font-variant-ligatures: none;
   }
 
   .breaks .lst li .path {
