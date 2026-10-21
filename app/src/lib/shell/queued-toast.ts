@@ -29,8 +29,12 @@ function failingName(source: WriteSource | null | undefined, store: Pick<Health,
 
 /** "Queued: <what>.", and the sign-in sentence when `failing` names the source whose sign-in fails. */
 function queuedText(what: string, failing: string | null): string {
-  const queued = `Queued: ${what}.`;
-  return failing === null ? queued : `${queued} ${failing} sign-in is failing, so it waits there.`;
+  return withSignIn(`Queued: ${what}.`, failing);
+}
+
+/** `text`, and the sign-in sentence when `failing` names the source whose sign-in fails. */
+function withSignIn(text: string, failing: string | null): string {
+  return failing === null ? text : `${text} ${failing} sign-in is failing, so it waits there.`;
 }
 
 /**
@@ -63,7 +67,7 @@ export function toastStarted(key: string, queued: number, source: WriteSource | 
   const failing = failingName(source, store);
   const count = `${started} ${queued === 1 ? "1 write" : `${queued} writes`} queued.`;
   push({
-    text: failing === null ? count : `${count} ${failing} sign-in is failing, so it waits there.`,
+    text: withSignIn(count, failing),
     action: { label: "Show queue", run: openWriteQueue },
   });
 }
