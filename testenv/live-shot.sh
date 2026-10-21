@@ -25,6 +25,8 @@
 #                          modifiers command, shift, option, control
 #   settle [seconds]       wait for the app (default 1)
 #
+# `press`, `focus` and `click-at` retry for up to 10 s, as `just shot`'s
+# `click:` does; the steps start once the web view has drawn something.
 # Every command first checks that the screen is not locked, and `type`, `key`
 # and `click-at` that knobas is frontmost (activating it once): keystrokes sent
 # to another app are a person's work typed over. A failing command writes
@@ -56,8 +58,10 @@ die() {
     if [ -n "$app_pid" ] && [ -z "${dying:-}" ]; then
         dying=1
         local id
-        if read -r id _ < <("$ax" window-id "$app_pid" 2>/dev/null) \
-            && screencapture -x -o -l "$id" "$out/failed.png"; then
+        local width
+        if read -r id width _ < <("$ax" window-id "$app_pid" 2>/dev/null) \
+            && screencapture -x -o -l "$id" "$out/failed.png" \
+            && sips --resampleWidth "$width" "$out/failed.png" >/dev/null; then
             printf 'live-shot:   the window: %s\n' "$out/failed.png" >&2
         fi
         "$ax" dump "$app_pid" 40 >"$out/failed-ax.txt" 2>&1 || true
@@ -153,9 +157,22 @@ shot() {
     sips --resampleWidth "$width" "$file" >/dev/null
     say "shot: $file"
 }
-press() { ready; "$ax" press-visible "$app_pid" "$@" || die "press $*"; }
-focus() { ready; "$ax" focus-visible "$app_pid" "$@" || die "focus $*"; }
-click-at() { ready; frontmost; "$ax" click-at "$app_pid" "$@" || die "click-at $*"; }
+# reach <verb> <ax subcommand> <label> [n]: the subcommand, retried for up to
+# 10 s as `just shot`'s click: waits, since a view draws after the step that
+# asked for it; the last attempt's complaint is the one printed.
+reach() {
+    local verb=$1 sub=$2 i
+    shift 2
+    for i in $(seq 1 20); do
+        "$ax" "$sub" "$app_pid" "$@" 2>"$scratch/reach.err" && return 0
+        sleep 0.5
+    done
+    cat "$scratch/reach.err" >&2
+    die "$verb $*"
+}
+press() { ready; reach press press-visible "$@"; }
+focus() { ready; reach focus focus-visible "$@"; }
+click-at() { ready; frontmost; reach click-at click-at "$@"; }
 type() { ready; frontmost; "$ax" type "$*" || die "type"; }
 key() {
     [ $# -ge 1 ] || die "usage: key <key> [command|shift|option|control ...]"
@@ -183,6 +200,7 @@ done
 [ -n "$app_pid" ] || die "no knobas process within 15 minutes; see $out/demo.log"
 say "knobas is pid $app_pid; waiting for its window"
 "$ax" wait-window "$app_pid" 300 >/dev/null || die "knobas (pid $app_pid) showed no window in 5 minutes"
+"$ax" wait-content "$app_pid" 300 || die "knobas' window stayed blank for 5 minutes; see $out/demo.log"
 "$ax" activate "$app_pid" || die "knobas would not come forward"
 if [ -n "$aerospace" ]; then
     read -r id _ < <("$ax" window-id "$app_pid")

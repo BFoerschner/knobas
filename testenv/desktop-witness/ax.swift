@@ -564,6 +564,28 @@ func clickAt(pid: pid_t, label: String, nth: Int?) -> Int32 {
     return 0
 }
 
+/// Waits until a window's web area holds anything. A window is up long before
+/// the webview has drawn the page (measured 2026-10-21 on `just demo`: an empty
+/// AXWebArea and a blank window three seconds after the window appeared).
+func waitContent(pid: pid_t, seconds: Double) -> Int32 {
+    let deadline = Date().addingTimeInterval(seconds)
+    while Date() < deadline {
+        var drawn = false
+        for window in windows(of: pid) {
+            visit(window, maxDepth: 6) { element, _ in
+                if text(element, kAXRoleAttribute as String) == "AXWebArea",
+                    !children(element, kAXChildrenAttribute as String).isEmpty
+                {
+                    drawn = true
+                }
+            }
+        }
+        if drawn { return 0 }
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+    return fail("pid \(pid)'s web view drew nothing within \(Int(seconds)) s")
+}
+
 /// The app's largest on-screen window, as the window server knows it:
 /// `<window id>\t<width>\t<height>` in points, for `screencapture -l`.
 func windowID(pid: pid_t) -> Int32 {
@@ -649,6 +671,8 @@ case "click-at" where (3...4).contains(arguments.count) && integer(1) != nil
     status = clickAt(pid: pid_t(integer(1)!), label: arguments[2], nth: integer(3))
 case "window-id" where arguments.count == 2 && integer(1) != nil:
     status = windowID(pid: pid_t(integer(1)!))
+case "wait-content" where arguments.count == 3 && integer(1) != nil && seconds(2) != nil:
+    status = waitContent(pid: pid_t(integer(1)!), seconds: seconds(2)!)
 default:
     FileHandle.standardError.write(
         Data(
@@ -672,6 +696,7 @@ default:
                    ax focus-visible <pid> <label> [n]
                    ax click-at <pid> <label> [n]
                    ax window-id <pid>
+                   ax wait-content <pid> <seconds>
 
             """.utf8))
     status = 2

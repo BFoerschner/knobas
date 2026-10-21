@@ -10687,3 +10687,40 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   its criteria touch the Tickets view, `requirements.md`, a ruling line and a screenshot, none of
   which this PR changes, and its fixture can seed `FAKE_CONTEXTS` without the retired fake handler.
   A comment on #1502 says the command is gone. *Reversing:* medium.
+## #1483: `just shot`'s pointer steps and `just live-shot` (Opus implementer, 2026-10-21)
+
+Björn delegated four picks at triage (2026-10-21); two more came up while building.
+
+- **Build or defer the driver.** *Ruling:* built in this PR, with `Closes #1483`. *Reasoning:* the
+  dispatch held the desktop-witness slot, this Mac's session has the Screen Recording and
+  Accessibility grants (`CGPreflightScreenCaptureAccess` true, `ax probe` trusted), and the
+  knobas-app build was warm (2 m 14 s), so the driver could be witnessed in the same run.
+  *Reversing:* low; the recipe and its script are new files.
+- **The driver's home.** *Ruling:* a sibling script, `testenv/live-shot.sh`, which compiles the
+  witness's own `testenv/desktop-witness/ax.swift`. The four new subcommands (`press-visible`,
+  `focus-visible`, `click-at`, `window-id`) go into that file beside the witness's. The
+  witness's `press`/`focus` are unchanged, because its drivers count on exactly one match in the
+  tree. *Reasoning:* the ticket's recommendation. A mode of the witness would inherit its signed
+  bundle and Launch Services steps, which a screenshot does not need. *Reversing:* medium; the
+  steps would move into a driver.
+- **AeroSpace.** *Ruling:* optional, off by default. `LIVE_SHOT_AEROSPACE=1` fullscreens the
+  window by its CG window id, which AeroSpace uses as its own, and is refused when `aerospace`
+  is not on PATH. *Reasoning:* the ticket's recommendation; a Mac without a tiling WM needs
+  nothing. *Reversing:* low.
+- **Locks.** *Ruling:* `just live-shot` always takes the desktop witness's lock
+  (`$TMPDIR/knobas-desktop-witness.lock`), so one witness or live-shot runs at a time. It takes
+  a product's lock only when `LIVE_SHOT_PRODUCT` names a product it starts through
+  `live_session`: the Gitea lock for Gitea, the JVM lock for a JVM product. *Reasoning:* the
+  ticket's recommendation. `live_session` already holds the right lock and puts the product
+  back. *Reversing:* low.
+- **Mouse buttons 3 and 4 as steps.** *Ruling:* `back:<name>` and `forward:<name>`, CDP
+  `button: "back"`/`"forward"` at the element's centre. *Reasoning:* they are the names the app
+  (`TfShell`, #693) and CDP give them. A fixture that does not `preventDefault` the press is
+  navigated back by Chrome itself, so the shot test's fixture prevents it the way the app does.
+  *Reversing:* low.
+- **What a pointer step can name.** *Ruling:* first the elements `click:` would take, but only
+  those with a box. Failing those, the innermost element whose whole text is the name (a table
+  row's key cell), so `dblclick:PAY-231` reaches a row that is no button. `click:` itself is
+  unchanged. *Reasoning:* the ticket asks for `click:`'s resolution, and rows that open on a
+  double-click (`TicketsPage`'s `<tr>`) have no name or test id. The brief forbids adding a
+  label to the app to reach one. *Reversing:* low, one branch in `findJs`.

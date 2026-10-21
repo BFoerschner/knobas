@@ -819,7 +819,7 @@ if [ "$(uname -s)" = Darwin ] && command -v swiftc >/dev/null; then
         check "the lookup refuses an unregistered identifier" yes yes
     fi
 
-    # live-shot's four (#1483), against the same windowless shell: a window
+    # live-shot's five (#1483), against the same windowless shell: a window
     # id it cannot find, and a visible match it cannot see, are refusals; an
     # n that is not a number is the usage block, not a guess.
     "$helper/ax" window-id $$ >/dev/null 2>&1 && answer=0 || answer=$?
@@ -828,6 +828,8 @@ if [ "$(uname -s)" = Darwin ] && command -v swiftc >/dev/null; then
     check "press-visible refuses when nothing is visible" 1 "$answer"
     "$helper/ax" click-at $$ Anything 2 >/dev/null 2>&1 && answer=0 || answer=$?
     check "click-at refuses when the process is not frontmost" 1 "$answer"
+    "$helper/ax" wait-content $$ 0.5 >/dev/null 2>&1 && answer=0 || answer=$?
+    check "wait-content refuses a process whose window never draws" 1 "$answer"
     "$helper/ax" focus-visible $$ Anything second >/dev/null 2>&1 && answer=0 || answer=$?
     check "an n that is no number is a usage error" 2 "$answer"
 else
