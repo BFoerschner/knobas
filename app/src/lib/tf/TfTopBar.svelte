@@ -97,7 +97,7 @@
       disabled={ontimer === undefined}
       onclick={() => ontimer?.()}
     >
-      <span class="tf-timer-key">{clockOn}</span>
+      <span class="tf-timer-key" class:tf-mono={timer.current?.target.kind === "entity"} title={clockOn}>{clockOn}</span>
       <span class="tf-timer-t">{clock}</span>
       <span class="tf-timer-stop" title="Stop and log"><i></i></span>
     </button>

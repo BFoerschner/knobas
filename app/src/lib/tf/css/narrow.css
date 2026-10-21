@@ -21,6 +21,14 @@
   .tf-stg-src { grid-template-columns: auto 1fr auto; }
   .tf-stg-src .tf-stg-si { display: none; }
 }
+/* Between the stacked layout and 1240px the nav gives up width, not items: Time stays in view at 1100px (#1430). */
+@media (max-width: 1240px) and (min-width: 901px) {
+  .tf-search { min-width: 0; }
+  .tf-search .tf-label, .tf-search kbd { display: none; }
+  .tf-timer-key { max-width: 12ch; }
+  .tf-nav a { padding: 6px 7px; }
+  .tf-nav .tf-count { display: none; }
+}
 @media (max-width: 1240px) {
   .tf-grid { grid-template-columns: minmax(0, 1fr); }
 }

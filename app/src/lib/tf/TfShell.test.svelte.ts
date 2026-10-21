@@ -417,6 +417,32 @@ test("the timer chip ticks the store's reading and stops through the shell's ver
   expect(target.querySelector(".tf-nav a:nth-child(2)")?.textContent?.replace(/\s+/g, " ").trim(), "the Job tab names the timer's ticket").toBe("Job PAY-231");
 });
 
+test("the chip's target carries its full text in a title: a label reads in the sans face, a ticket key stays mono (#1430)", async () => {
+  const label = "DB config for the migration";
+  const timer = {
+    current: { target: { kind: "label", label }, started_at: "2026-08-22T12:00:00Z", last_heartbeat: "2026-08-22T12:00:00Z" } as RunningTimer,
+    elapsed: "0:05",
+  };
+  start({ timer });
+  await settle();
+  const on = target.querySelector<HTMLElement>(".tf-timer-key")!;
+  expect(on.textContent).toBe(label);
+  expect(on.getAttribute("title")).toBe(label);
+  expect(on.classList.contains("tf-mono"), "a label is not a code value").toBe(false);
+});
+
+test("a timer on a ticket key keeps the mono face and its title (#1430)", async () => {
+  const timer = {
+    current: { target: { kind: "entity", entity_id: "jira:PAY-231" }, started_at: "2026-08-22T12:00:00Z", last_heartbeat: "2026-08-22T12:00:00Z" } as RunningTimer,
+    elapsed: "0:05",
+  };
+  start({ timer });
+  await settle();
+  const on = target.querySelector<HTMLElement>(".tf-timer-key")!;
+  expect(on.classList.contains("tf-mono")).toBe(true);
+  expect(on.getAttribute("title")).toBe("PAY-231");
+});
+
 test("⌘K opens search and ⌘, opens Settings", async () => {
   const onsearch = vi.fn();
   start({ onsearch });
