@@ -52,29 +52,29 @@ const PAYOUTS = "Payments › Payouts";
 
 /** The rows PAY-231's job draws that the demo corpus does not hold. */
 export const JOB_ROWS = [
-  row("mock:Payout_Build#1188", "build", "Payout_Build #1188", "2026-08-22T11:45:00Z", {
+  row("teamcity:build:Payout_Build-1188", "build", "Payout_Build #1188", "2026-08-22T11:45:00Z", {
     path: PAYOUTS,
     chip: { text: "running", tone: "info" },
     source: "teamcity",
   }),
-  row("mock:Payout_IntegrationTests#1187", "build", "Payout_IntegrationTests #1187", "2026-08-22T10:10:00Z", {
+  row("teamcity:build:Payout_IntegrationTests-1187", "build", "Payout_IntegrationTests #1187", "2026-08-22T10:10:00Z", {
     path: PAYOUTS,
     chip: { text: "failed", tone: "err" },
     source: "teamcity",
   }),
-  row("mock:Payout_Lint#904", "build", "Payout_Lint #904", "2026-08-22T11:44:00Z", { path: PAYOUTS, chip: ok, source: "teamcity" }),
-  row("mock:Payout_Docker#611", "build", "Payout_Docker #611", "2026-08-22T11:52:00Z", { path: PAYOUTS, chip: ok, source: "teamcity" }),
-  row("mock:Payout_Deploy_Staging#318", "build", "Payout_Deploy_Staging #318", "2026-08-22T12:04:00Z", {
+  row("teamcity:build:Payout_Lint-904", "build", "Payout_Lint #904", "2026-08-22T11:44:00Z", { path: PAYOUTS, chip: ok, source: "teamcity" }),
+  row("teamcity:build:Payout_Docker-611", "build", "Payout_Docker #611", "2026-08-22T11:52:00Z", { path: PAYOUTS, chip: ok, source: "teamcity" }),
+  row("teamcity:build:Payout_Deploy_Staging-318", "build", "Payout_Deploy_Staging #318", "2026-08-22T12:04:00Z", {
     path: "Payments › Payouts › Deploy",
     chip: ok,
     source: "teamcity",
   }),
-  row("mock:PspClient_Build#233", "build", "PspClient_Build #233", "2026-08-20T15:20:00Z", {
+  row("teamcity:build:PspClient_Build-233", "build", "PspClient_Build #233", "2026-08-20T15:20:00Z", {
     path: "Payments › PSP client",
     chip: ok,
     source: "teamcity",
   }),
-  row("mock:PspClient_Release#41", "build", "PspClient_Release #41", "2026-08-20T15:31:00Z", {
+  row("teamcity:build:PspClient_Release-41", "build", "PspClient_Release #41", "2026-08-20T15:31:00Z", {
     path: "Payments › PSP client",
     chip: ok,
     source: "teamcity",
@@ -99,11 +99,7 @@ export const JOB_ROWS = [
     chip: { text: "up", tone: "ok" },
     source: "kuma",
   }),
-  row("mock:ENG-PSP-codes", "page", "PSP error codes", "2026-08-19T14:00:00Z", { path: "ENG › Payments" }),
-  row("mock:OPS-manual-review", "page", "Manual review queue", "2026-08-21T15:10:00Z", {
-    path: "OPS › Runbooks",
-    chip: { text: "SLA section is empty", tone: "warn" },
-  }),
+  row("confluence:psp-codes", "page", "PSP error codes", "2026-08-19T14:00:00Z", { path: "ENG › Payments" }),
 ];
 
 /** What PAY-231 reaches, each entity with its first step. */
@@ -112,16 +108,15 @@ const PAY_231: [id: string, kind: string, step: string][] = [
   ["mock:tidewater/payout-service@refs/heads/feat/PAY-231-idempotent-retry", "branch", "mock:payout-service#142"],
   ["mock:payout-service#142", "pr", "mock:payout-service#142"],
   ["mock:9f2c1ab", "commit", "mock:payout-service#142"],
-  ["mock:Payout_Build#1188", "build", "mock:payout-service#142"],
-  ["mock:Payout_IntegrationTests#1187", "build", "mock:payout-service#142"],
-  ["mock:Payout_Lint#904", "build", "mock:payout-service#142"],
-  ["mock:Payout_Docker#611", "build", "mock:payout-service#142"],
-  ["mock:Payout_Deploy_Staging#318", "build", "mock:payout-service#142"],
-  ["mock:PspClient_Build#233", "build", "mock:tidewater/payout-service"],
-  ["mock:PspClient_Release#41", "build", "mock:tidewater/payout-service"],
-  ["mock:ENG-SEPA", "page", "mock:ENG-SEPA"],
-  ["mock:ENG-PSP-codes", "page", "mock:ENG-PSP-codes"],
-  ["mock:OPS-manual-review", "page", "mock:OPS-manual-review"],
+  ["teamcity:build:Payout_Build-1188", "build", "mock:payout-service#142"],
+  ["teamcity:build:Payout_IntegrationTests-1187", "build", "mock:payout-service#142"],
+  ["teamcity:build:Payout_Lint-904", "build", "mock:payout-service#142"],
+  ["teamcity:build:Payout_Docker-611", "build", "mock:payout-service#142"],
+  ["teamcity:build:Payout_Deploy_Staging-318", "build", "mock:payout-service#142"],
+  ["teamcity:build:PspClient_Build-233", "build", "mock:tidewater/payout-service"],
+  ["teamcity:build:PspClient_Release-41", "build", "mock:tidewater/payout-service"],
+  ["confluence:sepa", "page", "confluence:sepa"],
+  ["confluence:psp-codes", "page", "confluence:psp-codes"],
   // The Docs fixture's pages of the job (`docs.ts`, #863): the mock adapter
   // emits no pages, so Docs' *This job* reads these, which no `list_entities`
   // row answers to.

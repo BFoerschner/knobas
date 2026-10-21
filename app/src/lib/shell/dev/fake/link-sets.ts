@@ -73,7 +73,7 @@ let SETS: FakeSet[] = [
     description: "What a change on the payout path touches: the repos, the Payouts builds, the PSP pages and the payout monitors.",
     members: [
       ...m("repo", "mock:tidewater/payout-service", "mock:tidewater/psp-client"),
-      ...m("page", "mock:ENG-PSP-codes", "confluence:sepa"),
+      ...m("page", "confluence:psp-codes", "confluence:sepa"),
       ...m("asset", "asset:knobas-gitea", "asset:orbstack-docker"),
       ...m("monitor", "kuma:5"),
     ],
@@ -94,7 +94,7 @@ let SETS: FakeSet[] = [
     description: "ledger-api and fx-rates, the Ledger builds, the reconciliation runbook.",
     members: [
       ...m("repo", "mock:tidewater/ledger", "mock:tidewater/fx-rates"),
-      ...m("page", "mock:OPS-manual-review"),
+      ...m("page", "confluence:manual-review"),
       ...m("asset", "asset:knobas-teamcity"),
       ...m("monitor", "kuma:2"),
     ],
@@ -105,7 +105,7 @@ let SETS: FakeSet[] = [
     id: "finance-docs",
     name: "Finance docs",
     description: "Every page in the Finance space, and the finance requests.",
-    members: m("page", "mock:ENG-SEPA"),
+    members: m("page", "confluence:sepa"),
     patterns: [],
     rules: [r("epic", "mock:PAY-150")],
   },

@@ -33,7 +33,7 @@ const FAKE_SUGGESTIONS: LinkRow[] = [
     "this build's parameters name PAY-231", "2026-08-22T14:30:03Z"),
   proposal(2, "mock:9f2c1ab", "mock:PAY-231", "commit_message_key", "exact_key",
     "the commit message mentions PAY-231", "2026-08-22T14:30:02Z"),
-  proposal(3, "mock:ENG-SEPA", "mock:PAY-231", "similar_text", "similarity",
+  proposal(3, "confluence:sepa", "mock:PAY-231", "similar_text", "similarity",
     "both mention 409, fail, idempotent, payout", "2026-08-22T14:30:01Z"),
   // The Proposed links view (#835) wants a queue to compare with
   // prototype-6's: more of the detector's own rules over the same corpus,

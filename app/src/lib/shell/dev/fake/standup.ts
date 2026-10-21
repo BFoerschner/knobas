@@ -117,7 +117,7 @@ export function handlers(): Record<string, Handler> {
   const settle = (day: string): Protocol => {
     const publication = published.get(day);
     if (publication?.state === "pending") {
-      published.set(day, { ...publication, state: "sent", page_entity_id: "mock:ENG-SEPA", linked: true });
+      published.set(day, { ...publication, state: "sent", page_entity_id: "confluence:sepa", linked: true });
     }
     return protocol(day);
   };
@@ -136,7 +136,7 @@ export function handlers(): Record<string, Handler> {
             : [
                 line("mock:PAY-231", "ticket", "Retry failed SEPA payouts", "tracked", "4h 30m; pushed 3 commits to the pull request", on(when, 17, 40)),
                 line("mock:payout-service#142", "pr", "PR #142", "merged", "PAY-228 moved to In Review", on(when, 15, 5)),
-                line("mock:ENG-SEPA", "page", "SEPA retry design", "edited", "Backoff policy", on(when, 11, 20)),
+                line("confluence:sepa", "page", "SEPA retry design", "edited", "Backoff policy", on(when, 11, 20)),
               ],
         today: [
           line("mock:PAY-231", "ticket", "Retry failed SEPA payouts", "tracking", "timer running", on(today.day, 9, 40)),
