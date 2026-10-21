@@ -312,7 +312,7 @@ test("once the blocker is discarded the write waits on its source alone", async 
 // -- a row in words (#1425) ---------------------------------------------------
 
 /** A row's heading as the reader sees it: the parts, joined. */
-function words(row: Pick<QueuedWrite, "op" | "entity_id" | "payload">, names: Record<string, string> = {}): string {
+function words(row: Parameters<typeof writeWords>[0], names: Record<string, string> = {}): string {
   return writeWords(row, (id) => names[id] ?? null)
     .map((part) => part.text)
     .join("");
@@ -376,6 +376,47 @@ test("every op this build knows reads as words", () => {
   ];
   const names = { "confluence:sepa": "SEPA payout retry design", "teamcity:Payout_Build": "Payout build" };
   for (const [row, expected] of cases) expect(words(row, names)).toBe(expected);
+});
+
+// -- a page edit names its section (#1520) -----------------------------------
+
+/** A Confluence page as the mirror holds it: storage format and a version. */
+const PAGE = '<p>How payouts retry.</p><h2>Context</h2><p>Nightly batch.</p><h2><strong>Risks &amp; limits</strong></h2><p>None yet.</p>';
+
+/** A queued page edit whose whole body is `body`, made against `PAGE`. */
+function pageEdit(body: string, snapshot: unknown = { op: "update_page", live: true, payload: { body: { storage: { value: PAGE } }, version: { number: 4 } } }) {
+  return {
+    op: "update_page",
+    entity_id: "confluence:sepa",
+    payload: { UpdatePage: { entity: "confluence:sepa", base_version: 4, body } },
+    target_snapshot: snapshot,
+  };
+}
+
+const SEPA = { "confluence:sepa": "SEPA payout retry design" };
+
+test("a page edit names the one section it changes", () => {
+  const context = pageEdit(PAGE.replace("Nightly batch.", "Nightly batch, 14 unsettled."));
+  expect(words(context, SEPA)).toBe("Edit section “Context” of SEPA payout retry design");
+  const last = pageEdit(PAGE.replace("None yet.", "<p>The PSP caps retries.</p>"));
+  expect(words(last, SEPA), "markup and an entity in the heading read as words").toBe(
+    "Edit section “Risks & limits” of SEPA payout retry design",
+  );
+  expect(words(context), "a page whose title is not known yet").toBe("Edit section “Context” of a page");
+});
+
+test("a page edit names the page when no one section is the change", () => {
+  const cases: [string, ReturnType<typeof pageEdit>][] = [
+    ["two sections", pageEdit(PAGE.replace("Nightly batch.", "Daily.").replace("None yet.", "Some."))],
+    ["nothing", pageEdit(PAGE)],
+    ["the words before the first heading", pageEdit(PAGE.replace("How payouts retry.", "How payouts are retried."))],
+    ["a heading added", pageEdit(PAGE.replace("Nightly batch.", "Nightly batch.</p><h2>Ledger</h2><p>Drift."))],
+    ["a heading's own words", pageEdit(PAGE.replace("<h2>Context</h2>", "<h2>Background</h2>"))],
+    ["no snapshot", pageEdit(PAGE.replace("Nightly", "Daily"), null)],
+    ["a snapshot with no storage body", pageEdit(PAGE.replace("Nightly", "Daily"), { op: "update_page", live: true, payload: { body: "plain" } })],
+    ["another op's snapshot", pageEdit(PAGE.replace("Nightly", "Daily"), { op: "comment", live: true, payload: { body: { storage: { value: PAGE } } } })],
+  ];
+  for (const [what, row] of cases) expect(words(row, SEPA), what).toBe("Edit page SEPA payout retry design");
 });
 
 /**
