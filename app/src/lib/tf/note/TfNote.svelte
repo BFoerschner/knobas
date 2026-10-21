@@ -99,7 +99,7 @@
       }
       if (!live) return;
       // A protocol opens where `itemHash` sends it: Time › Standup at its date.
-      if (protocolDayOf(note.note.title) !== null) return ports.replace(entityAddress("note", note.note.id, note.note.title));
+      if (protocolDayOf(note.note.title) !== null) return ports.replace(entityAddress("note", note.note.id, false, note.note.title));
       read = { note };
     })();
     return () => {
