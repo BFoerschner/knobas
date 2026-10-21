@@ -9863,3 +9863,23 @@ unchanged.
   rules. `tf-css.test.ts` scans every rule that names `var(--mono)` and fails one whose declaration
   is missing or precedes its `font` shorthand, so a new mono rule cannot slip by. No earlier ruling
   reversed; the JQL rules are unchanged. *Reversing:* low, one declaration per rule.
+
+## #1419: `/` focuses Dependencies' Find (Sonnet implementer, 2026-10-21)
+
+- **Give the asset tree's *Find an asset* the filter mark and `/` listener now, or leave it.**
+  *Ruling:* leave it, the recommended pick, per #881's ruling that unported rooms code is untouched
+  until a ticket ports it. Reverses no earlier ruling. *Reversing:* low; the same mark and the same
+  ten-line listener on `AssetsView.svelte`.
+
+## #1456: how `exposes` is reversed (Sonnet implementer, 2026-10-21)
+
+- **Reverse `exposes` inside `graphOf`, or emit `exposed-by` from the read.** *Ruling:* reverse in
+  `graphOf`, with a comment. The read's direction is pinned by §10.8 (#871), an IPC test and the
+  fake, so changing it is a frozen-surface touch; `holders` keeps reading the raw relation.
+  *Reversing:* low; one line in `graphOf`.
+
+## #1462: the broken-tile match colour (Sonnet implementer, 2026-10-21)
+
+- **Fix with `--ink` on the `--mark` fill, or an underline/outline.** *Ruling:* the ticket's:
+  one rule, `.tf-dp-t.tf-dp-err mark { color: var(--ink); }`, since an outline departs from
+  "highlights use `--mark`". No mono rule added, so no ligature declaration. *Reversing:* drop one rule.

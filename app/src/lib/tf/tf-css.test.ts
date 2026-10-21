@@ -302,3 +302,12 @@ test("every rule that takes the mono font variable turns ligatures off after its
     .map((m) => m[1]!.trim());
   expect(bare).toEqual([]);
 });
+
+test("a Find match in a broken Dependencies tile is --ink on --mark; elsewhere it inherits (#1462)", () => {
+  const rule = block(code, ".tf-dp-t.tf-dp-err mark");
+  expect(rule).toMatch(/color:\s*var\(--ink\)/);
+  expect(rule).not.toMatch(/background/);
+  const base = block(code, ".tf mark");
+  expect(base).toMatch(/background:\s*var\(--mark\)/);
+  expect(base).toMatch(/color:\s*inherit/);
+});

@@ -410,3 +410,40 @@ test("a ticket nothing in the mirror answers to says so", async () => {
   await settle();
   expect(target.querySelector("[role='alert']")!.textContent).toContain("nothing in the mirror answers to PAY-999");
 });
+
+const slash = (on: EventTarget = window) => {
+  const event = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
+  on.dispatchEvent(event);
+  return event;
+};
+
+test("/ focuses Find, and Find is the page's filter for the shell's Esc ladder (#1419)", async () => {
+  render();
+  await settle();
+  const find = target.querySelector<HTMLInputElement>('input[aria-label="Find"]')!;
+  expect(find.hasAttribute("data-filter")).toBe(true);
+  expect(document.activeElement).not.toBe(find);
+  expect(slash().defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(find);
+});
+
+test("/ typed in another field does not steal focus (#1419)", async () => {
+  render();
+  await settle();
+  const other = document.body.appendChild(document.createElement("input"));
+  other.focus();
+  slash(other);
+  expect(document.activeElement).toBe(other);
+  other.remove();
+});
+
+test("the / listener is removed when the page unmounts (#1419)", async () => {
+  render();
+  await settle();
+  const find = target.querySelector<HTMLInputElement>('input[aria-label="Find"]')!;
+  unmount(app!);
+  app = null;
+  const event = slash();
+  expect(event.defaultPrevented).toBe(false);
+  expect(document.activeElement).not.toBe(find);
+});
