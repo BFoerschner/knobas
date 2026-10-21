@@ -10981,3 +10981,6 @@ Ruled 2026-10-21 by the implementer (Sonnet).
   (as `assetColumn` and the depends walk do) without a test of its own. *Reasoning:* both readers
   render the IPC order as given, so the backend order is what a user sees. *Reversing:* delete
   one assertion.
+## #1593: Gitea declares `closed` as its done-like status (Sonnet implementer, 2026-10-21)
+
+No fork. The ticket-system role and the contract battery ask nothing of `done_statuses` (grep of `crates/knobas-source/src/role` and the battery finds no reader), so no further change. `closed` is lowercase as Gitea spells `state`; the match is case-insensitive per #1501. Forgejo shares the descriptor and so the set.
