@@ -125,8 +125,10 @@
     moreLanesLine,
     moreLine,
     nextSort,
+    sharedKeys,
     sortRows,
     statusOrder,
+    ticketAddress,
     when,
     type LaneField,
     type SortColumn,
@@ -447,6 +449,10 @@
       statusOrder(boardColumns),
     ),
   );
+  /** The keys two sources' cards hold (#1476): those cards name their source and open by it. */
+  const shared = $derived(sharedKeys(boardColumns));
+  /** A card's source name when its key is shared, else `null`. */
+  const sourceOf = (card: MiniBoardCard) => (shared.has(card.key) ? sourceRoles.nameOf(card.source_id) : null);
   /** The list's columns: the view's, in the list's order (R-3.16). */
   const listColumns = $derived(
     LIST_COLUMN_ORDER.filter(([column]) => (view?.list_columns ?? DEFAULT_LIST_COLUMNS).includes(column)),
@@ -510,7 +516,7 @@
 
   function openJob(card: MiniBoardCard) {
     session.selected = card.entity_id;
-    location.hash = jobHash(card.key);
+    location.hash = ticketAddress(card, shared);
   }
 
   /** `j`/`k` and the arrows (R-3.10): the next or previous card on screen, selected and focused. */
@@ -548,7 +554,7 @@
       if (entry === null) return;
       event.preventDefault();
       session.selected = entry.card.entity_id;
-      location.hash = jobHash(entry.card.key);
+      location.hash = ticketAddress(entry.card, shared);
     };
     window.addEventListener("keydown", onkey);
     return () => window.removeEventListener("keydown", onkey);
@@ -749,6 +755,7 @@
                     <TicketCard
                       {card}
                       fields={view?.card_fields ?? null}
+                      source={sourceOf(card)}
                       typed={filter.text}
                       selected={current?.card.entity_id === card.entity_id}
                       onselect={() => select(card)}
@@ -799,7 +806,10 @@
               >
                 {#each listColumns as [column] (column)}
                   {#if column === "key"}
-                    <td class="tf-mono tf-nowrap"><Marked text={card.key} typed={filter.text} /></td>
+                    {@const source = sourceOf(card)}
+                    <td class="tf-mono tf-nowrap"
+                      ><Marked text={card.key} typed={filter.text} />{#if source}<span class="tf-sub">{source}</span>{/if}</td
+                    >
                   {:else if column === "summary"}
                     <td
                       ><Marked text={card.title} typed={filter.text} />{#if card.path}<span class="tf-sub"
@@ -858,6 +868,7 @@
   {#if current !== null && base !== null}
     <TicketPreview
       card={current.card}
+      address={ticketAddress(current.card, shared)}
       description={reader.description}
       around={reader.around}
       timerOnIt={timedTicket === current.card.key}

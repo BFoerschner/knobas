@@ -3,7 +3,8 @@
   fixed 320px column left of the work.
 
   Top to bottom: *All tickets* (`Esc`), the key at 64px in Archivo width 62,
-  the summary, the status select, the facts line and the blocked chip, the
+  the source when another source holds the same key (#1476), with a link to
+  each other one, the summary, the status select, the facts line and the blocked chip, the
   clock, *What it asks for* and *Time this week*. The conversation summary is
   #819's.
 
@@ -17,11 +18,13 @@
   import type { EntityDetail } from "../../ipc/entity";
   import type { Timer } from "../../shell/timer.svelte";
   import { clockReading } from "../../time/day";
+  import { jobHash } from "../route";
   import { commentCount, firstName, mentionCount, since, stamp, type Summary } from "./conversation";
   import { blockers, factsLine, keyOf, weekLine, type WeekReading } from "./job";
 
   let {
     detail,
+    others = [],
     offered,
     week,
     conversation = null,
@@ -34,6 +37,8 @@
     onstart,
   }: {
     detail: EntityDetail;
+    /** The other sources' tickets under the same key (#1476); none draws no source. */
+    others?: EntityDetail[];
     /** Where the ticket can move now, or `null` while the workflow read is out. */
     offered: string[] | null;
     week: WeekReading | null;
@@ -74,6 +79,12 @@
   <a class="tf-back" href="#/tickets">All tickets <kbd>Esc</kbd></a>
   <div>
     <div class="tf-jobkey">{key}</div>
+    {#if others.length > 0}
+      <p class="tf-jobsrc">
+        In {detail.source.display_name} · also in {#each others as other, at (other.row.entity_id)}{#if at > 0},
+          {/if}<a href={jobHash(other.row.entity_id)}>{other.source.display_name}</a>{/each}
+      </p>
+    {/if}
     <h1 class="tf-jobtitle">{detail.row.title}</h1>
   </div>
   <div class="tf-jobrow">

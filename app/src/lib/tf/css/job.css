@@ -15,6 +15,9 @@
 }
 .tf-jobcard .tf-back kbd { background: transparent; border-color: rgba(0,0,0,.25); color: inherit; }
 .tf-jobcard .tf-jobkey { line-height: .9; margin-top: 4px; }
+/* Which source's ticket this is, when another source holds the same key (#1476). */
+.tf-jobcard .tf-jobsrc { font-size: var(--t-sm); margin: 6px 0 0; }
+.tf-jobcard .tf-jobsrc a { color: inherit; }
 .tf-jobtitle { font-size: var(--t-2xl); line-height: 1.2; font-weight: 600; }
 .tf-jobrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .tf-jobcard select {

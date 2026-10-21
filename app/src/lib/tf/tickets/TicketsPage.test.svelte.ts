@@ -1340,6 +1340,40 @@ test("on a Jira view the preview and the list read the ticket's status, the colu
   expect([status("PAY-1"), status("PAY-40"), status("PAY-50")]).toEqual(["To Do", "In Progress", "Done"]);
 });
 
+test("two sources holding PAY-1: each card and row names its source and opens by it; a unique key names none (#1476)", async () => {
+  const twin = { status: "To Do", card: card("PAY-1", "Retry failed SEPA payouts", { entity_id: "gitea:PAY-1", source_id: "gitea" }) };
+  sourceRoles.take([
+    { id: "jira", display_name: "Tidewater Jira" },
+    { id: "gitea", display_name: "Tidewater Gitea" },
+  ]);
+  try {
+    // Counted over the cards read: the twin is among the first eight.
+    await open(harness([], [], [twin, ...CORPUS]));
+    const marks = () =>
+      [...target.querySelectorAll<HTMLElement>(".tf-tcard")]
+        .filter((el) => el.querySelector(".tf-k")!.textContent === "PAY-1" || el.querySelector(".tf-k")!.textContent === "PAY-2")
+        .map((el) => [el.dataset.entity, el.querySelector(".tf-tsrc")?.textContent ?? null]);
+    expect(marks()).toEqual(
+      expect.arrayContaining([
+        ["jira:PAY-1", "Tidewater Jira"],
+        ["gitea:PAY-1", "Tidewater Gitea"],
+        ["jira:PAY-2", null],
+      ]),
+    );
+    target.querySelector<HTMLElement>('.tf-tcard[data-entity="gitea:PAY-1"]')!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    expect(location.hash).toBe("#/job/gitea%3APAY-1");
+
+    [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
+    await settle();
+    const keyCell = (id: string) => target.querySelector(`.tf-tbl tr[data-entity="${id}"] td`)!;
+    expect(keyCell("gitea:PAY-1").textContent).toBe("PAY-1Tidewater Gitea");
+    expect(keyCell("jira:PAY-1").querySelector(".tf-sub")!.textContent).toBe("Tidewater Jira");
+    expect(keyCell("jira:PAY-2").querySelector(".tf-sub")).toBeNull();
+  } finally {
+    sourceRoles.forget();
+  }
+});
+
 // ---- Make an editable copy (#880) ----
 
 const fromLine = () => dialog()!.querySelector(".tf-vw-from")!.textContent!.replace(/\s+/g, " ").trim();

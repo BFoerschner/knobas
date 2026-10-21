@@ -38,6 +38,8 @@ export const TRANSLATE_QUERY = "translate_query";
 /** What a surface needs to know of one source: its id and the roles it claims. */
 export interface ClaimingSource {
   id: string;
+  /** What a person calls it: what a card names when two sources hold its key (#1476). */
+  display_name?: string;
   /** Carried as the source list has it and never read: a surface draws by role. */
   adapter_kind?: string;
   roles?: readonly RoleClaim[];
@@ -67,6 +69,8 @@ export interface SourceRoles {
    * an undeclared write is not drawn (ADR-0020).
    */
   answers(role: string, sourceId: string, read: string): boolean;
+  /** What a person calls `sourceId` (#1476): its display name, or the id when the list never said. */
+  nameOf(sourceId: string): string;
 }
 
 export function createSourceRoles(): SourceRoles {
@@ -76,6 +80,7 @@ export function createSourceRoles(): SourceRoles {
     take(sources) {
       state.sources = sources.map((row) => ({
         id: row.id,
+        ...(row.display_name === undefined ? {} : { display_name: row.display_name }),
         roles: [...(row.roles ?? [])],
         role_misses: [...(row.role_misses ?? [])],
       }));
@@ -87,6 +92,9 @@ export function createSourceRoles(): SourceRoles {
       const source = state.sources?.find((row) => row.id === sourceId);
       if (source === undefined || !fills(source, role)) return false;
       return (source.roles ?? []).some((claim) => claim.role === role && claim.reads.includes(read));
+    },
+    nameOf(sourceId) {
+      return state.sources?.find((row) => row.id === sourceId)?.display_name ?? sourceId;
     },
   };
 }

@@ -32,10 +32,9 @@ import { PROPOSAL_LIMIT, proposalsFor } from "./connections";
 import {
   assetTone,
   byAttention,
-  isEntityId,
   isMine,
   offersStartWork,
-  resolveTicket,
+  resolveJob,
   weekReading,
   type AssetLine,
   type FrameKinds,
@@ -81,6 +80,8 @@ export interface JobReaderOptions {
 export interface JobReader {
   /** `undefined` while reading, `null` when nothing answers to the address. */
   readonly detail: EntityDetail | null | undefined;
+  /** The other sources' tickets under the same key (#1476), in list order; empty when the key is one source's. */
+  readonly others: EntityDetail[];
   /** The statuses the ticket can move to, `null` until read, `[]` when the read fails. */
   readonly transitions: string[] | null;
   readonly week: WeekReading | null;
@@ -138,6 +139,7 @@ const CHECKOUT_TRIES = 3;
 function fresh() {
   return {
     detail: undefined as EntityDetail | null | undefined,
+    others: [] as EntityDetail[],
     transitions: null as string[] | null,
     week: null as WeekReading | null,
     code: null as EntityRow[] | null,
@@ -175,8 +177,10 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       const listed = await ports.listSources().catch(() => [] as SourceFacts[]);
       if (mine !== token) return;
       state.sources = listed;
-      const found = await resolveTicket(wanted, isEntityId(wanted) ? [] : listed, ports.getEntity);
+      const job = await resolveJob(wanted, listed, ports.getEntity);
       if (mine !== token) return;
+      state.others = job?.others ?? [];
+      const found = job?.ticket ?? null;
       state.detail = found;
       if (found === null) return;
       const id = found.row.entity_id;
@@ -363,6 +367,9 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
   return {
     get detail() {
       return state.detail;
+    },
+    get others() {
+      return state.others;
     },
     get transitions() {
       return state.transitions;

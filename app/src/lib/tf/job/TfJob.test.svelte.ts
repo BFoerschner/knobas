@@ -319,6 +319,47 @@ test("every section reads through what the ticket reaches, each for its own kind
   expect(calls.list.find((filter) => filter.order === "latest_per_parent")).toMatchObject({ role: "ci", kinds: [] });
 });
 
+/** Ports where Gitea holds PAY-231 too (#1476), listed before Jira. */
+function twoHolders(): JobPorts {
+  const gitea = ticket({
+    row: { ...ticket().row, entity_id: "gitea:PAY-231", source_id: "gitea" },
+    source: { id: "gitea", display_name: "Tidewater Gitea", adapter_kind: "gitea", enabled: true },
+  });
+  return ports({
+    getEntity: (id) => {
+      calls.read.push(id);
+      if (id === ID) return Promise.resolve(ticket());
+      if (id === "gitea:PAY-231") return Promise.resolve(gitea);
+      return Promise.reject({ code: "not_found", message: `${id} is not in the mirror`, source_id: null });
+    },
+  });
+}
+
+const sourceLine = () => target.querySelector("[aria-label='Job card'] .tf-jobsrc");
+
+test("a key two sources hold: the card names its source and links the other's, and the source's address opens it (#1476)", async () => {
+  open("PAY-231", { ports: twoHolders() });
+  await settle();
+  expect(calls.promote).toEqual(["gitea:PAY-231"]);
+  expect(sourceLine()?.textContent?.replace(/\s+/g, " ").trim()).toBe("In Tidewater Gitea · also in Jira");
+  expect(sourceLine()?.querySelector("a")?.getAttribute("href")).toBe("#/job/jira%3APAY-231");
+
+  unmount(job!);
+  calls.promote.length = 0;
+  open("jira:PAY-231", { ports: twoHolders() });
+  await settle();
+  expect(calls.promote).toEqual([ID]);
+  expect(target.querySelector(".tf-jobkey")?.textContent).toBe("PAY-231");
+  expect(sourceLine()?.textContent?.replace(/\s+/g, " ").trim()).toBe("In Jira · also in Tidewater Gitea");
+});
+
+test("a key one source holds names no source on the card", async () => {
+  open();
+  await settle();
+  expect(target.querySelector(".tf-jobkey")?.textContent).toBe("PAY-231");
+  expect(sourceLine()).toBeNull();
+});
+
 test("a key nothing answers to says so and offers the way back", async () => {
   open("NOPE-1");
   await settle();

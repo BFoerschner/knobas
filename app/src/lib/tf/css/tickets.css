@@ -35,6 +35,8 @@
 .tf-tcard.tf-card .tf-dim, .tf-tcard.tf-card .tf-cep { color: var(--card-ink-2); }
 .tf-tcard .tf-k { font: 600 var(--t-xs) var(--mono); }
 .tf-tkind { font-size: var(--t-xs); margin-left: 4px; }
+/* The source, when another source holds the same key (#1476). */
+.tf-tsrc { font-size: var(--t-xs); margin-left: 4px; }
 .tf-tcard .tf-s { display: block; margin: 2px 0 6px; font-weight: 500; line-height: 1.3; }
 .tf-cep { display: block; font-size: var(--t-xs); color: var(--ink-2); margin: -3px 0 6px; }
 .tf-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--t-xs); }

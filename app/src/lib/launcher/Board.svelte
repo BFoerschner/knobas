@@ -27,6 +27,7 @@
   import { sourceMonogram } from "../shell/monogram";
   import Monogram from "../shell/Monogram.svelte";
   import { ago } from "../shell/time";
+  import { sharesKey } from "./format";
   import Row from "./Row.svelte";
   import type { LauncherRow } from "./rows";
 
@@ -129,6 +130,8 @@
 
   /** Where the recent rows start in the flat list; `rows.ts` decides the order. */
   const recentFrom = $derived(rows.findIndex((row) => row.kind === "recent"));
+  /** Recent items another source's item of the same key sits beside (#1476): they name their source. */
+  const shares = $derived(sharesKey(home.recent));
 
   /**
    * The saved list whose *Delete* has been pressed once.
@@ -363,6 +366,7 @@
       syncedAt={item.synced_at}
       path={item.path}
       state={item.state}
+      named={shares(item)}
       {sources}
       {now}
       id={optionId(index)}

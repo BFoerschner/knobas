@@ -52,6 +52,8 @@ export function provenance(
   syncedAt: string,
   sources: CredentialHealth[],
   now?: Date,
+  /** Whether another source holds the row's key too (#1476): the age then follows the source's id. */
+  named = false,
 ): { text: string; failing: boolean } {
   const health = sources.find((source) => source.source_id === sourceId);
   // `health &&` is not the call-site guard #72 folded into the rule. That one
@@ -66,7 +68,26 @@ export function provenance(
       failing: true,
     };
   }
-  return { text: syncAge(syncedAt, now), failing: false };
+  return { text: named ? `${sourceId} · ${syncAge(syncedAt, now)}` : syncAge(syncedAt, now), failing: false };
+}
+
+/**
+ * Which rows another source's row of the same kind and key sits beside
+ * (#1476): two sources' PAY-231, drawn otherwise alike. Those rows name their
+ * source ({@link provenance}'s `named`). The key is the id past its first
+ * colon, as the row draws it.
+ */
+export function sharesKey(
+  rows: readonly { entity_id: string; kind: string }[],
+): (row: { entity_id: string; kind: string }) => boolean {
+  const name = (row: { entity_id: string; kind: string }) => `${row.kind} ${row.entity_id.slice(row.entity_id.indexOf(":") + 1)}`;
+  const seen = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const sources = seen.get(name(row)) ?? new Set<string>();
+    sources.add(row.entity_id.slice(0, row.entity_id.indexOf(":")));
+    seen.set(name(row), sources);
+  }
+  return (row) => (seen.get(name(row))?.size ?? 0) > 1;
 }
 
 /**

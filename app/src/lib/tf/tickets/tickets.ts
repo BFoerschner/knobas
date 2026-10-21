@@ -6,6 +6,7 @@
 import type { KindTally, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type { ListSort as StoredSort, ViewLanes, ViewSortColumn } from "../../ipc/search";
 import { kindLabel, kindSingular, sectionOf } from "../../shell/kinds";
+import { jobHash } from "../route";
 import type { SectionTally } from "../job/sections";
 
 /** How many cards a column draws before *Show N more* (R-3.4). */
@@ -431,4 +432,28 @@ export function sortRows<Row extends TicketRow>(
  */
 export function statusOrder(columns: readonly MiniBoardColumn[]): (string | null)[] {
   return [...new Set(columns.flatMap((column) => column.cards.map((card) => card.status)))];
+}
+
+/**
+ * The keys more than one card on the board holds (#1476): two sources'
+ * PAY-231. Their cards and rows name their source, and each opens at its
+ * source's address. Counted over the cards read.
+ */
+export function sharedKeys(columns: readonly MiniBoardColumn[]): Set<string> {
+  const seen = new Set<string>();
+  const shared = new Set<string>();
+  for (const card of columns.flatMap((column) => column.cards)) {
+    if (seen.has(card.key)) shared.add(card.key);
+    seen.add(card.key);
+  }
+  return shared;
+}
+
+/**
+ * Where a card opens (#1476): its job by key, or, for a key another source
+ * holds too, by its entity id (`#/job/jira:PAY-231`), the address that names
+ * the source.
+ */
+export function ticketAddress(card: Pick<MiniBoardCard, "key" | "entity_id">, shared: ReadonlySet<string>): string {
+  return jobHash(shared.has(card.key) ? card.entity_id : card.key);
 }

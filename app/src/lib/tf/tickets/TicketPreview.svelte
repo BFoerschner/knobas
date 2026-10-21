@@ -6,17 +6,19 @@
 -->
 <script lang="ts">
   import type { MiniBoardCard } from "../../ipc/entity";
-  import { jobHash } from "../route";
   import { columnName, epicLine, previewAction, when, type AroundLine } from "./tickets";
 
   let {
     card,
+    address,
     description,
     around,
     timerOnIt,
   }: {
     /** The ticket; its status is its own, whatever column it stands in (#1423). */
     card: MiniBoardCard;
+    /** Where its button goes: the job's address, by source when another holds the key (#1476). */
+    address: string;
     /** The description, or `null` while it is read. */
     description: string | null;
     /** *Around this ticket*, or `null` while it is read. */
@@ -64,7 +66,7 @@
     {/if}
   </div>
   <div class="tf-go">
-    <a class="tf-btn tf-primary" href={jobHash(card.key)}>{action.label}</a>
+    <a class="tf-btn tf-primary" href={address}>{action.label}</a>
     <small>{action.note} <kbd>Enter</kbd></small>
   </div>
 </aside>

@@ -5,6 +5,9 @@
   double click opens the job (#813). The epic is its key and name and the
   comment count is drawn above zero only (#894).
 
+  A key another source holds too (#1476) draws its source's name beside it,
+  so two sources' PAY-231 are told apart.
+
   A ticket view says what its cards show (#812, R-3.16, *Cards show*):
   `fields` names them; without it the card shows what it always has.
 -->
@@ -22,6 +25,7 @@
     onselect,
     onopen,
     fields = null,
+    source = null,
   }: {
     card: MiniBoardCard;
     typed: string;
@@ -31,6 +35,8 @@
     onopen: () => void;
     /** What the card shows, from its view; `null` is everything it has. */
     fields?: CardField[] | null;
+    /** The source's name, when another source holds the same key (#1476); `null` draws none. */
+    source?: string | null;
   } = $props();
 
   const shows = (field: CardField) => fields === null || fields.includes(field);
@@ -52,6 +58,7 @@
   ondblclick={onopen}
 >
   <span class="tf-k"><Marked text={card.key} {typed} /></span>
+  {#if source}<span class="tf-dim tf-tsrc">{source}</span>{/if}
   {#if kind && shows("type")}<span class="tf-dim tf-tkind">{kind}</span>{/if}
   <span class="tf-s"><Marked text={card.title} {typed} /></span>
   {#if epic && shows("epic")}<span class="tf-cep">{epic}</span>{/if}
