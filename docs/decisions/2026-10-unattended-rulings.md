@@ -9096,3 +9096,40 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   row's only line; #1473 reworks them next.
 - **`unported.css` loses `.log` and `.grid2`**, which only the panel read, and its header no longer
   lists the write queue. *Reversing:* low.
+## #1431: a Modal opens on its body's first control (Opus implementer, 2026-10-21)
+
+- **Where the fix lives** (delegated). *Fork:* fix `Modal`'s open-time focus for every Modal user, or
+  fold it into #1432's port and fix the picker only. *Ruling:* both, as recommended. `Modal` focuses
+  the first focusable control inside `.dlg-b` and falls back to the header's Close only when the body
+  has none; #1432's port moves the picker and the ad-hoc dialog onto `TfDialog`, which already
+  focuses its first field. *Reasoning:* the fix is one line and reaches the dialogs still on `Modal`
+  (the write queue, the link dialog, the asset dialogs); no new prop, as the ticket rules out.
+  *Reversing:* one line in `Modal.svelte`.
+
+## #1432: the ⌘T picker and the ad-hoc dialog in the ticket-first shell (Opus implementer, 2026-10-21)
+
+- **The `context_anchor` sentence** (delegated). *Ruling:* "The timer was started while you were in
+  PAY-231." as recommended, with the suggestion's key read through `targetReading`. *Reasoning:* it
+  names the job's ticket and nothing else, per #1427: the context behind a job is never named.
+  *Reversing:* one string.
+- **Where the two dialogs mount.** *Ruling:* in `TfShell`'s `dialogs` snippet in `App.svelte`,
+  beside the worklog draft, not outside `.tf` where they were. *Reasoning:* `.tf .tf-dim`,
+  `.tf .tf-mono` and the shell's form reset only reach inside `.tf`, and `TfShell`'s header already
+  says ported dialogs arrive there. `Esc` now closes them through the shell's ladder (rung 1),
+  because `TfDialog` registers a dialog layer. *Reversing:* move two blocks in `App.svelte`.
+- **The picker's Start button and a Cancel.** *Ruling:* Start moves to the footer (a `form=`
+  submit, still disabled while the label is blank, Enter still submits) beside a ghost Cancel; the
+  "⌘T" subtitle is dropped. *Reasoning:* every tf dialog ends in a footer of buttons, and without
+  `Modal`'s × the footer's Cancel is the visible way out. *Reversing:* move the button back into
+  the form.
+- **`TfDialog` gets an optional `subtitle`** (the `.tf-dsub` line `TfBlockDialog` and `TfLogAll` draw
+  by hand). *Reasoning:* the ad-hoc dialog's "1 h 30 min on DB config" line has to stay under the
+  title. *Reversing:* drop the prop; the ad-hoc dialog draws the line in its body.
+- **The ad-hoc dialog's open-time focus** lands on *Keep local*, `TfDialog`'s first button, since the
+  dialog has no field. *Reasoning:* it is the answer that writes nothing; Enter cannot log by
+  accident. *Reversing:* none needed.
+- **unported.css: no rule removed.** Every rule the two dialogs reached is still read by another
+  unported surface. The write queue reads `.spacer`, `.btn.ghost` and `.scrim.center` (through
+  `Modal`'s `center`), and the launcher, link and asset dialogs read the rest. The sheet's header no
+  longer lists the two dialogs. Once the write queue is ported (#1425), nothing reads those three
+  rules, and that PR or this one, whichever lands second, deletes them.
