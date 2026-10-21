@@ -97,6 +97,31 @@ if (!window.matchMedia) {
   });
 }
 
+// jsdom has no `IntersectionObserver` either, and an effect that observes an
+// element returns early without one, so a component test never ran the code a
+// browser runs. That hid the pipeline freeze (#1446): Svelte 5 sets a
+// `bind:this` to `null` on unmount, the guard checked `undefined`, and
+// `observe(null)` throws in WebKit and Chrome. This one refuses a non-Element
+// as they do, and never reports an intersection.
+if (!("IntersectionObserver" in globalThis)) {
+  class StrictIntersectionObserver {
+    readonly root = null;
+    readonly rootMargin = "0px";
+    readonly thresholds = [0];
+    observe(target: unknown): void {
+      if (!(target instanceof Element)) {
+        throw new TypeError("Failed to execute 'observe' on 'IntersectionObserver': parameter 1 is not of type 'Element'.");
+      }
+    }
+    unobserve(): void {}
+    disconnect(): void {}
+    takeRecords(): [] {
+      return [];
+    }
+  }
+  Object.defineProperty(globalThis, "IntersectionObserver", { writable: true, configurable: true, value: StrictIntersectionObserver });
+}
+
 /**
  * Recording starts at import time, not in a `beforeAll`.
  *
