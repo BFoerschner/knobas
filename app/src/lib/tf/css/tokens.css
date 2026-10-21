@@ -67,7 +67,7 @@ a { color: var(--info); text-decoration: none; }
 .tf :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .tf .tf-card:focus-visible, .tf .tf-card :focus-visible { outline-color: var(--card-ink); }
 
-.tf .tf-mono { font-family: var(--mono); font-size: .9em; }
+.tf .tf-mono { font-family: var(--mono); font-variant-ligatures: none; font-size: .9em; }
 .tf .tf-dim { color: var(--ink-2); }
 .tf .tf-num { font-variant-numeric: tabular-nums; }
 

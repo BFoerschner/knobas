@@ -35,7 +35,7 @@
 .tf-phs { display: flex; flex-wrap: wrap; gap: 6px; }
 .tf-phb { border: 1px solid var(--rule); background: var(--sheet); border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-phb .tf-mono { color: var(--ink); font-weight: 600; }
-.tf-log { margin: 0; font: var(--t-xs)/1.5 var(--mono); background: var(--paper); border-radius: 4px; padding: 8px 10px; overflow: auto; color: var(--ink); white-space: pre-wrap; }
+.tf-log { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; background: var(--paper); border-radius: 4px; padding: 8px 10px; overflow: auto; color: var(--ink); white-space: pre-wrap; }
 .tf-dialog .tf-remove { margin-right: auto; color: var(--err); }
 .tf-applist { display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 4px; }
 .tf-approw { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
@@ -64,7 +64,7 @@
 }
 .tf-flist button {
   display: flex; gap: 8px; padding: 6px 10px; border: 0; border-top: 1px solid var(--rule-2); background: none; color: var(--ink);
-  font: var(--t-sm) var(--mono); align-items: center; text-align: left; cursor: pointer;
+  font: var(--t-sm) var(--mono); font-variant-ligatures: none; align-items: center; text-align: left; cursor: pointer;
 }
 .tf-flist button:first-of-type { border-top: 0; }
 .tf-flist button:hover { background: var(--sheet-2); }

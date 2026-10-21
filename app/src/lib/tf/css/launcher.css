@@ -94,12 +94,12 @@
 .tf-ln-ty, .tf-ln-sy { font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-ln-sy { text-align: right; }
 .tf-ln-sy.tf-ln-fail { color: var(--err); }
-.tf-ln-k { font-family: var(--mono); font-size: var(--t-xs); color: var(--ink-2); margin-right: 6px; }
+.tf-ln-k { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-xs); color: var(--ink-2); margin-right: 6px; }
 /* The path and the excerpt are second lines under the title; the excerpt is the reason the row matched. */
 .tf-ln-pa, .tf-ln-sn {
   display: block; line-height: 1.35; margin-top: 1px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.tf-ln-pa { font-family: var(--mono); font-size: var(--t-2xs); }
+.tf-ln-pa { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-2xs); }
 .tf-ln-sn { font-size: var(--t-xs); }
 .tf-ln-sn mark { background: var(--mark); color: var(--ink); border-radius: 3px; }
 /* An item's state (#666): the shell's chip in the adapter's tone (`.tf-chip.tf-ok` and its siblings). */

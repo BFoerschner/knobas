@@ -32,7 +32,7 @@
 .tf-wq-side { display: block; margin-bottom: 3px; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-wq-pre {
   margin: 0; padding: 8px 10px; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet-2);
-  font: var(--t-xs)/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto;
+  font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto;
 }
 .tf-wq-pre.tf-wq-mine { border-color: var(--rule); color: var(--ink); }
 .tf-wq-gone {

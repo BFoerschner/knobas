@@ -33,7 +33,7 @@
 /* The selected card is the yellow card, and the one card that floats. */
 .tf-tcard.tf-card { border-color: var(--card-2); box-shadow: var(--shadow); }
 .tf-tcard.tf-card .tf-dim, .tf-tcard.tf-card .tf-cep { color: var(--card-ink-2); }
-.tf-tcard .tf-k { font: 600 var(--t-xs) var(--mono); }
+.tf-tcard .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-tkind { font-size: var(--t-xs); margin-left: 4px; }
 /* The source, when another source holds the same key (#1476). */
 .tf-tsrc { font-size: var(--t-xs); margin-left: 4px; }
@@ -70,7 +70,7 @@
   border-left: 1px solid var(--rule); background: var(--sheet); overflow: auto; padding: 18px;
   display: flex; flex-direction: column; gap: 14px; min-height: 0;
 }
-.tf-preview .tf-k { font: 600 var(--t-sm) var(--mono); color: var(--ink-2); }
+.tf-preview .tf-k { font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
 .tf-preview h2 { font-size: var(--t-2xl); line-height: 1.2; margin: 2px 0 0; font-weight: 600; font-variation-settings: "wdth" 90; }
 .tf-preview p { color: var(--ink-2); }
 .tf-desc { white-space: pre-line; }

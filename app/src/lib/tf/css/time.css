@@ -22,7 +22,7 @@
 .tf-tm-hr { stroke: var(--rule-2); shape-rendering: crispEdges; }
 .tf-tm-hl { font-size: var(--t-2xs); font-variant-numeric: tabular-nums; fill: var(--ink-2); }
 .tf-tm-b { cursor: pointer; }
-.tf-tm-b text { font: 600 var(--t-2xs) var(--mono); }
+.tf-tm-b text { font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; }
 .tf-tm-b text.tf-tm-plain { font-family: var(--sans); }
 .tf-tm-b:focus-visible { outline: none; }
 .tf-tm-b.tf-tm-manual rect { fill: var(--ink); } .tf-tm-b.tf-tm-manual text { fill: var(--sheet); }

@@ -44,12 +44,12 @@
 .tf-dp-t:hover { border-color: var(--ink-2); }
 .tf-dp-t:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
 .tf-dp-mono {
-  display: inline-block; font: 600 10px/16px var(--mono); width: 22px; text-align: center; border-radius: 3px;
+  display: inline-block; font: 600 10px/16px var(--mono); font-variant-ligatures: none; width: 22px; text-align: center; border-radius: 3px;
   background: var(--sheet-2); color: var(--ink-2); border: 1px solid var(--rule-2);
 }
 .tf-dp-t .tf-dp-mono { position: absolute; left: 7px; top: 7px; }
 .tf-dp-nm { font-size: var(--t-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tf-dp-nm.tf-dp-code { font-family: var(--mono); font-size: var(--t-xs); }
+.tf-dp-nm.tf-dp-code { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-xs); }
 .tf-dp-w { font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-dp-t.tf-dp-c { width: 164px; min-height: 0; padding: 3px 22px 3px 32px; flex-direction: row; align-items: center; }
 .tf-dp-t.tf-dp-c .tf-dp-mono { top: 3px; left: 5px; line-height: 14px; }

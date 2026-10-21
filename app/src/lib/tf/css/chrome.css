@@ -11,7 +11,7 @@
 }
 .tf-nav a:hover { background: var(--sheet-2); color: var(--ink); }
 .tf-nav a[aria-current="page"] { color: var(--ink); background: var(--sheet-2); box-shadow: inset 0 -2px 0 var(--ink); }
-.tf-navkey { font-family: var(--mono); font-size: var(--t-2xs); }
+.tf-navkey { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-2xs); }
 .tf-count {
   font-size: var(--t-2xs); font-weight: 600; padding: 0 6px; border-radius: 9px;
   background: var(--muted-bg); color: var(--ink-2); font-variant-numeric: tabular-nums;
@@ -24,7 +24,7 @@
 }
 .tf-search kbd { margin-left: auto; }
 .tf kbd {
-  font: 600 var(--t-2xs) var(--mono); padding: 1px 5px; border: 1px solid var(--rule); border-bottom-width: 2px;
+  font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; padding: 1px 5px; border: 1px solid var(--rule); border-bottom-width: 2px;
   border-radius: 3px; background: var(--sheet); color: var(--ink-2);
 }
 .tf-timer {
@@ -34,7 +34,7 @@
 .tf-timer.tf-off { background: var(--sheet-2); color: var(--ink-2); }
 /* The target is capped, the chip's title carries the full text; a ticket key is a code value (mono), a label is not. */
 .tf-timer-key { font-size: var(--t-xs); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tf-timer-key.tf-mono { font-family: var(--mono); }
+.tf-timer-key.tf-mono { font-family: var(--mono); font-variant-ligatures: none; }
 /* A duration is Archivo with tabular figures, not mono (design system, Type). */
 .tf-timer-t { font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
 .tf-timer-stop { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 3px; background: rgba(0,0,0,.12); }
@@ -81,7 +81,7 @@
 .tf-crumbs a.tf-crumb { text-decoration: underline; text-underline-offset: 2px; }
 .tf-jobchip {
   display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 3px;
-  font-weight: 600; text-decoration: none; font-family: var(--mono); font-size: var(--t-xs);
+  font-weight: 600; text-decoration: none; font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-xs);
 }
 .tf-crumbs .tf-sep { color: var(--ink-2); }
 .tf-crumbs .tf-esc { margin-left: auto; color: var(--ink-2); }

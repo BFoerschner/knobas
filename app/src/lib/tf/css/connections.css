@@ -87,7 +87,7 @@
 .tf-picked { display: flex; gap: 8px; align-items: center; }
 
 /* ---------- Proposed links (#835, R-6.3, R-6.4): the queue and the proposal ---------- */
-.tf-seg .tf-jobk { font-family: var(--mono); font-size: var(--t-xs); }
+.tf-seg .tf-jobk { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-xs); }
 .tf-rv { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: 100%; }
 .tf-rvq { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-rvq .tf-fbar { position: static; padding: 10px 12px; }
