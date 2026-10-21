@@ -2,8 +2,8 @@
 # `./seed --env` unit test (issue #982): a state with no Gitea block exports no
 # Gitea variable, not the literal `null` the probe took for a URL. Runs a copy
 # of `seed` beside a scratch seed-state.json; no container is started.
-set -euo pipefail
 # shellcheck disable=SC2016,SC2015
+set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/knobas-seed-env-test.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
