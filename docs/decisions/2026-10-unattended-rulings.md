@@ -9854,3 +9854,12 @@ unchanged.
   does not justify that cost while higher-priority work is waiting. *Reversing:* low; the
   ticket's Agent Brief still holds the build plan (generalise Standup's dialog, project picker,
   run-to-ticket link) for whoever picks it up from `backlog`.
+## #1445: ligatures off on the mono surfaces (Sonnet implementer, 2026-10-21)
+
+- **Scope of the rule** (delegated). *Ruling:* the wide form: `font-variant-ligatures: none` on every
+  rule in the tf sheets that takes `var(--mono)`, the `.tf-mono` token class included. *Reasoning:* a
+  branch name or a log line can hold `->` or `<=` too. It sits in each rule, not on one ancestor,
+  because a `font:` shorthand resets the property, so an inherited value would not reach those
+  rules. `tf-css.test.ts` scans every rule that names `var(--mono)` and fails one whose declaration
+  is missing or precedes its `font` shorthand, so a new mono rule cannot slip by. No earlier ruling
+  reversed; the JQL rules are unchanged. *Reversing:* low, one declaration per rule.

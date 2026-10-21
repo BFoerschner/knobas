@@ -57,9 +57,9 @@
 .tf-doc ul, .tf-doc ol { margin: 0 0 15px; padding-left: 24px; }
 .tf-doc li { margin: 4px 0; }
 .tf-doc li > p:last-child, .tf-doc .tf-callout p:last-child { margin-bottom: 0; }
-.tf-doc code { font: .82em var(--mono); background: var(--sheet-2); padding: 1px 5px; border-radius: 3px; }
+.tf-doc code { font: .82em var(--mono); font-variant-ligatures: none; background: var(--sheet-2); padding: 1px 5px; border-radius: 3px; }
 .tf-doc pre {
-  font: var(--t-md)/1.55 var(--mono); background: var(--sheet-2); border: 1px solid var(--rule); border-radius: 6px;
+  font: var(--t-md)/1.55 var(--mono); font-variant-ligatures: none; background: var(--sheet-2); border: 1px solid var(--rule); border-radius: 6px;
   padding: 12px 14px; overflow: auto; position: relative; margin: 0 0 18px; white-space: pre;
 }
 .tf-doc pre .tf-copy { position: absolute; top: 6px; right: 6px; font: var(--t-xs) var(--sans); }
@@ -85,7 +85,7 @@
   display: inline-flex; gap: 5px; align-items: baseline; font-family: var(--sans); font-size: var(--t-md); padding: 0 6px;
   border: 1px solid var(--rule); border-radius: 3px; background: var(--sheet); text-decoration: none; white-space: nowrap; line-height: 1.5;
 }
-.tf-tchip .tf-k { font: 600 var(--t-xs) var(--mono); }
+.tf-tchip .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-tchip .tf-chip { font-size: var(--t-2xs); padding: 0 5px; }
 .tf-ment { font-family: var(--sans); font-size: .85em; font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 4px; border-radius: 3px; }
 .tf-ment.tf-me { background: var(--card); color: var(--card-ink); }
@@ -105,7 +105,7 @@
 .tf-dl-head .tf-dl-scope { display: flex; }
 .tf-dl-scope button { flex: 1; }
 .tf-dl-hint { font-size: var(--t-2xs); color: var(--ink-2); }
-.tf-dl-hint code { font: var(--t-2xs) var(--mono); background: var(--sheet-2); padding: 0 3px; border-radius: 2px; color: var(--ink); }
+.tf-dl-hint code { font: var(--t-2xs) var(--mono); font-variant-ligatures: none; background: var(--sheet-2); padding: 0 3px; border-radius: 2px; color: var(--ink); }
 .tf-dl-foot { padding: 10px 12px; border-top: 1px solid var(--rule-2); }
 .tf-dl-meta { padding: 6px 14px 8px; font-size: var(--t-xs); color: var(--ink-2); border-bottom: 1px solid var(--rule-2); }
 .tf-rd-tree a.tf-dl-hit {

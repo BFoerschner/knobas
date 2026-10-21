@@ -21,4 +21,4 @@
 .tf-item-text { white-space: pre-line; overflow-wrap: anywhere; font-size: var(--t-sm); }
 .tf-item-meta { color: var(--ink-2); font-size: var(--t-sm); }
 .tf-item-acts { display: flex; gap: 6px; flex-wrap: wrap; }
-.tf-item-log { font-family: var(--mono); font-size: var(--t-xs); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 10px 12px; }
+.tf-item-log { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-xs); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 10px 12px; }

@@ -24,7 +24,7 @@
 .tf-rule-n { font-size: var(--t-xs); }
 .tf-rule-add { padding: 8px 12px 10px; }
 .tf-keys { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 12px; align-items: baseline; }
-.tf-keys a { font: 600 var(--t-2xs) var(--mono); padding: 1px 6px; border-radius: 3px; background: var(--sheet-2); color: var(--ink); text-decoration: none; }
+.tf-keys a { font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; padding: 1px 6px; border-radius: 3px; background: var(--sheet-2); color: var(--ink); text-decoration: none; }
 .tf-keys a.tf-mine { background: var(--card); color: var(--card-ink); }
 .tf-keys .tf-dim { font-size: var(--t-xs); }
 .tf-set-note { margin: 0; font-size: var(--t-xs); }
@@ -42,7 +42,7 @@
 .tf-pattern { align-items: flex-start; }
 .tf-pattern details { min-width: 0; }
 .tf-pattern summary { cursor: pointer; }
-.tf-pattern code, .tf-pat-query code { font: var(--t-xs) var(--mono); }
+.tf-pattern code, .tf-pat-query code { font: var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-pattern ul { margin: 6px 0 2px; padding-left: 18px; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-pat-intro, .tf-pat-query { margin: 0; font-size: var(--t-sm); }
 .tf-pat-query { font-size: var(--t-xs); }

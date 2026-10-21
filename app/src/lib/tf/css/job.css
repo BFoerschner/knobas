@@ -91,7 +91,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-r .tf-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-r .tf-rend { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: none; }
 .tf-r .tf-rsub { display: block; font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
-.tf-r .tf-repo { font: var(--t-xs) var(--mono); color: var(--ink-2); }
+.tf-r .tf-repo { font: var(--t-xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
 .tf-secfoot { display: flex; gap: 8px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); flex-wrap: wrap; }
 .tf-secfoot .tf-push { margin-left: auto; }
 .tf-minif {
@@ -130,14 +130,14 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-step:first-of-type { border-top: 0; }
 .tf-step .tf-num {
   display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--rule);
-  font: 700 var(--t-xs) var(--mono); color: var(--ink-2);
+  font: 700 var(--t-xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2);
 }
 .tf-step.tf-st-done .tf-num { background: var(--ok); border-color: var(--ok); color: var(--sheet); }
 .tf-step.tf-st-queued .tf-num { border-color: var(--warn); color: var(--warn); }
 .tf-step.tf-st-failed .tf-num { border-color: var(--err); color: var(--err); }
 .tf-step .tf-field { grid-column: 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .tf-step input, .tf-step select {
-  font: var(--t-sm) var(--mono); border: 1px solid var(--rule); background: var(--paper); color: var(--ink);
+  font: var(--t-sm) var(--mono); font-variant-ligatures: none; border: 1px solid var(--rule); background: var(--paper); color: var(--ink);
   padding: 4px 8px; border-radius: 4px; width: 100%; max-width: 400px;
 }
 .tf-step select { max-width: 260px; }

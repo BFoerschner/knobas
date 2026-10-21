@@ -277,3 +277,28 @@ test("the launcher is prototype-6's dialog: an ink selection bar, a borderless 1
   const rooms = [...unportedCode.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((match) => match[1]!);
   expect(used.filter((token) => rooms.includes(token))).toEqual([]);
 });
+
+/*
+ * #1445: JetBrains Mono's contextual ligatures draw `->`, `=>`, `<=` and `==`
+ * as single glyphs, so source text would show characters the file does not
+ * hold. A `font:` shorthand resets `font-variant-ligatures`, so the property
+ * has to sit in the same rule, after the shorthand.
+ */
+test("code, diff, editor and the mono token class draw without ligatures", () => {
+  for (const selector of [".tf-code", ".tf-diff", ".tf-editor", ".tf .tf-mono"]) {
+    expect(block(code, selector), selector).toMatch(/font-variant-ligatures: none/);
+  }
+});
+
+test("every rule that takes the mono font variable turns ligatures off after its font declaration", () => {
+  const rules = [...code.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((m) => m[2]!.includes("var(--mono)"));
+  expect(rules.length).toBeGreaterThan(30);
+  const bare = rules
+    .filter((m) => {
+      const body = m[2]!;
+      const lastFont = Math.max(body.lastIndexOf("font:"), body.lastIndexOf("font-family:"));
+      return body.lastIndexOf("font-variant-ligatures: none") < lastFont;
+    })
+    .map((m) => m[1]!.trim());
+  expect(bare).toEqual([]);
+});
