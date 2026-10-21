@@ -1561,6 +1561,7 @@ const CASES: Case[] = [
           ports: {
             monitorRoster: () => deferred([]),
             unmonitoredAssets: () => deferred([]),
+            openAlerts: () => deferred([]),
             ackAlert: () => deferred({} as never),
             submitWrite: () => deferred({ id: 1 } as never),
             getAsset: () => deferred({} as never),
