@@ -555,6 +555,21 @@ struct HealthRow {
     changed: bool,
 }
 
+impl HealthRow {
+    fn into_health(self, id: &str) -> (CredentialHealth, bool) {
+        (
+            CredentialHealth {
+                source_id: id.to_owned(),
+                state: auth_state_from_db(&self.auth_state),
+                checked_at: self.auth_checked_at,
+                detail: self.auth_detail,
+                secret_expires_at: self.secret_expires_at,
+            },
+            self.changed,
+        )
+    }
+}
+
 /// Write the verdict; `Ok(None)` means no such source.
 ///
 /// The `bool` is **changed**, and it is the only thing that may fire
@@ -576,18 +591,7 @@ pub async fn set_health(
         .bind(secret_expires_at)
         .fetch_optional(pool)
         .await?;
-    Ok(row.map(|r| {
-        (
-            CredentialHealth {
-                source_id: id.to_owned(),
-                state: auth_state_from_db(&r.auth_state),
-                checked_at: r.auth_checked_at,
-                detail: r.auth_detail,
-                secret_expires_at: r.secret_expires_at,
-            },
-            r.changed,
-        )
-    }))
+    Ok(row.map(|r| r.into_health(id)))
 }
 
 /// Drop a stored `unreachable` to `unknown`, and touch no other state.
@@ -599,40 +603,28 @@ pub async fn set_health(
 /// so the state becomes `unknown` rather than `ok`; and any other state is a
 /// verdict an error says nothing about, so it stays.
 ///
-/// `Ok(Some(_))` is the new health when the state changed, which is what fires
-/// `source:health`; `Ok(None)` when there was nothing to clear.
+/// The same answer as [`set_health`], so the scheduler reads both one way:
+/// `Ok(None)` when there was nothing to clear, and a returned row always
+/// `changed`.
 ///
 /// # Errors
 /// [`sqlx::Error`] if the statement fails.
 pub async fn clear_unreachable(
     pool: &PgPool,
     id: &str,
-) -> Result<Option<CredentialHealth>, sqlx::Error> {
-    #[derive(sqlx::FromRow)]
-    struct Row {
-        auth_state: String,
-        auth_checked_at: Option<DateTime<Utc>>,
-        auth_detail: Option<String>,
-        secret_expires_at: Option<DateTime<Utc>>,
-    }
-    let row: Option<Row> = sqlx::query_as(
+) -> Result<Option<(CredentialHealth, bool)>, sqlx::Error> {
+    let row: Option<HealthRow> = sqlx::query_as(
         "update knobas.source_config
             set auth_state = $2, auth_detail = null, auth_checked_at = now()
           where id = $1 and auth_state = $3
-      returning auth_state, auth_checked_at, auth_detail, secret_expires_at",
+      returning auth_state, auth_checked_at, auth_detail, secret_expires_at, true as changed",
     )
     .bind(id)
     .bind(AuthState::Unknown.as_str())
     .bind(AuthState::Unreachable.as_str())
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|r| CredentialHealth {
-        source_id: id.to_owned(),
-        state: auth_state_from_db(&r.auth_state),
-        checked_at: r.auth_checked_at,
-        detail: r.auth_detail,
-        secret_expires_at: r.secret_expires_at,
-    }))
+    Ok(row.map(|r| r.into_health(id)))
 }
 
 /// The cheap poll the top strip's sync monograms use (interfaces §2.2).
