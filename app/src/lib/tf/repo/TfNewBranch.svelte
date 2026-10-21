@@ -14,10 +14,11 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import type { ChoiceOption } from "../../ipc/entity";
+  import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { resolveTicket } from "../job/job";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { markMade, toastQueued } from "./queued.svelte";
+  import { markMade } from "./queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { newBranchName } from "./repo";
 
@@ -28,6 +29,7 @@
     from = null,
     job,
     ports,
+    source = null,
     onclose,
   }: {
     repoId: string;
@@ -39,6 +41,8 @@
     from?: ChoiceOption | null;
     job: string | null;
     ports: Pick<RepoPorts, "submitWrite" | "listSources" | "getEntity">;
+    /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
+    source?: WriteSource | null;
     onclose: () => void;
   } = $props();
 
@@ -70,7 +74,7 @@
       }
       await ports.submitWrite({ CreateBranch: { entity: repoId, name: branch, from_ref: start } }, ticket ?? undefined);
       markMade(repoId, branch);
-      toastQueued(`create branch ${branch} in ${repoName}`);
+      toastQueued(`create branch ${branch} in ${repoName}`, source);
       onclose();
     } catch (cause) {
       push({ text: `Could not queue the branch: ${ipcErrorMessage(cause)}`, tone: "err" });

@@ -195,6 +195,10 @@ test("Pause and Resume queue the source's op for that monitor", async () => {
   button(paused!, "Resume")!.click();
   await settle();
   expect(writes).toEqual([{ PauseMonitor: { entity: "kuma:1" } }, { ResumeMonitor: { entity: "kuma:3" } }]);
+  expect(toasts.items.map((t) => t.text).filter((t) => t.startsWith("Queued:"))).toEqual([
+    "Queued: pause payouts /health.",
+    "Queued: resume yard-planner.",
+  ]);
 });
 
 test("This job keeps the monitors watching what the job reaches; My jobs and All offer the rest", async () => {
@@ -257,7 +261,7 @@ test("Create monitor opens prefilled as TCP, records the name on the asset, then
   expect(edits).toEqual([["asset:pg", [{ field: "monitors", added: ["pg-main"] }]]]);
   expect(writes).toEqual([{ CreateMonitor: { entity: "kuma:monitors", name: "pg-main", url: "db.internal:5432", kind: "tcp" } }]);
   expect(document.querySelector(".tf-dialog")).toBeNull();
-  expect(toasts.items.map((t) => t.text)).toContain("Create monitor queued for pg-main");
+  expect(toasts.items.map((t) => t.text)).toContain("Queued: create monitor for pg-main.");
 });
 
 test("a create the backend refuses stays open and says why", async () => {

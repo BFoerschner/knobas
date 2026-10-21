@@ -13,7 +13,7 @@
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
   import { timer } from "./lib/shell/timer.svelte";
   import { targetReading } from "./lib/shell/timer";
-  import { openWriteQueue } from "./lib/shell/write-queue.svelte";
+  import { toastQueued } from "./lib/shell/queued-toast";
   import TimerPicker from "./lib/shell/TimerPicker.svelte";
   import { push } from "./lib/shell/toasts.svelte";
   import { followWrite } from "./lib/shell/follow-write";
@@ -154,10 +154,8 @@
   function onWorklogged(logged: Worklog) {
     timeRevision += 1;
     const key = targetReading({ kind: "entity", entity_id: logged.entity_id });
-    push({
-      text: `Queued: log ${hoursAndMinutes(Math.floor(logged.seconds / 60))} to ${key}.`,
-      action: { label: "Show queue", run: openWriteQueue },
-    });
+    // A worklog carries no source to name (`Worklog` has its entity only), so no sign-in sentence.
+    toastQueued(`log ${hoursAndMinutes(Math.floor(logged.seconds / 60))} to ${key}`, null);
     if (logged.write_queue_id !== null) followWrite({ id: logged.write_queue_id }, { name: "Worklog" });
   }
 

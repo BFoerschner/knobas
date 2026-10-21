@@ -24,6 +24,7 @@ export interface SourceFacts {
 }
 import type { Week } from "../../ipc/time";
 import type { AuthMethod, RoleClaim } from "../../ipc/sources";
+import { signInFails } from "../../shell/health.svelte";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { protocolDayOf } from "../../standup/protocol";
 import { CI, claims } from "../roles.svelte";
@@ -493,7 +494,7 @@ export function staleBuilds(
   const out: Staleness[] = [];
   for (const source of holders) {
     const state = health.find((row) => row.source_id === source.id);
-    if (state?.state !== "unauthorized" && state?.state !== "missing_secret") continue;
+    if (!state || !signInFails(state.state)) continue;
     const run = sync.find((row) => row.source_id === source.id);
     const since = run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
     const name = source.display_name || source.id;

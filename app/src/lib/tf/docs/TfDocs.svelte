@@ -52,6 +52,7 @@
   } from "../../ipc/entity";
   import { drawn } from "../../detail/relations";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
+  import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
@@ -474,12 +475,15 @@
     }
   }
 
+  /** A page's source: where its writes go, named in their toasts when its sign-in fails. */
+  const sourceOf = (p: Pick<DocPage, "source_id" | "source_name">): WriteSource => ({ id: p.source_id, display_name: p.source_name });
+
   async function saveSection(p: DocPage, section: number, text: string): Promise<boolean> {
     try {
       await io.docsEditSection(p.entity_id, section, p.version, text);
       const heading = sectionsOf(p.blocks)[section]?.heading;
       const name = heading ? inlineWords(heading.text) : "";
-      push({ text: `Queued: edit section “${name}” of ${p.title}.` });
+      toastQueued(`edit section “${name}” of ${p.title}`, sourceOf(p));
       return true;
     } catch (cause) {
       push({ text: `Could not queue the edit: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -492,7 +496,7 @@
     commenting = true;
     try {
       await io.submitWrite({ Comment: { entity: p.entity_id, body: comment } });
-      push({ text: `Queued: comment on ${p.title}.` });
+      toastQueued(`comment on ${p.title}`, sourceOf(p));
       comment = "";
     } catch (cause) {
       push({ text: `Could not queue the comment: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -502,6 +506,8 @@
   }
 
   async function createPage(next: NewPage, linkToJob: boolean): Promise<boolean> {
+    // The new page goes under the open one, to its source.
+    const under = page;
     try {
       const ticket = linkToJob && job !== null ? await jobTicket(job) : null;
       if (linkToJob && job !== null && ticket === null) {
@@ -510,7 +516,7 @@
         return false;
       }
       await io.docsCreatePage(next, ticket);
-      push({ text: `Queued: create page ${next.title.trim()}.` });
+      toastQueued(`create page ${next.title.trim()}`, under ? sourceOf(under) : null);
       return true;
     } catch (cause) {
       push({ text: `Could not queue the page: ${ipcErrorMessage(cause)}`, tone: "err" });

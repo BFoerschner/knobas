@@ -17,6 +17,7 @@ import type {
   SyncProgress,
   SyncRunRow,
 } from "../../ipc/sources";
+import { toasts } from "../../shell/toasts.svelte";
 import { JIRA_SCHEMA } from "../../sources/fixtures";
 import { createLayers } from "../layers.svelte";
 import type { SettingsPorts } from "./ports";
@@ -774,6 +775,8 @@ test("the schedule and the pause switch are saved as they change", async () => {
   target.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Syncing"]')!.click();
   await settle();
   expect(p.updateSource).toHaveBeenLastCalledWith("jira", { enabled: false });
+  // A pause holds the sync, never a write the reader makes (#1438).
+  expect(toasts.items.at(-1)?.text).toBe("Paused. Nothing syncs until you turn it on; writes you make still go.");
 });
 
 test("Backfill runs backfill_source for this source", async () => {

@@ -17,8 +17,8 @@
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import { actionPayload, missingFields } from "../../detail/view/actions";
   import { asReview, lineName, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
+  import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
-  import { toastQueued } from "../repo/queued.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { reviewChoices, type Verdict } from "./pr";
 
@@ -28,6 +28,7 @@
     name,
     base,
     pending,
+    source = null,
     submitWrite,
     onqueued,
     onclose,
@@ -38,6 +39,8 @@
     name: string;
     base: string | null;
     pending: PendingCommentStore;
+    /** The pull request's source: where the review goes, named in its toast when its sign-in fails. */
+    source?: WriteSource | null;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     onqueued: () => void;
     onclose: () => void;
@@ -66,7 +69,7 @@
     try {
       await submitWrite(payload);
       pending.settle(prId, sent);
-      toastQueued(`submit review on ${name}`);
+      toastQueued(`submit review on ${name}`, source);
       onqueued();
       onclose();
     } catch (cause) {

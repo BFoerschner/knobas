@@ -26,10 +26,10 @@
 
   import { ipcErrorMessage } from "../../ipc";
   import type { DiffFile } from "../../ipc/entity";
+  import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiff from "../code/TfDiff.svelte";
   import { itemHash, resolveTicket } from "../job/job";
-  import { toastQueued } from "./queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import {
     branchStanding,
@@ -44,12 +44,15 @@
 
   let {
     ports,
+    source = null,
     repoId,
     branches,
     head,
     defaultBranch,
   }: {
     ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite">;
+    /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
+    source?: WriteSource | null;
     repoId: string;
     branches: readonly BranchOption[];
     /** The branch proposed, from the address. */
@@ -136,7 +139,7 @@
     try {
       const linkTo = ticket !== null && link ? ticket.id : undefined;
       await ports.submitWrite({ CreatePullRequest: { entity: repoId, title: words, body, head, base } }, linkTo);
-      toastQueued(`open PR ${words}`);
+      toastQueued(`open PR ${words}`, source);
       location.hash = repoHash(repoId, "prs");
     } catch (cause) {
       push({ text: `Could not queue the pull request: ${ipcErrorMessage(cause)}`, tone: "err" });

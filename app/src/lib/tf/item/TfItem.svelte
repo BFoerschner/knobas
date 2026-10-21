@@ -241,6 +241,7 @@
     entityId={id}
     title="{name} on {detail.row.title}"
     what="{name.toLowerCase()} on {detail.row.title}"
+    source={detail.source}
     submitWrite={ports.submitWrite}
     onclose={() => (shown = null)}
   />

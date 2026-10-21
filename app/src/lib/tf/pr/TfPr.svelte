@@ -73,11 +73,11 @@
   } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import { pendingComments as sharedPending, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
+  import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { actionName } from "../../detail/view/actions";
   import { prNumber } from "../code/code";
   import { isMine, itemHash, keyOf, username } from "../job/job";
-  import { toastQueued } from "../repo/queued.svelte";
   import { commitHash, repoHash } from "../repo/repo";
   import { jobHash } from "../route";
   import { initials } from "../tickets/tickets";
@@ -347,10 +347,11 @@
     const body = draft.trim();
     if (prId === null || body === "" || sending) return;
     sending = true;
+    const source = detail?.source ?? null;
     try {
       await ports.submitWrite({ Comment: { entity: prId, body } });
       markComment(prId, body);
-      toastQueued(`comment on ${name}`);
+      toastQueued(`comment on ${name}`, source);
       draft = "";
     } catch (cause) {
       push({ text: `Could not queue the comment: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -567,6 +568,7 @@
     {name}
     base={header.base}
     {pending}
+    source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
     onqueued={() => markQueued(prId, "review queued")}
     onclose={() => (reviewing = false)}
@@ -580,7 +582,7 @@
     {name}
     head={header.head}
     base={header.base}
-    source={detail?.source.display_name ?? "The source"}
+    source={detail?.source ?? null}
     ready={readyRows}
     {ticket}
     submitWrite={ports.submitWrite}
@@ -596,6 +598,7 @@
     entityId={prId}
     title="{write.label} {name}"
     what="{write.phrase} {name}"
+    source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
     onqueued={() => markQueued(prId, `${write.verb} queued`)}
     onclose={() => (shown = null)}

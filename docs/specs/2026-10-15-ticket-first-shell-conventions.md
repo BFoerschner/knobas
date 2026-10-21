@@ -90,7 +90,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 ## Writes and undo
 
 - A write that no command can take back (a dismissal, an accepted proposal) is held for the toast's 6.5 s and then sent; the toast's *Undo* cancels it, and the toast on screen is the sign a write is still held. Quitting, closing or reloading the window inside those 6.5 s loses the decision: nothing is written, and the proposal is back next time. Moving to another view does not; the write still goes. (#835)
-- A write a page queues is drawn at once where it lands (a branch *queued*, a branch *delete queued*, a file's commit as a banner), held for the session as module `$state` and dropped once the source's read shows it; never stored. The toast reads `Queued: <what>. Sends with the next sync.` with *Show queue*. (#839, #845)
+- A write a page queues is drawn at once where it lands (a branch *queued*, a branch *delete queued*, a file's commit as a banner), held for the session as module `$state` and dropped once the source's read shows it; never stored. The toast reads `Queued: <what>.` with *Show queue*, from the one helper `shell/queued-toast.ts`; while the source's sign-in fails it adds `<Source> sign-in is failing, so it waits there.` (R-15.1). It never promises the next sync: a write is sent the moment it is queued, paused sync or not. (#839, #845, #1438)
 
 - Deleting a note is the one irreversible write sent at once: a confirm dialog asks first, and the toast "Deleted <title>" offers no *Undo*, because the `deleted` activity line is final (#1464's ruling, #1504).
 

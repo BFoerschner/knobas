@@ -10,7 +10,9 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { createInbox, type Inbox } from "../../inbox/inbox.svelte";
 import type { ContextRow, EntityDetail, InboxEntry, InboxItem, Reached } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
+import { writeQueuePanel } from "../../shell/write-queue.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TfInbox from "./TfInbox.svelte";
 
@@ -63,6 +65,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  health.replace([]);
+  writeQueuePanel.open = false;
   if (view) unmount(view);
   view = null;
   target.remove();
@@ -108,7 +112,7 @@ function context(anchor: string): ContextRow {
 async function open(over: { job?: string | null; contexts?: ContextRow[]; extra?: InboxEntry[] } = {}) {
   const ports = {
     listContexts: async () => over.contexts ?? [],
-    listSources: async () => [{ id: "jira" }, { id: "gitea" }],
+    listSources: async () => [{ id: "jira" }, { id: "gitea" }, { id: "tc", display_name: "TeamCity" }],
     getEntity: async (id: string) => {
       if (id !== "jira:PAY-231") throw { code: "not_found", message: "no", source_id: null };
       return { row: { entity_id: id, kind: "ticket" } } as unknown as EntityDetail;
@@ -200,7 +204,19 @@ test("Re-run queues the source's write and says so", async () => {
   button(rowOf("Payout_Integration"), "Re-run").click();
   await settle();
   expect(calls).toContain(`write ${JSON.stringify({ RerunBuild: { entity: "tc:Payout#1187" } })}`);
-  expect(toasts.items.map((toast) => toast.text)).toContain("Re-run queued for Payout_IntegrationTests #1187");
+  expect(toasts.items.at(-1)!.text).toBe("Queued: re-run Payout_IntegrationTests #1187.");
+});
+
+test("Re-run on a source whose sign-in fails says the write waits there, and Show queue opens the queue", async () => {
+  health.patch({ source_id: "tc", state: "unauthorized", checked_at: at(14, 0), detail: null, secret_expires_at: null });
+  await open();
+  button(rowOf("Payout_Integration"), "Re-run").click();
+  await settle();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("Queued: re-run Payout_IntegrationTests #1187. TeamCity sign-in is failing, so it waits there.");
+  expect(toast.action?.label).toBe("Show queue");
+  toast.action!.run();
+  expect(writeQueuePanel.open).toBe(true);
 });
 
 test("Ack acks the monitor's alert and the row leaves", async () => {

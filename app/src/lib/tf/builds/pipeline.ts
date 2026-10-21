@@ -10,6 +10,8 @@
  */
 import type { PipelineRow, PipelineSettings, PipelineTrigger, RunRow } from "../../ipc/entity";
 import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
+import { signInFails } from "../../shell/health.svelte";
+import type { WriteSource } from "../../shell/queued-toast";
 import { matchesAll } from "../filter/filter";
 import { age } from "../job/job";
 import { reenterWords, secretNoun } from "../settings/settings";
@@ -323,7 +325,7 @@ export function staleLine(
   const state = source?.health;
   const run = sync.find((row) => row.source_id === pipeline.source_id);
   const name = pipeline.source_name;
-  if (source && state && (state.state === "unauthorized" || state.state === "missing_secret")) {
+  if (source && state && signInFails(state.state)) {
     const secret = secretNoun(source.auth_kind);
     const since = run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
     const why = state.state === "missing_secret" ? `no ${secret} stored` : "sign-in failing";
@@ -350,8 +352,16 @@ export function chipTone(run: RunRow): string {
   return tone === "ok" || tone === "err" || tone === "warn" ? `tf-${tone}` : "";
 }
 
-/** The toast for a run queued from a Builds page, as prototype-6's `startRun` words it. */
-export function queuedRunText(pipeline: Pick<PipelineRow, "name" | "source_name">, summary: string, signInFailing: boolean): string {
-  const tail = signInFailing ? `${pipeline.source_name} sign-in is failing, so it waits there.` : "Sends with the next sync.";
-  return `Queued: run ${pipeline.name}. ${summary}. ${tail}`;
+/**
+ * What a run queued from a Builds page is, for the queued-write toast
+ * (`toastQueued`): *run Payout_IntegrationTests. Re-run of #1187, same settings*,
+ * as prototype-6's `startRun` words it.
+ */
+export function queuedRunWhat(pipeline: Pick<PipelineRow, "name">, summary: string): string {
+  return `run ${pipeline.name}. ${summary}`;
+}
+
+/** The source a pipeline's writes go to, for the queued-write toast's sign-in sentence. */
+export function pipelineSource(pipeline: Pick<PipelineRow, "source_id" | "source_name">): WriteSource {
+  return { id: pipeline.source_id, display_name: pipeline.source_name };
 }

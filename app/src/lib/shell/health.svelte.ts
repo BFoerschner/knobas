@@ -91,6 +91,29 @@ export function isActionable(state: AuthState | undefined): boolean {
   return state !== undefined && ACTIONABLE[state] === true;
 }
 
+/**
+ * The states where the reader has to fix the sign-in before the source takes
+ * anything: the credential was rejected, or none is stored. Narrower than
+ * {@link ACTIONABLE}: an unreachable server is retried on its own. Total over
+ * `AuthState` for the same reason that table is.
+ */
+const SIGN_IN_FAILS: Record<AuthState, boolean> = {
+  ok: false,
+  unknown: false,
+  unauthorized: true,
+  unreachable: false,
+  missing_secret: true,
+};
+
+/**
+ * Whether this source's sign-in fails until the reader acts: what the Builds
+ * warn line, the job's stale builds line and a queued write's toast (R-15.1)
+ * all say. `undefined`, no reading yet, does not.
+ */
+export function signInFails(state: AuthState | undefined): boolean {
+  return state !== undefined && SIGN_IN_FAILS[state] === true;
+}
+
 /** The IPC this store needs, injectable so a test needs no Tauri bridge. */
 export interface HealthPorts {
   credentialHealth: () => Promise<CredentialHealth[]>;

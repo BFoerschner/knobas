@@ -9618,3 +9618,52 @@ unchanged.
   The implementer's own `breadcrumbJobIsCurrent(route)` and `onbreadcrumbjob` callback are dropped:
   two answers to "the breadcrumb's job" would drift. On a job page the foreground wins, so the
   store naming it too changes nothing. *Reversing:* low.
+
+## #1438: one toast for every queued write, naming a failing sign-in (Opus implementer, 2026-10-21)
+
+- **The tail: #860's wording wins over #841's (delegated by Björn at triage, recommended pick).**
+  *Fork:* keep "Sends with the next sync" (#841's PR toasts, the shell conventions' *Writes and
+  undo* line) or drop it (#860–#862's Docs ruling). *Ruling:* dropped everywhere. A write toast
+  reads "Queued: <what>." with *Show queue*, plus "<Source> sign-in is failing, so it waits
+  there." (R-15.1) when the source's credential is rejected or missing. This **reverses #841's
+  toast line** and the conventions line, which now says the same. *Reasoning:* `submit_write`
+  queues and flushes the source at once (`knobas-sync` `write_queue::submit` → `flush_source`, which
+  reads no `enabled`), so the write is out in a second; the audit saw a move reach Jira with sync
+  paused. The only case where a write waits is the one the toast now names. *Reversing:* the
+  `queuedText` line in `shell/queued-toast.ts`.
+- **Pausing does not hold writes, and the pause toast says so (delegated, recommended pick).**
+  *Fork:* build a hold on pause in the backend, or say what is true. *Ruling:* no backend hold;
+  the source page's switch toasts "Paused. Nothing syncs until you turn it on; writes you make
+  still go." The recommended wording was "writes still go"; *you make* is added because a write
+  that was already waiting when the source was turned off does hold (CONTEXT.md *Held write*,
+  migration 0012: its target leaves the view, and the scheduler never retries a disabled source),
+  so the bare phrase would overclaim. *Reversing:* the string in `TfSourcePage.svelte`, or a hold
+  in `flush_source` and the old words back.
+- **Credential health comes from the shell's live store, not the page's own read.** *Fork:* each
+  page passes its own "sign-in fails" flag (Builds had `stale?.fix != null`), or the helper reads
+  `shell/health.svelte`'s `health`. *Ruling:* the store, keyed by the write's source id. *Reasoning:*
+  it is the store the status bar draws, it is live on `source:health`, and one reading means the
+  toast never disagrees with the bar. *Reversing:* a `failing` argument on `toastQueued`.
+- **"Sign-in is failing" means `unauthorized` or `missing_secret`.** *Fork:* those two, or every
+  actionable state (`isActionable`, which adds `unreachable`). *Ruling:* the two, as one total
+  table `signInFails` beside `isActionable` in `shell/health.svelte.ts`, which Builds' `staleLine`
+  and the job's stale builds line now read too. *Reasoning:* an unreachable server is retried on
+  its own and an untested (`unknown`) credential is not failing. *Reversing:* low.
+- **The caller names the source.** *Fork:* a module store of source names, or each caller passes
+  `{ id, display_name }` (the shape of `SourceRef`). *Ruling:* the caller, because no store holds
+  source names: the job, PR, item and repository pages pass their detail's `source`
+  (the repository page hands it down to Branches, Compare, New branch and the commit dialog);
+  Builds its pipeline's `source_id`/`source_name`; Docs its page's; *Create monitor* the target
+  the reader picked (`TfCreateMonitor`'s `oncreated` now carries it); Monitors its `sourceNames`;
+  the inbox reads `list_sources` after the re-run is queued. A worklog carries no source, so its
+  toast names none. *Reversing:* low.
+- **Every write toast routes through the helper, not only the ticket's list.** *Fork:* the
+  ticket's named callers only, or every write toast. *Ruling:* every one: Docs' three and
+  Monitors' *Pause*/*Resume*/*Create monitor* ("<label> queued for <name>" before) and the
+  worklog too, so "Queued: <what>." with *Show queue* holds on every page. The inbox reads
+  "Queued: re-run Payout_IntegrationTests #1187.", the row's title rather than prototype-6's
+  "#1187". The old `AssetsView` (the asset tree, kept unchanged) keeps its own monitor toast.
+  *Reversing:* low.
+- **`queuedRunText` became `queuedRunWhat`.** *Fork:* keep Builds' own text function with the
+  tail, or reduce it to the *what*. *Ruling:* the *what*; Builds' run toast keeps its words ("Queued: run
+  <pipeline>. <summary>.") and its tail now comes from the helper. *Reversing:* low.

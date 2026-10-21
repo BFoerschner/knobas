@@ -34,12 +34,12 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { PipelineRow, PipelineSettings, RunLog, RunRow, SourceView } from "../../ipc/entity";
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
+  import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
-  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { commitHash, fileHash } from "../repo/repo";
   import { when } from "../tickets/tickets";
   import { duration, pipelineHash, runTone } from "./builds";
-  import { chipTone, defaultBranch, jobBranchFor, queuedRunText, resultWord, staleLine, triggerLabel } from "./pipeline";
+  import { chipTone, defaultBranch, jobBranchFor, pipelineSource, queuedRunWhat, resultWord, staleLine, triggerLabel } from "./pipeline";
   import { RUN_BRIDGE, type RunPorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
   import TfRunChain from "./TfRunChain.svelte";
@@ -262,10 +262,7 @@
   async function queue(request: RunRequest) {
     try {
       await ports.submitWrite(request.payload);
-      push({
-        text: queuedRunText(pipeline, request.summary, stale?.fix != null),
-        action: { label: "Show queue", run: openWriteQueue },
-      });
+      toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline));
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
       return;

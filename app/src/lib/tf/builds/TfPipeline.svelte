@@ -25,8 +25,8 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { PipelineRow, PipelineSettings, RunRow, Setting } from "../../ipc/entity";
   import type { SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
+  import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
-  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { settingPayload } from "../../detail/view/settings";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -59,7 +59,8 @@
     keptRuns,
     longest,
     pipelineWord,
-    queuedRunText,
+    pipelineSource,
+    queuedRunWhat,
     resultWord,
     staleLine,
     startedHere,
@@ -250,10 +251,7 @@
         },
         ...started,
       ];
-      push({
-        text: queuedRunText(pipeline, summary, stale?.fix != null),
-        action: { label: "Show queue", run: openWriteQueue },
-      });
+      toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline));
       return true;
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -345,10 +343,7 @@
       await ports.submitWrite(payload);
       queuedValues = { ...queuedValues, [setting.name]: setting.secret ? "" : draft };
       editing = null;
-      push({
-        text: `Queued: set ${setting.name} on ${pipeline.name}. Sends with the next sync.`,
-        action: { label: "Show queue", run: openWriteQueue },
-      });
+      toastQueued(`set ${setting.name} on ${pipeline.name}`, pipelineSource(pipeline));
     } catch (cause) {
       push({ text: `Could not queue the change: ${ipcErrorMessage(cause)}`, tone: "err" });
     }

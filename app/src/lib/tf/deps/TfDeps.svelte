@@ -86,8 +86,8 @@
   import { importedLine } from "./import";
   import { isEntityId, resolveTicket } from "../job/job";
   import { reachedPart } from "./reach";
+  import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
-  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { prefill } from "../monitors/monitors";
   import TfCreateMonitor from "../monitors/TfCreateMonitor.svelte";
   import { isAsset, nameIsCode } from "./deps";
@@ -789,8 +789,8 @@
     record={(name) => ports.editAsset(creating!.asset.id, [{ field: "monitors", added: [name] }])}
     queue={ports.submitWrite}
     onclose={() => (creating = null)}
-    oncreated={() => {
-      push({ text: `Queued: create monitor for ${creating?.asset.name ?? ""}. Sends with the next sync.`, action: { label: "Show queue", run: openWriteQueue } });
+    oncreated={({ source }) => {
+      toastQueued(`create monitor for ${creating?.asset.name ?? ""}`, source);
       creating = null;
     }}
   />
