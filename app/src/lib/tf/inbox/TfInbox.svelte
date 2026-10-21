@@ -29,6 +29,7 @@
   import { ACTION_FORMS } from "../../inbox/actions";
   import { inbox as sharedInbox, pickedMorning, snoozePresets, tomorrowValue, type Inbox } from "../../inbox/inbox.svelte";
   import { followWrite } from "../../shell/follow-write";
+  import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -149,7 +150,13 @@
     queueing.add(entry.item.key);
     try {
       const write = await ports.submitWrite(form.build(entity));
-      push({ text: `${form.label} queued for ${entry.item.title}` });
+      // Named for the toast's sign-in sentence; a list that fails still lets the toast say what was queued.
+      const sources = await ports.listSources().catch(() => [] as SourceFacts[]);
+      const source = sources.find((row) => row.id === entry.item.source_id);
+      toastQueued(`${form.label.toLowerCase()} ${entry.item.title}`, {
+        id: entry.item.source_id,
+        display_name: source?.display_name || entry.item.source_id,
+      });
       following.push(followWrite(write, { name: form.label }));
       void inbox.refresh();
     } catch (error) {

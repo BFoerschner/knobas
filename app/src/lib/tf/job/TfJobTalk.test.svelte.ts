@@ -358,7 +358,7 @@ test("Comment queues a Comment write and clears the box; a refused one keeps the
   await settle();
   expect(calls.writes).toEqual([{ Comment: { entity: ID, body: "Priya, can you decide the SLA?" } }]);
   expect(box.value).toBe("");
-  expect(toasts.items.map((t) => t.text)).toContain("Queued: comment on PAY-231. Sends with the next sync.");
+  expect(toasts.items.map((t) => t.text)).toContain("Queued: comment on PAY-231.");
 
   job && unmount(job);
   job = null;

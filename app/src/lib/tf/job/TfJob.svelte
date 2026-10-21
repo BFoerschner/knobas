@@ -41,9 +41,9 @@
   } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
   import { inTextField } from "../../shell/keys";
+  import { toastQueued } from "../../shell/queued-toast";
   import type { Timer } from "../../shell/timer.svelte";
   import { push } from "../../shell/toasts.svelte";
-  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { Layers } from "../layers.svelte";
   import {
@@ -275,12 +275,10 @@
   async function comment(body: string): Promise<boolean> {
     if (!detail) return false;
     const key = keyOf(detail.row.entity_id);
+    const source = detail.source;
     try {
       await ports.submitWrite({ Comment: { entity: detail.row.entity_id, body } });
-      push({
-        text: `Queued: comment on ${key}. Sends with the next sync.`,
-        action: { label: "Show queue", run: openWriteQueue },
-      });
+      toastQueued(`comment on ${key}`, source);
       return true;
     } catch (cause) {
       push({ text: `Could not queue the comment: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -302,13 +300,11 @@
     if (!detail) return;
     const id = detail.row.entity_id;
     const key = keyOf(id);
+    const source = detail.source;
     try {
       await ports.submitWrite({ Transition: { entity: id, status } });
       reader.rereadDetail(id);
-      push({
-        text: `Queued: ${key} to ${status}. Sends with the next sync.`,
-        action: { label: "Show queue", run: openWriteQueue },
-      });
+      toastQueued(`${key} to ${status}`, source);
     } catch (cause) {
       push({ text: `Could not queue the move: ${ipcErrorMessage(cause)}`, tone: "err" });
     }

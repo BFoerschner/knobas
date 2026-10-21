@@ -21,6 +21,7 @@ import type {
 } from "../../ipc/entity";
 import type { CredentialHealth, SourceSyncStatus, SourceDescriptor, WriteOpPayload } from "../../ipc/sources";
 import type { RunningTimer, Week } from "../../ipc/time";
+import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters, sessionFilter } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
@@ -60,6 +61,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  health.replace([]);
   if (job) unmount(job);
   job = null;
   target.remove();
@@ -395,8 +397,19 @@ test("the status select offers where the ticket stands and the reachable transit
   await settle();
   expect(calls.writes).toEqual([{ Transition: { entity: ID, status: "In Review" } }]);
   expect(select.value).toBe("In Progress");
-  expect(toasts.items.at(-1)?.text).toBe("Queued: PAY-231 to In Review. Sends with the next sync.");
+  expect(toasts.items.at(-1)?.text).toBe("Queued: PAY-231 to In Review.");
   expect(toasts.items.at(-1)?.action?.label).toBe("Show queue");
+});
+
+test("a move while the ticket's source fails its sign-in says it waits there", async () => {
+  health.patch({ source_id: "jira", state: "unauthorized", checked_at: "2026-10-21T09:00:00Z", detail: null, secret_expires_at: null });
+  open();
+  await settle();
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
+  select.value = "In Review";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(toasts.items.at(-1)?.text).toBe("Queued: PAY-231 to In Review. Jira sign-in is failing, so it waits there.");
 });
 
 test("a workflow that cannot be read offers nothing to move to", async () => {
