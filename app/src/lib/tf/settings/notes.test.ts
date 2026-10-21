@@ -16,6 +16,19 @@ test("an accelerator draws as key caps in the order macOS draws them", () => {
   expect(keyCaps("Shift+CmdOrCtrl+space")).toEqual(["⇧", "⌘", "SPACE"]);
 });
 
+test("keyCaps never draws a token the registrar would refuse (#1467)", () => {
+  expect(keyCaps("KCtrl+Alt+Shift+K")).toEqual([]);
+  expect(keyCaps("CmdOrCtrl+")).toEqual([]);
+  expect(keyCaps("CmdOrCtrl+Shift")).toEqual([]);
+  expect(keyCaps("CmdOrCtrl+N+Shift")).toEqual([]);
+  expect(keyCaps("CmdOrCtrl+Shift+N+M")).toEqual([]);
+  expect(keyCaps("")).toEqual([]);
+  expect(keyCaps("Ctrl+F5")).toEqual(["⌃", "F5"]);
+  expect(keyCaps("Alt+ArrowUp")).toEqual(["⌥", "ARROWUP"]);
+  expect(keyCaps("Cmd+;")).toEqual(["⌘", ";"]);
+  expect(keyCaps("space")).toEqual(["SPACE"]);
+});
+
 test("a folder under the home directory is written from ~", () => {
   expect(homePath("/Users/mara/Downloads/knobas-notes")).toBe("~/Downloads/knobas-notes");
   expect(homePath("/home/mara/Downloads/knobas-notes")).toBe("~/Downloads/knobas-notes");

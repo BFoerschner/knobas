@@ -147,6 +147,47 @@ test("a shortcut the system refused says so while notes are shown", async () => 
   expect(text()).toContain("Not registered: taken by another application");
 });
 
+test("notes shown with no shortcut stored say no key is set (#1466)", async () => {
+  await render(stub({ shown: true, accelerator: null }).ports);
+  expect(text()).toContain("No key is set. Change… to choose one.");
+  expect(text()).not.toContain("Opens a small window");
+  expect(text()).toContain("Not set");
+});
+
+test("hidden notes and a refusal win over the no-key line (#1466)", async () => {
+  await render(stub({ shown: false, accelerator: null }).ports);
+  expect(text()).toContain("Inactive while notes are hidden.");
+  expect(text()).not.toContain("No key is set");
+});
+
+test("a refusal wins over the no-key line when both could apply (#1466)", async () => {
+  await render(stub({ shown: true, accelerator: null, refusal: "taken by another application" }).ports);
+  expect(text()).toContain("Not registered: taken by another application");
+  expect(text()).not.toContain("No key is set");
+});
+
+test("a refused save keeps the dialog open with the refusal under the field (#1467)", async () => {
+  const fake = stub({ shown: true });
+  await render(fake.ports);
+  fake.refuseNext("taken by another application");
+  button("Change capture shortcut").click();
+  flushSync();
+  shortcutField().value = "CmdOrCtrl+Space";
+  shortcutField().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Save").click();
+  await settle();
+  expect(shortcutField(), "the dialog stays").not.toBeNull();
+  expect(target.ownerDocument.body.querySelector(".tf-fail")?.textContent).toContain("taken by another application");
+  expect(shortcutField().value, "the stored value stays in the field").toBe("CmdOrCtrl+Space");
+});
+
+test("a stored string that does not parse draws Not registered, not caps (#1467)", async () => {
+  await render(stub({ shown: true, accelerator: "KCtrl+Alt+Shift+K", refusal: "unsupported key: KCTRL" }).ports);
+  expect(target.querySelectorAll("kbd").length).toBe(0);
+  expect(text()).toContain("Not registered");
+});
+
 function shortcutField(): HTMLInputElement {
   return target.querySelector<HTMLInputElement>('input[aria-label="Capture shortcut"]')!;
 }

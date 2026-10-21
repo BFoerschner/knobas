@@ -10047,3 +10047,24 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 
 - **Test through the attributes only.** The first-Esc symptom is WebKit's and not witnessable by the
   fake; the attribute test is the witness, as the ticket says. No other input is touched.
+
+## #1466: Settings › Notes and capture says no key is set (Sonnet implementer, 2026-10-21)
+
+- **Does turning the switch on with no key stored also open the *Change…* dialog.** *Ruling:* no (the
+  recommended pick). The help line now reads "No key is set. Change… to choose one." and tells the reader
+  where to go; a dialog popping from a switch is new behaviour. *Reversing:* low, call `openShortcut()` in
+  `toggle` when the answer is shown with a null accelerator.
+
+## #1467: the Change… dialog says what the registrar refused (Sonnet implementer, 2026-10-21)
+
+- **Which shape.** *Ruling:* the recommended one, store-and-report kept (#503, #1086 not reversed). After
+  the write the dialog reads the view back: a `refusal` keeps it open with "Not registered: <refusal>"
+  under the field and the typed value in place; it closes only on a clean registration. No Rust, no IPC
+  change, so no §10.8 entry and no sign-off step. *Reversing:* medium, a pre-write refusal in the dialog.
+- **`keyCaps` mirrors the registrar's grammar client-side**: modifiers (`parse_hotkey`'s names) then exactly
+  one key from `parse_key`'s set, else no caps. The row draws an unparseable stored string as *Not
+  registered* in place of caps. *Reasoning:* the registrar's parser is global-hotkey 0.8.0's; the table in
+  `notes.ts` is a copy and drifts if the crate grows keys, in which case the row says *Not registered* for a
+  key the registrar accepts. *Reversing:* low.
+- **The fake** (`dev/fake/capture.ts`) answers a refusal for any string `keyCaps` cannot parse while notes
+  are shown, so the dialog's refusal path is witnessable under `?fake-ipc`.
