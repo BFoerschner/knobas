@@ -527,6 +527,8 @@ function boardCard(entry: (typeof CORPUS)[number]) {
     source_id: "mock",
     key: entry.entity_id.slice(entry.entity_id.indexOf(":") + 1),
     title: entry.title,
+    // Its own status (#1423), whatever column a Jira view gathers it under.
+    status: ticketStatus(entry),
     priority: text(entry.payload["priority"]),
     // The fields the Tickets view's cards draw (#810), read flat because
     // that is the shape this corpus is in.
@@ -593,6 +595,7 @@ function giteaCard(entry: (typeof CORPUS)[number]) {
     source_id: "gitea",
     key: entry.entity_id.slice(entry.entity_id.indexOf(":") + 1),
     title: entry.title,
+    status: ticketStatus(entry),
     priority: payload.knobas.priority,
     issue_type: null,
     assignee,

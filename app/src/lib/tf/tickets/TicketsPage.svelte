@@ -126,6 +126,7 @@
     moreLine,
     nextSort,
     sortRows,
+    statusOrder,
     when,
     type LaneField,
     type SortColumn,
@@ -291,7 +292,7 @@
   const reader = createBoardReader(ports, {
     typingPause,
     sessions: session,
-    view: () => ({ columns: ownColumns, layout: saved.layout, lanes: saved.lanes }),
+    view: () => ({ columns: ownColumns, listed: view?.columns ?? [], layout: saved.layout, lanes: saved.lanes }),
   });
   /** How the tickets show now: the session's switches over the view's own (R-3.3). */
   const showing = $derived({
@@ -438,16 +439,12 @@
   // ---- what is drawn, and the selection ----
   /** The board's columns as read, before the view's own gather them. */
   const boardColumns = $derived(reader.board?.columns ?? []);
-  /** Each card's status, whatever column of the view it sits in. */
-  const statusOf = $derived(
-    new Map(boardColumns.flatMap((column) => column.cards.map((card) => [card.entity_id, column.status]))),
-  );
-  /** The list's rows: every card read, in the header's order. */
+  /** The list's rows: every card read, in the header's order; each card says its own status (#1423). */
   const rows = $derived(
     sortRows(
-      boardColumns.flatMap((column) => column.cards.map((card) => ({ card, status: column.status }))),
+      boardColumns.flatMap((column) => column.cards.map((card) => ({ card }))),
       showing.sort,
-      boardColumns.map((column) => column.status),
+      statusOrder(boardColumns),
     ),
   );
   /** The list's columns: the view's, in the list's order (R-3.16). */
@@ -464,7 +461,7 @@
   const visible = $derived(
     showing.layout === "board"
       ? reader.bands.flatMap(({ drawn }) =>
-          drawn.flatMap(({ cards }) => cards.map((card) => ({ card, status: statusOf.get(card.entity_id) ?? null }))),
+          drawn.flatMap(({ cards }) => cards.map((card) => ({ card }))),
         )
       : rows,
   );
@@ -734,8 +731,8 @@
             <h2>{lane.title} <span class="tf-count">{lane.count}</span></h2>
           {/if}
           <div class="tf-cols">
-            {#each drawn as { column, cards } (columnKey(column))}
-              {@const more = moreLine(column, cards.length)}
+            {#each drawn as { column, cards, done } (columnKey(column))}
+              {@const more = moreLine(column, cards.length, done)}
               {@const limit = columnLimit(view?.columns ?? [], column.status)}
               <div class="tf-col">
                 <h3>
@@ -790,7 +787,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each rows as { card, status } (card.entity_id)}
+            {#each rows as { card } (card.entity_id)}
               <tr
                 class="tf-row"
                 class:tf-card={current?.card.entity_id === card.entity_id}
@@ -810,7 +807,7 @@
                         >{/if}</td
                     >
                   {:else if column === "status"}
-                    <td class="tf-nowrap">{columnName(status)}</td>
+                    <td class="tf-nowrap">{columnName(card.status)}</td>
                   {:else if column === "priority"}
                     <td>{card.priority ?? ""}</td>
                   {:else if column === "signals"}
@@ -861,7 +858,6 @@
   {#if current !== null && base !== null}
     <TicketPreview
       card={current.card}
-      status={current.status}
       description={reader.description}
       around={reader.around}
       timerOnIt={timedTicket === current.card.key}

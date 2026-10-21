@@ -47,6 +47,7 @@ function card(key: string, updated: string): MiniBoardCard {
     source_id: "jira",
     key,
     title: key,
+    status: null,
     priority: null,
     issue_type: null,
     assignee: null,

@@ -5,6 +5,7 @@ import type { MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity
 import {
   aroundLines,
   boardLanes,
+  columnDone,
   drawnCards,
   moreLanesLine,
   initials,
@@ -14,15 +15,17 @@ import {
   previewAction,
   sortRows,
   splitLanes,
+  statusOrder,
   when,
 } from "./tickets";
 
-function card(n: number): MiniBoardCard {
+function card(n: number, status: string | null = null): MiniBoardCard {
   return {
     entity_id: `jira:PAY-${n}`,
     source_id: "jira",
     key: `PAY-${n}`,
     title: `Ticket ${n}`,
+    status,
     priority: null,
     issue_type: null,
     assignee: null,
@@ -36,8 +39,14 @@ function card(n: number): MiniBoardCard {
   };
 }
 
+/** A board column of one status: its cards stand in it. */
 function column(status: string | null, n: number, total = n): MiniBoardColumn {
-  return { status, cards: Array.from({ length: n }, (_, i) => card(i)), total };
+  return { status, cards: Array.from({ length: n }, (_, i) => card(i, status)), total };
+}
+
+/** A view's column (#1423): its name, and its cards' own statuses. */
+function named(name: string, statuses: (string | null)[]): MiniBoardColumn {
+  return { status: name, cards: statuses.map((status, i) => card(i, status)), total: statuses.length };
 }
 
 test("a column draws eight, Done three, fifty of either while words filter, and every card once expanded", () => {
@@ -48,6 +57,21 @@ test("a column draws eight, Done three, fifty of either while words filter, and 
   expect(drawnCards(column("To Do", 60), false, true)).toHaveLength(50);
   expect(drawnCards(column("Done", 60), false, true)).toHaveLength(50);
   expect(drawnCards(column("Done", 60), true, true)).toHaveLength(60);
+});
+
+test("a column is done by its tickets' statuses or the statuses it lists, never by its name (#1423)", () => {
+  const shipped = named("Shipped", Array(12).fill("Done"));
+  expect(columnDone(shipped)).toBe(true);
+  expect(drawnCards(shipped, false, false)).toHaveLength(3);
+  expect(moreLine({ ...shipped, total: 20 }, 3)).toBe("Show 17 more done");
+  const done = named("Done", [...Array(11).fill("Done"), "In Progress"]);
+  expect(columnDone(done)).toBe(false);
+  expect(drawnCards(done, false, false)).toHaveLength(8);
+  // The view's own list decides where it has one: every status it gathers done.
+  const closed = named("Closed", Array(12).fill("Done"));
+  expect(drawnCards(closed, false, false, columnDone(closed, ["Done"]))).toHaveLength(3);
+  expect(columnDone(named("Done", Array(12).fill("Done")), ["In Review", "Done"])).toBe(false);
+  expect(columnDone(named("Done", []))).toBe(false);
 });
 
 test("Show N more counts what the column holds past what it draws, Done saying so", () => {
@@ -71,17 +95,25 @@ test("a ticket's update reads today, yesterday or the date, as the prototype wri
 });
 
 test("the preview's button: Start work, Resume work or Open job by the ticket's state", () => {
-  const mine = { assignee: "mara", mine: true };
-  const theirs = { assignee: "jonas.becker", mine: false };
-  expect(previewAction(mine, "To Do", false).label).toBe("Start work");
-  expect(previewAction(mine, "In Progress", false)).toEqual({
+  const mine = (status: string) => ({ assignee: "mara", mine: true, status });
+  const theirs = { assignee: "jonas.becker", mine: false, status: "To Do" };
+  expect(previewAction(mine("To Do"), false).label).toBe("Start work");
+  expect(previewAction(mine("In Progress"), false)).toEqual({
     label: "Resume work",
     note: "Starts the timer on this ticket.",
   });
-  expect(previewAction(mine, "In Progress", true).note).toBe("Your timer is running on this ticket.");
-  expect(previewAction(mine, "Done", false).label).toBe("Open job");
-  expect(previewAction(theirs, "To Do", false)).toEqual({ label: "Open job", note: "Assigned to jonas.becker." });
-  expect(previewAction({ assignee: null, mine: false }, "To Do", false).note).toBe("Unassigned.");
+  expect(previewAction(mine("In Progress"), true).note).toBe("Your timer is running on this ticket.");
+  expect(previewAction(mine("Done"), false).label).toBe("Open job");
+  expect(previewAction(theirs, false)).toEqual({ label: "Open job", note: "Assigned to jonas.becker." });
+  expect(previewAction({ assignee: null, mine: false, status: "To Do" }, false).note).toBe("Unassigned.");
+});
+
+test("the preview's button reads the card's status, not the column it stands in (#1423)", () => {
+  // PAY-233 is To Do and mine, under a Jira view's *Ready*; a done one under *Shipped*.
+  const [ready] = named("Ready", ["To Do"]).cards;
+  expect(previewAction({ ...ready!, assignee: "mara", mine: true }, false).label).toBe("Start work");
+  const [shipped] = named("Shipped", ["Done"]).cards;
+  expect(previewAction({ ...shipped!, assignee: "mara", mine: true }, false).label).toBe("Open job");
 });
 
 test("Around this ticket groups the context's kinds as the room's tiles do, and counts what fails", () => {
@@ -172,11 +204,13 @@ test("a label lane is the ticket's first label; epic, priority and type lanes re
 
 test("list headers sort by their column, a second press turning the direction, missing values last", () => {
   const rows = [
-    { card: ticket("PAY-10", { title: "b", priority: "Low", assignee: "mara", updated_at: "2026-08-20T10:00:00Z" }), status: "Done" },
-    { card: ticket("PAY-9", { title: "a", priority: "Highest", assignee: null, updated_at: null }), status: "To Do" },
-    { card: ticket("PAY-11", { title: "c", priority: null, assignee: "jonas", updated_at: "2026-08-22T10:00:00Z" }), status: "In Progress" },
+    { card: ticket("PAY-10", { title: "b", priority: "Low", assignee: "mara", updated_at: "2026-08-20T10:00:00Z", status: "Done" }) },
+    { card: ticket("PAY-9", { title: "a", priority: "Highest", assignee: null, updated_at: null, status: "To Do" }) },
+    { card: ticket("PAY-11", { title: "c", priority: null, assignee: "jonas", updated_at: "2026-08-22T10:00:00Z", status: "In Progress" }) },
   ];
-  const order = ["To Do", "In Progress", "Done"];
+  // A view's columns: *Ready* holds To Do, *In flight* In Progress; the order is the cards' own statuses (#1423).
+  const order = statusOrder([named("Ready", ["To Do"]), named("In flight", ["In Progress", "To Do"]), named("Shipped", ["Done"])]);
+  expect(order).toEqual(["To Do", "In Progress", "Done"]);
   const keys = (column: Parameters<typeof nextSort>[1], direction: "ascending" | "descending") =>
     sortRows(rows, { column, direction }, order).map((row) => row.card.key);
   expect(keys("key", "ascending")).toEqual(["PAY-9", "PAY-10", "PAY-11"]);

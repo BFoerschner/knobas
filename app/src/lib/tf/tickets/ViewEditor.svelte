@@ -315,7 +315,7 @@
   );
   const listRows = $derived(
     (answer?.columns ?? [])
-      .flatMap((column) => column.cards.map((card) => ({ card, status: column.status })))
+      .flatMap((column) => column.cards.map((card) => ({ card })))
       .sort((a, b) => (b.card.updated_at ?? "").localeCompare(a.card.updated_at ?? ""))
       .slice(0, 9),
   );
@@ -659,12 +659,12 @@
                 <tr>{#each drawnList as [column, label] (column)}<th>{label}</th>{/each}</tr>
               </thead>
               <tbody>
-                {#each listRows as { card, status } (card.entity_id)}
+                {#each listRows as { card } (card.entity_id)}
                   <tr>
                     {#each drawnList as [column] (column)}
                       {#if column === "key"}<td class="tf-mono">{card.key}</td>
                       {:else if column === "summary"}<td>{card.title}</td>
-                      {:else if column === "status"}<td>{columnName(status)}</td>
+                      {:else if column === "status"}<td>{columnName(card.status)}</td>
                       {:else if column === "priority"}<td>{card.priority ?? ""}</td>
                       {:else if column === "signals"}<td>{card.signals.length}</td>
                       {:else if column === "assignee"}<td>{card.assignee ?? "Unassigned"}</td>

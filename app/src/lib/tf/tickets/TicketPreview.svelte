@@ -11,14 +11,12 @@
 
   let {
     card,
-    status,
     description,
     around,
     timerOnIt,
   }: {
+    /** The ticket; its status is its own, whatever column it stands in (#1423). */
     card: MiniBoardCard;
-    /** The ticket's status, the column it stands in. */
-    status: string | null;
     /** The description, or `null` while it is read. */
     description: string | null;
     /** *Around this ticket*, or `null` while it is read. */
@@ -27,7 +25,7 @@
     timerOnIt: boolean;
   } = $props();
 
-  const action = $derived(previewAction(card, status, timerOnIt));
+  const action = $derived(previewAction(card, timerOnIt));
   const epic = $derived(epicLine(card));
 </script>
 
@@ -38,7 +36,7 @@
   </div>
   <dl class="tf-facts">
     <dt>Status</dt>
-    <dd>{columnName(status)}</dd>
+    <dd>{columnName(card.status)}</dd>
     <dt>Assignee</dt>
     <dd>{card.assignee ?? "Unassigned"}</dd>
     <dt>Priority</dt>

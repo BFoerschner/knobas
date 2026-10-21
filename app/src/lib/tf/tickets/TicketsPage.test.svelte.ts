@@ -64,6 +64,8 @@ function card(key: string, title: string, extra: Partial<MiniBoardCard> = {}): M
     source_id: "jira",
     key,
     title,
+    // The harness's board puts the status it stands in on each card.
+    status: null,
     priority: null,
     issue_type: null,
     assignee: null,
@@ -251,7 +253,8 @@ function harness(
         );
         const board: MiniBoard = { columns: [], sources: [], lanes: [], more_lanes: 0 };
         for (const status of ["To Do", "In Progress", "Done"]) {
-          const cards = kept.filter((entry) => entry.status === status).map((entry) => entry.card);
+          // Each card carries the status it stands in (#1423).
+          const cards = kept.filter((entry) => entry.status === status).map((entry) => ({ ...entry.card, status }));
           if (cards.length === 0) continue;
           board.columns.push({
             status,
@@ -1300,7 +1303,8 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
   expect(columns()).toEqual([
     { head: "Ready 12", cards: 8, more: "Show 4 more" },
     { head: "In flight 1 of 6", cards: 1, more: null },
-    { head: "Shipped 5", cards: 5, more: null },
+    // Done by the status it lists, not by its name (#1423): three, like *Done*.
+    { head: "Shipped 5", cards: 3, more: "Show 2 more done" },
   ]);
   expect(target.querySelector(".tf-board-head .tf-q")).toBeNull();
   const settings = [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find(
@@ -1316,6 +1320,24 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
     "Make an editable copyyour own view, starting from this board",
     "Hide from the listit keeps syncing, so you can show it again",
   ]);
+});
+
+test("on a Jira view the preview and the list read the ticket's status, the column its view's name (#1423)", async () => {
+  const { h } = jiraHarness();
+  await open(h, null, "jira-board-21");
+  // PAY-1 is To Do and mine, under *Ready*.
+  expect(columns()[0]!.head).toBe("Ready 12");
+  const facts = [...preview().querySelectorAll(".tf-facts dt")].map((dt) => [dt.textContent, dt.nextElementSibling!.textContent]);
+  expect(facts).toContainEqual(["Status", "To Do"]);
+  expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Start work");
+
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
+  await settle();
+  const statusAt = [...target.querySelectorAll(".tf-tbl th")].findIndex((th) => th.textContent === "Status");
+  const status = (key: string) =>
+    [...target.querySelectorAll(".tf-tbl tbody tr")].find((tr) => tr.querySelector("td")!.textContent === key)!.children[statusAt]!
+      .textContent;
+  expect([status("PAY-1"), status("PAY-40"), status("PAY-50")]).toEqual(["To Do", "In Progress", "Done"]);
 });
 
 // ---- Make an editable copy (#880) ----
