@@ -9112,6 +9112,11 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   PAY-231." as recommended, with the suggestion's key read through `targetReading`. *Reasoning:* it
   names the job's ticket and nothing else, per #1427: the context behind a job is never named.
   *Reversing:* one string.
+- **The no-suggestion sentence.** *Ruling:* "This time has no ticket, and knobas has nothing to
+  suggest. Keep it local and assign one later on the Day tab." *Reasoning:* the ticket's example
+  ("Assign one here or later on the Day tab") promises an action this branch of the dialog lacks;
+  its only button is *Keep local*. The sentence keeps the ticket's two facts: no ticket, and the Day
+  tab as the place to assign one. Prototype-6 has no such dialog to quote. *Reversing:* one string.
 - **Where the two dialogs mount.** *Ruling:* in `TfShell`'s `dialogs` snippet in `App.svelte`,
   beside the worklog draft, not outside `.tf` where they were. *Reasoning:* `.tf .tf-dim`,
   `.tf .tf-mono` and the shell's form reset only reach inside `.tf`, and `TfShell`'s header already

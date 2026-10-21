@@ -130,7 +130,7 @@ test("announces itself as a dialog labelled by its title", () => {
 test("opens with focus on the first field in its body, not the header's Close", () => {
   const behind = opener();
   const target = host();
-  const app = mount(Modal, { target, props: { onclose: () => {}, body: "input" } });
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "input" } });
   flushSync();
 
   expect(document.activeElement).toBe(target.querySelector(".dlg-b input"));
@@ -144,7 +144,7 @@ test("opens with focus on the first field in its body, not the header's Close", 
 test("with nothing focusable in its body, focus goes to Close", () => {
   const behind = opener();
   const target = host();
-  const app = mount(Modal, { target, props: { onclose: () => {}, body: "none" } });
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "none" } });
   flushSync();
 
   expect(document.activeElement?.getAttribute("aria-label")).toBe("Close");

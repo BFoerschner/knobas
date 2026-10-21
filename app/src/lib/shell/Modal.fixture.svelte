@@ -7,7 +7,7 @@
   plain TypeScript test. Two body buttons plus the header's close button give
   the Tab trap three stops to cycle between.
 
-  `body` picks what the body holds, for the open-time focus (#1431): a button
+  `content` picks what the body holds, for the open-time focus (#1431): a button
   (the default), a text field, or nothing focusable at all.
 -->
 <script lang="ts">
@@ -15,8 +15,8 @@
 
   let {
     onclose,
-    body: content = "button",
-  }: { onclose: () => void; body?: "button" | "input" | "none" } = $props();
+    content = "button",
+  }: { onclose: () => void; content?: "button" | "input" | "none" } = $props();
 </script>
 
 <Modal title="Add source" subtitle="Step 1 of 5" {onclose}>

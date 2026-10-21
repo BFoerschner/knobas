@@ -176,13 +176,13 @@
   {#snippet body()}
     {#if suggestion}
       <p>This time has no ticket. knobas suggests:</p>
-      <div class="sug">
+      <div class="tf-tm-sug">
         <span class="tf-mono tf-dim">{key}</span>
-        <span class="t">{suggestion.title ?? key}</span>
-        <span class="tf-dim why">{because}</span>
+        <span class="tf-tm-sug-t">{suggestion.title ?? key}</span>
+        <span class="tf-dim tf-tm-sug-why">{because}</span>
       </div>
     {:else}
-      <p>This time has no ticket. Assign one here or later on the Day tab.</p>
+      <p>This time has no ticket, and knobas has nothing to suggest. Keep it local and assign one later on the Day tab.</p>
     {/if}
 
     {#if problem}
@@ -208,23 +208,3 @@
   {/snippet}
 </TfDialog>
 
-<style>
-  .sug {
-    display: grid;
-    gap: 3px;
-    padding: 10px;
-    border: 1px solid var(--rule);
-    border-radius: 4px;
-    background: var(--sheet-2);
-  }
-
-  .sug .t {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .sug .why {
-    font-size: var(--t-xs);
-  }
-</style>

@@ -140,3 +140,8 @@
 .tf .tf-su-foot a { text-decoration: underline; }
 @media (max-width: 900px) { .tf-su { grid-template-columns: 1fr; } }
 
+
+/* The ad-hoc dialog's suggestion (#1432): the key, the title, why knobas offers it. */
+.tf-tm-sug { display: grid; gap: 3px; padding: 10px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet-2); }
+.tf-tm-sug-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-tm-sug-why { font-size: var(--t-xs); }

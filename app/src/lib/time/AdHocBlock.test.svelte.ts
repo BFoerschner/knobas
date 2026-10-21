@@ -202,7 +202,9 @@ test("with no suggestion there is only Keep local, and it is the default", () =>
       .filter((label) => label !== ""),
   ).toEqual(["Keep local"]);
   expect(button("Keep local").classList).toContain("tf-primary");
-  expect(target.textContent).toContain("This time has no ticket. Assign one here or later on the Day tab.");
+  expect(target.textContent).toContain(
+    "This time has no ticket, and knobas has nothing to suggest. Keep it local and assign one later on the Day tab.",
+  );
 });
 
 /**
@@ -235,7 +237,7 @@ test("it draws in the ticket-first dialog and names no room and no day review", 
   ] as AdHocOffer[]) {
     const { layers } = render(offer);
     expect(target.querySelector(".tf-modal > .tf-dialog[role=dialog]"), "not the tf dialog shell").not.toBeNull();
-    expect(target.querySelector(".dlg, .scrim, .btn"), "still the rooms Modal").toBeNull();
+    expect(target.querySelector(".dlg, .scrim, .btn"), "still shell/Modal").toBeNull();
     expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
     expect(target.textContent!.toLowerCase()).not.toMatch(/\broom\b|day review/);
     if (app) unmount(app);

@@ -338,7 +338,7 @@ test("it opens in the ticket-first dialog with the label field focused, and typi
   const { picked } = render();
 
   expect(target.querySelector(".tf-modal > .tf-dialog[role=dialog]"), "not the tf dialog shell").not.toBeNull();
-  expect(target.querySelector(".dlg, .scrim"), "still the rooms Modal").toBeNull();
+  expect(target.querySelector(".dlg, .scrim"), "still shell/Modal").toBeNull();
   expect(document.activeElement).toBe(labelField());
   expect(labelField().labels?.[0]?.textContent).toBe("A label");
 
