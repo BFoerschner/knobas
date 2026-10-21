@@ -154,8 +154,8 @@ checked_at: string | null,
  */
 detail: string | null, 
 /**
- * When the credential expires, if the source says. Feeds §3's PAT expiry
- * countdown.
+ * When the credential expires, if the source says. Feeds §3's credential
+ * expiry countdown.
  */
 secret_expires_at: string | null, };
 

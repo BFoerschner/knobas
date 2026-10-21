@@ -854,7 +854,9 @@ mod tests {
             Some("mara"),
             "the username, not the display name: it is what a wrong-account token is spotted by"
         );
-        // TeamCity exposes no token expiry over REST.
+        // TeamCity lists a user's tokens with their `expirationTime`, but
+        // nothing says which token authenticated the request, so the
+        // adapter reports none (#1513).
         assert_eq!(info.secret_expires_at, None);
         assert_eq!(info.detail.as_deref(), Some("build 189456"));
     }

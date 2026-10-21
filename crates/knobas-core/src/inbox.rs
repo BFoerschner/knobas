@@ -289,9 +289,9 @@ impl TryFrom<String> for Category {
 ///
 /// **Fourteen days, and the same fourteen for both**, which is a judgement
 /// rather than a measurement: it is `mine-stale`'s fortnight
-/// (`knobas_search::lists`), it is long enough that a PAT expiry is actionable
-/// before the week it dies in, and it is short enough that switching the inbox
-/// on for the first time does not produce a year of history.
+/// (`knobas_search::lists`), it is long enough that a credential's expiry is
+/// actionable before the week it dies in, and it is short enough that switching
+/// the inbox on for the first time does not produce a year of history.
 ///
 /// Spelled into the statements below as a literal because they are compile-time
 /// `concat!`s; [`WINDOW_DAYS`] is the same number for a reader to name, and

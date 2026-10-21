@@ -10995,3 +10995,44 @@ No fork. The ticket-system role and the contract battery ask nothing of `done_st
   two next to a wrapped name read worst of the layouts tried. *Reversing:* delete the `.rt` rules.
 - **How is it pinned?** *Fork:* jsdom does no layout. *Ruling:* a stylesheet-source test in
   `AssetsView.depends.test.svelte.ts` checks the four declarations and the `rt` class.
+
+## #1513: no built-in adapter reports a credential's expiry (Opus implementer, 2026-10-21)
+
+The constraint is #1403's grilling ruling: the countdown's date comes from the source itself, never
+typed. Each built-in was checked against what its source publishes, not only against its endpoint
+set.
+
+- **Ruling: the countdown stays an external-adapter feature; no endpoint is added.** *Fork:* read
+  the token's expiry during the health check (Jira and Confluence DC from `/rest/pat/latest/tokens`,
+  TeamCity from `/app/rest/users/current/tokens`), or report nothing. *Ruling:* nothing, and spec
+  §3's row says so. *Reasoning, per source:*
+  - **Jira and Confluence DC.** `/rest/pat/latest/tokens` lists every token of the account, and the
+    Atlassian PAT documentation names no field that ties a row to the bearer of the request. The
+    date would be the source's, but the choice of row would be knobas' guess, which #1403 rules
+    out. A password source has no expiry at all, and its listing could still hold tokens.
+  - **TeamCity.** The `Token` schema is `name`, `creationTime`, `value` (shown only at creation),
+    `expirationTime`, `permissionRestrictions`: the same listing with the same gap. The client test's
+    note "TeamCity exposes no token expiry over REST" was wrong and now says this.
+  - **Gitea.** The `AccessToken` schema (`gitea.com/swagger.v1.json`, checked 2026-10-21) is
+    `created_at`, `id`, `last_used_at`, `name`, `scopes`, `sha1`, `token_last_eight`. There is no
+    expiry to report.
+  - **Uptime Kuma.** An API key opens `/metrics` and nothing else (contract §4.2), and no gauge
+    carries the key's expiry; the key's settings are on socket.io.
+  *Reversing:* medium. A §4.2 read-endpoint row and a §10.8 entry per adapter, mockd's Jira
+  subset, and `just jira-live`/`just confluence-live`/`just teamcity-live`. The live suites'
+  `secret_expires_at == None` assertions would flip.
+- **Rejected: report the expiry when the listing holds exactly one token.** *Fork:* a narrower
+  read of the same listings. *Ruling:* no. *Reasoning:* with Bearer auth and
+  one listed token, that token must be the one in use, so the date would be honest. But it goes
+  silent as soon as the account holds a second token for another tool, which is the usual case.
+  No run here has measured whether a PAT may list tokens at all (the live suite lists them with
+  the password). That buys a narrow case for a frozen-contract change and three JVM live runs.
+  *Reversing:* as above, plus one count check in each adapter.
+- **The stale wording is fixed in comments only.** "PAT expiry countdown" becomes "credential
+  expiry countdown" in `knobas-sync` (`health.rs`, `config.rs`, a test's doc comment),
+  `knobas-source/src/lib.rs` and `knobas-core/src/inbox.rs`, and the IPC mirror is regenerated.
+  The Jira and Confluence notes that said "the countdown shows as soon as that endpoint is added"
+  now give the reason it would not. The live suites' assertion messages ("PAT expiry needs
+  /rest/pat/latest/tokens, which is outside this adapter's endpoint set") are still true and stay
+  as they are, so no live suite is owed. `docs/contract.md` still says "PAT expiry countdown"
+  (§1, line 53, and §7's P4); it is frozen, and the wording is history there. *Reversing:* n/a.
