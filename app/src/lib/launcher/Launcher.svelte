@@ -800,8 +800,8 @@
           {:else}
             <div class="tf-ln-miss">
               <!--
-                The address missed, not necessarily the item (#1475): a source
-                serves a page under more forms than its adapter may declare.
+                The pasted URL missed, not necessarily the item (#1475): a
+                source serves a page under more URLs than its adapter declares.
               -->
               <p class="tf-ln-none">Not in the mirror as this address; it may be stored under another form.</p>
               <p class="tf-ln-none tf-ln-raw">{session.url}</p>

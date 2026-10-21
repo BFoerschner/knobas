@@ -143,10 +143,14 @@ pub struct UrlMatch {
 /// URL, an adapter kind, an entity kind and the payload values the item must
 /// hold. The base is held to a configured source's `base_url` under the same
 /// rule as the first arm, so a form never needs a second spelling of it; the
-/// values are compared with `#>>` on that source's items of that kind. A
-/// reading with no values is skipped rather than allowed to name every item.
+/// values are compared with `#>>` on that source's items of that kind. This
+/// is a payload read outside an adapter (ADR-0007), and its failure direction
+/// is the **miss**: a path the item does not hold is `null`, which is
+/// distinct from every value, so the item is not named. A reading with no
+/// values is skipped rather than allowed to name every item; `read` never
+/// makes one, and `a_reading_with_no_values_names_nothing` pins the guard.
 ///
-/// `order by form, entity_id limit 1`: the stored address wins over a form,
+/// `order by via_form, entity_id limit 1`: the stored address wins over a form,
 /// and nothing stops two mirrored items reporting one address, so an
 /// ambiguous paste must answer the same entity on every run rather than
 /// whichever row the plan reached first.
@@ -155,7 +159,7 @@ pub struct UrlMatch {
 pub const RESOLVE_URL: &str = concat!(
     "select found.entity_id, found.kind
        from (
-         select i.entity_id, i.kind, 0 as form
+         select i.entity_id, i.kind, 0 as via_form
            from sync.item i
           where i.web_url is not null
             and ",
@@ -164,7 +168,7 @@ pub const RESOLVE_URL: &str = concat!(
     knobas_core::web_url_normalized!("$1::text"),
     "
          union all
-         select i.entity_id, i.kind, 1 as form
+         select i.entity_id, i.kind, 1 as via_form
            from jsonb_to_recordset($2::jsonb)
                   as r(adapter_kind text, base text, kind text, fields jsonb)
            join knobas.source_config s
@@ -183,14 +187,14 @@ pub const RESOLVE_URL: &str = concat!(
                     from jsonb_to_recordset(r.fields) as f(path text[], value text)
                    where i.payload #>> f.path is distinct from f.value)
        ) found
-      order by found.form, found.entity_id
+      order by found.via_form, found.entity_id
       limit 1"
 );
 
 /// `$2` of [`RESOLVE_URL`] for a caller that resolves the stored address
 /// alone.
-pub(crate) fn no_form_readings() -> sqlx::types::Json<serde_json::Value> {
-    sqlx::types::Json(serde_json::Value::Array(Vec::new()))
+pub(crate) fn no_form_readings() -> sqlx::types::Json<Vec<FormReading>> {
+    sqlx::types::Json(Vec::new())
 }
 
 /// `url` read as every form every adapter declares, as `$2` of
@@ -199,24 +203,35 @@ pub(crate) fn no_form_readings() -> sqlx::types::Json<serde_json::Value> {
 pub(crate) fn form_readings(
     registry: &dyn AdapterRegistry,
     url: &str,
-) -> sqlx::types::Json<serde_json::Value> {
-    let readings: Vec<serde_json::Value> = registry
-        .descriptors()
-        .iter()
-        .flat_map(|descriptor| {
-            descriptor.url_forms.iter().flat_map(move |form| {
-                form.read(url).into_iter().map(move |reading| {
-                    serde_json::json!({
-                        "adapter_kind": descriptor.adapter_kind,
-                        "base": reading.base,
-                        "kind": reading.kind,
-                        "fields": reading.fields,
+) -> sqlx::types::Json<Vec<FormReading>> {
+    sqlx::types::Json(
+        registry
+            .descriptors()
+            .into_iter()
+            .flat_map(|descriptor| {
+                let adapter_kind = descriptor.adapter_kind;
+                descriptor
+                    .url_forms
+                    .iter()
+                    .flat_map(|form| form.read(url))
+                    .map(|reading| FormReading {
+                        adapter_kind: adapter_kind.clone(),
+                        reading,
                     })
-                })
+                    .collect::<Vec<_>>()
             })
-        })
-        .collect();
-    sqlx::types::Json(serde_json::Value::Array(readings))
+            .collect(),
+    )
+}
+
+/// One element of [`RESOLVE_URL`]'s `$2`: a reading, and the adapter kind
+/// whose sources it may name. Its keys are the statement's
+/// `jsonb_to_recordset` columns.
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct FormReading {
+    adapter_kind: String,
+    #[serde(flatten)]
+    reading: knobas_source::url_forms::Reading,
 }
 
 /// The entity a URL names, or `None` -- *"a URL in, an entity reference or a

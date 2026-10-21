@@ -784,3 +784,24 @@ async fn the_stored_address_wins_over_a_form() {
         Some(("confluence:9".to_owned(), "page".to_owned()))
     );
 }
+
+/// A reading that holds no values would match every item of its kind under
+/// its source; the statement skips it. `UrlForm::read` never makes one, so
+/// the guard is driven through the statement itself.
+#[tokio::test]
+async fn a_reading_with_no_values_names_nothing() {
+    let pool = pool("url_forms_no_values").await;
+    let base = "http://127.0.0.1:8090";
+    configure(&pool, "confluence", "confluence", base).await;
+    mirror_page(&pool, "confluence", base, "360458", "/x/CoAF").await;
+
+    let found: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
+        .bind("http://127.0.0.1:8090/anything")
+        .bind(serde_json::json!([
+            { "adapter_kind": "confluence", "base": base, "kind": "page", "fields": [] }
+        ]))
+        .fetch_optional(&pool)
+        .await
+        .expect("the statement runs");
+    assert_eq!(found, None);
+}

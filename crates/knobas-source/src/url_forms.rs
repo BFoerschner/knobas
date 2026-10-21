@@ -22,6 +22,11 @@
 //! statement. So the resolver stays one read on the local mirror, never a
 //! fetch (spec #491 story 16).
 //!
+//! Two of that rule's steps have a Rust echo here, and only for splitting:
+//! the fragment is cut before a form is matched, and a trailing `/` may
+//! follow one. Neither decides that two addresses are equal; the base is
+//! still compared in SQL, and a value against the payload.
+//!
 //! [`SourceDescriptor::payload_paths`]: crate::SourceDescriptor::payload_paths
 
 use knobas_spi_types::payload::PayloadPath;
@@ -267,7 +272,8 @@ fn check_form(form: &UrlForm) -> Result<(), String> {
 }
 
 /// A descriptor's [`url_forms`](crate::SourceDescriptor::url_forms), held to
-/// their rules: each names a declared kind, starts with `/`, has at least one
+/// their rules: each names a declared kind, starts with `/` (or is `{*}`
+/// alone), has at least one
 /// placeholder and exactly one field per placeholder, puts `{*}` last if at
 /// all, never sets two placeholders side by side, and names no empty path.
 ///
