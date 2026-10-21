@@ -497,7 +497,8 @@ func frame(_ element: AXUIElement) -> CGRect? {
 /// window not at all. Tree order, which is reading order. `prose` also takes a
 /// run of static text whose value is `label`: a pointer can click words (a
 /// radio's label, a list row's name) that accessibility cannot press.
-func visibleMatching(pid: pid_t, label: String, prose: Bool = false) -> [(AXUIElement, CGRect)] {
+/// `inside: false` takes the matches with a box outside every window instead.
+func visibleMatching(pid: pid_t, label: String, prose: Bool = false, inside: Bool = true) -> [(AXUIElement, CGRect)] {
     let names = [kAXDescriptionAttribute as String, kAXTitleAttribute as String, "AXPlaceholderValue"]
     let isProse = { (element: AXUIElement) in
         prose && text(element, kAXRoleAttribute as String) == (kAXStaticTextRole as String)
@@ -509,7 +510,7 @@ func visibleMatching(pid: pid_t, label: String, prose: Bool = false) -> [(AXUIEl
         visit(window, maxDepth: 40) { element, _ in
             guard names.contains(where: { text(element, $0) == label }) || isProse(element),
                 let box = frame(element), box.width > 0, box.height > 0,
-                bounds.intersects(box), !found.contains(where: { $0.1 == box })
+                bounds.intersects(box) == inside, !found.contains(where: { $0.1 == box })
             else { return }
             found.append((element, box))
         }
@@ -517,9 +518,21 @@ func visibleMatching(pid: pid_t, label: String, prose: Bool = false) -> [(AXUIEl
     return found
 }
 
-/// The `nth` visible match (from 1), or the only one when `nth` is `nil`.
+/// The `nth` visible match (from 1), or the only one when `nth` is `nil`,
+/// scrolled into view first as a person would. With none in the window, the
+/// matches with a box outside it count instead: a dialog field below its
+/// scroller's fold (measured 2026-10-21: *Add a source*'s Token field under
+/// Gitea's configuration).
 func pick(pid: pid_t, label: String, nth: Int?, what: String, prose: Bool = false) -> (AXUIElement, CGRect)? {
-    let found = visibleMatching(pid: pid, label: label, prose: prose)
+    var found = visibleMatching(pid: pid, label: label, prose: prose)
+    if found.isEmpty { found = visibleMatching(pid: pid, label: label, prose: prose, inside: false) }
+    guard let (element, box) = choose(found, label: label, nth: nth, what: what) else { return nil }
+    AXUIElementPerformAction(element, "AXScrollToVisible" as CFString)
+    Thread.sleep(forTimeInterval: 0.3)
+    return (element, frame(element) ?? box)
+}
+
+func choose(_ found: [(AXUIElement, CGRect)], label: String, nth: Int?, what: String) -> (AXUIElement, CGRect)? {
     if let nth = nth {
         guard nth >= 1, nth <= found.count else {
             _ = fail("\(found.count) visible elements labelled '\(label)' to \(what), wanted number \(nth)")

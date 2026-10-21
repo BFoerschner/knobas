@@ -2090,7 +2090,9 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
   does. A label is an accessible description, title or placeholder. Only
   *visible* matches count, because WebKit's tree reaches a table cell twice
   and keeps filtered-out rows. With several visible, `n` picks one in reading
-  order; without `n` it refuses. `click-at` is a pointer click at the
+  order; without `n` it refuses. With none in the window, a match below the
+  fold counts (a dialog field under its scroller's edge), and the one picked
+  is scrolled into view first. `click-at` is a pointer click at the
   element's centre, for a control only a hover reveals, and also takes words
   on screen (a radio's label, a list row's name).
 - **It takes the screen and the witness's lock**

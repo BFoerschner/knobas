@@ -13,7 +13,9 @@
 #                          from Retina to the window's size in points
 #   press <label> [n]      press the one visible element whose accessible
 #                          description, title or placeholder is <label>, or the
-#                          n-th in reading order when several are visible
+#                          n-th in reading order when several are visible (with
+#                          none in the window, one below the fold), scrolled
+#                          into view first
 #   focus <label> [n]      focus it
 #   click-at <label> [n]   a pointer click at its centre: a control only a hover
 #                          reveals, which accessibility cannot press, or words
