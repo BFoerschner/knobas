@@ -258,6 +258,15 @@ pub struct KindPaths {
     /// one record. Matched case-insensitively by its reader.
     #[serde(default)]
     pub blocked_statuses: Vec<String>,
+    /// The status names this source considers **done-like**, in its own
+    /// spelling (`Done`, `Closed`, `Resolved`): the same shape as
+    /// [`blocked_statuses`](Self::blocked_statuses), and matched the same way,
+    /// case-insensitively against [`status_name`](Self::status_name). While an
+    /// item's status is one of them, the job context anchored on it is
+    /// archived (#1501); a workflow spelling done otherwise never archives,
+    /// which is the safe miss. Empty for a source with no such status.
+    #[serde(default)]
+    pub done_statuses: Vec<String>,
     /// Where this item's parent is and what it answers to (ADR-0018). Empty
     /// for a kind with no parent -- an Uptime Kuma monitor, a repo -- and for
     /// every descriptor serialized before the field existed, so `under:` misses
@@ -708,8 +717,8 @@ pub mod field {
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
     /// `state`'s candidates with their value maps.
-    /// `blocked_statuses` is not here: it is a set of names, not somewhere to
-    /// look.
+    /// `blocked_statuses` and `done_statuses` are not here: they are sets of
+    /// names, not somewhere to look.
     pub const ALL: &[&str] = &[
         STATUS_NAME,
         PRIORITY,
@@ -1783,6 +1792,7 @@ mod tests {
         let mut expected: Vec<&str> = field::ALL.to_vec();
         expected.push("kind");
         expected.push("blocked_statuses");
+        expected.push("done_statuses");
         expected.push("frame");
         expected.push("system_name");
         expected.sort_unstable();

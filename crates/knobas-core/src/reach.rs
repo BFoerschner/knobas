@@ -13,9 +13,12 @@
 //! and takes membership's layers, with each row's path kept for the reason
 //! label:
 //!
-//! * **the start** -- the ticket itself, and when it anchors an unarchived
-//!   context, that context's explicit adds and, for an epic, its children (the
-//!   same `recorded_parent_key!` read membership makes);
+//! * **the start** -- the ticket itself, and when it anchors a context,
+//!   archived or not, that context's explicit adds and, for an epic, its
+//!   children (the same `recorded_parent_key!` read membership makes). A done
+//!   job is archived (#1501) and opening it is reading it: it shows what it
+//!   held, the way `member_ids` answers about a context whatever its state;
+//!   only the inbox's alert rule and the open jobs skip archived contexts;
 //! * **one link out** from each of those, then **one more**, over
 //!   `knobas.confirmed_link` (never proposals, for ADR-0008's second reason)
 //!   and never through a context -- the ticket's pull request, then its builds;
@@ -134,7 +137,7 @@ macro_rules! reach_walk {
             "anchored(t, c, epic) as (
         select s.t, c.id, c.kind = 'epic'
           from start s
-          join knobas.context c on c.anchor_id = s.t and c.archived_at is null
+          join knobas.context c on c.anchor_id = s.t
     ),
     l0(t, id, step) as (
         select s.t, s.t, null::text from start s

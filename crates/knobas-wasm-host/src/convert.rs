@@ -141,3 +141,56 @@ pub(crate) fn json<T: serde::de::DeserializeOwned>(
 pub(crate) fn to_json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).expect("an SPI type serializes")
 }
+
+#[cfg(test)]
+mod tests {
+    use knobas_source::SourceDescriptor;
+
+    /// A component's descriptor as `descriptor()` answers it, with one kind:
+    /// `done` is the `done_statuses` entry, or no key at all.
+    fn descriptor_text(done: Option<serde_json::Value>) -> String {
+        let mut paths = serde_json::json!({
+            "kind": "ticket",
+            "status_name": [["status"]],
+        });
+        if let Some(done) = done {
+            paths["done_statuses"] = done;
+        }
+        serde_json::json!({
+            "id": "tickets",
+            "adapter_kind": "tickets",
+            "name": "Tickets",
+            "capabilities": [],
+            "adapter_version": "0.1.0",
+            "auth_methods": [],
+            "write_ops": [],
+            "entity_kinds": [{
+                "id": "ticket", "label": "Ticket", "plural": "Tickets",
+                "monogram": "TK", "full_sync_exhaustive": true,
+            }],
+            "config_schema": { "type": "object" },
+            "payload_paths": [paths],
+        })
+        .to_string()
+    }
+
+    /// An external adapter's done-like set reaches the host (#1501): the
+    /// descriptor crosses the WIT as its serde JSON, so `adapter.wit` is
+    /// unchanged, a component that declares the set is read with it, and one
+    /// built before the field existed decodes as declaring none.
+    #[test]
+    fn a_components_done_like_set_decodes_and_one_without_it_declares_none() {
+        let declared: SourceDescriptor = super::json(
+            &descriptor_text(Some(serde_json::json!(["Shipped", "Scrapped"]))),
+            "descriptor",
+        )
+        .unwrap();
+        assert_eq!(
+            declared.payload_paths[0].done_statuses,
+            ["Shipped", "Scrapped"]
+        );
+
+        let older: SourceDescriptor = super::json(&descriptor_text(None), "descriptor").unwrap();
+        assert!(older.payload_paths[0].done_statuses.is_empty());
+    }
+}

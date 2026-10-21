@@ -43,6 +43,7 @@ mod inbox_ipc;
 mod ipc;
 mod jira_views_ipc;
 mod job_ipc;
+mod job_lifecycle_ipc;
 mod job_pipelines_ipc;
 mod link_on_arrival_ipc;
 mod link_set_patterns_ipc;

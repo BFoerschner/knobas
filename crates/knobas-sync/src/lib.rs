@@ -773,6 +773,20 @@ async fn run_locked(
         saved_views::project(tx, source_id, declared).await?;
     }
 
+    // The job contexts follow their tickets' status (#1501): archived while
+    // the status is in the source's done-like set, revived when it leaves.
+    // After the sweep and off the mirror, like the projections above, and in
+    // the transaction, so a failed run moves no context. Not gated on the
+    // declaration: a source that declares no done-like set revives what an
+    // older declaration archived.
+    knobas_core::context::follow_status(
+        &mut **tx,
+        source_id,
+        &knobas_core::payload::Declarations::empty()
+            .with(source_id, source.descriptor().payload_paths),
+    )
+    .await?;
+
     sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
         .bind(&cursor)
         .bind(source_id)

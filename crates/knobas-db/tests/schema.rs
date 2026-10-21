@@ -1413,8 +1413,9 @@ async fn one_unarchived_context_per_anchor() {
         "a second unarchived context on one anchor must be refused"
     );
 
-    // Archive the first: the anchor is free again, which is what lets a
-    // re-promotion mint a fresh room instead of resurrecting the old one.
+    // Archive the first: the index covers live contexts only, so the anchor
+    // is free again. Since #1501 `promote` answers with the archived context
+    // rather than minting a second, and serialises on the anchor itself.
     sqlx::query("update knobas.context set archived_at = now() where id = $1")
         .bind(format!("ctx:anchor-{run}-1"))
         .execute(pool)

@@ -2399,6 +2399,7 @@ async fn promoting_the_seeded_epic_brings_its_five_children_into_the_context() {
 
     let promoted = knobas_app::commands::entity::promote_context_inner(
         &state.pool,
+        state.registry.as_ref(),
         &format!("{JIRA}:PAY-200"),
     )
     .await

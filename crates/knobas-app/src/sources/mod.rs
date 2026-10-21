@@ -554,6 +554,7 @@ pub async fn bring_up<R: tauri::Runtime>(
     deps: BringUp,
 ) -> Result<SourcesState, SourcesError> {
     install::load_installed(&deps.pool, &deps.registry, &deps.store).await?;
+    archive_done_contexts(&deps.pool, &deps.registry).await;
     let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> = Arc::new(deps.registry);
     let scheduler = Scheduler::start(SchedulerDeps {
         pool: deps.sync_pool,
@@ -575,6 +576,31 @@ pub async fn bring_up<R: tauri::Runtime>(
         secrets: deps.secrets,
         registry,
     })
+}
+
+/// The one-time pass of #1501: archive every job context whose ticket the
+/// mirror already holds done-like, so the inbox stops routing alerts through
+/// jobs finished before the sync run kept `archived_at`.
+///
+/// After the installed adapters load, so an external adapter's done-like set
+/// counts, and before the scheduler starts. Every bring-up runs it, and every
+/// one after the first finds nothing to do: the statement archives only a
+/// live context on a done anchor, and the sync run has already archived those
+/// (`knobas_core::context::archive_done`). A failure is logged and starts the
+/// engine anyway: the next sync run of each source does the same work.
+async fn archive_done_contexts(pool: &PgPool, registry: &Registry) {
+    let declarations = match paths::declared_paths(pool, registry).await {
+        Ok(declarations) => declarations,
+        Err(error) => {
+            tracing::warn!(?error, "the done-job pass could not read the declarations");
+            return;
+        }
+    };
+    match knobas_core::context::archive_done(pool, &declarations).await {
+        Ok(0) => {}
+        Ok(archived) => tracing::info!(archived, "archived the contexts of done jobs"),
+        Err(error) => tracing::warn!(%error, "the done-job pass did not run"),
+    }
 }
 
 /// A scheduler over an already-open pool, for the IPC tests. **Tests only.**

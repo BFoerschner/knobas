@@ -194,6 +194,10 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// not blocked; it is broken, and M4.1's alerts are how it reaches a reader
 /// (spec #427, *The inbox's sixth category*). Putting `down` here would file
 /// every outage in the standup digest as a blocked ticket.
+///
+/// **`done_statuses` is empty for the same reason** (#1501): a monitor is
+/// never finished. `up` is healthy, not done, and a job context anchored on a
+/// monitor stays as live as the monitor does.
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
     use knobas_source::{KindPaths, PayloadPath};
     vec![KindPaths {
@@ -346,6 +350,11 @@ mod tests {
             paths.blocked_statuses.is_empty(),
             "a down monitor is broken, not blocked: {:?}",
             paths.blocked_statuses
+        );
+        assert!(
+            paths.done_statuses.is_empty(),
+            "an up monitor is healthy, not done: {:?}",
+            paths.done_statuses
         );
     }
 

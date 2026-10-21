@@ -270,10 +270,14 @@ async fn membership_stays_adr_0008s_and_the_context_seeds_the_reach() {
     draw(&pool, &parent, &repo, "works-in").await;
     draw(&pool, &repo, &repo_build, "built-by").await;
 
-    let promoted = context::promote(&pool, &EntityRef::parse(&sub).unwrap())
-        .await
-        .unwrap()
-        .unwrap();
+    let promoted = context::promote(
+        &pool,
+        &EntityRef::parse(&sub).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     draw(&pool, &promoted.context.id, &added, "related").await;
 
     let members = context::member_ids(&pool, &promoted.context.id)
@@ -328,10 +332,14 @@ async fn a_vm_the_context_adds_only_goes_down() {
     draw(&pool, &stranger, &vm, "related").await;
     draw(&pool, &elsewhere, &vm, "runs-on").await;
 
-    let promoted = context::promote(&pool, &EntityRef::parse(&pay).unwrap())
-        .await
-        .unwrap()
-        .unwrap();
+    let promoted = context::promote(
+        &pool,
+        &EntityRef::parse(&pay).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     draw(&pool, &promoted.context.id, &vm, "related").await;
 
     let got = reached(&pool, &pay).await;
@@ -483,4 +491,33 @@ async fn a_parent_whose_type_cannot_be_read_brings_nothing() {
     draw(&pool, &parent, &repo, "works-in").await;
 
     assert!(reached(&pool, &sub).await.is_empty());
+}
+
+/// A done job is archived (#1501), and opening it is reading it: its reach
+/// still starts from what its context holds, as it did while it was live.
+#[tokio::test]
+async fn an_archived_contexts_adds_are_still_reached() {
+    let pool = scratch().await;
+    let pay = ticket(&pool, "PAY-501").await;
+    let vm = asset(&pool, "vm", "vm-done-01", None).await;
+    let promoted = context::promote(
+        &pool,
+        &EntityRef::parse(&pay).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    draw(&pool, &promoted.context.id, &vm, "related").await;
+    assert!(reached(&pool, &pay).await.contains_key(&vm));
+
+    sqlx::query("update knobas.context set archived_at = now() where id = $1")
+        .bind(&promoted.context.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        reached(&pool, &pay).await.contains_key(&vm),
+        "an archived job still shows what it held"
+    );
 }

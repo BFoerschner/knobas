@@ -148,6 +148,8 @@ fn url_forms() -> Vec<knobas_source::url_forms::UrlForm> {
 /// **`blocked_statuses` is empty for the same reason**, not by omission: a
 /// page is never "stuck". A source with no status cannot have a blocked-like
 /// one, so the set is empty rather than borrowing Jira's three names.
+/// `done_statuses` is empty for that reason too (#1501): a page is never
+/// finished, so no job context anchored on one is archived by its status.
 ///
 /// **A page's parent is the page above it, and its chain is every ancestor**
 /// (ADR-0018, #599), read off the `ancestors` array [`crate::api::EXPAND`]
@@ -352,6 +354,11 @@ mod tests {
             paths.blocked_statuses.is_empty(),
             "a page is never stuck, so it borrows no other product's names: {:?}",
             paths.blocked_statuses
+        );
+        assert!(
+            paths.done_statuses.is_empty(),
+            "a page is never finished either: {:?}",
+            paths.done_statuses
         );
     }
 

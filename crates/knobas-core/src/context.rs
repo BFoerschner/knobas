@@ -133,28 +133,29 @@ fn mint_id() -> String {
     EntityRef::new("ctx", &uuid::Uuid::new_v4().to_string()).to_string()
 }
 
-/// Write one context and its entity row, in one transaction.
+/// Write one context and its entity row, in the caller's transaction.
 ///
 /// The entity row is what makes the context linkable at all -- an *Add to
 /// context* is a link, and `knobas.link` has foreign keys on both ends -- so a
 /// context without one would exist and be unusable. One transaction, because
-/// the two rows are one fact.
+/// the two rows are one fact. `archived` is the born-archived case (#1501): a
+/// context first made for a done ticket.
 async fn insert(
-    pool: &PgPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     id: &str,
     kind: ContextKind,
     title: &str,
     anchor_id: Option<&str>,
+    archived: bool,
 ) -> Result<ContextRow, CoreError> {
-    let mut tx = pool.begin().await?;
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ctx', $2)")
         .bind(id)
         .bind(title)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
-    let row = sqlx::query_as::<_, ContextRow>(concat!(
-        "insert into knobas.context (id, kind, title, anchor_id)
-         values ($1, $2, $3, $4)
+    Ok(sqlx::query_as::<_, ContextRow>(concat!(
+        "insert into knobas.context (id, kind, title, anchor_id, archived_at)
+         values ($1, $2, $3, $4, case when $5 then now() end)
          returning ",
         context_columns!()
     ))
@@ -162,10 +163,9 @@ async fn insert(
     .bind(kind.as_str())
     .bind(title)
     .bind(anchor_id)
-    .fetch_one(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    Ok(row)
+    .bind(archived)
+    .fetch_one(&mut **tx)
+    .await?)
 }
 
 /// Create an ad-hoc context -- a label, no anchor, no source system.
@@ -178,7 +178,40 @@ async fn insert(
 ///
 /// [`CoreError::Db`] if a write fails.
 pub async fn create_adhoc(pool: &PgPool, title: &str) -> Result<ContextRow, CoreError> {
-    insert(pool, &mint_id(), ContextKind::Adhoc, title.trim(), None).await
+    let mut tx = pool.begin().await?;
+    let row = insert(
+        &mut tx,
+        &mint_id(),
+        ContextKind::Adhoc,
+        title.trim(),
+        None,
+        false,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(row)
+}
+
+/// SQL for "item `i`'s status is one its source calls done-like" (#1501).
+///
+/// The set is the adapter's declaration (`KindPaths::done_statuses`), matched
+/// case-insensitively against the declared `status_name`, the way the
+/// standup's blocked-like read matches `blocked_statuses`. There is no list
+/// of words here and there must never be one: a source that declares none, a
+/// kind with no status path, or an item that is not mirrored is never done,
+/// which is the safe miss (ADR-0007). `$decl` is the placeholder the
+/// [`Declarations`](crate::payload::Declarations) jsonb is bound at, and the
+/// row's alias must be `i`, as for every `declared_*!` macro.
+macro_rules! done_like {
+    ($decl:literal) => {
+        concat!(
+            "coalesce(exists (select 1 from jsonb_array_elements_text(",
+            crate::declared_array!($decl, "done_statuses"),
+            ") as done(name) where lower(done.name) = lower(",
+            crate::declared_string!($decl, "status_name"),
+            ")), false)"
+        )
+    };
 }
 
 /// What the promote path needs to know about its anchor, in one read.
@@ -192,15 +225,26 @@ pub async fn create_adhoc(pool: &PgPool, title: &str) -> Result<ContextRow, Core
 /// ticket-kind context, never a wrong epic. A second source's spelling of
 /// "this is an epic" is one more `or` here and nothing anywhere else.
 ///
+/// `done` is [`done_like!`] on the anchor, which is what makes a context first
+/// made for a done ticket born archived.
+///
 /// The join is `left`, so an entity that was never mirrored (a note, say)
 /// still answers -- with no payload to read, it misses toward ticket like
-/// everything else.
-const ANCHOR_SHAPE: &str = "
-    select e.title,
-           coalesce(i.payload->'fields'->'issuetype'->>'name' ilike 'epic', false) as epic
-      from knobas.entity e
-      left join sync.live_item i on i.entity_id = e.id
-     where e.id = $1";
+/// everything else, and is never done.
+const ANCHOR_SHAPE: &str = concat!(
+    "select e.title,
+            coalesce(i.payload->'fields'->'issuetype'->>'name' ilike 'epic', false) as epic,
+            ",
+    done_like!("$2"),
+    " as done
+       from knobas.entity e
+       left join sync.live_item i on i.entity_id = e.id
+      where e.id = $1"
+);
+
+/// The advisory-lock space promotions serialise in: the two-key form, whose
+/// keys never meet the one-key locks a sync run takes on its source.
+const PROMOTE_LOCK_SPACE: i32 = 47;
 
 /// A promotion's answer: the context, and whether this call made it.
 ///
@@ -220,12 +264,19 @@ pub struct Promoted {
 /// Promote an entity to a context of its own (spec §7: "any ticket can be
 /// promoted").
 ///
-/// Idempotent: promoting an entity that already anchors an unarchived context
-/// answers with that context and `fresh: false`. The check-then-insert race is
-/// closed by `context_anchor_idx` (migration 0010), whose refusal classifies
-/// as [`CoreError::Duplicate`] and is answered by re-reading -- so two racing
-/// promotes both get the one context and exactly one of them hears
-/// `fresh: true`.
+/// Idempotent: promoting an entity that already anchors a context answers
+/// with that context and `fresh: false`, **archived or not** (#1501).
+/// Archived follows the ticket's status and only that, so opening a done job
+/// reads its archived context and never touches `archived_at`; a context
+/// first made for a ticket whose status is done-like (`declarations`, the
+/// anchor's source's) is born archived.
+///
+/// Two racing promotes of one anchor take a transaction-scoped advisory lock
+/// on it, so the second reads what the first made: `context_anchor_idx`
+/// (migration 0010) covers only unarchived rows and cannot keep two
+/// born-archived contexts apart. Its refusal still classifies as
+/// [`CoreError::Duplicate`] and is answered by re-reading, for a writer that
+/// is not this function.
 ///
 /// `None` if `anchor` has no `knobas.entity` row: promoting something that
 /// never synced is a miss the caller turns into its own not-found, not a
@@ -237,20 +288,31 @@ pub struct Promoted {
 /// about a context would put a `ctx` node at the walk's root, which is the
 /// exact traversal [`MEMBER_IDS`]'s kind filter exists to refuse -- see the
 /// module note. [`CoreError::Db`] if a statement fails.
-pub async fn promote(pool: &PgPool, anchor: &EntityRef) -> Result<Option<Promoted>, CoreError> {
+pub async fn promote(
+    pool: &PgPool,
+    anchor: &EntityRef,
+    declarations: &crate::payload::Declarations,
+) -> Result<Option<Promoted>, CoreError> {
     if anchor.namespace == "ctx" {
         return Err(CoreError::AnchorIsAContext);
     }
     let anchor_id = anchor.to_string();
-    let Some((title, epic)) = sqlx::query_as::<_, (String, bool)>(ANCHOR_SHAPE)
+    let mut tx = pool.begin().await?;
+    sqlx::query("select pg_advisory_xact_lock($1, hashtext($2))")
+        .bind(PROMOTE_LOCK_SPACE)
         .bind(&anchor_id)
-        .fetch_optional(pool)
+        .execute(&mut *tx)
+        .await?;
+    let Some((title, epic, done)) = sqlx::query_as::<_, (String, bool, bool)>(ANCHOR_SHAPE)
+        .bind(&anchor_id)
+        .bind(declarations.as_param())
+        .fetch_optional(&mut *tx)
         .await?
     else {
         return Ok(None);
     };
 
-    if let Some(existing) = anchored(pool, &anchor_id).await? {
+    if let Some(existing) = anchored(&mut *tx, &anchor_id).await? {
         return Ok(Some(Promoted {
             context: existing,
             fresh: false,
@@ -270,15 +332,19 @@ pub async fn promote(pool: &PgPool, anchor: &EntityRef) -> Result<Option<Promote
         title
     };
 
-    match insert(pool, &mint_id(), kind, &title, Some(&anchor_id)).await {
-        Ok(row) => Ok(Some(Promoted {
-            context: row,
-            fresh: true,
-        })),
-        // The race the index exists for: someone promoted between the read
-        // and the write. The context they made is the answer; this call
-        // mutated nothing, so it is not fresh.
+    match insert(&mut tx, &mint_id(), kind, &title, Some(&anchor_id), done).await {
+        Ok(row) => {
+            tx.commit().await?;
+            Ok(Some(Promoted {
+                context: row,
+                fresh: true,
+            }))
+        }
+        // Someone outside this function inserted between the read and the
+        // write. The context they made is the answer; this call mutated
+        // nothing, so it is not fresh. The failed transaction rolls back.
         Err(CoreError::Duplicate) => {
+            drop(tx);
             Ok(anchored(pool, &anchor_id).await?.map(|context| Promoted {
                 context,
                 fresh: false,
@@ -288,17 +354,127 @@ pub async fn promote(pool: &PgPool, anchor: &EntityRef) -> Result<Option<Promote
     }
 }
 
-/// The unarchived context anchored on `anchor_id`, if there is one.
-async fn anchored(pool: &PgPool, anchor_id: &str) -> Result<Option<ContextRow>, CoreError> {
+/// The context anchored on `anchor_id`, if there is one: the unarchived one,
+/// else the newest archived one (#1501). Before #1501 an archived context
+/// could be followed by a fresh one on the same anchor, so a database may
+/// still hold several.
+async fn anchored<'e, E>(executor: E, anchor_id: &str) -> Result<Option<ContextRow>, CoreError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
     Ok(sqlx::query_as::<_, ContextRow>(concat!(
         "select ",
         context_columns!(),
-        " from knobas.context where anchor_id = $1 and archived_at is null"
+        " from knobas.context where anchor_id = $1
+          order by archived_at is not null, created_at desc, id desc
+          limit 1"
     ))
     .bind(anchor_id)
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await?)
 }
+
+/// Archive and revive one source's job contexts by their anchors' status
+/// (#1501): what a sync run does as it lands, in the run's transaction.
+///
+/// A context whose anchor's status is in its source's done-like set
+/// ([`done_like!`]) is archived; one whose anchor's status is outside it is
+/// revived. Off the mirror and over every context anchored on this source's
+/// live items, not only those the run emitted: an incremental run that saw a
+/// ticket unchanged leaves its context as the last run did, and a changed
+/// declaration takes effect on the next run. A context whose anchor left the
+/// mirror is left as it was.
+///
+/// Revival takes one context per anchor, the newest, and none where the
+/// anchor already has a live one: `context_anchor_idx` allows one unarchived
+/// context per anchor, and a database from before #1501 may hold more than
+/// one archived context on an anchor.
+///
+/// `declarations` must hold this source's own descriptor: one that is absent
+/// declares no done-like set, and every context of the source would revive.
+///
+/// Answers how many contexts moved.
+///
+/// # Errors
+///
+/// The statement's own error, unwrapped: the run's transaction is the
+/// caller's, and its error type is the database's.
+pub async fn follow_status<'e, E>(
+    executor: E,
+    source_id: &str,
+    declarations: &crate::payload::Declarations,
+) -> Result<u64, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    Ok(sqlx::query(FOLLOW_STATUS)
+        .bind(source_id)
+        .bind(declarations.as_param())
+        .execute(executor)
+        .await?
+        .rows_affected())
+}
+
+/// [`follow_status`]' statement: `$1` the source id, `$2` the declarations.
+const FOLLOW_STATUS: &str = concat!(
+    "with s as (
+        select c.id, c.anchor_id, c.created_at, c.archived_at, ",
+    done_like!("$2"),
+    " as done
+          from knobas.context c
+          join sync.live_item i on i.entity_id = c.anchor_id
+         where i.source_id = $1
+     ),
+     moves as (
+        select id, true as done from s where done and archived_at is null
+        union all
+        (select distinct on (anchor_id) id, false
+           from s
+          where not done and archived_at is not null
+            and not exists (select 1 from knobas.context o
+                             where o.anchor_id = s.anchor_id and o.archived_at is null)
+          order by anchor_id, created_at desc, id desc)
+     )
+     update knobas.context c
+        set archived_at = case when m.done then now() end
+       from moves m
+      where c.id = m.id"
+);
+
+/// The one-time pass (#1501): archive every live context whose anchor's status
+/// is already done-like, over every source `declarations` holds.
+///
+/// Run at startup. It archives and never revives: a source whose adapter is
+/// not loaded declares nothing, and reviving on that would undo what its last
+/// sync run decided. Idempotent: a second run finds nothing unarchived on a
+/// done anchor and moves nothing.
+///
+/// Answers how many contexts it archived.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the statement fails.
+pub async fn archive_done(
+    pool: &PgPool,
+    declarations: &crate::payload::Declarations,
+) -> Result<u64, CoreError> {
+    Ok(sqlx::query(ARCHIVE_DONE)
+        .bind(declarations.as_param())
+        .execute(pool)
+        .await?
+        .rows_affected())
+}
+
+/// [`archive_done`]'s statement: `$1` the declarations.
+const ARCHIVE_DONE: &str = concat!(
+    "update knobas.context c
+        set archived_at = now()
+       from sync.live_item i
+      where i.entity_id = c.anchor_id
+        and c.archived_at is null
+        and ",
+    done_like!("$1")
+);
 
 /// Every unarchived context, newest first -- the switcher's list.
 ///

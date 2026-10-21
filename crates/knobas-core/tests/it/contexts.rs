@@ -174,7 +174,10 @@ async fn promoting_a_ticket_yields_one_ticket_context_however_often() {
         .unwrap();
 
     let anchor = EntityRef::parse(&ticket).unwrap();
-    let promoted = context::promote(&pool, &anchor).await.unwrap().unwrap();
+    let promoted = context::promote(&pool, &anchor, &knobas_core::payload::Declarations::empty())
+        .await
+        .unwrap()
+        .unwrap();
     assert!(promoted.fresh, "the first promotion made the context");
     let ctx = promoted.context;
     assert_eq!(ctx.kind, ContextKind::Ticket);
@@ -183,7 +186,10 @@ async fn promoting_a_ticket_yields_one_ticket_context_however_often() {
 
     // Promoting again is the same context, not a second one -- and the store
     // says so, which is what lets the command log and announce exactly once.
-    let again = context::promote(&pool, &anchor).await.unwrap().unwrap();
+    let again = context::promote(&pool, &anchor, &knobas_core::payload::Declarations::empty())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(again.context.id, ctx.id);
     assert!(!again.fresh, "the second promotion mutated nothing");
     assert_eq!(context::list(&pool).await.unwrap().len(), 1);
@@ -193,7 +199,12 @@ async fn promoting_a_ticket_yields_one_ticket_context_however_often() {
 async fn promoting_something_that_never_synced_is_a_miss_not_a_context() {
     let pool = scratch().await;
     let ghost = EntityRef::new(SOURCE, "PAY-404");
-    assert!(context::promote(&pool, &ghost).await.unwrap().is_none());
+    assert!(
+        context::promote(&pool, &ghost, &knobas_core::payload::Declarations::empty())
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert!(context::list(&pool).await.unwrap().is_empty());
 }
 
@@ -207,11 +218,15 @@ async fn promoting_an_epic_is_read_off_the_issue_type() {
         serde_json::json!({"fields": {"issuetype": {"name": "Epic"}}}),
     )
     .await;
-    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap())
-        .await
-        .unwrap()
-        .unwrap()
-        .context;
+    let ctx = context::promote(
+        &pool,
+        &EntityRef::parse(&epic).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .context;
     assert_eq!(ctx.kind, ContextKind::Epic);
 }
 
@@ -233,11 +248,15 @@ async fn an_unrecognized_issue_type_shape_misses_toward_ticket() {
         ),
     ] {
         let id = with_payload(&pool, "ticket", key, payload).await;
-        let ctx = context::promote(&pool, &EntityRef::parse(&id).unwrap())
-            .await
-            .unwrap()
-            .unwrap()
-            .context;
+        let ctx = context::promote(
+            &pool,
+            &EntityRef::parse(&id).unwrap(),
+            &knobas_core::payload::Declarations::empty(),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
         assert_eq!(ctx.kind, ContextKind::Ticket, "payload of {key}");
     }
 }
@@ -275,11 +294,15 @@ async fn a_promoted_anchor_is_a_member_and_seeds_the_walk() {
     draw(&pool, &pr, &build).await;
     draw(&pool, &build, &page).await;
 
-    let ctx = context::promote(&pool, &EntityRef::parse(&ticket).unwrap())
-        .await
-        .unwrap()
-        .unwrap()
-        .context;
+    let ctx = context::promote(
+        &pool,
+        &EntityRef::parse(&ticket).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .context;
 
     assert_eq!(members(&pool, &ctx.id).await, set(&[&ticket, &pr, &build]));
 }
@@ -356,11 +379,15 @@ async fn epic_children_seed_the_walk_through_the_recorded_parent() {
     draw(&pool, &pr, &build).await;
     draw(&pool, &build, &page).await;
 
-    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap())
-        .await
-        .unwrap()
-        .unwrap()
-        .context;
+    let ctx = context::promote(
+        &pool,
+        &EntityRef::parse(&epic).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .context;
 
     assert_eq!(
         members(&pool, &ctx.id).await,
@@ -399,11 +426,15 @@ async fn a_classic_epics_children_are_members_through_the_stored_epic() {
     )
     .await;
 
-    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap())
-        .await
-        .unwrap()
-        .unwrap()
-        .context;
+    let ctx = context::promote(
+        &pool,
+        &EntityRef::parse(&epic).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .context;
 
     assert_eq!(members(&pool, &ctx.id).await, set(&[&epic, &story, &bug]));
     let merged: BTreeSet<String> = context::held_by_any_context(&pool)
@@ -485,11 +516,15 @@ async fn a_foreign_or_misshapen_parent_contributes_nothing() {
     )
     .await;
 
-    let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap())
-        .await
-        .unwrap()
-        .unwrap()
-        .context;
+    let ctx = context::promote(
+        &pool,
+        &EntityRef::parse(&epic).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .context;
 
     let got = members(&pool, &ctx.id).await;
     assert!(
@@ -542,11 +577,15 @@ async fn an_unknown_context_has_no_members_rather_than_an_error() {
 async fn the_anchor_index_refuses_a_second_context_as_a_duplicate() {
     let pool = scratch().await;
     let ticket = with_payload(&pool, "ticket", "PAY-1", serde_json::json!({})).await;
-    let ctx = context::promote(&pool, &EntityRef::parse(&ticket).unwrap())
-        .await
-        .unwrap()
-        .unwrap()
-        .context;
+    let ctx = context::promote(
+        &pool,
+        &EntityRef::parse(&ticket).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .context;
 
     let refused = sqlx::query(
         "insert into knobas.context (id, kind, title, anchor_id)
@@ -579,11 +618,15 @@ async fn a_ticket_context_does_not_seed_its_subtasks() {
     )
     .await;
 
-    let ctx = context::promote(&pool, &EntityRef::parse(&story).unwrap())
-        .await
-        .unwrap()
-        .unwrap()
-        .context;
+    let ctx = context::promote(
+        &pool,
+        &EntityRef::parse(&story).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .context;
     assert_eq!(ctx.kind, ContextKind::Ticket);
     assert_eq!(
         members(&pool, &ctx.id).await,
@@ -604,7 +647,12 @@ async fn promoting_a_context_is_refused() {
     let ctx = context::create_adhoc(&pool, "payout retries")
         .await
         .unwrap();
-    let refused = context::promote(&pool, &EntityRef::parse(&ctx.id).unwrap()).await;
+    let refused = context::promote(
+        &pool,
+        &EntityRef::parse(&ctx.id).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await;
     assert!(
         matches!(refused, Err(CoreError::AnchorIsAContext)),
         "got {refused:?}"
@@ -872,11 +920,15 @@ async fn the_merged_walk_is_the_union_of_every_contexts_members() {
     )
     .await;
     draw(&pool, &child, &build).await;
-    let promoted = context::promote(&pool, &EntityRef::parse(&epic).unwrap())
-        .await
-        .unwrap()
-        .unwrap()
-        .context;
+    let promoted = context::promote(
+        &pool,
+        &EntityRef::parse(&epic).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .context;
 
     // Three: archived, and everything it alone reaches is out.
     let old = context::create_adhoc(&pool, "last spring").await.unwrap();
@@ -995,10 +1047,14 @@ async fn a_misshapen_parent_seeds_no_context_in_the_merged_walk() {
         serde_json::json!({"fields": {}, "epic": "EPIC-1"}),
     )
     .await;
-    context::promote(&pool, &EntityRef::parse(&epic).unwrap())
-        .await
-        .unwrap()
-        .unwrap();
+    context::promote(
+        &pool,
+        &EntityRef::parse(&epic).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
 
     let got: BTreeSet<String> = context::held_by_any_context(&pool)
         .await
@@ -1022,4 +1078,291 @@ async fn a_misshapen_parent_seeds_no_context_in_the_merged_walk() {
     ] {
         assert!(!got.contains(other), "{other} {why}");
     }
+}
+
+// -- the lifecycle (#1501) ---------------------------------------------------
+
+/// What the Jira adapter declares for a ticket's status and its done-like
+/// set, under this file's source id. The lifecycle reads nothing else.
+fn done_like_declared() -> knobas_core::payload::Declarations {
+    knobas_core::payload::Declarations::empty().with(
+        SOURCE,
+        vec![knobas_core::payload::KindPaths {
+            kind: "ticket".to_owned(),
+            status_name: vec![knobas_core::payload::PayloadPath::of([
+                "fields", "status", "name",
+            ])],
+            done_statuses: vec!["Done".to_owned(), "Closed".to_owned()],
+            ..knobas_core::payload::KindPaths::default()
+        }],
+    )
+}
+
+fn in_status(status: &str) -> serde_json::Value {
+    serde_json::json!({ "fields": { "status": { "name": status } } })
+}
+
+async fn set_status(pool: &PgPool, id: &str, status: &str) {
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(id)
+        .bind(in_status(status))
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn archived(pool: &PgPool, ctx: &str) -> bool {
+    sqlx::query_scalar::<_, bool>(
+        "select archived_at is not null from knobas.context where id = $1",
+    )
+    .bind(ctx)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// A context first made for a done ticket is born archived; one made for a
+/// ticket in any other status is born live, and so is one made for a done
+/// ticket whose source declares no done-like set.
+#[tokio::test]
+async fn a_context_first_made_for_a_done_ticket_is_born_archived() {
+    let pool = scratch().await;
+    let done = with_payload(&pool, "ticket", "LIFE-1", in_status("dOnE")).await;
+    let open = with_payload(&pool, "ticket", "LIFE-2", in_status("In Progress")).await;
+    let undeclared = with_payload(&pool, "ticket", "LIFE-3", in_status("Done")).await;
+
+    let born = context::promote(
+        &pool,
+        &EntityRef::parse(&done).unwrap(),
+        &done_like_declared(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(born.fresh);
+    assert!(
+        born.context.archived_at.is_some(),
+        "Done in any case is done-like: {:?}",
+        born.context
+    );
+
+    let live = context::promote(
+        &pool,
+        &EntityRef::parse(&open).unwrap(),
+        &done_like_declared(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(live.context.archived_at.is_none(), "{:?}", live.context);
+
+    let unknown = context::promote(
+        &pool,
+        &EntityRef::parse(&undeclared).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        unknown.context.archived_at.is_none(),
+        "a source that declares no done-like set never archives: {:?}",
+        unknown.context
+    );
+}
+
+/// Promoting a ticket that anchors an archived context answers with it, still
+/// archived, and makes nothing: opening a done job is reading it.
+#[tokio::test]
+async fn promoting_a_ticket_with_an_archived_context_returns_it_and_makes_nothing() {
+    let pool = scratch().await;
+    let ticket = with_payload(&pool, "ticket", "LIFE-4", in_status("Closed")).await;
+    let anchor = EntityRef::parse(&ticket).unwrap();
+    let first = context::promote(&pool, &anchor, &done_like_declared())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(first.context.archived_at.is_some());
+
+    // The ticket is still Closed, and an empty declaration would call it open:
+    // what promote answers with is the stored context, whatever it reads now.
+    let again = context::promote(&pool, &anchor, &knobas_core::payload::Declarations::empty())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!again.fresh);
+    assert_eq!(again.context.id, first.context.id);
+    assert_eq!(again.context.archived_at, first.context.archived_at);
+    let count: i64 = sqlx::query_scalar("select count(*) from knobas.context where anchor_id = $1")
+        .bind(&ticket)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1, "one context per anchor, archived or not");
+}
+
+/// Two racing promotes of a done ticket make one context between them. The
+/// unique index covers live contexts only, so it cannot be what holds this.
+#[tokio::test]
+async fn racing_promotes_of_a_done_ticket_make_one_context() {
+    let pool = scratch().await;
+    let ticket = with_payload(&pool, "ticket", "LIFE-5", in_status("Done")).await;
+    let anchor = EntityRef::parse(&ticket).unwrap();
+    let declared = done_like_declared();
+    let promote = || context::promote(&pool, &anchor, &declared);
+    let (a, b, c, d) = tokio::join!(promote(), promote(), promote(), promote());
+    let ids: BTreeSet<String> = [a, b, c, d]
+        .into_iter()
+        .map(|answer| answer.unwrap().unwrap().context.id)
+        .collect();
+    assert_eq!(ids.len(), 1, "{ids:?}");
+    let count: i64 = sqlx::query_scalar("select count(*) from knobas.context where anchor_id = $1")
+        .bind(&ticket)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+/// The sync run's step: a done anchor archives its context, a status outside
+/// the set revives it, and only this source's contexts move.
+#[tokio::test]
+async fn following_the_status_archives_on_done_and_revives_when_it_leaves() {
+    let pool = scratch().await;
+    let ticket = with_payload(&pool, "ticket", "LIFE-6", in_status("In Progress")).await;
+    let ctx = context::promote(
+        &pool,
+        &EntityRef::parse(&ticket).unwrap(),
+        &done_like_declared(),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .context
+    .id;
+    let elsewhere = mirrored(&pool, "jira-eu", "ticket", "LIFE-7", in_status("Done")).await;
+    let other = context::promote(
+        &pool,
+        &EntityRef::parse(&elsewhere).unwrap(),
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .context
+    .id;
+
+    set_status(&pool, &ticket, "DONE").await;
+    let moved = context::follow_status(&pool, SOURCE, &done_like_declared())
+        .await
+        .unwrap();
+    assert_eq!(moved, 1);
+    assert!(archived(&pool, &ctx).await, "Done archives");
+    assert!(
+        !archived(&pool, &other).await,
+        "another source's context stays"
+    );
+    assert_eq!(
+        context::follow_status(&pool, SOURCE, &done_like_declared())
+            .await
+            .unwrap(),
+        0,
+        "a second run moves nothing"
+    );
+
+    set_status(&pool, &ticket, "Reopened").await;
+    context::follow_status(&pool, SOURCE, &done_like_declared())
+        .await
+        .unwrap();
+    assert!(!archived(&pool, &ctx).await, "leaving Done revives");
+}
+
+/// A database from before #1501 may hold an archived context and a live one
+/// on one anchor: reviving takes neither the old one past the live one nor
+/// two at once, which the unique index would refuse.
+#[tokio::test]
+async fn reviving_leaves_an_older_archived_context_behind_a_live_one() {
+    let pool = scratch().await;
+    let ticket = with_payload(&pool, "ticket", "LIFE-8", in_status("Open")).await;
+    for (id, archived_at) in [
+        ("ctx:old-1", Some("2026-01-01T00:00:00Z")),
+        ("ctx:old-2", Some("2026-02-01T00:00:00Z")),
+    ] {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ctx', 'old')")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into knobas.context (id, kind, title, anchor_id, created_at, archived_at)
+             values ($1, 'ticket', 'old', $2, $3::timestamptz, $3::timestamptz)",
+        )
+        .bind(id)
+        .bind(&ticket)
+        .bind(archived_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    context::follow_status(&pool, SOURCE, &done_like_declared())
+        .await
+        .unwrap();
+    assert!(
+        archived(&pool, "ctx:old-1").await,
+        "only the newest revives"
+    );
+    assert!(!archived(&pool, "ctx:old-2").await, "the newest revives");
+    assert_eq!(
+        context::follow_status(&pool, SOURCE, &done_like_declared())
+            .await
+            .unwrap(),
+        0,
+        "with a live context on the anchor, the older one stays archived"
+    );
+}
+
+/// The one-time pass archives every live context on a done anchor and moves
+/// nothing on a second run; it never revives, even where the declarations it
+/// is given call a ticket open.
+#[tokio::test]
+async fn the_one_time_pass_archives_done_jobs_and_is_a_no_op_the_second_time() {
+    let pool = scratch().await;
+    let done = with_payload(&pool, "ticket", "LIFE-9", in_status("Done")).await;
+    let open = with_payload(&pool, "ticket", "LIFE-10", in_status("In Review")).await;
+    let empty = knobas_core::payload::Declarations::empty();
+    let done_ctx = context::promote(&pool, &EntityRef::parse(&done).unwrap(), &empty)
+        .await
+        .unwrap()
+        .unwrap()
+        .context
+        .id;
+    let open_ctx = context::promote(&pool, &EntityRef::parse(&open).unwrap(), &empty)
+        .await
+        .unwrap()
+        .unwrap()
+        .context
+        .id;
+    assert!(
+        !archived(&pool, &done_ctx).await,
+        "made before the pass knew"
+    );
+
+    assert_eq!(
+        context::archive_done(&pool, &done_like_declared())
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(archived(&pool, &done_ctx).await);
+    assert!(!archived(&pool, &open_ctx).await);
+    assert_eq!(
+        context::archive_done(&pool, &done_like_declared())
+            .await
+            .unwrap(),
+        0,
+        "the second run is a no-op"
+    );
+    context::archive_done(&pool, &empty).await.unwrap();
+    assert!(archived(&pool, &done_ctx).await, "the pass never revives");
 }
