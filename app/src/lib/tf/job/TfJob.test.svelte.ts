@@ -23,12 +23,8 @@ import type { CredentialHealth, SourceSyncStatus, SourceDescriptor, WriteOpPaylo
 import type { RunningTimer, Week } from "../../ipc/time";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
-<<<<<<< HEAD
 import { page as codeRowPage } from "../code-row/page";
-||||||| parent of 766cddbf (Start work: Run all steps says how many writes it queued; drop Step by step (#1426))
-=======
 import { writeQueuePanel } from "../../shell/write-queue.svelte";
->>>>>>> 766cddbf (Start work: Run all steps says how many writes it queued; drop Step by step (#1426))
 import { forgetFilters, sessionFilter } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
 import { createApps } from "../openin/apps.svelte";
