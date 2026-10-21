@@ -25,9 +25,9 @@
   import { recordCaptureContext } from "./lib/ipc/entity";
   import { entityAddress } from "./lib/tf/address";
   import { HOME, homeIfBlank } from "./lib/tf/home";
-  import { currentJob } from "./lib/tf/job/current.svelte";
+  import { breadcrumbJob, currentJob, linkRequest, type LinkTarget } from "./lib/tf/job/current.svelte";
   import { foregroundOf } from "./lib/tf/foreground";
-  import { parseTfHash } from "./lib/tf/route";
+  import { jobHash, parseTfHash } from "./lib/tf/route";
   import TfShell from "./lib/tf/TfShell.svelte";
   import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
   import { createDraftFlow } from "./lib/tf/drafting.svelte";
@@ -179,6 +179,19 @@
   /** *Start timer* on a ticket: the running ticket's draft first (R-13.2). */
   function startTimerOn(entityId: string, title: string) {
     void drafts.switchTo({ kind: "entity", entity_id: entityId }, title);
+  }
+
+  /**
+   * The launcher's *Link to <key>* (#1500): the job's own link dialog, the
+   * result preset. On the job page it opens there; from a view opened from
+   * the job, the job page is opened first, where its Connections drawer shows
+   * the link once it is made.
+   */
+  function linkToJob(target: LinkTarget) {
+    const job = breadcrumbJob.job;
+    if (job === null) return;
+    linkRequest.ask(job.key, target);
+    if (currentJob.entityId !== job.entityId) location.hash = jobHash(job.key);
   }
 
   /** Start on what the picker chose, and close it only if that worked. */
@@ -358,7 +371,8 @@
   <!--
     `sources` is supplied so the launcher's rows and chips read the live
     `source:health` store; an empty list means *watching, nothing to complain
-    about* (#36). There is no stored context to add to any more.
+    about* (#36). `openEntity` is the job the breadcrumb names, which *Link to
+    <key>* needs as its other end (#1500).
   -->
   <Launcher
     bind:open={launcherOpen}
@@ -366,8 +380,8 @@
     sourcesRead={{ phase: health.phase, error: health.error, retry: () => void health.reseed() }}
     inbox={{ count: inbox.count, items: inbox.stream.map((entry) => entry.item) }}
     today={todayTime}
-    context={undefined}
-    oncontext={undefined}
+    openEntity={breadcrumbJob.job === null ? undefined : { entityId: breadcrumbJob.job.entityId, label: breadcrumbJob.job.key }}
+    onlink={linkToJob}
     ontimer={startTimerOn}
     onnavigate={navigate}
     onclose={() => {}}

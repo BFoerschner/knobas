@@ -42,7 +42,7 @@
   {
     "token": "t",
     "insert": "t ",
-    "summary": "time — worklogs and the day review (M3)",
+    "summary": "time — worklogs and the day review",
     "probe": "t today",
     "prefix": "time",
     "expect": "recognised"
@@ -130,7 +130,7 @@
   {
     "token": "env:",
     "insert": "env:",
-    "summary": "greyed out — the estate arrives in M4 (also health:)",
+    "summary": "not a filter yet; use asset: or Dependencies (also health:)",
     "probe": "env:prod",
     "prefix": null,
     "expect": "reported"

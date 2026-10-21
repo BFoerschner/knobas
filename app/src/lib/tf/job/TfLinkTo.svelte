@@ -6,6 +6,9 @@
   the same debounce, sequencing and selection, over the job's ports. The link
   is written by `create_link` (BUILT) and stays in knobas, which the dialog
   says in one line (R-15.2).
+
+  The launcher's *Link to <key>* (#1500) opens it with the other end preset,
+  so only the relation and the note are left to pick.
 -->
 <script lang="ts">
   import type { LinkRow } from "../../ipc/entity";
@@ -15,11 +18,13 @@
   import { drawn } from "../../detail/relations";
   import { kindSingular } from "../../shell/kinds";
   import type { Layers } from "../layers.svelte";
+  import type { LinkTarget } from "./current.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
 
   let {
     jobKey,
     entityId,
+    preset = null,
     ports,
     layers,
     onclose,
@@ -27,12 +32,14 @@
   }: {
     jobKey: string;
     entityId: string;
+    /** The other end, already chosen: the launcher's *Link to <key>* (#1500). */
+    preset?: LinkTarget | null;
     ports: Pick<SessionPorts, "search" | "launcherHome"> & {
       createLink: (fromId: string, toId: string, relation?: string, note?: string) => Promise<LinkRow>;
     };
     layers: Layers;
     onclose: () => void;
-    onlinked: (target: SearchHit) => void;
+    onlinked: (target: LinkTarget) => void;
   } = $props();
 
   /** The relations prototype-6 offers, as `create_link` stores them. */
@@ -49,7 +56,9 @@
   // Read once: a `Session` owns a debounce timer and a request counter.
   const session = new Session({ search: ports.search, launcherHome: ports.launcherHome });
 
-  let target = $state<SearchHit | null>(null);
+  // svelte-ignore state_referenced_locally
+  // The preset is where the dialog starts; *Change* picks another.
+  let target = $state<LinkTarget | null>(preset);
   let relation = $state("related");
   let note = $state("");
   let failure = $state<string | null>(null);

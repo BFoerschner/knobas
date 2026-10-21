@@ -1,11 +1,11 @@
 /**
  * `>` — the navigation half of spec §4's action palette.
  *
- * §4 gives `>` two jobs: *"do it here"* rows that act on the selected result
+ * §4 gave `>` two jobs: *"do it here"* rows that act on the selected result
  * (start a timer, comment, change status) and, "with an empty query, the app's
- * navigation menu". The first needs write-back (M2) and the timer (M3) and is
- * out of M1 entirely — reserving rows for it would be dead chrome. The second
- * is a list of addresses: two since #1085.
+ * navigation menu". The first is retired (#1500, the 2026-10-21 ruling on
+ * #1416): the timer is ⌘T's, and commenting and status are the job page's. The
+ * second is a list of addresses: two since #1085.
  */
 
 /** One row of the `>` palette. */
@@ -15,7 +15,7 @@ export interface LauncherAction {
   label: string;
   /** The second line: what pressing it does. */
   detail: string;
-  /** Where it goes. Every M1 action is a navigation. */
+  /** Where it goes. Every action here is a navigation. */
   hash: string;
 }
 

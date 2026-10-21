@@ -20,3 +20,54 @@ export const currentJob = {
     };
   },
 };
+
+/**
+ * The job the breadcrumb names (#1500): the job page's, or the job a view
+ * opened from it starts its breadcrumb at ('PAY-231 › Time'), with the
+ * ticket's entity id; `null` on Tickets, Inbox and Settings, and while the
+ * key is still being resolved. The shell reports it; the launcher's *Link to
+ * <key>* row is offered against it. Never the newest open job: a guessed job
+ * would take links to the wrong ticket in silence.
+ */
+let crumb = $state<{ key: string; entityId: string } | null>(null);
+
+export const breadcrumbJob = {
+  get job() {
+    return crumb;
+  },
+  set(job: { key: string; entityId: string } | null): void {
+    crumb = job;
+  },
+};
+
+/** The other end of a link the launcher asked the job's dialog for. */
+export interface LinkTarget {
+  entity_id: string;
+  title: string;
+  kind: string;
+}
+
+let asked = $state<{ key: string; target: LinkTarget } | null>(null);
+
+/**
+ * *Link to <key>* from the launcher (#1500): the launcher never writes the
+ * link. It asks here, and the job page with that key opens its own link
+ * dialog with the result preset, so the relation is picked where every other
+ * link from the job is.
+ */
+export const linkRequest = {
+  ask(key: string, target: LinkTarget): void {
+    asked = { key, target };
+  },
+  /** The target asked for `key`, handed over once; `null` when none waits. */
+  take(key: string): LinkTarget | null {
+    if (asked === null || asked.key !== key) return null;
+    const { target } = asked;
+    asked = null;
+    return target;
+  },
+  /** Forget a request nobody took: the reader left before the job drew. */
+  drop(): void {
+    asked = null;
+  },
+};

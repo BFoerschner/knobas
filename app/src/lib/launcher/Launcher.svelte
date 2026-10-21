@@ -18,36 +18,35 @@
 
   ## The Tab action chain
 
-  §4's *"do it here"* rows, over the selected result, in §4's own order
-  (*… Link to… › Add to context › Start timer …*). There are three:
+  Two rows over the selected entity result, in this order, and nothing else
+  (#1500; the 2026-10-21 ruling on #1416 in
+  `docs/decisions/2026-10-unattended-rulings.md`):
 
-  * **Link to ⟨the open entity⟩** (M2), which exists only while a detail is
-    open — an action chain that offered "link to nothing" would be a row that
-    cannot be pressed;
-  * **Add to context ⟨the room the reader is standing in⟩** (M4.0, #436),
-    which exists only while they are standing in one, for the same reason. It
-    is an ordinary link to the context's own `ctx:` entity and not a command of
-    its own — ADR-0008, in as many words: *"an Add to context is an ordinary
-    link"* — so what the shell does with it is what it does with *Link to…*.
-    **On every entity row and not only on an asset**, though #436 is what asks
-    for it: the chain acts on *the selected result* and its other two rows have
-    never been per-kind, ADR-0008's membership rule is not per-kind either, and
-    a row that appeared for a container and vanished for the ticket about it
-    would be a rule the reader has to learn from its absences;
-  * **Start timer** (M3, #278), which exists on any result that can be a timer
+  * **Link to ⟨key⟩**, only while the breadcrumb names a job (the job page, or
+    a view opened from it: 'PAY-231 › Time') and the result is not that job's
+    own ticket. Never on Tickets, Inbox or Settings. Choosing it closes the
+    launcher and the shell opens the job's own link dialog with the result
+    preset, so the relation is picked where every other link from the job is;
+    the launcher never writes a link;
+  * **Start timer on ⟨title⟩** (#278), on any result that can be a timer
     target. A stored context cannot (`shell/timer.ts`), so the row is absent
     there rather than offered and then refused by the backend.
+
+  The rest of spec §4's old chain is retired by that ruling: Change status,
+  Comment and Start work are the job page's, the "do it here" timer and
+  comment rows are ⌘T's and the job page's, and *Add to context* went with
+  contexts made by hand (CONTEXT.md, Context). There is no *Open* row: `Enter`
+  opens. A saved smart list keeps its own two rows, Rename and Delete (#506).
 
   `Tab` still swallows the keystroke when the chain would be empty, because the
   alternative is `Tab` moving focus out of the box.
 
-  The launcher does neither of them. It says *which* result the reader chose
-  and lets the shell act, for the same reason it does not navigate: this is
-  stream E, and the entity that is open, the IPC and the toast are the shell's.
-  For the timer that division carries a rule with it — *Start timer* on another
-  entity **stops the running one first**, so the block the reader was in is
-  closed rather than lost (story 11) — and the shell is where the stop, and
-  #280's draft, belong.
+  The launcher acts on neither. It says *which* result the reader chose and
+  lets the shell act, for the same reason it does not navigate: the job, the
+  IPC and the toast are the shell's. For the timer that division carries a
+  rule with it: *Start timer* on another entity **stops the running one
+  first**, so the block the reader was in is closed rather than lost (story
+  11), and the shell is where the stop, and #280's draft, belong.
 -->
 <script lang="ts">
   import { onMount, tick } from "svelte";
@@ -66,6 +65,7 @@
   import type { HealthPhase } from "../shell/health.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import { entityAddress } from "../tf/address";
+  import type { LinkTarget } from "../tf/job/current.svelte";
   import { sharesKey } from "./format";
   import { canBeTarget } from "../shell/timer";
   import Board from "./Board.svelte";
@@ -91,8 +91,6 @@
     onclose,
     openEntity,
     onlink,
-    context,
-    oncontext,
     ontimer,
     ports,
     now,
@@ -131,43 +129,21 @@
     onnavigate: (hash: string) => void;
     onclose: () => void;
     /**
-     * The entity the shell has open behind the overlay, or `undefined`.
+     * The job the breadcrumb names, or `undefined` (#1500): the job page's,
+     * or the job a view opened from it names ('PAY-231 › Time'). Never on
+     * Tickets, Inbox or Settings, and never the newest open job.
      *
-     * The presence of this is what puts *Link to…* in a result's `Tab` chain:
-     * §4's action rows act on the selected result, and this one needs a second
-     * end. `label` is what the row says — the shell's word for what is open.
+     * The presence of this is what puts *Link to <key>* in a result's `Tab`
+     * chain: the one action about the pair (the result and the job). `label`
+     * is what the row says, the job's key.
      */
     openEntity?: { entityId: string; label: string } | undefined;
     /**
-     * Link the chosen result to the open entity. The write, the
-     * acknowledgement and the failure message are the shell's.
+     * Link the chosen result to that job. The launcher closes and the shell
+     * opens the job's own link dialog with the result preset, where the
+     * relation is picked and the write is the dialog's.
      */
-    onlink?: ((targetId: string, targetTitle: string) => void) | undefined;
-    /**
-     * The stored context the reader is standing in, or `undefined`.
-     *
-     * The second end of *Add to context*, and `openEntity`'s shape for
-     * `openEntity`'s reason: the launcher says which result was chosen and the
-     * shell knows which room it is standing in. `label` is what the row says —
-     * the context's own title, which is the word the reader picked.
-     *
-     * `undefined` is the ordinary answer in a *derived* room — *All work*, a
-     * source, a project — which has no `ctx:` entity to link to, and it leaves
-     * the row out of the chain rather than offering a write with one end.
-     */
-    context: { ctxId: string; label: string } | undefined;
-    /**
-     * Add the chosen result to that context. The write, the acknowledgement
-     * and the failure message are the shell's, exactly as `onlink`'s are —
-     * and it *is* `onlink`'s write, drawn to a `ctx:` entity (ADR-0008).
-     *
-     * **Required, like `ontimer` and unlike `onlink`**, for the reason #238
-     * put on `ontimer`: this pair of props is the only join between the
-     * launcher's *Add to context* row and the shell that acts on it, and an
-     * optional one can be dropped from `App.svelte`, type-check clean, and
-     * take the row out of the product without failing a test.
-     */
-    oncontext: ((targetId: string, targetTitle: string) => void) | undefined;
+    onlink?: ((target: LinkTarget) => void) | undefined;
     /**
      * Start the timer on the chosen result, **stopping whatever is running
      * first** (#278, story 11).
@@ -350,12 +326,12 @@
   }
 
   /** The entity a row stands for, if it stands for one. */
-  function entityOf(row: LauncherRow): { entityId: string; title: string } | null {
+  function entityOf(row: LauncherRow): { entityId: string; title: string; kind: string } | null {
     switch (row.kind) {
       case "hit":
-        return { entityId: row.hit.entity_id, title: row.hit.title };
+        return { entityId: row.hit.entity_id, title: row.hit.title, kind: row.hit.kind };
       case "recent":
-        return { entityId: row.row.entity_id, title: row.row.title };
+        return { entityId: row.row.entity_id, title: row.row.title, kind: row.row.kind };
       // A list, a syntax card and a navigation action are not entities, so
       // there is nothing to link. An inbox line is *about* an entity but is
       // not one (a credential expiry or an alert has none), and the day is a
@@ -372,10 +348,10 @@
   /**
    * What can be done to `row` right now.
    *
-   * Empty — and therefore no chain at all — when nothing is open, when the row
-   * is not an entity, and when the row *is* the open entity: an entity cannot
-   * be linked to itself, and the backend refuses it, so offering the row would
-   * be offering an error.
+   * Empty, and therefore no chain at all, when the row is not an entity and
+   * nothing can be done to it. *Link to <key>* is left out on the job's own
+   * ticket: an entity cannot be linked to itself, and the backend refuses it,
+   * so offering the row would be offering an error.
    */
   function chainFor(row: LauncherRow): ChainAction[] {
     // A saved smart list is not an entity and has its own two things to do
@@ -411,25 +387,12 @@
       actions.push({
         id: "link",
         label: `Link to ${open.label}`,
+        // The relation is picked in the job's dialog, which the shell opens
+        // over the job, so the launcher steps out of its way.
         run: () => {
-          link(entity.entityId, entity.title);
           chain = null;
-        },
-      });
-    }
-
-    // The room the reader is standing in, and never the row itself: a context
-    // reaches this list like anything else (it is a row in `knobas.entity`),
-    // and a context added to itself is the self-link the backend refuses.
-    const room = context;
-    if (room && oncontext && entity.entityId !== room.ctxId) {
-      const add = oncontext;
-      actions.push({
-        id: "context",
-        label: `Add to ${room.label}`,
-        run: () => {
-          add(entity.entityId, entity.title);
-          chain = null;
+          close();
+          link({ entity_id: entity.entityId, title: entity.title, kind: entity.kind });
         },
       });
     }
@@ -799,7 +762,8 @@
               onmouseenter={() => (suggestionPicked = index)}
             >
               <span class="nm">{suggestion.value}</span>
-              {#if suggestion.detail}<span class="s"> · {suggestion.detail}</span>{/if}
+              <!-- The separator is an expression: Svelte trims an element's leading space (#1515). -->
+              {#if suggestion.detail}<span class="s">{" · "}{suggestion.detail}</span>{/if}
             </button>
           {/each}
         </div>
