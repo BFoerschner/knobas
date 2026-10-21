@@ -10785,3 +10785,29 @@ Björn delegated four picks at triage (2026-10-21); two more came up while build
 
 - **How to read the item's source.** *Fork:* `spaceOfPage` on each item, or the `<source>:` prefix of `DocForYou.entity_id`. *Ruling:* the prefix. `for_you` items carry no source field and a page may be absent from the tree's space lists; the prefix is the contract's `<source>:<id>` form and needs no IPC change. Reversing costs one line.
 - **Does `forYouIn` dodge the house rule on `source_id` filter callbacks?** *Fork:* the helper destructures `source_id` outside the `.filter(` callback, so the scan in `house-rules.test.ts` does not see it; dodge or in intent? *Ruling (merge-manager, Sonnet):* in intent. The rule keeps a page from dropping rows of sources that do not fill a role; narrowing For you to the space the reader picked is a selection (the old filter already narrowed by the space's key), and the source is part of that space's identity. The helper sits in `docs.ts` beside `spaceId`/`spaceOfPage`, not in the page. *Reversing:* one function.
+
+---
+
+## #1564 — how *inherited* is marked, and which fixture parameter carries it
+
+Ruled 2026-10-21 by the implementer (Sonnet).
+
+**The fork:** the ticket offers "a dim chip or a separator other than a comma" and says the fake fixture needs one inherited select.
+
+**Ruling:** a `tf-chip` reading *inherited* after the kind word, for every kind but a secret (a secret drew none before). The fixture's `env` on `Payout_IntegrationTests` is inherited, which is also the pipeline `just shot` opens.
+
+**Reasoning:** a chip is the app's existing way to mark a state beside a value (the *queued* chip in the same row); no separator can be read as part of a list.
+
+**Cost of reversing:** one line in `TfPipeline.svelte` and its test.
+
+## #1583 — what tells a withdrawal from a send
+
+Ruled 2026-10-21 by the implementer (Sonnet).
+
+**The fork:** the follower hears `undefined` when a write leaves `pending_writes`, whether it was sent or withdrawn; no IPC carries the difference, and a sent write's mark must stay until the read shows it.
+
+**Ruling:** the signal is client-side: the queue store's `discard` announces a successful withdrawal (`noteWithdrawn` in `write-queue.svelte.ts`), and `markQueued` listens (`onWithdrawn`) for every mark with a write id, following or not. The mark goes quietly, with no toast. No IPC change.
+
+**Reasoning:** the ticket allows no IPC change where a client-visible signal exists. Listening apart from the follower keeps the drop safe if the follower has already left on the same queue read.
+
+**Cost of reversing:** a withdrawal made in another window of the app does not drop this window's mark; it falls back to today's behaviour (until a newer run lands). Removing the hook is two small functions.
