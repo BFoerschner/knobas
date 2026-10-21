@@ -867,8 +867,20 @@ async fn apply_health_and_backoff(deps: &SchedulerDeps, source_id: &str, result:
         SyncOutcome::Unauthorized => (Some(AuthState::Unauthorized), result.error.as_deref()),
         SyncOutcome::Unreachable => (Some(AuthState::Unreachable), result.error.as_deref()),
         // A protocol bug or a local database failure says nothing about the
-        // credential; leaving `auth_state` alone keeps the sources view honest.
-        SyncOutcome::Error => (None, None),
+        // credential, so no verdict is written -- but a stored `unreachable`
+        // is a claim about the far end this run did not re-witness, and left
+        // in place it reads over the run's own error on the sources view for
+        // as long as the error repeats (#1477). That one state is cleared.
+        SyncOutcome::Error => {
+            match config::clear_unreachable(&deps.pool, source_id).await {
+                Ok(Some(health)) => deps.events.source_health(health),
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(source_id, %error, "clearing a stale unreachable failed");
+                }
+            }
+            (None, None)
+        }
     };
     if let Some(state) = state {
         match config::set_health(&deps.pool, source_id, state, detail, None).await {
