@@ -30,13 +30,25 @@
     type OpenStretch,
     type TimerTarget,
   } from "../../ipc/time";
+  import { launcherHome as realLauncherHome, search as realSearch } from "../../ipc/search";
+  import type { SessionPorts } from "../../launcher/session.svelte";
   import { push } from "../../shell/toasts.svelte";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
   import { clockReading, dayBounds, dayKey, dayLabel, shiftDay } from "../../time/day";
   import { atClock, clockOf, offsetMinutes } from "../../time/draft";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
-  import { dayFigures, dayRows, hm, offerRuns, place, stripWindow, type DayRow, type OfferRun } from "./day-view";
+  import {
+    dayFigures,
+    dayRows,
+    fitLabel,
+    hm,
+    offerRuns,
+    place,
+    stripWindow,
+    type DayRow,
+    type OfferRun,
+  } from "./day-view";
   import TfBlockDialog, { type BlockForm } from "./TfBlockDialog.svelte";
 
   interface DayPorts {
@@ -46,6 +58,9 @@
     createBlock: typeof realCreateBlock;
     deleteBlock: typeof realDeleteBlock;
     dismissBlock: typeof realDismissBlock;
+    /** The block dialog's ticket picker searches with the launcher's reads (#1429). */
+    search: SessionPorts["search"];
+    launcherHome: SessionPorts["launcherHome"];
   }
 
   let {
@@ -60,6 +75,8 @@
     ports,
     now = () => new Date(),
     layers = sharedLayers,
+    stripWidth,
+    measureLabel,
   }: {
     /** Whether the database answers yet: nothing is read before it does. */
     databaseReady?: boolean;
@@ -79,6 +96,10 @@
     ports?: Partial<DayPorts>;
     now?: () => Date;
     layers?: Layers;
+    /** How wide the strip is in pixels: what a caller says, or what the element measures. */
+    stripWidth?: () => number;
+    /** How wide a strip label draws, `plain` for a label target's sans face; the canvas by default. */
+    measureLabel?: (text: string, plain: boolean) => number;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -91,6 +112,8 @@
     createBlock: realCreateBlock,
     deleteBlock: realDeleteBlock,
     dismissBlock: realDismissBlock,
+    search: (query) => realSearch(query),
+    launcherHome: () => realLauncherHome(),
     ...ports,
   };
 
@@ -149,6 +172,8 @@
       if (mine !== issued) return;
       loaded = answer;
       failure = null;
+      // A delete that has been sent is in this answer now, or refused and back.
+      held = held.filter((hold) => !hold.sent);
     } catch (cause) {
       if (mine !== issued) return;
       failure = ipcErrorMessage(cause);
@@ -158,6 +183,13 @@
   // The running timer's start is read too: a stop turns the running row into
   // a block, and the day has to read it back.
   const runningSince = $derived(timer.current?.started_at ?? null);
+
+  /**
+   * Blocks *Delete block* took and has not written yet (#1429): off the day at
+   * once, sent when the toast's *Undo* has had its time. `sent` once the write
+   * has landed, so the next read, which no longer has the block, lets it go.
+   */
+  let held = $state<{ id: number; sent: boolean }[]>([]);
   $effect(() => {
     revision;
     runningSince;
@@ -170,7 +202,7 @@
       ? []
       : dayRows({
           day: key,
-          blocks: ready.blocks,
+          blocks: ready.blocks.filter((entry) => !held.some((hold) => hold.id === entry.block.id)),
           offers: ready.offers,
           open: ready.open,
           running: timer.current,
@@ -188,10 +220,68 @@
     offered: ready?.pastHorizon ?? false,
     open: ready?.pastHorizon ?? false,
   });
-  const frame = $derived(stripWindow(key, rows));
+  const frame = $derived(stripWindow(key, rows, key === today ? clock : null));
   const hours = $derived(Array.from({ length: frame.to - frame.from + 1 }, (_, index) => frame.from + index));
   const nowAt = $derived(key === today ? place(key, frame, clock.toISOString(), clock.toISOString()).left : null);
   const noRecord = $derived(ready !== null && ready.pastHorizon && ready.blocks.length === 0);
+
+  // ---- strip labels (#1429) ----
+
+  let stripEl = $state<SVGSVGElement | null>(null);
+  let measured = $state(0);
+  const stripPx = $derived(stripWidth === undefined ? measured : stripWidth());
+
+  /**
+   * Measure the strip as it changes size. A `ResizeObserver` where there is
+   * one, which the window has, so a pane opening beside the view counts too.
+   * jsdom has none, and a suite that mounts the Day without `stripWidth` (the
+   * Time view's, the shell's) falls back on the window's resizes.
+   */
+  $effect(() => {
+    const element = stripEl;
+    if (element === null || stripWidth !== undefined) return;
+    const measure = () => {
+      measured = element.getBoundingClientRect().width;
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  });
+
+  let ink: CanvasRenderingContext2D | null | undefined;
+  /**
+   * How wide a string draws in the face `time.css` gives a strip label: 600
+   * at `--t-2xs`, mono for an entity's key and sans for a label. The face is
+   * read once per label, not once per character tried. With no canvas nothing
+   * can be measured, and an unmeasured label is not drawn.
+   */
+  function measurer(plain: boolean): (text: string) => number {
+    if (measureLabel !== undefined) return (text) => measureLabel(text, plain);
+    if (stripEl === null) return () => Infinity;
+    ink ??= document.createElement("canvas").getContext("2d");
+    const pen = ink;
+    if (pen === null) return () => Infinity;
+    const style = getComputedStyle(stripEl);
+    const font = `600 ${style.getPropertyValue("--t-2xs").trim()} ${style.getPropertyValue(plain ? "--sans" : "--mono").trim()}`;
+    return (text) => {
+      pen.font = font;
+      return pen.measureText(text).width;
+    };
+  }
+
+  /** Six pixels of padding at each end of a block, as `x="6"` starts the text. */
+  const LABEL_PAD = 12;
+  function stripLabel(row: DayRow, widthPct: number): string | null {
+    if (row.target === null) return null;
+    const room = (widthPct / 100) * stripPx - LABEL_PAD;
+    if (room <= 0) return null;
+    return fitLabel(targetReading(row.target), room, measurer(row.target.kind === "label"));
+  }
 
   let selected = $state<string | null>(null);
   function select(row: DayRow) {
@@ -267,6 +357,9 @@
     if (onchanged) onchanged();
     else await load(key);
   }
+
+  /** How long *Undo* is offered on *Delete block*, and so how long the delete waits: the toast's life. */
+  const UNDO_MS = 6500;
 
   const entity = (entityId: string): TimerTarget => ({ kind: "entity", entity_id: entityId });
 
@@ -352,11 +445,43 @@
     void write(() => io.dismissBlock(block.block.id), "Dismissed. knobas will not offer it again.");
   }
 
+  /**
+   * *Delete block* (#1429): the block leaves the day at once and the delete is
+   * held for the toast's life, then sent; *Undo* cancels a write that never
+   * happened, so the block keeps its id, its context and its worklog mark (the
+   * #835 pattern). The timer outlives the view, as the Proposed links view's
+   * do, so leaving the day does not lose the delete; closing the window inside
+   * those seconds does, and the block is simply there next time.
+   */
   function remove() {
     const current = dialog;
     if (current === null || current.mode !== "edit" || current.row.block === null) return;
     const id = current.row.block.block.id;
-    void write(() => io.deleteBlock(id), "Deleted the block");
+    dialog = null;
+    refusal = null;
+    held = [...held, { id, sent: false }];
+    const release = () => (held = held.filter((hold) => hold.id !== id));
+    const pending = setTimeout(async () => {
+      try {
+        await io.deleteBlock(id);
+        held = held.map((hold) => (hold.id === id ? { ...hold, sent: true } : hold));
+      } catch (error) {
+        release();
+        push({ text: ipcErrorMessage(error), tone: "err" });
+      }
+      await reread();
+    }, UNDO_MS);
+    push({
+      text: "Deleted the block",
+      ms: UNDO_MS,
+      action: {
+        label: "Undo",
+        run: () => {
+          clearTimeout(pending);
+          release();
+        },
+      },
+    });
   }
 
   function open(next: NonNullable<typeof dialog>) {
@@ -405,7 +530,7 @@
     </p>
   {/if}
 
-  <svg class="tf-tm-strip" width="100%" height="84" role="group" aria-label="The day's blocks">
+  <svg class="tf-tm-strip" width="100%" height="84" role="group" aria-label="The day's blocks" bind:this={stripEl}>
     <defs>
       <pattern id="tf-tm-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
         <rect class="tf-tm-hatch" width="5" height="10" />
@@ -419,6 +544,7 @@
     {/each}
     {#each rows as row (row.key)}
       {@const at = place(key, frame, row.from, row.to)}
+      {@const label = stripLabel(row, at.width)}
       <svg
         class="tf-tm-b {STRIP_CLASS[row.state]} {selected === row.key ? 'tf-on' : ''}"
         x="{at.left}%"
@@ -437,11 +563,17 @@
           }
         }}
       >
-        <title>{span(row)}</title>
+        <title>{span(row)}{row.target ? `, ${targetReading(row.target)}` : ""}</title>
         <rect width="100%" height="100%" rx="4" />
-        <svg width="100%" height="100%" aria-hidden="true">
-          <text class={row.target?.kind === "label" ? "tf-tm-plain" : ""} x="6" y="50%" dominant-baseline="central">{row.target ? targetReading(row.target) : ""}</text>
-        </svg>
+        {#if label !== null}
+          <text
+            class={row.target?.kind === "label" ? "tf-tm-plain" : ""}
+            x="6"
+            y="50%"
+            dominant-baseline="central"
+            aria-hidden="true">{label}</text
+          >
+        {/if}
       </svg>
     {/each}
     {#if nowAt !== null}
@@ -593,9 +725,11 @@
     from={row ? clockOf(row.from) : "09:00"}
     to={row ? clockOf(row.to) : "10:00"}
     target={dialog.mode === "edit" ? row?.target ?? null : null}
+    title={dialog.mode === "edit" && row ? titleOf(row) : null}
     span={row ? span(row) : null}
     {refusal}
     {layers}
+    ports={{ search: io.search, launcherHome: io.launcherHome }}
     onsave={save}
     ondelete={remove}
     onclose={() => (dialog = null)}

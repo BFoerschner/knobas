@@ -9142,3 +9142,71 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   `app/src` found no reader of `.spacer` or `.ghost`, and no `Modal` user passing `center`, so
   `.spacer`, `.btn.ghost` (two rules) and `.scrim.center` are gone, and `Modal`'s dead `center` prop
   with them. *Reversing:* restore four lines and one prop.
+## #1428: the block dialog's On field takes the row (Opus implementer, 2026-10-21)
+
+- **What the sizing holds for.** *Fork:* #1428 sizes a kind select that #1429 removes in the same
+  PR. *Ruling:* the rule is written for the row as it now stands: the kind switch (`.tf-seg`, *A
+  ticket* / *A label*) is `flex: none`, and whichever field sits beside it (the search box, the
+  label box, or the picked ticket) is `flex: 1; min-width: 0`, scoped to `.tf-tm-on` in `time.css`.
+  The global form-grid rule is untouched. *Reasoning:* the dispatch asked that #1428's sizing hold
+  for whatever field remains. *Reversing:* two selectors.
+- **What the test witnesses.** jsdom lays nothing out, so the Day test loads the app's stylesheets
+  into the document and reads the cascade: the switch's `flex-grow` and `flex-shrink` are 0, the
+  field's `flex-grow` is 1 and its `min-width` 0px, and the field holds the block's target.
+  *Reversing:* none needed.
+
+## #1429: strip labels, a ticket picker, and Undo on Delete block (Opus implementer, 2026-10-21)
+
+- **(a) The target field** (delegated). *Ruling:* the launcher `Session` picker, as `TfLinkTo`
+  draws it, with *A label* as the second mode, as recommended. The kind select goes; a `.tf-seg`
+  switch picks the mode. The picker lists **tickets only** (kind `ticket`): the board's recent
+  tickets on an empty box (`loadHome`, which `TfLinkTo` does not call) and the search's hits once
+  something is typed. The block is written on the picked entity's id. *Reasoning:* one place picks
+  (the #1416 ruling), and a picked id cannot carry a missing or wrong namespace to `create_block`,
+  which does not check that the entity exists. Tickets only because prototype-6 calls it a ticket
+  picker and Jira takes time on a ticket alone; a block on anything else is a row the Day tab says
+  *needs a ticket*. *Reversing:* one filter in `TfBlockDialog.svelte`'s `choices`.
+- **The picker stays in the block dialog's own shell**, not `TfDialog`. *Fork:* move the dialog
+  onto `TfDialog`, as `TfLinkTo` is. *Ruling:* keep the dialog's form, footer and layer
+  registration, and draw the picker inside it; `TfLinkTo` is unchanged. *Reasoning:* the brief
+  forbids changing `TfLinkTo`, and the form's submit, *Delete block* and the refusal line would
+  all move for no change the reader sees. *Reversing:* low.
+- **(b) Undo** (delegated). *Ruling:* the delete is held for the toast's 6.5 s and then sent;
+  *Undo* cancels a write that never happened, as recommended (the #835 pattern). The block leaves
+  the day at once. The timer outlives the view, so leaving the Day tab keeps the delete; closing
+  the window inside those seconds loses it, and the block is simply there next time, as #835's
+  merge-manager ruling has it for proposals. A held delete the backend refuses brings the block
+  back with the refusal as an error toast. *Reasoning:* re-creating through `create_block` would
+  lose the block's id, its context and its worklog mark. *Delete block* keeps meaning delete (#900).
+  *Reversing:* low, one function in `TfDay.svelte`.
+- **How a label is measured.** *Fork:* CSS `text-overflow` in a `<foreignObject>`, or measure in
+  script. *Ruling:* measure: a canvas draws the label in the strip label's face (600 at `--t-2xs`,
+  mono for a key, sans for a label), the strip's width comes from a `ResizeObserver` (window
+  resizes where there is none), and `fitLabel` keeps the longest head that fits with "…", dropping
+  a trailing space, or drops the label when not one character and the ellipsis fit. The nested
+  `<svg>` that clipped a label (the #827 ruling's) is gone. *Reasoning:* a test can witness what
+  script decides; jsdom draws no ellipsis. *Reversing:* one component.
+- **The block's title.** *Fork:* keep prototype-6's span alone, or add the target. *Ruling:* span
+  and target ("13:10 to 13:58, Standup and planning"). *Reasoning:* the brief says the title keeps
+  the full label, and a shortened or dropped label leaves the title as the only place it is whole.
+  *Reversing:* one line.
+- **Two lines of desired behavior a correct implementation cannot promise.** "'Standup and plan' at
+  08–18 reads whole" depends on the window's width: in the 1440 px shot the 48-minute block reads
+  "Standup and p…". "A block widened to 20:00 by an evening timer does not shorten labels it did
+  not shorten before" cannot hold for a label that just fits, because a wider window makes every
+  block narrower. What holds is that every label is fitted to its block's current width and never
+  cut without "…". *Reversing:* n/a.
+- **The open stretch's *Assign…* label** on the strip is still missing; filed as #1523, as the
+  brief asked.
+- **The held delete is its own few lines, not `review/decisions.svelte.ts`.** *Fork:* reuse the
+  Proposed links view's module, or hold the delete in `TfDay`. *Ruling:* in `TfDay`, with its own
+  `UNDO_MS`. *Reasoning:* that module is keyed by link id and carries verdicts and session
+  entries; the Day needs one timer and a hidden id. *Reversing:* extract a shared hold if a third
+  surface needs one.
+
+## #1434: today's strip holds now (Opus implementer, 2026-10-21)
+
+- **Widen or hide** (delegated). *Ruling:* widen, as recommended: on today `stripWindow` takes the
+  clock and widens by whole hours to hold it, as it does for a late row (the #827 ruling's
+  reasoning); on any other day it takes `null` and nothing changes. *Reasoning:* a now line that is
+  absent after 18:00 says nothing about the evening the reader is in. *Reversing:* one argument.
