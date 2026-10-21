@@ -8,9 +8,9 @@
 //!
 //! What certifies the exchange is still the live suite against the real
 //! container (ADR-0013); this fake is the witness for what the container
-//! cannot be asked to do on cue -- reap a session between two writes, or
-//! forget a login -- and for the count of logins, which the real server does
-//! not report.
+//! cannot be asked to do on cue -- reap a session between two writes, forget
+//! a login, or lose the race a login sent too early can lose (#1472) -- and
+//! for the count of logins, which the real server does not report.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -29,7 +29,19 @@ struct Engine {
     minted: usize,
     /// Live sessions: whether each is logged in, and what it has to say.
     sessions: HashMap<String, (bool, VecDeque<String>)>,
+    /// Sessions whose namespace `40` has arrived and whose handlers are not
+    /// registered yet (#1472). Kuma 2.5.3's connection handler awaits two
+    /// settings reads (`sendInfo`) before it registers `login` or anything
+    /// else, and socket.io drops an event nothing listens for, without an
+    /// ack. The value counts the client's reads until the handlers are
+    /// registered: the first read carries only the namespace's `40{…}`,
+    /// which socket.io sends before the handler runs, and the second the
+    /// handler's `info` and `loginRequired`. That is the worst case of the
+    /// real race, a handler slower than the client's next request.
+    registering: HashMap<String, usize>,
     logins: usize,
+    /// Logins that arrived before Kuma listened for them, and were dropped.
+    dropped: usize,
     login_limit: usize,
     /// Every emit other than the login that Kuma acted on.
     delivered: Vec<String>,
@@ -74,7 +86,25 @@ impl Respond for Kuma {
             return gone();
         }
         if request.method.as_str() == "GET" {
+            let registered = match engine.registering.get_mut(&sid) {
+                Some(reads) if *reads > 1 => {
+                    *reads -= 1;
+                    false
+                }
+                Some(_) => {
+                    engine.registering.remove(&sid);
+                    true
+                }
+                None => false,
+            };
             let (_, queued) = engine.sessions.get_mut(&sid).expect("checked above");
+            if registered {
+                // What the connection handler pushes once its awaits are
+                // done: `info` just before the handlers are registered, and
+                // `loginRequired` after the last of them.
+                queued.push_back(r#"42["info",{"primaryBaseURL":null}]"#.to_owned());
+                queued.push_back(r#"42["loginRequired"]"#.to_owned());
+            }
             let body = queued.drain(..).collect::<Vec<_>>().join("\u{1e}");
             return ResponseTemplate::new(200).set_body_string(if body.is_empty() {
                 "6".to_owned()
@@ -112,6 +142,8 @@ impl Engine {
     /// What Kuma pushes back for one posted packet, if anything.
     fn answer(&mut self, sid: &str, packet: &str) -> Option<String> {
         if packet == "40" {
+            // Registered on the second read: see the field's note.
+            self.registering.insert(sid.to_owned(), 2);
             return Some(r#"40{"sid":"socket"}"#.to_owned());
         }
         let rest = packet.strip_prefix("42")?;
@@ -119,6 +151,14 @@ impl Engine {
         let (ack, document) = rest.split_at(digits);
         let event: serde_json::Value = serde_json::from_str(document).ok()?;
         let name = event.get(0)?.as_str()?.to_owned();
+        if self.registering.contains_key(sid) {
+            // Nothing listens yet: socket.io drops the event, and no ack
+            // ever comes.
+            if name == "login" {
+                self.dropped += 1;
+            }
+            return None;
+        }
         let answered = if name == "login" {
             self.logins += 1;
             if self.logins > self.login_limit {
@@ -163,6 +203,10 @@ impl Kuma {
 
     fn logins(&self) -> usize {
         self.engine().logins
+    }
+
+    fn dropped(&self) -> usize {
+        self.engine().dropped
     }
 
     fn delivered(&self) -> usize {
@@ -211,6 +255,23 @@ async fn more_writes_than_kuma_allows_logins_all_land_on_one_login() {
     }
     assert_eq!(kuma.delivered(), 25);
     assert_eq!(kuma.logins(), 1, "one session carries every write");
+}
+
+/// **#1472.** A login POSTed straight after the namespace `40` can reach
+/// Kuma before its connection handler has registered `login`, and socket.io
+/// drops it without an ack: the session stays up, answers its pings, and the
+/// write runs out its whole budget. The login waits for `loginRequired`,
+/// which Kuma pushes once every handler is registered.
+#[tokio::test]
+async fn the_login_waits_until_kuma_listens_for_it() {
+    let (server, kuma) = Kuma::start(20).await;
+    let socket = socket_to(&server).with_budget(Duration::from_secs(5));
+    pause(&socket)
+        .await
+        .expect("the write lands on a login Kuma was listening for");
+    assert_eq!(kuma.dropped(), 0, "no login went out before Kuma listened");
+    assert_eq!(kuma.logins(), 1);
+    assert_eq!(kuma.delivered(), 1);
 }
 
 /// A held session Kuma has reaped (its POST answers `400 Session ID

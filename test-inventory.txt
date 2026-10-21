@@ -3092,11 +3092,13 @@ knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_session_idle_
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_session_that_lost_its_login_logs_in_again
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::adapters_for_one_account_share_a_socket_and_another_password_does_not
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::more_writes_than_kuma_allows_logins_all_land_on_one_login
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::the_login_waits_until_kuma_listens_for_it
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::a_refused_account_waits_and_a_refused_write_does_not
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::a_session_that_only_pings_is_given_up_on_when_the_time_is_gone
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_ack_is_matched_on_the_whole_id
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_emit_is_a_packet_type_an_ack_id_and_a_document
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_unreadable_answer_is_a_fault_rather_than_a_success
+knobas-source-kuma	lib/knobas_source_kuma	socket::tests::only_kuma_s_invitation_lets_the_login_go
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::the_docker_hosts_come_out_of_the_pushed_list
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::the_session_id_comes_out_of_the_open_packet
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::a_configuration_that_cannot_work_is_refused_at_build_time

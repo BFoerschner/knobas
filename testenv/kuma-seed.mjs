@@ -46,7 +46,19 @@ import { io } from "socket.io-client";
 const KUMA_URL = process.env.KUMA_URL ?? "http://uptime-kuma:3001";
 const USER = process.env.KUMA_USER ?? "knobas";
 const PASS = process.env.KUMA_PASS ?? "knobas-dev";
-const KEY_NAME = "knobas-seed";
+// This worktree's key name, `knobas-seed-<worktree>-<checksum>`, derived host
+// side by seed-kuma.sh (issue #1484): the container sees only its read-only
+// mount, not which worktree it came from. Everything below keeps, replaces or
+// adds the key of THIS name and no other, so a sibling worktree's key, and the
+// pre-#1484 shared `knobas-seed`, are never deleted. Refused when unset rather
+// than defaulted: a shared default is the collision #1484 ended, and a rename
+// on one side of the boundary would bring it back without failing a single
+// `just kuma-live`.
+const KEY_NAME = process.env.KNOBAS_KEY_NAME ?? "";
+if (!/^knobas-seed-.+-[0-9]+$/.test(KEY_NAME)) {
+  console.error(`kuma-seed: FAILED: KNOBAS_KEY_NAME is ${JSON.stringify(KEY_NAME)}, not a per-worktree key name; run ./seed-kuma.sh, which derives it`);
+  process.exit(1);
+}
 // Set by seed-kuma.sh when testenv/kuma-api-key holds a key this instance
 // still answers 200 to -- the host verifies before it claims (issue #552),
 // because a file is not a credential. Kuma returns an API key's clear text
@@ -57,9 +69,9 @@ const KEY_NAME = "knobas-seed";
 // The variable name is half a contract with seed-kuma.sh across the container
 // boundary, and the failure is silent in one direction: an unset variable is
 // not "1", so a rename there without this one reads as "did not authenticate"
-// and re-mints on EVERY run -- killing every sibling worktree's copy, while a
-// single `just kuma-live` still passes because one run only ever exercises the
-// re-mint side.
+// and re-mints on EVERY run -- killing this worktree's working copy each time
+// (and, before #1484, every sibling worktree's), while a single `just
+// kuma-live` still passes because one run only ever exercises the re-mint side.
 const HOST_KEY_AUTHENTICATED = process.env.KNOBAS_KEY_AUTHENTICATED === "1";
 
 const log = (...a) => console.error("kuma-seed:", ...a);
@@ -223,20 +235,23 @@ for (const m of monitors) {
 
 // -- API key ----------------------------------------------------------------
 const keys = await listen("apiKeyList", () => call("getAPIKeyList").then((r) => ok(r, "getAPIKeyList")));
-const mine = (keys ?? []).find((k) => k.name === KEY_NAME);
+// Every key of this worktree's name, not the first: a stale one is replaced,
+// never duplicated, so the instance holds one key per worktree name.
+const mine = (keys ?? []).filter((k) => k.name === KEY_NAME);
 
-if (mine && HOST_KEY_AUTHENTICATED) {
+if (mine.length > 0 && HOST_KEY_AUTHENTICATED) {
   log(`API key ${KEY_NAME} exists and the host's copy still authenticates; keeping`);
   console.log("KEEP");
 } else {
-  if (mine) {
+  for (const stale of mine) {
     // Unrecoverable: Kuma hands the clear text out once. Replacing it is the
     // only way back to a working /metrics, and leaving it would be a key
     // nobody can use sitting in the list forever. "No working copy" covers
     // both halves of what the host checked: no file at all, and a file whose
-    // key the instance has since rotated away (issue #552).
-    log(`API key ${KEY_NAME} exists but the host has no working copy; replacing it`);
-    ok(await call("deleteAPIKey", mine.id), "deleteAPIKey");
+    // key the instance has since deleted (issue #552). Only this worktree's
+    // name is in `mine`, so no other worktree's key goes with it (#1484).
+    log(`API key ${KEY_NAME} (id ${stale.id}) exists but the host has no working copy; replacing it`);
+    ok(await call("deleteAPIKey", stale.id), "deleteAPIKey");
   }
   const res = ok(await call("addAPIKey", { name: KEY_NAME, expires: null, active: true }), "addAPIKey");
   if (typeof res.key !== "string" || !res.key.startsWith("uk")) {

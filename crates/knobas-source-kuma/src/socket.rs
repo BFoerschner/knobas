@@ -31,8 +31,9 @@
 //! GET  /socket.io/?EIO=4&transport=polling
 //!   -> 0{"sid":"…","upgrades":["websocket"],"pingInterval":25000,…}
 //! POST …&sid=…   body `40`                      -> ok      (open the namespace)
+//! GET  …&sid=…   -> `40{"sid":…}`, `42["info",{…}]`, `42["loginRequired"]`
 //! POST …&sid=…   body `421["login",{…}]`        -> ok      (emit, ack id 1)
-//! GET  …&sid=…   -> `40{"sid":…}`, pushed `42[…]` events, and `431[{"ok":true,…}]`
+//! GET  …&sid=…   -> pushed `42[…]` events, and `431[{"ok":true,…}]`
 //! POST …&sid=…   body `422["pauseMonitor",8]`   -> ok      (emit, ack id 2)
 //! GET  …&sid=…   -> `432[{"ok":true,"msg":"successPaused"}]`
 //! POST …&sid=…   body `41`                                 (close)
@@ -41,6 +42,22 @@
 //! Several packets arrive in one polling response, separated by `\x1e`
 //! ([`SEPARATOR`]) -- a login pushes about fifty-five of them (the monitor
 //! list, the type list, uptimes, heartbeats) and they came back in nine reads.
+//!
+//! **The login must be invited, and that was measured too (#1472).** Kuma
+//! 2.5.3's connection handler (`io.on("connection")` in `server/server.js`)
+//! first awaits `sendInfo`, two settings reads, and only then registers
+//! `login` and every other handler; socket.io drops an event nothing listens
+//! for, without an ack. While Kuma's settings cache is warm those reads cost
+//! a microtask and the race is never lost, but each cached setting expires a
+//! minute or two after it was read, and a login POSTed straight after the
+//! namespace `40` then reaches Kuma before `login` is registered: the session
+//! stays up, answers its pings and never acknowledges, and the write runs out
+//! its whole [`CALL_BUDGET`]. Replayed against the pinned container on
+//! 2026-10-21 with the two POSTs 2.4 ms apart: dropped when the cache was
+//! cold, Kuma's log showing the polling connection and no `Login by
+//! username` line. So the login is sent only once Kuma pushes
+//! `loginRequired` (or `autoLogin`), which the handler emits after the last
+//! handler is registered ([`invites_login`]).
 //!
 //! **The login must be waited for, and that is measured too.** Emitting
 //! `pauseMonitor` in the same breath as `login` -- three POSTs, then one poll
@@ -144,6 +161,12 @@ const IDLE_REUSE: Duration = Duration::from_secs(15);
 /// `server/rate-limiter.js`, 2.5.3), in place of a verdict on the password.
 const RATE_LIMITED: &str = "Too frequently, try again later.";
 
+/// What Kuma pushes once its connection handler has registered every event
+/// handler, `login` among them (`server/server.js`, 2.5.3): `loginRequired`,
+/// or `autoLogin` on an instance with authentication disabled. Either means
+/// a login sent now is heard (#1472).
+const LOGIN_INVITATIONS: [&str; 2] = ["loginRequired", "autoLogin"];
+
 /// What Kuma answers an emit from a socket that is not logged in
 /// (`checkLogin`, `server/util-server.js`), before acting on it.
 const NOT_LOGGED_IN: &str = "You are not logged in.";
@@ -152,12 +175,13 @@ const NOT_LOGGED_IN: &str = "You are not logged in.";
 /// own ack, measured as wall-clock time.
 ///
 /// **A deadline over the exchange, not a count of reads**, and the difference
-/// is what an unanswered ack costs. Each pass of [`Session::wait_for`] is one
+/// is what an unanswered ack costs. Each pass of [`Session::read_until`] is one
 /// engine.io long-poll GET, and a session that is alive but never acks holds
 /// each of those until Kuma's ping interval (25 s) before answering with a
 /// bare ping -- so the request timeout never fires, every read is a legitimate
-/// answer, and a cap of 200 reads is eighty-three minutes. Twice, because
-/// there are two waits per write. [`knobas_http::SEND_BUDGET`] makes the same
+/// answer, and a cap of 200 reads is eighty-three minutes. Three times, because
+/// a fresh login waits three times: for Kuma's invitation (#1472), the
+/// login's ack and the call's. [`knobas_http::SEND_BUDGET`] makes the same
 /// argument one level down: a per-part cap bounds one wait, not their sum.
 ///
 /// The read count stays bounded without a count of its own, because the
@@ -446,10 +470,15 @@ impl KumaSocket {
         let sid = sid_of(&self.open().await?)?;
         let session = self.session(&sid);
         session.send("40".to_owned()).await?;
+        let mut pushed = Pushed::default();
+        // Not before Kuma listens for it: a login sent sooner can be dropped
+        // without an ack (#1472, the module note).
+        session
+            .read_until(&mut pushed, |packet| invites_login(packet).then_some(()))
+            .await?;
         session
             .send(emit(LOGIN_ACK, "login", &self.login_argument()))
             .await?;
-        let mut pushed = Pushed::default();
         let login = session.wait_for(LOGIN_ACK, &mut pushed).await?;
         login_verdict(&login, &self.account.username)?;
         Ok(LoggedIn {
@@ -578,21 +607,32 @@ impl Session<'_> {
         Ok(())
     }
 
-    /// Read until the ack numbered `ack` arrives, answering pings on the way.
+    /// Read until the ack numbered `ack` arrives ([`Session::read_until`]).
+    async fn wait_for(&self, ack: u32, pushed: &mut Pushed) -> Result<String, SourceError> {
+        self.read_until(pushed, |packet| ack_of(packet, ack).map(str::to_owned))
+            .await
+    }
+
+    /// Read until `wanted` picks a packet out of the stream: an ack, or
+    /// Kuma's invitation to log in (#1472). Pings are answered on the way.
     ///
     /// **No bound of its own, and that is the design**: what stops this loop
-    /// when the ack never comes is [`CALL_BUDGET`], the deadline
+    /// when the packet never comes is [`CALL_BUDGET`], the deadline
     /// [`KumaSocket::call`] holds over the whole exchange, which cancels this
-    /// future wherever it happens to be waiting. A write waits here twice, and
-    /// the constant's note says why bounding each wait separately would not
-    /// have bounded the write.
+    /// future wherever it happens to be waiting. A write on a fresh login
+    /// waits three times, and the constant's note says why bounding each wait
+    /// separately would not have bounded the write.
     ///
     /// Everything else in the stream is discarded on purpose, but for the
     /// Docker host list ([`Pushed`]): what a login pushes is the dashboard's
     /// whole state, and this module has no use for the rest of it -- reading a
     /// monitor is `/metrics`' job and stays so. Kuma pushes the list again
     /// when it changes, so a held session's copy stays current.
-    async fn wait_for(&self, ack: u32, pushed: &mut Pushed) -> Result<String, SourceError> {
+    async fn read_until<T>(
+        &self,
+        pushed: &mut Pushed,
+        wanted: impl Fn(&str) -> Option<T>,
+    ) -> Result<T, SourceError> {
         loop {
             let request = self
                 .socket
@@ -606,8 +646,8 @@ impl Session<'_> {
                 // could reach.
                 if packet == "2" {
                     self.send("3".to_owned()).await?;
-                } else if let Some(payload) = ack_of(packet, ack) {
-                    return Ok(payload.to_owned());
+                } else if let Some(found) = wanted(packet) {
+                    return Ok(found);
                 } else if let Some(hosts) = docker_hosts_of(packet) {
                     pushed.docker_hosts = Some(hosts);
                 }
@@ -625,7 +665,7 @@ async fn text_of(response: knobas_http::Response) -> Result<String, SourceError>
 }
 
 /// What a login pushed that a call may need (#864). Everything else a login
-/// pushes is still discarded ([`Session::wait_for`]'s note).
+/// pushes is still discarded ([`Session::read_until`]'s note).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct Pushed {
     /// The account's Docker hosts by id, lowest first, as `dockerHostList`
@@ -652,6 +692,21 @@ fn docker_hosts_of(packet: &str) -> Option<Vec<i64>> {
         .collect();
     ids.sort_unstable();
     Some(ids)
+}
+
+/// Whether `packet` is Kuma's invitation to log in, `42["loginRequired"]` or
+/// `42["autoLogin"]` ([`LOGIN_INVITATIONS`]).
+fn invites_login(packet: &str) -> bool {
+    packet
+        .strip_prefix("42")
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+        .and_then(|event| {
+            event
+                .get(0)?
+                .as_str()
+                .map(|name| LOGIN_INVITATIONS.contains(&name))
+        })
+        .unwrap_or(false)
 }
 
 /// One socket.io emit with an ack id: `42<ack>["<event>",<argument>]`.
@@ -788,8 +843,9 @@ mod tests {
     /// counterpart.
     ///
     /// It is faithful to the exchange in every other respect: the handshake
-    /// mints a session, `40`, the login emit and every pong are accepted, and
-    /// each poll answers a bare `2` after `hold` -- which is how a *healthy*
+    /// mints a session, `40` is accepted, the first read invites the login
+    /// (#1472), the login emit and every pong are accepted, and each poll
+    /// after that answers a bare `2` after `hold` -- which is how a *healthy*
     /// idle engine.io session behaves, at Kuma's own 25 s ping interval. That
     /// is the point: nothing here is an error the transport could classify.
     struct PingingKuma {
@@ -810,7 +866,20 @@ mod tests {
                 ))
                 .mount(&server)
                 .await;
-            // Every read of the session: a heartbeat, for ever.
+            // The first read of the session: the namespace opened and Kuma
+            // listening for the login, as its connection handler ends.
+            Mock::given(method("GET"))
+                .and(path(PATH))
+                .and(query_param("sid", "never-answers"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string("40{\"sid\":\"socket\"}\u{1e}42[\"loginRequired\"]"),
+                )
+                .up_to_n_times(1)
+                .with_priority(1)
+                .mount(&server)
+                .await;
+            // Every read after it: a heartbeat, for ever.
             Mock::given(method("GET"))
                 .and(path(PATH))
                 .and(query_param("sid", "never-answers"))
@@ -867,7 +936,7 @@ mod tests {
     /// reads it made, and what it finally said.
     ///
     /// The outer `tokio::time::timeout` is ten times the budget, so the code
-    /// *without* its deadline -- [`Session::wait_for`] loops for ever -- fails
+    /// *without* its deadline -- [`Session::read_until`] loops for ever -- fails
     /// here rather than hanging `just check`, and it is loose enough that the
     /// assertions on the deadline itself are what report a run that overshot.
     async fn until_it_gives_up(budget: Duration, hold: Duration) -> (Duration, usize, SourceError) {
@@ -949,6 +1018,24 @@ mod tests {
             "{polls} reads in {elapsed:?} and {more} in {longer:?}: the reads one write \
              makes have to be whatever fit inside its own deadline, not a fixed count"
         );
+    }
+
+    /// Kuma's two invitations open the way for the login; nothing pushed
+    /// before them does, `info` included, which Kuma sends *before* it
+    /// registers `login` (#1472).
+    #[test]
+    fn only_kuma_s_invitation_lets_the_login_go() {
+        assert!(invites_login(r#"42["loginRequired"]"#));
+        assert!(invites_login(r#"42["autoLogin"]"#));
+        for not_yet in [
+            r#"40{"sid":"socket"}"#,
+            r#"42["info",{"primaryBaseURL":null}]"#,
+            r#"42["loginRequiredSoon"]"#,
+            r#"431[{"ok":true}]"#,
+            "2",
+        ] {
+            assert!(!invites_login(not_yet), "{not_yet}");
+        }
     }
 
     /// The Docker hosts a login pushes, read by id; any other push is not
