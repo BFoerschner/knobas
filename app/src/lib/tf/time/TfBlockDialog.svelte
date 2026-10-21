@@ -91,7 +91,10 @@
   // svelte-ignore state_referenced_locally
   // Read once: a `Session` owns a debounce timer and a request counter.
   const session = new Session({ search: ports.search, launcherHome: ports.launcherHome });
-  /** The highlighted choice, for the arrow keys and `Enter`. */
+  /**
+   * The highlighted choice, for the arrow keys and `Enter`. Its own index and
+   * not `session.selected`, which counts the rows the ticket filter drops.
+   */
   let cursor = $state(0);
 
   /**

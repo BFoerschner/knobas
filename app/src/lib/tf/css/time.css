@@ -77,8 +77,8 @@
 .tf .tf-tm-empty p { margin: 0 0 10px; }
 /* The block dialog's *On* row (#1428, #1429): the kind switch is as wide as its words and never
    grows; the field takes the rest of the row and shrinks below its own width rather than push
-   out of it. job.css's `.tf-formgrid input { width: 100% }` stays: `flex: 1` sets the basis. */
-/* "On" stays level with the row's first line when the picker's list opens below it. */
+   out of it. job.css's `.tf-formgrid input { width: 100% }` stays: `flex: 1` sets the basis.
+   "On" stays level with the row's first line when the picker's list opens below it. */
 .tf-tm-on-l { align-self: start; padding-top: 6px; }
 .tf-tm-target { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .tf-tm-on { display: flex; gap: 8px; align-items: center; min-width: 0; }

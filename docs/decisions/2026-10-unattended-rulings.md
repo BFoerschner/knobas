@@ -9186,8 +9186,10 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   a trailing space, or drops the label when not one character and the ellipsis fit. The nested
   `<svg>` that clipped a label (the #827 ruling's) is gone. *Reasoning:* a test can witness what
   script decides; jsdom draws no ellipsis. *Reversing:* one component.
-- **The block's title is its span and its target** ("13:10 to 13:58, Standup and planning"), as
-  the brief says the title keeps the full label. *Reversing:* one line.
+- **The block's title.** *Fork:* keep prototype-6's span alone, or add the target. *Ruling:* span
+  and target ("13:10 to 13:58, Standup and planning"). *Reasoning:* the brief says the title keeps
+  the full label, and a shortened or dropped label leaves the title as the only place it is whole.
+  *Reversing:* one line.
 - **Two lines of desired behavior a correct implementation cannot promise.** "'Standup and plan' at
   08–18 reads whole" depends on the window's width: in the 1440 px shot the 48-minute block reads
   "Standup and p…". "A block widened to 20:00 by an evening timer does not shorten labels it did
@@ -9196,6 +9198,11 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   cut without "…". *Reversing:* n/a.
 - **The open stretch's *Assign…* label** on the strip is still missing; filed as #1523, as the
   brief asked.
+- **The held delete is its own few lines, not `review/decisions.svelte.ts`.** *Fork:* reuse the
+  Proposed links view's module, or hold the delete in `TfDay`. *Ruling:* in `TfDay`, with its own
+  `UNDO_MS`. *Reasoning:* that module is keyed by link id and carries verdicts and session
+  entries; the Day needs one timer and a hidden id. *Reversing:* extract a shared hold if a third
+  surface needs one.
 
 ## #1434: today's strip holds now (Opus implementer, 2026-10-21)
 

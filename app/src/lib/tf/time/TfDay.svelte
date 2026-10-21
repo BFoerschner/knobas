@@ -233,8 +233,9 @@
 
   /**
    * Measure the strip as it changes size. A `ResizeObserver` where there is
-   * one, which the window has; jsdom has none, and a test says the width
-   * through `stripWidth`, so there it falls back on the window's resizes.
+   * one, which the window has, so a pane opening beside the view counts too.
+   * jsdom has none, and a suite that mounts the Day without `stripWidth` (the
+   * Time view's, the shell's) falls back on the window's resizes.
    */
   $effect(() => {
     const element = stripEl;
@@ -254,19 +255,23 @@
 
   let ink: CanvasRenderingContext2D | null | undefined;
   /**
-   * A label's drawn width, in the face `time.css` gives a strip label: 600 at
-   * `--t-2xs`, mono for an entity's key and sans for a label. With no canvas
-   * nothing can be measured, and an unmeasured label is not drawn.
+   * How wide a string draws in the face `time.css` gives a strip label: 600
+   * at `--t-2xs`, mono for an entity's key and sans for a label. The face is
+   * read once per label, not once per character tried. With no canvas nothing
+   * can be measured, and an unmeasured label is not drawn.
    */
-  function drawnWidth(text: string, plain: boolean): number {
-    if (measureLabel !== undefined) return measureLabel(text, plain);
-    if (stripEl === null) return Infinity;
+  function measurer(plain: boolean): (text: string) => number {
+    if (measureLabel !== undefined) return (text) => measureLabel(text, plain);
+    if (stripEl === null) return () => Infinity;
     ink ??= document.createElement("canvas").getContext("2d");
-    if (ink === null) return Infinity;
+    const pen = ink;
+    if (pen === null) return () => Infinity;
     const style = getComputedStyle(stripEl);
-    const face = style.getPropertyValue(plain ? "--sans" : "--mono").trim();
-    ink.font = `600 ${style.getPropertyValue("--t-2xs").trim()} ${face}`;
-    return ink.measureText(text).width;
+    const font = `600 ${style.getPropertyValue("--t-2xs").trim()} ${style.getPropertyValue(plain ? "--sans" : "--mono").trim()}`;
+    return (text) => {
+      pen.font = font;
+      return pen.measureText(text).width;
+    };
   }
 
   /** Six pixels of padding at each end of a block, as `x="6"` starts the text. */
@@ -275,8 +280,7 @@
     if (row.target === null) return null;
     const room = (widthPct / 100) * stripPx - LABEL_PAD;
     if (room <= 0) return null;
-    const plain = row.target.kind === "label";
-    return fitLabel(targetReading(row.target), room, (text) => drawnWidth(text, plain));
+    return fitLabel(targetReading(row.target), room, measurer(row.target.kind === "label"));
   }
 
   let selected = $state<string | null>(null);
@@ -457,7 +461,7 @@
     refusal = null;
     held = [...held, { id, sent: false }];
     const release = () => (held = held.filter((hold) => hold.id !== id));
-    const timer = setTimeout(async () => {
+    const pending = setTimeout(async () => {
       try {
         await io.deleteBlock(id);
         held = held.map((hold) => (hold.id === id ? { ...hold, sent: true } : hold));
@@ -473,7 +477,7 @@
       action: {
         label: "Undo",
         run: () => {
-          clearTimeout(timer);
+          clearTimeout(pending);
           release();
         },
       },
