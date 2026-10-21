@@ -44,7 +44,7 @@
   reading joined to `knobas.source_config` on its adapter kind with
   `web_url_normalized!(s.base_url) = web_url_normalized!(r.base)` and to that source's `sync.item`
   rows of the reading's kind whose `payload #>> path` equals every value; a reading with no fields
-  is skipped. `order by form, entity_id limit 1`: the stored address wins over a form. The three
+  is skipped. `order by via_form, entity_id limit 1`: the stored address wins over a form. The three
   commit-hint reads in `sources/crud.rs` bind `[]` and resolve the stored address alone, as before.
   Still one read on the local mirror, never a fetch (spec #491 story 16).
 
@@ -57,11 +57,14 @@
   another form."*; *Open in browser* stays. The fake's `resolve_url` answers the SEPA page's
   `pageId=` and `/display/` forms under `docs.ts`'s host.
 
-  Witnessed by `knobas-source`'s `url_forms` unit tests, the Confluence crate's
+  Witnessed by `knobas-source`'s `url_forms` unit tests and
+  `url_forms_round_trip_and_a_descriptor_without_them_still_decodes` (a descriptor JSON with no
+  `url_forms` key decodes as one declaring none), the Confluence crate's
   `descriptor::tests::a_page_is_named_by_its_id_its_space_and_title_and_its_tiny_link` and
   `another_pages_address_does_not_name_this_one`, `knobas-app`'s `tests/it/url_resolve.rs`
   (`a_confluence_page_opens_from_each_form_confluence_serves_it_under`,
   `a_form_misses_another_page_and_another_instance`, `the_stored_address_wins_over_a_form`,
+  `a_reading_with_no_values_names_nothing`,
   `the_resolvers_statement_reaches_the_expression_index`), and, against the seeded Confluence Data
   Center, `tests/confluence_live.rs`'s
   `a_pasted_address_opens_its_page_in_every_form_confluence_serves`, which fetches each form from

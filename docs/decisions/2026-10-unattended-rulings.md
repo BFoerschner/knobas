@@ -10382,3 +10382,37 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   *Ruling:* signed. The entry matches the diff: one additive descriptor field and its type, one
   battery clause, `RESOLVE_URL`'s second parameter, no command, argument, migration or WIT change.
   *Reversing:* a follow-up removing the field; every adapter but Confluence declares none.
+
+## #1475, #1480: merge review of #1568 (Opus merge-manager, 2026-10-21)
+
+### Reserved for Björn, ruled by merge-manager on Opus: the §10.8 sign-off (#1475), confirmed
+
+**The step:** the implementer signed the sign-off for `docs/contract/10.8/1475-url-forms-in-the-source-descriptor.md` and left it to the merge-manager to confirm.
+
+**Ruling:** confirmed. The deep pass found the frozen surface as the entry describes it: `SourceDescriptor` gains one `#[serde(default)]` field and its type, every other adapter's descriptor adds `url_forms: Vec::new()` and nothing else, `adapter.wit` is unchanged at `knobas:adapter@1.3.0` (the descriptor is `func() -> json`, and `SourceDescriptor` has no `deny_unknown_fields`), and `RESOLVE_URL` stays one statement: its first arm is unchanged, the second is joined to the reading's own adapter kind and base, and `order by via_form, entity_id` keeps it deterministic with the stored address first. `docs/contract.md` changes only by its index line, and #1448's entry and amendment are intact. Two gaps are closed in the next two rulings.
+
+**Cost of reversing:** medium; a follow-up removing the field, and a Confluence paste in another form misses again.
+
+### The serde default for an external adapter's descriptor is witnessed
+
+**The fork:** the entry and the PR claimed that a component sending no `url_forms` decodes as one declaring none, and no test removed the key. The WASM fixture serialises the current `SourceDescriptor`, so it always sends the key.
+
+**Ruling:** `url_forms_round_trip_and_a_descriptor_without_them_still_decodes` in `knobas-source` removes the key from the wire and decodes it. With `#[serde(default)]` dropped, the test fails. The entry names it among its witnesses.
+
+**Cost of reversing:** none.
+
+### The §10.8 entry spells the order key `via_form`
+
+**The fork:** the entry said `order by form, entity_id`, but the review renamed the column to `via_form`.
+
+**Ruling:** the entry now reads `order by via_form, entity_id` and lists `a_reading_with_no_values_names_nothing` among its witnesses, so it matches the diff.
+
+**Cost of reversing:** none.
+
+### No install-time check of an external adapter's `url_forms`
+
+**The fork:** `knobas-wasm-host`'s `check_descriptor` does not run `url_forms::check`. Only the contract battery does, and an external adapter's author may never run it.
+
+**Ruling:** no check is added here. A form that `check` refuses gives no reading (`UrlForm::read` calls the same rules), a form that names a kind the adapter does not emit matches no item, and a reading is joined only to its own adapter kind's sources. So a malformed external declaration can only miss. It cannot name another adapter's item, and it cannot make install fail. Refusing it at install would turn a harmless miss into a broken adapter.
+
+**Cost of reversing:** low; one call in `check_descriptor` and a `Refusal` variant.

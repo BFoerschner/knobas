@@ -2001,6 +2001,29 @@ mod tests {
         assert_eq!(older.min_sync_interval_secs, 60);
     }
 
+    /// An external adapter's descriptor crosses the WIT boundary as this
+    /// JSON (#1475): one that declares forms keeps them, and one built before
+    /// the slot existed, which sends no `url_forms` key, still decodes, as an
+    /// adapter whose items open by their stored address alone.
+    #[test]
+    fn url_forms_round_trip_and_a_descriptor_without_them_still_decodes() {
+        let declared = SourceDescriptor {
+            url_forms: vec![url_forms::UrlForm::of(
+                "ticket",
+                "/browse/{}",
+                [PayloadPath::of(["key"])],
+            )],
+            ..a_descriptor()
+        };
+        let mut wire = serde_json::to_value(&declared).unwrap();
+        let back: SourceDescriptor = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(back.url_forms, declared.url_forms);
+
+        wire.as_object_mut().unwrap().remove("url_forms");
+        let older: SourceDescriptor = serde_json::from_value(wire).unwrap();
+        assert!(older.url_forms.is_empty());
+    }
+
     /// Spec §3a: every type crossing the SPI is plain serde data, so an adapter
     /// can later run out of process. That is only true if the types survive a
     /// round trip in *both* directions -- an out-of-process adapter sends its
