@@ -118,7 +118,8 @@
 //! `CONTEXT.md`, **Depends on this**: *what breaks if an asset goes down --
 //! its descendants, since they run inside it, and every asset linked to it by
 //! `depends-on` or `runs-on`, transitively over both*, with the routes that
-//! land on it listed beneath and not counted. [`depends_on_this`] is that
+//! land on it or on anything in that answer listed beneath and not counted
+//! (#1553). [`depends_on_this`] is that
 //! read and [`NEXT_LAYER`] is the one step it repeats; the two relations are
 //! [`DEPENDS_ON`] and [`RUNS_ON`], `knobas_core::link`'s constants beside
 //! [`MONITORED_BY`] because from here on a `where` clause reads them.
@@ -1511,26 +1512,29 @@ const ROUTES_REACHABLE: &str = "with recursive up (id, parent_id, depth) as (
        join knobas.asset ta on ta.id = r.target_id
       order by path.depth asc, r.name asc, r.id asc";
 
-/// The routes that land **on this asset itself** -- what the *Depends on this*
-/// panel lists beneath its count (#505).
+/// The routes that land on **any asset in `$1`** -- the asset and everything
+/// that breaks with it -- which the *Depends on this* panel lists beneath its
+/// count (#505, widened by #1553).
 ///
 /// [`ROUTES_EXPOSED`]' columns over a third `where`, and a statement of its own
 /// for the reason all of them are: the SQL audit is over literal text.
 ///
-/// **`target_id`, not the containment path**, which is what makes this a
-/// different read from [`ROUTES_REACHABLE`] rather than a filter over it.
-/// `CONTEXT.md`, **Depends on this**: *"Routes whose target **is the asset**
-/// are listed beneath as reachable via routes that would break"*. The panel
-/// answers *what breaks if this goes down*, and a route landing on the VM
-/// above still answers whatever else that VM holds; only the ones aimed here
-/// stop answering when this asset does.
+/// **`target_id` over the closure, not the containment path**, which is what
+/// makes this a different read from [`ROUTES_REACHABLE`] rather than a filter
+/// over it. `CONTEXT.md`, **Depends on this**: *"Routes whose target is the
+/// asset **or anything in that list** are listed beneath as reachable via
+/// routes that would break"*. The panel answers *what breaks if this goes
+/// down*: a route landing on a container inside the VM that went down stops
+/// answering with the container, while a route landing on the VM **above**
+/// this asset still answers whatever else that VM holds, so `$1` is
+/// [`depends_on_this`]' own answer and never the path upwards.
 const ROUTES_TO: &str = "select r.id, r.asset_id, r.target_id, r.name, r.url,
             r.visibility, r.properties,
             ea.name as asset_name, ta.name as target_name
        from knobas.route r
        join knobas.asset ea on ea.id = r.asset_id
        join knobas.asset ta on ta.id = r.target_id
-      where r.target_id = $1
+      where r.target_id = any($1::text[])
       order by r.name asc, r.id asc";
 
 /// One step of [`depends_on_this`]' walk: everything that breaks when any
@@ -2973,12 +2977,14 @@ pub struct DependsOnThis {
     ///
     /// Never the asset itself: the question is what *else* stops working.
     pub assets: Vec<DependsOnRow>,
-    /// The routes that land on the asset, listed beneath and **not counted**
-    /// (story 52, so that the number is about assets).
+    /// The routes that land on the asset or on any asset in
+    /// [`assets`](Self::assets), listed beneath and **not counted** (story 52,
+    /// so that the number is about assets; widened by #1553). Each row's
+    /// `target_id` says which of them it lands on.
     ///
     /// Not folded into [`assets`](Self::assets): a route is not an asset, and
-    /// the assets whose routes these are keep working -- what stops is the way
-    /// in.
+    /// what it adds to the answer is the way in that stops, not a thing that
+    /// stops.
     pub routes: Vec<RouteRow>,
 }
 
@@ -2987,8 +2993,9 @@ pub struct DependsOnThis {
 ///
 /// `CONTEXT.md`, **Depends on this**: *"its descendants, since they run inside
 /// it, and every asset linked to it by `depends-on` or `runs-on`, transitively
-/// over both … Routes whose target is the asset are listed beneath as
-/// reachable via routes that would break and not counted."*
+/// over both … Routes whose target is the asset or anything in that list are
+/// listed beneath as reachable via routes that would break and not counted."*
+/// (amended by #1553: until then only the routes landing on the asset itself).
 ///
 /// # One walk over two kinds of edge
 ///
@@ -3077,10 +3084,20 @@ pub async fn depends_on_this(pool: &PgPool, id: &str) -> Result<DependsOnThis, I
         }
     }
 
-    Ok(DependsOnThis {
-        assets,
-        routes: routes(pool, ROUTES_TO, id).await?,
-    })
+    // Every route aimed at something that went down goes with it (#1553):
+    // the asset itself and the whole closure, nothing above it.
+    let fallen: Vec<String> = std::iter::once(id.to_owned())
+        .chain(assets.iter().map(|row| row.asset.id.clone()))
+        .collect();
+    let routes = sqlx::query(ROUTES_TO)
+        .bind(&fallen)
+        .fetch_all(pool)
+        .await?
+        .iter()
+        .map(route_row_of)
+        .collect::<Result<_, _>>()?;
+
+    Ok(DependsOnThis { assets, routes })
 }
 
 /// Every open alert, newest first, with the monitor each is about.

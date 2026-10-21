@@ -6391,9 +6391,54 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
              Docker engine (OrbStack) / knobas-teamcity"
         )
     );
-    // Nothing in the file lands on the VM itself -- every route it has lands
-    // on a container -- so the routes half is empty here and is witnessed
-    // where it is not.
+    // Nothing in the file lands on the VM itself -- every route in it lands on
+    // a container -- and every one of those containers is on the list above,
+    // so every route breaks with the VM (#1553). Listed beneath and not
+    // counted: thirteen assets, nine routes.
+    let mut routes: Vec<&str> = answer.routes.iter().map(|r| r.id.as_str()).collect();
+    routes.sort_unstable();
+    assert_eq!(
+        routes,
+        vec![
+            "route:compose-gitea",
+            "route:notebook-confluence",
+            "route:notebook-gitea",
+            "route:notebook-jira",
+            "route:notebook-kuma",
+            "route:notebook-mockd-admin",
+            "route:notebook-mockd-jira",
+            "route:notebook-mockd-teamcity",
+            "route:notebook-teamcity",
+        ]
+    );
+    assert_eq!(answer.assets.len(), 13);
+}
+
+/// A route landing on what **holds** the asset is not one that breaks with it.
+///
+/// TeamCity's database sits inside the `knobas-teamcity` container, and
+/// `route:notebook-teamcity` lands on that container -- so the database reads
+/// the route under *reachable via* (the containment path, #432). But the
+/// container keeps answering when the database inside it goes down, so the
+/// route is not on the database's *Depends on this* (#1553): only the asset and
+/// what breaks with it are looked at, never what holds it.
+#[tokio::test]
+async fn a_route_landing_on_what_holds_the_asset_does_not_break_with_it() {
+    let pool = imported("depends-on-routes-above").await;
+
+    let reachable = assets::get(&pool, "asset:db-teamcity")
+        .await
+        .expect("the database's pane")
+        .reachable_via;
+    assert!(
+        reachable.iter().any(|r| r.id == "route:notebook-teamcity"),
+        "the route lands on the container above: {reachable:?}"
+    );
+
+    let answer = assets::depends_on_this(&pool, "asset:db-teamcity")
+        .await
+        .expect("the panel");
+    assert!(answer.assets.is_empty());
     assert!(answer.routes.is_empty(), "{:?}", answer.routes);
 }
 
@@ -6409,8 +6454,11 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
 /// assets, so it is one line, and its word is the edge that reached it first.
 ///
 /// The routes are the second half of `CONTEXT.md`'s sentence: the two that
-/// land on Gitea are listed and are **not** among the three, *"so that the
-/// number is about assets"* (story 52).
+/// land on Gitea and the one that lands on the TeamCity server, which breaks
+/// with it (#1553), are listed and are **not** among the three, *"so that the
+/// number is about assets"* (story 52). The server is on the list by a drawn
+/// link and not by the tree, so this is the case that says the routes follow
+/// the whole closure.
 #[tokio::test]
 async fn a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart() {
     let pool = imported("depends-on-chain").await;
@@ -6470,6 +6518,7 @@ async fn a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart() 
         vec![
             "route:compose-gitea".to_owned(),
             "route:notebook-gitea".to_owned(),
+            "route:notebook-teamcity".to_owned(),
         ]
     );
     // Not counted: the number the panel draws is the assets', and the routes
@@ -6658,6 +6707,8 @@ async fn a_link_the_panel_does_not_walk_leaves_the_list_empty() {
             .map(|row| (&row.asset.id, &row.relation))
             .collect::<Vec<_>>()
     );
+    // Exactly Gitea's two: mockd's three would be here if the walk went the
+    // other way down the `depends-on` link.
     assert_eq!(answer.routes.len(), 2, "the two routes still land on Gitea");
 }
 
