@@ -287,7 +287,9 @@ function neededBy(): Element[] {
   for (let at = from.nextElementSibling; at !== null && at.tagName !== "H4"; at = at.nextElementSibling) out.push(at);
   return out;
 }
-const neededText = () => neededBy().map((el) => el.textContent!.replace(/\s+/g, " ").trim()).join(" | ");
+/** An element's text with its whitespace collapsed. */
+const flat = (el: Element) => el.textContent!.replace(/\s+/g, " ").trim();
+const neededText = () => neededBy().map(flat).join(" | ");
 
 test("Needed by lists what breaks if it goes down: the closure nearest first, then the routes, under the direct links", async () => {
   const answer: DependsOnThis = {
@@ -308,9 +310,9 @@ test("Needed by lists what breaks if it goes down: the closure nearest first, th
   const chips = neededBy().flatMap((el) => [...el.querySelectorAll(".tf-chip")].map((c) => c.textContent!.trim()));
   expect(chips).toEqual(["payments-api"]);
   // Beneath it, read-only and in the answer's order: the assets, counted, then the route, not counted.
-  const breaks = [...target.querySelectorAll(".tf-dp-breaks li")].map((li) => li.textContent!.replace(/\s+/g, " ").trim());
+  const breaks = [...target.querySelectorAll(".tf-dp-breaks li")].map(flat);
   expect(breaks).toEqual(["payments-api depends on", "ct-worker inside", "pay.example https://pay.example"]);
-  expect(target.querySelector(".tf-dp-bn")!.textContent).toBe("2");
+  expect(target.querySelector(".tf-dp-breaks-n")!.textContent).toBe("2");
   expect(neededText()).not.toContain("Nothing recorded");
 });
 
@@ -321,14 +323,14 @@ test("an asset nothing depends on and no route lands on reads Nothing recorded",
   expect(target.querySelector(".tf-dp-breaks")).toBeNull();
 });
 
-test("the holds note says thing for one and things for more", async () => {
+test("the holds note says thing for one", async () => {
   render({}, detail({ holds: [row({ id: "asset:ct", name: "ct" })] }));
   await settle();
   expect(neededText()).toContain("and the 1 thing inside it");
   expect(neededText()).not.toContain("things");
-  if (app) unmount(app);
-  app = null;
-  target.remove();
+});
+
+test("the holds note says things for two", async () => {
   render({}, detail({ holds: [row({ id: "asset:ct", name: "ct" }), row({ id: "asset:ct2", name: "ct2" })] }));
   await settle();
   expect(neededText()).toContain("and the 2 things inside it");

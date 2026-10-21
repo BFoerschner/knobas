@@ -252,10 +252,10 @@
             {#each candidates as place (place.id)}<option value={place.id}>{place.name}</option>{/each}
           </select>
           <h4>Needed by</h4>
-          {#if neededBy.length > 0 || breaksNothing}
-            <div class="tf-dp-rels">
-              {#each neededBy as entry (entry.link.id)}<span class="tf-chip">{entry.other.title}</span>{:else}<span class="tf-dim">Nothing recorded</span>{/each}
-            </div>
+          {#if neededBy.length > 0}
+            <div class="tf-dp-rels">{#each neededBy as entry (entry.link.id)}<span class="tf-chip">{entry.other.title}</span>{/each}</div>
+          {:else if breaksNothing}
+            <div class="tf-dp-rels"><span class="tf-dim">Nothing recorded</span></div>
           {/if}
           {#if breaksFailure !== null}
             <p class="tf-ifail">{breaksFailure}</p>
@@ -264,7 +264,7 @@
           {:else if !breaksNothing}
             <div class="tf-dp-breaks">
               {#if breaks.assets.length > 0}
-                <p class="tf-dp-blab">Depends on this <span class="tf-dp-bn">{breaks.assets.length}</span></p>
+                <p class="tf-dp-breaks-h">Depends on this <span class="tf-dp-breaks-n">{breaks.assets.length}</span></p>
                 <ul>
                   {#each breaks.assets as row (row.asset.id)}
                     <li>{row.asset.name} <span class="tf-dim">{row.relation === null ? "inside" : readingOf(row.relation, true)}</span></li>
@@ -272,7 +272,7 @@
                 </ul>
               {/if}
               {#if breaks.routes.length > 0}
-                <p class="tf-dp-blab">Reachable via routes that would break</p>
+                <p class="tf-dp-breaks-h">Reachable via routes that would break</p>
                 <ul>
                   {#each breaks.routes as route (route.id)}
                     <li>{route.name} <span class="tf-dim tf-mono">{route.url}</span></li>

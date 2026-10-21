@@ -13,6 +13,7 @@
   import type { Dependencies, RouteRow, Visibility } from "../../ipc/assets";
   import TfDialog from "../settings/TfDialog.svelte";
   import { hasScheme, linkToTicket, routeEditsOf, routeNameOf, type RouteForm } from "./add";
+  import { routeDeleteConfirm } from "./asset-edit";
   import { assetPaths } from "./estate-paths";
   import type { AddPorts } from "./ports";
 
@@ -154,7 +155,7 @@
   {#snippet footer()}
     {#if row !== null}
       <!-- The asset editor's shape (#1458): the sentence above the buttons, the button short. -->
-      {#if sure}<p class="tf-dp-sure" id="{uid}-sure" role="status">Delete {row.name}? Links to it stay, marked deleted.</p>{/if}
+      {#if sure}<p class="tf-dp-sure" id="{uid}-sure" role="status">{routeDeleteConfirm(row.name)}</p>{/if}
       <button
         type="button"
         class="tf-btn tf-ghost tf-dp-del"

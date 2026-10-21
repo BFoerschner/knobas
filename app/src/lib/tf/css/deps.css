@@ -192,8 +192,8 @@
 .tf-dp-breaks { font-size: var(--t-sm); margin-bottom: 6px; }
 .tf-dp-breaks ul { list-style: none; margin: 0 0 6px; padding: 0; }
 .tf-dp-breaks li { padding: 1px 0; overflow-wrap: anywhere; }
-.tf-dp-blab { font-size: var(--t-xs); color: var(--ink-2); margin: 4px 0 2px; }
-.tf-dp-bn { margin-left: 4px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.tf-dp-breaks-h { font-size: var(--t-xs); color: var(--ink-2); margin: 4px 0 2px; }
+.tf-dp-breaks-n { margin-left: 4px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .tf-dp-del:not([disabled]):hover, .tf-dp-del.tf-danger { color: var(--err); }
 /* The two-click delete (#1458): the sentence takes a wrapping line of its own over the footer's buttons,
    and a long name in the short button ellipsises rather than pushing the footer out. */
