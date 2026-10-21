@@ -1017,8 +1017,26 @@ async fn export_writes_the_page_as_markdown() {
 async fn export_numbers_a_taken_name_and_leaves_the_file_there() {
     let pool = pool().await;
     let src = confluence(&pool).await;
-    let eng = page(&pool, &src, "1", "Notes", "ENG", &[], "<p>Engineering's notes.</p>").await;
-    let ops = page(&pool, &src, "2", "Notes", "OPS", &[], "<p>Operations' notes.</p>").await;
+    let eng = page(
+        &pool,
+        &src,
+        "1",
+        "Notes",
+        "ENG",
+        &[],
+        "<p>Engineering's notes.</p>",
+    )
+    .await;
+    let ops = page(
+        &pool,
+        &src,
+        "2",
+        "Notes",
+        "OPS",
+        &[],
+        "<p>Operations' notes.</p>",
+    )
+    .await;
     let folder =
         std::env::temp_dir().join(format!("knobas-export-{}", uuid::Uuid::new_v4().simple()));
     std::fs::create_dir_all(&folder).unwrap();
@@ -1038,8 +1056,16 @@ async fn export_numbers_a_taken_name_and_leaves_the_file_there() {
     assert_eq!(kept, mine);
     assert_eq!(first.file, "notes (1).md");
     assert_eq!(second.file, "notes (2).md");
-    assert!(String::from_utf8(one).unwrap().contains("Engineering's notes."));
-    assert!(String::from_utf8(two).unwrap().contains("Operations' notes."));
+    assert!(
+        String::from_utf8(one)
+            .unwrap()
+            .contains("Engineering's notes.")
+    );
+    assert!(
+        String::from_utf8(two)
+            .unwrap()
+            .contains("Operations' notes.")
+    );
 }
 
 /// *Edit section* queues the page's whole new body against the version read,

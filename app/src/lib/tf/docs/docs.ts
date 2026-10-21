@@ -90,18 +90,21 @@ export function spaceOfPage(tree: DocsTree, entityId: string): DocSpace | undefi
   return tree.spaces.find((s) => s.pages.some((p) => p.entity_id === entityId));
 }
 
+/** A space as its source and key name it. */
+type SpaceRef = { source_id: string; key: string };
+
 /** A space's stable identity in the picker: source and key. */
-export function spaceId(space: { source_id: string; key: string }): string {
+export function spaceId(space: SpaceRef): string {
   return `${space.source_id}/${space.key}`;
 }
 
 /**
  * The address of a space: `#/docs/space/<key>`, or `#/docs/space/<source>:<key>`
- * when another source in `tree` holds the key too (#1455, the shape #1476 gave
- * a job), so the address never opens the other source's space.
+ * when another of `spaces` holds the key too (#1455, the shape #1476 gave a
+ * job), so the address never opens the other source's space.
  */
-export function spaceHash(tree: DocsTree, space: { source_id: string; key: string }): string {
-  const shared = tree.spaces.some((s) => s.key === space.key && s.source_id !== space.source_id);
+export function spaceHash(spaces: readonly SpaceRef[], space: SpaceRef): string {
+  const shared = spaces.some((s) => s.key === space.key && s.source_id !== space.source_id);
   return `#/docs/space/${encodeURIComponent(shared ? `${space.source_id}:${space.key}` : space.key)}`;
 }
 

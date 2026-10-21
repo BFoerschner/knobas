@@ -63,16 +63,16 @@ const TWO: DocsTree = {
 
 test("a space's address names its source where two sources hold the key, and opens that source's space (#1455)", () => {
   const second = spaceOfPage(TWO, "wiki:home")!;
-  const hash = spaceHash(TWO, second);
+  const hash = spaceHash(TWO.spaces, second);
   expect(hash).toBe("#/docs/space/wiki%3AENG");
   const opened = pageToOpen(placeOf(["space", decodeURIComponent(hash.split("/").at(-1)!)]), TWO)!;
   expect(spaceId(spaceOfPage(TWO, opened)!)).toBe("wiki/ENG");
-  expect(spaceHash(TWO, TWO.spaces[0]!)).toBe("#/docs/space/confluence%3AENG");
+  expect(spaceHash(TWO.spaces, TWO.spaces[0]!)).toBe("#/docs/space/confluence%3AENG");
 });
 
 test("a key one source holds keeps the bare address, and a bare key two hold opens the first", () => {
-  expect(spaceHash(TREE, TREE.spaces[1]!)).toBe("#/docs/space/OPS");
-  expect(spaceHash(TWO, TWO.spaces[1]!)).toBe("#/docs/space/OPS");
+  expect(spaceHash(TREE.spaces, TREE.spaces[1]!)).toBe("#/docs/space/OPS");
+  expect(spaceHash(TWO.spaces, TWO.spaces[1]!)).toBe("#/docs/space/OPS");
   expect(pageToOpen(placeOf(["space", "ENG"]), TWO)).toBe("confluence:9");
   expect(pageToOpen(placeOf(["space", "nope:ENG"]), TWO)).toBeNull();
 });
@@ -82,7 +82,7 @@ test("a key holding a colon still opens by the bare address", () => {
     ...TREE,
     spaces: [{ source_id: "wiki", key: "a:b", name: null, pages: [{ entity_id: "wiki:1", title: "One", parent: null }] }],
   };
-  expect(spaceHash(odd, odd.spaces[0]!)).toBe("#/docs/space/a%3Ab");
+  expect(spaceHash(odd.spaces, odd.spaces[0]!)).toBe("#/docs/space/a%3Ab");
   expect(pageToOpen(placeOf(["space", "a:b"]), odd)).toBe("wiki:1");
 });
 

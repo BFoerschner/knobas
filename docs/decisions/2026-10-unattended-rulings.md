@@ -9977,12 +9977,13 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   its ruling applies here; one rule for both (the source before the first `:`, written only where
   the key is not unique) keeps a second addressing shape out of the app. The in-place pick would
   have left the address itself still opening the other source's space when copied or reopened.
-  Requirements §10's header and its opening paragraph name the new address.
+  Requirements §10's header and its opening paragraph name the new address. *Reversing:* low: the
+  breadcrumb's `spaceHash` and the split in `placeOf`.
 - **Encoding the source.** *Sub-fork:* how `source_id` sits in the segment. *Ruling:* `<source>:<key>`
   in the one segment, `encodeURIComponent`d (`wiki%3AENG`), split at the first `:`. A source id
   holds no `:` (an entity id is split at its first one), so the split is exact. A segment whose
   prefix names no space with that key is read again as a bare key, so a key that holds a `:`
-  still opens by its bare address.
+  still opens by its bare address. *Reversing:* low: one split, one fallback `find`.
 - **A bare key two sources hold.** *Sub-fork:* open the first or refuse. *Ruling:* open the first
   listed source's space, as before and as #1476 does for a job. The breadcrumb never hands out that
   address for a shared key, so it is reached only by hand or an old bookmark. *Reversing:* low: one

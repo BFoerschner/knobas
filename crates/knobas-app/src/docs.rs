@@ -1247,7 +1247,7 @@ pub async fn export(
         .map_err(IpcError::internal)?;
     let (path, mut out) = crate::downloads::create_free(folder, &name)
         .await
-        .map_err(|(_, e)| IpcError::internal(e))?;
+        .map_err(|(path, e)| IpcError::internal(format!("writing {}: {e}", path.display())))?;
     let text = page_markdown(&page.title, &page.blocks);
     if let Err(e) = write_whole(&mut out, text.as_bytes()).await {
         drop(out);

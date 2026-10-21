@@ -273,11 +273,10 @@
   const pageSpace = $derived(tree && page ? spaceOfPage(tree, page.entity_id) : undefined);
   /**
    * The breadcrumb's space link: the page's own space, named with its source
-   * where another source holds its key too (#1455); the bare key until the
-   * tree is read.
+   * where another source holds its key too (#1455).
    */
   const crumbSpace = $derived(
-    tree && pageSpace ? spaceHash(tree, pageSpace) : `#/docs/space/${encodeURIComponent(page?.space?.key ?? "")}`,
+    page?.space ? spaceHash(tree?.spaces ?? [], { source_id: page.source_id, key: page.space.key }) : null,
   );
   const shownSpace = $derived.by(() => {
     if (tree === null || picked === "*") return undefined;
@@ -779,7 +778,7 @@
           {/if}
           <a href="#/docs">Docs</a>
           {#if p.space}
-            › <a href={crumbSpace}>{p.space.name ?? p.space.key}</a>
+            › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>
           {/if}
           {#if parent}
             › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}
