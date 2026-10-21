@@ -10161,3 +10161,13 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   `reveal-item-in-dir` stays ungranted, as the capability file's description asks.
 - **No §10.8 entry and no sign-off.** The capability file is not a frozen surface and no command
   was added.
+
+## #1447: Change… on a fixed list is a select (Opus implementer, 2026-10-21)
+
+**The fork:** *Change…* on a parameter whose spec is a fixed list draws a select of the list, or keeps prototype-6's free text prompt.
+
+**Ruling:** a select, the Run… dialog's own control. Its options are what `fieldsOf` gives the dialog, so a default the list does not offer comes first and the pipeline's current value can stay. A text or secret parameter keeps its input. The Kind column reads `RunField.kindWord`, a new field `fieldsOf` fills: *one of a, b* from the spec's own values (an unlisted default is not named there), *password* for a secret, *text* otherwise. *, inherited* is still appended to a parameter that is not a secret, as it was before.
+
+**Reasoning:** the ticket recommends the select. It is the only option that stops a mistyped value from being queued as a `SetParameter` write. The kind word goes on `fieldsOf` rather than a copy in the tab, as the brief asks, and the dialog never reads it.
+
+**Cost of reversing:** low. A text prompt again is one `{#if}` arm in `TfPipeline.svelte`.
