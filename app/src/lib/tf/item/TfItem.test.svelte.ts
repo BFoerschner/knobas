@@ -209,6 +209,7 @@ test("pressing a source action opens its dialog and queues one SourceAction agai
   target.querySelector<HTMLButtonElement>(".tf-fhead .tf-acts button")!.click();
   flushSync();
   const dialog = document.querySelector(".tf-dialog")!;
+  expect(dialog.querySelector("h2")?.textContent?.trim()).toBe("Book repair on Quay crane 4 inspection");
   expect(dialog.textContent).toContain("Book a repair crew for this survey's finding?");
   const day = dialog.querySelector<HTMLInputElement>("input[type=text]")!;
   day.value = "Tuesday";

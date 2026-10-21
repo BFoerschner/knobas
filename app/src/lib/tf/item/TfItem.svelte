@@ -239,7 +239,7 @@
   <TfEntityAction
     {action}
     entityId={id}
-    title="{name} {detail.row.title}"
+    title="{name} on {detail.row.title}"
     what="{name.toLowerCase()} on {detail.row.title}"
     submitWrite={ports.submitWrite}
     onqueued={() => {}}
