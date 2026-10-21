@@ -443,10 +443,8 @@ fn payload_paths() -> Vec<KindPaths> {
 /// * **comment count** is Gitea's `comments`, the card's *N comments*.
 ///
 /// **No done-like set yet** (#1501): `closed` is the word that would be one,
-/// but #1501 names Jira's set alone and leaves every other built-in adapter
-/// empty. Until the follow-up declares it, a job on a closed issue keeps its
-/// context live, which is how every Gitea job behaved before the set existed.
-/// #1593 declares it.
+/// and #1593 declares it. Until then a job on a closed issue keeps its context
+/// live, as every Gitea job did before the set existed.
 fn ticket_paths() -> KindPaths {
     let knobas = |key: &str| vec![PayloadPath::of(["knobas", key])];
     KindPaths {

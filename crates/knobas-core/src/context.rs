@@ -206,9 +206,9 @@ macro_rules! done_like {
     ($decl:literal) => {
         concat!(
             "coalesce(exists (select 1 from jsonb_array_elements_text(",
-            crate::declared_array!($decl, "done_statuses"),
+            $crate::declared_array!($decl, "done_statuses"),
             ") as done(name) where lower(done.name) = lower(",
-            crate::declared_string!($decl, "status_name"),
+            $crate::declared_string!($decl, "status_name"),
             ")), false)"
         )
     };
