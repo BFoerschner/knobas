@@ -242,9 +242,9 @@
   /** Six pixels of padding at each end of a block, as `x="6"` starts the text. */
   const LABEL_PAD = 12;
   function stripLabel(row: DayRow, widthPct: number): string | null {
-    if (row.target === null) return null;
     const room = (widthPct / 100) * stripPx - LABEL_PAD;
     if (room <= 0) return null;
+    if (row.target === null) return fitLabel("Assign…", room, measurer(true));
     return fitLabel(targetReading(row.target), room, measurer(row.target.kind === "label"));
   }
 
@@ -532,7 +532,7 @@
         <rect width="100%" height="100%" rx="4" />
         {#if label !== null}
           <text
-            class={row.target?.kind === "label" ? "tf-tm-plain" : ""}
+            class={row.target === null || row.target.kind === "label" ? "tf-tm-plain" : ""}
             x="6"
             y="50%"
             dominant-baseline="central"

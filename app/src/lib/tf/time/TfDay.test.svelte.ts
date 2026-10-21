@@ -407,6 +407,26 @@ test("an open stretch is a dashed open row, and the open figure is the sum of th
   expect(squash(target.textContent)).not.toContain("Nothing tracked");
 });
 
+test("an open stretch reads Assign… in the sans face on the strip, and pressing it only selects the row (#1523)", async () => {
+  Element.prototype.scrollIntoView = () => {};
+  render({ stripWidth: 2000 });
+  await settle();
+  const gap = target.querySelector(".tf-tm-strip .tf-tm-gap")!;
+  const text = gap.querySelector("text")!;
+  expect(text.textContent).toBe("Assign…");
+  expect(text.getAttribute("class")).toContain("tf-tm-plain");
+  (gap as SVGElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await settle();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(gap.getAttribute("class")).toContain("tf-on");
+});
+
+test("an open stretch's Assign… is fitted to a narrow block like any label (#1523)", async () => {
+  render({ stripWidth: 600 });
+  await settle();
+  expect(target.querySelector(".tf-tm-strip .tf-tm-gap text")?.textContent).toBe("As…");
+});
+
 /** Type into the dialog's search and wait out the launcher session's debounce. */
 async function search(text: string) {
   const box = target.querySelector<HTMLInputElement>('[aria-label="Search for a ticket"]')!;
