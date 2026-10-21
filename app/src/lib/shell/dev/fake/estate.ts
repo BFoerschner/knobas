@@ -806,9 +806,10 @@ const FIXTURE_DEPENDENCIES: { from: string; to: string; relation: string }[] = [
  * list would walk once here as it does in the store. The relation is `null`
  * for a containment step, which the pane reads as *inside*.
  *
- * The routes are the ones landing on **this asset itself**, listed apart and
- * not counted -- a narrower read than `reachable_via` above, which takes the
- * whole containment path.
+ * The routes are the ones landing on **this asset or anything that breaks
+ * with it** (#1553), listed apart and not counted -- a different read from
+ * `reachable_via` above, which takes the whole containment path, upwards
+ * included.
  */
 function dependsOnThis(args: Record<string, unknown>) {
   const id = args.assetId as string;
@@ -860,10 +861,12 @@ function dependsOnThis(args: Record<string, unknown>) {
     frontier = layer.map((line) => line.asset.id);
   }
 
-  return {
-    assets,
-    routes: FIXTURE_ROUTES.filter((route) => route.target_id === id).map(routeRow),
-  };
+  // `seen` is now the asset and its whole closure: everything that went down.
+  // By name, `ROUTES_TO`'s order, rather than the file's.
+  const routes = FIXTURE_ROUTES.filter((route) => route.target_id !== null && seen.has(route.target_id)).sort(
+    (left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
+  );
+  return { assets, routes: routes.map(routeRow) };
 }
 
 /** `get_route`: one route and its history, which this fixture has none of. */

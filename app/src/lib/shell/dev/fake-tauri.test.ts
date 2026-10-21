@@ -326,6 +326,43 @@ test("a route in the real estate draws a wire to the asset that exposes it", () 
 });
 
 /**
+ * `depends_on_this`' routes are the ones landing on the asset **or on anything
+ * that breaks with it** (#1553), the rule `assets::depends_on_this` follows and
+ * `crates/knobas-app/tests/it/assets_ipc.rs` witnesses over the same file.
+ *
+ * Three subjects, one per reason: the VM, which no route targets and which
+ * every route in the file breaks with, since each lands on a container inside
+ * it; Gitea, where TeamCity's route arrives through a drawn `depends-on` link
+ * rather than through the tree; and TeamCity's database, under a container a
+ * route lands on, which keeps answering when the database goes down.
+ */
+test("Depends on this lists every route landing on what breaks, and none above it", () => {
+  const handlers = demoHandlers();
+  const routesOf = (assetId: string) =>
+    (handlers["depends_on_this"]!({ assetId }) as { routes: { id: string }[] }).routes
+      .map((route) => route.id)
+      .sort();
+
+  expect(routesOf("asset:orbstack")).toEqual([
+    "route:compose-gitea",
+    "route:notebook-confluence",
+    "route:notebook-gitea",
+    "route:notebook-jira",
+    "route:notebook-kuma",
+    "route:notebook-mockd-admin",
+    "route:notebook-mockd-jira",
+    "route:notebook-mockd-teamcity",
+    "route:notebook-teamcity",
+  ]);
+  expect(routesOf("asset:knobas-gitea")).toEqual([
+    "route:compose-gitea",
+    "route:notebook-gitea",
+    "route:notebook-teamcity",
+  ]);
+  expect(routesOf("asset:db-teamcity")).toEqual([]);
+});
+
+/**
  * The Import dialog under `?fake-ipc` (#440).
  *
  * The estate this fixture draws **is** the file `--demo` imports, so choosing
