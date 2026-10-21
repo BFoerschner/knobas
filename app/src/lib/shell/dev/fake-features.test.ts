@@ -5,6 +5,8 @@
 import { expect, test, vi } from "vitest";
 
 import type { AdHocBlock, DayBlock, OpenStretch } from "../../ipc/time";
+import type { EntityDetail, EntityPage } from "../../ipc/entity";
+import { repoOfRow, underRepoHash } from "../../tf/repo/repo";
 import { dayRows, offerRuns } from "../../tf/time/day-view";
 import { demoHandlers } from "./fake-tauri";
 import { fakeRoleScope } from "./fake/corpus";
@@ -622,4 +624,19 @@ test("everything PAY-231's job reaches opens in the fixture: its pages through d
     if (row.kind === "page") expect(() => h["docs_page"]!({ entityId: row.id }), `${row.id} opens nothing`).not.toThrow();
     else expect(runs, `${row.id} is no run of the Builds fixture`).toContain(row.id);
   }
+});
+
+test("job PAY-231's branch and commit declare payout-service as their parent, so their addresses land under it (#1440)", () => {
+  const h = demoHandlers() as Calls;
+  const land = (kind: "branch" | "commit", entityId: string) => {
+    const { row } = h["get_entity"]!({ entityId }) as EntityDetail;
+    const filter = { sources: [row.source_id], kinds: ["repo"], updated_within_days: null, order: "updated_desc", context: null, project: null, include_deleted: false, reach: null };
+    const repos = (h["list_entities"]!({ filter, limit: 1000, offset: 0 }) as EntityPage).rows;
+    const repo = repoOfRow(row, repos);
+    return repo === null ? null : underRepoHash(kind, row.entity_id, repo.entity_id);
+  };
+  expect(land("branch", "mock:tidewater/payout-service@refs/heads/feat/PAY-231-idempotent-retry")).toBe(
+    "#/repo/mock%3Atidewater%2Fpayout-service/branches",
+  );
+  expect(land("commit", "mock:9f2c1ab")).toBe("#/repo/mock%3Atidewater%2Fpayout-service/commits/mock%3A9f2c1ab");
 });

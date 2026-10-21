@@ -30,7 +30,9 @@ import {
   readRepoRoute,
   repoHash,
   repoPrs,
+  repoOfRow,
   shaOf,
+  underRepoHash,
   visibleRepoPrs,
   visibleViewRows,
 } from "./repo";
@@ -192,6 +194,24 @@ test("the repository's pull requests are those whose parent is it, in its source
   expect(mine.map((r) => r.title)).toEqual(["Retry", "Old fix"]);
   expect(visibleRepoPrs(mine, ["Merged"], "").map((r) => r.title)).toEqual(["Old fix"]);
   expect(visibleRepoPrs(mine, [], "#142").map((r) => r.title)).toEqual(["Retry"]);
+});
+
+test("a branch or commit is under the repository its declared parent names, in its source (#1440)", () => {
+  const repos = [
+    { ...pr(REPO, "tidewater/payout-service", "tidewater", "open"), kind: "repo" },
+    { ...pr("other:tidewater/ledger", "tidewater/ledger", "tidewater", "open", "other"), kind: "repo" },
+  ];
+  const branch = { source_id: "gitea", path: "tidewater/payout-service" };
+  expect(repoOfRow(branch, repos)?.entity_id).toBe(REPO);
+  // The same name in another source is another repository.
+  expect(repoOfRow({ source_id: "gitea", path: "tidewater/ledger" }, repos)).toBeNull();
+  // No declared parent is the miss (ADR-0007), never a guess from the id.
+  expect(repoOfRow({ source_id: "gitea", path: null }, repos)).toBeNull();
+});
+
+test("a branch lands on its repository's Branches tab, a commit on its page under Commits (#1440, R-8.1, R-8.7)", () => {
+  expect(underRepoHash("branch", `${REPO}@refs/heads/feat/x`, REPO)).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/branches");
+  expect(underRepoHash("commit", "mock:9f2c1ab", REPO)).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/commits/mock%3A9f2c1ab");
 });
 
 test("a view's rows filter on every word typed across chip, title and meta", () => {

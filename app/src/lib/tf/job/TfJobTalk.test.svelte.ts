@@ -12,7 +12,10 @@ import type { EntityDetail, LinkEntry, SuggestionEntry, Thread } from "../../ipc
 import type { WriteOpPayload } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
+import { page as codeRowPage } from "../code-row/page";
 import { createLayers, type Layers } from "../layers.svelte";
+import { pageFor } from "../pages";
+import { parseTfHash } from "../route";
 import type { JobPorts } from "./ports";
 import TfJob from "./TfJob.svelte";
 
@@ -435,6 +438,25 @@ test("the drawer's filter keeps the rows it matches", async () => {
   input.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
   expect([...target.querySelectorAll(".tf-lk a")].map((a) => squash(a))).toEqual(["SEPA payout retry design"]);
+});
+
+test("a linked branch or commit opens its own address, which the repository page's redirect draws (#1440)", async () => {
+  const branch = link("link:b", "gitea:tidewater/payout-service@refs/heads/feat/x", "branch", "feat/x");
+  const commit = link("link:c", "gitea:tidewater/payout-service@9f2c1ab", "commit", "payout: key the retry");
+  open(null, {
+    ports: ports({
+      getEntity: (id) => (id === ID ? Promise.resolve(ticket([branch, commit])) : Promise.reject({ code: "not_found", message: "", source_id: null })),
+    }),
+  });
+  await settle();
+  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  flushSync();
+  const hrefs = [...target.querySelectorAll(".tf-lk a")].map((a) => a.getAttribute("href")!);
+  expect(hrefs).toEqual([
+    "#/branch/gitea%3Atidewater%2Fpayout-service%40refs%2Fheads%2Ffeat%2Fx",
+    "#/commit/gitea%3Atidewater%2Fpayout-service%409f2c1ab",
+  ]);
+  for (const href of hrefs) expect(pageFor(parseTfHash(href)), href).toBe(codeRowPage);
 });
 
 test("Unlink withdraws the link in knobas only and Undo draws it again", async () => {

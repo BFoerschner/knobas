@@ -181,7 +181,8 @@ export const CORPUS: {
     "feat/PAY-231-idempotent-retry",
     "2026-08-22T09:40:00Z",
     "mara",
-    { name: "feat/PAY-231-idempotent-retry", repository: "tidewater/payout-service" },
+    // The parent path Gitea declares (#596), which its address reads to open the repository's Branches tab (#1440).
+    { name: "feat/PAY-231-idempotent-retry", repository: "tidewater/payout-service", path: "tidewater/payout-service" },
   ),
   // A second repo, with no clone on this fixture's disk: the *no checkout*
   // arm, and the one that shows the clone command.
@@ -224,6 +225,8 @@ export const CORPUS: {
     repo: "payout-service",
     branch: "feat/PAY-231-idempotent-retry",
     description: "A replayed payout with the same mandate id is now a no-op.\n\nRefs PAY-231.",
+    // The parent path Gitea declares, which its address reads to open the commit under its repository (#1440).
+    path: "tidewater/payout-service",
   }),
   row("mock:payout-service#318", "build", "payout-service #318", "2026-08-22T10:20:00Z", null, {
     cfg: "payout-service",

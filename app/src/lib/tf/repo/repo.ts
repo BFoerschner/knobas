@@ -118,6 +118,29 @@ export function commitHash(repoId: string, commitId: string): string {
   return repoHash(repoId, "commits", encodeURIComponent(commitId));
 }
 
+/**
+ * The repository a branch or commit is under (#1440): the repository whose
+ * name is the row's declared parent, `owner/name` (ADR-0018), in the same
+ * source. `null` where the row declares none (the miss, ADR-0007) or the
+ * mirror holds no such repository. The id is never taken apart (ADR-0020).
+ */
+export function repoOfRow(row: Pick<EntityRow, "source_id" | "path">, repos: readonly EntityRow[]): EntityRow | null {
+  if (row.path === null) return null;
+  return repos.find((repo) => repo.kind === "repo" && repo.source_id === row.source_id && repo.title === row.path) ?? null;
+}
+
+/** The two kinds whose addresses send the reader to their repository page (#1440). */
+export type UnderRepoKind = "branch" | "commit";
+
+/**
+ * Where a branch or commit opens under its repository (#1440): a branch the
+ * Branches tab (R-8.1, "a job's branch rows open that tab"), a commit its own
+ * page under Commits (R-8.7).
+ */
+export function underRepoHash(kind: UnderRepoKind, entityId: string, repoId: string): string {
+  return kind === "branch" ? repoHash(repoId, "branches") : commitHash(repoId, entityId);
+}
+
 /** One branch the dropdown offers. */
 export interface BranchOption {
   name: string;

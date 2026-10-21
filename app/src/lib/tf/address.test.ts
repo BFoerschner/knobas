@@ -1,5 +1,7 @@
 import { expect, test } from "vitest";
 import { entityAddress, legacyAddress } from "./address";
+import { page as codeRowPage } from "./code-row/page";
+import { pageFor } from "./pages";
 import { parseTfHash } from "./route";
 
 test("an entity of a known kind goes where its own page is", () => {
@@ -45,6 +47,12 @@ test("every address entityAddress produces has a place in the new shell", () => 
   for (const kind of ["ticket", "pr", "repo", "branch", "commit", "build", "page", "asset", "route", "monitor", "note", "mystery"]) {
     expect(parseTfHash(entityAddress(kind, "x:1")).view).not.toBe("unknown");
   }
+});
+
+test("a branch or commit opens its own address, which the repository page's redirect draws (#1440)", () => {
+  expect(entityAddress("branch", "gitea:x/pay@refs/heads/main")).toBe("#/branch/gitea%3Ax%2Fpay%40refs%2Fheads%2Fmain");
+  expect(entityAddress("commit", "mock:9f2c1ab")).toBe("#/commit/mock%3A9f2c1ab");
+  for (const kind of ["branch", "commit"]) expect(pageFor(parseTfHash(entityAddress(kind, "x:1"))), kind).toBe(codeRowPage);
 });
 
 test("a rooms-UI detail address is read as the entity it names", () => {

@@ -7,7 +7,10 @@ import { describe, expect, test, vi } from "vitest";
 import { kindRegistry } from "../../shell/kind-registry.svelte";
 
 import type { InboxEntry, InboxItem, Reached } from "../../ipc/entity";
+import { page as codeRowPage } from "../code-row/page";
 import { jobIndex } from "../job/open-jobs";
+import { pageFor } from "../pages";
+import { parseTfHash } from "../route";
 import {
   kindOf,
   opener,
@@ -125,6 +128,13 @@ describe("where a row opens", () => {
       href: "#/page/conf%3ASEPA",
     });
     expect(opener(item({ category: "mention", kind: "pr" }))?.label).toBe("Open PR");
+  });
+  test("a branch or commit opens its own address, which the repository page's redirect draws (#1440)", () => {
+    const branch = opener(item({ category: "mention", entity_id: "gitea:x/pay@refs/heads/main", kind: "branch" }))!;
+    const commit = opener(item({ category: "mention", entity_id: "gitea:x/pay@9f2c1ab", kind: "commit" }))!;
+    expect(branch).toEqual({ label: "Open", href: "#/branch/gitea%3Ax%2Fpay%40refs%2Fheads%2Fmain" });
+    expect(commit).toEqual({ label: "Open", href: "#/commit/gitea%3Ax%2Fpay%409f2c1ab" });
+    for (const { href } of [branch, commit]) expect(pageFor(parseTfHash(href)), href).toBe(codeRowPage);
   });
   test("a credential expiry opens its source's settings", () => {
     expect(opener(item({ category: "credential_expiry", source_id: "jira", entity_id: null, kind: null }))).toEqual({
