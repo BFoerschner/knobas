@@ -315,8 +315,8 @@
     // The wizard added a source, and neither `add_source` nor `demo_load`
     // emits `source:health`.
     void health.reseed();
-    if (landing !== "tickets") {
-      location.hash = `#/settings/${landing}`;
+    if (landing === "sources" || landing === "backup") {
+      location.hash = landing === "sources" ? "#/settings/sources" : "#/settings/backup";
       return;
     }
     location.hash = HOME;

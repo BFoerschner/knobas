@@ -336,12 +336,14 @@ test("a link set draws its tick after Links, on by default, and switching it off
   expect(p.shareExport).toHaveBeenLastCalledWith(expect.objectContaining({ link_sets: false }));
 });
 
+/** The file names the open dialog lists. */
+const listedFiles = () => [...target.querySelectorAll('[role="dialog"] tbody tr td:first-child')].map((el) => el.textContent);
+
 test("Restore from a file… lists the backups and Import… the share exports, each restoring that file", async () => {
   const p = await open("backup");
   button("Restore from a file…").click();
   await settle();
-  const files = () => [...target.querySelectorAll('[role="dialog"] tbody tr td:first-child')].map((el) => el.textContent);
-  expect(files()).toEqual(["knobas-20261015-020000.knobas"]);
+  expect(listedFiles()).toEqual(["knobas-20261015-020000.knobas"]);
   button("Restore").click();
   await settle();
   expect(p.restoreBackup).toHaveBeenCalledWith("knobas-20261015-020000.knobas");
@@ -350,7 +352,7 @@ test("Restore from a file… lists the backups and Import… the share exports, 
   button("Import…").click();
   await settle();
   expect(target.querySelector('[role="dialog"] h2')?.textContent).toBe("Import a share export");
-  expect(files()).toEqual(["knobas-share-20261012-101500.knobas"]);
+  expect(listedFiles()).toEqual(["knobas-share-20261012-101500.knobas"]);
   button("Import").click();
   await settle();
   expect(p.restoreBackup).toHaveBeenLastCalledWith("knobas-share-20261012-101500.knobas");
@@ -382,8 +384,6 @@ function statusWith(file: string, share: boolean): BackupStatus {
   const first = status();
   return { ...first, archives: [...first.archives, { file, bytes: 1024, share }] };
 }
-
-const listedFiles = () => [...target.querySelectorAll('[role="dialog"] tbody tr td:first-child')].map((el) => el.textContent);
 
 test("Import… and Restore from a file… read the folder again, so a file put there since the section opened is listed (#1470)", async () => {
   const backupStatus = vi

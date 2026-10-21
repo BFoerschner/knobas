@@ -65,23 +65,22 @@
   let choosing = $state<"backup" | "share" | null>(null);
 
   const read = latestRead<BackupStatus>();
-  /** How many folder reads were started, so a dialog can name the read it waits for. */
-  let asked = 0;
-  /** The newest started read whose answer landed (`latestRead` lets only the newest land). */
-  let landed = $state(0);
-  /** The first read that started after the open dialog opened (#1470). */
-  let wanted = $state(0);
+  /**
+   * Whether the open dialog waits for its own read of the folder (#1470).
+   * `latestRead` lands only the newest read, so whatever lands after `choose`
+   * started one is that read or a newer one.
+   */
+  let reading = $state(false);
   async function load() {
-    const ask = ++asked;
     await read(ports.backupStatus, {
       ok: (next) => {
         status = next;
         error = null;
-        landed = ask;
+        reading = false;
       },
       fail: (cause) => {
         error = ipcErrorMessage(cause);
-        landed = ask;
+        reading = false;
       },
     });
   }
@@ -89,7 +88,7 @@
   /** Open a dialog over the folder as it is now, not as the section found it (#1470). */
   function choose(kind: "backup" | "share") {
     choosing = kind;
-    wanted = asked + 1;
+    reading = true;
     void load();
   }
 
@@ -192,7 +191,6 @@
 
   const ticks = $derived(shareTicks(savedLists, savedViews, savedSets));
   const nothingTicked = $derived(!ticks.some((tick) => parts[tick.part]));
-  const reading = $derived(landed < wanted);
   const listed = $derived(status?.archives.filter((archive) => archive.share === (choosing === "share")) ?? []);
 </script>
 
