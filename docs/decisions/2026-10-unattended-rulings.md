@@ -10581,3 +10581,21 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   is where a stale `unreachable` most often starts, and this ticket left it alone: it is outside
   the delegated picks, and the clear above stops it from outliving the next error run. *Reversing:*
   not applicable.
+- **Merge-manager on Opus: every `Error` clears a stored `unreachable`, not only an error the server
+  answered** (deep pass, 2026-10-21). *Fork:* keep the implementer's wider clear, or narrow it to
+  the errors where the far end answered (`Protocol`, `Moved`) and leave `unreachable` standing
+  through a keychain, configuration or database error. *Ruling:* keep it wide. *Reasoning:* the
+  ticket asks for the narrow case and the wide rule contains it. An error the server never saw
+  leaves the stored `unreachable` no truer: it was not re-witnessed either way, and `unknown` is
+  the glossary's "not tested since something changed". On the source page, a stale *Unreachable*
+  would sit over a keychain failure that needs a person, which is the worse reading. Nothing
+  gates on `unreachable` (the scheduler skips only `unauthorized` and `missing_secret`; backoff
+  reads the run log, not the health), so the clear changes no schedule, and the next unreachable
+  run sets it again. The write is one guarded `update`, so a *Test connection* landing at the same
+  moment loses or wins whole. *Reversing:* low; narrowing needs the `RunFailure` kind on
+  `RunResult`, a sync-crate change with no IPC.
+- **The launcher strip no longer shows a stale red for an erroring source** (merge-manager, deep
+  pass). The strip reads only credential health, so a source whose runs keep ending in `Error` is
+  unmarked there, as an error-only source always was. *Ruling:* not this ticket's; filed #1581
+  (`backlog`). *Reasoning:* the red it loses was the stale state the ticket removes, and the source
+  page reads the run's own *Failed …*. *Reversing:* not applicable.
