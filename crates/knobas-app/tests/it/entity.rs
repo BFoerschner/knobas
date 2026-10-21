@@ -3372,9 +3372,9 @@ const CAPTURED_FROM: &str = "captured-from";
 #[tokio::test]
 async fn a_note_born_in_a_stored_room_carries_both_links_and_is_a_member() {
     let pool = seeded().await;
-    use knobas_app::commands::entity::{NoteLinkInput, create_context_inner, create_note_inner};
+    use knobas_app::commands::entity::{NoteLinkInput, create_note_inner};
 
-    let ctx = create_context_inner(&pool, &format!("Capture {}", unique()))
+    let ctx = knobas_core::context::create_adhoc(&pool, &format!("Capture {}", unique()))
         .await
         .unwrap();
     let (ticket, _unused) = linkable_pair(&pool).await;
@@ -3643,10 +3643,10 @@ async fn a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one(
 async fn a_born_link_survives_the_notes_first_autosave() {
     let pool = seeded().await;
     use knobas_app::commands::entity::{
-        NoteLinkInput, create_context_inner, create_note_inner, save_note_inner,
+        NoteLinkInput, create_note_inner, save_note_inner,
     };
 
-    let ctx = create_context_inner(&pool, &format!("Capture {}", unique()))
+    let ctx = knobas_core::context::create_adhoc(&pool, &format!("Capture {}", unique()))
         .await
         .unwrap();
     let (ticket, _unused) = linkable_pair(&pool).await;
@@ -3722,9 +3722,9 @@ async fn a_born_link_survives_the_notes_first_autosave() {
 #[tokio::test]
 async fn a_notes_birth_is_one_line_and_a_withdrawn_born_link_pairs_with_it() {
     let pool = seeded().await;
-    use knobas_app::commands::entity::{NoteLinkInput, create_context_inner, create_note_inner};
+    use knobas_app::commands::entity::{NoteLinkInput, create_note_inner};
 
-    let ctx = create_context_inner(&pool, &format!("Capture {}", unique()))
+    let ctx = knobas_core::context::create_adhoc(&pool, &format!("Capture {}", unique()))
         .await
         .unwrap();
     let (ticket, _unused) = linkable_pair(&pool).await;

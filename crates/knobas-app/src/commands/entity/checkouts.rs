@@ -7,19 +7,9 @@ use super::*;
 // Here rather than in a module pair of their own for the reason `notify` and
 // #290's setting are: a repo and a branch are entities, `get_entity` is in this
 // module, and §10.8 freezes the `commands/` + `ipc/` layout. The behaviour is
-// `crate::checkout`; these four are the thin shims the layout asks for.
-
-/// Where knobas looks for clones, or nothing.
-///
-/// # Errors
-///
-/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
-/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
-#[tauri::command]
-pub async fn clones_root(lifecycle: State<'_, Lifecycle>) -> Result<Option<String>, IpcError> {
-    let pool = lifecycle.pool()?;
-    crate::checkout::clones_root(&pool).await
-}
+// `crate::checkout`; these are the thin shims the layout asks for. #1481
+// retired the root's own read: the root reaches the app on
+// `checkout_settings` and on every `CheckoutView`.
 
 /// Set the clones root, or clear it with a blank one.
 ///
@@ -164,44 +154,8 @@ pub async fn entity_thread(
 // §10.8 freezes the `commands/` + `ipc/` layout. The behaviour is
 // `crate::checkout`; these are the shims. #844 adds `checkout_settings` and
 // `set_checkout_applications` here, and `open_checkout` takes an application.
-
-/// Every application as #501's buttons draw it, with the command it would run.
-///
-/// Read by the rooms UI's settings section and checkout panel. Since #844 a
-/// view over the *Open in…* list: one row per application, its id as the
-/// action.
-///
-/// # Errors
-///
-/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
-/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
-#[tauri::command]
-pub async fn checkout_commands(
-    lifecycle: State<'_, Lifecycle>,
-) -> Result<Vec<crate::checkout::OpenCommandView>, IpcError> {
-    let pool = lifecycle.pool()?;
-    crate::checkout::commands(&pool).await
-}
-
-/// Set one application's command, or put back the one this platform ships.
-///
-/// # Errors
-///
-/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
-/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an application
-/// that does not exist or a command that cannot be run,
-/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
-/// fails.
-#[tauri::command]
-pub async fn set_checkout_command(
-    lifecycle: State<'_, Lifecycle>,
-    action: String,
-    template: Option<String>,
-) -> Result<Vec<crate::checkout::OpenCommandView>, IpcError> {
-    let pool = lifecycle.pool()?;
-    crate::checkout::set_command(&pool, &action, template.as_deref()).await?;
-    crate::checkout::commands(&pool).await
-}
+// #1481 retired #501's two template commands, which the *Open in…* list had
+// replaced and nothing pressed any more.
 
 /// Run an application at this entity's checkout (#501, #844), at a file in it
 /// when `file` names one. Answers the argument vector it started.

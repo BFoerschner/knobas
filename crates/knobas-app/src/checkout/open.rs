@@ -17,8 +17,8 @@
 //! platform's shipped one with #501's stored templates over it
 //! (`checkout.command.vscode`, `.jetbrains`, `.terminal`): today's templates
 //! become the first entries, under the ids #501 gave them. #501's two
-//! commands keep working over the list (`commands`, `set_command`), because
-//! the rooms UI and the desktop witness of ADR-0016 still press them.
+//! commands, which wrote those templates, are gone (#1481); a database that
+//! holds one still reads it here.
 //!
 //! # The only values are from this disk (ADR-0016)
 //!
@@ -35,7 +35,7 @@ use knobas_core::checkout::open::{self as rules, Application, Draft, Fill};
 
 use super::working_tree::{self, TreeRead};
 use crate::IpcError;
-use crate::settings::{read as read_setting, read_value, settable, write_value};
+use crate::settings::{read as read_setting, read_value, write_value};
 
 /// The `knobas.setting` key holding the applications and the default.
 pub const APPLICATIONS_KEY: &str = "checkout.applications";
@@ -212,98 +212,6 @@ pub async fn set_applications(
     save(pool, &stored).await
 }
 
-// -- #501's two commands, over the list --------------------------------------
-
-/// One application as #501's checkout panel draws it: a button.
-///
-/// Since #844 a view over the *Open in…* list (`checkout_settings`): one row
-/// per application. `is_default` says whether the command is the one this
-/// platform ships for that id, so the rooms settings field can offer to go back
-/// to it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
-#[ts(export_to = "entity.ts", rename = "CheckoutCommand")]
-pub struct OpenCommandView {
-    /// The application's id: what `open_checkout` takes.
-    pub action: String,
-    /// What the button says: "Open in VS Code".
-    pub label: String,
-    /// The command. Always set: an application has one.
-    pub template: Option<String>,
-    /// Whether the command is the one this platform ships for this id, so
-    /// the rooms settings field can offer to go back to it.
-    pub is_default: bool,
-}
-
-fn command_view(app: &Application, shipped: &[Application]) -> OpenCommandView {
-    OpenCommandView {
-        action: app.id.clone(),
-        label: format!("Open in {}", app.name),
-        template: Some(app.command.clone()),
-        is_default: shipped
-            .iter()
-            .any(|known| known.id == app.id && known.command == app.command),
-    }
-}
-
-/// Every application as a button, in the list's order.
-///
-/// # Errors
-///
-/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
-pub async fn commands(pool: &PgPool) -> Result<Vec<OpenCommandView>, IpcError> {
-    let shipped = rules::shipped();
-    let stored = load_with(pool, shipped.clone()).await?;
-    Ok(stored
-        .applications
-        .iter()
-        .map(|app| command_view(app, &shipped))
-        .collect())
-}
-
-/// Set one application's command, or put back the one this platform ships
-/// for it.
-///
-/// # Errors
-///
-/// [`Invalid`](crate::IpcErrorCode::Invalid) for an id no application has, a
-/// command that cannot be run, or clearing one this platform ships nothing
-/// for; [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
-pub async fn set_command(
-    pool: &PgPool,
-    action: &str,
-    template: Option<&str>,
-) -> Result<(), IpcError> {
-    let shipped = rules::shipped();
-    let mut stored = load_with(pool, shipped.clone()).await?;
-    let known: Vec<String> = stored.applications.iter().map(|a| a.id.clone()).collect();
-    let Some(app) = stored.applications.iter_mut().find(|app| app.id == action) else {
-        return Err(IpcError::invalid(format!(
-            "'{action}' is not something knobas opens a checkout with; it has {}",
-            known.join(", ")
-        )));
-    };
-    let command = match settable(template) {
-        Some(command) => {
-            rules::check(command).map_err(|error| {
-                IpcError::invalid(format!("'{command}' cannot be run: {error}"))
-            })?;
-            command.to_owned()
-        }
-        None => shipped
-            .iter()
-            .find(|known| known.id == action)
-            .map(|known| known.command.clone())
-            .ok_or_else(|| {
-                IpcError::invalid(format!(
-                    "{} has no command on this platform to go back to",
-                    app.name
-                ))
-            })?,
-    };
-    app.command = command;
-    save(pool, &stored).await
-}
-
 // -- the spawn ----------------------------------------------------------------
 
 /// What to run: a saved application (the default when none is named), or a
@@ -439,16 +347,6 @@ fn spawn(argv: &[String]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// #501's button view names the application and says whether its
-    /// command is the one this platform ships.
-    #[test]
-    fn the_open_command_view_names_the_application() {
-        let shipped = knobas_core::checkout::open::shipped_on("macos");
-        let view = command_view(&shipped[0], &shipped);
-        assert_eq!(view.label, "Open in VS Code");
-        assert!(view.is_default);
-    }
 
     /// A default that names no entry is the first one, and an empty list has
     /// none.

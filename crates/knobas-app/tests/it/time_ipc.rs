@@ -2650,14 +2650,14 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
 #[tokio::test]
 async fn a_notes_whole_life_inside_the_interval_is_one_checkbox_carrying_its_title() {
     use knobas_app::commands::entity::unlink_inner;
-    use knobas_app::commands::entity::{NoteLinkInput, create_context_inner, create_note_inner};
+    use knobas_app::commands::entity::{NoteLinkInput, create_note_inner};
     use knobas_app::time::worklog::CandidateSource;
 
     let pool = scratch("worklog-note-one-checkbox").await;
     configure_jira(&pool, "mara.lindqvist").await;
     block(&pool, TICKET, (9, 0), (11, 0)).await;
 
-    let ctx = create_context_inner(&pool, "Payout retries")
+    let ctx = knobas_core::context::create_adhoc(&pool, "Payout retries")
         .await
         .expect("a context to capture into");
     let born = create_note_inner(
@@ -2760,10 +2760,10 @@ async fn a_note_created_and_deleted_inside_the_interval_is_no_candidate_at_all()
 
 /// **The narrowing is by kind, not by verb** (#561).
 ///
-/// An ad-hoc context's birth writes `created` on its own `ctx:<uuid>`
-/// (`create_context_inner`), and it has no second reader the way a note does:
-/// drop it and a draft loses the only signal it carries for a context the
-/// reader made while the clock ran. So it is still a candidate, from the activity
+/// An ad-hoc context's birth wrote `created` on its own `ctx:<uuid>`
+/// (`create_context`, retired by #1481; the log keeps the lines it wrote), and
+/// it has no second reader the way a note does: drop it and a draft loses the
+/// only signal it carries for a context the reader made while the clock ran. So it is still a candidate, from the activity
 /// read, with the bullet it has always had.
 ///
 /// That bullet says the context's uuid, which is the shape #409 dislikes and
@@ -2773,16 +2773,26 @@ async fn a_note_created_and_deleted_inside_the_interval_is_no_candidate_at_all()
 /// version of the same cure.
 #[tokio::test]
 async fn a_context_created_inside_the_interval_is_still_its_activity_candidate() {
-    use knobas_app::commands::entity::create_context_inner;
     use knobas_app::time::worklog::CandidateSource;
 
     let pool = scratch("worklog-context-created").await;
     configure_jira(&pool, "mara.lindqvist").await;
     block(&pool, TICKET, (9, 0), (11, 0)).await;
 
-    let ctx = create_context_inner(&pool, "Payout retries")
+    let ctx = knobas_core::context::create_adhoc(&pool, "Payout retries")
         .await
         .expect("a context");
+    // The line `create_context` wrote at the birth, in its shape.
+    let entity = knobas_core::entity::EntityRef::parse(&ctx.id).expect("a context id");
+    knobas_core::activity::record(
+        &pool,
+        "user",
+        "created",
+        Some(&entity),
+        serde_json::json!({ "context_id": ctx.id, "kind": ctx.kind, "title": ctx.title }),
+    )
+    .await
+    .expect("the birth's line");
     lines_about(&pool, &ctx.id, at(10, 20), 1).await;
 
     let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
