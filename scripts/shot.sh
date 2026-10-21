@@ -23,8 +23,12 @@
 #        SHOT_THEME=light|dark (Chrome's preferred colour scheme, which the app
 #          follows unless `data-theme` is set; unset leaves Chrome's default)
 #        SHOT_FULL=1 (the whole of a long page in one image: the viewport grows to
-#          its tallest scroller's content, at most 8000 px; every route takes the
-#          steps path, #1396)
+#          its tallest scroller's content, at most 8000 px, #1396)
+#        SHOT_ALLOW_ERRORS=1 (keep going when a page throws: every shot runs over
+#          the DevTools protocol, prints the page's uncaught exceptions and
+#          console errors, and by default fails on an uncaught one)
+#        SHOT_DRY_RUN=1 (print each route's URL and image path, start nothing;
+#          scripts/shot-test.sh reads it)
 #        (SHOT_SHELL is gone with the rooms UI, #881: there is one shell.)
 #
 # The dev server runs on 5300 + slot. A server already listening there (the
@@ -38,20 +42,18 @@ slot=$1 out=$2; shift 2
 port=$((5300 + slot)); size=${SHOT_SIZE:-1440,900}; theme=${SHOT_THEME:-}; full=${SHOT_FULL:-}
 case $theme in ''|light|dark) ;; *) echo "shot: SHOT_THEME must be light or dark, got '$theme'" >&2; exit 2 ;; esac
 case $full in ''|1) ;; *) echo "shot: SHOT_FULL must be 1 or unset, got '$full'" >&2; exit 2 ;; esac
-theme_flags=()
-# Blink's PreferredColorScheme enum is { kDark = 0, kLight = 1 }; --force-dark-mode and
-# --force-prefers-color-scheme did nothing on Chrome with a dark macOS (#935).
-[ "$theme" = dark ] && theme_flags=(--blink-settings=preferredColorScheme=0)
-[ "$theme" = light ] && theme_flags=(--blink-settings=preferredColorScheme=1)
-root=$(git rev-parse --show-toplevel)
-chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+dry=${SHOT_DRY_RUN:-}
+# The checkout this script lives in, not the one the caller stands in: run from
+# the root checkout, `git rev-parse` there shot a worktree's change with the
+# root's older scripts and app.
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 profile="${TMPDIR:-/tmp}/knobas-shot-profile-$slot"
 mkdir -p "$out" "$profile"
 up() { curl -fsS -o /dev/null "http://localhost:$port/" 2>/dev/null; }
 vite_pid=
 stop() { [ -z "$vite_pid" ] || { pkill -TERM -P "$vite_pid" 2>/dev/null || true; kill "$vite_pid" 2>/dev/null || true; wait "$vite_pid" 2>/dev/null || true; }; }
 trap stop EXIT
-if ! up; then
+if [ -z "$dry" ] && ! up; then
   (cd "$root/app" && exec npx vite --port "$port" --strictPort >"${TMPDIR:-/tmp}/knobas-shot-vite-$slot.log" 2>&1) &
   vite_pid=$!
   for _ in $(seq 1 120); do up && break; sleep 0.5; done
@@ -63,30 +65,26 @@ for route in "$@"; do
   # text, so that left `&?fake-…` in the query and every switch went unread (#1396).
   case $route in \?*'#'*) extra=${route%%#*}; extra="&${extra#\?}"; path=${route#*#} ;; esac
   case $path in '#/'*) path=${path#'#/'} ;; '#'*|/*) path=${path#?} ;; esac
-  q="fake-ipc$extra"
   file="$out/$(printf '%s' "$path" | tr '/?&=' '____' | sed 's/^$/root/').png"
-  stepped=$full
   case $route in
     *' > '*|*' + '*)
-      stepped=1
       name=$(printf '%s' "$route" | sed 's/#\/\{0,1\}//g; s/ [>+] /--/g; s/click://g' | tr -c 'A-Za-z0-9._-\n' '_')
       # Cut at 120, with the route's checksum when cut: two long routes that
       # share their first 120 characters overwrote each other's image (#1396).
       [ "${#name}" -le 120 ] || name="${name:0:111}-$(printf '%s' "$route" | cksum | awk '{ printf "%08x", $1 }')"
       file="$out/$name.png" ;;
   esac
-  if [ -n "$stepped" ]; then
-      # the query went into `extra`; the steps script gets the route after the first `#`
-      steps=$route
-      case $route in \?*'#'*) steps=${route#*#} ;; esac
-      node "$root/scripts/shot-steps.mjs" "$port" $((9400 + slot)) "$profile" "$size" "$theme" "$file" "$steps" "${extra:+&${extra#&}}" || exit 1
-      [ -s "$file" ] || { echo "shot: no image for $route" >&2; exit 1; }
-      echo "shot: $file  <- $route"
+  # Every shot runs over the DevTools protocol (scripts/shot-steps.mjs), so a
+  # page that throws is reported for a plain route too. The query went into
+  # `extra`; the steps script gets the route after the first `#`.
+  steps=$route
+  case $route in \?*'#'*) steps=${route#*#} ;; esac
+  if [ -n "$dry" ]; then
+      first=${steps%% [>+] *}; first=${first#\#}; first=${first#/}
+      echo "dry: root=$root url=http://localhost:$port/?fake-ipc$extra#/$first file=$file"
       continue
   fi
-  "$chrome" --headless=new --disable-gpu --hide-scrollbars ${theme_flags[@]+"${theme_flags[@]}"} --user-data-dir="$profile" \
-    --window-size="$size" --virtual-time-budget=8000 --screenshot="$file" \
-    "http://localhost:$port/?$q#/$path" >/dev/null 2>&1
+  node "$root/scripts/shot-steps.mjs" "$port" $((9400 + slot)) "$profile" "$size" "$theme" "$file" "$steps" "${extra:+&${extra#&}}" || exit 1
   [ -s "$file" ] || { echo "shot: no image for $route" >&2; exit 1; }
-  echo "shot: $file  <- http://localhost:$port/?$q#/$path"
+  echo "shot: $file  <- $route"
 done

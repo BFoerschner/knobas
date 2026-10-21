@@ -530,6 +530,7 @@ shell:
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/bash-guard-test.sh
+    scripts/shot-test.sh
     scripts/test-layout-test.sh
     scripts/append-only-merge-test.sh
     scripts/test-prefix-guard-test.sh

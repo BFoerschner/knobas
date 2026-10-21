@@ -23,6 +23,10 @@
 //       `scroll:testid=<id>` scrolls that element into view.
 //   SHOT_FULL=1 grows the viewport to the tallest scrolling element's content before the
 //   capture (at most 8000 px), so a long page is one image.
+//   Every uncaught exception and console.error in the page is printed as `shot: uncaught …`
+//   or `shot: console.error …`. An uncaught exception fails the shot (exit 1) after its image
+//   is written, so a screen that throws never passes as a picture; SHOT_ALLOW_ERRORS=1 lets
+//   it through.
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
@@ -103,9 +107,18 @@ try {
   await new Promise((r) => (ws.onopen = r));
   let seq = 0;
   const waiting = new Map();
+  const uncaught = [];
+  const consoleErrors = [];
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.id && waiting.has(m.id)) (waiting.get(m.id)(m), waiting.delete(m.id));
+    if (m.method === "Runtime.exceptionThrown") {
+      const d = m.params.exceptionDetails;
+      uncaught.push((d.exception?.description ?? d.text ?? "an exception").split("\n")[0]);
+    }
+    if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") {
+      consoleErrors.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" ").split("\n")[0]);
+    }
   };
   const send = (method, params = {}) =>
     new Promise((resolve) => {
@@ -118,6 +131,7 @@ try {
     return a.result?.result?.value;
   };
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+  await send("Runtime.enable");
   const base = `http://localhost:${port}/?fake-ipc${extra}`;
   const clickJs = (name) => {
     const byId = name.startsWith("testid=");
@@ -257,6 +271,11 @@ try {
   }
   const { result } = await send("Page.captureScreenshot", { format: "png" });
   writeFileSync(file, Buffer.from(result.data, "base64"));
+  for (const text of consoleErrors) console.error(`shot: console.error ${text}`);
+  for (const text of uncaught) console.error(`shot: uncaught ${text}`);
+  if (uncaught.length > 0 && process.env.SHOT_ALLOW_ERRORS !== "1") {
+    done(1, `shot: ${file} was written, but the page threw ${uncaught.length} uncaught exception(s); SHOT_ALLOW_ERRORS=1 lets it through`);
+  }
   done(0);
 } catch (e) {
   done(1, `shot: ${e.message}`);
