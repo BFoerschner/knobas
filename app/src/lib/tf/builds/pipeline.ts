@@ -9,9 +9,10 @@
  * pipeline frame on (ADR-0022).
  */
 import type { PipelineRow, PipelineSettings, PipelineTrigger, RunRow } from "../../ipc/entity";
-import type { CredentialHealth, SourceDescriptor, SourceSyncStatus } from "../../ipc/sources";
+import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
 import { matchesAll } from "../filter/filter";
 import { age } from "../job/job";
+import { reenterWords, secretNoun } from "../settings/settings";
 import { duration, pipelineHash, runTone, shortTime } from "./builds";
 
 /**
@@ -298,31 +299,38 @@ export function jobBranchFor(runs: readonly RunRow[], jobBranches: readonly stri
 /** The warn line over a pipeline whose source's data is stale, with its fix where it has one. */
 export interface StaleLine {
   text: string;
-  /** Where the fix is, for a credential the reader has to re-enter. */
-  fix: string | null;
+  /**
+   * Where the fix is, for a credential the reader has to re-enter: the link's
+   * words in the source's noun (#1405), *Re-enter token*, and the noun alone
+   * for the run dialog's sentence.
+   */
+  fix: { href: string; words: string; secret: "password" | "token" } | null;
 }
 
 /**
  * The warn line (R-9.4): a source whose sign-in fails, or whose last sync
  * failed, has data that may be out of date, and a run started now waits in
- * the queue. Nothing for a source that synced.
+ * the queue. Nothing for a source that synced. The source rows carry its
+ * credential's state and what that credential is called.
  */
 export function staleLine(
   pipeline: Pick<PipelineRow, "source_id" | "source_name">,
-  health: readonly CredentialHealth[],
+  sources: readonly Pick<SourceSummary, "id" | "health" | "auth_kind">[],
   sync: readonly SourceSyncStatus[],
   now: Date = new Date(),
 ): StaleLine | null {
-  const state = health.find((row) => row.source_id === pipeline.source_id);
+  const source = sources.find((row) => row.id === pipeline.source_id);
+  const state = source?.health;
   const run = sync.find((row) => row.source_id === pipeline.source_id);
   const name = pipeline.source_name;
-  if (state?.state === "unauthorized" || state?.state === "missing_secret") {
+  if (source && state && (state.state === "unauthorized" || state.state === "missing_secret")) {
+    const secret = secretNoun(source.auth_kind);
     const since = run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
-    const why = state.state === "missing_secret" ? "no password stored" : "sign-in failing";
+    const why = state.state === "missing_secret" ? `no ${secret} stored` : "sign-in failing";
     const lead = since ? `${name} data is ${age(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`;
     return {
       text: `${lead} Runs you start wait in the queue until it works again.`,
-      fix: `#/settings/source/${encodeURIComponent(pipeline.source_id)}`,
+      fix: { href: `#/settings/source/${encodeURIComponent(pipeline.source_id)}`, words: reenterWords(source.auth_kind), secret },
     };
   }
   if (run && !run.running && (run.last_outcome === "unreachable" || run.last_outcome === "error")) {

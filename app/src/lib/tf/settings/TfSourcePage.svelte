@@ -2,9 +2,10 @@
   A source's page (#830, R-13a.2): prototype-6's `stgSource`.
 
   - A credential the reader has to fix is said on top, with *Re-enter
-    password*. Every *Re-enter password* in the new shell links here.
+    password* (*Re-enter token* for a token source, #1405). Every *Re-enter …*
+    in the new shell links here.
   - **Connection**: the address and the user are edited and saved through
-    `update_source`; the password is re-entered into the keychain through
+    `update_source`; the password or token is re-entered into the keychain through
     `set_source_secret`, which never reads one back; an adapter that takes a
     second credential (Uptime Kuma) has an *Account* row. *Test connection*
     tests what is stored and says what it found.
@@ -22,7 +23,11 @@
     under the header, read from the channel `watch_sync` attaches. The page
     attaches when it opens on a running source and when `sync:state` says a
     run started, and stops listening when it leaves.
-  - **Sync runs**: the source's last runs.
+  - A value the address adds (*Sync WEB too*, #879) is scrolled into view,
+    with *WEB added, not saved yet* beside *Save* until it is saved or the
+    reader edits the field (#1404).
+  - **Sync runs**: the source's last runs. A result wraps anywhere, and an
+    unreachable run's transport error sits behind *Details* (#1478).
   - **Maintenance**: *Backfill* (`backfill_source`) and *Remove…*, which asks
     whether to keep what the source synced.
 
@@ -31,7 +36,7 @@
   adapter whose schema declares it. Nothing here names an adapter.
 -->
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type {
@@ -62,6 +67,7 @@
     declaresUser,
     intervalOptions,
     intervalWords,
+    reenterWords,
     runProgressWords,
     runRow,
     secretWord,
@@ -201,12 +207,41 @@
     });
   });
 
+  /**
+   * The value the address added to the form (#1404), and a snapshot of the
+   * field as it left it: the note beside *Save* stands while the field still reads so.
+   */
+  let added = $state<{ value: string; field: string; snapshot: string } | null>(null);
+  /** The config's *Save* and its note, to scroll to. */
+  let configActs = $state<HTMLElement>();
+  const addedNote = $derived(
+    added !== null && snapshotOf(configValues[added.field]) === added.snapshot ? `${added.value} added, not saved yet` : null,
+  );
+
+  function snapshotOf(value: unknown): string {
+    return JSON.stringify(value ?? null);
+  }
+
   /** Put a stored config in the form, as both what it shows and what it was read from. */
   function readForm(fields: typeof config.fields, stored: unknown) {
     configValues = formValues(fields, stored);
     configLoaded = validate(fields, configValues).config;
     // A value the address adds (#879) is the reader's edit, offered unsaved.
-    configValues = withAdded(fields, configValues, add);
+    const read = configValues;
+    configValues = withAdded(fields, read, add);
+    if (add && configValues !== read) {
+      added = { ...add, snapshot: snapshotOf(configValues[add.field]) };
+      // In view, so the reader sees it went in (#1404): *Save* and its note at
+      // the bottom of the window, then the field, if that left it out of sight.
+      // jsdom draws no layout and has no `scrollIntoView`.
+      const id = `tf-src-cfg-${add.field}`;
+      void tick().then(() => {
+        configActs?.scrollIntoView?.({ block: "end" });
+        document.getElementById(id)?.scrollIntoView?.({ block: "nearest" });
+      });
+    } else {
+      added = null;
+    }
   }
 
   async function saveConfig() {
@@ -353,7 +388,7 @@
     };
   });
 
-  // ---- Re-enter password ----
+  // ---- Re-enter the credential ----
   let reentering = $state(false);
   let secret = $state("");
   let accountUser = $state("");
@@ -442,7 +477,7 @@
 {#if alert !== null}
   <div class="tf-stg-alert" role="alert">
     <span class="tf-dot tf-err"></span><span>{alert}</span>
-    <button class="tf-btn tf-sm tf-primary" onclick={openReenter}>Re-enter password</button>
+    <button class="tf-btn tf-sm tf-primary" onclick={openReenter}>{reenterWords(source.auth_kind)}</button>
   </div>
 {/if}
 {#each missLines as line (line)}
@@ -545,10 +580,11 @@
       idPrefix="tf-src-cfg"
       layout="rows"
     />
-    <div class="tf-stg-acts">
+    <div class="tf-stg-acts" bind:this={configActs}>
       <button class="tf-btn tf-sm tf-primary" disabled={!configDirty || !configValid || saving} onclick={() => void saveConfig()}
         >Save</button
       >
+      {#if addedNote !== null}<span class="tf-stg-pend" role="status">{addedNote}</span>{/if}
     </div>
   {/if}
 </section>
@@ -568,15 +604,20 @@
   {#if runs !== null && runs.length === 0}
     <p class="tf-stg-p">No runs yet. The first one starts on the schedule, or with <b>Sync now</b>.</p>
   {:else if runs !== null}
-    <table class="tf-tbl">
+    <table class="tf-tbl tf-stg-runs">
       <thead><tr><th>Started</th><th>Took</th><th>Result</th></tr></thead>
       <tbody>
         {#each runs as run (run.id)}
-          {@const row = runRow(run, now)}
+          {@const row = runRow(run, source, now)}
           <tr>
             <td>{row.started}</td>
             <td>{row.took}</td>
-            <td class={row.tone === "err" ? "tf-stg-errt" : ""}>{row.result}</td>
+            <td class="tf-stg-res {row.tone === 'err' ? 'tf-stg-errt' : ''}"
+              >{row.result}{#if row.detail !== null}<details class="tf-stg-det">
+                  <summary>Details</summary>
+                  <code>{row.detail}</code>
+                </details>{/if}</td
+            >
           </tr>
         {/each}
       </tbody>

@@ -1,6 +1,7 @@
 <!--
   The ticket-first status bar (#809, R-1.5): *Sources*, each source's sync age,
-  a credential the reader has to fix in err tone with *Re-enter password*, and
+  a credential the reader has to fix in err tone with *Re-enter password* (or
+  *token*, the source's noun: #1405), and
   the write queue's count, which opens the queue.
 
   Drawn from what the shell hands it; the readings are `status.ts`'s.
@@ -23,10 +24,10 @@
 <footer class="tf-status">
   <a class="tf-sources" href="#/settings">Sources</a>
   {#each readings as reading (reading.id)}
-    {#if reading.failed}
+    {#if reading.fix !== null}
       <span class="tf-bad">
         {reading.text}
-        <a href="#/settings/source/{encodeURIComponent(reading.id)}">Re-enter password</a>
+        <a href="#/settings/source/{encodeURIComponent(reading.id)}">{reading.fix}</a>
       </span>
     {:else}
       <span>{reading.text}</span>

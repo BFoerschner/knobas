@@ -8822,3 +8822,71 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   true once an external adapter is installed. *Reversing:* a string, or a port plus a fallback.
 - **The Schedule note's "(P7)"** went with the rooms modal (#1400), so nothing is owed there, as the
   ticket foresaw.
+
+## #1404: *Sync WEB too*'s project in view, with a note beside Save (Opus implementer, 2026-10-21)
+
+- **Delegated pick: (a), the list textarea sized to its lines, not chips.** *Fork:* (a) size the
+  textarea, scroll to it and add the note, or (b) a chip control as prototype-6 draws. *Ruling:*
+  (a). *Reasoning:* the ticket recommends it; a chip control would change every list field in
+  Settings and in *Add a source* (`TfAddSource`, which the first-run wizard bundle mounts in
+  parallel) for a bug about one field being out of sight. *Reversing:* medium, a new schema-form
+  control with its parse and serialise tests.
+- **Three to twelve rows.** A list field has as many rows as lines, never fewer than the three it
+  had (a short list draws as before), and past twelve it scrolls inside. *Reasoning:* the ticket
+  asks for no inner scroll "for a list of reasonable length"; twelve keys is past any Jira source
+  the fixture or the live testenv has. *Reversing:* one number.
+- **Scroll Save up first, then the field.** *Fork:* scroll the field to the centre, or bring both
+  the field and the note into sight. *Ruling:* *Save*'s row is scrolled to the bottom of the window,
+  then the field with `block: "nearest"`, which moves only if the first scroll left it out. Both are
+  in sight when they fit; the field wins when they do not. *Reasoning:* the first dark shot with
+  `block: "center"` showed WEB but left the note about 550 px below. *Reversing:* low.
+- **The note stands while the field reads as the address left it.** It goes when the field's value
+  differs from the list the addition produced, or when a save reads the form again (the stored
+  value now holds WEB, so nothing is added). A reader who deletes WEB and types it back sees the
+  note again, which is still true. It is `role="status"`. *Reversing:* low.
+
+## #1405: the credential's noun is the source's (Opus implementer, 2026-10-21)
+
+- **Delegated pick: widen what the job and pipeline lines read.** *Fork:* give the job and
+  pipeline warn lines and the Job, Pipeline and Run links the source row, or let them say
+  "credential". *Ruling:* widen. The job module's `SourceFacts` gains an optional `auth_kind` (the
+  rows it is handed are `list_sources`' `SourceSummary` already); the pipeline module's `staleLine`
+  takes the source rows instead of their health, as both pages hold them. *Reasoning:* the
+  recommended pick; no IPC change, and "credential" would be a third noun beside the two the
+  source page already uses. *Reversing:* low.
+- **The run dialog's banner too.** "starts once you re-enter the password" was the same fixed
+  string on the Pipeline and Run pages' dialog, in reach of the same stale line, so its prop
+  carries the noun (`secretNoun`, replacing the `signInFailing` boolean). *Reversing:* one prop.
+- **Two helpers over `secretWord`.** `secretNoun(auth)` is its word inside a sentence and
+  `reenterWords(auth)` writes *Re-enter password* / *Re-enter token* from it, so the noun still has
+  one source; the Pipeline and Run links take their words from `staleLine` too. `secretWord` takes `undefined` as
+  `null` (Password): a row whose kind is not known (the status bar before the source list
+  answers) reads as today. The status module's `SourceReading.failed` becomes `fix`, the link's
+  words or `null`. *Reversing:* low.
+- **The fixture's token source is Uptime Kuma, no token stored.** *Fork:* Gitea or Kuma,
+  `unauthorized` or `missing_secret`. *Ruling:* Kuma, `missing_secret`, its last run fine.
+  *Reasoning:* that is what the live pass saw for Kuma after a restart with in-memory secrets; Gitea
+  is the fixture's code host and ticket system, so a refusing Gitea would add warnings to Code,
+  Tickets and the job page that no ticket here asked for. The status bar now carries two failing
+  sources and runs past 1440 px, which is #1410's. *Reversing:* one argument in the fixture.
+- **The component test does not read the fixture.** `house-rules.test.ts` forbids a static import
+  of `shell/dev/` outside it, so the Settings test builds the same Kuma row as a stand-in and
+  `fake-tauri.test.ts` pins the fixture's row. *Reversing:* n/a.
+
+## #1478: an unreachable run in a sentence, its transport error behind Details (Opus implementer, 2026-10-21)
+
+- **Delegated pick: the raw message behind a disclosure.** *Fork:* a `<details>` in the row, or
+  Logs only. *Ruling:* `<details>` with the summary *Details*, the message in mono at the small
+  size in `--ink-2`. *Reasoning:* the recommended pick; a reader filing a bug can copy it, and the
+  sentence is what they read first. *Reversing:* delete the element and `RunRow.detail`.
+- **The sentence names the display name, or the id.** "<display name> did not answer.", the id
+  when the name is empty, as the page's other sentences do. A null-error unreachable run reads the
+  same sentence with no Details. *Reversing:* low.
+- **Started and Took keep their line.** A cell that may break anywhere has almost no minimum
+  width, so the table took width from the first two columns and wrapped "22 Aug 16:29" in the
+  first open-Details shot; `.tf-stg-runs td:not(.tf-stg-res)` is `nowrap`. *Reversing:* one rule.
+- **The fixture's unanswered run is TeamCity's run 88**, older than its refused run, its error the
+  source crate's `unreachable:` around the HTTP client's message with a long URL-encoded request
+  on the fixture's reserved host. Aside: the unscoped `list_sync_runs` has run id 93 twice
+  (Confluence's last run and the in-flight one); every caller scopes it by source, so it never
+  reaches a page, and nothing is filed. *Reversing:* n/a.

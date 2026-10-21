@@ -89,7 +89,15 @@ export const FIXTURE_SOURCES = [
   // The monitor roster's rows name `kuma` (#977): without this source the
   // Monitors header read the bare id, and with no account the roster would not
   // offer Pause and Resume. Kuma's descriptor declares an API token.
-  { ...fixtureSource("kuma", "kuma", "Uptime Kuma", "https://status.tidewater.example", "ok", 6, 95, "ApiToken"), roles: [{ role: "monitoring", reads: [] }] },
+  //
+  // Its token is gone, as after a restart with in-memory secrets (#1405): the
+  // last run worked, and now nothing is stored. This is the token source with a
+  // credential to fix, so *Re-enter token* and *no token stored* are reachable
+  // under `?fake-ipc`; TeamCity is the password one.
+  {
+    ...fixtureSource("kuma", "kuma", "Uptime Kuma", "https://status.tidewater.example", "missing_secret", 6, 95, "ApiToken"),
+    roles: [{ role: "monitoring", reads: [] }],
+  },
 ];
 
 /**
@@ -285,6 +293,24 @@ function fakeRuns(args: Record<string, unknown>) {
   const sourceId = args["sourceId"];
   const runs = [
     ...FIXTURE_SOURCES.map((source) => source.last_run).filter((run) => run !== null),
+    // An older TeamCity run the server never answered (#1478): the source
+    // crate's "unreachable: …" around the HTTP client's message, whole request
+    // URL and all, as a live TeamCity that was stopped produced it. The page
+    // says "did not answer" and keeps this behind *Details*.
+    {
+      id: 88,
+      source_id: "teamcity",
+      trigger: "schedule",
+      started_at: "2026-08-22T13:14:48Z",
+      finished_at: "2026-08-22T13:15:18Z",
+      outcome: "unreachable",
+      upserted: 0,
+      deleted: 0,
+      swept: 0,
+      error:
+        "source: unreachable: error sending request for url (https://ci.tidewater.example/app/rest/builds?locator=defaultFilter%3Afalse%2Ccount%3A100%2CsinceBuild%3A(id%3A48211)%2Cbranch%3A(default%3Aany)&fields=build(id%2CbuildTypeId%2Cnumber%2Cstatus%2Cstate%2CbranchName%2CstartDate%2CfinishDate))",
+      cursor_after: null,
+    },
     // One still in flight, because "running" is a state the log has to be able
     // to draw and a fixture of finished runs can never show it.
     {

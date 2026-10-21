@@ -27,3 +27,18 @@ test("a source claiming ci warns with no build drawn; one only declaring a build
 
   expect(warned.map((row) => row.text)).toEqual(["Relay CI data is 40 min old: sign-in failing."]);
 });
+
+test("the warning names the source's credential: no token stored, Re-enter token (#1405)", () => {
+  const sources = [
+    { id: "relay", display_name: "Relay CI", auth_kind: "Pat" as const, roles: [{ role: "ci", reads: [] }] },
+    { id: "jenkins", display_name: "Jenkins", auth_kind: "UserPassword" as const, roles: [{ role: "ci", reads: [] }] },
+  ];
+  const missing = (source_id: string): CredentialHealth => ({ ...refused(source_id), state: "missing_secret" });
+
+  const warned = staleBuilds(sources, [missing("relay"), missing("jenkins")], [], [], NOW);
+
+  expect(warned).toEqual([
+    { sourceId: "relay", text: "Relay CI data is 40 min old: no token stored.", fix: "Re-enter token" },
+    { sourceId: "jenkins", text: "Jenkins data is 40 min old: no password stored.", fix: "Re-enter password" },
+  ]);
+});

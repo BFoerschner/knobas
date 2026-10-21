@@ -49,7 +49,7 @@
     runs,
     from = null,
     jobBranch = null,
-    signInFailing = false,
+    secretNoun = null,
     ports,
     onclose,
     onrun,
@@ -61,7 +61,8 @@
     /** The run *Run again…* was pressed on. */
     from?: RunRow | null;
     jobBranch?: string | null;
-    signInFailing?: boolean;
+    /** The credential the reader has to re-enter (its noun: *password*, *token*), or `null` while sign-in works. */
+    secretNoun?: string | null;
     ports: Pick<PipelinePorts, "presets" | "deletePreset" | "repoBranches" | "runParameters">;
     onclose: () => void;
     onrun: (request: RunRequest) => void;
@@ -318,9 +319,9 @@
       ><input type="checkbox" bind:checked={save} /> Save these settings as a preset named
       <input type="text" aria-label="Preset name" bind:value={presetName} /></label
     >
-    {#if signInFailing}
+    {#if secretNoun !== null}
       <div class="tf-banner tf-warn tf-dbanner">
-        {pipeline.source_name} sign-in is failing. The run waits in knobas’s write queue and starts once you re-enter the password.
+        {pipeline.source_name} sign-in is failing. The run waits in knobas’s write queue and starts once you re-enter the {secretNoun}.
       </div>
     {/if}
   {/snippet}

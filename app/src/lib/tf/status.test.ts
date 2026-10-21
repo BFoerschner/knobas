@@ -41,31 +41,43 @@ test("reads like prototype-6's status bar: the first says synced, a 401 says so"
     NOW,
   );
   expect(readings).toEqual([
-    { id: "jira", text: "Jira synced 4 min ago", failed: false },
-    { id: "confluence", text: "Confluence 4 min ago", failed: false },
-    { id: "teamcity", text: "TeamCity: sign-in failed 38 min ago (401)", failed: true },
+    { id: "jira", text: "Jira synced 4 min ago", fix: null },
+    { id: "confluence", text: "Confluence 4 min ago", fix: null },
+    { id: "teamcity", text: "TeamCity: sign-in failed 38 min ago (401)", fix: "Re-enter password" },
   ]);
 });
 
-test("a missing password needs the reader too; an unreachable server does not", () => {
+test("a missing credential needs the reader too, in the source's noun; an unreachable server does not", () => {
   const readings = sourceReadings(
     [
-      { id: "gitea", display_name: "Gitea" },
-      { id: "kuma", display_name: "Uptime Kuma" },
+      { id: "gitea", display_name: "Gitea", auth_kind: "Pat" },
+      { id: "kuma", display_name: "Uptime Kuma", auth_kind: "ApiToken" },
+      { id: "confluence", display_name: "Confluence", auth_kind: "UserPassword" },
     ],
-    [health("gitea", "unreachable"), health("kuma", "missing_secret")],
+    [health("gitea", "unreachable"), health("kuma", "missing_secret"), health("confluence", "missing_secret")],
     [synced("gitea", "2026-08-22T14:00:00Z")],
     NOW,
   );
   expect(readings).toEqual([
-    { id: "gitea", text: "Gitea unreachable, synced 32 min ago", failed: false },
-    { id: "kuma", text: "Uptime Kuma: no password stored", failed: true },
+    { id: "gitea", text: "Gitea unreachable, synced 32 min ago", fix: null },
+    { id: "kuma", text: "Uptime Kuma: no token stored", fix: "Re-enter token" },
+    { id: "confluence", text: "Confluence: no password stored", fix: "Re-enter password" },
   ]);
+});
+
+test("a refused token source is told to re-enter its token (#1405)", () => {
+  const [reading] = sourceReadings(
+    [{ id: "gitea", display_name: "Gitea", auth_kind: "Pat" }],
+    [health("gitea", "unauthorized")],
+    [],
+    NOW,
+  );
+  expect(reading).toEqual({ id: "gitea", text: "Gitea: sign-in failed 38 min ago (401)", fix: "Re-enter token" });
 });
 
 test("before the source list answers, the health store's ids are the names", () => {
   expect(sourceReadings(null, [health("jira", "ok")], [], NOW)).toEqual([
-    { id: "jira", text: "jira not synced yet", failed: false },
+    { id: "jira", text: "jira not synced yet", fix: null },
   ]);
 });
 

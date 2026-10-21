@@ -247,7 +247,7 @@
   const context = $derived(run === null || held === null ? "" : contextLine(held, run, mainBranch));
   const failed = $derived(run !== null && runTone(run) === "err");
   const inFlight = $derived(run !== null && run.finished === null);
-  const stale = $derived(staleLine(pipeline, sources.map((s) => s.health), sync));
+  const stale = $derived(staleLine(pipeline, sources, sync));
   const jobBranch = $derived(held === null ? null : jobBranchFor(held, jobBranches));
   const segments = $derived(stepSegments(log, inFlight, settings?.steps ?? []));
 
@@ -374,7 +374,7 @@
   {#if stale !== null}
     <div class="tf-stale tf-bstale">
       {stale.text}
-      {#if stale.fix !== null}<a href={stale.fix}>Re-enter password</a>{/if}
+      {#if stale.fix !== null}<a href={stale.fix.href}>{stale.fix.words}</a>{/if}
     </div>
   {/if}
 
@@ -513,7 +513,7 @@
       runs={held}
       from={run}
       {jobBranch}
-      signInFailing={stale?.fix != null}
+      secretNoun={stale?.fix?.secret ?? null}
       {ports}
       onclose={() => (dialog = false)}
       {onrun}

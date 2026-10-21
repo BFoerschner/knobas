@@ -19,11 +19,14 @@ export interface SourceFacts {
   kinds?: { id: string }[];
   /** The roles it claims (#1196): read only for the Builds staleness warning; the mirror narrows the rows (#1300). */
   roles?: readonly RoleClaim[];
+  /** How it signs in: read only for the noun of the Builds staleness warning (#1405). */
+  auth_kind?: AuthMethod | null;
 }
 import type { Week } from "../../ipc/time";
-import type { RoleClaim } from "../../ipc/sources";
+import type { AuthMethod, RoleClaim } from "../../ipc/sources";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { CI, claims } from "../roles.svelte";
+import { reenterWords, secretNoun } from "../settings/settings";
 
 /** Whether an address segment is an entity id (`jira:PAY-231`) rather than a key. */
 export function isEntityId(segment: string): boolean {
@@ -424,6 +427,8 @@ export function age(iso: string, now: Date): string {
 export interface Staleness {
   sourceId: string;
   text: string;
+  /** The fix's words, in the source's noun: *Re-enter password*, *Re-enter token* (#1405). */
+  fix: string;
 }
 
 /**
@@ -432,7 +437,7 @@ export interface Staleness {
  * from -- whose credential the reader has to fix. "TeamCity data is 38 min
  * old: sign-in failing." The age is since the sign-in started failing, the
  * moment the status bar dates the failure from. The fix is *Re-enter
- * password*, on the source's settings page.
+ * password* (or *token*, the source's noun), on the source's settings page.
  */
 export function staleBuilds(
   sources: readonly SourceFacts[],
@@ -451,8 +456,12 @@ export function staleBuilds(
     const run = sync.find((row) => row.source_id === source.id);
     const since = run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
     const name = source.display_name || source.id;
-    const why = state.state === "missing_secret" ? "no password stored" : "sign-in failing";
-    out.push({ sourceId: source.id, text: since ? `${name} data is ${age(since, now)} old: ${why}.` : `${name} data is stale: ${why}.` });
+    const why = state.state === "missing_secret" ? `no ${secretNoun(source.auth_kind)} stored` : "sign-in failing";
+    out.push({
+      sourceId: source.id,
+      text: since ? `${name} data is ${age(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`,
+      fix: reenterWords(source.auth_kind),
+    });
   }
   return out;
 }

@@ -49,6 +49,15 @@
     return typeof value === "string" ? value : "";
   }
 
+  /**
+   * A list field is as tall as its lines (#1404), so a value added below the
+   * fourth (a Jira view's *Sync WEB too*) is in sight: never fewer rows than
+   * the three it always had, and past twelve it scrolls inside after all.
+   */
+  function listRows(value: unknown): number {
+    return Math.min(12, Math.max(3, listText(value).split("\n").length));
+  }
+
   function text(value: unknown): string {
     return typeof value === "string" ? value : value === null || value === undefined ? "" : String(value);
   }
@@ -106,7 +115,7 @@
     <textarea
       class="{cls} tf-sf-area {field.control.kind === 'json' ? 'tf-sf-mono' : ''}"
       id={controlId(field.key)}
-      rows={field.control.kind === "json" ? 4 : 3}
+      rows={field.control.kind === "json" ? 4 : listRows(values[field.key])}
       {disabled}
       required={field.required}
       aria-invalid={errors[field.key] ? "true" : undefined}

@@ -1130,3 +1130,25 @@ test("the fixture's ticket_views carries a saved view's facts under saved_view_s
   expect(rows.find((row) => row.saved_view === null)!.saved_view_source).toBeNull();
   expect(rows.every((row) => !("jira" in row))).toBe(true);
 });
+
+test("the fixture has a token source whose credential needs the reader: Uptime Kuma, no token stored (#1405)", () => {
+  const handlers = demoHandlers();
+  type Source = { id: string; auth_kind: string | null; health: { state: string } };
+  const kuma = (handlers["list_sources"]!({}) as Source[]).find((source) => source.id === "kuma")!;
+  expect(kuma.auth_kind).toBe("ApiToken");
+  expect(kuma.health.state).toBe("missing_secret");
+  const health = handlers["credential_health"]!({}) as { source_id: string; state: string }[];
+  expect(health.find((row) => row.source_id === "kuma")?.state).toBe("missing_secret");
+});
+
+test("the fixture's TeamCity has a run the server never answered, with the long transport error a live one gave (#1478)", () => {
+  const handlers = demoHandlers();
+  type Run = { id: number; outcome: string | null; error: string | null };
+  const runs = handlers["list_sync_runs"]!({ sourceId: "teamcity" }) as Run[];
+  const unanswered = runs.filter((run) => run.outcome === "unreachable");
+  expect(unanswered).toHaveLength(1);
+  expect(unanswered[0]!.error).toMatch(/^source: unreachable: error sending request for url \(https:\/\/ci\.tidewater\.example\/.*%2C/);
+  expect(unanswered[0]!.error!.length).toBeGreaterThan(200);
+  // Its id is its own: the source's run log keys its rows on it.
+  expect(runs.filter((run) => run.id === unanswered[0]!.id)).toHaveLength(1);
+});

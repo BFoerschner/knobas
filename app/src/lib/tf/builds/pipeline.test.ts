@@ -6,7 +6,7 @@
 import { expect, test } from "vitest";
 
 import type { PipelineSettings, RunRow } from "../../ipc/entity";
-import type { CredentialHealth, SourceDescriptor, SourceSyncStatus } from "../../ipc/sources";
+import type { AuthMethod, CredentialHealth, SourceDescriptor, SourceSyncStatus } from "../../ipc/sources";
 import {
   appendOlder,
   barHeight,
@@ -230,16 +230,26 @@ test("Run on offers the first of the job's branches this pipeline has built, els
 test("the warn line: a failing sign-in with its fix, a failed sync without one, nothing for a source that synced", () => {
   const now = new Date("2026-08-22T12:00:00Z");
   const pipeline = { source_id: "teamcity", source_name: "TeamCity" };
-  const health = (state: CredentialHealth["state"]): CredentialHealth[] => [
-    { source_id: "teamcity", state, checked_at: "2026-08-22T11:22:00Z", detail: null, secret_expires_at: null },
+  const health = (state: CredentialHealth["state"], auth_kind: AuthMethod | null = "UserPassword") => [
+    {
+      id: "teamcity",
+      auth_kind,
+      health: { source_id: "teamcity", state, checked_at: "2026-08-22T11:22:00Z", detail: null, secret_expires_at: null },
+    },
   ];
   const sync = (outcome: SourceSyncStatus["last_outcome"]): SourceSyncStatus[] => [
     { source_id: "teamcity", running: false, run_id: 1, started_at: null, last_finished_at: "2026-08-22T11:00:00Z", last_outcome: outcome } as SourceSyncStatus,
   ];
   expect(staleLine(pipeline, health("unauthorized"), sync("unauthorized"), now)).toEqual({
     text: "TeamCity data is 1 h old: sign-in failing. Runs you start wait in the queue until it works again.",
-    fix: "#/settings/source/teamcity",
+    fix: { href: "#/settings/source/teamcity", words: "Re-enter password", secret: "password" },
   });
+  // A token source is told to re-enter its token (#1405).
+  expect(staleLine(pipeline, health("missing_secret", "Pat"), sync("ok"), now)).toEqual({
+    text: "TeamCity data is 38 min old: no token stored. Runs you start wait in the queue until it works again.",
+    fix: { href: "#/settings/source/teamcity", words: "Re-enter token", secret: "token" },
+  });
+  expect(staleLine(pipeline, health("missing_secret"), sync("ok"), now)?.text).toContain("no password stored");
   expect(staleLine(pipeline, health("ok"), sync("unreachable"), now)).toEqual({
     text: "TeamCity data may be out of date: TeamCity cannot be reached, last tried 1 h ago.",
     fix: null,

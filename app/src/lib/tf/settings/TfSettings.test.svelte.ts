@@ -337,6 +337,50 @@ test("Sync WEB too opens the source's page with the project added, for the reade
   expect(p.updateSource).toHaveBeenCalledWith("jira", { config: { username: "mara", projects: ["TW", "OPS", "WEB"] } });
 });
 
+test("the added project is in view, with a note beside Save until it is saved (#1404)", async () => {
+  const scrolled: Element[] = [];
+  const scrollIntoView = vi.fn(function (this: Element) {
+    scrolled.push(this);
+  });
+  Element.prototype.scrollIntoView = scrollIntoView;
+  try {
+    const jira = summary("jira", "Jira", "ok", { config: { username: "mara", projects: ["PAY", "OPS", "CUS", "TRK"] } });
+    const { p } = await open(
+      ["source", "jira", "add", "projects", "WEB"],
+      ports({ listSources: vi.fn(() => Promise.resolve([jira, SOURCES[1]!])) }),
+    );
+    // Five lines, five rows: WEB is on the last line and nothing scrolls inside the field.
+    expect(field("projects").value).toBe("PAY\nOPS\nCUS\nTRK\nWEB");
+    expect((field("projects") as HTMLTextAreaElement).rows).toBe(5);
+    // Save and its note brought up from below, then the field, so both are in sight.
+    expect(scrolled).toEqual([section("What it syncs").querySelector(".tf-stg-acts"), field("projects")]);
+    expect(addedNote()).toBe("WEB added, not saved yet");
+
+    sectionButton("What it syncs", "Save").click();
+    await settle();
+    expect(p.updateSource).toHaveBeenCalledWith("jira", {
+      config: { username: "mara", projects: ["PAY", "OPS", "CUS", "TRK", "WEB"] },
+    });
+    expect(addedNote()).toBeNull();
+  } finally {
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  }
+});
+
+test("editing the added field takes the note away; a page opened without an addition has none (#1404)", async () => {
+  await open(["source", "jira", "add", "projects", "WEB"]);
+  expect(addedNote()).toBe("WEB added, not saved yet");
+  type("#tf-src-cfg-projects", "TW\nOPS\nWEB\nCUS");
+  expect(addedNote()).toBeNull();
+  unmount(view!);
+  view = null;
+
+  await open(["source", "jira"]);
+  expect(addedNote()).toBeNull();
+  // Two values, the list's floor of three rows, as before.
+  expect((field("projects") as HTMLTextAreaElement).rows).toBe(3);
+});
+
 test("a project the source already syncs is not added twice", async () => {
   await open(["source", "jira", "add", "projects", "OPS"]);
   expect(field("projects").value).toBe("TW\nOPS");
@@ -1009,6 +1053,11 @@ function runReading(): string | null {
   return target.querySelector(".tf-stg-run p")?.textContent?.replace(/\s+/g, " ").trim() ?? null;
 }
 
+/** The note beside the config *Save* about a value the address added (#1404), or `null`. */
+function addedNote(): string | null {
+  return section("What it syncs").querySelector(".tf-stg-acts .tf-stg-pend")?.textContent?.trim() ?? null;
+}
+
 /** The Result column of *Sync runs*, newest first. */
 function runResults(): string[] {
   const section = [...target.querySelectorAll("section")].find((el) => el.querySelector("h2")?.textContent === "Sync runs");
@@ -1160,4 +1209,51 @@ test("a watch that finds nothing while the run's id arrives asks again for that 
   answers[1]!(9);
   await settle();
   expect(watchSync).toHaveBeenCalledTimes(2);
+});
+
+test("a token source with no token stored is never told about a password (#1405)", async () => {
+  // The fake fixture's Uptime Kuma (`shell/dev/fake/sources.ts`, which a test
+  // here may not import): an API token, none stored, its last run fine.
+  const kuma = summary("kuma", "Uptime Kuma", "missing_secret", { auth_kind: "ApiToken", config: {} });
+  const listSources = vi.fn(() => Promise.resolve([...SOURCES, kuma]));
+  const listSyncRuns = vi.fn((id: string) => Promise.resolve([kuma.last_run!].filter((run) => run.source_id === id)));
+  await open(["source", "kuma"], ports({ listSources, listSyncRuns }));
+
+  const alert = target.querySelector('[role="alert"]')!;
+  expect(alert.textContent).toContain("No token is stored for Uptime Kuma.");
+  expect(button("Re-enter token")).toBeTruthy();
+  expect(target.textContent).not.toMatch(/password/i);
+  unmount(view!);
+  view = null;
+
+  await open([], ports({ listSources, listSyncRuns }));
+  const row = [...target.querySelectorAll(".tf-stg-src")].find((el) => el.textContent?.includes("Uptime Kuma"))!;
+  expect(row.querySelectorAll(".tf-stg-si")[1]?.textContent?.trim()).toBe("No token stored");
+});
+
+test("an unreachable run says the source did not answer, its transport error behind Details, and wraps (#1478)", async () => {
+  // As the fake fixture's TeamCity has it: one older run the server never answered.
+  const transport =
+    "source: unreachable: error sending request for url (https://ci.tidewater.example/app/rest/builds?locator=defaultFilter%3Afalse%2Ccount%3A100%2CsinceBuild%3A(id%3A48211)%2Cbranch%3A(default%3Aany)&fields=build(id%2CbuildTypeId%2Cnumber%2Cstatus%2Cstate%2CbranchName%2CstartDate%2CfinishDate))";
+  const teamcity = SOURCES[1]!;
+  const unanswered: SyncRunRow = { ...teamcity.last_run!, id: 88, outcome: "unreachable", upserted: 0, error: transport };
+  const listSyncRuns = vi.fn((id: string) =>
+    Promise.resolve(id === "teamcity" ? [teamcity.last_run!, unanswered] : []),
+  );
+  await open(["source", "teamcity"], ports({ listSyncRuns }));
+
+  const cells = [...section("Sync runs").querySelectorAll("tbody tr td:nth-child(3)")];
+  const unreachable = cells.find((cell) => cell.textContent?.includes("did not answer"))!;
+  expect(unreachable.firstChild?.textContent?.trim()).toBe("TeamCity did not answer.");
+  const details = unreachable.querySelector("details")!;
+  expect(details.querySelector("summary")?.textContent).toBe("Details");
+  const raw = details.querySelector("code")!.textContent!;
+  expect(raw.length).toBeGreaterThan(200);
+  expect(raw).toBe(transport);
+  // Every result cell wraps anywhere, the refused run's sentence too.
+  for (const cell of cells) expect(cell.classList.contains("tf-stg-res")).toBe(true);
+  // A refused run keeps its sentence and has nothing behind it.
+  const refused = cells.find((cell) => cell.textContent?.startsWith("401 Unauthorized"))!;
+  expect(refused.textContent).toBe("401 Unauthorized. Re-enter the password.");
+  expect(refused.querySelector("details")).toBeNull();
 });
