@@ -10477,3 +10477,67 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   `onclick` sets `S.tm.sel` and redraws, and the *Assign…* buttons live in the row below. One press
   means "select" on the whole strip. *Reversing:* low, one handler on the open branch.
 - **Which fill for the open stretch's text?** *Ruling (merge-manager, Sonnet):* `--ink-2`, as prototype-6's `.tmv-b.gap` colours it, not `--ink`; both clear 4.5:1 on paper, sheet and sheet-2 in `tf-css.test.ts`. The face is now pinned by a test whose stub measures plain text narrower. *Reversing:* low, one CSS token.
+## #1450: Builds pages re-read when their source's sync finishes (Opus implementer, 2026-10-21)
+
+- **An *as of HH:MM* line on a run in flight** (delegated). *Ruling:* no. The #853 ruling stands:
+  the warn line (`staleLine`) is the run's last-seen, and the page now re-reads when its source's
+  sync finishes, so the callout is as current as the mirror. The `sync:state` payload also replaces
+  the page's sync status for that source, so the warn line moves with it. *Reasoning:* a second
+  clock beside the warn line says the same thing twice. *Reversing:* low, one line in the callout.
+- **Polling a run in flight between syncs** (delegated). *Ruling:* no; the pages re-read when the sync ends and at
+  no other time. *Reasoning:* polling is a read budget no ruling has granted, and the sync interval
+  is the source's own cadence. *Reversing:* low, an interval beside the listener.
+- **What "the open tab" re-reads.** *Ruling:* the run page bumps a `fresh` counter the Log, Tests,
+  Artifacts tabs and the Overview's chain panel take. Each reads again over what it draws: the
+  log's folds, the tests' filter and opened rows, the artifact folders opened stay. A tab's failed
+  re-read keeps its last answer. A failed runs re-read on either page keeps the runs and draws the
+  page's existing *Runs could not be read* line above them. *Reasoning:* the ticket asks that a
+  re-read keep the reader's place; remounting a tab would drop it. *Reversing:* low.
+- **The fake's sync-state path.** *Ruling:* no fake change. The component tests fire `sync:state`
+  through the pages' new `listen` port, and `fake-tauri`'s bridge already has `emit(event, payload)`
+  for any test that drives the fake. *Reversing:* none needed.
+
+## #1449: a run queued on the run page shows on its pipeline (Opus implementer, 2026-10-21)
+
+- **Store or pending writes** (delegated; (b) recommended). *Ruling:* (a) in the form the dispatch
+  named: the shared `tf/queued.svelte.ts` marks (#1424), kind `run`, keyed by pipeline id, written
+  by both pages' `queue()`, not a second store. The mark's text is the branch (`""` for the
+  default), its base the newest run the page held as the run was queued. A read holds a queued run
+  once it carries a run newer than that base, on its branch (any branch for one queued on the
+  default), that no change or schedule started; each such run settles one mark, the oldest first
+  (`runLanded`). The queue holding or refusing the write drops the mark and toasts, through the
+  module's `followWrite`. *Reasoning:* (b) loses the row the moment the write is sent, before the
+  mirror holds the build, so it needs a sent-write store anyway, which is (a). The shared module
+  already has the follow and the drop-on-read, and the dispatch asked for it where it fits.
+  *Known gap:* a write withdrawn in the queue panel leaves its row until a read holds a newer run,
+  because `pending_writes` cannot tell withdrawn from sent. Two runs queued before either lands
+  settle together once the first is read back. *Reversing:* medium. The marks become a
+  derivation over `pendingWrites()` plus a sent-write list.
+- **Amends #853.** #853 said a run started from the run page "is drawn *queued* on the pipeline
+  page's next read" and that "the page draws no queued row of its own". The first half's premise
+  was wrong: the next read is a mirror read and cannot show the run until a sync lands it. The
+  pipeline page now draws it from the mark at once. The second half stands: the run page draws no
+  queued row.
+- **The pipeline page's own queued rows.** *Ruling:* they move to the same marks, so they now
+  survive leaving the pipeline and coming back, and they go when a read holds the run, where before
+  any re-open dropped them. *Reasoning:* R-9.7 says "appears … as queued at once, never as
+  started"; dropping it on a revisit before the mirror holds it was the same gap. *Reversing:* low.
+
+## #1452: pipeline page run rows against prototype-6 (Opus implementer, 2026-10-21)
+
+- **Part (3), the history bar's focus tip** (delegated; leaving #851 recommended). *Ruling:* leave
+  it as #851 ruled: the SVG `<title>` as the tip and *Run N, result* as the bar's name. *Reasoning:*
+  a design-system tip component is its own piece of work, and the bar is a link whose name already
+  says the run. *Reversing:* medium, a new tooltip component reversing #851.
+- **Lining the columns up.** *Ruling:* a `<colgroup>` per day table with the cells' width classes,
+  and `table-layout: fixed`. Number 150, trigger 140, tests 140, duration 150, started 110 and
+  actions 150 px; the branch takes the rest. *Departs from prototype-6:* the number column keeps
+  #1265's 150 px (prototype-6 118), and prototype-6 sizes branch, trigger and tests by content, so
+  its own days do not line up. *Reasoning:* one table per day keeps the day headings as they are.
+  *Reversing:* low.
+- **A long branch.** *Ruling:* it wraps in its column (`overflow-wrap: anywhere`) and does not truncate. Today it
+  wraps, and a truncated name would hide the end that tells two feature branches apart.
+  *Reversing:* low, one CSS rule.
+- **Row click.** *Ruling:* the row opens the run unless the click lands in a link, button or form
+  control, or words in the row are selected. A queued row opens nothing and takes no `tf-row`
+  cursor. The number stays the keyboard's link, as the other row-click tables do. *Reversing:* low.
