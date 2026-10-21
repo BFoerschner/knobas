@@ -2910,3 +2910,74 @@ test("two sources' PAY-231: each row names its source before its age, a unique k
   await settle();
   expect(onnavigate).toHaveBeenCalledWith("#/job/jira%3APAY-231");
 });
+
+// ── Reopening selects the kept query (#1480) ───────────────────────────────
+
+/** Close by the ×, which leaves the session's query in place (Esc empties it first). */
+function closeByX() {
+  target.querySelector<HTMLButtonElement>('.tf-ln-q button[aria-label="Close"]')!.click();
+  flushSync();
+}
+
+/** ⌘K, as the window hears it. */
+async function reopen() {
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }));
+  flushSync();
+  await settle();
+}
+
+test("⌘K reopens on the kept query with the whole of it selected", async () => {
+  open();
+  await settle();
+  await search("PAY-231");
+  closeByX();
+  expect(target.querySelector(".tf-launch"), "the × closed the overlay").toBeNull();
+  await reopen();
+
+  const input = target.querySelector("input")!;
+  expect(input.value, "the session keeps what was searched for").toBe("PAY-231");
+  expect(document.activeElement).toBe(input);
+  expect(input.selectionStart).toBe(0);
+  expect(input.selectionEnd).toBe("PAY-231".length);
+});
+
+test("typing after a reopen replaces the kept query instead of appending to it", async () => {
+  open();
+  await settle();
+  await search("PAY-231");
+  closeByX();
+  await reopen();
+
+  // Typing replaces whatever is selected; jsdom does not insert text for a
+  // keydown, so the test does what the WebView does with a keystroke.
+  const input = target.querySelector("input")!;
+  input.setRangeText("x", input.selectionStart!, input.selectionEnd!, "end");
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+
+  expect(input.value).toBe("x");
+});
+
+test("an empty box opens with the caret in it and nothing to select", async () => {
+  open();
+  await settle();
+  const input = target.querySelector("input")!;
+  expect(document.activeElement).toBe(input);
+  expect(input.selectionStart).toBe(0);
+  expect(input.selectionEnd).toBe(0);
+});
+
+test("a click on a row re-focuses the box without selecting what it put there", async () => {
+  openSaved();
+  await settle();
+  railRows()[0]!.open!.click();
+  flushSync();
+  await settle();
+
+  const input = target.querySelector("input")!;
+  expect(input.value).toBe("list:mine");
+  expect(document.activeElement).toBe(input);
+  // The caret where setting the value left it: at the end, nothing selected.
+  expect(input.selectionStart).toBe("list:mine".length);
+  expect(input.selectionEnd).toBe("list:mine".length);
+});

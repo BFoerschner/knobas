@@ -489,7 +489,9 @@
   $effect(() => {
     if (open) {
       void session.loadHome();
-      void tick().then(() => box?.focus());
+      // Selected, not cleared: the session keeps the last query on purpose,
+      // and selecting it is what lets typing replace it (#1480).
+      void tick().then(() => box?.focus({ select: true }));
     } else {
       session.dispose();
     }

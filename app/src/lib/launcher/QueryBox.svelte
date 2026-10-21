@@ -41,9 +41,15 @@
     input?.focus();
   });
 
-  /** The one export: the shell re-focuses after a click landed on a row. */
-  export function focus(): void {
+  /**
+   * The one export. On opening the launcher passes `select`, so a query kept
+   * from the last opening is replaced by the next keystroke or paste rather
+   * than appended to (#1480). After a click landed on a row it does not: the
+   * caret stays where the reader left it.
+   */
+  export function focus(options: { select?: boolean } = {}): void {
     input?.focus();
+    if (options.select) input?.select();
   }
 </script>
 
