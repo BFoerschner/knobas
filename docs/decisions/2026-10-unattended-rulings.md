@@ -8635,3 +8635,104 @@ taken afresh from `time.ts` at f9fc1bf1.
 - **Fork:** `Handed` and `RefusesTheSecond` in `crates/knobas-wasm-host/tests/it/walk.rs` also implement `walked`. *Ruling:* left as they are. *Reasoning:* `Handed` records items and readings as one merged, formatted list (and the second wraps it with a refusal); that is a different record, not a copy. *Reversing:* none needed.
 - **Fork (merge-manager, Opus):** the four live suites' own files changed (their inline sinks replaced) and none was run. *Ruling:* no live re-run. *Reasoning:* the sink only observes; the assertions on `readings` are untouched and the item counts became `items.len()` / `!items.is_empty()` of the same values, so nothing a suite witnesses changed, and no adapter, engine or `knobas-source` trait code changed. *Reversing:* run `just gitea-live` (and the JVM suites) on `main`.
 - **Merge-manager confirms** both rulings above: the superset struct (only Kuma reads `readings_before_item`, and its test still witnesses the order) and leaving `Handed` / `RefusesTheSecond` alone.
+
+## Grilling of 2026-10-21 (Björn + Claude, `/grill-with-docs` on #1403, #1416, #1427, #1464): what #881 left behind
+
+Four journey-audit findings of 2026-10-20 share one root: #881 retired the rooms UI and left features
+whose only surface was a room. Each is ruled restore, trim or retire below; the spec and ticket cuts
+follow through to-spec and to-tickets. The glossary's **Context** and **Job** entries carry the
+vocabulary half of #1427.
+
+### #1403 — the credential expiry countdown: restore
+
+- **Drawn again, on the source's page and on the Sources row.** *Fork:* draw `expiryNote`, or rule
+  that the inbox's credential-expiry item replaces it and strike spec §3's countdown. *Ruling:* draw
+  it. The source's page shows "expires in N days" on the Token or Password row of Connection (the
+  row's label is the noun), plain over 14 days, amber under, red "expired"; the Sources list row shows
+  "Credential expires in N days" in its state column only while amber or expired. *Reasoning:* the
+  inbox item says something is wrong soon and opens this page, which today shows no date; the date
+  comes from the source itself (`secret_expires_at`, never typed), the function and the fixture exist,
+  so this is wiring. *Reversing:* delete two call sites.
+- **The function drops the word PAT; spec §3 says credential.** *Reasoning:* #1405 already found a
+  token source told to re-enter a password; the noun belongs to the row, not the function.
+  *Reversing:* low.
+- **The fixture's expiry date becomes relative to today.** The stored 2026-08-30 is past, so a
+  screenshot would read "expired" and never show the countdown. *Reversing:* n/a.
+
+### #1416 — the Tab chain: trimmed to two rows
+
+- **The chain on an entity row is *Link to <job>* then *Start timer on <title>*.** *Fork:* restore
+  everything spec §4 lists (Change status › Comment › Link to… › Add to context › Start timer › Start
+  work › Open), trim, or leave Start timer alone. *Ruling:* trim. Change status, Comment, Start work
+  and the "Do it here" rows (Start/Stop timer on the current ticket, Comment on it) are retired:
+  the job page owns them and ⌘T owns the timer. *Add to context* dies with the Context ruling
+  (nothing is added to a context by hand). No *Open* row: `chainFor` never drew one and Enter opens.
+  Spec §4's three rows, the Launcher.svelte header and the roadmap's M2 line are rewritten to match.
+  *Reasoning:* the launcher's job is finding; acting on a ticket is the job page's job; the one
+  action about the *pair* (result + current job) has no other home. *Reversing:* the rows are still
+  in `chainFor`'s shape; restoring one is a prop and a row.
+- ***Link to <job>* opens the job's link dialog with the result preset as the other end**, closing
+  the launcher; it does not write the link directly as the rooms shell did. *Reasoning:* one place
+  picks relations; the launcher never writes a link the reader did not name. *Reversing:* low.
+- **"The job" is the breadcrumb's job**: a job page or a view opened from one ('PAY-231 › Time'); no
+  row on Tickets, Inbox or Settings. Not the newest open job. *Reasoning:* a guessed job writes links
+  to the wrong ticket in silence. *Reversing:* low.
+
+### #1427 — contexts: kept as the job's hidden working set, given a lifecycle; ad-hoc retired
+
+- **The stored context stays.** *Fork:* keep it as the working set behind a job, or retire ticket
+  contexts and route alerts, open jobs and proposals off the ticket and its links directly.
+  *Ruling:* keep. *Reasoning:* ADR-0008's membership and #446's alert rule are built and
+  load-bearing; what was missing was a lifecycle and honest glossary wording. The glossary's Job
+  entry said a job "needs no stored context" while `job-reader.svelte.ts` promoted one on every
+  open; the entry is corrected, not the code. *Reversing:* a backend rewrite of the Alert rule and
+  ADR-0008's reach.
+- **Archived follows the ticket's status, and only that.** `archived_at` is set exactly while the
+  status is in the source's declared done-like set and cleared when it leaves, maintained by the
+  sync run as the status lands. Opening the job never touches it. `promote` returns an archived
+  context for a done ticket rather than making a second; a context first made for a done ticket is
+  born archived; a one-time pass archives existing contexts whose ticket is already done. *Fork
+  rejected:* reviving on reopen (nothing would ever re-archive a done ticket someone glanced at) and
+  a manual *Put away* (a second place to forget). *Reasoning:* done in the source is the fact the
+  inbox should follow; a reopened done job is reading, not working; leaving Done in the source is how
+  reopening work already happens. *Reversing:* the sync hook and the promote branch.
+- **Done-like is a `done_statuses` name list beside `blocked_statuses`**, matched the same way; Jira
+  claims Done, Closed and Resolved; a workflow spelling it otherwise never archives, which is today's
+  behaviour; a per-instance list is a setting the day one is asked for. One §10.8 entry (ADR-0007).
+  *Fork rejected:* a declared path to Jira's status category. *Reasoning:* the shape the descriptor
+  already has; absence is the safe miss. *Reversing:* add the path later as a second signal.
+- **Ad-hoc contexts are retired.** *Fork:* *New ad-hoc job…* under *Not a ticket* and in ⌘K plus a
+  job page with no ticket card, or retire. *Ruling:* retire: the *Not a ticket* group, R-3.11, the
+  Job entry's ad-hoc sentence and the 2026-10-15 ruling "where an ad-hoc context goes" go; ad-hoc
+  time is the ⌘T label timer; `create_context` stays an uncalled command under #881's ruling until a
+  cleanup pass. *Reasoning:* a job is the working view of a ticket, and no `#/job/<ctx id>` route was
+  ever built; an ad-hoc job would be a page whose every section is empty. *Reversing:* the command
+  exists; the UI is new work.
+- **The sixth built-in is renamed 'Open alerts on my jobs'**, description "Assets a job you have not
+  finished holds, with a monitor in trouble"; the predicate (unarchived contexts) is unchanged and
+  the fixture stops dropping the context clause. *Reasoning:* with the lifecycle above the list says
+  something true about the reader's open work, and it shares the alert rule's predicate.
+  *Reversing:* a string.
+- **No ADR.** ADR-0008 carries the membership trade-off; this is lifecycle and wording, recorded
+  here and in the glossary.
+
+### #1464 — notes: a minimal read-only page while they are shown
+
+- **`#/note/<id>` exists only while notes are shown.** *Fork:* a read-only page, the capture window
+  reused as reader and editor, or retire (notes out of search even when shown, the switch governing
+  the capture shortcut only). *Ruling:* the page: title, the body as pre-wrapped text with `[[refs]]`
+  as links to the entity's address, the born links, and *Delete* behind a confirm; no edit, no
+  Markdown dependency. *Reasoning:* D10 says hide, not break — a switch that puts notes back in search
+  must lead to the note; retiring leaves capture producing notes nobody can read; the capture window
+  as a second surface, and a dependency, are the wrong size for a page that lives one release.
+  *Reversing:* delete the page; #1085's address stands.
+- **Addresses.** While hidden the address redirects to Settings › Notes and capture as #1085 ruled;
+  while shown, `itemHash`, the capture window's *Open in knobas* and the `capture:open-note` listener
+  all go to the page. *Reversing:* `tf/address.ts`.
+- **After *Delete*** the reader returns where they came from, else to Settings › Notes, with a toast
+  "Deleted <title>" and no undo: the `deleted` activity line is final. *Reversing:* low.
+- **A protocol note opens Time › Standup at its date**, recognised by the backend's own
+  "Standup YYYY-MM-DD" title rule moved to one shared place; no stored marker. *Reasoning:* one rule
+  already names protocols, and that tab is where they are drawn and edited. *Reversing:* low.
+- **The switch's promise is reworded** in R-13a.6 and D10: "On, notes are back in search and open on
+  their own page, and the capture shortcut works again". *Reversing:* a string.
