@@ -2424,3 +2424,64 @@ test("the palette's rows are followed as well", async () => {
     target.querySelector('[role="listbox"][aria-label="Results"]')!.getAttribute("aria-activedescendant"),
   ).toBe(rows[1]!.id);
 });
+
+// ── Rename takes the focus it needs (#1412) ────────────────────────────────
+
+/** The name field, focused, with its whole text selected. */
+function expectRenameFocused() {
+  const field = target.querySelector<HTMLInputElement>("input.ren");
+  expect(field, "the rename field is open").not.toBeNull();
+  expect(document.activeElement, "focus is in the name field, not the query box").toBe(field);
+  expect(field!.selectionStart).toBe(0);
+  expect(field!.selectionEnd).toBe("SEPA retries".length);
+}
+
+test("Rename from the Tab chain focuses the name field with the name selected", async () => {
+  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  await settle();
+  press("ArrowDown");
+  press("Tab");
+  press("Enter");
+  await settle();
+  expectRenameFocused();
+});
+
+test("the row's Rename button focuses the name field with the name selected", async () => {
+  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  await settle();
+  [...target.querySelectorAll<HTMLButtonElement>("button.mini")]
+    .find((button) => button.textContent?.trim() === "Rename")!
+    .click();
+  flushSync();
+  await settle();
+  expectRenameFocused();
+});
+
+test("what is typed after the chain's Rename goes into the name, not the query", async () => {
+  const renamed = vi.fn(async () => {});
+  open({
+    ports: { launcherHome: async () => SAVED_HOME, search: async () => response(), renameSmartList: renamed },
+  });
+  await settle();
+  press("ArrowDown");
+  press("Tab");
+  press("Enter");
+  await settle();
+
+  // Typing is whatever holds focus receiving the text; jsdom does not insert
+  // it for a keydown, so the test writes into the focused element.
+  const focused = document.activeElement as HTMLInputElement;
+  focused.value = "X";
+  focused.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+
+  const query = target.querySelector<HTMLInputElement>("input:not(.ren)")!;
+  expect(query.value, "the query box is untouched").toBe("");
+  expect(target.querySelector("input.ren")!.value).toBe("X");
+  expect(railRows(), "the board is still drawn").toHaveLength(3);
+
+  focused.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  flushSync();
+  await settle();
+  expect(renamed).toHaveBeenCalledWith("sepa-retries", "X");
+});
