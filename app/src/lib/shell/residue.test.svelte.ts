@@ -797,6 +797,7 @@ const CASES: Case[] = [
                         source_id: "mock",
                         key: "PAY-231",
                         title: "Retry failed SEPA payouts",
+                        status: "To Do",
                         priority: null,
                         issue_type: null,
                         assignee: null,

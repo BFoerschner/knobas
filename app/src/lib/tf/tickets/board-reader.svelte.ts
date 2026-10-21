@@ -27,6 +27,7 @@ import {
   aroundLines,
   boardLanes,
   COLUMN_CAP,
+  columnDone,
   drawnCards,
   LANES_AT_FIRST,
   TYPED_CAP,
@@ -108,6 +109,12 @@ export interface BoardFilter {
 export interface BoardView {
   /** The view's own columns, which gather the board's statuses (R-3.15). */
   columns: ViewColumn[];
+  /**
+   * The view's columns as it stores them, each listing the statuses it
+   * gathers: what makes a column done (#1423). A Jira view's `columns` hold
+   * only their names, so it passes these too; `columns` otherwise.
+   */
+  listed?: ViewColumn[];
   /** The layout and lanes it was saved with, under the session's switches. */
   layout: "board" | "list";
   lanes: LaneField;
@@ -116,7 +123,8 @@ export interface BoardView {
 /** A band of the board (one, untitled, without lanes): each column with the cards it draws. */
 export interface Band {
   lane: Lane;
-  drawn: { column: MiniBoardColumn; cards: MiniBoardCard[] }[];
+  /** `done`: whether the column is a done one ({@link columnDone}), so it draws three. */
+  drawn: { column: MiniBoardColumn; cards: MiniBoardCard[]; done: boolean }[];
 }
 
 export interface BoardReader {
@@ -226,10 +234,11 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     boardLanes(state.board ?? emptyBoard(), laned ? lanes : "none", (columns) => viewColumns(columns, view.columns)).map(
       (lane) => ({
         lane,
-        drawn: lane.columns.map((column) => ({
-          column,
-          cards: drawnCards(column, expanded.includes(expandKey(lane, column)), typing),
-        })),
+        drawn: lane.columns.map((column) => {
+          const listed = (view.listed ?? view.columns).find((own) => own.name === column.status)?.statuses ?? [];
+          const done = columnDone(column, listed);
+          return { column, cards: drawnCards(column, expanded.includes(expandKey(lane, column)), typing, done), done };
+        }),
       }),
     ),
   );

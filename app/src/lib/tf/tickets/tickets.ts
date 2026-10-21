@@ -6,6 +6,7 @@
 import type { KindTally, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type { ListSort as StoredSort, ViewLanes, ViewSortColumn } from "../../ipc/search";
 import { kindLabel, kindSingular, sectionOf } from "../../shell/kinds";
+import { entityAddress } from "../address";
 import type { SectionTally } from "../job/sections";
 
 /** How many cards a column draws before *Show N more* (R-3.4). */
@@ -24,30 +25,50 @@ export const TYPED_CAP = 50;
  */
 export const LANES_AT_FIRST = 10;
 
-/** Whether a column is the *Done* one, however its source cases it. */
+/** Whether a status is *Done*, however its source cases it. */
 export function isDone(status: string | null): boolean {
   return status !== null && status.toLowerCase() === "done";
 }
 
-/** What a column's header says: its status in the source's words, or *No status*. */
+/**
+ * What a column's header says: its status in the source's words, or *No
+ * status*. A view's column (a Jira view's, or one a view gathers) says its
+ * name; a ticket's status is its card's (#1423).
+ */
 export function columnName(status: string | null): string {
   return status ?? "No status";
 }
 
 /**
- * The cards a column draws (R-3.4): up to eight, three for *Done*, fifty
- * of either while the filter has words, and all of them once expanded.
+ * Whether a column is a *Done* one (R-3.4, #1423), never by its name: every
+ * status the view's column lists is done, or, for a column that lists none
+ * (the board's own, one a status), every card on it is.
  */
-export function drawnCards(column: MiniBoardColumn, expanded: boolean, typing: boolean): MiniBoardCard[] {
+export function columnDone(column: MiniBoardColumn, listed: readonly string[] = []): boolean {
+  if (listed.length > 0) return listed.every(isDone);
+  return column.cards.length > 0 && column.cards.every((card) => isDone(card.status));
+}
+
+/**
+ * The cards a column draws (R-3.4): up to eight, three for a done one
+ * ({@link columnDone}), fifty of either while the filter has words, and all
+ * of them once expanded.
+ */
+export function drawnCards(
+  column: MiniBoardColumn,
+  expanded: boolean,
+  typing: boolean,
+  done: boolean = columnDone(column),
+): MiniBoardCard[] {
   if (expanded) return column.cards;
-  return column.cards.slice(0, typing ? TYPED_CAP : isDone(column.status) ? DONE_CAP : COLUMN_CAP);
+  return column.cards.slice(0, typing ? TYPED_CAP : done ? DONE_CAP : COLUMN_CAP);
 }
 
 /** What the column's *Show N more* button says, or `null` when it draws every card. */
-export function moreLine(column: MiniBoardColumn, drawn: number): string | null {
+export function moreLine(column: MiniBoardColumn, drawn: number, done: boolean = columnDone(column)): string | null {
   const rest = column.total - drawn;
   if (rest <= 0) return null;
-  return isDone(column.status) ? `Show ${rest} more done` : `Show ${rest} more`;
+  return done ? `Show ${rest} more done` : `Show ${rest} more`;
 }
 
 /**
@@ -108,15 +129,15 @@ function pad(n: number): string {
  * The preview's one primary button and the line under it (R-3.9), by the
  * ticket's state as prototype-6 decides it: *Start work* on a To Do ticket of
  * mine, *Open job* on a done one or somebody else's, *Resume work* on the
- * rest of mine. Where it goes is the job's address; #816 and #818 wire what
- * happens there.
+ * rest of mine. The state is the card's own status, whatever column it
+ * stands in (#1423). Where it goes is the job's address; #816 and #818 wire
+ * what happens there.
  */
 export function previewAction(
-  card: Pick<MiniBoardCard, "assignee" | "mine">,
-  status: string | null,
+  card: Pick<MiniBoardCard, "assignee" | "mine" | "status">,
   timerOnIt: boolean,
 ): { label: string; note: string } {
-  const lower = status?.toLowerCase() ?? "";
+  const lower = card.status?.toLowerCase() ?? "";
   if (lower === "to do" && card.mine) {
     return {
       label: "Start work",
@@ -346,10 +367,9 @@ const PRIORITY_ORDER = ["highest", "blocker", "critical", "high", "major", "medi
 
 const byText = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
-/** A card and the status column it stands in: one row of the list. */
+/** One row of the list: a card, whose status is its own (#1423). */
 export interface TicketRow {
   card: MiniBoardCard;
-  status: string | null;
 }
 
 /** One row's value for a column, comparable; `null` for none, which sorts last either way. */
@@ -365,7 +385,7 @@ function sortValue(
     case "summary":
       return card.title;
     case "status":
-      return statuses.indexOf(row.status);
+      return statuses.indexOf(card.status);
     case "priority": {
       if (card.priority === null) return null;
       const at = PRIORITY_ORDER.indexOf(card.priority.toLowerCase());
@@ -379,8 +399,8 @@ function sortValue(
 }
 
 /**
- * The list's rows sorted by a header (R-3.6). Status sorts in the board's
- * column order (`statuses`), priority by {@link PRIORITY_ORDER}, keys
+ * The list's rows sorted by a header (R-3.6). Status sorts in the order the
+ * board first draws each (`statuses`, {@link statusOrder}), priority by {@link PRIORITY_ORDER}, keys
  * numerically (`PAY-9` before `PAY-10`), the rest by text. A row with no
  * value sorts last in either direction; ties keep key order.
  */
@@ -403,4 +423,37 @@ export function sortRows<Row extends TicketRow>(
     }
     return byText.compare(a.card.key, b.card.key);
   });
+}
+
+/**
+ * The statuses in the order the board draws them (#1423): each card's own,
+ * first met column by column, so a view whose column gathers several keeps
+ * them together. What the list's *Status* sorts by.
+ */
+export function statusOrder(columns: readonly MiniBoardColumn[]): (string | null)[] {
+  return [...new Set(columns.flatMap((column) => column.cards.map((card) => card.status)))];
+}
+
+/**
+ * The keys more than one card on the board holds (#1476): two sources'
+ * PAY-231. Their cards and rows name their source, and each opens at its
+ * source's address. Counted over the cards read.
+ */
+export function sharedKeys(columns: readonly MiniBoardColumn[]): Set<string> {
+  const seen = new Set<string>();
+  const shared = new Set<string>();
+  for (const card of columns.flatMap((column) => column.cards)) {
+    if (seen.has(card.key)) shared.add(card.key);
+    seen.add(card.key);
+  }
+  return shared;
+}
+
+/**
+ * Where a card opens (#1476): its job by key, or, for a key another source
+ * holds too, by its entity id (`#/job/jira:PAY-231`), the address that names
+ * the source ({@link entityAddress}'s rule).
+ */
+export function ticketAddress(card: Pick<MiniBoardCard, "key" | "entity_id">, shared: ReadonlySet<string>): string {
+  return entityAddress("ticket", card.entity_id, shared.has(card.key));
 }

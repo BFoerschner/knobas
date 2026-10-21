@@ -30,6 +30,7 @@
     path = null,
     state = null,
     snippet = [],
+    named = false,
     sources,
     id,
     selected,
@@ -66,6 +67,8 @@
     state?: Chip | null;
     /** The matched excerpt, already split. Empty for a list or board row. */
     snippet?: Segment[];
+    /** Whether another source's row holds the same key (#1476): the provenance then names this one's source. */
+    named?: boolean;
     sources: CredentialHealth[];
     /** The option's element id, which the listbox names while it is active (#1411). */
     id: string;
@@ -80,7 +83,7 @@
    * key, so `split(":")[1]` would truncate `confluence:ENG:SEPA design`.
    */
   const key = $derived(entityId.slice(entityId.indexOf(":") + 1));
-  const prov = $derived(provenance(sourceId, syncedAt, sources, now));
+  const prov = $derived(provenance(sourceId, syncedAt, sources, now, named));
 </script>
 
 <button

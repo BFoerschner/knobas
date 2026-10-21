@@ -303,7 +303,8 @@ test("list_entities asked for a role reads its fillers' rows of its kinds, and a
   expect(code.every((pair) => /^mock\/(repo|branch|pr|commit)$/.test(pair))).toBe(true);
   // Named kinds intersect the role's.
   expect(pairs(read("code-host", ["pr", "ticket"]))).toEqual(["mock/pr"]);
-  expect(pairs(read("ticket-system"))).toEqual(["mock/ticket"]);
+  // Jira holds three of the mock's keys too (#1476).
+  expect(pairs(read("ticket-system"))).toEqual(["jira/ticket", "mock/ticket"]);
   // An unknown role is an empty page.
   expect(read("nobody:fills-this")).toEqual([]);
 

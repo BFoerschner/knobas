@@ -9,7 +9,7 @@
 import { expect, test } from "vitest";
 
 import type { AuthState, CredentialHealth } from "../ipc/sources";
-import { provenance, sourceMonogram, syncAge } from "./format";
+import { provenance, sharesKey, sourceMonogram, syncAge } from "./format";
 
 const NOW = new Date("2026-08-25T12:00:00Z");
 
@@ -63,4 +63,27 @@ test("a monogram is the first two letters of the id, upper-cased", () => {
   expect(sourceMonogram("jira-eu")).toBe("JI");
   expect(sourceMonogram("g")).toBe("G");
   expect(sourceMonogram("")).toBe("?");
+});
+
+/**
+ * Two sources' PAY-231 (#1476): rows otherwise identical but for the sync
+ * age, so the row names its source where another holds the same key, and
+ * only there.
+ */
+test("a row whose key another source holds names its source before the age", () => {
+  expect(provenance("mock", "2026-08-25T11:56:00Z", health("ok"), NOW, true).text).toBe("mock · synced 4 min ago");
+  expect(provenance("mock", "2026-08-25T11:56:00Z", health("ok"), NOW).text).toBe("synced 4 min ago");
+  // A complaint already names the source.
+  expect(provenance("jira", "2026-08-25T11:56:00Z", health("unauthorized"), NOW, true).text).toBe("jira · sign in again");
+});
+
+test("a key is shared when two rows of one kind hold it from different sources", () => {
+  const rows = [
+    { entity_id: "mock:PAY-231", kind: "ticket" },
+    { entity_id: "jira:PAY-231", kind: "ticket" },
+    { entity_id: "jira:PAY-9", kind: "ticket" },
+    { entity_id: "confluence:PAY-9", kind: "page" },
+  ];
+  const shares = sharesKey(rows);
+  expect(rows.map((row) => shares(row))).toEqual([true, true, false, false]);
 });

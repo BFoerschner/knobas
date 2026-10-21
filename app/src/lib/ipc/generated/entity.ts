@@ -2229,6 +2229,13 @@ source_id: string,
  */
 key: string, title: string, 
 /**
+ * The ticket's own status, in the source's words (#1423): the status
+ * it stands in on [`read_scoped`]'s board, carried on the card because
+ * a saved view's column gathers several statuses under the view's name
+ * ([`MiniBoardColumn::status`]). `None` for the terminal group.
+ */
+status: string | null, 
+/**
  * `None` where the record carries no readable priority; see
  * [`priority_read!`].
  *
@@ -2306,6 +2313,10 @@ export type MiniBoardColumn = {
  * group: tickets whose mirrored record carries no status this read
  * recognizes. The words on screen for that group are the shell's ("No
  * status"); what crosses the bridge is the absence itself.
+ *
+ * On a saved view's board (a Jira view's, #877) it is the view
+ * column's **name**, which gathers several statuses: read a ticket's
+ * status from [`MiniBoardCard::status`], never from here (#1423).
  */
 status: string | null, 
 /**

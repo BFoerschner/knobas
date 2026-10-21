@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { parseTfHash, sectionOf } from "./route";
+import { jobHash, parseTfHash, sectionOf } from "./route";
 
 test("the empty address is Tickets, as in prototype-6", () => {
   expect(parseTfHash("")).toEqual({ view: "tickets", rest: [] });
@@ -26,4 +26,13 @@ test("a deep address lights the section it belongs to", () => {
 test("a rooms-UI address is unknown here, not Tickets", () => {
   expect(parseTfHash("#/ctx/all")).toEqual({ view: "unknown", hash: "#/ctx/all" });
   expect(sectionOf(parseTfHash("#/ticket/jira:PAY-231"))).toBeNull();
+});
+
+test("a job addressed by its source round-trips, its tab too, and a bare key is still a key (#1476)", () => {
+  expect(jobHash("jira:PAY-231")).toBe("#/job/jira%3APAY-231");
+  expect(parseTfHash(jobHash("jira:PAY-231"))).toEqual({ view: "job", key: "jira:PAY-231", tab: null });
+  expect(parseTfHash(`${jobHash("jira:PAY-231")}/map`)).toEqual({ view: "job", key: "jira:PAY-231", tab: "map" });
+  // Typed by hand, unencoded, it reads the same.
+  expect(parseTfHash("#/job/jira:PAY-231")).toEqual({ view: "job", key: "jira:PAY-231", tab: null });
+  expect(parseTfHash(jobHash("PAY-231"))).toEqual({ view: "job", key: "PAY-231", tab: null });
 });

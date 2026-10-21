@@ -125,7 +125,10 @@
     moreLanesLine,
     moreLine,
     nextSort,
+    sharedKeys,
     sortRows,
+    statusOrder,
+    ticketAddress,
     when,
     type LaneField,
     type SortColumn,
@@ -291,7 +294,7 @@
   const reader = createBoardReader(ports, {
     typingPause,
     sessions: session,
-    view: () => ({ columns: ownColumns, layout: saved.layout, lanes: saved.lanes }),
+    view: () => ({ columns: ownColumns, listed: view?.columns ?? [], layout: saved.layout, lanes: saved.lanes }),
   });
   /** How the tickets show now: the session's switches over the view's own (R-3.3). */
   const showing = $derived({
@@ -438,18 +441,18 @@
   // ---- what is drawn, and the selection ----
   /** The board's columns as read, before the view's own gather them. */
   const boardColumns = $derived(reader.board?.columns ?? []);
-  /** Each card's status, whatever column of the view it sits in. */
-  const statusOf = $derived(
-    new Map(boardColumns.flatMap((column) => column.cards.map((card) => [card.entity_id, column.status]))),
-  );
-  /** The list's rows: every card read, in the header's order. */
+  /** The list's rows: every card read, in the header's order; each card says its own status (#1423). */
   const rows = $derived(
     sortRows(
-      boardColumns.flatMap((column) => column.cards.map((card) => ({ card, status: column.status }))),
+      boardColumns.flatMap((column) => column.cards.map((card) => ({ card }))),
       showing.sort,
-      boardColumns.map((column) => column.status),
+      statusOrder(boardColumns),
     ),
   );
+  /** The keys two sources' cards hold (#1476): those cards name their source and open by it. */
+  const shared = $derived(sharedKeys(boardColumns));
+  /** A card's source name when its key is shared, else `null`. */
+  const sourceOf = (card: MiniBoardCard) => (shared.has(card.key) ? sourceRoles.nameOf(card.source_id) : null);
   /** The list's columns: the view's, in the list's order (R-3.16). */
   const listColumns = $derived(
     LIST_COLUMN_ORDER.filter(([column]) => (view?.list_columns ?? DEFAULT_LIST_COLUMNS).includes(column)),
@@ -464,7 +467,7 @@
   const visible = $derived(
     showing.layout === "board"
       ? reader.bands.flatMap(({ drawn }) =>
-          drawn.flatMap(({ cards }) => cards.map((card) => ({ card, status: statusOf.get(card.entity_id) ?? null }))),
+          drawn.flatMap(({ cards }) => cards.map((card) => ({ card }))),
         )
       : rows,
   );
@@ -513,7 +516,7 @@
 
   function openJob(card: MiniBoardCard) {
     session.selected = card.entity_id;
-    location.hash = jobHash(card.key);
+    location.hash = ticketAddress(card, shared);
   }
 
   /** `j`/`k` and the arrows (R-3.10): the next or previous card on screen, selected and focused. */
@@ -551,7 +554,7 @@
       if (entry === null) return;
       event.preventDefault();
       session.selected = entry.card.entity_id;
-      location.hash = jobHash(entry.card.key);
+      location.hash = ticketAddress(entry.card, shared);
     };
     window.addEventListener("keydown", onkey);
     return () => window.removeEventListener("keydown", onkey);
@@ -734,8 +737,8 @@
             <h2>{lane.title} <span class="tf-count">{lane.count}</span></h2>
           {/if}
           <div class="tf-cols">
-            {#each drawn as { column, cards } (columnKey(column))}
-              {@const more = moreLine(column, cards.length)}
+            {#each drawn as { column, cards, done } (columnKey(column))}
+              {@const more = moreLine(column, cards.length, done)}
               {@const limit = columnLimit(view?.columns ?? [], column.status)}
               <div class="tf-col">
                 <h3>
@@ -752,6 +755,7 @@
                     <TicketCard
                       {card}
                       fields={view?.card_fields ?? null}
+                      source={sourceOf(card)}
                       typed={filter.text}
                       selected={current?.card.entity_id === card.entity_id}
                       onselect={() => select(card)}
@@ -790,7 +794,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each rows as { card, status } (card.entity_id)}
+            {#each rows as { card } (card.entity_id)}
               <tr
                 class="tf-row"
                 class:tf-card={current?.card.entity_id === card.entity_id}
@@ -802,7 +806,10 @@
               >
                 {#each listColumns as [column] (column)}
                   {#if column === "key"}
-                    <td class="tf-mono tf-nowrap"><Marked text={card.key} typed={filter.text} /></td>
+                    {@const source = sourceOf(card)}
+                    <td class="tf-mono tf-nowrap"
+                      ><Marked text={card.key} typed={filter.text} />{#if source}<span class="tf-sub">{source}</span>{/if}</td
+                    >
                   {:else if column === "summary"}
                     <td
                       ><Marked text={card.title} typed={filter.text} />{#if card.path}<span class="tf-sub"
@@ -810,7 +817,7 @@
                         >{/if}</td
                     >
                   {:else if column === "status"}
-                    <td class="tf-nowrap">{columnName(status)}</td>
+                    <td class="tf-nowrap">{columnName(card.status)}</td>
                   {:else if column === "priority"}
                     <td>{card.priority ?? ""}</td>
                   {:else if column === "signals"}
@@ -861,7 +868,7 @@
   {#if current !== null && base !== null}
     <TicketPreview
       card={current.card}
-      status={current.status}
+      address={ticketAddress(current.card, shared)}
       description={reader.description}
       around={reader.around}
       timerOnIt={timedTicket === current.card.key}

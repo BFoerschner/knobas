@@ -9343,3 +9343,82 @@ stays reachable and no component is added. Hiding counts costs the Inbox and Mon
   follows whichever way it is settled.
 - **The words:** *Edit section “Context” of SEPA payout retry design*, as #1425 asked and as the
   Docs toast says; *… of a page* until the title is known.
+## #1423: on a Jira view the preview and the list read the ticket's status (Opus implementer, 2026-10-21)
+
+Ruled 2026-10-21 (delegated by Björn at triage).
+
+- **The shape is (a): `MiniBoardCard` gains `status`.** *Fork:* (a) the card carries its own
+  status, or (b) `MiniBoardColumn` gains `name` with `status` null on a column of several statuses.
+  *Ruling:* (a), the recommended pick. *Reasoning:* the card is what the preview, the list and the
+  button read, and the #1200 ruling has the shell read only `MiniBoardCard`; (b) would still leave
+  the shell to find each card's status by looking up the column it came from, which is the lookup
+  that broke. A saved view's `MiniBoardColumn.status` stays the view column's name, as the header
+  draws it, and its doc says so. *Reversing:* low: one additive field (§10.8 entry
+  `1423-miniboardcard-carries-its-status.md`).
+- **A column is done by what it lists, else by its cards.** *Fork:* the done cap by "every card on
+  it is done", by the view's `statuses`, or by either. *Ruling:* where the view's column lists
+  statuses (a Jira view's, or a view's own columns), the column is done when every listed status is;
+  a column that lists none (the board's own, one per status) is done when it has cards and every
+  card's status is. "Done" is still the status spelled *done* in any case (`isDone`); knobas syncs
+  no status categories (#1208's *knobas does not sync status categories*). *Reasoning:* the list is
+  what the column is; the cards on it at one moment are a sample, and a column named *Done* that
+  gathers *In Review* must not drop to three because its review tickets are elsewhere. *Reversing:* low.
+- **The list's Status sort follows the statuses as the board first meets them.** *Fork:* sort by the
+  column a card stands in, or by its own status. *Ruling:* by its own status, in the order the board
+  first draws each, column by column (`statusOrder`). *Reasoning:* the cell shows the card's status,
+  so sorting by a column name the row no longer shows would read as unsorted. *Reversing:* low.
+- **The view editor's list preview reads the card's status too.** *Fork:* leave the editor's preview
+  as it was, or read the card there too. *Ruling:* the card. *Reasoning:* it sits on the Tickets page
+  and read the same column name; the ticket says nothing on the page reads a column name as a
+  status. *Reversing:* low.
+- **The fixture needed no change.** `jira-board-21` already holds PAY-233 (To Do, Mara's) under
+  *Ready* and five Done tickets under *Shipped*.
+- **Björn's sign-off before merge: reserved for Björn, ruled by implementer on Opus.** The §10.8
+  entry is one additive field on a read type, the pick Björn recommended at triage; signed off.
+
+## #1476: two sources holding one ticket key are told apart (Opus implementer, 2026-10-21)
+
+Ruled 2026-10-21 (delegated by Björn at triage). The ruling applies to #1455 (a space key two
+sources hold) too.
+
+- **Addressing: the entity-id job address, the bare key the fallback.** *Fork:* `#/job/<key>` with a
+  disambiguated `#/job/<source>/<key>`, or jobs moved to the entity id. *Ruling:* keep `#/job/<key>`
+  for a key one source holds; a key several sources hold opens at `#/job/<source>:<key>` (the entity
+  id), which the shell conventions already read ("An address holding an entity id
+  (`#/job/jira:PAY-231`) is read as one"). *Reasoning:* the recommended pick's intent with the
+  spelling the route already has: `#/job/<source>/<key>` would collide with `#/job/<key>/<tab>`
+  (`#/job/PAY-231/map`), so it would need a route grammar change; the colon form needs none, and no
+  §10.8 entry. A bare key two sources hold opens the first listed source's ticket and the job card
+  says *In <source> · also in <other>* with a link to the other's address, so it is never silent.
+  *Reversing:* low: one address rule (`ticketAddress`, `entityAddress`'s `shared`).
+- **When to draw the source: only when the key is not unique where it is drawn.** *Fork:* only then,
+  or always. *Ruling:* only then, the recommended pick. The board and the list count the cards read
+  (a capped read does not see a twin past its cap, so that card draws no source and opens by key,
+  where the job card names the other); the launcher counts the rows of the answer or the recent
+  items, per kind; the job card reads every listed source under the key. *Reversing:* low.
+- **What names the source.** *Fork:* the display name or the monogram. *Ruling:* the board card,
+  the list row and the job card draw its display name (the source list's, through
+  `sourceRoles.nameOf`, and the detail's `source.display_name`). The launcher row names it by id,
+  before the sync age (`jira · synced 25 min ago`), as its complaint line already does.
+  *Reasoning:* the launcher's health rows carry no display name (§2.2), and a monogram of two
+  letters tells `jira` from `jira-ops` no better than the id. *Reversing:* low.
+- **An entity's one stable address stays its entity id.** `CONTEXT.md`'s *Entity* has exactly one
+  stable in-app address; for a ticket that is `#/job/<source>:<key>`, which always opens it.
+  `#/job/<key>` is the short form a person reads, kept where it names one ticket (R-1.2).
+- **The fixture's second source is the Jira source it already lists.** *Ruling:* `Tidewater Jira`
+  now holds PAY-231, PAY-228 and OPS-77 as the mock does. *Reasoning:* it already claims the ticket
+  system; a sixth source would change every count the sources view draws.
+- **Björn's sign-off before merge: reserved for Björn, ruled by implementer on Opus.** No IPC type,
+  route grammar or §10.8 surface changes for this ticket; nothing to sign off beyond the rulings above.
+
+## #1423 and #1476: merge-manager's rulings on PR #1526 (Opus merge-manager, 2026-10-21)
+
+- **Björn's sign-off before merge: reserved for Björn, ruled by implementer on Opus; confirmed by
+  merge-manager on Opus.** *Fork:* confirm the implementer's sign-off, or hold the PR for Björn.
+  *Ruling:* confirm. *Reasoning:* the §10.8 entry matches the diff: one additive `Option<String>`
+  read field on `MiniBoardCard`, the barrel regenerated by `ipc_mirror` (the gate's `ipc-mirror`
+  step), `docs/contract.md` touched only in its index, no command, argument, barrel, migration or
+  adapter change; the shell still reads only `MiniBoardCard` for the board (#1200). #1476 changes no
+  route grammar: `#/job/<source>:<key>` is the entity-id form the route already read, and
+  `#/job/<source>/<key>` would have read as key `<source>`, tab `<key>`. *Reversing:* low: drop the
+  field and the done rule's card branch.

@@ -2794,3 +2794,36 @@ test("an inbox row opens its item and the time block opens the day", async () =>
   expect(onnavigate).toHaveBeenLastCalledWith("#/time");
   expect(onnavigate).toHaveBeenCalledTimes(4);
 });
+
+test("two sources' PAY-231: each row names its source before its age, a unique key's row does not (#1476)", async () => {
+  const twins = response({
+    groups: [
+      {
+        kind: "ticket",
+        label: "Ticket",
+        plural: "Tickets",
+        monogram: "TK",
+        total: 3,
+        hits: [
+          hit({ entity_id: "mock:PAY-231", kind: "ticket", title: "Retry failed SEPA payouts", source_id: "mock", synced_at: "2026-08-25T11:59:50Z" }),
+          hit({ entity_id: "jira:PAY-231", kind: "ticket", title: "Retry failed SEPA payouts", source_id: "jira", synced_at: "2026-08-25T11:35:00Z" }),
+          hit({ entity_id: "jira:PAY-232", kind: "ticket", title: "Metrics for SEPA retry attempts" }),
+        ],
+      },
+    ],
+  });
+  const onnavigate = vi.fn();
+  open({ onnavigate, ports: { search: async () => twins, launcherHome: async () => HOME } });
+  await settle();
+  target.querySelector("input")!.value = "PAY-231";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  const ages = [...target.querySelectorAll(".sy")].map((el) => el.textContent?.trim());
+  expect(ages).toEqual(["mock · synced just now", "jira · synced 25 min ago", "synced 4 min ago"]);
+  // The Jira row opens Jira's PAY-231, by the address that names its source.
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(onnavigate).toHaveBeenCalledWith("#/job/jira%3APAY-231");
+});

@@ -26,12 +26,13 @@ interface Read {
   fail: (error: Error) => void;
 }
 
-function card(key: string, assignee: string | null = null): MiniBoardCard {
+function card(key: string, assignee: string | null = null, status: string | null = null): MiniBoardCard {
   return {
     entity_id: `jira:${key}`,
     source_id: "jira",
     key,
     title: key,
+    status,
     priority: null,
     issue_type: null,
     assignee,
@@ -45,10 +46,11 @@ function card(key: string, assignee: string | null = null): MiniBoardCard {
   };
 }
 
-function column(status: string, total: number, drawn = total): MiniBoardColumn {
+/** A column named `status`; its cards stand in `own`, the name's status unless a view's column gathers another. */
+function column(status: string, total: number, drawn = total, own: string = status): MiniBoardColumn {
   return {
     status,
-    cards: Array.from({ length: Math.min(total, drawn) }, (_, i) => card(`${status[0]}-${i + 1}`)),
+    cards: Array.from({ length: Math.min(total, drawn) }, (_, i) => card(`${status[0]}-${i + 1}`, null, own)),
     total,
   };
 }
@@ -296,4 +298,27 @@ test("close stops the pause and drops every answer still out", async () => {
   await flush();
   expect(reader.board).toBeNull();
   expect(reader.description).toBeNull();
+});
+
+test("a Jira view's column draws three when every status it lists is done, whatever its name (#1423)", async () => {
+  const { reader, reads, view } = fakes();
+  // The read gathered Jira's columns under their names; the view lists their statuses.
+  view.columns = [
+    { name: "Ready", statuses: ["Ready"], limit: null },
+    { name: "Shipped", statuses: ["Shipped"], limit: null },
+    { name: "Done", statuses: ["Done"], limit: null },
+  ];
+  view.listed = [
+    { name: "Ready", statuses: ["To Do"], limit: null },
+    { name: "Shipped", statuses: ["Done"], limit: null },
+    { name: "Done", statuses: ["In Review", "Done"], limit: null },
+  ];
+  reader.open({ key: "jira-board-21", base: "", savedView: "jira:board-21" }, NO_WORDS);
+  reads[0]!.answer(board(column("Ready", 12, 12, "To Do"), column("Shipped", 12, 12, "Done"), column("Done", 12, 12, "Done")));
+  await flush();
+  expect(reader.bands[0]!.drawn.map(({ cards, done }) => [cards.length, done])).toEqual([
+    [8, false],
+    [3, true],
+    [8, false],
+  ]);
 });

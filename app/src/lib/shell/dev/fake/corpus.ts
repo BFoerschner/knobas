@@ -288,6 +288,19 @@ export const CORPUS: {
   ),
 ];
 
+/**
+ * The keys a second ticket source holds too (#1476): the Jira source mirrors
+ * these as the mock does, as a demo profile does beside the testenv Jira. Two
+ * tickets under one key, told apart by their source; Jira's synced earlier.
+ */
+export const SHARED_KEYS = ["PAY-231", "PAY-228", "OPS-77"] as const;
+CORPUS.push(
+  ...SHARED_KEYS.map((key) => {
+    const twin = CORPUS.find((entry) => entry.entity_id === `mock:${key}`)!;
+    return { ...twin, entity_id: `jira:${key}`, payload: { ...twin.payload, source: "jira" } };
+  }),
+);
+
 /** One corpus entry, with the fields every row shares filled in. */
 function row(
   entity_id: string,
@@ -524,9 +537,11 @@ function boardCard(entry: (typeof CORPUS)[number]) {
   const assignee = text(entry.payload["assignee"]);
   return {
     entity_id: entry.entity_id,
-    source_id: "mock",
+    source_id: text(entry.payload["source"]) ?? "mock",
     key: entry.entity_id.slice(entry.entity_id.indexOf(":") + 1),
     title: entry.title,
+    // Its own status (#1423), whatever column a Jira view gathers it under.
+    status: ticketStatus(entry),
     priority: text(entry.payload["priority"]),
     // The fields the Tickets view's cards draw (#810), read flat because
     // that is the shape this corpus is in.
@@ -593,6 +608,7 @@ function giteaCard(entry: (typeof CORPUS)[number]) {
     source_id: "gitea",
     key: entry.entity_id.slice(entry.entity_id.indexOf(":") + 1),
     title: entry.title,
+    status: ticketStatus(entry),
     priority: payload.knobas.priority,
     issue_type: null,
     assignee,

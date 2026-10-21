@@ -392,6 +392,7 @@
   <div class="tf-ws" class:tf-mapmode={current.id === "map"}>
     <TfJobCard
       {detail}
+      others={reader.others}
       {offered}
       {week}
       {conversation}

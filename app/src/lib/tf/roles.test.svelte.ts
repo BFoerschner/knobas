@@ -8,7 +8,8 @@ import { expect, test } from "vitest";
 import { claims, createSourceRoles, fills } from "./roles.svelte";
 
 test("the role module offers no row filter: a surface draws what its read answered (#1300)", () => {
-  expect(Object.keys(createSourceRoles()).sort()).toEqual(["answers", "forget", "take"]);
+  // `nameOf` names a source (#1476); it filters nothing.
+  expect(Object.keys(createSourceRoles()).sort()).toEqual(["answers", "forget", "nameOf", "take"]);
 });
 
 test("a source claims a role its list entry names, and fills it while its records missed none of the role's paths (#1199)", () => {
@@ -47,4 +48,11 @@ test("an optional read is answered only by a listed source whose claim names it 
 
   roles.forget();
   expect(roles.answers("ticket-system", "jira", "translate_query")).toBe(false);
+});
+
+test("a source is named by its display name, or its id when the list never said (#1476)", () => {
+  const roles = createSourceRoles();
+  expect(roles.nameOf("jira")).toBe("jira");
+  roles.take([{ id: "jira", display_name: "Tidewater Jira" }, { id: "mock" }]);
+  expect([roles.nameOf("jira"), roles.nameOf("mock"), roles.nameOf("gone")]).toEqual(["Tidewater Jira", "mock", "gone"]);
 });

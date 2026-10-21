@@ -13,6 +13,7 @@
   import type { CredentialHealth } from "../ipc/sources";
   import Row from "./Row.svelte";
   import { authorGaps, underGaps } from "./coverage";
+  import { sharesKey } from "./format";
   import type { LauncherRow } from "./rows";
 
   let {
@@ -37,6 +38,8 @@
     onhover: (index: number) => void;
   } = $props();
 
+  /** Rows another source's row of the same key sits beside (#1476): they name their source. */
+  const shares = $derived(sharesKey(response.groups.flatMap((group) => group.hits)));
   /** Where each group's hits start in the flat list. */
   const offsets = $derived.by(() => {
     const out: number[] = [];
@@ -109,6 +112,7 @@
         path={hit.path}
         state={hit.state}
         snippet={hit.snippet}
+        named={shares(hit)}
         {sources}
         {now}
         id={optionId(index)}

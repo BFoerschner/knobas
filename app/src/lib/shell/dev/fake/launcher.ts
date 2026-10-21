@@ -11,6 +11,33 @@ import { FIXTURE_SOURCES } from "./sources";
 import { FIXTURE_QUEUE } from "./write-queue";
 
 /**
+ * `search` for a ticket key the corpus holds (#1476), `PAY-231`: every
+ * source's ticket of that key, so the launcher's rows for a key two sources
+ * hold can be looked at. Any other words keep the refusal below; this is a
+ * key lookup, not the corpus's full-text search.
+ */
+function ticketsByKey(raw: string) {
+  if (!/^[A-Za-z][A-Za-z0-9]*-\d+$/.test(raw)) return null;
+  const key = raw.toUpperCase();
+  const hits = CORPUS.filter(
+    (entry) => entry.kind === "ticket" && entry.deleted_at === null && entry.entity_id.slice(entry.entity_id.indexOf(":") + 1) === key,
+  ).map((entry, index) => ({ ...mirrorRow(entry), rank: 1 - index / 10, snippet: [] }));
+  if (hits.length === 0) return null;
+  return {
+    interpreted: {
+      text: raw,
+      prefix: null,
+      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups: [{ kind: "ticket", label: "Ticket", plural: "Tickets", monogram: "TK", total: hits.length, hits }],
+    total: hits.length,
+    took_ms: 2,
+    coverage: [],
+  };
+}
+
+/**
  * `search`, narrowed to the estate — what `assets/tree.ts`'s `estateQuery`
  * asks for.
  *
@@ -33,6 +60,8 @@ function estateSearch(args: Record<string, unknown>) {
   // it answers with the refusal below.
   const listed = /^list:([a-z0-9-]+)$/.exec((query.raw ?? "").trim());
   if (listed) return fakeSmartListItems({ id: listed[1]!, limit: 50 });
+  const byKey = ticketsByKey((query.raw ?? "").trim());
+  if (byKey !== null) return byKey;
   if (!(query.filters?.kinds ?? []).includes("asset")) {
     throw {
       code: "not_ready",

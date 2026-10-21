@@ -10,6 +10,11 @@ test("an entity of a known kind goes where its own page is", () => {
   expect(entityAddress("route", "route:9a1b")).toBe("#/route/route%3A9a1b");
 });
 
+test("a ticket whose key another source holds opens at its source's address (#1476)", () => {
+  expect(entityAddress("ticket", "jira:PAY-231", true)).toBe("#/job/jira%3APAY-231");
+  expect(entityAddress("pr", "gitea:acme/svc#142", true)).toBe("#/pr/gitea%3Aacme%2Fsvc%23142");
+});
+
 test("a note opens Settings › Notes and capture, the one place notes are drawn (D10)", () => {
   expect(entityAddress("note", "note:0f2c1a")).toBe("#/settings/notes");
 });

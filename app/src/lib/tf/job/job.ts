@@ -45,7 +45,9 @@ export function keyOf(entityId: string): string {
  * an entity id is `<source>:<key>`, so a bare key is looked for under every
  * configured source, in the order the sources are listed, and the first
  * ticket wins. An address that already holds an id (`jira:PAY-231`) is read
- * as one. `null` when nothing in the mirror answers to it.
+ * as one: the address that tells two sources' PAY-231 apart (#1476). `null`
+ * when nothing in the mirror answers to it. The job page reads
+ * {@link resolveJob}, which also names the other sources holding the key.
  */
 export async function resolveTicket(
   segment: string,
@@ -53,19 +55,56 @@ export async function resolveTicket(
   read: (entityId: string) => Promise<EntityDetail>,
 ): Promise<EntityDetail | null> {
   const candidates = isEntityId(segment) ? [segment] : sources.map((source) => `${source.id}:${segment}`);
+  return (await ticketsOf(candidates, read))[0] ?? null;
+}
+
+/** What a job address opens (#1476): its ticket, and the other sources' tickets under the same key. */
+export interface ResolvedJob {
+  ticket: EntityDetail;
+  /** Every other listed source's ticket of that key, in list order; empty when the key is one source's. */
+  others: EntityDetail[];
+}
+
+/**
+ * The ticket a job address names, as {@link resolveTicket} reads it, with
+ * every other listed source's ticket under the same key (#1476), so a key two
+ * sources hold is never opened silently: a bare key opens the first listed,
+ * an id opens itself, and the page names the rest. `null` when nothing
+ * answers.
+ */
+export async function resolveJob(
+  segment: string,
+  sources: readonly { id: string }[],
+  read: (entityId: string) => Promise<EntityDetail>,
+): Promise<ResolvedJob | null> {
+  const named = isEntityId(segment);
+  const key = named ? keyOf(segment) : segment;
+  const candidates = sources.map((source) => `${source.id}:${key}`);
+  if (named && !candidates.includes(segment)) candidates.unshift(segment);
+  const tickets = await ticketsOf(candidates, read);
+  const ticket = named ? tickets.find((each) => each.row.entity_id === segment) : tickets[0];
+  if (ticket === undefined) return null;
+  return { ticket, others: tickets.filter((each) => each !== ticket) };
+}
+
+/**
+ * Every candidate that answers as a ticket, in order. A source that does not
+ * hold the key answers `not_found`, the ordinary miss; anything else (the
+ * database down, the bridge gone) is a failure to say as one, never "not in
+ * the mirror", when no candidate answered.
+ */
+async function ticketsOf(candidates: string[], read: (entityId: string) => Promise<EntityDetail>): Promise<EntityDetail[]> {
   const answers = await Promise.allSettled(candidates.map((id) => read(id)));
-  for (const answer of answers) {
-    if (answer.status === "fulfilled" && answer.value.row.kind === "ticket") return answer.value;
-  }
-  // A source that does not hold the key answers `not_found`, which is the
-  // ordinary miss. Anything else (the database down, the bridge gone) is a
-  // failure to say as one, never "not in the mirror".
+  const tickets = answers.flatMap((answer) =>
+    answer.status === "fulfilled" && answer.value.row.kind === "ticket" ? [answer.value] : [],
+  );
+  if (tickets.length > 0) return tickets;
   const failed = answers.find(
     (answer): answer is PromiseRejectedResult =>
       answer.status === "rejected" && (answer.reason as { code?: unknown } | null)?.code !== "not_found",
   );
   if (failed) throw failed.reason;
-  return null;
+  return [];
 }
 
 /**
