@@ -41,7 +41,7 @@
     source?: WriteSource | null;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     /** Called once the write is queued, for a page that marks it (the pull request's chip). */
-    onqueued?: () => void;
+    onqueued?: (write: QueuedWrite) => void;
     onclose: () => void;
   } = $props();
 
@@ -65,9 +65,9 @@
     }
     busy = true;
     try {
-      await submitWrite(payload);
+      const write = await submitWrite(payload);
       toastQueued(what, source);
-      onqueued?.();
+      onqueued?.(write);
       onclose();
     } catch (cause) {
       push({ text: `Could not queue the write: ${ipcErrorMessage(cause)}`, tone: "err" });

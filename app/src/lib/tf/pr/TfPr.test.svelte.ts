@@ -23,7 +23,8 @@ import type { WriteOpPayload } from "../../ipc/sources";
 import { createPendingComments, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
-import { forgetPrQueued } from "./queued.svelte";
+import type { Hear, WriteFollower } from "../../shell/follow-write";
+import { forgetQueued } from "../queued.svelte";
 import TfPr, { type PrPorts } from "./TfPr.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
@@ -102,7 +103,7 @@ const MERGE = action("merge_pull_request", "Merge…", { primary: true, disabled
 const COMMENT = action("comment", "Comment…");
 const APPROVE = action("submit_review", "Approve…", { values: { verdict: "approve" } });
 
-function prView(actions: ViewAction[] = [COMMENT, EDIT, CLOSE, UPDATE, MERGE]): SourceView {
+function prView(actions: ViewAction[] = [COMMENT, EDIT, CLOSE, UPDATE, MERGE], state = "open"): SourceView {
   return {
     sections: [
       {
@@ -114,7 +115,7 @@ function prView(actions: ViewAction[] = [COMMENT, EDIT, CLOSE, UPDATE, MERGE]): 
           {
             type: "facts",
             facts: [
-              fact("State", "open", "info"),
+              fact("State", state, state === "open" ? "info" : "muted"),
               fact("Author", "mara"),
               fact("Branches", "feature/PAY-231-sepa-retry → main"),
               fact("Mergeable", "no: 1 of 2 required approvals", "warn"),
@@ -201,7 +202,6 @@ let writes: WriteOpPayload[];
 let pending: PendingCommentStore;
 
 beforeEach(() => {
-  forgetPrQueued();
   writes = [];
   pending = createPendingComments(() => null);
   target = document.createElement("div");
@@ -235,8 +235,8 @@ function ports(over: Partial<PrPorts> & { pr?: SourceView; author?: string; chec
   };
 }
 
-async function draw(rest: string[], with_: PrPorts = ports()) {
-  view = mount(TfPr, { target, props: { ready: true, rest, job: "PAY-231", ports: with_, pending } });
+async function draw(rest: string[], with_: PrPorts = ports(), follower?: WriteFollower) {
+  view = mount(TfPr, { target, props: { ready: true, rest, job: "PAY-231", ports: with_, pending, ...(follower ? { follower } : {}) } });
   await settle();
 }
 
@@ -745,9 +745,102 @@ test("the hold outlives leaving the page and ends with the session; a source's o
   expect(holdOf("Merge…")).toEqual(["true", "merge queued"]);
   expect(holdOf("Edit")).toEqual(["true", "merge queued"]);
   unmount(view!);
-  forgetPrQueued();
+  forgetQueued();
   await draw([PR], offered());
   expect(holdOf("Merge…")).toEqual([null, ""]);
   expect(button("Merge…")!.classList.contains("tf-primary")).toBe(true);
   expect(holdOf("Edit")).toEqual([null, ""]);
+});
+
+// -- A queued mark goes once the source's read shows it (#1542) -------------
+
+const REOPEN = action("edit_pull_request", "Reopen", { values: { state: "open" } });
+
+/** Queue a close through Close's dialog. */
+async function queueClose() {
+  button("Close")!.click();
+  flushSync();
+  dialogButton("Close").click();
+  await settle();
+}
+
+const chips = () => [...target.querySelectorAll(".tf-fhead .tf-sub .tf-chip")].map((c) => c.textContent?.trim());
+
+test("a landed close drops its chip and the holds it drove; the source reopening it later does not bring the chip back", async () => {
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
+  await queueClose();
+  expect(chips()).toEqual(["open", "close queued"]);
+  unmount(view!);
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, REOPEN], "closed") }));
+  expect(chips()).toEqual(["closed"]);
+  expect(holdOf("Reopen")).toEqual([null, ""]);
+  unmount(view!);
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
+  expect(chips()).toEqual(["open"]);
+  expect(holdOf("Merge…")).toEqual([null, ""]);
+});
+
+test("a close the read still shows open keeps its chip and its holds", async () => {
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
+  await queueClose();
+  unmount(view!);
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
+  expect(chips()).toEqual(["open", "close queued"]);
+  expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
+});
+
+test("a landed merge drops its chip; an edit, which no read shows, keeps its chip for the session", async () => {
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, mergeAction(null)]) }));
+  button("Edit")!.click();
+  flushSync();
+  const title = document.querySelector<HTMLInputElement>('.tf-dialog input[aria-label="Title"]')!;
+  title.value = "SEPA retry with backoff";
+  title.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  dialogButton("Edit").click();
+  await settle();
+  await queueMerge();
+  expect(chips()).toEqual(["open", "edit queued", "merge queued"]);
+  unmount(view!);
+  await draw([PR], ports({ pr: prView([COMMENT], "merged") }));
+  expect(chips()).toEqual(["merged", "edit queued"]);
+});
+
+test("a comment's mark goes once the conversation holds its words", async () => {
+  await draw([PR, "conversation"]);
+  const box = target.querySelector<HTMLTextAreaElement>(".tf-compose textarea")!;
+  box.value = "Bounded to ±10 %.";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Comment")!.click();
+  await settle();
+  expect(target.querySelectorAll(".tf-convo .tf-msg")).toHaveLength(3);
+  unmount(view!);
+  await draw([PR, "conversation"]);
+  expect(target.querySelectorAll(".tf-convo .tf-msg")).toHaveLength(2);
+});
+
+test("a close the queue refuses drops its chip and its holds, and says why", async () => {
+  let hear: Hear = () => {};
+  const follower: WriteFollower = {
+    follow: (_id, h) => {
+      hear = h;
+      return () => {};
+    },
+  };
+  const numbered = ports({
+    pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]),
+    submitWrite: async (payload) => {
+      writes.push(payload);
+      return { id: 31 } as never;
+    },
+  });
+  await draw([PR], numbered, follower);
+  await queueClose();
+  expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
+  hear({ id: 31, state: "refused", detail: "403 Forbidden" } as never);
+  flushSync();
+  expect(chips()).toEqual(["open"]);
+  expect(holdOf("Merge…")).toEqual([null, ""]);
+  expect(toasts.items.at(-1)!.text).toBe("Close was refused: 403 Forbidden");
 });
