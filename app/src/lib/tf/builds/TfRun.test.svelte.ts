@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { DownloadTarget, PipelineRow, RunLog, PipelineSettings, RunRow, SourceView } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
+import { forgetQueued } from "../queued.svelte";
 import type { RunPorts } from "./pipeline-ports";
 import TfRun from "./TfRun.svelte";
 
@@ -25,6 +26,7 @@ afterEach(() => {
   if (page) unmount(page);
   page = null;
   target.remove();
+  forgetQueued();
 });
 
 async function settle() {
@@ -188,11 +190,35 @@ interface Drawn {
   views: string[];
   /** Moves the page to another tab of the same run, as the address does. */
   go: (tab?: string) => void;
+  /** Moves the page to another run of the pipeline. */
+  goRun: (runId: string) => void;
+  /** How many times the pipeline's runs were read. */
+  reads: number;
+  /** What the next runs read answers. */
+  next: RunRow[];
+  /** Fire `sync:state` as the shell hears it, to every listener the page holds. */
+  sync: (payload: unknown) => void;
+  /** How many `sync:state` listeners the page holds. */
+  listening: () => number;
 }
 
 function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<RunPorts> = {}, runs: RunRow[] = RUNS): Drawn {
   const props = $state({ rest: [PIPE, runId, ...(tab ? [tab] : [])] });
-  const drawn: Drawn = { downloads: [], writes: [], opened: [], views: [], go: (to) => (props.rest = [PIPE, runId, ...(to ? [to] : [])]) };
+  const handlers = new Set<(event: { payload: unknown }) => void>();
+  const drawn: Drawn = {
+    downloads: [],
+    writes: [],
+    opened: [],
+    views: [],
+    go: (to) => (props.rest = [PIPE, props.rest[1]!, ...(to ? [to] : [])]),
+    goRun: (to) => (props.rest = [PIPE, to]),
+    reads: 0,
+    next: runs,
+    sync: (payload) => {
+      for (const handler of [...handlers]) handler({ payload });
+    },
+    listening: () => handlers.size,
+  };
   const ports: RunPorts = {
     older: () => Promise.resolve([]),
     settings: () => Promise.resolve(SETTINGS),
@@ -227,6 +253,13 @@ function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<Ru
       if (section === "tests") return Promise.resolve(TESTS);
       return Promise.resolve(viewOf(id === "teamcity:build:1188"));
     },
+    listen: (event, handler) => {
+      if (event !== "sync:state") return Promise.resolve(() => {});
+      const mine = (e: { payload: unknown }) => handler(e);
+      handlers.add(mine);
+      return Promise.resolve(() => void handlers.delete(mine));
+    },
+    follower: () => ({ follow: () => () => {} }),
     ...overrides,
   };
   const crumbs = createRawSnippet((parts: () => { name: string }[]) => ({
@@ -247,7 +280,10 @@ function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<Ru
         return props.rest;
       },
       job: "PAY-231",
-      runs: () => Promise.resolve(runs),
+      runs: () => {
+        drawn.reads += 1;
+        return Promise.resolve(drawn.next);
+      },
       crumbs,
       ports,
     },
@@ -590,5 +626,103 @@ test("a run in flight is read again when the Log tab opens, and the bar follows 
   drawn.go("log");
   await settle();
   expect(reads).toBe(2);
+  expect(segments()).toHaveLength(3);
+});
+
+// -- a sync finishing reads again (#1450) ---------------------------------------
+
+/** A `sync:state` payload for `source`. */
+const synced = (source: string, running = false) => ({
+  source_id: source,
+  running,
+  run_id: running ? 7 : null,
+  started_at: null,
+  last_finished_at: "2026-10-16T08:10:00Z",
+  last_outcome: running ? null : "ok",
+  next_run_at: null,
+  backoff_until: null,
+});
+
+/** The running run 1188 as the next sync left it: passed. */
+const LANDED: RunRow[] = RUNS.map((r) =>
+  r.entity_id === "teamcity:build:1188" ? run(1188, "ok", FEATURE, { duration_seconds: 300, agent: "linux-agent-01" }) : r,
+);
+
+test("a sync of the run's source finishing reads the run again: a running run draws its result", async () => {
+  const views: string[] = [];
+  const drawn = draw("teamcity:build:1188", undefined, {
+    view: (id, section) => (views.push(section ?? ""), Promise.resolve(viewOf(views.length === 1))),
+  });
+  await settle();
+  expect(button("Stop")).toBeDefined();
+  expect(target.querySelector(".tf-callout.tf-info")?.textContent).toBe("Step 3 of 5 is running.");
+
+  drawn.next = LANDED;
+  drawn.sync(synced("teamcity", true));
+  await settle();
+  expect(drawn.reads, "a sync still running reads nothing").toBe(1);
+
+  drawn.sync(synced("teamcity"));
+  await settle();
+  expect(drawn.reads).toBe(2);
+  expect(views, "the view again, and its failed test now that it finished").toEqual(["", "", "tests"]);
+  expect(target.querySelector("h1 .tf-chip")?.textContent).toBe("SUCCESS");
+  expect(target.querySelector(".tf-bhead .tf-sub")!.textContent).toContain("took 5 m");
+  expect(button("Stop")).toBeUndefined();
+  expect(button("Re-run")).toBeDefined();
+  expect(target.querySelector(".tf-callout.tf-info")).toBeNull();
+});
+
+test("a sync of another source reads nothing", async () => {
+  const drawn = draw();
+  await settle();
+  drawn.sync(synced("gitea"));
+  await settle();
+  expect(drawn.reads).toBe(1);
+  expect(drawn.views).toEqual(["", "tests"]);
+});
+
+test("the open tab reads again too, on the tab the reader is on", async () => {
+  const asked: string[] = [];
+  const reads = {
+    log: (id: string) => (asked.push(`log ${id}`), Promise.resolve(null)),
+    tests: (id: string) => (asked.push(`tests ${id}`), Promise.resolve(null)),
+    artifacts: (id: string, path: string) => (asked.push(`artifacts ${id} ${JSON.stringify(path)}`), Promise.resolve([])),
+  };
+  for (const tab of ["log", "tests", "artifacts"]) {
+    asked.length = 0;
+    const drawn = draw("teamcity:build:1187", tab, reads);
+    await settle();
+    drawn.sync(synced("teamcity"));
+    await settle();
+    expect(target.querySelector('.tf-tabs [aria-current="page"]')?.getAttribute("href")).toMatch(new RegExp(`/${tab}$`));
+    const own = asked.filter((line) => line.startsWith(tab));
+    expect(own, `${tab} is read again`).toHaveLength(2);
+    unmount(page!);
+    page = null;
+  }
+});
+
+test("the page stops listening when the run changes or the page goes", async () => {
+  const drawn = draw();
+  await settle();
+  expect(drawn.listening()).toBe(1);
+  drawn.goRun("teamcity:build:1186");
+  await settle();
+  expect(drawn.listening(), "the last run's listener is gone").toBe(1);
+  unmount(page!);
+  page = null;
+  expect(drawn.listening()).toBe(0);
+});
+
+test("the Log tab draws the log read again, and the steps bar follows it", async () => {
+  const answers: RunLog[] = [{ total: 0, steps: [], lines: [] }, STEPPED];
+  const drawn = draw("teamcity:build:1187", "log", { log: () => Promise.resolve(answers.shift() ?? STEPPED) });
+  await settle();
+  expect(target.querySelector(".tf-runbody")?.textContent).toContain("This run has no log.");
+  expect(segments()).toHaveLength(0);
+  drawn.sync(synced("teamcity"));
+  await settle();
+  expect(target.querySelector(".tf-runbody")?.textContent).toContain("Process exited with code 101");
   expect(segments()).toHaveLength(3);
 });

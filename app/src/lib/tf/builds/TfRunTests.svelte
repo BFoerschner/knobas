@@ -24,6 +24,7 @@
     branch,
     logHref,
     ports,
+    fresh = 0,
   }: {
     runId: string;
     /** The run's branch: a history whose failures were all on it says so. */
@@ -31,6 +32,8 @@
     /** The run's Log tab. */
     logHref: string;
     ports: Pick<RunPorts, "tests" | "history">;
+    /** Bumped when the page reads the run again (#1450): the tests are read again, the filter and the open ones kept. */
+    fresh?: number;
   } = $props();
 
   /** How many failed tests start open. */
@@ -46,22 +49,36 @@
 
   $effect(() => {
     const id = runId;
-    const mine = ++token;
     untrack(() => {
       read = null;
       readFailed = null;
       opened = {};
       histories = {};
     });
+    readTests(id);
+  });
+
+  /** A read again keeps what is drawn, and a failed one keeps the last tests. */
+  let first = true;
+  $effect(() => {
+    void fresh;
+    if (first) return void (first = false);
+    untrack(() => readTests(runId));
+  });
+
+  function readTests(id: string) {
+    const mine = ++token;
     ports.tests(id).then(
       (answer) => {
-        if (mine === token) read = answer;
+        if (mine !== token) return;
+        read = answer;
+        readFailed = null;
       },
       (cause: unknown) => {
-        if (mine === token) readFailed = ipcErrorMessage(cause);
+        if (mine === token && read === null) readFailed = ipcErrorMessage(cause);
       },
     );
-  });
+  }
 
   const tests = $derived(read?.tests ?? []);
   const filter = $derived(sessionFilter(`run-tests:${runId}`));

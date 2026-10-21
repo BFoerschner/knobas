@@ -3,6 +3,8 @@
  * test needs no bridge. Each is wrapped rather than referenced, so importing
  * this module calls nothing.
  */
+import { listen as tauriListen } from "@tauri-apps/api/event";
+
 import {
   artifactPreview,
   downloadRunFile,
@@ -42,6 +44,7 @@ import {
   type SourceSyncStatus,
   type WriteOpPayload,
 } from "../../ipc/sources";
+import { writeFollower, type WriteFollower } from "../../shell/follow-write";
 import { openExternal } from "../../shell/open-external";
 import { isEntityId, resolveTicket } from "../job/job";
 import { branchOptions } from "../repo/repo";
@@ -71,6 +74,10 @@ export interface PipelinePorts {
   repoBranches: (repoId: string) => Promise<string[]>;
   /** The parameters a run ran with (its view's *Parameters*), for *#N settings*. */
   runParameters: (runId: string) => Promise<StartValue[]>;
+  /** The shell's events: `sync:state` says a source's sync finished, and the page reads again (#1450). */
+  listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
+  /** What follows a queued run until the queue holds or refuses it (#1449). */
+  follower: () => WriteFollower;
 }
 
 /** How many branches the job's read takes: a job reaches a handful. */
@@ -132,6 +139,8 @@ export const BRIDGE: PipelinePorts = {
   deletePreset: (pipelineId, name) => deleteRunPreset(pipelineId, name),
   repoBranches: (repoId) => readRepoBranches(repoId),
   runParameters: (runId) => readRunParameters(runId),
+  listen: (event, handler) => tauriListen(event, handler),
+  follower: () => writeFollower(),
 };
 
 /** The run page's reads (#853): the pipeline page's, and the run's source view. */

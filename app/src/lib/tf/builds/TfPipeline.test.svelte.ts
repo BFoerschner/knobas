@@ -13,6 +13,7 @@ import type { QueuedWrite, SourceDescriptor, SourceSummary, WriteOpPayload } fro
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
+import { forgetQueued } from "../queued.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
 import TfPipeline from "./TfPipeline.svelte";
 
@@ -30,6 +31,7 @@ afterEach(() => {
   page = null;
   target.remove();
   forgetFilters();
+  forgetQueued();
 });
 
 async function settle() {
@@ -148,6 +150,12 @@ interface Drawn {
   pinned: number;
   writes: WriteOpPayload[];
   olderAsked: string[];
+  /** How many times the runs were read. */
+  reads: number;
+  /** Fire `sync:state` as the shell hears it; `null` once the page stopped listening. */
+  sync: ((payload: unknown) => void) | null;
+  /** What the next runs read answers. */
+  next: RunRow[] | Error;
   /** Move the page to another address under the pipeline, as a tab click does. */
   go: (rest: string[]) => void;
 }
@@ -158,7 +166,7 @@ function draw(
   overrides: Partial<PipelinePorts> = {},
   older: RunRow[][] = [[run(1150, "ok", daysAgo(9, 9))], []],
 ): Drawn {
-  const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [], go: () => {} };
+  const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [], reads: 0, sync: null, next: RUNS, go: () => {} };
   const ports: PipelinePorts = {
     older: (_id, before) => {
       drawn.olderAsked.push(before);
@@ -179,9 +187,22 @@ function draw(
     deletePreset: () => Promise.resolve(),
     repoBranches: () => Promise.resolve(["main", "feature/PAY-231-sepa-retry", "release/1.9"]),
     runParameters: () => Promise.resolve([]),
+    listen: (event, handler) => {
+      if (event !== "sync:state") return Promise.resolve(() => {});
+      const fire = (payload: unknown) => handler({ payload });
+      drawn.sync = fire;
+      return Promise.resolve(() => {
+        if (drawn.sync === fire) drawn.sync = null;
+      });
+    },
+    follower: () => ({ follow: () => () => {} }),
     ...overrides,
   };
-  const props = $state({ pipeline: PIPELINE, rest, job, runs: () => Promise.resolve(RUNS), onpin: () => (drawn.pinned += 1), ports });
+  const runs = () => {
+    drawn.reads += 1;
+    return drawn.next instanceof Error ? Promise.reject(drawn.next) : Promise.resolve(drawn.next);
+  };
+  const props = $state({ pipeline: PIPELINE, rest, job, runs, onpin: () => (drawn.pinned += 1), ports });
   drawn.go = (next) => {
     props.rest = next;
     flushSync();
@@ -359,6 +380,94 @@ test("leaving Runs once its runs are drawn neither throws nor stops the page (#1
   drawn.go([PIPELINE.entity_id]);
   await settle();
   expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs");
+});
+
+// -- a sync finishing reads again (#1450) ---------------------------------------
+
+/** A `sync:state` payload for `source`. */
+const synced = (source: string, running = false) => ({
+  source_id: source,
+  running,
+  run_id: running ? 7 : null,
+  started_at: null,
+  last_finished_at: new Date().toISOString(),
+  last_outcome: running ? null : "ok",
+  next_run_at: null,
+  backoff_until: null,
+});
+
+/** The first run as the mirror held it in flight, then finished. */
+const RUNNING: RunRow[] = [run(1188, "ok", today(0, 30), { finished: null, duration_seconds: null, state: { text: "running", tone: "info" } }), ...RUNS];
+const FINISHED: RunRow[] = [run(1188, "ok", today(0, 30), { duration_seconds: 300 }), ...RUNS];
+
+const firstRow = () => target.querySelector(".tf-runs tbody tr")!;
+
+test("a sync of the pipeline's source finishing reads the runs again: a running run draws its result", async () => {
+  const drawn = draw();
+  drawn.next = RUNNING;
+  await settle();
+  expect(firstRow().textContent).toContain("running");
+  expect(drawn.reads).toBe(1);
+
+  drawn.next = FINISHED;
+  drawn.sync!(synced("teamcity", true));
+  await settle();
+  expect(drawn.reads, "a sync still running reads nothing").toBe(1);
+
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(drawn.reads).toBe(2);
+  expect(firstRow().textContent).toContain("#1188");
+  expect(firstRow().textContent).toContain("5 m");
+  expect(firstRow().textContent).not.toContain("running");
+});
+
+test("a sync of another source reads nothing", async () => {
+  const drawn = draw();
+  await settle();
+  drawn.sync!(synced("gitea"));
+  await settle();
+  expect(drawn.reads).toBe(1);
+});
+
+test("a read again keeps the entered filter and the tab; a failed one keeps the runs and says so", async () => {
+  const drawn = draw();
+  drawn.next = RUNNING;
+  await settle();
+  const input = target.querySelector<HTMLInputElement>(".tf-runbar input")!;
+  input.value = "1188";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  drawn.next = FINISHED;
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(target.querySelector<HTMLInputElement>(".tf-runbar input")!.value).toBe("1188");
+  const rows = [...target.querySelectorAll(".tf-runs tbody tr")];
+  expect(rows).toHaveLength(1);
+  expect(rows[0]!.textContent).not.toContain("running");
+
+  drawn.go([PIPELINE.entity_id, "params"]);
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(drawn.reads).toBe(3);
+  expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toBe("Parameters");
+
+  drawn.go([PIPELINE.entity_id]);
+  drawn.next = Object.assign(new Error("connection refused"), { code: "unreachable" });
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  expect(target.textContent).toContain("Runs could not be read");
+  expect(target.querySelectorAll(".tf-runs tbody tr")).toHaveLength(1);
+  expect(target.querySelectorAll(".tf-bars a"), "the chart stays").toHaveLength(30);
+});
+
+test("the page stops listening when it goes", async () => {
+  const drawn = draw();
+  await settle();
+  expect(drawn.sync).not.toBeNull();
+  unmount(page!);
+  page = null;
+  expect(drawn.sync).toBeNull();
 });
 
 /** A select whose default it does not offer, a checkbox, a secret and a plain spec (#1447). */

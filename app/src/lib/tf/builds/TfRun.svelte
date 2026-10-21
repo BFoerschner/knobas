@@ -31,7 +31,7 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
-  import { ipcErrorMessage } from "../../ipc";
+  import { EVENTS, ipcErrorMessage } from "../../ipc";
   import type { PipelineRow, PipelineSettings, RunLog, RunRow, SourceView } from "../../ipc/entity";
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
@@ -111,6 +111,8 @@
   let openStep = $state<{ step: number; seq: number } | null>(null);
   let openSeq = 0;
   let token = 0;
+  /** Bumped on every read again after a sync (#1450): the open tab reads again. */
+  let fresh = $state(0);
 
   $effect(() => {
     const wanted = { pipelineId, runId };
@@ -159,11 +161,57 @@
         if (older.length === 0) break;
         rows = [...rows, ...older];
       }
-      if (mine === token) held = rows;
+      if (mine !== token) return;
+      held = rows;
+      runsFailed = null;
     } catch (cause) {
       if (mine === token) runsFailed = ipcErrorMessage(cause);
     }
   }
+
+  /**
+   * A sync of the run's source finished (#1450): the run, its view, its log
+   * and the open tab again, over what is drawn. The tab, its filter and an
+   * open dialog stay; a failed read keeps the last answer and says so.
+   */
+  function reread(pipe: string, id: string) {
+    const mine = token;
+    void findRun(pipe, id, mine);
+    void readLog(id, mine);
+    ports.view(id).then(
+      (answer) => {
+        if (mine !== token) return;
+        view = answer;
+        viewFailed = null;
+        if ((sectionOf(answer, "tests")?.count ?? 0) > 0) readFailure(id, mine);
+        else failure = null;
+      },
+      (cause: unknown) => {
+        if (mine === token) viewFailed = ipcErrorMessage(cause);
+      },
+    );
+    fresh += 1;
+  }
+
+  $effect(() => {
+    const source = pipeline.source_id;
+    const wanted = { pipelineId, runId };
+    let dead = false;
+    let off: (() => void) | null = null;
+    ports
+      .listen(EVENTS.syncState, ({ payload }) => {
+        const row = payload as SourceSyncStatus;
+        if (dead || row.source_id !== source) return;
+        sync = [...sync.filter((s) => s.source_id !== source), row];
+        if (!row.running) reread(wanted.pipelineId, wanted.runId);
+      })
+      .then((stop) => (dead ? stop() : (off = stop)))
+      .catch(() => {});
+    return () => {
+      dead = true;
+      off?.();
+    };
+  });
 
   function readLog(id: string, mine: number): Promise<RunLog | null> {
     const read = ports.log(id);
@@ -305,7 +353,7 @@
   { name: run?.number != null ? `#${run.number}` : "Run" },
 ])}
 
-{#if runsFailed !== null}
+{#if runsFailed !== null && held === null}
   <div class="tf-empty"><p>Runs could not be read: {runsFailed}</p></div>
 {:else if held === null}
   <p class="tf-dim tf-runs">Reading the run…</p>
@@ -374,6 +422,9 @@
       {#if stale.fix !== null}<a href={stale.fix.href}>{stale.fix.words}</a>{/if}
     </div>
   {/if}
+  {#if runsFailed !== null}
+    <p class="tf-dim tf-runs">Runs could not be read: {runsFailed}</p>
+  {/if}
 
   <nav class="tf-tabs" aria-label="Run">
     {#each RUN_TABS as entry (entry.id)}
@@ -428,7 +479,7 @@
               <dd>{tookLine(run, previous)}</dd>
             </dl>
           </section>
-          <TfRunChain {runId} branch={run.branch} />
+          <TfRunChain {runId} branch={run.branch} {fresh} />
           <section class="tf-panel" aria-label="Artifacts">
             <header>
               <h3>Artifacts</h3>
@@ -495,11 +546,11 @@
         {/if}
       {/if}
     {:else if tab === "log"}
-      <TfRunLog {runId} {inFlight} {failed} ports={logPorts} {openStep} />
+      <TfRunLog {runId} {inFlight} {failed} ports={logPorts} {openStep} {fresh} />
     {:else if tab === "tests"}
-      <TfRunTests {runId} branch={run.branch} logHref={runTabHash(pipelineId, runId, "log")} {ports} />
+      <TfRunTests {runId} branch={run.branch} logHref={runTabHash(pipelineId, runId, "log")} {ports} {fresh} />
     {:else if tab === "artifacts"}
-      <TfRunArtifacts {runId} sourceName={pipeline.source_name} {ports} />
+      <TfRunArtifacts {runId} sourceName={pipeline.source_name} {ports} {fresh} />
     {/if}
   </div>
 

@@ -24,7 +24,7 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from "svelte";
 
-  import { ipcErrorMessage } from "../../ipc";
+  import { EVENTS, ipcErrorMessage } from "../../ipc";
   import type { PipelineRow, PipelineSettings, RunRow, Setting } from "../../ipc/entity";
   import type { SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
@@ -151,6 +151,45 @@
       },
     );
   }
+
+  /**
+   * A sync of the pipeline's source finished (#1450): the runs again, older
+   * pages kept, the reader's filter, tab and dialog untouched. A failed read
+   * keeps the runs it had and says so.
+   */
+  function reread(wanted: string) {
+    const mine = token;
+    readRuns(wanted).then(
+      (rows) => {
+        if (mine !== token) return;
+        failed = null;
+        held = appendOlder(rows, held ?? []);
+      },
+      (cause: unknown) => {
+        if (mine === token) failed = ipcErrorMessage(cause);
+      },
+    );
+  }
+
+  $effect(() => {
+    const source = pipeline.source_id;
+    const wanted = id;
+    let dead = false;
+    let off: (() => void) | null = null;
+    ports
+      .listen(EVENTS.syncState, ({ payload }) => {
+        const row = payload as SourceSyncStatus;
+        if (dead || row.source_id !== source) return;
+        sync = [...sync.filter((s) => s.source_id !== source), row];
+        if (!row.running) reread(wanted);
+      })
+      .then((stop) => (dead ? stop() : (off = stop)))
+      .catch(() => {});
+    return () => {
+      dead = true;
+      off?.();
+    };
+  });
 
   // Facts about the sources, read once: the word, the warn line.
   onMount(() => {
@@ -404,7 +443,8 @@
 
 {#if failed !== null}
   <p class="tf-dim tf-runs">Runs could not be read: {failed}</p>
-{:else if all !== null && all.length > 0}
+{/if}
+{#if all !== null && all.length > 0}
   <div class="tf-hist">
     <div class="tf-chart">
       <svg

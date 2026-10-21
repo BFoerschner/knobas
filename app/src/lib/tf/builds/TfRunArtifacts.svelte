@@ -22,11 +22,14 @@
     runId,
     sourceName,
     ports,
+    fresh = 0,
   }: {
     runId: string;
     /** The source's configured name, for whose sign-in a download uses. */
     sourceName: string;
     ports: Pick<RunPorts, "artifacts" | "preview" | "download">;
+    /** Bumped when the page reads the run again (#1450): the folders read are read again, open ones kept open. */
+    fresh?: number;
   } = $props();
 
   /** How many top-level folders start open. */
@@ -66,6 +69,24 @@
       open = {};
       preview = null;
       readFolder("");
+    });
+  });
+
+  /** A read again of every folder read so far; a failed one keeps what it had. */
+  let first = true;
+  $effect(() => {
+    void fresh;
+    if (first) return void (first = false);
+    untrack(() => {
+      const mine = token;
+      for (const path of Object.keys(folders).filter((p) => Array.isArray(folders[p]))) {
+        ports.artifacts(runId, path).then(
+          (entries) => {
+            if (mine === token) folders[path] = entries ?? [];
+          },
+          () => {},
+        );
+      }
     });
   });
 
