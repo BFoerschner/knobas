@@ -37,14 +37,13 @@
 
   let dialog = $state<HTMLDivElement | null>(null);
 
+  const FOCUSABLE =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
   /** Everything inside the dialog a Tab can reach, in document order. */
   function focusable(): HTMLElement[] {
     if (!dialog) return [];
-    return [
-      ...dialog.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      ),
-    ];
+    return [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)];
   }
 
   $effect(() => {
@@ -52,7 +51,10 @@
     // closes the reader must be back on the control that opened it, not at the
     // top of the document.
     const restoreTo = document.activeElement;
-    focusable()[0]?.focus();
+    // The body's first control, not the dialog's: the header's Close comes
+    // first in document order, and a reader who opened a dialog to type would
+    // type into nothing (#1431). Close only when the body offers nothing.
+    (dialog?.querySelector<HTMLElement>(`.dlg-b :is(${FOCUSABLE})`) ?? focusable()[0])?.focus();
     return () => {
       if (restoreTo instanceof HTMLElement && document.contains(restoreTo)) {
         restoreTo.focus();

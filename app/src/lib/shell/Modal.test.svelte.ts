@@ -121,3 +121,35 @@ test("announces itself as a dialog labelled by its title", () => {
   unmount(app);
   target.remove();
 });
+
+/**
+ * **Open-time focus is the body's** (#1431). The header's Close button comes
+ * first in document order, and a dialog that rings it leaves a reader who opened
+ * it to type typing into nothing.
+ */
+test("opens with focus on the first field in its body, not the header's Close", () => {
+  const behind = opener();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, body: "input" } });
+  flushSync();
+
+  expect(document.activeElement).toBe(target.querySelector(".dlg-b input"));
+
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
+/** A body with nothing to focus leaves the ring where it was before #1431: on Close. */
+test("with nothing focusable in its body, focus goes to Close", () => {
+  const behind = opener();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, body: "none" } });
+  flushSync();
+
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Close");
+
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
