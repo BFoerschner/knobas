@@ -1714,3 +1714,79 @@ async fn a_mention_of_anyone_resolves_and_children_keep_confluences_order() {
 
     drop(state);
 }
+
+/// **A pasted address opens its page in every form Confluence serves it
+/// under** (#1475): the stored `_links.webui`, `viewpage.action?pageId=`,
+/// `/display/<space>/<title>` and the tiny link, against a mirror the real
+/// sync filled.
+///
+/// Each address is fetched from the server first, with the seed's account, and
+/// must answer the page itself (`ajs-page-id`): a form the descriptor declares
+/// is a claim about Confluence, and this is where the claim meets it. The
+/// tiny link is the one `_links.tinyui` the sync stored, which is also what
+/// says the record carries it. Reads only; the shared fixture is untouched.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just confluence-live`"]
+async fn a_pasted_address_opens_its_page_in_every_form_confluence_serves() {
+    let env = env();
+    let page = env.page(PARENT);
+    let state = app("confluence_live_url_forms", &env).await;
+    sync(&state, CONFLUENCE).await;
+
+    let entity_id = format!("{CONFLUENCE}:{}", page.id);
+    let payload = mirrored(&state.pool, &page.id)
+        .await
+        .unwrap_or_else(|| panic!("{entity_id} is not mirrored after a full sync"));
+    let tiny = payload
+        .pointer("/_links/tinyui")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_else(|| panic!("{entity_id}'s record carries no `_links.tinyui`: {payload}"));
+    let stored: String = sqlx::query_scalar("select web_url from sync.item where entity_id = $1")
+        .bind(&entity_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("the page's stored address");
+
+    let url = &env.url;
+    let addresses = [
+        stored,
+        format!("{url}/pages/viewpage.action?pageId={}", page.id),
+        format!(
+            "{url}/display/{}/{}",
+            env.space,
+            url_encode(&page.title).replace("%20", "+")
+        ),
+        format!("{url}{tiny}"),
+    ];
+    for address in &addresses {
+        let response = client()
+            .get(address)
+            .basic_auth(&env.user, Some(&env.password))
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("GET {address}: {e}"));
+        let status = response.status().as_u16();
+        let html = response.text().await.unwrap_or_default();
+        assert!(
+            status == 200 && html.contains(&format!(r#"name="ajs-page-id" content="{}""#, page.id)),
+            "Confluence does not serve page {} at {address} (HTTP {status})",
+            page.id
+        );
+
+        let found = knobas_app::commands::entity::resolve_url_inner(
+            &state.pool,
+            &*state.registry,
+            address,
+        )
+        .await
+        .expect("a web URL is resolved, not refused");
+        assert_eq!(
+            found.map(|m| (m.entity_id, m.kind)),
+            Some((entity_id.clone(), "page".to_owned())),
+            "{address} must open {entity_id}"
+        );
+        eprintln!("resolved: {address} -> {entity_id}");
+    }
+
+    drop(state);
+}
