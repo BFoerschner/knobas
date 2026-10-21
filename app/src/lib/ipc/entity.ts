@@ -18,7 +18,6 @@ import type {
   CaptureShortcut,
   ChainStepRow,
   CheckoutApplicationDraft,
-  CheckoutCommand,
   CheckoutSettings,
   CheckoutView,
   CloneAnswer,
@@ -98,7 +97,6 @@ export type {
   ChangeKind,
   CheckoutApplication,
   CheckoutApplicationDraft,
-  CheckoutCommand,
   CheckoutFoundBy,
   CheckoutSettings,
   CheckoutView,
@@ -845,16 +843,6 @@ export function listContexts(): Promise<ContextRow[]> {
 }
 
 /**
- * Mint an ad-hoc context from a label — `create_context`.
- *
- * Rejects with `invalid` for a blank label. Writes one activity line and
- * emits `EVENTS.contextsChanged` with the new row.
- */
-export function createContext(title: string): Promise<ContextRow> {
-  return invoke<ContextRow>("create_context", { title });
-}
-
-/**
  * Promote an entity to a context of its own — `promote_context` (spec §7:
  * "any ticket can be promoted").
  *
@@ -1123,11 +1111,6 @@ export function notify(draft: NotificationDraft): Promise<void> {
   return invoke<void>("notify", { draft });
 }
 
-/** Where knobas looks for clones — `clones_root` (#499). */
-export function clonesRoot(): Promise<string | null> {
-  return invoke<string | null>("clones_root");
-}
-
 /**
  * Set the clones root, or clear it — `set_clones_root` (#499).
  *
@@ -1161,23 +1144,6 @@ export function setCheckoutOverride(
   path: string | null,
 ): Promise<CheckoutView> {
   return invoke<CheckoutView>("set_checkout_override", { entityId, path });
-}
-
-/** Every application as a button — `checkout_commands` (#501, #844). */
-export function checkoutCommands(): Promise<CheckoutCommand[]> {
-  return invoke<CheckoutCommand[]>("checkout_commands");
-}
-
-/**
- * Set one application's command, or put back the one this platform ships —
- * `set_checkout_command` (#501, #844). Answers the fresh list. Rejects with
- * `invalid` for a command knobas could not run.
- */
-export function setCheckoutCommand(
-  action: string,
-  template: string | null,
-): Promise<CheckoutCommand[]> {
-  return invoke<CheckoutCommand[]>("set_checkout_command", { action, template });
 }
 
 /** The applications, the default, the clones root and the git — `checkout_settings` (#844). */
