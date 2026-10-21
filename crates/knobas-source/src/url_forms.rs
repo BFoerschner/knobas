@@ -228,7 +228,10 @@ fn check_form(form: &UrlForm) -> Result<(), String> {
         ));
     }
     let pieces = pieces(template);
-    let placeholders = pieces.iter().filter(|p| !matches!(p, Piece::Literal(_))).count();
+    let placeholders = pieces
+        .iter()
+        .filter(|p| !matches!(p, Piece::Literal(_)))
+        .count();
     if placeholders == 0 {
         return Err(format!(
             "{template:?} has no placeholder, so it would name every item of its kind"
@@ -243,7 +246,9 @@ fn check_form(form: &UrlForm) -> Result<(), String> {
     if let Some(at) = pieces.iter().position(|p| *p == Piece::Rest)
         && at != pieces.len() - 1
     {
-        return Err(format!("{template:?}: `{{*}}` is the rest of the address, so it comes last"));
+        return Err(format!(
+            "{template:?}: `{{*}}` is the rest of the address, so it comes last"
+        ));
     }
     if pieces
         .windows(2)
@@ -309,7 +314,12 @@ mod tests {
     fn values(readings: &[Reading]) -> Vec<(String, Vec<String>)> {
         readings
             .iter()
-            .map(|r| (r.base.clone(), r.fields.iter().map(|f| f.value.clone()).collect()))
+            .map(|r| {
+                (
+                    r.base.clone(),
+                    r.fields.iter().map(|f| f.value.clone()).collect(),
+                )
+            })
             .collect()
     }
 
@@ -317,7 +327,10 @@ mod tests {
     fn a_query_form_reads_its_value_and_its_base() {
         assert_eq!(
             values(&page_id().read("http://wiki.example:8090/pages/viewpage.action?pageId=360458")),
-            [("http://wiki.example:8090".to_owned(), vec!["360458".to_owned()])]
+            [(
+                "http://wiki.example:8090".to_owned(),
+                vec!["360458".to_owned()]
+            )]
         );
     }
 
@@ -337,7 +350,10 @@ mod tests {
         ] {
             assert_eq!(values(&page_id().read(url))[0].1, ["360458"], "{url}");
         }
-        assert_eq!(values(&display().read("http://w/display/ENG/Title/"))[0].1, ["ENG", "Title"]);
+        assert_eq!(
+            values(&display().read("http://w/display/ENG/Title/"))[0].1,
+            ["ENG", "Title"]
+        );
     }
 
     #[test]
@@ -358,9 +374,18 @@ mod tests {
         assert_eq!(
             values(&tiny().read("https://w.example/wiki/x/CoAF")),
             [
-                ("https://w.example".to_owned(), vec!["/wiki/x/CoAF".to_owned()]),
-                ("https://w.example/wiki".to_owned(), vec!["/x/CoAF".to_owned()]),
-                ("https://w.example/wiki/x".to_owned(), vec!["/CoAF".to_owned()]),
+                (
+                    "https://w.example".to_owned(),
+                    vec!["/wiki/x/CoAF".to_owned()]
+                ),
+                (
+                    "https://w.example/wiki".to_owned(),
+                    vec!["/x/CoAF".to_owned()]
+                ),
+                (
+                    "https://w.example/wiki/x".to_owned(),
+                    vec!["/CoAF".to_owned()]
+                ),
             ]
         );
     }
@@ -375,24 +400,43 @@ mod tests {
             "http://w/display/ENG/Bad%ZZ",
             "not a url",
         ] {
-            assert!(page_id().read(url).is_empty() && display().read(url).is_empty(), "{url}");
+            assert!(
+                page_id().read(url).is_empty() && display().read(url).is_empty(),
+                "{url}"
+            );
         }
     }
 
     #[test]
     fn a_malformed_declaration_reads_as_nothing_and_is_refused() {
         for (form, rule) in [
-            (UrlForm::of("page", "pages/{}", [path(&["id"])]), "start with `/`"),
+            (
+                UrlForm::of("page", "pages/{}", [path(&["id"])]),
+                "start with `/`",
+            ),
             (UrlForm::of("page", "/pages/all", []), "no placeholder"),
             (UrlForm::of("page", "/pages/{}", []), "declares 0 field"),
-            (UrlForm::of("page", "/x/{*}/y/{}", [path(&["a"]), path(&["b"])]), "comes last"),
-            (UrlForm::of("page", "/x/{}{}", [path(&["a"]), path(&["b"])]), "in a row"),
+            (
+                UrlForm::of("page", "/x/{*}/y/{}", [path(&["a"]), path(&["b"])]),
+                "comes last",
+            ),
+            (
+                UrlForm::of("page", "/x/{}{}", [path(&["a"]), path(&["b"])]),
+                "in a row",
+            ),
             (UrlForm::of("page", "/x/{}", [path(&[])]), "empty path"),
-            (UrlForm::of("page", "x{*}", [path(&["a"])]), "start with `/`"),
+            (
+                UrlForm::of("page", "x{*}", [path(&["a"])]),
+                "start with `/`",
+            ),
         ] {
             let error = check_form(&form).expect_err(&form.template);
             assert!(error.contains(rule), "{error}");
-            assert!(form.read("http://w/pages/1").is_empty(), "{}", form.template);
+            assert!(
+                form.read("http://w/pages/1").is_empty(),
+                "{}",
+                form.template
+            );
         }
     }
 }

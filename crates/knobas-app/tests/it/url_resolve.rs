@@ -400,9 +400,13 @@ async fn something_that_is_not_a_web_url_is_refused_rather_than_missed() {
         "jira.example/browse/PAY-231",
         "",
     ] {
-        let error = resolve_url_inner(&pool, &knobas_app::sources::Registry::for_process(), not_a_url)
-            .await
-            .expect_err("not a web URL");
+        let error = resolve_url_inner(
+            &pool,
+            &knobas_app::sources::Registry::for_process(),
+            not_a_url,
+        )
+        .await
+        .expect_err("not a web URL");
         assert_eq!(
             code(&error),
             IpcErrorCode::Invalid,
@@ -700,8 +704,21 @@ async fn a_confluence_page_opens_from_each_form_confluence_serves_it_under() {
 async fn a_form_misses_another_page_and_another_instance() {
     let pool = pool("url_forms_miss").await;
     configure(&pool, "confluence", "confluence", "http://127.0.0.1:8090/").await;
-    mirror_page(&pool, "confluence", "http://127.0.0.1:8090", "360458", "/x/CoAF").await;
-    configure(&pool, "confluence-eu", "confluence", "https://wiki.eu.example/confluence").await;
+    mirror_page(
+        &pool,
+        "confluence",
+        "http://127.0.0.1:8090",
+        "360458",
+        "/x/CoAF",
+    )
+    .await;
+    configure(
+        &pool,
+        "confluence-eu",
+        "confluence",
+        "https://wiki.eu.example/confluence",
+    )
+    .await;
     mirror_page(
         &pool,
         "confluence-eu",
@@ -726,7 +743,13 @@ async fn a_form_misses_another_page_and_another_instance() {
         Some(("confluence-eu:777".to_owned(), "page".to_owned()))
     );
     assert_eq!(
-        pair(resolved(&pool, "http://127.0.0.1:8090/pages/viewpage.action?pageId=360458").await),
+        pair(
+            resolved(
+                &pool,
+                "http://127.0.0.1:8090/pages/viewpage.action?pageId=360458"
+            )
+            .await
+        ),
         Some(("confluence:360458".to_owned(), "page".to_owned()))
     );
 }
@@ -751,7 +774,13 @@ async fn the_stored_address_wins_over_a_form() {
     mirror_page(&pool, "confluence", base, "2", "/x/Ag").await;
 
     assert_eq!(
-        pair(resolved(&pool, "http://127.0.0.1:8090/pages/viewpage.action?pageId=2").await),
+        pair(
+            resolved(
+                &pool,
+                "http://127.0.0.1:8090/pages/viewpage.action?pageId=2"
+            )
+            .await
+        ),
         Some(("confluence:9".to_owned(), "page".to_owned()))
     );
 }

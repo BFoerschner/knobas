@@ -1773,13 +1773,10 @@ async fn a_pasted_address_opens_its_page_in_every_form_confluence_serves() {
             page.id
         );
 
-        let found = knobas_app::commands::entity::resolve_url_inner(
-            &state.pool,
-            &*state.registry,
-            address,
-        )
-        .await
-        .expect("a web URL is resolved, not refused");
+        let found =
+            knobas_app::commands::entity::resolve_url_inner(&state.pool, &*state.registry, address)
+                .await
+                .expect("a web URL is resolved, not refused");
         assert_eq!(
             found.map(|m| (m.entity_id, m.kind)),
             Some((entity_id.clone(), "page".to_owned())),

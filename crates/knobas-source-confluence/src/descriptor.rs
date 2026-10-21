@@ -114,7 +114,10 @@ fn url_forms() -> Vec<knobas_source::url_forms::UrlForm> {
         UrlForm::of(
             crate::KIND_PAGE,
             "/display/{}/{}",
-            [PayloadPath::of(["space", "key"]), PayloadPath::of(["title"])],
+            [
+                PayloadPath::of(["space", "key"]),
+                PayloadPath::of(["title"]),
+            ],
         ),
         UrlForm::of(
             crate::KIND_PAGE,
@@ -509,7 +512,10 @@ mod tests {
                 assert!(names(&format!("{base}{form}"), base, &page), "{base}{form}");
             }
         }
-        assert_eq!(knobas_source::url_forms::check(&descriptor_template()), Ok(()));
+        assert_eq!(
+            knobas_source::url_forms::check(&descriptor_template()),
+            Ok(())
+        );
     }
 
     /// Another page's id, another space, another tiny link: none names this
