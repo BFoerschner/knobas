@@ -9568,3 +9568,52 @@ sources hold) too.
   `tf/note/TfNote.svelte` (`NOTES_SETTINGS`), same value, and every gate after it fails on
   `scripts`; the guarantee the pin states (a note opens Settings > Notes) is unchanged.
   *Reversing:* revert one line.
+## #1525: the shell remembers the address a job was opened at (Opus implementer, 2026-10-21)
+
+- **Fork:** what the shell remembers of the last job. *Ruling:* `{ key, segment }`, as the ticket
+  suggested: `key` is what the chip, the Job tab and *Back to* name; `segment` is the address it was
+  opened at (`PAY-231`, or `tide:PAY-231` when two sources hold the key, #1476). The chip, the Job
+  tab and `Esc` link `jobHash(segment)`; `navJobId` resolves the segment, so an id reads as itself.
+  *Reasoning:* the key alone cannot tell two sources' PAY-231 apart; the segment can, and a bare key
+  still reads as it did. *Reversing:* low, one field.
+- **Fork:** how pages get the segment. *Ruling:* a second context field `jobAt` beside `job`, which
+  stays the key; the six components that draw the chip (TfCrumbs, Settings, Docs, Builds, Pr, Repo,
+  and Item through TfCrumbs) take an optional `jobAt` that falls back to the key. *Fork rejected:*
+  turning `job` into the object everywhere, which reaches about a dozen pages and their tests and every logic
+  read of the key (branch names, *This job*, monitors), and collides with the launcher bundle
+  (#1500) running beside this. *Reversing:* fold `jobAt` into `job` later; mechanical.
+- **Fork:** the Job tab while only the timer names the job. *Ruling:* it links the timer's ticket by
+  its entity id, not its bare key, so a timer on the second source's PAY-231 opens that one. The
+  address reads `#/job/jira%3APAY-231` even for a key only one source holds. *Reversing:* one
+  `$derived`.
+- **Fork:** a stale `navJobId` across two jobs with one key. *Ruling:* when the segment changes the
+  id is cleared before the read, so *Add to* and ⌘T never answer with the other source's ticket
+  while the new one is read. *Reversing:* one line.
+- **Left as it was:** Builds' and Docs' *This job* scope and Docs' *Link to <job>* still resolve the
+  key under every source (they take `job`, the key). Filed as #1537.
+
+## #886 amended by #1435 (Opus implementer, 2026-10-21)
+
+The #809 ruling above (and #886's body) read R-1.4's "current job" as the job on screen,
+`#/job/<key>` only. From #1435 on, the current job for the chip and ⌘T is also the breadcrumb's
+job, the #1416 reading: a full view or an item page opened from a job. #886's job-page behaviour is
+unchanged.
+
+## #1435: ⌘T starts on the breadcrumb's job (Opus implementer, 2026-10-21)
+
+- **Fork (delegated by Björn at triage):** follow the #1416 reading, list the breadcrumb's job first
+  in the picker, or keep #886's job-page-only reading. *Ruling:* the #1416 reading. With no timer
+  running, ⌘T and the chip on a view whose breadcrumb carries a job start on that job's ticket;
+  Tickets, Inbox, Settings and a view with no job opened yet still open the picker. Passive
+  attribution is untouched: the heartbeat carries the foreground only. *Reasoning:* R-1.4 says a
+  click starts on the current job, the crumb is yellow and *Back to PAY-231* names it, and the Day
+  on the same screen already offers *Add to PAY-231*; one reading of "the job" across the launcher
+  and the timer. Reverses #886's job-page-only reading (amendment above). *Reversing:* low, drop
+  the `breadcrumbJob` branch in `press()`.
+- **Fork:** where "counts" is decided. *Ruling:* `breadcrumbJobCounts(route)` in `route.ts`: a full
+  view or `#/item/<id>`, not Inbox or Settings (#1416: "no row on Tickets, Inbox or Settings"),
+  though their breadcrumbs draw the chip. A job page is its own job through the foreground.
+  #1500 can read the same function. *Reversing:* low.
+- **Fork:** how the job reaches the timer. *Ruling:* `TfShell` reports the entity id through an
+  `onbreadcrumbjob` callback; `App.svelte` writes it to a new `timer.breadcrumbJob`, beside
+  `timer.foreground`, and `press()` reads `foreground ?? breadcrumbJob`. *Reversing:* low.
