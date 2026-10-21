@@ -13,7 +13,7 @@
  */
 import type { AuthState, CredentialHealth, SourceSummary, SourceSyncStatus } from "../ipc/sources";
 import { ago } from "../shell/time";
-import { reenterWords, secretWord } from "./settings/settings";
+import { reenterWords, secretNoun } from "./settings/settings";
 
 export interface SourceReading {
   id: string;
@@ -52,8 +52,8 @@ export function sourceReadings(
     if (state && failure) {
       const failedAt =
         run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
-      const noun = secretWord(source.auth_kind).toLowerCase();
-      return { id: source.id, text: `${name}: ${failure(ago(failedAt, now), noun)}`, fix: reenterWords(source.auth_kind) };
+      const text = `${name}: ${failure(ago(failedAt, now), secretNoun(source.auth_kind))}`;
+      return { id: source.id, text, fix: reenterWords(source.auth_kind) };
     }
     if (run?.running) return { id: source.id, text: `${name} syncing…`, fix: null };
     if (!run?.last_finished_at) {

@@ -26,7 +26,7 @@ import type { Week } from "../../ipc/time";
 import type { AuthMethod, RoleClaim } from "../../ipc/sources";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { CI, claims } from "../roles.svelte";
-import { reenterWords, secretWord } from "../settings/settings";
+import { reenterWords, secretNoun } from "../settings/settings";
 
 /** Whether an address segment is an entity id (`jira:PAY-231`) rather than a key. */
 export function isEntityId(segment: string): boolean {
@@ -456,7 +456,7 @@ export function staleBuilds(
     const run = sync.find((row) => row.source_id === source.id);
     const since = run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
     const name = source.display_name || source.id;
-    const why = state.state === "missing_secret" ? `no ${secretWord(source.auth_kind).toLowerCase()} stored` : "sign-in failing";
+    const why = state.state === "missing_secret" ? `no ${secretNoun(source.auth_kind)} stored` : "sign-in failing";
     out.push({
       sourceId: source.id,
       text: since ? `${name} data is ${age(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`,

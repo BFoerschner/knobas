@@ -59,7 +59,7 @@ test("a source's page lights Sources; an unknown section is Sources, as in the p
 });
 
 test("a row says Synced, Sign-in failed or what else holds it, with a dot in the matching tone", () => {
-  const source = { enabled: true, last_run: null };
+  const source = { enabled: true, last_run: null, auth_kind: null };
   expect(sourceState(source, health("ok"), status(), NOW)).toEqual({ tone: "ok", text: "Synced 4 min ago", failed: false });
   expect(sourceState(source, health("unauthorized"), status(), NOW)).toEqual({ tone: "err", text: "Sign-in failed", failed: true });
   expect(sourceState(source, health("missing_secret"), null, NOW).text).toBe("No password stored");
@@ -221,7 +221,7 @@ test("the user is the config's username, and only an adapter that declares one g
 const priorityMiss = { role: "ticket-system", kind: "ticket", field: "priority", path: "fields.priority.name" };
 
 test("a source whose records missed a role's path says which role and which path (#1199)", () => {
-  const source = { enabled: true, last_run: null, role_misses: [priorityMiss] };
+  const source = { enabled: true, last_run: null, auth_kind: null, role_misses: [priorityMiss] };
   expect(sourceState(source, health("ok"), status(), NOW)).toEqual({
     tone: "warn",
     text: "Synced 4 min ago, ticket system not drawn (fields.priority.name)",

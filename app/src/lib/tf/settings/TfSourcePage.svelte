@@ -2,10 +2,10 @@
   A source's page (#830, R-13a.2): prototype-6's `stgSource`.
 
   - A credential the reader has to fix is said on top, with *Re-enter
-    password* (*Re-enter token* for a token source, #1405). Every *Re-enter
-    password* in the new shell links here.
+    password* (*Re-enter token* for a token source, #1405). Every *Re-enter …*
+    in the new shell links here.
   - **Connection**: the address and the user are edited and saved through
-    `update_source`; the password is re-entered into the keychain through
+    `update_source`; the password or token is re-entered into the keychain through
     `set_source_secret`, which never reads one back; an adapter that takes a
     second credential (Uptime Kuma) has an *Account* row. *Test connection*
     tests what is stored and says what it found.
@@ -208,17 +208,17 @@
   });
 
   /**
-   * The value the address added to the form (#1404), and the field's lines as
-   * it left them: the note beside *Save* stands while the field still reads so.
+   * The value the address added to the form (#1404), and a snapshot of the
+   * field as it left it: the note beside *Save* stands while the field still reads so.
    */
-  let added = $state<{ value: string; field: string; lines: string } | null>(null);
+  let added = $state<{ value: string; field: string; snapshot: string } | null>(null);
   /** The config's *Save* and its note, to scroll to. */
   let configActs = $state<HTMLElement>();
   const addedNote = $derived(
-    added !== null && linesOf(configValues[added.field]) === added.lines ? `${added.value} added, not saved yet` : null,
+    added !== null && snapshotOf(configValues[added.field]) === added.snapshot ? `${added.value} added, not saved yet` : null,
   );
 
-  function linesOf(value: unknown): string {
+  function snapshotOf(value: unknown): string {
     return JSON.stringify(value ?? null);
   }
 
@@ -230,7 +230,7 @@
     const read = configValues;
     configValues = withAdded(fields, read, add);
     if (add && configValues !== read) {
-      added = { ...add, lines: linesOf(configValues[add.field]) };
+      added = { ...add, snapshot: snapshotOf(configValues[add.field]) };
       // In view, so the reader sees it went in (#1404): *Save* and its note at
       // the bottom of the window, then the field, if that left it out of sight.
       // jsdom draws no layout and has no `scrollIntoView`.
@@ -388,7 +388,7 @@
     };
   });
 
-  // ---- Re-enter password ----
+  // ---- Re-enter the credential ----
   let reentering = $state(false);
   let secret = $state("");
   let accountUser = $state("");

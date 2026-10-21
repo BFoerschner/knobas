@@ -103,13 +103,13 @@ export function stoppedAt(error: string | null | undefined): string | null {
 }
 
 export function sourceState(
-  source: Pick<SourceSummary, "enabled" | "last_run" | "role_misses"> & Partial<Pick<SourceSummary, "auth_kind">>,
+  source: Pick<SourceSummary, "enabled" | "last_run" | "role_misses" | "auth_kind">,
   health: CredentialHealth | null,
   status: SourceSyncStatus | null,
   now: Date = new Date(),
 ): SourceState {
   const failure = health ? FAILED[health.state] : undefined;
-  if (failure) return { tone: "err", text: failure(secretWord(source.auth_kind).toLowerCase()), failed: true };
+  if (failure) return { tone: "err", text: failure(secretNoun(source.auth_kind)), failed: true };
   if (status?.running) return { tone: "run", text: "Syncing…", failed: false };
   if (!source.enabled) return { tone: "muted", text: "Paused", failed: false };
   const finished = status?.last_finished_at ?? source.last_run?.finished_at ?? null;
@@ -250,9 +250,14 @@ export function secretWord(auth: AuthMethod | null | undefined): "Password" | "T
   return auth === "UserPassword" || auth === null || auth === undefined ? "Password" : "Token";
 }
 
+/** The same word inside a sentence: *no token stored*, *re-enter the password*. */
+export function secretNoun(auth: AuthMethod | null | undefined): "password" | "token" {
+  return secretWord(auth) === "Password" ? "password" : "token";
+}
+
 /** The fix for a credential the reader has to re-enter: *Re-enter password*, *Re-enter token*. */
 export function reenterWords(auth: AuthMethod | null | undefined): string {
-  return `Re-enter ${secretWord(auth).toLowerCase()}`;
+  return `Re-enter ${secretNoun(auth)}`;
 }
 
 /** One row of *Sync runs*. */
@@ -315,7 +320,7 @@ const TRIGGER_NOTE: Partial<Record<SyncRunRow["trigger"], string>> = {
  */
 export function runRow(
   run: SyncRunRow,
-  source: Pick<SourceSummary, "id" | "display_name"> & Partial<Pick<SourceSummary, "auth_kind">>,
+  source: Pick<SourceSummary, "id" | "display_name" | "auth_kind">,
   now: Date = new Date(),
 ): RunRow {
   const started = startedWords(run.started_at, now);
@@ -325,8 +330,7 @@ export function runRow(
   }
   const took = tookWords(new Date(run.finished_at).getTime() - new Date(run.started_at).getTime());
   if (run.outcome === "unauthorized") {
-    const noun = secretWord(source.auth_kind).toLowerCase();
-    return { ...row, took, result: `${run.error ?? "401 Unauthorized"}. Re-enter the ${noun}.`, tone: "err" };
+    return { ...row, took, result: `${run.error ?? "401 Unauthorized"}. Re-enter the ${secretNoun(source.auth_kind)}.`, tone: "err" };
   }
   if (run.outcome === "unreachable") {
     const name = source.display_name || source.id;

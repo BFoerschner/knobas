@@ -12,7 +12,7 @@ import type { PipelineRow, PipelineSettings, PipelineTrigger, RunRow } from "../
 import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
 import { matchesAll } from "../filter/filter";
 import { age } from "../job/job";
-import { secretWord } from "../settings/settings";
+import { reenterWords, secretNoun } from "../settings/settings";
 import { duration, pipelineHash, runTone, shortTime } from "./builds";
 
 /**
@@ -300,10 +300,11 @@ export function jobBranchFor(runs: readonly RunRow[], jobBranches: readonly stri
 export interface StaleLine {
   text: string;
   /**
-   * Where the fix is, for a credential the reader has to re-enter, and what
-   * that credential is called on its source (#1405): *Re-enter token*.
+   * Where the fix is, for a credential the reader has to re-enter: the link's
+   * words in the source's noun (#1405), *Re-enter token*, and the noun alone
+   * for the run dialog's sentence.
    */
-  fix: { href: string; secret: string } | null;
+  fix: { href: string; words: string; secret: "password" | "token" } | null;
 }
 
 /**
@@ -323,13 +324,13 @@ export function staleLine(
   const run = sync.find((row) => row.source_id === pipeline.source_id);
   const name = pipeline.source_name;
   if (source && state && (state.state === "unauthorized" || state.state === "missing_secret")) {
-    const secret = secretWord(source.auth_kind).toLowerCase();
+    const secret = secretNoun(source.auth_kind);
     const since = run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
     const why = state.state === "missing_secret" ? `no ${secret} stored` : "sign-in failing";
     const lead = since ? `${name} data is ${age(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`;
     return {
       text: `${lead} Runs you start wait in the queue until it works again.`,
-      fix: { href: `#/settings/source/${encodeURIComponent(pipeline.source_id)}`, secret },
+      fix: { href: `#/settings/source/${encodeURIComponent(pipeline.source_id)}`, words: reenterWords(source.auth_kind), secret },
     };
   }
   if (run && !run.running && (run.last_outcome === "unreachable" || run.last_outcome === "error")) {

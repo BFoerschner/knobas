@@ -374,7 +374,7 @@
   {#if stale !== null}
     <div class="tf-stale tf-bstale">
       {stale.text}
-      {#if stale.fix !== null}<a href={stale.fix.href}>Re-enter {stale.fix.secret}</a>{/if}
+      {#if stale.fix !== null}<a href={stale.fix.href}>{stale.fix.words}</a>{/if}
     </div>
   {/if}
 
@@ -513,7 +513,7 @@
       runs={held}
       from={run}
       {jobBranch}
-      reenter={stale?.fix?.secret ?? null}
+      secretNoun={stale?.fix?.secret ?? null}
       {ports}
       onclose={() => (dialog = false)}
       {onrun}
