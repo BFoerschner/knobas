@@ -54,9 +54,10 @@ export const FIXTURE_SOURCES = [
       state: "ok",
       checked_at: SYNCED_AT,
       detail: null,
-      // Eight days out from the fixture's clock: amber, and the reading a
-      // screenshot of the expiry countdown needs.
-      secret_expires_at: "2026-08-30T14:30:00Z",
+      // Eight days from today, not from the fixture's clock (#1499): the page
+      // counts down from the reader's now, so a fixed date would read
+      // "expired" and never the amber countdown a screenshot needs.
+      secret_expires_at: new Date(Date.now() + 8 * 86_400_000).toISOString(),
     },
   },
   // The Docs tree's spaces name `confluence` (#860): the tree is the wiki
@@ -494,11 +495,18 @@ export function handlers(): Record<string, Handler> {
       // field id, which the Add-source dialog puts in the empty field.
       discovered: { epic_link_field: "customfield_10101" },
     }),
+    // Stored, unlike the other writes (#1406): the row joins `list_sources`, so
+    // a source of an adapter just installed opens its page under `?fake-ipc`.
     add_source: (args) => {
       const input = (args["input"] ?? {}) as Record<string, unknown>;
-      return {
+      const id = String(input["id"] ?? "new");
+      if (FIXTURE_SOURCES.some((row) => row.id === id)) {
+        throw { code: "conflict", message: `a source called ${id} already exists`, source_id: id };
+      }
+      const adapter = FIXTURE_ADAPTERS.find((row) => row.adapter_kind === input["adapter_kind"]);
+      const row = {
         ...FIXTURE_SOURCES[0]!,
-        id: String(input["id"] ?? "new"),
+        id,
         adapter_kind: String(input["adapter_kind"] ?? "mock"),
         display_name: String(input["display_name"] ?? "New source"),
         base_url: String(input["base_url"] ?? ""),
@@ -507,11 +515,19 @@ export function handlers(): Record<string, Handler> {
         // person just described, or the QA harness disagrees with itself one
         // render apart.
         auth_kind: input["auth_kind"] ?? null,
-        // The adapter's claims, as `list_sources` takes them from its template.
-        roles: FIXTURE_ADAPTERS.find((adapter) => adapter.adapter_kind === input["adapter_kind"])?.roles ?? [],
+        config: (input["config"] ?? {}) as Record<string, unknown>,
+        sync_interval_secs: Number(input["sync_interval_secs"] ?? 900),
+        health: { source_id: id, state: "ok", checked_at: SYNCED_AT, detail: null, secret_expires_at: null },
+        // The adapter's claims and kinds, as `list_sources` takes them from its template.
+        roles: adapter?.roles ?? [],
+        kinds: adapter?.entity_kinds ?? KIND_INFO,
         item_count: 0,
         last_run: null,
+        next_run_at: null,
       };
+      // Widened: the fixture rows are literal types, and this one is not among them.
+      (FIXTURE_SOURCES as unknown[]).push(row);
+      return row;
     },
   };
 }
