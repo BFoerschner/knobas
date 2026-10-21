@@ -442,9 +442,10 @@ fn payload_paths() -> Vec<KindPaths> {
 ///   as its key, the bare `name` as its name.
 /// * **comment count** is Gitea's `comments`, the card's *N comments*.
 ///
-/// **No done-like set yet** (#1501): `closed` is the word that would be one,
-/// and #1593 declares it. Until then a job on a closed issue keeps its context
-/// live, as every Gitea job did before the set existed.
+/// **Done-like is `closed`** (#1501, #1593): an issue's declared status is its
+/// `state`, `open` or `closed`, and `closed` is the word for done, so a job on
+/// a closed issue has its context archived. There is no blocked-like set: Gitea
+/// has no such state.
 fn ticket_paths() -> KindPaths {
     let knobas = |key: &str| vec![PayloadPath::of(["knobas", key])];
     KindPaths {
@@ -465,6 +466,7 @@ fn ticket_paths() -> KindPaths {
         project_key: vec![PayloadPath::of(["repository", "full_name"])],
         project_name: vec![PayloadPath::of(["repository", "name"])],
         comment_count: vec![PayloadPath::of(["comments"])],
+        done_statuses: vec!["closed".to_owned()],
         ..KindPaths::default()
     }
 }
@@ -491,6 +493,32 @@ fn pr_state() -> Vec<StatePath> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A closed issue is done-like (#1593): its job context is archived while
+    /// its `state` reads `closed`. The set is the ticket's alone, and `open`
+    /// is not in it.
+    #[test]
+    fn a_closed_issue_is_declared_done_like() {
+        let template = descriptor_template();
+        let ticket = template
+            .payload_paths
+            .iter()
+            .find(|paths| paths.kind == KIND_TICKET)
+            .expect("the ticket kind declares its paths");
+        assert_eq!(ticket.done_statuses, ["closed"]);
+        assert_eq!(ticket.status_name, vec![PayloadPath::of(["state"])]);
+        for paths in template
+            .payload_paths
+            .iter()
+            .filter(|p| p.kind != KIND_TICKET)
+        {
+            assert!(
+                paths.done_statuses.is_empty(),
+                "{} is never done",
+                paths.kind
+            );
+        }
+    }
 
     /// A pull request's chip (#666): Gitea says `closed` of a merged pull
     /// request too, so the flag is what tells the two apart.
