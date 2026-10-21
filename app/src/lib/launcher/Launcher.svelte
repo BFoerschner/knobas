@@ -975,13 +975,16 @@
     color: var(--faint);
     cursor: default;
   }
-  /* The suggestions sit under the box they complete, one line per value. */
+  /* The suggestions sit under the box they complete, one line per value.
+     A suggestion and a chain row are both drawn as `.pfx`, so their own rules
+     name `.pfx` as well (#1414): a single class would lose to `.pfx` below
+     and fall back into its 160 px label column. */
   .suggest {
     flex: none;
     border-bottom: 1px solid var(--hair);
     background: var(--panel);
   }
-  .sug {
+  .pfx.sug {
     display: flex;
     gap: 0;
     border-bottom: 0;
@@ -997,7 +1000,7 @@
     border-top: 1px solid var(--hair);
     background: var(--panel);
   }
-  .chain-a {
+  .pfx.chain-a {
     grid-template-columns: 1fr;
     border-bottom: 0;
   }

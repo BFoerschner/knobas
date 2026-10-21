@@ -8,6 +8,9 @@
  * is the backend's, that `Esc` unwinds one rung at a time and does not reach
  * the shell, and that `Tab` steals nothing.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -2409,12 +2412,22 @@ test("typing resets the cursor to the first row, and that row is scrolled back i
   expect(scrolls.at(-1)).toEqual({ el: first, options: { block: "nearest" } });
 });
 
+/** The `>` palette, open with every action: the answer says the prefix is `>`. */
+async function openPalette() {
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async () =>
+        response({ interpreted: { ...response().interpreted, prefix: "action", text: "" }, groups: [] }),
+    },
+  });
+  await settle();
+  await search(">");
+  expect(target.querySelector('[aria-label="Results"] .secl')?.textContent).toContain("Go to");
+}
+
 test("the palette's rows are followed as well", async () => {
-  open();
-  await settle();
-  await typeInto(">");
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  await openPalette();
   const scrolls = recordScrolls();
   press("ArrowDown");
   const rows = options();
@@ -2484,4 +2497,54 @@ test("what is typed after the chain's Rename goes into the name, not the query",
   flushSync();
   await settle();
   expect(renamed).toHaveBeenCalledWith("sepa-retries", "X");
+});
+
+// ── The chain rows and the suggestions keep their own layout (#1414) ───────
+
+/**
+ * The launcher's own stylesheet, put into the document so jsdom computes the
+ * cascade the WebView would. Svelte's scoping adds the same one class to
+ * every selector, so the order between two of these rules is the order with
+ * the scope in place.
+ */
+function launcherStyles(): HTMLStyleElement {
+  const source = readFileSync(join(process.cwd(), "src/lib/launcher/Launcher.svelte"), "utf8");
+  const css = /<style>([\s\S]*)<\/style>/.exec(source)?.[1];
+  expect(css, "Launcher.svelte has a stylesheet").toBeTruthy();
+  const style = document.createElement("style");
+  style.textContent = css!;
+  document.head.append(style);
+  return style;
+}
+
+test("a value suggestion draws inline, a chain row spans one column, and a prefix row keeps two", async () => {
+  const style = launcherStyles();
+  try {
+    await openPalette();
+    const prefix = target.querySelector<HTMLElement>('[aria-label="Results"] .pfx');
+    expect(prefix, "the palette draws prefix rows").not.toBeNull();
+    expect(getComputedStyle(prefix!).display).toBe("grid");
+    expect(getComputedStyle(prefix!).gridTemplateColumns).toBe("160px 1fr");
+
+    unmount(app!);
+    app = undefined;
+    openSuggesting();
+    await settle();
+    await typeInto("kind:");
+    const suggestion = target.querySelector<HTMLElement>('[aria-label="Suggestions"] [role="option"]')!;
+    expect(suggestion.classList.contains("pfx"), "the suggestion is a prefix row underneath").toBe(true);
+    expect(getComputedStyle(suggestion).display).toBe("flex");
+
+    unmount(app!);
+    app = undefined;
+    open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+    await settle();
+    press("ArrowDown");
+    press("Tab");
+    const chainRow = target.querySelector<HTMLElement>(".chain [role='option']")!;
+    expect(chainRow.classList.contains("pfx"), "the chain row is a prefix row underneath").toBe(true);
+    expect(getComputedStyle(chainRow).gridTemplateColumns).toBe("1fr");
+  } finally {
+    style.remove();
+  }
 });
