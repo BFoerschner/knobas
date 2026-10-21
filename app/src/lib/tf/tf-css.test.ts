@@ -267,7 +267,7 @@ test("the launcher is prototype-6's dialog: an ink selection bar, a borderless 1
   const selected = launcherRules.find(([selector]) => selector.includes(".tf-ln-res.tf-ln-on"))?.[1] ?? "";
   expect(selected).toMatch(/background:\s*var\(--sheet-2\)/);
   expect(selected).toMatch(/box-shadow:\s*inset 3px 0 0 var\(--ink\)/);
-  const box = launcherRules.find(([selector]) => selector === ".tf-ln-q input")?.[1] ?? "";
+  const box = launcherRules.find(([selector]) => selector === ".tf .tf-ln-q input")?.[1] ?? "";
   expect(box).toMatch(/font-size:\s*var\(--t-xl\)/);
   expect(box).toMatch(/border:\s*0/);
   expect(launcherRules.find(([selector]) => selector === ".tf-ln-q")?.[1]).toMatch(/border-bottom:\s*1px solid var\(--rule\)/);

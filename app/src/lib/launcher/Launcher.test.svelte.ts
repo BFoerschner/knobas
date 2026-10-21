@@ -2711,6 +2711,8 @@ test("what is typed after the chain's Rename goes into the name, not the query",
 function launcherStyles(): HTMLStyleElement {
   const css = readFileSync(join(process.cwd(), "src/lib/tf/css/launcher.css"), "utf8");
   expect(css, "the launcher has a stylesheet").toContain(".tf-ln-opt");
+  // Its rules on a button name `.tf`, where the launcher is drawn.
+  target.classList.add("tf");
   const style = document.createElement("style");
   style.textContent = css!;
   document.head.append(style);
@@ -2724,7 +2726,7 @@ test("a value suggestion draws inline, a chain row spans one column, and a prefi
     const prefix = target.querySelector<HTMLElement>('[aria-label="Results"] .tf-ln-opt');
     expect(prefix, "the palette draws prefix rows").not.toBeNull();
     expect(getComputedStyle(prefix!).display).toBe("grid");
-    expect(getComputedStyle(prefix!).gridTemplateColumns).toBe("160px 1fr");
+    expect(getComputedStyle(prefix!).gridTemplateColumns).toBe("240px 1fr");
 
     unmount(app!);
     app = undefined;
