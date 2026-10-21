@@ -27,9 +27,9 @@ export function handlers(): Record<string, Handler> {
       FAKE_CONTEXTS.unshift(row);
       return row;
     },
-    // The room's Assets tile (#434). Empty for `context_members`' reason: the
-    // fixture has no link graph, so no context holds anything and membership
-    // -- assets included -- is honestly nothing. A stored room under
+    // The room's Assets tile (#434). Empty: the fixture has no link graph, so
+    // a room's assets are not resolved here. (`FAKE_CONTEXT_ASSETS` feeds only
+    // the *Open alerts on my jobs* smart list, #1503.) A stored room under
     // `?fake-ipc` therefore draws the tile's empty state rather than a red
     // "command not found".
     context_assets: () => [],
