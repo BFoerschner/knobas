@@ -10329,3 +10329,56 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   and `the_seeded_records_fill_the_builds_frame` failed "ran on the one agent". *Reasoning:* the
   suite certifies one agent; a stray container is outside the repo, so the seed makes it
   harmless instead of stopping what another worktree owns. *Reversing:* low, one seed step.
+## #1480: ⌘K reopens with the kept query selected (Opus implementer, 2026-10-21)
+
+- **Which interface on the query box.** *Ruling:* `focus({ select: true })`, an option on the one
+  export, not a second export. The launcher's open effect passes it; every re-focus after a row
+  (list and syntax rows, a suggestion, an abandoned rename) calls `focus()` as before. *Reasoning:*
+  the ticket allows either; one export keeps "the box takes focus" one call. *Reversing:* low.
+- **The row re-focus witness.** A row that sets the box's text moves the caret to its end on the
+  value write, so it cannot tell a selecting re-focus from a plain one (the first test let that
+  mutant live). The test uses the re-focus that leaves the text alone: blanks in the box (the board
+  stays), the caret at 1, *Rename* on a saved row, `Esc` out of the name. *Reversing:* none.
+- **The session criterion** is already pinned by `closing after a paste leaves nothing to reopen onto`
+  and `closing after a search still comes back to it`; no test added.
+- **The screenshot route.** `Esc` with text in the box empties it first (one rung per press), so the
+  ticket's `type:PAY + key:Escape + key:Meta+k` reopens nothing and shows an empty box. The shot
+  closes with the × instead, which keeps the query; see the PR.
+
+## #1475: a pasted address opens its item in any form its source declares (Opus implementer, 2026-10-21)
+
+- **The pick.** *Ruling:* the descriptor slot, the ticket's recommendation and spec #491's own next
+  step. Not the Confluence-only alias column: an alias the Confluence crate stores reaches the
+  resolver only through the SPI's `SyncItem` (an SPI change anyway) or through a payload key core
+  would have to know by name, which is the per-adapter table §3a forbids. Not copy only: the soak
+  missed on forms the source serves. *Reversing:* medium (the slot is additive and `serde(default)`).
+- **The slot's shape.** *Ruling:* `UrlForm { kind, template, fields: Vec<PayloadPath> }`, `template`
+  relative to the source's base URL with `{}` (one value, form-decoded) and `{*}` (the rest, as
+  written). Not regular expressions: a template has no syntax to fail at run time, crosses the WIT
+  JSON as plain data, and cannot be written to backtrack. Values are compared on the item's payload
+  at declared paths, the way `payload_paths` already declares where a source keeps a fact.
+  *Reversing:* medium.
+- **Where the base is decided.** *Ruling:* in SQL, `web_url_normalized!` on the configured
+  `source_config.base_url` and on the pasted prefix, so `knobas_core::web_url`'s rule keeps its one
+  implementation; Rust only splits the string. A reading names its adapter kind, so two instances of
+  one adapter answer under their own hosts. *Reversing:* low.
+- **The tiny link.** *Ruling:* matched against `_links.tinyui` as Confluence stored it, not decoded
+  from the page id: the encoding is Confluence's, and a link knobas composed would be a guess (P5).
+  The live run confirms a seeded record carries it and the server serves the page there.
+- **Order.** *Ruling:* the stored address wins over a form, then entity id. *Reasoning:* an address
+  one item reports as its own is stronger than one that reads as another's form. *Reversing:* low.
+- **The WIT.** *Ruling:* no change to `adapter.wit` and no minor version: the descriptor crosses as
+  serde JSON, so the field is additive on both sides of an old host or an old component.
+  *Reversing:* low (a 1.4.0 that only documents the key).
+- **The commit-hint reads** in `sources/crud.rs` share `RESOLVE_URL` and bind no readings: their
+  behaviour is unchanged. *Reversing:* low.
+- **The live run's TeamCity.** The JVM lock was free but TeamCity was up (21 h, no holder), and the
+  guard refuses a second JVM product. The narrow run held the lock, put TeamCity down, ran, and put
+  it back up as found.
+
+### Reserved for Björn, ruled by implementer on Opus
+
+- **The §10.8 sign-off** (`docs/contract/10.8/1475-url-forms-in-the-source-descriptor.md`).
+  *Ruling:* signed. The entry matches the diff: one additive descriptor field and its type, one
+  battery clause, `RESOLVE_URL`'s second parameter, no command, argument, migration or WIT change.
+  *Reversing:* a follow-up removing the field; every adapter but Confluence declares none.
