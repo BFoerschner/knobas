@@ -188,6 +188,12 @@ export interface SectionPorts {
   dbStats: () => Promise<DbStats>;
   reindexFts: () => Promise<void>;
   openLogs: () => Promise<void>;
+  /**
+   * Open the profile's backup folder (#1471), the `directory` `backup_status`
+   * reported: the share exports and backups the Restore and Import dialogs
+   * list live there, under the hidden `~/Library`.
+   */
+  openBackupFolder: (directory: string) => Promise<void>;
 }
 
 /** The real commands, each looked up when it is called (see above). */
@@ -220,5 +226,11 @@ export const realSectionPorts: SectionPorts = {
     const { appLogDir } = await import("@tauri-apps/api/path");
     const { openPath } = await import("@tauri-apps/plugin-opener");
     await openPath(await appLogDir());
+  },
+  // The same opener, its `open-path` scope widened to the profile's
+  // `backups` folder under `$APPDATA` (#1471), so no command was added.
+  openBackupFolder: async (directory) => {
+    const { openPath } = await import("@tauri-apps/plugin-opener");
+    await openPath(directory);
   },
 };

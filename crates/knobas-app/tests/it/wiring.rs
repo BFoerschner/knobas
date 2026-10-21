@@ -64,9 +64,10 @@ fn the_window_may_open_http_urls_and_only_http_urls() {
     );
 }
 
-/// *Show logs* (#747) may open the log folder and nothing else on disk.
+/// *Show logs* (#747) may open the log folder, and *Open the backup folder*
+/// (#1471) each profile's backups folder (P13), and nothing else on disk.
 #[test]
-fn the_window_may_open_the_log_folder_and_no_other_path() {
+fn the_window_may_open_the_log_and_backup_folders_and_no_other_path() {
     let capability = capability();
     let opener = capability["permissions"]
         .as_array()
@@ -80,7 +81,10 @@ fn the_window_may_open_the_log_folder_and_no_other_path() {
         .iter()
         .filter_map(|entry| entry["path"].as_str())
         .collect();
-    assert_eq!(allowed, vec!["$APPLOG"]);
+    assert_eq!(
+        allowed,
+        vec!["$APPLOG", "$APPDATA/backups", "$APPDATA/demo/backups"]
+    );
 }
 
 /// `opener:default` is deliberately *not* used.

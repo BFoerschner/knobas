@@ -550,6 +550,7 @@ function sectionPorts() {
       deferred({ db_bytes: 1, entity_count: 0, item_count: 0, per_source: [], oldest_synced_at: null, newest_synced_at: null }),
     reindexFts: () => deferred(undefined),
     openLogs: () => deferred(undefined),
+    openBackupFolder: () => deferred(undefined),
   };
 }
 

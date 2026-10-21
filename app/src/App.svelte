@@ -307,15 +307,16 @@
   /**
    * §14a's landing: Tickets, with the launcher open over it. A reader who set
    * up later (#1399) lands on Settings › Sources instead, where adding a
-   * source lives, with nothing over it.
+   * source lives, and one who restores first (#1469) on Settings › Backup and
+   * export; neither with anything over it.
    */
   function onFirstRunDone(landing: FirstRunLanding) {
     completedFirstRun = true;
     // The wizard added a source, and neither `add_source` nor `demo_load`
     // emits `source:health`.
     void health.reseed();
-    if (landing === "sources") {
-      location.hash = "#/settings/sources";
+    if (landing === "sources" || landing === "backup") {
+      location.hash = landing === "sources" ? "#/settings/sources" : "#/settings/backup";
       return;
     }
     location.hash = HOME;
