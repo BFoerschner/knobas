@@ -8773,3 +8773,51 @@ Ruled 2026-10-21 (delegated by Björn at triage).
 - **`eval "$(./seed --env)"` swallows the exit status**, so the `responsiveness-probe` recipe and
   `live_session` now capture the output first (`seed_env=$(...) || exit 1`) and eval that. *Reversing:* low.
 - **A Gitea that does not answer is refused too** (HTTP 000), as the ticket says "anything but 200".
+## #1400: the first-run wizard in tf.css, with TfAddSource (Opus implementer, 2026-10-21)
+
+- **One PR for #1399, #1400 and #1401** (delegated). *Ruling:* one PR, as all three briefs
+  recommend when all three are dispatched. *Reasoning:* the port rewrites the markup #1399's
+  button and #1401's strings sit in, so the wizard is ported once. *Reversing:* none needed; the
+  three `Closes` lines are separate.
+- **Where the wizard draws.** *Fork:* mount it inside `TfShell` (a page under the top bar) or keep
+  it taking the whole window as its own `.tf` root. *Ruling:* its own root, `.tf tf-fr-root` with a
+  `tf-full` view inside, and no top or status bar. *Reasoning:* the ticket keeps the wizard's
+  behaviour, and `App.test` holds that the wizard takes the window. The shell's `Esc` ladder is
+  then not mounted, so the wizard closes the topmost dialog on `Esc` itself (rung 1 only), as the
+  rooms `Modal` did. *Reversing:* move the markup under `TfShell`; drop the window listener.
+- **Its rules** go in a new part, `lib/tf/css/first-run.css`, imported last in `tf.css`, every class
+  `tf-fr-*`. *Reversing:* one file.
+- **The rooms `AddSource` and its suite are deleted.** Nothing else mounted it, as the ticket says.
+  Its 1,091-line test file goes with it; `TfSettings.test` covers TfAddSource's main paths, not all
+  of them. The rooms `SchemaForm.svelte` was mounted only by `AddSource` and now has no mount; it
+  stays, with its rules (`.form`, `.sel-inline`), for a backlog follow-up (#1506) that retires it and moves
+  its DOM tests to `TfSchemaForm`. *Reasoning:* the ticket names the modal, not its form, and
+  porting the tests is its own piece of work. *Reversing:* restore from git.
+- **The fourth screenshot route** (`… + click:JI + click:Next`) names the rooms modal's steps, which
+  this ticket retires. It cannot pass on a correct implementation; the PR shows the dialog one step
+  earlier instead.
+
+## #1399: a way out of the Source step (Opus implementer, 2026-10-21)
+
+- ***Set up later in Settings*** (delegated). *Ruling:* add it. It calls the same `finish` as
+  *Finish*, so `complete_first_run` is recorded, and the shell lands on `#/settings/sources` with no
+  launcher open. *Reasoning:* spec §14a gives the wizard as guidance, not a gate; the reader asked
+  for Settings, so the launcher would be in the way. *Reversing:* the snippet and one branch in
+  `App.onFirstRunDone`.
+- **Where it shows.** *Fork:* only while no source is configured, or on both Source-step panels.
+  *Ruling:* both. A resumed wizard with a configured source can also skip the first sync and land
+  where the source is listed. *Reversing:* drop one `{@render later()}`.
+- **One add-source flow** (delegated). *Ruling:* the wizard mounts `TfAddSource` with
+  `realSettingsPorts`, the ports Settings passes, so *Install an adapter* is in the wizard too.
+  *Reversing:* none sensible; the rooms modal is gone.
+- ***Continue to knobas* while the first sync runs** (delegated). *Ruling:* left out, as
+  recommended. *Reasoning:* that is ADR-0005 territory, and once the reader is in Settings the source
+  page's walk already shows progress (#1384). *Reversing:* a new ticket.
+
+## #1401: three first-run strings (Opus implementer, 2026-10-21)
+
+- **The card's subtitle** (delegated). *Ruling:* the role sentence, "A ticket system, code host, CI,
+  wiki or monitoring", not adapter names from `list_adapters`. *Reasoning:* it needs no port and stays
+  true once an external adapter is installed. *Reversing:* a string, or a port plus a fallback.
+- **The Schedule note's "(P7)"** went with the rooms modal (#1400), so nothing is owed there, as the
+  ticket foresaw.
