@@ -9043,3 +9043,56 @@ Ruled 2026-10-21 (delegated by Björn at triage).
 - **Where it lands** (delegated). *Ruling:* in one PR with #1411 and #1412, as recommended, and
   before #1500, so #1500's Tab-chain screenshot does not show the squeeze. *Reversing:* none
   needed.
+
+---
+
+## #1409: the status bar counts the writes that need a decision (Opus implementer, 2026-10-21)
+
+- **Tones: the queued count in `--info`, *M need you* in `--warn`.** *Fork:* keep prototype-6's warn
+  on the whole control, or split it. *Ruling:* split. *Reasoning:* the design system's tone table
+  gives `info` to "running, queued" and `warn` to "needs attention"; with the whole control in warn,
+  *need you* could not be told from the waiting count, and the rooms bar this replaced drew the
+  decisions in their own colour. *Reversing:* one CSS line in `css/chrome.css`.
+- **The words live in `queueLabel(pending, decisions)` in `tf/status.ts`**, which returns the two
+  parts so the bar can tone the second; `queuedWords(0)` stays the idle text. *Reversing:* low.
+
+## #1410: the status bar pins the queue and failed credentials (Opus implementer, 2026-10-21)
+
+- **Order: the healthy run first, then the failed readings, then the queue.** *Fork:* keep
+  `sourceReadings`' interleaved order, or group. *Ruling:* group, each group in `sourceReadings`'
+  order. *Reasoning:* one shrinking element cannot interleave with pinned ones; *Sources* then the
+  healthy run reads as before, and the failures sit next to the queue, which they block.
+  *Reversing:* swap two blocks in `TfStatusBar.svelte`.
+- **Past the fixture:** with so many failed credentials that *Sources*, the failures and the queue
+  alone exceed the window, the bar clips at its right edge (no scroll), and the queue goes first.
+  Six sources with two failures fit at 1100 px with room to spare. *Reversing:* n/a.
+
+## #1425: the write queue panel on the ticket-first dialog (Opus implementer, 2026-10-21)
+
+Ruled 2026-10-21 (delegated by Björn at triage).
+
+- **Delegated pick: the title is *Queued writes*.** *Fork:* *Queued writes* (prototype-6, the bar)
+  or *Pending writes* (the glossary). *Ruling:* *Queued writes*, as recommended. *Reasoning:* the
+  bar says "1 queued write" (#1409) and the button and the dialog it opens should say the same
+  thing; the glossary's *Pending write* stays the concept's name. *Reversing:* one string.
+- **Names: a key for tickets and pull requests, a looked-up title for the rest.** A ticket or pull
+  request is named by the half of its id after the source prefix (`PAY-231`,
+  `tidewater/payout-service#142`), as the launcher's rows name it. A monitor, page, build
+  configuration, branch or source-action item has no readable key, so the panel asks `get_entity`
+  for its title once per id (an existing command; no IPC change). Until that answers, or if it
+  fails, the row says what kind of thing it is (*Pause a monitor*). *Reversing:* low.
+- **A page edit names the page, not the section.** The ticket's example is "Edit section “Context”
+  of SEPA payout retry design". The `UpdatePage` payload carries the whole page, so the section
+  would have to be guessed from a diff; the row reads *Edit page SEPA payout retry design*. Filed
+  as #1520 (`ready-for-agent`).
+- **The fixture is unchanged.** The monitor-pause wording is tested on a constructed row; the
+  fixture's refused pause and the second pause behind it are #1473's, which the dispatch leaves for
+  the next PR. Adding a refused row here would also change the bar's "3 need you" that this PR's
+  screenshots click.
+- **The panel mounts inside the shell's `.tf` root**, beside the shell's other dialogs, so it
+  draws with the shell's type and resets. Being a `TfDialog`, it now registers on the layer stack;
+  #1474's route-change close and its tests stay with #1474.
+- **The waiting reasons are sentence case** ("The server did not answer."), since each is the
+  row's only line; #1473 reworks them next.
+- **`unported.css` loses `.log` and `.grid2`**, which only the panel read, and its header no longer
+  lists the write queue. *Reversing:* low.
