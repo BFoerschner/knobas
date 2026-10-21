@@ -313,6 +313,22 @@
           />
         {/key}
       {/if}
+      <!-- The ⌘T picker and the ad-hoc dialog are ticket-first dialogs (#1432), drawn inside `.tf`. -->
+      {#if pickerOpen}
+        <TimerPicker onpick={startFromPicker} onclose={() => (pickerOpen = false)} />
+      {/if}
+      {#if adHoc}
+        <!-- *Log to a ticket…* re-targets the block, which moves a row of the week. -->
+        <AdHocBlockDialog
+          block={adHoc.block}
+          offer={adHoc.offer}
+          onclose={() => (adHoc = null)}
+          onlog={(draft) => {
+            timeRevision += 1;
+            drafts.show(draft);
+          }}
+        />
+      {/if}
     {/snippet}
   </TfShell>
   <!--
@@ -330,21 +346,6 @@
     onnavigate={navigate}
     onclose={() => {}}
   />
-  {#if pickerOpen}
-    <TimerPicker onpick={startFromPicker} onclose={() => (pickerOpen = false)} />
-  {/if}
-  {#if adHoc}
-    <!-- *Log to a ticket…* re-targets the block, which moves a row of the week. -->
-    <AdHocBlockDialog
-      block={adHoc.block}
-      offer={adHoc.offer}
-      onclose={() => (adHoc = null)}
-      onlog={(draft) => {
-        timeRevision += 1;
-        drafts.show(draft);
-      }}
-    />
-  {/if}
 {:else}
   <Booting
     db={lifecycle.db}

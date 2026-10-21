@@ -3,8 +3,7 @@
 
   Deliberately not a native `<dialog>`: `showModal()` puts the element in the
   top layer, where `::backdrop` — not `.scrim` — draws the dim, and the
-  mockup's `.scrim > .dlg` geometry (the 80 px drop from the top, `.scrim.center`
-  for the centred variant) would have to be rebuilt against a pseudo-element
+  mockup's `.scrim > .dlg` geometry (the 80 px drop from the top) would have to be rebuilt against a pseudo-element
   this stylesheet does not style. What a native dialog *gives* is focus
   trapping, Escape and focus restore, so those three are written out below and
   tested; nothing else about `showModal` was wanted.
@@ -15,7 +14,6 @@
   let {
     title,
     subtitle,
-    center = false,
     wide = false,
     onclose,
     body,
@@ -23,8 +21,6 @@
   }: {
     title: string;
     subtitle?: string;
-    /** `.scrim.center` — vertically centred rather than dropped from the top. */
-    center?: boolean;
     /** `.dlg.wide` — the 820 px variant the add-source flow uses. */
     wide?: boolean;
     onclose: () => void;
@@ -99,7 +95,7 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="scrim {center ? 'center' : ''}"
+  class="scrim"
   onclick={(event) => {
     if (event.target === event.currentTarget) onclose();
   }}

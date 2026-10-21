@@ -19,9 +19,12 @@
   ## Why *Keep local* is not a cancel
 
   It is the default when no rule fired, and it is a real answer even when one
-  did: a block that stays local is still on the day review, still in the
+  did: a block that stays local is still on the Day tab, still in the
   timesheet, still exportable. Nothing about closing this dialog loses the
   afternoon — what it declines is only sending it to Jira.
+
+  It draws as a ticket-first dialog (`TfDialog`, #1432), mounted in the shell's
+  `dialogs` so `.tf`'s rules reach it, and is rung 1 of the `Esc` ladder.
 -->
 <script lang="ts">
   import {
@@ -32,8 +35,9 @@
     type Draft,
   } from "../ipc/time";
   import type { SuggestionRule } from "../ipc/time";
-  import Modal from "../shell/Modal.svelte";
   import { targetReading } from "../shell/timer";
+  import { layers as sharedLayers, type Layers } from "../tf/layers.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
   import { durationReading, minutesBetween } from "./day";
   import { localDay, offsetMinutes } from "./draft";
 
@@ -44,6 +48,7 @@
     onlog,
     updateBlock = realUpdateBlock,
     worklogDraft = realWorklogDraft,
+    layers = sharedLayers,
   }: {
     /** The block that just closed. */
     block: Block;
@@ -62,14 +67,14 @@
     /** The bridge, injectable so a test needs no Tauri. */
     updateBlock?: typeof realUpdateBlock;
     worklogDraft?: typeof realWorklogDraft;
+    /** The shell's layer stack, which `Esc` closes from; a test builds its own. */
+    layers?: Layers;
   } = $props();
 
   const suggestion = $derived(offer.suggestion);
 
-  /** `PAY-231` — the half after the first colon, as everywhere else. */
-  const key = $derived(
-    suggestion ? suggestion.entity_id.slice(suggestion.entity_id.indexOf(":") + 1) : "",
-  );
+  /** `PAY-231` — the suggestion read the way every timer target is. */
+  const key = $derived(suggestion ? targetReading({ kind: "entity", entity_id: suggestion.entity_id }) : "");
 
   /** What the block itself was on — a key, or the label as it was typed. */
   const on = $derived(targetReading(block.target));
@@ -86,8 +91,10 @@
     switch (rule) {
       case "linked_to_target":
         return `You linked it to ${on}.`;
+      // The job's ticket, which is what the reader was in: the context behind
+      // a job is its hidden working set and is never named (#1427).
       case "context_anchor":
-        return "It anchors the room this block ran in.";
+        return `The timer was started while you were in ${key}.`;
       case "last_logged":
         return "It is the last ticket you logged time to on this day.";
       default: {
@@ -100,7 +107,7 @@
   const because = $derived(suggestion ? reasonFor(suggestion.rule) : "");
 
   /**
-   * `45 min`, `2 h 15 min` — how long the block was, **in the day review's own
+   * `45 min`, `2 h 15 min` — how long the block was, **in the Day tab's own
    * reading**.
    *
    * `durationReading` rather than a second formatter: this dialog opens over
@@ -128,7 +135,7 @@
    *
    * The times are the block's own, unchanged: the reader is saying what this
    * stretch was *about*, not when it happened. Correcting the minutes is the
-   * draft's own interval field, and after that the day review's.
+   * draft's own interval field, and after that the Day tab's.
    */
   function logToTicket() {
     if (!suggestion || sending) return;
@@ -165,56 +172,50 @@
   }
 </script>
 
-<Modal title="Log an ad-hoc block" subtitle="{length} on {on}" {onclose}>
+<TfDialog title="Log an ad-hoc block" subtitle="{length} on {on}" {onclose} {layers}>
   {#snippet body()}
     {#if suggestion}
-      <p class="lab">This time has no ticket. knobas suggests:</p>
+      <p>This time has no ticket. knobas suggests:</p>
       <div class="sug">
-        <span class="k">{key}</span>
-        <span class="t">{suggestion.title ?? suggestion.entity_id}</span>
-        <span class="why">{because}</span>
+        <span class="tf-mono tf-dim">{key}</span>
+        <span class="t">{suggestion.title ?? key}</span>
+        <span class="tf-dim why">{because}</span>
       </div>
     {:else}
-      <p class="lab">
-        This time has no ticket, and knobas has nothing to suggest — no link, no
-        room, and nothing logged today. Keep it local, or give it a ticket from
-        the day review.
-      </p>
+      <p>This time has no ticket. Assign one here or later on the Day tab.</p>
     {/if}
 
     {#if problem}
-      <p class="fail">{problem}</p>
+      <p class="tf-fail" role="alert">{problem}</p>
     {/if}
   {/snippet}
 
   {#snippet footer()}
-    <span class="spacer"></span>
-    <button class="btn" class:pri={!suggestion} class:ghost={!!suggestion} type="button" onclick={onclose}>
+    <button
+      type="button"
+      class="tf-btn"
+      class:tf-primary={!suggestion}
+      class:tf-ghost={!!suggestion}
+      onclick={onclose}
+    >
       Keep local
     </button>
     {#if suggestion}
-      <button class="btn pri" type="button" disabled={sending} onclick={logToTicket}>
+      <button type="button" class="tf-btn tf-primary" disabled={sending} onclick={logToTicket}>
         Log to {key}…
       </button>
     {/if}
   {/snippet}
-</Modal>
+</TfDialog>
 
 <style>
   .sug {
     display: grid;
     gap: 3px;
-    margin-top: 10px;
     padding: 10px;
-    border: 1px solid var(--hair);
-    border-radius: 3px;
-    background: var(--raised);
-  }
-
-  .sug .k {
-    font: 500 11px var(--mono);
-    color: var(--faint);
-    letter-spacing: 0.04em;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: var(--sheet-2);
   }
 
   .sug .t {
@@ -224,13 +225,6 @@
   }
 
   .sug .why {
-    color: var(--faint);
-    font-size: 11px;
-  }
-
-  .fail {
-    margin-top: 10px;
-    color: var(--fail);
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 </style>

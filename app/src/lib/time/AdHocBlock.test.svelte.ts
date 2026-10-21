@@ -19,6 +19,7 @@ import type {
   SuggestionRule,
   TimerTarget,
 } from "../ipc/time";
+import { createLayers, type Layers } from "../tf/layers.svelte";
 import AdHocBlock from "./AdHocBlock.svelte";
 
 const PAGE: TimerTarget = { kind: "entity", entity_id: "confluence:ENG:SEPA payout retry design" };
@@ -69,6 +70,7 @@ function render(
   const order: string[] = [];
   const onclose = vi.fn();
   const onlog = vi.fn();
+  const layers: Layers = createLayers();
   app = mount(AdHocBlock, {
     target,
     props: {
@@ -76,6 +78,7 @@ function render(
       offer,
       onclose,
       onlog,
+      layers,
       updateBlock: ((id: number, startedAt: string, endedAt: string, to: TimerTarget) => {
         order.push("move");
         moved.push({ id, startedAt, endedAt, target: to });
@@ -89,7 +92,7 @@ function render(
     },
   });
   flushSync();
-  return { moved, asked, order, onclose, onlog };
+  return { moved, asked, order, onclose, onlog, layers };
 }
 
 function button(starts: string): HTMLButtonElement {
@@ -122,7 +125,9 @@ afterEach(() => {
 test("it names the suggested ticket and says which rule produced it", () => {
   for (const [rule, reason] of [
     ["linked_to_target", "You linked it to ENG:SEPA payout retry design."],
-    ["context_anchor", "It anchors the room this block ran in."],
+    // The job's ticket and nothing else: the context behind a job is never
+    // named to the reader (#1427), and the room is gone (#881, #1432).
+    ["context_anchor", "The timer was started while you were in PAY-231."],
     ["last_logged", "It is the last ticket you logged time to on this day."],
   ] as [SuggestionRule, string][]) {
     render(offering(rule));
@@ -190,16 +195,14 @@ test("Keep local closes the dialog and writes nothing at all", () => {
 test("with no suggestion there is only Keep local, and it is the default", () => {
   render({ suggestion: null });
 
-  // Every button with words on it. The dialog's own dismiss control is an
-  // icon and carries none, so it is not one of the ways *out of this
-  // decision* -- what this asserts is that no second answer is offered.
+  // Every button with words on it: no second answer is offered.
   expect(
     [...target.querySelectorAll("button")]
       .map((b) => (b.textContent ?? "").trim())
       .filter((label) => label !== ""),
   ).toEqual(["Keep local"]);
-  expect(button("Keep local").className).toContain("pri");
-  expect(target.textContent).toContain("nothing to suggest");
+  expect(button("Keep local").classList).toContain("tf-primary");
+  expect(target.textContent).toContain("This time has no ticket. Assign one here or later on the Day tab.");
 });
 
 /**
@@ -216,4 +219,35 @@ test("a refused re-target keeps the dialog open and says why", async () => {
 
   expect(onclose).not.toHaveBeenCalled();
   expect(onlog).not.toHaveBeenCalled();
+});
+
+/**
+ * **The ticket-first dialog, in the Day tab's words** (#1432): the tf shell
+ * with `tf-btn` buttons, and no copy naming the retired room or the day review
+ * (CONTEXT.md, **Room**; the day review is the Day tab).
+ */
+test("it draws in the ticket-first dialog and names no room and no day review", () => {
+  for (const offer of [
+    offering("linked_to_target"),
+    offering("context_anchor"),
+    offering("last_logged"),
+    { suggestion: null },
+  ] as AdHocOffer[]) {
+    const { layers } = render(offer);
+    expect(target.querySelector(".tf-modal > .tf-dialog[role=dialog]"), "not the tf dialog shell").not.toBeNull();
+    expect(target.querySelector(".dlg, .scrim, .btn"), "still the rooms Modal").toBeNull();
+    expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+    expect(target.textContent!.toLowerCase()).not.toMatch(/\broom\b|day review/);
+    if (app) unmount(app);
+    app = undefined;
+    target.innerHTML = "";
+  }
+});
+
+/** The block's length and target stay in the header, under the title. */
+test("the header says how long the block was and what it was on", () => {
+  render();
+  expect(target.querySelector(".tf-dialog header .tf-dsub")?.textContent).toBe(
+    "1 h 30 min on ENG:SEPA payout retry design",
+  );
 });

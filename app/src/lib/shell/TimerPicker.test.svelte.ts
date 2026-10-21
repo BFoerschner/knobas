@@ -15,6 +15,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { EntityRow } from "../ipc/entity";
 import { noFilters, type ResultGroup, type SearchHit, type SearchQuery, type SearchResponse } from "../ipc/search";
 import type { TimerTarget } from "../ipc/time";
+import { createLayers, type Layers } from "../tf/layers.svelte";
 import TimerPicker from "./TimerPicker.svelte";
 
 function row(entity_id: string, kind: string, title: string): EntityRow {
@@ -87,11 +88,13 @@ function render(recent: EntityRow[] = RECENT, estate: SearchResponse = NO_ESTATE
   const picked: TimerTarget[] = [];
   const asked: SearchQuery[] = [];
   const onclose = vi.fn();
+  const layers: Layers = createLayers();
   app = mount(TimerPicker, {
     target,
     props: {
       onpick: (chosen: TimerTarget) => picked.push(chosen),
       onclose,
+      layers,
       recent: () => Promise.resolve(recent),
       estate: (query: SearchQuery) => {
         asked.push(query);
@@ -100,19 +103,19 @@ function render(recent: EntityRow[] = RECENT, estate: SearchResponse = NO_ESTATE
     },
   });
   flushSync();
-  return { picked, onclose, asked };
+  return { picked, onclose, asked, layers };
 }
 
 /** Every button in the recents list, by the text it shows. */
 function offered(): string[] {
-  return [...target.querySelectorAll(".recent:not(.estate) .row")].map((button) =>
+  return [...target.querySelectorAll(".tf-tm-recents button")].map((button) =>
     (button.textContent ?? "").trim().replace(/\s+/g, " "),
   );
 }
 
 /** Every button in the estate's list, by the text it shows (#437). */
 function estateOffered(): string[] {
-  return [...target.querySelectorAll(".estate .row")].map((button) =>
+  return [...target.querySelectorAll(".tf-tm-assets button")].map((button) =>
     (button.textContent ?? "").trim().replace(/\s+/g, " "),
   );
 }
@@ -192,7 +195,7 @@ test("a legal recent row is answered with as an entity target", async () => {
   const { picked } = render();
   await vi.waitFor(() => expect(offered()).toHaveLength(2));
 
-  target.querySelectorAll<HTMLButtonElement>(".recent .row")[0]!.click();
+  target.querySelectorAll<HTMLButtonElement>(".tf-tm-recents button")[0]!.click();
   flushSync();
   expect(picked).toEqual([{ kind: "entity", entity_id: "jira:PAY-231" }]);
 });
@@ -210,6 +213,7 @@ test("recents that cannot be read still leave a working label field", async () =
     props: {
       onpick: (chosen: TimerTarget) => picked.push(chosen),
       onclose: () => {},
+      layers: createLayers(),
       recent: () => Promise.reject(new Error("not_ready")),
       estate: () => Promise.resolve(NO_ESTATE),
     },
@@ -263,7 +267,7 @@ test("choosing an asset answers with it as an entity target", async () => {
   const { picked } = render(RECENT, estateOf([asset("asset:9f3c", "vm-db-01", "hel1")]));
   await vi.waitFor(() => expect(estateOffered()).toHaveLength(1));
 
-  target.querySelector<HTMLButtonElement>(".estate .row")!.click();
+  target.querySelector<HTMLButtonElement>(".tf-tm-assets button")!.click();
   flushSync();
   expect(picked).toEqual([{ kind: "entity", entity_id: "asset:9f3c" }]);
 });
@@ -296,6 +300,7 @@ test("an estate that cannot be read leaves the recents alone and says nothing", 
     props: {
       onpick: (chosen: TimerTarget) => picked.push(chosen),
       onclose: () => {},
+      layers: createLayers(),
       recent: () => Promise.resolve(RECENT),
       estate: () => Promise.reject(new Error("not_ready")),
     },
@@ -308,12 +313,53 @@ test("an estate that cannot be read leaves the recents alone and says nothing", 
   expect(target.textContent).not.toContain("could not be read");
 });
 
-/** Esc closes it — `Modal`'s rung, reached through the picker. */
-test("Escape closes the picker", () => {
-  const { onclose } = render();
-  target
-    .querySelector<HTMLElement>('[role="dialog"]')!
-    .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+/**
+ * Esc closes it as rung 1 of the shell's ladder: the picker is a dialog layer
+ * while it is open (`escape.ts`), and the layer's close is the picker's.
+ */
+test("the picker is a dialog layer that Esc closes, and leaves none behind", () => {
+  const { onclose, layers } = render();
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+
+  layers.open[0]!.close();
+  expect(onclose).toHaveBeenCalledTimes(1);
+
+  unmount(app!);
+  app = undefined;
+  expect(layers.open).toEqual([]);
+});
+
+/**
+ * **The ticket-first dialog, with the label field focused** (#1431, #1432).
+ * The label is the case the picker exists for, so ⌘T then typing has to land
+ * in it and not on a header control.
+ */
+test("it opens in the ticket-first dialog with the label field focused, and typing fills it", () => {
+  const { picked } = render();
+
+  expect(target.querySelector(".tf-modal > .tf-dialog[role=dialog]"), "not the tf dialog shell").not.toBeNull();
+  expect(target.querySelector(".dlg, .scrim"), "still the rooms Modal").toBeNull();
+  expect(document.activeElement).toBe(labelField());
+  expect(labelField().labels?.[0]?.textContent).toBe("A label");
+
+  const focused = document.activeElement as HTMLInputElement;
+  focused.value = "DB config";
+  focused.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  expect(onclose).toHaveBeenCalled();
+  focused.form!.requestSubmit();
+  flushSync();
+  expect(picked).toEqual([{ kind: "label", label: "DB config" }]);
+});
+
+/**
+ * Each recent is drawn by its key, `PAY-231`, never the raw id with its
+ * source's prefix (#1432): `mock:PAY-231` names a namespace the reader never
+ * typed.
+ */
+test("a recent is drawn by its key, not its source-prefixed id", async () => {
+  render([row("mock:PAY-231", "ticket", "Payments retry storm")]);
+  await vi.waitFor(() => expect(offered()).toHaveLength(1));
+
+  expect(offered()).toEqual(["Payments retry storm PAY-231"]);
+  expect(target.textContent).not.toContain("mock:");
 });
