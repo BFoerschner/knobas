@@ -1521,10 +1521,9 @@ const ROUTES_REACHABLE: &str = "with recursive up (id, parent_id, depth) as (
 ///
 /// **`target_id` over the closure, not the containment path**, which is what
 /// makes this a different read from [`ROUTES_REACHABLE`] rather than a filter
-/// over it. `CONTEXT.md`, **Depends on this**: *"Routes whose target is the
-/// asset **or anything in that list** are listed beneath as reachable via
-/// routes that would break"*. The panel answers *what breaks if this goes
-/// down*: a route landing on a container inside the VM that went down stops
+/// over it. `CONTEXT.md`, **Depends on this**, as amended by #1553: the routes
+/// listed beneath are *"the ones whose target is the asset or anything in its
+/// answer"*. The panel answers *what breaks if this goes down*: a route landing on a container inside the VM that went down stops
 /// answering with the container, while a route landing on the VM **above**
 /// this asset still answers whatever else that VM holds, so `$1` is
 /// [`depends_on_this`]' own answer and never the path upwards.
@@ -2993,9 +2992,10 @@ pub struct DependsOnThis {
 ///
 /// `CONTEXT.md`, **Depends on this**: *"its descendants, since they run inside
 /// it, and every asset linked to it by `depends-on` or `runs-on`, transitively
-/// over both … Routes whose target is the asset or anything in that list are
-/// listed beneath as reachable via routes that would break and not counted."*
-/// (amended by #1553: until then only the routes landing on the asset itself).
+/// over both … Routes whose target is the asset are listed beneath as
+/// reachable via routes that would break and not counted."* -- and, as #1553
+/// amended it, *"the ones whose target is the asset or anything in its
+/// answer"*.
 ///
 /// # One walk over two kinds of edge
 ///

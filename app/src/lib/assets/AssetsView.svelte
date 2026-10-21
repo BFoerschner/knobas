@@ -2178,9 +2178,10 @@
 
           The routes come **beneath the list and outside the count**, which is
           `CONTEXT.md`'s own arrangement: *"Routes whose target is the asset
-          or anything in that list are listed beneath as reachable via routes
-          that would break and not counted"* (#1553), so that the number is
-          about assets. They are drawn as plain rows rather than through the
+          are listed beneath as reachable via routes that would break and not
+          counted"*, which #1553 amended to *"the ones whose target is the
+          asset or anything in its answer"*, so that the number is about
+          assets. They are drawn as plain rows rather than through the
           `routeRow` snippet above, deliberately: that row carries the
           `data-wire` end the wire measurement reads (#433), and a route here
           landing on the asset or inside it is already in *Reachable via* with
