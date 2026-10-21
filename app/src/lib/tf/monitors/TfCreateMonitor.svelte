@@ -17,6 +17,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { MonitorTarget } from "../../ipc/assets";
   import type { MonitorKind, QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+  import type { WriteSource } from "../../shell/queued-toast";
   import TfDialog from "../settings/TfDialog.svelte";
   import { isRouteId, type MonitorSubject } from "./monitors";
 
@@ -34,8 +35,8 @@
     /** Queue the create: the second. */
     queue: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     onclose: () => void;
-    /** Both writes went; the view says what was queued and follows it. */
-    oncreated: (what: { name: string; write: QueuedWrite }) => void;
+    /** Both writes went; the view says what was queued, to which source, and follows it. */
+    oncreated: (what: { name: string; write: QueuedWrite; source: WriteSource }) => void;
   } = $props();
 
   /** The kinds offered, in prototype-6's words and order. */
@@ -71,7 +72,7 @@
     try {
       await record(wanted);
       const write = await queue({ CreateMonitor: { entity: chosen.entity, name: wanted, url: target.trim(), kind } });
-      oncreated({ name: wanted, write });
+      oncreated({ name: wanted, write, source: { id: chosen.source_id, display_name: chosen.display_name } });
     } catch (rejection) {
       failure = ipcErrorMessage(rejection);
     } finally {

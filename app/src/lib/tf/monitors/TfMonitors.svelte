@@ -55,6 +55,7 @@
   import { getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import { followWrite } from "../../shell/follow-write";
+  import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { ago } from "../../shell/time";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
@@ -251,7 +252,7 @@
     pressing[row.entity_id] = true;
     try {
       const write = await ports.submitWrite(form.build(row.entity_id));
-      push({ text: `${form.label} queued for ${row.name}` });
+      toastQueued(`${form.label.toLowerCase()} ${row.name}`, { id: row.source_id, display_name: sourceNames[row.source_id] ?? row.source_id });
       following.push(followWrite(write, { name: `${form.label} ${row.name}` }));
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
@@ -285,10 +286,10 @@
       : ports.editAsset(subject.id, [{ field: "monitors", added: [name] }]);
   }
 
-  function created(what: { name: string; write: QueuedWrite }) {
+  function created(what: { name: string; write: QueuedWrite; source: WriteSource }) {
     const asset = creating?.name ?? what.name;
     creating = null;
-    push({ text: `Create monitor queued for ${asset}` });
+    toastQueued(`create monitor for ${asset}`, what.source);
     following.push(followWrite(what.write, { name: `Monitor ${what.name}` }));
     revision += 1;
   }
