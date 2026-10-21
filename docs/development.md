@@ -176,7 +176,8 @@ under `docs/contract/10.8/`. `docs/contract.md` is the record.
 | --- | --- |
 | `app/src/App.svelte` | The root: the boot gate, the first-run wizard, then the shell. |
 | `app/src/app.css` | The global stylesheet and design tokens. |
-| `app/src/lib/shell/` | The frame: top strip, status bar, room and tiles, router, keyboard, lifecycle, shared primitives. |
+| `app/src/lib/tf/` | The shell since #881: `TfShell.svelte`, and one folder per page. Routes are `tf/route.ts` (`parseTfHash`, old addresses rewritten in `tf/address.ts`), each folder's `page.ts` registers its page, `tf/pages.ts` collects them. |
+| `app/src/lib/shell/` | Lifecycle, keyboard, toasts, the write queue and shared primitives. Its `router.svelte.ts` is the pre-#881 parser, still used by the asset tree and notification clicks; new routes go in `tf/route.ts`. |
 | `app/src/lib/detail/` | The detail slide-over. |
 | `app/src/lib/sources/` | The sources view, credential health, diagnostics, the first-run wizard. |
 | `app/src/lib/launcher/` | The ⌘K overlay. It binds its own hotkey and handles its own `Esc`. |
