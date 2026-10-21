@@ -35,6 +35,7 @@ function render(over: Record<string, unknown> = {}) {
       title: "SEPA payout retry design",
       syncedAt: "2026-08-22T14:30:00Z",
       sources: [],
+      id: "opt-0",
       selected: false,
       onopen: vi.fn(),
       onhover: vi.fn(),

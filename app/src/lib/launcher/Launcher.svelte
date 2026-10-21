@@ -439,6 +439,52 @@
   });
 
   /**
+   * The ids the options carry, so a listbox can name its active one (#1411).
+   *
+   * By index in the flat list rather than by row id: an index is what
+   * `session.selected` is, and a row id (`confluence:ENG:SEPA design`) is
+   * not a valid element id.
+   */
+  const uid = $props.id();
+  const optionId = (index: number) => `${uid}-opt-${index}`;
+  const chainOptionId = (index: number) => `${uid}-chain-${index}`;
+
+  /**
+   * The result the listbox names as current, or `undefined` when no option
+   * is drawn for it: no row, a failed read that draws its reason instead, or
+   * the saved list whose name is a text field while it is being renamed.
+   */
+  const activeOption = $derived.by(() => {
+    const row = session.current;
+    if (!row || session.error) return undefined;
+    if (row.kind === "list" && row.list.id === renaming) return undefined;
+    return optionId(session.selected);
+  });
+  const activeChainOption = $derived(chain ? chainOptionId(chain.selected) : undefined);
+
+  /**
+   * The cursor stays on screen (#1411, spec §4's ↑↓): whenever the active
+   * row changes — an arrow, a hover, the reset to the first row that typing
+   * makes — it is scrolled just far enough to be seen. `nearest` leaves a
+   * row that is already visible where it is. `rows` is read so a new answer
+   * under an unchanged index still brings its first row back into view.
+   *
+   * Runs after the DOM update, so the element is the one just drawn.
+   */
+  $effect(() => {
+    void session.rows;
+    if (activeOption) scrollToOption(activeOption);
+  });
+  $effect(() => {
+    if (activeChainOption) scrollToOption(activeChainOption);
+  });
+
+  function scrollToOption(id: string) {
+    // Guarded: jsdom has no `scrollIntoView`.
+    document.getElementById(id)?.scrollIntoView?.({ block: "nearest" });
+  }
+
+  /**
    * The `>` palette: navigation plus whatever the shell appended, narrowed by
    * what has been typed after the marker.
    *
@@ -731,7 +777,13 @@
         <Chips {interpreted} sources={health} sourcesRead={sourcesPhase === "ready"} />
       {/if}
 
-      <div class="rlist" role="listbox" tabindex="-1" aria-label="Results">
+      <div
+        class="rlist"
+        role="listbox"
+        tabindex="-1"
+        aria-label="Results"
+        aria-activedescendant={activeOption}
+      >
         {#if session.error}
           <p class="none err">{session.error}</p>
           <!-- A board that failed to load has nothing else to offer; a failed
@@ -768,6 +820,7 @@
               rows={session.rows}
               selected={session.selected}
               {renaming}
+              {optionId}
               {now}
               onopen={activate}
               onhover={(index) => (session.selected = index)}
@@ -782,6 +835,7 @@
           <Help
             rows={session.rows}
             selected={session.selected}
+            {optionId}
             onopen={activate}
             onhover={(index) => (session.selected = index)}
           />
@@ -790,6 +844,7 @@
           {#each session.rows as row, i (row.id)}
             {#if row.kind === "action"}
               <button
+                id={optionId(i)}
                 class="pfx"
                 class:on={i === session.selected}
                 role="option"
@@ -810,6 +865,7 @@
             response={session.response}
             rows={session.rows}
             selected={session.selected}
+            {optionId}
             sources={health}
             {now}
             onopen={activate}
@@ -821,9 +877,16 @@
       </div>
 
       {#if chain}
-        <div class="chain" role="listbox" aria-label="Actions on the selected result">
+        <div
+          class="chain"
+          role="listbox"
+          tabindex="-1"
+          aria-label="Actions on the selected result"
+          aria-activedescendant={activeChainOption}
+        >
           {#each chain.actions as action, index (action.id)}
             <button
+              id={chainOptionId(index)}
               class="pfx chain-a"
               class:on={index === chain.selected}
               role="option"

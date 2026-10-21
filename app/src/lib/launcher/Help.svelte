@@ -17,11 +17,14 @@
   let {
     rows,
     selected,
+    optionId,
     onopen,
     onhover,
   }: {
     rows: LauncherRow[];
     selected: number;
+    /** The element id of the option at a flat-list index (#1411). */
+    optionId: (index: number) => string;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
   } = $props();
@@ -33,6 +36,7 @@
     {#if row.kind === "syntax"}
     {@const entry = row.entry}
     <button
+      id={optionId(i)}
       class="pfx"
       class:on={i === selected}
       class:greyed={entry.expect === "reported"}

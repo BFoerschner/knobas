@@ -28,6 +28,7 @@
     rows,
     selected,
     renaming,
+    optionId,
     now,
     onopen,
     onhover,
@@ -66,6 +67,8 @@
      * for the input to be open.
      */
     renaming: string | null;
+    /** The element id of the option at a flat-list index (#1411). */
+    optionId: (index: number) => string;
     now?: Date | undefined;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
@@ -182,6 +185,7 @@
       />
     {:else}
       <button
+        id={optionId(i)}
         class="sl"
         role="option"
         aria-selected={i === selected}
@@ -290,6 +294,7 @@
       state={item.state}
       sources={home.sources}
       {now}
+      id={optionId(index)}
       selected={index === selected}
       onopen={() => onopen(row)}
       onhover={() => onhover(index)}

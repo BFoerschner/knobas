@@ -2290,3 +2290,137 @@ test("a rejected search shows the reason, never 'Nothing in the mirror matches'"
   expect(target.textContent).toContain("index is rebuilding");
   expect(target.textContent).not.toContain("Nothing in the mirror matches");
 });
+
+// ── The cursor stays on screen (#1411) ─────────────────────────────────────
+
+/**
+ * Every `scrollIntoView` the launcher asked for, with the element and the
+ * options. jsdom draws nothing and has no `scrollIntoView`, so the stub is the
+ * only witness; the screenshot in #1411's PR is the other one.
+ */
+function recordScrolls() {
+  const calls: { el: Element; options: ScrollIntoViewOptions | boolean | undefined }[] = [];
+  Element.prototype.scrollIntoView = function (this: Element, options?: ScrollIntoViewOptions | boolean) {
+    calls.push({ el: this, options });
+  };
+  return calls;
+}
+
+afterEach(() => {
+  Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+});
+
+/** The board's options in flat-list order: the lists, then the recent rows. */
+function options(): Element[] {
+  return [...target.querySelectorAll('[aria-label="Results"] [role="option"]')];
+}
+
+test("the arrows scroll the newly active row into view, and only as far as it needs", async () => {
+  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  await settle();
+  const scrolls = recordScrolls();
+
+  press("ArrowDown");
+  press("ArrowDown");
+  const rows = options();
+  expect(scrolls.at(-1)?.el).toBe(rows[2]);
+  expect(scrolls.at(-1)?.options).toEqual({ block: "nearest" });
+
+  press("ArrowUp");
+  expect(scrolls.at(-1)?.el).toBe(rows[1]);
+  expect(scrolls.at(-1)?.options).toEqual({ block: "nearest" });
+});
+
+test("the results listbox names the active option, and names nothing with no row", async () => {
+  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  await settle();
+  const listbox = target.querySelector('[role="listbox"][aria-label="Results"]')!;
+  const named = () => listbox.getAttribute("aria-activedescendant");
+  const active = () => target.querySelector('[aria-label="Results"] [aria-selected="true"]');
+
+  expect(named()).toBeTruthy();
+  expect(named()).toBe(active()?.id);
+  for (const key of ["ArrowDown", "ArrowDown", "ArrowUp"]) {
+    press(key);
+    expect(named(), key).toBe(active()?.id);
+  }
+  // Every option has an id of its own, so the name points at exactly one row.
+  const ids = options().map((el) => el.id);
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(ids.every((id) => id !== "")).toBe(true);
+
+  unmount(app!);
+  app = undefined;
+  open({
+    ports: {
+      launcherHome: async () => ({ ...HOME, smart_lists: [], recent: [] }),
+      search: async () => response(),
+    },
+  });
+  await settle();
+  expect(
+    target.querySelector('[role="listbox"][aria-label="Results"]')!.hasAttribute("aria-activedescendant"),
+  ).toBe(false);
+});
+
+test("a list being renamed has no option, so the listbox names none", async () => {
+  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  await settle();
+  press("ArrowDown");
+  press("Tab");
+  press("Enter");
+  const listbox = target.querySelector('[role="listbox"][aria-label="Results"]')!;
+  expect(target.querySelector("input.ren")).not.toBeNull();
+  expect(listbox.hasAttribute("aria-activedescendant")).toBe(false);
+});
+
+test("the Tab chain's active row is scrolled into view and named by its listbox", async () => {
+  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  await settle();
+  press("ArrowDown");
+  const scrolls = recordScrolls();
+  press("Tab");
+  const chain = target.querySelector('[role="listbox"][aria-label="Actions on the selected result"]')!;
+  const rows = [...chain.querySelectorAll('[role="option"]')];
+  expect(rows).toHaveLength(2);
+  expect(chain.getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
+  expect(scrolls.at(-1)).toEqual({ el: rows[0], options: { block: "nearest" } });
+
+  press("ArrowDown");
+  expect(chain.getAttribute("aria-activedescendant")).toBe(rows[1]!.id);
+  expect(scrolls.at(-1)).toEqual({ el: rows[1], options: { block: "nearest" } });
+
+  press("ArrowUp");
+  expect(chain.getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
+  expect(scrolls.at(-1)).toEqual({ el: rows[0], options: { block: "nearest" } });
+});
+
+test("typing resets the cursor to the first row, and that row is scrolled back into view", async () => {
+  open();
+  await settle();
+  press("ArrowDown");
+  press("ArrowDown");
+  const scrolls = recordScrolls();
+  await typeInto("sepa");
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  const first = options()[0];
+  expect(first?.textContent).toContain("Retry failed SEPA payouts");
+  expect(scrolls.at(-1)).toEqual({ el: first, options: { block: "nearest" } });
+});
+
+test("the palette's rows are followed as well", async () => {
+  open();
+  await settle();
+  await typeInto(">");
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  const scrolls = recordScrolls();
+  press("ArrowDown");
+  const rows = options();
+  expect(rows.length).toBeGreaterThan(1);
+  expect(scrolls.at(-1)).toEqual({ el: rows[1], options: { block: "nearest" } });
+  expect(
+    target.querySelector('[role="listbox"][aria-label="Results"]')!.getAttribute("aria-activedescendant"),
+  ).toBe(rows[1]!.id);
+});
