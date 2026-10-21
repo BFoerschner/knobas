@@ -10106,3 +10106,58 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   than the page's fixed parts, still draws no wire from a row below the bottom edge. Wires from
   visible rows, the dashed and held landings and the `laid` guard are unchanged. *Reversing:* low,
   one rule and two lines.
+
+## #1469: restore on a clean machine goes through Settings (Opus implementer, 2026-10-21)
+
+- **Which pick** (delegated). *Ruling:* #1399's *Set up later* is the answer, plus a pointer on the
+  Source step. Before any source is added the step says "Already have a backup or a share export?
+  Restore it before adding a source: knobas restores only into a database that holds no data yet."
+  and offers *Restore from a backup in Settings* beside *Set up later in Settings*. The button takes
+  the same `finish` (so `complete_first_run` is recorded, a `setting` row that a restore replaces)
+  and lands on `#/settings/backup` with no launcher open; `FirstRunLanding` gains `backup`. The
+  wizard lists no archives, so the section's dialog stays the only list, and `restore_backup`'s
+  empty-only rule (#831, the 2026-08-29 batch plan) stands. *Reasoning:* the recommended pick, with
+  the pointer made a button rather than a sentence naming three clicks, since #1399 already built
+  the landing. A restore step inside the wizard would need its own "restart knobas" ending.
+  *Reversing:* low: one paragraph, one button, one landing.
+- **Only before a source.** *Fork:* show the pointer on both Source-step panels, as #1399's *Set up
+  later* is shown, or only on the empty one. *Ruling:* only on the empty one. With a source
+  configured the restore is refused (`TargetNotEmpty` on `knobas.source_config`), so the button
+  would lead to a refusal. *Reversing:* one block.
+- **No §10.8 entry and no sign-off.** The pick touches no IPC command or migration, as the brief
+  says for every pick but the restore-semantics one.
+
+## #1470: the Restore and Import dialogs read the folder when they open (Opus implementer, 2026-10-21)
+
+- **Which fixes** (delegated). *Ruling:* re-read on dialog open and on window `focus`, no *Look
+  again* button, as recommended. *Reasoning:* both together cover a file copied in while Settings
+  is open and one dropped in Finder; a button would be a third way to do what opening the dialog
+  now does. *Reversing:* low.
+- **What the dialog draws while the read is out.** *Fork:* the list as the section found it until
+  the answer lands, or nothing. *Ruling:* nothing but "Reading the folder…" until a read started
+  after the dialog opened has landed. A counter of started reads, and the newest one that landed
+  (`latestRead` lets only the newest land), decide it, so an older read finishing first does not
+  bring the stale list back. A failed read is the section's failure line with *Try again*, which
+  replaces the dialog; *Try again* brings it back over a fresh list. *Reasoning:* the brief: "not a
+  stale list". *Reversing:* low.
+- **The focus listener** is the repo page's *Local changes* pattern (`TfRepoLocal`): added in an
+  effect, removed in its cleanup when the section unmounts. *Last backup* is fresh the same way.
+
+## #1471: *Open the backup folder* over the opener (Opus implementer, 2026-10-21)
+
+- **Which fix** (delegated). *Ruling:* fix 1, the button over the opener plugin's `openPath`, no
+  IPC; #831's reversal (the dialog plugin, a path-taking restore) stays Björn's. A new
+  `openBackupFolder(directory)` port beside `openLogs` takes `BackupStatus.directory`, and a
+  refusal toasts "Could not open the backup folder: <the platform's message>". It is drawn beside
+  *Export…* and *Import…*, and in both dialogs under "Put a file there to see it here."
+- **The opener scope** (delegated). *Ruling:* the literal folder under the app data directory, the
+  log scope's shape: `$APPDATA/backups` for the real profile and `$APPDATA/demo/backups` for the
+  demo profile, added to the existing `opener:allow-open-path` grant. *Reasoning:*
+  `Profile::backup_dir` is always `<app data dir>[/demo]/backups` (`Profile::from_args` takes
+  Tauri's `app_data_dir`), so the profile's folder cannot sit outside the app data directory and no
+  Rust reveal command is needed. The folders, not the files in them, as for `$APPLOG`. The
+  `wiring.rs` test that pins the scope names the two new paths. *Reversing:* low, two scope entries.
+- **Open, not reveal.** `openPath` on the folder opens it in Finder, as *Open the log folder* does;
+  `reveal-item-in-dir` stays ungranted, as the capability file's description asks.
+- **No §10.8 entry and no sign-off.** The capability file is not a frozen surface and no command
+  was added.
