@@ -857,7 +857,7 @@ if [ "$(uname -s)" = Darwin ]; then
         local envs=()
         while [ "$1" != -- ]; do envs+=("$1"); shift; done
         shift
-        env TMPDIR="$shot_tmp/" ${envs[@]+"${envs[@]}"} ./live-shot.sh "$@" 2>&1 && echo "status 0" || echo "status $?"
+        env TMPDIR="$shot_tmp/" LIVE_SHOT_DRY_RUN=1 ${envs[@]+"${envs[@]}"} ./live-shot.sh "$@" 2>&1 && echo "status 0" || echo "status $?"
     }
     said=$(refusal -- "$shot_tmp/out")
     check_contains "live-shot: one argument is a usage refusal" "usage: just live-shot" "$said"
@@ -872,6 +872,12 @@ if [ "$(uname -s)" = Darwin ]; then
     check_contains "live-shot: a held witness lock is refused" "one at a time" "$said"
     check_contains "live-shot: the refusal exits 1" "status 1" "$said"
     check "live-shot: the holder's lock survives the refusal" yes \
+        "$([ -d "$shot_tmp/knobas-desktop-witness.lock" ] && echo yes || echo no)"
+    # The lock free: taken, and given back on the way out.
+    rmdir "$shot_tmp/knobas-desktop-witness.lock"
+    said=$(refusal -- "$shot_tmp/out" "$shot_tmp/steps.sh")
+    check_contains "live-shot: a free lock is taken" "dry run: the lock is held" "$said"
+    check "live-shot: the lock is given back" no \
         "$([ -d "$shot_tmp/knobas-desktop-witness.lock" ] && echo yes || echo no)"
     rm -rf "$shot_tmp"
 fi

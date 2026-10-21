@@ -39,6 +39,7 @@
 #         product up first through testenv/live's session: its lock (the Gitea
 #         lock for Gitea, the JVM lock for a JVM product), its seed, and put
 #         back after. Unset starts no product and takes no product lock.
+#       LIVE_SHOT_DRY_RUN=1  stop once the lock is held (its unit test reads it).
 #       LIVE_SHOT_AEROSPACE=1  fullscreen the window in AeroSpace, so a tiling
 #         window manager does not resize it between shots. Off by default;
 #         refused when `aerospace` is not on PATH.
@@ -129,6 +130,9 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# desktop-witness-test.sh's refusals run with this: past the lock it stops,
+# so a broken lock cannot start the app inside a gate.
+[ -z "${LIVE_SHOT_DRY_RUN:-}" ] || { say "dry run: the lock is held; not starting knobas"; exit 0; }
 
 say "compiling the accessibility helper (the desktop witness's ax.swift)"
 ax=$scratch/ax
