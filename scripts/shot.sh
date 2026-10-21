@@ -9,13 +9,22 @@
 #            'A > B'                    open A, then B in the same page (state survives)
 #            'R + click:New branch…'    click the button/link/tab/menu item named so
 #            'R + click:testid=x'       or the element with data-testid x; then capture
+#            'R + focus:Name + type:x'  focus a field by label or placeholder, type into it
+#            'R + key:Meta+k + type:PAY' press a key (Meta/Control/Alt/Shift+<key>), type
+#            'R + wait:800 + scroll:600' pause; scroll the largest scroller (or testid=x)
+#            'R + select:Every=1 hour'  pick a <select> option by its label and text
 #          (an item with a dim description matches on its leading label: click:Import…;
 #          a query may lead a step route: '?fake-clone-percent=40#/repo/x/files + click:Clone')
-#          e.g. '#/job/PAY-231 > #/builds', '#/repo/x/branches + click:New branch…'.
+#          e.g. '#/job/PAY-231 > #/builds', '#/repo/x/branches + click:New branch…',
+#          '#/tickets + key:Meta+k + type:PAY' (the launcher, searched). scripts/shot-steps.mjs
+#          has every step's rules.
 #          A step that finds nothing fails, naming it; the server is still stopped.
 # Env:   SHOT_SIZE=1440,900 (the design system's comparison size)
 #        SHOT_THEME=light|dark (Chrome's preferred colour scheme, which the app
 #          follows unless `data-theme` is set; unset leaves Chrome's default)
+#        SHOT_FULL=1 (the whole of a long page in one image: the viewport grows to
+#          its tallest scroller's content, at most 8000 px; every route takes the
+#          steps path, #1396)
 #        (SHOT_SHELL is gone with the rooms UI, #881: there is one shell.)
 #
 # The dev server runs on 5300 + slot. A server already listening there (the
@@ -26,8 +35,9 @@
 set -euo pipefail
 [ $# -ge 3 ] || { echo "usage: $0 <slot> <out dir> <route>..." >&2; exit 2; }
 slot=$1 out=$2; shift 2
-port=$((5300 + slot)); size=${SHOT_SIZE:-1440,900}; theme=${SHOT_THEME:-}
+port=$((5300 + slot)); size=${SHOT_SIZE:-1440,900}; theme=${SHOT_THEME:-}; full=${SHOT_FULL:-}
 case $theme in ''|light|dark) ;; *) echo "shot: SHOT_THEME must be light or dark, got '$theme'" >&2; exit 2 ;; esac
+case $full in ''|1) ;; *) echo "shot: SHOT_FULL must be 1 or unset, got '$full'" >&2; exit 2 ;; esac
 theme_flags=()
 # Blink's PreferredColorScheme enum is { kDark = 0, kLight = 1 }; --force-dark-mode and
 # --force-prefers-color-scheme did nothing on Chrome with a dark macOS (#935).
@@ -49,21 +59,31 @@ if ! up; then
 fi
 for route in "$@"; do
   extra=; path=$route
-  case $route in \?*'#'*) extra="&${route%%#*}"; extra=${extra/&\?/&}; path=${route#*#} ;; esac
+  # Not `${extra/&\?/&}`: since bash 5.2 a `&` in the replacement is the matched
+  # text, so that left `&?fake-…` in the query and every switch went unread (#1396).
+  case $route in \?*'#'*) extra=${route%%#*}; extra="&${extra#\?}"; path=${route#*#} ;; esac
   case $path in '#/'*) path=${path#'#/'} ;; '#'*|/*) path=${path#?} ;; esac
   q="fake-ipc$extra"
   file="$out/$(printf '%s' "$path" | tr '/?&=' '____' | sed 's/^$/root/').png"
+  stepped=$full
   case $route in
     *' > '*|*' + '*)
-      file="$out/$(printf '%s' "$route" | sed 's/#\/\{0,1\}//g; s/ [>+] /--/g; s/click://g' | tr -c 'A-Za-z0-9._-\n' '_' | cut -c1-120).png"
+      stepped=1
+      name=$(printf '%s' "$route" | sed 's/#\/\{0,1\}//g; s/ [>+] /--/g; s/click://g' | tr -c 'A-Za-z0-9._-\n' '_')
+      # Cut at 120, with the route's checksum when cut: two long routes that
+      # share their first 120 characters overwrote each other's image (#1396).
+      [ "${#name}" -le 120 ] || name="${name:0:111}-$(printf '%s' "$route" | cksum | awk '{ printf "%08x", $1 }')"
+      file="$out/$name.png" ;;
+  esac
+  if [ -n "$stepped" ]; then
       # the query went into `extra`; the steps script gets the route after the first `#`
       steps=$route
       case $route in \?*'#'*) steps=${route#*#} ;; esac
       node "$root/scripts/shot-steps.mjs" "$port" $((9400 + slot)) "$profile" "$size" "$theme" "$file" "$steps" "${extra:+&${extra#&}}" || exit 1
       [ -s "$file" ] || { echo "shot: no image for $route" >&2; exit 1; }
       echo "shot: $file  <- $route"
-      continue ;;
-  esac
+      continue
+  fi
   "$chrome" --headless=new --disable-gpu --hide-scrollbars ${theme_flags[@]+"${theme_flags[@]}"} --user-data-dir="$profile" \
     --window-size="$size" --virtual-time-budget=8000 --screenshot="$file" \
     "http://localhost:$port/?$q#/$path" >/dev/null 2>&1

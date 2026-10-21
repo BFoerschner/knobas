@@ -1,6 +1,7 @@
 /**
  * `?fake-ipc`: The boot screen and the first run: `app_status` (held on one state by
- * `?fake-db=starting|migrating|failed`) and the wizard's two writes.
+ * `?fake-db=starting|migrating|failed`, and on the wizard by `?fake-first-run`) and
+ * the wizard's two writes.
  */
 import type { Handler } from "../fake-tauri";
 
@@ -34,12 +35,22 @@ function fakeDbState(params: URLSearchParams): unknown {
 
 /** This feature's commands. */
 export function handlers(params: URLSearchParams): Record<string, Handler> {
+  // `?fake-first-run` opens the §14a wizard, which the fixture otherwise never
+  // shows: a first run with no source yet, until the wizard finishes (#1396).
+  let firstRun = params.has("fake-first-run");
   return {
     ping: () => "pong",
-    app_status: () => ({ db: fakeDbState(params), ...DEMO_STATUS }),
+    app_status: () => ({
+      db: fakeDbState(params),
+      ...DEMO_STATUS,
+      ...(firstRun ? { first_run: true, source_count: 0 } : {}),
+    }),
     frontend_ready: () => null,
     retry_database: () => null,
     demo_load: () => ({ source_id: "mock", upserted: 21, deleted: 0, swept: 0, cursor: "" }),
-    complete_first_run: () => null,
+    complete_first_run: () => {
+      firstRun = false;
+      return null;
+    },
   };
 }
