@@ -2490,7 +2490,7 @@ test("what is typed after the chain's Rename goes into the name, not the query",
 
   const query = target.querySelector<HTMLInputElement>("input:not(.ren)")!;
   expect(query.value, "the query box is untouched").toBe("");
-  expect(target.querySelector("input.ren")!.value).toBe("X");
+  expect(target.querySelector<HTMLInputElement>("input.ren")!.value).toBe("X");
   expect(railRows(), "the board is still drawn").toHaveLength(3);
 
   focused.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
