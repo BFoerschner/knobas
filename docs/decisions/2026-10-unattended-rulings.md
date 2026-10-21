@@ -8933,3 +8933,61 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   Confluence sources note that PAT expiry needs `/rest/pat/latest/tokens`, outside their
   endpoints), so live, only an external adapter draws this countdown; the Rust doc comments that
   quote §3's old "PAT expiry countdown" are left for a pass that runs cargo.
+---
+
+## #1407: the item page draws a custom role's source actions (Opus implementer, 2026-10-21)
+
+Ruled 2026-10-21 (delegated by Björn at triage).
+
+- **Dialog shape: lifted, not copied.** *Fork:* lift the pull request page's action dialog into a
+  shared entity action dialog, or copy it under the item page. *Ruling:* lifted:
+  `tf/pr/TfPrAction.svelte` is now `tf/TfEntityAction.svelte`, its `prId` prop `entityId`, and both
+  pages open it. Its classes (`tf-pr-dialog`, `tf-pra`) went with it unchanged, so the pull request
+  page's tests pass untouched. *Reasoning:* one dialog in ADR-0020's vocabulary, as #1194's ruling
+  asks ("the view that offers one draws its dialog in ADR-0020's action vocabulary, as every
+  action's is"); a copy would drift on the first fix. *Reversing:* low: move the file back.
+- **Witness: both fixtures.** *Fork:* the WASM fixture and the dev fake each gain one source action,
+  or the dev fake only. *Ruling:* both. The WASM fixture declares `source_actions: ["book_repair"]`,
+  and the battery then requires `write_ops: ["source_action"]` and `Capability::Write` beside it
+  (clauses 5 and 11), so it declares those too. A survey's view offers *Book repair…* with one
+  required field, *Day*; `write` answers a receipt for `book_repair` on a survey and changes nothing,
+  and refuses every other write with a protocol error. The dev fake's demo commit (`mock:9f2c1ab`,
+  the route the ticket's screenshot names; the fake has no custom-role item) offers *Add note…*.
+  *Reasoning:* the WASM fixture is what the custom role is tested with, so the host's battery now
+  probes clause 11 on it, and `reads.rs` holds the view's action and the write it performs. All
+  existing fields, no §10.8 entry. *Reversing:* low: empty the three descriptor fields and the view's
+  `actions`.
+- **Every action in the view is drawn, not only `source_action` ones.** *Fork:* filter the toolbar to
+  `write_op === "source_action"`, as the pull request page does for its own list, or draw every
+  action. *Ruling:* every action, in the view's order, through the shared dialog. *Reasoning:* the
+  ticket says "draws them as the page's toolbar"; on a custom role's view every write is a source
+  action anyway, and an op the shell cannot build gets the dialog's existing *Could not queue* toast.
+  A disabled action is drawn `aria-disabled` with its reason as the title and opens nothing, as on
+  the pull request page. *Reversing:* low: one filter.
+- **Button words, dialog heading and toast.** The button is the label without its ellipsis
+  (`actionName`), as the pull request page draws a source action; the dialog's heading is *<action>
+  on <item title>*, and the toast *Queued: <action, lower case> on <item title>.* *Reversing:* low.
+
+## #1408: the item page draws the shell's breadcrumb (Opus implementer, 2026-10-21)
+
+Ruled 2026-10-21 (delegated by Björn at triage).
+
+- **#1201's "no breadcrumb" is reversed in favour of R-1.6.** *Fork:* reverse #1201's implementer
+  ruling ("No navigation entry, no breadcrumb … Reversing: low"), or keep it and argue R-1.6 does not
+  cover a custom role's view. *Ruling:* reversed. *Reasoning:* R-1.6 is the maintainer's requirement
+  and says *every* full view opened from a job; #1201 gave no reason the item page is exempt, and
+  the proposals view's exemption rested on prototype-6 drawing it without one, which has no item
+  page to point at. The rest of #1201's ruling stands: no navigation entry, and Esc's rung is
+  unchanged.
+- **The crumb's name is the kind's label.** *Fork:* the kind's label or the item's title. *Ruling:*
+  the kind's label (`kind_info.label`, else the kind's id, as the header's sub-line already reads
+  it); the title stays the page's `h1`. *Reasoning:* every other crumb names a view, not a record;
+  a title would also say the same thing twice, one line apart.
+- **One crumb, drawn by the item page.** *Fork:* widen `TfPage`'s crumbs guard to the item route, or
+  let the item page draw the same crumb. *Ruling:* the crumb is now one component, `tf/TfCrumbs.svelte`,
+  which `TfPage` draws for its full views and the item page draws itself; the item's page entry hands
+  it `job`. *Reasoning:* the name is the kind's label, which only the item page's own read
+  (`get_entity`) knows, so the frame cannot name it without a second read. *Reversing:* low.
+- **Before the read answers, no crumb; a failed read names it *Item*.** *Reasoning:* drawing a
+  placeholder name that flips to the kind's label a moment later is a flicker; a page that could not
+  read its item still needs the *Back Esc* hint. *Reversing:* low.
