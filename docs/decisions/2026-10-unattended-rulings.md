@@ -9210,3 +9210,64 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   clock and widens by whole hours to hold it, as it does for a late row (the #827 ruling's
   reasoning); on any other day it takes `null` and nothing changes. *Reasoning:* a now line that is
   absent after 18:00 says nothing about the evening the reader is in. *Reversing:* one argument.
+## #1413: Save as list is offered only where the backend can save (Opus implementer, 2026-10-21)
+
+- **`>` and `?` under the new sentence.** *Fork:* the ticket gives `NotASearch` the sentence
+  *`t` is not a search.*, but `NotASearch` is also what `> palette` and `?` get from `saved::plan`,
+  and they would then be told about a `t` they never typed. *Ruling:* `Refusal::NotASearch` carries
+  the prefix it refused, and `Refusal::on_create` names it: *`t` is not a search.*, *`>` is not a
+  search.*, *`?` is not a search.* (*That prefix is not a search.* for a prefix `empty_corpus` may
+  admit later). `Refusal::description()` ignores the field and its text is unchanged. *Reasoning:*
+  the `t` sentence is the one the ticket specifies, and following it literally for `>` and `?` would
+  repeat the bug the ticket fixes (a sentence that does not fit the case). The box never offers the
+  control on `>` or `?`, so only a direct caller ever sees those two. *Reversing:* drop the field
+  and use one sentence.
+- **The other refusals' wording.** *Ruling:* the rail's reason is kept word for word and
+  capitalised, ending with a full stop and without the delete sentence (*The launcher refuses the
+  saved query: …*), as the ticket says. *Reasoning:* "keep their reason sentence". The box has
+  already refused these queries on the keystroke, so the save path cannot reach them from the UI.
+  *Reversing:* one match arm.
+- **An answer to the previous query.** `canSave` needs *a* response, as the ticket says, not a
+  response to the text now in the box. In the 90 ms after a keystroke the control can still show
+  under the previous answer. A click in that window is refused by the backend with the new
+  sentence, which no longer misleads. Not gated on `pending` (*reversing:* one more condition).
+- **The IPC-seam test.** `creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in`
+  (knobas-app) asserted that `create`'s refusal carried *Needs attention*. That is the behaviour
+  this ticket removes. The test now asserts that the refusal carries neither the heading nor
+  "Delete it", and that every refusal is distinct.
+
+## #1418: the board previews the inbox and gives today's time (Opus implementer, 2026-10-21)
+
+- **Build or strike** (delegated). *Ruling:* build, as recommended. Both reads already exist in the
+  shell.
+- **Data path** (delegated). *Ruling:* shell props, as recommended. `App.svelte` hands the launcher
+  `inbox` (the live inbox store's `count` and its stream's items) and `today` (the Day tab's figures,
+  read on each opening). `LauncherHome` and `launcher_home` are unchanged: no §10.8 entry and no
+  sign-off. *Reversing:* move both onto `LauncherHome` with a §10.8 entry.
+- **Shape** (delegated). *Ruling:* the inbox count and the newest three items, and time as the Day
+  view's *tracked* and *to log*, in `hm` form (`2h 10m tracked`, `1h 5m to log`), as recommended.
+- **No second copy of the Day read.** *Ruling:* `TfDay.svelte`'s read (`day_blocks` plus
+  `ad_hoc_block` per unlogged block) moves to `tf/time/day-read.ts` as `readDay`. The Day tab and
+  the shell's `readTodayFigures` both call it, and the figures come from `day-view.ts`'s
+  `dayRows`/`dayFigures`, running timer included, as on the Day tab. A failed read leaves the time
+  block off the board rather than showing zeros.
+- **Rows or pictures.** *Fork:* the criteria say *pressing* opens. The launcher is driven from the
+  keyboard. *Ruling:* the inbox lines and the day are rows of the board's one flat list (`rows.ts`
+  kinds `inbox` and `today`), after the smart lists and before the recent items, so `↑`/`↓` reach
+  them and `Enter` opens them. Neither has a `Tab` chain. *Reasoning:* a board block the arrows
+  skip is a dead end in a keyboard surface. *Reversing:* drop the two kinds from `flatten` and draw
+  plain buttons.
+- **Where an inbox line goes.** The Inbox page's own opener (`tf/inbox/inbox.ts::opener`), which
+  is the item's view, the source's settings for a credential expiry, or Monitors for an alert. A line
+  with no opener goes to `#/inbox`.
+- **When a block is absent.** Inbox: when the count is 0. Time: when today's tracked minutes are 0
+  (to-log time is part of tracked time, so it is 0 then as well).
+- **Order.** Lists, inbox, today, the source strip, recent, which is spec §4's order with the strip
+  left where it was.
+
+## #1420: the recent rows read the live credential health (Opus implementer, 2026-10-21)
+
+- No fork. The recent `Row` takes the board's `sources` prop, as the ticket says. Nothing on the
+  board reads `home.sources` now. `LauncherHome.sources` is unchanged on the wire and is still the
+  launcher's fallback when the shell supplies no `sources`. No screenshot: under the fake both
+  copies agree, so nothing drawn changes.
