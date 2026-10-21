@@ -18,6 +18,13 @@
 
   import { createCapture, type CapturePorts } from "./capture.svelte";
 
+  /**
+   * WebKit's `autocorrect` is not in Svelte's textarea typings, so it goes in
+   * by spread (#1468): what was typed was typed, and the first Escape must
+   * close the window rather than dismiss a suggestion.
+   */
+  const NO_AUTOCORRECT = { autocorrect: "off" };
+
   let {
     ports,
   }: {
@@ -58,7 +65,7 @@
     bind:this={box}
     class="inp"
     aria-label="Capture"
-    autocorrect="off"
+    {...NO_AUTOCORRECT}
     autocapitalize="off"
     spellcheck="false"
     placeholder="Type. Escape or ⌘Enter to keep it."
