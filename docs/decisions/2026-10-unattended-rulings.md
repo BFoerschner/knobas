@@ -9785,7 +9785,7 @@ unchanged.
   `in` is a substring of *Link sets*, *Proposed links*, *Monitoring*, *Settings* and more, and `set`
   of *Link sets*; neither can pass on a correct implementation. The tests pin what the rule gives:
   `>In` lists Inbox first, `>inbox` lists Inbox alone, `>set` lists Link sets then the Settings
-  rows. The wording fix is a follow-up.
+  rows. The wording fix is #1546.
 - **The fake.** `search` under `?fake-ipc` answers a query starting `>` as the backend does (the text
   after the marker, `prefix: "action"`, no groups), so the palette draws there; every other word
   keeps the #430 refusal.
