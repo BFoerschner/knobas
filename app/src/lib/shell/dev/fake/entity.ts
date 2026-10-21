@@ -152,7 +152,8 @@ function fakeTransitions(args: Record<string, unknown>): string[] {
 
 /**
  * `entity_view` (#661): the demo commit draws an overview and a diff, so the
- * view's tabs and the diff viewer can be looked at in a browser; every other
+ * view's tabs and the diff viewer can be looked at in a browser, and one
+ * source action (#1407) for the item page's toolbar; every other
  * entity draws nothing, which is the real mock adapter's answer for all of
  * them. A deliberate divergence, for the same reason `kind_info` above is one:
  * the shell under test is the same either way.
@@ -244,8 +245,27 @@ function entityView(args: Record<string, unknown>) {
     ],
   };
   const sections = section === null ? [overview, diff] : [overview, diff].filter((s) => s.id === section);
-  return { sections };
+  return { sections, actions: [ADD_NOTE] };
 }
+
+/**
+ * The demo commit's one source action (#1407): a write outside every role's
+ * vocabulary, its id the fixed value, one field the source asks for, so the
+ * item page's toolbar and its dialog can be looked at under `?fake-ipc`.
+ */
+const ADD_NOTE = {
+  write_op: "source_action",
+  label: "Add note…",
+  fields: [{ name: "note", label: "Note", kind: { type: "long_text" }, value: null, required: true, placeholder: "What a reader of this commit should know" }],
+  confirm: null,
+  primary: false,
+  danger: false,
+  disabled: null,
+  with_settings: false,
+  values: { id: "add_note" },
+  entity: null,
+  line_comments: "none",
+};
 
 /**
  * The conversation (#819): prototype-6's PAY-231 thread, in its words, with

@@ -20,13 +20,14 @@
   import {
     entityView,
     getEntity,
+    submitWrite,
     type EntityDetail,
     type SourceView,
     type ViewAction,
     type ViewBlock,
     type ViewSection,
   } from "../../ipc/entity";
-  import { submitWrite, type QueuedWrite, type WriteOpPayload } from "../../ipc/sources";
+  import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 
   /** The page's two reads, and the write queue its actions queue through. */
   export interface ItemPorts {

@@ -54,13 +54,13 @@ const SURVEY_VIEW: SourceView = {
 };
 
 /**
- * The fixture's source action on a survey (#1407): a write outside every
- * role's vocabulary, its id fixed, one field the source asks for.
+ * The source action the WASM fixture's survey view offers (#1407): a write
+ * outside every role's vocabulary, its id fixed, one field the source asks for.
  */
 const BOOK_REPAIR: ViewAction = {
   write_op: "source_action",
   label: "Book repair…",
-  fields: [{ name: "day", label: "Day", kind: { type: "text", suggestions: [] }, value: null, required: true, placeholder: null }],
+  fields: [{ name: "day", label: "Day", kind: { type: "text", suggestions: [] }, value: null, required: true, placeholder: "Tuesday" }],
   confirm: "Book a repair crew for this survey's finding?",
   primary: false,
   danger: false,

@@ -345,7 +345,8 @@ const FIXTURE_EXTERNAL = {
   auth_methods: ["Pat"],
   min_sync_interval_secs: 60,
   roles: [{ role: "wasm-fixture:survey-desk", reads: [] as string[] }],
-  write_ops: [],
+  // Its one write is its source action, *Book repair…* (#1407).
+  write_ops: ["source_action"],
   entity_kinds: [{ id: "survey", label: "Survey", plural: "Surveys", monogram: "SV", full_sync_exhaustive: true }],
   config_schema: {
     type: "object",

@@ -21,6 +21,11 @@
 //! * **The roles** are the custom role [`ROLE`], whose survey's view is two
 //!   blocks: who surveyed it, and its body (#1202); and CI, for the Builds
 //!   frame, with every optional read (#1205).
+//! * **The writes** are one source action, [`BOOK_REPAIR`] (#1407): a
+//!   custom role's writes are all source actions (#1194), and a survey's
+//!   view offers this one, with one field, the day. The fixture performs it
+//!   on a survey by answering a receipt and changing nothing, and refuses
+//!   every other write with a protocol error, as battery clause 11 asks.
 //! * **Built with `--features v1_0`** it is the same adapter against the
 //!   frozen 1.0.0 world (`wit-1.0.0/`), which has no `downloads`, `query` or
 //!   `sink.walked`: what the host's hold on 1.0.0 components is tested with.
@@ -60,7 +65,9 @@ use knobas::adapter::types::{
     ConnectionInfo, Fault as WitFault, Instance, RunChainStep, SourceError, SyncItem, WriteReceipt,
 };
 use knobas_source::role::RoleClaim;
-use knobas_source::{AuthMethod, EntityRef, KindInfo, SourceDescriptor};
+use knobas_source::{
+    AuthMethod, Capability, EntityRef, KindInfo, SOURCE_ACTION, SourceDescriptor, WriteOp,
+};
 
 #[cfg(not(feature = "v1_0"))]
 wit_bindgen::generate!({
@@ -83,6 +90,10 @@ pub const KIND: &str = "wasm-fixture";
 /// the claim in the component's bytes (#1202's refusal of a role that is not
 /// namespaced to the adapter).
 pub const ROLE: &str = "wasm-fixture:survey-desk";
+
+/// The fixture's one source action (#1407), declared in the descriptor's
+/// `source_actions` and offered on every survey's view.
+pub const BOOK_REPAIR: &str = "book_repair";
 
 /// `(key, title, body)` per survey. The kind is `survey`, not `note`: a note
 /// is knobas' own (quick capture), and the launcher hides those on a setting.
@@ -370,14 +381,16 @@ impl GuestAdapter for Adapter {
             id: self.id.clone(),
             adapter_kind: KIND.into(),
             name: self.name.clone(),
-            capabilities: Vec::new(),
+            // It writes only its source action (#1407); the battery holds
+            // `Write` and `write_ops` to each other.
+            capabilities: vec![Capability::Write],
             adapter_version: "0.1.0".into(),
             // A token, which the fixture never reads: every source takes a
             // credential at Add source, and the host attaches it (#1203).
             auth_methods: vec![AuthMethod::Pat],
             accepts_account: false,
             min_sync_interval_secs: 60,
-            write_ops: Vec::new(),
+            write_ops: vec![SOURCE_ACTION.into()],
             entity_kinds: vec![
                 KindInfo {
                     id: "survey".into(),
@@ -410,7 +423,7 @@ impl GuestAdapter for Adapter {
                 },
                 builds::role(),
             ],
-            source_actions: Vec::new(),
+            source_actions: vec![BOOK_REPAIR.into()],
             clone_from: Vec::new(),
         };
         serde_json::to_string(&descriptor).expect("a descriptor serializes")
@@ -472,10 +485,24 @@ impl GuestAdapter for Adapter {
         Ok(corpus.len().to_string())
     }
 
+    /// [`BOOK_REPAIR`] on a survey answers a receipt and changes nothing;
+    /// every other write is refused with a protocol error naming it.
     fn write(&self, op: String) -> Result<WriteReceipt, SourceError> {
-        Err(protocol(format!(
-            "the {KIND} adapter declares no write ops, so it refuses {op}"
-        )))
+        let refuse = || {
+            protocol(format!(
+                "the {KIND} adapter performs only {BOOK_REPAIR:?} on a survey, so it refuses {op}"
+            ))
+        };
+        let parsed: WriteOp = serde_json::from_str(&op).map_err(|_| refuse())?;
+        match parsed {
+            WriteOp::SourceAction { entity, id, .. }
+                if id == BOOK_REPAIR
+                    && SURVEYS.iter().any(|(k, _, _)| Some(*k) == self.key(&entity)) =>
+            {
+                Ok(WriteReceipt { remote_id: None })
+            }
+            _ => Err(refuse()),
+        }
     }
 
     fn reachable_transitions(&self, _entity: String) -> Result<Vec<String>, SourceError> {
@@ -483,10 +510,8 @@ impl GuestAdapter for Adapter {
     }
 
     /// A survey's block view, the custom role's whole surface (ADR-0029):
-    /// the surveyor as a fact and the body as text. `None` for an entity
-    /// that is not one of the fixture's surveys.
-    /// A survey's block view, the custom role's whole surface (ADR-0029):
-    /// the surveyor as a fact and the body as text. The run's is
+    /// the surveyor as a fact and the body as text, and [`BOOK_REPAIR`] as
+    /// its one action (#1407). The run's is
     /// [`builds::view`]. `None` for the pipeline, and for an entity that is
     /// not the fixture's.
     fn view(&self, entity: String, section: Option<String>) -> Result<Option<String>, SourceError> {
@@ -513,7 +538,24 @@ impl GuestAdapter for Adapter {
                         { "type": "text", "text": body, "markdown": false },
                     ],
                 }],
-                "actions": [],
+                "actions": [{
+                    "write_op": SOURCE_ACTION,
+                    "label": "Book repair…",
+                    "fields": [{
+                        "name": "day",
+                        "label": "Day",
+                        "kind": { "type": "text", "suggestions": [] },
+                        "value": null,
+                        "required": true,
+                        "placeholder": "Tuesday",
+                    }],
+                    "confirm": "Book a repair crew for this survey's finding?",
+                    "primary": false,
+                    "danger": false,
+                    "disabled": null,
+                    "values": { "id": BOOK_REPAIR },
+                    "entity": null,
+                }],
             })
             .to_string(),
         ))
