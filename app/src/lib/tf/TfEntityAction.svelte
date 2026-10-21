@@ -1,26 +1,28 @@
 <!--
-  One of the pull request's toolbar writes as its source declares it (#841,
-  R-8.15): *Update branch…*, *Edit…*, *Close* or *Reopen*. The source names
-  the fields, the sentence and the tone (ADR-0020 rule 4); this draws them in
-  the new shell's dialog and queues the write `detail/view/actions.ts` builds
-  from the answers, against the pull request.
+  One write a source declares on an entity's view (ADR-0020 rule 4), in the
+  new shell's dialog: the pull request's toolbar writes (#841, R-8.15:
+  *Update branch…*, *Edit…*, *Close*, *Reopen*, a source action) and an
+  item's source actions (#1407, a custom role's writes, ADR-0029). The source
+  names the fields, the sentence and the tone; this draws them and queues the
+  write `detail/view/actions.ts` builds from the answers, against the entity.
 
   A text is an input, a long text a text area, a choice radio buttons, a flag
   a checkbox. *Edit…* sends only what changed (#706): sent back as drawn, it
-  closes without a write.
+  closes without a write. Lifted from the pull request page (#1407), its
+  classes (`tf-pr-dialog`, `tf-pra`) kept with it.
 -->
 <script lang="ts">
-  import { ipcErrorMessage } from "../../ipc";
-  import type { ViewAction } from "../../ipc/entity";
-  import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
-  import { push } from "../../shell/toasts.svelte";
-  import { actionName, actionPayload, answeredAsDrawn, initialValues, missingFields } from "../../detail/view/actions";
-  import { toastQueued } from "../repo/queued.svelte";
-  import TfDialog from "../settings/TfDialog.svelte";
+  import { ipcErrorMessage } from "../ipc";
+  import type { ViewAction } from "../ipc/entity";
+  import type { QueuedWrite, WriteOpPayload } from "../ipc/sources";
+  import { push } from "../shell/toasts.svelte";
+  import { actionName, actionPayload, answeredAsDrawn, initialValues, missingFields } from "../detail/view/actions";
+  import { toastQueued } from "./repo/queued.svelte";
+  import TfDialog from "./settings/TfDialog.svelte";
 
   let {
     action,
-    prId,
+    entityId,
     title,
     what,
     submitWrite,
@@ -28,15 +30,15 @@
     onclose,
   }: {
     action: ViewAction;
-    /** The pull request the view is of: the write's target unless the action names its own. */
-    prId: string;
+    /** The entity the view is of: the write's target unless the action names its own. */
+    entityId: string;
     /** The dialog's heading. */
     title: string;
-    /** What the toast says was queued (`close PR #142`). */
+    /** What the toast says was queued (`close PR #142`, `book repair on Quay crane 4 inspection`). */
     what: string;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
-    /** Called once the write is queued. */
-    onqueued: () => void;
+    /** Called once the write is queued, for a page that marks it (the pull request's chip). */
+    onqueued?: () => void;
     onclose: () => void;
   } = $props();
 
@@ -53,7 +55,7 @@
       onclose();
       return;
     }
-    const payload = actionPayload(action, prId, values);
+    const payload = actionPayload(action, entityId, values);
     if (payload === null) {
       push({ text: `Could not queue ${actionName(action.label).toLowerCase()}: the answers do not make a write.`, tone: "err" });
       return;
@@ -62,7 +64,7 @@
     try {
       await submitWrite(payload);
       toastQueued(what);
-      onqueued();
+      onqueued?.();
       onclose();
     } catch (cause) {
       push({ text: `Could not queue the write: ${ipcErrorMessage(cause)}`, tone: "err" });

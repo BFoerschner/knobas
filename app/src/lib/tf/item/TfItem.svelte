@@ -11,24 +11,52 @@
   kind draws the mirror's text with no line; a failed read draws it under a
   line naming the failure (rule 2). The payload is never read (ADR-0007).
 
-  Its writes (a source action, #1204) are not drawn here yet.
+  Its writes are source actions (#1194, #1407): every write a custom role has
+  is one. The view's actions are the header's toolbar, an `actions` block is
+  the same buttons where it stands, and each opens the shared action dialog,
+  which queues the write.
 -->
 <script module lang="ts">
-  import { entityView, getEntity, type EntityDetail, type SourceView, type ViewBlock, type ViewSection } from "../../ipc/entity";
+  import {
+    entityView,
+    getEntity,
+    submitWrite,
+    type EntityDetail,
+    type SourceView,
+    type ViewAction,
+    type ViewBlock,
+    type ViewSection,
+  } from "../../ipc/entity";
+  import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 
-  /** The page's two reads. */
+  /** The page's two reads, and the write queue its actions queue through. */
   export interface ItemPorts {
     getEntity: (entityId: string) => Promise<EntityDetail>;
     entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
+    submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
   }
 
-  const BRIDGE: ItemPorts = { getEntity, entityView };
+  const BRIDGE: ItemPorts = { getEntity, entityView, submitWrite: (payload) => submitWrite(payload) };
 </script>
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
+  import { actionName } from "../../detail/view/actions";
+  import TfCrumbs from "../TfCrumbs.svelte";
+  import TfEntityAction from "../TfEntityAction.svelte";
 
-  let { id, ready, ports = BRIDGE }: { id: string; ready: boolean; ports?: ItemPorts } = $props();
+  let {
+    id,
+    ready,
+    job,
+    ports = BRIDGE,
+  }: {
+    id: string;
+    ready: boolean;
+    /** The job the reader was last in, which the breadcrumb starts at (R-1.6). */
+    job: string | null;
+    ports?: ItemPorts;
+  } = $props();
 
   let detail = $state<EntityDetail | null>(null);
   let failed = $state<string | null>(null);
@@ -49,6 +77,7 @@
     view = undefined;
     viewFailed = null;
     opened = {};
+    shown = null;
     ports.getEntity(entity).then(
       (found) => live && (detail = found),
       (error: unknown) => live && (failed = ipcErrorMessage(error)),
@@ -81,7 +110,28 @@
   }
 
   const kindLabel = $derived(detail === null ? "" : (detail.kind_info?.label ?? detail.row.kind));
+  const actions = $derived(view?.actions ?? []);
+
+  /** The action whose dialog is open. */
+  let shown = $state<ViewAction | null>(null);
+
+  function press(action: ViewAction) {
+    if (action.disabled === null) shown = action;
+  }
 </script>
+
+{#snippet buttonsOf(list: ViewAction[])}
+  {#each list as action, n (n)}
+    <button
+      type="button"
+      class="tf-btn"
+      class:tf-primary={action.primary}
+      aria-disabled={action.disabled !== null ? "true" : undefined}
+      title={action.disabled ?? undefined}
+      onclick={() => press(action)}>{actionName(action.label)}</button
+    >
+  {/each}
+{/snippet}
 
 {#snippet textOf(text: string)}
   <div class="tf-panel tf-item-textp"><p class="tf-item-text">{text}</p></div>
@@ -115,6 +165,8 @@
       </ul>
     {:else if block.type === "log"}
       <pre class="tf-item-log">{block.text}</pre>
+    {:else if block.type === "actions"}
+      <div class="tf-item-acts">{@render buttonsOf(block.actions)}</div>
     {:else}
       <p class="tf-item-meta">A {block.type} block is drawn on its role's page, not here.</p>
     {/if}
@@ -122,16 +174,24 @@
 {/snippet}
 
 <div class="tf-full">
+  <!-- The breadcrumb names the kind (#1408): the title is the header's. -->
   {#if failed !== null}
+    <TfCrumbs {job} name="Item" />
     <div class="tf-empty"><p class="tf-cfail">Could not read {id}: {failed}</p></div>
   {:else if detail !== null}
+    <TfCrumbs {job} name={kindLabel} />
     <header class="tf-fhead">
       <div>
         <h1>{detail.row.title}</h1>
         <div class="tf-sub">{kindLabel} · {detail.source.display_name}</div>
       </div>
-      {#if detail.web_url !== null}
-        <div class="tf-acts"><a class="tf-btn" href={detail.web_url} target="_blank" rel="noreferrer">Open in {detail.source.display_name}</a></div>
+      {#if detail.web_url !== null || actions.length > 0}
+        <div class="tf-acts">
+          {@render buttonsOf(actions)}
+          {#if detail.web_url !== null}
+            <a class="tf-btn" href={detail.web_url} target="_blank" rel="noreferrer">Open in {detail.source.display_name}</a>
+          {/if}
+        </div>
       {/if}
     </header>
     <div class="tf-item-body">
@@ -169,3 +229,16 @@
     </div>
   {/if}
 </div>
+
+{#if shown !== null && detail !== null}
+  {@const action = shown}
+  {@const name = actionName(action.label)}
+  <TfEntityAction
+    {action}
+    entityId={id}
+    title="{name} on {detail.row.title}"
+    what="{name.toLowerCase()} on {detail.row.title}"
+    submitWrite={ports.submitWrite}
+    onclose={() => (shown = null)}
+  />
+{/if}

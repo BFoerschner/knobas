@@ -651,3 +651,19 @@ test("an item of a custom-role source opens its block view, and the role gets no
   expect(nav.textContent).not.toMatch(/survey/i);
   expect(entries.filter((a) => a.getAttribute("aria-current") === "page")).toEqual([]);
 });
+
+test("an item opened from a job draws the breadcrumb: the job's key, the kind's label, Back Esc; Esc returns to the job (#1408)", async () => {
+  start({ sources: [{ id: "surveys", display_name: "Harbour surveys", roles: [{ role: "wasm-fixture:survey-desk", reads: [] }] }] });
+  await at("#/job/PAY-231");
+  await at(entityAddress("survey", "surveys:survey-1"));
+
+  const crumbs = target.querySelector(".tf-crumbs")!;
+  expect(crumbs.querySelector(".tf-jobchip")?.textContent).toBe("PAY-231");
+  expect(crumbs.querySelector("strong")?.textContent).toBe("Survey");
+  expect(crumbs.querySelector(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back to PAY-231 Esc");
+  expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Quay crane 4 inspection");
+
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231");
+});
