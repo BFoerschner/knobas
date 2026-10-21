@@ -1282,9 +1282,15 @@ async fn a_failed_sign_in_is_an_item_once_per_episode_through_the_health_writer(
     let key = "failed_sign_in:tracker";
     let on_stream = |entries: Vec<InboxEntry>| entries.iter().any(|e| e.item.key == key);
 
-    config::set_health(h.pool(), "tracker", AuthState::Unauthorized, Some("401"), None)
-        .await
-        .unwrap();
+    config::set_health(
+        h.pool(),
+        "tracker",
+        AuthState::Unauthorized,
+        Some("401"),
+        None,
+    )
+    .await
+    .unwrap();
     let entry = h.entry(key).await;
     assert!(entry.actions.is_empty(), "nothing at a source can fix this");
     assert_eq!(entry.item.reason, "the tracker sign-in was rejected");
@@ -1292,9 +1298,15 @@ async fn a_failed_sign_in_is_an_item_once_per_episode_through_the_health_writer(
     complete_inbox_item_inner(h.pool(), h.registry.as_ref(), Utc::now(), key)
         .await
         .expect("the item is on the stream");
-    config::set_health(h.pool(), "tracker", AuthState::Unauthorized, Some("401"), None)
-        .await
-        .unwrap();
+    config::set_health(
+        h.pool(),
+        "tracker",
+        AuthState::Unauthorized,
+        Some("401"),
+        None,
+    )
+    .await
+    .unwrap();
     assert!(
         !on_stream(h.stream().await),
         "a retry rejected again is the same episode, and done holds"

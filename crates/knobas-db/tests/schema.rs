@@ -2402,12 +2402,11 @@ async fn zero_fifty_five_dates_an_episode_already_under_way_at_its_last_check() 
 
     migrate::run(&pool).await.unwrap();
 
-    let since: Vec<(String, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
-        "select id, auth_failing_since from knobas.source_config order by id",
-    )
-    .fetch_all(&pool)
-    .await
-    .unwrap();
+    let since: Vec<(String, Option<chrono::DateTime<chrono::Utc>>)> =
+        sqlx::query_as("select id, auth_failing_since from knobas.source_config order by id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     assert_eq!(
         since,
         vec![
@@ -2454,11 +2453,23 @@ async fn zero_fifty_five_keeps_the_start_of_an_episode_of_failed_sign_ins() {
     };
 
     assert_eq!(set("unknown").await, None, "a new source has no episode");
-    let began = set("unauthorized").await.expect("the first failure starts one");
-    assert_eq!(set("unauthorized").await, Some(began), "a retry is the same episode");
-    assert_eq!(set("missing_secret").await, Some(began), "so is a missing secret");
+    let began = set("unauthorized")
+        .await
+        .expect("the first failure starts one");
+    assert_eq!(
+        set("unauthorized").await,
+        Some(began),
+        "a retry is the same episode"
+    );
+    assert_eq!(
+        set("missing_secret").await,
+        Some(began),
+        "so is a missing secret"
+    );
     assert_eq!(set("unreachable").await, None, "any other verdict ends it");
-    let again = set("missing_secret").await.expect("and the next failure starts another");
+    let again = set("missing_secret")
+        .await
+        .expect("and the next failure starts another");
     assert!(again > began);
     assert_eq!(set("ok").await, None);
 }
