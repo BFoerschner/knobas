@@ -507,9 +507,12 @@ shell:
 # Services' answer against the bundle it built, and how it reads the
 # accessibility probe's three lines. Both are pure text and both have been
 # wrong in this shape before. Most of the suite needs nothing but bash; its
-# last four checks compile `ax.swift` and ask the helper for the probe and for
-# a registered path, and skip themselves where macOS and `swiftc` are not both
-# present.
+# helper checks compile `ax.swift` and ask it for the probe, a registered path
+# and live-shot's refusals (#1483), and skip themselves where macOS and
+# `swiftc` are not both present; live-shot's own refusals run dry, stopping
+# once its lock is held, and only on macOS. `shot-test.sh`'s pointer-step cases
+# (#1483) start headless Chrome on a fixture page, about 20 s, and skip where
+# Chrome is not installed.
 #
 # The test-layout script's own tests (issue #573) ride here too: they are bash
 # against fixture trees, need nothing installed, and take under a second.
@@ -1395,6 +1398,16 @@ demo: deps
 # `?fake-ipc` dev server (deputy's ruling of 2026-09-08 on #496), not here.
 desktop-witness driver="":
     testenv/desktop-witness.sh {{ quote(driver) }}
+
+# Screenshots of the real app against live products (#1483): starts `just demo`
+# with KNOBAS_SECRET_STORE=memory, sources <steps> (shot, press, focus, type,
+# key, click-at, settle; testenv/live-shot.sh has each) and writes the knobas
+# window only, scaled from Retina, to <out>. LIVE_SHOT_PRODUCT=gitea (or another
+# testenv/live product) brings one up under its lock first and exports its
+# `./seed --env`; LIVE_SHOT_AEROSPACE=1 fullscreens the window in AeroSpace.
+# Takes the screen and the desktop witness's lock; never part of a gate.
+live-shot out steps:
+    testenv/live-shot.sh {{ quote(out) }} {{ quote(steps) }}
 
 # The single-instance witness (#748): launches the debug binary twice against a
 # temp HOME and an unreachable database, and checks the second never reaches

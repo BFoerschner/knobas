@@ -18,6 +18,14 @@
 //     `select:<name>=<option>` picks the option whose text (or value) is <option> in the first
 //       enabled select whose aria-label or label text is <name>; `select:testid=<id>=<option>`.
 //       Headless Chrome on macOS will not change a select from a key press.
+//     `hover:<name>` moves the pointer to the centre of the element click would take (testid=
+//       too), and leaves it there, so a control revealed on hover is in the capture. Only an
+//       element with a box counts; failing a control, the innermost element whose whole text
+//       is <name> (a row's key cell). Waits as click does; a miss exits 1 naming the step.
+//     `dblclick:<name>` double-clicks there with the pointer (a row or card that opens on it).
+//     `back:<name>` / `forward:<name>` press mouse button 3 / 4 there (#693's navigation).
+//       These four go through Input.dispatchMouseEvent, so the page sees real pointer events;
+//       click: stays a DOM click.
 //     `wait:<ms>` pauses, for a debounce or an animation.
 //     `scroll:<px>` scrolls the page's largest scrolling element by <px> (negative goes up);
 //       `scroll:testid=<id>` scrolls that element into view.
@@ -57,6 +65,8 @@ const PUNCTUATION = {
   "=": ["Equal", 187], ">": ["Period", 190], "#": ["Digit3", 51], "@": ["Digit2", 50],
 };
 const MODIFIERS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
+// The steps that move the pointer, over CDP mouse events rather than a DOM click (#1483).
+const POINTER = new Set(["hover", "dblclick", "back", "forward"]);
 // `Meta+k` as the parameters of a CDP key event (the type is added by the caller), or
 // null for a key this table does not know. A key with no modifier but Shift carries its
 // text, so a bare `key:j` types into a focused field as well as reaching a key handler.
@@ -133,26 +143,56 @@ try {
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
   await send("Runtime.enable");
   const base = `http://localhost:${port}/?fake-ipc${extra}`;
-  const clickJs = (name) => {
+  // A statement that sets `el` to the element a click or pointer step names, or
+  // leaves it undefined. `pointer` keeps only elements with a box (a pointer
+  // cannot land on one without) and, failing a control, takes the innermost
+  // element whose whole text is <name>, so a row or card that is no button is
+  // reached through its key cell.
+  const findJs = (name, pointer) => {
     const byId = name.startsWith("testid=");
     const want = JSON.stringify(byId ? name.slice(7) : name);
-    return `(() => {
+    return `
       const want = ${want};
       const enabled = (x) => !x.disabled && x.getAttribute("aria-disabled") !== "true";
+      const boxed = (x) => !${pointer} || x.getClientRects().length > 0;
       let el;
       if (${byId}) {
-        el = [...document.querySelectorAll("[data-testid]")].find((x) => x.getAttribute("data-testid") === want && enabled(x));
+        el = [...document.querySelectorAll("[data-testid]")].find((x) => x.getAttribute("data-testid") === want && enabled(x) && boxed(x));
       } else {
-        const all = [...document.querySelectorAll("button, a, summary, [role=button], [role=menuitem], [role=tab]")].filter(enabled);
+        const all = [...document.querySelectorAll("button, a, summary, [role=button], [role=menuitem], [role=tab]")].filter((x) => enabled(x) && boxed(x));
         // The whole name wins; only when none matches does the leading label count
         // (an item with a dim description: <b>Import…</b><span>estate file, …</span>).
         el = all.find((x) => (x.getAttribute("aria-label") ?? x.textContent).trim() === want)
           ?? all.find((x) => !x.hasAttribute("aria-label") && x.firstElementChild?.textContent.trim() === want);
-      }
+        if (!el && ${pointer}) {
+          const whole = (x) => x.textContent.trim() === want;
+          el = [...document.body.querySelectorAll("*")].find((x) => whole(x) && boxed(x) && ![...x.children].some(whole));
+        }
+      }`;
+  };
+  const clickJs = (name) => `(() => {${findJs(name, false)}
       if (!el) return false;
       el.click();
       return true;
     })()`;
+  // The viewport point at the centre of the element a pointer step names, after
+  // scrolling it into view; null when there is none.
+  const pointJs = (name) => `(() => {${findJs(name, true)}
+      if (!el) return null;
+      el.scrollIntoView({ block: "nearest", inline: "nearest" });
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`;
+  // CDP's mouse buttons and the `buttons` bit each holds down.
+  const BUTTONS = { left: 1, back: 8, forward: 16 };
+  const pointer = async (verb, { x, y }) => {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    if (verb === "hover") return;
+    const button = verb === "dblclick" ? "left" : verb;
+    for (let clickCount = 1; clickCount <= (verb === "dblclick" ? 2 : 1); clickCount++) {
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button, buttons: BUTTONS[button], clickCount });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button, buttons: 0, clickCount });
+    }
   };
   // The elements that scroll, the document's own scroller first.
   const scrollers = `() => [document.scrollingElement, ...document.querySelectorAll("*")].filter((x) => {
@@ -233,6 +273,14 @@ try {
           if (!hit) await sleep(250);
         }
         if (!hit) done(1, `shot: step '${step}' found no enabled element on #/${path}`);
+      } else if (POINTER.has(verb)) {
+        let at = null;
+        for (let i = 0; i < 20 && !at; i++) {
+          at = await evaluate(pointJs(arg));
+          if (!at) await sleep(250);
+        }
+        if (!at) done(1, `shot: step '${step}' found no visible enabled element on #/${path}`);
+        await pointer(verb, at);
       } else if (verb === "select" && arg.slice(arg.startsWith("testid=") ? 7 : 0).includes("=")) {
         let hit = false;
         for (let i = 0; i < 20 && !hit; i++) {
@@ -252,7 +300,7 @@ try {
       } else if (verb === "scroll" && (/^-?\d+$/.test(arg) || arg.startsWith("testid="))) {
         if (!(await evaluate(scrollJs(arg)))) done(1, `shot: step '${step}' found nothing to scroll on #/${path}`);
       } else {
-        done(1, `shot: unknown step '${step}' (known: click:<name>, focus:<name>, type:<text>, key:<combo>, select:<name>=<option>, wait:<ms>, scroll:<px>, scroll:testid=<id>)`);
+        done(1, `shot: unknown step '${step}' (known: click:<name>, hover:<name>, dblclick:<name>, back:<name>, forward:<name>, focus:<name>, type:<text>, key:<combo>, select:<name>=<option>, wait:<ms>, scroll:<px>, scroll:testid=<id>)`);
       }
       await sleep(500);
     }

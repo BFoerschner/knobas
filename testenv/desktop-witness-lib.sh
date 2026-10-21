@@ -563,3 +563,20 @@ count_verdict() {
     *) printf 'yes\n' ;;
     esac
 }
+
+# key_code <key>
+#
+# The macOS virtual key code `ax key` takes, for a key `testenv/live-shot.sh`'s
+# `key` command names (#1483): a letter or digit (ANSI layout, the codes are
+# physical positions), return, escape, tab, space, delete, an arrow, or a code
+# given as a number. Nothing for any other word, and status 1.
+key_code() {
+    local pair
+    for pair in a:0 s:1 d:2 f:3 h:4 g:5 z:6 x:7 c:8 v:9 b:11 q:12 w:13 e:14 r:15 \
+        y:16 t:17 1:18 2:19 3:20 4:21 6:22 5:23 9:25 7:26 8:28 0:29 o:31 u:32 \
+        i:34 p:35 l:37 j:38 k:40 n:45 m:46 return:36 enter:36 tab:48 space:49 \
+        delete:51 backspace:51 escape:53 left:123 right:124 down:125 up:126; do
+        [ "${pair%%:*}" = "$1" ] && { echo "${pair#*:}"; return 0; }
+    done
+    case $1 in *[!0-9]* | '') return 1 ;; *) echo "$1" ;; esac
+}

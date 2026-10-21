@@ -11,6 +11,8 @@
 #            'R + click:testid=x'       or the element with data-testid x; then capture
 #            'R + focus:Name + type:x'  focus a field by label or placeholder, type into it
 #            'R + key:Meta+k + type:PAY' press a key (Meta/Control/Alt/Shift+<key>), type
+#            'R + hover:Mine'           hold the pointer over it (hover-revealed controls);
+#                                       dblclick:<name>, back:<name>, forward:<name> (buttons 3/4)
 #            'R + wait:800 + scroll:600' pause; scroll the largest scroller (or testid=x)
 #            'R + select:Every=1 hour'  pick a <select> option by its label and text
 #          (an item with a dim description matches on its leading label: click:Import…;

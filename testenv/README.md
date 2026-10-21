@@ -2075,6 +2075,43 @@ criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
   changes the **recipe**, which prerequisite 4 above now carries; it does not
   change the rule.
 
+### Screenshots of the real app (`just live-shot`, #1483)
+
+`just shot` photographs the frontend under `?fake-ipc`. What it cannot show is
+the app against a real product, so `just live-shot <out dir> <steps file>`
+starts `just demo` with `KNOBAS_SECRET_STORE=memory`, waits for the window and
+sources the steps file. The file is bash with seven commands: `shot <name>`
+(the knobas window only, `screencapture -l` of its window id, scaled from
+Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
+<label> [n]`, `type <text>`, `key <key> [modifier...]` and `settle [s]`.
+`testenv/live-shot.sh`'s header has each.
+
+- **It drives the witness's `ax.swift`**, compiled per run like the witness
+  does. A label is an accessible description, title or placeholder. Only
+  *visible* matches count, because WebKit's tree reaches a table cell twice
+  and keeps filtered-out rows. With several visible, `n` picks one in reading
+  order; without `n` it refuses. With none in the window, a match below the
+  fold counts (a dialog field under its scroller's edge), and the one picked
+  is scrolled into view first. `click-at` is a pointer click at the
+  element's centre, for a control only a hover reveals, and also takes words
+  on screen (a radio's label, a list row's name).
+- **It takes the screen and the witness's lock**
+  (`$TMPDIR/knobas-desktop-witness.lock`): one witness or live-shot at a time.
+  It refuses on a locked screen before every command, and `type`, `key` and
+  `click-at` refuse unless knobas is frontmost.
+- **`LIVE_SHOT_PRODUCT=gitea`** (or forgejo, teamcity, jira, confluence) brings
+  that product up through `live_session` first. That takes the Gitea lock for
+  Gitea and the JVM lock for a JVM product, and exports `./seed --env` for the
+  steps file (`type "$KNOBAS_GITEA_TOKEN"`). Unset, it starts no product and
+  takes no product lock.
+- **`LIVE_SHOT_AEROSPACE=1`** fullscreens the window in AeroSpace, so a tiling
+  window manager does not resize it between shots. It is off by default and
+  refused when `aerospace` is not on PATH.
+- **On a failed command** it writes `failed.png` and `failed-ax.txt` (the
+  window's accessibility tree) beside the shots, then quits the app with ⌘Q.
+- **The demo profile is shared.** A source a steps file adds stays in it, with
+  its credentials gone at exit, so a steps file that adds one removes it again.
+
 ## Scripts
 
 | Script | Does |
@@ -2095,6 +2132,7 @@ criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
 | `./pin-images.sh` | Re-resolve image tags to digests into `.env`; guarded pins are held, `--move VAR` takes a new one. |
 | `./check-ports.sh` | Assert the compose file against the §5 port table, default profile, opt-in profiles and the capped overlay. Starts nothing. |
 | `./desktop-witness.sh` | The desktop witness (#500): builds and signs the debug bundle, launches the copy Launch Services registered, runs one driver from `desktop-witness/drivers/` against the real accessibility tree, quits. Takes the screen; one at a time; not part of `just check`. See *The desktop witness (macOS)*. |
+| `./live-shot.sh` | Screenshots of the real app against live products (#1483): `just demo` with in-memory secrets, a steps file of `shot`/`press`/`focus`/`click-at`/`type`/`key`, the knobas window only. Takes the screen and the witness's lock; not part of `just check`. See *Screenshots of the real app*. |
 | `./desktop-witness-test.sh` | The witness's own unit tests, over `desktop-witness-lib.sh` -- the Launch Services path comparison, the accessibility probe's reading, and the pure halves of the `open-in-editor` and `capture` drivers. No screen, no bundle, no macOS. `just witness-unit`, and part of `just check`. |
 | `./reset` | `down -v` every profile, and delete the seed's outputs. |
 

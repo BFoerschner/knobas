@@ -462,6 +462,164 @@ func key(code: CGKeyCode, modifiers: [String]) -> Int32 {
     return 0
 }
 
+// MARK: - The screenshot driver's reach (#1483)
+//
+// `testenv/live-shot.sh` drives the app by hand-written steps rather than a
+// fixed scenario, so it needs what the witness's drivers never did: the one
+// match a person can *see*, a pointer click for controls only a hover reveals,
+// and the window to photograph. The witness's own `press` and `focus` above
+// are left as they are; their drivers count on exactly-one-in-the-tree.
+
+func fail(_ message: String) -> Int32 {
+    FileHandle.standardError.write(Data("ax: \(message)\n".utf8))
+    return 1
+}
+
+/// An element's frame in screen points (top-left origin, as CGEvent and the
+/// window list use), or `nil` when it carries none.
+func frame(_ element: AXUIElement) -> CGRect? {
+    guard let position = attribute(element, kAXPositionAttribute as String),
+        let size = attribute(element, kAXSizeAttribute as String),
+        CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID()
+    else { return nil }
+    var point = CGPoint.zero
+    var extent = CGSize.zero
+    guard AXValueGetValue(position as! AXValue, .cgPoint, &point),
+        AXValueGetValue(size as! AXValue, .cgSize, &extent)
+    else { return nil }
+    return CGRect(origin: point, size: extent)
+}
+
+/// The elements labelled `label` -- by description, title or placeholder --
+/// that a person could see: a frame with area, inside one of the app's
+/// windows. WebKit's tree reaches a table cell twice and keeps the rows a
+/// filter hid, so matches sharing one frame count once and those outside every
+/// window not at all. Tree order, which is reading order. `prose` also takes a
+/// run of static text whose value is `label`: a pointer can click words (a
+/// radio's label, a list row's name) that accessibility cannot press.
+/// `inside: false` takes the matches with a box outside every window instead.
+func visibleMatching(pid: pid_t, label: String, prose: Bool = false, inside: Bool = true) -> [(AXUIElement, CGRect)] {
+    let names = [kAXDescriptionAttribute as String, kAXTitleAttribute as String, "AXPlaceholderValue"]
+    let isProse = { (element: AXUIElement) in
+        prose && text(element, kAXRoleAttribute as String) == (kAXStaticTextRole as String)
+            && text(element, kAXValueAttribute as String) == label
+    }
+    var found: [(AXUIElement, CGRect)] = []
+    for window in windows(of: pid) {
+        guard let bounds = frame(window) else { continue }
+        visit(window, maxDepth: 40) { element, _ in
+            guard names.contains(where: { text(element, $0) == label }) || isProse(element),
+                let box = frame(element), box.width > 0, box.height > 0,
+                bounds.intersects(box) == inside, !found.contains(where: { $0.1 == box })
+            else { return }
+            found.append((element, box))
+        }
+    }
+    return found
+}
+
+/// The `nth` visible match (from 1), or the only one when `nth` is `nil`,
+/// scrolled into view first as a person would. With none in the window, the
+/// matches with a box outside it count instead: a dialog field below its
+/// scroller's fold (measured 2026-10-21: *Add a source*'s Token field under
+/// Gitea's configuration).
+func pick(pid: pid_t, label: String, nth: Int?, what: String, prose: Bool = false) -> (AXUIElement, CGRect)? {
+    var found = visibleMatching(pid: pid, label: label, prose: prose)
+    if found.isEmpty { found = visibleMatching(pid: pid, label: label, prose: prose, inside: false) }
+    guard let (element, box) = choose(found, label: label, nth: nth, what: what) else { return nil }
+    AXUIElementPerformAction(element, "AXScrollToVisible" as CFString)
+    Thread.sleep(forTimeInterval: 0.3)
+    return (element, frame(element) ?? box)
+}
+
+func choose(_ found: [(AXUIElement, CGRect)], label: String, nth: Int?, what: String) -> (AXUIElement, CGRect)? {
+    if let nth = nth {
+        guard nth >= 1, nth <= found.count else {
+            _ = fail("\(found.count) visible elements labelled '\(label)' to \(what), wanted number \(nth)")
+            return nil
+        }
+        return found[nth - 1]
+    }
+    guard found.count == 1 else {
+        _ = fail("\(found.count) visible elements labelled '\(label)' to \(what), wanted 1 (add <n> to pick one)")
+        return nil
+    }
+    return found[0]
+}
+
+func pressVisible(pid: pid_t, label: String, nth: Int?) -> Int32 {
+    guard let (target, _) = pick(pid: pid, label: label, nth: nth, what: "press") else { return 1 }
+    let status = AXUIElementPerformAction(target, kAXPressAction as CFString)
+    return status == .success ? 0 : fail("could not press '\(label)' (AXError \(status.rawValue))")
+}
+
+func focusVisible(pid: pid_t, label: String, nth: Int?) -> Int32 {
+    guard let (target, _) = pick(pid: pid, label: label, nth: nth, what: "focus") else { return 1 }
+    let status = AXUIElementSetAttributeValue(target, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    return status == .success ? 0 : fail("could not focus '\(label)' (AXError \(status.rawValue))")
+}
+
+/// A left click with the pointer at the element's centre, for a control that
+/// only a hover reveals and accessibility cannot press, or for words on screen. Refused unless the
+/// app is frontmost: the click lands on whatever window is under the point.
+func clickAt(pid: pid_t, label: String, nth: Int?) -> Int32 {
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
+        return fail("pid \(pid) is not frontmost; not clicking into another app")
+    }
+    guard let (_, box) = pick(pid: pid, label: label, nth: nth, what: "click", prose: true) else { return 1 }
+    let point = CGPoint(x: box.midX, y: box.midY)
+    for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+        guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
+        else { return fail("could not build a mouse event") }
+        event.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: type == .mouseMoved ? 0.15 : 0.03)
+    }
+    return 0
+}
+
+/// Waits until a window's web area holds anything. A window is up long before
+/// the webview has drawn the page (measured 2026-10-21 on `just demo`: an empty
+/// AXWebArea and a blank window three seconds after the window appeared).
+func waitContent(pid: pid_t, seconds: Double) -> Int32 {
+    let deadline = Date().addingTimeInterval(seconds)
+    while Date() < deadline {
+        var drawn = false
+        for window in windows(of: pid) {
+            visit(window, maxDepth: 6) { element, _ in
+                if text(element, kAXRoleAttribute as String) == "AXWebArea",
+                    !children(element, kAXChildrenAttribute as String).isEmpty
+                {
+                    drawn = true
+                }
+            }
+        }
+        if drawn { return 0 }
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+    return fail("pid \(pid)'s web view drew nothing within \(Int(seconds)) s")
+}
+
+/// The app's largest on-screen window, as the window server knows it:
+/// `<window id>\t<width>\t<height>` in points, for `screencapture -l`.
+func windowID(pid: pid_t) -> Int32 {
+    let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+        as? [[String: Any]] ?? []
+    let mine = list.compactMap { info -> (Int, CGRect)? in
+        guard (info[kCGWindowOwnerPID as String] as? Int) == Int(pid),
+            (info[kCGWindowLayer as String] as? Int) == 0,
+            let id = info[kCGWindowNumber as String] as? Int,
+            let raw = info[kCGWindowBounds as String] as? NSDictionary,
+            let bounds = CGRect(dictionaryRepresentation: raw)
+        else { return nil }
+        return (id, bounds)
+    }
+    guard let (id, bounds) = mine.max(by: { $0.1.width * $0.1.height < $1.1.width * $1.1.height }) else {
+        return fail("pid \(pid) has no on-screen window (none, another Space, or the screen is locked)")
+    }
+    print("\(id)\t\(Int(bounds.width))\t\(Int(bounds.height))")
+    return 0
+}
+
 // MARK: - Entry point
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -476,6 +634,10 @@ func integer(_ index: Int) -> Int? {
 func seconds(_ index: Int) -> Double? {
     index < arguments.count ? Double(arguments[index]) : nil
 }
+
+/// `<subcommand> <pid> <label> [n]`, each number a number.
+let labelled = integer(1) != nil
+    && (arguments.count == 3 || (arguments.count == 4 && integer(3) != nil))
 
 var status: Int32 = 0
 switch arguments.first {
@@ -514,6 +676,18 @@ case "type" where arguments.count == 2:
 // combination nobody sets.
 case "key" where arguments.count >= 2 && integer(1) != nil:
     status = key(code: CGKeyCode(integer(1)!), modifiers: Array(arguments.dropFirst(2)))
+// The screenshot driver's (#1483): `<pid> <label> [n]`, n picking the n-th
+// visible match.
+case "press-visible" where labelled:
+    status = pressVisible(pid: pid_t(integer(1)!), label: arguments[2], nth: integer(3))
+case "focus-visible" where labelled:
+    status = focusVisible(pid: pid_t(integer(1)!), label: arguments[2], nth: integer(3))
+case "click-at" where labelled:
+    status = clickAt(pid: pid_t(integer(1)!), label: arguments[2], nth: integer(3))
+case "window-id" where arguments.count == 2 && integer(1) != nil:
+    status = windowID(pid: pid_t(integer(1)!))
+case "wait-content" where arguments.count == 3 && integer(1) != nil && seconds(2) != nil:
+    status = waitContent(pid: pid_t(integer(1)!), seconds: seconds(2)!)
 default:
     FileHandle.standardError.write(
         Data(
@@ -533,6 +707,11 @@ default:
                    ax press <pid> <label>
                    ax type <text>
                    ax key <keycode> [command|shift|option|control ...]
+                   ax press-visible <pid> <label> [n]
+                   ax focus-visible <pid> <label> [n]
+                   ax click-at <pid> <label> [n]
+                   ax window-id <pid>
+                   ax wait-content <pid> <seconds>
 
             """.utf8))
     status = 2
