@@ -66,7 +66,7 @@ test("a held or refused write drops its own mark and toasts with Edit and resend
   markQueued("jira:PAY-231", "comment", "First", { many: true, write: { id: 1 }, following, follower });
   markQueued("jira:PAY-231", "comment", "Second", { many: true, write: { id: 2 }, following, follower });
 
-  hear(2, row(2, "sending"));
+  hear(2, row(2, "pending"));
   expect(queuedMarks("jira:PAY-231", "comment").map((m) => m.text)).toEqual(["First", "Second"]);
   expect(toasts.items).toEqual([]);
 

@@ -138,6 +138,11 @@ export function blockWords(block: DocBlock): string {
   }
 }
 
+/** The place a queued edit of section `number` draws in (`tf/queued.svelte.ts`). */
+export function sectionKind(number: number): string {
+  return `section ${number}`;
+}
+
 /** *N min read*: 220 words a minute, never less than one (prototype-6). */
 export function readingMinutes(page: DocPage): number {
   const words = page.blocks

@@ -8,12 +8,18 @@
   section* and *Cancel*; the backend says which sections are text-only
   (`DocSection.refusal`), and a refused one draws the button disabled with the
   reason. Saving goes through the write queue (`onsave`).
+
+  A saved section draws its queued text in place of the old, muted and marked
+  *queued* (#1424), until a read of the page has a newer version; *Edit
+  section* then starts from the queued text, and *Edit and resend* on a held
+  or refused save opens the editor with it.
 -->
 <script lang="ts">
   import type { DocBlock, DocSection } from "../../ipc/entity";
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocInlines from "./TfDocInlines.svelte";
-  import { pageHash, refusalReason, sectionsOf } from "./docs";
+  import { queuedMark, takeAgain } from "../queued.svelte";
+  import { pageHash, refusalReason, sectionKind, sectionsOf } from "./docs";
 
   let {
     blocks,
@@ -52,11 +58,24 @@
     editing = null;
   });
 
+  // *Edit and resend* on a held or refused save: the editor, with what was typed.
+  $effect(() => {
+    for (const section of sections) {
+      const again = takeAgain(entityId, sectionKind(section.number));
+      if (again === null) continue;
+      editing = section.number;
+      draft = again;
+    }
+  });
+
+  /** The text a save of `number` queued, drawn until the page's version moves. */
+  const queuedText = (number: number) => queuedMark(entityId, sectionKind(number))?.text ?? null;
+
   function open(number: number) {
     const section = sections.find((s) => s.number === number);
     if (!section || section.text === null) return;
     editing = number;
-    draft = section.text;
+    draft = queuedText(number) ?? section.text;
   }
 
   async function save(number: number) {
@@ -79,9 +98,11 @@
     <TfDocBlocks blocks={section.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} />
   {:else}
     {@const said = sections.find((s) => s.number === section.number)}
+    {@const queued = queuedText(section.number)}
     <section data-sec={section.number}>
       <h2 id={`s-${section.number}`}>
         <TfDocInlines text={section.heading.text} {onopen} {stems} />
+        {#if queued !== null}<span class="tf-chip tf-info tf-queued-mark">queued</span>{/if}
         <span class="tf-tools">
           <a href={pageHash(entityId, section.number)} title="Link to this section">#</a>
           {#if editable && said}
@@ -103,6 +124,8 @@
               >Save section</button>
           </div>
         </div>
+      {:else if queued !== null}
+        <p class="tf-sec-queued">{queued}</p>
       {:else}
         <TfDocBlocks blocks={section.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} />
       {/if}

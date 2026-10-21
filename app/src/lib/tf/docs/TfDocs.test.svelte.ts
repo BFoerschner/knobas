@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { DocPage, DocsTree, Reached } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
+import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
@@ -131,8 +132,8 @@ async function settle(): Promise<void> {
   flushSync();
 }
 
-async function draw(rest: string[], io = ports()): Promise<DocsPorts> {
-  view = mount(TfDocs, { target, props: { ready: true, rest, job: null, ports: io } });
+async function draw(rest: string[], io = ports(), follower?: WriteFollower): Promise<DocsPorts> {
+  view = mount(TfDocs, { target, props: { ready: true, rest, job: null, ports: io, ...(follower ? { follower } : {}) } });
   await settle();
   return io;
 }
@@ -619,4 +620,171 @@ test("Docs draws the search hits as read, the read being the wiki's (#1296)", as
   type("ledger");
   await settle();
   expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(answer.hits.length);
+});
+
+// -- what Docs queued is drawn at once (#1424) --------------------------------
+
+async function redraw(rest: string[], io = ports(), follower?: WriteFollower): Promise<DocsPorts> {
+  if (view) unmount(view);
+  view = null;
+  target.innerHTML = "";
+  return draw(rest, io, follower);
+}
+
+function fill(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
+  field.value = value;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+async function saveSection(words: string) {
+  button("Edit section")!.click();
+  await settle();
+  fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!, words);
+  button("Save section")!.click();
+  await settle();
+}
+
+async function sendComment(words: string) {
+  fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!, words);
+  await settle();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")][0]!.click();
+  await settle();
+}
+
+async function createPage(title: string, words: string) {
+  button("New page here")!.click();
+  await settle();
+  const dialog = document.querySelector("[role='dialog']")!;
+  fill(dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!, title);
+  fill(dialog.querySelector<HTMLTextAreaElement>("textarea[aria-label='Page text']")!, words);
+  await settle();
+  [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Create page")!.click();
+  await settle();
+}
+
+const section = () => target.querySelector("section[data-sec='1']")!;
+const squash = (node: Element | null | undefined) => node?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+const queuedComments = () => [...target.querySelectorAll(".tf-cmts .tf-msg.tf-queued")].map(squash);
+const queuedPages = () => [...target.querySelectorAll("nav[aria-label='Docs'] .tf-dl-queued")];
+
+test("Save section draws the queued text in place of the old, marked queued, until the page's version moves", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  await saveSection("Ask Priya.\n- or Jonas");
+  expect(squash(section().querySelector(".tf-sec-queued"))).toBe("Ask Priya. - or Jonas");
+  expect(section().querySelector(".tf-sec-queued")?.textContent).toContain("Ask Priya.\n- or Jonas");
+  expect(squash(section().querySelector("h2 .tf-queued-mark"))).toBe("queued");
+  expect(squash(section())).not.toContain("@Mara");
+
+  // Read again at the same version: still on its way.
+  await redraw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  expect(squash(section().querySelector(".tf-sec-queued"))).toBe("Ask Priya. - or Jonas");
+
+  // The page's version moved: the source's text is drawn.
+  const moved: DocPage = { ...RICH, version: 32 };
+  await redraw(["confluence:2"], ports({ docsPage: vi.fn(async () => moved) }));
+  expect(section().querySelector(".tf-sec-queued")).toBeNull();
+  expect(section().querySelector("h2 .tf-queued-mark")).toBeNull();
+  expect(squash(section())).toContain("@Mara");
+});
+
+test("Edit section while a save is queued starts from the queued text", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  await saveSection("Ask Priya.");
+  button("Edit section")!.click();
+  await settle();
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!.value).toBe("Ask Priya.");
+});
+
+test("a queued comment is drawn at the end of the list until the page holds it", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  await sendComment("Done.");
+  expect(queuedComments()).toEqual(["MA You queued Done."]);
+  const all = [...target.querySelectorAll(".tf-cmts .tf-msg")];
+  expect(all.at(-1)!.classList.contains("tf-queued")).toBe(true);
+
+  const said: DocPage = {
+    ...RICH,
+    comments: [...RICH.comments, { author: "mara", author_name: "Mara Lindqvist", at: "2026-10-21T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Done.")] }] }],
+  };
+  await redraw(["confluence:2"], ports({ docsPage: vi.fn(async () => said) }));
+  expect(queuedComments()).toEqual([]);
+});
+
+test("a created page is a muted row with no link under its parent in the tree, until the tree holds it", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  await createPage("Retry metrics", "## Dashboards");
+  const rows = queuedPages();
+  expect(rows.map(squash)).toEqual(["Retry metrics queued"]);
+  expect(rows[0]!.querySelector("a")).toBeNull();
+  const fold = rows[0]!.closest("details")!;
+  expect(squash(fold.querySelector("summary"))).toBe("On-call handbook");
+  expect(fold.open).toBe(true);
+
+  const grown: DocsTree = {
+    ...TREE,
+    spaces: [
+      { ...TREE.spaces[0]!, pages: [...TREE.spaces[0]!.pages, { entity_id: "confluence:30", title: "Retry metrics", parent: "confluence:2" }] },
+      TREE.spaces[1]!,
+    ],
+  };
+  await redraw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH), docsTree: vi.fn(async () => grown) }));
+  expect(queuedPages()).toEqual([]);
+});
+
+test("a held or refused write drops its echo and toasts; Edit and resend reopens what was typed", async () => {
+  const hears = new Map<number, Hear>();
+  const follower: WriteFollower = {
+    follow(id, hear) {
+      hears.set(id, hear);
+      return () => hears.delete(id);
+    },
+  };
+  const io = ports({
+    docsPage: vi.fn(async () => RICH),
+    docsEditSection: vi.fn(async () => ({ ...QUEUED, id: 11 })),
+    submitWrite: vi.fn(async () => ({ ...QUEUED, id: 12 })),
+    docsCreatePage: vi.fn(async () => ({ ...QUEUED, id: 13 })),
+  });
+  await draw(["confluence:2"], io, follower);
+  await saveSection("Ask Priya.");
+  await sendComment("Done.");
+  await createPage("Retry metrics", "## Dashboards");
+  expect(section().querySelector(".tf-sec-queued")).not.toBeNull();
+  expect(queuedComments()).toHaveLength(1);
+  expect(queuedPages()).toHaveLength(1);
+
+  const refuse = (id: number, detail: string) => {
+    hears.get(id)!({ ...QUEUED, id, state: "refused", detail });
+    flushSync();
+    return toasts.items.at(-1)!;
+  };
+  const resend = async (toast: (typeof toasts.items)[number]) => {
+    toast.more!.find((action) => action.label === "Edit and resend")!.run();
+    await settle();
+  };
+
+  const edit = refuse(11, "The page changed since you opened it");
+  expect(edit.text).toBe("Edit of “Ledger” on On-call handbook was refused: The page changed since you opened it");
+  expect(section().querySelector(".tf-sec-queued")).toBeNull();
+  expect(squash(section())).toContain("@Mara");
+  await resend(edit);
+  expect(location.hash).toBe("#/page/confluence%3A2/1");
+  expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Ask Priya.");
+
+  const said = refuse(12, "403 Forbidden");
+  expect(said.text).toBe("Comment on On-call handbook was refused: 403 Forbidden");
+  expect(queuedComments()).toEqual([]);
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!;
+  expect(box.value).toBe("");
+  await resend(said);
+  expect(box.value).toBe("Done.");
+
+  const made = refuse(13, "A page with this title already exists");
+  expect(made.text).toBe("Page Retry metrics was refused: A page with this title already exists");
+  expect(queuedPages()).toEqual([]);
+  await resend(made);
+  const dialog = document.querySelector("[role='dialog']")!;
+  expect(dialog.querySelector<HTMLSelectElement>("select[aria-label='Under']")?.value).toBe("confluence:2");
+  expect(dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")?.value).toBe("Retry metrics");
+  expect(dialog.querySelector<HTMLTextAreaElement>("textarea[aria-label='Page text']")?.value).toBe("## Dashboards");
 });
