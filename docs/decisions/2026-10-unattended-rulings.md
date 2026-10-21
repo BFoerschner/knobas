@@ -9336,5 +9336,10 @@ stays reachable and no component is added. Hiding counts costs the Inbox and Mon
   heading, a change touching or adding or removing a heading, two sections). The miss direction is
   pinned by a test. *Reversing:* drop the `UpdatePage` branch back to `titled(...)`.
 - **The `UpdatePage` doc comment still names `page-sections.ts`;** filed as #1528 (`backlog`).
+- **Every heading level counts,** as the adapter's split does (`spans` in
+  `knobas-source-confluence`), so the name is the heading *Save section* edited under, the one the
+  Docs toast names. `CONTEXT.md`'s **Section** says levels one to three; that pre-existing
+  disagreement between glossary and adapter is filed as #1531 (`backlog`), and `editedSection`
+  follows whichever way it is settled.
 - **The words:** *Edit section “Context” of SEPA payout retry design*, as #1425 asked and as the
   Docs toast says; *… of a page* until the title is known.

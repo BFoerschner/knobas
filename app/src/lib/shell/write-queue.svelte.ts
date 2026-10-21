@@ -375,6 +375,9 @@ export interface WritePart {
   code?: true;
 }
 
+/** What `writeWords` reads off a row: the op, its target, and for a page edit the page it was made against. */
+export type WordedRow = Pick<QueuedWrite, "op" | "entity_id" | "payload"> & { target_snapshot?: unknown };
+
 /**
  * What a queued write does, in words (#1425): *Comment on PAY-231*, *1 h
  * worklog on PAY-228*, *Pause monitor Payments API*.
@@ -391,7 +394,7 @@ export interface WritePart {
  * otherwise it names the page.
  */
 export function writeWords(
-  row: Pick<QueuedWrite, "op" | "entity_id" | "payload"> & { target_snapshot?: unknown },
+  row: WordedRow,
   name: (entityId: string) => string | null,
 ): WritePart[] {
   const bag = (typeof row.payload === "object" && row.payload !== null ? row.payload : {}) as Record<string, Record<string, unknown> | undefined>;
@@ -495,7 +498,7 @@ export function writeWords(
  * Whether a row's heading names its target by a looked-up title, so the panel
  * knows which rows to ask a name for: `writeWords` asks for one or it does not.
  */
-export function namedByTitle(row: Pick<QueuedWrite, "op" | "entity_id" | "payload"> & { target_snapshot?: unknown }): boolean {
+export function namedByTitle(row: WordedRow): boolean {
   let asked = false;
   writeWords(row, () => {
     asked = true;
@@ -518,7 +521,11 @@ export function namedByTitle(row: Pick<QueuedWrite, "op" | "entity_id" | "payloa
  *
  * A payload read outside an adapter (ADR-0007), confined to this function:
  * the record's `body.storage.value` and its `<h1>`–`<h6>` headings, as the
- * Confluence adapter keeps them. It **misses to the page name**, never to
+ * Confluence adapter keeps them. Every level, because the adapter's section
+ * split (`spans` in `knobas-source-confluence`'s `blocks.rs`) starts a section
+ * at every level, so the heading named is the one *Save section* edited under.
+ * Until the wiki role declares where a page's sections live (ADR-0007's
+ * destination), another wiki source's record misses here. It **misses to the page name**, never to
  * another section: no snapshot, another op's, no storage body, no difference,
  * a difference before the first heading, or one that touches a heading or
  * spans two sections all answer `null`, and the row says *Edit page …* as it

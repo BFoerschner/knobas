@@ -15,6 +15,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { QueueCounts, QueuedWrite } from "../ipc/sources";
+import type { WordedRow } from "./write-queue.svelte";
 
 const calls: { command: string; args: unknown }[] = [];
 let rows: QueuedWrite[] = [];
@@ -312,7 +313,7 @@ test("once the blocker is discarded the write waits on its source alone", async 
 // -- a row in words (#1425) ---------------------------------------------------
 
 /** A row's heading as the reader sees it: the parts, joined. */
-function words(row: Parameters<typeof writeWords>[0], names: Record<string, string> = {}): string {
+function words(row: WordedRow, names: Record<string, string> = {}): string {
   return writeWords(row, (id) => names[id] ?? null)
     .map((part) => part.text)
     .join("");
@@ -474,7 +475,7 @@ test("the panel is a ticket-first dialog: its title, its counts, no capitals, ev
  * closes the topmost layer, and the panel's layer is its own close. The
  * shell's tests press the key; this pins the layer the key reaches.
  */
-test("Esc closes the panel as a layer, and the layer goes with it", async () => {
+test("the panel's layer closes it, and goes when the panel does", async () => {
   let closes = 0;
   const screen = await render({}, () => (closes += 1));
   expect(screen.layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);

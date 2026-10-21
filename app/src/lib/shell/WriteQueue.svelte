@@ -128,7 +128,9 @@
     // First: one item's writes go in order, so nothing else moves this write
     // until the one above is sent or discarded, source or no source (#1473).
     const blocker = blockedBy.get(row.id);
-    if (blocker !== undefined) return `Waits for the ${blocker.state} write above.`;
+    if (blocker !== undefined) {
+      return blocker.state === "held" ? "Waits for the held write above." : "Waits for the refused write above.";
+    }
     // Before the per-attempt reasons: the scheduler never flushes a disabled
     // source, so whatever the last attempt said, nothing will move until the
     // source is back on — and "not tried yet" forever would be this surface
