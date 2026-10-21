@@ -9720,3 +9720,28 @@ unchanged.
 - **Fixture.** The fake's branch `feat/PAY-231-idempotent-retry` and commit `mock:9f2c1ab` gain the
   parent path Gitea declares (`tidewater/payout-service`), so `?fake-ipc` witnesses the redirect.
   *Reversing:* fixture only.
+## #1442: the Open in component remembers the root it just saved (Sonnet implementer, 2026-10-21)
+
+**The fork:** keep the saved root in `TfOpenIn`, or make every parent re-read the checkout.
+
+**Ruling:** `TfOpenIn` keeps the root *Set and clone* saved (`savedRoot`) and uses it in `clone()`, in the dialog's done handler (so the stop toast names the root) and in the Clone tooltip. The `checkout` prop's `clones_root` is the fallback. No `clones_root` IPC read.
+
+**Reasoning:** six parents mount the component; the local state fixes all of them and needs no late re-read. A remount reads a fresh checkout, which carries the root.
+
+**Cost of reversing:** low, one component.
+
+## #1443: the two sentences, and Make default keeps the order (Sonnet implementer, 2026-10-21)
+
+**The fork:** the exact sentences, and whether Make default moves the row to the top.
+
+**Ruling:** the recommended sentences. Manage applications: "Open in… ▾ lists these, the default first. Pick the default with the round button; ↑ orders the rest." Settings › Checkouts: "The default is listed first in Open in… and runs on Enter." Make default keeps the table order and changes only the default.
+
+**Reasoning:** R-8.23 keeps default and order as separate controls, and `menuOrder` already lists the default first in the menu.
+
+**Cost of reversing:** low, two strings; moving the row on Make default would be a small change in `makeDefault`.
+
+## #1444: mono only on a real root and a real command (Sonnet implementer, 2026-10-21)
+
+**The fork:** none beyond the ticket. The mono class moved from the table cells onto a span around the command text; *Not set* and *opens the checkout* are dim sans spans, so the cell text and columns are unchanged.
+
+**Cost of reversing:** low, one component.

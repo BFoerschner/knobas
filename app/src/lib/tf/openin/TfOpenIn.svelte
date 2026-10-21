@@ -57,6 +57,8 @@
   } = $props();
 
   let open = $state(false);
+  /** The root *Set and clone* just saved: the `checkout` prop is re-read later (#1442). */
+  let savedRoot = $state<string | null>(null);
   let dialog = $state<"add" | "manage" | "root" | null>(null);
   let face = $state<HTMLButtonElement | null>(null);
   let menu = $state<HTMLDivElement | null>(null);
@@ -68,6 +70,7 @@
   );
   const name = $derived(repoName(title));
   const repoId = $derived(checkout?.repo_entity_id ?? entityId);
+  const root = $derived(checkout?.clones_root ?? savedRoot);
   const mark = $derived(clones.marks[repoId]);
   const path = $derived(checkout?.path ?? null);
   const entries = $derived(apps.settings === null ? [] : menuOrder(apps.settings));
@@ -121,15 +124,16 @@
 
   function clone() {
     if (checkout === undefined) return;
-    if (checkout.clones_root === null) {
+    if (root === null) {
       dialog = "root";
       return;
     }
-    void clones.start({ entityId: repoId, name, repoUrl: checkout.repo_url, root: checkout.clones_root });
+    void clones.start({ entityId: repoId, name, repoUrl: checkout.repo_url, root });
   }
 
-  async function setRoot(root: string) {
-    await saveRoot(root);
+  async function setRoot(path: string) {
+    await saveRoot(path);
+    savedRoot = path;
     void apps.reload();
   }
 </script>
@@ -174,7 +178,7 @@
     </span>
   {:else}
     <span class="tf-openin">
-      <button type="button" class={cls} title={cloneTip(checkout.clones_root, name)} onclick={clone}
+      <button type="button" class={cls} title={cloneTip(root, name)} onclick={clone}
         >{mark?.kind === "failed" ? "Try again" : "Clone"}</button
       >
       {#if mark?.kind === "failed"}<span class="tf-clonefail" role="alert">{mark.text}</span>{/if}
@@ -191,6 +195,6 @@
     save={setRoot}
     {layers}
     onclose={() => (dialog = null)}
-    ondone={() => void clones.start({ entityId: repoId, name, repoUrl: checkout?.repo_url ?? null, root: null })}
+    ondone={() => void clones.start({ entityId: repoId, name, repoUrl: checkout?.repo_url ?? null, root: savedRoot })}
   />
 {/if}

@@ -101,3 +101,32 @@ test("Make default saves the list with the new default, and Change… sets the c
   expect(roots).toEqual(["~/src"]);
   expect(text(target.querySelector(".tf-stg-row"))).toContain("~/src");
 });
+
+test("the section says the default is listed first and runs on Enter, and Make default keeps the row order (#1443)", async () => {
+  await draw();
+  expect(text(target.querySelector(".tf-stg-p"))).toContain("The default is listed first in Open in… and runs on Enter.");
+  expect(text(target.querySelector(".tf-stg-p"))).not.toContain("The first one is the default");
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Make default")!.click();
+  await settle();
+  expect([...target.querySelectorAll("tbody tr")].map((tr) => text(tr.querySelector("td")))).toEqual(["VS Code", "Fork default"]);
+});
+
+const inMono = (el: Element | null | undefined) => el?.closest(".tf-mono") != null;
+const mark = (root: ParentNode, needle: string) =>
+  [...root.querySelectorAll("*")].filter((el) => text(el) === needle && el.children.length === 0).at(-1) ?? null;
+
+test("a set root and real commands draw in mono; Not set and opens the checkout are sans labels (#1444)", async () => {
+  await draw();
+  expect(inMono(mark(target, "/Users/mara/code"))).toBe(true);
+  expect(inMono(mark(target, "code {path}"))).toBe(true);
+  expect(inMono(mark(target, "open -a Fork {path}"))).toBe(true);
+  expect(inMono(mark(target, "opens the checkout"))).toBe(false);
+});
+
+test("with no clones root, Not set is not in the mono face (#1444)", async () => {
+  stored = { ...stored, clones_root: null };
+  await draw();
+  const notSet = mark(target, "Not set");
+  expect(notSet).not.toBeNull();
+  expect(inMono(notSet)).toBe(false);
+});
