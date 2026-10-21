@@ -104,6 +104,7 @@ function render(
     offers?: Record<number, AdHocBlock | null>;
     clock?: Date;
     stripWidth?: number;
+    plainPx?: number;
     refuseDelete?: boolean;
   } = {},
 ) {
@@ -130,7 +131,7 @@ function render(
       // Six hundred pixels wide and seven a character, unless a test says otherwise:
       // jsdom lays nothing out and measures no text.
       stripWidth: () => over.stripWidth ?? 600,
-      measureLabel: (text: string) => text.length * 7,
+      measureLabel: (text: string, plain: boolean) => text.length * (plain ? (over.plainPx ?? 7) : 7),
       layers,
       ports: {
         search: (query: SearchQuery) => {
@@ -425,6 +426,13 @@ test("an open stretch's Assign… is fitted to a narrow block like any label (#1
   render({ stripWidth: 600 });
   await settle();
   expect(target.querySelector(".tf-tm-strip .tf-tm-gap text")?.textContent).toBe("As…");
+});
+
+test("an open stretch is measured in the sans face: Assign… fits where the mono face would not (#1523)", async () => {
+  // The stub measures 6 px a character plain and 7 mono, so 42 px of room holds Assign… only in sans.
+  render({ stripWidth: 1000, plainPx: 6 });
+  await settle();
+  expect(target.querySelector(".tf-tm-strip .tf-tm-gap text")?.textContent).toBe("Assign…");
 });
 
 /** Type into the dialog's search and wait out the launcher session's debounce. */
