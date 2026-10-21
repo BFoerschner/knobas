@@ -1398,6 +1398,63 @@ test("moving to an asset no route reaches leaves no wire behind", async () => {
 });
 
 /**
+ * Lay the Tree out for one test: jsdom measures every element as zero, which
+ * is the unlaid branch every other wire test runs on. `rows` is where each
+ * route row sits, by its wire key, in the window's pixels; the frame and the
+ * pane run `tall` pixels down, past the window's bottom edge, which is the
+ * page that grows with its pane (#1460).
+ */
+function layOut(rows: Record<string, number>, tall: number): void {
+  const rect = (left: number, top: number, width: number, height: number) =>
+    ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    if (this.matches("div.tree")) return rect(0, 0, 1000, tall);
+    if (this.matches("aside.pane")) return rect(680, 0, 320, tall);
+    if (this.matches("div.cols")) return rect(0, 0, 680, tall);
+    if (this.matches("ol.col")) return rect(0, 0, 220, window.innerHeight);
+    if (this.matches("button.row")) return rect(20, 40, 200, 24);
+    const key = this.getAttribute("data-wire");
+    if (this.matches("li[data-wire]") && key !== null && rows[key] !== undefined) return rect(690, rows[key], 300, 20);
+    return rect(0, 0, 0, 0);
+  });
+}
+
+/**
+ * **A wire starts only from a route row the reader can see** (#1460).
+ *
+ * The pane's box reaching below the window is the page that grew with its
+ * pane: every *Reachable via* row in it counted as visible, and their wires
+ * ran off the bottom edge to rows nobody could see. The visible part of the
+ * pane ends at the window, so the row below it draws nothing and the one
+ * inside it still draws.
+ */
+test("a route row below the window draws no wire, and one inside it does", async () => {
+  const below = window.innerHeight + 400;
+  layOut({ "exposes:route:gitea": 100, "via:route:gitea": below }, window.innerHeight + 1500);
+  render("#/asset/asset:vm-app-02");
+
+  await vi.waitFor(() => expect(wires()).toEqual(["exposes:route:gitea → asset:gitea"]));
+});
+
+/**
+ * **Scrolling the pane re-measures** (#1460): the pane is its own scroller, and
+ * a row scrolled into view gains its wire at once, with nothing else changed.
+ */
+test("a scroll on the pane brings a row scrolled into view its wire", async () => {
+  const rows = { "exposes:route:gitea": 100, "via:route:gitea": window.innerHeight + 400 };
+  layOut(rows, window.innerHeight);
+  render("#/asset/asset:vm-app-02");
+  await vi.waitFor(() => expect(wires()).toEqual(["exposes:route:gitea → asset:gitea"]));
+
+  rows["via:route:gitea"] = 300;
+  expect(wires(), "nothing re-measures before the scroll").toHaveLength(1);
+  target.querySelector("aside.pane")?.dispatchEvent(new Event("scroll"));
+  flushSync();
+
+  expect(wires()).toEqual(["exposes:route:gitea → asset:gitea", "via:route:gitea → asset:vm-app-02"]);
+});
+
+/**
  * **The reduced-motion rule switches the wires' fade off and does not hide
  * them** — story 31's *off under reduced motion's no-animation rule (still
  * drawn, not animated)*, as far as a stylesheet can be asked.

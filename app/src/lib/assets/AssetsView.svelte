@@ -807,6 +807,13 @@
     // bundle reads as one thing arriving from the pane rather than as lines
     // starting at whatever indent a route's name happens to have.
     const startX = paneBox.left - box.left;
+    // The part of the pane the reader can see: its box, cut to the tree's and
+    // to the window's. The tree page is viewport-high and the pane its own
+    // scroller (#1460), so the cut is the pane's box itself; it stays a cut
+    // so that a page laid out taller than the window still draws no wire from
+    // a row below its bottom edge.
+    const seenTop = Math.max(paneBox.top, box.top, 0);
+    const seenBottom = Math.min(paneBox.bottom, box.bottom, window.innerHeight);
 
     const next: DrawnWire[] = [];
     for (const wire of wireEnds) {
@@ -823,9 +830,10 @@
       if (from === null || to === null) continue;
 
       const fromBox = from.getBoundingClientRect();
-      // A route row scrolled out of the pane draws nothing: a line leaving the
-      // pane's top edge would point at a row the reader cannot see.
-      if (laid && (fromBox.bottom < paneBox.top + 2 || fromBox.top > paneBox.bottom - 2)) continue;
+      // A route row scrolled out of the pane, or below the window, draws
+      // nothing: a line leaving an edge would start at a row the reader cannot
+      // see (CONTEXT.md, **Wire**).
+      if (laid && (fromBox.bottom < seenTop + 2 || fromBox.top > seenBottom - 2)) continue;
 
       const toBox = to.getBoundingClientRect();
       // The band the far end may be drawn in: the column's own scrolling list,

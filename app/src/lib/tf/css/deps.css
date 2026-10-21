@@ -200,4 +200,8 @@
 .tf-dialog footer:has(> .tf-dp-sure) { flex-wrap: wrap; }
 .tf-dp-sure { flex: 0 0 100%; margin: 0; color: var(--err); font-size: var(--t-sm); overflow-wrap: anywhere; }
 .tf-dp-del { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* The asset tree is viewport-high (#1460): the page under the breadcrumb is exactly the main area's
+   height, so the pane is its own scroller and the columns scroll under it (story 33), and nothing in the
+   page scrolls as a whole. A page that grew with its pane drew wires from rows below the window. */
+.tf-full:has(> .tf-asset-tree) { height: 100%; }
 .tf-asset-tree { min-height: 0; flex: 1; display: flex; flex-direction: column; }
