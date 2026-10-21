@@ -368,7 +368,7 @@ export function snoozePresets(now: Date, deadline?: Date | null): SnoozePreset[]
  * `now`'s day (a past `until` puts the item straight back in the stream).
  */
 export function pickedMorning(value: string, now: Date = new Date()): Date | null {
-  const match = /^(\d{4,})-(\d{2})-(\d{2})$/.exec(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) return null;
   const [y, m, d] = [Number(match[1]), Number(match[2]), Number(match[3])];
   if (y < 1000 || m < 1 || m > 12 || d < 1 || d > 31) return null;

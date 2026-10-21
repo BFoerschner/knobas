@@ -9435,3 +9435,11 @@ sources hold) too.
 - **Equivalent mutants:** the `year < 1000` guard and the `setFullYear` choice cannot be told apart
   from the past-day rule by any input, since every such year is already past. Both stay as the
   ticket specifies; the unit test pins `0002-11-02` and `0999-01-01` as `null`.
+
+## #1437: the picked year must be exactly four digits (Sonnet merge-manager, 2026-10-21)
+
+- **Fork:** Chrome's date field accepts 5 and 6 digit years; `\d{4,}` let `20261-01-01` through as a
+  future day (and `toISOString` writes it as `+020261-…`). *Ruling:* the pattern is `\d{4}`, as the
+  ticket says "four-digit year". *Reversing:* put `{4,}` back; one unit assertion goes with it.
+- **Equivalent mutants** (`year < 1000` dropped, years < 100 mapped to 19xx): accepted as equivalent
+  while `now` is after year 1000; the past-day rule catches every such year.

@@ -398,4 +398,5 @@ test("pickedMorning is 09:00 local on a day after today, and null for anything e
   expect(pickedMorning("", now)).toBeNull();
   expect(pickedMorning("2026-08", now)).toBeNull();
   expect(pickedMorning("0999-01-01", now)).toBeNull();
+  expect(pickedMorning("20261-01-01", now), "a five-digit year is not a four-digit year").toBeNull();
 });
