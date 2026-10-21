@@ -1396,6 +1396,16 @@ demo: deps
 desktop-witness driver="":
     testenv/desktop-witness.sh {{ quote(driver) }}
 
+# Screenshots of the real app against live products (#1483): starts `just demo`
+# with KNOBAS_SECRET_STORE=memory, sources <steps> (shot, press, focus, type,
+# key, click-at, settle; testenv/live-shot.sh has each) and writes the knobas
+# window only, scaled from Retina, to <out>. LIVE_SHOT_PRODUCT=gitea (or another
+# testenv/live product) brings one up under its lock first and exports its
+# `./seed --env`; LIVE_SHOT_AEROSPACE=1 fullscreens the window in AeroSpace.
+# Takes the screen and the desktop witness's lock; never part of a gate.
+live-shot out steps:
+    testenv/live-shot.sh {{ quote(out) }} {{ quote(steps) }}
+
 # The single-instance witness (#748): launches the debug binary twice against a
 # temp HOME and an unreachable database, and checks the second never reaches
 # database startup. `--demo-beside` checks the demo profile still runs beside a

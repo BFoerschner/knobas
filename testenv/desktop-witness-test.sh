@@ -818,8 +818,60 @@ if [ "$(uname -s)" = Darwin ] && command -v swiftc >/dev/null; then
     else
         check "the lookup refuses an unregistered identifier" yes yes
     fi
+
+    # live-shot's four (#1483), against the same windowless shell: a window
+    # id it cannot find, and a visible match it cannot see, are refusals; an
+    # n that is not a number is the usage block, not a guess.
+    "$helper/ax" window-id $$ >/dev/null 2>&1 && answer=0 || answer=$?
+    check "window-id refuses a process with no window" 1 "$answer"
+    "$helper/ax" press-visible $$ Anything >/dev/null 2>&1 && answer=0 || answer=$?
+    check "press-visible refuses when nothing is visible" 1 "$answer"
+    "$helper/ax" click-at $$ Anything 2 >/dev/null 2>&1 && answer=0 || answer=$?
+    check "click-at refuses when the process is not frontmost" 1 "$answer"
+    "$helper/ax" focus-visible $$ Anything second >/dev/null 2>&1 && answer=0 || answer=$?
+    check "an n that is no number is a usage error" 2 "$answer"
 else
     printf 'desktop-witness-test: skipping the helper checks (needs macOS and swiftc)\n'
+fi
+
+# --- live-shot (#1483) --------------------------------------------------------
+#
+# The key names its `key` command takes, and the refusals it makes before it
+# takes anything: the screen run itself is `just live-shot`, never a gate's.
+
+check "key_code: a letter is its ANSI position" 40 "$(key_code k)"
+check "key_code: b skips the code ANSI has no key for" 11 "$(key_code b)"
+check "key_code: a digit" 29 "$(key_code 0)"
+check "key_code: a named key" 36 "$(key_code return)"
+check "key_code: an arrow" 125 "$(key_code down)"
+check "key_code: a code passes through" 117 "$(key_code 117)"
+check "key_code: an unknown word is refused" refused "$(key_code Return || echo refused)"
+check "key_code: nothing is refused" refused "$(key_code '' || echo refused)"
+
+if [ "$(uname -s)" = Darwin ]; then
+    shot_tmp=$(mktemp -d "${TMPDIR:-/tmp}/knobas-live-shot-test.XXXXXX")
+    : >"$shot_tmp/steps.sh"
+    refusal() { # <env...> -- <args...>: the status and the message
+        local envs=()
+        while [ "$1" != -- ]; do envs+=("$1"); shift; done
+        shift
+        env TMPDIR="$shot_tmp/" ${envs[@]+"${envs[@]}"} ./live-shot.sh "$@" 2>&1 && echo "status 0" || echo "status $?"
+    }
+    said=$(refusal -- "$shot_tmp/out")
+    check_contains "live-shot: one argument is a usage refusal" "usage: just live-shot" "$said"
+    said=$(refusal -- "$shot_tmp/out" "$shot_tmp/none.sh")
+    check_contains "live-shot: a missing steps file is refused" "no steps file at" "$said"
+    said=$(refusal LIVE_SHOT_AEROSPACE=yes -- "$shot_tmp/out" "$shot_tmp/steps.sh")
+    check_contains "live-shot: LIVE_SHOT_AEROSPACE takes 1 only" "must be 1 or unset" "$said"
+    # Another run holds the witness's lock: refused, and that run's lock is
+    # still there after (the refusal's exit must not clean up what it never took).
+    mkdir "$shot_tmp/knobas-desktop-witness.lock"
+    said=$(refusal -- "$shot_tmp/out" "$shot_tmp/steps.sh")
+    check_contains "live-shot: a held witness lock is refused" "one at a time" "$said"
+    check_contains "live-shot: the refusal exits 1" "status 1" "$said"
+    check "live-shot: the holder's lock survives the refusal" yes \
+        "$([ -d "$shot_tmp/knobas-desktop-witness.lock" ] && echo yes || echo no)"
+    rm -rf "$shot_tmp"
 fi
 
 # --- verdict ----------------------------------------------------------------
