@@ -192,16 +192,16 @@ export function intervalWords(secs: number): string {
 }
 
 /**
- * The schedules *Every* can offer (#1188). A source is offered the steps at or
- * above its adapter's floor (`SourceDescriptor.min_sync_interval_secs`), which
- * is also what the backend refuses under.
- */
-/**
  * The class a credential expiry reading draws in (#1499): plain in the row's
  * own grey, amber in the warning tone, expired in the failure tone.
  */
 export const EXPIRY_CLASS: Record<ExpiryNote["tone"], string> = { plain: "", amber: "tf-stg-warnt", fail: "tf-stg-errt" };
 
+/**
+ * The schedules *Every* can offer (#1188). A source is offered the steps at or
+ * above its adapter's floor (`SourceDescriptor.min_sync_interval_secs`), which
+ * is also what the backend refuses under.
+ */
 export const INTERVALS: readonly number[] = [20, 30, 45, 60, 300, 900, 1800, 3600];
 
 /**

@@ -1153,33 +1153,27 @@ test("the fixture's TeamCity has a run the server never answered, with the long 
   expect(runs.filter((run) => run.id === unanswered[0]!.id)).toHaveLength(1);
 });
 
-test("the fixture's install adds the descriptor to list_adapters and add_source adds the row to list_sources (#1406)", () => {
-  const handlers = demoHandlers();
+test("the fixture's install adds the descriptor to list_adapters and add_source adds the row to list_sources (#1406)", async () => {
+  // A fixture of its own: the install and the new source are module state the other tests read.
+  vi.resetModules();
+  const handlers = (await import("./fake-tauri")).demoHandlers();
   type Source = { id: string; adapter_kind: string; health: { source_id: string }; kinds: { id: string }[] };
   const before = (handlers["list_sources"]!({}) as Source[]).length;
   handlers["install_adapter"]!({ manifest: "/releases/knobas-adapter.json" });
-  try {
-    const kinds = (handlers["list_adapters"]!({}) as { adapter_kind: string }[]).map((row) => row.adapter_kind);
-    expect(kinds).toContain("wasm-fixture");
+  const kinds = (handlers["list_adapters"]!({}) as { adapter_kind: string }[]).map((row) => row.adapter_kind);
+  expect(kinds).toContain("wasm-fixture");
 
-    handlers["add_source"]!({
-      input: { id: "harbour", adapter_kind: "wasm-fixture", display_name: "Harbour", base_url: "https://surveys.harbour.example", config: { fault: "none" } },
-    });
-    const sources = handlers["list_sources"]!({}) as Source[];
-    expect(sources).toHaveLength(before + 1);
-    const harbour = sources.find((source) => source.id === "harbour")!;
-    expect(harbour.adapter_kind).toBe("wasm-fixture");
-    // Its own health and kinds, not the spread fixture's.
-    expect(harbour.health.source_id).toBe("harbour");
-    expect(harbour.kinds.map((kind) => kind.id)).toEqual(["survey"]);
-    expect(() => handlers["add_source"]!({ input: { id: "harbour", adapter_kind: "wasm-fixture" } })).toThrow();
-  } finally {
-    // Module state: put the fixture back for the tests after this one.
-    const rows = FIXTURE_SOURCES as unknown as { id: string }[];
-    const at = rows.findIndex((row) => row.id === "harbour");
-    if (at >= 0) rows.splice(at, 1);
-    handlers["uninstall_adapter"]!({ kind: "wasm-fixture", choices: [] });
-  }
+  handlers["add_source"]!({
+    input: { id: "harbour", adapter_kind: "wasm-fixture", display_name: "Harbour", base_url: "https://surveys.harbour.example", config: { fault: "none" } },
+  });
+  const sources = handlers["list_sources"]!({}) as Source[];
+  expect(sources).toHaveLength(before + 1);
+  const harbour = sources.find((source) => source.id === "harbour")!;
+  expect(harbour.adapter_kind).toBe("wasm-fixture");
+  // Its own health and kinds, not the spread fixture's.
+  expect(harbour.health.source_id).toBe("harbour");
+  expect(harbour.kinds.map((kind) => kind.id)).toEqual(["survey"]);
+  expect(() => handlers["add_source"]!({ input: { id: "harbour", adapter_kind: "wasm-fixture" } })).toThrow();
 });
 
 test("the fixture's Jira credential expires inside the amber window from today, so the countdown is drawn (#1499)", () => {

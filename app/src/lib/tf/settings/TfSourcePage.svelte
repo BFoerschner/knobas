@@ -6,7 +6,8 @@
     in the new shell links here.
   - **Connection**: the address and the user are edited and saved through
     `update_source`; the password or token is re-entered into the keychain through
-    `set_source_secret`, which never reads one back; an adapter that takes a
+    `set_source_secret`, which never reads one back, and its row counts down to
+    the expiry the source reported (#1499); an adapter that takes a
     second credential (Uptime Kuma) has an *Account* row. *Test connection*
     tests what is stored and says what it found.
   - **What it syncs**: the schedule and the pause switch, each saved as it

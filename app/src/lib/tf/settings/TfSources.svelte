@@ -1,7 +1,9 @@
 <!--
   Settings › Sources (#830, R-13a.1): prototype-6's `STGV.sources`. A row per
   source with its state, address, what it holds and its last sync, each
-  opening the source's page; *+ Add a source* and *Sync all* above them.
+  opening the source's page; *+ Add a source* and *Sync all* above them. A
+  credential that expires within two weeks, or has expired, says so under the
+  row's state (#1499).
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";

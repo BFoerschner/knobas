@@ -13,6 +13,8 @@
   *Uninstall…* asks once per source of the adapter what *Remove…* on its
   page asks, keep what it synced or delete it, and sends one answer each.
   Drawn only once one adapter is installed: the built-in ones are not here.
+  An update or uninstall tells Settings, which reads the descriptors the
+  source pages are handed again (#1406).
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -127,12 +129,11 @@
       );
       rows = rows.filter((r) => r.adapter_kind !== row.adapter_kind);
       push({ text: `Uninstalled ${row.name}` });
-      onchanged();
-      if (row.sources.length > 0) onremoved();
     } catch (cause) {
       push({ text: `Could not uninstall ${row.name}: ${ipcErrorMessage(cause)}`, tone: "err" });
       // A failure part-way has removed the sources before it.
       rows = await ports.listInstalledAdapters().catch(() => rows);
+    } finally {
       onchanged();
       if (row.sources.length > 0) onremoved();
     }

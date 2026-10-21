@@ -147,6 +147,13 @@
   /** Whether *Add a source* is open (#903); a source it adds is a new row. */
   let adding = $state(false);
 
+  /** *Add a source* closed: an install there adds an Installed adapters row and a descriptor. */
+  function closeAdd() {
+    adding = false;
+    installs += 1;
+    void loadAdapters();
+  }
+
   /** A locally started run, before its first `sync:state` arrives. */
   function markStarted(id: string) {
     const had = statuses[id];
@@ -290,15 +297,9 @@
   <TfAddSource
     {ports}
     {layers}
-    onclose={() => {
-      adding = false;
-      installs += 1;
-      void loadAdapters();
-    }}
+    onclose={closeAdd}
     onsaved={() => {
-      adding = false;
-      installs += 1;
-      void loadAdapters();
+      closeAdd();
       push({ text: "Added. The first sync is running." });
       void load();
     }}
