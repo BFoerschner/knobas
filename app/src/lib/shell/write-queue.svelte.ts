@@ -36,6 +36,8 @@ import {
   type WriteOpPayload,
   type WriteState,
 } from "../ipc/sources";
+import { durationReading } from "../time/day";
+import { minutesOf } from "../time/week";
 
 /**
  * Whether the queue panel is open. Module-level for one reason: a toast about
@@ -333,6 +335,137 @@ export function withBody(payload: unknown, body: string, heldSnapshot: unknown =
   const base = (heldSnapshot as { base?: unknown } | null)?.base;
   return { CommitFile: { ...commit, content: body, base_sha: typeof base === "string" ? base : commit.base_sha } };
 }
+
+/**
+ * One piece of a row's heading. `code` marks a real code value -- a ticket
+ * key, a branch, a path -- which the panel sets in mono; the words around it
+ * are not (the design system keeps mono off labels).
+ */
+export interface WritePart {
+  text: string;
+  code?: true;
+}
+
+/**
+ * What a queued write does, in words (#1425): *Comment on PAY-231*, *1 h
+ * worklog on PAY-228*, *Pause monitor Payments API*.
+ *
+ * The op's wire name and the raw entity id are never drawn. A ticket or pull
+ * request is named by its key, the half of the id after the source's prefix,
+ * as the launcher's rows name it. A monitor, a page or a build configuration
+ * has no key a person reads, so `name` looks its title up; while it has none
+ * the heading says what kind of thing it is (*Pause a monitor*). A payload
+ * this build cannot read says *A write*, or *A write to* the target's name.
+ *
+ * The page edit names the page, not the section: the payload carries the
+ * whole page's storage format, and the section would have to be guessed
+ * from a diff.
+ */
+export function writeWords(
+  row: Pick<QueuedWrite, "op" | "entity_id" | "payload">,
+  name: (entityId: string) => string | null,
+): WritePart[] {
+  const bag = (typeof row.payload === "object" && row.payload !== null ? row.payload : {}) as Record<string, Record<string, unknown> | undefined>;
+  const variant = Object.keys(bag)[0];
+  const op = variant === undefined ? undefined : bag[variant];
+  const str = (key: string): string | null => (typeof op?.[key] === "string" ? (op[key] as string) : null);
+  const target = str("entity") ?? row.entity_id;
+  const key: WritePart = { text: target.slice(target.indexOf(":") + 1), code: true };
+  /** The target by its title, or by what it is when the title is not known. */
+  const titled = (named: string, unnamed: string): WritePart[] => {
+    const title = name(target);
+    return [{ text: title === null ? unnamed : `${named} ${title}` }];
+  };
+  const quoted = (lead: string, field: string): WritePart[] | null => {
+    const value = str(field);
+    return value === null ? null : [{ text: `${lead} “${value}”` }];
+  };
+
+  const said = ((): WritePart[] | null => {
+    switch (variant) {
+      case "Comment":
+        return [{ text: "Comment on " }, key];
+      case "Transition":
+        return [{ text: "Move " }, key, { text: ` to ${str("status") ?? "another status"}` }];
+      case "Approve":
+        return [{ text: "Approve " }, key];
+      case "LogWork": {
+        const seconds = op?.seconds;
+        if (typeof seconds !== "number") return null;
+        return [{ text: `${durationReading(minutesOf(seconds))} worklog on ` }, key];
+      }
+      case "CreateTicket":
+        return quoted("New ticket", "title");
+      case "CreateBranch": {
+        const branch = str("name");
+        return branch === null ? null : [{ text: "Create branch " }, { text: branch, code: true }];
+      }
+      case "CreatePullRequest":
+        return quoted("Open pull request", "title");
+      case "MergePullRequest":
+        return [{ text: "Merge " }, key];
+      case "SubmitReview":
+        return [{ text: "Review of " }, key];
+      case "EditPullRequest":
+        return [{ text: "Edit " }, key];
+      case "UpdatePullRequestBranch":
+        return [{ text: "Update the branch of " }, key];
+      case "DeleteBranch":
+        return titled("Delete branch", "Delete a branch");
+      case "CommitFile": {
+        const path = str("path");
+        const branch = str("new_branch") ?? str("branch");
+        if (path === null || branch === null) return null;
+        return [{ text: "Commit " }, { text: path, code: true }, { text: " to " }, { text: branch, code: true }];
+      }
+      case "CreatePage":
+        return quoted("New page", "title");
+      case "UpdatePage":
+        return titled("Edit page", "Edit a page");
+      case "PauseMonitor":
+        return titled("Pause monitor", "Pause a monitor");
+      case "ResumeMonitor":
+        return titled("Resume monitor", "Resume a monitor");
+      case "CreateMonitor":
+        return quoted("New monitor", "name");
+      case "TriggerBuild":
+      case "RunBuild":
+        return titled("Run", "Run a build");
+      case "RerunBuild":
+        return titled("Re-run", "Re-run a build");
+      case "SetParameter": {
+        const parameter = str("name");
+        if (parameter === null) return null;
+        const title = name(target);
+        return [{ text: "Set " }, { text: parameter, code: true }, { text: title === null ? "" : ` on ${title}` }];
+      }
+      case "SourceAction":
+        return titled("Action on", "An action on an item");
+      default:
+        return null;
+    }
+  })();
+  if (said !== null) return said.filter((part) => part.text !== "");
+  const title = name(row.entity_id);
+  return [{ text: title === null ? "A write" : `A write to ${title}` }];
+}
+
+/**
+ * The ops whose target is named by its title rather than its key, so the
+ * panel knows which rows to look a name up for.
+ */
+export function namedByTitle(row: Pick<QueuedWrite, "payload">): boolean {
+  if (typeof row.payload !== "object" || row.payload === null) return true;
+  const variant = Object.keys(row.payload)[0] ?? "";
+  return !KEYED.has(variant);
+}
+
+/** The variants whose heading names the target by its key, or by the payload's own words. */
+const KEYED = new Set([
+  "Comment", "Transition", "Approve", "LogWork", "CreateTicket", "CreateBranch", "CreatePullRequest",
+  "MergePullRequest", "SubmitReview", "EditPullRequest", "UpdatePullRequestBranch", "CommitFile",
+  "CreatePage", "CreateMonitor",
+]);
 
 export interface WriteQueue {
   /** The counts, `{0,0,0}` until the first read answers. */

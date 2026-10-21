@@ -1,0 +1,43 @@
+/* ---------- the write queue panel (#1425): prototype-6's *Queued writes* dialog ---------- */
+.tf-dialog.tf-wq-dialog { width: min(760px, calc(100vw - 32px)); }
+.tf-wq-sec { display: flex; flex-direction: column; gap: 8px; }
+.tf-wq-sec + .tf-wq-sec { margin-top: 8px; }
+.tf-wq-h { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); font-weight: 600; }
+/*
+  The decisions heading carries the tone, not just the rows under it: the eye
+  reaches the heading first, and it is the heading that says "this section is
+  different in kind".
+*/
+.tf-wq-h.tf-wq-decide { color: var(--warn); }
+.tf-wq-n { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-wq-note { font-size: var(--t-xs); color: var(--ink-2); }
+/*
+  Three states, three left edges. A held write and a merely pending one are
+  not the same thing waiting different lengths of time -- one needs the reader
+  and the other needs the network -- so they never share an edge.
+*/
+.tf-wq-row {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 12px;
+  border: 1px solid var(--rule); border-left-width: 3px; border-radius: 4px; background: var(--paper);
+}
+.tf-wq-row.tf-wq-held { border-left-color: var(--warn); }
+.tf-wq-row.tf-wq-refused { border-left-color: var(--err); }
+.tf-wq-row.tf-wq-pending { border-left-color: var(--info); }
+.tf-wq-row-h { display: flex; align-items: baseline; gap: 10px; font-size: var(--t-sm); }
+.tf-wq-row-h b { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.tf-wq-when { margin-left: auto; color: var(--ink-2); font-size: var(--t-xs); white-space: nowrap; }
+.tf-wq-why { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-wq-sides { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.tf-wq-side { display: block; margin-bottom: 3px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-wq-pre {
+  margin: 0; padding: 8px 10px; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet-2);
+  font: var(--t-xs)/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto;
+}
+.tf-wq-pre.tf-wq-mine { border-color: var(--rule); color: var(--ink); }
+.tf-wq-gone {
+  padding: 8px 10px; border: 1px dashed var(--rule); border-radius: 4px; color: var(--ink-2); font-size: var(--t-xs);
+}
+.tf-wq-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+/* The footer's line and ADR-0012's sentence stack beside the buttons. */
+.tf-wq-foot { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-wq-guarantee { font-size: var(--t-xs); color: var(--ink-2); }

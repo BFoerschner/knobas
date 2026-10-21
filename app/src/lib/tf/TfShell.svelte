@@ -413,8 +413,8 @@
   </main>
   <TfStatusBar {readings} pending={queue.counts.pending} decisions={decisionsIn(queue.counts)} onqueue={openWriteQueue} />
   {@render dialogs?.()}
+  {#if writeQueuePanel.open}
+    <WriteQueue {queue} {now} {layers} onclose={() => (writeQueuePanel.open = false)} />
+  {/if}
   <TfToasts />
 </div>
-{#if writeQueuePanel.open}
-  <WriteQueue {queue} {now} onclose={() => (writeQueuePanel.open = false)} />
-{/if}
