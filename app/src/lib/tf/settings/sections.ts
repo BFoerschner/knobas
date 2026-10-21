@@ -100,7 +100,7 @@ export const NOTIFY_KINDS: readonly { id: InboxCategory; label: string }[] = [
   { id: "mention", label: "You are mentioned" },
   { id: "failed_build", label: "A build you started or care about failed" },
   { id: "new_assignment", label: "A ticket is assigned to you" },
-  { id: "credential_expiry", label: "A source cannot sign in" },
+  { id: "credential_expiry", label: "A source's credential is about to expire" },
   { id: "alert", label: "A monitor goes down" },
 ];
 
