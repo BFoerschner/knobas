@@ -70,8 +70,7 @@ export function markQueued(entity: string, kind: string, text: string, how: Mark
   const gone = () => drop(entity, (mark) => mark.write === write);
   follows.add(onWithdrawn(write, gone));
   if (!how.following) return;
-  const onstop = gone;
-  follows.add(followWrite({ id: write }, { ...how.following, onstop }, how.follower ?? writeFollower()));
+  follows.add(followWrite({ id: write }, { ...how.following, onstop: gone }, how.follower ?? writeFollower()));
 }
 
 function drop(entity: string, gone: (mark: Mark) => boolean): void {
