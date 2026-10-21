@@ -857,7 +857,7 @@ if [ "$(uname -s)" = Darwin ]; then
         local envs=()
         while [ "$1" != -- ]; do envs+=("$1"); shift; done
         shift
-        env TMPDIR="$shot_tmp/" LIVE_SHOT_DRY_RUN=1 ${envs[@]+"${envs[@]}"} ./live-shot.sh "$@" 2>&1 && echo "status 0" || echo "status $?"
+        env TMPDIR="$shot_tmp/" LIVE_SHOT_DRY_RUN=1 LIVE_SHOT_PRODUCT= LIVE_SHOT_AEROSPACE= ${envs[@]+"${envs[@]}"} ./live-shot.sh "$@" 2>&1 && echo "status 0" || echo "status $?"
     }
     said=$(refusal -- "$shot_tmp/out")
     check_contains "live-shot: one argument is a usage refusal" "usage: just live-shot" "$said"

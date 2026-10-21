@@ -10735,3 +10735,10 @@ Björn delegated four picks at triage (2026-10-21); two more came up while build
   ⌘A came out capitalised (the steps file now keeps the default id). Each bug was fixed in the
   driver, not the app. *Reasoning:* the brief says to fix the driver when it cannot find an
   element, and only a run shows that the fix works. *Reversing:* none; this records what ran.
+- **Merge-manager: `pick` accepts no ambiguous match, no pin owed.** *Ruling:* the surviving
+  mutant (an ambiguous match accepted) is not pinned. `choose` already refuses a count other than
+  one without an `n`; the unit test has no window to hold two matches, and a pin would need a
+  fixture window the gate does not have. Instead the unit test now blanks `LIVE_SHOT_PRODUCT`
+  and `LIVE_SHOT_AEROSPACE` in its dry runs, so an exported variable cannot start a product
+  inside a gate. *Reasoning:* the refusal is one guard, read in review; the hazard that mattered
+  was the env leak. *Reversing:* low.
