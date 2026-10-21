@@ -3319,7 +3319,7 @@ export type SuggestionMore = { item: LinkEnd,
 more: number, };
 
 /**
- * One page of a room's tray: the proposals, and how many there are in all.
+ * One page of a room's proposals, and how many there are in all.
  *
  * `total` is the whole room, not the page -- #41's story 19 is "see how many
  * suggestions are waiting, so that I can choose when to spend attention on
@@ -3330,14 +3330,12 @@ export type SuggestionPage = { rows: Array<SuggestionEntry>,
 /**
  * Every proposal in the room, before `limit`.
  *
- * The number the tray's heading shows.
+ * The number the Proposed links badge shows.
  */
 total: number, 
 /**
- * Items holding more proposals than the tray draws for one item (#774),
- * most hidden first. The bound is applied by `suggest::proposals`.
- *
- * The tray draws three per item.
+ * Items holding more proposals than one item shows (#774), most hidden
+ * first. The bound is applied by `suggest::proposals`.
  */
 more: Array<SuggestionMore>, };
 

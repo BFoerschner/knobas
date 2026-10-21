@@ -720,8 +720,8 @@ pub enum WriteOp {
     /// never the fragment the reader edited. Confluence's content `PUT`
     /// replaces the record, so a request carrying one section would delete the
     /// rest of the page; re-assembling the whole body around the edited
-    /// section is the caller's job and `app/src/lib/detail/page-sections.ts`
-    /// is where it happens.
+    /// section is the caller's job and `DocWrites::edit_section`
+    /// (`knobas-source-confluence`, `blocks.rs`) is where it happens.
     ///
     /// `base_version` is the version number the edit was made **against** --
     /// `version.number` as the mirror held it when the reader started typing.
@@ -739,8 +739,8 @@ pub enum WriteOp {
         base_version: i64,
         /// The page's **whole** storage format. Confluence's content `PUT`
         /// replaces the record, so a body carrying only the edited section
-        /// would delete the rest of the page -- `page-sections.ts`'s
-        /// `replaceSectionBody` is what composes this.
+        /// would delete the rest of the page -- `DocWrites::edit_section`
+        /// is what composes this.
         body: String,
     },
     /// Identifier `"pause_monitor"`. Stop a monitor checking (M4.1, issue

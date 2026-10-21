@@ -1,16 +1,18 @@
-//! Suggestions and the room tray.
+//! Suggestions: the proposed-link writes and the reads behind Proposed links.
 
 use super::*;
 
-// -- suggestions and the room tray -----------------------------------------
+// -- suggestions -----------------------------------------------------------
 //
 // Four commands, and #836's evidence read, in this module and not a new one:
 // a suggestion **is** a link row (#41), these are the writes that move it
 // between the two states the link store already has, and the reads are the
-// same graph the panel above reads from the other side. A
+// same graph the panel above reads from the other side. The reads serve the
+// Proposed links view (the page, the open proposal's evidence) and the count
+// behind its badge; the room tray they once fed went with #881. A
 // `commands/suggest.rs` would be a second module over one table.
 
-/// One page of a room's tray: the proposals, and how many there are in all.
+/// One page of a room's proposals, and how many there are in all.
 ///
 /// `total` is the whole room, not the page -- #41's story 19 is "see how many
 /// suggestions are waiting, so that I can choose when to spend attention on
@@ -22,12 +24,10 @@ pub struct SuggestionPage {
     pub rows: Vec<SuggestionEntry>,
     /// Every proposal in the room, before `limit`.
     ///
-    /// The number the tray's heading shows.
+    /// The number the Proposed links badge shows.
     pub total: i64,
-    /// Items holding more proposals than the tray draws for one item (#774),
-    /// most hidden first. The bound is applied by `suggest::proposals`.
-    ///
-    /// The tray draws three per item.
+    /// Items holding more proposals than one item shows (#774), most hidden
+    /// first. The bound is applied by `suggest::proposals`.
     pub more: Vec<suggest::SuggestionMore>,
 }
 
@@ -67,7 +67,7 @@ pub async fn detect_suggestions_inner(
 /// one-hop rule, resolved by the store that owns it -- plus the context's own
 /// entity, so a proposed *add to this context* surfaces in the room it would
 /// add to. Membership is computed from confirmed links only (ADR-0008), which
-/// is what keeps "the tray scopes by membership" from becoming circular with
+/// is what keeps "proposals scope by membership" from becoming circular with
 /// "membership is built from links".
 ///
 /// # Errors
@@ -89,7 +89,7 @@ pub async fn room_suggestions_inner(
     };
     let members = members.as_deref();
     // The count reads the whole room and the rows read its newest end: two
-    // connections at once, so the tray waits for the slower and not the sum.
+    // connections at once, so the read waits for the slower and not the sum.
     let drawn = async {
         let rows = suggest::proposals(pool, sources, members, i64::from(limit)).await?;
         let more = suggest::proposal_overflow(pool, sources, members, &rows).await?;
@@ -160,8 +160,8 @@ pub async fn dismiss_suggestion_inner(
 /// text it was found in with the match marked, what supports it and what
 /// speaks against it. The Proposed links view reads it for the proposal open.
 ///
-/// A read beside `room_suggestions`, not a field on its rows: the tray's
-/// ranking and read are unchanged, and only the open proposal pays for the
+/// A read beside `room_suggestions`, not a field on its rows: that read's
+/// ranking and shape are unchanged, and only the open proposal pays for the
 /// text scan (`knobas_core::evidence`).
 ///
 /// # Errors
@@ -198,7 +198,10 @@ pub async fn detect_suggestions(lifecycle: State<'_, Lifecycle>) -> Result<u32, 
     detect_suggestions_inner(&lifecycle.suggestions()?).await
 }
 
-/// One page of a room's suggestion tray.
+/// One page of a room's proposals, newest first, and the room's total.
+///
+/// Serves Proposed links; the tray this once fed went with #881 (the badge
+/// count reads `total` with `limit` 1).
 ///
 /// # Errors
 ///
