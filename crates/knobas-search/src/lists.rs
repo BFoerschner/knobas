@@ -233,7 +233,7 @@
 //! board is still one round trip.**
 //!
 //! What changed is that there is now a second corpus. #504's three lists are
-//! about the **estate** -- *Not monitored*, *Open alerts in my contexts*,
+//! about the **estate** -- *Not monitored*, *Open alerts on my jobs*,
 //! *Certificates expiring* -- and `knobas.asset` is not in `sync.live_item` and
 //! never will be: an asset is a thing knobas owns, not a thing it mirrors
 //! ([`crate::corpus::ASSET`] says the same about search). A predicate over the
@@ -567,7 +567,7 @@ macro_rules! monitors_asset {
 /// When the newest **open** alert on the monitors watching this asset opened,
 /// or `null` if none is open.
 ///
-/// Written once and read twice: it is *Open alerts in my contexts*' badge
+/// Written once and read twice: it is *Open alerts on my jobs*' badge
 /// stamp, and `is not null` is the alert half of that list's predicate. That is
 /// deliberate -- an `exists` beside a `max` would be two spellings of "does
 /// this asset have an open alert", and the day one grew a clause the count and
@@ -848,8 +848,8 @@ builtins! {
     asset: "not-monitored", "Not monitored", "not_monitored",
         "Estate assets with no monitor attached to them.",
         not_monitored_pred, asset_touched_at;
-    asset: "alerts-in-context", "Open alerts in my contexts", "alerts_in_context",
-        "Assets a context you have not archived holds, with a monitor in trouble.",
+    asset: "alerts-in-context", "Open alerts on my jobs", "alerts_in_context",
+        "Assets a job you have not finished holds, with a monitor in trouble.",
         alerts_in_context_pred, open_alert_opened_at;
     asset: "certs-expiring", "Certificates expiring", "certs_expiring",
         "Assets whose certificate runs out in under 30 days.",
@@ -1207,7 +1207,7 @@ mod tests {
         );
     }
 
-    /// The context half of *Open alerts in my contexts* is ADR-0008's walk and
+    /// The context half of *Open alerts on my jobs* is ADR-0008's walk and
     /// not a second reading of it, and the alert half is open-and-not-closed.
     #[test]
     fn the_alert_list_routes_by_the_membership_walk_and_nothing_else() {

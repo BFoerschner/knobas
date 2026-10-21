@@ -57,7 +57,7 @@ These are decided, so a mockup changes them only by changing the spec.
 | Filter chips (source, kind, `@me`, time) and **coverage**: which sources could answer this filter and which have nothing to match | BUILT | `coverage.ts` |
 | Rows show a path line (parent chain) and a state chip (PR open/merged, build outcome) | BUILT | |
 | Empty query = **launcher board**: smart lists with counts and change badges, contexts, inbox preview, today's time, recent items, pending-writes footer | BUILT | `launcher_home` |
-| Built-in smart lists: *Changed today*, *My items*, *Mine, untouched 14 days*, *Just synced*, *Not monitored*, *Open alerts in my contexts*, *Certificates expiring* | BUILT | `knobas-search/src/lists.rs` |
+| Built-in smart lists: *Changed today*, *My items*, *Mine, untouched 14 days*, *Just synced*, *Not monitored*, *Open alerts on my jobs*, *Certificates expiring* | BUILT | `knobas-search/src/lists.rs` |
 | *Save this search as a list*, rename, delete (max 8 saved); a list the current grammar refuses shows *needs attention* | BUILT | `create/rename/delete_smart_list` |
 | `Tab` action chain on a result: *Link to ⟨open entity⟩* › *Add to ⟨current context⟩* › *Start timer* | BUILT | Only actions that apply are shown. |
 | Wider action chain: *Change status*, *Comment*, *Start work*, *Open in browser* straight from a result | LOW | The ops exist; the chain only needs entries. |
