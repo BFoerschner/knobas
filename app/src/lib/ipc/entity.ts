@@ -525,28 +525,6 @@ export function deleteNote(noteId: string): Promise<boolean> {
 }
 
 /**
- * Run a detection pass over the mirror, resolving to how many proposals it
- * wrote — `detect_suggestions`.
- *
- * Idempotent and cheap to repeat: a pass over an unchanged mirror writes
- * nothing, and a pass after a sync writes only what the new items justify and
- * resurrects nothing that was dismissed.
- *
- * Nothing in the frontend calls it: the sync scheduler requests a pass after
- * every run that ends OK (#1485). This is the manual *run a pass now*.
- *
- * One pass at a time, on a connection of its own (#745): a call made while a
- * pass runs resolves when the *next* pass does, and that one pass answers
- * every call that waited for it. It can therefore take a while; it never holds
- * a connection another command needs.
- *
- * It never creates a confirmed link, and nothing it writes reaches a source.
- */
-export function detectSuggestions(): Promise<number> {
-  return invoke<number>("detect_suggestions");
-}
-
-/**
  * The proposals a room holds, newest first — `room_suggestions`.
  *
  * `sources` is the room's membership, the same convention `EntityFilter.sources`

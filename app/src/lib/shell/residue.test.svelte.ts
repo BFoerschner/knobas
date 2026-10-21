@@ -188,9 +188,8 @@ vi.mock("../ipc/entity", () => ({
   saveNote: () => deferred(NOTE),
   deleteNote: () => deferred(true),
   unlink: () => deferred(undefined),
-  // The tray's read and its detection pass, deferred like everything else, so
-  // it can be unmounted with both still in flight.
-  detectSuggestions: () => deferred(0),
+  // The proposals read, deferred like everything else, so a view can be
+  // unmounted with it still in flight.
   roomSuggestions: () => deferred({ rows: [], total: 0 }),
   // The start-work stepper's reads, deferred like everything else, so it can be
   // unmounted with both still in flight.
