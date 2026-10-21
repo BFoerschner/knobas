@@ -10259,3 +10259,51 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   `job` key. *Reasoning:* `resolveTicket` reads an entity id as itself, so no resolver changes; the
   New page link is the same lookup and would otherwise still link the first source's ticket. The
   stale-answer guards compare against `jobRef`. *Reversing:* low, two derived values.
+## #1484: the Uptime Kuma seed's API key is per worktree (Opus implementer, 2026-10-21)
+
+- **The name derivation is copied into `seed-kuma.sh`, not sourced from `gitea-token.sh`.** *Fork:*
+  source the Gitea helper and call `gitea_seed_token_name`, or copy its three lines. *Ruling:* copied,
+  as the ticket says. *Reasoning:* the helper is the Gitea token's, named for it, and sourcing it pulls
+  in its probe functions; a shared helper would mean renaming Gitea's function in a ticket that
+  leaves Gitea alone. *Reversing:* low, one shared function and two callers.
+- **`kuma-seed.mjs` refuses to run without `KNOBAS_KEY_NAME`** (or with a value not shaped
+  `knobas-seed-<worktree>-<checksum>`) rather than falling back to a name. *Reasoning:* a default is
+  the shared name #1484 ended, and a rename on one side of the container boundary would bring the
+  collision back while a single `just kuma-live` stays green (#554's lesson). *Reversing:* low.
+- **A re-mint deletes every key of this worktree's name, not the first one found.** *Reasoning:* the
+  ticket's "one key per worktree name after two seeds"; a duplicate left by an interrupted seed is
+  cleaned up rather than kept. The pre-#1484 `knobas-seed` key and other worktrees' keys are never
+  deleted, as #684 ruled for Gitea. *Reversing:* low.
+- **The second worktree of the live witness is a copy of `testenv/` in the scratchpad.** *Fork:* a
+  second git worktree, or a path the derivation reads as another tree. *Ruling:* the copy. *Reasoning:*
+  the name comes from the testenv directory's path alone, the compose project is pinned
+  (`name: knobas-testenv`), and the brief keeps git inside the dispatched worktree. *Reversing:* none
+  needed; it is a test fixture.
+
+## #1472: the Kuma adapter logs in only once Kuma listens for the login (Opus implementer, 2026-10-21)
+
+- **Where the cause lies: in knobas** (Björn delegated this call at triage, 2026-10-21). Kuma 2.5.3's
+  `io.on("connection")` awaits `sendInfo` (two `Settings.get` reads) before it registers `login`, and
+  socket.io drops an event nothing listens for, with no ack. The adapter POSTed the login straight
+  after the namespace `40`. With Kuma's settings cache warm the race is never lost; each cached
+  setting expires 60 to 120 s after it was read, and then it is. The live suite runs right after
+  `seed-kuma.sh`, whose own login warms the cache; the app's first pause after minutes of quiet hits it
+  cold. Evidence: Kuma's log for the audit's two pauses (2026-10-20 20:55:15 and 21:07:59) shows `New
+  polling connection` from the host and no `Login by username` line. Replayed on 2026-10-21 against the
+  pinned container: the two POSTs sent 2 to 7 ms apart with curl lost the login on 5 of 5 cold attempts
+  (each 130 s after the last settings read) and kept it on the one warm attempt; the adapter itself, built on the old order,
+  failed 2 of 5 cold pauses of the canary with the audit's exact message, and on the new order acked 4
+  of 4 (117 to 360 ms).
+- **The fix waits for `loginRequired` (or `autoLogin`) before the login.** *Fork:* wait for `info`,
+  wait for `loginRequired`, or resend a login that goes unanswered. *Ruling:* `loginRequired`/`autoLogin`.
+  *Reasoning:* Kuma emits it at the end of the connection handler, after every handler is registered;
+  `info` is emitted before the registrations and is safe
+  only by Node's event-loop ordering; a resend guesses at a timeout and doubles logins against the
+  twenty-a-minute limit. A Kuma that stopped sending it trips the existing `CALL_BUDGET` deadline with
+  the protocol message, which is the right reading. `CALL_BUDGET` is unchanged. *Reversing:* low, one
+  read before the login.
+- **The session fake registers its handlers late for every session test**, not for one test alone,
+  answering the namespace's `40{…}` on the first read and `info`/`loginRequired` on the second.
+  *Reasoning:* that is how the real Kuma always behaves; a fake that answers a login nobody could have
+  heard is a claim about Kuma the container contradicts. On the old code every session test runs out
+  its budget. *Reversing:* low.
