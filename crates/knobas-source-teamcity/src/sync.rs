@@ -1548,7 +1548,10 @@ mod tests {
     async fn a_position_from_before_the_test_counts_is_read_again_from_the_top() {
         let mut tested = build(412, "Ledger_Deploy_Staging", "Ledger", "finished");
         tested["testOccurrences"] = serde_json::json!({ "failed": 1, "passed": 41, "ignored": 2 });
-        let rest = FakeRest::new(vec![build_type("Ledger_Deploy_Staging", "Ledger")], vec![tested]);
+        let rest = FakeRest::new(
+            vec![build_type("Ledger_Deploy_Staging", "Ledger")],
+            vec![tested],
+        );
         let cfg = TeamCityConfig::default();
         let (items, cursor) = run(
             &rest,

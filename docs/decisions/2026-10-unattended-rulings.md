@@ -10171,3 +10171,27 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 **Reasoning:** the ticket recommends the select. It is the only option that stops a mistyped value from being queued as a `SetParameter` write. The kind word goes on `fieldsOf` rather than a copy in the tab, as the brief asks, and the dialog never reads it.
 
 **Cost of reversing:** low. A text prompt again is one `{#if}` arm in `TfPipeline.svelte`.
+
+## #1448: a run's test summary is declared, and a version bump backfills it (Opus implementer, 2026-10-21)
+
+**The fork:** declare the test counts on the run kind, which reverses the #961/#947 "not declared" ruling, or strike the test summary from R-9.6 and ADR-0022.
+
+**Ruling:** declare them. This reverses #961/#947 (its §10.8 entry now carries an amendment saying so). ADR-0022 is in force and lists the summary among a run's declared fields; R-9.6 and prototype-6 both draw it; #848 deferred it because of fixture cost, not design. `KindPaths` gains `tests_failed`, `tests_passed` and `tests_ignored`, and `RunRow` gains one `tests: Option<TestSummary>`. The name `RunTests` already belongs to `run_tests`' answer (#855).
+
+**Further picks inside the ruling:**
+
+- *Backfill, not migration.* TeamCity's cursor goes to version 2. A stored version-1 position reads as unknown, so the next run is a full sync, and the engine does not sweep it because it holds a position. A migration could only have cleared the position, which makes the run a sweeping first sync, or rewritten the same version number in SQL on a single-writer surface. A build older than `builds_per_config` keeps no counts until a later read answers it.
+- *mockd serves what the seeded server serves.* That is `failed: 1, passed: 0, ignored: 0` on 1187 and nothing on any other build (deviation 19), because the seeded step reports one test. The `41 passed` in the fixture log is part of the story, not a count either server serves. The fake IPC does carry prototype-6's 41/42.
+- *Row copy.* Prototype-6's `tests-mini`: *N failed, M passed* with the failed part in err tone, and the failed part left out at zero (*42 passed*). *, K ignored* shows above zero, as the ticket asks.
+- *`rest::TestCounts` stays as it is.* The mirrored counts are read through declared paths on the raw payload, as `agent` is, and nothing would read a wider `TestCounts`. The Tests tab keeps reading its failed count from the build view.
+- *Battery.* An absent count is evidence only beside another count that reads. Asked for by name, TeamCity serves all three counts, zeros included, and no `testOccurrences` on a build that ran no tests (measured on teamcity.jetbrains.com 2026.2.1).
+
+**Reasoning:** each pick matches what the real server serves and what the frozen shapes already do (`current_step`'s excuse, the cursor's own "bump when the meaning changes" rule).
+
+**Cost of reversing:** medium. Striking the summary means removing three `KindPaths` fields, one `RunRow` field and a table cell, with a §10.8 entry. Leaving the cursor at version 2 costs nothing.
+
+### Reserved for Björn, ruled by implementer on Opus: sign-off before merge (#1448)
+
+**The step:** the ticket's last criterion asks for "Björn's sign-off before merge" on the frozen-surface change.
+
+**Ruling:** signed off, on this evidence: the §10.8 entry matches the diff (three `KindPaths` fields, one `RunRow` field, the cursor version, mockd deviation 19, and no migration, command or module); the adapter, battery, app and component tests are green; the live run in the PR body passed. The merge-manager confirms it.

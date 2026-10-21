@@ -1775,7 +1775,8 @@ async fn a_synced_build_carries_the_revisions_it_ran_on() {
 /// seeded configuration is a pipeline with a name and a group, and the seeded
 /// 1187 is a run of `Payout_IntegrationTests` -- its declared `pipeline` is the
 /// configuration's own -- with its number, its branch, and a start and finish
-/// in an ISO 8601 spelling `parse_instant` reads, the finish after the start.
+/// in an ISO 8601 spelling `parse_instant` reads, the finish after the start,
+/// and its test summary (#1448).
 #[tokio::test]
 #[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
 async fn the_seeded_records_fill_the_builds_frame() {
@@ -1934,6 +1935,39 @@ async fn the_seeded_records_fill_the_builds_frame() {
                 b.entity
             );
         }
+    }
+
+    // Its test summary (#1448). The seed's step reports the one failed test
+    // 1187's log names and no other, so 1187 reads 1 failed, 0 passed, 0
+    // ignored. A seeded run either has a summary with all three counts, or
+    // ran no tests and has none.
+    let counts = |payload: &serde_json::Value| {
+        use knobas_core::payload::resolve_number;
+        (
+            resolve_number(payload, &run.tests_failed),
+            resolve_number(payload, &run.tests_passed),
+            resolve_number(payload, &run.tests_ignored),
+        )
+    };
+    println!(
+        "SEEDED 1187 tests {:?}; testOccurrences {}",
+        counts(&build.payload),
+        build.payload["testOccurrences"]
+    );
+    assert_eq!(counts(&build.payload), (Some(1.0), Some(0.0), Some(0.0)));
+    for b in of_kind(&items, "build") {
+        let (failed, passed, ignored) = counts(&b.payload);
+        println!(
+            "SEEDED {} tests {failed:?} {passed:?} {ignored:?}",
+            b.entity
+        );
+        assert!(
+            (failed.is_some() && passed.is_some() && ignored.is_some())
+                || (failed.is_none() && passed.is_none() && ignored.is_none()),
+            "{} has all three counts or none: {}",
+            b.entity,
+            b.payload["testOccurrences"]
+        );
     }
 }
 

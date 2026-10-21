@@ -1058,11 +1058,19 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         // the source saying nothing, unless one of the run's other counts
         // reads. Then the summary is there, and a count missing from it is a
         // misspelled path.
-        let tests = [field::TESTS_FAILED, field::TESTS_PASSED, field::TESTS_IGNORED];
-        let ran_tests = [&paths.tests_failed, &paths.tests_passed, &paths.tests_ignored]
-            .into_iter()
-            .flatten()
-            .any(|path| at(&item.payload, path).is_some());
+        let tests = [
+            field::TESTS_FAILED,
+            field::TESTS_PASSED,
+            field::TESTS_IGNORED,
+        ];
+        let ran_tests = [
+            &paths.tests_failed,
+            &paths.tests_passed,
+            &paths.tests_ignored,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|path| at(&item.payload, path).is_some());
         for (name, candidates, wanted) in scalars {
             let seen = evidence.entry((&item.kind, name)).or_default();
             let judged = seen.names_a_missing_key;

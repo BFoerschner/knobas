@@ -487,6 +487,7 @@ knobas-app	test/it	builds_ipc::older_runs_are_the_sources_answer_read_through_th
 knobas-app	test/it	builds_ipc::older_runs_of_no_pipeline_or_a_foreign_run_are_refused
 knobas-app	test/it	builds_ipc::pipelines_carry_their_name_group_and_last_twelve_runs
 knobas-app	test/it	builds_ipc::runs_carry_their_agent_what_they_do_now_and_their_mirrored_commit
+knobas-app	test/it	builds_ipc::runs_carry_their_test_summary_and_a_run_without_tests_none
 knobas-app	test/it	builds_ipc::runs_carry_their_trigger_who_started_them_and_their_commit
 knobas-app	test/it	builds_ipc::runs_of_something_that_is_no_pipeline_are_refused
 knobas-app	test/it	builds_ipc::settings_name_the_mirrored_repository_by_its_id
@@ -2112,6 +2113,7 @@ knobas-source	lib/knobas_source	contract::tests::accepts_a_ticket_system_claim_i
 knobas-source	lib/knobas_source	contract::tests::accepts_a_wrong_declaration_for_a_kind_the_corpus_never_populates
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_answers_the_read
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_draws_no_view
+knobas-source	lib/knobas_source	contract::tests::accepts_test_counts_absent_from_runs_without_tests
 knobas-source	lib/knobas_source	contract::tests::every_role_write_is_a_known_write_op
 knobas-source	lib/knobas_source	contract::tests::every_write_op_answers_a_delivery_whose_target_it_carries
 knobas-source	lib/knobas_source	contract::tests::no_role_names_the_source_action
@@ -2151,6 +2153,7 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_started_by_at_a_key_n
 knobas-source	lib/knobas_source	contract::tests::rejects_a_started_time_that_is_no_instant
 knobas-source	lib/knobas_source	contract::tests::rejects_a_state_at_that_leads_to_an_object
 knobas-source	lib/knobas_source	contract::tests::rejects_a_state_no_item_draws_a_chip_for
+knobas-source	lib/knobas_source	contract::tests::rejects_a_test_count_missing_from_a_summary_that_reads
 knobas-source	lib/knobas_source	contract::tests::rejects_a_ticket_system_claim_whose_tickets_declare_no_priority
 knobas-source	lib/knobas_source	contract::tests::rejects_a_trigger_at_a_key_no_record_has
 knobas-source	lib/knobas_source	contract::tests::rejects_a_view_whose_section_ids_repeat
@@ -3189,6 +3192,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_n
 knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_never_regresses
 knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_stands_still_when_nothing_finished
 knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_stays_below_the_oldest_build_still_in_flight
+knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_carries_its_test_counts_and_one_without_tests_none
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_declares_its_configuration_as_parent_by_name_and_id
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_draws_running_or_its_outcome
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_names_its_agent_and_what_it_is_doing_now
@@ -3278,6 +3282,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_newly_finished_
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_page_whose_row_0_is_not_its_max_does_not_deadlock_the_source
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_paged_build_configuration_listing_is_refused_rather_than_narrowing_the_scope
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_personal_build_is_witnessed_by_the_ceiling_and_never_mirrored
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_position_from_before_the_test_counts_is_read_again_from_the_top
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_query_that_exactly_fills_a_server_s_ceiling_is_refused_though_it_fitted
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_run_whose_pages_reach_the_watermark_asks_nothing_by_id
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_running_build_is_re_emitted_without_moving_the_cursor
