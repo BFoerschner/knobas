@@ -219,6 +219,8 @@ afterEach(() => {
   if (app) unmount(app);
   app = undefined;
   target.remove();
+  // `recordScrolls()` stubs it; jsdom has none of its own.
+  Reflect.deleteProperty(Element.prototype, "scrollIntoView");
 });
 
 test("the box takes focus and keeps it while the overlay is open", async () => {
@@ -2294,7 +2296,7 @@ test("a rejected search shows the reason, never 'Nothing in the mirror matches'"
   expect(target.textContent).not.toContain("Nothing in the mirror matches");
 });
 
-// ── The cursor stays on screen (#1411) ─────────────────────────────────────
+// ── The selected row stays on screen (#1411) ─────────────────────────────────────
 
 /**
  * Every `scrollIntoView` the launcher asked for, with the element and the
@@ -2309,23 +2311,24 @@ function recordScrolls() {
   return calls;
 }
 
-afterEach(() => {
-  Reflect.deleteProperty(Element.prototype, "scrollIntoView");
-});
+/** The board with its saved lists, as the rename and chain tests need it. */
+function openSaved() {
+  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+}
 
-/** The board's options in flat-list order: the lists, then the recent rows. */
-function options(): Element[] {
+/** The results listbox's options in flat-list order. */
+function resultOptions(): Element[] {
   return [...target.querySelectorAll('[aria-label="Results"] [role="option"]')];
 }
 
 test("the arrows scroll the newly active row into view, and only as far as it needs", async () => {
-  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  openSaved();
   await settle();
   const scrolls = recordScrolls();
 
   press("ArrowDown");
   press("ArrowDown");
-  const rows = options();
+  const rows = resultOptions();
   expect(scrolls.at(-1)?.el).toBe(rows[2]);
   expect(scrolls.at(-1)?.options).toEqual({ block: "nearest" });
 
@@ -2335,7 +2338,7 @@ test("the arrows scroll the newly active row into view, and only as far as it ne
 });
 
 test("the results listbox names the active option, and names nothing with no row", async () => {
-  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  openSaved();
   await settle();
   const listbox = target.querySelector('[role="listbox"][aria-label="Results"]')!;
   const named = () => listbox.getAttribute("aria-activedescendant");
@@ -2348,7 +2351,7 @@ test("the results listbox names the active option, and names nothing with no row
     expect(named(), key).toBe(active()?.id);
   }
   // Every option has an id of its own, so the name points at exactly one row.
-  const ids = options().map((el) => el.id);
+  const ids = resultOptions().map((el) => el.id);
   expect(new Set(ids).size).toBe(ids.length);
   expect(ids.every((id) => id !== "")).toBe(true);
 
@@ -2367,7 +2370,7 @@ test("the results listbox names the active option, and names nothing with no row
 });
 
 test("a list being renamed has no option, so the listbox names none", async () => {
-  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  openSaved();
   await settle();
   press("ArrowDown");
   press("Tab");
@@ -2378,7 +2381,7 @@ test("a list being renamed has no option, so the listbox names none", async () =
 });
 
 test("the Tab chain's active row is scrolled into view and named by its listbox", async () => {
-  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  openSaved();
   await settle();
   press("ArrowDown");
   const scrolls = recordScrolls();
@@ -2398,7 +2401,7 @@ test("the Tab chain's active row is scrolled into view and named by its listbox"
   expect(scrolls.at(-1)).toEqual({ el: rows[0], options: { block: "nearest" } });
 });
 
-test("typing resets the cursor to the first row, and that row is scrolled back into view", async () => {
+test("typing resets the selection to the first row, and that row is scrolled back into view", async () => {
   open();
   await settle();
   press("ArrowDown");
@@ -2407,16 +2410,16 @@ test("typing resets the cursor to the first row, and that row is scrolled back i
   await typeInto("sepa");
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
-  const first = options()[0];
+  const first = resultOptions()[0];
   expect(first?.textContent).toContain("Retry failed SEPA payouts");
   expect(scrolls.at(-1)).toEqual({ el: first, options: { block: "nearest" } });
 
-  // A new answer with the cursor already on the first row brings it back too.
+  // A new answer with the first row already selected brings it back too.
   scrolls.length = 0;
   await typeInto("sepa payouts");
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
-  expect(scrolls.at(-1)).toEqual({ el: options()[0], options: { block: "nearest" } });
+  expect(scrolls.at(-1)).toEqual({ el: resultOptions()[0], options: { block: "nearest" } });
 });
 
 /** The `>` palette, open with every action: the answer says the prefix is `>`. */
@@ -2437,7 +2440,7 @@ test("the palette's rows are followed as well", async () => {
   await openPalette();
   const scrolls = recordScrolls();
   press("ArrowDown");
-  const rows = options();
+  const rows = resultOptions();
   expect(rows.length).toBeGreaterThan(1);
   expect(scrolls.at(-1)).toEqual({ el: rows[1], options: { block: "nearest" } });
   expect(
@@ -2457,7 +2460,7 @@ function expectRenameFocused() {
 }
 
 test("Rename from the Tab chain focuses the name field with the name selected", async () => {
-  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  openSaved();
   await settle();
   press("ArrowDown");
   press("Tab");
@@ -2467,7 +2470,7 @@ test("Rename from the Tab chain focuses the name field with the name selected", 
 });
 
 test("the row's Rename button focuses the name field with the name selected", async () => {
-  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  openSaved();
   await settle();
   [...target.querySelectorAll<HTMLButtonElement>("button.mini")]
     .find((button) => button.textContent?.trim() === "Rename")!
@@ -2544,7 +2547,7 @@ test("a value suggestion draws inline, a chain row spans one column, and a prefi
 
     unmount(app!);
     app = undefined;
-    open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+    openSaved();
     await settle();
     press("ArrowDown");
     press("Tab");

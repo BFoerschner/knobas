@@ -463,8 +463,8 @@
   const activeChainOption = $derived(chain ? chainOptionId(chain.selected) : undefined);
 
   /**
-   * The cursor stays on screen (#1411, spec §4's ↑↓): whenever the active
-   * row changes — an arrow, a hover, the reset to the first row that typing
+   * The selected row stays on screen (#1411, spec §4's ↑↓): whenever it
+   * changes — an arrow, a hover, the reset to the first row that typing
    * makes — it is scrolled just far enough to be seen. `nearest` leaves a
    * row that is already visible where it is. `rows` is read so a new answer
    * under an unchanged index still brings its first row back into view.
