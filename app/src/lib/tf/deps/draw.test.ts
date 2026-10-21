@@ -186,6 +186,30 @@ describe("what a tile touches, and the filters (R-11.15)", () => {
     expect([...touches(graphOf(small), "a")].sort()).toEqual(["a", "t", "vm"]);
   });
 
+  test("a route is walked toward the asset that exposes it, never the other way (#1456)", () => {
+    const read: Dependencies = {
+      layers: LAYERS,
+      kinds: KINDS,
+      items: ["site", "vm", "c1", "c2", "r1", "r2", "r3", "tk"].map((id) => item({ id, kind: id === "tk" ? "ticket" : "service" })),
+      relations: [
+        { from: "vm", to: "site", relation: "inside" },
+        { from: "c1", to: "vm", relation: "inside" },
+        { from: "c2", to: "vm", relation: "inside" },
+        // The read emits `exposes` as exposing asset -> route.
+        { from: "vm", to: "r1", relation: "exposes" },
+        { from: "vm", to: "r2", relation: "exposes" },
+        { from: "vm", to: "r3", relation: "exposes" },
+        { from: "r1", to: "c1", relation: "lands-on" },
+        { from: "r2", to: "c2", relation: "lands-on" },
+        { from: "tk", to: "c1", relation: "deployed-to" },
+      ],
+    };
+    const of = (id: string) => [...touches(graphOf(read), id)].sort();
+    expect(of("c1")).toEqual(["c1", "r1", "site", "tk", "vm"]);
+    expect(of("r1")).toEqual(["c1", "r1", "site", "vm"]);
+    expect(of("r3")).toEqual(["r3", "site", "vm"]);
+  });
+
   test("Show only what this touches", () => {
     expect(ids(drawOf(small, settingsOf({}), gestures({ trace: "a" })))).toEqual(["a", "t", "vm"]);
   });

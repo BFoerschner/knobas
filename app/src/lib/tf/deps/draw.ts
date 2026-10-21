@@ -31,8 +31,13 @@ export function graphOf(read: Dependencies): Graph {
   const out = new Map<string, string[]>();
   const into = new Map<string, string[]>();
   for (const relation of read.relations) {
-    (out.get(relation.from) ?? out.set(relation.from, []).get(relation.from)!).push(relation.to);
-    (into.get(relation.to) ?? into.set(relation.to, []).get(relation.to)!).push(relation.from);
+    // Traversal runs "toward what it stands on". Every relation is read that way
+    // (`inside` child -> holder, `lands-on` route -> target) except `exposes`: the
+    // read's contract (§10.8, #871) emits it exposing asset -> route, so the graph
+    // stores it reversed. Only here; `holders` reads the raw relation.
+    const [from, to] = relation.relation === "exposes" ? [relation.to, relation.from] : [relation.from, relation.to];
+    (out.get(from) ?? out.set(from, []).get(from)!).push(to);
+    (into.get(to) ?? into.set(to, []).get(to)!).push(from);
   }
   return { out, into };
 }

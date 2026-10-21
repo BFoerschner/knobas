@@ -31,7 +31,8 @@
   open, switch between *This job <key>* and *Everything* (`#/deps`).
 -->
 <script lang="ts">
-  import { tick, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
+  import { inTextField } from "../../shell/keys";
 
   import { ipcErrorMessage } from "../../ipc";
   import {
@@ -468,6 +469,21 @@
   });
 
   let jump = -1;
+  let findField = $state<HTMLInputElement | null>(null);
+
+  /** `/` focuses Find (R-2.4, R-14), in FilterBar's shape: not while typing elsewhere, not with a modifier. */
+  onMount(() => {
+    const onkey = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
+      const at = document.activeElement;
+      if (at instanceof HTMLElement && inTextField(at)) return;
+      event.preventDefault();
+      findField?.focus();
+    };
+    window.addEventListener("keydown", onkey);
+    return () => window.removeEventListener("keydown", onkey);
+  });
+
   function findKey(event: KeyboardEvent) {
     if (event.key !== "Enter") return;
     event.preventDefault();
@@ -569,6 +585,8 @@
         <input
           placeholder="Find among {read.items.length.toLocaleString('en')} items"
           aria-label="Find"
+          data-filter
+          bind:this={findField}
           autocomplete="off"
           value={query}
           oninput={(event) => {

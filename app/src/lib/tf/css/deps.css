@@ -61,6 +61,7 @@
 .tf-dp-t.tf-dp-err { background: var(--err); border-color: var(--err); color: var(--sheet); }
 .tf-dp-t.tf-dp-err .tf-dp-w { color: var(--sheet); opacity: .9; }
 .tf-dp-t.tf-dp-err .tf-dp-mono { background: transparent; color: var(--sheet); border-color: var(--sheet); }
+.tf-dp-t.tf-dp-err mark { color: var(--ink); }
 .tf-dp-t.tf-dp-err .tf-dp-dot { background: var(--sheet); }
 .tf-dp-t.tf-dp-warn { background: var(--warn-bg); border-color: var(--warn); }
 .tf-dp-t.tf-dp-warn .tf-dp-w { color: var(--warn); font-weight: 600; }
