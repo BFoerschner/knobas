@@ -141,7 +141,7 @@ Those four, and a fifth needs a reason of its own and a line here. (Amended 2026
 A sync position that only advances as work completes. Its **ceiling** is the newest position the run *witnessed* at its start, which the watermark may never pass within that run. Witnessed, not the newest that exists: a ceiling too low costs a re-fetch, one too high loses work.
 
 **Backfill**:
-A deliberate full sync whose purpose is re-fetching unchanged items after the fetched payload widened.
+A deliberate full sync whose purpose is re-fetching unchanged items after the fetched payload widened. It runs with no stored position and keeps the one it ends on, so it is also the way out when an adapter refuses to sync on from a position the server no longer has (TeamCity's deleted newest build, #1477). There is no separate cursor reset.
 _Avoid_: refetch
 
 **Credential health**:
