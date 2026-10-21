@@ -80,6 +80,7 @@ function render(
     day?: string | null;
     job?: { key: string; entityId: string } | null;
     offers?: Record<number, AdHocBlock | null>;
+    clock?: Date;
   } = {},
 ) {
   const offers = over.offers ?? OFFERS;
@@ -100,7 +101,7 @@ function render(
       job: over.job ?? null,
       ontimer: () => (stops += 1),
       onlog: (entityId: string, day: string) => logs.push([entityId, day]),
-      now: () => NOW,
+      now: () => over.clock ?? NOW,
       layers,
       ports: {
         dayBlocks: () => Promise.resolve({ blocks: listed, past_horizon: over.pastHorizon ?? false, open }),
@@ -209,6 +210,17 @@ test("the strip places a block by its share of 08:00 to 18:00", async () => {
   expect([unlogged.getAttribute("x"), unlogged.getAttribute("width")]).toEqual(["16.67%", "21.67%"]);
   // The now line, at 14:42.
   expect(target.querySelector(".tf-tm-now")!.getAttribute("x")).toBe("67%");
+});
+
+test("after 18:00 the strip widens to hold now, and the now line is where the clock is (#1434)", async () => {
+  render({ clock: new Date(2026, 7, 22, 19, 43, 0, 0) });
+  await settle();
+  const hours = [...target.querySelectorAll(".tf-tm-hl")].map((label) => label.textContent);
+  expect(hours.at(-1)).toBe("20");
+  const now = target.querySelector(".tf-tm-now")!;
+  // 19:43 is 703 of 720 minutes into 08:00 to 20:00.
+  expect(now.getAttribute("x")).toBe("97.64%");
+  expect(squash(now.querySelector("title")?.textContent)).toBe("Now, 19:43");
 });
 
 test("Add to <ticket> gives an offered block to the ticket it is linked to", async () => {

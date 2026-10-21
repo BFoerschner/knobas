@@ -256,17 +256,21 @@ export interface StripWindow {
 /**
  * 08:00 to 18:00, as R-13.4 draws it, widened by whole hours when a row sits
  * outside: a strip that clipped a late evening would hide the time it is for.
+ *
+ * `now` is the clock on today and `null` on any other day. Today's window holds
+ * it the same way (#1434): the now line is drawn where the clock is, not
+ * pinned to the strip's edge at 18:00.
  */
-export function stripWindow(day: string, rows: DayRow[]): StripWindow {
+export function stripWindow(day: string, rows: DayRow[], now: Date | null = null): StripWindow {
   const midnight = dayBounds(day).from.getTime();
   let from = 8;
   let to = 18;
-  for (const row of rows) {
-    const a = (Math.max(instant(row.from), midnight) - midnight) / 3_600_000;
-    const b = (instant(row.to) - midnight) / 3_600_000;
-    from = Math.min(from, Math.floor(a));
-    to = Math.max(to, Math.min(24, Math.ceil(b)));
-  }
+  const hold = (fromMs: number, toMs: number) => {
+    from = Math.min(from, Math.floor((Math.max(fromMs, midnight) - midnight) / 3_600_000));
+    to = Math.max(to, Math.min(24, Math.ceil((toMs - midnight) / 3_600_000)));
+  };
+  for (const row of rows) hold(instant(row.from), instant(row.to));
+  if (now !== null) hold(now.getTime(), now.getTime());
   return { from, to };
 }
 

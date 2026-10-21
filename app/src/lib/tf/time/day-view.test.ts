@@ -180,6 +180,21 @@ test("the strip runs 08:00 to 18:00 and widens by whole hours to hold a day outs
   expect(stripWindow(DAY, late)).toEqual({ from: 6, to: 21 });
 });
 
+// #1434: the now line is drawn where the clock is, so on today the window holds now.
+test("on today the window widens by whole hours to hold now, as it does for a late row", () => {
+  const clock = (hour: number, minute: number) => new Date(2026, 7, 22, hour, minute, 0, 0);
+  const none = dayRows({ day: DAY, blocks: [], offers: {}, running: null, now: clock(19, 43) });
+  expect(stripWindow(DAY, none, clock(19, 43))).toEqual({ from: 8, to: 20 });
+  expect(stripWindow(DAY, none, clock(6, 30))).toEqual({ from: 6, to: 18 });
+  expect(stripWindow(DAY, none, clock(12, 0))).toEqual({ from: 8, to: 18 });
+  expect(stripWindow(DAY, none, clock(23, 30))).toEqual({ from: 8, to: 24 });
+  // A late row and now widen it the same way; the wider of the two wins.
+  const late = dayRows({ day: DAY, blocks: [block(1, at(20, 10), at(21, 5))], offers: {}, running: null, now: clock(19, 43) });
+  expect(stripWindow(DAY, late, clock(19, 43))).toEqual({ from: 8, to: 22 });
+  // On any other day there is no now to hold.
+  expect(stripWindow(DAY, none, null)).toEqual({ from: 8, to: 18 });
+});
+
 test("a row is placed by its share of the window, in percent", () => {
   const window = { from: 8, to: 18 };
   expect(place(DAY, window, at(9), at(11, 30))).toEqual({ left: 10, width: 25 });

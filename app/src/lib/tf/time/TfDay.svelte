@@ -188,7 +188,7 @@
     offered: ready?.pastHorizon ?? false,
     open: ready?.pastHorizon ?? false,
   });
-  const frame = $derived(stripWindow(key, rows));
+  const frame = $derived(stripWindow(key, rows, key === today ? clock : null));
   const hours = $derived(Array.from({ length: frame.to - frame.from + 1 }, (_, index) => frame.from + index));
   const nowAt = $derived(key === today ? place(key, frame, clock.toISOString(), clock.toISOString()).left : null);
   const noRecord = $derived(ready !== null && ready.pastHorizon && ready.blocks.length === 0);
