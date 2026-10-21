@@ -311,3 +311,8 @@ test("a Find match in a broken Dependencies tile is --ink on --mark; elsewhere i
   expect(base).toMatch(/background:\s*var\(--mark\)/);
   expect(base).toMatch(/color:\s*inherit/);
 });
+
+test("the asset tree page is viewport-high, so its pane scrolls and the page does not (#1460)", () => {
+  expect(block(code, ".tf-full:has(> .tf-asset-tree)")).toMatch(/(^|[{;\s])height:\s*100%/);
+  expect(block(code, ".tf-asset-tree")).toMatch(/min-height:\s*0/);
+});

@@ -10073,3 +10073,36 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   Rust change for a polish ticket, and a failed match only draws *Not registered* for a key the registrar
   accepts. Checked against 0.8.0's `parse_key` and `parse_hotkey`: `KEYS` matches; the modifier table had
   `meta` (refused by the parser) and lacked `commandorctrl` and `cmdorcontrol`, now fixed. *Reversing:* low.
+
+## #1459: the asset tree's dead *Monitors* tab (Opus implementer, 2026-10-21)
+
+- **The strip** (delegated). *Ruling:* the recommended pick. The strip goes entirely and
+  `AssetsTabs.svelte` is deleted; the room bar keeps the *Assets* heading and *Import*.
+  *Reasoning:* one tab is no strip, and the Tree is reached from Dependencies' *Asset tree* button.
+  *Reversing:* low, one component back.
+- **The old router's assets-tab union** (delegated). *Ruling:* the recommended pick. `AssetsTab`
+  loses `monitors`, `tabOf` goes, and `#/assets/<anything>` parses to the Tree. The union keeps its
+  one member and the `tab` field, so `#/assets/tree` and the Tree's own addresses are unchanged.
+  The router test that pinned the tab is gone and the Tree test pins `#/assets/monitors` as the Tree.
+  *Reasoning:* a parse-only residue is a trap; dropping the field too would touch 25 test fixtures
+  and change `hashFor`'s output for no reader. *Reversing:* low.
+- **How `#/assets/monitors` lands on `#/monitors`** (not named in the ticket). *Ruling:* as an old
+  address. `parseTfHash` reads it as `unknown` and `legacyAddress` answers `{ go: "#/monitors" }`,
+  so the shell replaces the address in place (no history step), as it does for `#/ctx/…` and
+  `#/sources`. *Reasoning:* the ticket wants the Monitors page *at* `#/monitors`; resolving the old
+  address to the Monitors section in place would draw the page under the old address. The route
+  module test checks the pair: the old address is unknown, its replacement draws the Monitors page,
+  and `#/assets`, `#/assets/tree` and `#/asset/<id>` still draw the Tree. *Reversing:* low.
+
+## #1460: wires from route rows below the window (Opus implementer, 2026-10-21)
+
+- **Viewport-high Tree or clip only** (delegated). *Ruling:* the recommended pick, with the clip
+  as well. `.tf-full:has(> .tf-asset-tree)` is `height: 100%`, so the page under the breadcrumb is
+  the main area's height, the pane is its own scroller and the columns scroll under it (story 33).
+  The existing capturing scroll listener on the tree frame already catches the pane's scroll and
+  re-measures. In `measureWires`, the visibility test for a route row cuts the pane's box to the
+  tree frame's box and the window (`0..innerHeight`). *Reasoning:* the sizing is the Tree's own
+  header and story 33. With the cut, a page laid out taller than the window, or a window shorter
+  than the page's fixed parts, still draws no wire from a row below the bottom edge. Wires from
+  visible rows, the dashed and held landings and the `laid` guard are unchanged. *Reversing:* low,
+  one rule and two lines.

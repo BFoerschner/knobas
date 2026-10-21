@@ -134,6 +134,10 @@ export function parseTfHash(hash: string): TfRoute {
   if (head === "") return { view: "tickets", rest: [] };
   if (head === "item" && segments[1]) return { view: "item", id: segments[1] };
   if (head === "note" && segments[1]) return { view: "note", id: segments[1] };
+  // The rooms UI's *Monitors* tab beside *Tree* (#448), whose roster went with
+  // #1087: Monitors lives at `#/monitors` now (R-11.3), so this is an old
+  // address, which `address.ts`' `legacyAddress` sends there (#1459).
+  if (head === "assets" && segments[1] === "monitors") return { view: "unknown", hash };
   const section = SECTION_OF[head];
   if (section === undefined) return { view: "unknown", hash };
   if (section === "tickets") return { view: "tickets", rest: segments.slice(1) };
