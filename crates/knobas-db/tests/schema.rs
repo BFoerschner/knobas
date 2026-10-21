@@ -2372,3 +2372,93 @@ async fn zero_fifty_four_keeps_the_query_an_install_already_had() {
     .unwrap();
     assert_eq!(query, "project = PAY ORDER BY Rank ASC");
 }
+
+/// `0055` (#1571): a source already failing its sign-in when the migration
+/// runs started that episode at its last check, and one that is not failing
+/// has no episode. Wound back to an install that predates `0055`.
+#[tokio::test]
+async fn zero_fifty_five_dates_an_episode_already_under_way_at_its_last_check() {
+    let pool = knobas_db::test_util::scratch_database("auth-failing-since-55")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+
+    sqlx::raw_sql(
+        "drop trigger source_config_auth_failing_since on knobas.source_config;
+         drop function knobas.keep_auth_failing_since();
+         alter table knobas.source_config drop column auth_failing_since;
+         delete from public._sqlx_migrations where version = 55;
+         insert into knobas.source_config
+             (id, kind, display_name, base_url, auth_kind, auth_state, auth_checked_at)
+         values ('rejected', 'jira', 'rejected', 'http://127.0.0.1:1', 'pat',
+                 'unauthorized', '2026-10-01T08:00:00Z'),
+                ('fine', 'jira', 'fine', 'http://127.0.0.1:1', 'pat',
+                 'ok', '2026-10-01T08:00:00Z');",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    migrate::run(&pool).await.unwrap();
+
+    let since: Vec<(String, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
+        "select id, auth_failing_since from knobas.source_config order by id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        since,
+        vec![
+            ("fine".to_owned(), None),
+            (
+                "rejected".to_owned(),
+                Some("2026-10-01T08:00:00Z".parse().unwrap())
+            ),
+        ]
+    );
+}
+
+/// `0055`'s trigger is what makes a failed sign-in once per episode: it starts
+/// an episode on the first failing verdict, keeps it through the next failing
+/// ones (a rejection turning into a missing secret included), and ends it on
+/// any other verdict.
+#[tokio::test]
+async fn zero_fifty_five_keeps_the_start_of_an_episode_of_failed_sign_ins() {
+    let pool = knobas_db::test_util::scratch_database("auth-failing-since-trigger")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    sqlx::raw_sql(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ('s', 'jira', 's', 'http://127.0.0.1:1', 'pat')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let set = |state: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
+                "update knobas.source_config set auth_state = $1 where id = 's'
+                 returning auth_failing_since",
+            )
+            .bind(state)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    assert_eq!(set("unknown").await, None, "a new source has no episode");
+    let began = set("unauthorized").await.expect("the first failure starts one");
+    assert_eq!(set("unauthorized").await, Some(began), "a retry is the same episode");
+    assert_eq!(set("missing_secret").await, Some(began), "so is a missing secret");
+    assert_eq!(set("unreachable").await, None, "any other verdict ends it");
+    let again = set("missing_secret").await.expect("and the next failure starts another");
+    assert!(again > began);
+    assert_eq!(set("ok").await, None);
+}

@@ -1262,3 +1262,52 @@ async fn a_second_ack_writes_nothing_and_an_alert_that_recovered_is_refused() {
         "the refusal names what happened: {missing:?}"
     );
 }
+
+// -- a failed sign-in, through the one writer of credential health (#1571) ---
+
+/// The whole wire: `knobas_sync::config::set_health`, the writer every
+/// credential verdict goes through, to the inbox's IPC read.
+///
+/// A rejected sign-in is an item with nothing to ask the source for; *done* on
+/// it holds while the source goes on refusing, because a retry rejected again
+/// is the same episode; a working sign-in takes it away; and the next failure
+/// is a new episode that comes back. *Done* is answered at the wall clock, as
+/// the command answers it, because the episode is dated by the database's.
+#[tokio::test]
+async fn a_failed_sign_in_is_an_item_once_per_episode_through_the_health_writer() {
+    use knobas_sync::config::AuthState;
+
+    let h = harness().await;
+    h.source("tracker", "tracker", ME).await;
+    let key = "failed_sign_in:tracker";
+    let on_stream = |entries: Vec<InboxEntry>| entries.iter().any(|e| e.item.key == key);
+
+    config::set_health(h.pool(), "tracker", AuthState::Unauthorized, Some("401"), None)
+        .await
+        .unwrap();
+    let entry = h.entry(key).await;
+    assert!(entry.actions.is_empty(), "nothing at a source can fix this");
+    assert_eq!(entry.item.reason, "the tracker sign-in was rejected");
+
+    complete_inbox_item_inner(h.pool(), h.registry.as_ref(), Utc::now(), key)
+        .await
+        .expect("the item is on the stream");
+    config::set_health(h.pool(), "tracker", AuthState::Unauthorized, Some("401"), None)
+        .await
+        .unwrap();
+    assert!(
+        !on_stream(h.stream().await),
+        "a retry rejected again is the same episode, and done holds"
+    );
+
+    config::set_health(h.pool(), "tracker", AuthState::Ok, None, None)
+        .await
+        .unwrap();
+    assert!(!on_stream(h.stream().await), "a working sign-in ends it");
+
+    config::set_health(h.pool(), "tracker", AuthState::MissingSecret, None, None)
+        .await
+        .unwrap();
+    let again = h.entry(key).await;
+    assert_eq!(again.item.reason, "no credential is stored for tracker");
+}
