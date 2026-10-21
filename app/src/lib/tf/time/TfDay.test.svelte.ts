@@ -63,8 +63,11 @@ const RUNNING: RunningTimer = {
   last_heartbeat: at(14, 40),
 };
 
-/** What the launcher's board lists as recent: one ticket. */
-const RECENT = { entity_id: "jira:PAY-228", kind: "ticket", title: "Payout export to CSV" } as EntityRow;
+/** What the launcher's board lists as recent: a pull request and a ticket. */
+const RECENT = [
+  { entity_id: "gitea:payments#139", kind: "pull_request", title: "Retry window" },
+  { entity_id: "jira:PAY-228", kind: "ticket", title: "Payout export to CSV" },
+] as EntityRow[];
 /** What any search finds: one ticket. */
 const FOUND = { entity_id: "jira:OPS-77", kind: "ticket", title: "Rotate the gateway certificates" } as SearchHit;
 
@@ -134,7 +137,7 @@ function render(
           searches.push(query.raw);
           return Promise.resolve(found());
         },
-        launcherHome: () => Promise.resolve({ recent: [RECENT], smart_lists: [], stale_sources: [] } as never),
+        launcherHome: () => Promise.resolve({ recent: RECENT, smart_lists: [], stale_sources: [] } as never),
         dayBlocks: () => Promise.resolve({ blocks: listed, past_horizon: over.pastHorizon ?? false, open }),
         adHocBlock: (id: number) => Promise.resolve(offers[id] ?? null),
         updateBlock: (id: number, from: string, to: string, on: TimerTarget) => {
@@ -424,8 +427,8 @@ test("Assign… on an open stretch picks a ticket by name and writes a block on 
   expect(target.querySelector('[role="dialog"] select')).toBeNull();
   await search("gateway");
   expect(sent.searches).toEqual(["gateway"]);
-  expect(options()).toEqual(["OPS-77 Rotate the gateway certificates Ticket"]);
-  button(target, "OPS-77 Rotate the gateway certificates Ticket").click();
+  expect(options()).toEqual(["OPS-77 Rotate the gateway certificates"]);
+  button(target, "OPS-77 Rotate the gateway certificates").click();
   flushSync();
   expect(squash(target.querySelector(".tf-tm-picked")?.textContent)).toBe("OPS-77 Rotate the gateway certificates");
   button(target, "Assign").click();
@@ -433,12 +436,12 @@ test("Assign… on an open stretch picks a ticket by name and writes a block on 
   expect(sent.creates).toEqual([[at(12, 35), at(13, 10), { kind: "entity", entity_id: "jira:OPS-77" }]]);
 });
 
-test("Assign… on an offered block lists the recent tickets before anything is typed, and Enter picks one", async () => {
+test("Assign… on an offered block lists the recent tickets, and only tickets, before anything is typed, and Enter picks one", async () => {
   const sent = render();
   await settle();
   button(row("offered"), "Assign…").click();
   await settle();
-  expect(options()).toEqual(["PAY-228 Payout export to CSV Ticket"]);
+  expect(options()).toEqual(["PAY-228 Payout export to CSV"]);
   // Assign waits for a pick.
   expect(button(target, "Assign").disabled).toBe(true);
   const box = target.querySelector<HTMLInputElement>('[aria-label="Search for a ticket"]')!;

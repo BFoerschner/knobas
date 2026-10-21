@@ -37,7 +37,6 @@
   import { onMount, tick } from "svelte";
 
   import { Session, type SessionPorts } from "../../launcher/session.svelte";
-  import { kindSingular } from "../../shell/kinds";
   import { targetReading } from "../../shell/timer";
   import type { Layers } from "../layers.svelte";
 
@@ -76,7 +75,6 @@
   /** A ticket the picker can name: the board's recents and the search's hits share these. */
   interface Ticket {
     entityId: string;
-    kind: string;
     title: string;
   }
 
@@ -86,7 +84,7 @@
     from,
     to,
     kind: target?.kind ?? ("entity" as TimerTarget["kind"]),
-    picked: target?.kind === "entity" ? ({ entityId: target.entity_id, kind: "", title: title ?? "" } as Ticket) : null,
+    picked: target?.kind === "entity" ? ({ entityId: target.entity_id, title: title ?? "" } as Ticket) : null,
     label: target?.kind === "label" ? target.label : "",
   });
 
@@ -96,12 +94,16 @@
   /** The highlighted choice, for the arrow keys and `Enter`. */
   let cursor = $state(0);
 
-  /** What the picker offers: the recent tickets on an empty box, the hits on a query. */
+  /**
+   * What the picker offers: the recent tickets on an empty box, the hits on a
+   * query, tickets only. Jira takes time on a ticket alone, and a block on
+   * anything else is a row the Day tab says *needs a ticket*.
+   */
   const choices = $derived(
     session.rows.flatMap((row): Ticket[] => {
-      if (row.kind === "hit") return [{ entityId: row.hit.entity_id, kind: row.hit.kind, title: row.hit.title }];
-      if (row.kind === "recent") return [{ entityId: row.row.entity_id, kind: row.row.kind, title: row.row.title }];
-      return [];
+      const item = row.kind === "hit" ? row.hit : row.kind === "recent" ? row.row : null;
+      if (item === null || item.kind !== "ticket") return [];
+      return [{ entityId: item.entity_id, title: item.title }];
     }),
   );
 
@@ -180,7 +182,7 @@
           <label for="tf-tm-to">To</label>
           <input id="tf-tm-to" type="time" bind:value={form.to} />
         {/if}
-        <span id="tf-tm-on-l">On</span>
+        <span id="tf-tm-on-l" class="tf-tm-on-l">On</span>
         <div class="tf-tm-target" role="group" aria-labelledby="tf-tm-on-l">
           <div class="tf-tm-on">
             <div class="tf-seg" role="group" aria-label="What the time was on">
@@ -226,7 +228,6 @@
                 {#each choices as choice, index (choice.entityId)}
                   <button type="button" role="option" aria-selected={index === cursor} onclick={() => pick(choice)}>
                     <span><span class="tf-mono">{keyOf(choice.entityId)}</span> {choice.title}</span>
-                    <span class="tf-dim">{kindSingular(choice.kind, null)}</span>
                   </button>
                 {/each}
               </div>
