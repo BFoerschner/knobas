@@ -10542,3 +10542,60 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 - **Row click.** *Ruling:* the row opens the run unless the click lands in a link, button or form
   control, or words in the row are selected. A queued row opens nothing and takes no `tf-row`
   cursor. The number stays the keyboard's link, as the other row-click tables do. *Reversing:* low.
+## #1477: a deleted newest TeamCity build, and the stale *Unreachable* (Opus implementer, 2026-10-21)
+
+- **On a 404 of the watermark build, the refusal stays, reworded, and names *Backfill*** (Björn
+  delegated this call at triage, 2026-10-21). *Fork:* (a) keep #91's refusal, reword it and name
+  Backfill as the way out, or (b) fall back to the newest build the run witnessed, or the next-lower
+  id, and carry on. *Ruling:* (a). #91 is not reversed. *Reasoning:* when a person deletes the newest
+  build, the server's answers are the same as a replaced server's (the watermark answers 404, and no
+  build the run saw reaches it), so nothing the adapter can ask tells the two cases apart. A
+  fallback would sync on blindly in both cases, and for a replaced server that is the quiet,
+  wrong-builds case #91 kept the refusal for. Backfill already gets out of it: it hands the adapter
+  no position (`run_backfill`), so the check does not run, and it stores the newest build that
+  survived. That is the "reset the cursor" #91 named, and the app has no other control for it. The
+  refusal is now one sentence for a reader plus the evidence: *"build N, the last one this source
+  synced, is no longer on the server, so syncing stopped; if it was deleted, Backfill on this
+  source's page starts over from the newest build. Evidence: `/app/rest/builds/id:N` answers 404
+  and no build this run saw reaches it, which is also what a source pointed at a different server
+  sees."* The line under *Fetch everything again* now says Backfill forgets where the last sync
+  stopped and is for a sync that names it. The contract's #91 amendment ("the same refusal, with the
+  message re-worded onto that evidence") still holds, so no amendment. The glossary's *Backfill*
+  gains the second purpose. *Reversing:* medium. (b) would be a change to `refuse_a_replaced_server`
+  and would reverse #91 by name.
+- **A run that ends in `Error` clears a stored `unreachable`, to `unknown`** (Björn delegated this
+  call at triage, 2026-10-21). *Fork:* leave `auth_state` alone on `Error` (until now), clear only a
+  stale `unreachable`, or write a verdict (`ok`) on every error. *Ruling:* clear a stored
+  `unreachable` to `unknown` (detail dropped, `source:health` fired), and touch no other state.
+  *Reasoning:* `unreachable` is a claim about the far end, made by an earlier run or by *Test
+  connection*. An error run did not witness it again, and as long as the error repeats the sources
+  view drew *Unreachable* over the run's own *Failed …*. `unknown` and not `ok`: a protocol error
+  does not vouch for the credential (some servers answer a bad token with a login page), and
+  `unknown` is already "not tested since something changed". `ok` and `unauthorized` stay: an
+  error says nothing about them. Every `Error` counts, not only one where the server answered: the
+  health step sees only the outcome, and an error the server never saw (a keychain read, a shutdown
+  cancel) is still the run's own outcome, which is what the row should read. The next unreachable
+  run sets `unreachable` again. *Reversing:* low, one arm in `apply_health_and_backoff` and
+  `config::clear_unreachable`.
+- **Test connection still maps `Protocol` to `unreachable`** (`knobas-app` `sources/crud.rs`). That
+  is where a stale `unreachable` most often starts, and this ticket left it alone: it is outside
+  the delegated picks, and the clear above stops it from outliving the next error run. *Reversing:*
+  not applicable.
+- **Merge-manager on Opus: every `Error` clears a stored `unreachable`, not only an error the server
+  answered** (deep pass, 2026-10-21). *Fork:* keep the implementer's wider clear, or narrow it to
+  the errors where the far end answered (`Protocol`, `Moved`) and leave `unreachable` standing
+  through a keychain, configuration or database error. *Ruling:* keep it wide. *Reasoning:* the
+  ticket asks for the narrow case and the wide rule contains it. An error the server never saw
+  leaves the stored `unreachable` no truer: it was not re-witnessed either way, and `unknown` is
+  the glossary's "not tested since something changed". On the source page, a stale *Unreachable*
+  would sit over a keychain failure that needs a person, which is the worse reading. Nothing
+  gates on `unreachable` (the scheduler skips only `unauthorized` and `missing_secret`; backoff
+  reads the run log, not the health), so the clear changes no schedule, and the next unreachable
+  run sets it again. The write is one guarded `update`, so a *Test connection* landing at the same
+  moment loses or wins whole. *Reversing:* low; narrowing needs the `RunFailure` kind on
+  `RunResult`, a sync-crate change with no IPC.
+- **The launcher strip no longer shows a stale red for an erroring source** (merge-manager, deep
+  pass). The strip reads only credential health, so a source whose runs keep ending in `Error` is
+  unmarked there, as an error-only source always was. *Ruling:* not this ticket's; filed #1581
+  (`backlog`). *Reasoning:* the red it loses was the stale state the ticket removes, and the source
+  page reads the run's own *Failed …*. *Reversing:* not applicable.

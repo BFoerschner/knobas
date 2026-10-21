@@ -1072,7 +1072,7 @@ async fn a_watermark_no_build_answers_to_is_refused_over_the_wire() {
     assert!(
         matches!(&err, SourceError::Protocol { message: m, .. }
             if m.contains("`/app/rest/builds/id:999999` answers 404")
-                && m.contains("reset the source's cursor")),
+                && m.contains("Backfill on this source's page")),
         "{err:?}"
     );
     assert!(sink.0.is_empty(), "nothing is emitted from a refused run");

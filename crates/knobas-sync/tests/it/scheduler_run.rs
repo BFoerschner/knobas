@@ -46,6 +46,11 @@ struct MockRegistry {
     /// what the adapter was asked. It is what `RunMode::Backfill` is visible
     /// *as* -- the mode changes nothing else about the run.
     cursors: Arc<Mutex<Vec<Option<knobas_source::Cursor>>>>,
+    /// Whether the built adapter's sync answers [`SourceError::Protocol`]: a
+    /// server that answered with something the adapter refuses, which the
+    /// mock's [`Fault`] has no member for. TeamCity's deleted-watermark
+    /// refusal is one (#1477).
+    protocol: Mutex<bool>,
 }
 
 impl AdapterRegistry for MockRegistry {
@@ -63,6 +68,7 @@ impl AdapterRegistry for MockRegistry {
             id: instance.id,
             inner,
             cursors: Arc::clone(&self.cursors),
+            protocol: *self.protocol.lock().unwrap(),
         }))
     }
 }
@@ -73,6 +79,7 @@ struct Renamed {
     id: String,
     inner: MockSource,
     cursors: Arc<Mutex<Vec<Option<knobas_source::Cursor>>>>,
+    protocol: bool,
 }
 
 #[async_trait::async_trait]
@@ -101,6 +108,11 @@ impl Source for Renamed {
         sink: &mut (dyn knobas_source::Sink + Send),
     ) -> Result<knobas_source::Cursor, SourceError> {
         self.cursors.lock().unwrap().push(cursor.clone());
+        if self.protocol {
+            return Err(SourceError::protocol(
+                "simulated: the server answered and the adapter refused the answer",
+            ));
+        }
         // Rewrite the mock's namespace onto this instance's id, which is what a
         // real adapter does natively.
         let mut renaming = Renaming {
@@ -214,6 +226,7 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
         fault: Mutex::new(Fault::None),
         tombstone: Mutex::new(false),
         cursors: Arc::new(Mutex::new(Vec::new())),
+        protocol: Mutex::new(false),
     });
 
     Harness {
@@ -440,6 +453,80 @@ async fn an_unreachable_source_backs_off_along_the_ladder() {
 
     // Same verdict twice: one health event, not two (interfaces §2.3).
     assert_eq!(h.events.healths.lock().unwrap().len(), 1);
+}
+
+/// A run that ends in `Error` clears a stale `unreachable` (#1477), and a run
+/// that ends `Unreachable` still sets it.
+///
+/// `unreachable` is a claim about the far end that an earlier run or *Test
+/// connection* made. A later run that ends in an error -- TeamCity refusing a
+/// watermark whose build is gone is the case that found this -- did not
+/// re-witness it, and the sources view drew *Unreachable* over that run's own
+/// outcome for as long as the error repeated. The state becomes `unknown`:
+/// nothing the run learned says the credential is good, so not `ok`.
+#[tokio::test]
+async fn an_error_run_clears_a_stale_unreachable_and_an_unreachable_run_sets_it_again() {
+    let h = harness(AuthKind::Method(AuthMethod::Pat), true).await;
+    config::set_health(
+        &h.deps.pool,
+        &h.id,
+        AuthState::Unreachable,
+        Some("dns"),
+        None,
+    )
+    .await
+    .unwrap();
+    *h.registry.protocol.lock().unwrap() = true;
+
+    let (row, _) = one_run(&h, SyncTrigger::Schedule).await;
+    assert_eq!(row.outcome, Some(SyncOutcome::Error));
+    let cfg = config::get(&h.deps.pool, &h.id).await.unwrap().unwrap();
+    assert_eq!(
+        cfg.health.state,
+        AuthState::Unknown,
+        "an error run leaves no stale unreachable behind it"
+    );
+    assert_eq!(cfg.health.detail, None, "nor the stale reason for it");
+    assert!(
+        cfg.backoff_until.is_some(),
+        "an error still backs the source off"
+    );
+    {
+        let healths = h.events.healths.lock().unwrap();
+        assert_eq!(
+            healths.len(),
+            1,
+            "unreachable -> unknown is one health change"
+        );
+        assert_eq!(healths[0].state, AuthState::Unknown);
+    }
+
+    *h.registry.protocol.lock().unwrap() = false;
+    *h.registry.fault.lock().unwrap() = Fault::Unreachable;
+    let (row, _) = one_run(&h, SyncTrigger::Schedule).await;
+    assert_eq!(row.outcome, Some(SyncOutcome::Unreachable));
+    let cfg = config::get(&h.deps.pool, &h.id).await.unwrap().unwrap();
+    assert_eq!(cfg.health.state, AuthState::Unreachable);
+}
+
+/// ...and an error is not a verdict on a credential: a source whose health is
+/// `ok` keeps it through an error run, as it did before #1477. Only a stale
+/// `unreachable` is cleared.
+#[tokio::test]
+async fn an_error_run_leaves_any_other_health_alone() {
+    let h = harness(AuthKind::Method(AuthMethod::Pat), true).await;
+    for state in [AuthState::Ok, AuthState::Unauthorized] {
+        config::set_health(&h.deps.pool, &h.id, state, Some("before"), None)
+            .await
+            .unwrap();
+        *h.registry.protocol.lock().unwrap() = true;
+        let (row, _) = one_run(&h, SyncTrigger::Manual).await;
+        assert_eq!(row.outcome, Some(SyncOutcome::Error));
+        let cfg = config::get(&h.deps.pool, &h.id).await.unwrap().unwrap();
+        assert_eq!(cfg.health.state, state, "an error run left {state:?} alone");
+        assert_eq!(cfg.health.detail.as_deref(), Some("before"));
+    }
+    assert!(h.events.healths.lock().unwrap().is_empty());
 }
 
 /// P7: `unauthorized` gets **no** automatic retry -- only a human can fix it.

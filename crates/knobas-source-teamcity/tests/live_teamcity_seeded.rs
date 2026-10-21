@@ -2112,6 +2112,11 @@ async fn passes_the_contract_battery_against_the_seeded_server() {
 /// the adapter refuses it as issue #91's replaced-server case, on a real 404
 /// from `GET /app/rest/builds/id:{id}`.
 ///
+/// That deletion is #1477's reproduction: a person deleting the newest build.
+/// The refusal names *Backfill* as the way out, and the test takes it: a run
+/// with no position (what `knobas_sync::run_backfill` hands the adapter) lands
+/// back on the newest seeded build, and the incremental run after it is idle.
+///
 /// On a feature branch deliberately: the incremental query is the one that
 /// would have lost such a build for good before #266, so the build this test
 /// makes is of the class the fix is about.
@@ -2228,11 +2233,28 @@ async fn a_build_queued_through_rest_moves_the_watermark_and_the_next_run_stands
     assert!(
         matches!(&refused, SourceError::Protocol { message, .. }
             if message.contains(&format!("`/app/rest/builds/id:{id}` answers 404"))
-                && message.contains("reset the source's cursor")),
+                && message.contains("Backfill on this source's page")),
         "{refused:?}"
     );
     assert!(sink.0.is_empty(), "nothing is emitted from a refused run");
     println!("SEEDED refusal on the deleted build: {refused:?}");
+
+    // #1477: the way out the refusal names. A backfill runs with no position
+    // and stores the one it ends on: the newest build that survived.
+    let (_, backfilled) = full(&*source).await;
+    assert_eq!(
+        since_build_id(&backfilled),
+        baseline,
+        "the backfill starts over and lands on the newest seeded build"
+    );
+    let (idle, resumed) = sync_from(&*source, Some(backfilled.clone())).await;
+    assert!(
+        idle.is_empty(),
+        "incremental sync carries on from the backfill's position: {:?}",
+        keys(&idle)
+    );
+    assert_eq!(resumed, backfilled, "byte-identical");
+    println!("SEEDED backfill after the refusal: {backfilled}");
 }
 
 /// The build configuration's source view against the real server (#664,

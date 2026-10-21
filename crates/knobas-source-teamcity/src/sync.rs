@@ -631,16 +631,28 @@ fn ceiling(probe: &[Rec<Build>], in_flight: &[Rec<Build>]) -> Option<i64> {
     probe.iter().chain(in_flight).map(|b| b.rec.id).max()
 }
 
-/// Refuse a server that cannot be the one this source's watermark came from.
+/// Refuse a server that may not be the one this source's watermark came from.
 ///
 /// The watermark is a build id this source has already synced. Ids are
 /// monotonic and never reused, and TeamCity's cleanup removes the *oldest*
-/// builds, so on the server that issued it that build is still there. A source
-/// repointed at another instance, or one restored from a state older than the
-/// watermark, is the case where it is not -- and carrying on from a position
-/// that describes another server's id space fills the mirror with the wrong
-/// builds while looking like an ordinary incremental run. That is the quiet,
-/// expensive variant: it arrives years in, on a source everyone trusts.
+/// builds, so on the server that issued it that build is normally still there.
+/// A source repointed at another instance, or one restored from a state older
+/// than the watermark, is the case where it is not -- and carrying on from a
+/// position that describes another server's id space fills the mirror with the
+/// wrong builds while looking like an ordinary incremental run. That is the
+/// quiet, expensive variant: it arrives years in, on a source everyone trusts.
+///
+/// # A person can delete the newest build (#1477)
+///
+/// Then the watermark's build is gone from the very server that issued it,
+/// and the server's answers are the same as a replaced server's: a 404 on the
+/// watermark and nothing this run saw reaching it. Nothing the adapter can ask
+/// tells the two apart, so the run still refuses rather than guess, and the
+/// refusal says what the reader can do: *Backfill* on the source's page. A
+/// backfill hands the adapter no position (`knobas_sync::run_backfill`), so
+/// this check does not run, and the position it stores is the newest build
+/// that survived. That is the "reset the cursor" #91 named, through the one
+/// control the app has for it; there is no separate reset.
 ///
 /// # The evidence is a fetch, not a comparison
 ///
@@ -663,9 +675,9 @@ fn ceiling(probe: &[Rec<Build>], in_flight: &[Rec<Build>]) -> Option<i64> {
 ///   server whose pages are not ordered. The ceiling is then below the
 ///   watermark, which [`cursor::advance`]'s floor already handles: it clamps
 ///   nothing and drags nothing back.
-/// * **Not found** -- the replacement, refused. And the remedy works now:
-///   after a cursor reset the ceiling comes from ids this run witnessed rather
-///   than from a stale row 0, so the loop cannot restart.
+/// * **Not found** -- a replacement or a deleted newest build, refused. And
+///   the remedy works now: after a backfill the ceiling comes from ids this
+///   run witnessed rather than from a stale row 0, so the loop cannot restart.
 ///
 /// A watermark of 0 is nothing to check -- no id is below it, and a source
 /// that has never synced has no position to contradict.
@@ -688,14 +700,11 @@ async fn refuse_a_replaced_server(
         return Ok(());
     }
     Err(SourceError::protocol(format!(
-        "teamcity: this source's watermark is build {watermark}, and \
-         `/app/rest/builds/id:{watermark}` answers 404 -- that build is not on this server. \
-         Build ids are monotonic and are never reused, and TeamCity's cleanup removes the \
-         oldest builds, so a build this source has already synced cannot be missing from the \
-         server it came from: either this source now points at a different instance, or one was \
-         restored from a state older than the watermark. Refusing rather than syncing on from a \
-         position that describes another server's id space; reset the source's cursor if the \
-         server really was replaced."
+        "teamcity: build {watermark}, the last one this source synced, is no longer on the \
+         server, so syncing stopped; if it was deleted, Backfill on this source's page starts \
+         over from the newest build. Evidence: `/app/rest/builds/id:{watermark}` answers 404 and \
+         no build this run saw reaches it, which is also what a source pointed at a different \
+         server sees."
     )))
 }
 
@@ -2721,12 +2730,13 @@ mod tests {
         .expect_err("a server missing a build this source synced must not be trusted");
         assert!(
             matches!(&err, SourceError::Protocol { message: m, .. }
-                if m.contains("watermark is build 5000")
+                if m.contains("build 5000, the last one this source synced, is no longer on the server")
+                    && m.contains("Backfill on this source's page")
                     && m.contains("`/app/rest/builds/id:5000` answers 404")
-                    && m.contains("points at a different instance")
-                    && m.contains("reset the source's cursor")),
-            "the message must name the build it asked about, the answer it got and the remedy: \
-             {err:?}"
+                    && m.contains("a different server")
+                    && !m.contains("cursor")),
+            "the message must name the build it asked about, the way out the app offers and the \
+             answer it got, and no remedy the app has no control for: {err:?}"
         );
         assert!(sink.0.is_empty(), "nothing is emitted from a refused run");
         assert_eq!(
@@ -2769,6 +2779,72 @@ mod tests {
             "the run asked, rather than inferring a replacement from a page: {:?}",
             rest.calls()
         );
+    }
+
+    /// Somebody deletes the newest build (#1477): the case the refusal's
+    /// premise left out. Cleanup takes the oldest builds, a person can take
+    /// the newest, and then the source's watermark names a build the server
+    /// no longer has.
+    ///
+    /// From the server's answers alone that is the same picture as a
+    /// replaced server -- a 404 on the watermark and nothing newer in sight
+    /// -- so the run still refuses, and the refusal names *Backfill* as the
+    /// way out. This test walks that way out: a Backfill hands the adapter no
+    /// position (`knobas_sync::run_backfill`), the run reads the window from
+    /// the top and returns the newest build that survived, and the next
+    /// incremental run carries on from there and picks up a new build.
+    #[tokio::test]
+    async fn a_deleted_newest_build_refuses_until_a_backfill_starts_over() {
+        let types = vec![build_type("Payout_Build", "Payout")];
+        let three = |ids: &[i64]| -> Vec<serde_json::Value> {
+            ids.iter()
+                .map(|&id| build(id, "Payout_Build", "Payout", "finished"))
+                .collect()
+        };
+        let cfg = TeamCityConfig::default();
+        let (_, synced) = run(
+            &FakeRest::new(types.clone(), three(&[9981, 9982, 9983])),
+            &cfg,
+            None,
+        )
+        .await;
+        assert_eq!(synced, r#"{"v":2,"since_build_id":9983}"#);
+
+        // Build 9983 is deleted in TeamCity.
+        let after_delete = FakeRest::new(types.clone(), three(&[9981, 9982]));
+        let mut sink = VecSink(Vec::new());
+        let err = execute(
+            "teamcity",
+            TEST_BASE_URL,
+            &cfg,
+            &after_delete,
+            Some(synced.clone()),
+            &mut sink,
+        )
+        .await
+        .expect_err("the server's answers cannot tell a deleted build from a replaced server");
+        assert!(
+            matches!(&err, SourceError::Protocol { message: m, .. }
+                if m.contains("build 9983") && m.contains("Backfill on this source's page")),
+            "the refusal names the way out: {err:?}"
+        );
+
+        // Backfill: the same run with no position.
+        let (_, backfilled) = run(&after_delete, &cfg, None).await;
+        assert_eq!(
+            backfilled, r#"{"v":2,"since_build_id":9982}"#,
+            "the backfill's position is the newest build that is still there"
+        );
+
+        // The next incremental run carries on from it.
+        let (items, next) = run(
+            &FakeRest::new(types, three(&[9981, 9982, 9984])),
+            &cfg,
+            Some(backfilled),
+        )
+        .await;
+        assert_eq!(keys(&items), ["buildType:Payout_Build", "build:9984"]);
+        assert_eq!(next, r#"{"v":2,"since_build_id":9984}"#);
     }
 
     /// An ordinary run never asks by id.

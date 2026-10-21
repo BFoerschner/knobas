@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import type { CredentialHealth, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import {
+  BACKFILL_HINT,
   bareAddress,
   credentialAlert,
   declaresUser,
@@ -238,4 +239,14 @@ test("a source whose records missed a role's path says which role and which path
     "Not drawn as a ticket system: no ticket resolves priority at fields.priority.name. Its tickets stay searchable and linkable.",
   ]);
   expect(roleMissLines({ kinds: [ticket], role_misses: [] })).toEqual([]);
+});
+
+// #1477: Backfill is also the way out of a sync that stopped on a position the
+// server no longer has (TeamCity's deleted newest build), and its refusal sends
+// the reader here. The line says it starts over from no position, not only that
+// it reads more fields.
+test("the Backfill line says it forgets where the last sync stopped, and when to use it", () => {
+  expect(BACKFILL_HINT).toBe(
+    "Reads everything again and forgets where the last sync stopped: after a knobas update reads more fields, or when a sync stopped and names Backfill. Takes a few minutes; the app stays usable.",
+  );
 });

@@ -3291,6 +3291,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_build_that_fini
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_configuration_carries_its_project_path
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_configuration_is_emitted_once_per_run
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_configured_project_takes_in_its_subprojects_at_every_depth
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_deleted_newest_build_refuses_until_a_backfill_starts_over
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_full_page_is_widened_until_the_server_stops_filling_it
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_full_sync_emits_every_configuration_and_its_builds
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_full_sync_mirrors_a_feature_branch_build_in_a_configuration
@@ -3667,6 +3668,8 @@ knobas-sync	test/it	scheduler_run::a_run_with_no_channel_reports_nothing
 knobas-sync	test/it	scheduler_run::a_source_that_needs_no_credential_syncs_without_one
 knobas-sync	test/it	scheduler_run::a_source_that_will_not_run_has_no_next_run_time
 knobas-sync	test/it	scheduler_run::a_source_whose_secret_is_gone_is_reported_rather_than_attempted
+knobas-sync	test/it	scheduler_run::an_error_run_clears_a_stale_unreachable_and_an_unreachable_run_sets_it_again
+knobas-sync	test/it	scheduler_run::an_error_run_leaves_any_other_health_alone
 knobas-sync	test/it	scheduler_run::an_unreachable_source_backs_off_along_the_ladder
 knobas-sync	test/it	scheduler_run::status_reports_running_then_the_finished_shape
 knobas-sync	test/it	scheduler_run::the_log_is_pruned_as_runs_accumulate

@@ -63,6 +63,7 @@
   import type { SettingsPorts } from "./ports";
   import { expiryNote } from "../../shell/health.svelte";
   import {
+    BACKFILL_HINT,
     EXPIRY_CLASS,
     IDENTITY_FIELD,
     credentialAlert,
@@ -638,7 +639,7 @@
   <h2>Maintenance</h2>
   <div class="tf-stg-row">
     <div class="tf-stg-l">
-      Fetch everything again<small>After a knobas update reads more fields. Takes a few minutes; the app stays usable.</small>
+      Fetch everything again<small>{BACKFILL_HINT}</small>
     </div>
     <div class="tf-stg-c">
       <button class="tf-btn tf-sm" disabled={status?.running === true} onclick={() => void backfill()}>Backfill</button>
