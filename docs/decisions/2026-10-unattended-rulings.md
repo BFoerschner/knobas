@@ -10617,3 +10617,12 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 - **Test fixture.** *Ruling:* the scratch script now uses its variables (an assignment alone pins
   nothing), and adds cases for a nested variable, `$tf/`, `${tf}/`, and the control: an unpinned
   file under the walked `tf/` answers `front`. *Reversing:* low.
+
+## #1453: Builds' inner filters draw no `/` hint (Sonnet implementer, 2026-10-21)
+
+- **Drop the hint, or let `/` follow focus** (delegated). *Ruling:* drop the hint from the runs
+  filter and the run's tests filter; `/` stays the pipeline filter's key. *Reasoning:* R-14 makes `/`
+  the page filter's key, singular. *Reversing:* low, remove two config lines.
+- **Config only, or with #1419's shell listener** (delegated). *Ruling:* config only: `FilterConfig.hint`
+  (default on); `false` draws no `<kbd>` and registers no `/` listener. #1419 stays its own ticket.
+  *Reversing:* low.
