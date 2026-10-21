@@ -23,6 +23,7 @@ import { columnPathFor, stripFor, wireKey, wiresFor } from "../../assets/tree";
 
 import type { ProposalEvidence, SuggestionPage } from "../../ipc/entity";
 import { demoHandlers } from "./fake-tauri";
+import { FAKE_CONTEXTS } from "./fake/corpus";
 import { FIXTURE_SOURCES } from "./fake/sources";
 
 test("the four commands the tray calls are answered", () => {
@@ -76,14 +77,14 @@ test("every proposal is unconfirmed, gives a reason, shows both classes and open
 
 /**
  * Scoped like `list_entities`: `[]` is every source, a room the mock source is
- * not in holds nothing, and a stored context's room is empty because the
- * fixture has no link graph to resolve its membership over.
+ * not in holds nothing, and a room the fixture does not store (`ctx:fake-9`; #1503 seeds
+ * `ctx:fake-1`, PAY-231's job) holds nothing.
  */
 test("the page is scoped to the room it is read from", () => {
   const handlers = demoHandlers();
   expect(page(handlers, { ...ROOM, sources: ["mock"] }).total).toBe(page(handlers).total);
   expect(page(handlers, { ...ROOM, sources: ["gitea"] })).toEqual({ rows: [], total: 0, more: [] });
-  expect(page(handlers, { ...ROOM, ctx: "ctx:fake-1" })).toEqual({ rows: [], total: 0, more: [] });
+  expect(page(handlers, { ...ROOM, ctx: "ctx:fake-9" })).toEqual({ rows: [], total: 0, more: [] });
 });
 
 /**
@@ -577,6 +578,7 @@ test("the fixture's launcher board draws the seven built-ins, with the estate's 
   const board = handlers["launcher_home"]!({}) as {
     smart_lists: {
       id: string;
+      label: string;
       count: number;
       changed: boolean;
       description: string;
@@ -610,6 +612,21 @@ test("the fixture's launcher board draws the seven built-ins, with the estate's 
   // Every estate list has something in it, or the walk has nothing to open.
   for (const id of ["not-monitored", "alerts-in-context", "certs-expiring"]) {
     expect(count(id), `${id} is empty and cannot be walked`).toBeGreaterThan(0);
+  }
+  // #1503: the sixth list is named for the reader's jobs, and its count is the
+  // alerted assets an unarchived fake context holds -- one, the TeamCity asset
+  // PAY-231 holds -- and falls to nothing when that context is archived.
+  expect(board.smart_lists.find((list) => list.id === "alerts-in-context")!.label).toBe(
+    "Open alerts on my jobs",
+  );
+  expect(count("alerts-in-context")).toBe(1);
+  const jobs = FAKE_CONTEXTS.filter((context) => context.archived_at === null);
+  jobs.forEach((context) => (context.archived_at = "2026-10-21T00:00:00Z"));
+  try {
+    const archived = handlers["smart_lists"]!({}) as { id: string; count: number }[];
+    expect(archived.find((list) => list.id === "alerts-in-context")!.count).toBe(0);
+  } finally {
+    jobs.forEach((context) => (context.archived_at = null));
   }
   // A badge is a comparison against a stamp this fixture cannot keep.
   expect(board.smart_lists.every((list) => list.changed === false)).toBe(true);

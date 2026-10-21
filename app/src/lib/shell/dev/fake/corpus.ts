@@ -337,8 +337,10 @@ function row(
   };
 }
 
-/** The stored contexts the fixture session holds. Starts empty; *Promote*
- * adds to it. */
+/** The stored contexts the fixture session holds. Starts with one unarchived
+ * job context, PAY-231's (#1503: the *Open alerts on my jobs* smart list is
+ * computed over the unarchived ones, and a fixture with none could not be
+ * walked); *Promote* adds to it. */
 export const FAKE_CONTEXTS: {
   id: string;
   kind: string;
@@ -347,6 +349,16 @@ export const FAKE_CONTEXTS: {
   created_at: string;
   archived_at: string | null;
 }[] = [];
+
+/**
+ * The estate assets a context holds, by the context's anchor (#1503). The
+ * fixture has no link graph, so this one table is all the asset membership
+ * there is; `smart-lists.ts` reads it for *Open alerts on my jobs*. PAY-231
+ * holds the TeamCity asset, which is the one the fixture's acked alert watches.
+ */
+export const FAKE_CONTEXT_ASSETS: Record<string, string[]> = {
+  "mock:PAY-231": ["asset:knobas-teamcity"],
+};
 
 let nextContext = 1;
 export function fakeContext(kind: string, title: string, anchor_id: string | null) {
@@ -359,6 +371,8 @@ export function fakeContext(kind: string, title: string, anchor_id: string | nul
     archived_at: null,
   };
 }
+
+FAKE_CONTEXTS.push(fakeContext("ticket", "Retry failed SEPA payouts", "mock:PAY-231"));
 
 /**
  * The mirror row `list_entities` returns. The path and the state chip are

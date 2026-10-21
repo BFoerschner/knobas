@@ -8,7 +8,7 @@
  * is its own module so the rest of the fixture is frontend-only.
  */
 import type { Handler } from "../fake-tauri";
-import { SYNCED_AT } from "./corpus";
+import { FAKE_CONTEXTS, FAKE_CONTEXT_ASSETS, SYNCED_AT } from "./corpus";
 import { FIXTURE_ESTATE, assetPathText } from "./estate";
 import { fakeMonitorRoster, fakeOpenAlerts, fakeUnmonitored } from "./monitors";
 
@@ -49,13 +49,14 @@ import { fakeMonitorRoster, fakeOpenAlerts, fakeUnmonitored } from "./monitors";
  * * *Not monitored* is `fakeUnmonitored` -- the assets the estate file names no
  *   monitor for -- which is what the backend's read answers over a mirror that
  *   has resolved those names into links.
- * * *Open alerts in my contexts* is the assets of `fakeOpenAlerts`, **with the
- *   context half of the rule dropped**: the fixture has no link graph and no
- *   context holds anything (`context_members` and `context_assets` both answer
- *   empty), so membership cannot be modelled here at all. An honest fixture
- *   would therefore answer 0 and the list could not be walked; this answers the
- *   alerts and says here that the routing clause is missing. What the clause
- *   does is asserted over a real database in `search_ipc.rs`.
+ * * *Open alerts on my jobs* is the assets of `fakeOpenAlerts` that an
+ *   **unarchived** fake context holds (`FAKE_CONTEXT_ASSETS`, keyed by the
+ *   context's anchor), which is the registry's rule over the fixture's one
+ *   membership table: an archived context holds nothing, and an alerted asset
+ *   no job holds is not on the list. The fixture has no link graph, so an
+ *   asset reaches a context only through that table and not through an
+ *   ancestor; the ancestor walk is asserted over a real database in
+ *   `search_ipc.rs`. Acked alerts stay in, as in the registry.
  * * *Certificates expiring* is the roster rows whose `cert_days_remaining` is
  *   under thirty -- the one certificate the roster invents, at nine days.
  *
@@ -82,8 +83,8 @@ export function fakeSmartLists() {
     ],
     [
       "alerts-in-context",
-      "Open alerts in my contexts",
-      "Assets a context you have not archived holds, with a monitor in trouble.",
+      "Open alerts on my jobs",
+      "Assets a job you have not finished holds, with a monitor in trouble.",
     ],
     [
       "certs-expiring",
@@ -242,9 +243,8 @@ function fakeListAssets(id: string): (typeof FIXTURE_ESTATE)[number][] {
         .map((row) => byId(row.id))
         .filter((asset) => asset !== undefined);
     case "alerts-in-context":
-      return fakeOpenAlerts()
-        .flatMap((alert) => alert.assets)
-        .map((asset) => byId(asset.id))
+      return fakeJobAlerts()
+        .map((assetId) => byId(assetId))
         .filter((asset) => asset !== undefined);
     case "certs-expiring":
       return fakeMonitorRoster()
@@ -255,6 +255,20 @@ function fakeListAssets(id: string): (typeof FIXTURE_ESTATE)[number][] {
     default:
       return [];
   }
+}
+
+/**
+ * The ids of the alerted assets an unarchived fake context holds (#1503),
+ * each once, in the alerts' order.
+ */
+function fakeJobAlerts(): string[] {
+  const held = new Set(
+    FAKE_CONTEXTS.filter((context) => context.archived_at === null).flatMap(
+      (context) => FAKE_CONTEXT_ASSETS[context.anchor_id ?? ""] ?? [],
+    ),
+  );
+  const alerted = fakeOpenAlerts().flatMap((alert) => alert.assets.map((asset) => asset.id));
+  return [...new Set(alerted)].filter((id) => held.has(id));
 }
 
 /**

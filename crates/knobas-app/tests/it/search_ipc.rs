@@ -1078,7 +1078,7 @@ async fn the_launchers_not_monitored_list_is_the_monitors_tabs_roster() {
     );
 }
 
-/// **Open alerts in my contexts, at the wire** -- routed by membership, and
+/// **Open alerts on my jobs, at the wire** -- routed by membership, and
 /// through an ancestor.
 ///
 /// The context holds `asset:orbstack-docker`, which is the *parent* of the
@@ -1089,6 +1089,13 @@ async fn the_launchers_not_monitored_list_is_the_monitors_tabs_roster() {
 #[tokio::test]
 async fn an_open_alert_reaches_the_list_through_the_contexts_ancestors() {
     let pool = estate_with_monitors("lists-alerts").await;
+
+    // The row's name on the rail is the reader's word for the rule (#1503).
+    let board = smart_lists_inner(&pool, &Registry::for_process())
+        .await
+        .expect("the board");
+    let list = board.iter().find(|l| l.id == "alerts-in-context").unwrap();
+    assert_eq!(list.label, "Open alerts on my jobs");
 
     open_alert(&pool, "kuma:gitea").await;
     // ...and one on an asset no context holds. The negative the criterion asks
