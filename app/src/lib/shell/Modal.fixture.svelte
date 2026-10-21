@@ -11,13 +11,13 @@
   (the default), a text field, or nothing focusable at all.
 -->
 <script lang="ts">
-  import type { Layers } from "../tf/layers.svelte";
+  import { layers as sharedLayers, type Layers } from "../tf/layers.svelte";
   import Modal from "./Modal.svelte";
 
   let {
     onclose,
     content = "button",
-    layers,
+    layers = sharedLayers,
   }: { onclose: () => void; content?: "button" | "input" | "none"; layers?: Layers } = $props();
 </script>
 
