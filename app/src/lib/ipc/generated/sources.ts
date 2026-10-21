@@ -1715,8 +1715,8 @@ base_version: number,
 /**
  * The page's **whole** storage format. Confluence's content `PUT`
  * replaces the record, so a body carrying only the edited section
- * would delete the rest of the page -- `page-sections.ts`'s
- * `replaceSectionBody` is what composes this.
+ * would delete the rest of the page -- `DocWrites::edit_section`
+ * is what composes this.
  */
 body: string, } } | { "PauseMonitor": { 
 /**
