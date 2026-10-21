@@ -88,6 +88,8 @@
       },
     ],
   });
+  /** The reader as the thread names them: the author of their own comments, else their account. */
+  const myName = $derived(thread?.comments.find((c) => c.mine)?.author ?? thread?.me[0] ?? null);
   const drawn = $derived(thread === null ? null : drawThread(thread, lastVisit, filter, expanded));
 
   async function send() {
@@ -144,7 +146,7 @@
   {/if}
   {#each queued as body, n (n)}
     <article class="tf-msg tf-queued">
-      <span class="tf-av tf-me" aria-hidden="true">{initials(thread?.me[0] ?? null)}</span>
+      <span class="tf-av tf-me" aria-hidden="true">{initials(myName)}</span>
       <div class="tf-msg-body">
         <div class="tf-who"><b>You</b><span class="tf-chip tf-info">queued</span></div>
         <p>{body}</p>

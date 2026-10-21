@@ -398,14 +398,14 @@ test("a sent comment is drawn at the end of the thread marked queued, and goes o
   open("conversation");
   await settle();
   await comment("Looking at the jitter now");
-  expect(queuedShown()).toEqual(["MA Youqueued Looking at the jitter now"]);
+  expect(queuedShown()).toEqual(["ML Youqueued Looking at the jitter now"]);
   expect(target.querySelector(".tf-convo .tf-msg.tf-queued + .tf-compose, .tf-convo .tf-msg.tf-queued ~ .tf-compose")).not.toBeNull();
 
   // Opened again before the sync: still on its way.
   unmount(job!);
   open("conversation");
   await settle();
-  expect(queuedShown()).toEqual(["MA Youqueued Looking at the jitter now"]);
+  expect(queuedShown()).toEqual(["ML Youqueued Looking at the jitter now"]);
 
   // The sync brought it back.
   unmount(job!);
