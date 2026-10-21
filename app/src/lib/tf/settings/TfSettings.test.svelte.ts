@@ -1373,3 +1373,76 @@ test("an unreachable run says the source did not answer, its transport error beh
   expect(refused.textContent).toBe("401 Unauthorized. Re-enter the password.");
   expect(refused.querySelector("details")).toBeNull();
 });
+
+// ---- The credential expiry countdown (#1499) ----
+
+/** Jira and TeamCity, Jira's credential expiring at `at` as its health check reports. */
+function expiring(at: string | null): SettingsPorts {
+  const jira = summary("jira", "Jira", "ok");
+  const rows = [{ ...jira, health: { ...jira.health, secret_expires_at: at } }, SOURCES[1]!];
+  return ports({ listSources: vi.fn(() => Promise.resolve(rows)) });
+}
+
+/** In `days` days from the tests' clock. */
+const IN_DAYS = (days: number) => new Date(NOW.getTime() + days * 86_400_000).toISOString();
+
+/** The credential row of Connection: its label is the noun, Token or Password. */
+function credentialRow(noun: string): HTMLElement {
+  const found = [...section("Connection").querySelectorAll<HTMLElement>(".tf-stg-row")].find(
+    (row) => row.querySelector(".tf-stg-l")?.textContent?.trim() === noun,
+  );
+  if (!found) throw new Error(`no ${noun} row`);
+  return found;
+}
+
+/** The countdown on the credential row, its text and tone, or `null` when none is drawn. */
+function countdown(noun: string): { text: string; amber: boolean; fail: boolean } | null {
+  const note = credentialRow(noun).querySelector(".tf-stg-exp");
+  if (!note) return null;
+  return {
+    text: note.textContent!.trim(),
+    amber: note.classList.contains("tf-stg-warnt"),
+    fail: note.classList.contains("tf-stg-errt"),
+  };
+}
+
+test("a source's page counts its credential down on the Password row: plain over 14 days, amber at 14, failed once expired (#1499)", async () => {
+  await open(["source", "jira"], expiring(IN_DAYS(41)));
+  expect(countdown("Password")).toEqual({ text: "expires in 41 days", amber: false, fail: false });
+  unmount(view!);
+
+  await open(["source", "jira"], expiring(IN_DAYS(14)));
+  expect(countdown("Password")).toEqual({ text: "expires in 14 days", amber: true, fail: false });
+  unmount(view!);
+
+  await open(["source", "jira"], expiring(IN_DAYS(-3)));
+  expect(countdown("Password")).toEqual({ text: "expired", amber: false, fail: true });
+  unmount(view!);
+
+  await open(["source", "jira"], expiring(null));
+  expect(countdown("Password")).toBeNull();
+});
+
+test("the Sources row says the credential is running out only while amber or expired (#1499)", async () => {
+  /** Jira's state column. */
+  const state = () => {
+    const cell = [...target.querySelectorAll(".tf-stg-src")][0]!.querySelectorAll(".tf-stg-si")[1]!;
+    return cell.textContent!.replace(/\s+/g, " ").trim();
+  };
+  await open([], expiring(IN_DAYS(41)));
+  expect(state()).toBe("Synced 4 min ago");
+  unmount(view!);
+
+  await open([], expiring(IN_DAYS(9)));
+  expect(state()).toBe("Synced 4 min ago Credential expires in 9 days");
+  expect(target.querySelector(".tf-stg-src .tf-stg-exp.tf-stg-warnt")).not.toBeNull();
+  unmount(view!);
+
+  await open([], expiring(IN_DAYS(-1)));
+  expect(state()).toBe("Synced 4 min ago Credential expired");
+  expect(target.querySelector(".tf-stg-src .tf-stg-exp.tf-stg-errt")).not.toBeNull();
+  unmount(view!);
+
+  await open([], expiring(null));
+  expect(state()).toBe("Synced 4 min ago");
+});

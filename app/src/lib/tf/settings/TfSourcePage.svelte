@@ -60,7 +60,9 @@
   import { configChanges, formValues, pageFields, withAdded, withChanges } from "./source-config";
   import TfSchemaForm from "./TfSchemaForm.svelte";
   import type { SettingsPorts } from "./ports";
+  import { expiryNote } from "../../shell/health.svelte";
   import {
+    EXPIRY_CLASS,
     IDENTITY_FIELD,
     credentialAlert,
     roleMissLines,
@@ -120,6 +122,8 @@
   // The roles its records did not fill (#1199): the surfaces that leave it out.
   const missLines = $derived(roleMissLines(source));
   const word = $derived(secretWord(source.auth_kind));
+  // The countdown on the credential row (#1499): the date the source reported, never typed.
+  const expiry = $derived(expiryNote(health?.secret_expires_at, now));
   const keychain = /Mac/.test(navigator.userAgent) ? "the macOS keychain" : "the system keychain";
   const showsUser = $derived(adapter !== null && declaresUser(adapter.config_schema));
   const acceptsAccount = $derived(adapter?.accepts_account ?? false);
@@ -503,6 +507,9 @@
       <div class="tf-stg-l">{word}</div>
       <div class="tf-stg-c tf-stg-inl">
         <span>{health?.state === "missing_secret" ? "None stored" : `Stored in ${keychain}`}</span>
+        {#if expiry !== null}
+          <span class="tf-stg-exp {EXPIRY_CLASS[expiry.tone]}">{expiry.text}</span>
+        {/if}
         <button class="tf-btn tf-sm" onclick={openReenter}>Re-enter…</button>
       </div>
     </div>

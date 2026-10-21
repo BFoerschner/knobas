@@ -54,6 +54,10 @@
 .tf-stg-sn .tf-dim { font-size: var(--t-sm); }
 .tf-stg-si { font-size: var(--t-sm); color: var(--ink-2); }
 .tf .tf-stg-errt { color: var(--err); }
+.tf .tf-stg-warnt { color: var(--warn); }
+/* the credential expiry countdown (#1499): beside the credential on its page, under the state on its row */
+.tf-stg-exp { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-stg-si .tf-stg-exp { display: block; }
 .tf-stg-go { color: var(--ink-2); }
 .tf-stg-alert {
   display: flex; gap: 10px; align-items: center; padding: 10px 14px; border: 1px solid var(--rule);
