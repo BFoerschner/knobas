@@ -1,6 +1,6 @@
 /**
- * `?fake-ipc`: The launcher (#504): its home board, the Tree's search box (#430) and the
- * query box's suggestions (#601).
+ * `?fake-ipc`: The launcher (#504): its home board, the Tree's search box (#430), the
+ * `>` palette (#1417) and the query box's suggestions (#601).
  */
 import type { Handler } from "../fake-tauri";
 import { fakeNotesAreShown } from "./capture";
@@ -38,6 +38,28 @@ function ticketsByKey(raw: string) {
 }
 
 /**
+ * `search` for `>` (#1417): what the backend answers, the text after the
+ * marker and no groups (`empty_corpus` in knobas-search: `>` is not a corpus
+ * search). The launcher draws its navigation palette from that, so the
+ * palette can be looked at under `?fake-ipc`.
+ */
+function actionPalette(raw: string) {
+  if (!raw.startsWith(">")) return null;
+  return {
+    interpreted: {
+      text: raw.slice(1).trim(),
+      prefix: "action",
+      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups: [],
+    total: 0,
+    took_ms: 0,
+    coverage: [],
+  };
+}
+
+/**
  * `search`, narrowed to the estate — what `assets/tree.ts`'s `estateQuery`
  * asks for.
  *
@@ -60,6 +82,8 @@ function estateSearch(args: Record<string, unknown>) {
   // it answers with the refusal below.
   const listed = /^list:([a-z0-9-]+)$/.exec((query.raw ?? "").trim());
   if (listed) return fakeSmartListItems({ id: listed[1]!, limit: 50 });
+  const palette = actionPalette((query.raw ?? "").trim());
+  if (palette !== null) return palette;
   const byKey = ticketsByKey((query.raw ?? "").trim());
   if (byKey !== null) return byKey;
   if (!(query.filters?.kinds ?? []).includes("asset")) {
@@ -145,7 +169,8 @@ export function handlers(): Record<string, Handler> {
     // not narrowed to assets is refused rather than answered from the estate,
     // because the launcher's corpus is the mirror's and this fixture has no
     // mirror to search. A handler that answered everything with assets would
-    // make a QA pass over the launcher look like it worked.
+    // make a QA pass over the launcher look like it worked. `>` is answered
+    // (#1417) because the backend answers it without a corpus too.
     search: (args) => estateSearch(args),
     // The query box's suggestions (#601). **Fixture-only**: the kinds the
     // corpus holds and the configured sources, so `kind:` and `source:` can be

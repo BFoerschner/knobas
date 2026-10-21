@@ -25,7 +25,6 @@
   import type { CredentialHealth } from "../ipc/sources";
   import { isActionable, type HealthPhase } from "../shell/health.svelte";
   import { sourceMonogram } from "../shell/monogram";
-  import Monogram from "../shell/Monogram.svelte";
   import { ago } from "../shell/time";
   import { sharesKey } from "./format";
   import Row from "./Row.svelte";
@@ -176,7 +175,7 @@
   );
 </script>
 
-<div class="secl"><span class="lab">Smart lists</span><span class="n">saved local queries</span></div>
+<div class="tf-ln-h"><span class="tf-ln-lab">Smart lists</span><span class="tf-ln-n">saved local queries</span></div>
 {#each home.smart_lists as list, i (list.id)}
   {@const row = rows[i]}
   <!--
@@ -184,16 +183,16 @@
     pointer onto *Rename* or *Delete* selects the row those act on rather than
     leaving the cursor two rows above.
 
-    `role="presentation"`: the listbox's options are the `.sl` buttons, and
+    `role="presentation"`: the listbox's options are the `.tf-ln-sl` buttons, and
     this wrapper exists only to put the two controls beside one. Marking it
     presentational is what keeps it out of the listbox's own structure — the
-    same thing `Launcher.svelte`'s scrim does with its click target. A row
+    same thing `TfDialog`'s scrim does with its click target. A row
     being renamed has *no* option, which is honest: its name is a text field
     for as long as the field is open.
   -->
   <div
-    class="slrow"
-    class:on={i === selected}
+    class="tf-ln-slrow"
+    class:tf-ln-on={i === selected}
     role="presentation"
     onmouseenter={() => onhover(i)}
   >
@@ -204,7 +203,7 @@
         when the reader clicked away is not a name they chose.
       -->
       <input
-        class="ren"
+        class="tf-ln-ren"
         type="text"
         use:takeFocus
         value={list.label}
@@ -227,21 +226,21 @@
     {:else}
       <button
         id={optionId(i)}
-        class="sl"
+        class="tf-ln-sl"
         role="option"
         aria-selected={i === selected}
         disabled={list.needs_attention}
         onclick={() => row && onopen(row)}
       >
-        <span class="nm">
+        <span class="tf-ln-nm">
           {list.label}
-          <small class:att={list.needs_attention}>{list.description}</small>
+          <small class:tf-ln-att={list.needs_attention}>{list.description}</small>
         </span>
-        <span class="c" class:chg={list.changed}>
+        <span class="tf-ln-c" class:tf-ln-chg={list.changed}>
           {#if list.needs_attention}
-            <span class="att">Needs attention</span>
+            <span class="tf-ln-att">Needs attention</span>
           {:else}
-            {list.count}{#if list.changed}<span class="dot" title="something in it is new"
+            {list.count}{#if list.changed}<span class="tf-ln-dot" title="something in it is new"
                 >●</span
               >{/if}
           {/if}
@@ -254,17 +253,17 @@
           the keyboard through the row's `Tab` chain, which is where every
           other per-row action in this box lives.
         -->
-        <span class="own" role="presentation">
+        <span class="tf-ln-own" role="presentation">
           <button
-            class="mini"
+            class="tf-ln-mini"
             onclick={() => {
               onhover(i);
               onstartrename(list.id);
             }}>Rename</button
           >
           <button
-            class="mini del"
-            class:armed={confirming === list.id}
+            class="tf-ln-mini tf-ln-del"
+            class:tf-ln-armed={confirming === list.id}
             onclick={() => {
               // Select first: `confirming` belongs to the row under the
               // cursor, so a press on a row the cursor is not on has to move
@@ -287,19 +286,19 @@
 {/each}
 
 {#if inboxRows.length > 0}
-  <div class="secl inboxh"><span class="lab">Inbox</span><span class="n">{inboxCount}</span></div>
-  <div class="inbox">
+  <div class="tf-ln-h tf-ln-inboxh"><span class="tf-ln-lab">Inbox</span><span class="tf-ln-n">{inboxCount}</span></div>
+  <div class="tf-ln-inbox">
     {#each inboxRows as { row, item, index } (row.id)}
-      <div class="slrow" class:on={index === selected} role="presentation" onmouseenter={() => onhover(index)}>
+      <div class="tf-ln-slrow" class:tf-ln-on={index === selected} role="presentation" onmouseenter={() => onhover(index)}>
         <button
           id={optionId(index)}
-          class="sl"
+          class="tf-ln-sl"
           role="option"
           aria-selected={index === selected}
           onclick={() => onopen(row)}
         >
-          <span class="nm">{#if failed(item)}<span class="err" aria-hidden="true">●</span>{" "}{/if}{sentence(item)}</span>
-          <span class="c">{when(item.occurred_at, now ?? new Date())}</span>
+          <span class="tf-ln-nm">{#if failed(item)}<span class="tf-ln-errdot" aria-hidden="true">●</span>{" "}{/if}{sentence(item)}</span>
+          <span class="tf-ln-c">{when(item.occurred_at, now ?? new Date())}</span>
         </button>
       </div>
     {/each}
@@ -308,12 +307,12 @@
 
 {#if todayRow}
   {@const { row, today, index } = todayRow}
-  <div class="secl"><span class="lab">Today</span><span class="n">time</span></div>
-  <div class="today">
-    <div class="slrow" class:on={index === selected} role="presentation" onmouseenter={() => onhover(index)}>
-      <button id={optionId(index)} class="sl" role="option" aria-selected={index === selected} onclick={() => onopen(row)}>
-        <span class="nm"><b>{hm(today.tracked)}</b> tracked</span>
-        <span class="c" class:warn={today.toLog > 0}>{hm(today.toLog)} to log</span>
+  <div class="tf-ln-h"><span class="tf-ln-lab">Today</span><span class="tf-ln-n">time</span></div>
+  <div class="tf-ln-today">
+    <div class="tf-ln-slrow" class:tf-ln-on={index === selected} role="presentation" onmouseenter={() => onhover(index)}>
+      <button id={optionId(index)} class="tf-ln-sl" role="option" aria-selected={index === selected} onclick={() => onopen(row)}>
+        <span class="tf-ln-nm"><b>{hm(today.tracked)}</b> tracked</span>
+        <span class="tf-ln-c" class:tf-ln-warn={today.toLog > 0}>{hm(today.toLog)} to log</span>
       </button>
     </div>
   </div>
@@ -328,32 +327,32 @@
 <!-- The count and the gate read the same list the strip does, not the copy the
      board arrived with — a header saying "2" over one line is the same lie in
      a smaller place. -->
-<div class="secl">
-  <span class="lab">Sources</span>{#if reading.phase === "ready" || sources.length > 0}<span class="n">{sources.length}</span>{/if}
+<div class="tf-ln-h">
+  <span class="tf-ln-lab">Sources</span>{#if reading.phase === "ready" || sources.length > 0}<span class="tf-ln-n">{sources.length}</span>{/if}
 </div>
 {#if sources.length === 0 && reading.phase === "loading"}
-  <p class="none">Reading the sources…</p>
+  <p class="tf-ln-none">Reading the sources…</p>
 {:else if sources.length === 0 && reading.phase === "failed"}
-  <p class="none err">Could not read the sources{reading.error ? `: ${reading.error}` : "."}</p>
-  <button class="pfx" onclick={() => reading.retry()}>
-    <span class="nm">Retry</span>
-    <span class="s">Read the sources again.</span>
+  <p class="tf-ln-none tf-ln-err">Could not read the sources{reading.error ? `: ${reading.error}` : "."}</p>
+  <button class="tf-ln-opt" onclick={() => reading.retry()}>
+    <span class="tf-ln-nm">Retry</span>
+    <span class="tf-ln-s">Read the sources again.</span>
   </button>
 {:else if sources.length === 0}
-  <p class="none">No source is configured yet.</p>
+  <p class="tf-ln-none">No source is configured yet.</p>
 {:else}
-  <div class="strip">
+  <div class="tf-ln-strip">
     {#each strip as source (source.id)}
-      <span class="src" class:fail={source.failing}>
-        <Monogram text={source.monogram} tone={source.failing ? "err" : "ok"} label={source.id} />
-        <span class="sid">{source.id}</span>
-        <span class="note">{source.note}</span>
+      <span class="tf-ln-src" class:tf-ln-fail={source.failing}>
+        <span class="tf-ln-mg" title={source.id} aria-label={source.id}>{source.monogram}</span>
+        <span class="tf-ln-sid">{source.id}</span>
+        <span class="tf-ln-note">{source.note}</span>
       </span>
     {/each}
   </div>
 {/if}
 
-<div class="secl"><span class="lab">Recent</span><span class="n">{home.recent.length}</span></div>
+<div class="tf-ln-h"><span class="tf-ln-lab">Recent</span><span class="tf-ln-n">{home.recent.length}</span></div>
 {#each home.recent as item, i (item.entity_id)}
   {@const index = recentFrom + i}
   {@const row = rows[index]}
@@ -378,188 +377,8 @@
 {/each}
 
 {#if home.recent.length === 0}
-  <p class="none">
+  <p class="tf-ln-none">
     Nothing has been synced yet. Add a source from the gear, or start knobas
-    with <span class="mono">--demo</span>.
+    with <strong>--demo</strong>.
   </p>
 {/if}
-
-<style>
-  .secl {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 24px;
-    padding: 0 12px 0 8px;
-    border-bottom: 1px solid var(--hair);
-    background: var(--panel);
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-  .n {
-    margin-left: auto;
-    font: 400 11px var(--mono);
-    color: var(--faint);
-  }
-  /* `.slrow` — the smart-list line and, on a saved one, its two controls. The
-     highlight is on the row so that the controls sit inside it rather than
-     beside a highlighted button. */
-  .slrow {
-    display: flex;
-    align-items: stretch;
-    border-bottom: 1px solid var(--hair);
-  }
-  .slrow:hover,
-  .slrow.on {
-    background: var(--raised);
-  }
-  .slrow.on {
-    box-shadow: inset 2px 0 0 var(--amber);
-  }
-  /* `.sl` — the smart-list line (round 3, lines 380-385). */
-  .sl {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 6px;
-    align-items: start;
-    flex: 1;
-    min-width: 0;
-    text-align: left;
-    padding: 7px 12px;
-    min-height: 32px;
-    font-size: 12px;
-    color: var(--text);
-  }
-  .sl:disabled {
-    cursor: default;
-  }
-  /* The rename field, sized like the row it replaces so the rail does not
-     jump when it opens. */
-  .ren {
-    flex: 1;
-    min-width: 0;
-    margin: 5px 12px;
-    padding: 2px 6px;
-    font: 500 12px var(--mono);
-    color: var(--text);
-    background: var(--panel);
-    border: 1px solid var(--amber);
-    border-radius: 3px;
-  }
-  .own {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding-right: 10px;
-  }
-  .mini {
-    font: 400 10px var(--mono);
-    color: var(--faint);
-    padding: 2px 6px;
-    border: 1px solid var(--hair);
-    border-radius: 3px;
-  }
-  .mini:hover {
-    color: var(--text);
-    border-color: var(--muted);
-  }
-  .mini.del:hover,
-  .mini.armed {
-    color: var(--fail);
-    border-color: var(--fail);
-  }
-  /* A saved query today's grammar cannot run: the reason where the blurb goes
-     and the words where the count goes, so the row reads as a state and not as
-     an empty list. */
-  .att {
-    color: var(--fail);
-  }
-  .nm {
-    min-width: 0;
-  }
-  .nm small {
-    display: block;
-    font: 400 10px/1.35 var(--mono);
-    color: var(--faint);
-    margin-top: 2px;
-  }
-  .c {
-    font: 500 11px var(--mono);
-    color: var(--muted);
-    white-space: nowrap;
-  }
-  .c.chg {
-    color: var(--amber);
-  }
-  .dot {
-    margin-left: 4px;
-    font-size: 9px;
-  }
-  /* A failure in the inbox (a failed build, a monitor down), as the Inbox
-     page marks one. */
-  .err {
-    color: var(--fail);
-    font-size: 9px;
-  }
-  /* Time not yet logged, in the Day view's warning colour. */
-  .c.warn {
-    color: var(--amber);
-  }
-  .none {
-    padding: 14px 12px;
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 1.5;
-  }
-  .none.err {
-    color: var(--fail);
-  }
-  .pfx {
-    display: grid;
-    grid-template-columns: 160px 1fr;
-    gap: 8px;
-    align-items: baseline;
-    width: 100%;
-    text-align: left;
-    padding: 7px 12px;
-    font-size: 12px;
-    color: var(--muted);
-    border-bottom: 1px solid var(--hair);
-  }
-  .pfx:hover {
-    background: var(--raised);
-    color: var(--text);
-  }
-  .pfx .nm {
-    color: var(--text);
-  }
-  .strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 14px;
-    padding: 8px 12px;
-  }
-  .src {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font: 400 11px var(--mono);
-    color: var(--muted);
-  }
-  .src.fail {
-    color: var(--fail);
-  }
-  .sid {
-    color: var(--text);
-  }
-  .src.fail .sid {
-    color: var(--fail);
-  }
-  .note {
-    color: var(--faint);
-  }
-  .src.fail .note {
-    color: var(--fail);
-  }
-</style>

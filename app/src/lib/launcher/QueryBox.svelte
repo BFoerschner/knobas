@@ -1,5 +1,6 @@
 <!--
-  The box itself (`.search .q`, round 3, lines 364-371).
+  The box itself: prototype-6's `.launch input`, borderless 17 px over a
+  bottom rule (#1422; the rules are `tf/css/launcher.css`).
 
   The input never loses focus while the overlay is open: everything else in the
   launcher is a list the keyboard walks, so a click that moved focus to a row
@@ -46,8 +47,8 @@
   }
 </script>
 
-<div class="q">
-  <span class="caret" class:pending></span>
+<div class="tf-ln-q">
+  <span class="tf-ln-caret" class:tf-ln-pending={pending}></span>
   <input
     bind:this={input}
     {value}
@@ -58,71 +59,11 @@
     oninput={(event) => oninput(event.currentTarget.value)}
     {onkeydown}
   />
-  <span class="faint k">{footnote}</span>
+  <span class="tf-ln-foot">{footnote}</span>
   <kbd>⌘K</kbd>
-  <button class="x" aria-label="Close" onclick={onclose}>
+  <button class="tf-ln-x" aria-label="Close" onclick={onclose}>
     <svg viewBox="0 0 16 16" aria-hidden="true">
       <path d="M4 4l8 8M12 4l-8 8" />
     </svg>
   </button>
 </div>
-
-<style>
-  .q {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    height: 48px;
-    padding: 0 12px 0 0;
-    border-bottom: 1px solid var(--hair);
-    flex: none;
-  }
-  .caret {
-    width: 3px;
-    height: 26px;
-    background: var(--amber);
-    flex: none;
-  }
-  /* Dimming the caret is the whole "loading" indicator. A spinner over a list
-     that is about to be replaced draws the eye to the wrong place, and the
-     debounce means it would flash on every word. */
-  .caret.pending {
-    background: var(--hair2);
-  }
-  input {
-    flex: 1;
-    min-width: 120px;
-    height: 100%;
-    font: 400 15px var(--sans);
-    color: var(--text);
-    background: transparent;
-  }
-  input::placeholder {
-    color: var(--faint);
-  }
-  .k {
-    white-space: nowrap;
-  }
-  .x {
-    width: 26px;
-    height: 26px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 2px;
-    color: var(--muted);
-    flex: none;
-  }
-  .x:hover {
-    background: var(--raised);
-    color: var(--text);
-  }
-  .x svg {
-    width: 14px;
-    height: 14px;
-    stroke: currentColor;
-    fill: none;
-    stroke-width: 1.6;
-    stroke-linecap: round;
-  }
-</style>

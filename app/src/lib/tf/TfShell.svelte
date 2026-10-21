@@ -15,11 +15,9 @@
   also writes (`theme.svelte.ts`, #831), so the dialogs mounted outside `.tf`
   follow it too.
 
-  **Dialogs not yet ported to this shell are mounted outside `.tf`**, the
-  write queue and the Add-source dialog (#830) here and the launcher in
-  `App.svelte`; they draw with `src/unported.css`. Dialogs ported to this
-  shell arrive through `dialogs` and are drawn inside it: the worklog draft
-  (#826), the ⌘T picker and the ad-hoc dialog (#1432).
+  **Dialogs ported to this shell arrive through `dialogs`** and are drawn
+  inside it: the worklog draft (#826), the ⌘T picker and the ad-hoc dialog
+  (#1432), and the ⌘K launcher (#1422).
 -->
 <script lang="ts" module>
   import type { SourceSummary as Summary, SourceSyncStatus as SyncRow } from "../ipc/sources";

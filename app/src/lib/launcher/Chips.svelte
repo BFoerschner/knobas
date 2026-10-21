@@ -1,5 +1,5 @@
 <!--
-  What the backend made of the box (`.fbar`/`.fchip`, round 3, lines 402-409).
+  What the backend made of the box (`.tf-ln-fbar`/`.tf-ln-fchip` in `tf/css/launcher.css`).
 
   **`response.interpreted` is the only source of these chips.** The frontend
   never re-parses the box: ruling P2 puts the whole grammar in
@@ -120,49 +120,12 @@
 </script>
 
 {#if chips.length > 0 || interpreted.unknown_tokens.length > 0}
-  <div class="fbar">
+  <div class="tf-ln-fbar">
     {#each chips as chip (chip.key)}
-      <span class="fchip on" class:fail={chip.fail} title={chip.title}>{chip.text}</span>
+      <span class="tf-ln-fchip tf-ln-set" class:tf-ln-fail={chip.fail} title={chip.title}>{chip.text}</span>
     {/each}
     {#each interpreted.unknown_tokens as token (token)}
-      <span class="fchip off" title={reason(token)}>{token} — {reason(token)}</span>
+      <span class="tf-ln-fchip tf-ln-off" title={reason(token)}>{token} — {reason(token)}</span>
     {/each}
   </div>
 {/if}
-
-<style>
-  .fbar {
-    display: flex;
-    gap: 4px;
-    row-gap: 5px;
-    align-items: center;
-    padding: 7px 10px;
-    border-bottom: 1px solid var(--hair);
-    flex-wrap: wrap;
-    flex: none;
-  }
-  .fchip {
-    flex: none;
-    white-space: nowrap;
-    font: 400 11px var(--mono);
-    border: 1px solid var(--hair);
-    border-radius: 2px;
-    padding: 2px 5px;
-  }
-  .fchip.on {
-    color: var(--text);
-    border-color: var(--muted);
-    background: var(--raised);
-  }
-  .fchip.on.fail {
-    color: var(--fail);
-    border-color: var(--fail);
-  }
-  /* Greyed *and* dashed: a filter that did nothing has to be legible as
-     "present but inert" at a glance, not just dimmer than its neighbours. */
-  .fchip.off {
-    color: var(--faint);
-    border-style: dashed;
-    border-color: var(--hair2);
-  }
-</style>

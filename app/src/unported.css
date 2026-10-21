@@ -3,11 +3,11 @@
 
   The rooms UI and its stylesheet, `app.css`, went in #881. What is left here
   are the rules of that sheet that a surviving component still reaches: the
-  launcher, the asset tree
-  (`#/assets`) and its dialogs, and the capture window. Every rule whose
+  asset tree (`#/assets`) and its dialogs, the shell's `Modal`, and the
+  capture window. Every rule whose
   class only the rooms UI drew went with it. A component ported to `tf.css`
   takes its rules out of here (the first-run wizard and the rooms *Add a
-  source* did with #1400, the write queue with #1425, the ⌘T picker and the ad-hoc dialog with #1432); when nothing reads
+  source* did with #1400, the write queue with #1425, the ⌘T picker and the ad-hoc dialog with #1432, the launcher with #1422, which read only rules others still read); when nothing reads
   this file it goes too.
 
   **The palette is the design system's.** The tokens live on `:root` in
@@ -115,7 +115,7 @@ textarea.inp{height:auto;min-height:64px;padding:6px 8px;resize:vertical;line-he
 .pill:hover{background:var(--raised)}
 kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);border-radius:2px;padding:1px 4px;white-space:nowrap}
 
-/* ---- the rooms sources row: the launcher's board and the asset tree still carry `.src` ---- */
+/* ---- the rooms sources row: the asset tree still carries `.src` ---- */
 .src{display:grid;grid-template-columns:34px 186px 1fr 200px 224px 152px;gap:12px;align-items:start;padding:10px 14px 10px 10px;min-height:46px;border-bottom:1px solid var(--hair);font-size:12px}
 .src .nm{font-weight:500;display:block}
 .src>span{min-width:0}

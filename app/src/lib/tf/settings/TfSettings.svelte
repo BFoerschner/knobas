@@ -26,7 +26,7 @@
   import { notifications as sharedNotifications, type Notifications } from "../../inbox/notify.svelte";
   import { theme as sharedTheme, type Theme } from "../theme.svelte";
   import { realSectionPorts, realSettingsPorts, type SectionPorts, type SettingsPorts } from "./ports";
-  import { SETTINGS_SECTIONS, settingsPlace, sourceState } from "./settings";
+  import { SETTINGS_SECTIONS, settingsHash, settingsPlace, sourceState } from "./settings";
     import TfSourcePage from "./TfSourcePage.svelte";
   import TfSources from "./TfSources.svelte";
   import TfInstalledAdapters from "./TfInstalledAdapters.svelte";
@@ -206,7 +206,7 @@
   <div class="tf-stg">
     <nav class="tf-stg-nav" aria-label="Settings">
       {#each SETTINGS_SECTIONS as [key, label] (key)}
-        <a href="#/settings/{key}" aria-current={key === place.section ? "page" : undefined}>
+        <a href={settingsHash(key)} aria-current={key === place.section ? "page" : undefined}>
           {label}
           {#if key === "sources" && anyFailing}
             <span class="tf-dot tf-err" role="img" aria-label="A source needs you" title="A source needs you"></span>

@@ -274,7 +274,7 @@ test("markup in source text is rendered as characters, not as elements", async (
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
 
-  const row = target.querySelector(".res");
+  const row = target.querySelector(".tf-ln-res");
   expect(row, "the hit rendered").not.toBeNull();
   expect(row!.textContent).toContain("<script>alert(1)</script>");
   expect(row!.textContent).toContain('onclick="steal()"');
@@ -294,18 +294,18 @@ test("groups render in the engine's order, with the count and what the page left
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
 
-  const headings = [...target.querySelectorAll(".lab")].map((el) => el.textContent?.trim());
+  const headings = [...target.querySelectorAll(".tf-ln-lab")].map((el) => el.textContent?.trim());
   expect(headings).toEqual(["Tickets", "Pull requests", "Builds"]);
 
   // 42 matched, one on the page: §4 wants both numbers or the reader believes
   // there is one ticket.
-  const first = target.querySelector(".n")!;
+  const first = target.querySelector(".tf-ln-n")!;
   expect(first.textContent).toContain("42");
   expect(first.textContent).toContain("41 more");
 
   // And every row carries its provenance, which is what §4 asks for on all of
   // them rather than on the ones that happen to have room.
-  const ages = [...target.querySelectorAll(".sy")].map((el) => el.textContent?.trim());
+  const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
   expect(ages).toEqual(["synced 4 min ago", "synced 4 min ago", "synced 4 min ago"]);
 });
 
@@ -335,7 +335,7 @@ test("a source that is refusing the credential replaces the age on its rows", as
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
 
-  const ages = [...target.querySelectorAll(".sy")].map((el) => el.textContent?.trim());
+  const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
   expect(ages).toEqual(["synced 4 min ago", "gitea · sign in again", "synced 4 min ago"]);
 });
 
@@ -380,7 +380,7 @@ test("an explicitly empty sources prop is a live reading, not an unsupplied one"
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
 
-  const ages = [...target.querySelectorAll(".sy")].map((el) => el.textContent?.trim());
+  const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
   expect(ages).toEqual(["synced 4 min ago", "synced 4 min ago", "synced 4 min ago"]);
 });
 
@@ -432,7 +432,7 @@ test("with no sources prop, the rows take their health from the board", async ()
 
   // Three rows from three different sources, only the middle one failing, so
   // a fixture that could not witness a mix-up is not what is being read here.
-  const ages = [...target.querySelectorAll(".sy")].map((el) => el.textContent?.trim());
+  const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
   expect(ages).toEqual(["synced 4 min ago", "gitea · sign in again", "synced 4 min ago"]);
 });
 
@@ -485,7 +485,7 @@ test("an empty box shows the smart lists and the recent items", async () => {
   expect(text).toContain("Reconcile mandates");
   // The change badge, which is the only thing distinguishing a list worth
   // opening from one that has not moved.
-  expect(target.querySelector(".c.chg")?.textContent).toContain("3");
+  expect(target.querySelector(".tf-ln-c.tf-ln-chg")?.textContent).toContain("3");
 });
 
 /**
@@ -530,7 +530,7 @@ test("the board strip reads the live health, not the copy the board arrived with
   });
   await settle();
 
-  const strip = [...target.querySelectorAll(".strip .src")];
+  const strip = [...target.querySelectorAll(".tf-ln-strip .tf-ln-src")];
   expect(strip.length, "the strip did not render at all").toBe(1);
   expect(strip[0]!.className).not.toContain("fail");
   expect(strip[0]!.textContent).not.toContain("401 from Gitea");
@@ -587,10 +587,10 @@ test("the recent rows read the live health, as the strip above them does", async
   });
   await settle();
 
-  const strip = [...target.querySelectorAll(".strip .src")];
+  const strip = [...target.querySelectorAll(".tf-ln-strip .tf-ln-src")];
   expect(strip.length, "the strip did not render at all").toBe(1);
   expect(strip[0]!.className).not.toContain("fail");
-  const ages = [...target.querySelectorAll(".sy")].map((el) => el.textContent?.trim());
+  const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
   expect(ages).toEqual(["synced 2 min ago"]);
 });
 
@@ -624,15 +624,15 @@ test("the board shows one line per source, and says which one needs attention", 
   });
   await settle();
 
-  const lines = [...target.querySelectorAll(".src")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
+  const lines = [...target.querySelectorAll(".tf-ln-src")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
   // `GI`, not `GT`: the monogram is the first two letters of the id, because
   // §3a forbids a table of adapter names. Written `GT` at first, from the
   // mockup's hand-curated map — the second time this fixture-vs-derivation gap
   // has been caught by a test rather than by reading the code.
   expect(lines).toEqual(["JI jira checked 1 h ago", "GI gitea 401 from Gitea"]);
   // Only the broken one is marked, and `ok` is not "needs attention".
-  expect(target.querySelectorAll(".src.fail")).toHaveLength(1);
-  expect(target.querySelector(".src.fail")?.textContent).toContain("gitea");
+  expect(target.querySelectorAll(".tf-ln-src.tf-ln-fail")).toHaveLength(1);
+  expect(target.querySelector(".tf-ln-src.tf-ln-fail")?.textContent).toContain("gitea");
 });
 
 test("Enter on a row navigates to its address and closes the overlay", async () => {
@@ -653,7 +653,7 @@ test("Enter on a row navigates to its address and closes the overlay", async () 
   // which have to survive the address or the PR page opens on nothing.
   expect(onnavigate).toHaveBeenCalledWith("#/pr/gitea%3Aacme%2Fsvc%23142");
   expect(onclose).toHaveBeenCalledTimes(1);
-  expect(target.querySelector(".dlg")).toBeNull();
+  expect(target.querySelector(".tf-launch")).toBeNull();
 });
 
 test("Esc clears the query first and only then closes", async () => {
@@ -678,7 +678,7 @@ test("Esc clears the query first and only then closes", async () => {
   press("Escape");
   await settle();
   expect(onclose).toHaveBeenCalledTimes(1);
-  expect(target.querySelector(".dlg")).toBeNull();
+  expect(target.querySelector(".tf-launch")).toBeNull();
 
   window.removeEventListener("keydown", shell);
 });
@@ -706,6 +706,36 @@ test("Tab steals no focus, and offers nothing while no detail is open", async ()
   expect(onlink, "Enter opens the row; there was no action to run").not.toHaveBeenCalled();
 });
 
+/**
+ * #1422: the launcher draws on `TfDialog`, whose `Tab` trap would send a
+ * Shift+Tab from its first field to its last control. The box takes `Tab`
+ * for the chain, so the trap leaves it alone and focus stays in the box.
+ */
+test("on the shell's dialog, Shift+Tab in the box keeps focus there", async () => {
+  openSaved();
+  await settle();
+  const input = target.querySelector("input");
+  expect(document.activeElement).toBe(input);
+  expect(target.querySelectorAll('[aria-label="Results"] [role="option"]').length).toBeGreaterThan(1);
+  const event = press("Tab", { shiftKey: true });
+  expect(event.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(input);
+});
+
+test("the overlay is the shell's dialog: no .scrim, no .dlg, and a click on the dim closes it", async () => {
+  const onclose = vi.fn();
+  open({ onclose });
+  await settle();
+  const dialog = target.querySelector<HTMLElement>('[role="dialog"]');
+  expect(dialog?.classList.contains("tf-dialog")).toBe(true);
+  expect(dialog?.classList.contains("tf-launch")).toBe(true);
+  expect(target.querySelector(".scrim, .dlg")).toBeNull();
+  dialog!.parentElement!.click();
+  flushSync();
+  expect(onclose).toHaveBeenCalledTimes(1);
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+});
+
 /** The open entity, as the shell names it to the launcher. */
 const OPEN = { entityId: "jira:PAY-999", label: "PAY-999" };
 
@@ -731,7 +761,7 @@ test("Tab offers Link to the open entity, and Enter hands the result to the shel
   // The first result of the fixture's first group.
   expect(onlink).toHaveBeenCalledWith({ entity_id: "jira:PAY-231", title: "Retry failed SEPA payouts", kind: "ticket" });
   // The launcher steps out of the way of the job's link dialog (#1500).
-  expect(target.querySelector(".dlg"), "the launcher stayed open over the job's dialog").toBeNull();
+  expect(target.querySelector(".tf-launch"), "the launcher stayed open over the job's dialog").toBeNull();
 });
 
 /** The chain acts on the row that was selected when it opened, not on a later one. */
@@ -900,14 +930,14 @@ test("⌘K opens the overlay from anywhere, and opening twice is not closing", a
     },
   });
   flushSync();
-  expect(target.querySelector(".dlg")).toBeNull();
+  expect(target.querySelector(".tf-launch")).toBeNull();
 
   window.dispatchEvent(
     new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }),
   );
   flushSync();
   await settle();
-  expect(target.querySelector(".dlg")).not.toBeNull();
+  expect(target.querySelector(".tf-launch")).not.toBeNull();
 
   // The shell binds ⌘K too. Two "open" writes on one keystroke must converge,
   // which a toggle would not.
@@ -916,7 +946,7 @@ test("⌘K opens the overlay from anywhere, and opening twice is not closing", a
   );
   flushSync();
   await settle();
-  expect(target.querySelector(".dlg")).not.toBeNull();
+  expect(target.querySelector(".tf-launch")).not.toBeNull();
 });
 
 test("an unknown token is greyed out with a reason rather than silently ignored", async () => {
@@ -941,7 +971,7 @@ test("an unknown token is greyed out with a reason rather than silently ignored"
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
 
-  const greyed = [...target.querySelectorAll(".fchip.off")].map((el) => el.textContent?.trim());
+  const greyed = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-off")].map((el) => el.textContent?.trim());
   expect(greyed).toEqual([
     "env:prod — the estate arrives with assets",
     "/cf — no source matches /cf",
@@ -1003,9 +1033,9 @@ test("a source chip is marked when that source is refusing the credential", asyn
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
 
-  const chips = [...target.querySelectorAll(".fchip.on")].map((el) => el.textContent?.trim());
+  const chips = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-set")].map((el) => el.textContent?.trim());
   expect(chips).toEqual(["gitea", "jira"]);
-  const failing = [...target.querySelectorAll(".fchip.on.fail")].map((el) => el.textContent?.trim());
+  const failing = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-set.tf-ln-fail")].map((el) => el.textContent?.trim());
   expect(failing).toEqual(["gitea"]);
 });
 
@@ -1064,9 +1094,9 @@ test("a chip for a source with no health reading is not marked failing", async (
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
 
-  const chips = [...target.querySelectorAll(".fchip.on")].map((el) => el.textContent?.trim());
+  const chips = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-set")].map((el) => el.textContent?.trim());
   expect(chips).toEqual(["gitea", "nowhere"]);
-  const failing = [...target.querySelectorAll(".fchip.on.fail")].map((el) => el.textContent?.trim());
+  const failing = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-set.tf-ln-fail")].map((el) => el.textContent?.trim());
   expect(failing).toEqual(["gitea"]);
 });
 
@@ -1107,9 +1137,9 @@ test("a named person is a chip, and nothing about them is greyed out", async () 
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
 
-  const chips = [...target.querySelectorAll(".fchip.on")].map((el) => el.textContent?.trim());
+  const chips = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-set")].map((el) => el.textContent?.trim());
   expect(chips).toEqual(["people", "@me", "jonas"]);
-  expect([...target.querySelectorAll(".fchip.off")]).toEqual([]);
+  expect([...target.querySelectorAll(".tf-ln-fchip.tf-ln-off")]).toEqual([]);
 });
 
 test("`?` lists the syntax, and clicking a row inserts it", async () => {
@@ -1134,7 +1164,7 @@ test("`?` lists the syntax, and clicking a row inserts it", async () => {
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
 
-  const rows = [...target.querySelectorAll(".pfx")];
+  const rows = [...target.querySelectorAll(".tf-ln-opt")];
   expect(rows.length).toBeGreaterThan(8);
   expect(target.textContent).toContain("tickets only");
 
@@ -1189,7 +1219,7 @@ test("an author search says which sources could not be asked", async () => {
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
 
-  const gap = target.querySelector(".gap");
+  const gap = target.querySelector(".tf-ln-gap");
   expect(gap?.textContent).toContain("An author search cannot be answered by:");
   expect(gap?.textContent).toContain("Buildserver");
   expect(gap?.textContent).toContain("nothing it has synced names a person");
@@ -1201,7 +1231,7 @@ test("an author search says which sources could not be asked", async () => {
   // its presence: this is another of the launcher's accounts of the store it
   // read, and it used the word `CONTEXT.md`'s **Mirror** entry forbids until
   // #518.
-  expect(target.querySelector(".none")?.textContent).toContain(
+  expect(target.querySelector(".tf-ln-none")?.textContent).toContain(
     "Nothing in the mirror matches",
   );
 });
@@ -1238,7 +1268,7 @@ test("an author search every source could answer explains nothing", async () => 
 
   // The results are there, so this is not green because nothing rendered.
   expect(target.textContent).toContain("Retry failed SEPA payouts");
-  expect(target.querySelector(".gap")).toBeNull();
+  expect(target.querySelector(".tf-ln-gap")).toBeNull();
 });
 
 /**
@@ -1304,16 +1334,16 @@ test("an asset hit draws its monogram and the path from the root", async () => {
   await settle();
   await search("kuma");
 
-  const rows = [...target.querySelectorAll(".res")].map((row) => row.textContent);
+  const rows = [...target.querySelectorAll(".tf-ln-res")].map((row) => row.textContent);
   expect(rows[0]).toContain("AS");
   expect(rows[0]).toContain("postgres");
   // Where it sits, which is what tells two containers called `postgres` apart.
-  expect(target.querySelector(".res .pa")?.textContent).toBe("hel1 › vm-db-01");
+  expect(target.querySelector(".tf-ln-res .tf-ln-pa")?.textContent).toBe("hel1 › vm-db-01");
   expect(rows[1]).toContain("RO");
   expect(rows[1]).toContain("Uptime Kuma");
   // The group headings are the backend's plurals, so the estate reads as a
   // section of the launcher rather than as unknown kinds at the bottom.
-  const headings = [...target.querySelectorAll(".secl .lab")].map((el) => el.textContent);
+  const headings = [...target.querySelectorAll(".tf-ln-h .tf-ln-lab")].map((el) => el.textContent);
   expect(headings).toEqual(["Assets", "Routes"]);
 });
 
@@ -1427,8 +1457,8 @@ test("two same-titled commits are told apart by their repo on the path line", as
   await settle();
   await search("fix typo");
 
-  const rows = [...target.querySelectorAll(".res")];
-  expect(rows.map((row) => row.querySelector(".pa")?.textContent ?? null)).toEqual([
+  const rows = [...target.querySelectorAll(".tf-ln-res")];
+  expect(rows.map((row) => row.querySelector(".tf-ln-pa")?.textContent ?? null)).toEqual([
     "tidewater/payout-service",
     "tidewater/ledger",
     null,
@@ -1483,7 +1513,7 @@ test("Tab offers Link to the job, then Start timer, and nothing else", async () 
 
   press("Tab");
   const chain = target.querySelector('[aria-label="Actions on the selected result"]');
-  expect([...chain!.querySelectorAll(".chain-a")].map((el) => el.textContent?.trim())).toEqual([
+  expect([...chain!.querySelectorAll(".tf-ln-chain-a")].map((el) => el.textContent?.trim())).toEqual([
     "Link to PAY-999",
     "Start timer on postgres",
   ]);
@@ -1689,14 +1719,14 @@ const SAVED_HOME: LauncherHome = {
 
 /** The smart-list rows on the board, as one object per row. */
 function railRows() {
-  return [...target.querySelectorAll(".slrow")].map((row) => ({
+  return [...target.querySelectorAll(".tf-ln-slrow")].map((row) => ({
     text: row.textContent ?? "",
     /** The right-hand cell: the count, or the words a refused query draws. */
-    right: row.querySelector(".c")?.textContent?.trim() ?? "",
-    controls: [...row.querySelectorAll("button.mini")].map(
+    right: row.querySelector(".tf-ln-c")?.textContent?.trim() ?? "",
+    controls: [...row.querySelectorAll("button.tf-ln-mini")].map(
       (button) => button.textContent?.trim() ?? "",
     ),
-    open: row.querySelector<HTMLButtonElement>("button.sl"),
+    open: row.querySelector<HTMLButtonElement>("button.tf-ln-sl"),
   }));
 }
 
@@ -1726,7 +1756,7 @@ test("the rail draws saved lists beside the built-ins, and only they can be rena
   expect(rows[1]!.text).toContain("#sepa @me");
   expect(rows[1]!.controls).toEqual(["Rename", "Delete"]);
   // Both badges are drawn, so "like the built-ins" is a rendered fact.
-  expect(target.querySelectorAll(".dot")).toHaveLength(2);
+  expect(target.querySelectorAll(".tf-ln-dot")).toHaveLength(2);
 });
 
 /**
@@ -1787,10 +1817,10 @@ test("save as list is offered on a query, never on an empty box", async () => {
     ports: { launcherHome: home, search: async () => response(), createSmartList: created },
   });
   await settle();
-  expect(target.querySelector("button.save"), "an empty box is the board").toBeNull();
+  expect(target.querySelector("button.tf-ln-save"), "an empty box is the board").toBeNull();
 
   await search("sepa retries");
-  const button = target.querySelector<HTMLButtonElement>("button.save");
+  const button = target.querySelector<HTMLButtonElement>("button.tf-ln-save");
   expect(button?.textContent?.trim()).toBe("Save as list");
 
   const before = home.mock.calls.length;
@@ -1800,7 +1830,7 @@ test("save as list is offered on a query, never on an empty box", async () => {
   // The **raw box text**, both as the query and as the name — one click, and
   // the name is what *Rename* is for.
   expect(created).toHaveBeenCalledWith("sepa retries", "sepa retries");
-  expect(target.querySelector("button.save")?.textContent?.trim()).toBe("Saved as list");
+  expect(target.querySelector("button.tf-ln-save")?.textContent?.trim()).toBe("Saved as list");
   expect(
     home.mock.calls.length,
     "the rail is re-read rather than patched in place",
@@ -1808,7 +1838,7 @@ test("save as list is offered on a query, never on an empty box", async () => {
 
   // And the next keystroke is a different query, so the control comes back.
   await search("sepa retries and more");
-  expect(target.querySelector("button.save")?.textContent?.trim()).toBe("Save as list");
+  expect(target.querySelector("button.tf-ln-save")?.textContent?.trim()).toBe("Save as list");
 });
 
 /**
@@ -1833,7 +1863,7 @@ test("save as list is off the palette and the help card", async () => {
     });
     await settle();
     await search(prefix === "action" ? "> sources" : "?");
-    expect(target.querySelector("button.save"), `${prefix} is not a query`).toBeNull();
+    expect(target.querySelector("button.tf-ln-save"), `${prefix} is not a query`).toBeNull();
     if (app) unmount(app);
     app = undefined;
   }
@@ -1872,7 +1902,7 @@ test("save as list is off an opened list, a time query and a failed search", asy
     await settle();
     await search(raw);
     if (fails) expect(target.textContent).toContain("the engine is down");
-    expect(target.querySelector("button.save"), `${raw} cannot be saved`).toBeNull();
+    expect(target.querySelector("button.tf-ln-save"), `${raw} cannot be saved`).toBeNull();
     if (app) unmount(app);
     app = undefined;
   }
@@ -1887,7 +1917,7 @@ test("save as list is off an opened list, a time query and a failed search", asy
   });
   await settle();
   await search("sepa retries");
-  expect(target.querySelector("button.save")?.textContent?.trim()).toBe("Save as list");
+  expect(target.querySelector("button.tf-ln-save")?.textContent?.trim()).toBe("Save as list");
 });
 
 /**
@@ -1912,14 +1942,14 @@ test("a saved list is renamed in place, and Escape abandons rather than commits"
   await settle();
 
   const rename = () =>
-    [...target.querySelectorAll<HTMLButtonElement>("button.mini")].find(
+    [...target.querySelectorAll<HTMLButtonElement>("button.tf-ln-mini")].find(
       (button) => button.textContent?.trim() === "Rename",
     )!;
 
   // Abandoned.
   rename().click();
   flushSync();
-  const field = target.querySelector<HTMLInputElement>("input.ren")!;
+  const field = target.querySelector<HTMLInputElement>("input.tf-ln-ren")!;
   expect(field.value).toBe("SEPA retries");
   field.value = "Half a name";
   const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
@@ -1927,19 +1957,19 @@ test("a saved list is renamed in place, and Escape abandons rather than commits"
   flushSync();
   await settle();
   expect(renamed).not.toHaveBeenCalled();
-  expect(target.querySelector("input.ren")).toBeNull();
+  expect(target.querySelector("input.tf-ln-ren")).toBeNull();
   expect(closed, "the launcher's own Esc ladder never saw the key").not.toHaveBeenCalled();
 
   // Committed.
   rename().click();
   flushSync();
-  const again = target.querySelector<HTMLInputElement>("input.ren")!;
+  const again = target.querySelector<HTMLInputElement>("input.tf-ln-ren")!;
   again.value = "SEPA, retried";
   again.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
   flushSync();
   await settle();
   expect(renamed).toHaveBeenCalledWith("sepa-retries", "SEPA, retried");
-  expect(target.querySelector("input.ren")).toBeNull();
+  expect(target.querySelector("input.tf-ln-ren")).toBeNull();
 });
 
 /** Deleting takes two presses on the row, and the first one only arms it. */
@@ -1955,7 +1985,7 @@ test("deleting a saved list takes a second press", async () => {
   await settle();
 
   const remove = () =>
-    [...target.querySelectorAll<HTMLButtonElement>("button.mini.del")].find((button) =>
+    [...target.querySelectorAll<HTMLButtonElement>("button.tf-ln-mini.tf-ln-del")].find((button) =>
       ["Delete", "Confirm"].includes(button.textContent?.trim() ?? ""),
     )!;
 
@@ -1991,19 +2021,19 @@ test("the Tab chain renames and deletes a saved list, and offers nothing on a bu
 
   // Row 0 is the built-in, and `Tab` on it opens nothing.
   press("Tab");
-  expect(target.querySelector(".chain")).toBeNull();
+  expect(target.querySelector(".tf-ln-chain")).toBeNull();
 
   // Row 1 is the saved one.
   press("ArrowDown");
   press("Tab");
-  const chain = [...target.querySelectorAll(".chain-a")].map((row) => row.textContent?.trim());
+  const chain = [...target.querySelectorAll(".tf-ln-chain-a")].map((row) => row.textContent?.trim());
   expect(chain).toEqual(["Rename SEPA retries", "Delete SEPA retries"]);
 
   press("ArrowDown");
   press("Enter");
   await settle();
   expect(removed).toHaveBeenCalledWith("sepa-retries");
-  expect(target.querySelector(".chain"), "the chain closes behind the write").toBeNull();
+  expect(target.querySelector(".tf-ln-chain"), "the chain closes behind the write").toBeNull();
 });
 
 // ── Value suggestions for `kind:`, `source:` and `under:` (#601) ──────────
@@ -2085,7 +2115,7 @@ test("a value suggestion's detail carries the space before its dot", async () =>
   await settle();
   await typeInto("kind:re");
   const option = target.querySelector('[aria-label="Suggestions"] [role="option"]');
-  expect(option?.querySelector(".s")?.textContent).toBe(" · Repository");
+  expect(option?.querySelector(".tf-ln-s")?.textContent).toBe(" · Repository");
 });
 
 test("source: opens the configured sources by id, with the name the sources list shows", async () => {
@@ -2463,7 +2493,7 @@ test("a list being renamed has no option, so the listbox names none", async () =
   press("Tab");
   press("Enter");
   const listbox = target.querySelector('[role="listbox"][aria-label="Results"]')!;
-  expect(target.querySelector("input.ren")).not.toBeNull();
+  expect(target.querySelector("input.tf-ln-ren")).not.toBeNull();
   expect(listbox.hasAttribute("aria-activedescendant")).toBe(false);
 });
 
@@ -2520,7 +2550,7 @@ async function openPalette() {
   });
   await settle();
   await search(">");
-  expect(target.querySelector('[aria-label="Results"] .secl')?.textContent).toContain("Go to");
+  expect(target.querySelector('[aria-label="Results"] .tf-ln-h')?.textContent).toContain("Go to");
 }
 
 test("the palette's rows are followed as well", async () => {
@@ -2535,11 +2565,87 @@ test("the palette's rows are followed as well", async () => {
   ).toBe(rows[1]!.id);
 });
 
+// ── `>` is the app's navigation menu (#1417) ───────────────────────────────
+
+/** The palette, answered as the backend answers `>` followed by `text`. */
+function openPaletteOn(text: string, props: Record<string, unknown> = {}) {
+  open({
+    ...props,
+    ports: {
+      launcherHome: async () => HOME,
+      search: async () =>
+        response({ interpreted: { ...response().interpreted, prefix: "action", text }, groups: [] }),
+    },
+  });
+}
+
+function paletteLabels(): string[] {
+  return resultOptions().map((row) => row.querySelector(".tf-ln-nm")?.textContent ?? "");
+}
+
+test("> with nothing after it lists every section, then Settings and its sections", async () => {
+  openPaletteOn("");
+  await settle();
+  await search(">");
+  const labels = paletteLabels();
+  expect(labels).toHaveLength(22);
+  expect(labels.slice(0, 11)).toEqual([
+    "Tickets",
+    "Inbox",
+    "Code",
+    "Builds",
+    "Docs",
+    "Dependencies",
+    "Monitors",
+    "Link sets",
+    "Proposed links",
+    "Time",
+    "Settings",
+  ]);
+  expect(labels.at(-1)).toBe("Settings › Logs and database");
+  expect(labels).not.toContain("Job");
+});
+
+test(">In puts Inbox first, and >inbox draws Inbox alone", async () => {
+  openPaletteOn("In");
+  await settle();
+  await search(">In");
+  expect(paletteLabels()[0]).toBe("Inbox");
+  if (app) unmount(app);
+  openPaletteOn("inbox");
+  await settle();
+  await search(">inbox");
+  expect(paletteLabels()).toEqual(["Inbox"]);
+});
+
+test("pressing a palette row navigates to its address and closes the launcher", async () => {
+  const onnavigate = vi.fn();
+  const onclose = vi.fn();
+  openPaletteOn("", { onnavigate, onclose });
+  await settle();
+  await search(">");
+  const row = resultOptions().find((option) => option.querySelector(".tf-ln-nm")?.textContent === "Settings › Time");
+  (row as HTMLElement).click();
+  await settle();
+  expect(onnavigate).toHaveBeenCalledWith("#/settings/time");
+  expect(onclose).toHaveBeenCalledTimes(1);
+
+  if (app) unmount(app);
+  onnavigate.mockClear();
+  openPaletteOn("", { onnavigate, onclose });
+  await settle();
+  await search(">");
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(onnavigate).toHaveBeenCalledWith("#/inbox");
+});
+
 // ── Rename takes the focus it needs (#1412) ────────────────────────────────
 
 /** The name field, focused, with its whole text selected. */
 function expectRenameFocused() {
-  const field = target.querySelector<HTMLInputElement>("input.ren");
+  const field = target.querySelector<HTMLInputElement>("input.tf-ln-ren");
   expect(field, "the rename field is open").not.toBeNull();
   expect(document.activeElement, "focus is in the name field, not the query box").toBe(field);
   expect(field!.selectionStart).toBe(0);
@@ -2559,7 +2665,7 @@ test("Rename from the Tab chain focuses the name field with the name selected", 
 test("the row's Rename button focuses the name field with the name selected", async () => {
   openSaved();
   await settle();
-  [...target.querySelectorAll<HTMLButtonElement>("button.mini")]
+  [...target.querySelectorAll<HTMLButtonElement>("button.tf-ln-mini")]
     .find((button) => button.textContent?.trim() === "Rename")!
     .click();
   flushSync();
@@ -2585,9 +2691,9 @@ test("what is typed after the chain's Rename goes into the name, not the query",
   focused.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();
 
-  const query = target.querySelector<HTMLInputElement>("input:not(.ren)")!;
+  const query = target.querySelector<HTMLInputElement>("input:not(.tf-ln-ren)")!;
   expect(query.value, "the query box is untouched").toBe("");
-  expect(target.querySelector<HTMLInputElement>("input.ren")!.value).toBe("X");
+  expect(target.querySelector<HTMLInputElement>("input.tf-ln-ren")!.value).toBe("X");
   expect(railRows(), "the board is still drawn").toHaveLength(3);
 
   focused.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
@@ -2599,15 +2705,14 @@ test("what is typed after the chain's Rename goes into the name, not the query",
 // ── The chain rows and the suggestions keep their own layout (#1414) ───────
 
 /**
- * The launcher's own stylesheet, put into the document so jsdom computes the
- * cascade the WebView would. Svelte's scoping adds the same one class to
- * every selector, so the order between two of these rules is the order with
- * the scope in place.
+ * The launcher's stylesheet (`tf/css/launcher.css` since #1422), put into the
+ * document so jsdom computes the cascade the WebView would.
  */
 function launcherStyles(): HTMLStyleElement {
-  const source = readFileSync(join(process.cwd(), "src/lib/launcher/Launcher.svelte"), "utf8");
-  const css = /<style>([\s\S]*)<\/style>/.exec(source)?.[1];
-  expect(css, "Launcher.svelte has a stylesheet").toBeTruthy();
+  const css = readFileSync(join(process.cwd(), "src/lib/tf/css/launcher.css"), "utf8");
+  expect(css, "the launcher has a stylesheet").toContain(".tf-ln-opt");
+  // Its rules on a button name `.tf`, where the launcher is drawn.
+  target.classList.add("tf");
   const style = document.createElement("style");
   style.textContent = css!;
   document.head.append(style);
@@ -2618,10 +2723,10 @@ test("a value suggestion draws inline, a chain row spans one column, and a prefi
   const style = launcherStyles();
   try {
     await openPalette();
-    const prefix = target.querySelector<HTMLElement>('[aria-label="Results"] .pfx');
+    const prefix = target.querySelector<HTMLElement>('[aria-label="Results"] .tf-ln-opt');
     expect(prefix, "the palette draws prefix rows").not.toBeNull();
     expect(getComputedStyle(prefix!).display).toBe("grid");
-    expect(getComputedStyle(prefix!).gridTemplateColumns).toBe("160px 1fr");
+    expect(getComputedStyle(prefix!).gridTemplateColumns).toBe("240px 1fr");
 
     unmount(app!);
     app = undefined;
@@ -2629,7 +2734,7 @@ test("a value suggestion draws inline, a chain row spans one column, and a prefi
     await settle();
     await typeInto("kind:");
     const suggestion = target.querySelector<HTMLElement>('[aria-label="Suggestions"] [role="option"]')!;
-    expect(suggestion.classList.contains("pfx"), "the suggestion is a prefix row underneath").toBe(true);
+    expect(suggestion.classList.contains("tf-ln-opt"), "the suggestion is a prefix row underneath").toBe(true);
     expect(getComputedStyle(suggestion).display).toBe("flex");
 
     unmount(app!);
@@ -2638,8 +2743,8 @@ test("a value suggestion draws inline, a chain row spans one column, and a prefi
     await settle();
     press("ArrowDown");
     press("Tab");
-    const chainRow = target.querySelector<HTMLElement>(".chain [role='option']")!;
-    expect(chainRow.classList.contains("pfx"), "the chain row is a prefix row underneath").toBe(true);
+    const chainRow = target.querySelector<HTMLElement>(".tf-ln-chain [role='option']")!;
+    expect(chainRow.classList.contains("tf-ln-opt"), "the chain row is a prefix row underneath").toBe(true);
     expect(getComputedStyle(chainRow).gridTemplateColumns).toBe("1fr");
   } finally {
     style.remove();
@@ -2698,10 +2803,10 @@ const INBOX = {
 test("the board previews the inbox: the count and its newest three, and nothing when it is empty", async () => {
   open({ inbox: INBOX });
   await settle();
-  const block = target.querySelector(".inbox");
+  const block = target.querySelector(".tf-ln-inbox");
   expect(block, "no inbox block").not.toBeNull();
-  expect(target.querySelector(".secl.inboxh")?.textContent).toMatch(/Inbox\s*3/);
-  const rows = [...target.querySelectorAll(".inbox [role=option]")].map((el) =>
+  expect(target.querySelector(".tf-ln-h.tf-ln-inboxh")?.textContent).toMatch(/Inbox\s*3/);
+  const rows = [...target.querySelectorAll(".tf-ln-inbox [role=option]")].map((el) =>
     el.textContent?.replace(/\s+/g, " ").trim(),
   );
   expect(rows).toEqual([
@@ -2715,8 +2820,8 @@ test("the board previews the inbox: the count and its newest three, and nothing 
 
   open({ inbox: { count: 0, items: [] } });
   await settle();
-  expect(target.querySelector(".inbox")).toBeNull();
-  expect(target.querySelector(".inboxh")).toBeNull();
+  expect(target.querySelector(".tf-ln-inbox")).toBeNull();
+  expect(target.querySelector(".tf-ln-inboxh")).toBeNull();
   // The board itself still drew: the absence is the inbox's, not the board's.
   expect(target.textContent).toContain("Reconcile mandates");
 });
@@ -2728,14 +2833,14 @@ test("the board previews the inbox: the count and its newest three, and nothing 
 test("the board gives today's tracked and to-log time, and nothing on a day with none", async () => {
   open({ today: { tracked: 130, toLog: 65 } });
   await settle();
-  const block = target.querySelector(".today [role=option]");
+  const block = target.querySelector(".tf-ln-today [role=option]");
   expect(block?.textContent?.replace(/\s+/g, " ").trim()).toBe("2h 10m tracked 1h 5m to log");
   if (app) unmount(app);
   app = undefined;
 
   open({ today: { tracked: 0, toLog: 0 } });
   await settle();
-  expect(target.querySelector(".today")).toBeNull();
+  expect(target.querySelector(".tf-ln-today")).toBeNull();
   expect(target.textContent).toContain("Reconcile mandates");
 });
 
@@ -2753,11 +2858,11 @@ test("an inbox row opens its item and the time block opens the day", async () =>
     await settle();
   }
   await reopen();
-  target.querySelectorAll<HTMLButtonElement>(".inbox [role=option]")[1]!.click();
+  target.querySelectorAll<HTMLButtonElement>(".tf-ln-inbox [role=option]")[1]!.click();
   expect(onnavigate).toHaveBeenLastCalledWith("#/build/tc%3Apayments-main-88");
 
   await reopen();
-  target.querySelector<HTMLButtonElement>(".today [role=option]")!.click();
+  target.querySelector<HTMLButtonElement>(".tf-ln-today [role=option]")!.click();
   expect(onnavigate).toHaveBeenLastCalledWith("#/time");
 
   // The keyboard: two smart lists, then the inbox's three, then the day.
@@ -2797,7 +2902,7 @@ test("two sources' PAY-231: each row names its source before its age, a unique k
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 120));
   await settle();
-  const ages = [...target.querySelectorAll(".sy")].map((el) => el.textContent?.trim());
+  const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
   expect(ages).toEqual(["mock · synced just now", "jira · synced 25 min ago", "synced 4 min ago"]);
   // The Jira row opens Jira's PAY-231, by the address that names its source.
   press("ArrowDown");

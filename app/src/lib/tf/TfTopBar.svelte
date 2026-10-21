@@ -12,7 +12,7 @@
   import type { Timer } from "../shell/timer.svelte";
   import { targetReading } from "../shell/timer";
   import type { Badges } from "./badges.svelte";
-  import { jobHash, NAV, SECTION_NAME, type Section } from "./route";
+  import { jobHash, NAV, SECTION_NAME, sectionHash, type Section } from "./route";
 
   let {
     current,
@@ -57,7 +57,7 @@
   }
 
   function hrefOf(section: Section): string {
-    return section === "job" ? jobHash(jobAt ?? job) : `#/${section}`;
+    return section === "job" ? jobHash(jobAt ?? job) : sectionHash(section);
   }
 
   /** Prototype-6 draws the clock as `H:MM:SS` from the first second. */

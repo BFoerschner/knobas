@@ -1,5 +1,7 @@
 <!--
-  One selectable line of the launcher (`.res`, `signal-miller.html:413`).
+  One selectable line of the launcher: prototype-6's `.launch .res a` (kind,
+  title, source), with the provenance as its source column (#1422; the rules
+  are `tf/css/launcher.css`). Mono only on the key and the path.
 
   Results and the board's recent items both draw this, deliberately: spec §4
   promises the same per-row provenance everywhere, and two components drawing
@@ -16,7 +18,6 @@
   import type { Segment } from "../ipc";
   import type { StateChip as Chip } from "../ipc/entity";
   import type { CredentialHealth } from "../ipc/sources";
-  import Monogram from "../shell/Monogram.svelte";
   import StateChip from "../shell/StateChip.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { provenance } from "./format";
@@ -88,131 +89,28 @@
 
 <button
   {id}
-  class="res"
-  class:on={selected}
+  class="tf-ln-res"
+  class:tf-ln-on={selected}
   role="option"
   aria-selected={selected}
   onclick={onopen}
   onmouseenter={onhover}
 >
-  <Monogram text={kindMonogram(kind)} label={kindSingular(kind)} />
-  <span class="ty">{kind}</span>
-  <span class="t">
-    <span class="k">{key}</span>{title}
+  <span class="tf-ln-mg" title={kindSingular(kind)} aria-label={kindSingular(kind)}>{kindMonogram(kind)}</span>
+  <span class="tf-ln-ty">{kind}</span>
+  <span class="tf-ln-t">
+    <span class="tf-ln-k">{key}</span>{title}
     {#if state}
       <StateChip {state} />
     {/if}
     {#if path}
-      <span class="pa">{path}</span>
+      <span class="tf-ln-pa">{path}</span>
     {/if}
     {#if snippet.length > 0}
-      <span class="sn"
+      <span class="tf-ln-sn"
         >{#each snippet as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</span
       >
     {/if}
   </span>
-  <span class="sy" class:fail={prov.failing}>{prov.text}</span>
+  <span class="tf-ln-sy" class:tf-ln-fail={prov.failing}>{prov.text}</span>
 </button>
-
-<style>
-  /*
-    `.res` is the mockup's launcher row (round 3, lines 413-425). It is not in
-    `unported.css` on purpose — the launcher's selectors ship with the
-    component (stream E's, as the old `app.css` recorded).
-
-    Four columns, not the mockup's six: its status and per-row action cells
-    need write-back (M2), and a column reserved for a control that cannot work
-    is how a UI fills up with dead chrome.
-  */
-  .res {
-    display: grid;
-    grid-template-columns: 28px 56px minmax(0, 1fr) 140px;
-    gap: 8px;
-    align-items: center;
-    width: 100%;
-    text-align: left;
-    min-height: 32px;
-    padding: 4px 12px 4px 8px;
-    border-bottom: 1px solid var(--hair);
-    font-size: 12px;
-    color: var(--text);
-  }
-  .res:hover,
-  .res.on {
-    background: var(--raised);
-  }
-  .res.on {
-    box-shadow: inset 2px 0 0 var(--amber);
-  }
-  .res > * {
-    min-width: 0;
-    overflow: hidden;
-  }
-  .ty {
-    font: 400 10px var(--mono);
-    color: var(--faint);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .t {
-    overflow: hidden;
-  }
-  .t .k {
-    color: var(--muted);
-    margin-right: 6px;
-    font-family: var(--mono);
-    font-size: 11.5px;
-  }
-  /*
-    The excerpt is a second line rather than a third column: it is prose, it
-    is the reason the row matched, and truncating it to a column width throws
-    away the half a reader is scanning for.
-  */
-  .sn {
-    display: block;
-    color: var(--muted);
-    font-size: 11.5px;
-    line-height: 1.35;
-    margin-top: 1px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .sn mark {
-    background: transparent;
-    color: var(--amber);
-    font-weight: 500;
-  }
-  /*
-    The path is where the item lives, not what it says, so it is quieter than
-    the excerpt and sits above it — a reader scanning five pages called
-    *Runbook* is looking for the space, and finds it on the same line every
-    time.
-  */
-  .pa {
-    display: block;
-    color: var(--faint);
-    font-size: 11px;
-    line-height: 1.3;
-    margin-top: 1px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .sy {
-    font: 400 10px var(--mono);
-    color: var(--faint);
-    text-align: right;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  /* Spec §4 pairs provenance with health: a stale row whose source is
-     refusing the credential says so instead of quoting an innocent age. */
-  .sy.fail {
-    color: var(--fail);
-  }
-</style>

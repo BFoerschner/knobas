@@ -373,26 +373,27 @@
           }}
         />
       {/if}
+      <!--
+        The ⌘K launcher is a ticket-first dialog (#1422), drawn inside `.tf`,
+        last so it sits over the others. `sources` is supplied so the launcher's rows and chips read the live
+        `source:health` store; an empty list means *watching, nothing to complain
+        about* (#36). `openEntity` is the job the breadcrumb names, which *Link to
+        <key>* needs as its other end (#1500).
+      -->
+      <Launcher
+        bind:open={launcherOpen}
+        sources={health.all}
+        sourcesRead={{ phase: health.phase, error: health.error, retry: () => void health.reseed() }}
+        inbox={{ count: inbox.count, items: inbox.stream.map((entry) => entry.item) }}
+        today={todayTime}
+        openEntity={breadcrumbJob.job === null ? undefined : { entityId: breadcrumbJob.job.entityId, label: breadcrumbJob.job.key }}
+        onlink={linkToJob}
+        ontimer={startTimerOn}
+        onnavigate={navigate}
+        onclose={() => {}}
+      />
     {/snippet}
   </TfShell>
-  <!--
-    `sources` is supplied so the launcher's rows and chips read the live
-    `source:health` store; an empty list means *watching, nothing to complain
-    about* (#36). `openEntity` is the job the breadcrumb names, which *Link to
-    <key>* needs as its other end (#1500).
-  -->
-  <Launcher
-    bind:open={launcherOpen}
-    sources={health.all}
-    sourcesRead={{ phase: health.phase, error: health.error, retry: () => void health.reseed() }}
-    inbox={{ count: inbox.count, items: inbox.stream.map((entry) => entry.item) }}
-    today={todayTime}
-    openEntity={breadcrumbJob.job === null ? undefined : { entityId: breadcrumbJob.job.entityId, label: breadcrumbJob.job.key }}
-    onlink={linkToJob}
-    ontimer={startTimerOn}
-    onnavigate={navigate}
-    onclose={() => {}}
-  />
 {:else}
   <Booting
     db={lifecycle.db}

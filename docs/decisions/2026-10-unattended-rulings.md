@@ -9760,3 +9760,81 @@ unchanged.
   `queued-toast.ts`, so the action (*Show queue*) and the failing sign-in sentence are the same
   code; the sign-in sentence follows the count and only when N > 0. N counts the flow's steps
   whose outcome is `queued` after the run. *Reversing:* low.
+## #1417: `>` lists every section, then Settings and its sections (Opus implementer, 2026-10-21)
+
+- **Row set** (delegated). *Ruling:* `NAV` minus Job, then *Settings* and one row per
+  `SETTINGS_SECTIONS` entry: 22 rows. *Reasoning:* the triage's recommendation; Settings' own
+  sections are where a reader most often wants to land by name (Sources, Time, Keyboard), and the
+  cog is the only other way in. *Reversing:* drop the `SETTINGS_SECTIONS` half of
+  `navigationActions()`.
+- **Shell-only rows** (*Reload demo data*, the write queue, the timer; delegated). *Ruling:* left
+  out; the `actions` prop stays unused by the shell. *Reasoning:* the triage's recommendation; they
+  are an enhancement, and the timer is ⌘T's since the 2026-10-21 ruling on #1416. *Reversing:* the
+  shell passes them through `actions`.
+- **A settings section's label.** *Fork:* the section's own name (*Time*) or *Settings › Time*.
+  *Ruling:* *Settings › <section>*. *Reasoning:* Settings has a *Time* of its own, so the bare name
+  draws two *Time* rows; and `filterActions` matches label and detail by substring, so the prefix is
+  what makes `>set` reach the sections at all. *Reversing:* the label template in
+  `navigationActions()`.
+- **Addresses.** The route module had no builder for a section's address (the top bar and the
+  settings navigation spelled `#/${section}` inline). `sectionHash` (`tf/route.ts`) and
+  `settingsHash` (`tf/settings/settings.ts`) are new, and both of those callers use them.
+  *Reversing:* inline them again.
+- **`>In` and `>set` with matching unchanged.** The ticket asks for `>In` to draw Inbox alone and
+  `>set` to draw Settings and its sections, with `filterActions`' rules unchanged. Under that rule
+  `in` is a substring of *Link sets*, *Proposed links*, *Monitoring*, *Settings* and more, and `set`
+  of *Link sets*; neither can pass on a correct implementation. The tests pin what the rule gives:
+  `>In` lists Inbox first, `>inbox` lists Inbox alone, `>set` lists Link sets then the Settings
+  rows. The wording fix is #1546.
+- **The fake.** `search` under `?fake-ipc` answers a query starting `>` as the backend does (the text
+  after the marker, `prefix: "action"`, no groups), so the palette draws there; every other word
+  keeps the #430 refusal.
+
+## #1422: the ⌘K launcher on TfDialog and the shell's tokens (Opus implementer, 2026-10-21)
+
+- **Width** (delegated). *Ruling:* `className="tf-launch"`, `min(840px, 100vw − 32px)`, height
+  `min(588px, 84vh)`. *Reasoning:* the box's placeholder names five prefixes and at 17 px needs about
+  600 px beside the footnote, ⌘K and ×; the rows carry a provenance column prototype-6's list does
+  not. 760 px (the write queue's) cut the placeholder at *source,*. The height stays fixed, as before
+  the port, so the box does not jump as answers replace each other. *Reversing:* one rule in
+  `tf/css/launcher.css`.
+- **Board arrangement** (delegated). The three-column board the ticket describes is gone on this SHA:
+  the board is one column on this SHA (smart lists, inbox, today, sources strip, recent). *Ruling:*
+  keep the one column. Not a fork any more; recorded because the ticket names one.
+- **#1411 and #1414** (delegated). Both landed with #1516 before this port. The port keeps their
+  rules (the chain row's single column, the suggestion's inline line, the scroll to the cursor) and
+  their tests pass unchanged in behaviour, so neither symptom returns. Not folded in: nothing to fold.
+- **The header.** `TfDialog` draws a title; prototype-6's launcher has none. *Ruling:* the title
+  *Search and actions* names the dialog (`aria-labelledby`) and is hidden from sight only.
+  *Reversing:* drop the `.tf-launch > header` rule.
+- **The footer.** The hint row and *Save as list* become `TfDialog`'s footer, left-aligned, 12 px
+  Archivo; the match count sits right with tabular figures. Prototype-6 has no footer; the hints and
+  the save control are behaviour this ticket keeps.
+- **The box row.** The bar left of the input stays as the only loading sign, in `--ink`, dimmed to
+  `--rule` while a query is in flight (amber is the timer's, and the design system keeps yellow for
+  the card). The footnote, ⌘K and the × stay; the × is the pointer's way out beside the dim.
+- **Rows.** Kind monogram (Archivo 11 px in a hairline frame), the kind word, the title with the key
+  and the path, and the provenance as the source column, 12 px `--ink-2`, as prototype-6's `.kind`
+  and `.src`. The monogram is drawn inline rather than through `shell/Monogram.svelte`, which still
+  draws the asset tree's with `unported.css`'s `.mg`. The state chip is the shell's `.tf-chip` in the
+  adapter's tone. The excerpt's hit is `--mark` behind ink, not amber text.
+- **Mono.** Only the key and the path of a result row, as the ticket's criterion says. The `?`
+  card's tokens, the miss's raw link, the *Nothing matches* echo and `--demo` are Archivo (bold
+  where they stood out before). *Reversing:* one selector each.
+- **Palette labels.** The `>` palette's label column is 240 px, not 160: *Settings › Checkouts and
+  Open in…* (#1417) wrapped at 160. The #1414 layout test reads the new width.
+- **Specificity.** `.tf button, .tf input { font: inherit; color: inherit }` beats a single class,
+  so every launcher rule on a button or an input names `.tf` as well.
+- **`TfDialog` and `Tab`.** The trap now leaves a `Tab` whose default a field already prevented:
+  the box takes `Tab` (and Shift+Tab) for the action chain, and the trap would otherwise move focus
+  from the box to the dialog's last control on Shift+Tab. Every other dialog is unchanged (none
+  prevents `Tab`).
+- **No focus ring on the box.** The design system draws a 2 px `--focus` ring on whatever has focus;
+  the ticket asks for prototype-6's input with no rectangular focus box. *Ruling:* the ticket's,
+  for this one field: it holds focus for as long as the launcher is open (rows are walked with the
+  arrows, never focused), and the ink bar beside it and the text caret mark it. Every other control
+  in the launcher keeps the ring. *Reversing:* drop one rule.
+- **What the shell's dialog adds.** On `TfDialog` the launcher registers on the shell's layer
+  stack, so the history keys and the mouse's back button do nothing while it is open (#1086's rule
+  for every dialog), and focus returns to what opened it when it closes. Its own `Esc` ladder still
+  runs first and stops the key.

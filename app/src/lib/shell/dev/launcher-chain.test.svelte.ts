@@ -69,7 +69,7 @@ function until(condition: () => boolean, whatWasWaitedFor: string): Promise<void
 
 /** The launcher's dialog, once it is up. */
 function launcher(): HTMLElement | null {
-  return target.querySelector<HTMLElement>('[role="dialog"][aria-label="Search and actions"]');
+  return target.querySelector<HTMLElement>('.tf [role="dialog"].tf-launch');
 }
 
 /** ⌘K, as the window receives it, then `text` typed into the box and its debounce waited out. */
@@ -79,7 +79,7 @@ async function search(text: string): Promise<void> {
   const box = launcher()!.querySelector("input")!;
   box.value = text;
   box.dispatchEvent(new Event("input", { bubbles: true }));
-  await until(() => (launcher()?.querySelectorAll(".res").length ?? 0) > 0, `no result for ${text}`);
+  await until(() => (launcher()?.querySelectorAll(".tf-ln-res").length ?? 0) > 0, `no result for ${text}`);
 }
 
 function press(key: string): void {
@@ -92,7 +92,7 @@ function press(key: string): void {
 /** The `Tab` chain's rows, in order, or `null` when no chain is drawn. */
 function chain(): string[] | null {
   const strip = target.querySelector('[aria-label="Actions on the selected result"]');
-  return strip === null ? null : [...strip.querySelectorAll(".chain-a")].map((row) => row.textContent?.trim() ?? "");
+  return strip === null ? null : [...strip.querySelectorAll(".tf-ln-chain-a")].map((row) => row.textContent?.trim() ?? "");
 }
 
 async function openOn(hash: string, drawn: string): Promise<void> {
@@ -205,4 +205,44 @@ test("a link asked for and left behind does not open on a later visit to the job
   await until(() => currentJob.entityId !== null, "the job never drew");
   flushSync();
   expect(linkDialog(), "the dialog opened unasked").toBeNull();
+});
+
+/**
+ * #1422: the launcher is a ticket-first dialog. It mounts inside `.tf` through
+ * the shell's `dialogs`, on `TfDialog`, and nothing it draws reads the
+ * unported sheet's `.scrim` or `.dlg`.
+ */
+test("the launcher opens inside .tf on the shell's dialog, with no .scrim or .dlg", async () => {
+  await openOn("#/tickets", "Tickets");
+  await search("PAY-231");
+  const dialog = launcher()!;
+  expect(dialog.classList.contains("tf-dialog")).toBe(true);
+  expect(dialog.closest(".tf-modal")?.parentElement?.closest(".tf")).not.toBeNull();
+  expect(dialog.closest(".scrim, .dlg")).toBeNull();
+  expect(dialog.querySelector(".scrim, .dlg")).toBeNull();
+  expect(target.querySelector(".scrim, .dlg")).toBeNull();
+  expect(dialog.getAttribute("aria-labelledby")).toBeTruthy();
+  expect(document.getElementById(dialog.getAttribute("aria-labelledby")!)?.textContent).toBe("Search and actions");
+});
+
+/**
+ * #1417 end to end under the fixture: `>` reaches the fake's `search`, which
+ * answers it as the backend does, so the palette draws the navigation menu,
+ * and a row goes to its address and closes the launcher.
+ */
+test("> under the fixture draws the navigation menu, and Enter on Inbox goes there", async () => {
+  await openOn("#/tickets", "Tickets");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }));
+  await until(() => launcher() !== null, "⌘K never opened the launcher");
+  const box = launcher()!.querySelector("input")!;
+  box.value = ">";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  const rows = () => [...(launcher()?.querySelectorAll('[aria-label="Results"] .tf-ln-opt .tf-ln-nm') ?? [])].map((row) => row.textContent);
+  await until(() => rows().length > 0, "the palette never drew");
+  expect(rows().slice(0, 3)).toEqual(["Tickets", "Inbox", "Code"]);
+  expect(rows()).toContain("Settings › Keyboard");
+  press("ArrowDown");
+  press("Enter");
+  await until(() => launcher() === null, "the launcher stayed open");
+  expect(location.hash).toBe("#/inbox");
 });

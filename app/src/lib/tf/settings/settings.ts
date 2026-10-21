@@ -69,6 +69,11 @@ export function settingsPlace(rest: readonly string[]): SettingsPlace {
   return { section: known ? known[0] : "sources" };
 }
 
+/** The address of a section of Settings. */
+export function settingsHash(section: SettingsSection): string {
+  return `#/settings/${section}`;
+}
+
 /** The address of a source's page; with `add`, the page with that value added to a list field (#879). */
 export function sourceHash(id: string, add?: ListAddition): string {
   const page = `#/settings/source/${encodeURIComponent(id)}`;

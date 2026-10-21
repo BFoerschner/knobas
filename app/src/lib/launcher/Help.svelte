@@ -1,5 +1,5 @@
 <!--
-  The `?` card (`.prefixes`/`.pfx`, round 3, lines 386-389).
+  The `?` card (`.tf-ln-help` in `tf/css/launcher.css`).
 
   Generated from `syntax.json`, which mirrors the token table in
   `crates/knobas-search/src/query.rs` — and the mirroring is *enforced*, not
@@ -30,77 +30,24 @@
   } = $props();
 </script>
 
-<div class="secl"><span class="lab">Prefix syntax</span><span class="n">{rows.length}</span></div>
-<div class="prefixes">
+<div class="tf-ln-h"><span class="tf-ln-lab">Prefix syntax</span><span class="tf-ln-n">{rows.length}</span></div>
+<div class="tf-ln-help">
   {#each rows as row, i (row.id)}
     {#if row.kind === "syntax"}
     {@const entry = row.entry}
     <button
       id={optionId(i)}
-      class="pfx"
-      class:on={i === selected}
-      class:greyed={entry.expect === "reported"}
+      class="tf-ln-opt tf-ln-syn"
+      class:tf-ln-on={i === selected}
+      class:tf-ln-greyed={entry.expect === "reported"}
       role="option"
       aria-selected={i === selected}
       onclick={() => onopen(row)}
       onmouseenter={() => onhover(i)}
     >
-      <span class="k">{entry.token}</span>
-      <span class="s">{entry.summary}</span>
+      <span class="tf-ln-tok">{entry.token}</span>
+      <span class="tf-ln-s">{entry.summary}</span>
     </button>
     {/if}
   {/each}
 </div>
-
-<style>
-  .secl {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 24px;
-    padding: 0 12px 0 8px;
-    border-bottom: 1px solid var(--hair);
-    background: var(--panel);
-  }
-  .n {
-    margin-left: auto;
-    font: 400 11px var(--mono);
-    color: var(--faint);
-  }
-  .prefixes {
-    display: grid;
-    gap: 1px;
-    padding: 6px 8px;
-  }
-  .pfx {
-    display: grid;
-    grid-template-columns: 74px 1fr;
-    gap: 8px;
-    align-items: baseline;
-    width: 100%;
-    text-align: left;
-    padding: 4px;
-    border-radius: 2px;
-    font-size: 11.5px;
-    color: var(--muted);
-  }
-  .pfx:hover,
-  .pfx.on {
-    background: var(--raised);
-    color: var(--text);
-  }
-  .pfx .k {
-    font: 500 11px var(--mono);
-    color: var(--link);
-    text-align: center;
-    border: 1px solid var(--hair);
-    border-radius: 2px;
-    padding: 1px 0;
-  }
-  /* A token the parser reports rather than honours is drawn the way the chip
-     bar draws it, so the two agree about what "does nothing yet" looks like. */
-  .pfx.greyed .k {
-    color: var(--faint);
-    border-style: dashed;
-  }
-</style>

@@ -230,3 +230,50 @@ test("the top bar's timer target is capped with an ellipsis, a label is sans and
   expect(band).toMatch(/\.tf-nav a\s*\{[^}]*padding:/);
   expect(band).toMatch(/\.tf-nav \.tf-count\s*\{[^}]*display:\s*none/);
 });
+
+/**
+ * The ⌘K launcher on the shell's tokens (#1422). Its rules are one part of
+ * `tf.css`, so the tf- prefix test above reads them; its components carry no
+ * stylesheet of their own, so nothing outside this part can set a font there.
+ */
+const LAUNCHER = ["Launcher", "Board", "Chips", "Help", "QueryBox", "Results", "Row"].map((name) =>
+  readFileSync(join(APP, `src/lib/launcher/${name}.svelte`), "utf8"),
+);
+const launcherCode = readFileSync(join(APP, "src/lib/tf/css/launcher.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+/** `[selector, body]` for every rule of the launcher's part. */
+const launcherRules = [...launcherCode.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((rule) => [rule[1]!.trim(), rule[2]!] as const);
+
+test("the launcher's rules are a part of tf.css, and its components have no stylesheet of their own (#1422)", () => {
+  expect(readFileSync(join(APP, "src/lib/tf/tf.css"), "utf8")).toMatch(/^@import "\.\/css\/launcher\.css";$/m);
+  expect(code).toContain(".tf-ln-res");
+  expect(launcherRules.length).toBeGreaterThan(40);
+  for (const source of [...LAUNCHER, readFileSync(join(APP, "src/lib/shell/StateChip.svelte"), "utf8")]) {
+    expect(source).not.toMatch(/<style\b/);
+    expect(source).not.toMatch(/\btf-mono\b|--mono\b/);
+  }
+});
+
+test("the launcher sets mono on a result row's key and path and nowhere else (#1422)", () => {
+  const mono = launcherRules.filter(([, body]) => /var\(--mono\)/.test(body)).map(([selector]) => selector);
+  expect(mono).toEqual([".tf-ln-k", ".tf-ln-pa"]);
+  // Both spans are drawn by the row, and only there.
+  const row = LAUNCHER[6]!;
+  expect(row).toMatch(/<span class="tf-ln-k">\{key\}<\/span>/);
+  expect(row).toMatch(/<span class="tf-ln-pa">\{path\}<\/span>/);
+  expect(LAUNCHER.slice(0, 6).join("\n")).not.toMatch(/tf-ln-(k|pa)\b/);
+});
+
+test("the launcher is prototype-6's dialog: an ink selection bar, a borderless 17px box, no capitals and no rooms tokens (#1422)", () => {
+  const selected = launcherRules.find(([selector]) => selector.includes(".tf-ln-res.tf-ln-on"))?.[1] ?? "";
+  expect(selected).toMatch(/background:\s*var\(--sheet-2\)/);
+  expect(selected).toMatch(/box-shadow:\s*inset 3px 0 0 var\(--ink\)/);
+  const box = launcherRules.find(([selector]) => selector === ".tf .tf-ln-q input")?.[1] ?? "";
+  expect(box).toMatch(/font-size:\s*var\(--t-xl\)/);
+  expect(box).toMatch(/border:\s*0/);
+  expect(launcherRules.find(([selector]) => selector === ".tf-ln-q")?.[1]).toMatch(/border-bottom:\s*1px solid var\(--rule\)/);
+  expect(launcherCode).not.toMatch(/text-transform/);
+  // Only the design system's tokens: none of the names unported.css keeps for the rooms components.
+  const used = [...launcherCode.matchAll(/var\((--[a-z0-9-]+)\)/g)].map((match) => match[1]!);
+  const rooms = [...unportedCode.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((match) => match[1]!);
+  expect(used.filter((token) => rooms.includes(token))).toEqual([]);
+});
