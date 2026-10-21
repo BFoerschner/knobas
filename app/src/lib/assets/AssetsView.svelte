@@ -137,6 +137,7 @@
   import { push } from "../shell/toasts.svelte";
   import { hashFor, type Router } from "../shell/router.svelte";
   import { entityAddress } from "../tf/address";
+  import { deleteConfirm } from "../tf/deps/asset-edit";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import AssetsTabs from "./AssetsTabs.svelte";
   import CreateDialog from "./CreateDialog.svelte";
@@ -2523,12 +2524,15 @@
   <!-- Bound here: a `{#snippet}` is its own scope and the narrowing above does
        not reach into it. -->
   {@const doomed = detail.asset}
+  {@const ask = deleteConfirm(detail)}
   <Modal title="Delete asset" subtitle={doomed.name} onclose={() => (deleting = false)}>
     {#snippet body()}
-      <p class="ask">
-        Delete <strong>{doomed.name}</strong>? Its history goes with it, and links drawn to it
-        stay visible and marked.
-      </p>
+      <!--
+        The Dependencies editor's own sentence (#1463, R-11.19a), not a copy:
+        links stay marked deleted, the routes landing on it are counted, and
+        the history, which the backend keeps, goes unmentioned.
+      -->
+      <p class="ask">{ask}</p>
       <!--
         Nothing here counts what the asset holds. `assets::delete` refuses a
         branch by name, with the count in the sentence, and a second copy of
