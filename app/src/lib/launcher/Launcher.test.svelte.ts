@@ -729,7 +729,7 @@ test("Tab offers Link to the open entity, and Enter hands the result to the shel
 
   press("Enter");
   // The first result of the fixture's first group.
-  expect(onlink).toHaveBeenCalledWith("jira:PAY-231", "Retry failed SEPA payouts", "ticket");
+  expect(onlink).toHaveBeenCalledWith({ entity_id: "jira:PAY-231", title: "Retry failed SEPA payouts", kind: "ticket" });
   // The launcher steps out of the way of the job's link dialog (#1500).
   expect(target.querySelector(".dlg"), "the launcher stayed open over the job's dialog").toBeNull();
 });
@@ -755,7 +755,7 @@ test("moving the selection abandons an open chain", async () => {
   press("Tab");
   press("Enter");
 
-  expect(onlink).toHaveBeenCalledWith("gitea:acme/svc#142", "Backoff", "pr");
+  expect(onlink).toHaveBeenCalledWith({ entity_id: "gitea:acme/svc#142", title: "Backoff", kind: "pr" });
 });
 
 /** An entity cannot be linked to itself, so its own row offers nothing. */

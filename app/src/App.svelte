@@ -25,7 +25,7 @@
   import { recordCaptureContext } from "./lib/ipc/entity";
   import { entityAddress } from "./lib/tf/address";
   import { HOME, homeIfBlank } from "./lib/tf/home";
-  import { breadcrumbJob, currentJob, linkRequest } from "./lib/tf/job/current.svelte";
+  import { breadcrumbJob, currentJob, linkRequest, type LinkTarget } from "./lib/tf/job/current.svelte";
   import { foregroundOf } from "./lib/tf/foreground";
   import { jobHash, parseTfHash } from "./lib/tf/route";
   import TfShell from "./lib/tf/TfShell.svelte";
@@ -187,10 +187,10 @@
    * the job, the job page is opened first, where its Connections drawer shows
    * the link once it is made.
    */
-  function linkToJob(entityId: string, title: string, kind: string) {
+  function linkToJob(target: LinkTarget) {
     const job = breadcrumbJob.job;
     if (job === null) return;
-    linkRequest.ask(job.key, { entity_id: entityId, title, kind });
+    linkRequest.ask(job.key, target);
     if (currentJob.entityId !== job.entityId) location.hash = jobHash(job.key);
   }
 

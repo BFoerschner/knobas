@@ -63,7 +63,7 @@
   import { entityAddress, legacyAddress } from "./address";
   import { isEntityId, keyOf, resolveTicket } from "./job/job";
   import { bridgePorts, type JobPorts } from "./job/ports";
-  import { breadcrumbJob } from "./job/current.svelte";
+  import { breadcrumbJob, linkRequest } from "./job/current.svelte";
   import TfPage from "./TfPage.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
   import TfToasts from "./TfToasts.svelte";
@@ -242,6 +242,11 @@
     const id = navJobId;
     breadcrumbJob.set(crumbKey !== null && id !== null && id.key === crumbKey ? id : null);
     return () => breadcrumbJob.set(null);
+  });
+  // A link asked for a job is the job page's to take; leaving for any other
+  // page before it did drops it, so a later visit does not open the dialog.
+  $effect(() => {
+    if (route.view !== "job" || route.key === null) linkRequest.drop();
   });
 
   // ---- the status bar's reads, once the database can answer ----

@@ -66,4 +66,8 @@ export const linkRequest = {
     asked = null;
     return target;
   },
+  /** Forget a request nobody took: the reader left before the job drew. */
+  drop(): void {
+    asked = null;
+  },
 };

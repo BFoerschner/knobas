@@ -10,7 +10,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import App from "../../../App.svelte";
 import { demoHandlers, installFakeTauri, type Handler } from "./fake-tauri";
-import { currentJob } from "../../tf/job/current.svelte";
+import { currentJob, linkRequest } from "../../tf/job/current.svelte";
 
 /**
  * The fixture's search answers the estate's lists alone (#430). `PAY-231` is
@@ -189,4 +189,20 @@ test("from a view opened from the job, Link to opens the job with its link dialo
   await until(() => linkDialog() !== null, "the job's link dialog never opened");
   expect(location.hash).toBe("#/job/PAY-231");
   expect(linkDialog()!.querySelector(".tf-picked")?.textContent).toContain(FIRST_UNMONITORED);
+});
+
+/**
+ * A request the job page never took (the reader went elsewhere before the job
+ * drew) is dropped, so a later visit to that job does not open the dialog
+ * unasked.
+ */
+test("a link asked for and left behind does not open on a later visit to the job", async () => {
+  await openOn("#/time", "Time");
+  linkRequest.ask("PAY-231", { entity_id: "asset:knobas-estate", title: FIRST_UNMONITORED, kind: "asset" });
+  location.hash = "#/tickets";
+  await until(() => target.querySelector(".tf-crumbs") === null, "Tickets never replaced Time");
+  location.hash = "#/job/PAY-231";
+  await until(() => currentJob.entityId !== null, "the job never drew");
+  flushSync();
+  expect(linkDialog(), "the dialog opened unasked").toBeNull();
 });

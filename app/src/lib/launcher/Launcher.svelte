@@ -65,6 +65,7 @@
   import type { HealthPhase } from "../shell/health.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import { entityAddress } from "../tf/address";
+  import type { LinkTarget } from "../tf/job/current.svelte";
   import { sharesKey } from "./format";
   import { canBeTarget } from "../shell/timer";
   import Board from "./Board.svelte";
@@ -142,7 +143,7 @@
      * opens the job's own link dialog with the result preset, where the
      * relation is picked and the write is the dialog's.
      */
-    onlink?: ((targetId: string, targetTitle: string, targetKind: string) => void) | undefined;
+    onlink?: ((target: LinkTarget) => void) | undefined;
     /**
      * Start the timer on the chosen result, **stopping whatever is running
      * first** (#278, story 11).
@@ -391,7 +392,7 @@
         run: () => {
           chain = null;
           close();
-          link(entity.entityId, entity.title, entity.kind);
+          link({ entity_id: entity.entityId, title: entity.title, kind: entity.kind });
         },
       });
     }

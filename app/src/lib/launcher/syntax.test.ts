@@ -9,7 +9,7 @@ import { SYNTAX } from "./syntax";
 
 test("no summary on the ? card names a milestone", () => {
   expect(SYNTAX.length, "the table is empty, so this proves nothing").toBeGreaterThan(0);
-  const dated = SYNTAX.filter((entry) => /\(M\d/.test(entry.summary) || /arrives in M/.test(entry.summary));
+  const dated = SYNTAX.filter((entry) => /\bM\d/.test(entry.summary) || /arrives in M/.test(entry.summary));
   expect(dated.map((entry) => `${entry.token}: ${entry.summary}`)).toEqual([]);
 });
 
