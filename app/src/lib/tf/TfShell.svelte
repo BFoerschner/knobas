@@ -163,6 +163,19 @@
   });
 
   /**
+   * The write queue panel belongs to the page it was opened on (#1474): a new
+   * address closes it, so it never sits over the next page or its dialogs.
+   * Plain, not state: the effect compares against it and must not re-run on it;
+   * seeded as `hash` is, from the window.
+   */
+  let panelHash = location.hash;
+  $effect(() => {
+    if (hash === panelHash) return;
+    panelHash = hash;
+    writeQueuePanel.open = false;
+  });
+
+  /**
    * The job the reader was last in: the breadcrumb's chip and where `Esc`
    * returns (R-1.6). Only a job actually opened, as prototype-6's `S.job`.
    */

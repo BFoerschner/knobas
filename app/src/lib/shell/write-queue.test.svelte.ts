@@ -169,7 +169,7 @@ async function settle() {
   flushSync();
 }
 
-async function render(names: Record<string, string> = {}) {
+async function render(names: Record<string, string> = {}, onclose: () => void = () => {}) {
   const queue = createWriteQueue();
   await queue.refresh();
   const target = document.createElement("div");
@@ -177,7 +177,7 @@ async function render(names: Record<string, string> = {}) {
   const layers = createLayers();
   const app = mount(WriteQueuePanel, {
     target,
-    props: { queue, now: NOW, onclose: () => {}, layers, nameOf: (id: string) => Promise.resolve(names[id] ?? null) },
+    props: { queue, now: NOW, onclose, layers, nameOf: (id: string) => Promise.resolve(names[id] ?? null) },
   });
   flushSync();
   return {
@@ -424,6 +424,21 @@ test("the panel is a ticket-first dialog: its title, its counts, no capitals, ev
   expect(controls(refusedRow!)).toEqual(["Discard"]);
   expect(controls(screen.section("Waiting")!.querySelector("article")!)).toEqual(["Cancel"]);
   screen.done();
+});
+
+/**
+ * The panel is rung 1 of the `Esc` ladder (#1474): the shell's `escStep`
+ * closes the topmost layer, and the panel's layer is its own close. The
+ * shell's tests press the key; this pins the layer the key reaches.
+ */
+test("Esc closes the panel as a layer, and the layer goes with it", async () => {
+  let closes = 0;
+  const screen = await render({}, () => (closes += 1));
+  expect(screen.layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+  screen.layers.open[0]!.close();
+  expect(closes).toBe(1);
+  screen.done();
+  expect(screen.layers.open, "the panel's layer outlived it").toEqual([]);
 });
 
 test("a snapshot is read per op, and says so when it cannot be", () => {

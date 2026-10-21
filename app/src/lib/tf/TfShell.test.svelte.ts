@@ -536,6 +536,68 @@ test("the queued-writes count opens the queue list (R-1.5)", async () => {
   }
 });
 
+/** The write queue panel, as the shell draws it. */
+function queuePanel(): HTMLElement | null {
+  return target.querySelector<HTMLElement>(".tf-wq-dialog");
+}
+
+/** Open the panel from the bar, and close it whatever the test did (#1474). */
+async function withQueueOpen(run: () => Promise<void>) {
+  try {
+    queueControl()!.click();
+    flushSync();
+    expect(queuePanel()).not.toBeNull();
+    await run();
+  } finally {
+    writeQueuePanel.open = false;
+    flushSync();
+  }
+}
+
+test("Esc on the window closes the write queue panel and leaves the page where it is (#1474)", async () => {
+  start();
+  await at("#/job/PAY-231");
+  await withQueueOpen(async () => {
+    // Focus outside the panel, as after the live pass's clicks: the window's
+    // Esc, not the dialog's own.
+    (document.activeElement as HTMLElement | null)?.blur();
+    press("Escape");
+    await settle();
+    expect(writeQueuePanel.open).toBe(false);
+    expect(queuePanel()).toBeNull();
+    expect(location.hash).toBe("#/job/PAY-231");
+  });
+});
+
+test("a route change closes the write queue panel (#1474)", async () => {
+  start();
+  await at("#/job/PAY-231");
+  await withQueueOpen(async () => {
+    await at("#/tickets");
+    expect(writeQueuePanel.open).toBe(false);
+    expect(queuePanel()).toBeNull();
+  });
+});
+
+test("a dialog opened over the write queue panel closes first on Esc, then the panel (#1474)", async () => {
+  const layers = createLayers();
+  start({ layers });
+  await at("#/job/PAY-231");
+  await withQueueOpen(async () => {
+    const closed: string[] = [];
+    const off = layers.add({ kind: "dialog", close: () => (closed.push("draft"), off()) });
+    press("Escape");
+    await settle();
+    expect(closed).toEqual(["draft"]);
+    expect(writeQueuePanel.open, "the panel under it stays").toBe(true);
+    press("Escape");
+    await settle();
+    expect(writeQueuePanel.open).toBe(false);
+    expect(layers.open).toEqual([]);
+    expect(location.hash).toBe("#/job/PAY-231");
+  });
+});
+
 /**
  * The bar fits its width (#1410): the healthy readings share one run that
  * shrinks with an ellipsis, and its title keeps every word. A failed
