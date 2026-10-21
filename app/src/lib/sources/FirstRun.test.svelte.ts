@@ -10,6 +10,9 @@
  * empty room, which is the state hardest to tell apart from a working knobas
  * that has nothing in it.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -135,12 +138,22 @@ function summary(id = "jira"): SourceSummary {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 let done = 0;
+/** Where the last `onfinish` asked the shell to land. */
+let landing: unknown;
 
 function render(props: Record<string, unknown> = {}) {
   done = 0;
+  landing = undefined;
   app = mount(FirstRun, {
     target,
-    props: { demo: false, onfinish: () => (done += 1), ...props },
+    props: {
+      demo: false,
+      onfinish: (to: unknown) => {
+        done += 1;
+        landing = to;
+      },
+      ...props,
+    },
   });
   flushSync();
   return app;
@@ -153,12 +166,12 @@ async function settle() {
 
 function button(label: string) {
   return [...target.querySelectorAll<HTMLButtonElement>("button")].find(
-    (b) => b.textContent?.trim() === label,
+    (b) => b.textContent?.trim() === label || b.querySelector(".tf-fr-name")?.textContent?.trim() === label,
   );
 }
 
 function step() {
-  return target.querySelector(".steps span.on")?.textContent?.trim();
+  return target.querySelector('[aria-current="step"]')?.textContent?.trim();
 }
 
 function text() {
@@ -215,7 +228,7 @@ test("the demo profile offers the Tidewater dataset as the first option", async 
   // §14a: in the demo profile the fastest route to a populated window is the
   // fixture, and it is offered *first* because it is what a person opening a
   // demo build came for.
-  const first = target.querySelector<HTMLButtonElement>(".modules button")!;
+  const first = target.querySelector<HTMLButtonElement>(".tf-fr-mods button")!;
   expect(first.textContent).toMatch(/Tidewater/i);
 
   first.click();
@@ -273,7 +286,7 @@ test("a walk reading draws a determinate bar and names its unit (#1379)", async 
   flushSync();
   button("Start the first sync")!.click();
   await settle();
-  const bar = () => target.querySelector<HTMLProgressElement>(".progress progress")!;
+  const bar = () => target.querySelector<HTMLProgressElement>(".tf-fr-progress progress")!;
 
   // No reading yet: indeterminate, as for an adapter that never reports one.
   progress({ phase: "fetching", items: 40, elapsed_ms: 900 });
@@ -322,7 +335,7 @@ test("a real source's finished run lands on the DONE step (#156)", async () => {
   expect(text()).toContain("knobas mirrored");
   expect(text()).toContain("⌘K");
   // One button before, one button after.
-  expect(target.querySelectorAll(".acts button")).toHaveLength(1);
+  expect(target.querySelectorAll(".tf-fr-acts button")).toHaveLength(1);
   expect(button("Finish")).toBeTruthy();
 });
 
@@ -556,7 +569,7 @@ test("a demo load whose corpus read fails says so too, and never the run's count
   render({ demo: true });
   button("Next")!.click();
   flushSync();
-  target.querySelector<HTMLButtonElement>(".modules button")!.click();
+  target.querySelector<HTMLButtonElement>(".tf-fr-mods button")!.click();
   await settle();
 
   expect(calls.demoLoad).toBe(1);
@@ -636,6 +649,8 @@ test("Finish calls complete_first_run and hands the shell back", async () => {
 
   expect(calls.completeFirstRun).toBe(1);
   expect(done).toBe(1);
+  // §14a's landing: Tickets, with the launcher open over it.
+  expect(landing).toBe("tickets");
 });
 
 test("Skip still records the first run as complete, or the wizard returns for ever", async () => {
@@ -694,4 +709,133 @@ test("a progress message from a source system is text, never markup", async () =
   progress({ phase: "failed", items: 0, elapsed_ms: 1, message: "<img src=x onerror=alert(1)>" });
   expect(text()).toContain("<img src=x onerror=alert(1)>");
   expect(target.querySelector("img")).toBeNull();
+});
+
+/**
+ * **A way out of the Source step** (#1399, ruled 2026-10-21). Spec §14a gives
+ * the wizard as guidance, not a gate: a reader whose system needs an adapter
+ * they have not got, or a credential they have not got yet, used to be held
+ * here on every launch, because completion was recorded only by *Finish* and
+ * the failed-sync *Skip*.
+ */
+test("Set up later in Settings records the first run once and lands on Settings › Sources (#1399)", async () => {
+  render({ source: null });
+  button("Next")!.click();
+  flushSync();
+  expect(step()).toBe("Source");
+
+  button("Set up later in Settings")!.click();
+  button("Set up later in Settings")?.click();
+  await settle();
+
+  expect(calls.completeFirstRun).toBe(1);
+  expect(done).toBe(1);
+  expect(landing).toBe("sources");
+});
+
+/**
+ * **One add-source flow** (#1399, #1400): *Connect a real system* opens the
+ * dialog Settings opens, with *Install an adapter* in it (ADR-0028), not the
+ * rooms five-step modal that had no way to install one.
+ */
+test("Connect a real system opens the add-source dialog Settings uses (#1399, #1400)", async () => {
+  render({ source: null });
+  button("Next")!.click();
+  flushSync();
+  button("Connect a real system")!.click();
+  await settle();
+
+  const dialog = target.querySelector<HTMLElement>('[role="dialog"]');
+  expect(dialog, "no dialog opened").toBeTruthy();
+  expect(dialog!.querySelector("h2")?.textContent?.trim()).toBe("Add a source");
+  expect(dialog!.textContent).toContain("Install an adapter");
+  expect([...dialog!.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Test connection")).toBe(true);
+  // The rooms dialog's steps are not here: TfAddSource is one page.
+  expect(dialog!.textContent).not.toMatch(/Schedule/);
+});
+
+/**
+ * The wizard is not under the shell, so nothing else hears `Esc`: the dialog
+ * it opens registers with the layer stack like any other and the wizard
+ * closes the topmost layer itself, as the rooms `Modal` did.
+ */
+test("Esc closes the add-source dialog over the wizard, and the wizard stays (#1400)", async () => {
+  render({ source: null });
+  button("Next")!.click();
+  flushSync();
+  button("Connect a real system")!.click();
+  await settle();
+  expect(target.querySelector('[role="dialog"]')).toBeTruthy();
+
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  flushSync();
+
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(step()).toBe("Source");
+});
+
+/**
+ * The stylesheets the app loads, as one sheet in the document, so a computed
+ * style here is the cascade the window draws with: `unported.css` (the rooms
+ * rules a bare class still reaches) and `tf.css` with its parts inlined in
+ * import order. The font imports are left out; jsdom fetches nothing.
+ */
+function loadAppStyles(): HTMLStyleElement {
+  const APP = process.cwd();
+  const tf = readFileSync(join(APP, "src/lib/tf/tf.css"), "utf8")
+    .replace(/^@import "(\.\/css\/[^"]+)";$/gm, (_, part: string) => readFileSync(join(APP, "src/lib/tf", part), "utf8"))
+    .replace(/^@import [^;]+;$/gm, "");
+  const style = document.createElement("style");
+  style.textContent = readFileSync(join(APP, "src/unported.css"), "utf8") + "\n" + tf;
+  document.head.append(style);
+  return style;
+}
+
+/**
+ * **The ticket-first look** (#1400). The design system: *"Labels are sentence
+ * case and never all caps"*, and mono is for real code values only. The rooms
+ * classes the wizard drew with carried both: an uppercase mono breadcrumb and
+ * an uppercase *FIRST RUN* chip.
+ */
+test("the wizard draws in the ticket-first look: no rooms class, no uppercase label (#1400)", async () => {
+  const style = loadAppStyles();
+  try {
+    render({ source: null, demo: true });
+    expect(target.querySelector(".tf"), "the wizard is not in the tf scope").toBeTruthy();
+    for (let at = 0; at < 2; at += 1) {
+      expect(target.querySelector(".room-bar, .steps, .modules, .mod, .kind, .panel, .view")).toBeNull();
+      const labels = [...target.querySelectorAll<HTMLElement>(".tf-fr-steps li, .tf-chip")];
+      expect(labels.length).toBeGreaterThanOrEqual(STEP_COUNT + 1);
+      for (const label of labels) {
+        expect(getComputedStyle(label).textTransform, label.textContent ?? "").not.toBe("uppercase");
+        expect(label.textContent?.trim()).toMatch(/^[A-Z][a-z ]+$/);
+      }
+      button("Next")?.click();
+      flushSync();
+    }
+  } finally {
+    style.remove();
+  }
+});
+
+const STEP_COUNT = 4;
+
+/**
+ * **Copy** (#1401). Rooms were retired with #881 (CONTEXT.md: *"Do not use the
+ * word"*), a reader is never pointed at a spec section, and the card names the
+ * roles knobas has a surface for rather than three of its adapters.
+ */
+test("the wizard says nothing of rooms or spec sections, and names the roles it connects (#1401)", async () => {
+  render({ source: null });
+  const seen: string[] = [text()];
+  button("Next")!.click();
+  flushSync();
+  seen.push(text());
+  expect(text()).toContain("A ticket system, code host, CI, wiki or monitoring");
+  for (const page of seen) {
+    expect(page).not.toMatch(/room/i);
+    expect(page).not.toContain("§");
+    expect(page).not.toContain("(P7)");
+  }
+  expect(seen[0]).toContain("so search and every page work without a network round trip");
 });

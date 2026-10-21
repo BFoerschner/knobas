@@ -260,12 +260,20 @@
   let completedFirstRun = $state(false);
   const firstRun = $derived(!completedFirstRun && (lifecycle.status?.first_run ?? false));
 
-  /** §14a's landing: Tickets, with the launcher open over it. */
-  function onFirstRunDone() {
+  /**
+   * §14a's landing: Tickets, with the launcher open over it. A reader who set
+   * up later (#1399) lands on Settings › Sources instead, where adding a
+   * source lives, with nothing over it.
+   */
+  function onFirstRunDone(landing: "tickets" | "sources") {
     completedFirstRun = true;
     // The wizard added a source, and neither `add_source` nor `demo_load`
     // emits `source:health`.
     void health.reseed();
+    if (landing === "sources") {
+      location.hash = "#/settings/sources";
+      return;
+    }
     location.hash = HOME;
     launcherOpen = true;
   }
