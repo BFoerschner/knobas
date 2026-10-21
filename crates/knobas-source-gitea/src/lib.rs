@@ -446,6 +446,7 @@ fn payload_paths() -> Vec<KindPaths> {
 /// but #1501 names Jira's set alone and leaves every other built-in adapter
 /// empty. Until the follow-up declares it, a job on a closed issue keeps its
 /// context live, which is how every Gitea job behaved before the set existed.
+/// #1593 declares it.
 fn ticket_paths() -> KindPaths {
     let knobas = |key: &str| vec![PayloadPath::of(["knobas", key])];
     KindPaths {

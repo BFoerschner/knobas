@@ -10816,3 +10816,65 @@ Ruled 2026-10-21 by the implementer (Sonnet).
 **Reasoning:** the ticket allows no IPC change where a client-visible signal exists. Listening apart from the follower keeps the drop safe if the follower has already left on the same queue read.
 
 **Cost of reversing:** a withdrawal made in another window of the app does not drop this window's mark; it falls back to today's behaviour (until a newer run lands). Removing the hook is two small functions.
+## #1501: a ticket's job context is archived while the ticket is done (Opus implementer, 2026-10-21)
+
+- **The one-time pass is a startup pass, not a migration.** *Ruling:* `sources::bring_up` runs
+  `knobas_core::context::archive_done` after the installed adapters load and before the scheduler
+  starts, on every bring-up, with no marker. *Reasoning:* the done-like sets are in the adapters'
+  descriptors, which SQL cannot read, so a migration could only add a marker; the statement only
+  archives a live context on a done anchor, so every bring-up after the first finds nothing. A
+  marker would cost a migration and a §10.8 line for nothing. *Reversing:* low.
+- **The pass archives and never revives.** *Ruling:* archive only. *Reasoning:* a source whose
+  adapter is not loaded declares nothing, and reviving on that would undo what its last sync run
+  decided. Reviving is the sync run's job. *Reversing:* low.
+- **The sync run reconciles every context of its source, every run.** *Ruling:* after the saved
+  views, inside the run's transaction, off the mirror, over every context anchored on one of the
+  source's live items, and not gated on the source declaring a set. *Reasoning:* an incremental
+  run that saw a ticket unchanged must leave it as the last run did, which a whole-source
+  reconcile does by construction. A changed declaration then takes effect on the next run, and a
+  source that stops declaring a set revives what it archived. Contexts are few, so the join is
+  cheap. *Reversing:* low.
+- **Born archived without a migration.** *Fork:* widen `context_anchor_idx` to cover archived
+  rows (a migration that fails on a database already holding two contexts on one anchor), or
+  serialise promotes. *Ruling:* `promote` takes `pg_advisory_xact_lock(47, hashtext(anchor))` in
+  its transaction, in the two-key space that never meets a sync run's one-key lock.
+  *Reasoning:* the partial index cannot keep two born-archived contexts apart, and the lock does
+  without touching the schema. *Reversing:* low.
+- **Which context `promote` answers with.** *Ruling:* the live one, else the newest archived one.
+  *Reasoning:* before #1501 an archived context could be followed by a fresh one on the same
+  anchor, so an old database may hold several. *Reversing:* low.
+- **Which context revives.** *Ruling:* the newest archived one per anchor, and none where the
+  anchor already has a live one. *Reasoning:* the unique index allows one live context per
+  anchor, and a revive that broke it would fail the whole run. *Reversing:* low.
+- **A done job still reaches what its context held.** *Fork:* leave `reach_walk!`'s
+  `archived_at is null`, or drop it. *Ruling:* drop it. *Reasoning:* "a reopened done job is
+  reading, not working"; with the filter, everything a person added to a job would vanish from
+  its page the moment the ticket went Done. `member_ids` already answers about a context whatever
+  its state; only the inbox's alert rule and the open jobs ask whether anyone is still working.
+  *Reversing:* low, one clause.
+- **`promote_context` reads the declarations from the sync engine's state.** *Ruling:* the
+  command takes the registry from `sources::state`, so it answers `not_ready` until the engine
+  is up. *Reasoning:* the done-like sets are the registry's; every command that reads
+  declarations does the same. *Reversing:* low.
+- **No WIT change and no contract bump.** *Ruling:* `adapter.wit` stays at
+  `knobas:adapter@1.3.0`. *Reasoning:* the descriptor crosses as serde JSON, as #1475 ruled for
+  `url_forms`; the field is `#[serde(default)]`, and `convert`'s new test witnesses both an old
+  and a new component. *Reversing:* low.
+- **Gitea declares no set, as the ticket says.** *Ruling:* empty, with the reason beside
+  `ticket_paths()`. A Gitea issue's status is `open` or `closed`, and `closed` is done-like, so
+  the body is too narrow there: follow-up #1593 (`ready-for-agent`). The mock adapter declares
+  none either, so the demo's finished jobs stay as drawn. *Reversing:* one line each.
+- **No event when a run archives.** *Ruling:* the sync run emits no `contexts:changed`.
+  *Reasoning:* the views that read the open jobs read them on mount, and the sync crate has no
+  event for contexts. *Reversing:* low.
+- **`list_contexts` is witnessed through `knobas_core::context::list`.** The command has no inner
+  function and is that call alone, so the IPC test reads it there, beside `open_alerts` and
+  `inbox_items_inner`. *Reversing:* none.
+
+### Reserved for Björn, ruled by implementer on Opus
+
+- **The §10.8 sign-off** (`docs/contract/10.8/1501-done-statuses-and-the-job-context-lifecycle.md`).
+  *Ruling:* signed. The entry matches the diff: one additive `KindPaths` field, the regenerated
+  `sources.ts`, `promote_context`'s answer now archived where its anchor is done, the sync run's
+  step, the bring-up pass and the reach change. No command, argument, migration or WIT change.
+  *Reversing:* a follow-up removing the field and the step; every adapter but Jira declares none.
