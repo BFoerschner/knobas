@@ -230,7 +230,7 @@ async fn an_alert_held_only_by_a_done_jobs_context_leaves_the_inbox_and_stays_in
     };
 
     assert!(inbox(pool.clone()).await.contains(&key), "the control");
-    assert_eq!(open_jobs(pool.clone()).await, [job.clone()]);
+    assert_eq!(open_jobs(pool.clone()).await, std::slice::from_ref(&job));
 
     set_status(&pool, &job, "Done").await;
     sync_lands(&pool).await;
