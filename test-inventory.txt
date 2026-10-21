@@ -68,7 +68,6 @@ knobas-app	lib/knobas_app	capture::tests::the_shortcut_is_stored_under_its_own_k
 knobas-app	lib/knobas_app	capture::tests::what_the_main_window_recorded_is_what_comes_back
 knobas-app	lib/knobas_app	checkout::open::tests::a_default_whose_entry_is_gone_is_the_first
 knobas-app	lib/knobas_app	checkout::open::tests::the_keys_are_501s_and_the_lists_own
-knobas-app	lib/knobas_app	checkout::open::tests::the_open_command_view_names_the_application
 knobas-app	lib/knobas_app	checkout::tests::a_leading_tilde_is_the_home_directory
 knobas-app	lib/knobas_app	checkout::tests::the_setting_key_is_the_one_the_migration_names
 knobas-app	lib/knobas_app	checkout::uncommitted::tests::a_git_that_does_not_answer_is_abandoned_at_the_timeout
@@ -520,7 +519,6 @@ knobas-app	test/it	checkout_ipc::a_repo_reads_the_clone_the_scan_found
 knobas-app	test/it	checkout_ipc::a_repo_with_no_checkout_refuses_and_names_it
 knobas-app	test/it	checkout_ipc::a_repo_with_no_clone_reads_no_checkout_and_a_clone_command
 knobas-app	test/it	checkout_ipc::a_repo_with_no_url_has_no_clone_command_and_is_not_scanned_for
-knobas-app	test/it	checkout_ipc::a_stored_command_wins_and_clearing_gives_the_shipped_one_back
 knobas-app	test/it	checkout_ipc::a_withdrawn_repo_and_a_turned_off_source_still_answer_their_checkout
 knobas-app	test/it	checkout_ipc::an_override_answers_without_a_clones_root
 knobas-app	test/it	checkout_ipc::an_override_wins_over_the_scan_and_clearing_it_gives_the_scan_back
@@ -558,7 +556,6 @@ knobas-app	test/it	config_schema_mirror::a_top_level_key_the_fixture_drops_is_no
 knobas-app	test/it	config_schema_mirror::an_object_literal_with_unquoted_keys_parses
 knobas-app	test/it	config_schema_mirror::every_exported_fixture_is_compared_against_an_adapter
 knobas-app	test/it	config_schema_mirror::every_fixture_schema_says_what_its_adapter_says
-knobas-app	test/it	contexts_ipc::a_blank_label_is_refused_as_invalid
 knobas-app	test/it	contexts_ipc::a_stored_context_scopes_the_page_and_its_total
 knobas-app	test/it	contexts_ipc::an_unknown_context_is_an_empty_page_not_the_corpus
 knobas-app	test/it	contexts_ipc::promote_announces_once_however_often_it_is_pressed
