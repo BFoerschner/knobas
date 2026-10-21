@@ -53,6 +53,7 @@ function run(no: number, tone: "ok" | "err" | null, branch: string, extra: Parti
     commit_id: null,
     agent: null,
     current_step: null,
+    tests: null,
     ...extra,
   };
 }

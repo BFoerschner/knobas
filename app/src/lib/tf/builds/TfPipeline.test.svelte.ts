@@ -64,6 +64,7 @@ function run(no: number, tone: "ok" | "err", started: string, extra: Partial<Run
     commit_id: null,
     agent: null,
     current_step: null,
+    tests: null,
     ...extra,
   };
 }
@@ -74,8 +75,15 @@ const RUNS: RunRow[] = [
     duration_seconds: 252,
     trigger: "change",
     revision: "a41f2c0e9b8d7c6a",
+    tests: { failed: 1, passed: 41, ignored: 0 },
   }),
-  run(1186, "ok", daysAgo(1, 18), { duration_seconds: 241, trigger: "person", started_by: "mara", started_by_me: true }),
+  run(1186, "ok", daysAgo(1, 18), {
+    duration_seconds: 241,
+    trigger: "person",
+    started_by: "mara",
+    started_by_me: true,
+    tests: { failed: 0, passed: 42, ignored: 2 },
+  }),
   run(1185, "err", daysAgo(1, 17), { branch: "feature/PAY-231-sepa-retry", duration_seconds: 268 }),
   ...Array.from({ length: 31 }, (_, i) => run(1184 - i, "ok", daysAgo(3, 12), { duration_seconds: 200 + i })),
 ];
@@ -289,6 +297,20 @@ test("each run says how it was started; Started by me keeps the reader's; the wo
   input.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
   expect(rows().map((r) => r.querySelector(".tf-run-no b")?.textContent)).toEqual(["#1187"]);
+});
+
+test("a run's test summary sits between how it started and its duration, the failed count in err tone; a run without tests draws none", async () => {
+  draw();
+  await settle();
+  const rows = [...target.querySelectorAll(".tf-runs tbody tr")];
+  const cell = (row: Element) => row.querySelector(".tf-run-tests");
+  expect(cell(rows[0]!)?.previousElementSibling?.classList.contains("tf-run-trig")).toBe(true);
+  expect(cell(rows[0]!)?.nextElementSibling?.classList.contains("tf-run-dur")).toBe(true);
+  expect(cell(rows[0]!)?.textContent).toBe("1 failed, 41 passed");
+  expect(cell(rows[0]!)?.querySelector(".tf-tests-failed")?.textContent).toBe("1 failed");
+  expect(cell(rows[1]!)?.textContent).toBe("42 passed, 2 ignored");
+  expect(cell(rows[1]!)?.querySelector(".tf-tests-failed")).toBeNull();
+  expect(cell(rows[2]!)?.textContent).toBe("");
 });
 
 test("older runs are asked of the source from the oldest run held, appended, until it answers none", async () => {

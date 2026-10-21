@@ -107,6 +107,7 @@ const THE_RUN: RunRow = {
   commit_id: null,
   agent: null,
   current_step: null,
+  tests: null,
 };
 
 const PIPELINE: PipelineRow = {

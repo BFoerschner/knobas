@@ -40,6 +40,7 @@ function run(extra: Partial<RunRow> = {}): RunRow {
     commit_id: null,
     agent: null,
     current_step: null,
+    tests: null,
     ...extra,
   };
 }

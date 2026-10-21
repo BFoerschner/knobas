@@ -229,7 +229,14 @@ fn run_of_item(
     item: &knobas_source::SyncItem,
 ) -> Option<RunRow> {
     use knobas_core::payload::{
-        Frame, resolve_list, resolve_state, resolve_string, resolve_trigger,
+        Frame, resolve_list, resolve_number, resolve_state, resolve_string, resolve_trigger,
+    };
+    // A count as `declared_integer!` reads one in the mirror: a whole number.
+    #[allow(clippy::cast_possible_truncation)]
+    let count = |paths: &[knobas_core::payload::PayloadPath]| {
+        resolve_number(&item.payload, paths)
+            .filter(|n| n.fract() == 0.0 && *n < 1e18)
+            .map(|n| n as i64)
     };
     let paths = declarations.get(&item.entity.namespace, &item.kind)?;
     if paths.frame != Some(Frame::Run) {
@@ -250,6 +257,9 @@ fn run_of_item(
             started_by: resolve_string(payload, &paths.started_by),
             agent: resolve_string(payload, &paths.agent),
             current_step: resolve_string(payload, &paths.current_step),
+            tests_failed: count(&paths.tests_failed),
+            tests_passed: count(&paths.tests_passed),
+            tests_ignored: count(&paths.tests_ignored),
             revision: resolve_list(payload, &paths.revision).into_iter().next(),
         },
         identity,

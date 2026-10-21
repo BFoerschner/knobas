@@ -12,7 +12,8 @@
     result, each a link to its run with its facts as the tip; *Passed*,
     *Usual duration*, *Last passing*.
   - **Tabs**: *Runs* (the filter bar, runs by day, each with result, branch
-    and the job's chip, duration bar, start, *Log* and *Run again…*; older
+    and the job's chip, how it started, its test summary (*1 failed, 41
+    passed*, #1448), duration bar, start, *Log* and *Run again…*; older
     runs asked of the source when the end scrolls into view), *Parameters*
     (each default with the kind its spec gives and *Change…* through the
     write queue, a select for a fixed list), *Triggers*.
@@ -249,6 +250,7 @@
           commit_id: null,
           agent: null,
           current_step: null,
+          tests: null,
         },
         ...started,
       ];
@@ -475,6 +477,10 @@
                   >{/if}</td
               >
               <td class="tf-dim tf-run-trig"><Marked text={triggerLabel(run)} typed={filter.text} /></td>
+              <td class="tf-nowrap tf-run-tests"
+                >{#if run.tests !== null}{#if run.tests.failed > 0}<span class="tf-tests-failed">{run.tests.failed} failed</span>,{" "}{/if}{run.tests
+                    .passed} passed{#if run.tests.ignored > 0}, {run.tests.ignored} ignored{/if}{/if}</td
+              >
               <td class="tf-nowrap tf-num tf-run-dur">
                 {#if run.duration_seconds !== null}
                   <svg class="tf-durbar" width={DURBAR_WIDTH} height="4" aria-hidden="true"
