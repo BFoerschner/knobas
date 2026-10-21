@@ -341,3 +341,21 @@ test("a line on the panel opens the asset it names", async () => {
 
   expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: TEAMCITY.id });
 });
+
+/**
+ * #1606: a route name too long for the column wrapped centred (a button
+ * centres its text) and pushed its URL right. jsdom does no layout, so the
+ * rule is pinned in the component's stylesheet.
+ */
+test("a route's name is left-aligned and its URL wraps beneath it (#1606)", async () => {
+  const fs = await import("node:fs");
+  const source = fs.readFileSync("src/lib/assets/AssetsView.svelte", "utf8");
+  const rule = (selector: string) =>
+    source.match(new RegExp(`${selector.replace(/[.]/g, "\\.")}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+  expect(rule(".breaks .lst li.rt .link")).toMatch(/text-align:\s*left/);
+  expect(rule(".breaks .lst li.rt")).toMatch(/display:\s*flex/);
+  expect(rule(".breaks .lst li.rt")).toMatch(/flex-wrap:\s*wrap/);
+  expect(rule(".breaks .lst li.rt .mono")).toMatch(/flex:\s*0 0 auto/);
+  expect(rule(".breaks .lst li.rt .mono")).toMatch(/font-variant-ligatures:\s*none/);
+  expect(source).toMatch(/<li class="rt">\s*<button class="link" onclick=\{\(\) => openRoute/);
+});
