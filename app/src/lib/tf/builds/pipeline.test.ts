@@ -17,7 +17,9 @@ import {
   jobBranchFor,
   keptRuns,
   longest,
+  markQueuedRun,
   pipelineWord,
+  QUEUED_RUN,
   queuedRunRows,
   resultOf,
   runLanded,
@@ -29,7 +31,7 @@ import {
   triggerLabel,
   triggersSentence,
 } from "./pipeline";
-import type { Mark } from "../queued.svelte";
+import { forgetQueued, queuedMarks, type Mark } from "../queued.svelte";
 
 function run(no: number, tone: "ok" | "err" | "info", extra: Partial<RunRow> = {}): RunRow {
   return {
@@ -305,4 +307,16 @@ test("a sync status heard takes its source's place, or joins the list", () => {
   const rows = [status("teamcity", true), status("gitea", false)];
   expect(syncWith(rows, status("teamcity", false))).toEqual([status("teamcity", false), status("gitea", false)]);
   expect(syncWith(rows, status("jira", false))).toEqual([...rows, status("jira", false)]);
+});
+
+test("a run queued before the page's read arrives is based on the pipeline's own recent runs", () => {
+  const follower = { follow: () => () => {} };
+  const pipeline = { entity_id: "teamcity:buildType:X", name: "X", recent: [run(7, "ok"), run(6, "ok")] };
+  markQueuedRun(pipeline, { id: 3 }, null, null, follower);
+  markQueuedRun(pipeline, { id: 4 }, "feature/x", [run(8, "ok")], follower);
+  expect(queuedMarks("teamcity:buildType:X", QUEUED_RUN)).toEqual([
+    { write: 3, kind: QUEUED_RUN, text: "", base: "teamcity:build:7" },
+    { write: 4, kind: QUEUED_RUN, text: "feature/x", base: "teamcity:build:8" },
+  ]);
+  forgetQueued();
 });

@@ -11,6 +11,7 @@ import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetQueued, queuedMarks } from "../queued.svelte";
 import type { RunPorts } from "./pipeline-ports";
+import { QUEUED_RUN } from "./pipeline";
 import TfRun from "./TfRun.svelte";
 
 let target: HTMLElement;
@@ -734,7 +735,7 @@ test("Re-run leaves the run queued on its pipeline, from the newest run held, an
   await settle();
   button("Re-run")!.click();
   await settle();
-  expect(queuedMarks(PIPE, "run")).toEqual([{ write: 9, kind: "run", text: FEATURE, base: "teamcity:build:1188" }]);
+  expect(queuedMarks(PIPE, QUEUED_RUN)).toEqual([{ write: 9, kind: QUEUED_RUN, text: FEATURE, base: "teamcity:build:1188" }]);
   expect(target.textContent).not.toContain("queued");
 });
 
@@ -749,5 +750,5 @@ test("Run in Run again with changes… leaves the run queued on its pipeline too
   flushSync();
   [...target.querySelectorAll<HTMLButtonElement>(".tf-run-dialog button")].find((b) => b.textContent?.trim() === "Run")!.click();
   await settle();
-  expect(queuedMarks(PIPE, "run")).toEqual([{ write: 9, kind: "run", text: "", base: "teamcity:build:1188" }]);
+  expect(queuedMarks(PIPE, QUEUED_RUN)).toEqual([{ write: 9, kind: QUEUED_RUN, text: "", base: "teamcity:build:1188" }]);
 });

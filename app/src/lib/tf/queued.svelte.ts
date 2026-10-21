@@ -2,7 +2,8 @@
  * What a ticket-first page queued this session (#1424, #1542), so a write is
  * drawn at once where it lands: the job's picked status and its comment, a
  * Docs section's new text, comment and page, a pull request's chips and its
- * comment. The repository page keeps its own (`repo/queued.svelte.ts`).
+ * comment, a run queued on a pipeline from its page or a run page (#1449).
+ * The repository page keeps its own (`repo/queued.svelte.ts`).
  *
  * A mark is module `$state` by the entity it lands on, kind by kind, never
  * written anywhere: the write queue is the record, and a restart reads only

@@ -44,6 +44,7 @@ import {
   type SourceSyncStatus,
   type WriteOpPayload,
 } from "../../ipc/sources";
+import { EVENTS } from "../../ipc";
 import { writeFollower, type WriteFollower } from "../../shell/follow-write";
 import { openExternal } from "../../shell/open-external";
 import { isEntityId, resolveTicket } from "../job/job";
@@ -171,3 +172,31 @@ export const RUN_BRIDGE: RunPorts = {
   preview: (runId, path) => artifactPreview(runId, path),
   download: (runId, target) => downloadRunFile(runId, target),
 };
+
+/**
+ * Hear `source`'s sync statuses (#1450): `heard` with each, `finished` once a
+ * sync of it ends. Answers the stop, which also stops a listen still being
+ * set up, so a page that goes first leaves no listener behind.
+ */
+export function listenSynced(
+  ports: Pick<PipelinePorts, "listen">,
+  source: string,
+  heard: (row: SourceSyncStatus) => void,
+  finished: () => void,
+): () => void {
+  let dead = false;
+  let off: (() => void) | null = null;
+  ports
+    .listen(EVENTS.syncState, ({ payload }) => {
+      const row = payload as SourceSyncStatus;
+      if (dead || row.source_id !== source) return;
+      heard(row);
+      if (!row.running) finished();
+    })
+    .then((stop) => (dead ? stop() : (off = stop)))
+    .catch(() => {});
+  return () => {
+    dead = true;
+    off?.();
+  };
+}

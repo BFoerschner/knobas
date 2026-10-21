@@ -41,7 +41,7 @@
     failed,
     ports,
     openStep = null,
-    fresh = 0,
+    rereads = 0,
   }: {
     runId: string;
     /** The run has not finished: its last step is running. */
@@ -52,7 +52,7 @@
     /** The step to open at, from a click on the steps bar; `seq` tells two clicks on one step apart. */
     openStep?: { step: number; seq: number } | null;
     /** Bumped when the page reads the run again (#1450): the log is read again, the reader's place kept. */
-    fresh?: number;
+    rereads?: number;
   } = $props();
 
   let log = $state<RunLog | null>(null);
@@ -80,7 +80,7 @@
   /** A read again keeps what is drawn, and a failed one keeps the last log. */
   let first = true;
   $effect(() => {
-    void fresh;
+    void rereads;
     if (first) return void (first = false);
     untrack(() => read(runId));
   });

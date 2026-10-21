@@ -13,11 +13,11 @@
     runId,
     branch,
     read = runChain,
-    fresh = 0,
+    rereads = 0,
   }: {
     runId: string;
     /** Bumped when the page reads the run again (#1450): the chain is read again over what it drew. */
-    fresh?: number;
+    rereads?: number;
     /** The run's branch, the panel's heading. */
     branch: string | null;
     read?: (runId: string) => Promise<ChainStepRow[]>;
@@ -28,7 +28,7 @@
 
   $effect(() => {
     const wanted = runId;
-    void fresh;
+    void rereads;
     // A new run starts empty; the same run read again keeps its boxes until the answer.
     if (drawn !== wanted) steps = [];
     drawn = wanted;

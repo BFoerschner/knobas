@@ -15,6 +15,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import { forgetQueued, markQueued, queuedMarks } from "../queued.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
+import { QUEUED_RUN } from "./pipeline";
 import TfPipeline from "./TfPipeline.svelte";
 
 let target: HTMLElement;
@@ -155,7 +156,7 @@ interface Drawn {
   /** Fire `sync:state` as the shell hears it; `null` once the page stopped listening. */
   sync: ((payload: unknown) => void) | null;
   /** What the next runs read answers. */
-  next: RunRow[] | Error;
+  next: RunRow[] | Error | Promise<RunRow[]>;
   /** Open another pipeline in the same page. */
   goPipeline: (pipeline: PipelineRow) => void;
   /** Move the page to another address under the pipeline, as a tab click does. */
@@ -202,7 +203,8 @@ function draw(
   };
   const runs = () => {
     drawn.reads += 1;
-    return drawn.next instanceof Error ? Promise.reject(drawn.next) : Promise.resolve(drawn.next);
+    const next = drawn.next;
+    return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
   };
   const props = $state({ pipeline: PIPELINE, rest, job, runs, onpin: () => (drawn.pinned += 1), ports });
   drawn.go = (next) => {
@@ -468,6 +470,21 @@ test("a read again keeps the entered filter and the tab; a failed one keeps the 
   expect(target.querySelectorAll(".tf-bars a"), "the chart stays").toHaveLength(30);
 });
 
+test("of two reads again, the later one's answer stands even when the earlier one answers last", async () => {
+  const drawn = draw();
+  await settle();
+  let answerFirst: (rows: RunRow[]) => void = () => {};
+  drawn.next = new Promise<RunRow[]>((resolve) => (answerFirst = resolve));
+  drawn.sync!(synced("teamcity"));
+  drawn.next = FINISHED;
+  drawn.sync!(synced("teamcity"));
+  await settle();
+  answerFirst(RUNNING);
+  await settle();
+  expect(firstRow().textContent).toContain("#1188");
+  expect(firstRow().textContent).not.toContain("running");
+});
+
 test("the page stops listening when it goes", async () => {
   const drawn = draw();
   await settle();
@@ -482,7 +499,7 @@ test("the page stops listening when it goes", async () => {
 const runNos = () => [...target.querySelectorAll(".tf-runs tbody tr .tf-run-no")].map((td) => td.querySelector("b")?.textContent);
 
 test("a run queued on the run page is one queued row at the top; another pipeline draws none for it", async () => {
-  markQueued(PIPELINE.entity_id, "run", "feature/PAY-231-sepa-retry", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
+  markQueued(PIPELINE.entity_id, QUEUED_RUN, "feature/PAY-231-sepa-retry", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
   const drawn = draw();
   await settle();
   expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
@@ -496,7 +513,7 @@ test("a run queued on the run page is one queued row at the top; another pipelin
 });
 
 test("the queued row goes once a read holds the run, and is never drawn beside it", async () => {
-  markQueued(PIPELINE.entity_id, "run", "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
+  markQueued(PIPELINE.entity_id, QUEUED_RUN, "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
   const drawn = draw();
   await settle();
   expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
@@ -510,7 +527,7 @@ test("the queued row goes once a read holds the run, and is never drawn beside i
   drawn.sync!(synced("teamcity"));
   await settle();
   expect(runNos().slice(0, 2)).toEqual(["#1188", "#1187"]);
-  expect(queuedMarks(PIPELINE.entity_id, "run")).toEqual([]);
+  expect(queuedMarks(PIPELINE.entity_id, QUEUED_RUN)).toEqual([]);
   expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs 35");
 });
 
@@ -552,7 +569,7 @@ test("a click anywhere on a run row opens the run; its Log link and Run again…
 
 test("a click on a queued row opens nothing: there is no run yet", async () => {
   location.hash = "#/builds";
-  markQueued(PIPELINE.entity_id, "run", "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
+  markQueued(PIPELINE.entity_id, QUEUED_RUN, "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
   draw();
   await settle();
   (firstRow() as HTMLElement).querySelector<HTMLElement>(".tf-run-br")!.click();

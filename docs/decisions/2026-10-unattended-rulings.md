@@ -10487,7 +10487,7 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 - **Polling a run in flight between syncs** (delegated). *Ruling:* no; the pages re-read when the sync ends and at
   no other time. *Reasoning:* polling is a read budget no ruling has granted, and the sync interval
   is the source's own cadence. *Reversing:* low, an interval beside the listener.
-- **What "the open tab" re-reads.** *Ruling:* the run page bumps a `fresh` counter the Log, Tests,
+- **What "the open tab" re-reads.** *Ruling:* the run page bumps a `rereads` counter the Log, Tests,
   Artifacts tabs and the Overview's chain panel take. Each reads again over what it draws: the
   log's folds, the tests' filter and opened rows, the artifact folders opened stay. A tab's failed
   re-read keeps its last answer. A failed runs re-read on either page keeps the runs and draws the
@@ -10502,7 +10502,8 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 - **Store or pending writes** (delegated; (b) recommended). *Ruling:* (a) in the form the dispatch
   named: the shared `tf/queued.svelte.ts` marks (#1424), kind `run`, keyed by pipeline id, written
   by both pages' `queue()`, not a second store. The mark's text is the branch (`""` for the
-  default), its base the newest run the page held as the run was queued. A read holds a queued run
+  default), its base the newest run the page held as the run was queued (the pipeline's own `recent` runs
+  before the page's read arrives). A read holds a queued run
   once it carries a run newer than that base, on its branch (any branch for one queued on the
   default), that no change or schedule started; each such run settles one mark, the oldest first
   (`runLanded`). The queue holding or refusing the write drops the mark and toasts, through the

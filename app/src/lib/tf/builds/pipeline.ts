@@ -9,11 +9,12 @@
  * pipeline frame on (ADR-0022).
  */
 import type { PipelineRow, PipelineSettings, PipelineTrigger, RunRow } from "../../ipc/entity";
-import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
+import type { QueuedWrite, SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
 import { signInFails } from "../../shell/health.svelte";
 import type { WriteSource } from "../../shell/queued-toast";
 import { matchesAll } from "../filter/filter";
-import type { Mark } from "../queued.svelte";
+import type { WriteFollower } from "../../shell/follow-write";
+import { markQueued, type Mark } from "../queued.svelte";
 import { age } from "../job/job";
 import { reenterWords, secretNoun } from "../settings/settings";
 import { duration, pipelineHash, runTone, shortTime } from "./builds";
@@ -37,6 +38,33 @@ export function isStartedHere(run: RunRow): boolean {
  * newest run the page held as it was queued.
  */
 export const QUEUED_RUN = "run";
+
+/** The branch a run write names: `null` for the default, as the Run… dialog sends it (#852). */
+export function runBranch(payload: WriteOpPayload): string | null {
+  return "RunBuild" in payload ? payload.RunBuild.branch : null;
+}
+
+/**
+ * A run queued on `pipeline`, from its page or a run page (#1449): marked on
+ * the pipeline until a read holds it ({@link runLanded}), followed until the
+ * queue holds or refuses it. `held` is the runs the page holds, newest first;
+ * before its read arrives, the pipeline's own recent runs stand in.
+ */
+export function markQueuedRun(
+  pipeline: Pick<PipelineRow, "entity_id" | "name" | "recent">,
+  write: Pick<QueuedWrite, "id">,
+  branch: string | null,
+  held: readonly RunRow[] | null,
+  follower: WriteFollower,
+): void {
+  markQueued(pipeline.entity_id, QUEUED_RUN, branch ?? "", {
+    write,
+    base: (held ?? pipeline.recent)[0]?.entity_id ?? null,
+    many: true,
+    following: { name: `Run of ${pipeline.name}` },
+    follower,
+  });
+}
 
 /** The runs queued this session and not yet read back, as queued rows, newest first. */
 export function queuedRunRows(marks: readonly Mark[], fallback: string | null): RunRow[] {

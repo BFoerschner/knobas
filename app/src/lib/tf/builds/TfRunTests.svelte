@@ -24,7 +24,7 @@
     branch,
     logHref,
     ports,
-    fresh = 0,
+    rereads = 0,
   }: {
     runId: string;
     /** The run's branch: a history whose failures were all on it says so. */
@@ -33,7 +33,7 @@
     logHref: string;
     ports: Pick<RunPorts, "tests" | "history">;
     /** Bumped when the page reads the run again (#1450): the tests are read again, the filter and the open ones kept. */
-    fresh?: number;
+    rereads?: number;
   } = $props();
 
   /** How many failed tests start open. */
@@ -61,7 +61,7 @@
   /** A read again keeps what is drawn, and a failed one keeps the last tests. */
   let first = true;
   $effect(() => {
-    void fresh;
+    void rereads;
     if (first) return void (first = false);
     untrack(() => readTests(runId));
   });

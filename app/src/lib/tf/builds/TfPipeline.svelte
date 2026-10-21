@@ -24,7 +24,7 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from "svelte";
 
-  import { EVENTS, ipcErrorMessage } from "../../ipc";
+  import { ipcErrorMessage } from "../../ipc";
   import type { PipelineRow, PipelineSettings, RunRow, Setting } from "../../ipc/entity";
   import type { SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
@@ -34,10 +34,10 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
-  import { markQueued, queuedMarks, settleQueued } from "../queued.svelte";
+  import { queuedMarks, settleQueued } from "../queued.svelte";
   import { duration, runHash, runTone, shortTime } from "./builds";
   import { chainSentence } from "./chain";
-  import { BRIDGE, type PipelinePorts } from "./pipeline-ports";
+  import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
   import { fieldsOf, type RunRequest } from "./run-dialog";
   import TfRunDialog from "./TfRunDialog.svelte";
   import {
@@ -61,12 +61,14 @@
     jobBranchFor,
     keptRuns,
     longest,
+    markQueuedRun,
     pipelineWord,
     pipelineSource,
     QUEUED_RUN,
     queuedRunRows,
     queuedRunWhat,
     resultWord,
+    runBranch,
     runLanded,
     staleLine,
     syncWith,
@@ -155,6 +157,9 @@
     );
   }
 
+  /** Bumped on every read again, so an older one answering late is dropped. */
+  let rereads = 0;
+
   /**
    * A sync of the pipeline's source finished (#1450): the runs again, older
    * pages kept, the reader's filter, tab and dialog untouched. A failed read
@@ -162,37 +167,29 @@
    */
   function reread(wanted: string) {
     const mine = token;
+    const seq = ++rereads;
+    const current = () => mine === token && seq === rereads;
     readRuns(wanted).then(
       (rows) => {
-        if (mine !== token) return;
+        if (!current()) return;
         settleQueued(wanted, runLanded(rows));
         failed = null;
         held = appendOlder(rows, held ?? []);
       },
       (cause: unknown) => {
-        if (mine === token) failed = ipcErrorMessage(cause);
+        if (current()) failed = ipcErrorMessage(cause);
       },
     );
   }
 
   $effect(() => {
-    const source = pipeline.source_id;
     const wanted = id;
-    let dead = false;
-    let off: (() => void) | null = null;
-    ports
-      .listen(EVENTS.syncState, ({ payload }) => {
-        const row = payload as SourceSyncStatus;
-        if (dead || row.source_id !== source) return;
-        sync = syncWith(sync, row);
-        if (!row.running) reread(wanted);
-      })
-      .then((stop) => (dead ? stop() : (off = stop)))
-      .catch(() => {});
-    return () => {
-      dead = true;
-      off?.();
-    };
+    return listenSynced(
+      ports,
+      pipeline.source_id,
+      (row) => (sync = syncWith(sync, row)),
+      () => reread(wanted),
+    );
   });
 
   // Facts about the sources, read once: the word, the warn line.
@@ -269,23 +266,17 @@
   /** *Run on <branch>*: one run on the queue, drawn queued at once (R-9.8). */
   function runOn(branch: string | null) {
     const words = branch ?? fallback ?? "the default branch";
-    void queue({ RunBuild: { entity: id, branch, parameters: [] } }, branch ?? fallback, `On ${words}, defaults`);
+    void queue({ RunBuild: { entity: id, branch, parameters: [] } }, `On ${words}, defaults`);
   }
 
   /**
    * Queue a run and draw it *queued* at the top at once (R-9.8). The toast
    * names it by the dialog's line, as prototype-6's `startRun` does.
    */
-  async function queue(payload: WriteOpPayload, branch: string | null, summary: string): Promise<boolean> {
+  async function queue(payload: WriteOpPayload, summary: string): Promise<boolean> {
     try {
       const write = await ports.submitWrite(payload);
-      markQueued(id, QUEUED_RUN, branch ?? "", {
-        write,
-        base: held?.[0]?.entity_id ?? null,
-        many: true,
-        following: { name: `Run of ${pipeline.name}` },
-        follower: ports.follower(),
-      });
+      markQueuedRun(pipeline, write, runBranch(payload), held, ports.follower());
       toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline));
       return true;
     } catch (cause) {
@@ -303,8 +294,7 @@
 
   async function onrun(request: RunRequest) {
     dialog = null;
-    const branch = "RunBuild" in request.payload ? (request.payload.RunBuild.branch ?? fallback) : fallback;
-    if (!(await queue(request.payload, branch, request.summary)) || request.preset === null) return;
+    if (!(await queue(request.payload, request.summary)) || request.preset === null) return;
     try {
       await ports.savePreset(request.preset);
     } catch (cause) {
