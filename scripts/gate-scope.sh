@@ -12,6 +12,15 @@
 # `check`'s `ipc-mirror` step regenerates it and compares, so a head that
 # touches it takes the full gate even when nothing in `crates/` changed.
 #
+# The testenv scripts pin strings from app source too (#1543):
+# `testenv/desktop-witness-test.sh` greps `app/src/lib/tf/`, `QueryBox.svelte`,
+# `CaptureWindow.svelte` and others, and `witness-unit` runs only under the
+# full `check`. So a path (or a directory holding one) that any `testenv/*.sh`
+# names as `app/...` is not front-only either: moving a pinned constant under
+# `check-front` merged green and turned `main` red twice on 2026-10-21. Picked
+# over adding `witness-unit` to `check-front` because that changes what
+# `just check-front` runs; this changes only which head earns the full gate.
+#
 # Usage: scripts/gate-scope.sh [BASE]   (default origin/main)
 set -euo pipefail
 base=${1:-origin/main}
@@ -19,6 +28,10 @@ root=$(git rev-parse --show-toplevel)
 mb=$(git -C "$root" merge-base "$base" HEAD)
 changed=$(git -C "$root" diff --name-only "$mb" HEAD)
 if [ -z "$changed" ]; then echo "gate-scope: nothing changed since $mb" >&2; echo full; exit 0; fi
+# Every `app/...` path the testenv scripts name; a directory pins its contents.
+# The leading class keeps `crates/knobas-app/src/...` from reading as `app/src/...`.
+pinned=$(grep -hoE '(^|[^A-Za-z0-9_-])app/[A-Za-z0-9_./@+-]+' "$root"/testenv/*.sh 2>/dev/null \
+  | sed -E 's#^[^a]*##; s#/*$##' | sort -u || true)
 while IFS= read -r f; do
   case $f in
     app/src/lib/ipc/generated/*)
@@ -28,8 +41,14 @@ while IFS= read -r f; do
       if grep -rhF --include='*.rs' --include='*.toml' --include='*.json' "app/$rel" "$root/crates" 2>/dev/null \
            | grep -qvE '^[[:space:]]*//'; then
         echo "gate-scope: full: crates/ reads $f" >&2; echo full; exit 0
-      fi ;;
-    docs/*|mockups/*|screenshots/*|.claude/*|*.md) ;;
+      fi
+      while IFS= read -r pin; do
+        [ -n "$pin" ] || continue
+        if [ "$f" = "$pin" ] || [ "${f#"$pin"/}" != "$f" ]; then
+          echo "gate-scope: full: testenv/ pins $f (via $pin)" >&2; echo full; exit 0
+        fi
+      done <<< "$pinned" ;;
+    docs/*|mockups/*|.claude/*|*.md) ;;
     *) echo "gate-scope: full: $f is outside app/ and the prose dirs" >&2; echo full; exit 0 ;;
   esac
 done <<< "$changed"

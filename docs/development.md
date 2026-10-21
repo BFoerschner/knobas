@@ -216,15 +216,12 @@ breaks only in a bundled build: `tauri dev` loads the Vite server over
 
 ### QA without Tauri
 
-Any screen runs in a browser with a fake behind `invoke`. Pick your own port
-and Chrome user-data directory so parallel runs do not collide:
+Any screen runs in a browser with a fake behind `invoke`. `just shot` starts
+the dev server on its own port (`5300 + slot`) and captures a route under
+`?fake-ipc`:
 
 ```bash
-cd app && npx vite --port "$PORT" --strictPort &
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --headless --disable-gpu --window-size=1440,900 \
-  --user-data-dir="/tmp/knobas-qa-$PORT" \
-  --screenshot=/tmp/shot.png "http://localhost:$PORT/?fake-ipc#/ctx/all"
+just shot 3 /tmp/shots '#/tickets'
 ```
 
 `?fake-ipc` turns the fake on. It only exists in the dev server: a production
@@ -234,8 +231,9 @@ checks layout and interaction. `just dev` or `just demo` checks the bridge.
 
 ### Mockups
 
-`mockups/` holds the design rounds: clickable HTML mockups built from the brief
-in `mockups/shared/`. `mockups/round-3/signal-miller.html` is the behaviour and
-layout reference. Its CSS became the global stylesheet. Its rendering approach
-(string templates and one `innerHTML` swap per frame) did not carry over.
-`mockups/playground/` holds standalone idea pages.
+`mockups/ticket-first/` holds the clickable HTML mockups, `prototype-1.html`
+to `prototype-6.html`, with the brief in `requirements.md`; `mockups/shared/`
+holds the shared notes (`assets.md`, `capabilities.md`, `dataset.md`).
+`prototype-6.html` is the behaviour and layout reference. Its CSS became the
+global stylesheet. Its rendering approach (string templates and one
+`innerHTML` swap per frame) did not carry over.
