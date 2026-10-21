@@ -176,6 +176,7 @@ function start(
     sources?: { id: string; display_name: string; roles?: RoleClaim[] }[];
     listSources?: TfShellPorts["listSources"];
     listen?: TfShellPorts["listen"];
+    counts?: WriteQueue["counts"];
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -199,7 +200,7 @@ function start(
       }),
       layers: over.layers ?? createLayers(),
       theme: over.theme ?? createTheme(),
-      queue,
+      queue: over.counts ? { ...queue, counts: over.counts } : queue,
       ports: {
         listSources:
           over.listSources ??
@@ -507,6 +508,48 @@ test("the queued-writes count opens the queue list (R-1.5)", async () => {
     writeQueuePanel.open = false;
     flushSync();
   }
+});
+
+/** The bar's queue control (#1409): what waits, and what needs the reader. */
+function queueControl(): HTMLButtonElement | null {
+  return target.querySelector<HTMLButtonElement>(".tf-status button.tf-queued");
+}
+
+test("held and refused writes make the queue control a button that opens the queue", async () => {
+  start({ counts: { pending: 0, held: 1, refused: 2 } });
+  await settle();
+  try {
+    const control = queueControl()!;
+    expect(control.textContent?.replace(/\s+/g, " ").trim()).toBe("0 queued writes · 3 need you");
+    expect(control.querySelector(".tf-need")?.textContent).toBe("3 need you");
+    expect(control.title).toBe("Writes knobas still owes a source. Open to see what is queued.");
+    control.click();
+    flushSync();
+    expect(writeQueuePanel.open).toBe(true);
+  } finally {
+    writeQueuePanel.open = false;
+    flushSync();
+  }
+});
+
+test("the queue control counts waiting writes and decisions together", async () => {
+  start({ counts: { pending: 1, held: 1, refused: 2 } });
+  await settle();
+  expect(queueControl()?.textContent?.replace(/\s+/g, " ").trim()).toBe("1 queued write · 3 need you");
+});
+
+test("with no decision owed the queue control says nothing about one", async () => {
+  start({ counts: { pending: 2, held: 0, refused: 0 } });
+  await settle();
+  expect(queueControl()?.textContent?.trim()).toBe("2 queued writes");
+  expect(target.querySelector(".tf-status")!.textContent).not.toContain("need you");
+});
+
+test("an empty queue is plain words, not a button", async () => {
+  start({ counts: { pending: 0, held: 0, refused: 0 } });
+  await settle();
+  expect(queueControl()).toBeNull();
+  expect(target.querySelector(".tf-status .tf-queue")?.textContent?.trim()).toBe("No queued writes");
 });
 
 test("the Monitors badge counts monitors down, in the err tone", async () => {

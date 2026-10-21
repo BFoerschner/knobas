@@ -48,6 +48,7 @@
   import WriteQueue from "../shell/WriteQueue.svelte";
   import {
     createWriteQueue,
+    decisionsIn,
     openWriteQueue,
     writeQueuePanel,
     type WriteQueue as Queue,
@@ -410,7 +411,7 @@
       }}
     />
   </main>
-  <TfStatusBar {readings} pending={queue.counts.pending} onqueue={openWriteQueue} />
+  <TfStatusBar {readings} pending={queue.counts.pending} decisions={decisionsIn(queue.counts)} onqueue={openWriteQueue} />
   {@render dialogs?.()}
   <TfToasts />
 </div>
