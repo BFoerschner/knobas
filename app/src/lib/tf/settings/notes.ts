@@ -72,7 +72,7 @@ const KEYS = new Set(
  */
 export function keyCaps(accelerator: string): string[] {
   const tokens = accelerator.split("+").map((part) => part.trim());
-  const key = tokens[tokens.length - 1];
+  const key = tokens[tokens.length - 1] ?? "";
   const modifiers = tokens.slice(0, -1);
   if (!KEYS.has(key.toUpperCase())) return [];
   const caps: string[] = [];

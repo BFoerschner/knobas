@@ -183,7 +183,7 @@ test("a refused save keeps the dialog open with the refusal under the field (#14
 });
 
 test("a stored string that does not parse draws Not registered, not caps (#1467)", async () => {
-  await render(stub({ shown: true, accelerator: "KCtrl+Alt+Shift+K", refusal: "unsupported key: KCTRL" }).ports);
+  await render(stub({ shown: true, accelerator: "KCtrl+Alt+Shift+K", refusal: null }).ports);
   expect(target.querySelectorAll("kbd").length).toBe(0);
   expect(text()).toContain("Not registered");
 });
