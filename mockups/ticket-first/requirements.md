@@ -103,7 +103,7 @@ Every list view has the same filter bar. That way nobody has to open the global 
 - **R-3.8** **Signals** are short tone-coloured facts: *build failed*, *PR #142 open*, *blocked by OPS-77*, *review asked of you*, *dashboard 8.4 s*. LOW: a reader over links plus declared state. The spec catalogue lists already need most of it (`My tickets with a failing build`, `Blocked tickets`).
 - **R-3.9** The preview shows key, title, status, assignee, priority, epic, updated, and the description. Then *Around this ticket*, one line per section: "Builds: 7 configurations, 1 failing or down". Then one primary button whose label follows the ticket's state: *Start work* (To Do, mine), *Resume work* (in progress, mine), *Open job* (anything else). `Enter` presses it.
 - **R-3.10** Keyboard: `j`/`k` or arrows move the selection through the visible cards in reading order. `Enter` opens the job. A double click opens it too.
-- **R-3.11** Ad-hoc work without a ticket (an ad-hoc context like *Staging DB configuration*) is listed under *Not a ticket* at the bottom of the views. BUILT (ad-hoc contexts).
+- ~~**R-3.11** Ad-hoc work without a ticket (an ad-hoc context like *Staging DB configuration*) is listed under *Not a ticket* at the bottom of the views.~~ retired 2026-10-21; ad-hoc time is the ⌘T label timer.
 
 ### 3a. Making and changing views (2026-10-15)
 

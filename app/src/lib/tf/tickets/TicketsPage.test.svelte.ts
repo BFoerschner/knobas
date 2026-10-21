@@ -1,7 +1,7 @@
 /**
  * Tickets in the ticket-first shell (#810): the ticket board and the list
  * over `mini_board`, the filter bar sending its query to the server, the
- * yellow selected card, the preview and *Not a ticket*.
+ * yellow selected card and the preview.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -114,6 +114,8 @@ const CORPUS: { status: string; card: MiniBoardCard }[] = [
 
 interface Harness {
   ports: TicketsPorts;
+  /** How often the retired contexts read was made: none (#1502). */
+  contextReads: number;
   reads: { perColumn: number | null; query: string | null; lanes?: LanesAsked }[];
   /** The ticket views the views read answers with (#812); the writes change it. */
   views: TicketViewRow[];
@@ -195,6 +197,7 @@ function harness(
   const reads: Harness["reads"] = [];
   const h: Harness = {
     reads,
+    contextReads: 0,
     views,
     saved: [],
     deleted: [],
@@ -266,7 +269,13 @@ function harness(
         return Promise.resolve(board);
       },
       detail: (id) => Promise.resolve({ body_text: `The description of ${id}.` }),
-      contexts: () => Promise.resolve(contexts),
+      // No longer a port: a page that still asked would count here (#1502).
+      ...{
+        contexts: () => {
+          h.contextReads++;
+          return Promise.resolve(contexts);
+        },
+      },
       // The mirror's rows, as the job's section reads ask for them: scoped by
       // what a ticket reaches, or (what no read should ask any more) by a
       // stored context's membership.
@@ -491,19 +500,16 @@ test("the list's Show N more reads every ticket, and the board keeps its caps", 
   expect(columns()[2]!.cards).toBe(3);
 });
 
-test("Not a ticket lists the ad-hoc contexts", async () => {
-  await open(
-    harness([
-      { id: "ctx:1", kind: "adhoc", title: "Staging DB configuration", anchor_id: null, created_at: "", archived_at: null },
-      { id: "ctx:2", kind: "ticket", title: "PAY-1", anchor_id: "jira:PAY-1", created_at: "", archived_at: null },
-    ]),
-  );
-  const views = target.querySelector(".tf-views")!;
-  expect(views.querySelector("h2")!.textContent).toBe("Not a ticket");
-  expect([...views.querySelectorAll(".tf-vlist > a")].map((a) => a.textContent!.trim())).toEqual([
-    "All tickets 18",
-    "Staging DB configuration",
+test("an ad-hoc context draws no Not a ticket group and is never read for", async () => {
+  const h = harness([
+    { id: "ctx:1", kind: "adhoc", title: "Staging DB configuration", anchor_id: null, created_at: "", archived_at: null },
   ]);
+  await open(h);
+  const views = target.querySelector(".tf-views")!;
+  expect(views.querySelector("h2")).toBeNull();
+  expect(views.textContent).not.toContain("Not a ticket");
+  expect(views.textContent).not.toContain("Staging DB configuration");
+  expect(h.contextReads).toBe(0);
 });
 
 const around = () => [...preview().querySelectorAll(".tf-rollup > div")].map((d) => d.textContent);
