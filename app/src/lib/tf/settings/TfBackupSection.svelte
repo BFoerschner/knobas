@@ -78,10 +78,9 @@
         error = null;
         reading = false;
       },
-      fail: (cause) => {
-        error = ipcErrorMessage(cause);
-        reading = false;
-      },
+      // A failure needs no `reading = false`: the failure line replaces the
+      // dialog, and *Try again* lands a read that clears it.
+      fail: (cause) => (error = ipcErrorMessage(cause)),
     });
   }
 
