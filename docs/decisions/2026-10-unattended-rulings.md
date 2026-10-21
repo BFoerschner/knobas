@@ -9760,3 +9760,32 @@ unchanged.
   `queued-toast.ts`, so the action (*Show queue*) and the failing sign-in sentence are the same
   code; the sign-in sentence follows the count and only when N > 0. N counts the flow's steps
   whose outcome is `queued` after the run. *Reversing:* low.
+## #1417: `>` lists every section, then Settings and its sections (Opus implementer, 2026-10-21)
+
+- **Row set** (delegated). *Ruling:* `NAV` minus Job, then *Settings* and one row per
+  `SETTINGS_SECTIONS` entry: 22 rows. *Reasoning:* the triage's recommendation; Settings' own
+  sections are where a reader most often wants to land by name (Sources, Time, Keyboard), and the
+  cog is the only other way in. *Reversing:* drop the `SETTINGS_SECTIONS` half of
+  `navigationActions()`.
+- **Shell-only rows** (*Reload demo data*, the write queue, the timer; delegated). *Ruling:* left
+  out; the `actions` prop stays unused by the shell. *Reasoning:* the triage's recommendation; they
+  are an enhancement, and the timer is ⌘T's since the 2026-10-21 ruling on #1416. *Reversing:* the
+  shell passes them through `actions`.
+- **A settings section's label.** *Fork:* the section's own name (*Time*) or *Settings › Time*.
+  *Ruling:* *Settings › <section>*. *Reasoning:* Settings has a *Time* of its own, so the bare name
+  draws two *Time* rows; and `filterActions` matches label and detail by substring, so the prefix is
+  what makes `>set` reach the sections at all. *Reversing:* the label template in
+  `navigationActions()`.
+- **Addresses.** The route module had no builder for a section's address (the top bar and the
+  settings navigation spelled `#/${section}` inline). `sectionHash` (`tf/route.ts`) and
+  `settingsHash` (`tf/settings/settings.ts`) are new, and both of those callers use them.
+  *Reversing:* inline them again.
+- **`>In` and `>set` with matching unchanged.** The ticket asks for `>In` to draw Inbox alone and
+  `>set` to draw Settings and its sections, with `filterActions`' rules unchanged. Under that rule
+  `in` is a substring of *Link sets*, *Proposed links*, *Monitoring*, *Settings* and more, and `set`
+  of *Link sets*; neither can pass on a correct implementation. The tests pin what the rule gives:
+  `>In` lists Inbox first, `>inbox` lists Inbox alone, `>set` lists Link sets then the Settings
+  rows. The wording fix is a follow-up.
+- **The fake.** `search` under `?fake-ipc` answers a query starting `>` as the backend does (the text
+  after the marker, `prefix: "action"`, no groups), so the palette draws there; every other word
+  keeps the #430 refusal.

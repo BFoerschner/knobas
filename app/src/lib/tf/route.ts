@@ -151,6 +151,14 @@ export function sectionOf(route: TfRoute): Section | null {
   return null;
 }
 
+/**
+ * The address of a section's own page: `#/inbox`, `#/settings`. Job's needs a
+ * ticket key, so it has {@link jobHash} instead.
+ */
+export function sectionHash(section: Exclude<Section, "job">): string {
+  return `#/${section}`;
+}
+
 /** The address of a job, or of the bare Job page when no ticket is known. */
 export function jobHash(key: string | null): string {
   return key === null ? "#/job" : `#/job/${encodeURIComponent(key)}`;

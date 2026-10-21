@@ -1200,3 +1200,25 @@ test("the fixture's search answers a ticket key with every source's ticket of it
   expect(search("pay-231").groups[0]!.hits.map((hit) => hit.entity_id)).toEqual(["mock:PAY-231", "jira:PAY-231"]);
   expect(() => search("sepa")).toThrow();
 });
+
+/**
+ * #1417: `>` is not a corpus search, and the real backend answers it with the
+ * marker stripped and no groups (`empty_corpus`). The fixture does the same,
+ * so the palette draws under `?fake-ipc` instead of the #430 refusal.
+ */
+test("the fixture's search answers > as the backend does: the text after the marker, no groups", () => {
+  const handlers = demoHandlers();
+  type Answer = { interpreted: { text: string; prefix: string | null }; groups: unknown[]; total: number };
+  const search = (raw: string) => handlers["search"]!({ query: { raw, filters: {} } }) as Answer;
+  for (const [raw, text] of [
+    [">", ""],
+    [">In", "In"],
+    ["> set ", "set"],
+  ] as const) {
+    const answer = search(raw);
+    expect(answer.interpreted, raw).toMatchObject({ prefix: "action", text });
+    expect(answer.groups, raw).toEqual([]);
+    expect(answer.total, raw).toBe(0);
+  }
+  expect(() => search("sepa >")).toThrow();
+});

@@ -5,8 +5,10 @@
  * (start a timer, comment, change status) and, "with an empty query, the app's
  * navigation menu". The first is retired (#1500, the 2026-10-21 ruling on
  * #1416): the timer is ⌘T's, and commenting and status are the job page's. The
- * second is a list of addresses: two since #1085.
+ * second is a list of addresses: every place the shell has one for (#1417).
  */
+import { NAV, SECTION_NAME, type Section, sectionHash } from "../tf/route";
+import { SETTINGS_SECTIONS, type SettingsSection, settingsHash } from "../tf/settings/settings";
 
 /** One row of the `>` palette. */
 export interface LauncherAction {
@@ -19,41 +21,68 @@ export interface LauncherAction {
   hash: string;
 }
 
+/** What each section holds, in one line: the row's second line. */
+const SECTION_DETAIL: Record<Exclude<Section, "job">, string> = {
+  tickets: "Every ticket from every configured source",
+  inbox: "What asks for you: mentions, reviews, failed builds",
+  code: "Repositories, branches and pull requests",
+  builds: "Pipelines and their runs",
+  docs: "The wiki's spaces and pages",
+  deps: "Hosts, services and what each one exposes",
+  monitors: "Uptime checks and their current state",
+  sets: "Groups of repos, pipelines and pages shown on tickets by rule",
+  review: "Links knobas found between items, for you to accept or reject",
+  time: "Your day, your worklogs and your standup",
+  settings: "Sources, checkouts, time, notifications and the rest",
+};
+
+/** What each section of Settings holds. *Sources* keeps the line it had since #1085. */
+const SETTINGS_DETAIL: Record<SettingsSection, string> = {
+  sources: "Add, edit and sync the systems knobas reads",
+  checkouts: "Where your clones live and which editor opens them",
+  time: "How knobas helps you account for your day",
+  notifications: "What knobas tells you about, and how",
+  standup: "Where the standup protocol is published",
+  monitoring: "How Uptime Kuma data is read",
+  notes: "Notes and how you capture them",
+  backup: "Export and restore what knobas keeps",
+  appearance: "Theme and density",
+  keyboard: "The shortcuts",
+  logs: "The sync log and the local database",
+};
+
 /**
- * The addresses the ticket-first shell has for these (`tf/route.ts`).
+ * Spec §4's navigation menu (#1417): the top bar's sections in `NAV` order,
+ * then Settings and its sections in the order its own navigation draws them.
+ * Every address comes from the module that owns it, so a section the shell
+ * gains is a row here without a second list to keep.
  *
- * **Two of the plan's four were deliberately absent from the start, and both
- * for the same reason — they are not addresses.** (A third, *First-run
- * setup*, went with the rooms UI in #1085.)
+ * *Job* is left out: its address needs a ticket key, and the palette has
+ * none. *Diagnostics* has no address at all (interfaces §2.3 puts the sync
+ * log under Settings › Logs and database, which is a row). *Reload demo data*
+ * is a **write** (`demo_load`), refused outside the demo profile (ruling
+ * P13), and the launcher does not know which profile it is in: it belongs in
+ * the `actions` prop, which exists so the shell can append what only the
+ * shell knows. The 2026-10-21 ruling on #1417 left such rows out.
  *
- * *Diagnostics* has no route: interfaces §2.3 puts the sync log inside the
- * sources view, so `#/diagnostics` parses as `unknown` and would render "this
- * arrives in a later milestone". An action that navigates to an apology is
- * worse than no action.
- *
- * *Reload demo data* is a **write** (`demo_load`), refused outside the demo
- * profile (ruling P13), and the launcher does not know which profile it is in
- * — `AppStatus.demo` is stream D's. It belongs in the `actions` prop, which
- * exists so the shell can append what only the shell knows.
+ * A settings section is labelled *Settings › <section>*: Settings has a
+ * *Time* of its own, and the prefix is what `>set` finds.
  */
 export function navigationActions(): LauncherAction[] {
-  // Ticket-first addresses since #1085. *All work* was the room over every
-  // source and is Tickets now; *First-run setup* went with the rooms UI (the
-  // wizard has no address in the new shell, and adding a source is Settings ›
-  // Sources, the row above it).
+  const sections = NAV.filter((section): section is Exclude<Section, "job"> => section !== "job");
   return [
-    {
-      id: "tickets",
-      label: "Tickets",
-      detail: "Every ticket from every configured source",
-      hash: "#/tickets",
-    },
-    {
-      id: "sources",
-      label: "Sources",
-      detail: "Add, edit and sync the systems knobas reads",
-      hash: "#/settings/sources",
-    },
+    ...[...sections, "settings" as const].map((section) => ({
+      id: section,
+      label: SECTION_NAME[section],
+      detail: SECTION_DETAIL[section],
+      hash: sectionHash(section),
+    })),
+    ...SETTINGS_SECTIONS.map(([section, name]) => ({
+      id: `settings-${section}`,
+      label: `${SECTION_NAME.settings} › ${name}`,
+      detail: SETTINGS_DETAIL[section],
+      hash: settingsHash(section),
+    })),
   ];
 }
 

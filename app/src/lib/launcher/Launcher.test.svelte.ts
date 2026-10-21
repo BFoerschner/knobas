@@ -2535,6 +2535,82 @@ test("the palette's rows are followed as well", async () => {
   ).toBe(rows[1]!.id);
 });
 
+// ── `>` is the app's navigation menu (#1417) ───────────────────────────────
+
+/** The palette, answered as the backend answers `>` followed by `text`. */
+function openPaletteOn(text: string, props: Record<string, unknown> = {}) {
+  open({
+    ...props,
+    ports: {
+      launcherHome: async () => HOME,
+      search: async () =>
+        response({ interpreted: { ...response().interpreted, prefix: "action", text }, groups: [] }),
+    },
+  });
+}
+
+function paletteLabels(): string[] {
+  return resultOptions().map((row) => row.querySelector(".nm")?.textContent ?? "");
+}
+
+test("> with nothing after it lists every section, then Settings and its sections", async () => {
+  openPaletteOn("");
+  await settle();
+  await search(">");
+  const labels = paletteLabels();
+  expect(labels).toHaveLength(22);
+  expect(labels.slice(0, 11)).toEqual([
+    "Tickets",
+    "Inbox",
+    "Code",
+    "Builds",
+    "Docs",
+    "Dependencies",
+    "Monitors",
+    "Link sets",
+    "Proposed links",
+    "Time",
+    "Settings",
+  ]);
+  expect(labels.at(-1)).toBe("Settings › Logs and database");
+  expect(labels).not.toContain("Job");
+});
+
+test(">In puts Inbox first, and >inbox draws Inbox alone", async () => {
+  openPaletteOn("In");
+  await settle();
+  await search(">In");
+  expect(paletteLabels()[0]).toBe("Inbox");
+  if (app) unmount(app);
+  openPaletteOn("inbox");
+  await settle();
+  await search(">inbox");
+  expect(paletteLabels()).toEqual(["Inbox"]);
+});
+
+test("pressing a palette row navigates to its address and closes the launcher", async () => {
+  const onnavigate = vi.fn();
+  const onclose = vi.fn();
+  openPaletteOn("", { onnavigate, onclose });
+  await settle();
+  await search(">");
+  const row = resultOptions().find((option) => option.querySelector(".nm")?.textContent === "Settings › Time");
+  (row as HTMLElement).click();
+  await settle();
+  expect(onnavigate).toHaveBeenCalledWith("#/settings/time");
+  expect(onclose).toHaveBeenCalledTimes(1);
+
+  if (app) unmount(app);
+  onnavigate.mockClear();
+  openPaletteOn("", { onnavigate, onclose });
+  await settle();
+  await search(">");
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(onnavigate).toHaveBeenCalledWith("#/inbox");
+});
+
 // ── Rename takes the focus it needs (#1412) ────────────────────────────────
 
 /** The name field, focused, with its whole text selected. */
