@@ -12,7 +12,7 @@
 //! a login, or lose the race a login sent too early can lose (#1472) -- and
 //! for the count of logins, which the real server does not report.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use wiremock::matchers::{method, path};
@@ -33,10 +33,12 @@ struct Engine {
     /// registered yet (#1472). Kuma 2.5.3's connection handler awaits two
     /// settings reads (`sendInfo`) before it registers `login` or anything
     /// else, and socket.io drops an event nothing listens for, without an
-    /// ack. Here the handlers are registered when the client next reads, the
-    /// worst case of the real race: a handler slower than the client's next
-    /// POST.
-    registering: HashSet<String>,
+    /// ack. The value counts the client's reads until the handlers are
+    /// registered: the first read carries only the namespace's `40{…}`,
+    /// which socket.io sends before the handler runs, and the second the
+    /// handler's `info` and `loginRequired`. That is the worst case of the
+    /// real race, a handler slower than the client's next request.
+    registering: HashMap<String, usize>,
     logins: usize,
     /// Logins that arrived before Kuma listened for them, and were dropped.
     dropped: usize,
@@ -84,7 +86,14 @@ impl Respond for Kuma {
             return gone();
         }
         if request.method.as_str() == "GET" {
-            let registered = engine.registering.remove(&sid);
+            let registered = match engine.registering.get_mut(&sid) {
+                Some(reads) if *reads > 1 => {
+                    *reads -= 1;
+                    false
+                }
+                Some(_) => engine.registering.remove(&sid).is_some(),
+                None => false,
+            };
             let (_, queued) = engine.sessions.get_mut(&sid).expect("checked above");
             if registered {
                 // What the connection handler pushes once its awaits are
@@ -130,7 +139,7 @@ impl Engine {
     /// What Kuma pushes back for one posted packet, if anything.
     fn answer(&mut self, sid: &str, packet: &str) -> Option<String> {
         if packet == "40" {
-            self.registering.insert(sid.to_owned());
+            self.registering.insert(sid.to_owned(), 2);
             return Some(r#"40{"sid":"socket"}"#.to_owned());
         }
         let rest = packet.strip_prefix("42")?;
@@ -138,7 +147,7 @@ impl Engine {
         let (ack, document) = rest.split_at(digits);
         let event: serde_json::Value = serde_json::from_str(document).ok()?;
         let name = event.get(0)?.as_str()?.to_owned();
-        if self.registering.contains(sid) {
+        if self.registering.contains_key(sid) {
             // Nothing listens yet: socket.io drops the event, and no ack
             // ever comes.
             if name == "login" {
