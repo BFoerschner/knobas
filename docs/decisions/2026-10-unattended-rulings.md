@@ -8773,6 +8773,7 @@ Ruled 2026-10-21 (delegated by Björn at triage).
 - **`eval "$(./seed --env)"` swallows the exit status**, so the `responsiveness-probe` recipe and
   `live_session` now capture the output first (`seed_env=$(...) || exit 1`) and eval that. *Reversing:* low.
 - **A Gitea that does not answer is refused too** (HTTP 000), as the ticket says "anything but 200".
+
 ## #1400: the first-run wizard in tf.css, with TfAddSource (Opus implementer, 2026-10-21)
 
 - **One PR for #1399, #1400 and #1401** (delegated). *Ruling:* one PR, as all three briefs

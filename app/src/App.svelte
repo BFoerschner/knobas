@@ -18,7 +18,7 @@
   import { push } from "./lib/shell/toasts.svelte";
   import { followWrite } from "./lib/shell/follow-write";
   import AdHocBlockDialog from "./lib/time/AdHocBlock.svelte";
-  import FirstRun from "./lib/sources/FirstRun.svelte";
+  import FirstRun, { type FirstRunLanding } from "./lib/sources/FirstRun.svelte";
   import { EVENTS, ipcErrorMessage } from "./lib/ipc";
   import { adHocBlock, worklogDraft, type AdHocBlock, type Block, type Worklog } from "./lib/ipc/time";
   import { recordCaptureContext } from "./lib/ipc/entity";
@@ -265,7 +265,7 @@
    * up later (#1399) lands on Settings › Sources instead, where adding a
    * source lives, with nothing over it.
    */
-  function onFirstRunDone(landing: "tickets" | "sources") {
+  function onFirstRunDone(landing: FirstRunLanding) {
     completedFirstRun = true;
     // The wizard added a source, and neither `add_source` nor `demo_load`
     // emits `source:health`.

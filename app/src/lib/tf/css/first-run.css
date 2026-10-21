@@ -14,7 +14,7 @@
 .tf-fr-mods { display: grid; gap: 8px; }
 .tf-fr-mod {
   display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 12px;
-  border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); cursor: pointer;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); cursor: pointer;
 }
 .tf-fr-mod:hover { border-color: var(--ink-2); }
 .tf-fr-mod[disabled] { opacity: .55; cursor: not-allowed; }

@@ -805,7 +805,8 @@ test("the wizard draws in the ticket-first look: no rooms class, no uppercase la
     for (let at = 0; at < 2; at += 1) {
       expect(target.querySelector(".room-bar, .steps, .modules, .mod, .kind, .panel, .view")).toBeNull();
       const labels = [...target.querySelectorAll<HTMLElement>(".tf-fr-steps li, .tf-chip")];
-      expect(labels.length).toBeGreaterThanOrEqual(STEP_COUNT + 1);
+      // The four steps and the chip.
+      expect(labels.length).toBe(5);
       for (const label of labels) {
         expect(getComputedStyle(label).textTransform, label.textContent ?? "").not.toBe("uppercase");
         expect(label.textContent?.trim()).toMatch(/^[A-Z][a-z ]+$/);
@@ -817,8 +818,6 @@ test("the wizard draws in the ticket-first look: no rooms class, no uppercase la
     style.remove();
   }
 });
-
-const STEP_COUNT = 4;
 
 /**
  * **Copy** (#1401). Rooms were retired with #881 (CONTEXT.md: *"Do not use the

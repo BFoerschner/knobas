@@ -93,6 +93,11 @@
   pushes nothing, the case a customer read as stuck (#1378). An adapter that
   reports no total, or no walk at all, keeps the indeterminate bar.
 -->
+<script lang="ts" module>
+  /** Where the shell lands once the wizard hands it back. */
+  export type FirstRunLanding = "tickets" | "sources";
+</script>
+
 <script lang="ts">
   import { Channel } from "@tauri-apps/api/core";
   import { walkAfter, walkMax, type Walk } from "./walk";
@@ -139,7 +144,7 @@
      * `tickets` is §14a's landing; `sources` is Settings › Sources, for a
      * reader who set up later (#1399).
      */
-    onfinish: (landing: "tickets" | "sources") => void;
+    onfinish: (landing: FirstRunLanding) => void;
   } = $props();
 
   const STEPS = ["Database", "Source", "First sync", "Done"] as const;
@@ -389,7 +394,7 @@
    * would show the wizard again on the next launch over a knobas that is
    * already set up.
    */
-  async function finish(landing: "tickets" | "sources") {
+  async function finish(landing: FirstRunLanding) {
     if (finishing) return;
     finishing = true;
     try {
