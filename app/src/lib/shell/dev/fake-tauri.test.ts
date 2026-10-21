@@ -1108,13 +1108,14 @@ test("the fixture's mini_board reads a role's fillers: the demo board whole, a m
   const drawnBy = (read: Board) => [...new Set(read.columns.flatMap((column) => column.cards.map((card) => card.source_id)))].sort();
   // Every demo source with tickets fills the ticket system: the board is the one every source draws.
   expect(board("ticket-system")).toEqual(board(null));
-  expect(drawnBy(board("ticket-system"))).toEqual(["gitea", "mock"]);
+  // Jira holds three of the mock's keys too (#1476).
+  expect(drawnBy(board("ticket-system"))).toEqual(["gitea", "jira", "mock"]);
 
   const gitea = FIXTURE_SOURCES.find((source) => source.id === "gitea") as { role_misses?: { role: string }[] };
   gitea.role_misses = [{ role: "ticket-system" }];
   try {
     const narrowed = board("ticket-system");
-    expect(drawnBy(narrowed)).toEqual(["mock"]);
+    expect(drawnBy(narrowed)).toEqual(["jira", "mock"]);
     const counted = narrowed.columns.reduce((all, column) => all + column.total, 0);
     expect(counted).toBe(narrowed.columns.flatMap((column) => column.cards).length);
   } finally {
@@ -1183,4 +1184,18 @@ test("the fixture's Jira credential expires inside the amber window from today, 
   const days = (new Date(jira.health.secret_expires_at!).getTime() - Date.now()) / 86_400_000;
   expect(days).toBeGreaterThan(1);
   expect(days).toBeLessThanOrEqual(14);
+});
+
+test("the fixture's Jira source holds PAY-231 as the mock does, each a ticket under its own source's name (#1476)", () => {
+  const handlers = demoHandlers();
+  type Detail = { row: { entity_id: string; kind: string; source_id: string } };
+  const both = ["mock:PAY-231", "jira:PAY-231"].map((entityId) => (handlers["get_entity"]!({ entityId }) as Detail).row);
+  expect(both.map((row) => [row.entity_id, row.kind, row.source_id])).toEqual([
+    ["mock:PAY-231", "ticket", "mock"],
+    ["jira:PAY-231", "ticket", "jira"],
+  ]);
+  const names = (handlers["list_sources"]!({}) as { id: string; display_name: string }[])
+    .filter((source) => source.id === "mock" || source.id === "jira")
+    .map((source) => source.display_name);
+  expect(new Set(names).size).toBe(2);
 });
