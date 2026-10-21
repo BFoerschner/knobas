@@ -63,6 +63,7 @@
   import { entityAddress, legacyAddress } from "./address";
   import { isEntityId, keyOf, resolveTicket } from "./job/job";
   import { bridgePorts, type JobPorts } from "./job/ports";
+  import { breadcrumbJob } from "./job/current.svelte";
   import TfPage from "./TfPage.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
   import TfToasts from "./TfToasts.svelte";
@@ -226,6 +227,22 @@
     };
   });
 
+  /**
+   * The job the breadcrumb names (#1500), for the launcher's *Link to <key>*:
+   * the job page's, or the last job on a view opened from it. Tickets, Inbox
+   * and Settings are no job's, though the last two draw it in their crumbs.
+   */
+  const crumbKey = $derived.by(() => {
+    if (route.view === "job") return route.key === null ? null : lastJob;
+    if (route.view === "item") return lastJob;
+    if (route.view === "full" && route.section !== "inbox" && route.section !== "settings") return lastJob;
+    return null;
+  });
+  $effect(() => {
+    const id = navJobId;
+    breadcrumbJob.set(crumbKey !== null && id !== null && id.key === crumbKey ? id : null);
+    return () => breadcrumbJob.set(null);
+  });
 
   // ---- the status bar's reads, once the database can answer ----
   let sources = $state<Pick<SourceSummary, "id" | "display_name">[] | null>(null);

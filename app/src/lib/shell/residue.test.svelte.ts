@@ -2117,8 +2117,6 @@ const CASES: Case[] = [
           onnavigate: () => {},
           onclose: () => {},
           ontimer: undefined,
-          context: undefined,
-          oncontext: undefined,
           ports: LAUNCHER_PORTS,
         },
       }),

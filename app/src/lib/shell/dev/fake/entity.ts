@@ -6,6 +6,7 @@ import type { LinkEntry, LinkRow } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 import { FAKE_ACTIVITY } from "./activity";
 import { CORPUS, mirrorRow } from "./corpus";
+import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
 import { runView } from "./builds";
 import { pullView } from "./views/pulls";
@@ -42,8 +43,10 @@ function resolveUrl(args: Record<string, unknown>) {
  * confirmed, over the entities this corpus holds (PR #142 implements PAY-231;
  * the retry design page documents it), so the job card's connections have rows. A link
  * made by `create_link` is `manual` and one `unlink` removes goes from both
- * ends at once, as the real graph is undirected. Reload and it is the seed
- * again. `delete_note` is `notes.ts`' (#1504).
+ * ends at once, as the real graph is undirected. An estate asset is a link end
+ * too, as it is a row in `knobas.entity` (#1500: the launcher's *Link to <key>*
+ * on a `list:` result). Reload and it is the seed again. `delete_note` is
+ * `notes.ts`' (#1504).
  */
 let nextLink = 1;
 function linkRow(from_id: string, to_id: string, relation: string, origin: LinkRow["origin"], note: string | null): LinkRow {
@@ -69,10 +72,18 @@ const LINKS: LinkRow[] = [
   linkRow("mock:OPS-77", "mock:PAY-228", "blocks", "source", "Staging verification needs the rotated credentials. Priya expects Tuesday."),
 ];
 
-/** One link's far end from `id`, resolved against the corpus. */
+/** A link end the fixture knows: a corpus entity, or an estate asset. */
+function linkEnd(id: string): { kind: string; title: string; deleted_at: string | null } | null {
+  const entity = CORPUS.find((candidate) => candidate.entity_id === id);
+  if (entity) return entity;
+  const asset = FIXTURE_ESTATE.find((candidate) => candidate.id === id);
+  return asset ? { kind: "asset", title: asset.name, deleted_at: null } : null;
+}
+
+/** One link's far end from `id`, resolved against the corpus and the estate. */
 function entryFor(id: string, link: LinkRow): LinkEntry | null {
   const otherId = link.from_id === id ? link.to_id : link.from_id;
-  const other = CORPUS.find((candidate) => candidate.entity_id === otherId);
+  const other = linkEnd(otherId);
   if (!other) return null;
   return { link, other: { entity_id: otherId, kind: other.kind, title: other.title, deleted_at: other.deleted_at } };
 }
@@ -392,7 +403,7 @@ export function handlers(): Record<string, Handler> {
       const from = String(args["fromId"]);
       const to = String(args["toId"]);
       for (const end of [from, to]) {
-        if (!CORPUS.some((candidate) => candidate.entity_id === end)) {
+        if (linkEnd(end) === null) {
           throw { code: "not_found", message: `${end} is not in the mirror`, source_id: null };
         }
       }

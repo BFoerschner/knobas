@@ -151,12 +151,9 @@ function open(props: Record<string, unknown> = {}) {
       open: true,
       onnavigate: () => {},
       onclose: () => {},
-      // Spelled out rather than omitted: `ontimer` and `oncontext` are
-      // required so a shell cannot drop either silently, and a fixture with no
-      // timer and no room to offer says so.
+      // Spelled out rather than omitted: `ontimer` is required so a shell
+      // cannot drop it silently, and a fixture with no timer says so.
       ontimer: undefined,
-      context: undefined,
-      oncontext: undefined,
       now: NOW,
       ports: {
         search: async () => response(),
@@ -732,9 +729,9 @@ test("Tab offers Link to the open entity, and Enter hands the result to the shel
 
   press("Enter");
   // The first result of the fixture's first group.
-  expect(onlink).toHaveBeenCalledWith("jira:PAY-231", "Retry failed SEPA payouts");
-  // The chain closes behind the action rather than staying over a done thing.
-  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
+  expect(onlink).toHaveBeenCalledWith("jira:PAY-231", "Retry failed SEPA payouts", "ticket");
+  // The launcher steps out of the way of the job's link dialog (#1500).
+  expect(target.querySelector(".dlg"), "the launcher stayed open over the job's dialog").toBeNull();
 });
 
 /** The chain acts on the row that was selected when it opened, not on a later one. */
@@ -758,7 +755,7 @@ test("moving the selection abandons an open chain", async () => {
   press("Tab");
   press("Enter");
 
-  expect(onlink).toHaveBeenCalledWith("gitea:acme/svc#142", "Backoff");
+  expect(onlink).toHaveBeenCalledWith("gitea:acme/svc#142", "Backoff", "pr");
 });
 
 /** An entity cannot be linked to itself, so its own row offers nothing. */
@@ -899,8 +896,6 @@ test("⌘K opens the overlay from anywhere, and opening twice is not closing", a
       onnavigate: () => {},
       onclose: () => {},
       ontimer: undefined,
-      context: undefined,
-      oncontext: undefined,
       ports: { search: async () => response(), launcherHome: async () => HOME },
     },
   });
@@ -1469,24 +1464,17 @@ test("Enter on an asset opens the Tree at it, and on a route at its exposing ass
   expect(onnavigate).toHaveBeenLastCalledWith("#/route/route%3A2ab7");
 });
 
-/** The room the reader is standing in, as the shell names it to the launcher. */
-const ROOM = { ctxId: "ctx:5b1c0f1e", label: "Payments" };
-
 /**
- * **§4's third action row** (#436). *Add to context* exists only while the
- * reader is standing in a stored context — a derived room (*All work*, a
- * source, a project) has no `ctx:` entity to link to — and the launcher hands
- * the chosen result back rather than writing, exactly as *Link to…* does.
+ * **The chain's two rows, in order** (#1500, the 2026-10-21 ruling on #1416):
+ * *Link to <key>* then *Start timer on <title>*, and nothing else, on an
+ * asset as on a ticket.
  */
-test("Tab offers Add to context on an asset, and hands the result to the shell", async () => {
-  const oncontext = vi.fn();
+test("Tab offers Link to the job, then Start timer, and nothing else", async () => {
   const onlink = vi.fn();
   const ontimer = vi.fn();
   open({
     openEntity: OPEN,
     onlink,
-    context: ROOM,
-    oncontext,
     ontimer,
     ports: { search: async () => response(ESTATE), launcherHome: async () => HOME },
   });
@@ -1495,75 +1483,15 @@ test("Tab offers Add to context on an asset, and hands the result to the shell",
 
   press("Tab");
   const chain = target.querySelector('[aria-label="Actions on the selected result"]');
-  // All three of the ticket's actions, in spec §4's order.
   expect([...chain!.querySelectorAll(".chain-a")].map((el) => el.textContent?.trim())).toEqual([
     "Link to PAY-999",
-    "Add to Payments",
     "Start timer on postgres",
   ]);
 
   press("ArrowDown");
   press("Enter");
-  expect(oncontext).toHaveBeenCalledWith("asset:9f1c", "postgres");
+  expect(ontimer).toHaveBeenCalledWith("asset:9f1c", "postgres");
   expect(onlink).not.toHaveBeenCalled();
-  expect(ontimer).not.toHaveBeenCalled();
-  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
-});
-
-test("with no stored context to stand in, there is no Add to context row", async () => {
-  const oncontext = vi.fn();
-  open({
-    oncontext,
-    ontimer: vi.fn(),
-    ports: { search: async () => response(ESTATE), launcherHome: async () => HOME },
-  });
-  await settle();
-  await search("kuma");
-
-  press("Tab");
-  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
-  // The chain is not empty — the timer row is there — so this is not green
-  // because `Tab` opened nothing.
-  expect(chain?.textContent).toContain("Start timer on postgres");
-  expect(chain?.textContent).not.toContain("Add to");
-});
-
-/**
- * A context cannot be added to itself: the backend refuses a self-link, so
- * offering the row would be offering an error. The same shape as the open
- * entity's own row having no *Link to…*.
- */
-test("the standing room's own row is not offered Add to context", async () => {
-  const oncontext = vi.fn();
-  const withRoom = response({
-    groups: [
-      {
-        kind: "ctx",
-        label: "Context",
-        plural: "Contexts",
-        monogram: "CX",
-        total: 1,
-        hits: [hit({ entity_id: ROOM.ctxId, kind: "ctx", source_id: "ctx", title: "Payments" })],
-      },
-      ...ESTATE.groups,
-    ],
-    total: 3,
-  });
-  open({
-    context: ROOM,
-    oncontext,
-    openEntity: OPEN,
-    onlink: vi.fn(),
-    ontimer: vi.fn(),
-    ports: { search: async () => withRoom, launcherHome: async () => HOME },
-  });
-  await settle();
-  await search("payments");
-
-  press("Tab");
-  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
-  expect(chain?.textContent).toContain("Link to PAY-999");
-  expect(chain?.textContent).not.toContain("Add to Payments");
 });
 
 // -- a pasted link (#496, spec #491 stories 9 and 10) ------------------------

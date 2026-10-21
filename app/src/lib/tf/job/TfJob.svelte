@@ -78,7 +78,7 @@
   import TfSaveSet from "./TfSaveSet.svelte";
   import { createJobReader } from "./job-reader.svelte";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
-  import { currentJob } from "./current.svelte";
+  import { currentJob, linkRequest, type LinkTarget } from "./current.svelte";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfDeps from "../deps/TfDeps.svelte";
   import { clones } from "../openin/clones.svelte";
@@ -126,6 +126,8 @@
 
   let drawer = $state(false);
   let linking = $state(false);
+  /** The other end the launcher's *Link to <key>* chose (#1500), preset in the dialog. */
+  let preset = $state<LinkTarget | null>(null);
   /** *Apply a link set…* and *Save as a link set…* open (#869). */
   let applyingSet = $state(false);
   let savingSet = $state(false);
@@ -158,6 +160,17 @@
 
   // The job on screen is what the timer chip and ⌘T start on (R-1.4).
   $effect(() => currentJob.set(detail?.row.entity_id ?? null));
+
+  // *Link to <key>* from the launcher (#1500): this job's own dialog, over its
+  // Connections drawer, with the result preset, once the job has drawn.
+  $effect(() => {
+    if (!detail) return;
+    const asked = linkRequest.take(keyOf(detail.row.entity_id));
+    if (asked === null) return;
+    preset = asked;
+    drawer = true;
+    linking = true;
+  });
 
   $effect(() => {
     const wanted = segment;
@@ -493,7 +506,10 @@
       {layers}
       onclose={() => (drawer = false)}
       onunlink={(entry) => void unlinkEntry(entry)}
-      onlinkto={() => (linking = true)}
+      onlinkto={() => {
+        preset = null;
+        linking = true;
+      }}
       onhide={(row) => void hideHere(row)}
       onshow={(memberId) => void showAgain(memberId)}
       onapplyset={() => (applyingSet = true)}
@@ -524,6 +540,7 @@
     <TfLinkTo
       jobKey={key}
       entityId={detail.row.entity_id}
+      {preset}
       {ports}
       {layers}
       onclose={() => (linking = false)}
