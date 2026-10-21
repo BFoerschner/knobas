@@ -9677,17 +9677,19 @@ unchanged.
   styling kept, and a press opens the dialog, whose *Merge* stays disabled. Held by a queued write,
   Merge… loses primary styling and a press opens nothing, as the ticket says. *Reasoning:* the
   criterion asks for the attribute only, and the reasons box is the one place the source's reasons
-  are listed. *Reversing:* one guard in the button's `onclick`.
+  are listed. An `aria-disabled` control stays focusable so it can explain itself, and here the
+  explanation is the dialog. *Reversing:* one guard in the button's `onclick`.
 - **A queued close or reopen holds the state-change button whatever it reads.** *Fork:* the ticket
   says "the opposite state change"; before the sync the source still offers *Close* after a queued
   close, so a second close could be queued. *Ruling:* `close queued` or `reopen queued` holds *Merge…*
   and the *Close*/*Reopen* button, both before the sync (the same change again) and after it (the
   opposite one). *Edit* and *Update branch* stay live then. *Reasoning:* a duplicate close is the same
   refused-write case as a duplicate merge. *Reversing:* drop the state chips from `close`/`reopen` in
-  `TfPr.svelte`'s `HOLDS`.
+  `TfPr.svelte`'s `HOLDS`. A landed close keeps *Reopen* held until the session ends, because nothing
+  drops the page's chips once the source's read shows them; #1542 has that.
 - **A source's own actions (#1194) are never held.** *Fork:* the ticket names Close/Reopen, Edit and
   Update branch only. *Ruling:* a source action stays as the source draws it. *Reasoning:* the shell
-  never reads their op (ADR-0029), so it cannot know which a merge makes stale. *Reversing:* add a
-  `source:` entry to `HOLDS`.
+  never reads their op (ADR-0029), so it cannot know which a merge makes stale. *Reversing:* look up
+  a source action's key (`source:<id>`) by its prefix in `heldBy`.
 - **A queued hold names itself before the source's reason.** When both apply, the title is the chip
   (`merge queued`), since it is the newer fact. *Reversing:* swap the `??` order.

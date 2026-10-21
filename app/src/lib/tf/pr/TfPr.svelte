@@ -329,20 +329,24 @@
    * stale, and a queued close or reopen makes *Merge…* and another state
    * change stale. A source's own actions are never held.
    */
-  const STATE = ["close queued", "reopen queued"];
+  const STATE_CHANGES = ["close", "reopen"];
+  /** By a write's key, the verbs whose queued write holds it back. */
   const HOLDS: Record<string, readonly string[]> = {
-    merge: ["merge queued", ...STATE],
-    update: ["merge queued"],
-    edit: ["merge queued"],
-    close: ["merge queued", ...STATE],
-    reopen: ["merge queued", ...STATE],
+    merge: ["merge", ...STATE_CHANGES],
+    update: ["merge"],
+    edit: ["merge"],
+    close: ["merge", ...STATE_CHANGES],
+    reopen: ["merge", ...STATE_CHANGES],
   };
+
+  /** The chip a write queued as `verb` draws, which is also what holds a button back. */
+  const chipOf = (verb: string) => `${verb} queued`;
 
   /** The chip this session queued that holds the write keyed `key` back, or null while it is live. */
   function heldBy(key: string): string | null {
     if (prId === null) return null;
     const id = prId;
-    return (HOLDS[key] ?? []).find((chip) => isQueued(id, chip)) ?? null;
+    return (HOLDS[key] ?? []).map(chipOf).find((chip) => isQueued(id, chip)) ?? null;
   }
 
   /** Where the reader's checkout stands against this pull request's head. */
@@ -604,7 +608,7 @@
     {pending}
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={() => markQueued(prId, "review queued")}
+    onqueued={() => markQueued(prId, chipOf("review"))}
     onclose={() => (reviewing = false)}
   />
 {/if}
@@ -620,7 +624,7 @@
     ready={readyRows}
     {ticket}
     submitWrite={ports.submitWrite}
-    onqueued={() => markQueued(prId, "merge queued")}
+    onqueued={() => markQueued(prId, chipOf("merge"))}
     onclose={() => (merging = false)}
   />
 {/if}
@@ -634,7 +638,7 @@
     what="{write.phrase} {name}"
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={() => markQueued(prId, `${write.verb} queued`)}
+    onqueued={() => markQueued(prId, chipOf(write.verb))}
     onclose={() => (shown = null)}
   />
 {/if}

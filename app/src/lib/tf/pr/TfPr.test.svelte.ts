@@ -690,7 +690,7 @@ async function queueMerge() {
   await settle();
 }
 
-const held = (name: string) => {
+const holdOf = (name: string) => {
   const b = button(name)!;
   return [b.getAttribute("aria-disabled"), b.title];
 };
@@ -699,7 +699,7 @@ test("after a queued merge, Merge… is held: aria-disabled, titled merge queued
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, UPDATE, mergeAction(null)]) }));
   await queueMerge();
   expect(writes).toHaveLength(1);
-  expect(held("Merge…")).toEqual(["true", "merge queued"]);
+  expect(holdOf("Merge…")).toEqual(["true", "merge queued"]);
   expect(button("Merge…")!.classList.contains("tf-primary")).toBe(false);
   button("Merge…")!.click();
   flushSync();
@@ -711,7 +711,7 @@ test("after a queued merge, Update branch, Edit and Close are held with merge qu
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, UPDATE, mergeAction(null)]) }));
   await queueMerge();
   for (const name of ["Update branch", "Edit", "Close"]) {
-    expect(held(name)).toEqual(["true", "merge queued"]);
+    expect(holdOf(name)).toEqual(["true", "merge queued"]);
     button(name)!.click();
     flushSync();
     expect(document.querySelector(".tf-dialog")).toBeNull();
@@ -725,10 +725,10 @@ test("after a queued close, Merge… and Close are held with close queued; Edit 
   dialogButton("Close").click();
   await settle();
   expect(writes).toHaveLength(1);
-  expect(held("Merge…")).toEqual(["true", "close queued"]);
-  expect(held("Close")).toEqual(["true", "close queued"]);
-  expect(held("Edit")).toEqual([null, ""]);
-  expect(held("Update branch")).toEqual([null, ""]);
+  expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
+  expect(holdOf("Close")).toEqual(["true", "close queued"]);
+  expect(holdOf("Edit")).toEqual([null, ""]);
+  expect(holdOf("Update branch")).toEqual([null, ""]);
   button("Merge…")!.click();
   flushSync();
   expect(document.querySelector(".tf-dialog")).toBeNull();
@@ -739,15 +739,15 @@ test("the hold outlives leaving the page and ends with the session; a source's o
   const offered = () => ports({ pr: prView([COMMENT, EDIT, stamp, mergeAction(null)]) });
   await draw([PR], offered());
   await queueMerge();
-  expect(held("Stamp release")).toEqual([null, ""]);
+  expect(holdOf("Stamp release")).toEqual([null, ""]);
   unmount(view!);
   await draw([PR], offered());
-  expect(held("Merge…")).toEqual(["true", "merge queued"]);
-  expect(held("Edit")).toEqual(["true", "merge queued"]);
+  expect(holdOf("Merge…")).toEqual(["true", "merge queued"]);
+  expect(holdOf("Edit")).toEqual(["true", "merge queued"]);
   unmount(view!);
   forgetPrQueued();
   await draw([PR], offered());
-  expect(held("Merge…")).toEqual([null, ""]);
+  expect(holdOf("Merge…")).toEqual([null, ""]);
   expect(button("Merge…")!.classList.contains("tf-primary")).toBe(true);
-  expect(held("Edit")).toEqual([null, ""]);
+  expect(holdOf("Edit")).toEqual([null, ""]);
 });
