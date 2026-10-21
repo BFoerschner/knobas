@@ -104,6 +104,7 @@ function render(
     offers?: Record<number, AdHocBlock | null>;
     clock?: Date;
     stripWidth?: number;
+    plainPx?: number;
     refuseDelete?: boolean;
   } = {},
 ) {
@@ -130,7 +131,7 @@ function render(
       // Six hundred pixels wide and seven a character, unless a test says otherwise:
       // jsdom lays nothing out and measures no text.
       stripWidth: () => over.stripWidth ?? 600,
-      measureLabel: (text: string) => text.length * 7,
+      measureLabel: (text: string, plain: boolean) => text.length * (plain ? (over.plainPx ?? 7) : 7),
       layers,
       ports: {
         search: (query: SearchQuery) => {
@@ -405,6 +406,33 @@ test("an open stretch is a dashed open row, and the open figure is the sum of th
   expect(squash(target.querySelector(".tf-tm-legend")?.textContent)).toContain("Open: app in front, no target");
   // 11:50 to 12:10 is neither a block nor focused time, and is no row.
   expect(squash(target.textContent)).not.toContain("Nothing tracked");
+});
+
+test("an open stretch reads Assign… in the sans face on the strip, and pressing it only selects the row (#1523)", async () => {
+  Element.prototype.scrollIntoView = () => {};
+  render({ stripWidth: 2000 });
+  await settle();
+  const gap = target.querySelector(".tf-tm-strip .tf-tm-gap")!;
+  const text = gap.querySelector("text")!;
+  expect(text.textContent).toBe("Assign…");
+  expect(text.getAttribute("class")).toContain("tf-tm-plain");
+  (gap as SVGElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await settle();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(gap.getAttribute("class")).toContain("tf-on");
+});
+
+test("an open stretch's Assign… is fitted to a narrow block like any label (#1523)", async () => {
+  render({ stripWidth: 600 });
+  await settle();
+  expect(target.querySelector(".tf-tm-strip .tf-tm-gap text")?.textContent).toBe("As…");
+});
+
+test("an open stretch is measured in the sans face: Assign… fits where the mono face would not (#1523)", async () => {
+  // The stub measures 6 px a character plain and 7 mono, so 42 px of room holds Assign… only in sans.
+  render({ stripWidth: 1000, plainPx: 6 });
+  await settle();
+  expect(target.querySelector(".tf-tm-strip .tf-tm-gap text")?.textContent).toBe("Assign…");
 });
 
 /** Type into the dialog's search and wait out the launcher session's debounce. */

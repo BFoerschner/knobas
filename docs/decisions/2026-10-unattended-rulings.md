@@ -10468,3 +10468,12 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 - **Its test.** *Ruling:* `scripts/gate-scope-test.sh`, in `witness-unit`, builds a scratch repo and
   checks a pinned file and a file under a pinned directory answer `full`, an unpinned app file
   and a prose file answer `front`. *Reversing:* low.
+
+## #1523: an open stretch on the strip reads Assign… (Sonnet implementer, 2026-10-21)
+
+- **Does pressing an open block open Assign… directly?** *Ruling:* no. The block reads *Assign…*
+  and pressing it only selects the row, as every other block does; Assign… opens from the row's
+  button. *Reasoning:* prototype-6's `tmDay` draws the label inside a `tmv-b` button whose
+  `onclick` sets `S.tm.sel` and redraws, and the *Assign…* buttons live in the row below. One press
+  means "select" on the whole strip. *Reversing:* low, one handler on the open branch.
+- **Which fill for the open stretch's text?** *Ruling (merge-manager, Sonnet):* `--ink-2`, as prototype-6's `.tmv-b.gap` colours it, not `--ink`; both clear 4.5:1 on paper, sheet and sheet-2 in `tf-css.test.ts`. The face is now pinned by a test whose stub measures plain text narrower. *Reversing:* low, one CSS token.
