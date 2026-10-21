@@ -10447,7 +10447,9 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   hand-named prototypes. *Reversing:* low, `git show` brings it back.
 - **The frontend package manifest.** *Ruling:* `app/package.json` and its lock file go from 0.1.0 to
   2.0.0. *Reasoning:* "the manifests say 2.0.0" is then true of all three; nothing reads the
-  field. *Reversing:* low.
+  field. *Merge-manager review (Sonnet, 2026-10-21):* kept. The ticket body recommends it and
+  delegates the pick; `ticket-loop.md` Step 3's "`package.json` stays" governs the release PR's bumps,
+  not a ticket that asks for the field. The next release PR still leaves it alone. *Reversing:* low.
 - **Left as history.** `docs/specs/2026-08-23-knobas-design.md` (lines 10, 24, 369-370) still names
   round-3 and the playground. *Ruling:* untouched: the spec is the dated design record and these lines
   say what its mockups were. The acceptance grep therefore prints those four lines, which a correct
