@@ -1481,7 +1481,8 @@ export type InboxItem = {
  * the interface hands back when the user answers.
  *
  * Stable across syncs: the category is a fixed word and the subject is an
- * entity id (or a source id, for a credential expiry or a failed sign-in). The shell never
+ * entity id (or a source id, for a credential expiry or a failed
+ * sign-in). The shell never
  * composes one: it hands back the string it was given, to
  * `snooze_inbox_item` and `complete_inbox_item`.
  */
@@ -1498,9 +1499,9 @@ category: InboxCategory,
 source_id: string, 
 /**
  * The entity to open. `None` only for credential expiry and a failed
- * sign-in, whose subject is a source and not an entity: the inbox is a way in, not a dead end
- * (story 8), and the one item with no entity behind it says so by
- * carrying none rather than by pointing somewhere wrong.
+ * sign-in, whose subject is a source and not an entity: the inbox is a
+ * way in, not a dead end (story 8), and an item with no entity behind it
+ * says so by carrying none rather than by pointing somewhere wrong.
  *
  * An item with no entity has no *Open*, and that is honest rather than
  * incomplete.
