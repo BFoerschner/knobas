@@ -211,8 +211,7 @@
   const repositories = $derived(settings?.repositories ?? []);
   const triggers = $derived(triggersSentence(settings));
   const chain = $derived(chainSentence(settings?.chain ?? [], pipeline.entity_id));
-  const health = $derived(sources.map((source) => source.health));
-  const stale = $derived(staleLine(pipeline, health, sync));
+  const stale = $derived(staleLine(pipeline, sources, sync));
   const jobBranch = $derived(all === null ? null : jobBranchFor(all, jobBranches));
   const fallback = $derived(defaultBranch(settings));
 
@@ -392,7 +391,7 @@
 {#if stale !== null}
   <div class="tf-stale tf-bstale">
     {stale.text}
-    {#if stale.fix !== null}<a href={stale.fix}>Re-enter password</a>{/if}
+    {#if stale.fix !== null}<a href={stale.fix.href}>Re-enter {stale.fix.secret}</a>{/if}
   </div>
 {/if}
 
@@ -606,7 +605,7 @@
     runs={all ?? []}
     from={dialog.from}
     {jobBranch}
-    signInFailing={stale?.fix != null}
+    reenter={stale?.fix?.secret ?? null}
     {ports}
     onclose={() => (dialog = null)}
     {onrun}

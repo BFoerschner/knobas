@@ -2,7 +2,8 @@
   A source's page (#830, R-13a.2): prototype-6's `stgSource`.
 
   - A credential the reader has to fix is said on top, with *Re-enter
-    password*. Every *Re-enter password* in the new shell links here.
+    password* (*Re-enter token* for a token source, #1405). Every *Re-enter
+    password* in the new shell links here.
   - **Connection**: the address and the user are edited and saved through
     `update_source`; the password is re-entered into the keychain through
     `set_source_secret`, which never reads one back; an adapter that takes a
@@ -22,7 +23,11 @@
     under the header, read from the channel `watch_sync` attaches. The page
     attaches when it opens on a running source and when `sync:state` says a
     run started, and stops listening when it leaves.
-  - **Sync runs**: the source's last runs.
+  - A value the address adds (*Sync WEB too*, #879) is scrolled into view,
+    with *WEB added, not saved yet* beside *Save* until it is saved or the
+    reader edits the field (#1404).
+  - **Sync runs**: the source's last runs. A result wraps anywhere, and an
+    unreachable run's transport error sits behind *Details* (#1478).
   - **Maintenance**: *Backfill* (`backfill_source`) and *Remove…*, which asks
     whether to keep what the source synced.
 
@@ -31,7 +36,7 @@
   adapter whose schema declares it. Nothing here names an adapter.
 -->
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type {
@@ -62,6 +67,7 @@
     declaresUser,
     intervalOptions,
     intervalWords,
+    reenterWords,
     runProgressWords,
     runRow,
     secretWord,
@@ -201,12 +207,34 @@
     });
   });
 
+  /**
+   * The value the address added to the form (#1404), and the field's lines as
+   * it left them: the note beside *Save* stands while the field still reads so.
+   */
+  let added = $state<{ value: string; field: string; lines: string } | null>(null);
+  const addedNote = $derived(
+    added !== null && linesOf(configValues[added.field]) === added.lines ? `${added.value} added, not saved yet` : null,
+  );
+
+  function linesOf(value: unknown): string {
+    return JSON.stringify(value ?? null);
+  }
+
   /** Put a stored config in the form, as both what it shows and what it was read from. */
   function readForm(fields: typeof config.fields, stored: unknown) {
     configValues = formValues(fields, stored);
     configLoaded = validate(fields, configValues).config;
     // A value the address adds (#879) is the reader's edit, offered unsaved.
-    configValues = withAdded(fields, configValues, add);
+    const read = configValues;
+    configValues = withAdded(fields, read, add);
+    if (add && configValues !== read) {
+      added = { ...add, lines: linesOf(configValues[add.field]) };
+      // In view, so the reader sees it went in (#1404). jsdom draws no layout.
+      const id = `tf-src-cfg-${add.field}`;
+      void tick().then(() => document.getElementById(id)?.scrollIntoView?.({ block: "center" }));
+    } else {
+      added = null;
+    }
   }
 
   async function saveConfig() {
@@ -442,7 +470,7 @@
 {#if alert !== null}
   <div class="tf-stg-alert" role="alert">
     <span class="tf-dot tf-err"></span><span>{alert}</span>
-    <button class="tf-btn tf-sm tf-primary" onclick={openReenter}>Re-enter password</button>
+    <button class="tf-btn tf-sm tf-primary" onclick={openReenter}>{reenterWords(source.auth_kind)}</button>
   </div>
 {/if}
 {#each missLines as line (line)}
@@ -549,6 +577,7 @@
       <button class="tf-btn tf-sm tf-primary" disabled={!configDirty || !configValid || saving} onclick={() => void saveConfig()}
         >Save</button
       >
+      {#if addedNote !== null}<span class="tf-stg-pend" role="status">{addedNote}</span>{/if}
     </div>
   {/if}
 </section>
@@ -572,11 +601,16 @@
       <thead><tr><th>Started</th><th>Took</th><th>Result</th></tr></thead>
       <tbody>
         {#each runs as run (run.id)}
-          {@const row = runRow(run, now)}
+          {@const row = runRow(run, source, now)}
           <tr>
             <td>{row.started}</td>
             <td>{row.took}</td>
-            <td class={row.tone === "err" ? "tf-stg-errt" : ""}>{row.result}</td>
+            <td class="tf-stg-res {row.tone === 'err' ? 'tf-stg-errt' : ''}"
+              >{row.result}{#if row.detail !== null}<details class="tf-stg-det">
+                  <summary>Details</summary>
+                  <code>{row.detail}</code>
+                </details>{/if}</td
+            >
           </tr>
         {/each}
       </tbody>

@@ -210,3 +210,7 @@ test("on the Time view's strip, yellow fills the running timer's block and nothi
     .map(([, selector]) => selector!.trim());
   expect(yellow).toEqual([".tf-tm-b.tf-tm-run rect", ".tf-tm-legend i.tf-tm-run"]);
 });
+
+test("a sync run's result wraps anywhere, so a request URL in an error cannot widen the table (#1478)", () => {
+  expect(block(code, ".tf-stg-res")).toContain("overflow-wrap: anywhere;");
+});

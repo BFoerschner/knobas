@@ -455,7 +455,7 @@
                   {#each stale as warning (warning.sourceId)}
                     <div class="tf-stale">
                       {warning.text}
-                      <a href="#/settings/source/{encodeURIComponent(warning.sourceId)}">Re-enter password</a>
+                      <a href="#/settings/source/{encodeURIComponent(warning.sourceId)}">{warning.fix}</a>
                     </div>
                   {/each}
                 {/snippet}

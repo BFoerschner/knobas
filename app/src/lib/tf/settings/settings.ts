@@ -82,14 +82,14 @@ export interface SourceState {
   tone: Tone;
   /** The row's last column: *Synced 4 min ago*, *Sign-in failed*. */
   text: string;
-  /** The credential needs the reader: err tone and *Re-enter password*. */
+  /** The credential needs the reader: err tone and *Re-enter password* (or *token*). */
   failed: boolean;
 }
 
-/** Credential states the reader has to fix, and what the row calls them. */
-const FAILED: Partial<Record<CredentialHealth["state"], string>> = {
-  unauthorized: "Sign-in failed",
-  missing_secret: "No password stored",
+/** Credential states the reader has to fix, and what the row calls them, in the source's noun. */
+const FAILED: Partial<Record<CredentialHealth["state"], (noun: string) => string>> = {
+  unauthorized: () => "Sign-in failed",
+  missing_secret: (noun) => `No ${noun} stored`,
 };
 
 /**
@@ -103,13 +103,13 @@ export function stoppedAt(error: string | null | undefined): string | null {
 }
 
 export function sourceState(
-  source: Pick<SourceSummary, "enabled" | "last_run" | "role_misses">,
+  source: Pick<SourceSummary, "enabled" | "last_run" | "role_misses"> & Partial<Pick<SourceSummary, "auth_kind">>,
   health: CredentialHealth | null,
   status: SourceSyncStatus | null,
   now: Date = new Date(),
 ): SourceState {
   const failure = health ? FAILED[health.state] : undefined;
-  if (failure) return { tone: "err", text: failure, failed: true };
+  if (failure) return { tone: "err", text: failure(secretWord(source.auth_kind).toLowerCase()), failed: true };
   if (status?.running) return { tone: "run", text: "Syncing…", failed: false };
   if (!source.enabled) return { tone: "muted", text: "Paused", failed: false };
   const finished = status?.last_finished_at ?? source.last_run?.finished_at ?? null;
@@ -242,9 +242,17 @@ export function credentialAlert(
   return null;
 }
 
-/** What the credential is called on the Password row and in its dialog. */
-export function secretWord(auth: AuthMethod | null): "Password" | "Token" {
-  return auth === "UserPassword" || auth === null ? "Password" : "Token";
+/**
+ * What the credential is called on the Password row and in its dialog, and
+ * the one place every *Re-enter …* and *no … stored* takes its noun from (#1405).
+ */
+export function secretWord(auth: AuthMethod | null | undefined): "Password" | "Token" {
+  return auth === "UserPassword" || auth === null || auth === undefined ? "Password" : "Token";
+}
+
+/** The fix for a credential the reader has to re-enter: *Re-enter password*, *Re-enter token*. */
+export function reenterWords(auth: AuthMethod | null | undefined): string {
+  return `Re-enter ${secretWord(auth).toLowerCase()}`;
 }
 
 /** One row of *Sync runs*. */
@@ -253,6 +261,8 @@ export interface RunRow {
   started: string;
   took: string;
   result: string;
+  /** What the source said, behind *Details*, where the result is a sentence of knobas's own (#1478). */
+  detail: string | null;
   tone: "ok" | "err" | "run";
 }
 
@@ -297,21 +307,37 @@ const TRIGGER_NOTE: Partial<Record<SyncRunRow["trigger"], string>> = {
   backfill: ", backfill",
 };
 
-export function runRow(run: SyncRunRow, now: Date = new Date()): RunRow {
+/**
+ * One row of *Sync runs*, for the source it ran on. A refused run names the
+ * source's credential (#1405). An unreachable run says the source did not
+ * answer, and keeps the transport error (the HTTP client's message with the
+ * whole request URL) as its detail rather than its sentence (#1478).
+ */
+export function runRow(
+  run: SyncRunRow,
+  source: Pick<SourceSummary, "id" | "display_name"> & Partial<Pick<SourceSummary, "auth_kind">>,
+  now: Date = new Date(),
+): RunRow {
   const started = startedWords(run.started_at, now);
+  const row = { id: run.id, started, detail: null };
   if (run.finished_at === null || run.outcome === null) {
-    return { id: run.id, started, took: "—", result: "Running…", tone: "run" };
+    return { ...row, took: "—", result: "Running…", tone: "run" };
   }
   const took = tookWords(new Date(run.finished_at).getTime() - new Date(run.started_at).getTime());
   if (run.outcome === "unauthorized") {
-    return { id: run.id, started, took, result: `${run.error ?? "401 Unauthorized"}. Re-enter the password.`, tone: "err" };
+    const noun = secretWord(source.auth_kind).toLowerCase();
+    return { ...row, took, result: `${run.error ?? "401 Unauthorized"}. Re-enter the ${noun}.`, tone: "err" };
+  }
+  if (run.outcome === "unreachable") {
+    const name = source.display_name || source.id;
+    return { ...row, took, result: `${name} did not answer.`, detail: run.error, tone: "err" };
   }
   if (run.outcome !== "ok") {
-    return { id: run.id, started, took, result: run.error ?? (run.outcome === "unreachable" ? "Unreachable" : "Failed"), tone: "err" };
+    return { ...row, took, result: run.error ?? "Failed", tone: "err" };
   }
   const parts = [`${run.upserted.toLocaleString("en-GB")} updated`];
   if (run.deleted + run.swept > 0) parts.push(`${(run.deleted + run.swept).toLocaleString("en-GB")} removed`);
-  return { id: run.id, started, took, result: parts.join(", ") + (TRIGGER_NOTE[run.trigger] ?? ""), tone: "ok" };
+  return { ...row, took, result: parts.join(", ") + (TRIGGER_NOTE[run.trigger] ?? ""), tone: "ok" };
 }
 
 /**

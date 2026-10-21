@@ -67,6 +67,14 @@
 .tf-stg-run progress::-webkit-progress-value { background: var(--info); border-radius: 2px; }
 .tf-stg-run p { font: 400 var(--t-sm)/1.5 var(--mono); color: var(--ink-2); }
 .tf-stg-note { font-size: var(--t-sm); color: var(--ink-2); margin-top: 10px; }
+/* a value the address added to the config, beside its Save until saved (#1404) */
+.tf-stg-pend { align-self: center; font-size: var(--t-sm); color: var(--ink-2); }
+/* a sync run's result (#1478): wraps anywhere, as the boot screen's error does, so a
+   request URL cannot widen the table; an unreachable run's transport error sits behind Details */
+.tf-stg-res { overflow-wrap: anywhere; }
+.tf-stg-det { margin-top: 4px; color: var(--ink-2); }
+.tf-stg-det summary { cursor: pointer; font-size: var(--t-xs); }
+.tf-stg-det code { display: block; margin-top: 4px; font: 400 var(--t-xs)/1.45 var(--mono); }
 /* the generated config form (#903, #904): TfSchemaForm, in rows on a source's page and a grid in a dialog */
 .tf-sf-c { flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; display: flex; }
 .tf-sf-row .tf-stg-l { align-self: start; padding-top: 5px; }

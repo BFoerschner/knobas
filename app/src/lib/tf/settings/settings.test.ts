@@ -8,6 +8,7 @@ import {
   holdings,
   intervalOptions,
   intervalWords,
+  reenterWords,
   roleMissLines,
   runRow,
   settingsPlace,
@@ -62,6 +63,12 @@ test("a row says Synced, Sign-in failed or what else holds it, with a dot in the
   expect(sourceState(source, health("ok"), status(), NOW)).toEqual({ tone: "ok", text: "Synced 4 min ago", failed: false });
   expect(sourceState(source, health("unauthorized"), status(), NOW)).toEqual({ tone: "err", text: "Sign-in failed", failed: true });
   expect(sourceState(source, health("missing_secret"), null, NOW).text).toBe("No password stored");
+  // The noun is the source's (#1405): a token source has no password to store.
+  expect(sourceState({ ...source, auth_kind: "UserPassword" }, health("missing_secret"), null, NOW).text).toBe(
+    "No password stored",
+  );
+  expect(sourceState({ ...source, auth_kind: "ApiToken" }, health("missing_secret"), null, NOW).text).toBe("No token stored");
+  expect(sourceState({ ...source, auth_kind: "Pat" }, health("unauthorized"), null, NOW).text).toBe("Sign-in failed");
   expect(sourceState(source, health("ok"), status({ running: true }), NOW).tone).toBe("run");
   expect(sourceState({ ...source, enabled: false }, health("ok"), status(), NOW).text).toBe("Paused");
   expect(sourceState(source, health("ok"), null, NOW).text).toBe("Not synced yet");
@@ -128,32 +135,79 @@ test("a credential failure is said on top with what waits for it; a working one 
   expect(credentialAlert("TeamCity", "Password", health("unreachable"), null, NOW)).toBeNull();
 });
 
+const RUN: SyncRunRow = {
+  id: 7,
+  source_id: "jira",
+  trigger: "schedule",
+  started_at: "2026-10-15T12:28:00Z",
+  finished_at: "2026-10-15T12:28:04Z",
+  outcome: "ok",
+  upserted: 12,
+  deleted: 0,
+  swept: 0,
+  error: null,
+  cursor_after: null,
+};
+const JIRA = { id: "jira", display_name: "Jira", auth_kind: "UserPassword" as const };
+
 test("a sync run reads as started, took and what it did", () => {
-  const run: SyncRunRow = {
-    id: 7,
-    source_id: "jira",
-    trigger: "schedule",
-    started_at: "2026-10-15T12:28:00Z",
-    finished_at: "2026-10-15T12:28:04Z",
-    outcome: "ok",
-    upserted: 12,
-    deleted: 0,
-    swept: 0,
-    error: null,
-    cursor_after: null,
-  };
+  const run = RUN;
   // The suite runs in Europe/Berlin (vite.config.ts), two hours ahead in October.
-  expect(runRow(run, NOW)).toEqual({ id: 7, started: "14:28", took: "4 s", result: "12 updated", tone: "ok" });
-  expect(runRow({ ...run, trigger: "backfill", finished_at: "2026-10-15T12:31:12Z" }, NOW)).toMatchObject({
+  expect(runRow(run, JIRA, NOW)).toEqual({ id: 7, started: "14:28", took: "4 s", result: "12 updated", detail: null, tone: "ok" });
+  expect(runRow({ ...run, trigger: "backfill", finished_at: "2026-10-15T12:31:12Z" }, JIRA, NOW)).toMatchObject({
     took: "3 min 12 s",
     result: "12 updated, backfill",
   });
-  expect(runRow({ ...run, outcome: "unauthorized", error: "401 Unauthorized" }, NOW)).toMatchObject({
+  expect(runRow({ ...run, outcome: "unauthorized", error: "401 Unauthorized" }, JIRA, NOW)).toMatchObject({
     result: "401 Unauthorized. Re-enter the password.",
     tone: "err",
   });
-  expect(runRow({ ...run, finished_at: null, outcome: null }, NOW)).toMatchObject({ result: "Running…", tone: "run" });
-  expect(runRow({ ...run, started_at: "2026-10-12T08:00:00Z" }, NOW).started).toBe("12 Oct 10:00");
+  expect(runRow({ ...run, finished_at: null, outcome: null }, JIRA, NOW)).toMatchObject({ result: "Running…", tone: "run" });
+  expect(runRow({ ...run, started_at: "2026-10-12T08:00:00Z" }, JIRA, NOW).started).toBe("12 Oct 10:00");
+});
+
+test("a refused run tells the reader to re-enter the source's own credential (#1405)", () => {
+  const refused = { ...RUN, outcome: "unauthorized" as const, error: "401 Unauthorized" };
+  expect(runRow(refused, { ...JIRA, auth_kind: "Pat" }, NOW).result).toBe("401 Unauthorized. Re-enter the token.");
+  expect(runRow(refused, { ...JIRA, auth_kind: "ApiToken" }, NOW).result).toBe("401 Unauthorized. Re-enter the token.");
+  expect(runRow({ ...refused, error: null }, JIRA, NOW).result).toBe("401 Unauthorized. Re-enter the password.");
+});
+
+test("the fix for a credential names the source's noun (#1405)", () => {
+  expect(reenterWords("UserPassword")).toBe("Re-enter password");
+  expect(reenterWords("Pat")).toBe("Re-enter token");
+  expect(reenterWords("ApiToken")).toBe("Re-enter token");
+  expect(reenterWords(null)).toBe("Re-enter password");
+  expect(reenterWords(undefined)).toBe("Re-enter password");
+});
+
+test("an unreachable run says the source did not answer, the transport error kept as its detail (#1478)", () => {
+  const transport =
+    "source: unreachable: error sending request for url (http://127.0.0.1:8111/app/rest/builds?locator=defaultFilter%3Afalse%2Ccount%3A100)";
+  const teamcity = { id: "teamcity", display_name: "TeamCity", auth_kind: "UserPassword" as const };
+  expect(runRow({ ...RUN, outcome: "unreachable", error: transport }, teamcity, NOW)).toMatchObject({
+    result: "TeamCity did not answer.",
+    detail: transport,
+    tone: "err",
+  });
+  expect(runRow({ ...RUN, outcome: "unreachable", error: null }, teamcity, NOW)).toMatchObject({
+    result: "TeamCity did not answer.",
+    detail: null,
+  });
+  // A source with no display name is called by its id, as everywhere else.
+  expect(runRow({ ...RUN, outcome: "unreachable", error: null }, { ...teamcity, display_name: "" }, NOW).result).toBe(
+    "teamcity did not answer.",
+  );
+  // The other outcomes keep the sentence they had, and no detail.
+  expect(runRow({ ...RUN, outcome: "unauthorized", error: "401 Unauthorized" }, teamcity, NOW)).toMatchObject({
+    result: "401 Unauthorized. Re-enter the password.",
+    detail: null,
+  });
+  expect(runRow({ ...RUN, outcome: "error", error: "watermark refused" }, teamcity, NOW)).toMatchObject({
+    result: "watermark refused",
+    detail: null,
+  });
+  expect(runRow({ ...RUN, outcome: "error", error: null }, teamcity, NOW).result).toBe("Failed");
 });
 
 test("the user is the config's username, and only an adapter that declares one gets the row", () => {
