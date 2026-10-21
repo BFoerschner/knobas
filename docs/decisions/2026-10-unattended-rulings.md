@@ -9991,3 +9991,44 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 - **No route grammar or §10.8 change.** The route keeps `space` and the segment after it whole;
   `#/docs/space/<source>/<key>` would have needed a third segment. `foreground` reads a docs space
   as nothing, with or without the source.
+## #1457: the asset editor's *Needed by* reads `depends_on_this` (Opus implementer, 2026-10-21)
+
+- **Shape** (delegated). *Ruling:* the recommended pick. The direct `depends-on` links stay as chips,
+  and beneath them a read-only block draws the answer as the Tree's *Depends on this* panel does:
+  the assets nearest first under *Depends on this* with their count, then *Reachable via routes
+  that would break*, listed and not counted. Each asset row names the edge it came through
+  (*inside* for containment). *Reasoning:* it is the glossary's own arrangement, and a reader sees
+  the whole answer without opening anything. *Reversing:* low, one block in one component.
+- **When it reads** (delegated). *Ruling:* on every editor open, as its own read beside `get_asset`.
+  If it fails, *Needed by* says *What breaks could not be read: …* and the rest of the editor
+  still works. *Reasoning:* the recommended pick; requirements §0 leaves performance for later.
+  *Reversing:* low.
+- **"The direct chips stay editable".** The editor has never had a control that edits a *Needed by*
+  chip. A `depends-on` link is added from the other asset's *Depends on*, and nothing in the editor
+  removes one. *Ruling:* the chips stay as they are, the part a link edit changes, and get no new
+  control. *Reasoning:* the ticket rules editing out of scope and asks for the direct part to be
+  kept, not for an unlink control. *Reversing:* low.
+- **Routes landing on the asset** used to be chips taken from `reachable_via`. *Ruling:* they now
+  come only from `depends_on_this.routes`, in the read-only block, so no route is drawn twice.
+- **The VM's screenshot criterion.** `DependsOnThis.routes` holds only the routes whose target is
+  the asset itself (`CONTEXT.md`, *Depends on this*). No route targets the OrbStack VM, so its
+  editor shows its 14 assets and no routes. *Ruling:* follow the glossary. The knobas-mockd shot
+  shows the routes, and #1553 holds the conflict (routes landing on anything in the closure).
+  Reverses no earlier ruling.
+
+## #1458: the two-click delete's sentence above the footer (Opus implementer, 2026-10-21)
+
+- **Sentence line or wrapping button** (delegated). *Ruling:* the recommended pick. The sentence is
+  its own line and the button reads *Delete <name>*; the route dialog does the same. The line sits
+  in the footer, as its first full-width row (`footer:has(> .tf-dp-sure)` wraps only that footer),
+  rather than at the end of the body. *Reasoning:* the editor's body scrolls, and a sentence at its
+  end could sit out of view beside the button that acts on it. A long name ellipsises in the
+  `nowrap` button, and the sentence carries it whole. The shared `.tf-btn` stays `nowrap`.
+  *Reversing:* low, one rule and two footers.
+
+## #1463: the Tree's delete confirm reads `deleteConfirm` (Opus implementer, 2026-10-21)
+
+- **The emphasised name** ("may stay"). *Ruling:* dropped. The modal draws `deleteConfirm(detail)`
+  as plain text. *Reasoning:* keeping `<strong>` would mean splitting the helper's string or copying
+  its first clause, and the ticket forbids a second copy. The modal's subtitle already names the
+  asset. *Reversing:* low.

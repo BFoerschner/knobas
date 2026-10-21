@@ -909,6 +909,41 @@ test("deleting a leaf asks first, then lands on what held it", async () => {
 });
 
 /**
+ * **The delete confirm says what the backend does** (#1463, R-11.19a): links
+ * stay, marked deleted, and the routes landing on the asset are counted. It is
+ * the Dependencies editor's `deleteConfirm`, so the history, which the backend
+ * keeps, is not mentioned.
+ */
+test("the delete confirm counts the routes landing on the asset and says nothing about history", async () => {
+  const lands = (id: string, name: string): StoredRoute => ({
+    id,
+    asset_id: "asset:vm-db-01",
+    target_id: "asset:postgres",
+    name,
+    url: `https://hel1.example/${name}`,
+    visibility: "internal",
+    properties: {},
+  });
+  const store = estate(seed(), [lands("route:pg", "pg"), lands("route:pgadmin", "pgadmin")]);
+  render("#/asset/asset:postgres", store);
+  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+
+  click("Delete");
+  const ask = (reachable() as Element).querySelector(".ask")!.textContent!.replace(/\s+/g, " ").trim();
+  expect(ask).toBe("Delete postgres? 2 routes landing on it will land on nothing. Links to it stay, marked deleted.");
+  expect(ask).not.toMatch(/history/i);
+});
+
+test("with no route landing on it, the delete confirm has no routes clause", async () => {
+  render("#/asset/asset:postgres", estate(seed()));
+  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+
+  click("Delete");
+  const ask = (reachable() as Element).querySelector(".ask")!.textContent!.replace(/\s+/g, " ").trim();
+  expect(ask).toBe("Delete postgres? Links to it stay, marked deleted.");
+});
+
+/**
  * **Deleting a branch is refused by name, and the branch is still there.**
  *
  * Criterion 4's second half. The view counts nothing itself: `assets::delete`

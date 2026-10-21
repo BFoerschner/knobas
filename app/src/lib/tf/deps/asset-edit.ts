@@ -183,6 +183,11 @@ export function deleteBlock(detail: AssetDetail): string | null {
   return parts.length > 0 ? parts.join(" ") : null;
 }
 
+/** The route dialog's delete confirm (#1458): a route has nothing landing on it to count. */
+export function routeDeleteConfirm(name: string): string {
+  return `Delete ${name}? Links to it stay, marked deleted.`;
+}
+
 /** The delete confirm's words, in prototype-6's. */
 export function deleteConfirm(detail: AssetDetail): string {
   const lands = detail.reachable_via.filter((route) => route.target_id === detail.asset.id).length;

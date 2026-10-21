@@ -5,16 +5,23 @@
   typed then custom properties and *Add a property*. Right, *Depends on*,
   *Needed by*, *Watched by* with *Create monitor*, and linked work.
 
+  *Needed by* (#1457) keeps the direct `depends-on` links as chips, the part a
+  link edit changes, and beneath them reads `depends_on_this`: every asset that
+  breaks if this one goes down, nearest first and counted, then the routes
+  landing on it, listed and not counted, as the Tree's *Depends on this* does.
+
   *Save* runs `asset-edit.ts`' order: one `edit_asset` with only the changed
   fields, then `move_asset`, then the new `depends-on` links. A failure keeps
   the dialog open, says which part did not save and keeps what did, so the
   next *Save* sends only the rest. *Delete…* is disabled with the reason while
   the asset holds assets or exposes routes; its confirm counts the routes that
-  will land on nothing, and a `conflict` from the backend shows in place.
+  will land on nothing, on a line of its own above the footer's buttons
+  (#1458), and a `conflict` from the backend shows in place.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { AssetDetail, AssetType, Environment, Dependencies } from "../../ipc/assets";
+  import type { AssetDetail, AssetType, DependsOnThis, Environment, Dependencies } from "../../ipc/assets";
+  import { readingOf } from "../../detail/relations";
   import TfDialog from "../settings/TfDialog.svelte";
   import {
     deleteBlock,
@@ -67,6 +74,9 @@
   let moved = false;
   let sure = $state(false);
   let deleteFailure = $state<string | null>(null);
+  /** `depends_on_this`'s answer; `null` while it reads or when it failed. */
+  let breaks = $state.raw<DependsOnThis | null>(null);
+  let breaksFailure = $state<string | null>(null);
 
   const uid = $props.id();
 
@@ -82,6 +92,16 @@
   }
   void load();
 
+  /** Its own read beside `load`: a failure here costs *Needed by*'s closure, not the editor. */
+  async function readBreaks() {
+    try {
+      breaks = await ports.dependsOnThis(assetId);
+    } catch (error) {
+      breaksFailure = `What breaks could not be read: ${ipcErrorMessage(error)}`;
+    }
+  }
+  void readBreaks();
+
   const paths = $derived(assetPaths(read));
   const places = $derived(
     paths.places.filter((place) => place.id !== assetId && !paths.under(assetId).has(place.id)),
@@ -91,10 +111,8 @@
   const dependsOn = $derived(
     detail?.links.filter((entry) => entry.link.relation === DEPENDS_ON && entry.link.from_id === assetId) ?? [],
   );
-  const neededBy = $derived([
-    ...(detail?.links.filter((entry) => entry.link.relation === DEPENDS_ON && entry.link.to_id === assetId).map((e) => e.other.title) ?? []),
-    ...(detail?.reachable_via.filter((route) => route.target_id === assetId).map((route) => route.name) ?? []),
-  ]);
+  const neededBy = $derived(detail?.links.filter((entry) => entry.link.relation === DEPENDS_ON && entry.link.to_id === assetId) ?? []);
+  const breaksNothing = $derived(breaks !== null && breaks.assets.length === 0 && breaks.routes.length === 0);
   const work = $derived(detail?.links.filter((entry) => ["ticket", "pr", "build", "page", "commit"].includes(entry.other.kind)) ?? []);
   const candidates = $derived(
     paths.places.filter((place) => place.id !== assetId && !dependsOn.some((e) => e.other.entity_id === place.id) && !form?.dependsOn.includes(place.id)),
@@ -234,10 +252,38 @@
             {#each candidates as place (place.id)}<option value={place.id}>{place.name}</option>{/each}
           </select>
           <h4>Needed by</h4>
-          <div class="tf-dp-rels">
-            {#each neededBy as name, index (index)}<span class="tf-chip">{name}</span>{:else}<span class="tf-dim">Nothing recorded</span>{/each}
-            {#if detail.holds.length > 0}<div class="tf-dim tf-note">and the {detail.holds.length} things inside it</div>{/if}
-          </div>
+          {#if neededBy.length > 0}
+            <div class="tf-dp-rels">{#each neededBy as entry (entry.link.id)}<span class="tf-chip">{entry.other.title}</span>{/each}</div>
+          {:else if breaksNothing}
+            <div class="tf-dp-rels"><span class="tf-dim">Nothing recorded</span></div>
+          {/if}
+          {#if breaksFailure !== null}
+            <p class="tf-ifail">{breaksFailure}</p>
+          {:else if breaks === null}
+            <p class="tf-dim tf-note">Reading what breaks…</p>
+          {:else if !breaksNothing}
+            <div class="tf-dp-breaks">
+              {#if breaks.assets.length > 0}
+                <p class="tf-dp-breaks-h">Depends on this <span class="tf-dp-breaks-n">{breaks.assets.length}</span></p>
+                <ul>
+                  {#each breaks.assets as row (row.asset.id)}
+                    <li>{row.asset.name} <span class="tf-dim">{row.relation === null ? "inside" : readingOf(row.relation, true)}</span></li>
+                  {/each}
+                </ul>
+              {/if}
+              {#if breaks.routes.length > 0}
+                <p class="tf-dp-breaks-h">Reachable via routes that would break</p>
+                <ul>
+                  {#each breaks.routes as route (route.id)}
+                    <li>{route.name} <span class="tf-dim tf-mono">{route.url}</span></li>
+                  {/each}
+                </ul>
+              {/if}
+            </div>
+          {/if}
+          {#if detail.holds.length > 0}
+            <p class="tf-dim tf-note">and the {detail.holds.length} {detail.holds.length === 1 ? "thing" : "things"} inside it</p>
+          {/if}
           <h4>Watched by</h4>
           {#each detail.monitoring as monitor (monitor.entity_id)}
             <div class="tf-dp-watch">
@@ -263,13 +309,16 @@
   {/snippet}
   {#snippet footer()}
     {#if detail !== null}
+      <!-- The confirm sentence on a line of its own above the buttons, the button short (#1458). -->
+      {#if sure}<p class="tf-dp-sure" id="{uid}-sure" role="status">{deleteConfirm(detail)}</p>{/if}
       <button
         type="button"
         class="tf-btn tf-ghost tf-dp-del"
         class:tf-danger={sure}
         disabled={blocked !== null}
         title={blocked ?? undefined}
-        onclick={() => void remove()}>{sure ? deleteConfirm(detail) : "Delete…"}</button
+        aria-describedby={sure ? `${uid}-sure` : undefined}
+        onclick={() => void remove()}>{sure ? `Delete ${detail.asset.name}` : "Delete…"}</button
       >
       <a class="tf-btn tf-ghost" href="#/asset/{encodeURIComponent(assetId)}" onclick={onclose}>Open in the asset tree</a>
     {/if}

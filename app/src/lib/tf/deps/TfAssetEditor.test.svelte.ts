@@ -7,7 +7,8 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, expect, test } from "vitest";
 
-import type { AssetDetail, AssetRow, AssetType, Dependencies } from "../../ipc/assets";
+import type { AssetDetail, AssetRow, AssetType, Dependencies, DependsOnThis, RouteRow } from "../../ipc/assets";
+import type { LinkEntry } from "../../ipc/entity";
 import type { EditorPorts } from "./ports";
 import TfAssetEditor from "./TfAssetEditor.svelte";
 
@@ -96,6 +97,7 @@ function render(over: Partial<EditorPorts> = {}, read: AssetDetail = detail()) {
     moveAsset: (id, to) => (calls.push(["moveAsset", id, to]), Promise.resolve(VM)),
     createLink: (from, to, relation) => (calls.push(["createLink", from, to, relation]), Promise.resolve({})),
     deleteAsset: (id) => (calls.push(["deleteAsset", id]), Promise.resolve()),
+    dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
     ...over,
   };
   app = mount(TfAssetEditor, {
@@ -232,10 +234,125 @@ test("the delete confirm counts the routes landing on it, and a conflict shows i
   await settle();
   press("Delete…");
   flushSync();
+  // The sentence is a line of its own above the footer's buttons, not the button's label (#1458).
+  expect(target.querySelector(".tf-dp-sure")!.textContent).toBe(
+    "Delete vm-pay-01? 1 route landing on it will land on nothing. Links to it stay, marked deleted.",
+  );
   const confirm = target.querySelector<HTMLButtonElement>(".tf-dp-del")!;
-  expect(confirm.textContent).toBe("Delete vm-pay-01? 1 route landing on it will land on nothing. Links to it stay, marked deleted.");
+  expect(confirm.textContent!.trim()).toBe("Delete vm-pay-01");
   confirm.click();
   await settle();
   expect(target.querySelector("[role='alert']")!.textContent).toBe("vm-pay-01 still holds something");
   expect(closed.deleted).toBeUndefined();
+});
+
+/** A `depends-on` link drawn from `from` at the asset in the editor. */
+function dependsOnVm(id: string, from: string, title: string): LinkEntry {
+  return {
+    link: {
+      id,
+      from_id: from,
+      to_id: "asset:vm",
+      relation: "depends-on",
+      origin: "manual",
+      note: null,
+      created_by: "user",
+      created_at: "2026-10-21T09:00:00Z",
+      confirmed_at: "2026-10-21T09:00:00Z",
+      rule: null,
+      rule_class: null,
+      reason: null,
+    },
+    other: { entity_id: from, kind: "asset", title, deleted_at: null },
+  };
+}
+
+const ROUTE: RouteRow = {
+  id: "route:pay",
+  asset_id: "asset:px",
+  asset_name: "traefik",
+  target_id: "asset:vm",
+  target_name: "vm-pay-01",
+  name: "pay.example",
+  url: "https://pay.example",
+  visibility: "public",
+  properties: [],
+};
+
+/** The *Needed by* column: its heading through to *Watched by*. */
+function neededBy(): Element[] {
+  const heads = [...target.querySelectorAll(".tf-dp-ecols h4")];
+  const from = heads.find((h) => h.textContent!.trim().startsWith("Needed by"))!;
+  const out: Element[] = [];
+  for (let at = from.nextElementSibling; at !== null && at.tagName !== "H4"; at = at.nextElementSibling) out.push(at);
+  return out;
+}
+/** An element's text with its whitespace collapsed. */
+const flat = (el: Element) => el.textContent!.replace(/\s+/g, " ").trim();
+const neededText = () => neededBy().map(flat).join(" | ");
+
+test("Needed by lists what breaks if it goes down: the closure nearest first, then the routes, under the direct links", async () => {
+  const answer: DependsOnThis = {
+    assets: [
+      { asset: row({ id: "asset:api", name: "payments-api" }), path: "hv-02", relation: "depends-on" },
+      { asset: row({ id: "asset:ct", name: "ct-worker", parent_id: "asset:vm" }), path: "hv-01 / vm-pay-01", relation: null },
+    ],
+    routes: [ROUTE],
+  };
+  const asked: string[] = [];
+  render(
+    { dependsOnThis: (id) => (asked.push(id), Promise.resolve(answer)) },
+    detail({ links: [dependsOnVm("link:1", "asset:api", "payments-api")] }),
+  );
+  await settle();
+  expect(asked).toEqual(["asset:vm"]);
+  // The direct link stays a chip, the part *Depends on* edits from the other end.
+  const chips = neededBy().flatMap((el) => [...el.querySelectorAll(".tf-chip")].map((c) => c.textContent!.trim()));
+  expect(chips).toEqual(["payments-api"]);
+  // Beneath it, read-only and in the answer's order: the assets, counted, then the route, not counted.
+  const breaks = [...target.querySelectorAll(".tf-dp-breaks li")].map(flat);
+  expect(breaks).toEqual(["payments-api depends on", "ct-worker inside", "pay.example https://pay.example"]);
+  expect(target.querySelector(".tf-dp-breaks-n")!.textContent).toBe("2");
+  expect(neededText()).not.toContain("Nothing recorded");
+});
+
+test("an asset nothing depends on and no route lands on reads Nothing recorded", async () => {
+  render();
+  await settle();
+  expect(neededText()).toBe("Nothing recorded");
+  expect(target.querySelector(".tf-dp-breaks")).toBeNull();
+});
+
+test("the holds note says thing for one", async () => {
+  render({}, detail({ holds: [row({ id: "asset:ct", name: "ct" })] }));
+  await settle();
+  expect(neededText()).toContain("and the 1 thing inside it");
+  expect(neededText()).not.toContain("things");
+});
+
+test("the holds note says things for two", async () => {
+  render({}, detail({ holds: [row({ id: "asset:ct", name: "ct" }), row({ id: "asset:ct2", name: "ct2" })] }));
+  await settle();
+  expect(neededText()).toContain("and the 2 things inside it");
+});
+
+test("Delete… asks with the sentence above the footer, and the second click deletes", async () => {
+  render();
+  await settle();
+  expect(target.querySelector(".tf-dp-sure")).toBeNull();
+  press("Delete…");
+  flushSync();
+  expect(target.querySelector(".tf-dp-sure")!.textContent).toBe("Delete vm-pay-01? Links to it stay, marked deleted.");
+  expect(calls).toEqual([]);
+  press("Delete vm-pay-01");
+  await settle();
+  expect(calls).toEqual([["deleteAsset", "asset:vm"]]);
+  expect(closed.deleted).toBe("vm-pay-01");
+});
+
+test("a depends_on_this that fails says so under Needed by and leaves the rest of the editor working", async () => {
+  render({ dependsOnThis: () => Promise.reject({ code: "not_found", message: "no asset asset:vm", source_id: null }) });
+  await settle();
+  expect(neededText()).toBe("What breaks could not be read: no asset asset:vm");
+  expect((field("Name") as HTMLInputElement).value).toBe("vm-pay-01");
 });
