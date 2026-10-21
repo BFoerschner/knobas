@@ -8,7 +8,7 @@ This file names no spec, milestone, version or ticket. **The tracker wins over t
 
 First iteration of a session: read `docs/agents/working-model.md` and `docs/agents/issue-tracker.md`; keep the Mac awake with `pgrep -x caffeinate -q || (nohup caffeinate -i -w $PPID >/dev/null 2>&1 & disown)` (it dies with this session; a sleeping Mac has cut agents mid-response); then read `.claude/loop/in-flight.tsv` (see *Ledger*).
 
-**Unattended: no permission prompts.** One prompt stalls the loop until Björn is back. Neither you nor any agent you dispatch may: chain `cd` into a compound command (use absolute paths, `git -C`, `npm --prefix`); write, delete or move under `~/.claude/` or any `.git/` from Bash (git commands are fine; memory files change only via Write/Edit); edit shell config; run `rm` with a glob or a path built from a variable (`rm -f $T/*.png` prompted on 2026-10-20; name each file as a literal absolute path, or leave it). Skip such a step and name it in the report. The briefs carry this rule; quote it in every brief-less dispatch (splitter, milestone reviewer). Start piped commands with `set -o pipefail;` or `| tail` hides the exit code.
+**Unattended: no permission prompts.** One prompt stalls the loop until Björn is back. The Bash hook refuses the shapes that prompt, for you and every agent you dispatch (CLAUDE.md, Machine): take the form its message names, or skip the step and name it in the report. Start piped commands with `set -o pipefail;` or `| tail` hides the exit code.
 
 ## Ledger
 

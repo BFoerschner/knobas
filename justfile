@@ -529,6 +529,7 @@ shell:
 # `gh` and a private TMPDIR, about 15 s.
 witness-unit:
     testenv/desktop-witness-test.sh
+    scripts/bash-guard-test.sh
     scripts/test-layout-test.sh
     scripts/append-only-merge-test.sh
     scripts/test-prefix-guard-test.sh
