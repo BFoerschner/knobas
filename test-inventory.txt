@@ -2550,6 +2550,7 @@ knobas-source-gitea	lib/knobas_source_gitea	sync::tests::only_a_repository_scope
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_default_branch_gets_the_budget_first
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_watermark_keeps_every_key_on_the_instant_it_stands_on
 knobas-source-gitea	lib/knobas_source_gitea	tests::a_branch_pr_and_commit_declare_their_repo_as_parent
+knobas-source-gitea	lib/knobas_source_gitea	tests::a_closed_issue_is_declared_done_like
 knobas-source-gitea	lib/knobas_source_gitea	tests::a_pull_request_declares_its_head_and_base_branch
 knobas-source-gitea	lib/knobas_source_gitea	tests::a_pull_request_draws_merged_open_or_closed
 knobas-source-gitea	lib/knobas_source_gitea	tests::exactly_the_unbudgeted_code_host_kinds_are_exhaustive_and_the_ticket_is_not
