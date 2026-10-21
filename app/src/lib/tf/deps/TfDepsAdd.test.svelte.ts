@@ -287,8 +287,11 @@ test("a route tile opens the route dialog: Exposed by is fixed, Save sends only 
   await settle();
   button("Delete…", dialog()).click();
   flushSync();
-  expect(button("Delete payouts.example?", dialog()).textContent).toBe("Delete payouts.example? Links to it stay, marked deleted.");
-  button("Delete payouts.example?", dialog()).click();
+  // The sentence above the footer, the button short (#1458).
+  expect(dialog().querySelector(".tf-dp-sure")!.textContent).toBe("Delete payouts.example? Links to it stay, marked deleted.");
+  expect(calls.at(-1)).not.toEqual(["deleteRoute", "route:pay"]);
+  expect(button("Delete payouts.example", dialog()).textContent!.trim()).toBe("Delete payouts.example");
+  button("Delete payouts.example", dialog()).click();
   await settle();
   expect(calls.at(-1)).toEqual(["deleteRoute", "route:pay"]);
   expect(toasts.items.at(-1)!.text).toBe("Deleted payouts.example");

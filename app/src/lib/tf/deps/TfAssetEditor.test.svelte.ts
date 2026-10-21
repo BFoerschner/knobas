@@ -234,8 +234,12 @@ test("the delete confirm counts the routes landing on it, and a conflict shows i
   await settle();
   press("Delete…");
   flushSync();
+  // The sentence is a line of its own above the footer's buttons, not the button's label (#1458).
+  expect(target.querySelector(".tf-dp-sure")!.textContent).toBe(
+    "Delete vm-pay-01? 1 route landing on it will land on nothing. Links to it stay, marked deleted.",
+  );
   const confirm = target.querySelector<HTMLButtonElement>(".tf-dp-del")!;
-  expect(confirm.textContent).toBe("Delete vm-pay-01? 1 route landing on it will land on nothing. Links to it stay, marked deleted.");
+  expect(confirm.textContent!.trim()).toBe("Delete vm-pay-01");
   confirm.click();
   await settle();
   expect(target.querySelector("[role='alert']")!.textContent).toBe("vm-pay-01 still holds something");
@@ -328,6 +332,20 @@ test("the holds note says thing for one and things for more", async () => {
   render({}, detail({ holds: [row({ id: "asset:ct", name: "ct" }), row({ id: "asset:ct2", name: "ct2" })] }));
   await settle();
   expect(neededText()).toContain("and the 2 things inside it");
+});
+
+test("Delete… asks with the sentence above the footer, and the second click deletes", async () => {
+  render();
+  await settle();
+  expect(target.querySelector(".tf-dp-sure")).toBeNull();
+  press("Delete…");
+  flushSync();
+  expect(target.querySelector(".tf-dp-sure")!.textContent).toBe("Delete vm-pay-01? Links to it stay, marked deleted.");
+  expect(calls).toEqual([]);
+  press("Delete vm-pay-01");
+  await settle();
+  expect(calls).toEqual([["deleteAsset", "asset:vm"]]);
+  expect(closed.deleted).toBe("vm-pay-01");
 });
 
 test("a depends_on_this that fails says so under Needed by and leaves the rest of the editor working", async () => {

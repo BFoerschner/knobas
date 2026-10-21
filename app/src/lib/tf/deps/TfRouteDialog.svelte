@@ -153,8 +153,14 @@
   {/snippet}
   {#snippet footer()}
     {#if row !== null}
-      <button type="button" class="tf-btn tf-ghost tf-dp-del" class:tf-danger={sure} onclick={() => void remove()}
-        >{sure ? `Delete ${row.name}? Links to it stay, marked deleted.` : "Delete…"}</button
+      <!-- The asset editor's shape (#1458): the sentence above the buttons, the button short. -->
+      {#if sure}<p class="tf-dp-sure" id="{uid}-sure" role="status">Delete {row.name}? Links to it stay, marked deleted.</p>{/if}
+      <button
+        type="button"
+        class="tf-btn tf-ghost tf-dp-del"
+        class:tf-danger={sure}
+        aria-describedby={sure ? `${uid}-sure` : undefined}
+        onclick={() => void remove()}>{sure ? `Delete ${row.name}` : "Delete…"}</button
       >
     {/if}
     <span class="tf-dp-gap"></span>

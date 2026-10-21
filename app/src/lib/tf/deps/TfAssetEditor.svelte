@@ -15,7 +15,8 @@
   the dialog open, says which part did not save and keeps what did, so the
   next *Save* sends only the rest. *Delete…* is disabled with the reason while
   the asset holds assets or exposes routes; its confirm counts the routes that
-  will land on nothing, and a `conflict` from the backend shows in place.
+  will land on nothing, on a line of its own above the footer's buttons
+  (#1458), and a `conflict` from the backend shows in place.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -308,13 +309,16 @@
   {/snippet}
   {#snippet footer()}
     {#if detail !== null}
+      <!-- The confirm sentence on a line of its own above the buttons, the button short (#1458). -->
+      {#if sure}<p class="tf-dp-sure" id="{uid}-sure" role="status">{deleteConfirm(detail)}</p>{/if}
       <button
         type="button"
         class="tf-btn tf-ghost tf-dp-del"
         class:tf-danger={sure}
         disabled={blocked !== null}
         title={blocked ?? undefined}
-        onclick={() => void remove()}>{sure ? deleteConfirm(detail) : "Delete…"}</button
+        aria-describedby={sure ? `${uid}-sure` : undefined}
+        onclick={() => void remove()}>{sure ? `Delete ${detail.asset.name}` : "Delete…"}</button
       >
       <a class="tf-btn tf-ghost" href="#/asset/{encodeURIComponent(assetId)}" onclick={onclose}>Open in the asset tree</a>
     {/if}
