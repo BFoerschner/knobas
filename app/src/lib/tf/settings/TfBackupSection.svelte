@@ -11,6 +11,13 @@
 
   Every write re-reads, because an export also prunes past `keep`;
   `set_backup_schedule` answers with the status itself.
+
+  The folder is read again when either dialog opens and when the window comes
+  back into focus (#1470): the list is the only way in (#831), and the dialog
+  asks the reader to put a file there. Until the dialog's own read lands it
+  lists nothing rather than the folder as it was. *Open the backup folder*
+  (#1471) opens that folder through the opener, as *Open the log folder* does,
+  since it sits under the hidden `~/Library`.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -38,6 +45,7 @@
       | "smartLists"
       | "ticketViews"
       | "linkSets"
+      | "openBackupFolder"
     >;
     layers: Layers;
     now: Date;
@@ -57,14 +65,48 @@
   let choosing = $state<"backup" | "share" | null>(null);
 
   const read = latestRead<BackupStatus>();
+  /** How many folder reads were started, so a dialog can name the read it waits for. */
+  let asked = 0;
+  /** The newest started read whose answer landed (`latestRead` lets only the newest land). */
+  let landed = $state(0);
+  /** The first read that started after the open dialog opened (#1470). */
+  let wanted = $state(0);
   async function load() {
+    const ask = ++asked;
     await read(ports.backupStatus, {
       ok: (next) => {
         status = next;
         error = null;
+        landed = ask;
       },
-      fail: (cause) => (error = ipcErrorMessage(cause)),
+      fail: (cause) => {
+        error = ipcErrorMessage(cause);
+        landed = ask;
+      },
     });
+  }
+
+  /** Open a dialog over the folder as it is now, not as the section found it (#1470). */
+  function choose(kind: "backup" | "share") {
+    choosing = kind;
+    wanted = asked + 1;
+    void load();
+  }
+
+  $effect(() => {
+    // A file dropped in Finder shows when the reader comes back (#1470),
+    // as the repo page's *Local changes* does.
+    const again = () => void load();
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  });
+
+  async function openFolder(directory: string) {
+    try {
+      await ports.openBackupFolder(directory);
+    } catch (cause) {
+      push({ text: `Could not open the backup folder: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
   }
 
   $effect(() => {
@@ -150,6 +192,7 @@
 
   const ticks = $derived(shareTicks(savedLists, savedViews, savedSets));
   const nothingTicked = $derived(!ticks.some((tick) => parts[tick.part]));
+  const reading = $derived(landed < wanted);
   const listed = $derived(status?.archives.filter((archive) => archive.share === (choosing === "share")) ?? []);
 </script>
 
@@ -201,7 +244,7 @@
   </div>
   <div class="tf-stg-acts">
     <button class="tf-btn" disabled={busy} onclick={() => void backUpNow()}>Back up now</button>
-    <button class="tf-btn tf-ghost" onclick={() => (choosing = "backup")}>Restore from a file…</button>
+    <button class="tf-btn tf-ghost" onclick={() => choose("backup")}>Restore from a file…</button>
   </div>
   <div class="tf-stg-sec">
     <h2>Share with a colleague</h2>
@@ -213,7 +256,8 @@
     </div>
     <div class="tf-stg-acts">
       <button class="tf-btn tf-primary" disabled={busy || nothingTicked} onclick={() => void exportShare()}>Export…</button>
-      <button class="tf-btn tf-ghost" onclick={() => (choosing = "share")}>Import…</button>
+      <button class="tf-btn tf-ghost" onclick={() => choose("share")}>Import…</button>
+      <button class="tf-btn tf-ghost" onclick={() => void openFolder(current.directory)}>Open the backup folder</button>
     </div>
   </div>
 
@@ -228,11 +272,16 @@
           {choosing === "share" ? "Share exports" : "Backups"} in <span class="tf-mono">{current.directory}</span>. Put a
           file there to see it here.
         </p>
+        <div class="tf-stg-acts">
+          <button class="tf-btn tf-sm" onclick={() => void openFolder(current.directory)}>Open the backup folder</button>
+        </div>
         <p class="tf-dsub">
           This works only into a knobas that holds no data yet; one that has data refuses it. Passwords are not in the
           file, so each source asks for its own again.
         </p>
-        {#if listed.length === 0}
+        {#if reading}
+          <p class="tf-stg-note">Reading the folder…</p>
+        {:else if listed.length === 0}
           <p class="tf-stg-note">{choosing === "share" ? "No share exports there yet." : "No backups there yet."}</p>
         {:else}
           <table class="tf-tbl tf-stg-gap">

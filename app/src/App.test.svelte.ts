@@ -154,6 +154,8 @@ vi.mock("./lib/ipc/entity", () => ({
       : Promise.reject({ code: "not_found", message: "no such entity" }),
   recentActivity: () => Promise.resolve([]),
   miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  // The share export's link-set tick, read when Settings › Backup and export draws (#1469).
+  linkSets: () => Promise.resolve([]),
   // The inbox (#45), which the notifier is fed from (#290). Answered rather
   // than left undefined: a stream that always fails can never witness an item
   // arriving.
@@ -638,6 +640,30 @@ test("Set up later in Settings lands on Settings › Sources, and the next launc
   app = mount(App, { target, props: {} });
   await until(() => target.querySelector(".tf-top") !== null, "the shell never drew on the next launch");
   expect(target.querySelector(".tf-fr")).toBeNull();
+});
+
+/**
+ * **Restore on a clean machine** (#1469): the Source step's restore pointer
+ * records completion and lands on Settings › Backup and export, with no
+ * launcher over it, so the empty-database restore is reachable.
+ */
+test("Restore from a backup in Settings lands on Settings › Backup and export", async () => {
+  dbReady = true;
+  firstRun = true;
+  location.hash = "#/tickets";
+
+  app = mount(App, { target, props: {} });
+  await until(() => target.querySelector(".tf-fr") !== null, "the wizard never took the window");
+  press("Next");
+  press("Restore from a backup in Settings");
+
+  await until(() => target.querySelector(".tf-top") !== null, "the shell never drew after the wizard");
+  expect(location.hash).toBe("#/settings/backup");
+  await until(
+    () => target.querySelector(".tf-stg-h h1")?.textContent?.trim() === "Backup and export",
+    "Settings › Backup and export never drew",
+  );
+  expect(target.querySelector('.tf [role="dialog"].tf-launch')).toBeNull();
 });
 
 /**

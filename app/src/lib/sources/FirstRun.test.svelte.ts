@@ -734,6 +734,39 @@ test("Set up later in Settings records the first run once and lands on Settings 
 });
 
 /**
+ * **Restore on a clean machine** (#1469): `restore_backup` restores only into
+ * a knobas that holds no data, and a source is data. So the Source step says
+ * so before any source is added, and its button records completion (a
+ * `setting` row, which a restore replaces) and lands on Settings › Backup and
+ * export, where *Restore from a file…* and *Import…* list the folder.
+ */
+test("before any source, the Source step points a reader with a backup at Settings › Backup and export (#1469)", async () => {
+  render({ source: null });
+  button("Next")!.click();
+  flushSync();
+  expect(step()).toBe("Source");
+  expect(target.querySelector(".tf-fr-note")?.textContent).toMatch(
+    /^Already have a backup or a share export\? Restore it before adding a source/,
+  );
+
+  button("Restore from a backup in Settings")!.click();
+  button("Restore from a backup in Settings")?.click();
+  await settle();
+
+  expect(calls.completeFirstRun).toBe(1);
+  expect(done).toBe(1);
+  expect(landing).toBe("backup");
+});
+
+test("with a source configured, the Source step does not offer a restore it would refuse (#1469)", () => {
+  render({ source: summary() });
+  button("Next")!.click();
+  flushSync();
+  expect(step()).toBe("Source");
+  expect(button("Restore from a backup in Settings")).toBeUndefined();
+});
+
+/**
  * **One add-source flow** (#1399, #1400): *Connect a real system* opens the
  * dialog Settings opens, with *Install an adapter* in it (ADR-0028), not the
  * rooms five-step modal that had no way to install one.

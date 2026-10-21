@@ -95,7 +95,7 @@
 -->
 <script lang="ts" module>
   /** Where the shell lands once the wizard hands it back. */
-  export type FirstRunLanding = "tickets" | "sources";
+  export type FirstRunLanding = "tickets" | "sources" | "backup";
 </script>
 
 <script lang="ts">
@@ -142,7 +142,8 @@
     /**
      * Hand the shell back. The wizard has recorded completion by then.
      * `tickets` is §14a's landing; `sources` is Settings › Sources, for a
-     * reader who set up later (#1399).
+     * reader who set up later (#1399); `backup` is Settings › Backup and
+     * export, for a reader who restores before adding a source (#1469).
      */
     onfinish: (landing: FirstRunLanding) => void;
   } = $props();
@@ -504,7 +505,25 @@
             {#if failure}
               <p class="tf-fail tf-fr-fail">{failure}</p>
             {/if}
-            <div class="tf-fr-acts">{@render later()}</div>
+            <!--
+              Restore on a clean machine (#1469). `restore_backup` restores only
+              into a knobas that holds no data, and a source is data, so this is
+              said here, before one is added, and only here: with a source
+              configured the restore would be refused. The button records
+              completion (a `setting` row, which the restore replaces) and lands
+              where *Restore from a file…* and *Import…* list the folder, so the
+              wizard has no second list of archives.
+            -->
+            <p class="tf-fr-note">
+              Already have a backup or a share export? Restore it before adding a source: knobas restores only into a
+              database that holds no data yet.
+            </p>
+            <div class="tf-fr-acts">
+              {@render later()}
+              <button class="tf-btn tf-ghost" disabled={finishing} onclick={() => void finish("backup")}>
+                Restore from a backup in Settings
+              </button>
+            </div>
           {/if}
         {:else if stepIndex === 2}
           <p class="tf-fr-lead">

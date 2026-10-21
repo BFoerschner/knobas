@@ -115,6 +115,7 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
     ),
     reindexFts: vi.fn(() => Promise.resolve()),
     openLogs: vi.fn(() => Promise.resolve()),
+    openBackupFolder: vi.fn((_directory: string) => Promise.resolve()),
     ...over,
   } satisfies SectionPorts;
 }
@@ -338,7 +339,7 @@ test("a link set draws its tick after Links, on by default, and switching it off
 test("Restore from a file… lists the backups and Import… the share exports, each restoring that file", async () => {
   const p = await open("backup");
   button("Restore from a file…").click();
-  flushSync();
+  await settle();
   const files = () => [...target.querySelectorAll('[role="dialog"] tbody tr td:first-child')].map((el) => el.textContent);
   expect(files()).toEqual(["knobas-20261015-020000.knobas"]);
   button("Restore").click();
@@ -347,7 +348,7 @@ test("Restore from a file… lists the backups and Import… the share exports, 
   expect(target.querySelector('[role="dialog"]')).toBeNull();
 
   button("Import…").click();
-  flushSync();
+  await settle();
   expect(target.querySelector('[role="dialog"] h2')?.textContent).toBe("Import a share export");
   expect(files()).toEqual(["knobas-share-20261012-101500.knobas"]);
   button("Import").click();
@@ -363,7 +364,7 @@ test("a restore into a knobas that holds data is refused: the dialog stays and s
   const p = await open("backup", sectionPorts({ restoreBackup: vi.fn(() => Promise.reject(refusal)) }));
   // Opening the dialog writes nothing; only a file's own button does.
   button("Restore from a file…").click();
-  flushSync();
+  await settle();
   expect(p.restoreBackup).not.toHaveBeenCalled();
   // The toast store is the app's one, so count only what this press adds.
   const before = toasts.items.length;
@@ -373,6 +374,115 @@ test("a restore into a knobas that holds data is refused: the dialog stays and s
   expect(target.querySelector('[role="dialog"]')).not.toBeNull();
   expect(toasts.items.slice(before).map((toast) => [toast.tone, toast.text])).toEqual([
     ["err", `Restore refused: ${refusal.message}`],
+  ]);
+});
+
+/** The section's status with one more archive in the folder, as a later read finds it. */
+function statusWith(file: string, share: boolean): BackupStatus {
+  const first = status();
+  return { ...first, archives: [...first.archives, { file, bytes: 1024, share }] };
+}
+
+const listedFiles = () => [...target.querySelectorAll('[role="dialog"] tbody tr td:first-child')].map((el) => el.textContent);
+
+test("Import… and Restore from a file… read the folder again, so a file put there since the section opened is listed (#1470)", async () => {
+  const backupStatus = vi
+    .fn<SectionPorts["backupStatus"]>()
+    .mockResolvedValueOnce(status())
+    .mockResolvedValueOnce(statusWith("knobas-share-20261015-120000.knobas", true))
+    .mockResolvedValue(statusWith("knobas-20261015-140000.knobas", false));
+  const p = await open("backup", sectionPorts({ backupStatus }));
+  expect(p.backupStatus).toHaveBeenCalledOnce();
+
+  button("Import…").click();
+  await settle();
+  expect(p.backupStatus).toHaveBeenCalledTimes(2);
+  expect(listedFiles()).toEqual(["knobas-share-20261012-101500.knobas", "knobas-share-20261015-120000.knobas"]);
+  button("Cancel").click();
+  flushSync();
+
+  button("Restore from a file…").click();
+  await settle();
+  expect(p.backupStatus).toHaveBeenCalledTimes(3);
+  expect(listedFiles()).toEqual(["knobas-20261015-020000.knobas", "knobas-20261015-140000.knobas"]);
+});
+
+test("the dialog lists nothing until the folder is read again, and a failed read is the section's failure line (#1470)", async () => {
+  let answer: (next: BackupStatus) => void = () => {};
+  const backupStatus = vi
+    .fn<SectionPorts["backupStatus"]>()
+    .mockResolvedValueOnce(status())
+    .mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
+    .mockRejectedValueOnce({ code: "io", message: "permission denied" });
+  await open("backup", sectionPorts({ backupStatus }));
+
+  button("Import…").click();
+  await settle();
+  expect(listedFiles()).toEqual([]);
+  expect(target.querySelector('[role="dialog"] .tf-stg-note')?.textContent).toBe("Reading the folder…");
+  answer(status());
+  await settle();
+  expect(listedFiles()).toEqual(["knobas-share-20261012-101500.knobas"]);
+  button("Cancel").click();
+  flushSync();
+
+  button("Restore from a file…").click();
+  await settle();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(body().querySelector(".tf-stg-errt")?.textContent).toBe("Could not read the backup settings: permission denied");
+  expect(button("Try again")).toBeTruthy();
+});
+
+test("coming back to the window reads the folder again; leaving the section stops listening (#1470)", async () => {
+  const backupStatus = vi
+    .fn<SectionPorts["backupStatus"]>()
+    .mockResolvedValueOnce(status())
+    .mockResolvedValue({ ...status(), last: { taken_at: new Date(2026, 9, 15, 14, 0).toISOString(), file: "knobas-20261015-140000.knobas", bytes: 50 * 1024 * 1024 } });
+  const p = await open("backup", sectionPorts({ backupStatus }));
+  expect(p.backupStatus).toHaveBeenCalledOnce();
+
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(p.backupStatus).toHaveBeenCalledTimes(2);
+  expect(rowValue("Last backup")).toBe(`today 14:00, 50 MB, in ${DIR}`);
+
+  unmount(view!);
+  view = null;
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(p.backupStatus).toHaveBeenCalledTimes(2);
+});
+
+test("Open the backup folder: beside Export… and Import…, and in both dialogs (#1471)", async () => {
+  const p = await open("backup");
+  const opens = () => [...target.querySelectorAll("button")].filter((el) => el.textContent?.trim() === "Open the backup folder");
+  expect(opens()).toHaveLength(1);
+  expect(opens()[0]!.closest(".tf-stg-sec")?.querySelector("h2")?.textContent).toBe("Share with a colleague");
+  opens()[0]!.click();
+  await settle();
+  expect(p.openBackupFolder).toHaveBeenCalledOnce();
+  expect(p.openBackupFolder).toHaveBeenLastCalledWith(DIR);
+
+  for (const [press, calls] of [["Restore from a file…", 2], ["Import…", 3]] as const) {
+    button(press).click();
+    await settle();
+    const inDialog = opens().filter((el) => el.closest('[role="dialog"]'));
+    expect(inDialog, press).toHaveLength(1);
+    inDialog[0]!.click();
+    await settle();
+    expect(p.openBackupFolder).toHaveBeenCalledTimes(calls);
+    button("Cancel").click();
+    flushSync();
+  }
+});
+
+test("Open the backup folder refused: the platform's message in a toast (#1471)", async () => {
+  await open("backup", sectionPorts({ openBackupFolder: vi.fn(() => Promise.reject(new Error("not allowed by scope"))) }));
+  const before = toasts.items.length;
+  button("Open the backup folder").click();
+  await settle();
+  expect(toasts.items.slice(before).map((toast) => [toast.tone, toast.text])).toEqual([
+    ["err", "Could not open the backup folder: not allowed by scope"],
   ]);
 });
 
