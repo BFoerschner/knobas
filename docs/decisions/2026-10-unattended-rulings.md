@@ -11092,3 +11092,57 @@ set.
   change the key format.
 - **No step of the ticket is reserved for Björn.** The §10.8 entries are ratified under the
   2026-10-18 reserved-steps rule, as #1285's were.
+## #1578: six uncalled IPC commands retire (Opus implementer, 2026-10-21)
+
+- **Which of the six still have a caller.** *Ruling:* none. Re-checked on `b6bc27a1`, after #1581
+  (PR #1600), #1485 (PR #1597), PR #1519 and #1501 (PR #1595): the ticket's grep prints nothing for
+  `contextAssets`, `sourceAssets`, `recentActivity`, `contextMembers`, `sourceStatuses` and
+  `smartListItems`, and no open issue names a reader for any of them. All six lost their callers
+  with #1087, which removed the rooms UI. *Reversing:* n/a.
+- **Wire or delete, per command.** *Ruling:* delete all six. *Reasoning:* each one's surface is
+  gone, or another read answers it. The rooms' Assets tile went with #1087, so `context_assets` and
+  `source_assets` went with it. The detail's history rides on `get_entity` and `get_asset`, so
+  `recent_activity` goes. Context membership is read by `list_entities`' scope, `mini_board` and
+  the tray, so `context_members` goes. The job card shows the current status when the workflow
+  cannot be read, so `source_statuses` (#760's fallback offer) goes. The launcher opens a list by
+  searching `list:<id>`, which reaches the same `list_response` and clears the same badge, so
+  `smart_list_items` goes. *Reversing:* medium. The commands come back from git, with a §10.8
+  entry.
+- **How far the deletion reaches.** *Ruling:* to the knobas-app code that only these commands used:
+  `MemberAsset` (regenerated out of the mirror), `assets::in_context`, `assets::monitored_by`,
+  `tile_rows`, `MEMBER_ASSETS`, `MONITORED_ASSETS`, `recent_activity_inner` and
+  `smart_list_items_inner`. `knobas-core` and `knobas-search` are not touched, as #1481 left
+  `knobas-core` alone: `knobas_core::mini_board::source_statuses` and
+  `knobas_search::Searcher::smart_list_items` stay. The latter is the engine battery's entry to the
+  list path. The former now has no caller outside its own tests, which is backlog follow-up
+  #1612. *Reversing:* low.
+- **Tests that read through a retired seam.** *Ruling:* each one reads through the read that
+  survives: `knobas_core::activity::recent` in `entity.rs`, `knobas_core::context::member_ids` in
+  the two exit witnesses (`estate_exit.rs`, `share_exit.rs`), and a `list:<id>` search
+  (`open_list`) in `search_ipc.rs`. `ipc.rs`'s two bring-up tests (`not_ready` before the pool, past
+  the guard after it) invoke `list_contexts`, another pool-backed read with no arguments. The two
+  exit witnesses keep their membership claims and drop the tile's order and path assertions,
+  because those described the retired read. The five tile tests in `assets_ipc.rs` are deleted:
+  they witnessed only the tile reads, and membership through ancestors stays pinned in
+  `knobas-core/tests/it/contexts.rs`. *Reversing:* low.
+- **The dev fake.** *Ruling:* the six handlers go. `fake/activity.ts` answered only
+  `recent_activity`, so its log lines move into `fake/entity.ts`, their only reader, and the file
+  goes. `fakeSmartListItems` stays, because the fake's `search` answers `list:<id>` with it. The
+  census's two smart-list tests now open lists through `search`. *Reversing:* low.
+- **The `the_relation_a_source_rooms_tile_reads_is_in_the_frontend_vocabulary` pin.** *Ruling:*
+  kept under its name, and its doc now names the roster as the reader. §10.8 entries #435 and #445
+  cite the name, and those entries are not edited. *Reversing:* n/a.
+- **`mockups/shared/capabilities.md`** still lists `context_assets`, `source_assets` and
+  `recent_activity`. *Ruling:* left alone, for #1481's reason: the sheet describes the removed
+  rooms UI. *Reversing:* low.
+- **`detect_suggestions`.** *Ruling:* out of scope. The ticket gives it to #1485, which PR #1597
+  fixed in Rust (the scheduler requests the pass). The IPC command still has no frontend caller;
+  backlog follow-up #1611. *Reversing:* n/a.
+
+### Reserved for Björn, ruled by implementer on Opus
+
+- **Sign-off on the §10.8 entry** (`docs/contract/10.8/1578-retire-six-uncalled-commands.md`).
+  *Ruling:* signed off, on #1481's grounds. The entry only removes from the frozen surface. Every
+  removed name had no caller outside the fake, the mirror and tests, and the census holds the fake
+  and the barrel to each other. The parts it supersedes (§2.4, §2.5 with D5, #47, #434, #435, #760)
+  are named and left unedited. *Reversing:* medium, revert the PR.
