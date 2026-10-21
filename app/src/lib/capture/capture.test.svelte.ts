@@ -303,3 +303,64 @@ test("the next keystroke after a failed write tries again", async () => {
   expect(created).toEqual(["I", "Id"]);
   expect(capture.noteId).toBe(NOTE_ID);
 });
+
+// --- the exits after a failed first write (issue #1465) ----------------------
+
+const NOT_READY = { code: "not_ready", message: "the database is still starting" };
+
+test("Escape after a failed first write keeps the window up with the text", async () => {
+  const { capture, calls } = harness(
+    { context: null, foreground: null },
+    { createNote: () => Promise.reject(NOT_READY) },
+  );
+  await capture.typed("Idea");
+  await capture.finish();
+
+  expect(calls).not.toContain("close");
+  expect(capture.failure).toBe("the database is still starting");
+  expect(capture.text).toBe("Idea");
+});
+
+test("Escape after a failed first write retries the create once and then closes", async () => {
+  let attempts = 0;
+  const made: { title: string | undefined; body: string | undefined }[] = [];
+  const { capture, calls, saved } = harness(
+    { context: null, foreground: null },
+    {
+      createNote: async (title, body) => {
+        attempts += 1;
+        if (attempts === 1) throw NOT_READY;
+        made.push({ title, body });
+        return detail();
+      },
+    },
+  );
+  await capture.typed("Idea");
+  await capture.finish();
+
+  expect(made).toEqual([{ title: "Idea", body: "" }]);
+  expect(saved).toEqual([{ noteId: NOTE_ID, title: "Idea", body: "" }]);
+  expect(calls.filter((c) => c === "close")).toHaveLength(1);
+  expect(capture.failure).toBeNull();
+});
+
+test("Escape with nothing typed closes and attempts no create", async () => {
+  const { capture, calls } = harness();
+  await capture.finish();
+
+  expect(calls).not.toContain("createNote");
+  expect(calls).toContain("close");
+});
+
+test("Open in knobas after a failed first write neither closes nor reveals", async () => {
+  const { capture, calls, revealed } = harness(
+    { context: null, foreground: null },
+    { createNote: () => Promise.reject(NOT_READY) },
+  );
+  await capture.typed("Idea");
+  await capture.openInMain();
+
+  expect(calls).not.toContain("close");
+  expect(revealed).toEqual([]);
+  expect(capture.failure).toBe("the database is still starting");
+});

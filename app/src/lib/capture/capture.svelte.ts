@@ -173,6 +173,18 @@ export function createCapture(ports?: Partial<CapturePorts>): Capture {
     return chain;
   }
 
+  /**
+   * Create the note from what is typed, unless it already exists or nothing
+   * worth keeping is typed. Runs inside the queue, so it cannot race a
+   * keystroke's own create. Throws on failure: the exits must not close then.
+   */
+  async function ensureNote(): Promise<void> {
+    if (state.noteId !== null || state.text.trim() === "") return;
+    const { title, body } = split(state.text);
+    const born = await io.createNote(title, body, bornWith(await recorded));
+    state.noteId = born.note.id;
+  }
+
   /** Save what is typed, if there is a note to save it into. */
   async function save(): Promise<NoteDetail | null> {
     if (state.noteId === null) return null;
@@ -203,23 +215,21 @@ export function createCapture(ports?: Partial<CapturePorts>): Capture {
       // whitespace is not a thought — `split` would give it neither a title
       // nor a body.
       if (state.noteId !== null || text.trim() === "") return;
-      await queue(async () => {
-        // Re-read inside the queue: a second keystroke queued behind the first
-        // must not write a second note, and the first one's id lands here.
-        if (state.noteId !== null) return;
-        const { title, body } = split(text);
-        const born = await io.createNote(title, body, bornWith(await recorded));
-        state.noteId = born.note.id;
-      });
+      // Re-read inside the queue: a second keystroke queued behind the first
+      // must not write a second note, and the first one's id lands there.
+      await queue(ensureNote);
     },
     async finish() {
       await queue(async () => {
+        // A first create that failed is retried here: close only on success.
+        await ensureNote();
         await save();
         await io.close();
       });
     },
     async openInMain() {
       await queue(async () => {
+        await ensureNote();
         const saved = await save();
         if (saved !== null) await io.revealNote(saved.note.id);
         await io.close();
