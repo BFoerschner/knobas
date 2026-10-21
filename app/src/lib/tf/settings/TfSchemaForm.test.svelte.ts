@@ -87,6 +87,8 @@ test("a list control splits on newlines and keeps what was typed", () => {
   // The textarea keeps what was typed (deleting a blank line under the
   // caret makes a text box unusable); the *validated* config is tidied.
   expect(box.value).toBe("PAY\n\n  OPS  \n");
+  // The form writes the lines, not the raw text, into the caller's values.
+  expect(values.projects).toEqual(["PAY", "", "  OPS  ", ""]);
   expect(validate(fields, { ...values, flavor: "datacenter" }).config).toEqual({
     flavor: "datacenter",
     projects: ["PAY", "OPS"],
