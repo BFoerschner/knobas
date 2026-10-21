@@ -8774,6 +8774,12 @@ Ruled 2026-10-21 (delegated by Björn at triage).
 - **`eval "$(./seed --env)"` swallows the exit status**, so the `responsiveness-probe` recipe and
   `live_session` now capture the output first (`seed_env=$(...) || exit 1`) and eval that. *Reversing:* low.
 - **A Gitea that does not answer is refused too** (HTTP 000), as the ticket says "anything but 200".
+- **Corrected reading of the `gitea-live` dead-token criterion (#1509, Sonnet implementer, 2026-10-21).**
+  The criterion cannot pass as worded: `live_session` runs `./seed-gitea.sh` before `./seed --env`,
+  which re-mints a refused token (seen on PR #1508), so `just gitea-live` with a dead recorded token
+  passes. The `--env` probe guards only a token that dies between seed and eval. *Ruling:* the
+  criterion is read that way; no code change, and the closed issue's body stays as it is.
+  *Reversing:* none needed.
 
 ## #1400: the first-run wizard in tf.css, with TfAddSource (Opus implementer, 2026-10-21)
 
