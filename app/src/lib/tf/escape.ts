@@ -34,7 +34,7 @@ export interface EscState {
   field: { filter: boolean; text: string } | null;
   route: TfRoute;
   /** The address of the job the reader was last in (its key, or its entity id, #1525), if any. */
-  job: string | null;
+  jobAt: string | null;
 }
 
 /** What one press does. */
@@ -60,5 +60,5 @@ export function escStep(state: EscState): EscStep {
     return { do: "go", hash: "#/tickets" };
   }
   if (route.view === "tickets") return { do: "nothing" };
-  return { do: "go", hash: state.job === null ? "#/tickets" : jobHash(state.job) };
+  return { do: "go", hash: state.jobAt === null ? "#/tickets" : jobHash(state.jobAt) };
 }

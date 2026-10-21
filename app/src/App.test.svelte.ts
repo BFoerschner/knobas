@@ -376,7 +376,12 @@ function pressTimerKey(): void {
   flushSync();
 }
 
-/** A few macrotask turns, for the reads an address change starts (the breadcrumb job's, #1435). */
+/**
+ * A few macrotask turns, for the reads an address change starts (the
+ * breadcrumb job's, #1435): `list_sources`, then `get_entity`, each answered
+ * at once by the mocks, so five turns is more than the chain needs. Nothing
+ * on screen shows the read landed; the tests then wait on the outcome itself.
+ */
 async function turns(): Promise<void> {
   for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   flushSync();

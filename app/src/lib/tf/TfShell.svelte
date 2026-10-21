@@ -253,9 +253,9 @@
    * and Settings are no job's, though the last two draw it in their crumbs.
    */
   const crumbKey = $derived.by(() => {
-    if (route.view === "job") return route.key === null ? null : lastJob;
-    if (route.view === "item") return lastJob;
-    if (route.view === "full" && route.section !== "inbox" && route.section !== "settings") return lastJob;
+    if (route.view === "job") return route.key === null ? null : (lastJob?.key ?? null);
+    if (route.view === "item") return lastJob?.key ?? null;
+    if (route.view === "full" && route.section !== "inbox" && route.section !== "settings") return lastJob?.key ?? null;
     return null;
   });
   $effect(() => {
@@ -387,7 +387,7 @@
               text: field instanceof HTMLInputElement ? field.value : "",
             },
       route,
-      job: lastJob?.segment ?? null,
+      jobAt: lastJob?.segment ?? null,
     });
     if (step.do === "nothing") return;
     event.preventDefault();

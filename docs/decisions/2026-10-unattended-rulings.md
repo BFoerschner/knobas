@@ -9610,10 +9610,11 @@ unchanged.
   on the same screen already offers *Add to PAY-231*; one reading of "the job" across the launcher
   and the timer. Reverses #886's job-page-only reading (amendment above). *Reversing:* low, drop
   the `breadcrumbJob` branch in `press()`.
-- **Fork:** where "counts" is decided. *Ruling:* `breadcrumbJobCounts(route)` in `route.ts`: a full
-  view or `#/item/<id>`, not Inbox or Settings (#1416: "no row on Tickets, Inbox or Settings"),
-  though their breadcrumbs draw the chip. A job page is its own job through the foreground.
-  #1500 can read the same function. *Reversing:* low.
-- **Fork:** how the job reaches the timer. *Ruling:* `TfShell` reports the entity id through an
-  `onbreadcrumbjob` callback; `App.svelte` writes it to a new `timer.breadcrumbJob`, beside
-  `timer.foreground`, and `press()` reads `foreground ?? breadcrumbJob`. *Reversing:* low.
+- **Fork:** where "counts" is decided, and how the job reaches the timer (merge-manager, Sonnet,
+  2026-10-21, after #1500 landed). *Ruling:* #1500's `breadcrumbJob` store (`job/current.svelte`),
+  which `TfShell` already fills for the launcher's *Link to <key>* by the same #1416 reading (a job
+  page, an item page, a full view but not Inbox or Settings). `App.svelte` copies it to
+  `timer.breadcrumbJob`, beside `timer.foreground`, and `press()` reads `foreground ?? breadcrumbJob`.
+  The implementer's own `breadcrumbJobIsCurrent(route)` and `onbreadcrumbjob` callback are dropped:
+  two answers to "the breadcrumb's job" would drift. On a job page the foreground wins, so the
+  store naming it too changes nothing. *Reversing:* low.
