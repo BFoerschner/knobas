@@ -23,7 +23,7 @@
 
   import type { EntityDetail, StartWorkStep } from "../../ipc/entity";
   import type { Timer } from "../../shell/timer.svelte";
-  import { push } from "../../shell/toasts.svelte";
+  import { toastStarted } from "../../shell/queued-toast";
   import { createStartWork, demandOf, edited, type StartWorkApi } from "../../start-work/start-work.svelte";
   import { keyOf } from "./job";
 
@@ -131,6 +131,9 @@
 
   async function runAll() {
     await flow.run();
+    if (flow.error === null) {
+      toastStarted(key, flow.steps.filter((each) => each.outcome === "queued").length, detail.source);
+    }
     if (flow.error === null && !timerDone && !timerSkipped) {
       onstarttimer(detail.row.entity_id, detail.row.title);
     }
@@ -199,6 +202,6 @@
   {/each}
   <footer>
     <button class="tf-btn tf-primary" disabled={flow.busy || flow.steps.length === 0} onclick={() => void runAll()}>Run all steps</button>
-    <button class="tf-btn tf-ghost" onclick={() => push({ text: "Each step can also run on its own, be retried, skipped or amended." })}>Step by step</button>
+    <span class="tf-dim tf-small">A failed step can be retried, skipped or amended.</span>
   </footer>
 </div>

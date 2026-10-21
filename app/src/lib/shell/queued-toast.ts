@@ -41,3 +41,24 @@ export function toastQueued(what: string, source: WriteSource | null | undefined
     action: { label: "Show queue", run: openWriteQueue },
   });
 }
+
+/**
+ * The toast *Run all steps* raises on the Start work stepper (#1426), in
+ * prototype-6's words: "Started work on PAY-240. 3 writes queued." with
+ * *Show queue*, "1 write queued." for one, and no count when nothing was
+ * queued (every step skipped or already there). The sign-in sentence follows
+ * the count, as on every other queued write, and only when something waits.
+ */
+export function toastStarted(key: string, queued: number, source: WriteSource | null | undefined, store: Pick<Health, "get"> = health): void {
+  const started = `Started work on ${key}.`;
+  if (queued <= 0) {
+    push({ text: started });
+    return;
+  }
+  const failing = source && signInFails(store.get(source.id)?.state) ? source : null;
+  const count = `${started} ${queued === 1 ? "1 write" : `${queued} writes`} queued.`;
+  push({
+    text: failing === null ? count : `${count} ${failing.display_name || failing.id} sign-in is failing, so it waits there.`,
+    action: { label: "Show queue", run: openWriteQueue },
+  });
+}
