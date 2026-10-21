@@ -566,22 +566,138 @@ const SURVEYS = {
   clone_from: [],
 };
 
+/** What `install_adapter` answers for [`SURVEYS`]'s manifest. */
+function installAnswer() {
+  return {
+    adapter_kind: "wasm-fixture",
+    adapter_version: "0.1.0",
+    interface_version: "1.0.0",
+    source_url: "/releases/knobas-adapter.json",
+    tag: null,
+    artifact_sha256: "a".repeat(64),
+    hosts: ["{base_url}", "api.example.com", "{mirror}"],
+    template: SURVEYS,
+  };
+}
+
+/** A source of [`SURVEYS`]'s kind, as `list_sources` lists it. */
+const HARBOUR = summary("harbour", "Harbour", "ok", {
+  adapter_kind: "wasm-fixture",
+  base_url: "https://surveys.harbour.example",
+  auth_kind: "Pat",
+  config: { fault: "none" },
+  kinds: SURVEYS.entity_kinds,
+});
+
+/** Settings mounted with props a test can move, as the shell moves `rest` on a hash change. */
+async function openMovable(rest: string[], p: SettingsPorts) {
+  const props = $state({ rest, job: null, ready: true, ports: p, health: createHealthStub(), layers: createLayers(), now: () => NOW });
+  view = mount(TfSettings, { target, props });
+  await settle();
+  return props;
+}
+
+test("a source of an adapter just installed in Add a source opens with its descriptor, without leaving Settings (#1406)", async () => {
+  const p = ports();
+  const jira = (await p.listAdapters())[0]!;
+  let installed = false;
+  let added = false;
+  p.listAdapters = vi.fn(() => Promise.resolve(installed ? [jira, SURVEYS] : [jira]));
+  p.installAdapter = vi.fn(() => {
+    installed = true;
+    return Promise.resolve(installAnswer());
+  });
+  p.addSource = vi.fn(() => {
+    added = true;
+    return Promise.resolve(HARBOUR);
+  });
+  p.listSources = vi.fn(() => Promise.resolve(added ? [...SOURCES, HARBOUR] : SOURCES));
+  const props = await openMovable([], p);
+
+  button("+ Add a source").click();
+  await settle();
+  type("#tf-add-manifest", "/releases/knobas-adapter.json");
+  dialogButton("Install").click();
+  await settle();
+  type("#tf-add-id", "harbour");
+  type("#tf-add-address", "https://surveys.harbour.example");
+  type("#tf-add-secret", "s3cret");
+  dialogButton("Test connection").click();
+  await settle();
+  dialogButton("Add source").click();
+  await settle();
+  expect(p.addSource).toHaveBeenCalledOnce();
+
+  props.rest = ["source", "harbour"];
+  await settle();
+  expect(target.querySelector(".tf-stg-srch p")?.textContent).toContain("Harbour surveys");
+  expect(section("What it syncs").querySelector("#tf-src-cfg-fault")).not.toBeNull();
+});
+
+test("an Update that changes an adapter's schema shows the new fields on its source's page (#1406)", async () => {
+  const deeper = {
+    ...SURVEYS,
+    adapter_version: "0.2.0",
+    config_schema: {
+      ...SURVEYS.config_schema,
+      properties: { ...SURVEYS.config_schema.properties, depth: { type: "string" } },
+    },
+  };
+  let updated = false;
+  const p = ports({
+    listSources: vi.fn(() => Promise.resolve([...SOURCES, HARBOUR])),
+    listAdapters: vi.fn(() => Promise.resolve([updated ? deeper : SURVEYS])),
+    listInstalledAdapters: vi.fn(() =>
+      Promise.resolve([adapterRow({ update: { state: "available", tag: "v0.2.0", adapter_version: "0.2.0" } })]),
+    ),
+    updateAdapter: vi.fn(() => {
+      updated = true;
+      return Promise.resolve(adapterRow({ tag: "v0.2.0", adapter_version: "0.2.0" }));
+    }),
+  });
+  const props = await openMovable(["source", "harbour"], p);
+  expect(section("What it syncs").querySelector("#tf-src-cfg-depth")).toBeNull();
+
+  props.rest = [];
+  await settle();
+  button("Update").click();
+  await settle();
+  props.rest = ["source", "harbour"];
+  await settle();
+  expect(section("What it syncs").querySelector("#tf-src-cfg-fault")).not.toBeNull();
+  expect(section("What it syncs").querySelector("#tf-src-cfg-depth")).not.toBeNull();
+});
+
+test("an Uninstall takes the adapter out of what Settings offers (#1406)", async () => {
+  let uninstalled = false;
+  const p = ports({
+    listSources: vi.fn(() => Promise.resolve(uninstalled ? SOURCES : [...SOURCES, HARBOUR])),
+    listAdapters: vi.fn(async () => [...(await ports().listAdapters()), ...(uninstalled ? [] : [SURVEYS])]),
+    listInstalledAdapters: vi.fn(() =>
+      Promise.resolve(uninstalled ? [] : [adapterRow({ sources: [{ id: "harbour", display_name: "Harbour" }] })]),
+    ),
+    uninstallAdapter: vi.fn(() => {
+      uninstalled = true;
+      return Promise.resolve();
+    }),
+  });
+  await openMovable([], p);
+  button("Uninstall…").click();
+  flushSync();
+  dialogButton("Uninstall").click();
+  await settle();
+
+  button("+ Add a source").click();
+  await settle();
+  const radios = [...dialog().querySelectorAll<HTMLLabelElement>(".tf-radio label")];
+  expect(radios.map((label) => label.querySelector("span")?.firstChild?.textContent)).toEqual(["Jira Data Center"]);
+});
+
 test("Add a source installs an adapter from a manifest, and it joins the radios chosen (#1202)", async () => {
   const p = ports();
   const jira = (await p.listAdapters())[0]!;
   p.listAdapters = vi.fn().mockResolvedValueOnce([jira]).mockResolvedValue([jira, SURVEYS]);
-  p.installAdapter = vi.fn(() =>
-    Promise.resolve({
-      adapter_kind: "wasm-fixture",
-      adapter_version: "0.1.0",
-      interface_version: "1.0.0",
-      source_url: "/releases/knobas-adapter.json",
-      tag: null,
-      artifact_sha256: "a".repeat(64),
-      hosts: ["{base_url}", "api.example.com", "{mirror}"],
-      template: SURVEYS,
-    }),
-  );
+  p.installAdapter = vi.fn(() => Promise.resolve(installAnswer()));
   await open([], p);
   button("+ Add a source").click();
   await settle();

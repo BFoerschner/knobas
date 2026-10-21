@@ -1658,7 +1658,7 @@ const CASES: Case[] = [
     open: (target) => ({
       app: mount(TfInstalledAdapters, {
         target,
-        props: { ports: settingsPorts(), layers: createLayers(), onremoved: () => {} },
+        props: { ports: settingsPorts(), layers: createLayers(), onremoved: () => {}, onchanged: () => {} },
       }),
     }),
   },
