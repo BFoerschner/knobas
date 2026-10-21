@@ -75,8 +75,14 @@
 .tf .tf-tm-foot a { text-decoration: underline; }
 .tf-tm-empty { padding: 28px; border: 1px dashed var(--rule); border-radius: 6px; max-width: 640px; }
 .tf .tf-tm-empty p { margin: 0 0 10px; }
-.tf-tm-on { display: flex; gap: 8px; }
-.tf-tm-on input { flex: 1; }
+/* The block dialog's *On* row (#1428, #1429): the kind switch is as wide as its words and never
+   grows; the field takes the rest of the row and shrinks below its own width rather than push
+   out of it. job.css's `.tf-formgrid input { width: 100% }` stays: `flex: 1` sets the basis. */
+.tf-tm-target { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tf-tm-on { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.tf-tm-on > .tf-seg { flex: none; }
+.tf-tm-on > input, .tf-tm-on > .tf-tm-picked { flex: 1; min-width: 0; }
+.tf-tm-picked { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tf-tm-refusal { color: var(--err); font-size: var(--t-sm); }
 
 /* The Week tab (#828): a row per target, a column per day, the weekend shaded. */

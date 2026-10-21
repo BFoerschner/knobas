@@ -5,9 +5,14 @@
  *
  * Instants are local, for `day.test.ts`'s reason.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+import type { EntityRow } from "../../ipc/entity";
+import type { SearchHit, SearchQuery, SearchResponse } from "../../ipc/search";
 import type { AdHocBlock, Block, DayBlock, OpenStretch, RunningTimer, TimerTarget } from "../../ipc/time";
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
@@ -58,6 +63,20 @@ const RUNNING: RunningTimer = {
   last_heartbeat: at(14, 40),
 };
 
+/** What the launcher's board lists as recent: one ticket. */
+const RECENT = { entity_id: "jira:PAY-228", kind: "ticket", title: "Payout export to CSV" } as EntityRow;
+/** What any search finds: one ticket. */
+const FOUND = { entity_id: "jira:OPS-77", kind: "ticket", title: "Rotate the gateway certificates" } as SearchHit;
+
+function found(): SearchResponse {
+  return {
+    interpreted: { prefix: null },
+    groups: [{ kind: "ticket", label: "Tickets", plural: "tickets", monogram: "T", total: 1, hits: [FOUND] }],
+    total: 1,
+    took_ms: 0,
+  } as unknown as SearchResponse;
+}
+
 let target: HTMLDivElement;
 let view: Record<string, unknown> | undefined;
 
@@ -93,6 +112,7 @@ function render(
   const deletes: number[] = [];
   const dismissals: number[] = [];
   const logs: [string, string][] = [];
+  const searches: string[] = [];
   let stops = 0;
   const layers = createLayers();
   view = mount(TfDay, {
@@ -110,6 +130,11 @@ function render(
       measureLabel: (text: string) => text.length * 7,
       layers,
       ports: {
+        search: (query: SearchQuery) => {
+          searches.push(query.raw);
+          return Promise.resolve(found());
+        },
+        launcherHome: () => Promise.resolve({ recent: [RECENT], smart_lists: [], stale_sources: [] } as never),
         dayBlocks: () => Promise.resolve({ blocks: listed, past_horizon: over.pastHorizon ?? false, open }),
         adHocBlock: (id: number) => Promise.resolve(offers[id] ?? null),
         updateBlock: (id: number, from: string, to: string, on: TimerTarget) => {
@@ -140,7 +165,7 @@ function render(
     },
   });
   flushSync();
-  return { updates, creates, deletes, dismissals, logs, layers, stops: () => stops };
+  return { updates, creates, deletes, dismissals, logs, layers, searches, stops: () => stops };
 }
 
 async function settle() {
@@ -272,7 +297,7 @@ test("Log… opens the draft for that ticket and day; Stop and log… is the tim
   expect(sent.stops()).toBe(1);
 });
 
-test("Edit moves a block and Delete block removes it, and Esc closes the dialog first", async () => {
+test("Edit moves a block and keeps its target, and the dialog sits on the shell's layers", async () => {
   const sent = render();
   await settle();
   button(row("unlogged"), "Edit").click();
@@ -285,7 +310,6 @@ test("Edit moves a block and Delete block removes it, and Esc closes the dialog 
   await settle();
   expect(sent.updates).toEqual([[3, at(9, 30), at(11, 50), { kind: "entity", entity_id: "jira:PAY-231" }]]);
   expect(sent.layers.open).toHaveLength(0);
-
 });
 
 /**
@@ -377,17 +401,113 @@ test("an open stretch is a dashed open row, and the open figure is the sum of th
   expect(squash(target.textContent)).not.toContain("Nothing tracked");
 });
 
-test("Assign… on an open stretch writes a block over exactly that stretch", async () => {
+/** Type into the dialog's search and wait out the launcher session's debounce. */
+async function search(text: string) {
+  const box = target.querySelector<HTMLInputElement>('[aria-label="Search for a ticket"]')!;
+  box.value = text;
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+}
+
+function options(): string[] {
+  return [...target.querySelectorAll('[role="dialog"] [role="option"]')].map((option) => squash(option.textContent));
+}
+
+test("Assign… on an open stretch picks a ticket by name and writes a block on its id over exactly that stretch (#1429)", async () => {
   const sent = render();
   await settle();
   button(row("open"), "Assign…").click();
+  await settle();
+  // No raw `ns:id` field: the reader searches, and the free-text placeholder is gone.
+  expect(target.querySelector('[role="dialog"]')!.innerHTML).not.toContain("jira:PAY-231");
+  expect(target.querySelector('[role="dialog"] select')).toBeNull();
+  await search("gateway");
+  expect(sent.searches).toEqual(["gateway"]);
+  expect(options()).toEqual(["OPS-77 Rotate the gateway certificates Ticket"]);
+  button(target, "OPS-77 Rotate the gateway certificates Ticket").click();
   flushSync();
-  const on = target.querySelector<HTMLInputElement>("#tf-tm-on")!;
-  on.value = "jira:OPS-77";
-  on.dispatchEvent(new Event("input", { bubbles: true }));
+  expect(squash(target.querySelector(".tf-tm-picked")?.textContent)).toBe("OPS-77 Rotate the gateway certificates");
   button(target, "Assign").click();
   await settle();
   expect(sent.creates).toEqual([[at(12, 35), at(13, 10), { kind: "entity", entity_id: "jira:OPS-77" }]]);
+});
+
+test("Assign… on an offered block lists the recent tickets before anything is typed, and Enter picks one", async () => {
+  const sent = render();
+  await settle();
+  button(row("offered"), "Assign…").click();
+  await settle();
+  expect(options()).toEqual(["PAY-228 Payout export to CSV Ticket"]);
+  // Assign waits for a pick.
+  expect(button(target, "Assign").disabled).toBe(true);
+  const box = target.querySelector<HTMLInputElement>('[aria-label="Search for a ticket"]')!;
+  box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  flushSync();
+  button(target, "Assign").click();
+  await settle();
+  expect(sent.updates).toEqual([[2, at(9, 25), at(9, 40), { kind: "entity", entity_id: "jira:PAY-228" }]]);
+});
+
+test("+ Add a block on A label makes an ad-hoc block on that label", async () => {
+  const sent = render();
+  await settle();
+  button(target, "+ Add a block").click();
+  await settle();
+  button(target, "A label").click();
+  flushSync();
+  const on = target.querySelector<HTMLInputElement>("#tf-tm-on")!;
+  expect(on.placeholder).toBe("What it was");
+  on.value = "Lunch walk";
+  on.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button(target, "Add").click();
+  await settle();
+  expect(sent.creates).toEqual([[at(9), at(10), { kind: "label", label: "Lunch walk" }]]);
+});
+
+/** The app's stylesheets in the document, so a computed style is the cascade the window draws with. */
+function loadAppStyles(): HTMLStyleElement {
+  const APP = process.cwd();
+  const tf = readFileSync(join(APP, "src/lib/tf/tf.css"), "utf8")
+    .replace(/^@import "(\.\/css\/[^"]+)";$/gm, (_, part: string) => readFileSync(join(APP, "src/lib/tf", part), "utf8"))
+    .replace(/^@import [^;]+;$/gm, "");
+  const style = document.createElement("style");
+  style.textContent = readFileSync(join(APP, "src/unported.css"), "utf8") + "\n" + tf;
+  document.head.append(style);
+  return style;
+}
+
+/**
+ * #1428: the *On* row's target field takes the row, and what it is on can be
+ * read. The kind switch is as wide as its words and does not grow; the field
+ * grows and may shrink below its own width rather than push out of the row.
+ * jsdom lays nothing out, so the cascade's flex values are what is witnessed.
+ */
+test("the On row's field takes the row and shows what the block is on; the kind switch does not grow (#1428)", async () => {
+  const style = loadAppStyles();
+  try {
+    render();
+    await settle();
+    button(row("label"), "Edit").click();
+    await settle();
+    const on = target.querySelector<HTMLInputElement>("#tf-tm-on")!;
+    expect(on.value).toBe("Standup and planning");
+    const kind = target.querySelector<HTMLElement>(".tf-tm-on > .tf-seg")!;
+    expect([getComputedStyle(kind).flexGrow, getComputedStyle(kind).flexShrink]).toEqual(["0", "0"]);
+    expect([getComputedStyle(on).flexGrow, getComputedStyle(on).minWidth]).toEqual(["1", "0px"]);
+    button(target, "Cancel").click();
+    flushSync();
+
+    // A ticket reads by its key and title, in a field that grows the same way.
+    button(row("unlogged"), "Edit").click();
+    await settle();
+    const picked = target.querySelector<HTMLElement>(".tf-tm-on > .tf-tm-picked")!;
+    expect(squash(picked.textContent)).toBe("PAY-231 Retry failed SEPA payouts");
+    expect([getComputedStyle(picked).flexGrow, getComputedStyle(picked).minWidth]).toEqual(["1", "0px"]);
+  } finally {
+    style.remove();
+  }
 });
 
 test("an open stretch offers Add to the current job, and makes a block on it over exactly that stretch", async () => {

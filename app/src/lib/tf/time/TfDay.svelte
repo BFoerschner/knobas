@@ -30,6 +30,8 @@
     type OpenStretch,
     type TimerTarget,
   } from "../../ipc/time";
+  import { launcherHome as realLauncherHome, search as realSearch } from "../../ipc/search";
+  import type { SessionPorts } from "../../launcher/session.svelte";
   import { push } from "../../shell/toasts.svelte";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
@@ -56,6 +58,9 @@
     createBlock: typeof realCreateBlock;
     deleteBlock: typeof realDeleteBlock;
     dismissBlock: typeof realDismissBlock;
+    /** The block dialog's ticket picker searches with the launcher's reads (#1429). */
+    search: SessionPorts["search"];
+    launcherHome: SessionPorts["launcherHome"];
   }
 
   let {
@@ -107,6 +112,8 @@
     createBlock: realCreateBlock,
     deleteBlock: realDeleteBlock,
     dismissBlock: realDismissBlock,
+    search: (query) => realSearch(query),
+    launcherHome: () => realLauncherHome(),
     ...ports,
   };
 
@@ -714,9 +721,11 @@
     from={row ? clockOf(row.from) : "09:00"}
     to={row ? clockOf(row.to) : "10:00"}
     target={dialog.mode === "edit" ? row?.target ?? null : null}
+    title={dialog.mode === "edit" && row ? titleOf(row) : null}
     span={row ? span(row) : null}
     {refusal}
     {layers}
+    ports={{ search: io.search, launcherHome: io.launcherHome }}
     onsave={save}
     ondelete={remove}
     onclose={() => (dialog = null)}
