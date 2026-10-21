@@ -70,10 +70,8 @@
   **What this ticket does not draw, and why the gaps are gaps rather than
   stubs.** The *open URL* / *copy SSH* actions are #431's neighbours in spec §2
   and arrive with the routes that carry the URLs (#432). Wires are #433's.
-  The Monitors tab landed with #448 and is `MonitorsView`, a surface of its own
-  behind the shared tab strip: it draws no columns, no pane and no search box,
-  so folding it in here would have been one component loading the whole estate
-  to show a roster of the mirror. **Environment, owner and status are
+  Monitors is a section of its own at `#/monitors` (R-11.3); the tab strip that
+  once led to its rooms-era roster went with it (#1087, #1459). **Environment, owner and status are
   editable fields on `AssetEdit` and this pane does not set them**: #431 owns
   their *in force* half and draws it, and a control that wrote the stored value
   beside a line reading "or inherited from vm-db-01" is a second ticket's
@@ -139,7 +137,6 @@
   import { entityAddress } from "../tf/address";
   import { deleteConfirm } from "../tf/deps/asset-edit";
   import { openExternal as realOpenExternal } from "../shell/open-external";
-  import AssetsTabs from "./AssetsTabs.svelte";
   import CreateDialog from "./CreateDialog.svelte";
   import ImportDialog from "./ImportDialog.svelte";
   import MonitorDialog from "./MonitorDialog.svelte";
@@ -403,7 +400,7 @@
    * Whether the Import is open (#439).
    *
    * A whole-view capability rather than a pane one, which is why it sits in
-   * the room bar beside the tab strip: an import is about the estate, and the
+   * the room bar: an import is about the estate, and the
    * address that most needs it -- `#/assets/tree` with an empty tree -- has no
    * asset selected to hang a button off.
    */
@@ -504,7 +501,7 @@
       })
       .catch((cause: unknown) => {
         // Not `failure`: the columns and the pane still draw. What stops
-        // working is creating, and the line below the tab strip plus the
+        // working is creating, and the line below the room bar plus the
         // plus's own title are where that is said.
         typesFailure = ipcErrorMessage(cause);
       });
@@ -975,14 +972,14 @@
    *   a reader reading the pane means the same thing by it as one standing in
    *   a column. The press the Tree has no step for is *not* consumed, and the
    *   shell's ladder takes it back to the room (`shell/keys.ts`).
-   * * the arrows and `Enter` are answered everywhere **except** the three
+   * * the arrows and `Enter` are answered everywhere **except** the two
    *   places with keys of their own: the pane, which is full of buttons
    *   (*Held by*, *Holds*, a history) whose activation `Enter` would
-   *   otherwise swallow; the search box, whose arrows walk its offers; and
-   *   the tab strip. Everywhere else in the Tree — a column row, a spine, the
-   *   strip itself — the arrows are the walk's.
+   *   otherwise swallow; and the search box, whose arrows walk its offers.
+   *   Everywhere else in the Tree — a column row, a spine, the strip itself —
+   *   the arrows are the walk's.
    */
-  const KEEPS_ITS_OWN_KEYS = ".pane, .find, .tabs";
+  const KEEPS_ITS_OWN_KEYS = ".pane, .find";
 
   function onkeydown(event: KeyboardEvent): void {
     if (event.key !== "Escape" && !WALK_KEYS.includes(event.key)) return;
@@ -1478,16 +1475,11 @@
   <div class="room-bar">
     <h1>Assets</h1>
     <!--
-      The tab strip, shared with the roster (`AssetsTabs`): *Tree* is a
-      destination with an address (`#/assets/tree`) and the name is what keeps
-      "board" off this surface (ADR-0009). Its sibling *Monitors* landed with
-      #448 and is a view of its own, which is why the strip is a component
-      rather than markup here.
-    -->
-    <AssetsTabs {router} />
+      No tab strip (#1459): its *Monitors* tab named a roster that went with
+      the rooms UI (#1087), and one tab left is no strip. Monitors is a section
+      of its own at `#/monitors` (R-11.3).
 
-    <!--
-      Beside the tab strip, not on a column header: an import is about the
+      In the room bar, not on a column header: an import is about the
       whole estate, and the address that most needs it — a tree with nothing
       in it yet — has neither a column nor a selection to hang it off.
     -->
@@ -2554,9 +2546,8 @@
 
 <style>
   /*
-    Pushed to the far end of the room bar: the tab strip is the destination
-    picker and this is an action on the whole estate, so they are not a row of
-    peers. `.tb-btn` itself is the shell's, shared with the top strip's own
+    Pushed to the far end of the room bar, away from the heading: this is an
+    action on the whole estate. `.tb-btn` itself is the shell's, shared with the top strip's own
     buttons, and only the placement is this view's.
   */
   .imp {

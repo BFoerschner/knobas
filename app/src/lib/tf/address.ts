@@ -68,6 +68,9 @@ export function legacyAddress(hash: string): Legacy {
   if (head === "sources" || head === "first-run") return { go: "#/settings/sources" };
   // The standup digest is a tab of Time.
   if (head === "standup") return { go: "#/time/standup" };
+  // The Assets view's *Monitors* tab (#448): Monitors is a section of its own
+  // since #864, and the tab's roster went with the rooms UI (#1087, #1459).
+  if (head === "assets" && rest[0] === "monitors") return { go: "#/monitors" };
   if (id === "") return null;
   if (head === "entity") return { resolve: id };
   if (head === "start-work") return { go: jobHash(id) };

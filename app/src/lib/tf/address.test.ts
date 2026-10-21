@@ -1,6 +1,8 @@
 import { expect, test } from "vitest";
 import { entityAddress, legacyAddress } from "./address";
+import { page as assetTreePage } from "./asset-tree/page";
 import { page as codeRowPage } from "./code-row/page";
+import { page as monitorsPage } from "./monitors/page";
 import { pageFor } from "./pages";
 import { parseTfHash } from "./route";
 
@@ -71,6 +73,19 @@ test("a room, the sources view and the wizard land on pages that exist", () => {
   expect(legacyAddress("#/first-run")).toEqual({ go: "#/settings/sources" });
   expect(legacyAddress("#/standup")).toEqual({ go: "#/time/standup" });
   expect(legacyAddress("#/start-work/jira:PAY-231")).toEqual({ go: "#/job/jira%3APAY-231" });
+});
+
+// #1459: the rooms UI's *Monitors* tab beside *Tree* went with #1087;
+// Monitors lives at `#/monitors` (R-11.3), and the Tree keeps its addresses.
+test("the Assets view's old Monitors tab lands on the Monitors page, and the Tree keeps its addresses", () => {
+  const old = parseTfHash("#/assets/monitors");
+  expect(old).toEqual({ view: "unknown", hash: "#/assets/monitors" });
+  expect(legacyAddress("#/assets/monitors")).toEqual({ go: "#/monitors" });
+  expect(pageFor(parseTfHash("#/monitors"))).toBe(monitorsPage);
+  expect(pageFor(parseTfHash("#/assets"))).toBe(assetTreePage);
+  expect(pageFor(parseTfHash("#/assets/tree"))).toBe(assetTreePage);
+  expect(pageFor(parseTfHash("#/asset/asset:vm-pay-01"))).toBe(assetTreePage);
+  expect(legacyAddress("#/assets")).toBeNull();
 });
 
 test("an address that was never the rooms UI's is left alone", () => {

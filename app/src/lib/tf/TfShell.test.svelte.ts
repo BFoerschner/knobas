@@ -328,6 +328,18 @@ test("a rooms-UI address is replaced by the ticket-first one", async () => {
   expect(history.length - depth, "each old address was a step, its replacement was not").toBe(3);
 });
 
+// #1459: the Assets view's old *Monitors* tab address opens Monitors at its
+// own address, lit in the nav, rather than the Tree under a dead tab.
+test("the Assets view's old Monitors tab address lands on Monitors", async () => {
+  start();
+  await at("#/assets/monitors");
+  expect(location.hash).toBe("#/monitors");
+  const lit = target.querySelector(".tf-nav a[aria-current='page']");
+  expect(lit?.firstChild?.textContent?.trim()).toBe("Monitors");
+  expect(target.querySelector(".tf-asset-tree")).toBeNull();
+  expect(target.textContent).not.toContain("Nothing lives at");
+});
+
 // The theme is on `<html>`, where the tokens are since #881, so a dialog
 // mounted outside the shell follows it too.
 test("the theme follows the OS until the toggle overrides it, both ways", async () => {

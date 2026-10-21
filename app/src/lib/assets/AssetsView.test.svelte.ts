@@ -633,6 +633,21 @@ test("the bare address draws the roots and nothing is selected", async () => {
 });
 
 /**
+ * **No tab strip** (#1459): the *Monitors* tab beside *Tree* named a roster
+ * that went with the rooms UI (#1087), and one tab left is no strip. The Tree
+ * is reached from Dependencies' *Asset tree* button.
+ */
+test("the Tree draws no tab strip and no Monitors tab", async () => {
+  render("#/assets");
+
+  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  expect(target.querySelector("nav[aria-label='Assets views']")).toBeNull();
+  const labels = [...target.querySelectorAll("button, a")].map((el) => el.textContent?.trim());
+  expect(labels).not.toContain("Monitors");
+  expect(labels).not.toContain("Tree");
+});
+
+/**
  * **An asset's address, opened cold, draws one column per level with the path
  * marked in each — and the pane beside it.**
  *
