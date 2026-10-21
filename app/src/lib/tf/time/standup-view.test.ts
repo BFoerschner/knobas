@@ -114,7 +114,9 @@ test("a digest line opens its item in the new shell, and a timer label opens not
   expect(lineHash(line({}))).toBe("#/job/PAY-231");
   expect(lineHash(line({ entity_id: "gitea:payout-service#142", kind: "pr" }))).toBe("#/pr/gitea%3Apayout-service%23142");
   expect(lineHash(line({ entity_id: "confluence:98401", kind: "page" }))).toBe("#/page/confluence%3A98401");
-  expect(lineHash(line({ entity_id: "note:0f2c1a", kind: "note" }))).toBe("#/settings/notes");
+  expect(lineHash(line({ entity_id: "note:0f2c1a", kind: "note" }))).toBe("#/note/note%3A0f2c1a");
+  // A protocol note opens the Standup at its date (#1504).
+  expect(lineHash(line({ entity_id: "note:7a1", kind: "note", title: "Standup 2026-09-03" }))).toBe("#/time/standup/2026-09-03");
   expect(lineHash(line({ entity_id: "route:9a1b", kind: "route" }))).toBe("#/route/route%3A9a1b");
   expect(lineHash(line({ entity_id: null, kind: null }))).toBeNull();
 });

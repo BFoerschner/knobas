@@ -114,6 +114,17 @@ export const CORPUS: {
     assignee: null,
     labels: ["on-call"],
   }),
+  // The ticket filed from the standup protocol's first action item, titled by
+  // the item's words as `create_action_item_ticket` titles it (#1433): the
+  // fixture protocol links it, so the Standup tab reads it back on open.
+  row("mock:OPS-131", "ticket", "Update the on-call runbook for the new ledger topology (Tomasz Wójcik)", "2026-08-21T10:05:00Z", "mara", {
+    key: "OPS-131",
+    fields: { project: { key: "OPS", name: "Operations" } },
+    status: "To Do",
+    priority: "Normal",
+    assignee: null,
+    type: "Task",
+  }),
   // The Tickets view's board (#810) wants more than three tickets to look
   // like prototype-6's: these are its own, in its words, with the type, the
   // assignee and the epic its cards draw, flat like the rest of this corpus.

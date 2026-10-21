@@ -7,8 +7,8 @@
  * window's *Open in knobas*. It is `job.ts`' `itemHash` plus the two kinds
  * that function has no page for: a route opens Dependencies' asset tree at
  * the asset exposing it (`#/route/<id>`, as before #881), and a note opens
- * Settings › Notes and capture, the one place notes are drawn while they hide
- * (D10).
+ * its own page (`#/note/<id>`, #1504), which sends the reader to Settings ›
+ * Notes and capture while notes hide (D10).
  *
  * {@link legacyAddress} reads an address the new shell has no place for. A
  * notification delivered before #1085 still carries `#/entity/<id>`, and a
@@ -22,11 +22,13 @@ import { jobHash } from "./route";
  * The address of an entity of `kind`: `itemHash`, which owns every kind's
  * rule (#1101), save one: a ticket whose key another source holds too
  * (`shared`, #1476) opens by its entity id, the job address that names the
- * source, which only the caller can know.
+ * source, which only the caller can know. `title`, where the producer holds
+ * one, lets a standup protocol note open Time › Standup at its date rather
+ * than the note page (#1504).
  */
-export function entityAddress(kind: string, entityId: string, shared = false): string {
+export function entityAddress(kind: string, entityId: string, shared = false, title?: string): string {
   if (shared && kind === "ticket") return jobHash(entityId);
-  return itemHash({ kind, entity_id: entityId });
+  return itemHash({ kind, entity_id: entityId, title });
 }
 
 /**

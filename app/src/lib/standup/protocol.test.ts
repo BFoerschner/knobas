@@ -9,7 +9,7 @@
  */
 import { expect, test } from "vitest";
 
-import { actionItems, presumedSource, publishableSources } from "./protocol";
+import { actionItems, presumedSource, protocolDayOf, publishableSources } from "./protocol";
 
 /** The fixture the Rust battery uses, character for character. */
 const BODY = `# Standup 2026-09-03
@@ -93,4 +93,28 @@ test("one Confluence needs no question and two have no default", () => {
     ]),
   ).toBeNull();
   expect(presumedSource([])).toBeNull();
+});
+
+/**
+ * #1504: a protocol is a note titled by `knobas_app::protocol::title_of`, and
+ * that title is the protocol's whole identity. Pinned against the backend's
+ * own example (`title_of(day())`, `protocol.rs`), so the two rules cannot drift.
+ */
+test("the protocol title rule reads the backend's own example title as its day", () => {
+  expect(protocolDayOf("Standup 2026-09-03")).toBe("2026-09-03");
+});
+
+test("a title that is not exactly a protocol's names no day", () => {
+  for (const title of [
+    "Standup notes",
+    "standup 2026-09-03",
+    "Standup 2026-09-03 (copy)",
+    " Standup 2026-09-03",
+    "Standup 2026-9-3",
+    "Standup 2026-02-30",
+    "Standup 2026-13-01",
+    "Untitled note",
+  ]) {
+    expect(protocolDayOf(title), title).toBeNull();
+  }
 });

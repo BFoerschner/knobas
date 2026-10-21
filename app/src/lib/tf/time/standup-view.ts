@@ -213,10 +213,10 @@ export function withActionItem(body: string, text: string): string {
  * Where a digest line opens in the new shell, or `null` for the one line with
  * nothing behind it (a running timer on a label). A page opens Docs.
  */
-export function lineHash(line: Pick<DigestLine, "entity_id" | "kind">): string | null {
+export function lineHash(line: Pick<DigestLine, "entity_id" | "kind" | "title">): string | null {
   if (line.entity_id === null) return null;
   if (line.kind === "page") return `#/page/${encodeURIComponent(line.entity_id)}`;
-  return itemHash({ entity_id: line.entity_id, kind: line.kind ?? "" });
+  return itemHash({ entity_id: line.entity_id, kind: line.kind ?? "", title: line.title });
 }
 
 /** The ticket key a line leads with, or `null` for anything not a ticket. */

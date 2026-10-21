@@ -101,6 +101,9 @@ const SECTION_OF: Record<string, Section> = {
  * - `item` is one item's page, `#/item/<entity id>` (#1201): the source's
  *   block view of an item whose kind no surface draws, such as a custom
  *   role's (ADR-0029). It lights no nav entry: a custom role has none.
+ * - `note` is one note's read-only page, `#/note/<note id>` (#1504), which
+ *   sends the reader to Settings › Notes and capture while notes hide (D10).
+ *   It lights no nav entry either: notes have none.
  * - `unknown` is an address this shell has no place for. The shell first asks
  *   `address.ts` whether it is a rooms-UI address (`#/ticket/jira:PAY-231`,
  *   #1085) and replaces it; otherwise saying so beats drawing Tickets under
@@ -120,6 +123,7 @@ export type TfRoute =
       rest: string[];
     }
   | { view: "item"; id: string }
+  | { view: "note"; id: string }
   | { view: "unknown"; hash: string };
 
 /** Read an address. Total: every string is some route. */
@@ -129,6 +133,7 @@ export function parseTfHash(hash: string): TfRoute {
   const head = segments[0] ?? "";
   if (head === "") return { view: "tickets", rest: [] };
   if (head === "item" && segments[1]) return { view: "item", id: segments[1] };
+  if (head === "note" && segments[1]) return { view: "note", id: segments[1] };
   const section = SECTION_OF[head];
   if (section === undefined) return { view: "unknown", hash };
   if (section === "tickets") return { view: "tickets", rest: segments.slice(1) };

@@ -766,12 +766,6 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
     commands: ["follow_merges"],
   },
   {
-    // `create_link` and `unlink` are answered since #921 (`fake/entity.ts`).
-    surface: "Deleting a note (hidden from the new shell, D10)",
-    witnesses: ["crates/knobas-app/tests/it/entity.rs"],
-    commands: ["delete_note"],
-  },
-  {
     surface: "A source's assets",
     witnesses: ["crates/knobas-app/tests/it/assets_ipc.rs"],
     commands: ["source_assets"],

@@ -144,7 +144,7 @@ function open(
     target,
     props: {
       now: () => NOW,
-      date: over.date,
+      date: over.date ?? null,
       saveAfterMs: 0,
       layers: createLayers(),
       ports: {

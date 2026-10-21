@@ -26,9 +26,11 @@
  *   body is prototype-6's: four of five people there, two notes, two action
  *   items. Lena Hoffmann, absent in the prototype, is not in it: the body
  *   records who was there, not who was not.
- * - Prototype-6's first action item already has OPS-131; here neither has a
- *   ticket until *Create ticket*, because which item a ticket was filed for is
- *   not stored anywhere.
+ * - Prototype-6's first action item already has OPS-131, and so does this
+ *   one: the protocol note carries the `related` link the backend draws to a
+ *   ticket it filed, and `OPS-131` in the corpus is titled by the item's words,
+ *   which is how the tab matches the two (#1433). The second item has none
+ *   until *Create ticket*.
  * - The publish target is the mock source and a page id, not "Confluence,
  *   Payments > Standups": the fixture has no Confluence source (`sources.ts`).
  * - A publish and an action-item ticket start `pending` and read `sent` on the
@@ -39,6 +41,9 @@ import type { Handler } from "../fake-tauri";
 import type { ActionItemTicket, DigestLine, Protocol, PublishTarget } from "../../../ipc/entity";
 import { CORPUS } from "./corpus";
 import { seedNote } from "./notes";
+
+/** The ticket filed for the protocol's first action item, titled by its words (#1433). */
+const FILED_TICKET = "mock:OPS-131";
 
 /** The mirror's title for an entity, else the given one. */
 function titled(entityId: string, fallback: string): string {
@@ -104,7 +109,8 @@ export function handlers(): Record<string, Handler> {
   const asked = new Map<number, number>();
 
   const protocol = (day: string): Protocol => {
-    seedNote(`note:standup-${day}`, `Standup ${day}`, protocolBody(day));
+    // The backend's `related` link from the protocol to the ticket it filed.
+    seedNote(`note:standup-${day}`, `Standup ${day}`, protocolBody(day), [{ target_id: FILED_TICKET, relation: "related" }]);
     return protocolOf(day);
   };
   const protocolOf = (day: string): Protocol => ({

@@ -118,10 +118,17 @@ vi.mock("./lib/ipc/entity", () => ({
   // The rest of the module the shell's pages import at module scope: a mock
   // short of an export throws at the call rather than failing as a missing
   // feature, so each answers empty or refuses.
-  getNote: () => Promise.reject(new Error("no note in this test")),
+  getNote: (noteId: string) =>
+    noteShownHere && noteId === "note:0f2c1a"
+      ? Promise.resolve({
+          note: { id: noteId, title: "Retry backoff, thinking aloud", body_md: "Jitter it.", created_at: "", updated_at: "" },
+          refs: [],
+          links: [],
+        })
+      : Promise.reject(new Error("no note in this test")),
   saveNote: () => Promise.reject(new Error("no note is saved in this test")),
   captureShortcut: () =>
-    Promise.resolve({ accelerator: null, refusal: null, shown: false, note_count: 0, last_note_at: null }),
+    Promise.resolve({ accelerator: null, refusal: null, shown: noteShownHere, note_count: 0, last_note_at: null }),
   setCaptureShortcut: () => Promise.reject(new Error("no shortcut is set in this test")),
   unlink: () => Promise.reject(new Error("no unlink in this test")),
   listContexts: () => Promise.resolve([]),
@@ -189,6 +196,8 @@ let captureRecords: { context: string | null; foreground: string | null }[] = []
 let timerRunning: unknown = null;
 /** What `get_entity` answers for its own id (the job page's read, #886); others are `not_found`. */
 let entityAnswer: EntityDetail | null = null;
+/** *Show notes and quick capture* (D10), and with it the one note `get_note` answers (#1504). */
+let noteShownHere = false;
 /** The block `stopTimer` closes. */
 let timerClosed: unknown = null;
 /** Every `worklog_draft` the shell asked for, in order (#280). */
@@ -315,6 +324,7 @@ beforeEach(() => {
   demoProfile = false;
   timerStarts = [];
   entityAnswer = null;
+  noteShownHere = false;
   timerRooms = [];
   timerStops = 0;
   captureRecords = [];
@@ -687,9 +697,9 @@ test("a pull request page puts the pull request in front, for the heartbeat and 
 /**
  * **The main window's half of *Open in knobas*** (#503): the capture window
  * asks the backend to bring this window forward, and this window listens for
- * `capture:open-note` and goes where notes are drawn while they hide:
- * Settings › Notes and capture (D10, #1085), not the rooms UI's
- * `#/entity/<note id>`.
+ * `capture:open-note` and opens the note's page, which sends the reader where
+ * notes are drawn while they hide: Settings › Notes and capture (D10, #1085,
+ * #1504), not the rooms UI's `#/entity/<note id>`.
  */
 test("a note captured in the other window is asked for here when the capture says so", async () => {
   dbReady = true;
@@ -709,6 +719,22 @@ test("a note captured in the other window is asked for here when the capture say
     "Settings never opened on Notes and capture",
   );
   expect(target.textContent).not.toContain("Nothing lives at");
+});
+
+/** #1504: while notes are shown, *Open in knobas* lands on the note's own page. */
+test("a captured note opens on its own page while notes are shown", async () => {
+  dbReady = true;
+  noteShownHere = true;
+  app = mount(App, { target, props: {} });
+  await until(
+    () => (listeners.get("capture:open-note") ?? []).length > 0,
+    "the shell never subscribed to capture:open-note",
+  );
+
+  emit("capture:open-note", "note:0f2c1a");
+  await until(() => target.querySelector(".tf h1")?.textContent === "Retry backoff, thinking aloud", "the note page never drew");
+  expect(location.hash).toBe("#/note/note%3A0f2c1a");
+  expect(target.querySelector(".tf-note-body")?.textContent).toBe("Jitter it.");
 });
 
 /**
