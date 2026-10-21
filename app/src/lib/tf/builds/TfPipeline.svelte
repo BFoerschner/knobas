@@ -324,6 +324,7 @@
     placeholder: "Filter runs by number, branch, commit or person",
     noun: "runs",
     one: "run",
+    hint: false,
     scopes: [
       ...(job !== null ? [{ id: "job", label: "My job’s branches", query: "" }] : []),
       { id: "mine", label: "Started by me", query: "" },

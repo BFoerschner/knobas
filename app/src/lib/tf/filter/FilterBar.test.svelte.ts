@@ -174,3 +174,19 @@ test("a view's filter is kept for the session: a second bar for it opens where t
   expect(field().value).toBe("p");
   expect(sessionFilter("tickets-other").text).toBe("");
 });
+
+test("with the hint off the bar draws no / hint and does not claim the key (#1453)", () => {
+  const quiet: FilterConfig = { ...config, id: "tickets-quiet", hint: false };
+  bar = mount(FilterBar, { target, props: { config: quiet, filter: sessionFilter(quiet.id), shown: 1, total: 1 } });
+  flushSync();
+  expect(target.querySelector("kbd")).toBeNull();
+  const event = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
+  document.body.dispatchEvent(event);
+  expect(document.activeElement).not.toBe(field());
+  expect(event.defaultPrevented).toBe(false);
+});
+
+test("the default config draws the / hint (#1453)", () => {
+  mountBar(sessionFilter(config.id));
+  expect(target.querySelector("kbd")!.textContent).toBe("/");
+});

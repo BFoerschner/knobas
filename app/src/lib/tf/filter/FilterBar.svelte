@@ -91,6 +91,7 @@
   }
 
   onMount(() => {
+    if (config.hint === false) return;
     const onkey = (event: KeyboardEvent) => {
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       const at = document.activeElement;
@@ -118,7 +119,7 @@
     />
     {#if filter.text !== ""}
       <button type="button" class="tf-fclear" aria-label="Clear filter" onclick={clear}>✕</button>
-    {:else}
+    {:else if config.hint !== false}
       <kbd>/</kbd>
     {/if}
   </label>

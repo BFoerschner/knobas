@@ -385,3 +385,17 @@ test("This job reads the pipelines of the ticket the reader opened, not the firs
   expect(entityIpc.jobPipelines).toHaveBeenCalledWith("tidewater:PAY-231");
   expect(entityIpc.jobPipelines).not.toHaveBeenCalledWith("jira:PAY-231");
 });
+
+test("/ focuses the pipeline filter, and the runs filter beside it draws no hint (#1453)", async () => {
+  draw(["teamcity:buildType:Payout_IntegrationTests"]);
+  await settle();
+  const fields = [...target.querySelectorAll<HTMLInputElement>("[data-filter]")];
+  expect(fields).toHaveLength(2);
+  const runs = target.querySelector(".tf-runbar .tf-fbar")!;
+  expect(runs.querySelector("kbd")).toBeNull();
+  const event = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
+  document.body.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(fields[0]);
+  expect(runs.contains(document.activeElement)).toBe(false);
+});

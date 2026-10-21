@@ -86,6 +86,7 @@
     id: `run-tests:${runId}`,
     placeholder: "Filter tests",
     noun: "tests",
+    hint: false,
     chips: [{ key: "st", label: "Result", options: RESULT_CHIPS.map((c) => ({ ...c })) }],
     dropdowns: [{ key: "mod", label: "Module", options: modulesOf(tests).map((m) => ({ value: m, label: m })) }],
   });

@@ -122,3 +122,10 @@ test("the filter bar keeps by result, module and words, and counts what it kept"
   expect(names()).toEqual(["sepa::retry::backs_off_exponentially"]);
   expect(target.textContent).toContain("1 of 3 tests");
 });
+
+test("the tests filter draws no / hint: / belongs to the page's pipeline filter (#1453)", async () => {
+  draw();
+  await settle();
+  expect(target.querySelector(".tf-fbar")).not.toBeNull();
+  expect(target.querySelector(".tf-fbar kbd")).toBeNull();
+});

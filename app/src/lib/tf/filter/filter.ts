@@ -84,6 +84,12 @@ export interface FilterConfig {
    * view that filters what it holds in the browser.
    */
   base?: string;
+  /**
+   * Whether the bar draws the `/` hint and answers the key. Default on; a page
+   * that holds two bars (Builds) turns it off on the inner ones, since `/` is
+   * the page filter's key (R-2.4, R-14) and goes to the first (#1453).
+   */
+  hint?: boolean;
 }
 
 /** Where one view's filter stands. */
