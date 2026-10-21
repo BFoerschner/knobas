@@ -15,7 +15,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 ## Mounting and the shell switch
 
 - The switch between the rooms UI and the new shell is `localStorage` `knobas.shell`, read at startup; switching reloads. A dev build also takes `?shell=tickets`. No command, so a share export does not carry it. (#809, PR #885)
-- Rooms-styled dialogs (the launcher) mount outside `.tf` and keep their own tokens. A ticket that redraws one ports it. (#809, PR #885) The worklog draft (#826), the timer picker and the ad-hoc dialog (#1432) are ported and mount in `TfShell`'s `dialogs`, as the write queue (#1425) does.
+- Rooms-styled dialogs mounted outside `.tf` and kept their own tokens until a ticket redrew each. (#809, PR #885) All are ported now: the worklog draft (#826), the timer picker and the ad-hoc dialog (#1432) and the ⌘K launcher (#1422) mount in `TfShell`'s `dialogs`, as the write queue (#1425) does. Only the shell's `Modal` still draws with `unported.css`'s `.scrim`/`.dlg`.
 - Under the new shell `Esc` on a full view with no job goes to Tickets. (#809, PR #885)
 - A setting the shell and a page both change (the colour theme) is one store under `tf/`, passed to pages on the shell's context (`TfPageContext`), so a test can hand both the same instance. (#831)
 

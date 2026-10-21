@@ -58,7 +58,8 @@
   });
 
   function onkeydown(event: KeyboardEvent) {
-    if (event.key !== "Tab") return;
+    // A field that takes `Tab` for itself says so (the launcher's box opens its action chain, #1422).
+    if (event.key !== "Tab" || event.defaultPrevented) return;
     const items = focusable();
     if (items.length === 0) return;
     const first = items[0]!;

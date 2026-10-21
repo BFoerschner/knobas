@@ -64,38 +64,38 @@
 </script>
 
 {#if gaps.length > 0}
-  <div class="gap">
+  <div class="tf-ln-gap">
     <!-- Deliberately not "not every source": that is false in the case a
          reader most needs this, `@jonas /tc`, where the one source in scope is
          the one that cannot be asked. A heading that does not count is honest
          at one source and at five. -->
-    <p class="gap-h">An author search cannot be answered by:</p>
+    <p class="tf-ln-gap-h">An author search cannot be answered by:</p>
     <ul>
       {#each gaps as gap (gap.sourceId)}
-        <li><span class="gap-s">{gap.name}</span> — {gap.reason}</li>
+        <li><span class="tf-ln-gap-s">{gap.name}</span> — {gap.reason}</li>
       {/each}
     </ul>
   </div>
 {/if}
 
 {#if parentGaps.length > 0}
-  <div class="gap">
-    <p class="gap-h">An under: search cannot be answered by:</p>
+  <div class="tf-ln-gap">
+    <p class="tf-ln-gap-h">An under: search cannot be answered by:</p>
     <ul>
       {#each parentGaps as gap (gap.sourceId)}
-        <li><span class="gap-s">{gap.name}</span> — {gap.reason}</li>
+        <li><span class="tf-ln-gap-s">{gap.name}</span> — {gap.reason}</li>
       {/each}
     </ul>
   </div>
 {/if}
 
 {#each response.groups as group, g (group.kind)}
-  <div class="secl">
-    <span class="lab">{group.plural}</span>
-    <span class="n">
+  <div class="tf-ln-h">
+    <span class="tf-ln-lab">{group.plural}</span>
+    <span class="tf-ln-n">
       {group.total}
       {#if group.total > group.hits.length}
-        <span class="more">· {group.total - group.hits.length} more</span>
+        <span class="tf-ln-more">· {group.total - group.hits.length} more</span>
       {/if}
     </span>
   </div>
@@ -125,63 +125,8 @@
 {/each}
 
 {#if response.groups.length === 0}
-  <p class="none">
+  <p class="tf-ln-none">
     Nothing in the mirror matches
-    <span class="mono">{response.interpreted.text || "these filters"}</span>.
+    <strong>{response.interpreted.text || "these filters"}</strong>.
   </p>
 {/if}
-
-<style>
-  /* `.secl` — the sticky group heading (round 3, line 411). */
-  .secl {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 24px;
-    padding: 0 12px 0 8px;
-    border-bottom: 1px solid var(--hair);
-    background: var(--panel);
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-  .n {
-    margin-left: auto;
-    font: 400 11px var(--mono);
-    color: var(--faint);
-  }
-  /* §4 asks for the count *and* what the page left behind: a group of 400
-     showing 10 has to say so, or the reader thinks there are ten. */
-  .more {
-    color: var(--muted);
-  }
-  .none {
-    padding: 14px 12px;
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 1.5;
-  }
-  /* The #141 explanation. Amber-ruled rather than red: a source that cannot be
-     asked an author question is not a failure, it is a fact about the corpus,
-     and drawing it as an error would put a fault where there is none. */
-  .gap {
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--hair);
-    box-shadow: inset 2px 0 0 var(--amber);
-    background: var(--panel);
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--muted);
-  }
-  .gap-h {
-    color: var(--text);
-  }
-  .gap ul {
-    margin: 2px 0 0;
-    padding: 0;
-    list-style: none;
-  }
-  .gap-s {
-    color: var(--text);
-  }
-</style>

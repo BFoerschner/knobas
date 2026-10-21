@@ -601,7 +601,7 @@ test("finishing the wizard lands on Tickets with the launcher open, and the new 
   await until(() => target.querySelector(".tf-top") !== null, "the shell never drew after the wizard");
   expect(location.hash).toBe("#/tickets");
   await until(
-    () => target.querySelector('[role="dialog"][aria-label="Search and actions"]') !== null,
+    () => target.querySelector('.tf [role="dialog"].tf-launch') !== null,
     "the launcher never opened over the landing",
   );
   await until(() => health.get("mock") !== null, "the wizard's source never reached the health store");
@@ -629,7 +629,7 @@ test("Set up later in Settings lands on Settings › Sources, and the next launc
     () => target.querySelector(".tf-stg-h h1")?.textContent?.trim() === "Sources",
     "Settings › Sources never drew",
   );
-  expect(target.querySelector('[role="dialog"][aria-label="Search and actions"]')).toBeNull();
+  expect(target.querySelector('.tf [role="dialog"].tf-launch')).toBeNull();
 
   unmount(app);
   app = undefined;

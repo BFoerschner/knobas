@@ -54,7 +54,7 @@ function render(over: Record<string, unknown> = {}) {
 
 test("a row whose hit carries an ancestor path draws it under the title", () => {
   const screen = render({ path: "Engineering › Payments" });
-  expect(screen.target.querySelector(".pa")?.textContent).toBe("Engineering › Payments");
+  expect(screen.target.querySelector(".tf-ln-pa")?.textContent).toBe("Engineering › Payments");
   // The title is still the title: the path is an addition, not a replacement.
   expect(screen.target.textContent).toContain("SEPA payout retry design");
   screen.done();
@@ -67,7 +67,7 @@ test("a row with no path draws none rather than an empty line", () => {
   // `string_agg` over no rows is null — but which a future caller might pass.
   for (const props of [{}, { path: null }, { path: "" }]) {
     const screen = render(props);
-    expect(screen.target.querySelector(".pa"), JSON.stringify(props)).toBeNull();
+    expect(screen.target.querySelector(".tf-ln-pa"), JSON.stringify(props)).toBeNull();
     screen.done();
   }
 });
@@ -79,7 +79,7 @@ test("a row with no path draws none rather than an empty line", () => {
  */
 test("a path that looks like markup is drawn as text", () => {
   const screen = render({ path: "Engineering › <img src=x onerror=alert(1)>" });
-  const path = screen.target.querySelector(".pa");
+  const path = screen.target.querySelector(".tf-ln-pa");
   expect(path?.textContent).toBe("Engineering › <img src=x onerror=alert(1)>");
   expect(path?.querySelector("img")).toBeNull();
   screen.done();
@@ -98,20 +98,20 @@ test("a path the title already repeats is still drawn", () => {
     title: "Payments / Deploy #42",
     path: "Payments / Deploy",
   });
-  expect(screen.target.querySelector(".pa")?.textContent).toBe("Payments / Deploy");
+  expect(screen.target.querySelector(".tf-ln-pa")?.textContent).toBe("Payments / Deploy");
   screen.done();
 });
 
 /** The state chip (#666): drawn after the title with its tone, absent for the miss. */
 test("a row with a state draws its chip with its tone, and none without", () => {
   const screen = render({ kind: "pr", state: { text: "merged", tone: "ok" } });
-  const chip = screen.target.querySelector<HTMLElement>(".st");
+  const chip = screen.target.querySelector<HTMLElement>(".tf-state");
   expect(chip?.textContent).toBe("merged");
   expect(chip?.dataset.tone).toBe("ok");
   screen.done();
   for (const props of [{}, { state: null }]) {
     const none = render(props);
-    expect(none.target.querySelector(".st"), JSON.stringify(props)).toBeNull();
+    expect(none.target.querySelector(".tf-state"), JSON.stringify(props)).toBeNull();
     none.done();
   }
 });

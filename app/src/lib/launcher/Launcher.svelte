@@ -68,6 +68,7 @@
   import type { LinkTarget } from "../tf/job/current.svelte";
   import { sharesKey } from "./format";
   import { canBeTarget } from "../shell/timer";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
   import Board from "./Board.svelte";
   import Chips from "./Chips.svelte";
   import Help from "./Help.svelte";
@@ -722,19 +723,16 @@
 
 {#if open}
   <!--
-    The scrim is a click target, not a control: `Esc` and the × are the
-    keyboard and pointer routes out, and this is the third. `role="presentation"`
-    plus the keyboard handler on the dialog is what keeps a11y honest about
-    that.
+    The ticket-first dialog shell (#1422): `TfDialog` draws the scrim, takes
+    the click on it as the third way out beside `Esc` and the ×, keeps `Tab`
+    inside, and registers the launcher on the shell's layer stack. Its title
+    names the dialog for a screen reader; the prototype draws no header, so
+    `tf/css/launcher.css` hides it from sight only. `TfDialog` leaves `Tab`
+    alone here: the box takes it for the action chain and says so with
+    `preventDefault`.
   -->
-  <div
-    class="scrim"
-    role="presentation"
-    onclick={(event) => {
-      if (event.target === event.currentTarget) close();
-    }}
-  >
-    <div class="dlg search" role="dialog" aria-modal="true" aria-label="Search and actions">
+  <TfDialog title="Search and actions" className="tf-launch" onclose={close}>
+    {#snippet body()}
       <QueryBox
         bind:this={box}
         value={session.raw}
@@ -751,19 +749,19 @@
           Directly under the box, over the chips and the results: it completes
           the word being typed, and it is what the keyboard drives while open.
         -->
-        <div class="suggest" role="listbox" aria-label="Suggestions">
+        <div class="tf-ln-suggest" role="listbox" aria-label="Suggestions">
           {#each offer as suggestion, index (`${suggestion.value}\u0000${suggestion.detail}`)}
             <button
-              class="pfx sug"
-              class:on={index === suggestionPicked}
+              class="tf-ln-opt tf-ln-sug"
+              class:tf-ln-on={index === suggestionPicked}
               role="option"
               aria-selected={index === suggestionPicked}
               onclick={() => pickSuggestion(suggestion.value)}
               onmouseenter={() => (suggestionPicked = index)}
             >
-              <span class="nm">{suggestion.value}</span>
+              <span class="tf-ln-nm">{suggestion.value}</span>
               <!-- The separator is an expression: Svelte trims an element's leading space (#1515). -->
-              {#if suggestion.detail}<span class="s">{" · "}{suggestion.detail}</span>{/if}
+              {#if suggestion.detail}<span class="tf-ln-s">{" · "}{suggestion.detail}</span>{/if}
             </button>
           {/each}
         </div>
@@ -774,20 +772,20 @@
       {/if}
 
       <div
-        class="rlist"
+        class="tf-ln-list"
         role="listbox"
         tabindex="-1"
         aria-label="Results"
         aria-activedescendant={activeOption}
       >
         {#if session.error}
-          <p class="none err">{session.error}</p>
+          <p class="tf-ln-none tf-ln-err">{session.error}</p>
           <!-- A board that failed to load has nothing else to offer; a failed
                search is retried by typing. -->
           {#if !session.home}
-            <button class="pfx" onclick={() => void session.loadHome()}>
-              <span class="nm">Retry</span>
-              <span class="s">Read the board again.</span>
+            <button class="tf-ln-opt" onclick={() => void session.loadHome()}>
+              <span class="tf-ln-nm">Retry</span>
+              <span class="tf-ln-s">Read the board again.</span>
             </button>
           {/if}
         {:else if session.mode === "url"}
@@ -796,14 +794,14 @@
             answer, so what is left here is the wait and the miss.
           -->
           {#if !session.urlAnswer}
-            <p class="none">Looking up the link…</p>
+            <p class="tf-ln-none">Looking up the link…</p>
           {:else}
-            <div class="miss">
-              <p class="none">Not in the mirror</p>
-              <p class="none raw">{session.url}</p>
-              <button class="pfx" onclick={() => session.url && void openTheMiss(session.url)}>
-                <span class="nm">Open in browser</span>
-                <span class="s">Open it where it lives.</span>
+            <div class="tf-ln-miss">
+              <p class="tf-ln-none">Not in the mirror</p>
+              <p class="tf-ln-none tf-ln-raw">{session.url}</p>
+              <button class="tf-ln-opt" onclick={() => session.url && void openTheMiss(session.url)}>
+                <span class="tf-ln-nm">Open in browser</span>
+                <span class="tf-ln-s">Open it where it lives.</span>
               </button>
             </div>
           {/if}
@@ -826,7 +824,7 @@
               ondelete={(id) => void session.deleteList(id)}
             />
           {:else}
-            <p class="none">Reading the mirror…</p>
+            <p class="tf-ln-none">Reading the mirror…</p>
           {/if}
         {:else if session.mode === "help"}
           <Help
@@ -837,25 +835,25 @@
             onhover={(index) => (session.selected = index)}
           />
         {:else if session.mode === "actions"}
-          <div class="secl"><span class="lab">Go to</span></div>
+          <div class="tf-ln-h"><span class="tf-ln-lab">Go to</span></div>
           {#each session.rows as row, i (row.id)}
             {#if row.kind === "action"}
               <button
                 id={optionId(i)}
-                class="pfx"
-                class:on={i === session.selected}
+                class="tf-ln-opt"
+                class:tf-ln-on={i === session.selected}
                 role="option"
                 aria-selected={i === session.selected}
                 onclick={() => activate(row)}
                 onmouseenter={() => (session.selected = i)}
               >
-                <span class="nm">{row.action.label}</span>
-                <span class="s">{row.action.detail}</span>
+                <span class="tf-ln-nm">{row.action.label}</span>
+                <span class="tf-ln-s">{row.action.detail}</span>
               </button>
             {/if}
           {/each}
           {#if session.rows.length === 0}
-            <p class="none">No action matches.</p>
+            <p class="tf-ln-none">No action matches.</p>
           {/if}
         {:else if session.response}
           <Results
@@ -869,13 +867,13 @@
             onhover={(index) => (session.selected = index)}
           />
         {:else}
-          <p class="none">Searching…</p>
+          <p class="tf-ln-none">Searching…</p>
         {/if}
       </div>
 
       {#if chain}
         <div
-          class="chain"
+          class="tf-ln-chain"
           role="listbox"
           tabindex="-1"
           aria-label="Actions on the selected result"
@@ -884,169 +882,39 @@
           {#each chain.actions as action, index (action.id)}
             <button
               id={chainOptionId(index)}
-              class="pfx chain-a"
-              class:on={index === chain.selected}
+              class="tf-ln-opt tf-ln-chain-a"
+              class:tf-ln-on={index === chain.selected}
               role="option"
               aria-selected={index === chain.selected}
               onclick={() => action.run()}
               onmouseenter={() => chain && (chain.selected = index)}
             >
-              <span class="nm">{action.label}</span>
+              <span class="tf-ln-nm">{action.label}</span>
             </button>
           {/each}
         </div>
       {/if}
+    {/snippet}
 
-      <div class="search-f">
-        <span><kbd>↑↓</kbd> move</span>
-        <span><kbd>↵</kbd> open</span>
-        <span title="Actions on the selected result"><kbd>Tab</kbd> actions</span>
-        <span><kbd>Esc</kbd> back one step</span>
-        {#if session.canSave}
-          <!--
-            On a query and never on the board: an empty box is the board, and
-            there is nothing there to save. `canSave` is the session's, so the
-            control and the write agree about when there is a query.
-          -->
-          <button class="save" onclick={saveAsList} disabled={session.savedId !== null}>
-            {session.savedId === null ? "Save as list" : "Saved as list"}
-          </button>
-        {/if}
-        <span class="sp"></span>
-        {#if session.response}
-          <span class="faint">{session.response.total} matches · {session.response.took_ms} ms</span>
-        {/if}
-      </div>
-    </div>
-  </div>
+    {#snippet footer()}
+      <span><kbd>↑↓</kbd> move</span>
+      <span><kbd>↵</kbd> open</span>
+      <span title="Actions on the selected result"><kbd>Tab</kbd> actions</span>
+      <span><kbd>Esc</kbd> back one step</span>
+      {#if session.canSave}
+        <!--
+          On a query and never on the board: an empty box is the board, and
+          there is nothing there to save. `canSave` is the session's, so the
+          control and the write agree about when there is a query.
+        -->
+        <button class="tf-btn tf-sm tf-ln-save" onclick={saveAsList} disabled={session.savedId !== null}>
+          {session.savedId === null ? "Save as list" : "Saved as list"}
+        </button>
+      {/if}
+      <span class="tf-spacer"></span>
+      {#if session.response}
+        <span class="tf-ln-took">{session.response.total} matches · {session.response.took_ms} ms</span>
+      {/if}
+    {/snippet}
+  </TfDialog>
 {/if}
-
-<style>
-  /*
-    `.search` — the launcher box (round 3, lines 363-377). `.scrim`, `.dlg` and
-    `kbd` are the shell's and live in `unported.css`; everything the launcher adds
-    is here, which is what the stylesheet's header says should happen.
-  */
-  .search {
-    width: 960px;
-    max-width: 94vw;
-    height: 588px;
-    max-height: 84vh;
-  }
-  .rlist {
-    overflow: auto;
-    flex: 1;
-    min-height: 0;
-  }
-  .search-f {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    height: 26px;
-    padding: 0 12px;
-    border-top: 1px solid var(--hair);
-    background: var(--panel);
-    font: 400 11px var(--mono);
-    color: var(--faint);
-    flex: none;
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  .search-f .sp {
-    flex: 1;
-  }
-  /* *Save as list* — a control in the hint row, so it sits with the other
-     things the box can do rather than over the results it would save. */
-  .save {
-    font: 400 11px var(--mono);
-    color: var(--text);
-    padding: 1px 7px;
-    border: 1px solid var(--hair);
-    border-radius: 3px;
-  }
-  .save:hover:not(:disabled) {
-    border-color: var(--amber);
-    color: var(--amber);
-  }
-  .save:disabled {
-    color: var(--faint);
-    cursor: default;
-  }
-  /* The suggestions sit under the box they complete, one line per value.
-     A suggestion and a chain row are both drawn as `.pfx`, so their own rules
-     name `.pfx` as well (#1414): a single class would lose to `.pfx` below
-     and fall back into its 160 px label column. */
-  .suggest {
-    flex: none;
-    border-bottom: 1px solid var(--hair);
-    background: var(--panel);
-  }
-  .pfx.sug {
-    display: flex;
-    gap: 0;
-    border-bottom: 0;
-  }
-  .sug .s {
-    color: var(--faint);
-    white-space: pre;
-  }
-  /* The chain sits between the results and the footnote: it acts on the row
-     above it, and it is the thing the keyboard is now driving. */
-  .chain {
-    flex: none;
-    border-top: 1px solid var(--hair);
-    background: var(--panel);
-  }
-  .pfx.chain-a {
-    grid-template-columns: 1fr;
-    border-bottom: 0;
-  }
-  .secl {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 24px;
-    padding: 0 12px 0 8px;
-    border-bottom: 1px solid var(--hair);
-    background: var(--panel);
-  }
-  .pfx {
-    display: grid;
-    grid-template-columns: 160px 1fr;
-    gap: 8px;
-    align-items: baseline;
-    width: 100%;
-    text-align: left;
-    padding: 7px 12px;
-    font-size: 12px;
-    color: var(--muted);
-    border-bottom: 1px solid var(--hair);
-  }
-  .pfx:hover,
-  .pfx.on {
-    background: var(--raised);
-    color: var(--text);
-  }
-  .pfx.on {
-    box-shadow: inset 2px 0 0 var(--amber);
-  }
-  .pfx .nm {
-    color: var(--text);
-  }
-  /* The paste that missed: a sentence, the link as it was typed, and the one
-     thing left to do with it. */
-  .miss .raw {
-    padding-top: 0;
-    font: 400 11px var(--mono);
-    word-break: break-all;
-  }
-  .none {
-    padding: 14px 12px;
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 1.5;
-  }
-  .none.err {
-    color: var(--fail);
-  }
-</style>
