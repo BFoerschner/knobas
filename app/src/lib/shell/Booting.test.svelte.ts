@@ -91,3 +91,37 @@ test("no retry button while it is still coming up", () => {
     screen.done();
   }
 });
+
+/**
+ * The design system keeps JetBrains Mono for real code values (#1402): the
+ * raw failure message is one, the sentences around it are not. *Retry* is
+ * the design system's primary button.
+ */
+test("only the raw failure message is set in mono, and Retry is the primary button", () => {
+  const screen = render({ state: "failed", message: "port 50861 is in use" });
+
+  const lines = [...screen.target.querySelectorAll("p")];
+  const message = lines.find((p) => p.textContent === "port 50861 is in use");
+  expect(message?.classList.contains("mono")).toBe(true);
+  const prose = lines.filter((p) => p !== message);
+  expect(prose.map((p) => p.textContent?.trim())).toEqual(["knobas 0.1.0 · profile demo"]);
+  expect(prose.filter((p) => p.classList.contains("mono"))).toEqual([]);
+
+  const retry = screen.target.querySelector("button");
+  expect([...(retry?.classList ?? [])]).toEqual(expect.arrayContaining(["tf-btn", "tf-primary"]));
+  expect(retry?.classList.contains("btn")).toBe(false);
+  screen.done();
+});
+
+test("the sentences while it comes up are prose, not mono", () => {
+  for (const db of [
+    { state: "starting", detail: "first run: downloading and initialising PostgreSQL" } as const,
+    { state: "migrating" } as const,
+  ]) {
+    const screen = render(db);
+    const lines = [...screen.target.querySelectorAll("p")];
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.classList.contains("mono")).toBe(false);
+    screen.done();
+  }
+});
