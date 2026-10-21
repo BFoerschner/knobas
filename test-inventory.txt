@@ -1131,6 +1131,7 @@ knobas-app	test/it	url_resolve::a_confluence_page_opens_from_each_form_confluenc
 knobas-app	test/it	url_resolve::a_different_query_and_an_unknown_host_both_miss
 knobas-app	test/it	url_resolve::a_form_misses_another_page_and_another_instance
 knobas-app	test/it	url_resolve::a_fragment_a_trailing_slash_and_a_shouted_host_still_resolve
+knobas-app	test/it	url_resolve::a_reading_with_no_values_names_nothing
 knobas-app	test/it	url_resolve::a_row_with_no_address_is_unreachable_by_paste
 knobas-app	test/it	url_resolve::a_teamcity_configuration_link_resolves_under_the_configured_host_only
 knobas-app	test/it	url_resolve::a_tombstoned_item_still_resolves_to_its_id
