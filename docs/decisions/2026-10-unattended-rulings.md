@@ -9838,3 +9838,19 @@ unchanged.
   stack, so the history keys and the mouse's back button do nothing while it is open (#1086's rule
   for every dialog), and focus returns to what opened it when it closes. Its own `Esc` ladder still
   runs first and stops the key.
+
+## #1451: the run Overview's *Create ticket* stays deferred (Opus implementer, 2026-10-21)
+
+- **Build R-9.11's *Create ticket* (LOW) now, or keep #853's deferral.** *Ruling:* keep the
+  deferral, the recommended pick; #1451 stays open under `backlog`. Reverses no earlier ruling: it
+  upholds #853's "*Create ticket* (LOW) is not drawn". The triage's third reason is gone, since
+  #1433 merged on 2026-10-21 (ce70c4fb), so Standup's flow is fixed and could be generalised.
+  The other two still hold. The ticket asks for the run and the ticket to be linked, and the
+  shell has no such link: `create_action_item_ticket` and `action_item_ticket` bind the new
+  ticket to a note, and the raw `CreateTicket` op links nothing. A link from a run means a new
+  command and a relation from the run entity (or a migration), which is a frozen-surface touch:
+  a §10.8 entry and Björn's sign-off. Leaving the link out (the run address only in the body)
+  would fail the ticket's own criterion that the run page draws the linked ticket. A LOW item
+  does not justify that cost while higher-priority work is waiting. *Reversing:* low; the
+  ticket's Agent Brief still holds the build plan (generalise Standup's dialog, project picker,
+  run-to-ticket link) for whoever picks it up from `backlog`.
