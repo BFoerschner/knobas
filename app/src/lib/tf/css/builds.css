@@ -139,9 +139,11 @@
 .tf-runs { padding: 0 22px 18px; }
 .tf-runs .tf-run-no { width: 150px; }
 .tf-runs .tf-run-no a { color: inherit; text-decoration: none; margin-right: 6px; }
-.tf-runs .tf-run-br { font-size: var(--t-xs); }
-.tf-runs .tf-run-trig { font-size: var(--t-sm); }
-.tf-runs .tf-run-tests { font-size: var(--t-sm); }
+/* One layout for every day's table (#1452): the widths are the colgroup's, the branch takes what is left, and a long name wraps in its column. */
+.tf-runs .tf-runtbl { table-layout: fixed; }
+.tf-runs .tf-run-br { font-size: var(--t-xs); overflow-wrap: anywhere; }
+.tf-runs .tf-run-trig { width: 140px; font-size: var(--t-sm); overflow-wrap: anywhere; }
+.tf-runs .tf-run-tests { width: 140px; font-size: var(--t-sm); }
 .tf-runs .tf-tests-failed { color: var(--err); font-weight: 600; }
 @media (max-width: 900px) {
   .tf-bv { grid-template-columns: 1fr; height: auto; }

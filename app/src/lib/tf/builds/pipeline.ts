@@ -90,6 +90,11 @@ export function runLanded(rows: readonly RunRow[]): (mark: Mark) => boolean {
   };
 }
 
+/** The sync statuses with `row` in its source's place (#1450): what a `sync:state` event says replaces what was read. */
+export function syncWith(rows: readonly SourceSyncStatus[], row: SourceSyncStatus): SourceSyncStatus[] {
+  return rows.some((r) => r.source_id === row.source_id) ? rows.map((r) => (r.source_id === row.source_id ? row : r)) : [...rows, row];
+}
+
 /** How many runs the history chart draws (R-9.4). */
 export const HISTORY = 30;
 

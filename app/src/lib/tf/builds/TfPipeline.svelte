@@ -69,6 +69,7 @@
     resultWord,
     runLanded,
     staleLine,
+    syncWith,
     tabHash,
     tabOf,
     triggerDetail,
@@ -183,7 +184,7 @@
       .listen(EVENTS.syncState, ({ payload }) => {
         const row = payload as SourceSyncStatus;
         if (dead || row.source_id !== source) return;
-        sync = [...sync.filter((s) => s.source_id !== source), row];
+        sync = syncWith(sync, row);
         if (!row.running) reread(wanted);
       })
       .then((stop) => (dead ? stop() : (off = stop)))
@@ -358,6 +359,19 @@
   );
   const days = $derived(byDay(kept));
 
+  /**
+   * A click anywhere on a run row opens the run (R-9.6, prototype-6's
+   * `tr.row`, #1452); the number stays the keyboard's link. A link or button
+   * in the row does its own, a selection of the row's words is not a click,
+   * and a queued row has no run yet.
+   */
+  function openRow(event: MouseEvent, run: RunRow) {
+    if (isStartedHere(run)) return;
+    if ((event.target as Element | null)?.closest("a, button, input, select, label")) return;
+    if ((window.getSelection()?.toString() ?? "") !== "") return;
+    location.hash = runHash(id, run.entity_id);
+  }
+
   // -- parameters tab --------------------------------------------------------
 
   let editing = $state<string | null>(null);
@@ -497,11 +511,17 @@
     {/if}
     {#each days as day (day.label)}
       <h3 class="tf-dayh">{day.label}</h3>
-      <table class="tf-tbl" aria-label={`Runs, ${day.label}`}>
+      <table class="tf-tbl tf-runtbl" aria-label={`Runs, ${day.label}`}>
+        <!-- One width per column on every day's table, so they line up down the page (#1452). -->
+        <colgroup
+          ><col class="tf-run-no" /><col class="tf-run-br" /><col class="tf-run-trig" /><col class="tf-run-tests" /><col
+            class="tf-run-dur"
+          /><col class="tf-run-at" /><col class="tf-run-acts" /></colgroup
+        >
         <tbody>
           {#each day.runs as run (run.entity_id)}
             {@const tone = runTone(run)}
-            <tr>
+            <tr class:tf-row={!isStartedHere(run)} onclick={(event) => openRow(event, run)}>
               <td class="tf-nowrap tf-run-no">
                 {#if isStartedHere(run)}
                   <b>queued</b>

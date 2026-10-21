@@ -50,6 +50,7 @@
     resultWord,
     runLanded,
     staleLine,
+    syncWith,
     triggerLabel,
   } from "./pipeline";
   import { RUN_BRIDGE, type RunPorts } from "./pipeline-ports";
@@ -215,7 +216,7 @@
       .listen(EVENTS.syncState, ({ payload }) => {
         const row = payload as SourceSyncStatus;
         if (dead || row.source_id !== source) return;
-        sync = [...sync.filter((s) => s.source_id !== source), row];
+        sync = syncWith(sync, row);
         if (!row.running) reread(wanted.pipelineId, wanted.runId);
       })
       .then((stop) => (dead ? stop() : (off = stop)))

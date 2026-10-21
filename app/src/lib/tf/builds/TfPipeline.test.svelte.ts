@@ -533,6 +533,60 @@ test("Run on keeps its queued row through a visit elsewhere, and the queue refus
   expect(toasts.items.at(-1)?.text).toBe("Run of Payout_IntegrationTests was refused: no such branch");
 });
 
+// -- the run rows against prototype-6 (#1452) ------------------------------------
+
+test("a click anywhere on a run row opens the run; its Log link and Run again… do their own", async () => {
+  location.hash = "#/builds";
+  draw();
+  await settle();
+  const row = firstRow() as HTMLTableRowElement;
+  row.querySelector<HTMLElement>(".tf-run-br")!.click();
+  expect(location.hash).toBe("#/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3A1187");
+
+  location.hash = "#/builds";
+  [...row.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Run again…")!.click();
+  await settle();
+  expect(location.hash).toBe("#/builds");
+  expect(target.querySelector('[role="dialog"]')).not.toBeNull();
+});
+
+test("a click on a queued row opens nothing: there is no run yet", async () => {
+  location.hash = "#/builds";
+  markQueued(PIPELINE.entity_id, "run", "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
+  draw();
+  await settle();
+  (firstRow() as HTMLElement).querySelector<HTMLElement>(".tf-run-br")!.click();
+  expect(location.hash).toBe("#/builds");
+  expect(firstRow().classList.contains("tf-row")).toBe(false);
+});
+
+test("the run number stays the keyboard's link to the run", async () => {
+  draw();
+  await settle();
+  const link = firstRow().querySelector<HTMLAnchorElement>(".tf-run-no a")!;
+  expect(link.getAttribute("href")).toBe("#/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3A1187");
+  expect(link.tabIndex).toBe(0);
+});
+
+test("every day's table lays its columns out the same, so they line up down the page", async () => {
+  draw();
+  await settle();
+  const tables = [...target.querySelectorAll<HTMLTableElement>(".tf-runs table")];
+  expect(tables.length).toBeGreaterThanOrEqual(3);
+  const layout = (table: HTMLTableElement) => [table.className, ...[...table.querySelectorAll("colgroup col")].map((col) => col.className)];
+  expect(layout(tables[0]!)).toEqual([
+    "tf-tbl tf-runtbl",
+    "tf-run-no",
+    "tf-run-br",
+    "tf-run-trig",
+    "tf-run-tests",
+    "tf-run-dur",
+    "tf-run-at",
+    "tf-run-acts",
+  ]);
+  for (const table of tables) expect(layout(table)).toEqual(layout(tables[0]!));
+});
+
 /** A select whose default it does not offer, a checkbox, a secret and a plain spec (#1447). */
 const KINDS: PipelineSettings = {
   ...SETTINGS,

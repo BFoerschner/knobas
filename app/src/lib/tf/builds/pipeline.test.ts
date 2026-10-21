@@ -22,6 +22,7 @@ import {
   resultOf,
   runLanded,
   staleLine,
+  syncWith,
   tabHash,
   tabOf,
   triggerDetail,
@@ -297,4 +298,11 @@ test("each newer run holds one queued run, the oldest first", () => {
   const second = mark(5, "main", "teamcity:build:10");
   const landed = runLanded([run(11, "info"), run(10, "ok")]);
   expect([first, second].filter(landed)).toEqual([first]);
+});
+
+test("a sync status heard takes its source's place, or joins the list", () => {
+  const status = (source_id: string, running: boolean) => ({ source_id, running }) as SourceSyncStatus;
+  const rows = [status("teamcity", true), status("gitea", false)];
+  expect(syncWith(rows, status("teamcity", false))).toEqual([status("teamcity", false), status("gitea", false)]);
+  expect(syncWith(rows, status("jira", false))).toEqual([...rows, status("jira", false)]);
 });
