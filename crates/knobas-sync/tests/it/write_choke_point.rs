@@ -26,7 +26,9 @@
 //! 3. **Anything that declares or implements the trait** -- the SPI itself, the
 //!    four adapters, and the sync engine's `Observed` decorator. These *are*
 //!    `Source::write`, or forward it; none of them decides that a write should
-//!    happen.
+//!    happen. An external adapter implements it through the WIT world's
+//!    `GuestAdapter` (ADR-0028): the host's `impl Source` forwards each write
+//!    to the guest's `write`, which the WASM fixture implements (#1407).
 //! 4. **Callers that hand a write op *to* the queue** -- the desktop shell's
 //!    amendment guard builds a `WriteOp` out of what the reader typed and
 //!    passes it to `knobas_sync::write_queue::amend`. That is the queue being
@@ -139,9 +141,14 @@ fn code_only(source: &str) -> String {
 /// A file names the trait rather than merely calling it.
 ///
 /// `impl Source for` covers every adapter and the sync engine's progress
-/// decorator; `trait Source` covers the SPI's own declaration.
+/// decorator; `trait Source` covers the SPI's own declaration; `impl
+/// GuestAdapter for` covers an external adapter's guest, whose `write` the
+/// host's `impl Source` forwards to (ADR-0028, #1407). A guest is a WASM
+/// component and cannot reach a source but through that host.
 fn implements_the_trait(source: &str) -> bool {
-    source.contains("impl Source for") || source.contains("trait Source")
+    source.contains("impl Source for")
+        || source.contains("trait Source")
+        || source.contains("impl GuestAdapter for")
 }
 
 /// Whether `source`, living at `relative`, is a second write path.
@@ -243,6 +250,14 @@ fn the_rule_actually_rejects_a_second_call_site() {
             needle,
         ),
         "an adapter implementing the trait is not a second path"
+    );
+    assert!(
+        !offends(
+            "knobas-wasm-fixture/src/lib.rs",
+            "impl GuestAdapter for Adapter { fn write(&self, op: String) { let _: WriteOp = parse(&op); } }",
+            needle,
+        ),
+        "an external adapter's guest implementing write is the trait, through the host"
     );
     assert!(
         !offends("knobas-search/src/sql.rs", "fn build() {}", needle),

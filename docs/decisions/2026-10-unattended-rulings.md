@@ -8967,6 +8967,17 @@ Ruled 2026-10-21 (delegated by Björn at triage).
 - **Button words, dialog heading and toast.** The button is the label without its ellipsis
   (`actionName`), as the pull request page draws a source action; the dialog's heading is *<action>
   on <item title>*, and the toast *Queued: <action, lower case> on <item title>.* *Reversing:* low.
+- **The write choke-point lint counts an external adapter's guest as implementing the trait**
+  (merge-manager on Opus). *Fork:* the gate's `write_choke_point` scan flagged
+  `knobas-wasm-fixture/src/lib.rs`, whose `write` now parses its op as a `WriteOp`. Parse it as
+  untyped JSON so the file never names the op, or widen the lint. *Ruling:* widened:
+  `implements_the_trait` also accepts `impl GuestAdapter for`, with a rule assertion beside the
+  Jira one. *Reasoning:* the lint's category 3 is "anything that implements the trait": the host's
+  `impl Source` forwards every write to the guest's `write` (ADR-0028), so the guest is
+  `Source::write`, not a second path, and a WASM component cannot reach a source except through
+  that host. Spelling the op as untyped JSON to slip past the scan would trade a compile-time
+  check for a run-time one, which the lint's own file argues against. *Reversing:* low: drop
+  the clause and parse a `serde_json::Value` in the fixture.
 
 ## #1408: the item page draws the shell's breadcrumb (Opus implementer, 2026-10-21)
 
