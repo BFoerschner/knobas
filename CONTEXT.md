@@ -247,7 +247,7 @@ Something a source made because knobas asked, that knobas has no record of. It h
 _Avoid_: orphan, leaked write, ghost ticket
 
 **Inbox**:
-The single actionable stream — mentions, review requests, failed builds, assignments, credential expiry, and from M4 [alerts](#alert) — with actions and snooze.
+The single actionable stream — mentions, review requests, failed builds, assignments, credential expiry, and from M4 [alerts](#alert) — with actions and snooze. (Amended 2026-10-21, #1571: a **failed sign-in** is a seventh category. It is raised for a source whose [credential health](#credential-health) says the sign-in fails until somebody acts, meaning the credential was rejected or none is stored (the shell's `signInFails`). It is raised **once per episode**: an episode is the run of consecutive failing verdicts, and the item is dated at its first one, so a retry rejected again neither moves the item nor undoes a *done*. Any other verdict ends the episode and the item with it, and the next failure is a new episode.)
 _Avoid_: notifications, feed
 
 **Desktop notification**:
