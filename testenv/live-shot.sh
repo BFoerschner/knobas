@@ -117,19 +117,19 @@ cleanup() {
     fi
     if [ -n "$demo_pid" ]; then
         for _ in $(seq 1 20); do kill -0 "$demo_pid" 2>/dev/null || break; sleep 0.5; done
-        local group
-        group=$(ps -o pgid= -p "$demo_pid" 2>/dev/null | tr -d ' ' || true)
-        # Never our own group: that would be this script.
-        [ -z "$group" ] || [ "$group" = "$(ps -o pgid= -p $$ | tr -d ' ')" ] || pkill -TERM -g "$group" 2>/dev/null || true
+        # Started under `set -m`, so its group is its pid; the group outlives a
+        # leader that has exited (the dev server on :1420 is in it).
+        pkill -TERM -g "$demo_pid" 2>/dev/null || true
     fi
+    # What live_session's own EXIT trap runs, which this trap replaced.
     [ -z "$product" ] || { _live_restore; live_lock_release; }
     rm -rf "$scratch"
     rmdir "$LOCK" 2>/dev/null || true
     exit "$status"
 }
 trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'trap - INT; kill -INT $$' INT
+trap 'trap - TERM; kill -TERM $$' TERM
 # desktop-witness-test.sh's refusals run with this: past the lock it stops,
 # so a broken lock cannot start the app inside a gate.
 [ -z "${LIVE_SHOT_DRY_RUN:-}" ] || { say "dry run: the lock is held; not starting knobas"; exit 0; }
@@ -167,9 +167,9 @@ shot() {
 # 10 s as `just shot`'s click: waits, since a view draws after the step that
 # asked for it; the last attempt's complaint is the one printed.
 reach() {
-    local verb=$1 sub=$2 i
+    local verb=$1 sub=$2
     shift 2
-    for i in $(seq 1 20); do
+    for _ in $(seq 1 20); do
         "$ax" "$sub" "$app_pid" "$@" 2>"$scratch/reach.err" && return 0
         sleep 0.5
     done
@@ -179,6 +179,8 @@ reach() {
 press() { ready; reach press press-visible "$@"; }
 focus() { ready; reach focus focus-visible "$@"; }
 click-at() { ready; frontmost; reach click-at click-at "$@"; }
+# Shadows bash's `type` builtin from here on, as the ticket names the command;
+# nothing after this line, nor a steps file, may use the builtin.
 type() { ready; frontmost; "$ax" type "$*" || die "type"; }
 key() {
     [ $# -ge 1 ] || die "usage: key <key> [command|shift|option|control ...]"
@@ -209,9 +211,9 @@ say "knobas is pid $app_pid; waiting for its window"
 "$ax" wait-content "$app_pid" 300 || die "knobas' window stayed blank for 5 minutes; see $out/demo.log"
 "$ax" activate "$app_pid" || die "knobas would not come forward"
 if [ -n "$aerospace" ]; then
-    read -r id _ < <("$ax" window-id "$app_pid")
-    aerospace fullscreen on --window-id "$id" --no-outer-gaps
-    say "AeroSpace: window $id fullscreen"
+    read -r window _ < <("$ax" window-id "$app_pid") || die "AeroSpace: knobas has no window on screen"
+    aerospace fullscreen on --window-id "$window" --no-outer-gaps || die "AeroSpace refused to fullscreen window $window"
+    say "AeroSpace: window $window fullscreen"
 fi
 settle 3
 

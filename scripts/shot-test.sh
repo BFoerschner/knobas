@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# `scripts/shot.sh`'s own test, run by `just witness-unit`, through its dry run
+# `scripts/shot.sh`'s own test, run by `just witness-unit`. Its dry run
 # (SHOT_DRY_RUN=1: each route's URL and image path, no server, no Chrome):
 #
 # - a query switch reaches the URL as `?fake-ipc&<switch>` (bash 5.2+ turned a
 #   `&` replacement into the matched text and dropped every switch, #1396);
 # - two step routes that share their first 120 characters get two images;
 # - run from another directory, the script uses its own checkout;
-# - the pointer steps (hover, dblclick, back, forward) on a fixture page.
+# and then, through scripts/shot-steps.mjs in headless Chrome (skipped where
+# Chrome is not installed), the pointer steps on a fixture page.
 set -euo pipefail
 here=$(dirname "$0")
 shot=$here/shot.sh
@@ -36,6 +37,12 @@ case $elsewhere in *"root=$checkout "*) ;; *) fail "run from /, the root is not 
 # event can, and the `click:` after it misses (exit 1) unless the step worked.
 # `Hovered` stands only while the row is under the pointer, so the hover holds
 # through later steps to the capture. A miss on each new step exits 1 naming it.
+if [ ! -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
+    echo "shot-test: no Chrome at the path shot-steps.mjs starts; the pointer-step cases skipped"
+    if [ "$failures" -gt 0 ]; then echo "shot-test: $failures failure(s)" >&2; exit 1; fi
+    echo "shot-test: ok"
+    exit 0
+fi
 fixture=$(mktemp -d "${TMPDIR:-/tmp}/knobas-shot-steps.XXXXXX")
 server=
 cleanup() { [ -z "$server" ] || kill "$server" 2>/dev/null || true; rm -rf "$fixture"; }

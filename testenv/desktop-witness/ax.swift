@@ -635,6 +635,10 @@ func seconds(_ index: Int) -> Double? {
     index < arguments.count ? Double(arguments[index]) : nil
 }
 
+/// `<subcommand> <pid> <label> [n]`, each number a number.
+let labelled = integer(1) != nil
+    && (arguments.count == 3 || (arguments.count == 4 && integer(3) != nil))
+
 var status: Int32 = 0
 switch arguments.first {
 case "probe" where arguments.count == 1:
@@ -672,15 +676,13 @@ case "type" where arguments.count == 2:
 // combination nobody sets.
 case "key" where arguments.count >= 2 && integer(1) != nil:
     status = key(code: CGKeyCode(integer(1)!), modifiers: Array(arguments.dropFirst(2)))
-// The screenshot driver's (#1483). `[n]` picks the n-th visible match.
-case "press-visible" where (3...4).contains(arguments.count) && integer(1) != nil
-    && (arguments.count == 3 || integer(3) != nil):
+// The screenshot driver's (#1483): `<pid> <label> [n]`, n picking the n-th
+// visible match.
+case "press-visible" where labelled:
     status = pressVisible(pid: pid_t(integer(1)!), label: arguments[2], nth: integer(3))
-case "focus-visible" where (3...4).contains(arguments.count) && integer(1) != nil
-    && (arguments.count == 3 || integer(3) != nil):
+case "focus-visible" where labelled:
     status = focusVisible(pid: pid_t(integer(1)!), label: arguments[2], nth: integer(3))
-case "click-at" where (3...4).contains(arguments.count) && integer(1) != nil
-    && (arguments.count == 3 || integer(3) != nil):
+case "click-at" where labelled:
     status = clickAt(pid: pid_t(integer(1)!), label: arguments[2], nth: integer(3))
 case "window-id" where arguments.count == 2 && integer(1) != nil:
     status = windowID(pid: pid_t(integer(1)!))
