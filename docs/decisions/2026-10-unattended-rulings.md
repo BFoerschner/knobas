@@ -9128,7 +9128,7 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   `Modal`'s × the footer's Cancel is the visible way out. *Reversing:* move the button back into
   the form.
 - **`TfDialog` gets an optional `subtitle`** (the `.tf-dsub` line `TfBlockDialog` and `TfLogAll` draw
-  by hand). *Reasoning:* the ad-hoc dialog's "1 h 30 min on DB config" line has to stay under the
+  by hand; #1425 added the same prop first, and the rebase kept its version). *Reasoning:* the ad-hoc dialog's "1 h 30 min on DB config" line has to stay under the
   title. *Reversing:* drop the prop; the ad-hoc dialog draws the line in its body.
 - **The ad-hoc dialog's open-time focus** lands on *Keep local*, `TfDialog`'s first button, since the
   dialog has no field. *Reasoning:* it is the answer that writes nothing; Enter cannot log by
@@ -9138,3 +9138,7 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   `Modal`'s `center`), and the launcher, link and asset dialogs read the rest. The sheet's header no
   longer lists the two dialogs. Once the write queue is ported (#1425), nothing reads those three
   rules, and that PR or this one, whichever lands second, deletes them.
+  *Merge-manager (Sonnet, 2026-10-21):* #1425 landed first (#1521), so this PR deletes them. A grep of
+  `app/src` found no reader of `.spacer` or `.ghost`, and no `Modal` user passing `center`, so
+  `.spacer`, `.btn.ghost` (two rules) and `.scrim.center` are gone, and `Modal`'s dead `center` prop
+  with them. *Reversing:* restore four lines and one prop.
