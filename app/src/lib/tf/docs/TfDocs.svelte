@@ -202,8 +202,10 @@
     return { reach: rows, titles };
   }
 
+  /** What the job's ticket is read by: the address it was opened at (#1537), else its key. */
+  const jobRef = $derived(job === null ? null : (jobAt ?? job));
   $effect(() => {
-    const key = job;
+    const key = jobRef;
     reach = null;
     if (!ready || key === null) return;
     let live = true;
@@ -484,9 +486,9 @@
     return found?.row.entity_id ?? null;
   }
 
-  async function linkToJob(p: DocPage, key: string): Promise<void> {
+  async function linkToJob(p: DocPage, ref: string, key: string): Promise<void> {
     try {
-      const ticket = await jobTicket(key);
+      const ticket = await jobTicket(ref);
       if (ticket === null) {
         push({ text: `${key} is not in the mirror`, tone: "err" });
         return;
@@ -611,7 +613,7 @@
     // The new page goes under the open one, to its source.
     const under = page;
     try {
-      const ticket = linkToJob && job !== null ? await jobTicket(job) : null;
+      const ticket = linkToJob && jobRef !== null ? await jobTicket(jobRef) : null;
       if (linkToJob && job !== null && ticket === null) {
         // Asked for a link we cannot make: refuse, the dialog stays open (as *Link to <job>* does).
         push({ text: `${job} is not in the mirror`, tone: "err" });
@@ -804,7 +806,8 @@
           {/if}
           {#if job !== null && linkPorts}
             {@const key = job}
-            <button type="button" class="tf-btn tf-sm" onclick={() => linkToJob(p, key)}>Link to {key}</button>
+            {@const ref = jobAt ?? job}
+            <button type="button" class="tf-btn tf-sm" onclick={() => linkToJob(p, ref, key)}>Link to {key}</button>
           {:else if linkPorts}
             <button type="button" class="tf-btn tf-sm" onclick={() => (linking = true)}>Link to…</button>
           {/if}

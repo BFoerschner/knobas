@@ -622,6 +622,23 @@ test("New page with Link it to <job> for a job the mirror lacks is refused, and 
   expect(toasts.items.map((t) => t.text)).toEqual(["PAY-231 is not in the mirror"]);
 });
 
+test("This job and Link to <job> use the ticket the reader opened when two sources hold the key (#1537)", async () => {
+  const links = linkPorts();
+  links.listSources = vi.fn(async () => [{ id: "jira" }, { id: "tidewater" }] as never);
+  links.getEntity = vi.fn(async (id: string) => ({ row: { entity_id: id, kind: "ticket", title: id } }) as never);
+  const io = ports({ jobReach: vi.fn(async () => REACH), docsPage: vi.fn(async () => RICH), docsCreatePage: vi.fn(async () => ({}) as never) });
+  view = mount(TfDocs, {
+    target,
+    props: { ready: true, rest: ["confluence:2"], job: "PAY-231", jobAt: "tidewater:PAY-231", ports: io, linkPorts: links as never },
+  });
+  await settle();
+  expect(io.jobReach).toHaveBeenCalledWith("tidewater:PAY-231");
+  expect(io.jobReach).not.toHaveBeenCalledWith("jira:PAY-231");
+  button("Link to PAY-231")!.click();
+  await settle();
+  expect(links.createLink).toHaveBeenCalledWith("confluence:2", "tidewater:PAY-231", "documents");
+});
+
 test("the choice is kept for the session, and without a job there is no switch", async () => {
   await drawJob(["confluence:2"]);
   scope()[0]!.click();

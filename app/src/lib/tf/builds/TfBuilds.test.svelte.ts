@@ -4,11 +4,23 @@
  * source's word in one header line only.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
 import { forgetFilters } from "../filter/filter-state.svelte";
+import * as entityIpc from "../../ipc/entity";
 import TfBuilds, { forgetFolds, type BuildsPorts } from "./TfBuilds.svelte";
+
+// Only the default *This job* read (#1537) reaches these; the other tests pass `ports.jobPipelines`.
+vi.mock("../../ipc/sources", async (original) => ({
+  ...(await original<typeof import("../../ipc/sources")>()),
+  listSources: vi.fn(async () => [{ id: "jira" }, { id: "tidewater" }]),
+}));
+vi.mock("../../ipc/entity", async (original) => ({
+  ...(await original<typeof import("../../ipc/entity")>()),
+  getEntity: vi.fn(async (id: string) => ({ row: { entity_id: id, kind: "ticket", title: id } })),
+  jobPipelines: vi.fn(async () => []),
+}));
 
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
@@ -355,4 +367,21 @@ test("Builds draws every pipeline the read answers and drops none by the source 
 
   expect(names()).toHaveLength(LIST.length + 1);
   expect(names()).toContain("Rocket_Build");
+});
+
+test("This job reads the pipelines of the ticket the reader opened, not the first source's same key (#1537)", async () => {
+  page = mount(TfBuilds, {
+    target,
+    props: {
+      ready: true,
+      head: "builds",
+      rest: [],
+      job: "PAY-231",
+      jobAt: "tidewater:PAY-231",
+      ports: { pipelines: () => Promise.resolve(LIST), runs: () => Promise.resolve([]) },
+    },
+  });
+  await settle();
+  expect(entityIpc.jobPipelines).toHaveBeenCalledWith("tidewater:PAY-231");
+  expect(entityIpc.jobPipelines).not.toHaveBeenCalledWith("jira:PAY-231");
 });

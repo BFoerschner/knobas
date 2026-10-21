@@ -10250,3 +10250,12 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   shows. The wizard mounts the same `TfAddSource`, so it gets the fix too. The adapter and the
   report's `discovered` are untouched: no live run owed. *Reversing:* low, one helper and one
   state variable.
+
+## #1537: Builds' and Docs' job scope resolve the bare key (Sonnet implementer, 2026-10-21)
+
+- **What the reads take, and what the screen keeps showing.** *Ruling:* both components read the job
+  by `jobAt ?? job` (a derived `jobRef`) for *This job*, Docs' `job_reach`, *Link to <job>* and the
+  New page dialog's *Link it to <job>*; the chip text, button labels and the toast still say the bare
+  `job` key. *Reasoning:* `resolveTicket` reads an entity id as itself, so no resolver changes; the
+  New page link is the same lookup and would otherwise still link the first source's ticket. The
+  stale-answer guards compare against `jobRef`. *Reversing:* low, two derived values.
