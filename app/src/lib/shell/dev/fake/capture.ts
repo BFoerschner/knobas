@@ -2,6 +2,7 @@
  * `?fake-ipc`: The capture window (#503): its shortcut and the context it attaches.
  * `seed` reads the stored shortcut from the query.
  */
+import { keyCaps } from "../../../tf/settings/notes";
 import type { Handler } from "../fake-tauri";
 
 /**
@@ -41,13 +42,20 @@ export function fakeNotesAreShown(): boolean {
   return fakeNotesShown;
 }
 
+/**
+ * What the registrar would say: a string its parser refuses (the same grammar
+ * `keyCaps` draws, #1467), or `?fake-shortcut-refused`'s taken combination.
+ */
+function fakeRefusal(): string | null {
+  if (fakeShortcutStored === null || !fakeNotesShown) return null;
+  if (keyCaps(fakeShortcutStored).length === 0) return `Couldn't recognize "${fakeShortcutStored}" as a valid hotkey`;
+  return fakeShortcutRefused ? `${fakeShortcutStored} is registered by another application` : null;
+}
+
 function fakeShortcut() {
   return {
     accelerator: fakeShortcutStored,
-    refusal:
-      fakeShortcutStored !== null && fakeNotesShown && fakeShortcutRefused
-        ? `${fakeShortcutStored} is registered by another application`
-        : null,
+    refusal: fakeRefusal(),
     shown: fakeNotesShown,
     // Prototype-6's count (#832): 37 notes, the last from 12 August.
     note_count: 37,

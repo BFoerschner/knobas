@@ -117,6 +117,8 @@
   let editing = $state(false);
   let draft = $state("");
   let saveError = $state<string | null>(null);
+  /** `saveError` is a failed write, not the registrar's refusal of a stored one. */
+  let saveFailed = $state(false);
   let saving = $state(false);
   /** What Save sends: the field without its surrounding spaces. */
   const typed = $derived(draft.trim());
@@ -124,6 +126,7 @@
   function openShortcut() {
     draft = view?.accelerator ?? "";
     saveError = null;
+    saveFailed = false;
     editing = true;
   }
 
@@ -135,11 +138,16 @@
   async function saveShortcut(accelerator: string | null) {
     saving = true;
     saveError = null;
+    saveFailed = false;
     try {
       view = await ports.setCaptureShortcut(accelerator);
-      editing = false;
+      // A refused combination is stored (#503, #1086) and the dialog says why
+      // (#1467): it closes only on a clean registration.
+      if (view.refusal) saveError = view.refusal;
+      else editing = false;
     } catch (cause) {
       saveError = ipcErrorMessage(cause);
+      saveFailed = true;
     } finally {
       saving = false;
     }
@@ -150,6 +158,7 @@
   const help = $derived.by(() => {
     if (!shown) return "Inactive while notes are hidden.";
     if (view?.refusal) return `Not registered: ${view.refusal}`;
+    if (view?.accelerator == null) return "No key is set. Change… to choose one.";
     return "Opens a small window over whatever you are doing.";
   });
 </script>
@@ -184,6 +193,8 @@
     <div class="tf-stg-c">
       {#if view.accelerator === null}
         <span>Not set</span>
+      {:else if keyCaps(view.accelerator).length === 0}
+        <span>Not registered</span>
       {:else}
         {#each keyCaps(view.accelerator) as cap, index (index)}<kbd>{cap}</kbd>{/each}
       {/if}
@@ -221,7 +232,7 @@
           disabled={saving}
         />
       </div>
-      {#if saveError !== null}<p class="tf-fail">Could not save the shortcut: {saveError}</p>{/if}
+      {#if saveError !== null}<p class="tf-fail">{saveFailed ? `Could not save the shortcut: ${saveError}` : `Not registered: ${saveError}`}</p>{/if}
     {/snippet}
     {#snippet footer()}
       <button class="tf-btn" onclick={() => (editing = false)}>Cancel</button>
