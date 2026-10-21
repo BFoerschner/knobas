@@ -188,11 +188,13 @@
     }
   }
 
-  // The end of the list in view asks for the next page (R-9.5).
-  let sentinel: HTMLElement | undefined = $state();
+  // The end of the list in view asks for the next page (R-9.5). Svelte 5 sets a
+  // `bind:this` to `null`, not `undefined`, when the element goes (another tab),
+  // and `observe(null)` threw and stopped every later effect in the window (#1446).
+  let sentinel: HTMLElement | null | undefined = $state();
   $effect(() => {
     const at = sentinel;
-    if (at === undefined || typeof IntersectionObserver === "undefined") return;
+    if (at == null || typeof IntersectionObserver === "undefined") return;
     const watcher = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting) && olderFailed === null) void more();
     });

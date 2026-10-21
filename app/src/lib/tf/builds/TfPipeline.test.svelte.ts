@@ -138,6 +138,8 @@ interface Drawn {
   pinned: number;
   writes: WriteOpPayload[];
   olderAsked: string[];
+  /** Move the page to another address under the pipeline, as a tab click does. */
+  go: (rest: string[]) => void;
 }
 
 function draw(
@@ -146,7 +148,7 @@ function draw(
   overrides: Partial<PipelinePorts> = {},
   older: RunRow[][] = [[run(1150, "ok", daysAgo(9, 9))], []],
 ): Drawn {
-  const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [] };
+  const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [], go: () => {} };
   const ports: PipelinePorts = {
     older: (_id, before) => {
       drawn.olderAsked.push(before);
@@ -169,10 +171,12 @@ function draw(
     runParameters: () => Promise.resolve([]),
     ...overrides,
   };
-  page = mount(TfPipeline, {
-    target,
-    props: { pipeline: PIPELINE, rest, job, runs: () => Promise.resolve(RUNS), onpin: () => (drawn.pinned += 1), ports },
-  });
+  const props = $state({ pipeline: PIPELINE, rest, job, runs: () => Promise.resolve(RUNS), onpin: () => (drawn.pinned += 1), ports });
+  drawn.go = (next) => {
+    props.rest = next;
+    flushSync();
+  };
+  page = mount(TfPipeline, { target, props });
   return drawn;
 }
 
@@ -319,6 +323,18 @@ test("Run on queues one run on that branch and draws it queued at once, never as
   expect(first.querySelector(".tf-run-no")?.textContent).toContain("queued");
   expect(first.textContent).toContain("waiting");
   expect(first.textContent).toContain("feature/PAY-231-sepa-retry");
+});
+
+test("leaving Runs once its runs are drawn neither throws nor stops the page (#1446)", async () => {
+  const drawn = draw();
+  await settle();
+  expect(target.querySelector(".tf-older")).not.toBeNull();
+  drawn.go([PIPELINE.entity_id, "params"]);
+  await settle();
+  expect(target.querySelector("table[aria-label='Parameters']")).not.toBeNull();
+  drawn.go([PIPELINE.entity_id]);
+  await settle();
+  expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs");
 });
 
 test("Parameters: each default with its kind; Change… queues the new default against the old one; a secret is never drawn", async () => {
