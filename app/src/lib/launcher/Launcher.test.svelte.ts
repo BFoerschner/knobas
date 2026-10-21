@@ -1598,7 +1598,11 @@ test("a pasted link the mirror does not hold offers the browser instead", async 
   // button hands over: the raw one, not the normalised one the resolver used.
   await search(`${PASTED}#comment-42`);
 
-  expect(target.textContent).toContain("Not in the mirror");
+  // The address as pasted is what missed, not the page (#1475): the source
+  // may serve it under a form this adapter does not declare.
+  expect(target.querySelector(".tf-ln-miss")?.textContent).toContain(
+    "Not in the mirror as this address; it may be stored under another form.",
+  );
   // The mirror's own word, and not a synonym `CONTEXT.md`'s **Mirror** entry
   // says to avoid. The whole overlay now, not just the panel: #518 took the
   // forbidden word off the footnote, the empty-result line and the reading

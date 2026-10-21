@@ -1126,7 +1126,9 @@ knobas-app	test/it	uncommitted_diff::an_untracked_file_is_listed_by_path_and_is_
 knobas-app	test/it	uncommitted_diff::no_git_on_the_path_says_so
 knobas-app	test/it	uncommitted_diff::no_prefix_does_not_cost_a_directory_called_b
 knobas-app	test/it	uncommitted_diff::the_read_leaves_the_index_and_the_refs_as_they_were
+knobas-app	test/it	url_resolve::a_confluence_page_opens_from_each_form_confluence_serves_it_under
 knobas-app	test/it	url_resolve::a_different_query_and_an_unknown_host_both_miss
+knobas-app	test/it	url_resolve::a_form_misses_another_page_and_another_instance
 knobas-app	test/it	url_resolve::a_fragment_a_trailing_slash_and_a_shouted_host_still_resolve
 knobas-app	test/it	url_resolve::a_row_with_no_address_is_unreachable_by_paste
 knobas-app	test/it	url_resolve::a_teamcity_configuration_link_resolves_under_the_configured_host_only
@@ -1137,6 +1139,7 @@ knobas-app	test/it	url_resolve::something_that_is_not_a_web_url_is_refused_rathe
 knobas-app	test/it	url_resolve::the_index_holds_only_the_rows_that_carry_an_address
 knobas-app	test/it	url_resolve::the_migration_carries_the_macros_expression_verbatim
 knobas-app	test/it	url_resolve::the_resolvers_statement_reaches_the_expression_index
+knobas-app	test/it	url_resolve::the_stored_address_wins_over_a_form
 knobas-app	test/it	url_resolve::two_jira_instances_resolve_their_own_items_only
 knobas-app	test/it	week_ipc::a_block_through_midnight_is_booked_on_monday_and_covers_tuesdays_small_hours
 knobas-app	test/it	week_ipc::a_cell_counts_pending_as_logged_held_as_held_and_a_guess_as_neither
@@ -2265,6 +2268,13 @@ knobas-source	lib/knobas_source	tests::spi_types_round_trip_in_both_directions
 knobas-source	lib/knobas_source	tests::the_create_target_is_not_a_monitor_id
 knobas-source	lib/knobas_source	tests::the_interval_floor_round_trips_and_defaults_to_sixty_seconds
 knobas-source	lib/knobas_source	tests::write_op_round_trips
+knobas-source	lib/knobas_source	url_forms::tests::a_base_with_a_context_path_is_kept_whole
+knobas-source	lib/knobas_source	url_forms::tests::a_malformed_declaration_reads_as_nothing_and_is_refused
+knobas-source	lib/knobas_source	url_forms::tests::a_query_form_reads_its_value_and_its_base
+knobas-source	lib/knobas_source	url_forms::tests::a_segment_is_form_decoded
+knobas-source	lib/knobas_source	url_forms::tests::another_shape_reads_as_nothing
+knobas-source	lib/knobas_source	url_forms::tests::more_query_a_fragment_or_a_trailing_slash_still_read
+knobas-source	lib/knobas_source	url_forms::tests::the_rest_is_compared_as_written
 knobas-source	lib/knobas_source	view::tests::a_tree_and_a_file_have_the_wire_shape_the_shell_reads
 knobas-source	lib/knobas_source	view::tests::every_block_round_trips
 knobas-source	lib/knobas_source	view::tests::the_wire_shape_is_a_union_on_type
@@ -2321,7 +2331,9 @@ knobas-source-confluence	lib/knobas_source_confluence	cursor::tests::the_next_qu
 knobas-source-confluence	lib/knobas_source_confluence	cursor::tests::the_same_window_encodes_to_the_same_bytes_in_any_arrival_order
 knobas-source-confluence	lib/knobas_source_confluence	descriptor::tests::a_full_sync_is_the_whole_corpus_of_the_configured_scope
 knobas-source-confluence	lib/knobas_source_confluence	descriptor::tests::a_page_declares_its_ancestors_as_parent_by_title
+knobas-source-confluence	lib/knobas_source_confluence	descriptor::tests::a_page_is_named_by_its_id_its_space_and_title_and_its_tiny_link
 knobas-source-confluence	lib/knobas_source_confluence	descriptor::tests::a_space_is_this_sources_project_and_the_declaration_says_where
+knobas-source-confluence	lib/knobas_source_confluence	descriptor::tests::another_pages_address_does_not_name_this_one
 knobas-source-confluence	lib/knobas_source_confluence	descriptor::tests::the_facts_confluence_does_not_have_are_declared_nowhere
 knobas-source-confluence	lib/knobas_source_confluence	descriptor::tests::the_full_sync_claim_rests_on_a_query_with_no_time_bound
 knobas-source-confluence	lib/knobas_source_confluence	descriptor::tests::the_schema_and_the_config_struct_agree

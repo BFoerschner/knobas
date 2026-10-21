@@ -34,8 +34,34 @@ function resolveUrl(args: Record<string, unknown>) {
     return parsed.href.replace(/\/$/, "");
   };
   const wanted = key(url);
-  const found = CORPUS.find((entry) => entry.web_url !== null && key(entry.web_url) === wanted);
+  const found =
+    CORPUS.find((entry) => entry.web_url !== null && key(entry.web_url) === wanted) ??
+    CORPUS.find((entry) => byForm(entry, wanted));
   return found ? { entity_id: found.entity_id, kind: found.kind } : null;
+}
+
+/** Where the fixture's Confluence serves its pages: `docs.ts`'s host. */
+const CONFLUENCE = "http://127.0.0.1:5399/confluence";
+
+/**
+ * The forms the Confluence descriptor declares (#1475), for this corpus's
+ * pages: `viewpage.action?pageId=<key>` and `/display/<space>/<title>`. Not
+ * the declaration itself, which is Rust and read by a SQL statement; what a QA
+ * walk needs is a page that opens from an address it is not stored under.
+ */
+function byForm(entry: (typeof CORPUS)[number], wanted: string): boolean {
+  if (entry.kind !== "page" || !wanted.startsWith(`${CONFLUENCE}/`)) return false;
+  const rest = wanted.slice(CONFLUENCE.length);
+  const id = /^\/pages\/viewpage\.action\?pageId=([^&]+)/.exec(rest)?.[1];
+  if (id !== undefined) return entry.entity_id === `confluence:${id}`;
+  const display = /^\/display\/([^/?]+)\/([^/?]+)$/.exec(rest);
+  if (!display) return false;
+  try {
+    const decoded = (text: string) => decodeURIComponent(text.replace(/\+/g, " "));
+    return entry.payload["space"] === decoded(display[1]!) && entry.title === decoded(display[2]!);
+  } catch {
+    return false; // a malformed escape is a miss, as the Rust reading's is
+  }
 }
 
 /**

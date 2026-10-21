@@ -799,7 +799,11 @@
             <p class="tf-ln-none">Looking up the link…</p>
           {:else}
             <div class="tf-ln-miss">
-              <p class="tf-ln-none">Not in the mirror</p>
+              <!--
+                The address missed, not necessarily the item (#1475): a source
+                serves a page under more forms than its adapter may declare.
+              -->
+              <p class="tf-ln-none">Not in the mirror as this address; it may be stored under another form.</p>
               <p class="tf-ln-none tf-ln-raw">{session.url}</p>
               <button class="tf-ln-opt" onclick={() => session.url && void openTheMiss(session.url)}>
                 <span class="tf-ln-nm">Open in browser</span>
