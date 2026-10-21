@@ -76,7 +76,7 @@ seedNote(
     "The retry window in [[mock:PAY-231]] has to be idempotent before the scheduler goes back on.",
     "",
     "- jittered backoff, capped at 6 attempts",
-    "- the 409 from the second bank is [[mock:PAY-228]]'s idempotency key",
+    "- the 409 from the second bank: [[mock:PAY-228]] fixes it",
     "- ask about [[mock:PAY-999]] on Monday",
   ].join("\n"),
   [
