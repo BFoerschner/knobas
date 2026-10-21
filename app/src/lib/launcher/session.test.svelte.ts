@@ -511,3 +511,54 @@ test("a parents-only read keeps the opening's ticket-key values (#811)", async (
   expect(session.suggestions?.fields).toEqual(fields);
   expect(session.suggestions?.parents).toEqual([{ name: "PAY-200", kind: "ticket" }]);
 });
+
+/**
+ * *Save as list* is offered only on a query the backend can save (#1413).
+ *
+ * An opened list and a `t ` query both answer as results, and the backend
+ * refuses to save either; a search that failed has no answer at all. The gate
+ * reads the backend's own `interpreted.prefix` (ruling P2), so the test hands
+ * it responses carrying each prefix.
+ */
+test("Save as list waits for an answer and is never offered on a list or a time query", async () => {
+  let prefix: "list" | "time" | null = null;
+  let fail = false;
+  const session = new Session({
+    ...ports(async (q) => {
+      if (fail) throw new Error("the engine is down");
+      const response = answer(q.raw);
+      return { ...response, interpreted: { ...response.interpreted, prefix } };
+    }),
+    createSmartList: async () => {
+      throw new Error("not called");
+    },
+  });
+
+  // Typed, and nothing has answered yet.
+  session.type("payments");
+  expect(session.canSave).toBe(false);
+  await vi.advanceTimersByTimeAsync(200);
+  expect(session.canSave).toBe(true);
+
+  prefix = "list";
+  session.type("list:not-monitored");
+  await vi.advanceTimersByTimeAsync(200);
+  expect(session.response?.interpreted.prefix).toBe("list");
+  expect(session.canSave).toBe(false);
+
+  prefix = "time";
+  session.type("t today");
+  await vi.advanceTimersByTimeAsync(200);
+  expect(session.response?.interpreted.prefix).toBe("time");
+  expect(session.canSave).toBe(false);
+
+  // A failed search leaves an error line and no answer under it.
+  prefix = null;
+  fail = true;
+  session.type("payments");
+  await vi.advanceTimersByTimeAsync(200);
+  expect(session.error).not.toBeNull();
+  expect(session.canSave).toBe(false);
+
+  session.dispose();
+});

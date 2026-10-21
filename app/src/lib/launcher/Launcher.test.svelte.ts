@@ -1819,6 +1819,56 @@ test("save as list is off the palette and the help card", async () => {
 });
 
 /**
+ * The control is off the two queries that answer as results and that the
+ * backend still refuses to save, and off a search that failed (#1413).
+ *
+ * An opened list (`list:`) would be a list of a list, `t ` is a worklog query
+ * and not a search, and a failed search leaves an error line with no answer
+ * under it. All three read as *results* to the mode helper, so the gate is the
+ * backend's `interpreted.prefix` and the presence of an answer. The plain
+ * query at the end is the positive control: without it a launcher that never
+ * drew the control would pass.
+ */
+test("save as list is off an opened list, a time query and a failed search", async () => {
+  const created = vi.fn(async () => SAVED_HOME.smart_lists[1]!);
+  const cases = [
+    { raw: "list:not-monitored", prefix: "list" as const, fails: false },
+    { raw: "t today", prefix: "time" as const, fails: false },
+    { raw: "sepa retries", prefix: null, fails: true },
+  ];
+  for (const { raw, prefix, fails } of cases) {
+    open({
+      ports: {
+        launcherHome: async () => SAVED_HOME,
+        search: async () => {
+          if (fails) throw { code: "internal", message: "the engine is down" };
+          return response({ interpreted: { ...response().interpreted, prefix } });
+        },
+        createSmartList: created,
+      },
+    });
+    await settle();
+    await search(raw);
+    if (fails) expect(target.textContent).toContain("the engine is down");
+    expect(target.querySelector("button.save"), `${raw} cannot be saved`).toBeNull();
+    if (app) unmount(app);
+    app = undefined;
+  }
+  expect(created).not.toHaveBeenCalled();
+
+  open({
+    ports: {
+      launcherHome: async () => SAVED_HOME,
+      search: async () => response(),
+      createSmartList: created,
+    },
+  });
+  await settle();
+  await search("sepa retries");
+  expect(target.querySelector("button.save")?.textContent?.trim()).toBe("Save as list");
+});
+
+/**
  * Renaming: Enter commits the field, Escape abandons it — and Escape does not
  * reach the launcher's own ladder while the field is open.
  *
