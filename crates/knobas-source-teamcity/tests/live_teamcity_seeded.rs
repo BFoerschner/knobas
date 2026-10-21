@@ -552,7 +552,12 @@ impl Seeded {
     /// it recorded (a configuration id is `<project>_<name>`, the seed's own
     /// `project_of`), and the chain's.
     fn owned_projects(&self) -> std::collections::BTreeSet<String> {
-        let mut configs: Vec<&str> = self.seed.builds.iter().map(|b| b.build_type.as_str()).collect();
+        let mut configs: Vec<&str> = self
+            .seed
+            .builds
+            .iter()
+            .map(|b| b.build_type.as_str())
+            .collect();
         configs.extend(self.seed.settings.iter().map(|s| s.build_type.as_str()));
         configs.extend(self.seed.changes.iter().map(|c| c.build_type.as_str()));
         let mut owned: std::collections::BTreeSet<String> = configs
@@ -615,9 +620,7 @@ impl Seeded {
                 response.text().await.unwrap_or_default()
             );
         }
-        let (status, body) = self
-            .get("app/rest/projects?fields=project(id)")
-            .await;
+        let (status, body) = self.get("app/rest/projects?fields=project(id)").await;
         assert_eq!(status, 200, "{body}");
         let mut now: Vec<&str> = body["project"]
             .as_array()
@@ -3318,7 +3321,11 @@ async fn a_project_the_seed_does_not_own_is_deleted_by_the_cleanup() {
     )
     .await
     .expect("create a configuration in the stray");
-    assert!(r.status().is_success(), "create the configuration: {}", r.status());
+    assert!(
+        r.status().is_success(),
+        "create the configuration: {}",
+        r.status()
+    );
 
     seeded.clear_leftovers().await;
 
