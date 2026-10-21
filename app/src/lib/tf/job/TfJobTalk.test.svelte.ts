@@ -10,7 +10,9 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { EntityDetail, LinkEntry, SuggestionEntry, Thread } from "../../ipc/entity";
 import type { WriteOpPayload } from "../../ipc/sources";
+import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
+import { forgetQueued } from "../queued.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import { page as codeRowPage } from "../code-row/page";
 import { createLayers, type Layers } from "../layers.svelte";
@@ -42,7 +44,9 @@ beforeEach(() => {
   document.body.appendChild(target);
 });
 
+/** What a page queued is held for the session (#1424), and each test is one. */
 afterEach(() => {
+  forgetQueued();
   if (job) unmount(job);
   job = null;
   target.remove();
@@ -196,7 +200,7 @@ function ports(over: Partial<JobPorts> = {}): JobPorts {
   };
 }
 
-function open(tab: string | null = null, over: { ports?: JobPorts; layers?: Layers } = {}) {
+function open(tab: string | null = null, over: { ports?: JobPorts; layers?: Layers; follower?: WriteFollower } = {}) {
   job = mount(TfJob, {
     target,
     props: {
@@ -208,6 +212,7 @@ function open(tab: string | null = null, over: { ports?: JobPorts; layers?: Laye
       onstarttimer: () => {},
       ports: over.ports ?? ports(),
       today: () => new Date(2026, 9, 15, 14, 0),
+      ...(over.follower ? { follower: over.follower } : {}),
     },
   });
   flushSync();
@@ -374,6 +379,77 @@ test("Comment queues a Comment write and clears the box; a refused one keeps the
   [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")][0]!.click();
   await settle();
   expect(again.value).toBe("kept");
+});
+
+// ---- a queued comment is drawn at once (#1424) ----
+
+/** The queued comments at the end of the thread, as read. */
+function queuedShown(): string[] {
+  return [...target.querySelectorAll(".tf-convo .tf-msg.tf-queued")].map((m) => squash(m));
+}
+
+async function comment(words: string) {
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
+  box.value = words;
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!.click();
+  await settle();
+}
+
+test("a sent comment is drawn at the end of the thread marked queued, and goes once the conversation holds it", async () => {
+  open("conversation");
+  await settle();
+  await comment("Looking at the jitter now");
+  expect(queuedShown()).toEqual(["ML Youqueued Looking at the jitter now"]);
+  expect(target.querySelector(".tf-convo .tf-msg.tf-queued + .tf-compose, .tf-convo .tf-msg.tf-queued ~ .tf-compose")).not.toBeNull();
+
+  // Opened again before the sync: still on its way.
+  unmount(job!);
+  open("conversation");
+  await settle();
+  expect(queuedShown()).toEqual(["ML Youqueued Looking at the jitter now"]);
+
+  // The sync brought it back.
+  unmount(job!);
+  const synced = thread();
+  synced.comments.push({ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter\nnow", mine: true, mentions_me: false });
+  open("conversation", { ports: ports({ entityThread: () => Promise.resolve(synced) }) });
+  await settle();
+  expect(queuedShown()).toEqual([]);
+  expect(messages().at(-1)).toBe("Looking at the jitter now");
+});
+
+test("a comment the queue holds drops its echo and toasts; Edit and resend puts the words back in the box", async () => {
+  const hears = new Map<number, Hear>();
+  const follower: WriteFollower = {
+    follow(id, hear) {
+      hears.set(id, hear);
+      return () => hears.delete(id);
+    },
+  };
+  const numbered = ports({
+    submitWrite: (payload) => {
+      calls.writes.push(payload);
+      return Promise.resolve({ id: 77 } as never);
+    },
+  });
+  open("conversation", { ports: numbered, follower });
+  await settle();
+  await comment("Looking at the jitter now");
+  expect(queuedShown()).toHaveLength(1);
+
+  hears.get(77)!({ id: 77, state: "held", detail: "Jira sign-in is failing" } as never);
+  flushSync();
+  expect(queuedShown()).toEqual([]);
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("Comment on PAY-231 was held: Jira sign-in is failing");
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
+  expect(box.value).toBe("");
+  toast.more!.find((action) => action.label === "Edit and resend")!.run();
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231/conversation");
+  expect(box.value).toBe("Looking at the jitter now");
 });
 
 // ---- the Connections drawer (R-4.3, R-6.1, R-6.2) ----

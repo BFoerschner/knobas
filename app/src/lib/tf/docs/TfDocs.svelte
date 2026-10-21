@@ -29,6 +29,14 @@
   space picker hides, and the search is kept to those pages with *Search all
   pages*. Off by default; the job's Pages section opens Docs with it on, and
   the choice is kept for the session (`sessionFilter("docs")`).
+
+  **What Docs queued is drawn at once** (#1424, `tf/queued.svelte.ts`): a saved
+  section's text in place of the old until the page's version moves, a comment
+  at the end of the list until the page holds its words, a new page as a muted
+  row with no link under its parent until the tree holds its title. Each write
+  is followed: held or refused, the echo goes and a toast offers *Edit and
+  resend*, which opens the section editor, the composer or *New page* again
+  with what was typed.
 -->
 <script lang="ts">
   import { tick, untrack } from "svelte";
@@ -51,6 +59,7 @@
     type Reached,
   } from "../../ipc/entity";
   import { drawn } from "../../detail/relations";
+  import { writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
@@ -59,6 +68,7 @@
   import { resolveTicket } from "../job/job";
   import TfLinkTo from "../job/TfLinkTo.svelte";
   import type { JobPorts } from "../job/ports";
+  import { askAgain, markQueued, queuedMarks, sameWords, settleQueued, takeAgain } from "../queued.svelte";
   import { jobHash } from "../route";
   import { initials, when } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
@@ -71,6 +81,7 @@
   import {
     copyLinkText,
     LINK_RELATION,
+    blockWords,
     firstPage,
     firstName,
     forYouWhy,
@@ -83,6 +94,7 @@
     reachedPages,
     readingMinutes,
     scopeName,
+    sectionKind,
     sectionsOf,
     spaceId,
     spaceLabel,
@@ -116,6 +128,7 @@
     ports,
     linkPorts,
     layers = sharedLayers,
+    follower = writeFollower(),
   }: {
     ready: boolean;
     /** What follows the address's first segment. */
@@ -127,6 +140,8 @@
     ports?: DocsPorts;
     linkPorts?: LinkPorts;
     layers?: Layers;
+    /** Follows each queued edit, comment and page, so one held or refused drops its echo (#1424). */
+    follower?: WriteFollower;
   } = $props();
 
   const io: DocsPorts = $derived(
@@ -219,8 +234,10 @@
 
   async function readTree() {
     try {
-      tree = await io.docsTree();
+      const read = await io.docsTree();
+      tree = read;
       treeError = null;
+      settlePages(read);
     } catch (cause) {
       treeError = ipcErrorMessage(cause);
     }
@@ -411,7 +428,7 @@
 
   // ---- actions ----
   let linking = $state(false);
-  let newPage = $state<{ space: string | null; parent: string | null } | null>(null);
+  let newPage = $state<{ space: string | null; parent: string | null; title?: string; text?: string } | null>(null);
   let comment = $state("");
   let commenting = $state(false);
   let composer = $state<HTMLTextAreaElement | null>(null);
@@ -475,14 +492,77 @@
     }
   }
 
+  // ---- what this page queued (#1424) ----
+
+  /** A tree read drops each queued page it holds: a page of that title under that parent. */
+  function settlePages(read: DocsTree): void {
+    const under = new Map<string, Set<string>>();
+    for (const node of read.spaces.flatMap((s) => s.pages)) {
+      if (node.parent === null) continue;
+      under.set(node.parent, (under.get(node.parent) ?? new Set()).add(node.title.trim()));
+    }
+    for (const [parent, titles] of under) settleQueued(parent, (mark) => mark.kind === "page" && titles.has(mark.text.trim()));
+  }
+
+  // A page read drops a section edit once the version moved, and a comment it holds.
+  $effect(() => {
+    const p = page;
+    if (p === null) return;
+    const version = String(p.version);
+    const said = p.comments.map((c) => c.blocks.map(blockWords).join(" "));
+    untrack(() =>
+      settleQueued(
+        p.entity_id,
+        (mark) =>
+          (mark.kind.startsWith("section ") && mark.base !== version) ||
+          (mark.kind === "comment" && said.some((words) => sameWords(words, mark.text))),
+      ),
+    );
+  });
+
+  /** The comments queued on the open page that its read does not hold yet. */
+  const queuedComments = $derived(page === null ? [] : queuedMarks(page.entity_id, "comment").map((mark) => mark.text));
+
+  // *Edit and resend* on a comment: the composer with its words.
+  $effect(() => {
+    if (page === null) return;
+    const words = takeAgain(page.entity_id, "comment");
+    if (words === null) return;
+    comment = words;
+    void tick().then(() => composer?.focus());
+  });
+
+  // *Edit and resend* on a new page: *New page* with what it asked for.
+  $effect(() => {
+    if (page === null || tree === null) return;
+    const asked = takeAgain<NewPage>(page.entity_id, "page");
+    if (asked === null) return;
+    const space = spaceOfPage(tree, asked.parent);
+    newPage = { space: space ? spaceId(space) : null, parent: asked.parent, title: asked.title, text: asked.text };
+  });
+
   /** A page's source: where its writes go, named in their toasts when its sign-in fails. */
   const sourceOf = (p: Pick<DocPage, "source_id" | "source_name">): WriteSource => ({ id: p.source_id, display_name: p.source_name });
 
   async function saveSection(p: DocPage, section: number, text: string): Promise<boolean> {
     try {
-      await io.docsEditSection(p.entity_id, section, p.version, text);
+      const write = await io.docsEditSection(p.entity_id, section, p.version, text);
       const heading = sectionsOf(p.blocks)[section]?.heading;
       const name = heading ? inlineWords(heading.text) : "";
+      const id = p.entity_id;
+      const kind = sectionKind(section);
+      markQueued(id, kind, text, {
+        write,
+        base: String(p.version),
+        following: {
+          name: `Edit of “${name}” on ${p.title}`,
+          resend: () => {
+            askAgain(id, kind, text);
+            location.hash = pageHash(id, section);
+          },
+        },
+        follower,
+      });
       toastQueued(`edit section “${name}” of ${p.title}`, sourceOf(p));
       return true;
     } catch (cause) {
@@ -495,7 +575,21 @@
     if (comment.trim() === "" || commenting) return;
     commenting = true;
     try {
-      await io.submitWrite({ Comment: { entity: p.entity_id, body: comment } });
+      const body = comment;
+      const id = p.entity_id;
+      const write = await io.submitWrite({ Comment: { entity: id, body } });
+      markQueued(id, "comment", body, {
+        write,
+        many: true,
+        following: {
+          name: `Comment on ${p.title}`,
+          resend: () => {
+            askAgain(id, "comment", body);
+            location.hash = pageHash(id);
+          },
+        },
+        follower,
+      });
       toastQueued(`comment on ${p.title}`, sourceOf(p));
       comment = "";
     } catch (cause) {
@@ -515,8 +609,21 @@
         push({ text: `${job} is not in the mirror`, tone: "err" });
         return false;
       }
-      await io.docsCreatePage(next, ticket);
-      toastQueued(`create page ${next.title.trim()}`, under ? sourceOf(under) : null);
+      const write = await io.docsCreatePage(next, ticket);
+      const title = next.title.trim();
+      markQueued(next.parent, "page", title, {
+        write,
+        many: true,
+        following: {
+          name: `Page ${title}`,
+          resend: () => {
+            askAgain(next.parent, "page", next);
+            location.hash = pageHash(next.parent);
+          },
+        },
+        follower,
+      });
+      toastQueued(`create page ${title}`, under ? sourceOf(under) : null);
       return true;
     } catch (cause) {
       push({ text: `Could not queue the page: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -750,9 +857,19 @@
                   />
                 </div>
               </div>
-            {:else}
-              <p class="tf-dl-note">No comments yet.</p>
             {/each}
+            {#each queuedComments as body, n (n)}
+              <div class="tf-msg tf-queued">
+                <span class="tf-av tf-me">{initials(p.me[0] ?? null)}</span>
+                <div class="tf-cmt-body">
+                  <div class="tf-who"><b>You</b> <span class="tf-chip tf-info">queued</span></div>
+                  <p class="tf-cmt-queued">{body}</p>
+                </div>
+              </div>
+            {/each}
+            {#if p.comments.length === 0 && queuedComments.length === 0}
+              <p class="tf-dl-note">No comments yet.</p>
+            {/if}
             {#if p.writes.includes("comment")}
               <div class="tf-compose">
                 <textarea bind:this={composer} bind:value={comment} placeholder="Comment on this page" aria-label="Comment on this page"
@@ -800,6 +917,8 @@
     {tree}
     space={newPage.space}
     parent={newPage.parent}
+    title={newPage.title ?? ""}
+    text={newPage.text ?? ""}
     {job}
     sourceName={page?.source_name ?? "the source"}
     {layers}

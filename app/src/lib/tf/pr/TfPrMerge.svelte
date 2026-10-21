@@ -53,7 +53,7 @@
     /** The key of the ticket knobas links the pull request to, or `null`. */
     ticket: string | null;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
-    onqueued: () => void;
+    onqueued: (write: QueuedWrite) => void;
     onclose: () => void;
   } = $props();
 
@@ -83,9 +83,9 @@
     if (payload === null) return;
     busy = true;
     try {
-      await submitWrite(payload);
+      const write = await submitWrite(payload);
       toastQueued(`merge ${name}`, source);
-      onqueued();
+      onqueued(write);
       onclose();
     } catch (cause) {
       push({ text: `Could not queue the merge: ${ipcErrorMessage(cause)}`, tone: "err" });

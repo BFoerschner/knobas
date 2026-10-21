@@ -9,15 +9,18 @@
   #819's.
 
   **The status select offers only where the ticket can go now** (BUILT
-  `reachable_transitions`). It is re-bound to the mirrored status after every
-  pick: the move is queued, and until a sync mirrors it the ticket is still
-  where the source last said. A workflow that cannot be read leaves the select
-  showing the current status and nothing else.
+  `reachable_transitions`). A pick queues the move, and the select shows the
+  picked status muted with *queued* beside it (#1424) until the ticket's
+  mirrored status moves or the queue holds or refuses the move; then it shows
+  where the source last said. *Edit and resend* on a held move focuses it.
+  A workflow that cannot be read leaves the select showing the current status
+  and nothing else.
 -->
 <script lang="ts">
   import type { EntityDetail } from "../../ipc/entity";
   import type { Timer } from "../../shell/timer.svelte";
   import { clockReading } from "../../time/day";
+  import { takeAgain } from "../queued.svelte";
   import { jobHash } from "../route";
   import { commentCount, firstName, mentionCount, since, stamp, type Summary } from "./conversation";
   import { blockers, factsLine, keyOf, weekLine, type WeekReading } from "./job";
@@ -32,6 +35,7 @@
     lastVisit = null,
     now = new Date(),
     timer,
+    queued = null,
     onmove,
     onstop,
     onstart,
@@ -50,6 +54,8 @@
     lastVisit?: string | null;
     now?: Date;
     timer: Pick<Timer, "current" | "elapsed">;
+    /** The status a queued move picked, drawn muted until the mirror moves (#1424). */
+    queued?: string | null;
     onmove: (status: string) => void;
     onstop: () => void;
     onstart: () => void;
@@ -67,12 +73,21 @@
   /** The tallest weekday, never under 4.5 hours, so a short day stays short. */
   const peak = $derived(Math.max(4.5 * 3600, ...(week?.days ?? []).map((day) => day.logged + day.unlogged)));
 
+  /** What the select shows: a queued move's status, else the mirrored one. */
+  const shown = $derived(queued ?? detail.status);
+
   function pick(event: Event) {
     const select = event.currentTarget as HTMLSelectElement;
     const status = select.value;
-    select.value = detail.status ?? "";
-    if (status && status !== detail.status) onmove(status);
+    select.value = shown ?? "";
+    if (status && status !== shown) onmove(status);
   }
+
+  let select = $state<HTMLSelectElement | null>(null);
+  // *Edit and resend* on a held or refused move: the pick again.
+  $effect(() => {
+    if (takeAgain(detail.row.entity_id, "status") !== null) select?.focus();
+  });
 </script>
 
 <aside class="tf-jobcard tf-card" aria-label="Job card">
@@ -88,16 +103,27 @@
     <h1 class="tf-jobtitle">{detail.row.title}</h1>
   </div>
   <div class="tf-jobrow">
-    <select aria-label="Status" value={detail.status ?? ""} onchange={pick} disabled={options.length === 0}>
+    <select
+      bind:this={select}
+      aria-label="Status"
+      class:tf-queued={queued !== null}
+      value={shown ?? ""}
+      onchange={pick}
+      disabled={options.length === 0 && queued === null}
+    >
       {#if detail.status === null}
         <option value="" disabled>No status</option>
       {:else}
         <option value={detail.status}>{detail.status}</option>
       {/if}
+      {#if queued !== null && queued !== detail.status && !options.includes(queued)}
+        <option value={queued}>{queued}</option>
+      {/if}
       {#each options as status (status)}
         <option value={status}>{status}</option>
       {/each}
     </select>
+    {#if queued !== null}<span class="tf-chip tf-info tf-queued-mark">queued</span>{/if}
     {#if facts}<span class="tf-jobdim">{facts}</span>{/if}
     {#each blockedBy as blocker (blocker)}
       <span class="tf-chip tf-err">Blocked by {blocker}</span>

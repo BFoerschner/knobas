@@ -27,6 +27,9 @@
 .tf-rd-tree details > summary.tf-cur::before { color: inherit; }
 .tf-rd-tree summary a.tf-sl { display: inline; padding: 0; color: inherit; background: none; }
 .tf-rd-tree .tf-fold-in { padding-left: 16px; }
+/* A page queued under its parent (#1424): muted, with no link, until the tree holds it. */
+.tf-rd-tree .tf-dl-queued { display: block; padding: 3px 8px; color: var(--muted); font-style: italic; }
+.tf-rd-tree .tf-dl-queued .tf-chip { font-style: normal; }
 .tf-rd-tree summary.tf-spc { font-weight: 600; color: var(--ink-2); margin-top: 4px; }
 .tf-rd-main { overflow: auto; min-height: 0; }
 .tf-rd-page { max-width: 74ch; margin: 0 auto; padding: 22px 32px 90px; }
@@ -100,6 +103,10 @@
 .tf-cmts .tf-who { color: var(--ink-2); font-size: var(--t-sm); }
 .tf-cmts .tf-who b { color: var(--ink); }
 .tf-cmts .tf-cmt-body p { margin: 2px 0 6px; }
+/* What is on its way (#1424): a queued comment and a section's queued text, muted. */
+.tf-cmts .tf-msg.tf-queued .tf-cmt-queued { color: var(--muted); white-space: pre-wrap; }
+.tf-doc h2 .tf-queued-mark { font-family: var(--sans); vertical-align: middle; }
+.tf-doc .tf-sec-queued { color: var(--muted); white-space: pre-wrap; border-left: 2px dashed var(--rule); padding-left: 10px; }
 /* The Docs search, the rail, the find bar and the writes (#860 to #862) */
 .tf-dl-head .tf-fsearch { max-width: none; flex: none; padding: 6px 9px; }
 .tf-dl-head .tf-dl-scope { display: flex; }

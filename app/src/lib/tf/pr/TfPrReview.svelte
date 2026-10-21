@@ -42,7 +42,7 @@
     /** The pull request's source: where the review goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
-    onqueued: () => void;
+    onqueued: (write: QueuedWrite) => void;
     onclose: () => void;
   } = $props();
 
@@ -67,10 +67,10 @@
     if (payload === null) return;
     busy = true;
     try {
-      await submitWrite(payload);
+      const write = await submitWrite(payload);
       pending.settle(prId, sent);
       toastQueued(`submit review on ${name}`, source);
-      onqueued();
+      onqueued(write);
       onclose();
     } catch (cause) {
       push({ text: `Could not queue the review: ${ipcErrorMessage(cause)}`, tone: "err" });

@@ -17,6 +17,8 @@
     tree,
     space: initialSpace,
     parent: initialParent,
+    title: initialTitle = "",
+    text: initialText = "",
     job,
     sourceName,
     layers,
@@ -28,6 +30,9 @@
     space: string | null;
     /** The page it opens under. */
     parent: string | null;
+    /** What *Edit and resend* opens it with (#1424): the title and text a refused create carried. */
+    title?: string;
+    text?: string;
     job: string | null;
     sourceName: string;
     layers: Layers;
@@ -41,8 +46,10 @@
   const space = $derived(tree.spaces.find((s) => spaceId(s) === picked));
   // svelte-ignore state_referenced_locally
   let under = $state(initialParent ?? "");
-  let title = $state("");
-  let text = $state("");
+  // svelte-ignore state_referenced_locally
+  let title = $state(initialTitle);
+  // svelte-ignore state_referenced_locally
+  let text = $state(initialText);
   let link = $state(true);
   let sending = $state(false);
 

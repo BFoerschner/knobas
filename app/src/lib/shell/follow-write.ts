@@ -132,6 +132,8 @@ export interface Following {
   name: string;
   /** Reopen the surface with what was typed; absent where it cannot. */
   resend?: () => void;
+  /** What the surface takes back as the write is told held or refused, before the toast: its echo (#1424). */
+  onstop?: () => void;
 }
 
 /** Whether an open row is one that will not go on its own: held or refused. */
@@ -170,6 +172,7 @@ export function followWrite(
     if (row === undefined) return leave();
     if (!willNotGo(row)) return;
     leave();
+    following.onstop?.();
     toastStopped(row, following);
   });
   if (done) stop();

@@ -40,6 +40,7 @@
     LinkSetRow,
   } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
+  import { writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { inTextField } from "../../shell/keys";
   import { toastQueued } from "../../shell/queued-toast";
   import type { Timer } from "../../shell/timer.svelte";
@@ -79,6 +80,8 @@
   import { createJobReader } from "./job-reader.svelte";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { currentJob, linkRequest, type LinkTarget } from "./current.svelte";
+  import { askAgain, markQueued, queuedMark, queuedMarks, sameWords, settleQueued } from "../queued.svelte";
+  import { jobHash } from "../route";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfDeps from "../deps/TfDeps.svelte";
   import { clones } from "../openin/clones.svelte";
@@ -103,6 +106,7 @@
     apps = sharedApps,
     sets = bridgeSetPorts,
     registry = kindRegistry,
+    follower = writeFollower(),
   }: {
     /** What the address names: a key (`PAY-231`) or an entity id. */
     segment: string;
@@ -122,6 +126,8 @@
     sets?: JobSetPorts;
     /** The adapters' claims, for the CI role's run kinds a run is routed by (#1230, #1256). */
     registry?: FrameKinds;
+    /** Follows each queued move and comment, so one held or refused drops its echo (#1424). */
+    follower?: WriteFollower;
   } = $props();
 
   let drawer = $state(false);
@@ -272,12 +278,47 @@
     }
   }
 
+  // ---- what this job queued, drawn at once (#1424) ----
+  /** The status a queued move picked, drawn in the select until the ticket's status moves. */
+  const queuedStatus = $derived(detail ? (queuedMark(detail.row.entity_id, "status")?.text ?? null) : null);
+  /** The comments queued here, drawn at the end of the thread until the thread holds them. */
+  const queuedComments = $derived(detail ? queuedMarks(detail.row.entity_id, "comment").map((mark) => mark.text) : []);
+
+  // Each read of the ticket drops a move once its status moved from where the move left it.
+  $effect(() => {
+    if (!detail) return;
+    const id = detail.row.entity_id;
+    const status = detail.status;
+    untrack(() => settleQueued(id, (mark) => mark.kind === "status" && mark.base !== status));
+  });
+
+  // Each read of the thread drops a comment it holds.
+  $effect(() => {
+    if (!detail || thread === null) return;
+    const id = detail.row.entity_id;
+    const said = thread.comments;
+    untrack(() => settleQueued(id, (mark) => mark.kind === "comment" && said.some((c) => sameWords(c.body, mark.text))));
+  });
+
   async function comment(body: string): Promise<boolean> {
     if (!detail) return false;
-    const key = keyOf(detail.row.entity_id);
+    const id = detail.row.entity_id;
+    const key = keyOf(id);
     const source = detail.source;
     try {
-      await ports.submitWrite({ Comment: { entity: detail.row.entity_id, body } });
+      const write = await ports.submitWrite({ Comment: { entity: id, body } });
+      markQueued(id, "comment", body, {
+        write,
+        many: true,
+        following: {
+          name: `Comment on ${key}`,
+          resend: () => {
+            askAgain(id, "comment", body);
+            location.hash = `${jobHash(key)}/conversation`;
+          },
+        },
+        follower,
+      });
       toastQueued(`comment on ${key}`, source);
       return true;
     } catch (cause) {
@@ -295,14 +336,30 @@
     untrack(() => reader.rereadCheckout());
   });
 
-  /** A move queued, then the ticket and its transitions read again: nothing else it reaches changed. */
+  /**
+   * A move queued and drawn in the select, then the ticket and its transitions
+   * read again: nothing else it reaches changed.
+   */
   async function move(status: string) {
     if (!detail) return;
     const id = detail.row.entity_id;
     const key = keyOf(id);
     const source = detail.source;
+    const from = detail.status;
     try {
-      await ports.submitWrite({ Transition: { entity: id, status } });
+      const write = await ports.submitWrite({ Transition: { entity: id, status } });
+      markQueued(id, "status", status, {
+        write,
+        base: from,
+        following: {
+          name: `Move of ${key} to ${status}`,
+          resend: () => {
+            askAgain(id, "status", status);
+            location.hash = jobHash(key);
+          },
+        },
+        follower,
+      });
       reader.rereadDetail(id);
       toastQueued(`${key} to ${status}`, source);
     } catch (cause) {
@@ -409,6 +466,7 @@
       {lastVisit}
       now={today()}
       {timer}
+      queued={queuedStatus}
       onmove={move}
       onstop={() => ontimer?.()}
       onstart={() => onstarttimer(detail!.row.entity_id, detail!.row.title)}
@@ -478,6 +536,8 @@
         {:else if current.id === "conversation"}
           <TfConversation
             jobKey={key}
+            entityId={detail.row.entity_id}
+            queued={queuedComments}
             {thread}
             {lastVisit}
             failure={threadFailure}

@@ -56,6 +56,8 @@
 </script>
 
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import { ipcErrorMessage } from "../../ipc";
   import {
     entityCheckout,
@@ -73,6 +75,7 @@
   } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import { pendingComments as sharedPending, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
+  import { writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { actionName } from "../../detail/view/actions";
@@ -92,7 +95,7 @@
     tabCounts,
     type PrTab,
   } from "./pr";
-  import { isQueued, markComment, markQueued, pendingComments as pendingOf, queuedChips } from "./queued.svelte";
+  import { askAgain, markQueued, queuedMark, queuedMarks, sameWords, settleQueued, takeAgain, type Mark } from "../queued.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfPrFiles from "./TfPrFiles.svelte";
@@ -117,6 +120,7 @@
       setPrFileViewed: (id, path, viewed) => setPrFileViewed(id, path, viewed),
     },
     pending = sharedPending,
+    follower = writeFollower(),
   }: {
     /** Whether the database answers yet: the reads wait for it. */
     ready: boolean;
@@ -129,6 +133,8 @@
     ports?: PrPorts;
     /** The reader's pending line comments (#842): this viewer's, kept across restarts. */
     pending?: PendingCommentStore;
+    /** Follows each queued write, so one held or refused drops its mark (#1424). */
+    follower?: WriteFollower;
   } = $props();
 
   /** How many repositories and proposals one read asks for. */
@@ -317,11 +323,45 @@
   let reviewing = $state(false);
   let merging = $state(false);
 
-  /** The comments this session queued that the conversation does not hold yet. */
-  const pendingComments = $derived(
-    prId === null ? [] : pendingOf(prId, messages.map((message) => message.body)),
-  );
-  const chips = $derived(prId === null ? [] : queuedChips(prId));
+  /** The comments this session queued that the conversation did not hold when it was read. */
+  const queuedComments = $derived(prId === null ? [] : queuedMarks(prId, "comment").map((mark) => mark.text));
+  /** The chips of what this session queued here, beside the state: `close queued`. */
+  const chips = $derived(prId === null ? [] : queuedMarks(prId).filter((mark) => mark.kind !== "comment").map((mark) => mark.text));
+
+  /**
+   * The writes whose landing the view's *State* reads (#1542): each goes once
+   * the state moved from what it was when the write was queued. An edit, an
+   * update, a review and a source's own action have no state to read, so their
+   * chip lasts the session unless the queue holds or refuses the write.
+   */
+  const STATE_READ = ["merge", "close", "reopen"];
+
+  /** Whether the read in `answer` shows `mark` landed. */
+  function landedIn(answer: SourceView, mark: Mark): boolean {
+    if (mark.kind === "comment") return conversationOf(answer).some((message) => sameWords(message.body, mark.text));
+    const state = headerOf(answer).state?.text ?? null;
+    return STATE_READ.includes(mark.kind) && state !== null && mark.base !== null && state !== mark.base;
+  }
+
+  // Each read of the view drops what it shows landed.
+  $effect(() => {
+    const answer = view;
+    const id = prId;
+    if (id === null || answer == null) return;
+    untrack(() => settleQueued(id, (mark) => landedIn(answer, mark)));
+  });
+
+  // *Edit and resend* on a refused comment: the box again, with its words.
+  $effect(() => {
+    if (prId === null) return;
+    const again = takeAgain(prId, "comment");
+    if (again !== null) draft = again;
+  });
+
+  /** Mark a write queued as `verb`, followed under `name`. */
+  function markChip(id: string, verb: string, name: string, write: QueuedWrite) {
+    markQueued(id, verb, chipOf(verb), { write, base: header.state?.text ?? null, following: { name }, follower });
+  }
 
   /**
    * The chips that hold each toolbar write back (#1441), as the Branches tab
@@ -346,7 +386,11 @@
   function heldBy(key: string): string | null {
     if (prId === null) return null;
     const id = prId;
-    return (HOLDS[key] ?? []).map(chipOf).find((chip) => isQueued(id, chip)) ?? null;
+    for (const verb of HOLDS[key] ?? []) {
+      const mark = queuedMark(id, verb);
+      if (mark !== null) return mark.text;
+    }
+    return null;
   }
 
   /** Where the reader's checkout stands against this pull request's head. */
@@ -375,8 +419,20 @@
     sending = true;
     const source = detail?.source ?? null;
     try {
-      await ports.submitWrite({ Comment: { entity: prId, body } });
-      markComment(prId, body);
+      const id = prId;
+      const write = await ports.submitWrite({ Comment: { entity: id, body } });
+      markQueued(id, "comment", body, {
+        write,
+        many: true,
+        following: {
+          name: "Comment",
+          resend: () => {
+            askAgain(id, "comment", body);
+            location.hash = prHash(id, "conversation");
+          },
+        },
+        follower,
+      });
       toastQueued(`comment on ${name}`, source);
       draft = "";
     } catch (cause) {
@@ -524,8 +580,8 @@
                   </div>
                 </article>
               {/each}
-              {#each pendingComments as body, n (n)}
-                <article class="tf-msg">
+              {#each queuedComments as body, n (n)}
+                <article class="tf-msg tf-queued">
                   <span class="tf-av tf-me" aria-hidden="true">{initials(me)}</span>
                   <div class="tf-msg-body">
                     <div class="tf-who"><b>You</b><span class="tf-chip tf-info">queued</span></div>
@@ -533,7 +589,7 @@
                   </div>
                 </article>
               {/each}
-              {#if messages.length === 0 && pendingComments.length === 0}
+              {#if messages.length === 0 && queuedComments.length === 0}
                 <div class="tf-empty">No comments yet.</div>
               {/if}
               {#if comment !== null}
@@ -608,7 +664,7 @@
     {pending}
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={() => markQueued(prId, chipOf("review"))}
+    onqueued={(write) => markChip(prId, "review", "Review", write)}
     onclose={() => (reviewing = false)}
   />
 {/if}
@@ -624,7 +680,7 @@
     ready={readyRows}
     {ticket}
     submitWrite={ports.submitWrite}
-    onqueued={() => markQueued(prId, chipOf("merge"))}
+    onqueued={(write) => markChip(prId, "merge", "Merge", write)}
     onclose={() => (merging = false)}
   />
 {/if}
@@ -638,7 +694,7 @@
     what="{write.phrase} {name}"
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={() => markQueued(prId, chipOf(write.verb))}
+    onqueued={(queued) => markChip(prId, write.verb, write.label, queued)}
     onclose={() => (shown = null)}
   />
 {/if}

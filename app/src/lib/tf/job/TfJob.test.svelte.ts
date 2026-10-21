@@ -22,9 +22,11 @@ import type {
 import type { CredentialHealth, SourceSyncStatus, SourceDescriptor, WriteOpPayload } from "../../ipc/sources";
 import type { RunningTimer, Week } from "../../ipc/time";
 import { health } from "../../shell/health.svelte";
+import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { page as codeRowPage } from "../code-row/page";
 import { writeQueuePanel } from "../../shell/write-queue.svelte";
+import { forgetQueued } from "../queued.svelte";
 import { forgetFilters, sessionFilter } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
 import { createApps } from "../openin/apps.svelte";
@@ -64,7 +66,9 @@ beforeEach(() => {
   document.body.appendChild(target);
 });
 
+/** What a page queued is held for the session (#1424), and each test is one. */
 afterEach(() => {
+  forgetQueued();
   health.replace([]);
   if (job) unmount(job);
   job = null;
@@ -254,6 +258,7 @@ function open(
     layers?: Layers;
     tab?: string | null;
     registry?: FrameKinds;
+    follower?: WriteFollower;
   } = {},
 ) {
   job = mount(TfJob, {
@@ -268,6 +273,7 @@ function open(
       ports: over.ports ?? ports(),
       today: () => new Date(2026, 9, 15, 14, 0),
       ...(over.registry ? { registry: over.registry } : {}),
+      ...(over.follower ? { follower: over.follower } : {}),
       apps: createApps({
         checkoutSettings: () => Promise.resolve(APPS),
         setCheckoutApplications: () => Promise.reject(new Error("not in this suite")),
@@ -400,7 +406,6 @@ test("the status select offers where the ticket stands and the reachable transit
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
   expect(calls.writes).toEqual([{ Transition: { entity: ID, status: "In Review" } }]);
-  expect(select.value).toBe("In Progress");
   expect(toasts.items.at(-1)?.text).toBe("Queued: PAY-231 to In Review.");
   expect(toasts.items.at(-1)?.action?.label).toBe("Show queue");
 });
@@ -1106,4 +1111,97 @@ test("with no CI claim known, Builds still asks for the CI role and names no kin
   await reachTally(p, ID);
   const tallied = calls.list.find((filter) => filter.order === "latest_per_parent");
   expect(tallied).toMatchObject({ role: "ci", kinds: [], reach: ID });
+});
+
+// -- A queued move is drawn at once (#1424) ----------------------------------
+
+/** The status the select shows, whether it is drawn as queued, and the mark beside it. */
+function statusShown() {
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
+  const mark = target.querySelector(".tf-jobrow .tf-queued-mark");
+  return [select.value, select.classList.contains("tf-queued"), mark?.textContent?.trim() ?? null];
+}
+
+async function pick(status: string) {
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
+  select.value = status;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+}
+
+test("a picked status is drawn muted with queued until the detail's status moves; then the mark goes", async () => {
+  let status = "In Progress";
+  const moving = () =>
+    ports({
+      getEntity: (id) => {
+        calls.read.push(id);
+        return id === ID ? Promise.resolve(ticket({ status })) : Promise.reject({ code: "not_found" });
+      },
+    });
+  open("PAY-231", { ports: moving() });
+  await settle();
+  expect(statusShown()).toEqual(["In Progress", false, null]);
+  await pick("In Review");
+  // The move re-read the ticket, which the sync has not moved yet.
+  expect(calls.read.filter((id) => id === ID).length).toBeGreaterThan(1);
+  expect(statusShown()).toEqual(["In Review", true, "queued"]);
+
+  unmount(job!);
+  open("PAY-231", { ports: moving() });
+  await settle();
+  expect(statusShown()).toEqual(["In Review", true, "queued"]);
+
+  // The status moved, here past the picked one (somebody closed it): the mark goes.
+  unmount(job!);
+  status = "Done";
+  open("PAY-231", { ports: moving() });
+  await settle();
+  expect(statusShown()).toEqual(["Done", false, null]);
+
+  // Moved back in Jira by somebody else: the old move is not drawn again.
+  unmount(job!);
+  status = "In Progress";
+  open("PAY-231", { ports: moving() });
+  await settle();
+  expect(statusShown()).toEqual(["In Progress", false, null]);
+});
+
+/** A follower the test speaks for, and ports whose writes answer ids from 50 up. */
+function following() {
+  const hears = new Map<number, Hear>();
+  const follower: WriteFollower = {
+    follow(id, hear) {
+      hears.set(id, hear);
+      return () => hears.delete(id);
+    },
+  };
+  let next = 50;
+  const numbered = ports({
+    submitWrite: (payload) => {
+      calls.writes.push(payload);
+      return Promise.resolve({ id: next++ } as never);
+    },
+  });
+  return { follower, numbered, hear: (id: number, row: unknown) => hears.get(id)?.(row as never) };
+}
+
+test("a move the queue refuses drops the queued status and toasts; Edit and resend opens the status pick again", async () => {
+  const { follower, numbered, hear } = following();
+  open("PAY-231", { ports: numbered, follower });
+  await settle();
+  await pick("In Review");
+  expect(statusShown()).toEqual(["In Review", true, "queued"]);
+
+  hear(50, { id: 50, state: "refused", detail: "The transition needs a resolution" });
+  flushSync();
+  expect(statusShown()).toEqual(["In Progress", false, null]);
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("Move of PAY-231 to In Review was refused: The transition needs a resolution");
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
+  expect(document.activeElement).not.toBe(select);
+  toast.more!.find((action) => action.label === "Edit and resend")!.run();
+  await settle();
+  expect(location.hash).toBe("#/job/PAY-231");
+  expect(document.activeElement).toBe(select);
+  expect(select.value).toBe("In Progress");
 });
