@@ -25,8 +25,9 @@
 //!   sync.
 //! * **The inbox stays usable when one source is broken** (story 24). The
 //!   derivation reads the mirror, not the sources, so a rejected credential
-//!   leaves the other four categories exactly where they were and leaves that
-//!   source's own last-known items in the stream.
+//!   leaves the other categories exactly where they were and leaves that
+//!   source's own last-known items in the stream -- and, since #1571, is an
+//!   item of its own (`failed_sign_in`).
 //! * **Snoozing is durable** (story 20) without the stream being durable: the
 //!   only row is the user's answer, and it is keyed so that the item derived
 //!   again after a sync finds it.
@@ -37,7 +38,7 @@
 //! and *done*. Neither is derivable from anything a source says. Its key is
 //! `'<category>:<subject>'` and both halves are stable across syncs:
 //!
-//! * the **category** is one of six words fixed in [`Category`] -- not the
+//! * the **category** is one of seven words fixed in [`Category`] -- not the
 //!   name of the rule that produced the item. Rules are expected to grow (a
 //!   second mention spelling, a second way a build is "on my work"), and
 //!   keying on a rule name would forget a snooze the day a category gained a
@@ -46,8 +47,8 @@
 //!   categories and for the alert (the *monitor's* entity, which outlives the
 //!   mirror row) -- the durable identity in this database, which survives
 //!   re-sync, tombstoning and a source being deleted and re-added -- and
-//!   `source_config.id` for credential expiry, which interfaces §4.1 makes
-//!   immutable.
+//!   `source_config.id` for credential expiry and a failed sign-in, which
+//!   interfaces §4.1 makes immutable.
 //!
 //! # The rules
 //!
@@ -56,7 +57,7 @@
 //! control*: a rule that fires for everything is as broken as one that never
 //! fires, and only the negative case catches the first.
 //!
-//! Four of the six read a payload path, and that is a deliberate and narrow
+//! Four of the seven read a payload path, and that is a deliberate and narrow
 //! coupling rather than an oversight. Interfaces §4.1 normalizes `title`,
 //! `body_text`, `author` and `updated_at` and nothing else; a review request,
 //! a build's status and an assignee live only in the verbatim `payload`.
@@ -97,7 +98,7 @@ use sqlx::PgPool;
 
 use crate::CoreError;
 
-/// The six kinds of demand the inbox distinguishes.
+/// The seven kinds of demand the inbox distinguishes.
 ///
 /// Serialized as its stored spelling, which is also the first half of every
 /// [`InboxItem::key`]. **Not a database vocabulary**: no column holds a
@@ -111,6 +112,8 @@ use crate::CoreError;
 /// - `failed_build`: A build on your work went red.
 /// - `new_assignment`: Work arrived: a ticket somebody else pointed at you.
 /// - `credential_expiry`: A credential knobas holds stops working soon.
+/// - `failed_sign_in`: A source refuses knobas' sign-in, or knobas holds no
+///   credential for it, so it takes nothing until somebody acts.
 /// - `alert`: A monitor watching something in the estate is down or slow, and a
 ///   context holds the asset it watches.
 ///
@@ -126,6 +129,7 @@ pub enum Category {
     FailedBuild,
     NewAssignment,
     CredentialExpiry,
+    FailedSignIn,
     Alert,
 }
 
@@ -137,6 +141,7 @@ impl Category {
         Category::FailedBuild,
         Category::NewAssignment,
         Category::CredentialExpiry,
+        Category::FailedSignIn,
         Category::Alert,
     ];
 
@@ -149,6 +154,7 @@ impl Category {
             Category::FailedBuild => "failed_build",
             Category::NewAssignment => "new_assignment",
             Category::CredentialExpiry => "credential_expiry",
+            Category::FailedSignIn => "failed_sign_in",
             Category::Alert => "alert",
         }
     }
@@ -161,7 +167,7 @@ impl Category {
     /// registry is. An action the source does not declare is never shown --
     /// the interface must not present a button that will fail (#45, story 23).
     ///
-    /// Two categories are deliberately empty, and both absences are decisions:
+    /// Four categories are deliberately empty, and every absence is a decision:
     ///
     /// * **`NewAssignment`.** What a new assignment asks for is *transition*,
     ///   and `WriteOp::Transition` needs the status the user picked, in the
@@ -174,6 +180,9 @@ impl Category {
     ///   credential is a knobas-local act on the sources view, and there is no
     ///   write op for it. Snooze -- *after the credential expires* is one of
     ///   the presets -- and done are the actions.
+    /// * **`FailedSignIn`.** The same act for the same reason: *Re-enter* is on
+    ///   the source's page, and the source that refuses the sign-in is the one
+    ///   thing that cannot be asked to fix it.
     /// * **`Alert`.** Three, and none of them is a `WriteOp`. *Ack* is
     ///   knobas-local because **Uptime Kuma has no ack** (`CONTEXT.md`,
     ///   **Alert**) -- it is `knobas_app::assets::ack_alert`, an estate write
@@ -187,7 +196,10 @@ impl Category {
             Category::ReviewRequest => &["approve", "comment"],
             Category::Mention => &["comment"],
             Category::FailedBuild => &["rerun_build"],
-            Category::NewAssignment | Category::CredentialExpiry | Category::Alert => &[],
+            Category::NewAssignment
+            | Category::CredentialExpiry
+            | Category::FailedSignIn
+            | Category::Alert => &[],
         }
     }
 }
@@ -230,7 +242,7 @@ pub struct InboxItem {
     /// the interface hands back when the user answers.
     ///
     /// Stable across syncs: the category is a fixed word and the subject is an
-    /// entity id (or a source id, for a credential expiry). The shell never
+    /// entity id (or a source id, for a credential expiry or a failed sign-in). The shell never
     /// composes one: it hands back the string it was given, to
     /// `snooze_inbox_item` and `complete_inbox_item`.
     pub key: String,
@@ -241,8 +253,8 @@ pub struct InboxItem {
     /// The source that owes this item -- a `source_config.id`, which is also
     /// the entity namespace.
     pub source_id: String,
-    /// The entity to open. `None` only for credential expiry, whose subject is
-    /// a source and not an entity: the inbox is a way in, not a dead end
+    /// The entity to open. `None` only for credential expiry and a failed
+    /// sign-in, whose subject is a source and not an entity: the inbox is a way in, not a dead end
     /// (story 8), and the one item with no entity behind it says so by
     /// carrying none rather than by pointing somewhere wrong.
     ///
@@ -627,6 +639,51 @@ macro_rules! credential_expiry {
     };
 }
 
+/// A source refuses knobas' sign-in, or knobas holds no credential for it
+/// (#1571).
+///
+/// The second category read off `knobas.source_config` rather than the
+/// mirror, and for the same reason as [`credential_expiry!`]: the mirror of a
+/// source that refuses the sign-in simply stops moving, which says nothing.
+///
+/// **Which states.** `unauthorized` and `missing_secret` -- the two the
+/// scheduler skips because no retry can fix them, and the two the shell's
+/// `signInFails` reads as *the sign-in fails until the reader acts*.
+/// `unreachable` is retried on its own and `unknown` vouches for nothing, so
+/// neither is an item. Enabled sources only, as for an expiry.
+///
+/// **Once per episode.** The subject is the source, so the key is the same for
+/// every failure of it; `occurred_at` is `auth_failing_since`, the first
+/// failing verdict of the current run of them, which migration `0055`'s
+/// trigger keeps. A retry rejected again (or a rejection turning into a
+/// missing secret) is the same episode: the row does not move and a *done* on
+/// it holds. A verdict that is not a failure nulls the column and ends the
+/// episode; the rule stops firing and the item leaves by construction. The
+/// next failure dates a new episode past the old *done*, so it comes back.
+/// The `coalesce` onto `auth_checked_at` and then the clock is for a row the
+/// trigger never saw, which `0055`'s backfill leaves none of; a null
+/// `occurred_at` would fail the whole stream's decode.
+///
+/// **What it says.** Which of the two it is, because they are different
+/// prompts on the source's page (*Re-enter* after a rejection, *no token
+/// stored*): the reason names the source, so the row is readable without
+/// opening it.
+macro_rules! failed_sign_in {
+    () => {
+        "select 'failed_sign_in', s.id, s.id, null::text, null::text,
+                s.display_name,
+                case s.auth_state
+                  when 'missing_secret' then format('no credential is stored for %s', s.display_name)
+                  else format('the %s sign-in was rejected', s.display_name)
+                end,
+                coalesce(s.auth_failing_since, s.auth_checked_at, $2),
+                null::text
+           from knobas.source_config s
+          where s.enabled
+            and s.auth_state in ('unauthorized', 'missing_secret')"
+    };
+}
+
 /// A monitor watching something somebody is working on is in trouble.
 ///
 /// The sixth category (#446), and the one that is **not about the reader's
@@ -783,6 +840,8 @@ macro_rules! all_rules {
             "\nunion all\n",
             credential_expiry!(),
             "\nunion all\n",
+            failed_sign_in!(),
+            "\nunion all\n",
             alert!(),
         ))
     };
@@ -844,6 +903,10 @@ pub const RULES: &[Rule] = &[
     Rule {
         category: Category::CredentialExpiry,
         sql: shelved!(credential_expiry!()),
+    },
+    Rule {
+        category: Category::FailedSignIn,
+        sql: shelved!(failed_sign_in!()),
     },
     Rule {
         category: Category::Alert,
