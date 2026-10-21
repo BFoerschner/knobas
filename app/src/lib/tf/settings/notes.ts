@@ -23,14 +23,19 @@ export function notesLine(total: number, last: string | null, now: Date): string
   return total === 1 ? `${count}, from ${date}` : `${count}, the last from ${date}`;
 }
 
-/** The symbols a modifier is drawn with on a key cap, as macOS draws them. */
+/**
+ * The symbols a modifier is drawn with on a key cap, as macOS draws them. The
+ * names are `parse_hotkey`'s modifiers in global-hotkey 0.8.0 (Cargo.lock);
+ * re-check this table and `KEYS` below when that crate is bumped (#1467).
+ */
 const KEY_CAPS: Record<string, string> = {
   cmdorctrl: "⌘",
   commandorcontrol: "⌘",
+  commandorctrl: "⌘",
+  cmdorcontrol: "⌘",
   cmd: "⌘",
   command: "⌘",
   super: "⌘",
-  meta: "⌘",
   alt: "⌥",
   option: "⌥",
   shift: "⇧",
@@ -42,8 +47,8 @@ const KEY_CAPS: Record<string, string> = {
 const ORDER = ["⌃", "⌥", "⇧", "⌘"];
 
 /**
- * The keys the capture registrar accepts (global-hotkey's `parse_key`, upper
- * case): a token outside this set and the modifiers is refused (#1467).
+ * The keys the capture registrar accepts (global-hotkey 0.8.0's `parse_key`, upper
+ * case; a hand copy, re-check it on a bump of the crate): a token outside this set and the modifiers is refused (#1467).
  */
 const KEYS = new Set(
   [

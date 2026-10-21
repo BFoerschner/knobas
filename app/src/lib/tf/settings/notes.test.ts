@@ -27,6 +27,9 @@ test("keyCaps never draws a token the registrar would refuse (#1467)", () => {
   expect(keyCaps("Alt+ArrowUp")).toEqual(["⌥", "ARROWUP"]);
   expect(keyCaps("Cmd+;")).toEqual(["⌘", ";"]);
   expect(keyCaps("space")).toEqual(["SPACE"]);
+  expect(keyCaps("CommandOrCtrl+N")).toEqual(["⌘", "N"]);
+  expect(keyCaps("CmdOrControl+N")).toEqual(["⌘", "N"]);
+  expect(keyCaps("Meta+N"), "global-hotkey 0.8.0 has no Meta").toEqual([]);
 });
 
 test("a folder under the home directory is written from ~", () => {

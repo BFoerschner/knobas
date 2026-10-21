@@ -10068,3 +10068,8 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   key the registrar accepts. *Reversing:* low.
 - **The fake** (`dev/fake/capture.ts`) answers a refusal for any string `keyCaps` cannot parse while notes
   are shown, so the dialog's refusal path is witnessable under `?fake-ipc`.
+- **Does the `KEYS` copy need a pin** (merge-manager, Sonnet, 2026-10-21). *Ruling:* a comment naming global-hotkey
+  0.8.0 on `KEYS` and on the modifier table, no cross-language test: a Rust test would make the head a full-gate
+  Rust change for a polish ticket, and a failed match only draws *Not registered* for a key the registrar
+  accepts. Checked against 0.8.0's `parse_key` and `parse_hotkey`: `KEYS` matches; the modifier table had
+  `meta` (refused by the parser) and lacked `commandorctrl` and `cmdorcontrol`, now fixed. *Reversing:* low.
