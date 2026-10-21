@@ -422,6 +422,7 @@ const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
 const TfNotesSection = (await import("../tf/settings/TfNotesSection.svelte")).default;
 const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).default;
+const WriteQueuePanel = (await import("./WriteQueue.svelte")).default;
 const TfBoardsAndFilters = (await import("../tf/settings/TfBoardsAndFilters.svelte")).default;
 const TfAddSource = (await import("../tf/settings/TfAddSource.svelte")).default;
 const TfInstalledAdapters = (await import("../tf/settings/TfInstalledAdapters.svelte")).default;
@@ -1682,6 +1683,37 @@ const CASES: Case[] = [
   sectionCase("TfMonitoringSection", "monitoring"),
   sectionCase("TfBackupSection", "backup"),
   sectionCase("TfLogsSection", "logs"),
+  {
+    /**
+     * The write queue panel (#1425): a layer on the stack, and a title read
+     * per monitor row, answering after the unmount.
+     */
+    name: "WriteQueue",
+    source: "lib/shell/WriteQueue.svelte",
+    open: (target) => ({
+      app: mount(WriteQueuePanel, {
+        target,
+        props: {
+          queue: {
+            counts: { pending: 1, held: 0, refused: 0 },
+            rows: [
+              {
+                id: 1, source_id: "kuma", entity_id: "kuma:8", op: "pause_monitor", payload: { PauseMonitor: { entity: "kuma:8" } },
+                target_snapshot: null, state: "pending", wait_reason: null, detail: null, queued_at: "2026-08-29T11:57:00Z",
+                attempted_at: null, attempts: 0, held_snapshot: null, settled_at: null, source_enabled: true,
+              },
+            ],
+            error: null, answered: true, busy: false,
+            refresh: () => Promise.resolve(), flush: () => Promise.resolve(), apply: () => Promise.resolve(),
+            discard: () => Promise.resolve(), amend: () => Promise.resolve(),
+          },
+          onclose: () => {},
+          layers: createLayers(),
+          nameOf: () => deferred("Payments API"),
+        },
+      }),
+    }),
+  },
   {
     /** The dialog registers a layer and moves focus while it is open (#830). */
     name: "TfDialog",

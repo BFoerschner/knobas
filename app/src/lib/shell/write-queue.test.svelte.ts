@@ -61,7 +61,9 @@ const {
   readSnapshot,
   withBody,
   withdrawnWorklog,
+  writeWords,
 } = await import("./write-queue.svelte");
+const { createLayers } = await import("../tf/layers.svelte");
 
 /**
  * ADR-0012's canonical sentence, **read out of the ADR at test time**.
@@ -166,18 +168,21 @@ async function settle() {
   flushSync();
 }
 
-async function render() {
+async function render(names: Record<string, string> = {}) {
   const queue = createWriteQueue();
   await queue.refresh();
   const target = document.createElement("div");
   document.body.append(target);
+  const layers = createLayers();
   const app = mount(WriteQueuePanel, {
     target,
-    props: { queue, now: NOW, onclose: () => {} },
+    props: { queue, now: NOW, onclose: () => {}, layers, nameOf: (id: string) => Promise.resolve(names[id] ?? null) },
   });
   flushSync();
   return {
     queue,
+    layers,
+    target,
     text: () => (target.textContent ?? "").replace(/\s+/g, " "),
     button: (label: string) =>
       [...target.querySelectorAll("button")].find((b) =>
@@ -220,6 +225,120 @@ test("held and refused need a decision; pending needs patience", () => {
   expect(demandOf("discarded")).toBe("settled");
   expect(decisionsIn({ pending: 4, held: 1, refused: 2 })).toBe(3);
   expect(decisionsIn({ pending: 4, held: 0, refused: 0 })).toBe(0);
+});
+
+// -- a row in words (#1425) ---------------------------------------------------
+
+/** A row's heading as the reader sees it: the parts, joined. */
+function words(row: Pick<QueuedWrite, "op" | "entity_id" | "payload">, names: Record<string, string> = {}): string {
+  return writeWords(row, (id) => names[id] ?? null)
+    .map((part) => part.text)
+    .join("");
+}
+
+/**
+ * The `?fake-ipc` queue's rows (`dev/fake/write-queue.ts`), by op, target and
+ * payload. Copied, not imported: only the dev harness may reach the fixture.
+ */
+const FIXTURE_QUEUE = [
+  { op: "comment", entity_id: "mock:PAY-231", payload: { Comment: { entity: "mock:PAY-231", body: "Taking this." } } },
+  { op: "comment", entity_id: "mock:PAY-228", payload: { Comment: { entity: "mock:PAY-228", body: "Closing." } } },
+  { op: "comment", entity_id: "mock:PAY-300", payload: { Comment: { entity: "mock:PAY-300", body: "Same root cause." } } },
+  {
+    op: "log_work",
+    entity_id: "mock:PAY-228",
+    payload: { LogWork: { entity: "mock:PAY-228", started: "2026-08-27T14:00:00Z", seconds: 3600, comment: "" } },
+  },
+];
+
+test("the fixture's rows are named in words, never by op or raw id", () => {
+  const headings = FIXTURE_QUEUE.map((row) => words(row));
+  expect(headings).toEqual([
+    "Comment on PAY-231",
+    "Comment on PAY-228",
+    "Comment on PAY-300",
+    "1 h worklog on PAY-228",
+  ]);
+  for (const [index, heading] of headings.entries()) {
+    const row = FIXTURE_QUEUE[index]!;
+    expect(heading).not.toContain(row.op);
+    expect(heading).not.toContain(row.entity_id);
+  }
+});
+
+test("only a key is set in mono, the words around it are not", () => {
+  const parts = writeWords(FIXTURE_QUEUE[0]!, () => null);
+  expect(parts).toEqual([{ text: "Comment on " }, { text: "PAY-231", code: true }]);
+});
+
+test("a monitor pause names the monitor, and says only what it is when the name is not known", () => {
+  const pause = { op: "pause_monitor", entity_id: "kuma:8", payload: { PauseMonitor: { entity: "kuma:8" } } };
+  expect(words(pause, { "kuma:8": "Payments API" })).toBe("Pause monitor Payments API");
+  expect(words(pause)).toBe("Pause a monitor");
+  const resume = { op: "resume_monitor", entity_id: "kuma:8", payload: { ResumeMonitor: { entity: "kuma:8" } } };
+  expect(words(resume, { "kuma:8": "Payments API" })).toBe("Resume monitor Payments API");
+});
+
+test("every op this build knows reads as words", () => {
+  const cases: [Pick<QueuedWrite, "op" | "entity_id" | "payload">, string][] = [
+    [{ op: "transition", entity_id: "jira:PAY-231", payload: { Transition: { entity: "jira:PAY-231", status: "In Review" } } }, "Move PAY-231 to In Review"],
+    [{ op: "create_ticket", entity_id: "jira:PAY", payload: { CreateTicket: { entity: "jira:PAY", title: "Retry cap", body: "", ticket_type: "Task" } } }, "New ticket “Retry cap”"],
+    [{ op: "update_page", entity_id: "confluence:sepa", payload: { UpdatePage: { entity: "confluence:sepa", base_version: 4, body: "<p/>" } } }, "Edit page SEPA payout retry design"],
+    [{ op: "create_page", entity_id: "confluence:sepa", payload: { CreatePage: { parent: "confluence:sepa", space: "PAY", title: "Runbook", body: "" } } }, "New page “Runbook”"],
+    [{ op: "run_build", entity_id: "teamcity:Payout_Build", payload: { RunBuild: { entity: "teamcity:Payout_Build", branch: null, parameters: [] } } }, "Run Payout build"],
+    [{ op: "commit_file", entity_id: "gitea:tidewater/payout-service", payload: COMMIT }, "Commit README.md to main"],
+    [{ op: "something_new", entity_id: "x:1", payload: { SomethingNew: {} } as unknown as QueuedWrite["payload"] }, "A write"],
+  ];
+  const names = { "confluence:sepa": "SEPA payout retry design", "teamcity:Payout_Build": "Payout build" };
+  for (const [row, expected] of cases) expect(words(row, names)).toBe(expected);
+});
+
+/**
+ * The classes the unported sheet sets in capitals, read out of it, so a rule
+ * added there later is checked too.
+ */
+function uppercaseClasses(): string[] {
+  const sheet = readFileSync(join(process.cwd(), "src/unported.css"), "utf8");
+  const classes = new Set<string>();
+  for (const rule of sheet.matchAll(/([^{}]+)\{[^}]*text-transform:\s*uppercase[^}]*\}/g)) {
+    for (const name of rule[1]!.matchAll(/\.([A-Za-z][\w-]*)/g)) classes.add(name[1]!);
+  }
+  return [...classes];
+}
+
+test("the panel is a ticket-first dialog: its title, its counts, no capitals, every row's controls", async () => {
+  rows = [
+    held({ id: 2, entity_id: "jira:PAY-231" }),
+    write({ id: 3, state: "refused", entity_id: "kuma:8", op: "pause_monitor", payload: { PauseMonitor: { entity: "kuma:8" } }, detail: "monitor is in maintenance" }),
+    write({ id: 1, entity_id: "jira:PAY-300", payload: { Comment: { entity: "jira:PAY-300", body: "same root cause" } } }),
+  ];
+  counts = { pending: 1, held: 1, refused: 1 };
+  const screen = await render({ "kuma:8": "Payments API" });
+  await vi.waitFor(() => expect(screen.text()).toContain("Pause monitor Payments API"));
+
+  const [dialog] = screen.dialogs();
+  const title = document.getElementById(dialog!.getAttribute("aria-labelledby")!);
+  expect(title?.textContent).toBe("Queued writes");
+  expect(dialog!.querySelector(".tf-dsub")?.textContent).toBe("1 waiting · 2 need you");
+  expect(screen.text()).toContain("Retries the waiting writes. Held writes are untouched.");
+  expect(screen.layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+
+  const capitals = uppercaseClasses();
+  expect(capitals).toContain("lab");
+  for (const name of capitals) expect(screen.target.querySelector(`.${name}`), name).toBeNull();
+
+  const headings = [...screen.target.querySelectorAll(".tf-wq-row-h b")].map((node) => node.textContent);
+  expect(headings).toEqual(["Comment on PAY-231", "Pause monitor Payments API", "Comment on PAY-300"]);
+  expect(screen.text()).not.toContain("pause_monitor");
+  expect(screen.text()).not.toContain("kuma:8");
+
+  const decisions = screen.section("Needs your decision")!;
+  const controls = (article: Element) => [...article.querySelectorAll("button")].map((b) => b.textContent?.trim());
+  const [heldRow, refusedRow] = decisions.querySelectorAll("article");
+  expect(controls(heldRow!)).toEqual(["Send mine anyway", "Edit…", "Discard"]);
+  expect(controls(refusedRow!)).toEqual(["Discard"]);
+  expect(controls(screen.section("Waiting")!.querySelector("article")!)).toEqual(["Cancel"]);
+  screen.done();
 });
 
 test("a snapshot is read per op, and says so when it cannot be", () => {
@@ -313,9 +432,9 @@ test("a write needing a decision is separated from one merely waiting", async ()
   expect(decisions).not.toBeNull();
   expect(patience).not.toBeNull();
   expect(decisions!.textContent).toContain("The target changed");
-  expect(patience!.textContent).toContain("the server did not answer");
+  expect(patience!.textContent).toContain("The server did not answer");
   // And neither section contains the other's row.
-  expect(decisions!.textContent).not.toContain("the server did not answer");
+  expect(decisions!.textContent).not.toContain("The server did not answer");
   screen.done();
 });
 
@@ -338,7 +457,7 @@ test("a target that vanished is shown as gone rather than as blank", async () =>
   rows = [held({ held_snapshot: { op: "comment", live: false, text: null } })];
   counts = { pending: 0, held: 1, refused: 0 };
   const screen = await render();
-  expect(screen.text()).toContain("the source withdrew it");
+  expect(screen.text()).toContain("The source withdrew it");
   screen.done();
 });
 
@@ -396,7 +515,7 @@ test("a pending write against a disabled source says why nothing moves", async (
   rows = [write({ source_enabled: false })];
   counts = { pending: 1, held: 0, refused: 0 };
   const screen = await render();
-  expect(screen.text()).toContain("its source is turned off");
+  expect(screen.text()).toContain("Its source is turned off");
   screen.done();
 });
 
@@ -529,7 +648,7 @@ test("discarding a queued worklog asks first, and cancelling leaves it queued", 
   // Read after `settle`, so a *Keep it queued* that discarded would have
   // emptied both by now rather than being caught only by the call log.
   expect(screen.queue.rows.map((row) => row.id)).toEqual([4]);
-  expect(screen.section("Waiting")!.textContent).toContain("jira:PAY-231");
+  expect(screen.section("Waiting")!.textContent).toContain("worklog on PAY-231");
   screen.done();
 });
 
@@ -874,7 +993,7 @@ test("a commit over a file that moved shows both versions of the file, and Edit 
   rows = [movedCommit()];
   counts = { pending: 0, held: 1, refused: 0 };
   const screen = await render();
-  const sides = [...document.querySelectorAll(".grid2 > div")].map((side) => (side.textContent ?? "").replace(/\s+/g, " ").trim());
+  const sides = [...document.querySelectorAll(".tf-wq-sides > div")].map((side) => (side.textContent ?? "").replace(/\s+/g, " ").trim());
   expect(sides).toEqual(["Yours, README.md # payout mine", "On the source now # payout theirs"]);
   expect(screen.button("Send mine anyway")).toBeDefined();
   expect(screen.button("Discard")).toBeDefined();

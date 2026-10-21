@@ -24,22 +24,30 @@
   to retry what is merely waiting; it cannot release a held write, and the
   backend would not offer it one. `write-queue.test.svelte.ts` runs the clock
   forward over a held row and asserts it is untouched.
+
+  **Drawn in the ticket-first look (#1425).** A `TfDialog`, so it sits on the
+  shell's layer stack; *Queued writes*, the status bar's word; each row named
+  in words by `writeWords`, mono only for keys, paths and bodies.
 -->
 <script lang="ts">
+  import { getEntity } from "../ipc/entity";
   import type { QueuedWrite } from "../ipc/sources";
   import { clockReading, dayKey, dayLabel, durationReading } from "../time/day";
   import { minutesOf } from "../time/week";
-  import Modal from "./Modal.svelte";
+  import { layers as sharedLayers, type Layers } from "../tf/layers.svelte";
+  import TfDialog from "../tf/settings/TfDialog.svelte";
   import { patience } from "./patience.svelte";
   import { ago } from "./time";
   import {
     demandOf,
     editableBody,
     movedFile,
+    namedByTitle,
     readSnapshot,
     unconfirmedSend,
     withBody,
     withdrawnWorklog,
+    writeWords,
     type WithdrawnWorklog,
     type WriteQueue,
   } from "./write-queue.svelte";
@@ -48,11 +56,21 @@
     queue,
     now = new Date(),
     onclose,
+    layers = sharedLayers,
+    nameOf = (entityId: string) => getEntity(entityId).then((detail) => detail.row.title || null),
   }: {
     queue: WriteQueue;
     /** Injectable clock, so "3 minutes ago" is testable rather than waited for. */
     now?: Date;
     onclose: () => void;
+    /** The shell's layer stack, which `Esc` reads. Tests build their own. */
+    layers?: Layers;
+    /**
+     * A monitor's, page's or build configuration's title, for a row that has
+     * no key a person reads (`writeWords`). `null`, or a failed read, leaves
+     * the row saying what kind of thing it is.
+     */
+    nameOf?: (entityId: string) => Promise<string | null>;
   } = $props();
 
   const wait = patience(() => !queue.answered && queue.error === null);
@@ -73,21 +91,38 @@
   const decisions = $derived(queue.rows.filter((row) => demandOf(row.state) === "decide"));
   const waiting = $derived(queue.rows.filter((row) => demandOf(row.state) === "waiting"));
 
+  /** Titles looked up so far, by entity id; each id is asked once. */
+  let names = $state<Record<string, string>>({});
+  const asked = new Set<string>();
+  $effect(() => {
+    for (const row of queue.rows) {
+      const id = row.entity_id;
+      if (!namedByTitle(row) || asked.has(id)) continue;
+      asked.add(id);
+      nameOf(id).then(
+        (title) => {
+          if (title) names[id] = title;
+        },
+        () => {},
+      );
+    }
+  });
+
   /** Why a pending write has not gone, in the reader's words rather than the wire's. */
   function waitingBecause(row: QueuedWrite): string {
     // Before the per-attempt reasons: the scheduler never flushes a disabled
     // source, so whatever the last attempt said, nothing will move until the
     // source is back on — and "not tried yet" forever would be this surface
     // going silent about it (issue #204).
-    if (!row.source_enabled) return "its source is turned off — re-enable it in Sources to send this";
-    if (row.attempted_at === null) return "not tried yet";
+    if (!row.source_enabled) return "Its source is turned off. Re-enable it in Sources to send this.";
+    if (row.attempted_at === null) return "Not tried yet.";
     switch (row.wait_reason) {
       case "unauthorized":
-        return "the credential was rejected";
+        return "The credential was rejected.";
       case "unreachable":
-        return "the server did not answer";
+        return "The server did not answer.";
       default:
-        return "waiting";
+        return "Waiting.";
     }
   }
 
@@ -143,44 +178,51 @@
   `write-queue.test.svelte.ts` stopped holding one of its own.
 -->
 {#snippet guarantee()}
-  <p class="wq-guarantee">
+  <p class="tf-wq-guarantee">
     A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than
     guess; it never merges or drops what you wrote.
   </p>
 {/snippet}
 
-<Modal
-  title="Pending writes"
+<!-- A row's heading: what the write does, and when it was queued. -->
+{#snippet heading(row: QueuedWrite)}
+  <div class="tf-wq-row-h">
+    <b>{#each writeWords(row, (id) => names[id] ?? null) as part, index (index)}{#if part.code}<span class="tf-mono">{part.text}</span>{:else}{part.text}{/if}{/each}</b>
+    <span class="tf-wq-when">Queued {ago(row.queued_at, now)}</span>
+  </div>
+{/snippet}
+
+<TfDialog
+  title="Queued writes"
   subtitle={queue.rows.length === 0
-    ? "nothing owed"
+    ? "Nothing owed"
     : `${queue.counts.pending} waiting · ${queue.counts.held + queue.counts.refused} need you`}
-  wide
+  className="tf-wq-dialog"
+  {layers}
   {onclose}
 >
   {#snippet body()}
     {#if queue.error}
-      <p class="wq-error" role="alert">{queue.error}</p>
+      <p class="tf-fail" role="alert">{queue.error}</p>
     {/if}
 
     {#if queue.rows.length === 0 && !queue.answered}
       <!-- Unread, or the read failed (the reason is above): neither is an
            empty queue. -->
       {#if queue.error === null && wait.slow}
-        <div class="empty">Reading the queue…</div>
+        <p class="tf-dim">Reading the queue…</p>
       {/if}
     {:else if queue.rows.length === 0}
-      <div class="empty">
-        Nothing is queued. Every edit you have made has reached its source.
-      </div>
+      <p class="tf-dim">Nothing is queued. Every edit you have made has reached its source.</p>
     {/if}
 
     {#if decisions.length > 0}
-      <section class="wq-sec">
-        <h3 class="wq-h decide">
+      <section class="tf-wq-sec">
+        <h3 class="tf-wq-h tf-wq-decide">
           Needs your decision
-          <span class="lab">{decisions.length}</span>
+          <span class="tf-wq-n">{decisions.length}</span>
         </h3>
-        <p class="wq-note">
+        <p class="tf-wq-note">
           knobas is holding these. Nothing sends them, and nothing discards them, until you say
           so.
         </p>
@@ -190,12 +232,8 @@
           {@const body = editableBody(row.payload)}
           {@const file = movedFile(row)}
           {@const unconfirmed = row.source_enabled ? unconfirmedSend(row) : null}
-          <article class="wq-row {row.state}">
-            <header class="wq-row-h">
-              <b class="wq-op">{row.op}</b>
-              <span class="wq-target">{row.entity_id}</span>
-              <span class="wq-when">queued {ago(row.queued_at, now)}</span>
-            </header>
+          <article class="tf-wq-row tf-wq-{row.state}">
+            {@render heading(row)}
 
             {#if row.state === "held" && !row.source_enabled}
               <!--
@@ -208,7 +246,7 @@
                 source. So neither is offered; the remedy is the source
                 toggle, and the row says so.
               -->
-              <p class="wq-why">
+              <p class="tf-wq-why">
                 knobas is holding this because its source is turned off. Re-enable it in Sources
                 to send it — or edit or discard it here.
               </p>
@@ -218,11 +256,11 @@
                 Sending it again on its own could make a second ticket or
                 comment, so the reader checks the source first.
               -->
-              <p class="wq-why">
+              <p class="tf-wq-why">
                 knobas sent this, but {unconfirmed.source} did not answer, so it may have arrived.
                 Check {unconfirmed.source}, then send it again or discard it.
               </p>
-              {#if unconfirmed.detail}<pre class="log">{unconfirmed.detail}</pre>{/if}
+              {#if unconfirmed.detail}<pre class="tf-wq-pre">{unconfirmed.detail}</pre>{/if}
             {:else if row.state === "held" && file !== null}
               <!--
                 A commit over a file that moved (#822, #845): the queue
@@ -230,20 +268,20 @@
                 so "when you queued it" has nothing to show. The two versions
                 that matter are the reader's file and the source's.
               -->
-              <p class="wq-why">The file changed on the source after you queued this.</p>
-              <div class="grid2">
+              <p class="tf-wq-why">The file changed on the source after you queued this.</p>
+              <div class="tf-wq-sides">
                 <div>
-                  <span class="wq-side">Yours, {file.path}</span>
-                  <pre class="log">{file.mine}</pre>
+                  <span class="tf-wq-side">Yours, <span class="tf-mono">{file.path}</span></span>
+                  <pre class="tf-wq-pre">{file.mine}</pre>
                 </div>
                 <div>
-                  <span class="wq-side">On the source now</span>
-                  <pre class="log">{file.theirs}</pre>
+                  <span class="tf-wq-side">On the source now</span>
+                  <pre class="tf-wq-pre">{file.theirs}</pre>
                 </div>
               </div>
             {:else if row.state === "held"}
-              <p class="wq-why">The target changed after you queued this.</p>
-              <div class="grid2">
+              <p class="tf-wq-why">The target changed after you queued this.</p>
+              <div class="tf-wq-sides">
                 <div>
                   <!--
                     The version, where the op has one (#286). A page edit is the
@@ -251,100 +289,89 @@
                     what matters, so the number goes in the label rather than
                     leaving the reader to spot it.
                   -->
-                  <span class="wq-side">
+                  <span class="tf-wq-side">
                     When you queued it{before.version === null ? "" : ` — version ${before.version}`}
                   </span>
                   {#if before.raw !== null}
-                    <pre class="log">{before.raw}</pre>
+                    <pre class="tf-wq-pre">{before.raw}</pre>
                   {:else if before.live}
-                    <pre class="log">{before.text ?? ""}</pre>
+                    <pre class="tf-wq-pre">{before.text ?? ""}</pre>
                   {:else}
-                    <p class="wq-gone">not in the mirror</p>
+                    <p class="tf-wq-gone">Not in the mirror</p>
                   {/if}
                 </div>
                 <div>
-                  <span class="wq-side">
+                  <span class="tf-wq-side">
                     As it stands now{nowSide.version === null ? "" : ` — version ${nowSide.version}`}
                   </span>
                   {#if nowSide.raw !== null}
-                    <pre class="log">{nowSide.raw}</pre>
+                    <pre class="tf-wq-pre">{nowSide.raw}</pre>
                   {:else if nowSide.live}
-                    <pre class="log">{nowSide.text ?? ""}</pre>
+                    <pre class="tf-wq-pre">{nowSide.text ?? ""}</pre>
                   {:else}
-                    <p class="wq-gone">the source withdrew it</p>
+                    <p class="tf-wq-gone">The source withdrew it</p>
                   {/if}
                 </div>
               </div>
             {:else}
-              <p class="wq-why">
-                The source refused this write. It will not be retried.
-              </p>
-              {#if row.detail}<pre class="log">{row.detail}</pre>{/if}
+              <p class="tf-wq-why">The source refused this write. It will not be retried.</p>
+              {#if row.detail}<pre class="tf-wq-pre">{row.detail}</pre>{/if}
             {/if}
 
             {#if editing === row.id}
-              <div class="wq-edit">
-                <span class="lab" id="wq-edit-label-{row.id}">Your write</span>
-                <textarea
-                  class="inp"
-                  aria-labelledby="wq-edit-label-{row.id}"
-                  bind:value={draft}
-                  rows="4"
-                ></textarea>
+              <div class="tf-wq-edit">
+                <span class="tf-wq-side" id="wq-edit-label-{row.id}">Your write</span>
+                <textarea aria-labelledby="wq-edit-label-{row.id}" bind:value={draft} rows="4"></textarea>
               </div>
             {:else if body !== null && file === null}
-              <pre class="log wq-mine">{body}</pre>
+              <pre class="tf-wq-pre tf-wq-mine">{body}</pre>
             {/if}
 
-            <footer class="wq-acts">
+            <div class="tf-wq-acts">
               {#if editing === row.id}
-                <button class="btn pri" disabled={queue.busy} onclick={() => save(row)}>
+                <button class="tf-btn tf-sm tf-primary" disabled={queue.busy} onclick={() => save(row)}>
                   Send this instead
                 </button>
-                <button class="btn ghost" onclick={() => (editing = null)}>Cancel</button>
+                <button class="tf-btn tf-sm tf-ghost" onclick={() => (editing = null)}>Cancel</button>
               {:else}
                 {#if row.state === "held" && row.source_enabled}
-                  <button class="btn" disabled={queue.busy} onclick={() => queue.apply(row.id)}>
+                  <button class="tf-btn tf-sm" disabled={queue.busy} onclick={() => queue.apply(row.id)}>
                     {unconfirmed === null ? "Send mine anyway" : "Send again"}
                   </button>
                 {/if}
                 {#if body !== null}
-                  <button class="btn" disabled={queue.busy} onclick={() => openEditor(row)}>
+                  <button class="tf-btn tf-sm" disabled={queue.busy} onclick={() => openEditor(row)}>
                     Edit…
                   </button>
                 {/if}
-                <button class="btn danger" disabled={queue.busy} onclick={() => withdraw(row)}>
+                <button class="tf-btn tf-sm tf-danger" disabled={queue.busy} onclick={() => withdraw(row)}>
                   Discard
                 </button>
               {/if}
-            </footer>
+            </div>
           </article>
         {/each}
       </section>
     {/if}
 
     {#if waiting.length > 0}
-      <section class="wq-sec">
-        <h3 class="wq-h">
+      <section class="tf-wq-sec">
+        <h3 class="tf-wq-h">
           Waiting
-          <span class="lab">{waiting.length}</span>
+          <span class="tf-wq-n">{waiting.length}</span>
         </h3>
-        <p class="wq-note">These go on their own as soon as their source can take them.</p>
+        <p class="tf-wq-note">These go on their own as soon as their source can take them.</p>
         {#each waiting as row (row.id)}
           {@const body = editableBody(row.payload)}
-          <article class="wq-row pending">
-            <header class="wq-row-h">
-              <b class="wq-op">{row.op}</b>
-              <span class="wq-target">{row.entity_id}</span>
-              <span class="wq-when">queued {ago(row.queued_at, now)}</span>
-            </header>
-            <p class="wq-why">{waitingBecause(row)}</p>
-            {#if body !== null}<pre class="log wq-mine">{body}</pre>{/if}
-            <footer class="wq-acts">
-              <button class="btn danger" disabled={queue.busy} onclick={() => withdraw(row)}>
+          <article class="tf-wq-row tf-wq-pending">
+            {@render heading(row)}
+            <p class="tf-wq-why">{waitingBecause(row)}</p>
+            {#if body !== null}<pre class="tf-wq-pre tf-wq-mine">{body}</pre>{/if}
+            <div class="tf-wq-acts">
+              <button class="tf-btn tf-sm tf-danger" disabled={queue.busy} onclick={() => withdraw(row)}>
                 Cancel
               </button>
-            </footer>
+            </div>
           </article>
         {/each}
       </section>
@@ -355,8 +382,8 @@
     <!--
       *Flush now* is impatience, not a decision: the scheduler already retries
       on its own tick. It is deliberately incapable of releasing a held write,
-      and the label says which rows it moves so that pressing it is never
-      mistaken for answering a conflict.
+      and the line beside it says which rows it moves so that pressing it is
+      never mistaken for answering a conflict.
 
       Beneath it, the guarantee knobas cannot keep, in ADR-0012's words: no
       transaction spans the send and the settle, so a write in flight when
@@ -364,15 +391,14 @@
       where a re-send is contemplated, and it is unconditional because it is
       true of the queue, not of any row in it.
     -->
-    <div class="wq-foot">
-      <span class="lab">Retries the waiting writes. Held writes are untouched.</span>
+    <div class="tf-wq-foot tf-first">
+      <p>Retries the waiting writes. Held writes are untouched.</p>
       {@render guarantee()}
     </div>
-    <span class="spacer"></span>
-    <button class="btn" disabled={queue.busy} onclick={() => queue.flush(null)}>Flush now</button>
-    <button class="btn ghost" onclick={onclose}>Close</button>
+    <button class="tf-btn" disabled={queue.busy} onclick={() => queue.flush(null)}>Flush now</button>
+    <button class="tf-btn tf-ghost" onclick={onclose}>Close</button>
   {/snippet}
-</Modal>
+</TfDialog>
 
 <!--
   The consent moment on the one withdrawal that can bill an hour twice
@@ -401,14 +427,14 @@
 -->
 {#if withdrawing}
   {@const log = withdrawing.log}
-  <Modal title="Withdraw this worklog?" center onclose={() => (withdrawing = null)}>
+  <TfDialog title="Withdraw this worklog?" {layers} onclose={() => (withdrawing = null)}>
     {#snippet body()}
       <p>
-        <b>{worked(log.seconds)}</b> logged to <b>{ticketKey(log.entity)}</b>, starting
+        <b>{worked(log.seconds)}</b> logged to <b class="tf-mono">{ticketKey(log.entity)}</b>, starting
         {dayLabel(dayKey(new Date(log.started)))} at {clockReading(log.started)} — {log.seconds}
         seconds.
       </p>
-      {#if log.comment}<pre class="log wq-mine">{log.comment}</pre>{/if}
+      {#if log.comment}<pre class="tf-wq-pre tf-wq-mine">{log.comment}</pre>{/if}
       <p>
         <b>knobas cannot tell whether Jira already took it.</b> Nothing in the queue separates a
         write that arrived and was never marked sent from one that never left — not the state it
@@ -420,166 +446,10 @@
       {@render guarantee()}
     {/snippet}
     {#snippet footer()}
-      <span class="spacer"></span>
-      <button class="btn ghost" onclick={() => (withdrawing = null)}>Keep it queued</button>
-      <button class="btn danger" disabled={queue.busy} onclick={confirmWithdrawal}>
+      <button class="tf-btn tf-ghost" onclick={() => (withdrawing = null)}>Keep it queued</button>
+      <button class="tf-btn tf-primary tf-danger" disabled={queue.busy} onclick={confirmWithdrawal}>
         Discard the worklog
       </button>
     {/snippet}
-  </Modal>
+  </TfDialog>
 {/if}
-
-<style>
-  .wq-error {
-    margin-bottom: 10px;
-    color: var(--fail);
-    font-size: 12px;
-  }
-
-  .wq-sec + .wq-sec {
-    margin-top: 18px;
-  }
-
-  .wq-h {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font: 500 13px var(--sans);
-    color: var(--text);
-  }
-
-  /*
-    The decisions heading carries the colour, not just the rows under it: the
-    reader's eye reaches the heading first, and it is the heading that has to
-    say "this section is different in kind".
-  */
-  .wq-h.decide {
-    color: var(--amber);
-  }
-
-  .wq-note {
-    margin: 2px 0 8px;
-    color: var(--muted);
-    font-size: 11.5px;
-  }
-
-  .wq-row {
-    padding: 10px 12px;
-    margin-bottom: 8px;
-    border: 1px solid var(--hair);
-    border-left-width: 3px;
-    border-radius: 2px;
-    background: var(--bg);
-  }
-
-  /*
-    Three states, three left edges. A held write and a merely pending one are
-    not the same thing waiting different lengths of time -- one needs the
-    reader and the other needs the network -- so they never share an edge.
-  */
-  .wq-row.held {
-    border-left-color: var(--amber);
-  }
-
-  .wq-row.refused {
-    border-left-color: var(--fail);
-  }
-
-  .wq-row.pending {
-    border-left-color: var(--hair2);
-  }
-
-  .wq-row-h {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    font-size: 12px;
-  }
-
-  .wq-op {
-    font: 500 11px var(--mono);
-    color: var(--text);
-  }
-
-  .wq-target {
-    font: 400 11.5px var(--mono);
-    color: var(--link);
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .wq-when {
-    margin-left: auto;
-    color: var(--faint);
-    font: 400 11px var(--mono);
-    white-space: nowrap;
-  }
-
-  .wq-why {
-    margin: 6px 0;
-    font-size: 12px;
-    color: var(--muted);
-  }
-
-  /* `.grid2` is the sheet's own two-column pair; only the gap below it is ours. */
-  .grid2 {
-    margin-bottom: 8px;
-  }
-
-  .wq-side {
-    display: block;
-    margin-bottom: 3px;
-    color: var(--faint);
-    font: 400 11px var(--mono);
-  }
-
-  .wq-gone {
-    margin: 0;
-    padding: 8px 10px;
-    border: 1px dashed var(--hair2);
-    border-radius: 2px;
-    color: var(--faint);
-    font: 400 11.5px var(--mono);
-  }
-
-  .wq-mine {
-    border-color: var(--hair2);
-    color: var(--text);
-  }
-
-  .wq-edit {
-    display: block;
-    margin: 6px 0;
-  }
-
-  .wq-edit .lab {
-    display: block;
-    margin-bottom: 3px;
-  }
-
-  .wq-acts {
-    display: flex;
-    gap: 6px;
-    margin-top: 8px;
-  }
-
-  /*
-    The footer is one flex row, and its only text was the uppercase label.
-    Two prose sentences do not survive that treatment, so the label and the
-    guarantee stack in a column of their own and the buttons keep the row.
-  */
-  .wq-foot {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-  }
-
-  .wq-guarantee {
-    margin: 0;
-    color: var(--muted);
-    font-size: 11.5px;
-  }
-</style>

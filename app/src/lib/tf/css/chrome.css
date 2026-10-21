@@ -48,8 +48,15 @@
 /* ---------- status bar ---------- */
 .tf-status {
   display: flex; gap: 18px; align-items: center; padding: 5px 14px; font-size: var(--t-xs); color: var(--ink-2);
-  background: var(--sheet); border-top: 1px solid var(--rule); overflow-x: auto; white-space: nowrap;
+  background: var(--sheet); border-top: 1px solid var(--rule); overflow: hidden; white-space: nowrap;
 }
+/*
+  Pin and ellipsis (#1410): everything but the healthy run keeps its width;
+  the run takes what is left and is cut at its end.
+*/
+.tf-status > * { flex: none; }
+.tf-status > .tf-healthy { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-status .tf-healthy > span + span { margin-left: 18px; }
 .tf-status .tf-bad { color: var(--err); font-weight: 600; }
 .tf-status button, .tf-status a {
   border: 0; background: none; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; color: inherit;
@@ -57,7 +64,9 @@
 .tf-status a.tf-sources { font-weight: 600; text-decoration: none; }
 .tf-status a.tf-sources:hover { text-decoration: underline; }
 .tf-status .tf-queue { margin-left: auto; }
-.tf-status button.tf-queued { color: var(--warn); font-weight: 600; }
+/* Queued is the info tone; a write that needs the reader is warn (#1409). */
+.tf-status button.tf-queued { color: var(--info); font-weight: 600; }
+.tf-status .tf-queued .tf-need { color: var(--warn); }
 
 /* ---------- main, full views, breadcrumb ---------- */
 .tf-main { overflow: auto; min-height: 0; min-width: 0; }

@@ -14,6 +14,7 @@
 
   let {
     title,
+    subtitle = null,
     onclose,
     layers = sharedLayers,
     body,
@@ -21,6 +22,8 @@
     className = "",
   }: {
     title: string;
+    /** A line under the title, in the dialog's sub tone (the write queue's counts, #1425). */
+    subtitle?: string | null;
     onclose: () => void;
     layers?: Layers;
     body: Snippet;
@@ -79,7 +82,10 @@
   }}
 >
   <div class="tf-dialog {className}" role="dialog" aria-modal="true" aria-labelledby={titleId} tabindex="-1" bind:this={dialog} {onkeydown}>
-    <header><h2 id={titleId}>{title}</h2></header>
+    <header>
+      <h2 id={titleId}>{title}</h2>
+      {#if subtitle !== null}<p class="tf-dsub">{subtitle}</p>{/if}
+    </header>
     <div class="tf-body">{@render body()}</div>
     <footer>{@render footer()}</footer>
   </div>

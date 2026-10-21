@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { AuthState, CredentialHealth, SourceSyncStatus } from "../ipc/sources";
-import { queuedWords, sourceReadings } from "./status";
+import { queueLabel, queuedWords, sourceReadings } from "./status";
 
 const NOW = new Date("2026-08-22T14:32:00Z");
 
@@ -85,4 +85,20 @@ test("the queue count in words", () => {
   expect(queuedWords(0)).toBe("No queued writes");
   expect(queuedWords(1)).toBe("1 queued write");
   expect(queuedWords(3)).toBe("3 queued writes");
+});
+
+/**
+ * The bar's queue control (#1409): waiting writes and the ones that need a
+ * decision, held plus refused. The decision part is absent at zero.
+ */
+test("the queue control counts the writes that need a decision too", () => {
+  const read = (pending: number, decisions: number) => {
+    const label = queueLabel(pending, decisions);
+    return [label.queued, label.decide].filter((part) => part !== null).join(" · ");
+  };
+  expect(read(1, 3)).toBe("1 queued write · 3 need you");
+  expect(read(0, 3)).toBe("0 queued writes · 3 need you");
+  expect(read(2, 0)).toBe("2 queued writes");
+  expect(queueLabel(2, 0).decide).toBeNull();
+  expect(read(0, 0)).toBe("No queued writes");
 });

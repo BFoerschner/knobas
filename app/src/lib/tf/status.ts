@@ -72,3 +72,18 @@ export function queuedWords(pending: number): string {
   if (pending === 0) return "No queued writes";
   return `${pending} queued write${pending === 1 ? "" : "s"}`;
 }
+
+/**
+ * The bar's queue control (#1409): *1 queued write · 3 need you*.
+ *
+ * `decisions` is held plus refused (`decisionsIn`): writes that never move on
+ * their own, which the bar is where to ask about (CONTEXT.md, *Pending
+ * write*). `decide` is `null` at zero, and with nothing waiting either the
+ * control reads the idle *No queued writes*. With decisions and nothing
+ * waiting the count says *0 queued writes*, so the label still names what the
+ * control opens.
+ */
+export function queueLabel(pending: number, decisions: number): { queued: string; decide: string | null } {
+  if (decisions === 0) return { queued: queuedWords(pending), decide: null };
+  return { queued: pending === 0 ? "0 queued writes" : queuedWords(pending), decide: `${decisions} need you` };
+}
