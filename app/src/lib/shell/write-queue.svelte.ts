@@ -366,7 +366,11 @@ export function writeWords(
   name: (entityId: string) => string | null,
 ): WritePart[] {
   const bag = (typeof row.payload === "object" && row.payload !== null ? row.payload : {}) as Record<string, Record<string, unknown> | undefined>;
-  const variant = Object.keys(bag)[0];
+  const first = Object.keys(bag)[0];
+  // Typed as the union's variants so the `default` below stops compiling when
+  // `WriteOp` gains one (ADR-0006); a variant this build has never heard of
+  // still lands there at run time.
+  const variant = first as PayloadVariant | undefined;
   const op = variant === undefined ? undefined : bag[variant];
   const str = (key: string): string | null => (typeof op?.[key] === "string" ? (op[key] as string) : null);
   const target = str("entity") ?? row.entity_id;
@@ -441,8 +445,11 @@ export function writeWords(
       }
       case "SourceAction":
         return titled("Action on", "An action on an item");
-      default:
+      default: {
+        const unheard: undefined = variant;
+        void unheard;
         return null;
+      }
     }
   })();
   if (said !== null) return said.filter((part) => part.text !== "");
@@ -451,21 +458,20 @@ export function writeWords(
 }
 
 /**
- * The ops whose target is named by its title rather than its key, so the
- * panel knows which rows to look a name up for.
+ * Whether a row's heading names its target by a looked-up title, so the panel
+ * knows which rows to ask a name for: `writeWords` asks for one or it does not.
  */
-export function namedByTitle(row: Pick<QueuedWrite, "payload">): boolean {
-  if (typeof row.payload !== "object" || row.payload === null) return true;
-  const variant = Object.keys(row.payload)[0] ?? "";
-  return !KEYED.has(variant);
+export function namedByTitle(row: Pick<QueuedWrite, "op" | "entity_id" | "payload">): boolean {
+  let asked = false;
+  writeWords(row, () => {
+    asked = true;
+    return null;
+  });
+  return asked;
 }
 
-/** The variants whose heading names the target by its key, or by the payload's own words. */
-const KEYED = new Set([
-  "Comment", "Transition", "Approve", "LogWork", "CreateTicket", "CreateBranch", "CreatePullRequest",
-  "MergePullRequest", "SubmitReview", "EditPullRequest", "UpdatePullRequestBranch", "CommitFile",
-  "CreatePage", "CreateMonitor",
-]);
+/** `"Comment"`, `"LogWork"`, … -- the keys of the `WriteOp` payload union. */
+type PayloadVariant = WriteOpPayload extends infer Payload ? (Payload extends Record<infer Key, unknown> ? Key : never) : never;
 
 export interface WriteQueue {
   /** The counts, `{0,0,0}` until the first read answers. */
