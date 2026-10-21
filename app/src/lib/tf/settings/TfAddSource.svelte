@@ -8,8 +8,11 @@
   connection* tests the draft and fills what it found into empty fields: the
   account into the user (#82), the ids the source reports into theirs (#297).
   *Add source* sends one `add_source` with the secret and the row, as the
-  rooms UI's `AddSource.svelte` does (contract §3: the backend orders the two
+  rooms UI's `AddSource.svelte` did (contract §3: the backend orders the two
   writes), and only after a passing test of the draft as it stands.
+
+  Settings › Sources mounts it, and so does the first-run wizard's *Connect a
+  real system* (#1400), with the same ports: there is one add-source flow.
 
   *Install an adapter* (#1202, #1209, ADR-0028) takes a GitHub repository
   URL (its latest release), a manifest URL, or the path of a local

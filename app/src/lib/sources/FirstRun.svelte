@@ -2,7 +2,7 @@
   The first-run wizard — spec §14a: *"initialize the database → add the first
   source (the §3 flow) → initial sync with progress → land in the launcher."*
 
-  Four panels over the mockup's `.steps` breadcrumb, and **DONE is the terminal
+  Four panels under a step breadcrumb, and **DONE is the terminal
   one for a real source and a demo load alike** (#156, ruled 2026-08-29). It was
   not always: `stepIndex = 3` was assigned only in `loadDemo`, so a real first
   sync ended at step 2 offering a bare *Finish*, and the sentence below —
@@ -13,14 +13,25 @@
   and what the reader gains is the sentence and the ⌘K pointer. A *failed*
   ending stays at step 2, where *Retry* and *Skip for now* are.
 
-  **Known deviation from task 20 step 3.** The brief asks for the Add-source
-  flow "embedded inline rather than in a modal; a modal over an otherwise empty
-  window is a dialog with nothing behind it". It is reused here exactly as the
-  sources view mounts it — `AddSource` *is* a `Modal` and has no inline mode —
-  so step 2 does open a dialog over the wizard. Recorded rather than papered
-  over: the reasons the brief gives are about how it looks, and giving
-  `AddSource` a second presentation is a change to a component the sources view
-  also owns. Not attempted inside this PR's review round.
+  ## The ticket-first look (#1400)
+
+  A full view in the `.tf` scope, drawn with `tf.css` (`css/first-run.css`):
+  the page title, a *First run* chip, the step breadcrumb in sentence case,
+  `tf-btn` buttons. The shell is not mounted while the wizard has the window,
+  so the wizard is its own `.tf` root and answers `Esc` for its dialog itself.
+
+  *Connect a real system* opens **the dialog Settings opens**, `TfAddSource`,
+  with the ports Settings gives it, so *Install an adapter* (ADR-0028) is here
+  too and there is one add-source flow (#1399). It is a dialog over the
+  wizard, as the rooms `AddSource` was: task 20 step 3 asked for the flow
+  inline, and that deviation stands, recorded rather than papered over.
+
+  ## A way out (#1399)
+
+  Spec §14a's reason for the wizard is guidance, not a gate. *Set up later in
+  Settings* on the Source step records completion as *Finish* does and lands
+  on Settings › Sources, so a reader with no built-in source or no credential
+  yet is not held here on every launch.
 
   ## Why completion comes off the channel
 

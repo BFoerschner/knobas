@@ -1,7 +1,8 @@
 /**
- * What both *Add a source* dialogs share: the rooms UI's `AddSource.svelte`
- * and the new shell's `tf/settings/TfAddSource.svelte` (#903). The rules a
- * new source is held to, and the one fill *Test connection* applies.
+ * What *Add a source* (`tf/settings/TfAddSource.svelte`, #903) is held to: the
+ * rules a new source must meet, and the one fill *Test connection* applies.
+ * The rooms UI's `AddSource.svelte` shared them until the first-run wizard,
+ * its last mount, moved to TfAddSource (#1400).
  */
 import type { AuthMethod, SourceDescriptor } from "../ipc/sources";
 import type { SchemaField } from "./schema-form";
