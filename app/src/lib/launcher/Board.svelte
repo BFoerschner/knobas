@@ -1,18 +1,27 @@
 <!--
-  What an empty box shows (spec §4): the smart lists with their counts and
-  change badges, and the newest items across every kind.
+  What an empty box shows (spec §4), top to bottom: the smart lists with their
+  counts and change badges; the inbox's count and its newest three items; the
+  time tracked today and what is still to log; the source-health strip; and
+  the newest items across every kind. Every block but the lists and the strip
+  is a list of rows the arrows walk (`rows.ts`), in that order.
 
-  **What is absent, and why it is absent rather than stubbed.** §4's board also
-  lists contexts, an inbox preview and today's time. Contexts need links (M2),
-  the inbox needs the notification model (M2) and time needs the timer (M3).
-  An empty column with a heading over it teaches a reader that the app is
-  broken; nothing at all teaches them what M1 is.
+  **A block with nothing to show is absent, not empty.** No inbox items, no
+  inbox block; nothing tracked today, no time block. An empty column with a
+  heading over it teaches a reader that the app is broken. §4's contexts are
+  not on the board by decision: the #1427 ruling keeps them as the job's
+  hidden working set (2026-10-21).
+
+  The inbox and the time are the shell's live reads handed in as props
+  (#1418) — the store the top bar's inbox count reads, and the Day view's own
+  read and figures — not fields on `launcher_home`.
 
   The recent items use the same `Row` the results use, so their provenance
   looks identical — which is the point of §4 promising it "on every result".
 -->
 <script lang="ts">
   import type { LauncherHome } from "../ipc";
+  import { failed, sentence, when } from "../tf/inbox/inbox";
+  import { hm } from "../tf/time/day-view";
   import type { CredentialHealth } from "../ipc/sources";
   import { isActionable, type HealthPhase } from "../shell/health.svelte";
   import { sourceMonogram } from "../shell/monogram";
@@ -23,6 +32,7 @@
 
   let {
     home,
+    inboxCount = 0,
     sources,
     reading: readingProp,
     rows,
@@ -37,6 +47,12 @@
     ondelete,
   }: {
     home: LauncherHome;
+    /**
+     * How many inbox items need the reader now — the inbox store's count, the
+     * number the top bar draws (#1418). The heading's number; the rows under
+     * it are the newest few of that many, from `rows`.
+     */
+    inboxCount?: number;
     /**
      * Whether `sources` has been read (#746). An empty list is "none
      * configured" only when `phase` is `ready`; while the shell's seed waits
@@ -103,8 +119,16 @@
 
   const reading = $derived(readingProp ?? { phase: "ready" as const, error: null, retry: () => {} });
 
-  /** Recent rows start after the lists in the flat selectable list. */
-  const recentFrom = $derived(home.smart_lists.length);
+  /** The inbox rows and the day's row, as `rows.ts` placed them after the lists. */
+  const inboxRows = $derived(
+    rows.flatMap((row, index) => (row.kind === "inbox" ? [{ row, item: row.item, index }] : [])),
+  );
+  const todayRow = $derived(
+    rows.flatMap((row, index) => (row.kind === "today" ? [{ row, today: row.today, index }] : []))[0],
+  );
+
+  /** Recent rows start after the lists, the inbox and the day in the flat selectable list. */
+  const recentFrom = $derived(home.smart_lists.length + inboxRows.length + (todayRow ? 1 : 0));
 
   /**
    * The saved list whose *Delete* has been pressed once.
@@ -258,6 +282,39 @@
     {/if}
   </div>
 {/each}
+
+{#if inboxRows.length > 0}
+  <div class="secl inboxh"><span class="lab">Inbox</span><span class="n">{inboxCount}</span></div>
+  <div class="inbox">
+    {#each inboxRows as { row, item, index } (row.id)}
+      <div class="slrow" class:on={index === selected} role="presentation" onmouseenter={() => onhover(index)}>
+        <button
+          id={optionId(index)}
+          class="sl"
+          role="option"
+          aria-selected={index === selected}
+          onclick={() => onopen(row)}
+        >
+          <span class="nm">{#if failed(item)}<span class="err" aria-hidden="true">●</span>{" "}{/if}{sentence(item)}</span>
+          <span class="c">{when(item.occurred_at, now ?? new Date())}</span>
+        </button>
+      </div>
+    {/each}
+  </div>
+{/if}
+
+{#if todayRow}
+  {@const { row, today, index } = todayRow}
+  <div class="secl"><span class="lab">Today</span><span class="n">time</span></div>
+  <div class="today">
+    <div class="slrow" class:on={index === selected} role="presentation" onmouseenter={() => onhover(index)}>
+      <button id={optionId(index)} class="sl" role="option" aria-selected={index === selected} onclick={() => onopen(row)}>
+        <span class="nm"><b>{hm(today.tracked)}</b> tracked</span>
+        <span class="c" class:warn={today.toLog > 0}>{hm(today.toLog)} to log</span>
+      </button>
+    </div>
+  </div>
+{/if}
 
 <!--
   The source-health strip. Not selectable, and deliberately not: a row here is
@@ -434,6 +491,16 @@
   .dot {
     margin-left: 4px;
     font-size: 9px;
+  }
+  /* A failure in the inbox (a failed build, a monitor down), as the Inbox
+     page marks one. */
+  .err {
+    color: var(--fail);
+    font-size: 9px;
+  }
+  /* Time not yet logged, in the Day view's warning colour. */
+  .c.warn {
+    color: var(--amber);
   }
   .none {
     padding: 14px 12px;

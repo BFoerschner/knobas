@@ -8,7 +8,7 @@
 export { default as Launcher } from "./Launcher.svelte";
 export { type LauncherAction, navigationActions } from "./actions";
 export { provenance, sourceMonogram, syncAge } from "./format";
-export { type LauncherMode, type LauncherRow } from "./rows";
+export { type InboxPreview, type LauncherMode, type LauncherRow, type TodayTime } from "./rows";
 export { DEBOUNCE_MS, SEARCH_LIMIT } from "./session.svelte";
 export { SYNTAX, type SyntaxEntry } from "./syntax";
 

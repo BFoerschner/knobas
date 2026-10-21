@@ -27,7 +27,7 @@ import {
   noFilters,
 } from "../ipc";
 import type { LauncherAction } from "./actions";
-import { type LauncherMode, type LauncherRow, flatten, modeOf } from "./rows";
+import { type BoardExtras, type LauncherMode, type LauncherRow, flatten, modeOf } from "./rows";
 import { SYNTAX } from "./syntax";
 import { pastedUrl } from "./url";
 
@@ -134,6 +134,13 @@ export class Session {
   selected = $state(0);
   actions = $state<LauncherAction[]>([]);
   /**
+   * The inbox preview and today's time the board draws beside {@link home}
+   * (#1418). The shell's live reads, set by the launcher from its props; rows
+   * of the board's list like the lists and the recent items, so the arrows
+   * reach them.
+   */
+  extras = $state<BoardExtras>({ inbox: null, today: null });
+  /**
    * The id of the list the query in the box was just saved as, or `null`.
    *
    * A statement about the *current* query, so every path that changes the box
@@ -182,6 +189,7 @@ export class Session {
       home: this.home,
       actions: this.actions,
       syntax: this.syntax,
+      extras: this.extras,
     });
   }
 

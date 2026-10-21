@@ -74,7 +74,8 @@
   import Results from "./Results.svelte";
   import { type LauncherAction, filterActions, navigationActions } from "./actions";
   import { counted } from "../tf/counted";
-  import type { LauncherRow } from "./rows";
+  import type { InboxPreview, LauncherRow, TodayTime } from "./rows";
+  import { opener } from "../tf/inbox/inbox";
   import { Session, type SessionPorts } from "./session.svelte";
   import { type Suggestion, activeToken, complete, suggest } from "./suggest";
 
@@ -82,6 +83,8 @@
     open = $bindable(false),
     sources,
     sourcesRead,
+    inbox,
+    today,
     actions = [],
     onnavigate,
     onclose,
@@ -111,6 +114,17 @@
      * so, and `retry` is offered.
      */
     sourcesRead?: { phase: HealthPhase; error: string | null; retry: () => void } | undefined;
+    /**
+     * The inbox the board previews (#1418, spec §4): the live store's count
+     * and its newest items, from the shell. Omitted or empty, the board draws
+     * no inbox block.
+     */
+    inbox?: InboxPreview | undefined;
+    /**
+     * Today's tracked and to-log minutes, the Day view's figures, from the
+     * shell (#1418). Omitted or nothing tracked, the board draws no time block.
+     */
+    today?: TodayTime | undefined;
     /** Extras appended to `>` — things only the shell knows it can offer. */
     actions?: LauncherAction[];
     onnavigate: (hash: string) => void;
@@ -342,10 +356,14 @@
       case "recent":
         return { entityId: row.row.entity_id, title: row.row.title };
       // A list, a syntax card and a navigation action are not entities, so
-      // there is nothing to link.
+      // there is nothing to link. An inbox line is *about* an entity but is
+      // not one (a credential expiry or an alert has none), and the day is a
+      // view: both open, and neither has a chain.
       case "list":
       case "action":
       case "syntax":
+      case "inbox":
+      case "today":
         return null;
     }
   }
@@ -492,6 +510,11 @@
    * already stripped — rather than against the raw box, which still has the
    * marker in it (ruling P2 again: the frontend does not strip grammar).
    */
+  /** The shell's inbox and today's time, as rows of the board (#1418). */
+  $effect.pre(() => {
+    session.extras = { inbox: inbox ?? null, today: today ?? null };
+  });
+
   $effect(() => {
     const typed = session.response?.interpreted.text ?? "";
     session.actions = filterActions([...navigationActions(), ...actions], typed);
@@ -545,6 +568,13 @@
         return entityAddress(row.row.kind, row.row.entity_id);
       case "action":
         return row.action.hash;
+      // The Inbox page's own link for the line, and the Inbox page for a line
+      // that has none to open.
+      case "inbox":
+        return opener(row.item)?.href ?? "#/inbox";
+      // Time › Day, which is today when the address names no day.
+      case "today":
+        return "#/time";
       // A list and a syntax row do not navigate: they rewrite the box, which
       // is what makes them a *filter* rather than a destination.
       case "list":
@@ -815,6 +845,7 @@
           {#if session.home}
             <Board
               home={session.home}
+              inboxCount={inbox?.count ?? 0}
               sources={health}
               reading={sourcesRead}
               rows={session.rows}
