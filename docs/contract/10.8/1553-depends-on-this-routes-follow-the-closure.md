@@ -18,9 +18,9 @@
   `app/src/lib/shell/dev/fake/estate.ts`' `dependsOnThis`.
 
   Pinned by `crates/knobas-app/tests/it/assets_ipc.rs`'
-  `what_breaks_below_an_asset_is_everything_it_holds_nearest_first` (the VM's nine routes),
-  `a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart` (a route reached through
-  a drawn link), `a_route_landing_on_what_holds_the_asset_does_not_break_with_it` and
+  `what_breaks_below_an_asset_is_everything_it_holds_nearest_first` (the VM's nine routes, in
+  name order), `a_depends_on_chain_counts_each_asset_once_and_lists_the_routes_apart` (a route
+  reached through a drawn link), `a_route_landing_on_what_holds_the_asset_does_not_break_with_it` and
   `a_link_the_panel_does_not_walk_leaves_the_list_empty` (the negatives), and
   `app/src/lib/shell/dev/fake-tauri.test.ts`' "Depends on this lists every route landing on what
   breaks, and none above it".

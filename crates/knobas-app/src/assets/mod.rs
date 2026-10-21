@@ -1523,8 +1523,9 @@ const ROUTES_REACHABLE: &str = "with recursive up (id, parent_id, depth) as (
 /// makes this a different read from [`ROUTES_REACHABLE`] rather than a filter
 /// over it. `CONTEXT.md`, **Depends on this**, as amended by #1553: the routes
 /// listed beneath are *"the ones whose target is the asset or anything in its
-/// answer"*. The panel answers *what breaks if this goes down*: a route landing on a container inside the VM that went down stops
-/// answering with the container, while a route landing on the VM **above**
+/// answer"*. The panel answers *what breaks if this goes down*: a route
+/// landing on a container inside the VM that went down stops answering with
+/// the container, while a route landing on the VM **above**
 /// this asset still answers whatever else that VM holds, so `$1` is
 /// [`depends_on_this`]' own answer and never the path upwards.
 const ROUTES_TO: &str = "select r.id, r.asset_id, r.target_id, r.name, r.url,

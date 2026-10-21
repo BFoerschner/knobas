@@ -10961,3 +10961,23 @@ Ruled 2026-10-21 by the implementer (Sonnet).
   renderer. *Reasoning:* `RouteRow.target_id`/`target_name` already say where each route lands,
   so a "lands on" column would be a UI choice, not this read's job. The Tree's panel and the
   editor's *Needed by* read the same answer, so they agree. *Reversing:* low.
+
+### #1553: merge-manager rulings (Opus, 2026-10-21)
+
+- **Does the widening contradict spec #491 story 52 or #505?** *Ruling:* no; merged as ruled.
+  *Reasoning:* story 52 asks that routes whose target is the asset be listed beneath and not
+  counted, and they still are: the new list contains the old one. #505's case for the narrow read
+  was a route landing on the VM *above* the asset, which still answers, and
+  `a_route_landing_on_what_holds_the_asset_does_not_break_with_it` keeps those out. #432 widened
+  **Route**'s *reachable via* on the same argument (every route in the estate lands on a
+  container). The ticket offered this option with the glossary amendment. *Reversing:* as the
+  implementer's ruling above.
+- **Is a route order owed a test?** *Fork:* both new tests sort the ids, so `ROUTES_TO`'s
+  `order by r.name` went unwitnessed, and the list a machine shows grew from at most three rows to
+  nine. *Ruling:* yes for the backend, no for the fake. The VM test now asserts the routes come back
+  in the order the same database sorts their names (`unnest … order by`), not a literal list: the
+  names mix cases and `en_US.UTF-8` sorts case differently across platforms. Dropping the
+  `order by` fails it (file order comes back). The fake keeps the file's `localeCompare` convention
+  (as `assetColumn` and the depends walk do) without a test of its own. *Reasoning:* both readers
+  render the IPC order as given, so the backend order is what a user sees. *Reversing:* delete
+  one assertion.
