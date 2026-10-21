@@ -10134,10 +10134,10 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   is open and one dropped in Finder; a button would be a third way to do what opening the dialog
   now does. *Reversing:* low.
 - **What the dialog draws while the read is out.** *Fork:* the list as the section found it until
-  the answer lands, or nothing. *Ruling:* nothing but "Reading the folder…" until a read started
-  after the dialog opened has landed. A counter of started reads, and the newest one that landed
-  (`latestRead` lets only the newest land), decide it, so an older read finishing first does not
-  bring the stale list back. A failed read is the section's failure line with *Try again*, which
+  the answer lands, or nothing. *Ruling:* nothing but "Reading the folder…" until the dialog's own
+  read lands. One flag, set when the dialog opens and cleared when a read lands: `latestRead` lets
+  only the newest read land, so an older read finishing first is dropped and cannot bring the stale
+  list back. A failed read is the section's failure line with *Try again*, which
   replaces the dialog; *Try again* brings it back over a fresh list. *Reasoning:* the brief: "not a
   stale list". *Reversing:* low.
 - **The focus listener** is the repo page's *Local changes* pattern (`TfRepoLocal`): added in an
