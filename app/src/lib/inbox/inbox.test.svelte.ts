@@ -90,7 +90,7 @@ vi.mock("../shell/open-external", () => ({
   openExternal: (url: string) => record(`open ${url}`, undefined),
 }));
 
-const { createInbox, snoozePresets, subjectOf } = await import("./inbox.svelte");
+const { createInbox, pickedMorning, snoozePresets, subjectOf } = await import("./inbox.svelte");
 const { drawable, formFor } = await import("./actions");
 
 function entry(over: Partial<InboxEntry["item"]> = {}, actions: string[] = []): InboxEntry {
@@ -386,4 +386,17 @@ test("a re-read taken while an answer was out cannot draw the row back after the
   await early;
   expect(inbox.stream).toEqual([]);
   expect(inbox.count).toBe(0);
+});
+
+test("pickedMorning is 09:00 local on a day after today, and null for anything else (#1437)", () => {
+  const now = new Date(2026, 7, 22, 15, 0);
+  expect(pickedMorning("2026-08-23", now)).toEqual(new Date(2026, 7, 23, 9, 0));
+  expect(pickedMorning("0002-11-02", now), "a two-digit year stays literal, not 1902").toBeNull();
+  expect(pickedMorning("1902-11-02", now), "a past day").toBeNull();
+  expect(pickedMorning("2026-08-22", now), "today").toBeNull();
+  expect(pickedMorning("2026-08-21", now), "yesterday").toBeNull();
+  expect(pickedMorning("", now)).toBeNull();
+  expect(pickedMorning("2026-08", now)).toBeNull();
+  expect(pickedMorning("0999-01-01", now)).toBeNull();
+  expect(pickedMorning("20261-01-01", now), "a five-digit year is not a four-digit year").toBeNull();
 });

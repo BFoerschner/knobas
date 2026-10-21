@@ -235,6 +235,73 @@ test("Snooze offers the presets, and one moves the item to the snoozed line", as
   );
 });
 
+function picker(row: Element): HTMLInputElement {
+  return row.querySelector<HTMLInputElement>('input[type="date"]')!;
+}
+function typeDate(row: Element, value: string) {
+  const input = picker(row);
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+}
+async function openPicker() {
+  await open();
+  const row = rowOf("Idempotent");
+  button(row, "Snooze").click();
+  flushSync();
+  return row;
+}
+const snoozeCalls = () => calls.filter((call) => call.startsWith("snooze "));
+const snoozeToasts = () => toasts.items.filter((toast) => toast.text.startsWith("Snoozed until"));
+
+test("the date field has min set to tomorrow (#1437)", async () => {
+  const row = await openPicker();
+  expect(picker(row).min).toBe("2026-08-23");
+});
+
+test("a change event with a half-typed year snoozes nothing and keeps the picker open (#1437)", async () => {
+  const row = await openPicker();
+  typeDate(row, "0002-11-02");
+  await settle();
+  expect(snoozeCalls()).toEqual([]);
+  expect(snoozeToasts()).toEqual([]);
+  expect(row.querySelector(".tf-isnooze")).not.toBeNull();
+});
+
+test("a past date and a press of Snooze make no call and no success toast (#1437)", async () => {
+  const row = await openPicker();
+  typeDate(row, "2026-08-20");
+  const press = button(row.querySelector(".tf-isnooze")!, "Snooze");
+  press.disabled = false;
+  press.click();
+  picker(row).dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await settle();
+  expect(snoozeCalls()).toEqual([]);
+  expect(snoozeToasts()).toEqual([]);
+  expect(row.querySelector(".tf-isnooze")).not.toBeNull();
+});
+
+test("a future date and a press of Snooze make one call at 09:00, close the picker and toast (#1437)", async () => {
+  const row = await openPicker();
+  typeDate(row, "2026-08-25");
+  expect(snoozeCalls()).toEqual([]);
+  button(row.querySelector(".tf-isnooze")!, "Snooze").click();
+  await settle();
+  expect(snoozeCalls()).toEqual([`snooze review_request:gitea:payouts#142 ${new Date(2026, 7, 25, 9, 0).toISOString()}`]);
+  expect(snoozeToasts()).toHaveLength(1);
+  expect(row.querySelector(".tf-isnooze")).toBeNull();
+});
+
+test("Enter in the date field commits a future date once (#1437)", async () => {
+  const row = await openPicker();
+  typeDate(row, "2026-08-25");
+  picker(row).dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await settle();
+  expect(snoozeCalls()).toEqual([`snooze review_request:gitea:payouts#142 ${new Date(2026, 7, 25, 9, 0).toISOString()}`]);
+  expect(snoozeToasts()).toHaveLength(1);
+});
+
 test("a credential expiry also offers After it expires, the day after the expiry the item is dated from (#1086)", async () => {
   // The backend dates the item at the expiry minus WINDOW_DAYS (14): this one
   // arrived on 22 Aug 08:00, so the credential expires on 5 Sep 08:00.
