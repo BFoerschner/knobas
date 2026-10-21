@@ -499,7 +499,9 @@ live_session() {
   if [ "$1" = forgejo ]; then
     eval "$(cd "$LIVE_TESTENV" && ./seed --env-forgejo)"
   else
-    eval "$(cd "$LIVE_TESTENV" && ./seed --env)"
+    # Captured first: eval "$(...)" would swallow a refused token (#1377).
+    seed_env=$(cd "$LIVE_TESTENV" && ./seed --env) || exit 1
+    eval "$seed_env"
   fi
   if [ -n "$LIVE_PUT_BACK" ]; then
     echo "live: $1 is up for this run; $LIVE_PUT_BACK will be stopped at its end"

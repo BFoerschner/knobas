@@ -351,6 +351,10 @@ the ways until #684 and is the rule that ended it; the four after it still are:
     holding it keeps while it works.
   - Any other answer to the probe, or none, is a refusal that changes
     nothing.
+  - `./seed --env` runs the same probe before it prints a token (#1377): a
+    token Gitea does not answer 200 to ends it, non-zero, naming the status
+    and `./seed`, so `just responsiveness-probe` and `just gitea-live` stop
+    before cargo starts. A print never re-mints; `./seed` does.
 
   So two worktrees seeding one after the other, or at the same time, both
   keep a working token. A 401 from `eval "$(./seed --env)"` now means this

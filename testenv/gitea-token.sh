@@ -23,6 +23,23 @@ gitea_seed_token_name() {
   printf 'knobas-seed-%s-%s\n' "$(basename "$(dirname "$_gt_dir")")" "$_gt_sum"
 }
 
+# gitea_token_status <api url> <token> -- the one probe: GET /user, prints the
+# HTTP status (empty when Gitea gave none).
+gitea_token_status() {
+  curl -sS -o /dev/null -w '%{http_code}' \
+    -H "Authorization: token $2" "$1/user" 2>/dev/null || true
+}
+
+# gitea_token_require <api url> <token> -- 0 when Gitea accepts the token (200);
+# otherwise says so on stderr, naming the status and the remedy, and returns 1.
+# Read-only: re-minting is ./seed's job, never a print's (#1377).
+gitea_token_require() {
+  _gr_status=$(gitea_token_status "$1" "$2")
+  [ "$_gr_status" = 200 ] && return 0
+  echo "seed: the recorded Gitea access token in seed-state.json is refused by $1/user (HTTP ${_gr_status:-000}, not 200); run ./seed (from testenv/) and retry" >&2
+  return 1
+}
+
 # gitea_seed_token <api url> <admin user:pass> <recorded token or ""> <name>
 # Prints the token to use. A recorded token is kept while Gitea accepts it --
 # one call to /user -- whatever its name, so a tree still holding a working
@@ -34,8 +51,7 @@ gitea_seed_token() {
   _gt_api=$1 _gt_admin=$2 _gt_token=$3 _gt_name=$4
   _gt_user=${_gt_admin%%:*}
   if [ -n "$_gt_token" ]; then
-    _gt_status=$(curl -sS -o /dev/null -w '%{http_code}' \
-                   -H "Authorization: token $_gt_token" "$_gt_api/user" 2>/dev/null) || true
+    _gt_status=$(gitea_token_status "$_gt_api" "$_gt_token")
     case $_gt_status in
       200) printf '%s\n' "$_gt_token"; return 0 ;;
       401) echo "seed-gitea: the recorded access token no longer authenticates; minting a new one" >&2 ;;
