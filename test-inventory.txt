@@ -368,6 +368,7 @@ knobas-app	test/it	assets_ipc::a_rename_is_its_own_line_and_moves_the_entity_tit
 knobas-app	test/it	assets_ipc::a_route_is_an_entity_in_the_namespace_knobas_reserves
 knobas-app	test/it	assets_ipc::a_route_is_deleted_and_its_entity_row_is_tombstoned
 knobas-app	test/it	assets_ipc::a_route_is_renamed_re_pointed_and_re_classified_one_line_each
+knobas-app	test/it	assets_ipc::a_route_landing_on_what_holds_the_asset_does_not_break_with_it
 knobas-app	test/it	assets_ipc::a_route_reads_from_both_ends_and_from_every_asset_on_the_path
 knobas-app	test/it	assets_ipc::a_route_that_could_not_be_read_back_is_refused
 knobas-app	test/it	assets_ipc::a_route_with_no_target_reads_under_exposes_only

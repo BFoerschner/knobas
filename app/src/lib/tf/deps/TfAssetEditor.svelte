@@ -8,7 +8,8 @@
   *Needed by* (#1457) keeps the direct `depends-on` links as chips, the part a
   link edit changes, and beneath them reads `depends_on_this`: every asset that
   breaks if this one goes down, nearest first and counted, then the routes
-  landing on it, listed and not counted, as the Tree's *Depends on this* does.
+  landing on it or on any of those (#1553), listed and not counted, as the
+  Tree's *Depends on this* does.
 
   *Save* runs `asset-edit.ts`' order: one `edit_asset` with only the changed
   fields, then `move_asset`, then the new `depends-on` links. A failure keeps

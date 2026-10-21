@@ -189,7 +189,7 @@ export function contextAssets(ctxId: string): Promise<MemberAsset[]> {
 /**
  * What breaks if this asset goes down (#505): its descendants and everything
  * linked to it by `depends-on` or `runs-on`, transitively over both, plus the
- * routes that land on it listed apart.
+ * routes that land on it or on any of those (#1553) listed apart.
  *
  * A read of its own and not part of {@link getAsset}: the pane's read runs on
  * every selection in every column, and this walk costs a round trip per step

@@ -10937,3 +10937,47 @@ Ruled 2026-10-21 by the implementer (Sonnet).
 
 - **Fork:** keep `chrome.kill()` (SIGTERM to the main process) and wait for it to exit, or kill harder. **Ruling:** spawn Chrome `detached` (its own process group) and SIGKILL the group from one `closeChrome`, called by `done()`, by SIGINT/SIGTERM/SIGHUP handlers and by the process's `exit` event. **Reasoning:** `done()` is synchronous and followed by `process.exit`, so it cannot wait; SIGTERM only reaches the main process, which can ignore it early in start-up, and leaves helpers. The profile is a throwaway temp directory, so a hard kill loses nothing. **Cost of reversing:** low, one function.
 - **Fork:** the orphan did not reproduce on this tree (ten runs of `scripts/shot-test.sh`, none left a Chrome), so the old code cannot be shown to leak. **Ruling:** the fix closes the unproven race anyway; `scripts/shot-test.sh` now fails if any process names `--user-data-dir=$fixture`, which would catch a regression that leaks reliably. A mutant restoring the old `chrome.kill()` survives; one making `closeChrome` a no-op dies.
+## #1553: Depends on this lists the routes landing on anything that breaks (Opus implementer, 2026-10-21)
+
+- **Widen `depends_on_this.routes`, or keep the narrow reading.** *Fork:* the ticket offers both:
+  (a) routes whose target is the asset or any asset in its closure, or (b) routes whose target is
+  the asset itself, recorded so later audits stop expecting more. *Ruling:* (a). *Reasoning:* the
+  panel answers *what breaks if this goes down*. A route landing on a container stops answering
+  when the machine holding the container goes down, so leaving it off answers that question
+  wrong. The narrow reading also leaves the panel empty for every machine in
+  `testenv/estate.json`, because every route there lands on a container. #432 widened **Route**'s
+  *reachable via* on that argument. Story 52's purpose, *"so that the number is about assets"*,
+  holds: the routes stay beneath the count and outside it. #505's own reasoning for the narrow
+  read was about routes **above** the asset (*"a route landing on the VM above still answers
+  whatever else that VM holds"*), and those stay out. The glossary entry is amended in the same
+  PR, as the ticket's option (a) says, so nothing here contradicts it. *Reversing:* one `where`
+  clause, the fake's filter, the glossary amendment and a §10.8 entry.
+- **What "the closure" is.** *Ruling:* the asset plus exactly `DependsOnThis.assets`: containment
+  and the two link relations, read toward the asset. A route landing on an asset that holds the
+  subject, or on an asset only linked *from* it, is not listed. *Reasoning:* the routes then
+  follow the same walk as the count, so the two halves of the panel cannot disagree about what
+  went down. *Reversing:* low.
+- **Order and labelling.** *Ruling:* still by name, with no new field and no change to either
+  renderer. *Reasoning:* `RouteRow.target_id`/`target_name` already say where each route lands,
+  so a "lands on" column would be a UI choice, not this read's job. The Tree's panel and the
+  editor's *Needed by* read the same answer, so they agree. *Reversing:* low.
+
+### #1553: merge-manager rulings (Opus, 2026-10-21)
+
+- **Does the widening contradict spec #491 story 52 or #505?** *Ruling:* no; merged as ruled.
+  *Reasoning:* story 52 asks that routes whose target is the asset be listed beneath and not
+  counted, and they still are: the new list contains the old one. #505's case for the narrow read
+  was a route landing on the VM *above* the asset, which still answers, and
+  `a_route_landing_on_what_holds_the_asset_does_not_break_with_it` keeps those out. #432 widened
+  **Route**'s *reachable via* on the same argument (every route in the estate lands on a
+  container). The ticket offered this option with the glossary amendment. *Reversing:* as the
+  implementer's ruling above.
+- **Is a route order owed a test?** *Fork:* both new tests sort the ids, so `ROUTES_TO`'s
+  `order by r.name` went unwitnessed, and the list a machine shows grew from at most three rows to
+  nine. *Ruling:* yes for the backend, no for the fake. The VM test now asserts the routes come back
+  in the order the same database sorts their names (`unnest … order by`), not a literal list: the
+  names mix cases and `en_US.UTF-8` sorts case differently across platforms. Dropping the
+  `order by` fails it (file order comes back). The fake keeps the file's `localeCompare` convention
+  (as `assetColumn` and the depends walk do) without a test of its own. *Reasoning:* both readers
+  render the IPC order as given, so the backend order is what a user sees. *Reversing:* delete
+  one assertion.
