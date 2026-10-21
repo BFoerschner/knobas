@@ -407,6 +407,7 @@ const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
 const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
 const TfItem = (await import("../tf/item/TfItem.svelte")).default;
+const TfCodeRow = (await import("../tf/code-row/TfCodeRow.svelte")).default;
 const TfNote = (await import("../tf/note/TfNote.svelte")).default;
 const { createPendingComments } = await import("../detail/view/pending-comments.svelte");
 const TfMonitors = (await import("../tf/monitors/TfMonitors.svelte")).default;
@@ -1417,6 +1418,30 @@ const CASES: Case[] = [
             replace: () => {},
             canGoBack: () => false,
             back: () => {},
+          },
+        },
+      }),
+    }),
+  },
+  // A branch's or commit's address (#1440): the mirror row and its source's repositories, answering late.
+  {
+    name: "TfCodeRow",
+    source: "lib/tf/code-row/TfCodeRow.svelte",
+    open: (target) => ({
+      app: mount(TfCodeRow, {
+        target,
+        props: {
+          head: "branch",
+          id: "gitea:tidewater/payout-service@refs/heads/main",
+          ready: true,
+          ports: {
+            getEntity: () =>
+              deferred({
+                row: { entity_id: "gitea:tidewater/payout-service@refs/heads/main", kind: "branch", source_id: "gitea", title: "main", path: "tidewater/payout-service" },
+              } as never),
+            listEntities: () =>
+              deferred({ rows: [{ entity_id: "gitea:tidewater/payout-service", kind: "repo", source_id: "gitea", title: "tidewater/payout-service" }], total: 1 } as never),
+            replace: () => {},
           },
         },
       }),
