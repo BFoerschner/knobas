@@ -179,11 +179,16 @@
   /**
    * The job the reader was last in: the breadcrumb's chip and where `Esc`
    * returns (R-1.6). Only a job actually opened, as prototype-6's `S.job`.
+   * `key` is what the chip and the tab name (R-1.2); `segment` is the address
+   * it was opened at, a bare key or an entity id (#1476), which every way
+   * back to it uses, so a key two sources hold returns to the one the
+   * reader was on (#1525).
    */
-  let lastJob = $state<string | null>(null);
+  let lastJob = $state<{ key: string; segment: string } | null>(null);
   $effect(() => {
-    // The key, also when the address held an id: the tab names a key (R-1.2).
-    if (route.view === "job" && route.key !== null) lastJob = isEntityId(route.key) ? keyOf(route.key) : route.key;
+    if (route.view === "job" && route.key !== null) {
+      lastJob = { key: isEntityId(route.key) ? keyOf(route.key) : route.key, segment: route.key };
+    }
   });
 
   /** What the timer runs on, as a ticket key; an asset or a label is no job. */
@@ -193,29 +198,44 @@
     return targetReading(target);
   });
   /** The Job tab's job: the last one opened, else the timer's ticket (R-1.2). */
-  const navJob = $derived(lastJob ?? timedTicket);
+  const navJob = $derived(lastJob?.key ?? timedTicket);
+  /** Where the Job tab goes: the address the last job was opened at, else the timer's ticket by its id. */
+  const navJobAt = $derived.by(() => {
+    if (lastJob !== null) return lastJob.segment;
+    const target = timer.current?.target ?? null;
+    return timedTicket === null || target === null || target.kind !== "entity" ? null : target.entity_id;
+  });
 
   /**
    * The current job as an entity id, which `create_block` needs (#1027). The
-   * timer's ticket is already one; the last job opened is a key, looked for
-   * under every source as the job page does. `null` while it is not known.
+   * timer's ticket is already one; the last job opened is read at the address
+   * it was opened at, as the job page reads it (#1525): an id as itself, a
+   * bare key under every source. `null` while it is not known.
    */
   let navJobId = $state<{ key: string; entityId: string } | null>(null);
+  /** The address `navJobId` was read for; plain, so the effect does not re-run on it. */
+  let navJobRead: string | null = null;
   $effect(() => {
     const key = navJob;
+    const segment = lastJob?.segment ?? null;
     const timed = timer.current?.target ?? null;
     if (key === null || !lifecycle.ready) {
       navJobId = null;
+      navJobRead = null;
       return;
     }
-    if (lastJob === null && timed !== null && timed.kind === "entity") {
+    if (segment === null && timed !== null && timed.kind === "entity") {
       navJobId = { key, entityId: timed.entity_id };
+      navJobRead = null;
       return;
     }
+    // Another source's ticket under the same key is another job: never answer with the last one's id.
+    if (segment !== navJobRead) navJobId = null;
+    navJobRead = segment;
     let stale = false;
     void jobPorts
       .listSources()
-      .then((sources) => resolveTicket(key, sources, jobPorts.getEntity))
+      .then((sources) => resolveTicket(segment ?? key, sources, jobPorts.getEntity))
       .then((found) => {
         if (!stale) navJobId = found === null ? null : { key, entityId: found.row.entity_id };
       })
@@ -233,9 +253,9 @@
    * and Settings are no job's, though the last two draw it in their crumbs.
    */
   const crumbKey = $derived.by(() => {
-    if (route.view === "job") return route.key === null ? null : lastJob;
-    if (route.view === "item") return lastJob;
-    if (route.view === "full" && route.section !== "inbox" && route.section !== "settings") return lastJob;
+    if (route.view === "job") return route.key === null ? null : (lastJob?.key ?? null);
+    if (route.view === "item") return lastJob?.key ?? null;
+    if (route.view === "full" && route.section !== "inbox" && route.section !== "settings") return lastJob?.key ?? null;
     return null;
   });
   $effect(() => {
@@ -367,7 +387,7 @@
               text: field instanceof HTMLInputElement ? field.value : "",
             },
       route,
-      job: lastJob,
+      jobAt: lastJob?.segment ?? null,
     });
     if (step.do === "nothing") return;
     event.preventDefault();
@@ -419,6 +439,7 @@
   <TfTopBar
     current={sectionOf(route)}
     job={navJob}
+    jobAt={navJobAt}
     {inbox}
     {badges}
     {timer}
@@ -431,7 +452,8 @@
       ctx={{
         route,
         ready: lifecycle.ready,
-        job: lastJob,
+        job: lastJob?.key ?? null,
+        jobAt: lastJob?.segment ?? null,
         timedTicket,
         navJob: navJobId,
         timer,

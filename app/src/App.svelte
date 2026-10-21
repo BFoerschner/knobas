@@ -81,9 +81,10 @@
   /**
    * What is in front of the reader (#1102): the entity page on screen, else
    * the asset the Tree selects, else the job on screen (R-1.4), else nothing,
-   * by `foregroundOf`'s reading of `CONTEXT.md`'s rule. A page with none of
-   * them leaves ⌘T asking. The store holds the answer because the heartbeat
-   * reads it from an interval, outside any reactive scope.
+   * by `foregroundOf`'s reading of `CONTEXT.md`'s rule. On a page with none
+   * of them ⌘T starts on the breadcrumb's job, else asks (#1435). The store
+   * holds the answer because the heartbeat reads it from an interval,
+   * outside any reactive scope.
    */
   const foregroundId = $derived(foregroundOf(parseTfHash(hash), currentJob.entityId)?.entity_id ?? null);
   // Keyed on the id, so a tab of the same page (`#/pr/<id>/files`) changes nothing downstream.
@@ -163,7 +164,8 @@
   /**
    * ⌘T and the timer chip. One draft at a time (#826); a running clock opens
    * its draft and stops on the answer (#896); otherwise `timer.press()`
-   * starts on the foreground or asks with the picker.
+   * starts on the foreground, else on the breadcrumb's job (#1435), or asks
+   * with the picker.
    */
   function toggleTimer() {
     if (drafts.busy) return drafts.refuse();
@@ -193,6 +195,13 @@
     linkRequest.ask(job.key, target);
     if (currentJob.entityId !== job.entityId) location.hash = jobHash(job.key);
   }
+
+  // ⌘T with nothing in front starts on the job the breadcrumb names (#1435);
+  // the shell keeps that job in `breadcrumbJob` (#1500), one answer for both.
+  $effect(() => {
+    const job = breadcrumbJob.job;
+    timer.breadcrumbJob = job === null ? null : { kind: "entity", entity_id: job.entityId };
+  });
 
   /** Start on what the picker chose, and close it only if that worked. */
   function startFromPicker(target: Parameters<typeof timer.start>[0]) {

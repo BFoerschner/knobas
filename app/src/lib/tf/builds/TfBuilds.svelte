@@ -99,6 +99,7 @@
     head,
     rest,
     job,
+    jobAt = null,
     ports = { pipelines: readPipelines, runs: (id) => pipelineRuns(id) },
   }: {
     /** Whether the database answers yet: the reads wait for it. */
@@ -109,6 +110,8 @@
     rest: string[];
     /** The job the reader was last in, for the breadcrumb. */
     job: string | null;
+    /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
+    jobAt?: string | null;
     ports?: BuildsPorts;
   } = $props();
 
@@ -259,7 +262,7 @@
 {#snippet crumbs(parts: { name: string; href?: string }[])}
   <nav class="tf-crumbs" aria-label="Breadcrumb">
     {#if job !== null}
-      <a class="tf-jobchip tf-card" href={jobHash(job)}>{job}</a><span class="tf-sep">›</span>
+      <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a><span class="tf-sep">›</span>
     {/if}
     {#each parts as part, at (at)}
       {#if part.href !== undefined}

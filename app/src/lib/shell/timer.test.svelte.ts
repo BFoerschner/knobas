@@ -128,6 +128,39 @@ test("⌘T with nothing running and nothing in front asks for a target", async (
   expect(timer.current).toBeNull();
 });
 
+/**
+ * **The breadcrumb's job** (#1435, R-1.4): a view opened from a job
+ * ('PAY-231 › Time') has nothing in front of the reader, and ⌘T starts on the
+ * job it was opened from rather than asking.
+ */
+test("⌘T with nothing in front starts on the breadcrumb's job", async () => {
+  const { timer, calls } = bench();
+  timer.foreground = null;
+  timer.breadcrumbJob = TICKET;
+
+  await expect(timer.press()).resolves.toEqual({ did: "started", closed: null });
+  expect(calls.started).toEqual([TICKET]);
+});
+
+test("⌘T prefers what is in front of the reader to the breadcrumb's job", async () => {
+  const { timer, calls } = bench();
+  const pr: TimerTarget = { kind: "entity", entity_id: "gitea:pr-12" };
+  timer.foreground = pr;
+  timer.breadcrumbJob = TICKET;
+
+  await timer.press();
+  expect(calls.started).toEqual([pr]);
+});
+
+test("⌘T with neither something in front nor a breadcrumb job asks", async () => {
+  const { timer, calls } = bench();
+  timer.foreground = null;
+  timer.breadcrumbJob = null;
+
+  await expect(timer.press()).resolves.toEqual({ did: "pick", closed: null });
+  expect(calls.started).toEqual([]);
+});
+
 /** Behaviour 3: running → stop, whatever is in front of the reader. */
 test("⌘T with a timer running stops it, and does not start a second", async () => {
   const { timer, calls } = bench();
@@ -231,6 +264,9 @@ test("the heartbeat is sent every thirty seconds and carries the foreground", ()
   expect(belt.calls.beats).toEqual([TICKET]);
 
   belt.timer.foreground = null;
+  // The breadcrumb's job is ⌘T's (#1435), never an observation: passive
+  // attribution records nothing on a list.
+  belt.timer.breadcrumbJob = { kind: "entity", entity_id: "jira:PAY-228" };
   vi.advanceTimersByTime(HEARTBEAT_MS);
   // `null` is an observation and not a missing one: nothing was in front of
   // the reader, which is what #282 will record as an unattributed gap.

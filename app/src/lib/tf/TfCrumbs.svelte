@@ -11,12 +11,22 @@
 <script lang="ts">
   import { jobHash } from "./route";
 
-  let { job, name }: { job: string | null; name: string } = $props();
+  let {
+    job,
+    jobAt = null,
+    name,
+  }: {
+    /** The job's key, which the chip names. */
+    job: string | null;
+    /** The address the job was opened at (#1525), which the chip links; its key when omitted. */
+    jobAt?: string | null;
+    name: string;
+  } = $props();
 </script>
 
 <nav class="tf-crumbs" aria-label="Breadcrumb">
   {#if job !== null}
-    <a class="tf-jobchip tf-card" href={jobHash(job)}>{job}</a><span class="tf-sep">›</span>
+    <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a><span class="tf-sep">›</span>
   {/if}
   <strong>{name}</strong>
   <span class="tf-esc">{job !== null ? `Back to ${job}` : "Back"} <kbd>Esc</kbd></span>

@@ -25,8 +25,10 @@ export interface TfPageContext {
   route: TfRoute;
   /** Whether the database answers yet: a page's reads wait for it. */
   ready: boolean;
-  /** The job the reader was last in. */
+  /** The job the reader was last in, as its key. */
   job: string | null;
+  /** The address that job was opened at (#1525): its key, or its entity id when two sources hold the key. */
+  jobAt: string | null;
   /** The ticket key the timer runs on, or `null`. */
   timedTicket: string | null;
   /** The Job tab's job (the last opened, else the timer's) with its entity id, or `null`. */

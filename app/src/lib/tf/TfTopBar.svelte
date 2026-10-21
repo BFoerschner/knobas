@@ -17,6 +17,7 @@
   let {
     current,
     job,
+    jobAt = null,
     inbox,
     badges,
     timer,
@@ -28,6 +29,8 @@
     current: Section | null;
     /** The job the Job tab opens: the last one visited, else the timer's. */
     job: string | null;
+    /** That job's address (#1525): where it was opened, else the timer's ticket id; its key when omitted. */
+    jobAt?: string | null;
     inbox: Pick<Inbox, "count">;
     badges: Pick<Badges, "builds" | "monitors" | "proposals">;
     timer: Pick<Timer, "current" | "elapsed">;
@@ -54,7 +57,7 @@
   }
 
   function hrefOf(section: Section): string {
-    return section === "job" ? jobHash(job) : `#/${section}`;
+    return section === "job" ? jobHash(jobAt ?? job) : `#/${section}`;
   }
 
   /** Prototype-6 draws the clock as `H:MM:SS` from the first second. */

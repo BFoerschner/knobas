@@ -15,13 +15,20 @@ import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
 import { entityAddress } from "./address";
 import { sourceRoles } from "./roles.svelte";
-import { NAV, SECTION_NAME } from "./route";
+import { jobHash, NAV, SECTION_NAME } from "./route";
 import TfShell, { type TfShellPorts } from "./TfShell.svelte";
 import { createTheme, type Theme } from "./theme.svelte";
+
+/** Every block the Day tab's *Add to* wrote, as its target (#1525). */
+const created = vi.hoisted(() => [] as unknown[]);
 
 // The Day tab reads the real bridge; its one read here is an open stretch.
 vi.mock("../ipc/time", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../ipc/time")>()),
+  createBlock: (_from: string, _to: string, target: unknown) => {
+    created.push(target);
+    return Promise.resolve(null);
+  },
   dayBlocks: () =>
     Promise.resolve({
       blocks: [],
@@ -177,6 +184,7 @@ function start(
     listSources?: TfShellPorts["listSources"];
     listen?: TfShellPorts["listen"];
     counts?: WriteQueue["counts"];
+    jobPorts?: JobPorts;
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -216,7 +224,7 @@ function start(
       },
       prefersDark: over.prefersDark ?? (() => false),
       onstarttimer: over.onstarttimer ?? (() => {}),
-      jobPorts: JOB_PORTS,
+      jobPorts: over.jobPorts ?? JOB_PORTS,
       nav: over.nav ?? { back: () => {}, forward: () => {} },
     },
   });
@@ -720,6 +728,62 @@ test("a job opened by its id names its key on the Job tab", async () => {
   await at("#/job/jira:PAY-231");
   expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent).toContain("PAY-231");
   expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent).not.toContain("jira:");
+});
+
+/**
+ * `PAY-231` under two sources (#1476, #1525): Jira's, listed first, and
+ * Tidewater's, which a bare `#/job/PAY-231` would never open.
+ */
+const TWO_SOURCE_PORTS: JobPorts = {
+  ...JOB_PORTS,
+  listSources: () => Promise.resolve([{ id: "jira" }, { id: "tide" }]),
+  getEntity: (id) =>
+    id === "tide:PAY-231"
+      ? JOB_PORTS.getEntity("jira:PAY-231").then((detail) => ({
+          ...detail,
+          row: { ...detail.row, entity_id: id, source_id: "tide" },
+          source: { id: "tide", display_name: "Tidewater Jira", adapter_kind: "jira", enabled: true },
+        }))
+      : JOB_PORTS.getEntity(id),
+};
+
+test("a job opened at its source's address is the one the chip, the Job tab and Esc return to (#1525)", async () => {
+  start({ jobPorts: TWO_SOURCE_PORTS });
+  await at("#/job/tide:PAY-231");
+  await at("#/builds");
+  const chip = target.querySelector<HTMLAnchorElement>(".tf-crumbs .tf-jobchip");
+  expect(chip?.textContent, "the chip still names the key").toBe("PAY-231");
+  expect(chip?.getAttribute("href")).toBe(jobHash("tide:PAY-231"));
+  const tab = [...target.querySelectorAll<HTMLAnchorElement>(".tf-nav a")].find((a) => a.textContent?.includes("PAY-231"));
+  expect(tab?.getAttribute("href"), "the Job tab").toBe(jobHash("tide:PAY-231"));
+
+  // The shell's own breadcrumb (Time) and a page's own (Settings) link it too.
+  for (const view of ["#/time/2026-08-22", "#/settings"]) {
+    await at(view);
+    expect(target.querySelector(".tf-crumbs .tf-jobchip")?.getAttribute("href"), view).toBe(jobHash("tide:PAY-231"));
+  }
+
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe(jobHash("tide:PAY-231"));
+});
+
+test("the Day tab's Add to writes to the ticket of the address the job was opened at (#1525)", async () => {
+  created.length = 0;
+  start({ jobPorts: TWO_SOURCE_PORTS });
+  await at("#/job/tide:PAY-231");
+  await at("#/time/2026-08-22");
+  expect(addToButton()?.textContent?.trim()).toBe("Add to PAY-231");
+  addToButton()!.click();
+  await settle();
+  expect(created).toEqual([{ kind: "entity", entity_id: "tide:PAY-231" }]);
+});
+
+test("a job opened by its bare key keeps the bare key's address (#1525)", async () => {
+  start({ jobPorts: TWO_SOURCE_PORTS });
+  await at("#/job/PAY-231");
+  await at("#/settings");
+  expect(target.querySelector(".tf-jobchip")?.getAttribute("href")).toBe("#/job/PAY-231");
 });
 
 function addToButton(): HTMLButtonElement | undefined {

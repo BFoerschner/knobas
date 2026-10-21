@@ -93,6 +93,13 @@ export interface Timer {
    */
   foreground: TimerTarget | null;
   /**
+   * **The job in the breadcrumb** (#1435, R-1.4): the ticket of a job page or
+   * of a view opened from one ('PAY-231 › Time'), or `null`. ⌘T starts on it
+   * when nothing is in front of the reader. The shell writes it; the heartbeat
+   * never carries it, so passive attribution still records nothing on a list.
+   */
+  breadcrumbJob: TimerTarget | null;
+  /**
    * **The stored context the reader is standing in**, which every start
    * records on the block it opens (#281).
    *
@@ -136,8 +143,10 @@ export interface Timer {
    *
    * * a timer is running → **stop** it (and close its block);
    * * nothing running, something in front of the reader → **start** on it;
-   * * nothing running and nothing in front → `"pick"`, and the shell opens
-   *   the picker with its ad-hoc label field.
+   * * nothing running, nothing in front, a job in the breadcrumb → **start**
+   *   on that job (#1435);
+   * * nothing running and neither → `"pick"`, and the shell opens the picker
+   *   with its ad-hoc label field.
    *
    * The rule lives with the state it reads instead of in `keys.ts`, for the
    * reason the launcher's own `⌘K` binding lives in the launcher: a rule split
@@ -178,11 +187,13 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
     current: RunningTimer | null;
     now: Date;
     foreground: TimerTarget | null;
+    breadcrumbJob: TimerTarget | null;
     roomContext: string | null;
   }>({
     current: null,
     now: io.now(),
     foreground: null,
+    breadcrumbJob: null,
     roomContext: null,
   });
 
@@ -213,6 +224,12 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
     set foreground(target: TimerTarget | null) {
       state.foreground = target;
     },
+    get breadcrumbJob() {
+      return state.breadcrumbJob;
+    },
+    set breadcrumbJob(target: TimerTarget | null) {
+      state.breadcrumbJob = target;
+    },
     get roomContext() {
       return state.roomContext;
     },
@@ -240,7 +257,7 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
       if (state.current) {
         return { did: "stopped", closed: await this.stop() };
       }
-      const target = state.foreground;
+      const target = state.foreground ?? state.breadcrumbJob;
       if (!target) return { did: "pick", closed: null };
       await this.start(target);
       return { did: "started", closed: null };

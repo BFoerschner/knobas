@@ -44,6 +44,7 @@
   let {
     rest,
     job,
+    jobAt = null,
     ready,
     ports = realSettingsPorts,
     sectionPorts = realSectionPorts,
@@ -57,6 +58,8 @@
     rest: string[];
     /** The job the reader was last in, for the breadcrumb. */
     job: string | null;
+    /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
+    jobAt?: string | null;
     /** Whether the database answers yet. */
     ready: boolean;
     ports?: SettingsPorts;
@@ -194,7 +197,7 @@
 <div class="tf-full">
   <nav class="tf-crumbs" aria-label="Breadcrumb">
     {#if job !== null}
-      <a class="tf-jobchip tf-card" href={jobHash(job)}>{job}</a><span class="tf-sep">›</span>
+      <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a><span class="tf-sep">›</span>
     {/if}
     <a class="tf-crumb" href="#/settings">Settings</a><span class="tf-sep">›</span>
     <strong>{crumbName}</strong>

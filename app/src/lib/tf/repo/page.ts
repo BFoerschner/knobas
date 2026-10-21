@@ -12,5 +12,5 @@ type RepoRoute = Extract<TfRoute, { view: "full" }> & { section: "code"; head: "
 export const page = definePage({
   matches: (route): route is RepoRoute => route.view === "full" && route.section === "code" && route.head === "repo",
   component: TfRepo,
-  props: ({ route, ready, job }) => ({ ready, rest: route.rest, job }),
+  props: ({ route, ready, job, jobAt }) => ({ ready, rest: route.rest, job, jobAt }),
 });
