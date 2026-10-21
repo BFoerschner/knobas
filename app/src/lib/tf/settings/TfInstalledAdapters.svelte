@@ -13,6 +13,8 @@
   *Uninstall…* asks once per source of the adapter what *Remove…* on its
   page asks, keep what it synced or delete it, and sends one answer each.
   Drawn only once one adapter is installed: the built-in ones are not here.
+  An update or uninstall tells Settings, which reads the descriptors the
+  source pages are handed again (#1406).
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -27,6 +29,7 @@
     layers,
     refresh = 0,
     onremoved,
+    onchanged,
   }: {
     ports: Pick<SettingsPorts, "listInstalledAdapters" | "checkAdapterUpdates" | "updateAdapter" | "uninstallAdapter">;
     layers: Layers;
@@ -34,6 +37,8 @@
     refresh?: number;
     /** An uninstall removed sources: the source list is stale. */
     onremoved: () => void;
+    /** An update or uninstall changed what `list_adapters` answers: the descriptors are stale (#1406). */
+    onchanged: () => void;
   } = $props();
 
   let rows = $state<AdapterStatus[]>([]);
@@ -98,6 +103,7 @@
     try {
       const next = await ports.updateAdapter(row.adapter_kind);
       rows = rows.map((r) => (r.adapter_kind === next.adapter_kind ? next : r));
+      onchanged();
       push({ text: `Updated ${next.name} to ${release(next)}` });
     } catch (cause) {
       push({ text: `${capital(ipcErrorMessage(cause))}. ${row.name} stays on ${release(row)}.`, tone: "err" });
@@ -123,11 +129,12 @@
       );
       rows = rows.filter((r) => r.adapter_kind !== row.adapter_kind);
       push({ text: `Uninstalled ${row.name}` });
-      if (row.sources.length > 0) onremoved();
     } catch (cause) {
       push({ text: `Could not uninstall ${row.name}: ${ipcErrorMessage(cause)}`, tone: "err" });
       // A failure part-way has removed the sources before it.
       rows = await ports.listInstalledAdapters().catch(() => rows);
+    } finally {
+      onchanged();
       if (row.sources.length > 0) onremoved();
     }
   }

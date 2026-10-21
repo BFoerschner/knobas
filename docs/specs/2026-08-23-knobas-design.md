@@ -75,7 +75,7 @@ Why first-class: two already-decided features are views over exactly this data �
 | **Auth methods**: user + password, PAT (DC: Bearer, supported since Jira 8.14 / Confluence 7.9), API token, (OAuth later) | Decided | Stored in the OS keychain. |
 | **Add source** flow: type → URL → auth → *Test connection* → sync schedule → save | In mockup | |
 | **Sync schedule** per source (default every 5 min); *Sync now* | In mockup | |
-| **Credential health**: PAT expiry countdown, 401 detection → *Re-enter password*, reminder in inbox (snoozable) | In mockup | |
+| **Credential health**: credential expiry countdown, 401 detection → *Re-enter password*, reminder in inbox (snoozable) | In mockup | |
 | **Offline / failed-source write queue**: edits made while a source is 401/offline queue as "pending writes", flush after re-auth; conflicts shown | In mockup | **Rec 08-24 (answers Q7):** the queue is inspectable (a list, not just a count — R3 only had the integer). Before flushing, the adapter re-reads the target; if it changed since the edit was queued, the write is held and shown as both-versions-side-by-side → you pick (apply anyway / discard / edit). No silent last-write-wins in v1; a per-source "just apply my version" toggle can come later. |
 | **Work adapters vs asset-import adapters** are listed separately in Sources (Jira/Gitea/… vs Proxmox/Docker host/Traefik); asset adapters show configured / "not configured — import creates editable assets" | In mockup (R3) | |
 | **Diagnostics** (Rec 08-24): per-source sync log with errors, last-run durations, item counts, FTS index state, re-index button, DB size | Proposed | The status bar shows the summary; this is where you look when a sync misbehaves. Cheap to build, saves debugging pain later. |

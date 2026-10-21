@@ -566,22 +566,138 @@ const SURVEYS = {
   clone_from: [],
 };
 
+/** What `install_adapter` answers for [`SURVEYS`]'s manifest. */
+function installAnswer() {
+  return {
+    adapter_kind: "wasm-fixture",
+    adapter_version: "0.1.0",
+    interface_version: "1.0.0",
+    source_url: "/releases/knobas-adapter.json",
+    tag: null,
+    artifact_sha256: "a".repeat(64),
+    hosts: ["{base_url}", "api.example.com", "{mirror}"],
+    template: SURVEYS,
+  };
+}
+
+/** A source of [`SURVEYS`]'s kind, as `list_sources` lists it. */
+const HARBOUR = summary("harbour", "Harbour", "ok", {
+  adapter_kind: "wasm-fixture",
+  base_url: "https://surveys.harbour.example",
+  auth_kind: "Pat",
+  config: { fault: "none" },
+  kinds: SURVEYS.entity_kinds,
+});
+
+/** Settings mounted with props a test can move, as the shell moves `rest` on a hash change. */
+async function openMovable(rest: string[], p: SettingsPorts) {
+  const props = $state({ rest, job: null, ready: true, ports: p, health: createHealthStub(), layers: createLayers(), now: () => NOW });
+  view = mount(TfSettings, { target, props });
+  await settle();
+  return props;
+}
+
+test("a source of an adapter just installed in Add a source opens with its descriptor, without leaving Settings (#1406)", async () => {
+  const p = ports();
+  const jira = (await p.listAdapters())[0]!;
+  let installed = false;
+  let added = false;
+  p.listAdapters = vi.fn(() => Promise.resolve(installed ? [jira, SURVEYS] : [jira]));
+  p.installAdapter = vi.fn(() => {
+    installed = true;
+    return Promise.resolve(installAnswer());
+  });
+  p.addSource = vi.fn(() => {
+    added = true;
+    return Promise.resolve(HARBOUR);
+  });
+  p.listSources = vi.fn(() => Promise.resolve(added ? [...SOURCES, HARBOUR] : SOURCES));
+  const props = await openMovable([], p);
+
+  button("+ Add a source").click();
+  await settle();
+  type("#tf-add-manifest", "/releases/knobas-adapter.json");
+  dialogButton("Install").click();
+  await settle();
+  type("#tf-add-id", "harbour");
+  type("#tf-add-address", "https://surveys.harbour.example");
+  type("#tf-add-secret", "s3cret");
+  dialogButton("Test connection").click();
+  await settle();
+  dialogButton("Add source").click();
+  await settle();
+  expect(p.addSource).toHaveBeenCalledOnce();
+
+  props.rest = ["source", "harbour"];
+  await settle();
+  expect(target.querySelector(".tf-stg-srch p")?.textContent).toContain("Harbour surveys");
+  expect(section("What it syncs").querySelector("#tf-src-cfg-fault")).not.toBeNull();
+});
+
+test("an Update that changes an adapter's schema shows the new fields on its source's page (#1406)", async () => {
+  const deeper = {
+    ...SURVEYS,
+    adapter_version: "0.2.0",
+    config_schema: {
+      ...SURVEYS.config_schema,
+      properties: { ...SURVEYS.config_schema.properties, depth: { type: "string" } },
+    },
+  };
+  let updated = false;
+  const p = ports({
+    listSources: vi.fn(() => Promise.resolve([...SOURCES, HARBOUR])),
+    listAdapters: vi.fn(() => Promise.resolve([updated ? deeper : SURVEYS])),
+    listInstalledAdapters: vi.fn(() =>
+      Promise.resolve([adapterRow({ update: { state: "available", tag: "v0.2.0", adapter_version: "0.2.0" } })]),
+    ),
+    updateAdapter: vi.fn(() => {
+      updated = true;
+      return Promise.resolve(adapterRow({ tag: "v0.2.0", adapter_version: "0.2.0" }));
+    }),
+  });
+  const props = await openMovable(["source", "harbour"], p);
+  expect(section("What it syncs").querySelector("#tf-src-cfg-depth")).toBeNull();
+
+  props.rest = [];
+  await settle();
+  button("Update").click();
+  await settle();
+  props.rest = ["source", "harbour"];
+  await settle();
+  expect(section("What it syncs").querySelector("#tf-src-cfg-fault")).not.toBeNull();
+  expect(section("What it syncs").querySelector("#tf-src-cfg-depth")).not.toBeNull();
+});
+
+test("an Uninstall takes the adapter out of what Settings offers (#1406)", async () => {
+  let uninstalled = false;
+  const p = ports({
+    listSources: vi.fn(() => Promise.resolve(uninstalled ? SOURCES : [...SOURCES, HARBOUR])),
+    listAdapters: vi.fn(async () => [...(await ports().listAdapters()), ...(uninstalled ? [] : [SURVEYS])]),
+    listInstalledAdapters: vi.fn(() =>
+      Promise.resolve(uninstalled ? [] : [adapterRow({ sources: [{ id: "harbour", display_name: "Harbour" }] })]),
+    ),
+    uninstallAdapter: vi.fn(() => {
+      uninstalled = true;
+      return Promise.resolve();
+    }),
+  });
+  await openMovable([], p);
+  button("Uninstall…").click();
+  flushSync();
+  dialogButton("Uninstall").click();
+  await settle();
+
+  button("+ Add a source").click();
+  await settle();
+  const radios = [...dialog().querySelectorAll<HTMLLabelElement>(".tf-radio label")];
+  expect(radios.map((label) => label.querySelector("span")?.firstChild?.textContent)).toEqual(["Jira Data Center"]);
+});
+
 test("Add a source installs an adapter from a manifest, and it joins the radios chosen (#1202)", async () => {
   const p = ports();
   const jira = (await p.listAdapters())[0]!;
   p.listAdapters = vi.fn().mockResolvedValueOnce([jira]).mockResolvedValue([jira, SURVEYS]);
-  p.installAdapter = vi.fn(() =>
-    Promise.resolve({
-      adapter_kind: "wasm-fixture",
-      adapter_version: "0.1.0",
-      interface_version: "1.0.0",
-      source_url: "/releases/knobas-adapter.json",
-      tag: null,
-      artifact_sha256: "a".repeat(64),
-      hosts: ["{base_url}", "api.example.com", "{mirror}"],
-      template: SURVEYS,
-    }),
-  );
+  p.installAdapter = vi.fn(() => Promise.resolve(installAnswer()));
   await open([], p);
   button("+ Add a source").click();
   await settle();
@@ -1256,4 +1372,77 @@ test("an unreachable run says the source did not answer, its transport error beh
   const refused = cells.find((cell) => cell.textContent?.startsWith("401 Unauthorized"))!;
   expect(refused.textContent).toBe("401 Unauthorized. Re-enter the password.");
   expect(refused.querySelector("details")).toBeNull();
+});
+
+// ---- The credential expiry countdown (#1499) ----
+
+/** Jira and TeamCity, Jira's credential expiring at `at` as its health check reports. */
+function expiring(at: string | null): SettingsPorts {
+  const jira = summary("jira", "Jira", "ok");
+  const rows = [{ ...jira, health: { ...jira.health, secret_expires_at: at } }, SOURCES[1]!];
+  return ports({ listSources: vi.fn(() => Promise.resolve(rows)) });
+}
+
+/** In `days` days from the tests' clock. */
+const IN_DAYS = (days: number) => new Date(NOW.getTime() + days * 86_400_000).toISOString();
+
+/** The credential row of Connection: its label is the noun, Token or Password. */
+function credentialRow(noun: string): HTMLElement {
+  const found = [...section("Connection").querySelectorAll<HTMLElement>(".tf-stg-row")].find(
+    (row) => row.querySelector(".tf-stg-l")?.textContent?.trim() === noun,
+  );
+  if (!found) throw new Error(`no ${noun} row`);
+  return found;
+}
+
+/** The countdown on the credential row, its text and tone, or `null` when none is drawn. */
+function countdown(noun: string): { text: string; amber: boolean; fail: boolean } | null {
+  const note = credentialRow(noun).querySelector(".tf-stg-exp");
+  if (!note) return null;
+  return {
+    text: note.textContent!.trim(),
+    amber: note.classList.contains("tf-stg-warnt"),
+    fail: note.classList.contains("tf-stg-errt"),
+  };
+}
+
+test("a source's page counts its credential down on the Password row: plain over 14 days, amber at 14, failed once expired (#1499)", async () => {
+  await open(["source", "jira"], expiring(IN_DAYS(41)));
+  expect(countdown("Password")).toEqual({ text: "expires in 41 days", amber: false, fail: false });
+  unmount(view!);
+
+  await open(["source", "jira"], expiring(IN_DAYS(14)));
+  expect(countdown("Password")).toEqual({ text: "expires in 14 days", amber: true, fail: false });
+  unmount(view!);
+
+  await open(["source", "jira"], expiring(IN_DAYS(-3)));
+  expect(countdown("Password")).toEqual({ text: "expired", amber: false, fail: true });
+  unmount(view!);
+
+  await open(["source", "jira"], expiring(null));
+  expect(countdown("Password")).toBeNull();
+});
+
+test("the Sources row says the credential is running out only while amber or expired (#1499)", async () => {
+  /** Jira's state column. */
+  const state = () => {
+    const cell = [...target.querySelectorAll(".tf-stg-src")][0]!.querySelectorAll(".tf-stg-si")[1]!;
+    return cell.textContent!.replace(/\s+/g, " ").trim();
+  };
+  await open([], expiring(IN_DAYS(41)));
+  expect(state()).toBe("Synced 4 min ago");
+  unmount(view!);
+
+  await open([], expiring(IN_DAYS(9)));
+  expect(state()).toBe("Synced 4 min ago Credential expires in 9 days");
+  expect(target.querySelector(".tf-stg-src .tf-stg-exp.tf-stg-warnt")).not.toBeNull();
+  unmount(view!);
+
+  await open([], expiring(IN_DAYS(-1)));
+  expect(state()).toBe("Synced 4 min ago Credential expired");
+  expect(target.querySelector(".tf-stg-src .tf-stg-exp.tf-stg-errt")).not.toBeNull();
+  unmount(view!);
+
+  await open([], expiring(null));
+  expect(state()).toBe("Synced 4 min ago");
 });

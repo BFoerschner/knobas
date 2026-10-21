@@ -1152,3 +1152,35 @@ test("the fixture's TeamCity has a run the server never answered, with the long 
   // Its id is its own: the source's run log keys its rows on it.
   expect(runs.filter((run) => run.id === unanswered[0]!.id)).toHaveLength(1);
 });
+
+test("the fixture's install adds the descriptor to list_adapters and add_source adds the row to list_sources (#1406)", async () => {
+  // A fixture of its own: the install and the new source are module state the other tests read.
+  vi.resetModules();
+  const handlers = (await import("./fake-tauri")).demoHandlers();
+  type Source = { id: string; adapter_kind: string; health: { source_id: string }; kinds: { id: string }[] };
+  const before = (handlers["list_sources"]!({}) as Source[]).length;
+  handlers["install_adapter"]!({ manifest: "/releases/knobas-adapter.json" });
+  const kinds = (handlers["list_adapters"]!({}) as { adapter_kind: string }[]).map((row) => row.adapter_kind);
+  expect(kinds).toContain("wasm-fixture");
+
+  handlers["add_source"]!({
+    input: { id: "harbour", adapter_kind: "wasm-fixture", display_name: "Harbour", base_url: "https://surveys.harbour.example", config: { fault: "none" } },
+  });
+  const sources = handlers["list_sources"]!({}) as Source[];
+  expect(sources).toHaveLength(before + 1);
+  const harbour = sources.find((source) => source.id === "harbour")!;
+  expect(harbour.adapter_kind).toBe("wasm-fixture");
+  // Its own health and kinds, not the spread fixture's.
+  expect(harbour.health.source_id).toBe("harbour");
+  expect(harbour.kinds.map((kind) => kind.id)).toEqual(["survey"]);
+  expect(() => handlers["add_source"]!({ input: { id: "harbour", adapter_kind: "wasm-fixture" } })).toThrow();
+});
+
+test("the fixture's Jira credential expires inside the amber window from today, so the countdown is drawn (#1499)", () => {
+  const handlers = demoHandlers();
+  type Source = { id: string; health: { secret_expires_at: string | null } };
+  const jira = (handlers["list_sources"]!({}) as Source[]).find((source) => source.id === "jira")!;
+  const days = (new Date(jira.health.secret_expires_at!).getTime() - Date.now()) / 86_400_000;
+  expect(days).toBeGreaterThan(1);
+  expect(days).toBeLessThanOrEqual(14);
+});

@@ -7,6 +7,7 @@
  * back, so every sentence on these pages can be tested as a string.
  */
 import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
+import type { ExpiryNote } from "../../shell/health.svelte";
 import { ago } from "../../shell/time";
 import { CI, CODE_HOST, MONITORING, TICKET_SYSTEM, WIKI } from "../roles.svelte";
 import { IDENTITY_FIELD } from "../../sources/new-source";
@@ -189,6 +190,12 @@ export function intervalWords(secs: number): string {
   if (secs % 60 === 0) return `${secs / 60} min`;
   return `${secs} s`;
 }
+
+/**
+ * The class a credential expiry reading draws in (#1499): plain in the row's
+ * own grey, amber in the warning tone, expired in the failure tone.
+ */
+export const EXPIRY_CLASS: Record<ExpiryNote["tone"], string> = { plain: "", amber: "tf-stg-warnt", fail: "tf-stg-errt" };
 
 /**
  * The schedules *Every* can offer (#1188). A source is offered the steps at or

@@ -88,6 +88,16 @@
   // svelte-ignore state_referenced_locally
   let clock = $state(now());
 
+  const readAdapters = latestRead<SourceDescriptor[]>();
+  /**
+   * The descriptors the source pages are handed, read again whenever an
+   * adapter is installed, updated or uninstalled (#1406): a page handed `null`
+   * draws no config form and the bare kind for its adapter.
+   */
+  function loadAdapters() {
+    return readAdapters(ports.listAdapters, { ok: (rows) => (adapters = rows), fail: () => {} });
+  }
+
   const read = latestRead<SourceSummary[]>();
   function load() {
     return read(ports.listSources, {
@@ -105,12 +115,7 @@
     let dead = false;
     const offs: (() => void)[] = [];
     void load();
-    void ports
-      .listAdapters()
-      .then((rows) => {
-        if (!dead) adapters = rows;
-      })
-      .catch(() => {});
+    void loadAdapters();
     void ports
       .syncStatus()
       .then((rows) => {
@@ -141,6 +146,13 @@
 
   /** Whether *Add a source* is open (#903); a source it adds is a new row. */
   let adding = $state(false);
+
+  /** *Add a source* closed: an install there adds an Installed adapters row and a descriptor. */
+  function closeAdd() {
+    adding = false;
+    installs += 1;
+    void loadAdapters();
+  }
 
   /** A locally started run, before its first `sync:state` arrives. */
   function markStarted(id: string) {
@@ -244,7 +256,13 @@
           onstopped={(ids) => ids.forEach(stopped)}
           onadd={() => (adding = true)}
         />
-        <TfInstalledAdapters {ports} {layers} refresh={installs} onremoved={() => void load()} />
+        <TfInstalledAdapters
+          {ports}
+          {layers}
+          refresh={installs}
+          onremoved={() => void load()}
+          onchanged={() => void loadAdapters()}
+        />
       {:else if current === null}
         <header class="tf-stg-h"><h1>{sourceId}</h1></header>
         <p class="tf-stg-p">There is no source called {sourceId}. It may have been removed.</p>
@@ -279,13 +297,9 @@
   <TfAddSource
     {ports}
     {layers}
-    onclose={() => {
-      adding = false;
-      installs += 1;
-    }}
+    onclose={closeAdd}
     onsaved={() => {
-      adding = false;
-      installs += 1;
+      closeAdd();
       push({ text: "Added. The first sync is running." });
       void load();
     }}
