@@ -24,6 +24,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { AssetDetail, AssetRow } from "../ipc/assets";
 import type { LinkEntry } from "../ipc/entity";
 import { createRouter } from "../shell/router.svelte";
+import { layers } from "../tf/layers.svelte";
 
 /**
  * The picker's engine, stubbed at the module boundary.
@@ -332,6 +333,13 @@ test("Link to… opens the dialog over the open asset", async () => {
     [...target.querySelectorAll("h2, .sub, .subtitle")].map((node) => node.textContent?.trim()),
     "and it names the asset it is linking from",
   ).toContain("postgres");
+
+  // On the shell's layer stack while open, so the window's `Esc` closes it (#1527).
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+  layers.open[0]!.close();
+  flushSync();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(layers.open).toEqual([]);
 });
 
 /**

@@ -44,6 +44,7 @@ import type {
 } from "../ipc/assets";
 import type { ActivityRow } from "../ipc/entity";
 import { createRouter } from "../shell/router.svelte";
+import { layers } from "../tf/layers.svelte";
 import AssetsView from "./AssetsView.svelte";
 
 const NOW = new Date(2026, 8, 6, 12, 0, 0, 0);
@@ -1002,6 +1003,33 @@ test("a type table that will not load is said out loud, not left as a dead plus"
  * notification's deep link — which is what `router.go` stands in for here, and
  * a headless walk of this branch is where it was found.
  */
+/**
+ * The tree's dialogs are rooms-UI `Modal`s under the ticket-first shell, and
+ * each sits on the shell's layer stack while open (#1527): the stack's close,
+ * which the window's `Esc` calls when focus is outside the dialog, shuts it,
+ * and nothing is left on the stack for history to wait on (#1086).
+ */
+test.each([
+  ["New asset in vm-db-01", "Create"],
+  ["Move…", "Move into hel1"],
+  ["Delete", "Delete"],
+  ["Add a route", "Expose"],
+])("%s opens a dialog on the layer stack, and its close shuts it (#1527)", async (opener, inside) => {
+  const store = estate(seed());
+  render("#/asset/asset:vm-db-01", store);
+  await vi.waitFor(() => expect(text()).toContain("Exposes No routes."));
+
+  click(opener);
+  expect(target.querySelector('[role="dialog"]')).not.toBeNull();
+  button(inside);
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+
+  layers.open[0]!.close();
+  flushSync();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(layers.open).toEqual([]);
+});
+
 test("an open dialog closes when the address names another asset", async () => {
   const store = estate(seed());
   const { router } = render("#/asset/asset:postgres", store);

@@ -30,6 +30,7 @@ import type {
 } from "../ipc/assets";
 import type { IpcError } from "../ipc";
 import { createRouter } from "../shell/router.svelte";
+import { layers } from "../tf/layers.svelte";
 
 const { default: AssetsView } = await import("./AssetsView.svelte");
 
@@ -364,6 +365,21 @@ test("the pane lists the monitor names an import kept", async () => {
  * headings and dropped the lists would fail here, and so would one that put
  * a group's entries under another group's name.
  */
+test("Import opens a dialog on the layer stack, and its close shuts it (#1527)", async () => {
+  render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+  expect(target.querySelector('input[type="file"]')).not.toBeNull();
+
+  // On the shell's layer stack while open, so the window's `Esc` closes it (#1527).
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+  layers.open[0]!.close();
+  flushSync();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(layers.open).toEqual([]);
+});
+
 test("choosing a file previews it and draws the three groups", async () => {
   const calls = render();
   await settle();
