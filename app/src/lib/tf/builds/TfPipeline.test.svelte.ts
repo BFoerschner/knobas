@@ -609,7 +609,7 @@ const KINDS: PipelineSettings = {
   ...SETTINGS,
   parameters: [
     { name: "env", value: "qa", inherited: false, secret: false, editable: true, description: null },
-    { name: "dry.run", value: "false", inherited: false, secret: false, editable: true, description: null },
+    { name: "dry.run", value: "false", inherited: true, secret: false, editable: true, description: null },
     { name: "deploy.token", value: "", inherited: true, secret: true, editable: true, description: null },
     { name: "test.filter", value: "", inherited: true, secret: false, editable: true, description: null },
   ],
@@ -627,12 +627,15 @@ test("Parameters: each default with the kind its spec gives; a secret is never d
   await settle();
   const rows = paramRows();
   expect(rows.map((r) => r.querySelector("td")?.textContent)).toEqual(["env", "dry.run", "deploy.token", "test.filter"]);
-  expect(rows.map((r) => r.querySelectorAll("td")[2]?.textContent)).toEqual([
+  const kindCell = (r: Element) => r.querySelectorAll("td")[2]!;
+  expect(rows.map((r) => kindCell(r).firstChild?.textContent?.trim())).toEqual([
     "one of staging, prod-dryrun",
     "one of false, true",
     "password",
-    "text, inherited",
+    "text",
   ]);
+  // *inherited* is a chip of its own, never a word in the kind's list (#1564); a secret draws none.
+  expect(rows.map((r) => kindCell(r).querySelector(".tf-chip")?.textContent ?? null)).toEqual([null, "inherited", null, "inherited"]);
   expect(rows[2]!.textContent).toContain("(hidden)");
 });
 

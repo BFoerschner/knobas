@@ -349,13 +349,13 @@ export function fakeOlderRuns(config: string, before: RunRow, limit: number, sto
 }
 
 /** One of prototype-6's `paramDefs`: a name, its default, its options or hint. */
-type ParamDef = { k: string; def: string; opts?: string[]; hint?: string };
+type ParamDef = { k: string; def: string; opts?: string[]; hint?: string; inherited?: boolean };
 
 /** prototype-6's `paramDefs`, word for word. */
 function paramDefs(config: string): ParamDef[] {
   if (config === "Payout_IntegrationTests")
     return [
-      { k: "env", opts: ["staging", "prod-dryrun"], def: "staging" },
+      { k: "env", opts: ["staging", "prod-dryrun"], def: "staging", inherited: true },
       { k: "test.filter", def: "", hint: "empty runs every test" },
       { k: "log.level", opts: ["info", "debug", "trace"], def: "info" },
     ];
@@ -373,7 +373,7 @@ function paramDefs(config: string): ParamDef[] {
 
 /** The settings read's parameters, from {@link paramDefs}. */
 function parameters(config: string): Setting[] {
-  return paramDefs(config).map((p) => ({ name: p.k, value: p.def, inherited: false, secret: false, editable: true, description: null }));
+  return paramDefs(config).map((p) => ({ name: p.k, value: p.def, inherited: p.inherited ?? false, secret: false, editable: true, description: null }));
 }
 
 /** The settings read's parsed specs (#852), from {@link paramDefs}. */

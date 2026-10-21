@@ -618,7 +618,10 @@
                 {/if}
                 {#if setting.name in queuedValues}<span class="tf-chip tf-info">queued</span>{/if}
               </td>
-              <td class="tf-dim">{field?.kindWord ?? "text"}{!setting.secret && setting.inherited ? ", inherited" : ""}</td>
+              <td class="tf-dim">
+                {field?.kindWord ?? "text"}
+                {#if !setting.secret && setting.inherited}<span class="tf-chip">inherited</span>{/if}
+              </td>
               <td class="tf-nowrap">
                 {#if editing === setting.name}
                   <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => void save(setting)}>Save</button>

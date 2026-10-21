@@ -14,7 +14,8 @@
  *   comment whose words are in the thread, a page version that moved. A mark
  *   dropped stays dropped, so a ticket moved back by somebody else does not
  *   draw an old move again.
- * - **The queue says it will not go** (held or refused): the mark goes, and a
+ * - **The queue says it will not go** (held or refused, or withdrawn in the
+ *   queue panel, which drops the mark quietly: `noteWithdrawn`, #1583): the mark goes, and a
  *   toast says why with *Edit and resend* (`shell/follow-write.ts`'s
  *   `followWrite`). The follow lives here, not on the page, so the toast
  *   comes and the echo goes wherever the reader is by then.
@@ -24,6 +25,7 @@
  * (`takeAgain`).
  */
 import type { QueuedWrite } from "../ipc/sources";
+import { onWithdrawn } from "../shell/write-queue.svelte";
 import { followWrite, writeFollower, type Following, type WriteFollower } from "../shell/follow-write";
 
 /** One queued write as its page draws it. */
@@ -64,8 +66,11 @@ export function markQueued(entity: string, kind: string, text: string, how: Mark
   const write = typeof how.write?.id === "number" ? how.write.id : null;
   const kept = (marks[entity] ?? []).filter((mark) => how.many || mark.kind !== kind);
   marks[entity] = [...kept, { write, kind, text, base: how.base ?? null }];
-  if (write === null || !how.following) return;
-  const onstop = () => drop(entity, (mark) => mark.write === write);
+  if (write === null) return;
+  const gone = () => drop(entity, (mark) => mark.write === write);
+  follows.add(onWithdrawn(write, gone));
+  if (!how.following) return;
+  const onstop = gone;
   follows.add(followWrite({ id: write }, { ...how.following, onstop }, how.follower ?? writeFollower()));
 }
 

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { QueuedWrite } from "../ipc/sources";
 import type { Hear, WriteFollower } from "../shell/follow-write";
+import { noteWithdrawn } from "../shell/write-queue.svelte";
 import { toasts } from "../shell/toasts.svelte";
 import { askAgain, forgetQueued, markQueued, queuedMark, queuedMarks, sameWords, settleQueued, takeAgain } from "./queued.svelte";
 
@@ -115,4 +116,22 @@ test("forgetting stops every follow", () => {
 test("a read holds a comment's words whatever it did to the spaces, and only those words", () => {
   expect(sameWords("Looking at\n the jitter now ", "Looking at the jitter now")).toBe(true);
   expect(sameWords("Looking at the jitter", "Looking at the jitter now")).toBe(false);
+});
+
+test("a write withdrawn in the queue panel takes its mark with it, quietly", () => {
+  const { follower } = fakeFollower();
+  markQueued("tc:build/1", "run", "run queued", { write: { id: 5 }, following: { name: "Run" }, follower });
+  markQueued("tc:build/1", "other", "kept", { write: { id: 6 }, following: { name: "Run" }, follower });
+
+  noteWithdrawn(5);
+
+  expect(queuedMark("tc:build/1", "run")).toBeNull();
+  expect(queuedMark("tc:build/1", "other")?.text).toBe("kept");
+  expect(toasts.items).toHaveLength(0);
+});
+
+test("a mark with no follow still goes when its write is withdrawn", () => {
+  markQueued("tc:build/2", "run", "run queued", { write: { id: 8 } });
+  noteWithdrawn(8);
+  expect(queuedMark("tc:build/2", "run")).toBeNull();
 });
