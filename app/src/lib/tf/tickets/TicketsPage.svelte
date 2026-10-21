@@ -3,8 +3,7 @@
   panes:
 
   - **left**, the views: *Find a view*, *All tickets* with its count, the
-    ticket views in their groups with their counts (#812, R-3.2), and *Not a
-    ticket*, the ad-hoc contexts (R-3.11);
+    ticket views in their groups with their counts (#812, R-3.2);
   - **middle**, every synced ticket as a ticket board, one column per status
     in the source's words, eight cards then *Show N more*, *Done* three, and
     fifty while the filter has words (R-3.4, #1024), split into lanes by a
@@ -42,7 +41,6 @@
   *Delete*, in the ⋯ menus and the editor, a toast's *Undo* takes back.
 -->
 <script lang="ts" module>
-  import type { ContextRow } from "../../ipc/entity";
   import type {
     FilterSuggestions,
     QueryTranslation,
@@ -56,7 +54,6 @@
   export interface TicketsPorts extends BoardReaderPorts {
     /** Hands a Jira view's address to the browser: *Open in Jira* (#879). */
     openExternal?: (url: string) => Promise<void>;
-    contexts: () => Promise<ContextRow[]>;
     suggestions: () => Promise<Pick<FilterSuggestions, "fields" | "parents">>;
     /** Every ticket view, each with its count (#812). */
     views: () => Promise<TicketViewRow[]>;
@@ -90,7 +87,6 @@
   import {
     getEntity,
     jobReach,
-    listContexts,
     listEntities,
     miniBoard,
     type MiniBoardCard,
@@ -111,7 +107,6 @@
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
-  import { jobHash } from "../route";
   import { sourceHash } from "../settings/settings";
   import { sourceRoles, TICKET_SYSTEM, TRANSLATE_QUERY } from "../roles.svelte";
   import { columnKey, createBoardReader, messageOf, viewSession } from "./board-reader.svelte";
@@ -163,7 +158,6 @@
         miniBoard({ role: role ?? null, context: null, project: null }, perColumn, query, savedView, lanes),
       openExternal,
       detail: getEntity,
-      contexts: listContexts,
       listEntities,
       jobReach,
       suggestions: () => filterSuggestions(),
@@ -474,9 +468,6 @@
   const current = $derived(visible.find((entry) => entry.card.entity_id === session.selected) ?? visible[0] ?? null);
 
   // ---- the preview ----
-  let contexts = $state<ContextRow[] | null>(null);
-  const adhoc = $derived((contexts ?? []).filter((context) => context.kind === "adhoc"));
-
   /** The selected ticket's id: the preview re-reads when it changes, not when the board answers. */
   const currentId = $derived(current?.card.entity_id ?? null);
 
@@ -494,15 +485,11 @@
   });
   $effect(() => () => reader.close());
 
-  // Once the database answers: the views, the contexts and the suggestions.
+  // Once the database answers: the views and the suggestions.
   $effect(() => {
     if (!ready) return;
     untrack(() => {
       loadViews();
-      ports
-        .contexts()
-        .then((rows) => (contexts = rows))
-        .catch(() => (contexts = []));
       ports
         .suggestions()
         .then((answer) => (suggested = answer))
@@ -620,12 +607,6 @@
             </div>
           {/each}
         {/if}
-      {/if}
-      {#if adhoc.length > 0}
-        <h2>Not a ticket</h2>
-        {#each adhoc as context (context.id)}
-          <a href={jobHash(context.id)}>{context.title}</a>
-        {/each}
       {/if}
       <p class="tf-vw-foot">
         Boards and favourite filters come in with the Jira source at every sync. <a href={savedViewSettingsHref}>Choose which</a>

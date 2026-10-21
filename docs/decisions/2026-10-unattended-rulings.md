@@ -1609,6 +1609,7 @@ Ruled 2026-10-15 by the implementer, in the PR for #810. Each is fork / ruling /
 - **The list layout.** *Ruling:* the same read as the board, newest first, ending in *Show N more* that lifts every column's cap. Header sorting, `j`/`k` and lanes are #813's; the Signals column waits for #815. *Reasoning:* the ticket's siblings own them. *Reversing:* none needed.
 - **The left pane before views exist.** *Ruling:* *All tickets* with its count, then *Not a ticket*. *Find a view*, *+ New view*, *Edit view*, the ⋯ menu and *Save as a view* come with #812. *Reasoning:* nothing to list or save yet. *Reversing:* none needed.
 - **Where an ad-hoc context goes.** *Ruling:* `#/job/<ctx id>`, the job's address, which the Job tickets take over. *Reasoning:* the job is where work without a ticket happens too (R-3.11); the empty Job page names it until then. *Reversing:* one line.
+  *Withdrawn 2026-10-21* (#1502): ad-hoc contexts are retired; see "Ad-hoc contexts are retired" under the Grilling of 2026-10-21 (#1427). Ad-hoc time is the ⌘T label timer.
 - **Chips and dropdowns.** *Ruling:* *Type* and *Priority* chips from `filter_suggestions` (at most six each), *Assignee* (`@me` as *Me*) and *Epic* (`under:` over parents of kind ticket) as dropdowns. A group with no values is not drawn. *Reasoning:* prototype-6's TCFG, filled with values the mirror has. *Reversing:* low.
 - **Whose ticket.** *Ruling:* `mine` is the server's, the assignee against the enabled sources' usernames ignoring case, on every card. *Reasoning:* the frontend has no identity read, and `@me` already means this. *Reversing:* low.
 - **Initials.** *Ruling:* from the account's spelling (`mara.lindqvist` is ML, `mara` is MA). *Reasoning:* the declared assignee is an account, not a display name. *Reversing:* low, if a display name is declared later.
@@ -10742,3 +10743,7 @@ Björn delegated four picks at triage (2026-10-21); two more came up while build
   and `LIVE_SHOT_AEROSPACE` in its dry runs, so an exported variable cannot start a product
   inside a gate. *Reasoning:* the refusal is one guard, read in review; the hazard that mattered
   was the env leak. *Reversing:* low.
+
+## #1502: Not a ticket leaves the Tickets view (Sonnet implementer, 2026-10-21)
+
+- **The `contexts` port leaves `TicketsPorts`.** *Fork:* keep the port unused, or drop it with the read. *Ruling:* drop it; the page no longer imports `listContexts`. The test harness still answers a `contexts` read and counts it, so the new test pins that none is made. *Reasoning:* an unused port invites a reader back. *Reversing:* low, re-add the port and the group.
