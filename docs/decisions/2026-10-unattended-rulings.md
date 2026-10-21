@@ -9509,3 +9509,50 @@ sources hold) too.
 - **Fixture.** `note:retry-backoff` is seeded so the page has a note under `?fake-notes-shown`,
   and `delete_note` is answered (it was out of the walk's reach while notes were hidden).
   *Reversing:* fixture only.
+## #1500: the Tab chain is Link to the breadcrumb's job, then Start timer (Opus implementer, 2026-10-21)
+
+- **Where "the breadcrumb's job" comes from.** *Fork:* the launcher reads the address itself, or the
+  shell says which job its breadcrumb names. *Ruling:* the shell. `TfShell.svelte` reports it to a
+  window singleton beside `currentJob` (`tf/job/current.svelte.ts`, `breadcrumbJob`): the job page's
+  job, or the last job on a view or an item page opened from it, with the entity id `navJobId`
+  resolved. *Reasoning:* only the shell knows the last job opened and its entity id; the launcher
+  stays a component that is handed its second end. *Reversing:* one `$effect` and a prop.
+- **Inbox and Settings.** Both start their breadcrumb at the last job ('PAY-231 › Inbox'). The
+  ticket and the 2026-10-21 ruling on #1416 name them as job-less, so they offer the timer row
+  alone. Not a fork; recorded because the breadcrumb alone would say otherwise.
+- **From a view opened from the job.** *Fork:* draw the job's link dialog over the view (Time,
+  Dependencies), or open the job page and its dialog there. *Ruling:* open the job page. The
+  launcher asks through `linkRequest`, `App.svelte` moves to `#/job/<key>` when that job is not on
+  screen, and the job page takes the request once its ticket has drawn. *Reasoning:* the dialog is
+  the job page's, and the Connections drawer there shows the link the moment it is made; one
+  mechanism serves both cases; Back returns to the view. *Reversing:* mount `TfLinkTo` in the
+  shell's dialogs for a view, and keep the request for the job page.
+- **The Connections drawer opens under the dialog.** *Ruling:* yes, so confirming leaves the reader
+  looking at the new link, as *Link to…* from the drawer does. *Reversing:* drop `drawer = true`.
+- **The launcher's props.** `openEntity` and `onlink` keep their names, re-documented as the
+  breadcrumb's job; `onlink` gains the result's kind, since the dialog draws the preset's kind.
+  *Reversing:* a rename.
+- **The fake.** `create_link` under `?fake-ipc` refused any end outside the corpus, so a `list:`
+  result (an estate asset) could not be linked and the screenshot route ended in an error. The
+  fixture now resolves an estate asset as a link end, in `create_link` and in the drawer's rows.
+  Fixture-only; the real graph already holds assets as entities.
+- **Where the shell-level test lives.** It mounts `App.svelte` over the whole fake bridge, and
+  `house-rules.test.ts` lets only `lib/shell/dev/` import the harness, so the file is
+  `lib/shell/dev/launcher-chain.test.svelte.ts`.
+
+## #1421: the `?` card names no milestone (Opus implementer, 2026-10-21)
+
+- **Keep or drop the `env:` row** (delegated). *Ruling:* keep it, as recommended, reading "not a
+  filter yet; use asset: or Dependencies (also health:)", `expect` still `reported`. *Reasoning:*
+  the grammar still greys the token out, and the card is where a reader learns why. *Reversing:*
+  delete one row; the help-card test needs no change.
+- **The grammar's inline comment.** `query.rs`'s `apply_key_value` said the estate keys "have no
+  home before M4", the same claim as the header; reworded with it. Comment only.
+
+## #1515: a value suggestion keeps the space before its dot (Opus implementer, 2026-10-21)
+
+- **The test the ticket proposes cannot fail.** *Fork:* assert the option's whole `textContent`
+  is `branch · branch`, as the fix shape says, or the detail's own text. *Ruling:* the detail's
+  own text is ` · branch`. *Reasoning:* the whitespace between the value and the detail spans
+  is in the DOM, so the option's `textContent` reads `branch · branch` before the fix too; the flex
+  row just does not draw it. The detail span's text is what is drawn. *Reversing:* one selector.
