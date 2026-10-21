@@ -1,5 +1,6 @@
 /* ---------- the write queue panel (#1425): prototype-6's *Queued writes* dialog ---------- */
 .tf-dialog.tf-wq-dialog { width: min(760px, calc(100vw - 32px)); }
+.tf-dialog.tf-wq-dialog > footer { align-items: center; }
 .tf-wq-sec { display: flex; flex-direction: column; gap: 8px; }
 .tf-wq-sec + .tf-wq-sec { margin-top: 8px; }
 .tf-wq-h { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); font-weight: 600; }

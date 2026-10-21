@@ -186,10 +186,10 @@
 
 <!-- A row's heading: what the write does, and when it was queued. -->
 {#snippet heading(row: QueuedWrite)}
-  <header class="tf-wq-row-h">
+  <div class="tf-wq-row-h">
     <b>{#each writeWords(row, (id) => names[id] ?? null) as part, index (index)}{#if part.code}<span class="tf-mono">{part.text}</span>{:else}{part.text}{/if}{/each}</b>
     <span class="tf-wq-when">Queued {ago(row.queued_at, now)}</span>
-  </header>
+  </div>
 {/snippet}
 
 <TfDialog
@@ -327,7 +327,7 @@
               <pre class="tf-wq-pre tf-wq-mine">{body}</pre>
             {/if}
 
-            <footer class="tf-wq-acts">
+            <div class="tf-wq-acts">
               {#if editing === row.id}
                 <button class="tf-btn tf-sm tf-primary" disabled={queue.busy} onclick={() => save(row)}>
                   Send this instead
@@ -348,7 +348,7 @@
                   Discard
                 </button>
               {/if}
-            </footer>
+            </div>
           </article>
         {/each}
       </section>
@@ -367,11 +367,11 @@
             {@render heading(row)}
             <p class="tf-wq-why">{waitingBecause(row)}</p>
             {#if body !== null}<pre class="tf-wq-pre tf-wq-mine">{body}</pre>{/if}
-            <footer class="tf-wq-acts">
+            <div class="tf-wq-acts">
               <button class="tf-btn tf-sm tf-danger" disabled={queue.busy} onclick={() => withdraw(row)}>
                 Cancel
               </button>
-            </footer>
+            </div>
           </article>
         {/each}
       </section>

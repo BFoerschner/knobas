@@ -327,7 +327,7 @@ test("the panel is a ticket-first dialog: its title, its counts, no capitals, ev
   expect(capitals).toContain("lab");
   for (const name of capitals) expect(screen.target.querySelector(`.${name}`), name).toBeNull();
 
-  const headings = [...screen.target.querySelectorAll("article header b")].map((node) => node.textContent);
+  const headings = [...screen.target.querySelectorAll(".tf-wq-row-h b")].map((node) => node.textContent);
   expect(headings).toEqual(["Comment on PAY-231", "Pause monitor Payments API", "Comment on PAY-300"]);
   expect(screen.text()).not.toContain("pause_monitor");
   expect(screen.text()).not.toContain("kuma:8");
