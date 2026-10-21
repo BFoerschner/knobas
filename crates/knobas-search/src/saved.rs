@@ -66,7 +66,7 @@ use crate::corpus;
 use crate::lists::{self, SmartListSummary};
 use crate::query::{self, EffectiveFilters};
 use crate::sql::{self, SavedQuery};
-use crate::types::SearchFilters;
+use crate::types::{Prefix, SearchFilters};
 use crate::vocab::Vocabulary;
 use crate::{MAX_FILTER_VALUES, SearchError};
 
@@ -243,7 +243,10 @@ pub enum Refusal {
     /// The query names a smart list, so running it would be a list of a list.
     NamesAnotherList,
     /// The prefix names no corpus at all -- `t `, `>`, `?` (`empty_corpus`).
-    NotASearch,
+    ///
+    /// Carries the prefix so that [`Refusal::on_create`] can name the one the
+    /// reader typed; the rail's [`Refusal::description`] does not need it.
+    NotASearch(Prefix),
     /// Neither text nor a filter survived the parse, which is the board's
     /// question and not a query.
     NothingToSearchFor,
@@ -264,21 +267,60 @@ impl Refusal {
     /// reader is already looking at.
     #[must_use]
     pub fn description(&self) -> String {
-        let reason = match self {
+        format!(
+            "{NEEDS_ATTENTION}: {}. Delete it and save the search again.",
+            self.reason()
+        )
+    }
+
+    /// The sentence `create` refuses with, when the box asks to save a query
+    /// that cannot be a list (#1413).
+    ///
+    /// Not [`Refusal::description`]: that one is for a row already stored, and
+    /// its way out -- delete it and save the search again -- names a list that
+    /// at creation time does not exist. This one names the rule and stops. The
+    /// two refusals the box can reach (an opened list, a `t ` query) get a
+    /// sentence of their own; the rest are refusals the box has already shown
+    /// on the keystroke, and keep the rail's reason as a sentence.
+    #[must_use]
+    pub fn on_create(&self) -> String {
+        match self {
+            Self::NamesAnotherList => "A smart list cannot save another list.".to_owned(),
+            Self::NotASearch(prefix) => match prefix {
+                Prefix::Time => "`t` is not a search.",
+                Prefix::Action => "`>` is not a search.",
+                Prefix::Help => "`?` is not a search.",
+                // `empty_corpus` admits only the three above; a prefix that
+                // joins it is named generically rather than wrongly.
+                _ => "That prefix is not a search.",
+            }
+            .to_owned(),
+            _ => {
+                let reason = self.reason();
+                let mut letters = reason.chars();
+                letters.next().map_or_else(String::new, |first| {
+                    format!("{}{}.", first.to_uppercase(), letters.as_str())
+                })
+            }
+        }
+    }
+
+    /// The rule, as the middle of [`Refusal::description`]'s sentence.
+    fn reason(&self) -> String {
+        match self {
             Self::Rejected(message) => format!("the launcher refuses the saved query: {message}"),
             Self::TooManyValues { dimension, values } => format!(
                 "the saved query narrows by {values} {dimension} and the launcher accepts \
                  {MAX_FILTER_VALUES}"
             ),
             Self::NamesAnotherList => "the saved query names another smart list".to_owned(),
-            Self::NotASearch => {
+            Self::NotASearch(_) => {
                 "the saved query starts with a prefix that is not a search".to_owned()
             }
             Self::NothingToSearchFor => {
                 "the saved query has no words and no filters left in it".to_owned()
             }
-        };
-        format!("{NEEDS_ATTENTION}: {reason}. Delete it and save the search again.")
+        }
     }
 }
 
@@ -329,8 +371,8 @@ pub fn plan(raw: &str, vocab: &Vocabulary) -> Result<Runnable, Refusal> {
     // where "this prefix names no corpus at all" is decided, and a prefix that
     // leaves it -- as `note:` did with #46 and `asset:` with #436 -- must stop
     // making saved lists need attention on the same commit.
-    if crate::empty_corpus(parsed.query.prefix) {
-        return Err(Refusal::NotASearch);
+    if let Some(prefix) = parsed.query.prefix.filter(|p| crate::empty_corpus(Some(*p))) {
+        return Err(Refusal::NotASearch(prefix));
     }
 
     let filters = query::merge(&parsed, &SearchFilters::default());
@@ -400,8 +442,8 @@ pub async fn find(pool: &PgPool, id: &str) -> Result<Option<SavedList>, SearchEr
 /// # Errors
 ///
 /// [`SearchError::Invalid`] for a blank label, for a query today's grammar
-/// cannot run (with the [`Refusal`]'s own sentence, so the reader is told
-/// *which* rule), and when [`MAX_SAVED_LISTS`] are already saved;
+/// cannot run (with [`Refusal::on_create`], so the reader is told *which*
+/// rule and is not told to delete a list that does not exist), and when [`MAX_SAVED_LISTS`] are already saved;
 /// [`SearchError::Db`] if the row cannot be written.
 pub async fn create(
     pool: &PgPool,
@@ -423,7 +465,7 @@ pub async fn create(
     // bug, and a row nothing could have produced is a state no reader should
     // ever meet.
     if let Err(refusal) = plan(raw, vocab) {
-        return Err(SearchError::Invalid(refusal.description()));
+        return Err(SearchError::Invalid(refusal.on_create()));
     }
 
     let taken: i64 = sqlx::query_scalar("select count(*) from knobas.smart_list")
@@ -710,7 +752,7 @@ mod tests {
                 values: 40,
             },
             Refusal::NamesAnotherList,
-            Refusal::NotASearch,
+            Refusal::NotASearch(Prefix::Time),
             Refusal::NothingToSearchFor,
         ];
         let mut seen: Vec<String> = Vec::new();
@@ -727,5 +769,60 @@ mod tests {
             seen.push(description);
         }
         assert_eq!(seen.len(), refusals.len());
+    }
+
+    /// The rail offers the way out of a stored row; saving refuses with the
+    /// rule alone (#1413).
+    ///
+    /// At creation time there is no row to delete, so the save-time sentence
+    /// may not carry the rail's suffix or its heading -- and the rail's own
+    /// sentence keeps both, since a stored row still has to be told how to
+    /// clear.
+    #[test]
+    fn saving_names_the_rule_and_only_the_rail_offers_to_delete() {
+        let refusals = [
+            Refusal::Rejected("query is 900 characters".to_owned()),
+            Refusal::TooManyValues {
+                dimension: "sources",
+                values: 40,
+            },
+            Refusal::NamesAnotherList,
+            Refusal::NotASearch(Prefix::Time),
+            Refusal::NotASearch(Prefix::Action),
+            Refusal::NotASearch(Prefix::Help),
+            Refusal::NothingToSearchFor,
+        ];
+        let mut seen: Vec<String> = Vec::new();
+        for refusal in &refusals {
+            assert!(
+                refusal
+                    .description()
+                    .ends_with(". Delete it and save the search again."),
+                "{refusal:?}"
+            );
+            let sentence = refusal.on_create();
+            assert!(!sentence.contains("Delete it"), "{refusal:?} -> {sentence}");
+            assert!(
+                !sentence.contains(NEEDS_ATTENTION),
+                "{refusal:?} -> {sentence}"
+            );
+            assert!(
+                sentence.ends_with('.') && !sentence.ends_with(".."),
+                "{refusal:?} -> {sentence}"
+            );
+            assert!(
+                !sentence.starts_with(char::is_lowercase),
+                "{refusal:?} -> {sentence}"
+            );
+            assert!(
+                !seen.contains(&sentence),
+                "two refusals say the same thing: {sentence}"
+            );
+            seen.push(sentence);
+        }
+        assert_eq!(
+            Refusal::NotASearch(Prefix::Action).on_create(),
+            "`>` is not a search."
+        );
     }
 }
