@@ -91,7 +91,10 @@ impl Respond for Kuma {
                     *reads -= 1;
                     false
                 }
-                Some(_) => engine.registering.remove(&sid).is_some(),
+                Some(_) => {
+                    engine.registering.remove(&sid);
+                    true
+                }
                 None => false,
             };
             let (_, queued) = engine.sessions.get_mut(&sid).expect("checked above");
@@ -139,6 +142,7 @@ impl Engine {
     /// What Kuma pushes back for one posted packet, if anything.
     fn answer(&mut self, sid: &str, packet: &str) -> Option<String> {
         if packet == "40" {
+            // Registered on the second read: see the field's note.
             self.registering.insert(sid.to_owned(), 2);
             return Some(r#"40{"sid":"socket"}"#.to_owned());
         }

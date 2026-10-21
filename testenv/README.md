@@ -391,34 +391,35 @@ the ways until #684 and is the rule that ended it; the four after it still are:
   way back. Add a monitor that has to survive to `monitors.json`, not to the
   UI.
 
-- **`just kuma-live` re-mints the API key** when the worktree it runs from has
-  no `kuma-api-key`, or has one the instance no longer answers to — Kuma hands
-  a key's clear text out once, so `seed-kuma.sh` verifies the recorded key
+- **`just kuma-live` adds and deletes four monitors of its own** --
+  `knobas-live-scratch` and `knobas-write-scratch` through `kuma-monitor.sh`,
+  `knobas-live-created` and `knobas-write-created` through knobas' own create
+  (#453) -- and pauses and resumes them, which is why the sweep above matters:
+  a killed run's leftovers are removed by the next `./seed-kuma.sh`, and a
+  sibling counting monitors mid-run counts them.
+
+  Its **API key no longer collides** (since #1484, the rule #684 made for the
+  Gitea token). The run re-mints the key when the worktree it runs from has no
+  `kuma-api-key`, or has one the instance no longer answers to: Kuma hands a
+  key's clear text out once, so `seed-kuma.sh` verifies the recorded key
   against `/metrics` and keeps it **while it still authenticates**, exactly as
   `seed-gitea.sh` does with its Gitea token, and replaces it when it does not
-  (since 2026-09-11, #552) — and only on an answer the instance actually gave,
-  because re-minting destroys the instance's key: a probe that gets no answer
-  at all refuses rather than guessing. **The key is per worktree** (since
-  #1484, the rule #684 made for the Gitea token): it is named
-  `knobas-seed-<worktree directory>-<checksum of its path>`, and a re-mint
-  deletes only keys of **that** name, so a sibling's seed never 401s your
-  copy. Another worktree's key, and the shared `knobas-seed` key the seed
+  (since 2026-09-11, #552), and only on an answer the instance actually gave: a
+  probe that gets no answer at all refuses rather than guessing. The key is
+  named `knobas-seed-<worktree directory>-<checksum of its path>`, and a
+  re-mint deletes only keys of **that** name, so a sibling's seed never 401s
+  your copy. Another worktree's key, and the shared `knobas-seed` key the seed
   minted before #1484, are never deleted; one key per worktree that ever
   seeded accumulates on the instance, and a `down -v` clears them. A 401 from
   `/metrics` now means this tree's own key is gone (a reset volume, a
-  hand-deleted key), and the next `./seed-kuma.sh` here replaces it. It
-  also adds and deletes four monitors of its own -- `knobas-live-scratch` and
-  `knobas-write-scratch` through `kuma-monitor.sh`, `knobas-live-created` and
-  `knobas-write-created` through knobas' own create (#453) -- which is why the
-  sweep above matters: a killed run's leftovers are removed by the next
-  `./seed-kuma.sh`.
+  hand-deleted key), and the next `./seed-kuma.sh` here replaces it.
 
 So: **claim the environment before running `./seed` or `just kuma-live`, and
 say when you release it.** `start-work-live` seeds too, and its branches carry
 the same `knobas-` prefix `live_gitea.rs` sweeps, so a concurrent `just
 gitea-live` would delete the branch out from under it. The failure mode is a
-mid-run 401 or a vanished branch, neither of which reads as "somebody else is
-in here". For the three Gitea recipes the tooling enforces it since #724: they
+vanished branch, a vanished monitor or a count that is one off, none of which
+reads as "somebody else is in here". For the three Gitea recipes the tooling enforces it since #724: they
 queue on the Gitea lock (*Live products, on demand*). Kuma and a bare `./seed`
 take no lock, and neither does a TeamCity run -- so **`just gitea-live-capped`
 still wants the environment claimed** while a TeamCity run may be cloning from

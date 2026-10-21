@@ -175,7 +175,7 @@ const NOT_LOGGED_IN: &str = "You are not logged in.";
 /// own ack, measured as wall-clock time.
 ///
 /// **A deadline over the exchange, not a count of reads**, and the difference
-/// is what an unanswered ack costs. Each pass of [`Session::wait_for`] is one
+/// is what an unanswered ack costs. Each pass of [`Session::read_until`] is one
 /// engine.io long-poll GET, and a session that is alive but never acks holds
 /// each of those until Kuma's ping interval (25 s) before answering with a
 /// bare ping -- so the request timeout never fires, every read is a legitimate
@@ -607,10 +607,17 @@ impl Session<'_> {
         Ok(())
     }
 
-    /// Read until the ack numbered `ack` arrives, answering pings on the way.
+    /// Read until the ack numbered `ack` arrives ([`Session::read_until`]).
+    async fn wait_for(&self, ack: u32, pushed: &mut Pushed) -> Result<String, SourceError> {
+        self.read_until(pushed, |packet| ack_of(packet, ack).map(str::to_owned))
+            .await
+    }
+
+    /// Read until `wanted` picks a packet out of the stream: an ack, or
+    /// Kuma's invitation to log in (#1472). Pings are answered on the way.
     ///
     /// **No bound of its own, and that is the design**: what stops this loop
-    /// when the ack never comes is [`CALL_BUDGET`], the deadline
+    /// when the packet never comes is [`CALL_BUDGET`], the deadline
     /// [`KumaSocket::call`] holds over the whole exchange, which cancels this
     /// future wherever it happens to be waiting. A write on a fresh login
     /// waits three times, and the constant's note says why bounding each wait
@@ -621,14 +628,6 @@ impl Session<'_> {
     /// whole state, and this module has no use for the rest of it -- reading a
     /// monitor is `/metrics`' job and stays so. Kuma pushes the list again
     /// when it changes, so a held session's copy stays current.
-    async fn wait_for(&self, ack: u32, pushed: &mut Pushed) -> Result<String, SourceError> {
-        self.read_until(pushed, |packet| ack_of(packet, ack).map(str::to_owned))
-            .await
-    }
-
-    /// Read until `wanted` picks a packet out of the stream, answering pings
-    /// and keeping [`Pushed`] current on the way. [`Session::wait_for`]'s
-    /// loop, and its note on what bounds it holds here too.
     async fn read_until<T>(
         &self,
         pushed: &mut Pushed,
@@ -666,7 +665,7 @@ async fn text_of(response: knobas_http::Response) -> Result<String, SourceError>
 }
 
 /// What a login pushed that a call may need (#864). Everything else a login
-/// pushes is still discarded ([`Session::wait_for`]'s note).
+/// pushes is still discarded ([`Session::read_until`]'s note).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct Pushed {
     /// The account's Docker hosts by id, lowest first, as `dockerHostList`
@@ -937,7 +936,7 @@ mod tests {
     /// reads it made, and what it finally said.
     ///
     /// The outer `tokio::time::timeout` is ten times the budget, so the code
-    /// *without* its deadline -- [`Session::wait_for`] loops for ever -- fails
+    /// *without* its deadline -- [`Session::read_until`] loops for ever -- fails
     /// here rather than hanging `just check`, and it is loose enough that the
     /// assertions on the deadline itself are what report a run that overshot.
     async fn until_it_gives_up(budget: Duration, hold: Duration) -> (Duration, usize, SourceError) {
