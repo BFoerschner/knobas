@@ -70,7 +70,7 @@
   );
   const name = $derived(repoName(title));
   const repoId = $derived(checkout?.repo_entity_id ?? entityId);
-  const root = $derived(savedRoot ?? checkout?.clones_root ?? null);
+  const root = $derived(checkout?.clones_root ?? savedRoot);
   const mark = $derived(clones.marks[repoId]);
   const path = $derived(checkout?.path ?? null);
   const entries = $derived(apps.settings === null ? [] : menuOrder(apps.settings));
