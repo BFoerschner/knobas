@@ -252,7 +252,7 @@
     pressing[row.entity_id] = true;
     try {
       const write = await ports.submitWrite(form.build(row.entity_id));
-      toastQueued(`${form.label.toLowerCase()} ${row.name}`, { id: row.source_id, display_name: sourceNames[row.source_id] ?? row.source_id });
+      toastQueued(`${form.label.toLowerCase()} ${row.name}`, { id: row.source_id, display_name: sourceNames[row.source_id] ?? "" });
       following.push(followWrite(write, { name: `${form.label} ${row.name}` }));
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });

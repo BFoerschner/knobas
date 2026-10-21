@@ -9644,21 +9644,26 @@ unchanged.
   `shell/health.svelte`'s `health`. *Ruling:* the store, keyed by the write's source id. *Reasoning:*
   it is the store the status bar draws, it is live on `source:health`, and one reading means the
   toast never disagrees with the bar. *Reversing:* a `failing` argument on `toastQueued`.
-- **"Sign-in is failing" means `unauthorized` or `missing_secret`.** An unreachable server is
-  retried on its own and an untested (`unknown`) credential is not failing; both toast plainly.
-  Matches Builds' `staleLine`, which already warns on exactly those two. *Reversing:* low.
-- **The caller names the source** (`{ id, display_name }`, the shape of `SourceRef`), because no
-  store holds source names: the job, PR, item and repository pages pass their detail's `source`
+- **"Sign-in is failing" means `unauthorized` or `missing_secret`.** *Fork:* those two, or every
+  actionable state (`isActionable`, which adds `unreachable`). *Ruling:* the two, as one total
+  table `signInFails` beside `isActionable` in `shell/health.svelte.ts`, which Builds' `staleLine`
+  and the job's stale builds line now read too. *Reasoning:* an unreachable server is retried on
+  its own and an untested (`unknown`) credential is not failing. *Reversing:* low.
+- **The caller names the source.** *Fork:* a module store of source names, or each caller passes
+  `{ id, display_name }` (the shape of `SourceRef`). *Ruling:* the caller, because no store holds
+  source names: the job, PR, item and repository pages pass their detail's `source`
   (the repository page hands it down to Branches, Compare, New branch and the commit dialog);
   Builds its pipeline's `source_id`/`source_name`; Docs its page's; *Create monitor* the target
   the reader picked (`TfCreateMonitor`'s `oncreated` now carries it); Monitors its `sourceNames`;
   the inbox reads `list_sources` after the re-run is queued. A worklog carries no source, so its
   toast names none. *Reversing:* low.
-- **Every write toast routes through the helper, not only the ticket's list:** Docs' three and
+- **Every write toast routes through the helper, not only the ticket's list.** *Fork:* the
+  ticket's named callers only, or every write toast. *Ruling:* every one: Docs' three and
   Monitors' *Pause*/*Resume*/*Create monitor* ("<label> queued for <name>" before) and the
   worklog too, so "Queued: <what>." with *Show queue* holds on every page. The inbox reads
   "Queued: re-run Payout_IntegrationTests #1187.", the row's title rather than prototype-6's
   "#1187". The old `AssetsView` (the asset tree, kept unchanged) keeps its own monitor toast.
   *Reversing:* low.
-- **`queuedRunText` became `queuedRunWhat`:** Builds' run toast keeps its words ("Queued: run
+- **`queuedRunText` became `queuedRunWhat`.** *Fork:* keep Builds' own text function with the
+  tail, or reduce it to the *what*. *Ruling:* the *what*; Builds' run toast keeps its words ("Queued: run
   <pipeline>. <summary>.") and its tail now comes from the helper. *Reversing:* low.

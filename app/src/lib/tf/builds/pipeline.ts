@@ -10,6 +10,7 @@
  */
 import type { PipelineRow, PipelineSettings, PipelineTrigger, RunRow } from "../../ipc/entity";
 import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
+import { signInFails } from "../../shell/health.svelte";
 import type { WriteSource } from "../../shell/queued-toast";
 import { matchesAll } from "../filter/filter";
 import { age } from "../job/job";
@@ -324,7 +325,7 @@ export function staleLine(
   const state = source?.health;
   const run = sync.find((row) => row.source_id === pipeline.source_id);
   const name = pipeline.source_name;
-  if (source && state && (state.state === "unauthorized" || state.state === "missing_secret")) {
+  if (source && state && signInFails(state.state)) {
     const secret = secretNoun(source.auth_kind);
     const since = run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
     const why = state.state === "missing_secret" ? `no ${secret} stored` : "sign-in failing";

@@ -155,7 +155,7 @@
       const source = sources.find((row) => row.id === entry.item.source_id);
       toastQueued(`${form.label.toLowerCase()} ${entry.item.title}`, {
         id: entry.item.source_id,
-        display_name: source?.display_name || entry.item.source_id,
+        display_name: source?.display_name ?? "",
       });
       following.push(followWrite(write, { name: form.label }));
       void inbox.refresh();
