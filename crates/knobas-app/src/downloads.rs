@@ -51,6 +51,48 @@ fn numbered(name: &str, n: u32) -> String {
     }
 }
 
+/// Create `name` in `dir`, or the first free one of `name (1)` to
+/// `name (999)`: a name is claimed with `create_new`, so a file already there
+/// is never opened, let alone truncated. Every download and the Docs export
+/// (#1454) take their name here.
+///
+/// # Errors
+///
+/// The file system's, with the path it failed on; once all thousand names
+/// are taken, [`std::io::ErrorKind::AlreadyExists`] on `dir`, saying so.
+pub async fn create_free(
+    dir: &Path,
+    name: &str,
+) -> Result<(PathBuf, tokio::fs::File), (PathBuf, std::io::Error)> {
+    for n in 0..1000 {
+        let candidate = dir.join(if n == 0 {
+            name.to_owned()
+        } else {
+            numbered(name, n)
+        });
+        match tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+            .await
+        {
+            Ok(file) => return Ok((candidate, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err((candidate, e)),
+        }
+    }
+    Err((
+        dir.to_owned(),
+        std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!(
+                "{} holds {name} and a thousand numbered copies of it",
+                dir.display()
+            ),
+        ),
+    ))
+}
+
 /// Writes one download into `dir`.
 pub struct FileSink {
     dir: PathBuf,
@@ -105,30 +147,17 @@ impl DownloadSink for FileSink {
         tokio::fs::create_dir_all(&self.dir)
             .await
             .map_err(|e| sink_error(&self.dir, &e))?;
-        for n in 0..1000 {
-            let candidate = self.dir.join(if n == 0 {
-                name.clone()
-            } else {
-                numbered(&name, n)
-            });
-            match tokio::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&candidate)
-                .await
-            {
-                Ok(file) => {
-                    self.file = Some((candidate, file));
-                    return Ok(());
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(e) => return Err(sink_error(&candidate, &e)),
+        match create_free(&self.dir, &name).await {
+            Ok(file) => {
+                self.file = Some(file);
+                Ok(())
             }
+            // Every name taken: the message says so whole.
+            Err((_, e)) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                Err(SourceError::Sink(e.to_string()))
+            }
+            Err((path, e)) => Err(sink_error(&path, &e)),
         }
-        Err(SourceError::Sink(format!(
-            "{} holds {name} and a thousand numbered copies of it",
-            self.dir.display()
-        )))
     }
 
     async fn write(&mut self, bytes: &[u8]) -> Result<(), SourceError> {

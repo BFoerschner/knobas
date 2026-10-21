@@ -4,7 +4,9 @@
  *
  * Prototype-6 draws all three Docs addresses with one screen: `#/docs` opens
  * the page read last, `#/docs/space/<key>` that space's first page, and
- * `#/page/<id>[/<section>]` the page itself.
+ * `#/page/<id>[/<section>]` the page itself. A key two sources hold is
+ * addressed `#/docs/space/<source>:<key>` (#1455), as a ticket key two sources
+ * hold is `#/job/<source>:<key>` (#1476).
  */
 import type {
   DocBlock,
@@ -26,18 +28,26 @@ import { isDone } from "../tickets/tickets";
 /** Where a Docs address points. */
 export type DocsPlace =
   | { kind: "last" }
-  | { kind: "space"; key: string }
+  | { kind: "space"; source: string | null; key: string }
   | { kind: "page"; id: string; section: number | null };
 
 /**
  * Read the rest of a Docs address. The route keeps what follows the first
  * segment, and both `#/docs/…` and `#/page/…` arrive here: `space` names a
  * space, and anything else is a page's entity id (which always holds a `:`).
+ * A space segment holding a `:` names its source before the first one, as an
+ * entity id does (a source id holds no `:`).
  */
 export function placeOf(rest: string[]): DocsPlace {
   const [head, next] = rest;
   if (head === undefined || head === "") return { kind: "last" };
-  if (head === "space") return next ? { kind: "space", key: next } : { kind: "last" };
+  if (head === "space") {
+    if (!next) return { kind: "last" };
+    const colon = next.indexOf(":");
+    return colon > 0
+      ? { kind: "space", source: next.slice(0, colon), key: next.slice(colon + 1) }
+      : { kind: "space", source: null, key: next };
+  }
   const section = next !== undefined && /^\d+$/.test(next) ? Number(next) : null;
   return { kind: "page", id: head, section };
 }
@@ -55,12 +65,19 @@ export function firstPage(space: DocSpace): DocNode | undefined {
 
 /**
  * The page an address opens, or `null` when the tree has nothing to open.
- * `#/docs` with nothing read yet opens the first space's first page.
+ * `#/docs` with nothing read yet opens the first space's first page. A space
+ * named with its source is matched through {@link spaceId}; a bare key opens
+ * the first space holding it, and so does a segment whose `:` belongs to the
+ * key rather than naming a source.
  */
 export function pageToOpen(place: DocsPlace, tree: DocsTree): string | null {
   if (place.kind === "page") return place.id;
   if (place.kind === "space") {
-    const space = tree.spaces.find((s) => s.key === place.key);
+    const { source, key } = place;
+    const named = source === null ? undefined : spaceId({ source_id: source, key });
+    const space =
+      tree.spaces.find((s) => spaceId(s) === named) ??
+      tree.spaces.find((s) => s.key === (source === null ? key : `${source}:${key}`));
     return space ? (firstPage(space)?.entity_id ?? null) : null;
   }
   if (tree.last_read !== null) return tree.last_read;
@@ -73,9 +90,22 @@ export function spaceOfPage(tree: DocsTree, entityId: string): DocSpace | undefi
   return tree.spaces.find((s) => s.pages.some((p) => p.entity_id === entityId));
 }
 
+/** A space as its source and key name it. */
+type SpaceRef = { source_id: string; key: string };
+
 /** A space's stable identity in the picker: source and key. */
-export function spaceId(space: { source_id: string; key: string }): string {
+export function spaceId(space: SpaceRef): string {
   return `${space.source_id}/${space.key}`;
+}
+
+/**
+ * The address of a space: `#/docs/space/<key>`, or `#/docs/space/<source>:<key>`
+ * when another of `spaces` holds the key too (#1455, the shape #1476 gave a
+ * job), so the address never opens the other source's space.
+ */
+export function spaceHash(spaces: readonly SpaceRef[], space: SpaceRef): string {
+  const shared = spaces.some((s) => s.key === space.key && s.source_id !== space.source_id);
+  return `#/docs/space/${encodeURIComponent(shared ? `${space.source_id}:${space.key}` : space.key)}`;
 }
 
 /** The picker's words for a space: *ENG Engineering (12)*. */

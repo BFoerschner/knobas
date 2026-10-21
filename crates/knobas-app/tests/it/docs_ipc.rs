@@ -1010,6 +1010,64 @@ async fn export_writes_the_page_as_markdown() {
     assert!(text.contains("<!-- macro: roadmap -->"), "{text}");
 }
 
+/// *Export as Markdown* never replaces a file already in the folder (#1454):
+/// a taken name gets ` (1)`, then ` (2)`, as a download does, and the answer
+/// names the file written. Two same-titled pages end up as two files.
+#[tokio::test]
+async fn export_numbers_a_taken_name_and_leaves_the_file_there() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let eng = page(
+        &pool,
+        &src,
+        "1",
+        "Notes",
+        "ENG",
+        &[],
+        "<p>Engineering's notes.</p>",
+    )
+    .await;
+    let ops = page(
+        &pool,
+        &src,
+        "2",
+        "Notes",
+        "OPS",
+        &[],
+        "<p>Operations' notes.</p>",
+    )
+    .await;
+    let folder =
+        std::env::temp_dir().join(format!("knobas-export-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let mine = b"my own notes, not knobas'\n";
+    std::fs::write(folder.join("notes.md"), mine).unwrap();
+
+    let first = docs_export_markdown_inner(&pool, &Registry::for_process(), &eng, &folder)
+        .await
+        .unwrap();
+    let second = docs_export_markdown_inner(&pool, &Registry::for_process(), &ops, &folder)
+        .await
+        .unwrap();
+
+    let read = |name: &str| std::fs::read(folder.join(name)).unwrap();
+    let (kept, one, two) = (read("notes.md"), read(&first.file), read(&second.file));
+    std::fs::remove_dir_all(&folder).ok();
+    assert_eq!(kept, mine);
+    assert_eq!(first.file, "notes (1).md");
+    assert_eq!(second.file, "notes (2).md");
+    assert!(
+        String::from_utf8(one)
+            .unwrap()
+            .contains("Engineering's notes.")
+    );
+    assert!(
+        String::from_utf8(two)
+            .unwrap()
+            .contains("Operations' notes.")
+    );
+}
+
 /// *Edit section* queues the page's whole new body against the version read,
 /// and refuses a section knobas does not edit and a page that moved on.
 #[tokio::test]

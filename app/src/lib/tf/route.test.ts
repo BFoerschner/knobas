@@ -23,6 +23,12 @@ test("a deep address lights the section it belongs to", () => {
   expect(sectionOf(parseTfHash("#/settings/source/jira"))).toBe("settings");
 });
 
+test("a space's address keeps its segment whole, with or without a source (#1455)", () => {
+  const docs = { view: "full", section: "docs", head: "docs" };
+  expect(parseTfHash("#/docs/space/ENG")).toEqual({ ...docs, rest: ["space", "ENG"] });
+  expect(parseTfHash("#/docs/space/wiki%3AENG")).toEqual({ ...docs, rest: ["space", "wiki:ENG"] });
+});
+
 test("a rooms-UI address is unknown here, not Tickets", () => {
   expect(parseTfHash("#/ctx/all")).toEqual({ view: "unknown", hash: "#/ctx/all" });
   expect(sectionOf(parseTfHash("#/ticket/jira:PAY-231"))).toBeNull();

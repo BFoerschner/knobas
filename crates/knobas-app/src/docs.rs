@@ -1219,11 +1219,14 @@ pub fn page_markdown(title: &str, blocks: &[DocBlock]) -> String {
     knobas_source::docs::markdown::page(title, blocks)
 }
 
-/// Write one page as Markdown into `folder`.
+/// Write one page as Markdown into `folder`, under the first free name of
+/// `<slug>.md`, `<slug> (1).md`, … (#1454): a file already there is never
+/// replaced, and the answer names the file written.
 ///
 /// # Errors
 ///
-/// As [`page`]; `internal` if the file cannot be written.
+/// As [`page`]; `internal` if the file cannot be written, which leaves no
+/// file behind.
 pub async fn export(
     pool: &PgPool,
     declarations: &Declarations,
@@ -1238,14 +1241,31 @@ pub async fn export(
             page.title
         )));
     }
-    let file = knobas_source::docs::markdown::page_file_name(&page.title);
-    std::fs::create_dir_all(folder).map_err(IpcError::internal)?;
-    std::fs::write(folder.join(&file), page_markdown(&page.title, &page.blocks))
+    let name = knobas_source::docs::markdown::page_file_name(&page.title);
+    tokio::fs::create_dir_all(folder)
+        .await
         .map_err(IpcError::internal)?;
+    let (path, mut out) = crate::downloads::create_free(folder, &name)
+        .await
+        .map_err(|(path, e)| IpcError::internal(format!("writing {}: {e}", path.display())))?;
+    let text = page_markdown(&page.title, &page.blocks);
+    if let Err(e) = write_whole(&mut out, text.as_bytes()).await {
+        drop(out);
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(IpcError::internal(e));
+    }
     Ok(DocExport {
-        file,
+        file: path
+            .file_name()
+            .map_or(name, |n| n.to_string_lossy().into_owned()),
         folder: folder.display().to_string(),
     })
+}
+
+async fn write_whole(out: &mut tokio::fs::File, bytes: &[u8]) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    out.write_all(bytes).await?;
+    out.flush().await
 }
 
 // -- Edit section and New page (#862) -----------------------------------------

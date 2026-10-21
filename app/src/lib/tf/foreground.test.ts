@@ -49,6 +49,7 @@ test("a list, a space or the tree with nothing selected is nothing, never the la
     "#/builds/teamcity%3APayouts_Build",
     "#/docs",
     "#/docs/space/ENG",
+    "#/docs/space/wiki%3AENG",
     "#/assets",
     "#/route/route%3Aget-payouts",
     "#/deps",

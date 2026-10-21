@@ -9947,3 +9947,47 @@ unchanged.
   unnarrowed) holds. A failed read leaves rows as *Ack*. *Reversing:* medium, an IPC change.
 - **Does the row also say since when.** *Ruling:* no; the disabled *Acked* button carries the ack
   time in its title. *Reversing:* low.
+## #1454: *Export as Markdown* never replaces a file in Downloads (Opus implementer, 2026-10-21)
+
+Ruled 2026-10-21 (delegated by Björn at triage).
+
+- **Where the export lands: bare `~/Downloads`, a taken name numbered ` (1)`, ` (2)`.** *Fork:*
+  bare `~/Downloads` with the downloads module's numbering, or a knobas-owned
+  `~/Downloads/knobas-docs` folder as the notes export has. *Ruling:* bare `~/Downloads`, the
+  recommended pick. *Reasoning:* it is what ruling #854–#856 already says for every download ("a
+  taken name gets ` (1)`, ` (2)`"), the toast's *Saved <name> to ~/Downloads* stays true, and a
+  page exported for someone else lands where a browser download would. No earlier ruling reversed.
+  *Reversing:* low: pass `folder.join("knobas-docs")` in the command.
+- **One free-name rule for both writers.** *Fork:* make `numbered` visible to the docs module and
+  loop there, or lift the downloads sink's create-new loop into `downloads::create_free` and call
+  it from both. *Ruling:* the shared function. *Reasoning:* the name is claimed with `create_new`,
+  so a file that appears between the check and the write is still never opened, and the rule
+  (`name`, then ` (1)` to ` (999)`) is spelled once; `numbered` and its test are unchanged. A write
+  that fails after the name was claimed removes the empty file, as a failed download does.
+  *Reversing:* low.
+
+## #1455: a docs space two sources hold is addressed with its source (Opus implementer, 2026-10-21)
+
+Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above, which named #1455.
+
+- **Addressing: the address grows a source, in the entity-id spelling.** *Fork:* the breadcrumb
+  picks the space in place and the address stays, or the address names the source. *Ruling:* the
+  address, as `#/docs/space/<source>:<key>` where another source holds the key, and
+  `#/docs/space/<key>` otherwise. *Reasoning:* #1476 ruled the same class for a ticket key and said
+  its ruling applies here; one rule for both (the source before the first `:`, written only where
+  the key is not unique) keeps a second addressing shape out of the app. The in-place pick would
+  have left the address itself still opening the other source's space when copied or reopened.
+  Requirements §10's header and its opening paragraph name the new address. *Reversing:* low: the
+  breadcrumb's `spaceHash` and the split in `placeOf`.
+- **Encoding the source.** *Sub-fork:* how `source_id` sits in the segment. *Ruling:* `<source>:<key>`
+  in the one segment, `encodeURIComponent`d (`wiki%3AENG`), split at the first `:`. A source id
+  holds no `:` (an entity id is split at its first one), so the split is exact. A segment whose
+  prefix names no space with that key is read again as a bare key, so a key that holds a `:`
+  still opens by its bare address. *Reversing:* low: one split, one fallback `find`.
+- **A bare key two sources hold.** *Sub-fork:* open the first or refuse. *Ruling:* open the first
+  listed source's space, as before and as #1476 does for a job. The breadcrumb never hands out that
+  address for a shared key, so it is reached only by hand or an old bookmark. *Reversing:* low: one
+  `find` in `pageToOpen`.
+- **No route grammar or §10.8 change.** The route keeps `space` and the segment after it whole;
+  `#/docs/space/<source>/<key>` would have needed a third segment. `foreground` reads a docs space
+  as nothing, with or without the source.
