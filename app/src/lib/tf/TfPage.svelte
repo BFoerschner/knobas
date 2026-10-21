@@ -28,6 +28,7 @@
 
   const route = $derived(ctx.route);
   const job = $derived(ctx.job);
+  const jobAt = $derived(ctx.jobAt);
 
   const page = $derived(pageFor(route));
 </script>
@@ -35,7 +36,7 @@
 {#if page && page.crumbs && route.view === "full"}
   {@const Page = page.component}
   <div class="tf-full">
-    <TfCrumbs {job} name={SECTION_NAME[route.section]} />
+    <TfCrumbs {job} {jobAt} name={SECTION_NAME[route.section]} />
     <Page {...page.props(ctx)} />
   </div>
 {:else if page}
@@ -57,7 +58,7 @@
 {:else if route.view === "full"}
   {@const name = SECTION_NAME[route.section]}
   <div class="tf-full">
-    <TfCrumbs {job} {name} />
+    <TfCrumbs {job} {jobAt} {name} />
     <header class="tf-fhead">
       <div><h1>{name}</h1></div>
     </header>

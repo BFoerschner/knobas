@@ -12,5 +12,5 @@ type BuildsRoute = Extract<TfRoute, { view: "full" }> & { section: "builds" };
 export const page = definePage({
   matches: (route): route is BuildsRoute => route.view === "full" && route.section === "builds",
   component: TfBuilds,
-  props: ({ route, ready, job }) => ({ ready, head: route.head, rest: route.rest, job }),
+  props: ({ route, ready, job, jobAt }) => ({ ready, head: route.head, rest: route.rest, job, jobAt }),
 });

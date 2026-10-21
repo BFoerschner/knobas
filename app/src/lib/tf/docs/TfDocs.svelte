@@ -111,6 +111,7 @@
     ready,
     rest,
     job,
+    jobAt = null,
     ports,
     linkPorts,
     layers = sharedLayers,
@@ -120,6 +121,8 @@
     rest: string[];
     /** The job the reader was last in, for the breadcrumb's chip and *Link to <job>*. */
     job: string | null;
+    /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
+    jobAt?: string | null;
     ports?: DocsPorts;
     linkPorts?: LinkPorts;
     layers?: Layers;
@@ -650,7 +653,7 @@
       <article class="tf-rd-page" bind:this={article}>
         <div class="tf-rd-crumb">
           {#if job !== null}
-            <a class="tf-jobchip tf-card" href={jobHash(job)}>{job}</a> ›
+            <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a> ›
           {/if}
           <a href="#/docs">Docs</a>
           {#if p.space}

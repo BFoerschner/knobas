@@ -110,6 +110,7 @@
     ready,
     rest,
     job,
+    jobAt = null,
     ports = {
       getEntity: (entityId) => getEntity(entityId),
       listEntities: (filter, limit, offset) => listEntities(filter, limit, offset),
@@ -131,6 +132,8 @@
     rest: string[];
     /** The job the reader was last in, as a ticket key. */
     job: string | null;
+    /** The address the job was opened at (#1525), which its chip links; its key when omitted. */
+    jobAt?: string | null;
     ports?: RepoPorts;
     /** Injectable clock, for the times drawn. */
     now?: Date;
@@ -300,7 +303,7 @@
 <div class="tf-full">
   <nav class="tf-crumbs" aria-label="Breadcrumb">
     {#if job !== null}
-      <a class="tf-jobchip tf-card" href={jobHash(job)}>{job}</a><span class="tf-sep">›</span>
+      <a class="tf-jobchip tf-card" href={jobHash(jobAt ?? job)}>{job}</a><span class="tf-sep">›</span>
     {/if}
     <a class="tf-crumb" href="#/code">Code</a><span class="tf-sep">›</span>
     <a class="tf-crumb" href="#/code/repos">Repositories</a><span class="tf-sep">›</span>

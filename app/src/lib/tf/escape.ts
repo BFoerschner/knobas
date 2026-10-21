@@ -33,7 +33,7 @@ export interface EscState {
   /** The focused text field, or `null` when focus is not in one. */
   field: { filter: boolean; text: string } | null;
   route: TfRoute;
-  /** The job the reader was last in, if any. */
+  /** The address of the job the reader was last in (its key, or its entity id, #1525), if any. */
   job: string | null;
 }
 
