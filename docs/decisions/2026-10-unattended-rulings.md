@@ -11149,3 +11149,14 @@ set.
   removed name had no caller outside the fake, the mirror and tests, and the census holds the fake
   and the barrel to each other. The parts it supersedes (§2.4, §2.5 with D5, #47, #434, #435, #760)
   are named and left unedited. *Reversing:* medium, revert the PR.
+- **Confirmed by merge-manager on Opus (2026-10-21).** *Ruling:* the sign-off stands.
+  `git diff --name-status` under `docs/` shows one `A` row in `docs/contract/10.8/` and no edit to
+  an existing entry. A word-wise grep of the six command names, the six barrel names and
+  `MemberAsset` over app, crates (the WASM host among them), testenv and scripts finds only
+  retirement comments and the `knobas-core`/`knobas-search` functions the entry keeps. The
+  launcher strip's run statuses (#1581) come from `sync_status`, which TfShell holds and hands to
+  the dialogs snippet, not from `source_statuses`. The rewritten exit witnesses still pin
+  membership through ancestors after import and after restore, and the container's path stays
+  witnessed by each file's tree test. #141's and #448's entries mention `smart_list_items` and
+  `context_assets` only in passing, describing those commands; nothing there needs to hold, so
+  the entry need not name them. *Reversing:* medium, revert the PR.
