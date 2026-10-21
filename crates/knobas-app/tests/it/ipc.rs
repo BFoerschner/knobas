@@ -207,7 +207,7 @@ fn invoke_managing(
             knobas_app::commands::app::app_status,
             knobas_app::commands::app::frontend_ready,
             knobas_app::commands::entity::create_link,
-            knobas_app::commands::entity::recent_activity,
+            knobas_app::commands::entity::list_contexts,
             knobas_app::commands::entity::unlink,
             knobas_app::commands::entity::submit_write,
             knobas_app::commands::sources::demo_load,
@@ -965,13 +965,9 @@ async fn a_submitted_write_is_queued_delivered_and_followed_by_a_re_read() {
 /// window between `setup` and a live pool.
 #[test]
 fn a_command_that_beats_the_database_is_told_to_try_again() {
-    let rejection = invoke_managing(
-        "recent_activity",
-        serde_json::json!({ "limit": 5 }),
-        |app| {
-            app.manage(knobas_app::Lifecycle::new());
-        },
-    )
+    let rejection = invoke_managing("list_contexts", serde_json::json!({}), |app| {
+        app.manage(knobas_app::Lifecycle::new());
+    })
     .expect_err("there is no pool yet");
 
     assert!(
@@ -989,17 +985,13 @@ fn a_command_that_beats_the_database_is_told_to_try_again() {
 /// ...and once the pool is there the same call gets past the guard.
 ///
 /// Without this the test above would pass just as well against a
-/// `recent_activity` that answers `not_ready` to everybody. The pool points at
+/// `list_contexts` that answers `not_ready` to everybody. The pool points at
 /// nothing, so the assertion is that the failure is no longer the lifecycle's.
 #[test]
 fn the_same_command_gets_through_once_the_database_is_up() {
-    let rejection = invoke_managing(
-        "recent_activity",
-        serde_json::json!({ "limit": 5 }),
-        |app| {
-            app.manage(ready_over(unreachable_pool()));
-        },
-    )
+    let rejection = invoke_managing("list_contexts", serde_json::json!({}), |app| {
+        app.manage(ready_over(unreachable_pool()));
+    })
     .expect_err("the pool points at no server");
 
     assert!(

@@ -34,8 +34,8 @@ use tauri::State;
 use knobas_core::asset::AssetType;
 
 use crate::assets::{
-    self, AssetDetail, AssetEdit, AssetRow, DependsOnThis, ImportOutcome, ImportPreview,
-    MemberAsset, OpenAlert, PropertyValue, RouteDetail, RouteEdit, RouteRow, Visibility,
+    self, AssetDetail, AssetEdit, AssetRow, DependsOnThis, ImportOutcome, ImportPreview, OpenAlert,
+    PropertyValue, RouteDetail, RouteEdit, RouteRow, Visibility,
 };
 use crate::{IpcError, Lifecycle};
 
@@ -305,31 +305,6 @@ pub async fn delete_asset<R: tauri::Runtime>(
     Ok(())
 }
 
-/// The assets a stored room's Assets tile draws: this context's member assets,
-/// worst health first, each with the path it sits at (#434).
-///
-/// The membership rule is `knobas_core::context::member_ids`' -- the same one
-/// statement `context_members` answers with and the per-context inbox filter
-/// intersects on -- so an asset reached through its ancestors is in this list
-/// and in that badge by construction, and there is no second walk to keep in
-/// step.
-///
-/// A context that does not exist answers with no assets rather than an error,
-/// like `context_members`: an address can outlive the thing it names.
-///
-/// # Errors
-///
-/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is still
-/// coming up, [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
-#[tauri::command]
-pub async fn context_assets(
-    lifecycle: State<'_, Lifecycle>,
-    ctx_id: String,
-) -> Result<Vec<MemberAsset>, IpcError> {
-    let pool = lifecycle.pool()?;
-    assets::in_context(&pool, &ctx_id).await
-}
-
 /// One route, with its own history — what `#/route/<id>` opens on (#432).
 ///
 /// The exposing asset is [`RouteRow::asset_id`] on the answer, which is where
@@ -437,31 +412,6 @@ pub async fn delete_route<R: tauri::Runtime>(
     let written = assets::delete_route(&pool, &route_id).await?;
     announce(&app, written.activity);
     Ok(())
-}
-
-/// The assets a **source** room's Assets tile draws: the ones this source's
-/// monitors are attached to, worst health first (#435).
-///
-/// The rule is spec #427's *"a source room lists assets with a monitored-by
-/// link to that source's monitors"*, and it is [`assets::monitored_by`]'s one
-/// statement. It answers with nothing until the Kuma adapter lands in M4.1 --
-/// no source emits a `monitor` yet -- which is the read working rather than a
-/// stub standing in for it.
-///
-/// A source id nothing was ever synced under answers with no assets rather
-/// than an error, like [`context_assets`]: a room can outlive its source.
-///
-/// # Errors
-///
-/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is still
-/// coming up, [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
-#[tauri::command]
-pub async fn source_assets(
-    lifecycle: State<'_, Lifecycle>,
-    source_id: String,
-) -> Result<Vec<MemberAsset>, IpcError> {
-    let pool = lifecycle.pool()?;
-    assets::monitored_by(&pool, &source_id).await
 }
 
 /// What breaks if this asset goes down — the pane's *Depends on this* panel
@@ -927,9 +877,9 @@ pub async fn set_monitoring_settings(
 /// would be answering a question the caller can only ask by having the list --
 /// and two answers that could disagree.
 ///
-/// Takes no room filter, unlike `context_assets` and `source_assets`: the tab
-/// is a destination of its own (`#/assets/monitors`) and the estate is not
-/// scoped by the room the reader came from.
+/// Takes no room filter: the tab is a destination of its own
+/// (`#/assets/monitors`) and the estate is not scoped by the room the reader
+/// came from.
 ///
 /// # Errors
 ///
@@ -1105,7 +1055,7 @@ mod tests {
 
     const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/assets.ts");
 
-    /// The twenty-one commands are invoked from the mirror by the names they
+    /// The commands below are invoked from the mirror by the names they
     /// are registered under, and registered under the names they are declared
     /// with.
     ///
@@ -1118,8 +1068,6 @@ mod tests {
         for command in [
             "asset_tree",
             "get_asset",
-            "context_assets",
-            "source_assets",
             "create_asset",
             "edit_asset",
             "move_asset",
@@ -1240,8 +1188,6 @@ mod tests {
         for (call, argument) in [
             ("asset_tree", "parentId"),
             ("get_asset", "assetId"),
-            ("context_assets", "ctxId"),
-            ("source_assets", "sourceId"),
             ("create_asset", "typeId"),
             ("create_asset", "parentId"),
             ("edit_asset", "edits"),
@@ -1407,11 +1353,11 @@ mod tests {
         }
     }
 
-    /// The relation a source room's tile reads is one the dialog can draw
+    /// The relation the monitor roster reads is one the dialog can draw
     /// (#435).
     ///
-    /// `assets::MONITORED_BY` is the word `assets::MONITORED_ASSETS` filters
-    /// on, and the estate file's monitor names become links carrying it
+    /// `assets::MONITORED_BY` is the word the roster's statements filter on,
+    /// and the estate file's monitor names become links carrying it
     /// (#439). If `relations.ts` did not curate it, the reader could still
     /// type it -- relations are open -- but the link would read `monitored-by`
     /// from **both** ends, since an unknown relation has no inverse to give.

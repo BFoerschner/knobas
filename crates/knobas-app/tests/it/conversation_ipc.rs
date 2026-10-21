@@ -122,9 +122,9 @@ async fn a_visit_to_nothing_is_refused_and_writes_nothing() {
     assert_eq!(lines, 0);
 }
 
-/// **A visit is bookkeeping**: the history panel and the status bar
-/// (`recent_activity`) never draw one, while a real change on the same ticket
-/// still shows.
+/// **A visit is bookkeeping**: the activity read (`knobas_core::activity::
+/// recent`, the detail's history) never draws one, while a real change on the
+/// same ticket still shows.
 #[tokio::test]
 async fn a_visit_is_not_in_the_recent_activity() {
     let pool = pool().await;

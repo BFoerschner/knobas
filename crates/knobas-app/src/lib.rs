@@ -327,16 +327,13 @@ pub fn run() {
             commands::backup::restore_backup,
             commands::entity::list_contexts,
             commands::entity::promote_context,
-            commands::entity::context_members,
             commands::entity::mini_board,
-            commands::entity::source_statuses,
             commands::entity::create_link,
             commands::entity::create_note,
             commands::entity::delete_note,
             commands::entity::get_entity,
             commands::entity::get_note,
             commands::entity::list_entities,
-            commands::entity::recent_activity,
             commands::entity::save_note,
             commands::entity::unlink,
             commands::entity::detect_suggestions,
@@ -370,7 +367,6 @@ pub fn run() {
             commands::search::search,
             commands::search::launcher_home,
             commands::search::smart_lists,
-            commands::search::smart_list_items,
             commands::search::create_smart_list,
             commands::search::rename_smart_list,
             commands::search::delete_smart_list,
@@ -436,7 +432,6 @@ pub fn run() {
             commands::assets::delete_asset,
             commands::assets::asset_types,
             // #434, appended after #428's group for the same reason.
-            commands::assets::context_assets,
             // #432's routes, appended after those.
             commands::assets::get_route,
             commands::assets::create_route,
@@ -444,7 +439,6 @@ pub fn run() {
             commands::assets::delete_route,
             // #435, appended after those: the source room's half of #434's
             // tile.
-            commands::assets::source_assets,
             // #439's Import, appended after those for the same reason.
             commands::assets::preview_estate_import,
             commands::assets::apply_estate_import,

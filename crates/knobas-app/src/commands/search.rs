@@ -141,23 +141,6 @@ pub async fn smart_lists(
     smart_lists_inner(&lifecycle.pool()?, lifecycle.registry()).await
 }
 
-/// The rows of one smart list, shaped exactly like a search.
-///
-/// Opening a list is also what clears its badge.
-///
-/// # Errors
-///
-/// `not_found` if nobody ships a list by that id, `not_ready` before the
-/// database is up, `internal` if the statement fails.
-#[tauri::command]
-pub async fn smart_list_items(
-    lifecycle: State<'_, Lifecycle>,
-    id: String,
-    limit: u32,
-) -> Result<knobas_search::SearchResponse, IpcError> {
-    smart_list_items_inner(&lifecycle.pool()?, lifecycle.registry(), &id, limit).await
-}
-
 /// Save the launcher's current query as a smart list (#506, story 56).
 ///
 /// `label` is what the rail shows; `query` is the **raw box text**, which is
@@ -444,23 +427,6 @@ pub async fn smart_lists_inner(
     registry: &dyn AdapterRegistry,
 ) -> Result<Vec<knobas_search::SmartListSummary>, IpcError> {
     Ok(searcher(pool, registry).await?.smart_lists().await?)
-}
-
-/// [`smart_list_items`], against a pool and a registry.
-///
-/// # Errors
-///
-/// See [`smart_list_items`].
-pub async fn smart_list_items_inner(
-    pool: &PgPool,
-    registry: &dyn AdapterRegistry,
-    id: &str,
-    limit: u32,
-) -> Result<knobas_search::SearchResponse, IpcError> {
-    Ok(searcher(pool, registry)
-        .await?
-        .smart_list_items(id, limit)
-        .await?)
 }
 
 /// [`create_smart_list`], against a pool and a registry.

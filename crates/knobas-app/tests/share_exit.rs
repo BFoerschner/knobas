@@ -373,14 +373,16 @@ async fn the_estate_is_in_the_tree_on_the_clean_machine() {
 /// **The room lists its members on the clean machine** (#455, criterion 2;
 /// ADR-0008's ancestor clause).
 ///
-/// One link crossed -- the server into the room -- and the tile on the far
-/// side is the server *and everything it holds*, because membership is walked
+/// One link crossed -- the server into the room -- and the members on the far
+/// side are the server *and everything it holds*, because membership is walked
 /// and not stored. That is what makes this a test of the restore rather than
 /// of a copied table: a machine that had the `knobas.link` row and had lost
 /// `knobas.asset.parent_id` would list exactly one member.
 ///
 /// The negative is the other half: the notebook above the VM is not in the
-/// room, so the tile is the subtree and not the estate.
+/// room, so the members are the subtree and not the estate. The room's Assets
+/// tile that drew them went with the rooms UI (#1087) and its read with
+/// #1578; the membership is `knobas_core::context::member_ids`'.
 #[tokio::test]
 async fn the_contexts_room_lists_its_members_on_the_clean_machine() {
     let pool = &shared().await;
@@ -391,13 +393,10 @@ async fn the_contexts_room_lists_its_members_on_the_clean_machine() {
     };
     assert_eq!(room.title, ROOM_TITLE);
 
-    let tile: Vec<(String, Option<String>)> = assets::in_context(pool, &room.id)
+    let members = knobas_core::context::member_ids(pool, &room.id)
         .await
-        .expect("the room's Assets tile")
-        .into_iter()
-        .map(|member| (member.asset.id, member.path))
-        .collect();
-    let listed: Vec<&str> = tile.iter().map(|(id, _)| id.as_str()).collect();
+        .expect("the room's members");
+    let listed: Vec<&str> = members.iter().map(String::as_str).collect();
 
     assert!(
         listed.contains(&SERVER),
@@ -411,14 +410,6 @@ async fn the_contexts_room_lists_its_members_on_the_clean_machine() {
     assert!(
         !listed.contains(&"asset:notebook"),
         "the notebook *above* the VM is not a member: {listed:?}"
-    );
-    assert_eq!(
-        tile.iter()
-            .find(|(id, _)| id == CONTAINER)
-            .and_then(|(_, path)| path.clone())
-            .as_deref(),
-        Some(CONTAINER_PATH),
-        "and the tile draws each member's path"
     );
 }
 

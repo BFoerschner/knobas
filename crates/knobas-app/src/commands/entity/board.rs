@@ -350,24 +350,3 @@ pub async fn saved_view_board_laned(
         None => board,
     })
 }
-
-/// The statuses one source's live ticket corpus shows (#760): the ticket
-/// detail's fallback offer when the workflow cannot be read (#179, #498).
-///
-/// Asked only then. It used to come out of a whole [`mini_board`] read of the
-/// ticket's source on every open (133-137 ms and 725 KB at 5,000 tickets);
-/// the current status is [`EntityDetail::status`] now.
-///
-/// # Errors
-///
-/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
-/// database is still coming up; a query failure is `Internal`.
-#[tauri::command]
-pub async fn source_statuses(
-    lifecycle: State<'_, Lifecycle>,
-    source_id: String,
-) -> Result<Vec<String>, IpcError> {
-    let pool = lifecycle.pool()?;
-    let declarations = declared_paths(&pool, lifecycle.registry()).await?;
-    Ok(knobas_core::mini_board::source_statuses(&pool, &source_id, &declarations).await?)
-}

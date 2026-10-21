@@ -22,7 +22,7 @@ use super::*;
 /// turned off reports no projects (migration `0012`), and its projects come
 /// back with it. Everything it decides lives in [`knobas_core::project`];
 /// there is nothing for this seam to add, so it adds nothing, the same as
-/// [`mini_board`] and [`context_members`].
+/// [`mini_board`].
 ///
 /// # Errors
 ///

@@ -26,7 +26,7 @@ use std::time::Instant;
 use crate::probe_snapshot;
 use knobas_app::commands::entity::{
     get_entity_inner, inbox_count_inner, inbox_items_inner, list_entities_inner,
-    list_projects_inner, recent_activity_inner, room_suggestions_inner,
+    list_projects_inner, room_suggestions_inner,
 };
 use knobas_app::commands::search::{
     filter_suggestions_inner, launcher_home_inner, search_inner, searcher, smart_lists_inner,
@@ -400,16 +400,6 @@ async fn room(
         room_suggestions_inner(pool, &owned, ctx, 20)
     })
     .await;
-    if let Some(ctx) = ctx {
-        time(name, "context_members", runs, || {
-            knobas_core::context::member_ids(pool, ctx)
-        })
-        .await;
-        time(name, "context_assets", runs, || {
-            knobas_app::assets::in_context(pool, ctx)
-        })
-        .await;
-    }
 }
 
 /// The mirror this probe reads: the synthetic sources, then the seeded Gitea
@@ -892,10 +882,6 @@ async fn what_the_reader_waits_on() {
         knobas_app::assets::open_alerts(pool)
     })
     .await;
-    time(boot, "recent_activity (1)", runs, || {
-        recent_activity_inner(pool, 1, None)
-    })
-    .await;
     time(boot, "db_stats", runs, || {
         knobas_sync::stats::db_stats(pool)
     })
@@ -1027,40 +1013,19 @@ async fn what_the_reader_waits_on() {
         .await
         .unwrap();
     let _ = declarations;
-    for (what, id, kind) in [
-        ("detail: ticket", "jira0:JIRA0-42", "ticket"),
-        ("detail: build", "ci:build:42", "build"),
-        ("detail: page", "wiki:page:42", "page"),
+    for (what, id) in [
+        ("detail: ticket", "jira0:JIRA0-42"),
+        ("detail: build", "ci:build:42"),
+        ("detail: page", "wiki:page:42"),
     ] {
         time(what, "get_entity", runs, || {
             get_entity_inner(pool, &registry, id)
-        })
-        .await;
-        let entity = knobas_core::entity::EntityRef::parse(id).unwrap();
-        time(what, "recent_activity (entity, 50)", runs, || {
-            recent_activity_inner(pool, 50, Some(&entity))
         })
         .await;
         time(what, "entity_checkout", runs, || async {
             Ok::<_, ()>(knobas_app::checkout::view(pool, id).await.ok())
         })
         .await;
-        if kind == "ticket" {
-            let source = ["jira0".to_owned()];
-            let declarations = knobas_app::sources::paths::declared_paths(pool, &registry)
-                .await
-                .unwrap();
-            // Opening a ticket reads no board since #760 (it was 725 KB here):
-            // `get_entity` above carries the status, and this is the offer's
-            // fallback, asked only when the workflow read fails.
-            time(
-                what,
-                "source_statuses (workflow-failure fallback)",
-                runs,
-                || knobas_core::mini_board::source_statuses(pool, &source[0], &declarations),
-            )
-            .await;
-        }
     }
 
     // -- the launcher --------------------------------------------------------

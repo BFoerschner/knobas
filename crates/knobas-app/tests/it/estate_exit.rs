@@ -17,13 +17,13 @@
 //!
 //! The exit criterion is a sentence about *a profile*: the file imports, a
 //! container is found in the launcher with its path, ⌘T times it, adding its
-//! machine to a context lists the container in the room's Assets tile, a route
-//! to it draws its wire, and a re-import previews everything as already in the
-//! tree. Six tests over six databases would be six profiles, and the claim
-//! would be about none of them. So [`estate`] imports the file **once** into
-//! one scratch database, every test here reads that one estate, and what the
-//! file asserts as a whole is that those six things are true of the same
-//! sixteen assets at the same time.
+//! machine to a context makes the container a member, a route to it draws its
+//! wire, and a re-import previews everything as already in the tree. Six
+//! tests over six databases would be six profiles, and the claim would be
+//! about none of them. So [`estate`] imports the file **once** into one
+//! scratch database, every test here reads that one estate, and what the file
+//! asserts as a whole is that those six things are true of the same sixteen
+//! assets at the same time.
 //!
 //! They still do not collide: the timer is a singleton and exactly one test
 //! starts one, the context test creates its own room, and every search is for
@@ -379,19 +379,21 @@ async fn cmd_t_on_the_container_times_it_and_the_day_review_names_it() {
 }
 
 // ---------------------------------------------------------------------------
-// Criterion 2, clause 4: the machine in a context lists the container
+// Criterion 2, clause 4: the machine in a context brings the container in
 // ---------------------------------------------------------------------------
 
-/// **Adding the machine to a context lists the container in the room's Assets
-/// tile** (#440, criterion 2; ADR-0008's ancestor clause, story 41).
+/// **Adding the machine to a context makes the container a member** (#440,
+/// criterion 2; ADR-0008's ancestor clause, story 41). The room's Assets tile
+/// that drew the members went with the rooms UI (#1087) and its read with
+/// #1578; the membership it drew is `knobas_core::context::member_ids`'.
 ///
 /// One link is drawn -- OrbStack's VM into the room -- and the container
 /// arrives two levels below it, through the container engine, because
 /// membership counts through ancestors and over nothing else. The negative is
 /// the other half of that sentence: the notebook and the site **above** the VM
-/// are not members, so the tile is the subtree and not the estate.
+/// are not members, so the members are the subtree and not the estate.
 #[tokio::test]
-async fn the_machine_in_a_context_brings_the_container_into_the_rooms_assets_tile() {
+async fn the_machine_in_a_context_brings_the_container_into_its_members() {
     let pool = &estate().await;
 
     let room = knobas_core::context::create_adhoc(pool, "the docker vm")
@@ -409,21 +411,14 @@ async fn the_machine_in_a_context_brings_the_container_into_the_rooms_assets_til
     .await
     .expect("Add to context is an ordinary link");
 
-    let tile: Vec<(String, String, Option<String>)> = assets::in_context(pool, &room.id)
+    let members = knobas_core::context::member_ids(pool, &room.id)
         .await
-        .expect("the tile's read")
-        .into_iter()
-        .map(|row| (row.asset.id, row.asset.name, row.path))
+        .expect("the room's members");
+    let mut drawn: Vec<&str> = members
+        .iter()
+        .map(String::as_str)
+        .filter(|id| id.starts_with("asset:"))
         .collect();
-
-    // Worst first and then by name, which is `assets::in_context`'s order.
-    // Nothing in the estate carries a status yet, so the whole tile is the
-    // name sort.
-    let names: Vec<&str> = tile.iter().map(|(_, name, _)| name.as_str()).collect();
-    let mut sorted = names.clone();
-    sorted.sort_unstable();
-    assert_eq!(names, sorted, "the tile is in name order, byte for byte");
-    let mut drawn: Vec<&str> = tile.iter().map(|(id, _, _)| id.as_str()).collect();
     drawn.sort_unstable();
     assert_eq!(
         drawn,
@@ -444,16 +439,6 @@ async fn the_machine_in_a_context_brings_the_container_into_the_rooms_assets_til
             "asset:orbstack-docker",
         ],
         "the VM and everything it holds, and nothing else"
-    );
-
-    let container = tile
-        .iter()
-        .find(|(id, _, _)| id == CONTAINER)
-        .expect("the container is in the tile");
-    assert_eq!(
-        (container.1.as_str(), container.2.as_deref()),
-        ("knobas-teamcity", Some(CONTAINER_PATH)),
-        "and it carries the path"
     );
 
     for outside in ["asset:knobas-estate", NOTEBOOK] {
