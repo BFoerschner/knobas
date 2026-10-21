@@ -920,7 +920,7 @@ test("the delete confirm counts the routes landing on the asset and says nothing
     asset_id: "asset:vm-db-01",
     target_id: "asset:postgres",
     name,
-    url: `https://${name}.hel1.example/`,
+    url: `https://hel1.example/${name}`,
     visibility: "internal",
     properties: {},
   });
