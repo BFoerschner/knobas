@@ -10599,3 +10599,21 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   unmarked there, as an error-only source always was. *Ruling:* not this ticket's; filed #1581
   (`backlog`). *Reasoning:* the red it loses was the stale state the ticket removes, and the source
   page reads the run's own *Failed …*. *Reversing:* not applicable.
+
+## #1577: gate-scope pins the files a testenv script reads, not a directory it walks (Sonnet implementer, 2026-10-21)
+
+- **Explicit pin list in the testenv scripts, or resolve the paths the scripts expand?** *Ruling:*
+  resolve. `gate-scope.sh` reads each `testenv/*.sh` with a small awk pass: a variable assigned an
+  `app/...` path (`tf=../app/src/lib/tf`), directly or through another variable
+  (`notes=$tf/settings/N.svelte`), pins nothing by itself; each `$var/rest` or `${var}/rest` use
+  pins `app/.../rest`, and a bare `$var` pins the directory. *Reasoning:* a marked list needs every
+  testenv author, including the agents adding scripts today (#1483), to remember a second
+  declaration beside each `pin_label`, and a forgotten line silently loses #1543's guarantee; the
+  resolver keeps it for any script written the way `desktop-witness-test.sh` is. Literal `app/...`
+  mentions pin as before (`tf.css`, `QueryBox.svelte`, `CaptureWindow.svelte`). *Cost of reversing:*
+  low, one block in `scripts/gate-scope.sh`. *Known limit:* a path built by a loop or a
+  second variable (`$tf/$name`) pins the directory prefix before the `$`; assignments inside
+  functions or conditionals are read as written, line by line.
+- **Test fixture.** *Ruling:* the scratch script now uses its variables (an assignment alone pins
+  nothing), and adds cases for a nested variable, `$tf/`, `${tf}/`, and the control: an unpinned
+  file under the walked `tf/` answers `front`. *Reversing:* low.

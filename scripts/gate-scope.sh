@@ -28,10 +28,36 @@ root=$(git rev-parse --show-toplevel)
 mb=$(git -C "$root" merge-base "$base" HEAD)
 changed=$(git -C "$root" diff --name-only "$mb" HEAD)
 if [ -z "$changed" ]; then echo "gate-scope: nothing changed since $mb" >&2; echo full; exit 0; fi
-# Every `app/...` path the testenv scripts name; a directory pins its contents.
+# Every `app/...` path the testenv scripts pin; a directory pinned bare pins its contents.
+# A shell variable assigned an `app/...` path (`tf=../app/src/lib/tf`) pins nothing by
+# itself: a script that walks a directory is not reading every file in it (#1577).
+# The paths it expands into do (`$tf/TfTopBar.svelte` pins that file); nested
+# assignments (`notes=$tf/settings/N.svelte`) resolve; a bare `$tf` pins the directory.
 # The leading class keeps `crates/knobas-app/src/...` from reading as `app/src/...`.
-pinned=$(grep -hoE '(^|[^A-Za-z0-9_-])app/[A-Za-z0-9_./@+-]+' "$root"/testenv/*.sh 2>/dev/null \
-  | sed -E 's#^[^a]*##; s#/*$##' | sort -u || true)
+pinned=$(for s in "$root"/testenv/*.sh; do [ -f "$s" ] && awk '
+  function path(str,   m) {  # first app/... path in str, after a non-name character
+    if (match(str, /(^|[^A-Za-z0-9_-])app\/[A-Za-z0-9_.\/@+-]+/) == 0) return ""
+    m = substr(str, RSTART, RLENGTH); sub(/^[^a]*/, "", m); return m
+  }
+  {
+    line = $0
+    if (match(line, /^[ \t]*[A-Za-z_][A-Za-z0-9_]*=/)) {
+      name = line; sub(/^[ \t]*/, "", name); sub(/=.*/, "", name)
+      val = substr(line, RSTART + RLENGTH); gsub(/["\047]/, "", val)
+      if (match(val, /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/)) {
+        ref = substr(val, RSTART, RLENGTH); rest = substr(val, RLENGTH + 1)
+        gsub(/[${}]/, "", ref); sub(/[^A-Za-z0-9_.\/@+-].*/, "", rest)
+        if (ref in v) { v[name] = v[ref] rest; next }
+      } else if ((p = path(val)) != "") { v[name] = p; next }
+    }
+    rest = line
+    while (match(rest, /\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/)) {
+      ref = substr(rest, RSTART, RLENGTH); rest = substr(rest, RSTART + RLENGTH)
+      gsub(/[${}]/, "", ref)
+      if (ref in v) { tail = rest; sub(/[^A-Za-z0-9_.\/@+-].*/, "", tail); print v[ref] tail }
+    }
+    while ((p = path(line)) != "") { print p; line = substr(line, index(line, p) + length(p)) }
+  }' "$s"; done 2>/dev/null | sed -E 's#/*$##' | sort -u || true)
 while IFS= read -r f; do
   case $f in
     app/src/lib/ipc/generated/*)
