@@ -53,6 +53,7 @@ vi.mock("../ipc/sources", () => ({
 
 const { default: WriteQueuePanel } = await import("./WriteQueue.svelte");
 const {
+  blockers,
   createWriteQueue,
   decisionsIn,
   demandOf,
@@ -227,6 +228,87 @@ test("held and refused need a decision; pending needs patience", () => {
   expect(decisionsIn({ pending: 4, held: 0, refused: 0 })).toBe(0);
 });
 
+// -- a write behind a stalled one (#1473) ------------------------------------
+
+/**
+ * One entity's writes go in order, and a held or refused head stops the ones
+ * behind it (`knobas_core::write_queue::due`). The panel names that blocker
+ * rather than promising the write goes on its own.
+ */
+test("a waiting write behind a held or refused write on the same item names it", () => {
+  const pause = (over: Partial<QueuedWrite>) =>
+    write({ entity_id: "kuma:8", op: "pause_monitor", payload: { PauseMonitor: { entity: "kuma:8" } }, ...over });
+  const refused = pause({ id: 10, state: "refused" });
+  const behind = pause({ id: 11 });
+  const heldPage = write({ id: 20, entity_id: "jira:PAY-300", state: "held" });
+  const behindHeld = write({ id: 21, entity_id: "jira:PAY-300" });
+  const elsewhere = write({ id: 12, entity_id: "jira:PAY-231" });
+  const ahead = pause({ id: 9 });
+  const found = blockers([behindHeld, heldPage, behind, refused, elsewhere, ahead]);
+  expect(found.get(11)?.id).toBe(10);
+  expect(found.get(11)?.state).toBe("refused");
+  expect(found.get(21)?.state).toBe("held");
+  expect(found.has(12), "a write on another item").toBe(false);
+  expect(found.has(9), "a write ahead of the refused one").toBe(false);
+  expect(found.has(10), "the blocker itself is no waiting write").toBe(false);
+});
+
+test("of two stalled writes ahead, the oldest is the one that blocks", () => {
+  const found = blockers([
+    write({ id: 3 }),
+    write({ id: 2, state: "held" }),
+    write({ id: 1, state: "refused" }),
+  ]);
+  expect(found.get(3)?.id).toBe(1);
+  expect(found.size).toBe(1);
+});
+
+const PROMISE = "These go on their own as soon as their source can take them.";
+
+test("a write behind a refused one says it waits for it, and the group does not promise it goes on its own", async () => {
+  const pause = { entity_id: "kuma:8", op: "pause_monitor", payload: { PauseMonitor: { entity: "kuma:8" } } };
+  rows = [
+    write({ id: 11, ...pause, attempted_at: null }),
+    write({ id: 10, ...pause, state: "refused", detail: "monitor is in maintenance" }),
+  ];
+  counts = { pending: 1, held: 0, refused: 1 };
+  const screen = await render({ "kuma:8": "Payments API" });
+  const waiting = screen.section("Waiting")!;
+  expect(waiting.querySelector(".tf-wq-why")?.textContent).toBe("Waits for the refused write above.");
+  expect(waiting.textContent).not.toContain("Not tried yet");
+  expect(waiting.textContent).not.toContain("go on their own");
+  expect(waiting.querySelector(".tf-wq-note")?.textContent).toBe(
+    "These wait for a write above that needs your decision. Each goes once that write is sent or discarded.",
+  );
+  screen.done();
+});
+
+test("a write behind a held one names the held write, and an unblocked neighbour keeps its own reason", async () => {
+  rows = [write({ id: 12, entity_id: "jira:PAY-300" }), write({ id: 3 }), held({ id: 2 })];
+  counts = { pending: 2, held: 1, refused: 0 };
+  const screen = await render();
+  const waiting = screen.section("Waiting")!;
+  const reasons = [...waiting.querySelectorAll(".tf-wq-why")].map((node) => node.textContent);
+  expect(reasons).toEqual(["The server did not answer.", "Waits for the held write above."]);
+  expect(waiting.querySelector(".tf-wq-note")?.textContent).toBe(
+    "Unless a row says it waits for a write above, these go on their own as soon as their source can take them.",
+  );
+  screen.done();
+});
+
+test("once the blocker is discarded the write waits on its source alone", async () => {
+  rows = [write({ id: 3, attempted_at: null }), write({ id: 1, state: "refused" })];
+  counts = { pending: 1, held: 0, refused: 1 };
+  const screen = await render();
+  expect(screen.section("Waiting")!.textContent).toContain("Waits for the refused write above.");
+  screen.section("Needs your decision")!.querySelector<HTMLButtonElement>("button.tf-danger")!.click();
+  await settle();
+  const waiting = screen.section("Waiting")!;
+  expect(waiting.querySelector(".tf-wq-why")?.textContent).toBe("Not tried yet.");
+  expect(waiting.querySelector(".tf-wq-note")?.textContent).toBe(PROMISE);
+  screen.done();
+});
+
 // -- a row in words (#1425) ---------------------------------------------------
 
 /** A row's heading as the reader sees it: the parts, joined. */
@@ -249,6 +331,8 @@ const FIXTURE_QUEUE = [
     entity_id: "mock:PAY-228",
     payload: { LogWork: { entity: "mock:PAY-228", started: "2026-08-27T14:00:00Z", seconds: 3600, comment: "" } },
   },
+  // The refused pause and the pause waiting behind it (#1473): one heading.
+  { op: "pause_monitor", entity_id: "mock:payouts-stage-health", payload: { PauseMonitor: { entity: "mock:payouts-stage-health" } } },
 ];
 
 test("the fixture's rows are named in words, never by op or raw id", () => {
@@ -258,6 +342,7 @@ test("the fixture's rows are named in words, never by op or raw id", () => {
     "Comment on PAY-228",
     "Comment on PAY-300",
     "1 h worklog on PAY-228",
+    "Pause a monitor",
   ]);
   for (const [index, heading] of headings.entries()) {
     const row = FIXTURE_QUEUE[index]!;

@@ -92,6 +92,35 @@ export function demandOf(state: WriteState): Demand {
 }
 
 /**
+ * The held or refused write each waiting write is stuck behind (#1473), by the
+ * waiting write's id.
+ *
+ * One item's writes go in queue order: `knobas_core::write_queue::due` offers
+ * an entity's oldest open write and nothing for an entity whose oldest is held
+ * or refused. So a pending write with an earlier held or refused write on the
+ * same item does not go on its own; it goes once that one is sent or
+ * discarded. The blocker is the oldest such write, the one `due` stops on.
+ *
+ * Read off what every row already carries (`entity_id`, the queue-order `id`,
+ * `state`); a waiting write with no entry here waits only on its source.
+ */
+export function blockers<Row extends Pick<QueuedWrite, "id" | "entity_id" | "state">>(rows: readonly Row[]): Map<number, Row> {
+  const stalled = new Map<string, Row>();
+  for (const row of rows) {
+    if (demandOf(row.state) !== "decide") continue;
+    const oldest = stalled.get(row.entity_id);
+    if (oldest === undefined || row.id < oldest.id) stalled.set(row.entity_id, row);
+  }
+  const found = new Map<number, Row>();
+  for (const row of rows) {
+    if (demandOf(row.state) !== "waiting") continue;
+    const blocker = stalled.get(row.entity_id);
+    if (blocker !== undefined && blocker.id < row.id) found.set(row.id, blocker);
+  }
+  return found;
+}
+
+/**
  * One side of the two-versions comparison, in a shape a template can render.
  *
  * A snapshot is `knobas_core::write_queue::project`'s output, and its shape is
