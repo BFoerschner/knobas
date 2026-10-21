@@ -10,6 +10,7 @@ import type {
   AssetDetail,
   AssetRow,
   AssetType,
+  DependsOnThis,
   DepLayer,
   DepView,
   DepViews,
@@ -58,4 +59,6 @@ export interface EditorPorts extends SavePorts {
   getAsset: (assetId: string) => Promise<AssetDetail>;
   assetTypes: () => Promise<AssetType[]>;
   deleteAsset: (assetId: string) => Promise<void>;
+  /** What breaks if the asset goes down (#505): *Needed by*'s closure (#1457). */
+  dependsOnThis: (assetId: string) => Promise<DependsOnThis>;
 }

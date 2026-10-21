@@ -188,5 +188,11 @@
 .tf-dp-ck { font-style: italic; }
 .tf-dp-rels { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 6px; font-size: var(--t-sm); }
 .tf-dp-watch { font-size: var(--t-sm); }
+/* *Needed by*'s closure (#1457): what breaks if it goes down, read-only under the direct links. */
+.tf-dp-breaks { font-size: var(--t-sm); margin-bottom: 6px; }
+.tf-dp-breaks ul { list-style: none; margin: 0 0 6px; padding: 0; }
+.tf-dp-breaks li { padding: 1px 0; overflow-wrap: anywhere; }
+.tf-dp-blab { font-size: var(--t-xs); color: var(--ink-2); margin: 4px 0 2px; }
+.tf-dp-n { margin-left: 4px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .tf-dp-del:not([disabled]):hover, .tf-dp-del.tf-danger { color: var(--err); }
 .tf-asset-tree { min-height: 0; flex: 1; display: flex; flex-direction: column; }
