@@ -705,10 +705,11 @@ const MEMBER_IDS: &str = concat!(
 /// **Archived contexts are left out**, which is the one place this and
 /// [`member_ids`] deliberately differ: `member_ids` is asked about a context by
 /// name and answers about *that* context whatever its state, while this asks
-/// "is anyone still working on this?" — and an archived context is one the
-/// reader put away. [`list`] draws the same line for the switcher, and an alert
-/// that went on interrupting somebody because of a context they archived last
-/// spring would be the inbox failing its own promise. It is why the comparison
+/// "is anyone still working on this?" — and an archived context is a done
+/// job's (#1501: archived exactly while its ticket is done-like). [`list`]
+/// draws the same line for the switcher, and an alert that went on
+/// interrupting somebody because of a job finished last spring would be the
+/// inbox failing its own promise. It is why the comparison
 /// above is against `list`'s contexts rather than every row.
 ///
 /// The epic-children seed makes the same **payload read outside an adapter**

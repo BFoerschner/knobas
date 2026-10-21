@@ -155,16 +155,18 @@ async fn record(
 ///
 /// # Errors
 ///
-/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the sync
-/// engine is still coming up (the done-like sets are its registry's), and
-/// whatever [`promote_context_inner`] refuses with.
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up, and whatever [`promote_context_inner`]
+/// refuses with. The done-like sets are the lifecycle's registry's, the one
+/// the sync engine shares, so opening a job needs no engine to be up.
 #[tauri::command]
 pub async fn promote_context<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
     entity_id: String,
 ) -> Result<knobas_core::context::ContextRow, IpcError> {
-    let state = crate::sources::state(&app)?;
-    let promoted = promote_context_inner(&state.pool, state.registry.as_ref(), &entity_id).await?;
+    let pool = lifecycle.pool()?;
+    let promoted = promote_context_inner(&pool, lifecycle.registry(), &entity_id).await?;
     // Only a mutation is news: a re-promotion changed nothing the switcher
     // could learn from re-listing.
     if promoted.fresh {

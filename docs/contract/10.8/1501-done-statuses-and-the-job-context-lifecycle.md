@@ -32,8 +32,9 @@
   answers with the context anchored on the entity **archived or not** (the live one first, else the
   newest archived one), where before an archived context was passed over and a second one minted; a
   context it mints for a ticket whose status is done-like is born with `archived_at` set. It reads
-  the done-like sets from the sync engine's registry, so it answers `not_ready` until the engine is
-  up, as every command that reads the declarations does. Two promotes of one anchor serialise on a
+  the done-like sets from the lifecycle's registry (the process registry the sync engine shares),
+  as `get_entity` and `list_entities` do, so it answers `not_ready` only while the database is
+  coming up, as before. Two promotes of one anchor serialise on a
   transaction-scoped advisory lock (`pg_advisory_xact_lock(47, hashtext(anchor))`, the two-key
   space, which never meets a sync run's one-key lock), because migration `0010`'s
   `context_anchor_idx` covers only unarchived rows.
@@ -53,7 +54,9 @@
   does not fail bring-up. No marker, so no migration.
 
   **`job_reach`** (`knobas_core::reach`) starts from the anchored context whether archived or not, so
-  a done job still shows what its context held. The inbox's alert rule (`held_by_any_context!`) and
+  a done job still shows what its context held. The walk is `reach_walk!`, so the two other readers
+  of it move with it: search's `reach:` filter (`knobas-search`'s `reach_ids`) and the job drawer's
+  parent read (`link_sets.rs`'s `JOB_PARENT`). The inbox's alert rule (`held_by_any_context!`) and
   `list_contexts` still skip archived contexts, unchanged.
 
   Witnessed by `knobas-spi-types`' `the_field_names_the_sql_macros_use_are_the_serialized_ones`,
