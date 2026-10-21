@@ -22,6 +22,11 @@ import { openWriteQueue } from "./write-queue.svelte";
 /** The source a write goes to: its id, to read its credential, and its name, to say it. */
 export type WriteSource = Pick<SourceSummary, "id" | "display_name">;
 
+/** The name of `source` when its sign-in fails, else `null`. */
+function failingName(source: WriteSource | null | undefined, store: Pick<Health, "get">): string | null {
+  return source && signInFails(store.get(source.id)?.state) ? source.display_name || source.id : null;
+}
+
 /** "Queued: <what>.", and the sign-in sentence when `failing` names the source whose sign-in fails. */
 function queuedText(what: string, failing: string | null): string {
   const queued = `Queued: ${what}.`;
@@ -35,9 +40,9 @@ function queuedText(what: string, failing: string | null): string {
  * toast then says what was queued and nothing about sign-in.
  */
 export function toastQueued(what: string, source: WriteSource | null | undefined, store: Pick<Health, "get"> = health): void {
-  const failing = source && signInFails(store.get(source.id)?.state) ? source : null;
+  const failing = failingName(source, store);
   push({
-    text: queuedText(what, failing === null ? null : failing.display_name || failing.id),
+    text: queuedText(what, failing),
     action: { label: "Show queue", run: openWriteQueue },
   });
 }
@@ -55,10 +60,10 @@ export function toastStarted(key: string, queued: number, source: WriteSource | 
     push({ text: started });
     return;
   }
-  const failing = source && signInFails(store.get(source.id)?.state) ? source : null;
+  const failing = failingName(source, store);
   const count = `${started} ${queued === 1 ? "1 write" : `${queued} writes`} queued.`;
   push({
-    text: failing === null ? count : `${count} ${failing.display_name || failing.id} sign-in is failing, so it waits there.`,
+    text: failing === null ? count : `${count} ${failing} sign-in is failing, so it waits there.`,
     action: { label: "Show queue", run: openWriteQueue },
   });
 }
