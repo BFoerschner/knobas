@@ -9667,3 +9667,27 @@ unchanged.
 - **`queuedRunText` became `queuedRunWhat`.** *Fork:* keep Builds' own text function with the
   tail, or reduce it to the *what*. *Ruling:* the *what*; Builds' run toast keeps its words ("Queued: run
   <pipeline>. <summary>.") and its tail now comes from the helper. *Reversing:* low.
+
+## #1441: what a queued merge or state change holds back on the PR page (Opus implementer, 2026-10-21)
+
+- **A source-blocked Merge… is `aria-disabled` yet still opens its dialog.** *Fork:* the ticket
+  asks Merge… to honour the source's `disabled` as `aria-disabled`, and every other held button on
+  the page opens nothing; but #843 has the blocked dialog name each reason the source gives, which
+  the tooltip carries only as one sentence. *Ruling:* `aria-disabled` and the source's title, primary
+  styling kept, and a press opens the dialog, whose *Merge* stays disabled. Held by a queued write,
+  Merge… loses primary styling and a press opens nothing, as the ticket says. *Reasoning:* the
+  criterion asks for the attribute only, and the reasons box is the one place the source's reasons
+  are listed. *Reversing:* one guard in the button's `onclick`.
+- **A queued close or reopen holds the state-change button whatever it reads.** *Fork:* the ticket
+  says "the opposite state change"; before the sync the source still offers *Close* after a queued
+  close, so a second close could be queued. *Ruling:* `close queued` or `reopen queued` holds *Merge…*
+  and the *Close*/*Reopen* button, both before the sync (the same change again) and after it (the
+  opposite one). *Edit* and *Update branch* stay live then. *Reasoning:* a duplicate close is the same
+  refused-write case as a duplicate merge. *Reversing:* drop the state chips from `close`/`reopen` in
+  `TfPr.svelte`'s `HOLDS`.
+- **A source's own actions (#1194) are never held.** *Fork:* the ticket names Close/Reopen, Edit and
+  Update branch only. *Ruling:* a source action stays as the source draws it. *Reasoning:* the shell
+  never reads their op (ADR-0029), so it cannot know which a merge makes stale. *Reversing:* add a
+  `source:` entry to `HOLDS`.
+- **A queued hold names itself before the source's reason.** When both apply, the title is the chip
+  (`merge queued`), since it is the newer fact. *Reversing:* swap the `??` order.
