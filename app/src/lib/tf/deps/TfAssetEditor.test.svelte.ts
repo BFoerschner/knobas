@@ -310,7 +310,7 @@ test("Needed by lists what breaks if it goes down: the closure nearest first, th
   // Beneath it, read-only and in the answer's order: the assets, counted, then the route, not counted.
   const breaks = [...target.querySelectorAll(".tf-dp-breaks li")].map((li) => li.textContent!.replace(/\s+/g, " ").trim());
   expect(breaks).toEqual(["payments-api depends on", "ct-worker inside", "pay.example https://pay.example"]);
-  expect(target.querySelector(".tf-dp-n")!.textContent).toBe("2");
+  expect(target.querySelector(".tf-dp-bn")!.textContent).toBe("2");
   expect(neededText()).not.toContain("Nothing recorded");
 });
 

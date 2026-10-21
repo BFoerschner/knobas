@@ -264,7 +264,7 @@
           {:else if !breaksNothing}
             <div class="tf-dp-breaks">
               {#if breaks.assets.length > 0}
-                <p class="tf-dp-blab">Depends on this <span class="tf-dp-n">{breaks.assets.length}</span></p>
+                <p class="tf-dp-blab">Depends on this <span class="tf-dp-bn">{breaks.assets.length}</span></p>
                 <ul>
                   {#each breaks.assets as row (row.asset.id)}
                     <li>{row.asset.name} <span class="tf-dim">{row.relation === null ? "inside" : readingOf(row.relation, true)}</span></li>
