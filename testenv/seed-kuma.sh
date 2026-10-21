@@ -17,12 +17,32 @@ KEY_FILE=kuma-api-key
 # none -- `./seed --env-kuma` hands the suites 127.0.0.1:3001 regardless.
 PROBE_URL=http://127.0.0.1:3001/metrics
 
+# The key's name on the instance, one per worktree (issue #1484), derived as
+# gitea-token.sh derives the Gitea token's (#684): `knobas-seed-<worktree>-
+# <checksum of this directory's real path>`. The Kuma container is shared by
+# every worktree on the machine, while `kuma-api-key` is git-ignored and lives in
+# one of them, and until #1484 every tree minted under the one name
+# `knobas-seed`: a tree whose copy stopped working deleted that key and added a
+# new one, which 401ed every other tree's copy, and the next of them to seed did
+# the same. Now kuma-seed.mjs keeps, replaces or adds the key of THIS name only;
+# another tree's key, and the pre-#1484 `knobas-seed`, are never touched.
+#
+# `KNOBAS_KEY_NAME` is the other half of a contract across the container
+# boundary, like `KNOBAS_KEY_AUTHENTICATED` below: kuma-seed.mjs refuses to run
+# without it rather than fall back to a shared name.
+KEY_NAME=$(
+  dir=$(pwd -P)
+  sum=$(printf '%s' "$dir" | cksum | cut -d ' ' -f 1)
+  printf 'knobas-seed-%s-%s\n' "$(basename "$(dirname "$dir")")" "$sum"
+)
+
 # A key file is a credential only while the instance still answers to it. Kuma
-# hands a key's clear text out exactly once, so a sibling worktree's seed that
-# re-minted `knobas-seed` leaves this tree holding a well-formed key the
-# instance no longer has, and `[ -s "$KEY_FILE" ]` alone cannot tell the two
-# apart (issue #552). So the key is probed before it is kept, which is what
-# seed-gitea.sh step 8 does for the Gitea token in this same directory.
+# hands a key's clear text out exactly once, so a key file whose key was
+# deleted on the instance (a reset volume, a hand-deleted key, or before #1484 a
+# sibling worktree's re-mint) is well-formed and worthless, and
+# `[ -s "$KEY_FILE" ]` alone cannot tell the two apart (issue #552). So the key
+# is probed before it is kept, which is what seed-gitea.sh step 8 does for the
+# Gitea token in this same directory.
 #
 # Three outcomes, not two, and the third is the point. Re-minting DESTROYS the
 # instance's key, so it may only happen on an answer the instance actually
@@ -31,8 +51,8 @@ PROBE_URL=http://127.0.0.1:3001/metrics
 # is the only call the script makes over the host's port (everything else goes
 # to `uptime-kuma:3001` on the compose network, and the compose healthcheck
 # does not cover the forward), so a dead forward would otherwise read as a
-# dead key and re-mint on a guess, 401ing every sibling worktree's copy: the
-# collision README.md's "One environment, one owner at a time" describes.
+# dead key and re-mint on a guess, throwing away a key that still works (and,
+# before #1484, every sibling worktree's copy with it).
 #
 # The name says what was measured: the instance answered 200 to the key on
 # disk. It is not "a key file is here" -- that is the question this script
@@ -48,8 +68,8 @@ if [ -s "$KEY_FILE" ]; then
       echo "seed-kuma: the API key in $KEY_FILE no longer authenticates ($code); minting a new one" ;;
     *)
       echo "seed-kuma: $PROBE_URL answered '$code', so the key in $KEY_FILE can be neither" >&2
-      echo "seed-kuma: kept nor replaced -- re-minting on a guess would 401 every other" >&2
-      echo "seed-kuma: worktree's copy. Is the port up? docker compose up -d --wait uptime-kuma" >&2
+      echo "seed-kuma: kept nor replaced -- re-minting on a guess would throw away a key" >&2
+      echo "seed-kuma: that may still work. Is the port up? docker compose up -d --wait uptime-kuma" >&2
       exit 1 ;;
   esac
 fi
@@ -63,6 +83,7 @@ fi
 # `just kuma-live` (issue #554). Rename both halves or neither.
 out=$(docker compose --profile seed run --rm -T \
         -e KNOBAS_KEY_AUTHENTICATED="$KEY_AUTHENTICATED" \
+        -e KNOBAS_KEY_NAME="$KEY_NAME" \
         kuma-seed)
 
 case "$out" in

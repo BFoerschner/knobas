@@ -398,10 +398,15 @@ the ways until #684 and is the rule that ended it; the four after it still are:
   `seed-gitea.sh` does with its Gitea token, and replaces it when it does not
   (since 2026-09-11, #552) — and only on an answer the instance actually gave,
   because re-minting destroys the instance's key: a probe that gets no answer
-  at all refuses rather than guessing. So a sibling's re-mint heals itself on
-  your next `./seed-kuma.sh` instead of handing the suites a 401 — but a
-  second agent running it *mid-run* still makes the first agent's `/metrics`
-  requests answer 401, which reads as a credential defect and is not one. It
+  at all refuses rather than guessing. **The key is per worktree** (since
+  #1484, the rule #684 made for the Gitea token): it is named
+  `knobas-seed-<worktree directory>-<checksum of its path>`, and a re-mint
+  deletes only keys of **that** name, so a sibling's seed never 401s your
+  copy. Another worktree's key, and the shared `knobas-seed` key the seed
+  minted before #1484, are never deleted; one key per worktree that ever
+  seeded accumulates on the instance, and a `down -v` clears them. A 401 from
+  `/metrics` now means this tree's own key is gone (a reset volume, a
+  hand-deleted key), and the next `./seed-kuma.sh` here replaces it. It
   also adds and deletes four monitors of its own -- `knobas-live-scratch` and
   `knobas-write-scratch` through `kuma-monitor.sh`, `knobas-live-created` and
   `knobas-write-created` through knobas' own create (#453) -- which is why the
