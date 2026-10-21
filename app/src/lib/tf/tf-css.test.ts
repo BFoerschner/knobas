@@ -225,7 +225,7 @@ test("the top bar's timer target is capped with an ellipsis, a label is sans and
   expect(at, "no rule band between the narrow layout and 1240px").toBeGreaterThan(-1);
   const band = code.slice(at, code.indexOf("\n}", at));
   expect(band).toMatch(/\.tf-search\s*\{[^}]*min-width:\s*0/);
-  expect(band).toMatch(/\.tf-search \.tf-label\s*\{[^}]*display:\s*none/);
+  expect(band).toMatch(/\.tf-search \.tf-label, \.tf-search kbd\s*\{[^}]*display:\s*none/);
   expect(band).toMatch(/\.tf-timer-key\s*\{[^}]*max-width:\s*12ch/);
   expect(band).toMatch(/\.tf-nav a\s*\{[^}]*padding:/);
   expect(band).toMatch(/\.tf-nav \.tf-count\s*\{[^}]*display:\s*none/);
