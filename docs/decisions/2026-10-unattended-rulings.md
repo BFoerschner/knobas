@@ -10194,4 +10194,4 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
 
 **The step:** the ticket's last criterion asks for "Björn's sign-off before merge" on the frozen-surface change.
 
-**Ruling:** signed off, on this evidence: the §10.8 entry matches the diff (three `KindPaths` fields, one `RunRow` field, the cursor version, mockd deviation 19, and no migration, command or module); the adapter, battery, app and component tests are green; the live run in the PR body passed. The merge-manager confirms it.
+**Ruling:** signed off, on this evidence: the §10.8 entry matches the diff (three `KindPaths` fields, one `RunRow` field, the cursor version, mockd deviation 19, and no migration, command or module); the adapter, battery, app and component tests are green. On the PR's live runs, `just teamcity-live` passed 12 of 12. In `just teamcity-live-seeded`, 1187 read 1/0/0 and the battery passed on the seeded server; its 5 failures come from the fixture break filed as #1560 (stray configurations on the seeded server) and touch nothing this PR changed. The merge-manager confirms the sign-off.
