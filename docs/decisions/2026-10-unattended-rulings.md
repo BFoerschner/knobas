@@ -10032,3 +10032,18 @@ Ruled 2026-10-21 (delegated by Björn at triage), following #1476's ruling above
   as plain text. *Reasoning:* keeping `<strong>` would mean splitting the helper's string or copying
   its first clause, and the ticket forbids a second copy. The modal's subtitle already names the
   asset. *Reversing:* low.
+## #1465: Escape or ⌘Enter retries a failed first create (Sonnet implementer, 2026-10-21)
+
+- **The retry and the first keystroke's create are one function, `ensureNote`, run inside the write
+  queue.** *Fork:* a second copy of the create in `finish()`, or one shared body. *Ruling:* shared;
+  `typed()`, `finish()` and `openInMain()` all queue it. *Reasoning:* one place decides "blank text
+  creates nothing" and "an existing note is not created twice". *Reversing:* inline the body again.
+- **The create reads the text as it stands when the queued work runs**, not the string a keystroke
+  passed in. *Fork:* the ticket requires the retry to write the full text as typed; for a keystroke
+  queued behind a slow create the latest text is the same or fuller. *Reversing:* pass `text` into
+  `ensureNote`.
+
+## #1468: autocorrect off on the capture box (Sonnet implementer, 2026-10-21)
+
+- **Test through the attributes only.** The first-Esc symptom is WebKit's and not witnessable by the
+  fake; the attribute test is the witness, as the ticket says. No other input is touched.
