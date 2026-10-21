@@ -18,7 +18,7 @@ import type {
   SyncRunRow,
 } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
-import { JIRA_SCHEMA } from "../../sources/fixtures";
+import { GITEA_SCHEMA, JIRA_SCHEMA } from "../../sources/fixtures";
 import { createLayers } from "../layers.svelte";
 import type { SettingsPorts } from "./ports";
 import TfSettings from "./TfSettings.svelte";
@@ -830,6 +830,154 @@ test("a failing credential is said on top, and Re-enter password stores the new 
   expect(health.patched.at(-1)).toMatchObject({ source_id: "teamcity", state: "ok" });
   expect(p.syncNow).toHaveBeenCalledWith("teamcity");
   expect(target.querySelector('[role="dialog"]')).toBeNull();
+});
+
+/** Open Add a source over these adapters (Jira's descriptor from `ports()` is the template). */
+async function addDialogOver(over: (jira: AdapterRow) => AdapterRow[], p: Partial<SettingsPorts> = {}) {
+  const base = ports();
+  const [jira] = (await base.listAdapters()) as AdapterRow[];
+  const all = ports({ ...p, listAdapters: vi.fn(() => Promise.resolve(over(jira!) as never)) });
+  await open([], all);
+  button("+ Add a source").click();
+  await settle();
+  return all;
+}
+
+type AdapterRow = Awaited<ReturnType<SettingsPorts["listAdapters"]>>[number];
+
+async function fillAndTest() {
+  type("#tf-add-address", "https://jira2.tidewater.example");
+  type("#tf-add-secret", "s3cret");
+  dialogButton("Test connection").click();
+  await settle();
+}
+
+test("Add a source: the secret is written nowhere but the requests (#1506)", async () => {
+  const stored = new Map<string, string>();
+  const storage = {
+    getItem: (k: string) => stored.get(k) ?? null,
+    setItem: (k: string, v: string) => void stored.set(k, String(v)),
+    removeItem: (k: string) => void stored.delete(k),
+    clear: () => stored.clear(),
+    key: (i: number) => [...stored.keys()][i] ?? null,
+    get length() {
+      return stored.size;
+    },
+  };
+  const real = { local: window.localStorage, session: window.sessionStorage };
+  Object.defineProperty(window, "localStorage", { value: storage, configurable: true, writable: true });
+  Object.defineProperty(window, "sessionStorage", { value: storage, configurable: true, writable: true });
+  try {
+    // The control: this dump can see a value that is stored, so a clean dump
+    // below is a fact about the secret and not about the dump.
+    storage.setItem("canary", "s3cret");
+    expect(JSON.stringify([...stored])).toContain("s3cret");
+    storage.clear();
+
+    const p = await addDialogOver((jira) => [jira], { addSource: vi.fn(() => Promise.resolve(summary("jira", "Jira Data Center", "ok"))) });
+    dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
+    flushSync();
+    type("#tf-add-address", "https://jira2.tidewater.example");
+    type("#tf-add-secret", "s3cret");
+    // On screen the value lives in the input's property, not in an attribute.
+    expect(target.innerHTML).not.toContain("s3cret");
+    dialogButton("Test connection").click();
+    await settle();
+    dialogButton("Add source").click();
+    await settle();
+
+    expect(JSON.stringify([...stored])).not.toContain("s3cret");
+    expect(target.innerHTML).not.toContain("s3cret");
+    // Once in the test and once in the add, never a second round trip.
+    expect(p.testSource).toHaveBeenCalledTimes(1);
+    expect(p.addSource).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(p.addSource).mock.calls[0]![0].secret).toEqual({ value: "s3cret", account: null });
+  } finally {
+    Object.defineProperty(window, "localStorage", { value: real.local, configurable: true, writable: true });
+    Object.defineProperty(window, "sessionStorage", { value: real.session, configurable: true, writable: true });
+  }
+});
+
+test("Add a source: a failed save keeps the dialog open with its reason and the draft (#1506)", async () => {
+  const p = await addDialogOver((jira) => [jira], {
+    addSource: vi.fn(() => Promise.reject({ code: "conflict", message: "a source with id jira already exists", source_id: "jira" })),
+  });
+  await fillAndTest();
+  dialogButton("Add source").click();
+  await settle();
+
+  expect(p.addSource).toHaveBeenCalledTimes(1);
+  expect(dialog().querySelector('[role="alert"]')!.textContent).toContain("a source with id jira already exists");
+  // A dialog that closed on failure would throw the whole draft away.
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-address")!.value).toBe("https://jira2.tidewater.example");
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-secret")!.value).toBe("s3cret");
+  expect(p.listSources).toHaveBeenCalledTimes(1);
+});
+
+test("Add a source: choosing another adapter resets the config, so no field of the old one survives (#1506)", async () => {
+  const p = await addDialogOver((jira) => [
+    jira,
+    { ...jira, id: "gitea", adapter_kind: "gitea", name: "Gitea", config_schema: GITEA_SCHEMA as never },
+  ], { addSource: vi.fn(() => Promise.resolve(summary("gitea", "Gitea", "ok"))) });
+  const radios = dialog().querySelectorAll<HTMLInputElement>(".tf-radio input");
+  radios[0]!.click();
+  flushSync();
+  expect(dialog().querySelector("#tf-add-cfg-flavor")).not.toBeNull();
+  type("#tf-add-cfg-sprint_field", "customfield_99");
+
+  radios[1]!.click();
+  flushSync();
+  // Gitea's schema and nothing of Jira's: a config carrying `flavor` would be
+  // written to a Gitea source's config column, where it means nothing.
+  expect(dialog().querySelector("#tf-add-cfg-flavor")).toBeNull();
+  expect(dialog().querySelector("#tf-add-cfg-owners")).not.toBeNull();
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-id")!.value).toBe("gitea");
+
+  await fillAndTest();
+  dialogButton("Add source").click();
+  await settle();
+  const sent = vi.mocked(p.addSource).mock.calls[0]![0];
+  expect(sent.adapter_kind).toBe("gitea");
+  expect(sent.config).not.toHaveProperty("flavor");
+  expect(sent.config).not.toHaveProperty("sprint_field");
+});
+
+test("Add a source: an adapter whose schema declares a secret is refused, not drawn (#1506)", async () => {
+  await addDialogOver((jira) => [
+    { ...jira, id: "broken", adapter_kind: "broken", name: "Broken Adapter", config_schema: { type: "object", properties: { api_token: { type: "string" } } } as never },
+  ]);
+  dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
+  flushSync();
+  type("#tf-add-address", "https://x.example");
+  type("#tf-add-secret", "s3cret");
+
+  // Contract §3: a credential in the config column would be written to
+  // Postgres. Saying so beats drawing a field that quietly does it.
+  expect(dialog().textContent).toMatch(/secret/i);
+  expect(dialog().querySelector("#tf-add-cfg-api_token")).toBeNull();
+  expect(dialogButton("Test connection").disabled).toBe(true);
+  expect(dialogButton("Add source").disabled).toBe(true);
+});
+
+test("Add a source: a discovered key the adapter does not declare never reaches the config (#1506)", async () => {
+  // What enforces it is `validate`, which builds the config from the schema's
+  // fields; `fillFound` skipping an undeclared key is a second layer this test
+  // does not witness on its own.
+  const p = await addDialogOver((jira) => [jira], {
+    addSource: vi.fn(() => Promise.resolve(summary("jira", "Jira Data Center", "ok"))),
+    testSource: vi.fn(() =>
+      Promise.resolve({ ...GAP_REPORT, discovered: { not_a_property: "x", epic_link_field: "customfield_10101" } }),
+    ),
+  });
+  dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
+  flushSync();
+  await fillAndTest();
+  dialogButton("Add source").click();
+  await settle();
+
+  const config = vi.mocked(p.addSource).mock.calls[0]![0].config as Record<string, unknown>;
+  expect(config).toMatchObject({ epic_link_field: "customfield_10101" });
+  expect(config).not.toHaveProperty("not_a_property");
 });
 
 test("a password the source refuses keeps the dialog open and says so", async () => {

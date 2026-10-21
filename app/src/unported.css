@@ -103,8 +103,6 @@
 .btn[aria-disabled="true"]:hover{background:transparent}
 .btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .btn .k{font-size:11px}
-.sel-inline{height:22px;padding:0 4px;border:1px solid var(--hair2);border-radius:2px;background:var(--panel);font:500 12px var(--mono);color:var(--text)}
-.sel-inline option{background:var(--panel)}
 .inp{height:26px;padding:0 8px;border:1px solid var(--hair2);border-radius:2px;background:var(--bg);color:var(--text);width:100%}
 .inp:focus{border-color:var(--link);outline:0}
 .inp.k{font-family:var(--mono);font-size:12px}
@@ -135,8 +133,6 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
 .dlg-b{padding:14px;overflow:auto}
 .dlg-f{display:flex;gap:6px;justify-content:flex-end;padding:10px 14px;border-top:1px solid var(--hair);flex:none;align-items:center}
 .dlg-f .l{margin-right:auto;font:400 11px var(--mono);color:var(--faint);white-space:nowrap}
-.form{display:grid;grid-template-columns:140px 1fr;gap:10px 12px;align-items:center}
-.form .l{font:400 11px var(--mono);color:var(--muted)}
 .x{width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border-radius:2px;color:var(--muted)}
 .x:hover{background:var(--raised);color:var(--text)}
 .x svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}

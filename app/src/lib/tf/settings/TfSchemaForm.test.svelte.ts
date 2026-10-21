@@ -7,43 +7,32 @@
  * list round-trips through a textarea without losing entries, that a message
  * lands next to the field it is about, and that an adapter which needs no
  * configuration says so instead of showing an empty box.
+ *
+ * Carried from the rooms `sources/SchemaForm.test.svelte.ts` (#1506). Fields
+ * are found by the control id the form draws (`<idPrefix>-<key>`).
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import SchemaForm from "./SchemaForm.svelte";
-import { EMPTY_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "./fixtures";
-import { defaultValues, schemaFields, validate } from "./schema-form";
+import { EMPTY_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "../../sources/fixtures";
+import { defaultValues, schemaFields, validate } from "../../sources/schema-form";
+import TfSchemaForm from "./TfSchemaForm.svelte";
+
+const PREFIX = "sf";
 
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-function render(schema: unknown, errors: Record<string, string> = {}) {
+function render(schema: unknown, errors: Record<string, string> = {}, layout: "rows" | "grid" = "grid") {
   const fields = schemaFields(schema);
-  const state = $state({ values: defaultValues(fields) });
-  app = mount(SchemaForm, {
-    target,
-    get props() {
-      return {
-        fields,
-        values: state.values,
-        errors,
-        onchange: (key: string, value: unknown) => {
-          state.values = { ...state.values, [key]: value };
-        },
-      };
-    },
-  });
+  const values = $state(defaultValues(fields));
+  app = mount(TfSchemaForm, { target, props: { fields, values, errors, idPrefix: PREFIX, layout } });
   flushSync();
-  return { fields, state };
-}
-
-function field(key: string) {
-  return target.querySelector<HTMLElement>(`[data-field="${key}"]`);
+  return { fields, values };
 }
 
 function control<T extends HTMLElement>(key: string) {
-  return field(key)!.querySelector<T>("input, select, textarea")!;
+  return target.querySelector<T>(`#${PREFIX}-${key}`)!;
 }
 
 beforeEach(() => {
@@ -62,9 +51,9 @@ test("renders a select, a list and a number from the real adapter schemas", () =
   const flavor = control<HTMLSelectElement>("flavor");
   expect(flavor.tagName).toBe("SELECT");
   expect([...flavor.options].map((o) => o.value)).toEqual(["datacenter", "cloud"]);
-  expect(flavor.value).toBe("datacenter");
   // The declared default is *selected*, not merely present: a form that opens
   // on the wrong flavor is a form that saves the wrong flavor.
+  expect(flavor.value).toBe("datacenter");
   expect(control<HTMLTextAreaElement>("projects").tagName).toBe("TEXTAREA");
   expect(control<HTMLInputElement>("jql_filter").type).toBe("text");
 
@@ -76,9 +65,7 @@ test("renders a select, a list and a number from the real adapter schemas", () =
   expect(n.type).toBe("number");
   // The bounds are on the element too, so the browser and the validator agree.
   expect(n.min).toBe("1");
-  // The adapter's `MAX_BUILDS_PER_CONFIG`. This read "500" while the source
-  // allowed 10 000, so the browser refused a build budget the source would
-  // have taken (#124).
+  // The adapter's `MAX_BUILDS_PER_CONFIG` (#124).
   expect(n.max).toBe("10000");
   expect(n.value).toBe("100");
 });
@@ -90,67 +77,50 @@ test("a boolean renders as a checkbox, not as the word true", () => {
   expect(box.checked).toBe(true);
 });
 
-test("a list control splits on newlines and drops blank lines", () => {
-  const { fields, state } = render(JIRA_SCHEMA);
+test("a list control splits on newlines and keeps what was typed", () => {
+  const { fields, values } = render(JIRA_SCHEMA);
   const box = control<HTMLTextAreaElement>("projects");
   box.value = "PAY\n\n  OPS  \n";
   box.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
 
-  // The textarea keeps what was typed — deleting a reader's blank line under
-  // their caret is how a text box becomes unusable — and the *validated*
-  // config is what has been tidied.
+  // The textarea keeps what was typed (deleting a blank line under the
+  // caret makes a text box unusable); the *validated* config is tidied.
   expect(box.value).toBe("PAY\n\n  OPS  \n");
-  expect(validate(fields, { ...state.values, flavor: "datacenter" }).config).toEqual({
+  // The form writes the lines, not the raw text, into the caller's values.
+  expect(values.projects).toEqual(["PAY", "", "  OPS  ", ""]);
+  expect(validate(fields, { ...values, flavor: "datacenter" }).config).toEqual({
     flavor: "datacenter",
     projects: ["PAY", "OPS"],
   });
 });
 
 test("an invalid value shows its message next to its field, and says so accessibly", () => {
-  // The message is handed in as a prop: what is pinned here is that a message
-  // lands next to its own field and is named by the control, not what any
-  // particular bound is. It is spelled with the adapter's real maximum all the
-  // same, so a reader of this file is not taught a bound that does not exist.
   render(TEAMCITY_SCHEMA, {
     builds_per_config: "Builds kept per configuration must be at most 10000.",
   });
-  const row = field("builds_per_config")!;
-  expect(row.textContent).toContain("must be at most 10000");
-
   const input = control<HTMLInputElement>("builds_per_config");
+  const message = target.querySelector<HTMLElement>(`#${PREFIX}-builds_per_config-err`)!;
+  expect(message.textContent).toContain("must be at most 10000");
+  expect(input.parentElement!.contains(message)).toBe(true);
   expect(input.getAttribute("aria-invalid")).toBe("true");
   // The message is *named* by the control, so a screen reader reads it with
   // the field rather than leaving it as unattached red text.
-  const described = (input.getAttribute("aria-describedby") ?? "").split(/\s+/);
-  const messageId = row.querySelector(".err-msg")!.id;
-  expect(described).toContain(messageId);
+  expect((input.getAttribute("aria-describedby") ?? "").split(/\s+/)).toContain(message.id);
 });
 
 test("help text is wired to its control, and required is reflected on the element", () => {
   render(JIRA_SCHEMA);
   const flavor = control<HTMLSelectElement>("flavor");
-  const helpId = field("flavor")!.querySelector(".help")!.id;
-  expect((flavor.getAttribute("aria-describedby") ?? "").split(/\s+/)).toContain(helpId);
-  expect(field("flavor")!.querySelector(".help")!.textContent).toContain(
-    "Data Center / Server speaks REST v2",
-  );
-  // Nothing in Jira is required, and the element says so: the fixture used to
-  // invent `required: ["flavor"]`, which drew a `<select>` the browser would
-  // block a submit on where the real form draws an optional one (#124).
+  const help = target.querySelector<HTMLElement>(`#${PREFIX}-flavor-help`)!;
+  expect(help.classList.contains("tf-sf-help")).toBe(true);
+  expect((flavor.getAttribute("aria-describedby") ?? "").split(/\s+/)).toContain(help.id);
+  expect(help.textContent).toContain("Data Center / Server speaks REST v2");
+  // Nothing in Jira is required, and the element says so (#124).
   expect(flavor.required).toBe(false);
   expect(control<HTMLInputElement>("jql_filter").required).toBe(false);
 });
 
-/**
- * `required` reaches the element from the schema that declares it.
- *
- * Driven through a schema written here rather than through an adapter,
- * because no shipped adapter declares `required` — and the fixture that
- * pretended one did is what this file used to prove the rule against (#124).
- * The property still matters: without it the browser and the assistive layer
- * are told a different story from `validate`.
- */
 test("a required property is reflected on its element", () => {
   render({
     type: "object",
@@ -164,22 +134,22 @@ test("a required property is reflected on its element", () => {
   expect(control<HTMLInputElement>("note").required).toBe(false);
 });
 
-test("every control has a label a pointer and a screen reader can both use", () => {
-  render(JIRA_SCHEMA);
-  for (const key of ["flavor", "projects", "jql_filter", "username"]) {
-    const input = control<HTMLElement>(key);
-    // The label is the grid's left cell, a sibling of the control's cell —
-    // `.form` is a two-column grid and a label wrapping its control would
-    // break the alignment the whole form is built on.
-    const label = target.querySelector<HTMLLabelElement>(`label[data-field-label="${key}"]`)!;
-    expect(label.getAttribute("for")).toBe(input.id);
-    expect(input.id).not.toBe("");
-  }
-});
+for (const layout of ["grid", "rows"] as const) {
+  test(`every control has a label a pointer and a screen reader can both use (${layout})`, () => {
+    render(JIRA_SCHEMA, {}, layout);
+    for (const key of ["flavor", "projects", "jql_filter", "username"]) {
+      const input = control<HTMLElement>(key);
+      expect(input.id).not.toBe("");
+      const label = target.querySelector<HTMLLabelElement>(`label[for="${input.id}"]`);
+      expect(label, key).not.toBeNull();
+      expect(label!.textContent!.trim()).not.toBe("");
+    }
+  });
+}
 
 test("an adapter with no configuration shows a sentence, not an empty box", () => {
   render(EMPTY_SCHEMA);
-  expect(target.querySelector(".form")).toBeNull();
+  expect(target.querySelector(".tf-formgrid")).toBeNull();
   expect(target.textContent).toContain("needs no configuration");
 });
 
@@ -191,7 +161,7 @@ test("a shape the subset does not cover is editable as JSON rather than lost", (
   const box = control<HTMLTextAreaElement>("matrix");
   expect(box.tagName).toBe("TEXTAREA");
   expect(box.value).toContain('"a": 1');
-  expect(field("matrix")!.textContent).toContain("JSON");
+  expect(target.textContent).toContain("JSON");
 });
 
 test("two fields never share an element id, so two forms on a page stay wired", () => {

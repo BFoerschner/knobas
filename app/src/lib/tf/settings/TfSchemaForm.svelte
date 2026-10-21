@@ -1,16 +1,14 @@
 <!--
-  The generated config form (spec §3a) in the ticket-first look: the rooms
-  UI's `sources/SchemaForm.svelte` redrawn in `.tf` tokens, over the same form
-  model (`sources/schema-form`). One row per field, the control chosen by
+  The generated config form (spec §3a) in the ticket-first look, over the
+  form model (`sources/schema-form`). One row per field, the control chosen by
   `control.kind`; no per-adapter branch (#903, #904).
 
   `rows` draws prototype-6's settings rows (`.tf-stg-row`: the label with its
   help under it, then the control), for a source's page. `grid` draws the
   dialog's two-column `.tf-formgrid`, for *Add a source*.
 
-  Values are the caller's and are written in place, as `SchemaForm` does, so
-  the caller validates the whole draft on every keystroke. An empty text
-  field says *None set*: a field the sync fills (a Jira field id, #1021) then
+  Values are the caller's and are written in place, so the caller
+  validates the whole draft on every keystroke. An empty text field says *None set*: a field the sync fills (a Jira field id, #1021) then
   reads as not set rather than as a blank box.
 -->
 <script lang="ts">
