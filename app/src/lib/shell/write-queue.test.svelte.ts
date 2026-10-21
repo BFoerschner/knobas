@@ -15,7 +15,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { QueueCounts, QueuedWrite } from "../ipc/sources";
-import type { WordedRow } from "./write-queue.svelte";
+import { onWithdrawn, type WordedRow } from "./write-queue.svelte";
 
 const calls: { command: string; args: unknown }[] = [];
 let rows: QueuedWrite[] = [];
@@ -699,6 +699,20 @@ test("discard and cancel both withdraw the write", async () => {
   screen.button("Cancel")!.click();
   await vi.waitFor(() => expect(calls.some((c) => c.command === "discard_write")).toBe(true));
   expect(calls.find((c) => c.command === "discard_write")!.args).toEqual({ id: 1 });
+  screen.done();
+});
+
+/** The pages' queued marks follow this (#1583): withdrawn and sent both leave `pending_writes`, so only this says which. */
+test("a withdrawal from the panel is announced to whoever marked the write", async () => {
+  rows = [held(), write()];
+  counts = { pending: 1, held: 1, refused: 0 };
+  const screen = await render();
+  const heard: string[] = [];
+  const off = [onWithdrawn(2, () => heard.push("2")), onWithdrawn(1, () => heard.push("1"))];
+
+  screen.button("Discard")!.click();
+  await vi.waitFor(() => expect(heard).toEqual(["2"]));
+  off.forEach((stop) => stop());
   screen.done();
 });
 

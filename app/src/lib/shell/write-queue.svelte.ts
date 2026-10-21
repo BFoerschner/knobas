@@ -239,6 +239,24 @@ export function unconfirmedSend(row: Pick<QueuedWrite, "state" | "held_snapshot"
   return { source: said.source, detail: typeof said.detail === "string" ? said.detail : "" };
 }
 
+const withdrawals = new Set<{ id: number; gone: () => void }>();
+
+/**
+ * The queue panel withdrew write `id` (its `discard` succeeded). A withdrawn
+ * row and a sent one both leave `pending_writes`, so the read cannot tell
+ * them apart; the withdrawal is the one client-visible signal (#1583).
+ */
+export function noteWithdrawn(id: number): void {
+  for (const w of [...withdrawals]) if (w.id === id) w.gone();
+}
+
+/** Call `gone` when write `id` is withdrawn in the queue panel; answers the stop. */
+export function onWithdrawn(id: number, gone: () => void): () => void {
+  const w = { id, gone };
+  withdrawals.add(w);
+  return () => void withdrawals.delete(w);
+}
+
 /** What a queued `log_work` write would put on a ticket, read off its payload. */
 export interface WithdrawnWorklog {
   /** The ticket the time was logged against. */
@@ -680,7 +698,11 @@ export function createWriteQueue(): WriteQueue {
     refresh,
     flush,
     apply: (id) => act(() => applyHeldWrite(id)),
-    discard: (id) => act(() => discardWrite(id)),
+    discard: (id) =>
+      act(async () => {
+        await discardWrite(id);
+        noteWithdrawn(id);
+      }),
     amend: (id, payload) => act(() => amendWrite(id, payload)),
   };
 }
