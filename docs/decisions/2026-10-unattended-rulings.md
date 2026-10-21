@@ -9367,8 +9367,10 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   column a card stands in, or by its own status. *Ruling:* by its own status, in the order the board
   first draws each, column by column (`statusOrder`). *Reasoning:* the cell shows the card's status,
   so sorting by a column name the row no longer shows would read as unsorted. *Reversing:* low.
-- **The view editor's list preview reads the card's status too.** It sits on the Tickets page and
-  read the same column name; the ticket says nothing on the page reads a column name as a status.
+- **The view editor's list preview reads the card's status too.** *Fork:* leave the editor's preview
+  as it was, or read the card there too. *Ruling:* the card. *Reasoning:* it sits on the Tickets page
+  and read the same column name; the ticket says nothing on the page reads a column name as a
+  status. *Reversing:* low.
 - **The fixture needed no change.** `jira-board-21` already holds PAY-233 (To Do, Mara's) under
   *Ready* and five Done tickets under *Shipped*.
 - **Björn's sign-off before merge: reserved for Björn, ruled by implementer on Opus.** The §10.8
@@ -9394,11 +9396,15 @@ sources hold) too.
   (a capped read does not see a twin past its cap, so that card draws no source and opens by key,
   where the job card names the other); the launcher counts the rows of the answer or the recent
   items, per kind; the job card reads every listed source under the key. *Reversing:* low.
-- **What names the source.** The board card, the list row and the job card draw its display name
-  (the source list's, through `sourceRoles.nameOf`, and the detail's `source.display_name`). The
-  launcher row names it by id, before the sync age (`jira · synced 25 min ago`), as its complaint
-  line already does: the launcher's health rows carry no display name (§2.2), and a monogram of two
-  letters tells `jira` from `jira-ops` no better than the id.
+- **What names the source.** *Fork:* the display name or the monogram. *Ruling:* the board card,
+  the list row and the job card draw its display name (the source list's, through
+  `sourceRoles.nameOf`, and the detail's `source.display_name`). The launcher row names it by id,
+  before the sync age (`jira · synced 25 min ago`), as its complaint line already does.
+  *Reasoning:* the launcher's health rows carry no display name (§2.2), and a monogram of two
+  letters tells `jira` from `jira-ops` no better than the id. *Reversing:* low.
+- **An entity's one stable address stays its entity id.** `CONTEXT.md`'s *Entity* has exactly one
+  stable in-app address; for a ticket that is `#/job/<source>:<key>`, which always opens it.
+  `#/job/<key>` is the short form a person reads, kept where it names one ticket (R-1.2).
 - **The fixture's second source is the Jira source it already lists.** *Ruling:* `Tidewater Jira`
   now holds PAY-231, PAY-228 and OPS-77 as the mock does. *Reasoning:* it already claims the ticket
   system; a sixth source would change every count the sources view draws.

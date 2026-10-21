@@ -300,7 +300,10 @@ async fn a_ticket_with_no_recognizable_status_lands_in_the_terminal_group() {
         "every unreadable status belongs in the one terminal group"
     );
     assert!(
-        board.columns[0].cards.iter().all(|card| card.status.is_none()),
+        board.columns[0]
+            .cards
+            .iter()
+            .all(|card| card.status.is_none()),
         "a card in the terminal group carries no status either (#1423)"
     );
     assert!(

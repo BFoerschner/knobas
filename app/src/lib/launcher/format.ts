@@ -11,6 +11,7 @@ import type { CredentialHealth } from "../ipc/sources";
 import { isActionable } from "../shell/health.svelte";
 import { sourceMonogram } from "../shell/monogram";
 import { ago } from "../shell/time";
+import { keyOf } from "../tf/job/job";
 
 /**
  * `"synced 4 min ago"` — spec §4's per-row provenance.
@@ -80,7 +81,7 @@ export function provenance(
 export function sharesKey(
   rows: readonly { entity_id: string; kind: string }[],
 ): (row: { entity_id: string; kind: string }) => boolean {
-  const name = (row: { entity_id: string; kind: string }) => `${row.kind} ${row.entity_id.slice(row.entity_id.indexOf(":") + 1)}`;
+  const name = (row: { entity_id: string; kind: string }) => `${row.kind} ${keyOf(row.entity_id)}`;
   const seen = new Map<string, Set<string>>();
   for (const row of rows) {
     const sources = seen.get(name(row)) ?? new Set<string>();

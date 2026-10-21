@@ -6,7 +6,7 @@
 import type { KindTally, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type { ListSort as StoredSort, ViewLanes, ViewSortColumn } from "../../ipc/search";
 import { kindLabel, kindSingular, sectionOf } from "../../shell/kinds";
-import { jobHash } from "../route";
+import { entityAddress } from "../address";
 import type { SectionTally } from "../job/sections";
 
 /** How many cards a column draws before *Show N more* (R-3.4). */
@@ -452,8 +452,8 @@ export function sharedKeys(columns: readonly MiniBoardColumn[]): Set<string> {
 /**
  * Where a card opens (#1476): its job by key, or, for a key another source
  * holds too, by its entity id (`#/job/jira:PAY-231`), the address that names
- * the source.
+ * the source ({@link entityAddress}'s rule).
  */
 export function ticketAddress(card: Pick<MiniBoardCard, "key" | "entity_id">, shared: ReadonlySet<string>): string {
-  return jobHash(shared.has(card.key) ? card.entity_id : card.key);
+  return entityAddress("ticket", card.entity_id, shared.has(card.key));
 }

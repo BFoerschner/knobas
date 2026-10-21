@@ -226,7 +226,11 @@ async fn a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns() 
     let statuses: Vec<(String, Option<String>)> = board
         .columns
         .iter()
-        .flat_map(|c| c.cards.iter().map(|card| (card.key.clone(), card.status.clone())))
+        .flat_map(|c| {
+            c.cards
+                .iter()
+                .map(|card| (card.key.clone(), card.status.clone()))
+        })
         .collect();
     assert_eq!(
         statuses,
