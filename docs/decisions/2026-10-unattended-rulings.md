@@ -8737,7 +8737,7 @@ vocabulary half of #1427.
 - **The switch's promise is reworded** in R-13a.6 and D10: "On, notes are back in search and open on
   their own page, and the capture shortcut works again". *Reversing:* a string.
 
-## #1402: boot screen on the design system, implementer on Opus, 2026-10-21
+## #1402: boot screen on the design system (Opus implementer, 2026-10-21)
 
 - **No `.tf` wrapper.** *Fork:* wrap the boot screen in `.tf`, or reach `.tf-btn` without it.
   *Ruling:* without it. `.tf-btn` is unscoped in `css/chrome.css` and the tokens are on `:root`;
@@ -8749,7 +8749,10 @@ vocabulary half of #1427.
   ink token" for the version line. *Ruling:* `--ink-2`. *Reasoning:* the design system has no text
   ink fainter than `--ink-2`; `--muted` is a state tone ("unknown, no data") and the spec forbids a
   lighter grey for text. *Reversing:* one declaration.
-- **The failure message keeps the `mono` class name, styled by the component.** *Ruling:* the
-  component's own `.mono` (JetBrains Mono at .9em, as `.tf-mono`) and `.fail` (`--err`) rules, so
-  the boot screen reads nothing from `unported.css`; the sheet keeps its global `.mono`/`.fail`
-  for the components still on it, and its header stops naming the booting screen. *Reversing:* low.
+- **The failure message's mono and error ink are the component's own classes.** *Fork:* keep the
+  bare `.mono`/`.fail` classes `unported.css` styles globally, or name the component's own.
+  *Ruling:* `boot-mono` (JetBrains Mono at .9em, as `.tf-mono`) and `boot-fail` (`--err`), scoped.
+  *Reasoning:* a bare name the unported sheet defines leaks its rule onto the element (the wall
+  `tf.css`'s header describes), so the boot screen now reads nothing from that sheet, and the
+  sheet's header stops naming it. The two scoped rules restate `.tf .tf-mono` and `.tf
+  :focus-visible`, which is the price of not wrapping in `.tf`. *Reversing:* low.

@@ -34,7 +34,7 @@
     {#if db.state === "failed"}
       <h1>knobas cannot start its database</h1>
       <!-- Text, always: the message is whatever PostgreSQL or the OS said. -->
-      <p class="mono fail">{db.message}</p>
+      <p class="boot-mono boot-fail">{db.message}</p>
       <p>knobas {version} · profile {demo ? "demo" : "default"}</p>
       <div class="acts">
         <button class="tf-btn tf-primary" onclick={onretry}>Retry</button>
@@ -53,11 +53,12 @@
 
 <style>
   /*
-    The design system's, drawn outside the shell (#1402). This renders before
+    The design system's look, drawn outside the shell (#1402). This renders before
     `TfShell` mounts and is not wrapped in `.tf`: the app's tests take a `.tf`
     in the document to mean "the shell drew". The tokens are on `:root` and
     `.tf-btn` is unscoped, so neither needs the wrapper; what `.tf` would have
-    given (its paper, its focus ring) is set here.
+    given (its paper, its focus ring) is set here. The class names are the
+    component's own: `unported.css` styles bare `.mono` and `.fail` globally.
   */
   .boot {
     display: flex;
@@ -102,12 +103,12 @@
   }
 
   /* The one code value here: whatever PostgreSQL or the OS said. */
-  .boot-b .mono {
+  .boot-mono {
     font-family: var(--mono);
     font-size: 0.9em;
   }
 
-  .boot-b .fail {
+  .boot-fail {
     color: var(--err);
   }
 

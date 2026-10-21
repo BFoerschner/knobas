@@ -5,8 +5,9 @@
   are the rules of that sheet that a surviving component still reaches: the
   launcher, the ⌘T picker, the ad-hoc dialog, the write queue, the asset tree
   (`#/assets`) and its dialogs, the first-run wizard and Add source, and the
-  capture window. Every rule whose class only the rooms UI drew went with it. A component ported to `tf.css` takes its rules out of
-  here; when nothing reads this file it goes too.
+  capture window. Every rule whose class only the rooms UI drew went with it.
+  A component ported to `tf.css` takes its rules out of here; when nothing
+  reads this file it goes too.
 
   **The palette is the design system's.** The tokens live on `:root` in
   `lib/tf/tf.css` and follow the theme there; the old names these rules and

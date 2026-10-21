@@ -97,15 +97,20 @@ test("no retry button while it is still coming up", () => {
  * raw failure message is one, the sentences around it are not. *Retry* is
  * the design system's primary button.
  */
+/** Whether any of the element's classes is a mono one. */
+function mono(element: Element): boolean {
+  return [...element.classList].some((name) => name.includes("mono"));
+}
+
 test("only the raw failure message is set in mono, and Retry is the primary button", () => {
   const screen = render({ state: "failed", message: "port 50861 is in use" });
 
   const lines = [...screen.target.querySelectorAll("p")];
   const message = lines.find((p) => p.textContent === "port 50861 is in use");
-  expect(message?.classList.contains("mono")).toBe(true);
+  expect(mono(message!)).toBe(true);
   const prose = lines.filter((p) => p !== message);
   expect(prose.map((p) => p.textContent?.trim())).toEqual(["knobas 0.1.0 · profile demo"]);
-  expect(prose.filter((p) => p.classList.contains("mono"))).toEqual([]);
+  expect(prose.filter(mono)).toEqual([]);
 
   const retry = screen.target.querySelector("button");
   expect([...(retry?.classList ?? [])]).toEqual(expect.arrayContaining(["tf-btn", "tf-primary"]));
@@ -121,7 +126,7 @@ test("the sentences while it comes up are prose, not mono", () => {
     const screen = render(db);
     const lines = [...screen.target.querySelectorAll("p")];
     expect(lines).toHaveLength(1);
-    expect(lines[0]!.classList.contains("mono")).toBe(false);
+    expect(mono(lines[0]!)).toBe(false);
     screen.done();
   }
 });
