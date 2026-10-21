@@ -9271,3 +9271,21 @@ Ruled 2026-10-21 (delegated by Björn at triage).
   board reads `home.sources` now. `LauncherHome.sources` is unchanged on the wire and is still the
   launcher's fallback when the shell supplies no `sources`. No screenshot: under the fake both
   copies agree, so nothing drawn changes.
+
+## #1430 — how the top bar fits at 1100 px: CSS only, or a *More* menu
+
+Ruled 2026-10-21 by the implementer (Sonnet), delegated by Björn at triage.
+
+**The fork:** CSS only (drop the search field's minimum width, tighter item padding, hide the counts
+below a breakpoint), or a *More* menu that collapses the nav's tail (a new component).
+
+**Ruling:** CSS only, in `narrow.css`, for 901 to 1240 px. The search field loses its minimum width,
+its "Search" word and its `⌘K` hint (the magnifier stays, ⌘K still works), nav items take 7 px side
+padding, the nav's count badges hide, and the timer chip's target caps at 12ch (22ch everywhere else).
+
+**Reasoning:** with a timer on a long label at 1100 px, the first three cuts alone still lost *Proposed
+links* and *Time*; the tighter chip cap is what made it fit, so it is part of the band. Everything
+stays reachable and no component is added. Hiding counts costs the Inbox and Monitors badges between
+901 and 1240 px; the pages carry the same numbers. At 1440 px and above nothing changes.
+
+**Cost of reversing:** replace the band with a *More* component; one stylesheet block and one test.

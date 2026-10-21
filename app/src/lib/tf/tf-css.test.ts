@@ -214,3 +214,19 @@ test("on the Time view's strip, yellow fills the running timer's block and nothi
 test("a sync run's result wraps anywhere, so a request URL in an error cannot widen the table (#1478)", () => {
   expect(block(code, ".tf-stg-res")).toContain("overflow-wrap: anywhere;");
 });
+
+test("the top bar's timer target is capped with an ellipsis, a label is sans and a key mono, and the nav fits at 1100px (#1430)", () => {
+  const key = block(code, ".tf-timer-key");
+  expect(key).toMatch(/max-width:\s*22ch/);
+  expect(key).toMatch(/text-overflow:\s*ellipsis/);
+  expect(key).not.toMatch(/font-family/);
+  expect(block(code, ".tf-timer-key.tf-mono")).toMatch(/font-family:\s*var\(--mono\)/);
+  const at = code.indexOf("@media (max-width: 1240px) and (min-width: 901px)");
+  expect(at, "no rule band between the narrow layout and 1240px").toBeGreaterThan(-1);
+  const band = code.slice(at, code.indexOf("\n}", at));
+  expect(band).toMatch(/\.tf-search\s*\{[^}]*min-width:\s*0/);
+  expect(band).toMatch(/\.tf-search \.tf-label\s*\{[^}]*display:\s*none/);
+  expect(band).toMatch(/\.tf-timer-key\s*\{[^}]*max-width:\s*12ch/);
+  expect(band).toMatch(/\.tf-nav a\s*\{[^}]*padding:/);
+  expect(band).toMatch(/\.tf-nav \.tf-count\s*\{[^}]*display:\s*none/);
+});
