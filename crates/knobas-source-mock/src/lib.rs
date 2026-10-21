@@ -1012,6 +1012,9 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
         }]
     };
     vec![
+        // No blocked-like and no done-like set (#1501): the dataset's statuses
+        // are drawn as written, and a done set here would archive the demo's
+        // finished jobs out from under the mockups they were drawn for.
         KindPaths {
             kind: "ticket".to_owned(),
             status_name: vec![PayloadPath::of(["status"])],

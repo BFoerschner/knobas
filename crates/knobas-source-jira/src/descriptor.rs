@@ -131,6 +131,13 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// status -- absence, never a wrong one -- and a per-instance list is a
 /// configuration key the day one is asked for, not a guess made here.
 ///
+/// **The done-like set is the same kind of claim** (#1501): Done, Closed and
+/// Resolved are the three names Jira's shipped workflows end in, matched the
+/// same way. While a ticket's status is one of them, the job context anchored
+/// on it is archived. A workflow that ends in another word never archives,
+/// which is how knobas behaved before the set existed. Not the status
+/// category: a second signal for later, ruled in the grilling of 2026-10-21.
+///
 /// **A ticket's parent is its epic or parent issue** (ADR-0018, #598), read
 /// off the `fields.parent` object Jira nests in an issue record: a sub-task's
 /// parent issue, and the epic on a next-gen or recent company-managed project.
@@ -175,6 +182,11 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
                 "Blocked".to_owned(),
                 "On Hold".to_owned(),
                 "Impediment".to_owned(),
+            ],
+            done_statuses: vec![
+                "Done".to_owned(),
+                "Closed".to_owned(),
+                "Resolved".to_owned(),
             ],
             parent: vec![
                 ParentPath {
@@ -500,6 +512,29 @@ mod tests {
         let json = serde_json::to_string(&descriptor_template()).unwrap();
         let back: knobas_source::SourceDescriptor = serde_json::from_str(&json).unwrap();
         assert_eq!(back.adapter_kind, crate::ADAPTER_KIND);
+    }
+
+    /// A ticket's done-like set is the three names Jira's shipped workflows
+    /// end in (#1501), declared beside the blocked-like set and kept apart
+    /// from it: a status cannot be both stuck and finished.
+    #[test]
+    fn a_ticket_declares_done_closed_and_resolved_as_done_like() {
+        let template = descriptor_template();
+        let ticket = template
+            .payload_paths
+            .iter()
+            .find(|paths| paths.kind == crate::KIND_TICKET)
+            .expect("the ticket kind declares its paths");
+        assert_eq!(ticket.done_statuses, ["Done", "Closed", "Resolved"]);
+        for done in &ticket.done_statuses {
+            assert!(
+                !ticket
+                    .blocked_statuses
+                    .iter()
+                    .any(|blocked| blocked.eq_ignore_ascii_case(done)),
+                "{done} is in both sets"
+            );
+        }
     }
 
     /// **No example field id in the help text** (#297).

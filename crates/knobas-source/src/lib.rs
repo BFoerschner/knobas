@@ -2024,6 +2024,38 @@ mod tests {
         assert!(older.url_forms.is_empty());
     }
 
+    /// A kind's done-like set crosses the SPI beside its blocked-like one
+    /// (#1501): a descriptor that declares it keeps it, and one built before
+    /// the field existed, which sends no `done_statuses` key, decodes as a
+    /// source that calls nothing done, so it archives nothing.
+    #[test]
+    fn done_statuses_round_trip_and_a_descriptor_without_them_declares_none() {
+        let declared = SourceDescriptor {
+            payload_paths: vec![KindPaths {
+                kind: "ticket".to_owned(),
+                blocked_statuses: vec!["Blocked".to_owned()],
+                done_statuses: vec!["Done".to_owned(), "Won't Do".to_owned()],
+                ..KindPaths::default()
+            }],
+            ..a_descriptor()
+        };
+        let mut wire = serde_json::to_value(&declared).unwrap();
+        assert_eq!(
+            wire["payload_paths"][0]["done_statuses"],
+            serde_json::json!(["Done", "Won't Do"])
+        );
+        let back: SourceDescriptor = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(back.payload_paths, declared.payload_paths);
+
+        wire["payload_paths"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("done_statuses");
+        let older: SourceDescriptor = serde_json::from_value(wire).unwrap();
+        assert!(older.payload_paths[0].done_statuses.is_empty());
+        assert_eq!(older.payload_paths[0].blocked_statuses, ["Blocked"]);
+    }
+
     /// Spec §3a: every type crossing the SPI is plain serde data, so an adapter
     /// can later run out of process. That is only true if the types survive a
     /// round trip in *both* directions -- an out-of-process adapter sends its

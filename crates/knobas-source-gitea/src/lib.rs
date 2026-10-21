@@ -441,6 +441,10 @@ fn payload_paths() -> Vec<KindPaths> {
 /// * **project** is the repository the issue is in: `repository.full_name`
 ///   as its key, the bare `name` as its name.
 /// * **comment count** is Gitea's `comments`, the card's *N comments*.
+///
+/// **No done-like set yet** (#1501): `closed` is the word that would be one,
+/// and #1593 declares it. Until then a job on a closed issue keeps its context
+/// live, as every Gitea job did before the set existed.
 fn ticket_paths() -> KindPaths {
     let knobas = |key: &str| vec![PayloadPath::of(["knobas", key])];
     KindPaths {

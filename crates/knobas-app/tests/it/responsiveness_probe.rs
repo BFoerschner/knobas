@@ -848,6 +848,7 @@ async fn what_the_reader_waits_on() {
     let promoted = knobas_core::context::promote(
         pool,
         &knobas_core::entity::EntityRef::parse("jira0:JIRA0-3").unwrap(),
+        &knobas_core::payload::Declarations::empty(),
     )
     .await
     .unwrap()

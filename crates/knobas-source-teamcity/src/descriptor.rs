@@ -158,6 +158,10 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// **A build ran on its revisions** (#710): `revisions.revision[].version`,
 /// one full sha per VCS root, which is what the detail of a pull request, a
 /// branch or a commit finds the builds of its commit by.
+///
+/// **No blocked-like and no done-like set** (#1501): a build or a
+/// configuration has an outcome and a state chip, not a workflow status, so
+/// no job context anchored on one is archived by its status.
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
     use knobas_core::payload::Frame;
     use knobas_source::{

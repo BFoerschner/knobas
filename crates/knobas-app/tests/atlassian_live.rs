@@ -2399,6 +2399,7 @@ async fn promoting_the_seeded_epic_brings_its_five_children_into_the_context() {
 
     let promoted = knobas_app::commands::entity::promote_context_inner(
         &state.pool,
+        state.registry.as_ref(),
         &format!("{JIRA}:PAY-200"),
     )
     .await
@@ -2434,6 +2435,111 @@ async fn promoting_the_seeded_epic_brings_its_five_children_into_the_context() {
             "{id} is held by the PAY-200 context, so the merged walk reaches it: {merged:?}"
         );
     }
+}
+
+/// **A done job's context is archived, by the sync run and at birth** (#1501),
+/// against the status names the seeded workflow really serves: the fixture puts
+/// PAY-219 in *Done* and PAY-231 *In Progress*, and Jira's `Done` must meet the
+/// adapter's declared done-like set through the real payload.
+///
+/// First, a context on each, made as a database from before #1501 would hold
+/// them (no done-like set in hand), then a second sync: it archives PAY-219's
+/// and leaves PAY-231's live. Then a context first made for PAY-219 in a fresh
+/// database, through `promote_context` and the registry, is born archived.
+/// Read-only at Jira: it syncs and promotes in its own databases.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn a_done_seeded_tickets_job_context_is_archived_by_the_sync_and_born_archived() {
+    let env = env();
+    let (state, _events) = app(
+        "atlassian_live_done_jobs",
+        &env,
+        AuthMethod::UserPassword,
+        &env.password,
+    )
+    .await;
+    sync(&state, JIRA).await;
+    let status_of = |key: &'static str| {
+        let pool = state.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<String>>(
+                "select payload->'fields'->'status'->>'name' from sync.live_item where entity_id = $1",
+            )
+            .bind(format!("{JIRA}:{key}"))
+            .fetch_one(&pool)
+            .await
+            .expect("the seeded ticket is mirrored")
+        }
+    };
+    assert_eq!(
+        status_of("PAY-219").await.as_deref(),
+        Some("Done"),
+        "the fixture's done ticket"
+    );
+    assert_eq!(status_of("PAY-231").await.as_deref(), Some("In Progress"));
+
+    let before = |key: &'static str| {
+        let pool = state.pool.clone();
+        async move {
+            knobas_core::context::promote(
+                &pool,
+                &knobas_core::entity::EntityRef::new(JIRA, key),
+                &knobas_core::payload::Declarations::empty(),
+            )
+            .await
+            .expect("the promote runs")
+            .expect("the ticket is mirrored")
+            .context
+            .id
+        }
+    };
+    let done = before("PAY-219").await;
+    let open = before("PAY-231").await;
+    let archived = |id: String| {
+        let pool = state.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, bool>(
+                "select archived_at is not null from knobas.context where id = $1",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("the context is stored")
+        }
+    };
+    assert!(
+        !archived(done.clone()).await,
+        "made before the lifecycle knew"
+    );
+
+    sync(&state, JIRA).await;
+    assert!(
+        archived(done).await,
+        "the sync run archives the done ticket's context"
+    );
+    assert!(!archived(open).await, "and leaves the open one's live");
+
+    let (fresh, _events) = app(
+        "atlassian_live_done_jobs_born",
+        &env,
+        AuthMethod::UserPassword,
+        &env.password,
+    )
+    .await;
+    sync(&fresh, JIRA).await;
+    let born = knobas_app::commands::entity::promote_context_inner(
+        &fresh.pool,
+        fresh.registry.as_ref(),
+        &format!("{JIRA}:PAY-219"),
+    )
+    .await
+    .expect("PAY-219 is in the mirror and promotes");
+    assert!(born.fresh);
+    assert!(
+        born.context.archived_at.is_some(),
+        "a context first made for a done ticket is born archived: {:?}",
+        born.context
+    );
 }
 
 /// **`under:PAY-200` finds the epic and its five children, through the search

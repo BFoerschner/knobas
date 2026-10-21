@@ -3020,6 +3020,7 @@ async fn room_anchored_on(pool: &PgPool, anchor: &str) -> String {
     knobas_core::context::promote(
         pool,
         &knobas_core::entity::EntityRef::parse(anchor).expect("an entity id"),
+        &knobas_core::payload::Declarations::empty(),
     )
     .await
     .expect("the promotion runs")

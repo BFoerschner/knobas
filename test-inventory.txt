@@ -283,6 +283,7 @@ knobas-app	lib/knobas_app	time::worklog::tests::the_timers_own_verbs_are_not_wor
 knobas-app	test/alert_chain_live	the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_closes_it
 knobas-app	test/atlassian_live	a_comment_that_mentions_me_becomes_an_inbox_mention
 knobas-app	test/atlassian_live	a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror
+knobas-app	test/atlassian_live	a_done_seeded_tickets_job_context_is_archived_by_the_sync_and_born_archived
 knobas-app	test/atlassian_live	a_page_edited_through_knobas_is_on_the_digest_under_yesterday
 knobas-app	test/atlassian_live	a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved
 knobas-app	test/atlassian_live	a_protocol_is_published_under_standup_protocols_and_reads_back
@@ -795,6 +796,10 @@ knobas-app	test/it	job_ipc::a_missing_or_unreadable_estimate_is_none
 knobas-app	test/it	job_ipc::a_tickets_detail_carries_its_type_priority_and_estimate
 knobas-app	test/it	job_ipc::list_entities_scoped_by_reach_keeps_what_the_ticket_reaches
 knobas-app	test/it	job_ipc::opening_a_job_twice_promotes_its_ticket_once
+knobas-app	test/it	job_lifecycle_ipc::an_alert_held_only_by_a_done_jobs_context_leaves_the_inbox_and_stays_in_monitors
+knobas-app	test/it	job_lifecycle_ipc::bring_up_archives_the_contexts_of_jobs_already_done_and_a_second_does_nothing
+knobas-app	test/it	job_lifecycle_ipc::opening_a_done_job_reads_its_archived_context_and_makes_no_second
+knobas-app	test/it	job_lifecycle_ipc::opening_a_job_leaves_archived_at_as_it_was
 knobas-app	test/it	job_pipelines_ipc::a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link
 knobas-app	test/it	job_pipelines_ipc::a_sub_task_shows_the_pipelines_its_parent_links
 knobas-app	test/it	link_on_arrival_ipc::a_branch_that_lands_on_a_later_tick_is_linked_by_the_sync_that_brings_it_in
@@ -1318,6 +1323,7 @@ knobas-core	test/it	checkout_scan::the_scan_reaches_two_levels_and_no_further
 knobas-core	test/it	checkout_scan::the_shallower_of_two_clones_wins_and_the_answer_is_stable
 knobas-core	test/it	contexts::a_classic_epics_children_are_members_through_the_stored_epic
 knobas-core	test/it	contexts::a_container_linked_to_a_member_ticket_is_a_member_and_so_is_what_it_holds
+knobas-core	test/it	contexts::a_context_first_made_for_a_done_ticket_is_born_archived
 knobas-core	test/it	contexts::a_foreign_or_misshapen_parent_contributes_nothing
 knobas-core	test/it	contexts::a_hand_written_ctx_anchor_never_roots_the_walk
 knobas-core	test/it	contexts::a_misshapen_parent_seeds_no_context_in_the_merged_walk
@@ -1331,16 +1337,21 @@ knobas-core	test/it	contexts::an_adhoc_context_is_created_listed_and_linkable
 knobas-core	test/it	contexts::an_unknown_context_has_no_members_rather_than_an_error
 knobas-core	test/it	contexts::an_unrecognized_issue_type_shape_misses_toward_ticket
 knobas-core	test/it	contexts::epic_children_seed_the_walk_through_the_recorded_parent
+knobas-core	test/it	contexts::following_the_status_archives_on_done_and_revives_when_it_leaves
 knobas-core	test/it	contexts::membership_never_traverses_another_context
 knobas-core	test/it	contexts::membership_reaches_the_add_its_links_and_one_hop_no_further
 knobas-core	test/it	contexts::newest_context_first_in_the_switcher_list
 knobas-core	test/it	contexts::promoting_a_context_is_refused
+knobas-core	test/it	contexts::promoting_a_ticket_with_an_archived_context_returns_it_and_makes_nothing
 knobas-core	test/it	contexts::promoting_a_ticket_yields_one_ticket_context_however_often
 knobas-core	test/it	contexts::promoting_an_epic_is_read_off_the_issue_type
 knobas-core	test/it	contexts::promoting_something_that_never_synced_is_a_miss_not_a_context
+knobas-core	test/it	contexts::racing_promotes_of_a_done_ticket_make_one_context
 knobas-core	test/it	contexts::removing_the_link_that_implied_the_membership_removes_it
+knobas-core	test/it	contexts::reviving_leaves_an_older_archived_context_behind_a_live_one
 knobas-core	test/it	contexts::the_anchor_index_refuses_a_second_context_as_a_duplicate
 knobas-core	test/it	contexts::the_merged_walk_is_the_union_of_every_contexts_members
+knobas-core	test/it	contexts::the_one_time_pass_archives_done_jobs_and_is_a_no_op_the_second_time
 knobas-core	test/it	estate_file::a_monitor_is_named_by_a_name
 knobas-core	test/it	estate_file::every_compose_service_runs_on_the_notebooks_engine
 knobas-core	test/it	estate_file::every_compose_service_the_notebook_runs_is_recorded
@@ -1469,6 +1480,7 @@ knobas-core	test/it	reach::a_container_brings_its_vm_its_host_and_their_monitors
 knobas-core	test/it	reach::a_parent_whose_type_cannot_be_read_brings_nothing
 knobas-core	test/it	reach::a_parents_vm_comes_in_alone
 knobas-core	test/it	reach::a_vm_the_context_adds_only_goes_down
+knobas-core	test/it	reach::an_archived_contexts_adds_are_still_reached
 knobas-core	test/it	reach::an_epic_parent_brings_nothing
 knobas-core	test/it	reach::an_unknown_ticket_reaches_nothing
 knobas-core	test/it	reach::membership_stays_adr_0008s_and_the_context_seeds_the_reach
@@ -2262,6 +2274,7 @@ knobas-source	lib/knobas_source	tests::an_unconfirmed_write_crosses_with_its_sta
 knobas-source	lib/knobas_source	tests::an_update_style_is_merge_or_rebase_and_nothing_else_decodes
 knobas-source	lib/knobas_source	tests::declared_source_actions_round_trip_and_default_to_none
 knobas-source	lib/knobas_source	tests::descriptor_serializes_to_plain_json
+knobas-source	lib/knobas_source	tests::done_statuses_round_trip_and_a_descriptor_without_them_declares_none
 knobas-source	lib/knobas_source	tests::every_op_has_its_own_snake_case_identifier
 knobas-source	lib/knobas_source	tests::spi_types_round_trip_in_both_directions
 knobas-source	lib/knobas_source	tests::the_create_target_is_not_a_monitor_id
@@ -2871,6 +2884,7 @@ knobas-source-jira	lib/knobas_source_jira	cursor::tests::the_seen_set_covers_the
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::the_seen_set_is_capped_at_the_newest_entries
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::the_seen_set_is_ordered_newest_first_however_it_arrived
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::a_full_sync_is_the_whole_corpus
+knobas-source-jira	lib/knobas_source_jira	descriptor::tests::a_ticket_declares_done_closed_and_resolved_as_done_like
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::a_ticket_declares_fields_parent_as_its_parent_answered_to_by_key
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_epic_link_help_text_offers_no_example_id
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_full_sync_claim_rests_on_a_query_with_no_time_bound
@@ -3593,6 +3607,7 @@ knobas-sync	test/it	jira_views::a_view_kind_that_declares_no_saved_view_frame_ma
 knobas-sync	test/it	jira_views::a_view_that_turns_up_after_the_first_sync_is_new_and_a_hidden_one_stays_hidden
 knobas-sync	test/it	jira_views::a_view_whose_payload_says_nothing_holds_nothing
 knobas-sync	test/it	jira_views::name_and_columns_follow_jira_and_the_readers_settings_stay
+knobas-sync	test/it	job_contexts::a_run_archives_a_done_tickets_context_and_a_later_run_revives_it
 knobas-sync	test/it	progress::a_progress_message_reaches_every_sink_enrolled_after_one_that_panics
 knobas-sync	test/it	progress::a_refused_item_does_not_count_as_progress
 knobas-sync	test/it	progress::a_run_that_pushed_nothing_still_reports_once
@@ -3757,6 +3772,7 @@ knobas-wasm-host	lib/knobas_wasm_host	allow::tests::an_address_is_compared_as_th
 knobas-wasm-host	lib/knobas_wasm_host	allow::tests::an_entry_is_a_host_or_a_whole_template
 knobas-wasm-host	lib/knobas_wasm_host	allow::tests::local_addresses_are_loopback_private_link_local_and_unique_local
 knobas-wasm-host	lib/knobas_wasm_host	allow::tests::only_a_fixed_name_is_guarded
+knobas-wasm-host	lib/knobas_wasm_host	convert::tests::a_components_done_like_set_decodes_and_one_without_it_declares_none
 knobas-wasm-host	lib/knobas_wasm_host	limits::tests::a_table_growth_past_the_cap_is_refused_naming_it
 knobas-wasm-host	lib/knobas_wasm_host	limits::tests::memories_and_tables_count_against_one_cap
 knobas-wasm-host	lib/knobas_wasm_host	net::tests::a_body_that_stalls_past_its_gap_fails_read_timeout

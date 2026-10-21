@@ -435,7 +435,13 @@ async fn sets_never_feed_membership_the_tray_the_inbox_or_the_export() {
     let guess = thing(&pool, "page", "guess").await;
     link(&pool, &ticket, &own).await;
     link(&pool, &from_set, &beyond).await;
-    let context = promote_context_inner(&pool, &ticket).await.unwrap();
+    let context = promote_context_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &ticket,
+    )
+    .await
+    .unwrap();
     sqlx::query(
         "insert into knobas.link (from_id, to_id, relation, origin, created_by, confirmed_at,
                                   rule, rule_class, reason)

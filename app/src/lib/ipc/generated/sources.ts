@@ -294,6 +294,16 @@ project_path: Array<ProjectPath>,
  */
 blocked_statuses: Array<string>, 
 /**
+ * The status names this source considers **done-like**, in its own
+ * spelling (`Done`, `Closed`, `Resolved`): the same shape as
+ * [`blocked_statuses`](Self::blocked_statuses), and matched the same way,
+ * case-insensitively against [`status_name`](Self::status_name). While an
+ * item's status is one of them, the job context anchored on it is
+ * archived (#1501); a workflow spelling done otherwise never archives,
+ * which is the safe miss. Empty for a source with no such status.
+ */
+done_statuses: Array<string>, 
+/**
  * Where this item's parent is and what it answers to (ADR-0018). Empty
  * for a kind with no parent -- an Uptime Kuma monitor, a repo -- and for
  * every descriptor serialized before the field existed, so `under:` misses

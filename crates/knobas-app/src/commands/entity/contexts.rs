@@ -29,7 +29,10 @@ pub async fn list_contexts(
 ///
 /// Idempotent by the store's own promise: promoting twice answers with the one
 /// context, and only the first call writes an activity line -- the second
-/// mutated nothing, so it announces nothing.
+/// mutated nothing, so it announces nothing. A done ticket's context is
+/// archived (#1501): promoting answers with it as it is, and a context first
+/// made for a done ticket is born archived, by the anchor's source's declared
+/// done-like set (`registry`'s template descriptors).
 ///
 /// # Errors
 ///
@@ -39,10 +42,12 @@ pub async fn list_contexts(
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
 pub async fn promote_context_inner(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     entity_id: &str,
 ) -> Result<knobas_core::context::Promoted, IpcError> {
     let anchor = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
-    let promoted = knobas_core::context::promote(pool, &anchor)
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    let promoted = knobas_core::context::promote(pool, &anchor, &declarations)
         .await?
         .ok_or_else(|| IpcError::not_found(format!("{anchor} is not in the mirror")))?;
     // One line per *mutation*: the store says which call inserted, so a
@@ -151,8 +156,9 @@ async fn record(
 /// # Errors
 ///
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
-/// database is still coming up, and whatever [`promote_context_inner`] refuses
-/// with.
+/// database is still coming up, and whatever [`promote_context_inner`]
+/// refuses with. The done-like sets are the lifecycle's registry's, the one
+/// the sync engine shares, so opening a job needs no engine to be up.
 #[tauri::command]
 pub async fn promote_context<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -160,7 +166,7 @@ pub async fn promote_context<R: tauri::Runtime>(
     entity_id: String,
 ) -> Result<knobas_core::context::ContextRow, IpcError> {
     let pool = lifecycle.pool()?;
-    let promoted = promote_context_inner(&pool, &entity_id).await?;
+    let promoted = promote_context_inner(&pool, lifecycle.registry(), &entity_id).await?;
     // Only a mutation is news: a re-promotion changed nothing the switcher
     // could learn from re-listing.
     if promoted.fresh {

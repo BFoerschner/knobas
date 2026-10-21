@@ -80,7 +80,9 @@ fn code(error: &IpcError) -> IpcErrorCode {
 async fn promoting_the_unsynced_is_not_found_and_a_bad_id_is_invalid() {
     let pool = pool().await;
     let anchor = format!("jira:GONE-{}", unique());
-    let missing = promote_context_inner(&pool, &anchor).await.unwrap_err();
+    let missing = promote_context_inner(&pool, &Registry::for_process(), &anchor)
+        .await
+        .unwrap_err();
     assert_eq!(code(&missing), IpcErrorCode::NotFound);
     // The word is the glossary's: `CONTEXT.md`'s **Mirror** entry lists
     // *index* under `_Avoid_` (#518), and this sentence reaches a toast.
@@ -90,7 +92,7 @@ async fn promoting_the_unsynced_is_not_found_and_a_bad_id_is_invalid() {
         "the refusal names the anchor and the mirror"
     );
 
-    let malformed = promote_context_inner(&pool, "no-separator")
+    let malformed = promote_context_inner(&pool, &Registry::for_process(), "no-separator")
         .await
         .unwrap_err();
     assert_eq!(code(&malformed), IpcErrorCode::Invalid);
@@ -117,7 +119,10 @@ async fn a_stored_context_scopes_the_page_and_its_total() {
         .await
         .unwrap();
 
-    let ctx = promote_context_inner(&pool, &ticket).await.unwrap().context;
+    let ctx = promote_context_inner(&pool, &Registry::for_process(), &ticket)
+        .await
+        .unwrap()
+        .context;
 
     let listed = list_entities_inner(
         &pool,
@@ -177,7 +182,10 @@ async fn the_tray_scopes_by_the_contexts_membership() {
     let stranger = item(&pool, &source, "ticket", "EU-1").await;
     let stray = item(&pool, &source, "page", "EU/notes").await;
 
-    let ctx = promote_context_inner(&pool, &ticket).await.unwrap().context;
+    let ctx = promote_context_inner(&pool, &Registry::for_process(), &ticket)
+        .await
+        .unwrap()
+        .context;
 
     // One proposal touching the member, one touching nobody in the context.
     for (from, to) in [(&ticket, &branch), (&stranger, &stray)] {
@@ -216,8 +224,12 @@ async fn promote_announces_once_however_often_it_is_pressed() {
     let source = format!("ctxsrc-{}", unique());
     let ticket = item(&pool, &source, "ticket", "PAY-1").await;
 
-    let first = promote_context_inner(&pool, &ticket).await.unwrap();
-    let second = promote_context_inner(&pool, &ticket).await.unwrap();
+    let first = promote_context_inner(&pool, &Registry::for_process(), &ticket)
+        .await
+        .unwrap();
+    let second = promote_context_inner(&pool, &Registry::for_process(), &ticket)
+        .await
+        .unwrap();
     assert_eq!(first.context.id, second.context.id);
     assert!(
         first.fresh && !second.fresh,

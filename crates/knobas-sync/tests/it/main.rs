@@ -19,6 +19,7 @@ mod delete_during_run;
 mod discovered_config;
 mod flush_all_isolation;
 mod jira_views;
+mod job_contexts;
 mod progress;
 mod role_check;
 mod run;

@@ -136,8 +136,20 @@ async fn opening_a_job_twice_promotes_its_ticket_once() {
         .await
         .unwrap();
 
-    let first = promote_context_inner(&pool, &ticket).await.unwrap();
-    let again = promote_context_inner(&pool, &ticket).await.unwrap();
+    let first = promote_context_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &ticket,
+    )
+    .await
+    .unwrap();
+    let again = promote_context_inner(
+        &pool,
+        &knobas_app::sources::Registry::for_process(),
+        &ticket,
+    )
+    .await
+    .unwrap();
     assert_eq!(first.context.id, again.context.id);
 
     let (contexts,): (i64,) =
