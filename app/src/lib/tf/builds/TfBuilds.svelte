@@ -137,19 +137,21 @@
   // *This job* (#850): on by default while a job is current.
   const scope = $derived<Scope>(job !== null && (filter.scope ?? "job") === "job" ? "job" : "all");
   let reasons = $state<Map<string, PipelineReason[]> | null>(null);
+  /** What the job's ticket is read by: the address it was opened at (#1537), else its key. */
+  const jobRef = $derived(job === null ? null : (jobAt ?? job));
   $effect(() => {
-    const key = job;
+    const key = jobRef;
     reasons = null;
     if (!ready || key === null) return;
     const read = ports.jobPipelines ?? jobPipelinesByKey;
     read(key).then(
       (rows) => {
-        if (job === key) reasons = reasonsById(rows);
+        if (jobRef === key) reasons = reasonsById(rows);
       },
       // A job whose reasons cannot be read keeps nothing: *This job* says so
       // through its empty state, and *All* still lists everything.
       () => {
-        if (job === key) reasons = new Map();
+        if (jobRef === key) reasons = new Map();
       },
     );
   });
