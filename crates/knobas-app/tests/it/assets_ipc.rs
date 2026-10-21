@@ -2795,8 +2795,7 @@ async fn the_rollup_takes_the_worst_of_an_assets_status_and_its_monitors() {
 /// that is not a monitor, colours nothing.
 ///
 /// Two clauses, and a read that dropped either would still colour the VM:
-/// `MONITORED_ASSETS` states the same pair from the other end and #445's pane
-/// test spells out why they are two conditions rather than one.
+/// #445's pane test spells out why they are two conditions rather than one.
 #[tokio::test]
 async fn only_a_monitored_by_link_to_a_monitor_colours_an_asset() {
     let pool = pool("assets-health-near-miss").await;

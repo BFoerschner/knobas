@@ -431,14 +431,13 @@ pub fn run() {
             commands::assets::move_asset,
             commands::assets::delete_asset,
             commands::assets::asset_types,
-            // #434, appended after #428's group for the same reason.
-            // #432's routes, appended after those.
+            // #432's routes, appended after those. (#434's `context_assets`
+            // stood here until #1578 retired it.)
             commands::assets::get_route,
             commands::assets::create_route,
             commands::assets::edit_route,
             commands::assets::delete_route,
-            // #435, appended after those: the source room's half of #434's
-            // tile.
+            // (#435's `source_assets` stood here until #1578 retired it.)
             // #439's Import, appended after those for the same reason.
             commands::assets::preview_estate_import,
             commands::assets::apply_estate_import,

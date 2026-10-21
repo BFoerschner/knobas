@@ -720,9 +720,9 @@ function assetDetail(args: Record<string, unknown>) {
     reachable_via: routesReaching(asset, heldBy),
     // Empty for the mirror detail's reason: this fixture has no link graph,
     // so an asset is linked to nothing and the pane draws the links panel's
-    // empty state. Absent rather than empty (#435 landed
-    // the field and the panel; the fixture kept neither) it is `undefined`,
-    // and `groupLinks` throws on the pane of every asset.
+    // empty state. Absent rather than empty (#435 landed the field and the
+    // panel; the fixture kept neither) it is `undefined`, and `groupLinks`
+    // throws on the pane of every asset.
     links: [],
     // The monitor names an import kept (#439), for `links`' reason exactly:
     // the pane reads `detail.monitors.length`, so a fixture short of the key

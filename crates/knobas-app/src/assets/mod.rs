@@ -204,17 +204,16 @@
 //! the routes above have landed. A route is **not moved between exposing
 //! assets** -- there is no `move_route` -- because a route is the address *of*
 //! the thing that answers it: re-exposing one somewhere else is a different
-//! route with a different history, which is a delete and a create. The wires story 31 draws between a route row and its target are
-//! #433's.
+//! route with a different history, which is a delete and a create. The
+//! wires story 31 draws between a route row and its target are #433's.
 //!
 //! Monitors arrived with #442's Kuma adapter, so [`AssetDetail::monitoring`]
 //! fills the pane's *monitoring* section (#445). Story 37's other half landed
 //! with #444: [`ROLLUP`] takes the newest sample of every monitor attached to
 //! an asset, so a container is red because a monitor on it is red and not
-//! only because somebody rated it --
-//! and a paused monitor colours nothing, which is story 38. [`open_alerts`] is
-//! the estate's own list of what is wrong, one read that the top strip counts
-//! and the Assets view draws. The **ack** on an alert is #446's, with the
+//! only because somebody rated it -- and a paused monitor colours nothing,
+//! which is story 38. [`open_alerts`] is the estate's own list of what is
+//! wrong, one read that the top strip counts and the Assets view draws. The **ack** on an alert is #446's, with the
 //! inbox category it clears; the Monitors tab's cards are #449's. Story 70's
 //! *Create monitor for this asset* is #453's: [`AssetDetail::monitor_targets`]
 //! is how the pane knows whether to offer one, filled by
@@ -1364,9 +1363,10 @@ pub enum RouteEdit {
 /// structural and the reason it is repeated here in prose. `path_text` is left
 /// out of **these three** -- the launcher reads it through the corpus and no
 /// *Miller column* draws it, so selecting it on every column of a walk would
-/// be bytes nobody asked for. A flat list of assets from anywhere in the
-/// estate selects it in a statement of its own, because where each one sits
-/// is the column that makes such a list readable.
+/// be bytes nobody asked for. The reads that list assets from anywhere in the
+/// estate, [`ROSTER_ASSETS`] and [`ALERT_ASSETS`], select it in statements of
+/// their own, because where each one sits is the column that makes such a list
+/// readable.
 ///
 /// Three statements rather than one spliced constant: the SQL audit this repo
 /// runs is over literal text, and a statement assembled from fragments is one

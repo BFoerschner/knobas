@@ -53,8 +53,10 @@
     import and re-export; `app/src/lib/ipc/entity.ts` loses `recentActivity`, `contextMembers`
     and `sourceStatuses` (its `ActivityRow` re-export stays, for `EntityDetail.activity`);
     `app/src/lib/ipc/search.ts` loses `smartListItems`.
-  - The fake IPC loses the six handlers. `fake/activity.ts` answered only `recent_activity`; its
-    log lines move into `fake/entity.ts`, their one reader, and the file goes.
+  - The fake IPC loses the five handlers it answered (`source_assets` it never answered: it
+    stood on the census's `UNANSWERED` record, which loses that row). `fake/activity.ts`
+    answered only `recent_activity`; its log lines move into `fake/entity.ts`, their one
+    reader, and the file goes.
 
   **What is not touched.** No migration, no event, no `WriteOp`, nothing under
   `crates/knobas-source/src/**` or `crates/knobas-http/**`, `crates/knobas-app/src/{error,
@@ -63,6 +65,5 @@
   has no frontend caller, which is #1611's to rule.
 
   Pinned by `fake-tauri.test.ts`'s census (every command the fake answers is one the barrel
-  invokes, and every barrel command is answered or on its `UNANSWERED` record, which loses its
-  `source_assets` row) and `ipc_mirror` (the generated barrel is current). The rulings are in
+  invokes, and every barrel command is answered or on its `UNANSWERED` record) and `ipc_mirror` (the generated barrel is current). The rulings are in
   `docs/decisions/2026-10-unattended-rulings.md` under `## #1578`.

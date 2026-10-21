@@ -124,15 +124,6 @@ const NOTE = {
   links: [],
 };
 
-const LINE = {
-  id: 1,
-  at: "2026-08-22T14:30:00Z",
-  actor: "sync:mock",
-  verb: "synced",
-  entity_id: "mock:PAY-231",
-  detail: {},
-};
-
 vi.mock("../ipc/entity", () => ({
   // What a capture would attach (#503): the main window records its room and
   // its foreground here whenever either changes. Nothing in this file opens a
@@ -162,7 +153,6 @@ vi.mock("../ipc/entity", () => ({
   // The project census the switcher's third derived population is built from
   // (#209). Empty here: this file is not about which rooms exist.
   listProjects: () => Promise.resolve([]),
-  contextMembers: () => Promise.resolve([]),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   listEntities: () => deferred(PAGE),
   // What a ticket reaches (#817): the Tickets preview's default ports name it (#1030).
@@ -194,7 +184,6 @@ vi.mock("../ipc/entity", () => ({
   // No source view (#661): the panel is the mirror's, as before.
   entityView: () => Promise.resolve(null),
   getEntity: () => deferred(DETAIL),
-  recentActivity: () => deferred([LINE]),
   getNote: () => deferred(NOTE),
   saveNote: () => deferred(NOTE),
   deleteNote: () => deferred(true),

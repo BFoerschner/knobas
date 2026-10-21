@@ -11125,10 +11125,13 @@ set.
   because those described the retired read. The five tile tests in `assets_ipc.rs` are deleted:
   they witnessed only the tile reads, and membership through ancestors stays pinned in
   `knobas-core/tests/it/contexts.rs`. *Reversing:* low.
-- **The dev fake.** *Ruling:* the six handlers go. `fake/activity.ts` answered only
+- **The dev fake and the test mocks.** *Ruling:* the five handlers the fake answered go, and
+  `source_assets` leaves the census's `UNANSWERED` record. `fake/activity.ts` answered only
   `recent_activity`, so its log lines move into `fake/entity.ts`, their only reader, and the file
-  goes. `fakeSmartListItems` stays, because the fake's `search` answers `list:<id>` with it. The
-  census's two smart-list tests now open lists through `search`. *Reversing:* low.
+  goes. The `vi.mock` entries for `contextMembers`, `recentActivity` and `sourceStatuses`
+  (`App.test`, `inbox.test`, `residue.test`, `LinkDialog.test`) go too. `fakeSmartListItems`
+  stays, because the fake's `search` answers `list:<id>` with it, and the census's two smart-list
+  tests now open lists through `search`. *Reversing:* low.
 - **The `the_relation_a_source_rooms_tile_reads_is_in_the_frontend_vocabulary` pin.** *Ruling:*
   kept under its name, and its doc now names the roster as the reader. §10.8 entries #435 and #445
   cite the name, and those entries are not edited. *Reversing:* n/a.
