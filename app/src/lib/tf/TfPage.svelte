@@ -6,7 +6,7 @@
   Tickets is `tickets/page.ts` (#810), the job `#/job/<key>` is
   `job/page.ts` (#816), Time is `time/page.ts` (#827) and Settings is
   `settings/page.ts` (#830). A page that sets `crumbs` is drawn under the
-  shell's breadcrumb. A new screen adds a folder and does not edit this
+  shell's breadcrumb (`TfCrumbs.svelte`). A new screen adds a folder and does not edit this
   file. What stays here is the shell's own:
 
   - **A bare `#/job`** with no job opened yet says how to open one. Job has no
@@ -20,7 +20,8 @@
 <script lang="ts">
   import type { TfPageContext } from "./page-entry";
   import { pageFor } from "./pages";
-  import { jobHash, SECTION_NAME } from "./route";
+  import { SECTION_NAME } from "./route";
+  import TfCrumbs from "./TfCrumbs.svelte";
 
   /** Everything the shell hands a page; see `page-entry.ts`. */
   let { ctx }: { ctx: TfPageContext } = $props();
@@ -31,20 +32,10 @@
   const page = $derived(pageFor(route));
 </script>
 
-{#snippet crumbs(name: string)}
-  <nav class="tf-crumbs" aria-label="Breadcrumb">
-    {#if job !== null}
-      <a class="tf-jobchip tf-card" href={jobHash(job)}>{job}</a><span class="tf-sep">›</span>
-    {/if}
-    <strong>{name}</strong>
-    <span class="tf-esc">{job !== null ? `Back to ${job}` : "Back"} <kbd>Esc</kbd></span>
-  </nav>
-{/snippet}
-
 {#if page && page.crumbs && route.view === "full"}
   {@const Page = page.component}
   <div class="tf-full">
-    {@render crumbs(SECTION_NAME[route.section])}
+    <TfCrumbs {job} name={SECTION_NAME[route.section]} />
     <Page {...page.props(ctx)} />
   </div>
 {:else if page}
@@ -66,7 +57,7 @@
 {:else if route.view === "full"}
   {@const name = SECTION_NAME[route.section]}
   <div class="tf-full">
-    {@render crumbs(name)}
+    <TfCrumbs {job} {name} />
     <header class="tf-fhead">
       <div><h1>{name}</h1></div>
     </header>

@@ -261,3 +261,33 @@ test("a source action the source draws disabled says why and opens nothing", asy
   flushSync();
   expect(document.querySelector(".tf-dialog")).toBeNull();
 });
+
+test("opened from a job, the breadcrumb starts at the job's key, then the kind's label, with Back Esc (#1408)", async () => {
+  await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(SURVEY_VIEW) }, ID, "PAY-231");
+
+  const crumbs = target.querySelector('nav[aria-label="Breadcrumb"]')!;
+  expect(crumbs.querySelector(".tf-jobchip")?.textContent).toBe("PAY-231");
+  expect(crumbs.querySelector(".tf-jobchip")?.getAttribute("href")).toBe("#/job/PAY-231");
+  expect(crumbs.querySelector("strong")?.textContent).toBe("Survey");
+  expect(crumbs.querySelector(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back to PAY-231 Esc");
+});
+
+test("with no job, the breadcrumb starts at the kind's label; the item's title stays in the header (#1408)", async () => {
+  await open({ getEntity: () => Promise.resolve(detail()), entityView: () => Promise.resolve(SURVEY_VIEW) });
+
+  const crumbs = target.querySelector('nav[aria-label="Breadcrumb"]')!;
+  expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
+  expect(crumbs.querySelector("strong")?.textContent).toBe("Survey");
+  expect(crumbs.querySelector(".tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back Esc");
+  expect(crumbs.textContent).not.toContain("Quay crane 4 inspection");
+  expect(target.querySelector("h1")?.textContent).toBe("Quay crane 4 inspection");
+});
+
+test("an item the mirror cannot read still draws the breadcrumb, named for an item", async () => {
+  await open({
+    getEntity: () => Promise.reject({ code: "not_found", message: "surveys:gone is not in the mirror", source_id: null }),
+    entityView: () => Promise.resolve(null),
+  }, "surveys:gone");
+
+  expect(target.querySelector('nav[aria-label="Breadcrumb"] strong')?.textContent).toBe("Item");
+});

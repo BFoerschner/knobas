@@ -41,9 +41,21 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import { actionName } from "../../detail/view/actions";
+  import TfCrumbs from "../TfCrumbs.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
 
-  let { id, ready, ports = BRIDGE }: { id: string; ready: boolean; ports?: ItemPorts } = $props();
+  let {
+    id,
+    ready,
+    job,
+    ports = BRIDGE,
+  }: {
+    id: string;
+    ready: boolean;
+    /** The job the reader was last in, which the breadcrumb starts at (R-1.6). */
+    job: string | null;
+    ports?: ItemPorts;
+  } = $props();
 
   let detail = $state<EntityDetail | null>(null);
   let failed = $state<string | null>(null);
@@ -161,6 +173,12 @@
 {/snippet}
 
 <div class="tf-full">
+  <!-- The breadcrumb names the kind (#1408): the title is the header's. -->
+  {#if failed !== null}
+    <TfCrumbs {job} name="Item" />
+  {:else if detail !== null}
+    <TfCrumbs {job} name={kindLabel} />
+  {/if}
   {#if failed !== null}
     <div class="tf-empty"><p class="tf-cfail">Could not read {id}: {failed}</p></div>
   {:else if detail !== null}
