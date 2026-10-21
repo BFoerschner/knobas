@@ -114,9 +114,11 @@
     jobPorts?: JobPorts;
     /**
      * Dialogs drawn in this shell's tokens, inside `.tf`: the worklog draft
-     * (#826). Each registers itself on `layers` so `Esc` closes it.
+     * (#826). Each registers itself on `layers` so `Esc` closes it. It is given
+     * the sources' run statuses the shell already holds (#1581), so the launcher
+     * reads no second copy.
      */
-    dialogs?: Snippet;
+    dialogs?: Snippet<[SyncRow[]]>;
     /** Open the worklog draft for a ticket and day (the Time view's *Log…*). */
     onlog?: (entityId: string, day: string) => void;
     /** Bumped by `App.svelte` when a draft or a dialog changed a day's blocks. */
@@ -467,7 +469,7 @@
     />
   </main>
   <TfStatusBar {readings} pending={queue.counts.pending} decisions={decisionsIn(queue.counts)} onqueue={openWriteQueue} />
-  {@render dialogs?.()}
+  {@render dialogs?.(sync)}
   {#if writeQueuePanel.open}
     <WriteQueue {queue} {now} {layers} onclose={() => (writeQueuePanel.open = false)} />
   {/if}

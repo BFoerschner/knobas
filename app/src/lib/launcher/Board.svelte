@@ -22,10 +22,11 @@
   import type { LauncherHome } from "../ipc";
   import { failed, sentence, when } from "../tf/inbox/inbox";
   import { hm } from "../tf/time/day-view";
-  import type { CredentialHealth } from "../ipc/sources";
+  import type { CredentialHealth, SourceSyncStatus } from "../ipc/sources";
   import { isActionable, type HealthPhase } from "../shell/health.svelte";
   import { sourceMonogram } from "../shell/monogram";
   import { ago } from "../shell/time";
+  import { sourceState } from "../tf/settings/settings";
   import { sharesKey } from "./format";
   import Row from "./Row.svelte";
   import type { LauncherRow } from "./rows";
@@ -34,6 +35,7 @@
     home,
     inboxCount = 0,
     sources,
+    runs = [],
     reading: readingProp,
     rows,
     selected,
@@ -73,6 +75,12 @@
      * (#1420); nothing on the board reads `home.sources`.
      */
     sources: CredentialHealth[];
+    /**
+     * Each source's last run (#1581). A source whose runs keep ending in an
+     * error reads as the source page reads it, in the warn tone. Omitted, the
+     * strip is credential health alone.
+     */
+    runs?: SourceSyncStatus[];
     rows: LauncherRow[];
     selected: number;
     /**
@@ -157,21 +165,38 @@
     armed !== null && home.smart_lists[selected]?.id === armed ? armed : null,
   );
 
-  /** One line per source: what it is, and whether knobas can still read it. */
+  /** One line per source: what it is, whether knobas can still read it, and whether its last run failed. */
   const strip = $derived(
-    sources.map((source) => ({
-      id: source.source_id,
-      monogram: sourceMonogram(source.source_id),
-      // `shell/health.svelte` owns the reading of a health state, so this
-      // strip and a result row's badge cannot come to different conclusions
-      // about the same source.
-      failing: isActionable(source.state),
-      note: isActionable(source.state)
-        ? (source.detail ?? source.state)
-        : source.checked_at
-          ? `checked ${ago(source.checked_at, now)}`
-          : "not checked yet",
-    })),
+    sources.map((source) => {
+      const actionable = isActionable(source.state);
+      // The source page's own reading (`sourceState`), so a run that ended in
+      // an error says here what it says there (#1581). The board knows no more
+      // of the source than its health and its last run: `enabled` is assumed,
+      // and a role it did not draw is the page's to say.
+      const run = sourceState(
+        { enabled: true, last_run: null, role_misses: [], auth_kind: "Pat" },
+        source,
+        runs.find((row) => row.source_id === source.source_id) ?? null,
+        now,
+      );
+      const lastRunFailed = !actionable && run.tone === "warn";
+      return {
+        id: source.source_id,
+        monogram: sourceMonogram(source.source_id),
+        // `shell/health.svelte` owns the reading of a health state, so this
+        // strip and a result row's badge cannot come to different conclusions
+        // about the same source.
+        failing: actionable,
+        warning: lastRunFailed,
+        note: actionable
+          ? (source.detail ?? source.state)
+          : lastRunFailed
+            ? run.text
+            : source.checked_at
+              ? `checked ${ago(source.checked_at, now)}`
+              : "not checked yet",
+      };
+    }),
   );
 </script>
 
@@ -343,7 +368,7 @@
 {:else}
   <div class="tf-ln-strip">
     {#each strip as source (source.id)}
-      <span class="tf-ln-src" class:tf-ln-fail={source.failing}>
+      <span class="tf-ln-src" class:tf-ln-fail={source.failing} class:tf-ln-warn={source.warning}>
         <span class="tf-ln-mg" title={source.id} aria-label={source.id}>{source.monogram}</span>
         <span class="tf-ln-sid">{source.id}</span>
         <span class="tf-ln-note">{source.note}</span>

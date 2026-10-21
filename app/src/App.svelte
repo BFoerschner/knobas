@@ -346,7 +346,7 @@
     {timeRevision}
     ontimechanged={() => (timeRevision += 1)}
   >
-    {#snippet dialogs()}
+    {#snippet dialogs(runs)}
       {#if drafts.open}
         {#key drafts.open}
           <TfWorklogDraft
@@ -384,6 +384,7 @@
       <Launcher
         bind:open={launcherOpen}
         sources={health.all}
+        {runs}
         sourcesRead={{ phase: health.phase, error: health.error, retry: () => void health.reseed() }}
         inbox={{ count: inbox.count, items: inbox.stream.map((entry) => entry.item) }}
         today={todayTime}

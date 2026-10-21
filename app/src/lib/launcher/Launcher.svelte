@@ -61,7 +61,7 @@
     resolveUrl as defaultResolveUrl,
     search as defaultSearch,
   } from "../ipc";
-  import type { CredentialHealth } from "../ipc/sources";
+  import type { CredentialHealth, SourceSyncStatus } from "../ipc/sources";
   import type { HealthPhase } from "../shell/health.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import { entityAddress } from "../tf/address";
@@ -84,6 +84,7 @@
   let {
     open = $bindable(false),
     sources,
+    runs = [],
     sourcesRead,
     inbox,
     today,
@@ -107,6 +108,11 @@
      * `health` below.
      */
     sources?: CredentialHealth[] | undefined;
+    /**
+     * Each source's last run, from the shell's `sync:state` reading (#1581):
+     * what the board's strip reads beside credential health.
+     */
+    runs?: SourceSyncStatus[];
     /**
      * How the shell's read of `sources` stands (#746). Omitted, the list is
      * taken as read. An empty `sources` is "none configured" only when `phase`
@@ -817,6 +823,7 @@
               home={session.home}
               inboxCount={inbox?.count ?? 0}
               sources={health}
+              {runs}
               reading={sourcesRead}
               rows={session.rows}
               selected={session.selected}
