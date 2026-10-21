@@ -10780,3 +10780,7 @@ Björn delegated four picks at triage (2026-10-21); two more came up while build
 - **Where the carried tests live.** *Fork:* keep `SchemaForm.test.svelte.ts` under `sources/`, or move it beside the component. *Ruling:* `git mv` to `tf/settings/TfSchemaForm.test.svelte.ts`. *Reasoning:* a test file sits beside the component it pins. *Reversing:* low.
 - **Selectors.** *Ruling:* fields are found by the control id the form draws (`<idPrefix>-<key>`), help and error by `#<id>-help` / `#<id>-err`, since `TfSchemaForm` has no `data-field`. The label test runs in both layouts (`grid`, `rows`) because the rows layout draws no `.form` grid. The two-column-grid comment went with `.form`.
 - **Unwitnessed direction.** `choose()` merging the old config into the new one survives as a mutant: `validate` builds the config from the schema's fields, so a stray key never reaches the request. Recorded, as the old AddSource test recorded it. The post-save `secret = ""` has no witness either; the dialog closes on save.
+
+## #1556: For you, narrowed to a space, matches the source too (Sonnet implementer, 2026-10-21)
+
+- **How to read the item's source.** *Fork:* `spaceOfPage` on each item, or the `<source>:` prefix of `DocForYou.entity_id`. *Ruling:* the prefix. `for_you` items carry no source field and a page may be absent from the tree's space lists; the prefix is the contract's `<source>:<id>` form and needs no IPC change. Reversing costs one line.

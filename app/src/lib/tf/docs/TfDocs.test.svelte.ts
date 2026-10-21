@@ -496,6 +496,29 @@ test("For you lists the pages that mention me, with who asked", async () => {
   expect(forYou.querySelector("a")?.textContent).toBe("Ops homePriya mentioned you");
 });
 
+test("For you, narrowed to a space, leaves out another source's pages with the same key (#1556)", async () => {
+  const tree: DocsTree = {
+    ...TREE,
+    spaces: [
+      ...TREE.spaces,
+      { source_id: "notes", key: "OPS", name: "Notes ops", pages: [{ entity_id: "notes:7", title: "Notes rota", parent: null }] },
+    ],
+    for_you: [
+      { entity_id: "confluence:1", title: "Ops home", space_key: "OPS", by_name: "Priya Nair" },
+      { entity_id: "notes:7", title: "Notes rota", space_key: "OPS", by_name: "Mara" },
+    ],
+  };
+  await draw(["confluence:2"], ports({ docsTree: vi.fn(async () => tree) }));
+  const titles = () => [...target.querySelectorAll(".tf-dl-for a")].map((a) => a.textContent);
+  expect(titles()).toEqual(["Ops homePriya mentioned you"]);
+
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  select.value = "notes/OPS";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(titles()).toEqual(["Notes rotaMara mentioned you"]);
+});
+
 // ---- *This job* (#863, R-2.5, R-2.8) ----
 
 /** PAY-231 reaches *On-call handbook* itself, and *Eng home* through PAY-230, its parent. */

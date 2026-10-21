@@ -84,6 +84,7 @@
     blockWords,
     firstPage,
     firstName,
+    forYouIn,
     forYouWhy,
     inlineWords,
     jobPageGroups,
@@ -290,9 +291,7 @@
   const parent = $derived(page?.ancestors.at(-1));
   const current = $derived(page?.entity_id ?? target);
   const searching = $derived(query.trim() !== "");
-  const forYou = $derived(
-    (tree?.for_you ?? []).filter((f) => shownSpace === undefined || f.space_key === shownSpace.key),
-  );
+  const forYou = $derived(forYouIn(tree?.for_you ?? [], shownSpace));
 
   // Every keystroke searches; an answer to an older keystroke is dropped.
   let asked = 0;
