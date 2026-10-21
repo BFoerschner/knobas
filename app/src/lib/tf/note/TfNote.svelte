@@ -32,6 +32,9 @@
     back: () => void;
   }
 
+  /** Where notes are drawn while they hide, and where a delete from the first address lands (D10). */
+  const NOTES_SETTINGS = "#/settings/notes";
+
   /** Called through, not bound at load: a test's mock of the bridge may not carry every command. */
   const BRIDGE: NotePorts = {
     getNote: (noteId) => getNote(noteId),
@@ -86,7 +89,7 @@
       // A setting that cannot be read does not hide a note the reader asked for.
       const shown = await ports.notesShown().catch(() => true);
       if (!live) return;
-      if (!shown) return ports.replace("#/settings/notes");
+      if (!shown) return ports.replace(NOTES_SETTINGS);
       let note: NoteDetail;
       try {
         note = await ports.getNote(noteId);
@@ -95,8 +98,8 @@
         return;
       }
       if (!live) return;
-      const day = protocolDayOf(note.note.title);
-      if (day !== null) return ports.replace(`#/time/standup/${day}`);
+      // A protocol opens where `itemHash` sends it: Time › Standup at its date.
+      if (protocolDayOf(note.note.title) !== null) return ports.replace(entityAddress("note", note.note.id, note.note.title));
       read = { note };
     })();
     return () => {
@@ -119,7 +122,7 @@
     confirming = false;
     push({ text: `Deleted ${note.note.title}` });
     if (ports.canGoBack()) ports.back();
-    else ports.replace("#/settings/notes");
+    else ports.replace(NOTES_SETTINGS);
   }
 
   /** A reading as a row starts: "captured in" is "Captured in". */
@@ -162,7 +165,7 @@
       </div>
       {#if detail.links.length > 0}
         <h2 class="tf-cgroup-h">Links</h2>
-        <ul class="tf-item-rows tf-note-links">
+        <ul class="tf-item-rows" aria-label="Links">
           {#each detail.links as entry (entry.link.id)}
             {@const other = entry.other}
             <li>

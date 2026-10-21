@@ -121,7 +121,7 @@ test("the page draws the title, the body as it was typed, and each resolved ref 
 test("the note's links are rows that open their other end, a context's row only named", async () => {
   open();
   await settle();
-  const rows = [...target.querySelectorAll(".tf-note-links li")].map((row) => [
+  const rows = [...target.querySelectorAll("ul[aria-label='Links'] li")].map((row) => [
     row.textContent?.replace(/\s+/g, " ").trim(),
     row.querySelector("a")?.getAttribute("href") ?? null,
   ]);

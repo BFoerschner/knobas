@@ -24,7 +24,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - A route not built yet draws an empty page that says so (the Job page before #816; the Map and Conversation tabs "not built yet", until #874 and #819). (#810, PR #895; #816, PR #898)
 - The job's address is `#/job/<key>`; an ad-hoc context is `#/job/<ctx id>`. An address holding an entity id (`#/job/jira:PAY-231`) is read as one. (#810, PR #895; #816, PR #898)
 - A ticket view's address is `#/tickets/<id>`, the id a slug of its name made when it is first saved and kept through a rename; `#/tickets` is *All tickets*. (#812)
-- The Time view's addresses are `#/time` and `#/time/<date>` for the Day, and `#/time/week` and `#/time/week/<date>` for the Week containing that date. (#827; #828)
+- The Time view's addresses are `#/time` and `#/time/<date>` for the Day, and `#/time/week` and `#/time/week/<date>` for the Week containing that date, and `#/time/standup` and `#/time/standup/<date>` for that day's Standup, which is where a protocol note opens. (#827; #828; #1504)
 - A Code row opens `#/pr/<entity id>`, `#/repo/<entity id>`, `#/branch/<entity id>` or `#/commit/<entity id>`. The address carries the entity id, because a pull request's number is unique only inside its repository. `branch` and `commit` light the Code nav. (#816, PR #898)
 - Monitors' addresses are `#/monitors` (*Monitors*) and `#/monitors/unmonitored` (*Assets nothing watches*), two tabs of one page. (#864)
 - Code's addresses are `#/code` and `#/code/repos` (*Repositories*) and `#/code/prs` (*Pull requests*); *New pull request* opens `#/repo/<repo entity id>/compare/<branch>`. (#837)
@@ -36,6 +36,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - Dependencies opens in a saved view (`dep_views`): the top bar's default, its draft held for the session in `tf/deps/views.svelte.ts`; the reader's gestures (Find, the trace, folds opened by hand) hold for the page. (#873)
 - A source's settings page is `#/settings/source/<id>` (`sourceHash` in `tf/settings/settings.ts`); `#/settings/source/<id>/add/<list field>/<value>` is that page with the value added to a list field of its config, unsaved, for the reader to save (a Jira view's *Sync WEB too*). (#879)
 - An item whose kind no surface draws (a custom role's, ADR-0029) opens `#/item/<entity id>` (`tf/item/`), which draws the source's block view under the shell's breadcrumb (`tf/TfCrumbs.svelte`, named by the kind's label, #1408), draws the view's actions as its toolbar and an `actions` block in place through `tf/TfEntityAction.svelte` (#1407), and lights no nav entry; `itemHash` sends every such kind there. (#1201)
+- A note opens `#/note/<note id>` (`tf/note/`), a read-only page that lights no nav entry. While notes are hidden (D10) the page replaces its address with `#/settings/notes`, and a note titled by the standup protocol rule (`protocolDayOf` in `standup/protocol.ts`) opens `#/time/standup/<date>` instead, through `itemHash` when the producer holds the title and through the page when it holds only the id. (#1504)
 - Link sets' addresses are `#/sets` (the list) and `#/sets/<set id>` (its editor), the id a slug of the name the set was first saved under, kept through a rename, as a ticket view's. (#866)
 - Every job section is `tf/job/TfSection.svelte` reading `list_entities` with `reach: <ticket id>`; a row from the parent (or, from TF5, a link set) carries a `.tf-via` label naming it ("Parent PAY-231"). (#817) A row from a link set is labelled with the set's name, through `originLabel` (`tf/job/job.ts`). (#866)
 
@@ -90,6 +91,8 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 
 - A write that no command can take back (a dismissal, an accepted proposal) is held for the toast's 6.5 s and then sent; the toast's *Undo* cancels it, and the toast on screen is the sign a write is still held. Quitting, closing or reloading the window inside those 6.5 s loses the decision: nothing is written, and the proposal is back next time. Moving to another view does not; the write still goes. (#835)
 - A write a page queues is drawn at once where it lands (a branch *queued*, a branch *delete queued*, a file's commit as a banner), held for the session as module `$state` and dropped once the source's read shows it; never stored. The toast reads `Queued: <what>. Sends with the next sync.` with *Show queue*. (#839, #845)
+
+- Deleting a note is the one irreversible write sent at once: a confirm dialog asks first, and the toast "Deleted <title>" offers no *Undo*, because the `deleted` activity line is final (#1464's ruling, #1504).
 
 ## Checkouts
 

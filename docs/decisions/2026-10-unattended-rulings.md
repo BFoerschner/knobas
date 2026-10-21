@@ -9501,6 +9501,11 @@ sources hold) too.
 - **`#/time/standup/<date>` reads that day's digest as well as its protocol,** and the Time header
   names the day. A segment that is not a date is today's Standup. The tab is keyed by the date, so
   another date is a fresh mount. *Reversing:* low.
+- **Delete is sent at once, not held.** *Fork:* the shell conventions' *Writes and undo* hold an
+  irreversible write for the toast's 6.5 s with *Undo*; the ticket asks for a confirm and a toast
+  with no undo. *Ruling:* the ticket's, recorded as a line under *Writes and undo*. *Reasoning:*
+  #1464's ruling makes the `deleted` activity line final, and the confirm is the reader's chance
+  to stop. *Reversing:* hold the call behind the toast as `TfDay`'s delete does.
 - **Fixture.** `note:retry-backoff` is seeded so the page has a note under `?fake-notes-shown`,
   and `delete_note` is answered (it was out of the walk's reach while notes were hidden).
   *Reversing:* fixture only.
