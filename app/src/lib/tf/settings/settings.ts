@@ -203,6 +203,16 @@ export function intervalWords(secs: number): string {
 export const EXPIRY_CLASS: Record<ExpiryNote["tone"], string> = { plain: "", amber: "tf-stg-warnt", fail: "tf-stg-errt" };
 
 /**
+ * The line under *Fetch everything again* on a source's page. A backfill runs
+ * with no stored position and keeps the one it ends on, so besides reading
+ * fields a knobas update added it is the way out of a sync that stopped on a
+ * position the server no longer has: TeamCity's refusal of a deleted newest
+ * build names it (#1477). There is no separate cursor reset.
+ */
+export const BACKFILL_HINT =
+  "Reads everything again and forgets where the last sync stopped: after a knobas update reads more fields, or when a sync stopped and names Backfill. Takes a few minutes; the app stays usable.";
+
+/**
  * The schedules *Every* can offer (#1188). A source is offered the steps at or
  * above its adapter's floor (`SourceDescriptor.min_sync_interval_secs`), which
  * is also what the backend refuses under.
