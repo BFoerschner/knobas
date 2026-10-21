@@ -9559,3 +9559,12 @@ sources hold) too.
   own text is ` · branch`. *Reasoning:* the whitespace between the value and the detail spans
   is in the DOM, so the option's `textContent` reads `branch · branch` before the fix too; the flex
   row just does not draw it. The detail span's text is what is drawn. *Reversing:* one selector.
+
+## Merge-manager, PR #1536 (Sonnet, 2026-10-21)
+
+- **A red pin on main.** *Fork:* leave `testenv/desktop-witness-test.sh` failing (`witness-unit`,
+  "a note still opens Settings > Notes") and report, or repoint the pin. *Ruling:* repoint it.
+  *Reasoning:* #1504 (ce70c4fb) moved the constant from `tf/job/job.ts` (`NOTES_HASH`) to
+  `tf/note/TfNote.svelte` (`NOTES_SETTINGS`), same value, and every gate after it fails on
+  `scripts`; the guarantee the pin states (a note opens Settings > Notes) is unchanged.
+  *Reversing:* revert one line.

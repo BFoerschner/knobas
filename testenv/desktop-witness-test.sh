@@ -752,7 +752,7 @@ pin_label $tf/tickets/TicketPreview.svelte 'href={address}>{action.label}</a>' \
     "the ticket preview's button is still a link to the job"
 pin_label ../fixtures/tidewater/work.json '"summary": "Retry failed SEPA payouts"' \
     "the demo's PAY-231 still has the summary the capture driver waits for"
-pin_label $tf/job/job.ts 'const NOTES_HASH = "#/settings/notes"' \
+pin_label $tf/note/TfNote.svelte 'const NOTES_SETTINGS = "#/settings/notes"' \
     "a note still opens Settings › Notes and capture, which is where the driver looks for it"
 
 # --- the helper's own two answers -------------------------------------------
