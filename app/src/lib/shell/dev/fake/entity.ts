@@ -6,6 +6,7 @@ import type { LinkEntry, LinkRow } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 import { FAKE_ACTIVITY } from "./activity";
 import { CORPUS, mirrorRow } from "./corpus";
+import { FIXTURE_SOURCES } from "./sources";
 import { runView } from "./builds";
 import { pullView } from "./views/pulls";
 import { repoView } from "./views/repos";
@@ -85,6 +86,17 @@ function linksOf(id: string): LinkEntry[] {
     .reverse();
 }
 
+/**
+ * The source a row came from, as `get_entity` names it: the fixture's source
+ * of that id (#1476, so Jira's PAY-231 says *Tidewater Jira*), else the mock.
+ */
+function sourceRef(id: string) {
+  const source = FIXTURE_SOURCES.find((candidate) => candidate.id === id);
+  return source
+    ? { id: source.id, display_name: source.display_name, adapter_kind: source.adapter_kind, enabled: true }
+    : { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true };
+}
+
 /** `get_entity`, including the two refusals the detail view branches on. */
 function getEntity(args: Record<string, unknown>) {
   const id = String(args["entityId"] ?? "");
@@ -100,7 +112,7 @@ function getEntity(args: Record<string, unknown>) {
     // A ticket's path is its parent chain, as Jira declares it: the flat
     // `epic` here, so *Save as a link set…* (#869) offers the epic.
     row: entry.kind === "ticket" && row.path === null ? { ...row, path: fakeText(entry.payload["epic"]) } : row,
-    source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true },
+    source: sourceRef(row.source_id),
     // Null, where the real command now resolves the adapter's KindInfo from
     // the registry. Harmless divergence: the fallback path draws the same
     // words — knobas' own vocabulary (`kinds.ts` layer 2) matches the mock's

@@ -1188,14 +1188,21 @@ test("the fixture's Jira credential expires inside the amber window from today, 
 
 test("the fixture's Jira source holds PAY-231 as the mock does, each a ticket under its own source's name (#1476)", () => {
   const handlers = demoHandlers();
-  type Detail = { row: { entity_id: string; kind: string; source_id: string } };
-  const both = ["mock:PAY-231", "jira:PAY-231"].map((entityId) => (handlers["get_entity"]!({ entityId }) as Detail).row);
-  expect(both.map((row) => [row.entity_id, row.kind, row.source_id])).toEqual([
-    ["mock:PAY-231", "ticket", "mock"],
-    ["jira:PAY-231", "ticket", "jira"],
+  type Detail = { row: { entity_id: string; kind: string; source_id: string }; source: { display_name: string } };
+  const both = ["mock:PAY-231", "jira:PAY-231"].map((entityId) => handlers["get_entity"]!({ entityId }) as Detail);
+  expect(both.map(({ row, source }) => [row.entity_id, row.kind, row.source_id, source.display_name])).toEqual([
+    ["mock:PAY-231", "ticket", "mock", "Tidewater (mock)"],
+    ["jira:PAY-231", "ticket", "jira", "Tidewater Jira"],
   ]);
   const names = (handlers["list_sources"]!({}) as { id: string; display_name: string }[])
     .filter((source) => source.id === "mock" || source.id === "jira")
     .map((source) => source.display_name);
   expect(new Set(names).size).toBe(2);
+});
+
+test("the fixture's search answers a ticket key with every source's ticket of it, and refuses other words as before (#1476)", () => {
+  const handlers = demoHandlers();
+  const search = (raw: string) => handlers["search"]!({ query: { raw, filters: {} } }) as { groups: { hits: { entity_id: string }[] }[] };
+  expect(search("pay-231").groups[0]!.hits.map((hit) => hit.entity_id)).toEqual(["mock:PAY-231", "jira:PAY-231"]);
+  expect(() => search("sepa")).toThrow();
 });
