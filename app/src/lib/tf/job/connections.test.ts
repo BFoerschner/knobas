@@ -2,6 +2,9 @@
 import { expect, test, vi } from "vitest";
 
 import { kindRegistry } from "../../shell/kind-registry.svelte";
+import { page as codeRowPage } from "../code-row/page";
+import { pageFor } from "../pages";
+import { parseTfHash } from "../route";
 import { groupsOf, hiddenOf, sectionOf, viaLabel } from "./connections";
 
 test("a set's reason names its rule in prototype-6's words", () => {
@@ -38,4 +41,17 @@ test("a run of a kind the CI adapters claim is labelled Builds, as a build is (#
   } finally {
     spy.mockRestore();
   }
+});
+
+test("a set's branch or commit opens its own address, which the repository page's redirect draws (#1440)", () => {
+  const member = (entity_id: string, entity_kind: string) => ({ kind: "repo" as const, entity_id, entity_kind, title: entity_id, hidden: false });
+  const set = {
+    id: "a",
+    name: "a",
+    via: { kind: "manual" as const, value: "jira:PAY-1", title: null },
+    members: [member("gitea:x/pay@refs/heads/main", "branch"), member("gitea:x/pay@9f2c1ab", "commit")],
+  };
+  const hrefs = groupsOf({ sets: [set], parent: null })[0]!.rows.map((row) => row.href!);
+  expect(hrefs).toEqual(["#/branch/gitea%3Ax%2Fpay%40refs%2Fheads%2Fmain", "#/commit/gitea%3Ax%2Fpay%409f2c1ab"]);
+  for (const href of hrefs) expect(pageFor(parseTfHash(href)), href).toBe(codeRowPage);
 });

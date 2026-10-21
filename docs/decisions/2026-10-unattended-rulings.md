@@ -9693,3 +9693,30 @@ unchanged.
   a source action's key (`source:<id>`) by its prefix in `heldBy`.
 - **A queued hold names itself before the source's reason.** When both apply, the title is the chip
   (`merge queued`), since it is the newer fact. *Reversing:* swap the `??` order.
+
+## #1440: a branch or commit row opens its repository page (Opus implementer, 2026-10-21)
+
+- **How a branch or commit finds its repository** (delegated by Björn at triage). *Fork:* (a) parse
+  the id in the shell, (b) keep `#/branch/<id>` and `#/commit/<id>` and give them a page that reads
+  the entity's declared parent and redirects, (c) widen `itemHash` to take the row's parent.
+  *Ruling:* (b). `tf/code-row/` reads `get_entity`, then the repositories of the entity's own
+  source (`list_entities`, as the pull request page reads its header's), takes the one whose title
+  is the row's `path` (`repoOfRow` in `tf/repo/repo.ts`, ADR-0018), and replaces the address with
+  the Branches tab (`repoHash(…, "branches")`, R-8.1) or the commit's page (`commitHash`, R-8.7).
+  *Reasoning:* no caller changes, no id parsing (ADR-0020), and the window-address callers, which
+  hold only kind and id, land right too. It costs one round trip and a frame of empty page.
+  *Reversing:* low, `itemHash` and the two heads in `route.ts`.
+- **Whether `#/branch/<id>` and `#/commit/<id>` stay valid addresses** (delegated). *Ruling:* they
+  stay, so #816's ruling on the address stands as it was written; what changes is what they draw.
+  *Reversing:* low.
+- **What a miss draws.** A branch or commit with no declared parent (ADR-0007), or one naming a
+  repository the mirror does not hold in that source, draws *<title> is not under a repository in
+  the mirror.* with *Go to Code*, under the Code breadcrumb. An id the mirror does not hold reads
+  the shell's *Nothing lives at …*, as the note page does. *Reversing:* low.
+- **The two heads are the foreground.** *Ruling:* `branch` and `commit` join `ENTITY_HEADS`, so the
+  entity is in front while its page reads or names the miss; the redirect then puts the repository
+  in front. *Reasoning:* `foreground.ts` admits a head once a page draws it, and the miss page names
+  that entity. *Reversing:* low.
+- **Fixture.** The fake's branch `feat/PAY-231-idempotent-retry` and commit `mock:9f2c1ab` gain the
+  parent path Gitea declares (`tidewater/payout-service`), so `?fake-ipc` witnesses the redirect.
+  *Reversing:* fixture only.

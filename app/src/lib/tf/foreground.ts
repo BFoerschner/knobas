@@ -8,8 +8,9 @@
  * address change and never passes through a gap while a page reads.
  *
  * - **The open detail** is an entity page: `#/pr/<id>`, `#/repo/<id>`,
- *   `#/build/…<run>`, `#/page/<id>`. `#/branch/<id>` and `#/commit/<id>` draw
- *   only "not built yet", so they are nothing until a page draws them. A tab
+ *   `#/build/…<run>`, `#/page/<id>`, and `#/branch/<id>` and `#/commit/<id>`,
+ *   which send the reader on to the repository page that draws them (#1440)
+ *   and name the entity where its repository is unknown. A tab
  *   or a place inside the page (`#/pr/<id>/files`, `#/repo/<id>/commits/<sha>`,
  *   `#/build/<pipeline>/<run>/tests`, `#/page/<id>/3`) is the same entity, so
  *   moving between the tabs of one page keeps one run of observations.
@@ -27,12 +28,8 @@ import type { EntityTarget } from "../ipc/time";
 import { canBeTarget } from "../shell/timer";
 import type { TfRoute } from "./route";
 
-/**
- * First segments whose first id is the entity the page draws. A head joins
- * only when a page draws it: `foreground.test.ts` fails once `#/branch` or
- * `#/commit` gets one.
- */
-const ENTITY_HEADS = new Set(["pr", "repo", "page", "asset"]);
+/** First segments whose first id is the entity the page draws. A head joins only when a page draws it. */
+const ENTITY_HEADS = new Set(["pr", "repo", "page", "asset", "branch", "commit"]);
 
 /** The entity id an address's page is the detail of, or `null`. */
 function detailOf(route: TfRoute): string | null {

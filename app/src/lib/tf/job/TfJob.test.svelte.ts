@@ -23,9 +23,12 @@ import type { CredentialHealth, SourceSyncStatus, SourceDescriptor, WriteOpPaylo
 import type { RunningTimer, Week } from "../../ipc/time";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
+import { page as codeRowPage } from "../code-row/page";
 import { forgetFilters, sessionFilter } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
 import { createApps } from "../openin/apps.svelte";
+import { pageFor } from "../pages";
+import { parseTfHash } from "../route";
 import { aroundLines } from "../tickets/tickets";
 import type { JobPorts } from "./ports";
 import { createKindRegistry } from "../../shell/kind-registry.svelte";
@@ -494,6 +497,8 @@ test("the Code section rolls up repos and open PRs, sorts what asks for you firs
     `#/branch/${encodeURIComponent(BRANCH.entity_id)}`,
     `#/repo/${encodeURIComponent(REPO.entity_id)}`,
   ]);
+  // The branch's address is the repository page's redirect to its Branches tab (#1440).
+  expect(pageFor(parseTfHash(rows[2]!.getAttribute("href")!))).toBe(codeRowPage);
   expect(section.querySelector("a.tf-open")?.getAttribute("href")).toBe("#/code");
 });
 

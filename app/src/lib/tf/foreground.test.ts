@@ -1,7 +1,6 @@
 import { expect, test } from "vitest";
 
 import { foregroundOf } from "./foreground";
-import { pageFor } from "./pages";
 import { parseTfHash } from "./route";
 
 const JOB = "jira:PAY-231";
@@ -17,12 +16,9 @@ test("an entity page puts its entity in front, before the job", () => {
   expect(at("#/asset/asset%3Apayouts-api", JOB)).toBe("asset:payouts-api");
 });
 
-test("a branch or a commit draws only 'not built yet', so it is nothing until a page draws it", () => {
-  for (const hash of ["#/branch/gitea%3Aacme%2Fpayouts%40main", "#/commit/gitea%3Aabc123"]) {
-    // When this fails, the head has a page: add it to `ENTITY_HEADS` and flip the line below.
-    expect(pageFor(parseTfHash(hash)), hash).toBeUndefined();
-    expect(at(hash), hash).toBeNull();
-  }
+test("a branch or a commit is in front while its page sends the reader to its repository (#1440)", () => {
+  expect(at("#/branch/gitea%3Aacme%2Fpayouts%40main", JOB)).toBe("gitea:acme/payouts@main");
+  expect(at("#/commit/gitea%3Aabc123", JOB)).toBe("gitea:abc123");
 });
 
 test("a run is the run, whether the address names its pipeline yet or not", () => {

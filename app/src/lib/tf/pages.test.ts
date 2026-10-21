@@ -7,6 +7,7 @@ import { expect, test } from "vitest";
 import { page as buildsPage } from "./builds/page";
 import { page as assetTreePage } from "./asset-tree/page";
 import { page as codePage } from "./code/page";
+import { page as codeRowPage } from "./code-row/page";
 import { page as depsPage } from "./deps/page";
 import { page as inboxPage } from "./inbox/page";
 import { page as jobPage } from "./job/page";
@@ -33,6 +34,7 @@ test("the glob finds every feature's page", () => {
   expect(PAGES).toContain(codePage);
   expect(PAGES).toContain(repoPage);
   expect(PAGES).toContain(setsPage);
+  expect(PAGES).toContain(codeRowPage);
 });
 
 const ADDRESSES = [
@@ -58,6 +60,8 @@ const ADDRESSES = [
   ["#/repo/gitea%3Atidewater%2Fpayout-service/files/src/lib.rs", "repo"],
   ["#/pr/gitea%3Atidewater%2Fpayout-service%23142", "pr"],
   ["#/pr/gitea%3Atidewater%2Fpayout-service%23142/commits", "pr"],
+  ["#/branch/gitea%3Atidewater%2Fpayout-service%40refs%2Fheads%2Fmain", "code row"],
+  ["#/commit/mock%3A9f2c1ab", "code row"],
   ["#/deps", "deps"],
   ["#/deps/job/PAY-231", "deps"],
   ["#/map", "deps"],
@@ -86,6 +90,7 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
     [repoPage, "repo"],
     [prPage, "pr"],
     [setsPage, "sets"],
+    [codeRowPage, "code row"],
   ]);
   const name = found === undefined ? "shell" : (names.get(found) ?? "other");
   expect(name).toBe(expected);

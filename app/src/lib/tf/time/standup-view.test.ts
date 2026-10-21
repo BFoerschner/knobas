@@ -6,6 +6,9 @@
 import { expect, test, vi } from "vitest";
 
 import { kindRegistry } from "../../shell/kind-registry.svelte";
+import { page as codeRowPage } from "../code-row/page";
+import { pageFor } from "../pages";
+import { parseTfHash } from "../route";
 
 import type { DigestLine } from "../../ipc/entity";
 import {
@@ -119,6 +122,13 @@ test("a digest line opens its item in the new shell, and a timer label opens not
   expect(lineHash(line({ entity_id: "note:7a1", kind: "note", title: "Standup 2026-09-03" }))).toBe("#/time/standup/2026-09-03");
   expect(lineHash(line({ entity_id: "route:9a1b", kind: "route" }))).toBe("#/route/route%3A9a1b");
   expect(lineHash(line({ entity_id: null, kind: null }))).toBeNull();
+});
+
+test("a digest line's branch or commit opens its own address, which the repository page's redirect draws (#1440)", () => {
+  const branch = lineHash(line({ entity_id: "gitea:x/pay@refs/heads/main", kind: "branch" }))!;
+  const commit = lineHash(line({ entity_id: "mock:9f2c1ab", kind: "commit" }))!;
+  expect([branch, commit]).toEqual(["#/branch/gitea%3Ax%2Fpay%40refs%2Fheads%2Fmain", "#/commit/mock%3A9f2c1ab"]);
+  for (const href of [branch, commit]) expect(pageFor(parseTfHash(href)), href).toBe(codeRowPage);
 });
 
 test("a day reads as its weekday and date", () => {

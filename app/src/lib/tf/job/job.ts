@@ -287,7 +287,9 @@ export function runKindsOf(registry: Pick<KindRegistry, "frameKinds">): readonly
 /**
  * The full view a row opens (R-4.10): the item's own address in the new
  * shell, never a panel. The address carries the entity id, because a pull
- * request's number is unique only inside its repository. A kind with no view
+ * request's number is unique only inside its repository. A branch and a
+ * commit keep addresses of their own, which send the reader on to the
+ * repository page that draws them (#1440). A kind with no view
  * of its own opens the section that lists it: a Jira view its ticket view, a
  * build configuration Builds, a route Dependencies' asset tree, a note its
  * own page (`#/note/<id>`, #1504, which sends the reader to Settings › Notes
