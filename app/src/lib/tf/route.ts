@@ -151,6 +151,18 @@ export function sectionOf(route: TfRoute): Section | null {
   return null;
 }
 
+/**
+ * Whether the job in the breadcrumb is the reader's current job on `route`
+ * (#1416, #1435): a full view or an item's page opened from a job
+ * ('PAY-231 › Time'). Not Inbox or Settings, though their breadcrumb draws
+ * the chip: a guessed job writes to the wrong ticket in silence. Not Tickets,
+ * which has no breadcrumb, nor a job page, which is its own job.
+ */
+export function breadcrumbJobCounts(route: TfRoute): boolean {
+  if (route.view === "item") return true;
+  return route.view === "full" && route.section !== "inbox" && route.section !== "settings";
+}
+
 /** The address of a job, or of the bare Job page when no ticket is known. */
 export function jobHash(key: string | null): string {
   return key === null ? "#/job" : `#/job/${encodeURIComponent(key)}`;

@@ -376,6 +376,12 @@ function pressTimerKey(): void {
   flushSync();
 }
 
+/** A few macrotask turns, for the reads an address change starts (the breadcrumb job's, #1435). */
+async function turns(): Promise<void> {
+  for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+}
+
 /** The ⌘T picker, if it is up. */
 function pickerTitle(): string | null {
   const dialogs = [...target.querySelectorAll<HTMLElement>('[role="dialog"]')];
@@ -950,5 +956,41 @@ test("⌘T on a page with no job opens the picker", async () => {
   await until(() => target.querySelector(".tf") !== null, "the new shell never drew");
   pressTimerKey();
   await until(() => pickerTitle() !== null, "⌘T with no job on screen never asked");
+  expect(timerStarts).toEqual([]);
+});
+
+/**
+ * **⌘T on a view opened from a job starts on that job** (#1435, R-1.4, the
+ * #1416 reading of "the job"): 'PAY-231 › Time' has nothing in front of the
+ * reader, and the breadcrumb's job is what the timer starts on.
+ */
+test("⌘T on a view opened from a job starts the timer on the breadcrumb's job", async () => {
+  dbReady = true;
+  entityAnswer = jobTicket();
+  location.hash = "#/job/mock:PAY-231";
+  app = mount(App, { target, props: {} });
+  await until(() => target.textContent?.includes("Retry failed SEPA payouts") ?? false, "the job never drew");
+  location.hash = "#/time/2026-09-03";
+  await until(() => target.querySelector(".tf-crumbs .tf-jobchip")?.textContent === "PAY-231", "Time never drew PAY-231's crumb");
+  await turns();
+  pressTimerKey();
+  await until(() => timerStarts.length > 0, "⌘T never started a timer on the breadcrumb's job");
+  expect(timerStarts).toEqual([{ kind: "entity", entity_id: "mock:PAY-231" }]);
+  expect(pickerTitle(), "the picker opened over 'PAY-231 › Time'").toBeNull();
+  await until(() => target.querySelector(".tf-timer:not(.tf-off)")?.textContent?.includes("PAY-231") ?? false, "the chip never read PAY-231");
+});
+
+/** #1416: Inbox and Settings offer no job, though a job was opened before them. */
+test.each(["#/inbox", "#/settings"])("⌘T on %s after a job asks with the picker", async (hash) => {
+  dbReady = true;
+  entityAnswer = jobTicket();
+  location.hash = "#/job/mock:PAY-231";
+  app = mount(App, { target, props: {} });
+  await until(() => target.textContent?.includes("Retry failed SEPA payouts") ?? false, "the job never drew");
+  location.hash = hash;
+  await until(() => target.querySelector(".tf-crumbs .tf-jobchip")?.textContent === "PAY-231", `${hash} never drew PAY-231's crumb`);
+  await turns();
+  pressTimerKey();
+  await until(() => pickerTitle() !== null, `⌘T on ${hash} never asked`);
   expect(timerStarts).toEqual([]);
 });
