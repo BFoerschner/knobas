@@ -26,6 +26,7 @@ import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { page as codeRowPage } from "../code-row/page";
 import { writeQueuePanel } from "../../shell/write-queue.svelte";
+import { forgetQueued } from "../queued.svelte";
 import { forgetFilters, sessionFilter } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
 import { createApps } from "../openin/apps.svelte";
@@ -65,7 +66,9 @@ beforeEach(() => {
   document.body.appendChild(target);
 });
 
+/** What a page queued is held for the session (#1424), and each test is one. */
 afterEach(() => {
+  forgetQueued();
   health.replace([]);
   if (job) unmount(job);
   job = null;

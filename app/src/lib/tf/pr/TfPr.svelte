@@ -324,7 +324,7 @@
   let merging = $state(false);
 
   /** The comments this session queued that the conversation did not hold when it was read. */
-  const pendingComments = $derived(prId === null ? [] : queuedMarks(prId, "comment").map((mark) => mark.text));
+  const queuedComments = $derived(prId === null ? [] : queuedMarks(prId, "comment").map((mark) => mark.text));
   /** The chips of what this session queued here, beside the state: `close queued`. */
   const chips = $derived(prId === null ? [] : queuedMarks(prId).filter((mark) => mark.kind !== "comment").map((mark) => mark.text));
 
@@ -359,7 +359,7 @@
   });
 
   /** Mark a write queued as `verb`, followed under `name`. */
-  function marked(id: string, verb: string, name: string, write: QueuedWrite) {
+  function markChip(id: string, verb: string, name: string, write: QueuedWrite) {
     markQueued(id, verb, chipOf(verb), { write, base: header.state?.text ?? null, following: { name }, follower });
   }
 
@@ -580,7 +580,7 @@
                   </div>
                 </article>
               {/each}
-              {#each pendingComments as body, n (n)}
+              {#each queuedComments as body, n (n)}
                 <article class="tf-msg tf-queued">
                   <span class="tf-av tf-me" aria-hidden="true">{initials(me)}</span>
                   <div class="tf-msg-body">
@@ -589,7 +589,7 @@
                   </div>
                 </article>
               {/each}
-              {#if messages.length === 0 && pendingComments.length === 0}
+              {#if messages.length === 0 && queuedComments.length === 0}
                 <div class="tf-empty">No comments yet.</div>
               {/if}
               {#if comment !== null}
@@ -664,7 +664,7 @@
     {pending}
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={(write) => marked(prId, "review", "Review", write)}
+    onqueued={(write) => markChip(prId, "review", "Review", write)}
     onclose={() => (reviewing = false)}
   />
 {/if}
@@ -680,7 +680,7 @@
     ready={readyRows}
     {ticket}
     submitWrite={ports.submitWrite}
-    onqueued={(write) => marked(prId, "merge", "Merge", write)}
+    onqueued={(write) => markChip(prId, "merge", "Merge", write)}
     onclose={() => (merging = false)}
   />
 {/if}
@@ -694,7 +694,7 @@
     what="{write.phrase} {name}"
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={(queued) => marked(prId, write.verb, write.label, queued)}
+    onqueued={(queued) => markChip(prId, write.verb, write.label, queued)}
     onclose={() => (shown = null)}
   />
 {/if}

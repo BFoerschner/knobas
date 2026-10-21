@@ -208,7 +208,9 @@ beforeEach(() => {
   document.body.appendChild(target);
 });
 
+/** What a page queued is held for the session (#1424), and each test is one. */
 afterEach(() => {
+  forgetQueued();
   health.replace([]);
   if (view) unmount(view);
   view = null;

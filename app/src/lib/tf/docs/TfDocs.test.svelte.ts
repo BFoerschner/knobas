@@ -9,6 +9,7 @@ import type { DocPage, DocsTree, Reached } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
+import { forgetQueued } from "../queued.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
@@ -100,7 +101,9 @@ beforeEach(() => {
   document.body.append(target);
 });
 
+/** What a page queued is held for the session (#1424), and each test is one. */
 afterEach(() => {
+  forgetQueued();
   if (view) unmount(view);
   view = null;
   target.remove();

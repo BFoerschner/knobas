@@ -14,7 +14,6 @@ import "./test-no-storage";
 
 import { viewMemory } from "../detail/view-read";
 import { pendingComments } from "../detail/view/pending-comments.svelte";
-import { forgetQueued } from "../tf/queued.svelte";
 import { sourceRoles } from "../tf/roles.svelte";
 import { settleRejections, takeUnhandled, watchRejections } from "./unhandled";
 
@@ -30,9 +29,6 @@ afterEach(() => pendingComments.forget());
 
 /** The source list's role claims (#1196) are the shell's, held once per window. */
 afterEach(() => sourceRoles.forget());
-
-/** What the ticket-first pages queued (#1424) is held for the session, and each test is one. */
-afterEach(() => forgetQueued());
 
 /**
  * The zone is pinned in `vite.config.ts`; this is what makes the pin a fact

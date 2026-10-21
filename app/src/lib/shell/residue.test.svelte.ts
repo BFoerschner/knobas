@@ -400,6 +400,8 @@ const CLONED = {
 };
 const TfConnections = (await import("../tf/job/TfConnections.svelte")).default;
 const TfStartWork = (await import("../tf/job/TfStartWork.svelte")).default;
+const TfJobCard = (await import("../tf/job/TfJobCard.svelte")).default;
+const TfConversation = (await import("../tf/job/TfConversation.svelte")).default;
 const TfReview = (await import("../tf/review/TfReview.svelte")).default;
 const TfInbox = (await import("../tf/inbox/TfInbox.svelte")).default;
 const TfCode = (await import("../tf/code/TfCode.svelte")).default;
@@ -1070,6 +1072,44 @@ const CASES: Case[] = [
             amend: () => deferred([]),
           },
           onstarttimer: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /** The job card (#816): its one effect takes *Edit and resend*'s request for the status pick (#1424). */
+    name: "TfJobCard",
+    source: "lib/tf/job/TfJobCard.svelte",
+    open: (target) => ({
+      app: mount(TfJobCard, {
+        target,
+        props: {
+          detail: DETAIL,
+          offered: ["In Review"],
+          week: null,
+          timer: { current: null, elapsed: null },
+          onmove: () => {},
+          onstop: () => {},
+          onstart: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /** The job's Conversation tab (#819): its one effect takes *Edit and resend*'s request for the box (#1424). */
+    name: "TfConversation",
+    source: "lib/tf/job/TfConversation.svelte",
+    open: (target) => ({
+      app: mount(TfConversation, {
+        target,
+        props: {
+          jobKey: "PAY-231",
+          entityId: DETAIL.row.entity_id,
+          thread: null,
+          lastVisit: null,
+          failure: null,
+          now: new Date(2026, 9, 15, 14, 0),
+          oncomment: () => new Promise<boolean>(() => {}),
         },
       }),
     }),

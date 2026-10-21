@@ -523,21 +523,22 @@
   /** The comments queued on the open page that its read does not hold yet. */
   const queuedComments = $derived(page === null ? [] : queuedMarks(page.entity_id, "comment").map((mark) => mark.text));
 
-  // *Edit and resend*: the composer with the comment, or *New page* with what it asked for.
+  // *Edit and resend* on a comment: the composer with its words.
   $effect(() => {
-    const p = page;
-    const t = tree;
-    if (p === null) return;
-    const words = takeAgain(p.entity_id, "comment");
-    if (words !== null) {
-      comment = words;
-      void tick().then(() => composer?.focus());
-    }
-    const asked = t === null ? null : takeAgain<NewPage>(p.entity_id, "page");
-    if (asked !== null && t !== null) {
-      const space = spaceOfPage(t, asked.parent);
-      newPage = { space: space ? spaceId(space) : null, parent: asked.parent, title: asked.title, text: asked.text };
-    }
+    if (page === null) return;
+    const words = takeAgain(page.entity_id, "comment");
+    if (words === null) return;
+    comment = words;
+    void tick().then(() => composer?.focus());
+  });
+
+  // *Edit and resend* on a new page: *New page* with what it asked for.
+  $effect(() => {
+    if (page === null || tree === null) return;
+    const asked = takeAgain<NewPage>(page.entity_id, "page");
+    if (asked === null) return;
+    const space = spaceOfPage(tree, asked.parent);
+    newPage = { space: space ? spaceId(space) : null, parent: asked.parent, title: asked.title, text: asked.text };
   });
 
   /** A page's source: where its writes go, named in their toasts when its sign-in fails. */

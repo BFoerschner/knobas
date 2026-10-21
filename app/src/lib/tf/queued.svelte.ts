@@ -15,7 +15,7 @@
  *   draw an old move again.
  * - **The queue says it will not go** (held or refused): the mark goes, and a
  *   toast says why with *Edit and resend* (`shell/follow-write.ts`'s
- *   `toastStopped`). The follow lives here, not on the page, so the toast
+ *   `followWrite`). The follow lives here, not on the page, so the toast
  *   comes and the echo goes wherever the reader is by then.
  *
  * *Edit and resend* reopens a page that may have closed: the toast asks
@@ -23,7 +23,7 @@
  * (`takeAgain`).
  */
 import type { QueuedWrite } from "../ipc/sources";
-import { toastStopped, willNotGo, writeFollower, type Following, type WriteFollower } from "../shell/follow-write";
+import { followWrite, writeFollower, type Following, type WriteFollower } from "../shell/follow-write";
 
 /** One queued write as its page draws it. */
 export interface Mark {
@@ -53,7 +53,7 @@ export interface Marking {
 const marks: Record<string, Mark[]> = $state({});
 /** Edit and resend's requests, by entity and kind. */
 const asked: Record<string, unknown> = $state({});
-/** The follows still out, to stop on a new session. */
+/** The follows this session started, to stop on a new one. */
 const follows = new Set<() => void>();
 
 const askKey = (entity: string, kind: string) => `${entity}\u0000${kind}`;
@@ -63,32 +63,9 @@ export function markQueued(entity: string, kind: string, text: string, how: Mark
   const write = typeof how.write?.id === "number" ? how.write.id : null;
   const kept = (marks[entity] ?? []).filter((mark) => how.many || mark.kind !== kind);
   marks[entity] = [...kept, { write, kind, text, base: how.base ?? null }];
-  if (write !== null && how.following) follow(entity, write, how.following, how.follower ?? writeFollower());
-}
-
-function follow(entity: string, write: number, following: Following, follower: WriteFollower): void {
-  let done = false;
-  let stop: () => void = () => {};
-  const leave = () => {
-    done = true;
-    follows.delete(leave);
-    stop();
-  };
-  follows.add(leave);
-  try {
-    stop = follower.follow(write, (row) => {
-      if (done) return;
-      if (row === undefined) return leave();
-      if (!willNotGo(row)) return;
-      leave();
-      drop(entity, (mark) => mark.write === write);
-      toastStopped(row, following);
-    });
-  } catch {
-    // No follower: the queue panel still says where the write is.
-    leave();
-  }
-  if (done) stop();
+  if (write === null || !how.following) return;
+  const onstop = () => drop(entity, (mark) => mark.write === write);
+  follows.add(followWrite({ id: write }, { ...how.following, onstop }, how.follower ?? writeFollower()));
 }
 
 function drop(entity: string, gone: (mark: Mark) => boolean): void {
@@ -138,6 +115,7 @@ export function takeAgain<T = string>(entity: string, kind: string): T | null {
 
 /** Forget every mark and request and stop every follow: a new session, which is what each test is. */
 export function forgetQueued(): void {
-  for (const stop of [...follows]) stop();
+  for (const stop of follows) stop();
+  follows.clear();
   for (const bag of [marks, asked] as Record<string, unknown>[]) for (const key of Object.keys(bag)) delete bag[key];
 }

@@ -12,6 +12,7 @@ import type { EntityDetail, LinkEntry, SuggestionEntry, Thread } from "../../ipc
 import type { WriteOpPayload } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
+import { forgetQueued } from "../queued.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import { page as codeRowPage } from "../code-row/page";
 import { createLayers, type Layers } from "../layers.svelte";
@@ -43,7 +44,9 @@ beforeEach(() => {
   document.body.appendChild(target);
 });
 
+/** What a page queued is held for the session (#1424), and each test is one. */
 afterEach(() => {
+  forgetQueued();
   if (job) unmount(job);
   job = null;
   target.remove();
