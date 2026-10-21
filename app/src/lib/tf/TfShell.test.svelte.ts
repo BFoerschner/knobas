@@ -757,6 +757,12 @@ test("a job opened at its source's address is the one the chip, the Job tab and 
   const tab = [...target.querySelectorAll<HTMLAnchorElement>(".tf-nav a")].find((a) => a.textContent?.includes("PAY-231"));
   expect(tab?.getAttribute("href"), "the Job tab").toBe(jobHash("tide:PAY-231"));
 
+  // The shell's own breadcrumb (Time) and a page's own (Settings) link it too.
+  for (const view of ["#/time/2026-08-22", "#/settings"]) {
+    await at(view);
+    expect(target.querySelector(".tf-crumbs .tf-jobchip")?.getAttribute("href"), view).toBe(jobHash("tide:PAY-231"));
+  }
+
   press("Escape");
   await settle();
   expect(location.hash).toBe(jobHash("tide:PAY-231"));
