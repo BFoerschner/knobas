@@ -92,7 +92,7 @@
     tabCounts,
     type PrTab,
   } from "./pr";
-  import { markComment, markQueued, pendingComments as pendingOf, queuedChips } from "./queued.svelte";
+  import { isQueued, markComment, markQueued, pendingComments as pendingOf, queuedChips } from "./queued.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfPrFiles from "./TfPrFiles.svelte";
@@ -323,6 +323,32 @@
   );
   const chips = $derived(prId === null ? [] : queuedChips(prId));
 
+  /**
+   * The chips that hold each toolbar write back (#1441), as the Branches tab
+   * drops a queued delete's actions: a queued merge makes every write here
+   * stale, and a queued close or reopen makes *Merge…* and another state
+   * change stale. A source's own actions are never held.
+   */
+  const STATE_CHANGES = ["close", "reopen"];
+  /** By a write's key, the verbs whose queued write holds it back. */
+  const HOLDS: Record<string, readonly string[]> = {
+    merge: ["merge", ...STATE_CHANGES],
+    update: ["merge"],
+    edit: ["merge"],
+    close: ["merge", ...STATE_CHANGES],
+    reopen: ["merge", ...STATE_CHANGES],
+  };
+
+  /** The chip a write queued as `verb` draws, which is also what holds a button back. */
+  const chipOf = (verb: string) => `${verb} queued`;
+
+  /** The chip this session queued that holds the write keyed `key` back, or null while it is live. */
+  function heldBy(key: string): string | null {
+    if (prId === null) return null;
+    const id = prId;
+    return (HOLDS[key] ?? []).map(chipOf).find((chip) => isQueued(id, chip)) ?? null;
+  }
+
   /** Where the reader's checkout stands against this pull request's head. */
   const local = $derived.by(() => {
     const tree = checkout?.tree;
@@ -337,7 +363,7 @@
   let shown = $state<Write | null>(null);
 
   function open(write: Write) {
-    if (write.action.disabled === null) shown = write;
+    if (write.action.disabled === null && heldBy(write.key) === null) shown = write;
   }
 
   let draft = $state("");
@@ -411,16 +437,28 @@
           <button type="button" class="tf-btn" onclick={() => (reviewing = true)}>Review…</button>
         {/if}
         {#each writes as write (write.key)}
+          {@const why = heldBy(write.key) ?? write.action.disabled}
           <button
             type="button"
             class="tf-btn"
-            aria-disabled={write.action.disabled !== null ? "true" : undefined}
-            title={write.action.disabled ?? undefined}
+            aria-disabled={why !== null ? "true" : undefined}
+            title={why ?? undefined}
             onclick={() => open(write)}>{write.label}</button
           >
         {/each}
         {#if merge !== null}
-          <button type="button" class="tf-btn tf-primary" title={merge.disabled ?? undefined} onclick={() => (merging = true)}>Merge…</button>
+          {@const hold = heldBy("merge")}
+          <!-- Blocked by the source, it still opens its dialog, which names each reason (#843); held by a queued write, it opens nothing. -->
+          <button
+            type="button"
+            class="tf-btn"
+            class:tf-primary={hold === null}
+            aria-disabled={hold !== null || merge.disabled !== null ? "true" : undefined}
+            title={hold ?? merge.disabled ?? undefined}
+            onclick={() => {
+              if (hold === null) merging = true;
+            }}>Merge…</button
+          >
         {/if}
       </div>
     </header>
@@ -570,7 +608,7 @@
     {pending}
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={() => markQueued(prId, "review queued")}
+    onqueued={() => markQueued(prId, chipOf("review"))}
     onclose={() => (reviewing = false)}
   />
 {/if}
@@ -586,7 +624,7 @@
     ready={readyRows}
     {ticket}
     submitWrite={ports.submitWrite}
-    onqueued={() => markQueued(prId, "merge queued")}
+    onqueued={() => markQueued(prId, chipOf("merge"))}
     onclose={() => (merging = false)}
   />
 {/if}
@@ -600,7 +638,7 @@
     what="{write.phrase} {name}"
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={() => markQueued(prId, `${write.verb} queued`)}
+    onqueued={() => markQueued(prId, chipOf(write.verb))}
     onclose={() => (shown = null)}
   />
 {/if}

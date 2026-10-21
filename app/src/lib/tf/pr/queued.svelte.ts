@@ -20,6 +20,11 @@ export function queuedChips(prId: string): string[] {
   return chips[prId] ?? [];
 }
 
+/** Whether this session queued `chip` on `prId`: what holds a toolbar button back (#1441). */
+export function isQueued(prId: string, chip: string): boolean {
+  return chips[prId]?.includes(chip) ?? false;
+}
+
 /** A comment on `prId` queued. */
 export function markComment(prId: string, body: string): void {
   comments[prId] = [...(comments[prId] ?? []), body];

@@ -280,10 +280,11 @@ test("somebody else's pull request names its author and offers Review…", async
 test("the toolbar draws what the source offers, in prototype-6's order: Review…, Update branch, Edit, Close, Merge…", async () => {
   await draw([PR], ports({ pr: prView([APPROVE, COMMENT, EDIT, CLOSE, UPDATE, MERGE]) }));
   expect(buttons()).toEqual(["Review…", "Update branch", "Edit", "Close", "Merge…"]);
-  // Merge… opens its dialog (#843) even while blocked; its tooltip says why.
+  // Blocked by the source, Merge… says so (#1441) and its tooltip says why; it still opens its dialog with the reasons (#843, below).
   const merge = button("Merge…")!;
-  expect(merge.getAttribute("aria-disabled")).toBeNull();
+  expect(merge.getAttribute("aria-disabled")).toBe("true");
   expect(merge.title).toBe("1 of 2 required approvals");
+  expect(merge.classList.contains("tf-primary")).toBe(true);
 });
 
 test("a pull request whose head is not behind offers no Update branch; a merged one no Close or Merge…", async () => {
@@ -677,4 +678,76 @@ test("a merge while the pull request's source fails its sign-in says it waits th
   dialogButton("Merge").click();
   await settle();
   expect(toasts.items.at(-1)!.text).toBe("Queued: merge PR #142. Gitea sign-in is failing, so it waits there.");
+});
+
+// -- A queued write holds back what it makes stale (#1441) ------------------
+
+/** Queue a merge through Merge…'s dialog. */
+async function queueMerge() {
+  button("Merge…")!.click();
+  flushSync();
+  dialogButton("Merge").click();
+  await settle();
+}
+
+const holdOf = (name: string) => {
+  const b = button(name)!;
+  return [b.getAttribute("aria-disabled"), b.title];
+};
+
+test("after a queued merge, Merge… is held: aria-disabled, titled merge queued, not primary, and a press opens nothing", async () => {
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, UPDATE, mergeAction(null)]) }));
+  await queueMerge();
+  expect(writes).toHaveLength(1);
+  expect(holdOf("Merge…")).toEqual(["true", "merge queued"]);
+  expect(button("Merge…")!.classList.contains("tf-primary")).toBe(false);
+  button("Merge…")!.click();
+  flushSync();
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+  expect(writes).toHaveLength(1);
+});
+
+test("after a queued merge, Update branch, Edit and Close are held with merge queued and open nothing", async () => {
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, UPDATE, mergeAction(null)]) }));
+  await queueMerge();
+  for (const name of ["Update branch", "Edit", "Close"]) {
+    expect(holdOf(name)).toEqual(["true", "merge queued"]);
+    button(name)!.click();
+    flushSync();
+    expect(document.querySelector(".tf-dialog")).toBeNull();
+  }
+});
+
+test("after a queued close, Merge… and Close are held with close queued; Edit and Update branch stay live", async () => {
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, UPDATE, mergeAction(null)]) }));
+  button("Close")!.click();
+  flushSync();
+  dialogButton("Close").click();
+  await settle();
+  expect(writes).toHaveLength(1);
+  expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
+  expect(holdOf("Close")).toEqual(["true", "close queued"]);
+  expect(holdOf("Edit")).toEqual([null, ""]);
+  expect(holdOf("Update branch")).toEqual([null, ""]);
+  button("Merge…")!.click();
+  flushSync();
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+});
+
+test("the hold outlives leaving the page and ends with the session; a source's own action is never held", async () => {
+  const stamp = action("source_action", "Stamp release", { values: { id: "stamp_release" } });
+  const offered = () => ports({ pr: prView([COMMENT, EDIT, stamp, mergeAction(null)]) });
+  await draw([PR], offered());
+  await queueMerge();
+  expect(holdOf("Stamp release")).toEqual([null, ""]);
+  unmount(view!);
+  await draw([PR], offered());
+  expect(holdOf("Merge…")).toEqual(["true", "merge queued"]);
+  expect(holdOf("Edit")).toEqual(["true", "merge queued"]);
+  unmount(view!);
+  forgetPrQueued();
+  await draw([PR], offered());
+  expect(holdOf("Merge…")).toEqual([null, ""]);
+  expect(button("Merge…")!.classList.contains("tf-primary")).toBe(true);
+  expect(holdOf("Edit")).toEqual([null, ""]);
 });
