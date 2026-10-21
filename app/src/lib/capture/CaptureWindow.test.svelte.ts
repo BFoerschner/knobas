@@ -232,3 +232,10 @@ test("a write that failed is shown in the window and the window stays up", async
   expect(text()).toContain("the database is still starting");
   expect(wasClosed()).toBe(false);
 });
+
+test("the box turns autocorrect, autocapitalize and spellcheck off (issue #1468)", () => {
+  render();
+  expect(box().getAttribute("autocorrect")).toBe("off");
+  expect(box().getAttribute("autocapitalize")).toBe("off");
+  expect(box().getAttribute("spellcheck")).toBe("false");
+});

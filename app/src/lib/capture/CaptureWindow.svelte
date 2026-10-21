@@ -58,6 +58,9 @@
     bind:this={box}
     class="inp"
     aria-label="Capture"
+    autocorrect="off"
+    autocapitalize="off"
+    spellcheck="false"
     placeholder="Type. Escape or ⌘Enter to keep it."
     value={capture.text}
     oninput={(event) => void capture.typed(event.currentTarget.value)}
