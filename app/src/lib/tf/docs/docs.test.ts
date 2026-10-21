@@ -2,7 +2,18 @@
 import { expect, test } from "vitest";
 
 import type { DocBlock, DocPage, DocsTree } from "../../ipc/entity";
-import { holds, mentionText, pageToOpen, placeOf, readingMinutes, sectionsOf, statusTone } from "./docs";
+import {
+  holds,
+  mentionText,
+  pageToOpen,
+  placeOf,
+  readingMinutes,
+  sectionsOf,
+  spaceHash,
+  spaceId,
+  spaceOfPage,
+  statusTone,
+} from "./docs";
 
 const TREE: DocsTree = {
   spaces: [
@@ -24,7 +35,8 @@ const TREE: DocsTree = {
 
 test("the three addresses read as the page read last, a space, and a page with its section", () => {
   expect(placeOf([])).toEqual({ kind: "last" });
-  expect(placeOf(["space", "OPS"])).toEqual({ kind: "space", key: "OPS" });
+  expect(placeOf(["space", "OPS"])).toEqual({ kind: "space", source: null, key: "OPS" });
+  expect(placeOf(["space", "wiki:OPS"])).toEqual({ kind: "space", source: "wiki", key: "OPS" });
   expect(placeOf(["confluence:3"])).toEqual({ kind: "page", id: "confluence:3", section: null });
   expect(placeOf(["confluence:3", "2"])).toEqual({ kind: "page", id: "confluence:3", section: 2 });
 });
@@ -36,8 +48,42 @@ test("#/docs opens the page read last, else the first space's first top page", (
 });
 
 test("a space's address opens the page at the top of its tree, not the first by title", () => {
-  expect(pageToOpen({ kind: "space", key: "ENG" }, TREE)).toBe("confluence:9");
-  expect(pageToOpen({ kind: "space", key: "NOPE" }, TREE)).toBeNull();
+  expect(pageToOpen(placeOf(["space", "ENG"]), TREE)).toBe("confluence:9");
+  expect(pageToOpen(placeOf(["space", "NOPE"]), TREE)).toBeNull();
+});
+
+/** A second source mirroring ENG too, as a Markdown wiki does during a move (D9). */
+const TWO: DocsTree = {
+  ...TREE,
+  spaces: [
+    ...TREE.spaces,
+    { source_id: "wiki", key: "ENG", name: "Engineering", pages: [{ entity_id: "wiki:home", title: "Eng (wiki)", parent: null }] },
+  ],
+};
+
+test("a space's address names its source where two sources hold the key, and opens that source's space (#1455)", () => {
+  const second = spaceOfPage(TWO, "wiki:home")!;
+  const hash = spaceHash(TWO, second);
+  expect(hash).toBe("#/docs/space/wiki%3AENG");
+  const opened = pageToOpen(placeOf(["space", decodeURIComponent(hash.split("/").at(-1)!)]), TWO)!;
+  expect(spaceId(spaceOfPage(TWO, opened)!)).toBe("wiki/ENG");
+  expect(spaceHash(TWO, TWO.spaces[0]!)).toBe("#/docs/space/confluence%3AENG");
+});
+
+test("a key one source holds keeps the bare address, and a bare key two hold opens the first", () => {
+  expect(spaceHash(TREE, TREE.spaces[1]!)).toBe("#/docs/space/OPS");
+  expect(spaceHash(TWO, TWO.spaces[1]!)).toBe("#/docs/space/OPS");
+  expect(pageToOpen(placeOf(["space", "ENG"]), TWO)).toBe("confluence:9");
+  expect(pageToOpen(placeOf(["space", "nope:ENG"]), TWO)).toBeNull();
+});
+
+test("a key holding a colon still opens by the bare address", () => {
+  const odd: DocsTree = {
+    ...TREE,
+    spaces: [{ source_id: "wiki", key: "a:b", name: null, pages: [{ entity_id: "wiki:1", title: "One", parent: null }] }],
+  };
+  expect(spaceHash(odd, odd.spaces[0]!)).toBe("#/docs/space/a%3Ab");
+  expect(pageToOpen(placeOf(["space", "a:b"]), odd)).toBe("wiki:1");
 });
 
 test("a fold holds every page below it, so the one around the open page starts open", () => {

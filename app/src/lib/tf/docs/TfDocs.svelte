@@ -1,6 +1,6 @@
 <!--
   Docs (#859 to #862, requirements §10): one screen for `#/docs`,
-  `#/docs/space/<key>` and `#/page/<id>[/<section>]`, as prototype-6's
+  `#/docs/space/[<source>:]<key>` and `#/page/<id>[/<section>]`, as prototype-6's
   `renderDocs` → `renderPage`.
 
   **Left**, the space picker (*All spaces (N)*, then every space with its page
@@ -96,6 +96,7 @@
     scopeName,
     sectionKind,
     sectionsOf,
+    spaceHash,
     spaceId,
     spaceLabel,
     spaceOfPage,
@@ -270,6 +271,14 @@
   });
 
   const pageSpace = $derived(tree && page ? spaceOfPage(tree, page.entity_id) : undefined);
+  /**
+   * The breadcrumb's space link: the page's own space, named with its source
+   * where another source holds its key too (#1455); the bare key until the
+   * tree is read.
+   */
+  const crumbSpace = $derived(
+    tree && pageSpace ? spaceHash(tree, pageSpace) : `#/docs/space/${encodeURIComponent(page?.space?.key ?? "")}`,
+  );
   const shownSpace = $derived.by(() => {
     if (tree === null || picked === "*") return undefined;
     if (picked !== null) return tree.spaces.find((s) => spaceId(s) === picked);
@@ -770,7 +779,7 @@
           {/if}
           <a href="#/docs">Docs</a>
           {#if p.space}
-            › <a href={`#/docs/space/${encodeURIComponent(p.space.key)}`}>{p.space.name ?? p.space.key}</a>
+            › <a href={crumbSpace}>{p.space.name ?? p.space.key}</a>
           {/if}
           {#if parent}
             › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}

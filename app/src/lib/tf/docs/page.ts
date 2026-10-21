@@ -1,5 +1,5 @@
 /**
- * Docs (#859 to #862): `#/docs`, `#/docs/space/<key>` and `#/page/<id>[/<section>]`,
+ * Docs (#859 to #862): `#/docs`, `#/docs/space/[<source>:]<key>` and `#/page/<id>[/<section>]`,
  * one screen that draws its own breadcrumb inside the page.
  */
 import { definePage } from "../page-entry";

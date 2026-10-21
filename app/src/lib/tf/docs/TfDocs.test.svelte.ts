@@ -11,6 +11,7 @@ import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetQueued } from "../queued.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
+import { parseTfHash } from "../route";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -166,6 +167,43 @@ test("the header: breadcrumb, who edited when, version, reading time and labels"
   expect(meta).toContain("version 31");
   expect(meta).toContain("1 min read");
   expect([...target.querySelectorAll(".tf-rd-meta .tf-chip")].map((c) => c.textContent)).toEqual(["ops", "on-call"]);
+});
+
+test("on a page of the second source holding ENG, the breadcrumb's space link opens that source's ENG (#1455)", async () => {
+  const two: DocsTree = {
+    ...TREE,
+    spaces: [
+      ...TREE.spaces,
+      {
+        source_id: "wiki",
+        key: "ENG",
+        name: "Engineering",
+        pages: [
+          { entity_id: "wiki:home", title: "Wiki home", parent: null },
+          { entity_id: "wiki:7", title: "Retry design", parent: "wiki:home" },
+        ],
+      },
+    ],
+  };
+  const wikiPage = (id: string): DocPage => ({
+    ...PAGE,
+    entity_id: id,
+    source_id: "wiki",
+    title: id,
+    space: { key: "ENG", name: "Engineering" },
+    ancestors: [],
+  });
+  const io = ports({ docsTree: vi.fn(async () => two), docsPage: vi.fn(async (id: string) => wikiPage(id)) });
+  const props = $state({ ready: true, rest: ["wiki:7"], job: null, ports: io });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  const link = [...target.querySelectorAll<HTMLAnchorElement>(".tf-rd-crumb a")].find((a) => a.textContent === "Engineering")!;
+  expect(link.getAttribute("href")).toBe("#/docs/space/wiki%3AENG");
+  const route = parseTfHash(link.getAttribute("href")!);
+  props.rest = route.view === "full" ? route.rest : [];
+  await settle();
+  expect(io.docsPage).toHaveBeenLastCalledWith("wiki:home");
+  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("wiki/ENG");
 });
 
 test("the picker lists every space with its count and follows the open page", async () => {
