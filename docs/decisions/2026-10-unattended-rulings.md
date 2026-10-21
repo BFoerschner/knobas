@@ -9883,3 +9883,57 @@ unchanged.
 - **Fix with `--ink` on the `--mark` fill, or an underline/outline.** *Ruling:* the ticket's:
   one rule, `.tf-dp-t.tf-dp-err mark { color: var(--ink); }`, since an outline departs from
   "highlights use `--mark`". No mono rule added, so no ligature declaration. *Reversing:* drop one rule.
+## #1424: what the job and Docs draw of a queued write, and how it goes (Opus implementer, 2026-10-21)
+
+- **Delegated by Björn at triage, ruled by implementer on Opus: the section echo.** *Fork:* the queued
+  text in place of the old, or under the heading beside it. *Ruling:* in place of the old, muted, with
+  a dashed rule and *queued* by the heading. *Reasoning:* the triage's recommendation; two texts in one
+  section ask the reader which one holds. *Reversing:* draw `TfDocBlocks` above `.tf-sec-queued` in
+  `TfDocBody.svelte`.
+- **Delegated by Björn at triage, ruled by implementer on Opus: *Edit section* while a save is queued.**
+  *Ruling:* it starts from the queued text. *Reasoning:* the triage's recommendation; the live pass's
+  second save started from the old text and lost the first edit's words. A second save still carries
+  the version the page was read at, so once the first lands the source refuses it as stale; that
+  refusal now drops the echo and offers *Edit and resend*. *Reversing:* one `??` in `TfDocBody`'s `open`.
+- **One shared module, not a shape copied per surface.** *Ruling:* `tf/queued.svelte.ts`, keyed by
+  entity and write id, used by the job, Docs and the pull request page; the repository page keeps
+  `repo/queued.svelte.ts`, whose marks read a listing and a blob, not a write id. *Reasoning:* the
+  drop-on-read rule and the held-or-refused path are the same on every surface. *Reversing:* medium.
+- **The follow lives in the module, not on the page.** *Fork:* the inbox stops its follows on unmount.
+  *Ruling:* a mark's follow outlives its page, so a write held after the reader moved on still drops
+  its echo and toasts. *Edit and resend* asks the module (`askAgain`), navigates to the page, and the
+  page takes the request when it draws (`takeAgain`). *Reversing:* stop the follows on unmount.
+- **A move's mark goes once the mirrored status moved from where the move found it**, not only when it
+  equals the picked status, as the ticket's criterion says ("until the detail's status moves"). A mark
+  dropped stays dropped, so a ticket moved back by somebody else does not draw the old move again. The
+  same holds for a section edit (the page's version) and the pull request's state (#1542).
+- ***Edit and resend* on a held move focuses the Status select on the job's Work tab.** *Fork:* a
+  select has no typed text to put back; selecting the refused status without queuing it would draw a
+  status that is neither mirrored nor queued. *Ruling:* focus the select, showing the mirrored status.
+  *Reversing:* set the select's value in `TfJobCard`'s take effect.
+- **The toast names the write as the queue toast does:** *Move of PAY-231 to In Review*, *Comment on
+  PAY-231*, *Edit of “Context” on SEPA payout retry design*, *Comment on <page>*, *Page <title>*,
+  followed by `toastStopped`'s *was held* / *was refused* and the queue's detail.
+- **A comment's mark goes when a read holds its words**, compared with runs of white space collapsed
+  (`sameWords`): Jira and Confluence hand back the text with their own line breaks. A Docs comment's
+  words are its blocks' (`blockWords`).
+- **A queued page is keyed by its parent page and drawn at the end of the parent's fold**, which it
+  opens; it goes once a tree read holds a page of that title under that parent.
+- **Not built: a re-read on sync.** The job, Docs and the pull request page read once per opening, as
+  before; a mark goes on the next read after the sync. A write withdrawn in the queue panel leaves the
+  open rows the way a sent one does, so its mark stays until the session ends. *Reversing:* a
+  `sync:state` listener per page, or a `withdrawn` state on the follow.
+
+## #1542: the pull request page's queued chips go once the view reads them (Opus implementer, 2026-10-21)
+
+- **A *merge*, *close* or *reopen* chip goes once the view's *State* moved from what it read when the
+  write was queued** (`merged`, `closed`, `open` from `knobas-source-gitea`'s `view/pr.rs`), and the
+  holds it drives go with it. *edit*, *update*, *review* and a source action's chip have no state to
+  read and keep the session lifetime, as the ticket says. *Reversing:* `STATE_READ` in `TfPr.svelte`.
+- **The chips are followed too.** *Fork:* the ticket asks only for drop-on-read. *Ruling:* a chip whose
+  write is held or refused goes, with its holds, and a toast says why; its dialogs are not reopened, so
+  it offers no *Edit and resend*. The pull request's comment does: the box gets its words back.
+  *Reasoning:* a refused merge otherwise holds every toolbar button for the session, the same defect.
+  *Reversing:* drop `following` from `marked` in `TfPr.svelte`.
+- **The dialogs' `onqueued` passes the queued write** (`TfEntityAction`, `TfPrMerge`, `TfPrReview`),
+  so a chip carries its write id. `TfItem`'s use of `TfEntityAction` ignores the argument.
