@@ -9937,3 +9937,13 @@ unchanged.
   *Reversing:* drop `following` from `marked` in `TfPr.svelte`.
 - **The dialogs' `onqueued` passes the queued write** (`TfEntityAction`, `TfPrMerge`, `TfPrReview`),
   so a chip carries its write id. `TfItem`'s use of `TfEntityAction` ignores the argument.
+
+## #1461: the Monitors page keeps an ack across visits (Sonnet implementer, 2026-10-21)
+
+- **Where the ack state comes from: the page reads `open_alerts`, or `monitor_roster` gains `acked_at`
+  on `MonitorRow`.** *Ruling:* the page reads `open_alerts` through a new `openAlerts` port and joins
+  on `monitor_id` (the recommended pick); no IPC type moves, so no §10.8 entry. The read is used only
+  for `acked_at`, so ruling #1296-#1298 (no alert drawing of its own on the tab, `open_alerts`
+  unnarrowed) holds. A failed read leaves rows as *Ack*. *Reversing:* medium, an IPC change.
+- **Does the row also say since when.** *Ruling:* no; the disabled *Acked* button carries the ack
+  time in its title. *Reversing:* low.

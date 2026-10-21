@@ -12,7 +12,8 @@
   - **Assets nothing watches**: containers, services, routes, databases and VMs
     no monitor watches, each with *Create monitor* (`TfCreateMonitor.svelte`).
 
-  Over `monitor_roster`, `ack_alert`, `submit_write` (`PauseMonitor`,
+  Over `monitor_roster`, `open_alerts` (only for each down row's `acked_at`, so
+  an ack outlives the visit; the tab draws no alert of its own, #1296), `ack_alert`, `submit_write` (`PauseMonitor`,
   `ResumeMonitor`, `CreateMonitor`), `unmonitored_assets`, `get_asset` and
   `edit_asset` for the create, `list_sources` for the header's source name,
   and `job_reach` (`job/open-jobs.ts`) for the scopes. Knobas reads monitors
@@ -38,6 +39,7 @@
   export interface MonitorPorts extends OpenJobPorts {
     monitorRoster: () => Promise<MonitorRow[]>;
     unmonitoredAssets: () => Promise<UnmonitoredAsset[]>;
+    openAlerts: () => Promise<OpenAlert[]>;
     ackAlert: (monitorId: string) => Promise<OpenAlert>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     getAsset: (assetId: string) => Promise<AssetDetail>;
@@ -51,7 +53,7 @@
   import { onDestroy } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import { ackAlert, editAsset, editRoute, getAsset, getRoute, monitorRoster, unmonitoredAssets } from "../../ipc/assets";
+  import { ackAlert, editAsset, editRoute, getAsset, getRoute, monitorRoster, openAlerts, unmonitoredAssets } from "../../ipc/assets";
   import { getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import { followWrite } from "../../shell/follow-write";
@@ -88,6 +90,7 @@
     ports = {
       monitorRoster: () => monitorRoster(),
       unmonitoredAssets: () => unmonitoredAssets(),
+      openAlerts: () => openAlerts(),
       ackAlert: (monitorId) => ackAlert(monitorId),
       submitWrite: (payload) => submitWrite(payload),
       getAsset: (assetId) => getAsset(assetId),
@@ -125,8 +128,8 @@
   let sourceNames = $state<Record<string, string>>({});
   let failed = $state<string | null>(null);
   let jobs = $state<OpenJob[]>([]);
-  /** Monitors acked in this visit: the button reads *Acked* and stays down. */
-  let acked = $state<Record<string, true>>({});
+  /** When each monitor's open alert was acked, by monitor id: the open alerts' `acked_at`, so it outlives the visit (#1461). */
+  let acked = $state<Record<string, string>>({});
   /** Rows whose write has not answered: a double click is one press. */
   let pressing = $state<Record<string, true>>({});
   let creating = $state<MonitorSubject | null>(null);
@@ -146,6 +149,15 @@
     ports.monitorRoster().then((rows) => {
       if (live) roster = rows;
     }, fail);
+    ports.openAlerts().then(
+      (alerts) => {
+        if (!live) return;
+        const read: Record<string, string> = {};
+        for (const alert of alerts) if (alert.acked_at !== null) read[alert.monitor_id] = alert.acked_at;
+        acked = read;
+      },
+      () => {},
+    );
     ports.unmonitoredAssets().then((rows) => {
       if (live) unwatched = gaps(rows);
     }, fail);
@@ -230,8 +242,8 @@
     if (pressing[row.entity_id]) return;
     pressing[row.entity_id] = true;
     try {
-      await ports.ackAlert(row.entity_id);
-      acked[row.entity_id] = true;
+      const alert = await ports.ackAlert(row.entity_id);
+      acked[row.entity_id] = alert?.acked_at ?? new Date().toISOString();
       push({ text: "Acked in knobas. The alert stays open until the monitor recovers." });
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
@@ -382,8 +394,8 @@
               </td>
               <td class="tf-mon-acts">
                 {#if down}
-                  <button type="button" class="tf-btn tf-sm" disabled={acked[row.entity_id] === true} onclick={() => void ack(row)}
-                    >{acked[row.entity_id] ? "Acked" : "Ack"}</button
+                  <button type="button" class="tf-btn tf-sm" disabled={row.entity_id in acked} title={row.entity_id in acked ? `Acked ${acked[row.entity_id]}` : undefined} onclick={() => void ack(row)}
+                    >{row.entity_id in acked ? "Acked" : "Ack"}</button
                   >
                 {/if}
                 {#each row.actions.filter((op) => op in ROW_OPS) as op (op)}

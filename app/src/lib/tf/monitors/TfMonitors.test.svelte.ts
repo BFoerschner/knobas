@@ -6,7 +6,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { AssetDetail, AssetEdit, MonitorRow, RouteDetail, RouteEdit, UnmonitoredAsset } from "../../ipc/assets";
+import type { AssetDetail, AssetEdit, MonitorRow, OpenAlert, RouteDetail, RouteEdit, UnmonitoredAsset } from "../../ipc/assets";
 import type { Reached } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
@@ -108,6 +108,7 @@ function ports(over: Partial<MonitorPorts> = {}): MonitorPorts {
   return {
     monitorRoster: async () => ROSTER,
     unmonitoredAssets: async () => UNWATCHED,
+    openAlerts: async () => [],
     ackAlert: async (id) => {
       acks.push(id);
       return {} as never;
@@ -185,6 +186,42 @@ test("Ack is on a down monitor only, acks it by the monitor, and reads Acked", a
   expect(acks).toEqual(["kuma:2"]);
   expect(button(down!, "Acked")?.disabled).toBe(true);
   expect(toasts.items.map((t) => t.text)).toContain("Acked in knobas. The alert stays open until the monitor recovers.");
+});
+
+const alertOf = (monitor_id: string, acked_at: string | null): OpenAlert =>
+  ({ id: 1, monitor_id, monitor_name: "flows-stage", state: "down", opened_at: "2026-10-16T12:00:00Z", acked_at }) as OpenAlert;
+
+test("a down row whose open alert is acked reads a disabled Acked on first draw, and Ack when it is not", async () => {
+  await draw([], "PAY-231", ports({ openAlerts: async () => [alertOf("kuma:2", "2026-10-16T13:00:00Z")] }));
+  const down = rows()[0]!;
+  expect(button(down, "Ack")).toBeUndefined();
+  expect(button(down, "Acked")?.disabled).toBe(true);
+  expect(button(down, "Acked")?.title).toContain("2026-10-16");
+  unmount(view!);
+  view = null;
+  await draw([], "PAY-231", ports({ openAlerts: async () => [alertOf("kuma:2", null)] }));
+  expect(button(rows()[0]!, "Ack")?.disabled).toBe(false);
+});
+
+test("an ack survives leaving the page: a remount over the now-acked alert still reads Acked", async () => {
+  let alerts = [alertOf("kuma:2", null)];
+  const stand = ports({
+    openAlerts: async () => alerts,
+    ackAlert: async (id) => {
+      acks.push(id);
+      alerts = [alertOf(id, "2026-10-16T13:59:30Z")];
+      return alerts[0]!;
+    },
+  });
+  await draw([], "PAY-231", stand);
+  button(rows()[0]!, "Ack")!.click();
+  await settle();
+  expect(button(rows()[0]!, "Acked")?.disabled).toBe(true);
+  unmount(view!);
+  view = null;
+  await draw([], "PAY-231", stand);
+  expect(button(rows()[0]!, "Acked")?.disabled).toBe(true);
+  expect(button(rows()[0]!, "Ack")).toBeUndefined();
 });
 
 test("Pause and Resume queue the source's op for that monitor", async () => {
