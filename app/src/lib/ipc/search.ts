@@ -104,16 +104,6 @@ export function deleteSmartList(id: string): Promise<void> {
 }
 
 /**
- * The rows of one smart list, shaped exactly like a search — so the launcher
- * renders a list with the component it renders results with.
- *
- * Opening a list is also what clears its badge.
- */
-export function smartListItems(id: string, limit: number): Promise<SearchResponse> {
-  return invoke<SearchResponse>("smart_list_items", { id, limit });
-}
-
-/**
  * The query box's suggestion lists (#601), the parents for the `under:` value
  * being typed (#761). `parentsOnly` leaves `kinds` and `sources` empty and
  * unread (#768): the box asks for them once per opening, with its first read.

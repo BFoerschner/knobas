@@ -34,7 +34,6 @@ import type {
   ImportOutcome,
   ImportPreview,
   Landing,
-  MemberAsset,
   MonitorRow,
   MonitoringSettings,
   OpenAlert,
@@ -77,7 +76,6 @@ export type {
   Inherited,
   Landing,
   LayerInView,
-  MemberAsset,
   MonitorLink,
   MonitorRow,
   MonitorSample,
@@ -173,20 +171,6 @@ export function getAsset(assetId: string): Promise<AssetDetail> {
 }
 
 /**
- * The member assets of a stored context — the room's Assets tile (#434).
- *
- * Worst health first, then by name. Membership is the one rule
- * `contextMembers` answers with (ADR-0008), reaching assets **through their
- * ancestors**: a VM in the context brings what it holds, so a list of one VM
- * and its four containers is five rows.
- *
- * A context that does not exist answers with an empty list, not a rejection.
- */
-export function contextAssets(ctxId: string): Promise<MemberAsset[]> {
-  return invoke<MemberAsset[]>("context_assets", { ctxId });
-}
-
-/**
  * What breaks if this asset goes down (#505): its descendants and everything
  * linked to it by `depends-on` or `runs-on`, transitively over both, plus the
  * routes that land on it or on any of those (#1553) listed apart.
@@ -199,24 +183,6 @@ export function contextAssets(ctxId: string): Promise<MemberAsset[]> {
  */
 export function dependsOnThis(assetId: string): Promise<DependsOnThis> {
   return invoke<DependsOnThis>("depends_on_this", { assetId });
-}
-
-/**
- * The assets a **source** room's Assets tile draws (#435): the ones this
- * source's monitors are attached to, by a `monitored-by` link, worst health
- * first.
- *
- * **Written before there was a monitor to find**, as the real statement rather
- * than a stub, on the argument that a tile which fills itself the day the
- * adapter lands beats one somebody has to remember to come back to. #442's
- * Kuma adapter landed and it did — `assets::monitored_by`'s own docs say the
- * same, and this comment said *empty until M4.1* until #505 corrected it.
- *
- * A source nothing was synced under answers with an empty list, not a
- * rejection.
- */
-export function sourceAssets(sourceId: string): Promise<MemberAsset[]> {
-  return invoke<MemberAsset[]>("source_assets", { sourceId });
 }
 
 /**

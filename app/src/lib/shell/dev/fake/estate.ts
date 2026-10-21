@@ -718,9 +718,9 @@ function assetDetail(args: Record<string, unknown>) {
     holds: FIXTURE_ESTATE.filter((row) => row.parent_id === asset.id).map(assetRow),
     exposes: FIXTURE_ROUTES.filter((route) => route.asset_id === asset.id).map(routeRow),
     reachable_via: routesReaching(asset, heldBy),
-    // Empty for `context_assets`' reason and the mirror detail's: this fixture
-    // has no link graph, so an asset is linked to nothing and the pane draws
-    // the links panel's empty state. Absent rather than empty (#435 landed
+    // Empty for the mirror detail's reason: this fixture has no link graph,
+    // so an asset is linked to nothing and the pane draws the links panel's
+    // empty state. Absent rather than empty (#435 landed
     // the field and the panel; the fixture kept neither) it is `undefined`,
     // and `groupLinks` throws on the pane of every asset.
     links: [],

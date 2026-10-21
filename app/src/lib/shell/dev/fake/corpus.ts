@@ -441,8 +441,7 @@ function miniBoard(args: Record<string, unknown>) {
 
 function boardOf(args: Record<string, unknown>) {
   // The fixture has no link graph, so a stored context's membership is
-  // honestly empty — the same answer `context_members` and `list_entities`
-  // give.
+  // honestly empty — the same answer `list_entities` gives.
   if (args["ctxId"]) return { columns: [], sources: [] };
 
   const sources = (args["sources"] as string[] | undefined) ?? [];
@@ -510,16 +509,6 @@ function boardOf(args: Record<string, unknown>) {
         ]
       : [],
   };
-}
-
-/**
- * `source_statuses` (#760): the statuses the source's live tickets show, in
- * the board's order -- the board's `sources` entry for one source.
- */
-function sourceStatuses(args: Record<string, unknown>): string[] {
-  if (args["sourceId"] !== "mock") return [];
-  const board = boardOf({ sources: ["mock"], ctxId: null, project: null });
-  return board.sources[0]?.statuses ?? [];
 }
 
 /**
@@ -995,7 +984,6 @@ export function handlers(): Record<string, Handler> {
     code_facts: (args) => codeFacts(args),
     list_entities: (args) => listEntities(args),
     mini_board: (args) => miniBoard(args),
-    source_statuses: (args) => sourceStatuses(args),
     list_projects: () => listProjects(),
   };
 }
