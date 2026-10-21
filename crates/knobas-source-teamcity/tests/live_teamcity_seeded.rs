@@ -3282,6 +3282,58 @@ async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_
     drop((busy, waiting, ours));
 }
 
+/// **The cleanup keeps the fixture the seed's** (#1560): a project the seed
+/// does not own, with a configuration in it, is gone after `clear_leftovers`,
+/// and the seed's own projects are still there. Nothing else witnesses the
+/// project half of the guard, since a clean server has no stray to delete. A
+/// run killed between the create and the check leaves the stray for the next
+/// run's guard, which is the thing under test.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_project_the_seed_does_not_own_is_deleted_by_the_cleanup() {
+    const STRAY: &str = "KnobasStray1560";
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let post = |path: &str, body: serde_json::Value| {
+        seeded
+            .http
+            .post(format!("{}/{path}", seeded.url))
+            .bearer_auth(&seeded.token)
+            .header("Accept", "application/json")
+            .json(&body)
+            .send()
+    };
+    let r = post(
+        "app/rest/projects",
+        serde_json::json!({ "id": STRAY, "name": STRAY, "parentProject": { "id": "_Root" } }),
+    )
+    .await
+    .expect("create the stray project");
+    assert!(r.status().is_success(), "create {STRAY}: {}", r.status());
+    let r = post(
+        "app/rest/buildTypes",
+        serde_json::json!({
+            "id": format!("{STRAY}_Cfg"), "name": "Cfg", "project": { "id": STRAY }
+        }),
+    )
+    .await
+    .expect("create a configuration in the stray");
+    assert!(r.status().is_success(), "create the configuration: {}", r.status());
+
+    seeded.clear_leftovers().await;
+
+    let (status, _) = seeded.get(&format!("app/rest/projects/id:{STRAY}")).await;
+    assert_eq!(status, 404, "the stray project is gone");
+    let (status, _) = seeded
+        .get(&format!("app/rest/buildTypes/id:{STRAY}_Cfg"))
+        .await;
+    assert_eq!(status, 404, "and its configuration with it");
+    for owned in seeded.owned_projects().iter().filter(|p| *p != "_Root") {
+        let (status, body) = seeded.get(&format!("app/rest/projects/id:{owned}")).await;
+        assert_eq!(status, 200, "the seed's project {owned} is kept: {body}");
+    }
+}
+
 /// The nested project [`a_configured_project_takes_in_its_nested_projects_and_writes_their_path`]
 /// makes under the seeded `Payout`, deleted again when the guard drops --
 /// passing or panicking alike, [`Queued`]'s way. Deleting the outer project
