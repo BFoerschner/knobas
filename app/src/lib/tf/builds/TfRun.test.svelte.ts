@@ -290,7 +290,7 @@ test("Re-run queues the run's branch and values again, and says so", async () =>
       },
     },
   ]);
-  expect(toasts.items.at(-1)!.text).toBe("Queued: run Payout_IntegrationTests. Re-run of #1187, same settings. Sends with the next sync.");
+  expect(toasts.items.at(-1)!.text).toBe("Queued: run Payout_IntegrationTests. Re-run of #1187, same settings.");
 });
 
 test("Run again with changes… opens the Run… dialog from this run's settings", async () => {

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { PipelineRow, PipelineSettings, RunRow } from "../../ipc/entity";
 import type { QueuedWrite, SourceDescriptor, SourceSummary, WriteOpPayload } from "../../ipc/sources";
+import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
@@ -24,6 +25,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  health.replace([]);
   if (page) unmount(page);
   page = null;
   target.remove();
@@ -355,6 +357,24 @@ test("Parameters: each default with its kind; Change… queues the new default a
   ]);
   expect(rows[0]!.textContent).toContain("prod-dryrun");
   expect(rows[0]!.textContent).toContain("queued");
+  expect(toasts.items.at(-1)?.text).toBe(`Queued: set env on ${PIPELINE.name}.`);
+  expect(toasts.items.at(-1)?.action?.label).toBe("Show queue");
+});
+
+test("Change… while the source's sign-in fails says the new default waits there", async () => {
+  health.patch({ source_id: "teamcity", state: "unauthorized", checked_at: null, detail: null, secret_expires_at: null });
+  draw([PIPELINE.entity_id, "params"]);
+  await settle();
+  target.querySelector<HTMLButtonElement>("table[aria-label='Parameters'] tbody tr button")!.click();
+  flushSync();
+  const input = target.querySelector<HTMLInputElement>("input[aria-label='New default for env']")!;
+  input.value = "prod-dryrun";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  button("Save")!.click();
+  await settle();
+  expect(toasts.items.at(-1)?.text).toBe(
+    `Queued: set env on ${PIPELINE.name}. TeamCity sign-in is failing, so it waits there.`,
+  );
 });
 
 test("Triggers: each by name with what it fires on, read only", async () => {
