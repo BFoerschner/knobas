@@ -25,9 +25,6 @@
     deleteBlock as realDeleteBlock,
     dismissBlock as realDismissBlock,
     updateBlock as realUpdateBlock,
-    type AdHocBlock,
-    type DayBlock,
-    type OpenStretch,
     type TimerTarget,
   } from "../../ipc/time";
   import { launcherHome as realLauncherHome, search as realSearch } from "../../ipc/search";
@@ -36,7 +33,7 @@
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
   import { clockReading, dayBounds, dayKey, dayLabel, shiftDay } from "../../time/day";
-  import { atClock, clockOf, offsetMinutes } from "../../time/draft";
+  import { atClock, clockOf } from "../../time/draft";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import {
     dayFigures,
@@ -49,6 +46,7 @@
     type DayRow,
     type OfferRun,
   } from "./day-view";
+  import { readDay, type DayRecord } from "./day-read";
   import TfBlockDialog, { type BlockForm } from "./TfBlockDialog.svelte";
 
   interface DayPorts {
@@ -128,47 +126,14 @@
   const key = $derived(day ?? dayKey(clock));
   const today = $derived(dayKey(clock));
 
-  interface Loaded {
-    day: string;
-    blocks: DayBlock[];
-    pastHorizon: boolean;
-    offers: Record<number, AdHocBlock | null>;
-    /** The day's focused time nothing claims (#901). */
-    open: OpenStretch[];
-  }
-  let loaded = $state<Loaded | null>(null);
+  let loaded = $state<DayRecord | null>(null);
   let failure = $state<string | null>(null);
   let issued = 0;
-
-  /**
-   * The day, its open stretches, and what `ad_hoc_block` says of each
-   * unlogged block, as one answer so they cannot disagree.
-   *
-   * An offer that fails is left out, and the row falls back on the target's
-   * shape. That is not worth blanking the day for.
-   */
-  async function read(on: string): Promise<Loaded> {
-    const { from, to } = dayBounds(on);
-    const record = await io.dayBlocks(from.toISOString(), to.toISOString());
-    const offers: Record<number, AdHocBlock | null> = {};
-    const when = { day: on, offsetMinutes: offsetMinutes(from) };
-    await Promise.all(
-      record.blocks
-        .filter((entry) => entry.block.worklog_id === null)
-        .map((entry) =>
-          io.adHocBlock(entry.block.id, when).then(
-            (offer) => void (offers[entry.block.id] = offer),
-            () => {},
-          ),
-        ),
-    );
-    return { day: on, blocks: record.blocks, pastHorizon: record.past_horizon, offers, open: record.open };
-  }
 
   async function load(on: string) {
     const mine = (issued += 1);
     try {
-      const answer = await read(on);
+      const answer = await readDay(io, on);
       if (mine !== issued) return;
       loaded = answer;
       failure = null;

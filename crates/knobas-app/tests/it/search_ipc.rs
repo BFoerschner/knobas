@@ -1894,6 +1894,7 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
     )
     .await;
 
+    let mut refusals: Vec<String> = Vec::new();
     for (why, label, query) in [
         ("a prefix that is not a search", "Palette", "> palette"),
         ("a list of a list", "Alias", "list:mine"),
@@ -1910,13 +1911,21 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
             .err()
             .unwrap_or_else(|| panic!("{why} was saved"));
         assert_eq!(refused.code, IpcErrorCode::Invalid, "{why}");
+        // The rule, and not the rail's *needs attention* line: at creation
+        // time there is no stored row to delete (#1413).
         assert!(
-            refused
+            !refused
                 .message
-                .contains(knobas_search::saved::NEEDS_ATTENTION),
-            "{why}: the reader is told which rule refused it: {refused:?}"
+                .contains(knobas_search::saved::NEEDS_ATTENTION)
+                && !refused.message.contains("Delete it"),
+            "{why}: the reader is told the rule, not to delete a list: {refused:?}"
         );
+        refusals.push(refused.message);
     }
+    // Each names *which* rule, or the reader is told something is wrong and
+    // never what.
+    let distinct: std::collections::HashSet<&String> = refusals.iter().collect();
+    assert_eq!(distinct.len(), refusals.len(), "{refusals:?}");
     // A name is owed too, and its refusal is a different sentence: the query
     // was fine.
     let unnamed = create_smart_list_inner(&pool, &Registry::for_process(), "   ", &t)
@@ -1924,9 +1933,7 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
         .expect_err("a saved list needs a name");
     assert_eq!(unnamed.code, IpcErrorCode::Invalid);
     assert!(
-        !unnamed
-            .message
-            .contains(knobas_search::saved::NEEDS_ATTENTION),
+        !refusals.contains(&unnamed.message),
         "a blank name is not a broken query: {unnamed:?}"
     );
 

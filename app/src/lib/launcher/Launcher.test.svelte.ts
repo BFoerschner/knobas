@@ -21,6 +21,7 @@ import type {
   SearchResponse,
   Segment,
 } from "../ipc";
+import type { InboxItem } from "../ipc/entity";
 import type { CredentialHealth } from "../ipc/sources";
 import Launcher from "./Launcher.svelte";
 
@@ -536,6 +537,64 @@ test("the board strip reads the live health, not the copy the board arrived with
   expect(strip.length, "the strip did not render at all").toBe(1);
   expect(strip[0]!.className).not.toContain("fail");
   expect(strip[0]!.textContent).not.toContain("401 from Gitea");
+});
+
+/**
+ * The recent rows read the same live health as the strip above them (#1420).
+ *
+ * They used to be handed `home.sources`, the copy the board arrived with, so a
+ * 401 the live store had already cleared left the strip and stayed on a recent
+ * row as *sign in again* until the next opening. The board's copy here still
+ * remembers the 401 and the live store says the source is fine; both the strip
+ * and the row must read the store. The `synced` line is the positive control:
+ * a row that drew no provenance at all would pass the negative half.
+ */
+test("the recent rows read the live health, as the strip above them does", async () => {
+  open({
+    sources: [
+      {
+        source_id: "gitea",
+        state: "ok",
+        checked_at: "2026-08-25T12:00:00Z",
+        detail: null,
+        secret_expires_at: null,
+      },
+    ],
+    ports: {
+      search: async () => response(),
+      launcherHome: async (): Promise<LauncherHome> => ({
+        ...HOME,
+        recent: [
+          {
+            entity_id: "gitea:build-7",
+            kind: "build",
+            source_id: "gitea",
+            title: "payments main #7",
+            updated_at: null,
+            synced_at: "2026-08-25T11:58:00Z",
+            path: null,
+            state: null,
+          },
+        ],
+        sources: [
+          {
+            source_id: "gitea",
+            state: "unauthorized",
+            checked_at: "2026-08-25T11:00:00Z",
+            detail: "401 from Gitea",
+            secret_expires_at: null,
+          },
+        ],
+      }),
+    },
+  });
+  await settle();
+
+  const strip = [...target.querySelectorAll(".strip .src")];
+  expect(strip.length, "the strip did not render at all").toBe(1);
+  expect(strip[0]!.className).not.toContain("fail");
+  const ages = [...target.querySelectorAll(".sy")].map((el) => el.textContent?.trim());
+  expect(ages).toEqual(["synced 2 min ago"]);
 });
 
 /**
@@ -1819,6 +1878,56 @@ test("save as list is off the palette and the help card", async () => {
 });
 
 /**
+ * The control is off the two queries that answer as results and that the
+ * backend still refuses to save, and off a search that failed (#1413).
+ *
+ * An opened list (`list:`) would be a list of a list, `t ` is a worklog query
+ * and not a search, and a failed search leaves an error line with no answer
+ * under it. All three read as *results* to the mode helper, so the gate is the
+ * backend's `interpreted.prefix` and the presence of an answer. The plain
+ * query at the end is the positive control: without it a launcher that never
+ * drew the control would pass.
+ */
+test("save as list is off an opened list, a time query and a failed search", async () => {
+  const created = vi.fn(async () => SAVED_HOME.smart_lists[1]!);
+  const cases = [
+    { raw: "list:not-monitored", prefix: "list" as const, fails: false },
+    { raw: "t today", prefix: "time" as const, fails: false },
+    { raw: "sepa retries", prefix: null, fails: true },
+  ];
+  for (const { raw, prefix, fails } of cases) {
+    open({
+      ports: {
+        launcherHome: async () => SAVED_HOME,
+        search: async () => {
+          if (fails) throw { code: "internal", message: "the engine is down" };
+          return response({ interpreted: { ...response().interpreted, prefix } });
+        },
+        createSmartList: created,
+      },
+    });
+    await settle();
+    await search(raw);
+    if (fails) expect(target.textContent).toContain("the engine is down");
+    expect(target.querySelector("button.save"), `${raw} cannot be saved`).toBeNull();
+    if (app) unmount(app);
+    app = undefined;
+  }
+  expect(created).not.toHaveBeenCalled();
+
+  open({
+    ports: {
+      launcherHome: async () => SAVED_HOME,
+      search: async () => response(),
+      createSmartList: created,
+    },
+  });
+  await settle();
+  await search("sepa retries");
+  expect(target.querySelector("button.save")?.textContent?.trim()).toBe("Save as list");
+});
+
+/**
  * Renaming: Enter commits the field, Escape abandons it — and Escape does not
  * reach the launcher's own ladder while the field is open.
  *
@@ -2557,4 +2666,131 @@ test("a value suggestion draws inline, a chain row spans one column, and a prefi
   } finally {
     style.remove();
   }
+});
+
+/** One inbox line, as `inbox_items` answers it (#1418). */
+function inboxItem(over: Partial<InboxItem> & Pick<InboxItem, "key">): InboxItem {
+  return {
+    category: "mention",
+    source_id: "jira",
+    entity_id: "jira:PAY-1",
+    kind: "ticket",
+    title: "Reconcile mandates",
+    reason: "mara mentioned you",
+    occurred_at: "2026-08-25T11:30:00Z",
+    web_url: null,
+    snoozed_until: null,
+    ...over,
+  };
+}
+
+const INBOX = {
+  count: 3,
+  items: [
+    inboxItem({
+      key: "review_request:gitea:acme/payouts#144",
+      category: "review_request",
+      source_id: "gitea",
+      entity_id: "gitea:acme/payouts#144",
+      kind: "pr",
+      title: "Retry SEPA batches",
+      reason: "jonas asked for your review",
+    }),
+    inboxItem({
+      key: "failed_build:tc:payments-main-88",
+      category: "failed_build",
+      source_id: "tc",
+      entity_id: "tc:payments-main-88",
+      kind: "build",
+      title: "payments main #88",
+      reason: "build failed",
+      occurred_at: "2026-08-24T15:10:00Z",
+    }),
+    inboxItem({ key: "mention:jira:PAY-1" }),
+  ],
+};
+
+/**
+ * The board's inbox preview (#1418, spec §4: *"inbox preview"*): the count the
+ * top bar reads and the newest items, each a row of the board's own list.
+ *
+ * With nothing in the inbox there is no block at all — an empty column with a
+ * heading over it reads as a broken app, which is the board header's own rule.
+ */
+test("the board previews the inbox: the count and its newest three, and nothing when it is empty", async () => {
+  open({ inbox: INBOX });
+  await settle();
+  const block = target.querySelector(".inbox");
+  expect(block, "no inbox block").not.toBeNull();
+  expect(target.querySelector(".secl.inboxh")?.textContent).toMatch(/Inbox\s*3/);
+  const rows = [...target.querySelectorAll(".inbox [role=option]")].map((el) =>
+    el.textContent?.replace(/\s+/g, " ").trim(),
+  );
+  expect(rows).toEqual([
+    "jonas asked for your review: Retry SEPA batches 13:30",
+    // The Inbox page's err dot on a failure.
+    "\u25cf Build failed: payments main #88 yest. 17:10",
+    "Mara mentioned you: Reconcile mandates 13:30",
+  ]);
+  if (app) unmount(app);
+  app = undefined;
+
+  open({ inbox: { count: 0, items: [] } });
+  await settle();
+  expect(target.querySelector(".inbox")).toBeNull();
+  expect(target.querySelector(".inboxh")).toBeNull();
+  // The board itself still drew: the absence is the inbox's, not the board's.
+  expect(target.textContent).toContain("Reconcile mandates");
+});
+
+/**
+ * Today's time on the board (#1418, spec §4: *"today's time"*): the Day view's
+ * tracked and to-log figures, in its words, and nothing on a day with none.
+ */
+test("the board gives today's tracked and to-log time, and nothing on a day with none", async () => {
+  open({ today: { tracked: 130, toLog: 65 } });
+  await settle();
+  const block = target.querySelector(".today [role=option]");
+  expect(block?.textContent?.replace(/\s+/g, " ").trim()).toBe("2h 10m tracked 1h 5m to log");
+  if (app) unmount(app);
+  app = undefined;
+
+  open({ today: { tracked: 0, toLog: 0 } });
+  await settle();
+  expect(target.querySelector(".today")).toBeNull();
+  expect(target.textContent).toContain("Reconcile mandates");
+});
+
+/**
+ * Pressing an inbox row opens its item; pressing the time block opens Time ›
+ * Day (#1418). Both by pointer and by the keyboard, since they are rows of the
+ * board's one list: `↓` from the last smart list lands on the first inbox row.
+ */
+test("an inbox row opens its item and the time block opens the day", async () => {
+  const onnavigate = vi.fn();
+  async function reopen() {
+    if (app) unmount(app);
+    app = undefined;
+    open({ onnavigate, inbox: INBOX, today: { tracked: 130, toLog: 0 } });
+    await settle();
+  }
+  await reopen();
+  target.querySelectorAll<HTMLButtonElement>(".inbox [role=option]")[1]!.click();
+  expect(onnavigate).toHaveBeenLastCalledWith("#/build/tc%3Apayments-main-88");
+
+  await reopen();
+  target.querySelector<HTMLButtonElement>(".today [role=option]")!.click();
+  expect(onnavigate).toHaveBeenLastCalledWith("#/time");
+
+  // The keyboard: two smart lists, then the inbox's three, then the day.
+  await reopen();
+  press("ArrowDown");
+  press("ArrowDown");
+  press("Enter");
+  expect(onnavigate).toHaveBeenLastCalledWith("#/pr/gitea%3Aacme%2Fpayouts%23144");
+  await reopen();
+  for (let i = 0; i < 5; i += 1) press("ArrowDown");
+  press("Enter");
+  expect(onnavigate).toHaveBeenLastCalledWith("#/time");
+  expect(onnavigate).toHaveBeenCalledTimes(4);
 });

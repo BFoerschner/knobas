@@ -690,3 +690,40 @@ async fn a_list_page_is_bounded_however_much_the_caller_asks_for() {
     );
     assert!(r.total >= 250, "and the total still counts the whole list");
 }
+
+/// Saving a query that can never be a list is refused with the rule that
+/// refuses it, and not with the rail's way out (#1413).
+///
+/// The rail's *needs attention* sentence ends "Delete it and save the search
+/// again", which is right for a stored row the grammar has since moved away
+/// from and wrong at creation time, when there is nothing to delete. Refused
+/// before any row is written, so this needs no [`SERIAL`] and leaves nothing
+/// behind for a delta to see.
+#[tokio::test]
+async fn saving_a_query_that_cannot_be_a_list_names_the_rule_and_offers_no_delete() {
+    let pool = pool().await;
+    let s = searcher(&pool);
+    for (query, sentence) in [
+        ("list:mine", "A smart list cannot save another list."),
+        ("t today", "`t` is not a search."),
+    ] {
+        let refused = s.save_list("Refused", query).await.expect_err(query);
+        let SearchError::Invalid(message) = refused else {
+            panic!("{query}: refused as {refused:?}, not as an invalid query");
+        };
+        assert_eq!(message, sentence, "{query}");
+    }
+    // The refusals the box itself would already have shown keep their reason,
+    // as a sentence of its own.
+    let refused = s
+        .save_list("Paste", &"x".repeat(600))
+        .await
+        .expect_err("a paste rather than a query");
+    let SearchError::Invalid(message) = refused else {
+        panic!("a paste refused as {refused:?}");
+    };
+    assert!(message.starts_with("The launcher refuses"), "{message}");
+    assert!(message.ends_with('.'), "{message}");
+    assert!(!message.contains("Delete it"), "{message}");
+    assert!(!message.contains("Needs attention"), "{message}");
+}

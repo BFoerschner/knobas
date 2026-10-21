@@ -27,7 +27,7 @@ import {
   noFilters,
 } from "../ipc";
 import type { LauncherAction } from "./actions";
-import { type LauncherMode, type LauncherRow, flatten, modeOf } from "./rows";
+import { type BoardExtras, type LauncherMode, type LauncherRow, flatten, modeOf } from "./rows";
 import { SYNTAX } from "./syntax";
 import { pastedUrl } from "./url";
 
@@ -134,6 +134,13 @@ export class Session {
   selected = $state(0);
   actions = $state<LauncherAction[]>([]);
   /**
+   * The inbox preview and today's time the board draws beside {@link home}
+   * (#1418). The shell's live reads, set by the launcher from its props; rows
+   * of the board's list like the lists and the recent items, so the arrows
+   * reach them.
+   */
+  extras = $state<BoardExtras>({ inbox: null, today: null });
+  /**
    * The id of the list the query in the box was just saved as, or `null`.
    *
    * A statement about the *current* query, so every path that changes the box
@@ -182,6 +189,7 @@ export class Session {
       home: this.home,
       actions: this.actions,
       syntax: this.syntax,
+      extras: this.extras,
     });
   }
 
@@ -228,21 +236,31 @@ export class Session {
   /**
    * Whether this session can save what is in the box as a smart list.
    *
-   * Three things: a caller that supplied the write, a query to save, and a
-   * box that is actually showing results. The last is what keeps the control
-   * off the `>` palette, the `?` card and a pasted link — none of which the
-   * engine answers as a search, and all of which `saved::create` would refuse.
+   * Four things: a caller that supplied the write, a query to save, an answer
+   * to it, and an answer the backend could save. Without an answer there is
+   * nothing to save — nothing has answered yet, or the search failed and the
+   * box shows its error line. The mode is what keeps the control off the `>`
+   * palette, the `?` card and a pasted link. The prefix check keeps it off the
+   * two that draw as results and that `saved::create` still refuses: an opened
+   * list (`list:`, a list of a list) and a worklog query (`t `), #1413.
    *
-   * **And it is not a second copy of the prefix table** (ruling P2): {@link
-   * Session.mode} is read off the *backend's own interpretation* of the query,
-   * which is exactly what `modeOf` exists for. The one residue is `t ` — a
-   * worklog prefix draws as results, so the control is offered and the backend
-   * refuses it by name. That refusal names its rule, which is the honest
-   * behaviour for a case the frontend is not entitled to decide.
+   * **Ruling P2 holds for the parse, not for the rule.** Both the mode and the
+   * prefix are read off the *backend's own interpretation* of the query (the
+   * same field `modeOf` reads for `?` and `>`), so no prefix is recognised
+   * here. The rule that a list or a worklog query cannot be saved is
+   * `saved::plan`'s, and these two names are the cases of it the box can
+   * reach; a prefix `plan` starts refusing is refused by name until it is
+   * added here.
    */
   get canSave(): boolean {
+    const prefix = this.response?.interpreted.prefix;
     return (
-      this.#ports.createSmartList !== undefined && this.raw.trim() !== "" && this.mode === "results"
+      this.#ports.createSmartList !== undefined &&
+      this.raw.trim() !== "" &&
+      this.response !== null &&
+      this.mode === "results" &&
+      prefix !== "list" &&
+      prefix !== "time"
     );
   }
 
