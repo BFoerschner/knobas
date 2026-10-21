@@ -9527,6 +9527,9 @@ sources hold) too.
   the job page's, and the Connections drawer there shows the link the moment it is made; one
   mechanism serves both cases; Back returns to the view. *Reversing:* mount `TfLinkTo` in the
   shell's dialogs for a view, and keep the request for the job page.
+- **A request nobody took.** The shell drops it the moment the reader lands on any page but a job
+  page (found in review): otherwise a reader who left before the job drew would get the dialog
+  unasked on their next visit. *Reversing:* one `$effect`.
 - **The Connections drawer opens under the dialog.** *Ruling:* yes, so confirming leaves the reader
   looking at the new link, as *Link to…* from the drawer does. *Reversing:* drop `drawer = true`.
 - **The launcher's props.** `openEntity` and `onlink` keep their names, re-documented as the
