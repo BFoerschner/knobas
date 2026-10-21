@@ -355,6 +355,7 @@ test("a route's name is left-aligned and its URL wraps beneath it (#1606)", asyn
   expect(rule(".breaks .lst li.rt .link")).toMatch(/text-align:\s*left/);
   expect(rule(".breaks .lst li.rt")).toMatch(/display:\s*flex/);
   expect(rule(".breaks .lst li.rt")).toMatch(/flex-wrap:\s*wrap/);
+  expect(rule(".breaks .lst li.rt .mono")).toMatch(/flex:\s*0 0 auto/);
   expect(rule(".breaks .lst li.rt .mono")).toMatch(/font-variant-ligatures:\s*none/);
   expect(source).toMatch(/<li class="rt">\s*<button class="link" onclick=\{\(\) => openRoute/);
 });

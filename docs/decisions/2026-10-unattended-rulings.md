@@ -10984,3 +10984,14 @@ Ruled 2026-10-21 by the implementer (Sonnet).
 ## #1593: Gitea declares `closed` as its done-like status (Sonnet implementer, 2026-10-21)
 
 No fork. The ticket-system role and the contract battery ask nothing of `done_statuses` (grep of `crates/knobas-source/src/role` and the battery finds no reader), so no further change. `closed` is lowercase as Gitea spells `state`; the match is case-insensitive per #1501. Forgejo shares the descriptor and so the set.
+
+## #1606: a wrapping route name under Reachable via routes (Sonnet implementer, 2026-10-21)
+
+- **Where should the URL go when the name is long?** *Fork:* left-aligning the name alone
+  (`text-align: left` on the button) leaves the URL pushed right beside a two-line name. *Ruling:*
+  a route's row is a wrapping flex line (`li.rt`): the URL stays beside the name when both fit,
+  and drops under it, whole, when they do not; it breaks mid-string only when it alone is wider
+  than the pane. *Reasoning:* the acceptance asks for the URL to stay readable, and a URL cut in
+  two next to a wrapped name read worst of the layouts tried. *Reversing:* delete the `.rt` rules.
+- **How is it pinned?** *Fork:* jsdom does no layout. *Ruling:* a stylesheet-source test in
+  `AssetsView.depends.test.svelte.ts` checks the four declarations and the `rt` class.
