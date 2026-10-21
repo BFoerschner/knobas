@@ -10746,4 +10746,4 @@ Björn delegated four picks at triage (2026-10-21); two more came up while build
 
 ## #1502: Not a ticket leaves the Tickets view (Sonnet implementer, 2026-10-21)
 
-- **The `contexts` port leaves `TicketsPorts`.** *Fork:* keep the port unused, or drop it with the read. *Ruling:* drop it; the page no longer imports `listContexts`. The test harness still answers a `contexts` read and counts it, so the new test pins that none is made. `create_context` is not touched here (#1481 removed it). *Reasoning:* an unused port invites a reader back. *Reversing:* low, re-add the port and the group.
+- **The `contexts` port leaves `TicketsPorts`.** *Fork:* keep the port unused, or drop it with the read. *Ruling:* drop it; the page no longer imports `listContexts`. The test harness still answers a `contexts` read and counts it, so the new test pins that none is made. *Reasoning:* an unused port invites a reader back. *Reversing:* low, re-add the port and the group.
