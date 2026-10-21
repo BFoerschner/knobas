@@ -352,7 +352,8 @@ test("the added project is in view, with a note beside Save until it is saved (#
     // Five lines, five rows: WEB is on the last line and nothing scrolls inside the field.
     expect(field("projects").value).toBe("PAY\nOPS\nCUS\nTRK\nWEB");
     expect((field("projects") as HTMLTextAreaElement).rows).toBe(5);
-    expect(scrolled).toContain(field("projects"));
+    // Save and its note brought up from below, then the field, so both are in sight.
+    expect(scrolled).toEqual([section("What it syncs").querySelector(".tf-stg-acts"), field("projects")]);
     expect(addedNote()).toBe("WEB added, not saved yet");
 
     sectionButton("What it syncs", "Save").click();

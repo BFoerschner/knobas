@@ -212,6 +212,8 @@
    * it left them: the note beside *Save* stands while the field still reads so.
    */
   let added = $state<{ value: string; field: string; lines: string } | null>(null);
+  /** The config's *Save* and its note, to scroll to. */
+  let configActs = $state<HTMLElement>();
   const addedNote = $derived(
     added !== null && linesOf(configValues[added.field]) === added.lines ? `${added.value} added, not saved yet` : null,
   );
@@ -229,9 +231,14 @@
     configValues = withAdded(fields, read, add);
     if (add && configValues !== read) {
       added = { ...add, lines: linesOf(configValues[add.field]) };
-      // In view, so the reader sees it went in (#1404). jsdom draws no layout.
+      // In view, so the reader sees it went in (#1404): *Save* and its note at
+      // the bottom of the window, then the field, if that left it out of sight.
+      // jsdom draws no layout and has no `scrollIntoView`.
       const id = `tf-src-cfg-${add.field}`;
-      void tick().then(() => document.getElementById(id)?.scrollIntoView?.({ block: "center" }));
+      void tick().then(() => {
+        configActs?.scrollIntoView?.({ block: "end" });
+        document.getElementById(id)?.scrollIntoView?.({ block: "nearest" });
+      });
     } else {
       added = null;
     }
@@ -573,7 +580,7 @@
       idPrefix="tf-src-cfg"
       layout="rows"
     />
-    <div class="tf-stg-acts">
+    <div class="tf-stg-acts" bind:this={configActs}>
       <button class="tf-btn tf-sm tf-primary" disabled={!configDirty || !configValid || saving} onclick={() => void saveConfig()}
         >Save</button
       >
@@ -597,7 +604,7 @@
   {#if runs !== null && runs.length === 0}
     <p class="tf-stg-p">No runs yet. The first one starts on the schedule, or with <b>Sync now</b>.</p>
   {:else if runs !== null}
-    <table class="tf-tbl">
+    <table class="tf-tbl tf-stg-runs">
       <thead><tr><th>Started</th><th>Took</th><th>Result</th></tr></thead>
       <tbody>
         {#each runs as run (run.id)}

@@ -72,6 +72,9 @@
 /* a sync run's result (#1478): wraps anywhere, as the boot screen's error does, so a
    request URL cannot widen the table; an unreachable run's transport error sits behind Details */
 .tf-stg-res { overflow-wrap: anywhere; }
+/* a cell that may break anywhere has almost no minimum width, so the table would take it from
+   Started and Took: those two keep their line */
+.tf-stg-runs td:not(.tf-stg-res) { white-space: nowrap; }
 .tf-stg-det { margin-top: 4px; color: var(--ink-2); }
 .tf-stg-det summary { cursor: pointer; font-size: var(--t-xs); }
 .tf-stg-det code { display: block; margin-top: 4px; font: 400 var(--t-xs)/1.45 var(--mono); }
