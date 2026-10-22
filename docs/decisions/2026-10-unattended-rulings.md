@@ -11312,3 +11312,30 @@ set.
   compose calls and `live_teamcity_seeded.rs`, all of which `just teamcity-live-seeded` uses
   (working model, *A PR at the real systems' edge carries its live run*). *Reversing:* n/a.
 
+## #1622: the shared minute-resolution watermark (Opus implementer, 2026-10-22)
+
+- **Reserved for Björn, ruled by implementer on Opus: the frozen-surface change to
+  `crates/knobas-source/src/**`** (waived by Björn 2026-10-22, review handoff). *Ruling:* one new
+  public module, `knobas_source::watermark`, additive, booked in
+  `docs/contract/10.8/1622-knobas-source-shared-watermark.md`; nothing existing in the crate
+  changes. *Reversing:* moderate, as A4 says: the adapters take their copies back, nothing on disk
+  changes.
+- **Where Jira's ceiling comes from.** `serverInfo.serverTime` is already fetched and would cost
+  nothing; a probe costs one request per run. *Ruling:* a one-row probe, `<scope> ORDER BY updated
+  DESC`, `fields=updated`, as Confluence's. `CONTEXT.md` **Watermark** says the ceiling is
+  *witnessed*, "not the newest that exists", and a server clock is the latter. *Reversing:* low,
+  one function in `sync.rs`.
+- **Where the literal formats live.** *Ruling:* `Jql` and `Cql` are types in
+  `knobas_source::watermark` (both `"%Y-%m-%d %H:%M"`), with the rendering, the read-back floor,
+  the zone fallback and `MIN_UTC_OFFSET_SECS`, so the generic test runs over the real two and not
+  over copies. Each adapter keeps its response parsers. *Reversing:* low.
+- **How the identity is generic.** *Ruling:* an `Entry` trait (key, stamp, `Version`) implemented by
+  each adapter's own `Seen`. The envelopes, their serde names and their extra fields stay in the
+  adapters, not flattened into a shared struct, which is what keeps the stored bytes identical.
+  *Reversing:* low.
+- **The duplicated `busy()` test server in the two `write.rs` files.** *Ruling:* left. The two
+  return different client types and are test-only; sharing them needs a public test-support
+  surface in a frozen crate or a new crate, which costs more than the copy. *Reversing:* low.
+- **The adapters' cursor tests that now repeat the generic ones** (overlap, DST, cap, order).
+  *Ruling:* kept. They drive each adapter's envelope through its own `advanced`, which the generic
+  test cannot reach. *Reversing:* low.
