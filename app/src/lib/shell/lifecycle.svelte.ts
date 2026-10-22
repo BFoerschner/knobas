@@ -30,6 +30,8 @@ export interface Lifecycle {
   start(): Promise<void>;
   stop(): void;
   retry(): Promise<void>;
+  /** Back to `starting` with no status, stopped; the module-level one outlives a test. */
+  reset(): void;
 }
 
 /** Whether there is any point asking again. */
@@ -136,6 +138,12 @@ export function createLifecycle(options: { pollMs?: number } = {}): Lifecycle {
       clearTimeout(timer);
       unlisten?.();
       unlisten = undefined;
+    },
+
+    reset() {
+      this.stop();
+      state.db = { state: "starting", detail: null };
+      state.status = null;
     },
 
     async retry() {

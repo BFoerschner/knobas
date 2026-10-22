@@ -51,6 +51,15 @@ export function openWriteQueue(): void {
   writeQueuePanel.open = true;
 }
 
+/**
+ * Back to a fresh window: the panel shut and nobody waiting on a withdrawal.
+ * Module-level state is the window's one, so a test calls this between runs.
+ */
+export function reset(): void {
+  writeQueuePanel.open = false;
+  withdrawals.clear();
+}
+
 /** Nothing owed, and nothing asked yet — the counts before the first read. */
 const NONE: QueueCounts = { pending: 0, held: 0, refused: 0 };
 

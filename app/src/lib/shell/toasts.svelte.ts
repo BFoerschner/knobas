@@ -57,6 +57,12 @@ export function push(spec: ToastSpec): number {
   return id;
 }
 
+/** Drop the stack and restart the ids: a test starts on an empty screen. */
+export function reset(): void {
+  toasts.items = [];
+  nextId = 0;
+}
+
 /**
  * Remove a toast. Idempotent: the auto-dismiss timer always fires, including
  * for a toast the reader has already closed by hand.

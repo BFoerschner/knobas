@@ -85,6 +85,8 @@ export interface KindRegistry {
   frameKinds(role: string, frame: Frame): string[] | null;
   /** Read the registry. Idempotent after a success; retryable after a failure. */
   load(): Promise<void>;
+  /** Forget what was read, and drop any read still out, so the next {@link load} asks again. */
+  reset(): void;
 }
 
 export function createKindRegistry(ports?: KindRegistryPorts): KindRegistry {
@@ -94,6 +96,8 @@ export function createKindRegistry(ports?: KindRegistryPorts): KindRegistry {
   let loaded = false;
   /** The in-flight read, so three components mounting at once ask once. */
   let inFlight: Promise<void> | null = null;
+  /** Bumped by `reset`, so a read that was out across it lands nowhere. */
+  let epoch = 0;
 
   return {
     info(kind: string) {
@@ -133,9 +137,11 @@ export function createKindRegistry(ports?: KindRegistryPorts): KindRegistry {
     load() {
       if (loaded) return Promise.resolve();
       if (inFlight) return inFlight;
+      const mine = epoch;
       inFlight = io
         .listAdapters()
         .then((adapters) => {
+          if (mine !== epoch) return;
           state.adapters = adapters;
           loaded = true;
         })
@@ -144,9 +150,15 @@ export function createKindRegistry(ports?: KindRegistryPorts): KindRegistry {
           // shell still draws, and the next mount gets another go.
         })
         .finally(() => {
-          inFlight = null;
+          if (mine === epoch) inFlight = null;
         });
       return inFlight;
+    },
+    reset() {
+      epoch++;
+      state.adapters = [];
+      loaded = false;
+      inFlight = null;
     },
   };
 }
