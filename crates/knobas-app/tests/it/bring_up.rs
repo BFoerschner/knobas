@@ -609,7 +609,10 @@ async fn a_quit_while_migrating_stops_the_server() {
     orphan.abandon();
     let port = port_of(&root);
 
-    let mut holder = connector.connect().await.expect("a connection of the test's");
+    let mut holder = connector
+        .connect()
+        .await
+        .expect("a connection of the test's");
     sqlx::query("begin").execute(&mut holder).await.unwrap();
     sqlx::query("lock table _sqlx_migrations in access exclusive mode")
         .execute(&mut holder)
@@ -691,7 +694,10 @@ async fn a_failed_migration_stops_the_server_without_holding_the_runtime() {
         async move {
             loop {
                 let state = handle.state::<Lifecycle>().get();
-                ticks.lock().unwrap().push((std::time::Instant::now(), state));
+                ticks
+                    .lock()
+                    .unwrap()
+                    .push((std::time::Instant::now(), state));
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         }

@@ -403,7 +403,9 @@ async fn start_with(
     {
         let mut running = clones.lock();
         if clones.closed.load(Ordering::Relaxed) {
-            return Err(IpcError::not_ready("knobas is quitting, so no clone starts"));
+            return Err(IpcError::not_ready(
+                "knobas is quitting, so no clone starts",
+            ));
         }
         if running.contains_key(&repo_id) {
             return Ok(CloneAnswer::Cloning { path: shown });

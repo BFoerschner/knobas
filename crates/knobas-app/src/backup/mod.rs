@@ -716,12 +716,7 @@ pub fn start<R: tauri::Runtime>(
         },
         |sources| Arc::clone(&sources.secrets),
     );
-    let state = BackupState::new(
-        pool.clone(),
-        connector,
-        profile.backup_dir(),
-        secrets,
-    );
+    let state = BackupState::new(pool.clone(), connector, profile.backup_dir(), secrets);
     // The registry the installed adapters are restored into is the sources
     // state's (#1323). Without it a restore brings back no adapters, the
     // same way it brings back no secrets above.

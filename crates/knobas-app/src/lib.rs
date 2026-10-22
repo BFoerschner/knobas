@@ -145,7 +145,6 @@ pub mod events {
     }
 }
 
-
 use sqlx::PgPool;
 use tauri::Manager;
 

@@ -409,7 +409,10 @@ pub(crate) fn send_in_background(state: &crate::sources::SourcesState, source_id
         }
     });
     if !spawned {
-        tracing::info!(write_id = id, "knobas is quitting: the write waits for the next start");
+        tracing::info!(
+            write_id = id,
+            "knobas is quitting: the write waits for the next start"
+        );
     }
 }
 
@@ -448,7 +451,10 @@ pub(crate) fn send_in_background_then<F, Fut>(
         then(task).await;
     });
     if !spawned {
-        tracing::info!(write_id = id, "knobas is quitting: the write waits for the next start");
+        tracing::info!(
+            write_id = id,
+            "knobas is quitting: the write waits for the next start"
+        );
     }
 }
 
