@@ -12418,3 +12418,21 @@ The measurement came after it.
   to be seen. *Reversing:* drop two assertions.
 - **Where the contract records it.** *Ruling:* a dated paragraph inside "Amendments from the Jira
   walk order", as the ticket says. The diff touches no surface §10.8 freezes. *Reversing:* none.
+
+#### #1720's review (merge-manager on Opus, 2026-10-22)
+
+- **Is writing Jira's database a witness?** *Ruling:* yes, as setup. The `UPDATE` arranges a
+  state REST cannot reach (an import's shared stamp). What the test asserts, the reindex and the
+  search order, is the real product's. `Tied` updates only the ids it filed in the same call, its
+  `Drop` deletes those issues on unwind, which takes their stamp and index entries with them, and a
+  killed run's issues are outside `seed-state.json`, so the next `clear_leftovers` deletes them. The
+  suite runs `--test-threads=1`, as `SubTask` already relies on. *Reversing:* low.
+- **The edit could have written `created` back.** If the edit stored the issue's original
+  millisecond stamp, the edited issue would sort last as well, and the test would read "an edit
+  reorders a tie" off a tie that had gone. *Ruling:* the live test now also asserts that after the
+  edit the group still carries its one stamp, re-run on the seeded Jira. *Reversing:* drop one
+  assertion.
+- **mockd's growth under ADR-0013's freeze.** *Ruling:* minimal, so accepted. The ticket asks for
+  it. The alternative is the adapter's mockd-backed tests answering 400 to the walk's query. The
+  growth is one optional token pair that no answer depends on, because the search already broke
+  ties by id ascending, `DESC` included. This is the same precedent #1623 set. *Reversing:* low.

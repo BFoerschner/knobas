@@ -3546,7 +3546,12 @@ async fn an_edit_reorders_issues_tied_on_created_and_id_holds_them_still() {
         .await;
     let stamps: std::collections::BTreeSet<_> = rows
         .iter()
-        .map(|r| r["fields"]["created"].as_str().expect("a created stamp"))
+        .map(|r| {
+            r["fields"]["created"]
+                .as_str()
+                .expect("a created stamp")
+                .to_owned()
+        })
         .collect();
     assert_eq!(stamps.len(), 1, "one created stamp for the group: {rows:?}");
     let keys = |rows: Vec<serde_json::Value>| -> Vec<String> {
@@ -3590,11 +3595,23 @@ async fn an_edit_reorders_issues_tied_on_created_and_id_holds_them_still() {
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
 
-    let after = keys(
-        seeded
-            .jql(&format!("{scope} ORDER BY created ASC"), "key")
-            .await,
-    );
+    let rows = seeded
+        .jql(&format!("{scope} ORDER BY created ASC"), "created")
+        .await;
+    // Still one stamp: the edit moved the issue in the index, and did not
+    // write back a `created` of its own, which would sort it last just the
+    // same and be no tie at all.
+    let stamps_after: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| {
+            r["fields"]["created"]
+                .as_str()
+                .expect("a created stamp")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(stamps_after, stamps, "the edit left the one created stamp");
+    let after = keys(rows);
     println!("tie: {edited} edited; created ASC {in_index_order:?} -> {after:?}");
     let mut moved = in_index_order[1..].to_vec();
     moved.push(edited.clone());
