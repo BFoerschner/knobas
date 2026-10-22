@@ -66,15 +66,18 @@ jobs:
       # step's output rather than reaching for the ref again.
       - id: plan
         name: Resolve the tag and the platforms
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PLATFORMS: ${{ inputs.platforms }}
         run: |
-          tag='${{ inputs.tag }}'
+          tag="$INPUT_TAG"
           case "$tag" in
             v*) ;;
             *) echo "::error::'$tag' is not a v-prefixed release tag."; exit 1 ;;
           esac
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-          case '${{ inputs.platforms }}' in
+          case "$INPUT_PLATFORMS" in
             macos)   os='["macos-latest"]' ;;
             windows) os='["windows-latest"]' ;;
             linux)   os='["ubuntu-latest"]' ;;
@@ -84,7 +87,7 @@ jobs:
 
       # The tag, not the default branch: a manual re-run must build the code the
       # release is of, not whatever `main` has drifted to since.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.plan.outputs.tag }}
 
@@ -170,7 +173,7 @@ jobs:
     # which would otherwise sit on GitHub's 6-hour default -- at 10x billing.
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.draft.outputs.tag }}
 
@@ -187,11 +190,11 @@ jobs:
           test -n "$channel"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (same commit as master)
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # Both matrix legs are the same job id, so name the runner in the key
           # explicitly rather than trusting the default key's composition to
@@ -199,7 +202,7 @@ jobs:
           # confusing failure to read, and this costs one string.
           key: ${{ matrix.os }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
