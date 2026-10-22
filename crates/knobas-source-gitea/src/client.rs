@@ -55,7 +55,8 @@ mod repo;
 /// means "the collection ran out" *or* "we were capped", with nothing in the
 /// answer to say which. No walk in `sync.rs` ends a *listing* on a short page:
 /// it ends one on an **empty** page (`knobas_http::PageWalk`), and the two budgeted
-/// walks stop on their own budget or watermark before they get that far.
+/// walks stop on their own budget or watermark before they get that far. Nor
+/// does `write.rs`'s 409 readback of open pull requests (#1625).
 /// Reading a short page as the end is a run that reports success while its
 /// watermark advances past records it never saw. Issue #81, ruled 2026-08-29.
 /// `sync.rs` no longer **reads** this constant -- it does not import it, and
