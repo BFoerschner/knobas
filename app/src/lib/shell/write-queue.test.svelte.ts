@@ -24,6 +24,8 @@ let counts: QueueCounts = { pending: 0, held: 0, refused: 0 };
 let reject: unknown = null;
 /** Set to make every flush a send that never answers (#775). */
 let flushHold: Promise<void> | null = null;
+/** Set to make every apply a call that never answers, so the store stays busy (#1671). */
+let applyHold: Promise<void> | null = null;
 
 function record<T>(command: string, args: unknown, value: T): Promise<T> {
   calls.push({ command, args });
@@ -40,7 +42,7 @@ vi.mock("../ipc/sources", () => ({
   writeQueueCounts: () => record("write_queue_counts", null, counts),
   flushWrites: (sourceId: string | null) =>
     flushHold ?? record("flush_writes", { sourceId }, undefined),
-  applyHeldWrite: (id: number) => record("apply_held_write", { id }, undefined),
+  applyHeldWrite: (id: number) => applyHold ?? record("apply_held_write", { id }, undefined),
   discardWrite: (id: number) =>
     // The fake queue actually forgets the row, so "the row is untouched" is
     // something a test reads off the panel rather than infers from the call
@@ -1102,10 +1104,63 @@ test("flush now disables nothing while the send it asked for is out", async () =
     screen.button("Flush now")!.click();
     await settle();
     expect(screen.queue.busy).toBe(false);
-    expect(screen.button("Flush now")!.disabled).toBe(false);
+    // Its own button is off while it is out (#1671); the other answers are not.
+    expect(screen.button("Flush now")!.disabled).toBe(true);
     expect(screen.button("Discard")!.disabled).toBe(false);
   } finally {
     flushHold = null;
+  }
+  screen.done();
+});
+
+/** #1671: a double click on *Flush now* is one send. */
+test("double-clicking flush now sends one flush_writes", async () => {
+  rows = [write()];
+  counts = { pending: 1, held: 0, refused: 0 };
+  const screen = await render();
+  calls.length = 0;
+  const button = screen.button("Flush now")!;
+  button.click();
+  button.click();
+  await settle();
+  expect(calls.filter((c) => c.command === "flush_writes")).toHaveLength(1);
+  // …and the button is back once the send has answered.
+  expect(screen.button("Flush now")!.disabled).toBe(false);
+  button.click();
+  await settle();
+  expect(calls.filter((c) => c.command === "flush_writes")).toHaveLength(2);
+  screen.done();
+});
+
+/**
+ * #1671: an amend skipped because the store was busy keeps the editor and the
+ * words typed in it. The Save button is disabled while busy, so the test lifts
+ * that to reach the interleaving the button's state can lag behind.
+ */
+test("saving while the store is busy keeps the draft", async () => {
+  rows = [held(), write({ id: 9 })];
+  counts = { pending: 1, held: 1, refused: 0 };
+  const screen = await render();
+  screen.button("Edit")!.click();
+  flushSync();
+  const box = document.querySelector("textarea")!;
+  box.value = "my careful words";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+
+  applyHold = new Promise(() => {});
+  try {
+    void screen.queue.apply(9);
+    expect(screen.queue.busy).toBe(true);
+    calls.length = 0;
+    const save = screen.button("Send this instead")!;
+    save.disabled = false;
+    save.click();
+    await settle();
+    expect(calls.some((c) => c.command === "amend_write")).toBe(false);
+    expect(document.querySelector("textarea")!.value).toBe("my careful words");
+  } finally {
+    applyHold = null;
   }
   screen.done();
 });

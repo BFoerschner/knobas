@@ -610,11 +610,14 @@ export interface WriteQueue {
   readonly answered: boolean;
   /** True while an action is in flight, so a button cannot be double-fired. */
   readonly busy: boolean;
+  /** True while a *Flush now* is out, so its button cannot be double-fired (#1671). */
+  readonly flushing: boolean;
   refresh(): Promise<void>;
   flush(sourceId: string | null): Promise<void>;
   apply(id: number): Promise<void>;
   discard(id: number): Promise<void>;
-  amend(id: number, payload: WriteOpPayload): Promise<void>;
+  /** Resolves `true` when the amend ran, `false` when it was skipped because the store was busy. */
+  amend(id: number, payload: WriteOpPayload): Promise<boolean>;
 }
 
 export function createWriteQueue(): WriteQueue {
@@ -623,8 +626,9 @@ export function createWriteQueue(): WriteQueue {
     rows: QueuedWrite[];
     error: string | null;
     busy: boolean;
+    flushing: boolean;
     answered: boolean;
-  }>({ counts: NONE, rows: [], error: null, busy: false, answered: false });
+  }>({ counts: NONE, rows: [], error: null, busy: false, flushing: false, answered: false });
 
   async function refresh(): Promise<void> {
     try {
@@ -650,8 +654,8 @@ export function createWriteQueue(): WriteQueue {
    * `conflict` failed *because* the queue moved, so the list on screen is the
    * stale thing that caused it.
    */
-  async function act(run: () => Promise<void>): Promise<void> {
-    if (state.busy) return;
+  async function act(run: () => Promise<void>): Promise<boolean> {
+    if (state.busy) return false;
     state.busy = true;
     try {
       await run();
@@ -662,19 +666,26 @@ export function createWriteQueue(): WriteQueue {
       state.busy = false;
       await refresh();
     }
+    return true;
   }
 
   /**
    * *Flush now* (#775): the send, so it takes no `busy` -- the panel's other
    * answers stay pressable while it is out -- and the re-read follows it as
-   * `act`'s does, failure included.
+   * `act`'s does, failure included. Its own `flushing` flag (#1671) keeps a
+   * second click from sending a second `flush_writes`: one invoke per click
+   * that lands, none while one is out.
    */
   async function flush(sourceId: string | null): Promise<void> {
+    if (state.flushing) return;
+    state.flushing = true;
     try {
       await flushWrites(sourceId);
       state.error = null;
     } catch (error) {
       state.error = message(error);
+    } finally {
+      state.flushing = false;
     }
     await refresh();
   }
@@ -695,14 +706,18 @@ export function createWriteQueue(): WriteQueue {
     get busy() {
       return state.busy;
     },
+    get flushing() {
+      return state.flushing;
+    },
     refresh,
     flush,
-    apply: (id) => act(() => applyHeldWrite(id)),
-    discard: (id) =>
-      act(async () => {
+    apply: async (id) => void (await act(() => applyHeldWrite(id))),
+    discard: async (id) => {
+      await act(async () => {
         await discardWrite(id);
         noteWithdrawn(id);
-      }),
+      });
+    },
     amend: (id, payload) => act(() => amendWrite(id, payload)),
   };
 }
