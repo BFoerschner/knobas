@@ -45,7 +45,7 @@ function markup(text: string): string {
  * **This is the whole reason there is a scanner here.** The obvious
  * `<button\b([\s\S]*?)>` ends the tag at the first `>` in the source, and in
  * Svelte the first `>` is very often inside an attribute:
- * `onclick={() => router.go("#/sources")}`. Every button in this codebase has
+ * `onclick={() => location.hash = "#/sources"}`. Every button in this codebase has
  * one. The regex version therefore treated the arrow's `>` as the end of the
  * tag, took the rest of the handler as the element's *content*, and concluded
  * that no button was icon-only — a lint that reported zero offenders because

@@ -16,7 +16,7 @@
   import type { LinkRow } from "../../ipc/entity";
   import type { SearchHit } from "../../ipc/search";
   import { Session, type SessionPorts } from "../../launcher/session.svelte";
-  import { linkFailureMessage } from "../../detail/links.svelte";
+  import { linkFailureMessage } from "../../detail/links";
   import { drawn } from "../../detail/relations";
   import { kindSingular } from "../../shell/kinds";
   import type { Layers } from "../layers.svelte";

@@ -21,7 +21,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AssetDetail, AssetRow, DependsOnThis, RouteRow } from "../ipc/assets";
-import { createRouter } from "../shell/router.svelte";
+import { createTestNav } from "./test-nav.svelte";
 import AssetsView from "./AssetsView.svelte";
 
 const NOW = new Date(2026, 8, 8, 12, 0, 0, 0);
@@ -157,14 +157,14 @@ let app: Record<string, unknown> | undefined;
 
 function render(hash: string, answers: Answers) {
   location.hash = hash;
-  const router = createRouter();
+  const nav = createTestNav();
   const ports = bridge(answers);
   app = mount(AssetsView, {
     target,
-    props: { router, now: () => NOW, ports: ports as never },
+    props: { nav, now: () => NOW, ports: ports as never },
   });
   flushSync();
-  return { router, ports };
+  return { nav, ports };
 }
 
 function text(): string {
@@ -278,7 +278,7 @@ test("an asset nothing depends on says so, with a count of zero", async () => {
  * but left the number would still read "3" over an empty panel.
  */
 test("selecting another asset asks again and never draws the last one's answer", async () => {
-  const { router, ports } = render("#/asset/asset:knobas-gitea", {
+  const { nav, ports } = render("#/asset/asset:knobas-gitea", {
     [GITEA.id]: {
       assets: [{ asset: TEAMCITY, path: null, relation: "depends-on" }],
       routes: [TUNNEL],
@@ -289,7 +289,7 @@ test("selecting another asset asks again and never draws the last one's answer",
   // The second walk is held open, which is what makes the assertions below
   // about the gap between the two answers rather than about a race.
   const release = ports.holdNext();
-  router.go("#/asset/asset:hetzner-teamcity");
+  nav.go("#/asset/asset:hetzner-teamcity");
   flushSync();
   await vi.waitFor(() => expect(ports.asked).toContain(TEAMCITY.id));
   expect(lines()).toEqual([]);
@@ -324,7 +324,7 @@ test("a refused walk draws its message and not the empty state", async () => {
 
 /** A line is one click to the asset it names, which is what makes it useful. */
 test("a line on the panel opens the asset it names", async () => {
-  const { router } = render("#/asset/asset:knobas-gitea", {
+  const { nav } = render("#/asset/asset:knobas-gitea", {
     [GITEA.id]: {
       assets: [{ asset: TEAMCITY, path: null, relation: "depends-on" }],
       routes: [],
@@ -339,7 +339,7 @@ test("a line on the panel opens the asset it names", async () => {
   line?.click();
   flushSync();
 
-  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: TEAMCITY.id });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: TEAMCITY.id });
 });
 
 /**

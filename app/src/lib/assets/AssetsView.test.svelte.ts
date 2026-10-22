@@ -31,7 +31,7 @@ import type {
   RouteRow,
 } from "../ipc/assets";
 import { DEBOUNCE_MS } from "../launcher";
-import { createRouter } from "../shell/router.svelte";
+import { createTestNav } from "./test-nav.svelte";
 import AssetsView from "./AssetsView.svelte";
 
 /** The clock the history's *ago* readings are relative to. */
@@ -397,11 +397,11 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
   const searched: SearchQuery[] = [];
   const opened: string[] = [];
   location.hash = hash;
-  const router = createRouter();
+  const nav = createTestNav();
   app = mount(AssetsView, {
     target,
     props: {
-      router,
+      nav,
       now: () => NOW,
       // The strip is measured, and jsdom measures every element as zero — so
       // the width a reader's window would have is injected. Zero is also a
@@ -464,7 +464,7 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
     },
   });
   flushSync();
-  return { router, asked, searched, opened };
+  return { nav, asked, searched, opened };
 }
 
 /** What a test may put in front of the view besides the estate. */
@@ -701,7 +701,7 @@ test("an asset's address draws its whole path and its pane", async () => {
  * place, so the assertion is on the address as well as on the markup.
  */
 test("selecting an asset that holds something opens the next column", async () => {
-  const { router } = render("#/asset/asset:postgres");
+  const { nav } = render("#/asset/asset:postgres");
   await vi.waitFor(() => expect(columns()).toHaveLength(3));
 
   const vm = [...target.querySelectorAll<HTMLButtonElement>("button.row")].find(
@@ -710,7 +710,7 @@ test("selecting an asset that holds something opens the next column", async () =
   vm?.click();
   flushSync();
 
-  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: VM.id });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: VM.id });
   await vi.waitFor(() =>
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]),
   );
@@ -739,10 +739,10 @@ test("an empty estate is told apart from a read that has not landed", async () =
  * address names — and this is the deep-link case a notification produces.
  */
 test("a deep link to an asset that is gone says so instead of showing the last one", async () => {
-  const { router } = render("#/asset/asset:postgres");
+  const { nav } = render("#/asset/asset:postgres");
   await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
-  router.go("#/asset/asset:nobody");
+  nav.go("#/asset/asset:nobody");
   flushSync();
 
   await vi.waitFor(() => expect(text()).toContain("no asset asset:nobody"));
@@ -761,7 +761,7 @@ test("a deep link to an asset that is gone says so instead of showing the last o
  * with no way to find the place `prod` can be changed.
  */
 test("an inherited value names the ancestor it came from and links to it", async () => {
-  const { router } = render("#/asset/asset:postgres");
+  const { nav } = render("#/asset/asset:postgres");
   await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
   const pane = text();
@@ -778,7 +778,7 @@ test("an inherited value names the ancestor it came from and links to it", async
   expect(note).toBeDefined();
   note?.click();
   flushSync();
-  expect(router.route).toEqual({
+  expect(nav.route).toEqual({
     view: "assets",
     tab: "tree",
     assetId: SITE.id,
@@ -912,15 +912,15 @@ test("a column row badges what is wrong inside it, in the worst tone inside", as
  * address bar.
  */
 test("the arrows and enter walk three levels, and the pane follows", async () => {
-  const { router } = render("#/assets/tree");
+  const { nav } = render("#/assets/tree");
   await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
   press("ArrowDown");
-  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: SITE.id });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: SITE.id });
   await vi.waitFor(() => expect(marked()).toEqual(["hel1", null]));
 
   press("ArrowRight");
-  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: SIBLING.id });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: SIBLING.id });
   await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-app-02", null]));
 
   press("ArrowDown");
@@ -992,27 +992,27 @@ test("reduced motion is respected when the walk scrolls a row into view", async 
  * so the last press is asserted **not** to be consumed.
  */
 test("escape unwinds the path one level at a time and then falls through", async () => {
-  const { router } = render("#/asset/asset:postgres");
+  const { nav } = render("#/asset/asset:postgres");
   await vi.waitFor(() => expect(columns()).toHaveLength(3));
 
   expect(press("Escape").defaultPrevented).toBe(true);
-  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: VM.id });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: VM.id });
   // Waited out between presses, and that is a statement about the view rather
   // than about the test: the layout is derived from the pane's answer, so the
   // rung a press lands on is the one the *drawn* path offers.
   await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", null]));
 
   press("Escape");
-  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: SITE.id });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: SITE.id });
   await vi.waitFor(() => expect(marked()).toEqual(["hel1", null]));
 
   press("Escape");
-  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: null });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: null });
   await vi.waitFor(() => expect(marked()).toEqual([null]));
 
   const last = press("Escape");
   expect(last.defaultPrevented).toBe(false);
-  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: null });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: null });
 });
 
 /**
@@ -1062,13 +1062,13 @@ test("a path the window holds collapses nothing", async () => {
  * selects it** — criterion 3, and story 30.
  *
  * The reveal is an *address*: the box hands the first match's id to the
- * router, the pane reads it, and the columns are derived from the `held_by`
+ * nav, the pane reads it, and the columns are derived from the `held_by`
  * that comes back. So the box needs to know nothing about where an asset
  * lives, and a match four levels down opens four columns without the reader
  * having walked one of them.
  */
 test("typing a name opens the path to the first match and selects it", async () => {
-  const { router, searched } = render("#/assets/tree");
+  const { nav, searched } = render("#/assets/tree");
   await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
   await type("gitea-db");
@@ -1079,7 +1079,7 @@ test("typing a name opens the path to the first match and selects it", async () 
   expect(text()).toContain("hel1 / vm-app-02 / gitea");
 
   press("Enter", box());
-  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: GITEA_DB.id });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: GITEA_DB.id });
   await vi.waitFor(() =>
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]),
   );
@@ -1132,7 +1132,7 @@ test("a query nothing matches leaves the columns where they were", async () => {
  * columns back without losing the asset they were reading.
  */
 test("escape in the search box clears the query before it unwinds anything", async () => {
-  const { router } = render("#/asset/asset:postgres");
+  const { nav } = render("#/asset/asset:postgres");
   await vi.waitFor(() => expect(columns()).toHaveLength(3));
 
   await type("gitea");
@@ -1142,7 +1142,7 @@ test("escape in the search box clears the query before it unwinds anything", asy
   expect(box().value).toBe("");
   expect(text()).not.toContain("gitea-db");
   // The selection is untouched: clearing the box is not unwinding the path.
-  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: CONTAINER.id });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: CONTAINER.id });
 });
 
 /**
@@ -1151,7 +1151,7 @@ test("escape in the search box clears the query before it unwinds anything", asy
  * in front of the reader is the one that answers.
  */
 test("the arrows move through the matches instead of the columns", async () => {
-  const { router } = render("#/assets/tree");
+  const { nav } = render("#/assets/tree");
   await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
   await type("vm-");
@@ -1160,7 +1160,7 @@ test("the arrows move through the matches instead of the columns", async () => {
 
   // `vm-db-01` is the first match and `vm-app-02` the second: the press moved
   // the cursor down the offers, and `Enter` took the one it had moved to.
-  expect(router.route).toEqual({ view: "assets", tab: "tree", assetId: SIBLING.id });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: SIBLING.id });
 });
 
 /**
@@ -1178,14 +1178,14 @@ test("the arrows move through the matches instead of the columns", async () => {
  * which asset the spine is labelled with.
  */
 test("clicking a spine anchors this path and not the next one", async () => {
-  const { router } = render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 780 });
+  const { nav } = render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 780 });
   await vi.waitFor(() => expect(spines()).toEqual(["hel1"]));
 
   target.querySelector<HTMLButtonElement>("button.spine")?.click();
   flushSync();
   await vi.waitFor(() => expect(spines()).toEqual(["gitea-db"]));
 
-  router.go(`#/asset/${GITEA.id}`);
+  nav.go(`#/asset/${GITEA.id}`);
   flushSync();
 
   await vi.waitFor(() => expect(marked()).toEqual(["vm-app-02", "gitea", null]));
@@ -1249,7 +1249,7 @@ test("the pane of the asset a route lands on names the end it came from", async 
  * the route's own read.
  */
 test("a route's address opens the Tree at the asset that exposes it", async () => {
-  const { router, asked } = render("#/route/route:gitea");
+  const { nav, asked } = render("#/route/route:gitea");
 
   // Three columns: the estate, what the site holds, and what the *exposing*
   // asset holds — the layout `#/asset/asset:vm-app-02` draws, from an address
@@ -1261,7 +1261,7 @@ test("a route's address opens the Tree at the asset that exposes it", async () =
   expect(asked).toContain(SITE.id);
   // The address is kept as the route's: a reader who copied this link must be
   // able to hand it on, and the pane marks the route it names.
-  expect(router.route).toEqual({
+  expect(nav.route).toEqual({
     view: "assets",
     tab: "tree",
     assetId: null,
@@ -1283,7 +1283,7 @@ test("a route's address opens the Tree at the asset that exposes it", async () =
  * by a click instead of a link.
  */
 test("clicking a route reached from elsewhere opens the asset exposing it", async () => {
-  const { router } = render("#/asset/asset:gitea");
+  const { nav } = render("#/asset/asset:gitea");
   await vi.waitFor(() => expect(text()).toContain("Reachable via"));
 
   const route = [...target.querySelectorAll<HTMLButtonElement>("li button.link")].find(
@@ -1292,7 +1292,7 @@ test("clicking a route reached from elsewhere opens the asset exposing it", asyn
   route?.click();
   flushSync();
 
-  expect(router.route).toEqual({
+  expect(nav.route).toEqual({
     view: "assets",
     tab: "tree",
     assetId: null,
@@ -1387,10 +1387,10 @@ test("a route whose exposer is behind a spine draws a dashed wire to the spine",
  * hanging over the new path, pointing at rows that are no longer there.
  */
 test("moving to an asset no route reaches leaves no wire behind", async () => {
-  const { router } = render("#/asset/asset:vm-app-02");
+  const { nav } = render("#/asset/asset:vm-app-02");
   await vi.waitFor(() => expect(wires()).toHaveLength(2));
 
-  router.go("#/asset/asset:postgres");
+  nav.go("#/asset/asset:postgres");
   flushSync();
 
   await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
@@ -1511,15 +1511,15 @@ test("the pane lists the monitors watching the asset, with their state", async (
 
 /**
  * A monitor's name opens the ticket-first Monitors page directly: the pane
- * hands the router `entityAddress`'s address, not a rooms `#/monitor/<id>`
+ * hands the nav `entityAddress`'s address, not a rooms `#/monitor/<id>`
  * that the shell would have to rewrite on arrival (#1092).
  */
 test("a monitor's name goes to the Monitors page, not a rooms address", async () => {
-  const { router } = render(`#/asset/${CONTAINER.id}`);
+  const { nav } = render(`#/asset/${CONTAINER.id}`);
   await vi.waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
   const goes: string[] = [];
-  const go = router.go.bind(router);
-  router.go = (hash: string) => {
+  const go = nav.go.bind(nav);
+  nav.go = (hash: string) => {
     goes.push(hash);
     go(hash);
   };

@@ -52,8 +52,7 @@ export function createLifecycle(options: { pollMs?: number } = {}): Lifecycle {
    * Assign `state.db` only when it says something new. Every payload is a
    * fresh object and Svelte compares proxies by identity, so an unconditional
    * write re-runs every effect that follows `ready` (the five boot seeds in
-   * `App.svelte`) on each poll and event; `router.read()` guards the same
-   * way (#703).
+   * `App.svelte`) on each poll and event (#703).
    */
   function setDb(next: DbState): void {
     if (JSON.stringify(next) !== JSON.stringify(state.db)) state.db = next;

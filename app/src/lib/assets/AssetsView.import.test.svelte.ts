@@ -29,7 +29,7 @@ import type {
   Produced,
 } from "../ipc/assets";
 import type { IpcError } from "../ipc";
-import { createRouter } from "../shell/router.svelte";
+import { createTestNav } from "./test-nav.svelte";
 import { layers } from "../tf/layers.svelte";
 
 // `app_status` says where credentials live (#1615); the flag flips it per test.
@@ -227,11 +227,11 @@ function render(refusal: unknown = null, hash = "#/assets/tree") {
     produces: [],
   };
   location.hash = hash;
-  const router = createRouter();
+  const nav = createTestNav();
   app = mount(AssetsView, {
     target,
     props: {
-      router,
+      nav,
       now: () => NOW,
       ports: {
         assetTypes: () => Promise.resolve([]),

@@ -31,7 +31,7 @@
   ladder, which takes it back to the room. The columns that no longer fit
   beside the fixed pane collapse to spines rather than pushing the pane off
   the screen, and the search box is the launcher's own engine narrowed to
-  `corpus::ASSET`: it hands the first match's id to the router and the
+  `corpus::ASSET`: it hands the first match's id to the shell and the
   columns follow, so "search reveals the path" is the same derivation
   everything else here uses.
 
@@ -133,7 +133,7 @@
   // what a create can honestly say now is that knobas asked, and a toast is
   // where this app says that.
   import { push } from "../shell/toasts.svelte";
-  import { hashFor, type Router } from "../shell/router.svelte";
+  import { hashFor } from "../shell/router";
   import { entityAddress } from "../tf/address";
   import { deleteConfirm } from "../tf/deps/asset-edit";
   import { openExternal as realOpenExternal } from "../shell/open-external";
@@ -167,6 +167,7 @@
     wireKey,
     wiresFor,
     workBadge,
+    type AssetsNav,
     type ColumnPath,
     type Match,
     type Wire,
@@ -246,13 +247,13 @@
   }
 
   let {
-    router,
+    nav,
     ports,
     alerts = sharedAlerts,
     now = () => new Date(),
     stripWidth,
   }: {
-    router: Router;
+    nav: AssetsNav;
     ports?: Partial<AssetPorts>;
     /**
      * The live open-alert store this view lists (#444).
@@ -315,7 +316,7 @@
    * and the route's own read is what supplies one.
    */
   const routeId = $derived(
-    router.route.view === "assets" ? (router.route.routeId ?? null) : null,
+    nav.route.view === "assets" ? (nav.route.routeId ?? null) : null,
   );
 
   /** The route `routeId` names, once it has been read. */
@@ -332,8 +333,8 @@
    * for the frame between two route addresses.
    */
   const selectedId = $derived.by(() => {
-    if (router.route.view !== "assets") return null;
-    if (router.route.assetId !== null) return router.route.assetId;
+    if (nav.route.view !== "assets") return null;
+    if (nav.route.assetId !== null) return nav.route.assetId;
     if (routeId === null || routeDetail === null) return null;
     return routeDetail.route.id === routeId ? routeDetail.route.asset_id : null;
   });
@@ -633,7 +634,7 @@
   });
 
   function select(row: AssetRow) {
-    router.go(addressOf(row));
+    nav.go(addressOf(row));
   }
 
   // -- the walk (story 29) --------------------------------------------------
@@ -1001,11 +1002,11 @@
     event.stopPropagation();
     if (step.go === "asset") {
       wantFocus = true;
-      router.go(addressOf({ id: step.id }));
+      nav.go(addressOf({ id: step.id }));
     } else if (step.go === "top") {
       // No focus to want: nothing is selected, and the flag would be spent on
       // whatever the reader selected next.
-      router.go(hashFor({ view: "assets", tab: "tree", assetId: null }));
+      nav.go(hashFor({ view: "assets", tab: "tree", assetId: null }));
     }
   }
 
@@ -1077,7 +1078,7 @@
   function reveal(match: Match): void {
     clearQuery();
     wantFocus = true;
-    router.go(addressOf({ id: match.id }));
+    nav.go(addressOf({ id: match.id }));
   }
 
   /** The box's own keys — the launcher's, on a shorter list. */
@@ -1318,7 +1319,7 @@
     }, false);
     if (done === null) return;
     deleting = false;
-    router.go(
+    nav.go(
       parent === null ? hashFor({ view: "assets", tab: "tree", assetId: null }) : addressOf(parent),
     );
   }
@@ -1392,7 +1393,7 @@
 
   /** Open a route's own address — the Tree, at the asset exposing it. */
   function openRoute(route: RouteRow) {
-    router.go(routeAddressOf(route));
+    nav.go(routeAddressOf(route));
   }
 
   /**
@@ -1449,7 +1450,7 @@
    * happen is a click leading back to the asset the reader is looking at.
    */
   function goToSource(hash: string | null) {
-    if (hash !== null) router.go(hash);
+    if (hash !== null) nav.go(hash);
   }
 
   /**
@@ -1546,7 +1547,7 @@
                 <button
                   class="go"
                   onclick={() =>
-                    router.go(hashFor({ view: "assets", tab: "tree", assetId: watched.id }))}
+                    nav.go(hashFor({ view: "assets", tab: "tree", assetId: watched.id }))}
                 >
                   <span class="mn">{alert.monitor_name}</span>
                   <span class="nm">{watched.name}</span>
@@ -2261,7 +2262,7 @@
             <ul class="lst">
               {#each detail.monitoring as watch (watch.entity_id)}
                 <li>
-                  <button class="link" onclick={() => router.go(monitorAddress(watch))}>
+                  <button class="link" onclick={() => nav.go(monitorAddress(watch))}>
                     {watch.name}
                   </button>
                   <!--
@@ -2363,7 +2364,7 @@
           <LinksPanel
             entityId={detail.asset.id}
             links={detail.links}
-            onopen={(hash) => router.go(hash)}
+            onopen={(hash) => nav.go(hash)}
             onunlink={(entry) => void removeLink(entry)}
             onlink={() => {
               linking = true;
@@ -2403,7 +2404,7 @@
       // The address, not a local insert: the new asset is selected in its own
       // column because the Tree read it back, which is the same path a click
       // takes and the reason a cold link lands in the same place.
-      router.go(addressOf(row));
+      nav.go(addressOf(row));
     }}
   />
 {/if}
@@ -2506,7 +2507,7 @@
       // The address, not a local insert: the route is selected in the pane
       // because the Tree read it back, which is the path a link from a ticket
       // takes as well.
-      router.go(routeAddressOf(row));
+      nav.go(routeAddressOf(row));
       revision += 1;
     }}
     ondeleted={() => {
@@ -2515,7 +2516,7 @@
       // Back to the asset that exposed it: the route's own address would
       // answer `not_found` and draw the deep-link failure over a deletion
       // that worked — `confirmDelete`'s rule.
-      router.go(addressOf(on));
+      nav.go(addressOf(on));
       revision += 1;
     }}
   />

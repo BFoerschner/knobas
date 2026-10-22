@@ -319,7 +319,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 const { trackResidue } = await import("./residue");
-const { createRouter } = await import("./router.svelte");
+const { createTestNav } = await import("../assets/test-nav.svelte");
 
 const App = (await import("../../App.svelte")).default;
 const TfShell = (await import("../tf/TfShell.svelte")).default;
@@ -1980,7 +1980,7 @@ const CASES: Case[] = [
       app: mount(AssetsView, {
         target,
         props: {
-          router: createRouter(),
+          nav: createTestNav(),
           ports: {
             assetTree: () => deferred([]),
             getAsset: () => Promise.reject(new Error("nothing is selected in this test")),
@@ -2536,7 +2536,7 @@ test("every component with an effect or a launcher Session is in the table", () 
     }
   };
   // The whole of `src/`, not just `lib/`: `App.svelte` sits at the root and it
-  // holds the longest-lived subscriptions in the window (`router`, the keys,
+  // holds the longest-lived subscriptions in the window (the keys,
   // and `source:health`). Scanning only `lib/` meant the one component whose
   // teardown matters most was the one component this guard could not see.
   walk(root);

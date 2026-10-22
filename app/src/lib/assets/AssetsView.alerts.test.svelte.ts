@@ -22,7 +22,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AssetDetail, AssetRow, OpenAlert } from "../ipc/assets";
-import { createRouter } from "../shell/router.svelte";
+import { createTestNav } from "./test-nav.svelte";
 import { createAlerts, type Alerts } from "./alerts.svelte";
 
 const { default: AssetsView } = await import("./AssetsView.svelte");
@@ -96,11 +96,11 @@ function alertsHolding(open: OpenAlert[]): Alerts {
 
 function render(alerts: Alerts) {
   location.hash = "#/assets/tree";
-  const router = createRouter();
+  const nav = createTestNav();
   app = mount(AssetsView, {
     target,
     props: {
-      router,
+      nav,
       now: () => NOW,
       alerts,
       ports: {
@@ -116,7 +116,7 @@ function render(alerts: Alerts) {
     },
   });
   flushSync();
-  return router;
+  return nav;
 }
 
 /** The strip's rows, as a reader reads them. */
@@ -245,13 +245,13 @@ test("a warn alert is drawn amber", async () => {
 test("clicking a row opens the asset it is about", async () => {
   const alerts = alertsHolding([alert()]);
   await alerts.refresh();
-  const router = render(alerts);
+  const nav = render(alerts);
 
   target.querySelector<HTMLButtonElement>(".alerts .go")!.click();
   flushSync();
 
   expect(location.hash).toBe("#/asset/asset:postgres");
-  expect(router.route).toEqual({
+  expect(nav.route).toEqual({
     view: "assets",
     tab: "tree",
     assetId: "asset:postgres",
@@ -296,11 +296,11 @@ test("the ack and the recovery are sentences in the asset's history", async () =
   await alerts.refresh();
   // The pane, not the strip: the history is what the *selected* asset draws.
   location.hash = "#/asset/asset:hel1";
-  const router = createRouter();
+  const nav = createTestNav();
   app = mount(AssetsView, {
     target,
     props: {
-      router,
+      nav,
       now: () => NOW,
       alerts,
       ports: {

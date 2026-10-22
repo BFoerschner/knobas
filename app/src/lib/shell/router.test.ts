@@ -9,7 +9,7 @@
  */
 import { expect, test, vi } from "vitest";
 
-import { createRouter, hashFor, parseHash } from "./router.svelte";
+import { hashFor, parseHash } from "./router";
 
 test("parses the M1 addresses", () => {
   expect(parseHash("#/sources")).toEqual({ view: "sources" });
@@ -221,108 +221,15 @@ test("settings is a view even with something after it, never a kind", () => {
 });
 
 /**
- * `replace` rewrites the entry the reader is on (#241): the address it leaves
- * is not one step back in history.
- *
- * jsdom grows `history.length` on a fragment navigation and leaves it alone
- * on `location.replace`, which is what lets the assertion tell the two apart.
+ * The module is pure helpers (#1667): importing it reads and writes nothing,
+ * so no window's history grows a stamp because a component imported an address.
  */
-test("replace rewrites the address without leaving the old one in history", () => {
-  location.hash = "#/sources";
-  const router = createRouter();
-  const stop = router.start();
-  const entries = history.length;
-
-  router.replace({ view: "settings" });
-
-  expect(location.hash).toBe("#/settings");
-  expect(router.route).toEqual({ view: "settings" });
-  expect(history.length, "the old address must not be one step back").toBe(entries);
-
-  stop();
-});
-
-/**
- * Back and forward, like a browser (#693).
- *
- * The window cannot ask the webview whether there is anywhere to go forward
- * to, so the router keeps its own place in history: one step per `go` to a
- * new address, none for `replace`, and the place read back off the entry on a
- * traversal. jsdom traverses on a later task, so each step waits for the
- * router to have heard it.
- */
-test("back and forward are available exactly where the history has somewhere to go", async () => {
-  location.hash = "#/inbox";
-  const router = createRouter();
-  const stop = router.start();
-  expect([router.canGoBack, router.canGoForward], "a fresh session").toEqual([false, false]);
-
-  router.go("#/time/2026-09-01");
-  router.go("#/time/2026-09-02");
-  expect([router.canGoBack, router.canGoForward]).toEqual([true, false]);
-  // The same address again is not a step.
-  router.go("#/time/2026-09-02");
-
-  router.goBack();
-  await vi.waitFor(() => expect(location.hash).toBe("#/time/2026-09-01"));
-  await vi.waitFor(() => expect(router.route).toEqual({ view: "time", day: "2026-09-01" }));
-  expect([router.canGoBack, router.canGoForward]).toEqual([true, true]);
-
-  router.goForward();
-  await vi.waitFor(() => expect(location.hash).toBe("#/time/2026-09-02"));
-  await vi.waitFor(() => expect(router.canGoForward).toBe(false));
-  expect(router.canGoBack).toBe(true);
-
-  // `replace` rewrites where the reader stands and is not a step: back still
-  // lands on the entry before it, and forward stays empty.
-  router.replace({ view: "standup" });
-  expect([router.canGoBack, router.canGoForward]).toEqual([true, false]);
-
-  router.goBack();
-  await vi.waitFor(() => expect(location.hash).toBe("#/time/2026-09-01"));
-  router.goBack();
-  await vi.waitFor(() => expect(location.hash).toBe("#/inbox"));
-  await vi.waitFor(() => expect(router.canGoBack).toBe(false));
-  expect(router.canGoForward).toBe(true);
-
-  // A new address from the middle of history drops what was ahead of it.
-  router.go("#/sources");
-  expect([router.canGoBack, router.canGoForward]).toEqual([true, false]);
-
-  // `replace` in the middle of history keeps what is ahead of it, as a
-  // browser's does: it rewrites one entry and steps nowhere.
-  router.goBack();
-  await vi.waitFor(() => expect(location.hash).toBe("#/inbox"));
-  await vi.waitFor(() => expect(router.canGoForward).toBe(true));
-  router.replace({ view: "settings" });
-  expect([router.canGoBack, router.canGoForward]).toEqual([false, true]);
-  router.goForward();
-  await vi.waitFor(() => expect(location.hash).toBe("#/sources"));
-  await vi.waitFor(() => expect(router.canGoForward).toBe(false));
-
-  // Nowhere to go is a no-op, not a step out of the session.
-  router.goForward();
-  expect(location.hash).toBe("#/sources");
-  stop();
-});
-
-/**
- * The webview's `hashchange` for an address `go()` already read keeps the
- * route as it is (#703). A new object for the same place re-ran everything
- * that follows the route.
- */
-test("the hashchange for an address go() already read keeps the same route", () => {
-  location.hash = "#/inbox";
-  const router = createRouter();
-  const stop = router.start();
-
-  router.go("#/start-work/gitea:tidewater/ledger-api");
-  const read = router.route;
-  window.dispatchEvent(new HashChangeEvent("hashchange"));
-  expect(router.route).toBe(read);
-
-  router.go("#/start-work/gitea:tidewater/other");
-  expect(router.route).not.toBe(read);
-
-  stop();
+test("importing the module does not touch history", async () => {
+  vi.resetModules();
+  const replace = vi.spyOn(history, "replaceState");
+  const before = history.length;
+  await import("./router");
+  expect(replace).not.toHaveBeenCalled();
+  expect(history.length).toBe(before);
+  replace.mockRestore();
 });
