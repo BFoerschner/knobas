@@ -11586,7 +11586,8 @@ set.
 - **Incremental runs.** *Ruling:* the refusal is unconditional, as the page cap's is. A stepped-over
   issue on an incremental run sits below the advanced watermark and is lost for good, so the
   incremental case is worse than the full one, not safer. *Reversing:* low.
-- **A tiebreak after `created`.** *Ruling:* none. The ticket pins the literal `ORDER BY created
+- **A tiebreak after `created`.** *Superseded by #1720 below: an edit reorders a tie, measured.*
+  *Ruling:* none. The ticket pins the literal `ORDER BY created
   ASC`, `created` has millisecond resolution, and a second key would also need mockd's grammar to
   grow. *Reversing:* low, one clause.
 - **mockd.** Its JQL subset accepted only `ORDER BY updated`, so every adapter test against it
@@ -12402,7 +12403,9 @@ The measurement came after it.
 - **`id`, not `key`.** DC accepts both and orders them stably. *Ruling:* `id`. It is unique and
   immutable, while a key changes when the issue moves to another project. *Reversing:* one constant
   (`WALK_ORDER`).
-- **mockd's grammar.** *Ruling:* accept exactly a trailing `, id ASC` and refuse any other second
+- **mockd's grammar.** mockd is deprecated and frozen (ADR-0013, `docs/agents/working-model.md`).
+  Without the change, though, every adapter test against it answers 400 to the walk's query, as it
+  did for #1623. *Ruling:* accept exactly a trailing `, id ASC` and refuse any other second
   key or direction. The clause is parsed and stored nowhere, because mockd's search has always
   broken ties on the first key by id ascending. The subset stays as narrow as the adapter's need.
   *Reversing:* low.

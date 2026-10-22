@@ -3368,9 +3368,9 @@ async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {
 }
 
 /// The seeded Jira's database container (`testenv/docker-compose.yml`'s
-/// `jira-db`), which [`Tied::file`] writes one `created` stamp into: Jira's
-/// REST API sets `created` to the moment of the request and lets nothing change
-/// it.
+/// `jira-db`, whose user and database are both `jira`), which [`Tied::file`]
+/// writes one `created` stamp into: Jira's REST API sets `created` to the
+/// moment of the request and lets nothing change it.
 const JIRA_DB_CONTAINER: &str = "knobas-jira-db";
 
 /// Issues filed in one batch and given **one `created` stamp**, the state a
@@ -3423,7 +3423,10 @@ impl Tied {
                 .map(|i| {
                     let id = i["id"].as_str().and_then(|id| id.parse().ok());
                     let key = i["key"].as_str().map(str::to_owned);
-                    (id.expect("a filed issue has an id"), key.expect("and a key"))
+                    (
+                        id.expect("a filed issue has an id"),
+                        key.expect("and a key"),
+                    )
                 })
                 .collect(),
         };
@@ -3438,7 +3441,15 @@ impl Tied {
             ids.join(", ")
         );
         let out = std::process::Command::new("docker")
-            .args(["exec", JIRA_DB_CONTAINER, "psql", "-U", "jira", "-d", "jira"])
+            .args([
+                "exec",
+                JIRA_DB_CONTAINER,
+                "psql",
+                "-U",
+                "jira",
+                "-d",
+                "jira",
+            ])
             .args(["-v", "ON_ERROR_STOP=1", "-At", "-c", &sql])
             .output()
             .expect("docker runs");
