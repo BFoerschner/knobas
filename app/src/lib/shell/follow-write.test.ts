@@ -202,5 +202,5 @@ test("a write held while the listener is still registering is toasted at once (F
   register();
   await settle();
   expect(toasts.items).toHaveLength(1);
-  expect(toasts.items[0].text).toBe("Comment was held: no network");
+  expect(toasts.items[0]?.text).toBe("Comment was held: no network");
 });
