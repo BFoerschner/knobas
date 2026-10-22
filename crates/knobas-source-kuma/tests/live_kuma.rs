@@ -1225,9 +1225,11 @@ fn relay(
 #[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
 async fn a_create_whose_ack_is_lost_is_unconfirmed_and_one_monitor() {
     let env = env();
-    // Armed before the create, for the reason the create test gives.
+    // Armed before the create, for the reason the create test gives. No
+    // delete first, unlike that test: the seed `just kuma-live` runs first
+    // sweeps a name `monitors.json` does not carry, and every helper call is
+    // one of the twenty logins a minute Kuma allows the whole run.
     let _litter = Scratch::removing(LOST_ACK);
-    kuma_monitor(&["delete", LOST_ACK]);
 
     let link = LosingLink::start(&env.url);
     let source = knobas_source_kuma::build(SourceInstance {

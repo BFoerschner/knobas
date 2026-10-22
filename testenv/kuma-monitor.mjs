@@ -71,7 +71,19 @@ await new Promise((resolve, reject) => {
 log("connected to", KUMA_URL);
 
 if (await call("needSetup")) die("this Kuma has no admin account yet -- run ./seed-kuma.sh first");
-ok(await call("login", { username: USER, password: PASS }), "login");
+// Kuma 2.5.3 allows twenty logins a minute across every client
+// (`server/rate-limiter.js`, `loginRateLimiter`) and refuses the next with
+// this message inside an ok-shaped callback. A live run spends logins in the
+// adapter and in this helper alike, so a refusal for the limit waits out the
+// window once rather than failing a test on a fixture's budget (#1627).
+const RATE_LIMITED = "Too frequently, try again later.";
+let login = await call("login", { username: USER, password: PASS });
+if (login?.ok !== true && login?.msg === RATE_LIMITED) {
+  log("login refused for the rate limit; waiting 61 s for the next window");
+  await new Promise((resolve) => setTimeout(resolve, 61000));
+  login = await call("login", { username: USER, password: PASS });
+}
+ok(login, "login");
 
 // `monitorList` is an object keyed by monitor id, not an array, and it arrives
 // as a pushed event rather than in the callback (kuma-seed.mjs, trap 2).
