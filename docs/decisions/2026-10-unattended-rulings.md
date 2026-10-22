@@ -11339,3 +11339,18 @@ set.
 - **The adapters' cursor tests that now repeat the generic ones** (overlap, DST, cap, order).
   *Ruling:* kept. They drive each adapter's envelope through its own `advanced`, which the generic
   test cannot reach. *Reversing:* low.
+- **Merge-manager on Opus, review of the rulings above.** *Ruling:* all six upheld. The probe
+  agrees with `CONTEXT.md` **Watermark** (a witnessed ceiling, not a clock), and
+  `max(previous, min(newest, ceiling))` is what Confluence computed before, since each adapter
+  seeds `newest` from the previous watermark. One direction was unwitnessed on the Jira side: no
+  Jira test died when `SyncRun` passed `previous: None` in its `Bounds`. The review added
+  `sync::tests::a_ceiling_below_the_previous_watermark_does_not_move_it_back`, which dies on that
+  mutant. *Reversing:* low, one test.
+- **Whether the rebase obliges a fresh `just atlassian-live`** (merge-manager on Opus). The branch
+  was taken on `d8b0c9d8`; `origin/main` gained #1647 (`testenv/.env` → `testenv/images.env`, every
+  compose call `--env-file images.env`, `seed-atlassian.sh`, `seed-atlassian-content.sh`,
+  `live-lib.sh`, `docker-compose.yml` and the justfile recipes) and #1646 (workflow pins only).
+  *Ruling:* re-run on the rebased head. The working-model rule (amended 2026-10-12) re-runs a suite
+  whose seed or `testenv/` scripts the rebase touched, and #1647 touched the ones this suite starts
+  and seeds Jira and Confluence with. #1646 alone would not have obliged it. *Reversing:* none; a
+  re-run costs one JVM-lock hold.
