@@ -1933,7 +1933,8 @@ impl Drop for SubTask {
                 .build()
                 .expect("a runtime for the cleanup")
                 .block_on(async move {
-                    delete_issue(&client(), &url, &user, &password, &filed, &parent).await
+                    let named_by = format!("parent = {parent}");
+                    delete_issue(&client(), &url, &user, &password, &filed, &named_by).await
                 })
         })
         .join();
@@ -1958,7 +1959,7 @@ impl Drop for SubTask {
 }
 
 /// Delete one issue and **check** it is gone: the issue itself answers 404,
-/// and `/search` stops naming it under `parent` within [`INDEX_BUDGET`] --
+/// and `/search` over `named_by` stops naming it within [`INDEX_BUDGET`] --
 /// the index is updated asynchronously and can name an issue already deleted,
 /// which is what [`Seeded::clear_leftovers`]' 404 tolerance is for.
 async fn delete_issue(
@@ -1967,7 +1968,7 @@ async fn delete_issue(
     user: &str,
     password: &str,
     key: &str,
-    parent: &str,
+    named_by: &str,
 ) -> Result<(), String> {
     let response = http
         .delete(format!("{url}/rest/api/2/issue/{key}"))
@@ -1996,7 +1997,7 @@ async fn delete_issue(
             response.status()
         ));
     }
-    let jql = url_encode(&format!("parent = {parent}"));
+    let jql = url_encode(named_by);
     let deadline = tokio::time::Instant::now() + INDEX_BUDGET;
     loop {
         let response = http
@@ -3364,4 +3365,263 @@ async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {
     );
     assert_eq!(shrunk, seeded_total, "the deletion shrank the total");
     assert!(past_the_end.is_empty(), "{past_the_end:?}");
+}
+
+/// The seeded Jira's database container (`testenv/docker-compose.yml`'s
+/// `jira-db`, whose user and database are both `jira`), which [`Tied::file`]
+/// writes one `created` stamp into: Jira's REST API sets `created` to the
+/// moment of the request and lets nothing change it.
+const JIRA_DB_CONTAINER: &str = "knobas-jira-db";
+
+/// Issues filed in one batch and given **one `created` stamp**, the state a
+/// CSV or tracker import at minute resolution leaves (#1720), and owned until
+/// they are deleted again.
+///
+/// Filed in turn, each issue gets its own millisecond: `/search` renders
+/// `created` to the second, so bulk-filed issues *look* tied, but the column
+/// and the index hold milliseconds and sort them apart (measured 2026-10-22).
+/// So the stamp is written into `jiraissue.created` through `psql` in the
+/// database container, truncated to the minute, and each issue is reindexed
+/// through `POST /rest/api/2/reindex/issue`, which is synchronous. Marked with
+/// [`LITTER_LABEL`], so a killed run's issues are ones the seed did not create,
+/// which [`Seeded::clear_leftovers`] deletes.
+struct Tied {
+    url: String,
+    user: String,
+    password: String,
+    /// `(id, key)` in the order Jira filed them, which is ascending id.
+    filed: Vec<(u64, String)>,
+}
+
+impl Tied {
+    async fn file(seeded: &Seeded, count: usize) -> Tied {
+        let updates: Vec<_> = (0..count)
+            .map(|n| {
+                serde_json::json!({ "fields": {
+                    "project": { "key": "PAY" },
+                    "issuetype": { "name": "Task" },
+                    "summary": format!("knobas live suite: tied on created, {n}"),
+                    "labels": [LITTER_LABEL],
+                }})
+            })
+            .collect();
+        let (status, body) = seeded
+            .request(
+                reqwest::Method::POST,
+                "rest/api/2/issue/bulk",
+                Some(serde_json::json!({ "issueUpdates": updates })),
+            )
+            .await;
+        let mut guard = Tied {
+            url: seeded.url.clone(),
+            user: seeded.user.clone(),
+            password: seeded.password.clone(),
+            filed: body["issues"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|i| {
+                    let id = i["id"].as_str().and_then(|id| id.parse().ok());
+                    let key = i["key"].as_str().map(str::to_owned);
+                    (
+                        id.expect("a filed issue has an id"),
+                        key.expect("and a key"),
+                    )
+                })
+                .collect(),
+        };
+        assert_eq!(status, 201, "bulk-filing {count} issues: {body}");
+        assert_eq!(guard.filed.len(), count, "{body}");
+        guard.filed.sort();
+
+        let stamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:00+00");
+        let ids: Vec<String> = guard.filed.iter().map(|(id, _)| id.to_string()).collect();
+        let sql = format!(
+            "UPDATE jiraissue SET created = '{stamp}' WHERE id IN ({})",
+            ids.join(", ")
+        );
+        let out = std::process::Command::new("docker")
+            .args([
+                "exec",
+                JIRA_DB_CONTAINER,
+                "psql",
+                "-U",
+                "jira",
+                "-d",
+                "jira",
+            ])
+            .args(["-v", "ON_ERROR_STOP=1", "-At", "-c", &sql])
+            .output()
+            .expect("docker runs");
+        let said = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        assert!(
+            out.status.success() && said == format!("UPDATE {count}"),
+            "{sql}: {said} {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        guard
+    }
+
+    /// Reindex the issues one at a time in `order`: a group tied on `created`
+    /// comes back in the order its issues reached the index.
+    async fn reindex(&self, seeded: &Seeded, order: &[&(u64, String)]) {
+        for (id, key) in order {
+            let (status, body) = seeded
+                .request(
+                    reqwest::Method::POST,
+                    &format!("rest/api/2/reindex/issue?issueId={id}"),
+                    None,
+                )
+                .await;
+            assert!(
+                status == 200 && body["success"] == true,
+                "reindexing {key}: {status} {body}"
+            );
+        }
+    }
+}
+
+impl Drop for Tied {
+    fn drop(&mut self) {
+        let filed = std::mem::take(&mut self.filed);
+        let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
+        // A thread with a runtime of its own, for the reasons `Labeled`'s
+        // `Drop` gives.
+        let report = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime for the cleanup")
+                .block_on(async move {
+                    let (http, named_by) = (client(), format!("labels = {LITTER_LABEL}"));
+                    let mut failures = Vec::new();
+                    for (_, key) in &filed {
+                        if let Err(e) =
+                            delete_issue(&http, &url, &user, &password, key, &named_by).await
+                        {
+                            failures.push(e);
+                        }
+                    }
+                    failures
+                })
+        })
+        .join();
+        let report = match report {
+            Ok(failures) if failures.is_empty() => return,
+            Ok(failures) => failures.join("; "),
+            Err(_) => "the cleanup thread panicked (its own message is on stderr); the next \
+                       run's leftover clearing deletes what is left"
+                .to_owned(),
+        };
+        let report = format!("the live suite did not delete the tied issues it filed: {report}");
+        if std::thread::panicking() {
+            eprintln!("live suite cleanup: {report}");
+        } else {
+            panic!("{report}");
+        }
+    }
+}
+
+/// **An edit reorders issues tied on `created`, and `id` holds them still**
+/// (#1720). `created` alone leaves a tie group to Jira's own tiebreak, and
+/// this is where Jira says what that is, for `sync::tests`' `LiveIndex` to
+/// model: the order the issues reached the index, with an edited issue
+/// reindexed to the end of its group. Across a page boundary that is the
+/// shift that steps the walk over an unread issue, so the walk sorts by
+/// `created ASC, id ASC`, and that order is the same before and after.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn an_edit_reorders_issues_tied_on_created_and_id_holds_them_still() {
+    let scope = format!("labels = {LITTER_LABEL}");
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let tied = Tied::file(&seeded, 4).await;
+    let by_id: Vec<String> = tied.filed.iter().map(|(_, key)| key.clone()).collect();
+    // Reindexed newest first, so the index order is the reverse of the ids'.
+    let newest_first: Vec<&(u64, String)> = tied.filed.iter().rev().collect();
+    tied.reindex(&seeded, &newest_first).await;
+
+    let rows = seeded
+        .jql(&format!("{scope} ORDER BY created ASC"), "created")
+        .await;
+    let stamps: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| {
+            r["fields"]["created"]
+                .as_str()
+                .expect("a created stamp")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(stamps.len(), 1, "one created stamp for the group: {rows:?}");
+    let keys = |rows: Vec<serde_json::Value>| -> Vec<String> {
+        rows.iter()
+            .map(|r| r["key"].as_str().expect("a key").to_owned())
+            .collect()
+    };
+    let in_index_order: Vec<String> = by_id.iter().rev().cloned().collect();
+    assert_eq!(
+        keys(rows),
+        in_index_order,
+        "a tie on created comes back in the order the index took the issues"
+    );
+    let walk = format!("{scope} ORDER BY created ASC, id ASC");
+    assert_eq!(keys(seeded.jql(&walk, "key").await), by_id);
+
+    let edited = in_index_order[0].clone();
+    let (status, body) = seeded
+        .request(
+            reqwest::Method::PUT,
+            &format!("rest/api/2/issue/{edited}"),
+            Some(serde_json::json!({
+                "fields": { "summary": "knobas live suite: tied on created, edited" }
+            })),
+        )
+        .await;
+    assert_eq!(status, 204, "editing {edited}: {body}");
+    // The index is updated asynchronously: poll for the edit to show.
+    let deadline = std::time::Instant::now() + INDEX_BUDGET;
+    loop {
+        let rows = seeded
+            .jql(&format!("{scope} AND summary ~ \"edited\""), "key")
+            .await;
+        if keys(rows) == std::slice::from_ref(&edited) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the edit to {edited} did not reach the index within {INDEX_BUDGET:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+
+    let rows = seeded
+        .jql(&format!("{scope} ORDER BY created ASC"), "created")
+        .await;
+    // Still one stamp: the edit moved the issue in the index, and did not
+    // write back a `created` of its own, which would sort it last just the
+    // same and be no tie at all.
+    let stamps_after: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| {
+            r["fields"]["created"]
+                .as_str()
+                .expect("a created stamp")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(stamps_after, stamps, "the edit left the one created stamp");
+    let after = keys(rows);
+    println!("tie: {edited} edited; created ASC {in_index_order:?} -> {after:?}");
+    let mut moved = in_index_order[1..].to_vec();
+    moved.push(edited.clone());
+    assert_eq!(
+        after, moved,
+        "the edit reindexed {edited} to the end of its tie group"
+    );
+    assert_eq!(
+        keys(seeded.jql(&walk, "key").await),
+        by_id,
+        "created ASC, id ASC is where it was"
+    );
 }
