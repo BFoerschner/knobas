@@ -193,19 +193,6 @@ impl Lifecycle {
             _ => "the database is still starting".to_owned(),
         })
     }
-
-    /// The suggestion pass (#745), or the same refusal [`pool`](Self::pool)
-    /// gives while there is no database.
-    ///
-    /// # Errors
-    ///
-    /// As [`pool`](Self::pool).
-    pub fn suggestions(&self) -> Result<crate::suggestion_pass::SuggestionPass, IpcError> {
-        match self.app_state() {
-            Some(state) => Ok(state.suggestions.clone()),
-            None => Err(self.not_ready()),
-        }
-    }
 }
 
 /// Liveness probe. Answers as soon as the webview can call, which is now

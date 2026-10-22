@@ -13,7 +13,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use knobas_app::commands::entity::detect_suggestions_inner;
 use knobas_app::suggestion_pass::SuggestionPass;
 use knobas_sync::scheduler::RunConnections;
 use sqlx::PgPool;
@@ -81,7 +80,7 @@ async fn requests_during_a_pass_coalesce_into_one_more_pass() {
 
     let first = tokio::spawn({
         let pass = pass.clone();
-        async move { detect_suggestions_inner(&pass).await }
+        async move { pass.run().await }
     });
     while gated.opened.load(Ordering::SeqCst) == 0 {
         tokio::task::yield_now().await;
@@ -90,7 +89,7 @@ async fn requests_during_a_pass_coalesce_into_one_more_pass() {
     let rest: Vec<_> = (0..9)
         .map(|_| {
             let pass = pass.clone();
-            tokio::spawn(async move { detect_suggestions_inner(&pass).await })
+            tokio::spawn(async move { pass.run().await })
         })
         .collect();
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -117,7 +116,7 @@ async fn requests_during_a_pass_coalesce_into_one_more_pass() {
     );
 
     // And with nothing running, the next request starts a pass of its own.
-    detect_suggestions_inner(&pass).await.unwrap();
+    pass.run().await.unwrap();
     assert_eq!(gated.opened.load(Ordering::SeqCst), 3);
 }
 
@@ -129,13 +128,11 @@ async fn a_pass_runs_while_the_ui_pool_is_exhausted() {
     corpus(&pool, 20).await;
     let held = pool.acquire().await.unwrap();
 
-    let written = tokio::time::timeout(
-        Duration::from_secs(20),
-        detect_suggestions_inner(&SuggestionPass::beside(&pool)),
-    )
-    .await
-    .expect("a pass waiting on the UI pool would still be waiting")
-    .unwrap();
+    let written =
+        tokio::time::timeout(Duration::from_secs(20), SuggestionPass::beside(&pool).run())
+            .await
+            .expect("a pass waiting on the UI pool would still be waiting")
+            .unwrap();
     assert!(written > 0);
     assert_eq!(pool.size(), 1, "the pass opened nothing in the UI pool");
     drop(held);
@@ -161,7 +158,7 @@ async fn a_pass_past_its_statement_timeout_is_cancelled_and_the_next_one_finishe
         Arc::new(Direct(connector.clone())),
         Duration::from_millis(1),
     );
-    let refusal = tokio::time::timeout(Duration::from_secs(20), detect_suggestions_inner(&hurried))
+    let refusal = tokio::time::timeout(Duration::from_secs(20), hurried.run())
         .await
         .expect("a cancelled pass answers rather than hangs")
         .unwrap_err();
@@ -174,7 +171,8 @@ async fn a_pass_past_its_statement_timeout_is_cancelled_and_the_next_one_finishe
     drop(held);
 
     let patient = SuggestionPass::new(Arc::new(Direct(connector)), Duration::from_secs(60));
-    detect_suggestions_inner(&patient)
+    patient
+        .run()
         .await
         .expect("the same corpus under a sane limit");
 }
@@ -211,7 +209,7 @@ async fn a_pass_that_panics_answers_its_requests_and_the_next_one_runs() {
         Duration::from_secs(60),
     );
 
-    let refusal = tokio::time::timeout(Duration::from_secs(20), detect_suggestions_inner(&pass))
+    let refusal = tokio::time::timeout(Duration::from_secs(20), pass.run())
         .await
         .expect("a pass that panicked must answer, not leave its caller waiting")
         .unwrap_err();
@@ -221,7 +219,7 @@ async fn a_pass_that_panics_answers_its_requests_and_the_next_one_runs() {
         refusal.message
     );
 
-    let written = tokio::time::timeout(Duration::from_secs(20), detect_suggestions_inner(&pass))
+    let written = tokio::time::timeout(Duration::from_secs(20), pass.run())
         .await
         .expect("the queue must not stay wedged behind the pass that panicked")
         .unwrap();
@@ -284,7 +282,7 @@ async fn requests_that_do_not_wait_coalesce_into_one_more_pass() {
 /// to its end. Answers once the run has ended and every pass its ending
 /// requested has finished, with the outcome the run recorded.
 ///
-/// Nothing here calls `detect_suggestions`: whatever pass runs is one the
+/// Nothing here calls [`SuggestionPass::run`]: whatever pass runs is one the
 /// scheduler asked for.
 fn sync_through_bring_up(
     label: &str,
@@ -387,8 +385,7 @@ async fn proposed(pool: &PgPool) -> i64 {
 
 /// The audit's finding (#1485): with the room tray gone nothing asked for a
 /// pass, and Proposed links never grew. A sync run that ends OK now asks, on
-/// the pass bring-up was handed -- the one `AppState` holds, never one of the
-/// scheduler's own.
+/// the pass bring-up was handed, never one of the scheduler's own.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sync_that_ends_ok_proposes_links_without_anyone_asking() {
     let (pool, pass, outcome) = sync_through_bring_up("pass_after_sync_ok", serde_json::json!({}));
@@ -400,8 +397,8 @@ async fn a_sync_that_ends_ok_proposes_links_without_anyone_asking() {
     );
     assert!(
         pass.passes() >= 1,
-        "the pass that ran is not the one bring-up was handed, so `AppState`'s \
-         `detect_suggestions` would run beside a second one"
+        "the pass that ran is not the one bring-up was handed, so the process \
+         holds a second pass that could run beside it"
     );
 }
 

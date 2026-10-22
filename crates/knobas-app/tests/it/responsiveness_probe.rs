@@ -644,7 +644,7 @@ async fn run_pass(connector: &knobas_db::embedded::Connector, pool: &PgPool, ana
         knobas_app::suggestion_pass::PASS_STATEMENT_TIMEOUT,
     );
     let passed = Instant::now();
-    let outcome = knobas_app::commands::entity::detect_suggestions_inner(&pass).await;
+    let outcome = pass.run().await;
     let proposals: i64 = sqlx::query_scalar("select count(*) from knobas.proposed_link")
         .fetch_one(pool)
         .await

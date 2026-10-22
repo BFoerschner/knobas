@@ -2,14 +2,15 @@
 //! (#745).
 //!
 //! **Who asks for one.** The sync scheduler, whenever a run ends OK
-//! ([`SuggestOnSync`], #1485), without waiting for it; and the
-//! `detect_suggestions` command, the manual *run a pass now*, which waits
-//! for the pass that answers it. Both through the process's one
-//! [`SuggestionPass`], built once at start-up and handed to the scheduler and
-//! to `AppState` alike: a second one would run a second pass beside the
-//! first, the thing this module exists to stop. Until #881 the room's tray
-//! was the caller, on every finished sync; with the tray gone nothing asked,
-//! and no suggestion was made until #1485 gave the request to the scheduler.
+//! ([`SuggestOnSync`], #1485), without waiting for it, through the process's
+//! one [`SuggestionPass`], built once at start-up and handed to the
+//! scheduler: a second one would run a second pass beside the first, the
+//! thing this module exists to stop. Until #881 the room's tray was the
+//! caller, on every finished sync; with the tray gone nothing asked, and no
+//! suggestion was made until #1485 gave the request to the scheduler. The
+//! `detect_suggestions` command, the manual *run a pass now* that waited on
+//! [`run`](SuggestionPass::run), had no caller after that and retired (#1611);
+//! `run` stays as the waiting half of the queue, which the tests drive.
 //!
 //! Until #745 every finished sync made the tray call `detect_suggestions`,
 //! which ran [`knobas_core::suggest::detect`] on the **UI pool**, with nothing
@@ -223,7 +224,7 @@ pub struct SuggestOnSync<E> {
 
 impl<E> SuggestOnSync<E> {
     /// `inner`'s events, and passes requested on `pass`: the process's one
-    /// pass, the one `AppState` holds.
+    /// pass, the one bring-up builds.
     pub fn new(inner: E, pass: SuggestionPass) -> SuggestOnSync<E> {
         SuggestOnSync { inner, pass }
     }
