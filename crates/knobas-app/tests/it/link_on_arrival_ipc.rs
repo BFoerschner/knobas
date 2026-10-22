@@ -742,7 +742,14 @@ async fn a_new_ticket_is_linked_to_the_run_it_was_filed_from_once_it_is_mirrored
         serde_json::json!({}),
     )
     .await;
-    item(&pool, "jira:PAY-300", "ticket", FAILED_TITLE, serde_json::json!({})).await;
+    item(
+        &pool,
+        "jira:PAY-300",
+        "ticket",
+        FAILED_TITLE,
+        serde_json::json!({}),
+    )
+    .await;
     changed(&pool, "jira:PAY-300", "7 days").await;
     arrival_linkable(&pool, &new_ticket(), RUN).await.unwrap();
     let id = queued_ticket(&pool).await;
@@ -760,7 +767,14 @@ async fn a_new_ticket_is_linked_to_the_run_it_was_filed_from_once_it_is_mirrored
     );
     assert_eq!(owed(&pool, id).await.as_deref(), Some(RUN), "still owed");
 
-    item(&pool, NEW_TICKET, "ticket", FAILED_TITLE, serde_json::json!({})).await;
+    item(
+        &pool,
+        NEW_TICKET,
+        "ticket",
+        FAILED_TITLE,
+        serde_json::json!({}),
+    )
+    .await;
     changed(&pool, NEW_TICKET, "0 seconds").await;
     assert_eq!(
         link_arrivals(&pool, &declarations(), "jira").await.unwrap(),
@@ -774,6 +788,9 @@ async fn a_new_ticket_is_linked_to_the_run_it_was_filed_from_once_it_is_mirrored
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(drawn, vec![(NEW_TICKET.to_owned(), "related".to_owned(), true)]);
+    assert_eq!(
+        drawn,
+        vec![(NEW_TICKET.to_owned(), "related".to_owned(), true)]
+    );
     assert_eq!(owed(&pool, id).await, None, "drawn, so no longer owed");
 }

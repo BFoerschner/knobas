@@ -22,7 +22,7 @@
   import type { SourceSummary } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
-  import { createTicketPayload, type TicketDraft } from "../create-ticket";
+  import { createTicketPayload, projectSource, type TicketDraft } from "../create-ticket";
   import { itemHash, keyOf } from "../job/job";
   import { askAgain, markQueued, queuedMark, sameWords, settleQueued, takeAgain } from "../queued.svelte";
   import TfCreateTicket from "../TfCreateTicket.svelte";
@@ -104,7 +104,7 @@
     const id = runId;
     const back = href;
     const title = filed.title.trim();
-    const source = filed.project.split(":")[0] ?? "";
+    const source = projectSource(filed.project);
     try {
       const write = await ports.submitWrite(createTicketPayload(filed), id);
       markQueued(id, TICKET, title, {
