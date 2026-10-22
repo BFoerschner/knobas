@@ -9861,6 +9861,52 @@ unchanged.
   does not justify that cost while higher-priority work is waiting. *Reversing:* low; the
   ticket's Agent Brief still holds the build plan (generalise Standup's dialog, project picker,
   run-to-ticket link) for whoever picks it up from `backlog`.
+
+### #1451, 2026-10-22: built after all (Opus implementer)
+
+- **Build R-9.11's *Create ticket* now, or keep the deferral.** *Ruling:* build it. This reverses
+  #853's "*Create ticket* (LOW) is not drawn" and the ruling above (#1548, 2026-10-21). Two things
+  changed. First, Björn asked the loop on 2026-10-22 to work through the backlog, and this is its
+  oldest item, so "higher-priority work is waiting" no longer holds. Second, #1548 overestimated
+  the link's cost. It assumed a new command and a relation, or a migration. In fact
+  `submit_write`'s `link_to` (#984), with the intent held on the queued row (#1050), already
+  draws a link on arrival for a new branch, pull request or page. Extending it to a `CreateTicket`
+  takes one `delivery()` arm and one look-up arm. There is no new command, migration, relation or
+  DTO. The sign-off it needs is ruled below. *Reversing:* moderate; drop `TfRunTicket` from the
+  problem block and the `CreateTicket` arms. The shared dialog can stay.
+- **Reserved for Björn, ruled by implementer on Opus: sign-off on the frozen-surface touch.**
+  *Ruling:* signed off, as `docs/contract/10.8/1451-create-ticket-links-on-arrival.md` records it:
+  `WriteOp::CreateTicket`'s `delivery()` gains `link: Some(ArrivalLink::Related)`, and
+  `submit_write` accepts a `CreateTicket` with `link_to`. It widens an existing argument and adds
+  nothing to the wire, and every op that took `link_to` before keeps its behaviour, pinned by
+  the existing `link_on_arrival_ipc.rs` cases. *Reversing:* low; two match arms and the entry.
+- **How the filed ticket is found** (the run-to-ticket link's shape, delegated). *Ruling:* a
+  confirmed `related` link from the ticket to the run. The ticket is the newest live ticket in the
+  write's source with exactly the filed title, among tickets the source last changed no earlier
+  than five minutes before the write was queued. *Reasoning:* Jira's create receipt names no key,
+  so the title is the address, as it is for Standup's action item. The time bound keeps out the
+  likeliest wrong match: the same failing test filed from an earlier run under the same title. The
+  five minutes allow for skew between this machine's clock and the source's. *Cost:* a
+  same-titled ticket edited inside that window could be taken. Closing that gap would need the Jira
+  adapter to put the key in its receipt, which its own comment rules out. *Reversing:* low; one
+  query.
+- **Which project the ticket goes in** (delegated). *Ruling:* a picker over `list_projects`, empty
+  until chosen. No pipeline has a configured project to default to. *Reversing:* low.
+- **Generalise Standup's dialog or write a second one** (delegated). *Ruling:* generalise it, the
+  recommended pick: `tf/TfCreateTicket.svelte` is the shell's one create-ticket dialog. Standup
+  uses it with the action item's words as the note. The run page uses it with title and body
+  fields (`words`). Standup's behaviour and tests are unchanged. *Reversing:* low.
+- **What the problem block draws once a ticket exists.** *Ruling:* each ticket linked to the run is
+  drawn in place of *Create ticket* (`Ticket <KEY>`, opening its job, the title as its tip). While
+  a ticket filed here is queued, *Ticket queued* is drawn instead. Neither offers a second
+  *Create ticket*, as Standup's action item does not (#1433). While the mark is drawn, the page
+  reads the run's links again whenever any source's sync ends, because it is the ticket's source,
+  not the pipeline's, that brings the ticket in. *Reversing:* low.
+- **The prefill.** *Ruling:* the title is `<first failed test> fails in <pipeline> #<number>`. The
+  body is the failure heading, the details as the source wrote them, `At <path>:<line>` where the
+  details give one, and `<pipeline> #<number> on <branch>: <the run's URL at the source>`, so the
+  ticket can be read without knobas. The type is `Task`, as Standup's. *Reversing:* low; one pure
+  function (`ticketDraftOf`).
 ## #1445: ligatures off on the mono surfaces (Sonnet implementer, 2026-10-21)
 
 - **Scope of the rule** (delegated). *Ruling:* the wide form: `font-variant-ligatures: none` on every

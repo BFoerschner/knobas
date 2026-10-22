@@ -148,6 +148,10 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - A run page panel that needs a read beyond the run's row and view is its own component with its
   own read, injectable for its test (`TfRunChain` reads `run_chain`); a pipeline's chain rides on
   its settings (`PipelineSettings.chain`). (#857)
+- A ticket filed from an entity (a failed run's *Create ticket*) goes through the shell's one
+  create-ticket dialog, `tf/TfCreateTicket.svelte`, and is queued with `submit_write`'s `link_to`
+  naming that entity, so the backend links it once it arrives; the entity's page draws its linked
+  tickets from its confirmed links in place of *Create ticket*. (#1451)
 - A run's live reads (`run_log`, `run_tests`, `test_history`, `run_artifacts`, `artifact_preview`)
   route by the run's namespace with no mirror check, as `entity_view` does, and answer frame shapes
   (`knobas_source::run`). A download from a source is one command (`download_run_file`) into a new
