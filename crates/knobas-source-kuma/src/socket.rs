@@ -603,7 +603,7 @@ impl KumaSocket {
 /// A failure on the way to the emit, before the write's own packet went out
 /// (#1125): an unanswered login POST says nothing about the write, which was
 /// never sent, so it is plain [`SourceError::Unreachable`] and the write
-/// queue sends the write again on a later tick rather than holding it.
+/// queue sends the write again on its backoff ladder rather than holding it.
 fn not_yet_emitted(error: SourceError) -> SourceError {
     match error {
         SourceError::Unconfirmed { message, .. } => SourceError::Unreachable(message),
@@ -1053,7 +1053,7 @@ mod tests {
             other => panic!("expected Protocol, got {other:?}"),
         };
         // Status-less, which is what makes it a permanent refusal of this
-        // write rather than something the queue retries every tick.
+        // write rather than something the queue retries on its ladder.
         assert_eq!(status, None, "{message}");
         assert!(
             message.contains("500ms"),

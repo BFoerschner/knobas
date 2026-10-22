@@ -660,7 +660,9 @@ pub async fn write_queue_counts<R: tauri::Runtime>(
 /// The scheduler's own tick already does this every few seconds, so this is
 /// impatience rather than necessity -- which is why it cannot fail for a
 /// source that is still down: a write that cannot go simply stays queued, with
-/// its reason updated.
+/// its reason updated. It is also the one thing besides a new credential that
+/// sends a write the source refused the credential for (#1628), once per
+/// press.
 ///
 /// **It cannot release a held write.** A flush does not decide anything on the
 /// user's behalf; [`apply_held_write`] is the only thing that moves one.
@@ -674,16 +676,7 @@ pub async fn flush_writes<R: tauri::Runtime>(
     source_id: Option<String>,
 ) -> Result<(), IpcError> {
     let state = crate::sources::state(&app)?;
-    let deps = state.scheduler.deps();
-    match source_id {
-        Some(id) => knobas_sync::write_queue::flush_source(deps, &id)
-            .await
-            .map_err(|error| IpcError::internal(error).with_source(id)),
-        None => {
-            knobas_sync::write_queue::flush_all(deps).await;
-            Ok(())
-        }
-    }
+    crate::sources::write_queue::flush_now(&state, source_id).await
 }
 
 /// *I know, and I still mean it* (story 13): release a held write and send it.

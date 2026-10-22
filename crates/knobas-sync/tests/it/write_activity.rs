@@ -1,10 +1,10 @@
 //! The write queue's narration under repetition (issue #42, story 20).
 //!
-//! Story 20 promises one activity line per *change*. The scheduler retries a
-//! waiting write every tick, so a source that stays down has to read as one
-//! line of patience -- not as a line per attempt, which would bury the day's
-//! record under hundreds of identical entries an hour while a laptop is
-//! offline. A *different* fault is news and is announced again; the row
+//! Story 20 promises one activity line per *change*. The scheduler tries an
+//! unreachable write again on every rung of the sync side's backoff ladder
+//! (#1628), so a source that stays down has to read as one line of patience
+//! -- not as a line per attempt, which would add an identical entry every
+//! hour for as long as the source is gone. A *different* fault is news and is announced again; the row
 //! itself still records every attempt.
 //!
 //! In its own file, deliberately: each test file gets a database of its
@@ -238,6 +238,19 @@ impl Harness {
     async fn reload(&self, id: i64) -> store::QueuedWrite {
         store::get(self.pool(), id).await.unwrap().unwrap()
     }
+
+    /// This source's attempts a day into the past: every rung of the backoff
+    /// ladder has passed (#1628).
+    async fn later(&self) {
+        sqlx::query(
+            "update knobas.write_queue set attempted_at = attempted_at - interval '1 day'
+              where source_id = $1 and attempted_at is not null",
+        )
+        .bind(&self.source)
+        .execute(self.pool())
+        .await
+        .unwrap();
+    }
 }
 
 /// A migrated database, a configured source whose adapter is the fake, and a
@@ -300,7 +313,10 @@ async fn an_unchanged_wait_is_one_activity_line_not_one_per_attempt() {
 
     h.answer(Answer::Unreachable);
     let write = h.comment(&ticket, "typed offline").await;
+    // Each flush once the write's rung has passed: three more attempts on the
+    // ladder, none of them news.
     for _ in 0..3 {
+        h.later().await;
         flusher::flush_source(&h.deps, &h.source).await.unwrap();
     }
     assert_eq!(
@@ -308,13 +324,15 @@ async fn an_unchanged_wait_is_one_activity_line_not_one_per_attempt() {
         vec!["queued".to_owned(), "waiting".to_owned()],
         "a repeat of the same wait is patience, not news"
     );
-    assert!(
-        h.reload(write.id).await.attempts >= 4,
+    assert_eq!(
+        h.reload(write.id).await.attempts,
+        4,
         "the row still records every attempt"
     );
 
     // The fault changing is a change: the credential is now the problem.
     h.answer(Answer::Unauthorized);
+    h.later().await;
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
     assert_eq!(
         h.reload(write.id).await.wait_reason,

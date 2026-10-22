@@ -10,10 +10,13 @@
 //! (ADR-0017). Inside `write_queue.rs` these tests shared a database with the
 //! tests that assert a write's `wait_reason`, and an `Unreachable` read back
 //! as `Unauthorized` when a `flush_all` landed between the write and the
-//! reload (#609). Nothing here asserts a wait reason. What each test asserts
-//! (a state, or what its own fake received) is the same whichever reason a
-//! sibling's flush leaves on the row, and a sibling cannot deliver a write:
-//! it has no credential for any source but its own test's.
+//! reload (#609). Nothing here asserts a wait reason.
+//!
+//! And each test here has a scratch database of its own besides (#1628).
+//! Since a write refused its credential waits for a new one rather than for
+//! the next tick, a sibling's `flush_all` that failed to build this test's
+//! source would leave this test's write waiting for good, where it used to
+//! re-reason it for one tick.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -250,6 +253,18 @@ impl Harness {
     async fn reload(&self, id: i64) -> store::QueuedWrite {
         store::get(self.pool(), id).await.unwrap().unwrap()
     }
+
+    /// Every attempt in this test's database a day into the past, so the
+    /// backoff ladder an unreachable write climbs has passed (#1628).
+    async fn later(&self) {
+        sqlx::query(
+            "update knobas.write_queue set attempted_at = attempted_at - interval '1 day'
+              where attempted_at is not null",
+        )
+        .execute(self.pool())
+        .await
+        .unwrap();
+    }
 }
 
 /// A migrated database, a configured source whose adapter is the fake, and a
@@ -265,9 +280,8 @@ async fn harness() -> Harness {
 /// every one of these sources' credentials and its registry builds each its
 /// own fake, so one `flush_all` can deliver to any of them (#619).
 async fn sources(ids: &[String]) -> Vec<Harness> {
-    let connector = knobas_db::test_util::test_connector().await;
-    let pool = knobas_db::test_util::test_pool().await;
-    knobas_db::migrate::run(&pool).await.unwrap();
+    let connector = knobas_db::test_util::scratch_database("write_queue_flush_all").await;
+    let pool = connector.pool(4).await.unwrap();
 
     let secrets = MemoryStore::new();
     let mut lines = HashMap::new();
@@ -337,10 +351,12 @@ async fn the_scheduler_drains_the_queue_on_its_own() {
     let write = h.comment(&ticket, "sent by nobody").await;
     assert_eq!(h.reload(write.id).await.state, WriteState::Pending);
 
-    // The source can take it now -- and nothing tells the queue so.
+    // The source can take it now -- and nothing tells the queue so. Its rung
+    // of the ladder has passed.
     h.answer(Answer::Accept);
+    h.later().await;
     let scheduler = knobas_sync::scheduler::Scheduler::start(SchedulerDeps {
-        pool: knobas_db::test_util::test_pool().await,
+        pool: h.deps.pool.clone(),
         connections: Arc::clone(&h.deps.connections),
         registry: Arc::clone(&h.deps.registry),
         secrets: Arc::clone(&h.deps.secrets),
@@ -383,6 +399,7 @@ async fn a_held_write_never_flushes_on_its_own() {
         .await
         .unwrap();
     h.answer(Answer::Accept);
+    h.later().await;
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
     assert_eq!(h.reload(write.id).await.state, WriteState::Held);
 
@@ -434,11 +451,45 @@ async fn a_source_that_cannot_write_does_not_stop_another_source() {
     let goes = up.comment(&fine, "delivered").await;
     assert_eq!(up.reload(goes.id).await.state, WriteState::Pending);
 
-    // `up` comes back; `down` stays down.
+    // `up` comes back; `down` stays down. Both are past their rung, so the
+    // flush tries `down` before it reaches `up`.
     up.answer(Answer::Accept);
+    up.later().await;
     flusher::flush_all(&down.deps).await;
 
     assert_eq!(down.reload(held_back.id).await.state, WriteState::Pending);
     assert_eq!(up.reload(goes.id).await.state, WriteState::Sent);
     assert_eq!(up.delivered(), vec!["delivered".to_owned()]);
+}
+
+/// #1628: the tick skips a source whose credential needs a human -- the test
+/// `trigger_all` makes before a sync -- without building its adapter or
+/// sending anything. *Flush now* is a person asking, and does not.
+#[tokio::test]
+async fn the_tick_skips_a_source_whose_credential_needs_a_human() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-47", "a payout fails").await;
+    let op = WriteOp::Comment {
+        entity: ticket.to_string(),
+        body: "queued while refused".to_owned(),
+    };
+    // Queued without the attempt `submit` makes, so nothing about the row
+    // says why it should not go: only the source's health does.
+    let write = flusher::queue(&h.deps, &h.source, op).await.unwrap();
+    config::set_health(
+        h.pool(),
+        &h.source,
+        config::AuthState::Unauthorized,
+        Some("401"),
+        None,
+    )
+    .await
+    .unwrap();
+
+    flusher::flush_all(&h.deps).await;
+    assert!(h.delivered().is_empty());
+    assert_eq!(h.reload(write.id).await.attempted_at, None, "not tried");
+
+    flusher::flush_now(&h.deps, None).await.unwrap();
+    assert_eq!(h.delivered(), vec!["queued while refused".to_owned()]);
 }

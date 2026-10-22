@@ -464,6 +464,30 @@ pub(crate) async fn queue(
     Ok((queued, source_id))
 }
 
+/// *Flush now* from the queue panel: what the `flush_writes` command does.
+/// One source, or every source when `source_id` is `None`.
+///
+/// Sends each head write once whatever it waits on, a refused credential
+/// included (#1628) -- the tick never re-sends one of those --
+/// through [`knobas_sync::write_queue::flush_now`].
+///
+/// # Errors
+///
+/// `internal`, naming the source, if the queue's own reads or writes fail. A
+/// source that still cannot take the write is not an error.
+pub async fn flush_now(
+    state: &crate::sources::SourcesState,
+    source_id: Option<String>,
+) -> Result<(), IpcError> {
+    let deps = state.scheduler.deps();
+    knobas_sync::write_queue::flush_now(deps, source_id.as_deref())
+        .await
+        .map_err(|error| match source_id {
+            Some(id) => IpcError::internal(error).with_source(id),
+            None => IpcError::internal(error),
+        })
+}
+
 /// [`submit`]'s second half: send what the source owes, and re-read the mirror
 /// if the write landed.
 ///

@@ -40,6 +40,17 @@ knobas_core::closed_vocabulary! {
     }
 }
 
+impl AuthState {
+    /// Whether only a person can make this source answer again: the
+    /// credential was refused, or there is none. The scheduler starts no
+    /// sync of such a source on its own, and the write queue's tick skips it
+    /// (#1628).
+    #[must_use]
+    pub fn needs_human(self) -> bool {
+        matches!(self, AuthState::Unauthorized | AuthState::MissingSecret)
+    }
+}
+
 /// One source's credential health -- the cheap poll the top strip's sync
 /// monograms render from, the payload of the `source:health` event, and the
 /// answer of `credential_health`.

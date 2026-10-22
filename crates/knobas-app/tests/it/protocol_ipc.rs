@@ -967,6 +967,12 @@ async fn a_write_that_settles_later_is_linked_at_the_next_read() {
     // happens while the standup view is not on screen -- or while the app is
     // not running at all.
     harness.log().offline = false;
+    // An hour later, past the rung of the ladder an unreachable write
+    // waits out (#1628).
+    sqlx::query("update knobas.write_queue set attempted_at = attempted_at - interval '1 hour'")
+        .execute(harness.pool())
+        .await
+        .expect("the clock moves");
     knobas_sync::write_queue::flush_source(harness.state.scheduler.deps(), WIKI)
         .await
         .expect("the queue flushes");
