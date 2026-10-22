@@ -97,6 +97,7 @@
 
 use chrono::{DateTime, Utc};
 use knobas_http::{NextLink, PageWalk, Walked};
+use knobas_source::watermark::Bounds;
 use knobas_source::{Sink, SourceError};
 
 use crate::ConfluenceConfig;
@@ -434,28 +435,21 @@ impl SyncRun<'_> {
                 .unwrap_or_else(|| ConfluenceCursor::empty(offset))
                 .with_positions(positions)
                 .encode()),
+            // The ceiling clamp and the never-backwards floor are the shared
+            // watermark's (#1622): an edit made *during* the walk does not
+            // carry the position past the run's start, and a ceiling older
+            // than the previous watermark (its page deleted, or moved out of
+            // the configured spaces) does not drag it back.
             (_, Some(w)) => {
-                // The ceiling clamp. An edit made *during* the walk carries a
-                // stamp later than anything the run saw at its start;
-                // advancing to it would put the run's own duration below the
-                // next query's lower bound and hide every other edit made
-                // while it ran.
-                let clamped = witnessed.ceiling.map_or(w, |ceiling| w.min(ceiling));
-                // ...but never **backwards**. The ceiling is the newest page
-                // in the corpus *now*, and that can be older than the
-                // watermark -- the page which set it was deleted, or moved out
-                // of the configured spaces. Clamping to it unconditionally
-                // would then drag the position back, which is the one thing
-                // the `max(previous, …)` rule above exists to prevent
-                // ([`ConfluenceCursor::since`], condition 1). The cost of
-                // refusing is a ceiling that does not bind on that one run;
-                // the cost of accepting is a source that re-delivers its whole
-                // recent history on every poll and never settles.
-                let floor = previous.as_ref().and_then(|c| c.modified_to);
-                let clamped = floor.map_or(clamped, |previous| clamped.max(previous));
-                Ok(ConfluenceCursor::advanced(clamped, offset, &seen_in_window)
-                    .with_positions(positions)
-                    .encode())
+                let bounds = Bounds {
+                    previous: previous.as_ref().and_then(|c| c.modified_to),
+                    ceiling: witnessed.ceiling,
+                };
+                Ok(
+                    ConfluenceCursor::advanced(bounds, w, offset, &seen_in_window)
+                        .with_positions(positions)
+                        .encode(),
+                )
             }
         }
     }
@@ -552,7 +546,7 @@ impl SyncRun<'_> {
     ///   ever. Deduplicating on the comment cannot: its timestamp is newer
     ///   than the watermark, so it stays in `seen` exactly as long as the
     ///   query keeps returning it. It also *wins* `seen`'s cap for the same
-    ///   reason -- [`crate::cursor::SEEN_CAP`] keeps the newest entries -- so
+    ///   reason -- [`SEEN_CAP`](knobas_source::watermark::SEEN_CAP) keeps the newest entries -- so
     ///   a run with hundreds of fresh mentions can evict page-walk entries and
     ///   re-deliver a page. That is the cap's documented cost (bandwidth, not
     ///   correctness), reached from a second direction.

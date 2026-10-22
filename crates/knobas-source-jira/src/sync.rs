@@ -1436,7 +1436,7 @@ mod tests {
     /// newest emitted alone drags the position backwards onto it, and the next
     /// query's window widens to everything since. That is recoverable exactly
     /// while `seen` can hold the whole widened window; past
-    /// [`SEEN_CAP`](crate::cursor::SEEN_CAP) it is re-delivery on every poll,
+    /// [`SEEN_CAP`](knobas_source::watermark::SEEN_CAP) it is re-delivery on every poll,
     /// forever.
     #[tokio::test]
     async fn the_watermark_never_moves_backwards() {
@@ -1492,7 +1492,9 @@ mod tests {
         let (keys, cursor) = keys_of(&api, &config, None).await;
         assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3"]);
         assert_eq!(
-            crate::cursor::JiraCursor::parse(&cursor).unwrap().updated_to,
+            crate::cursor::JiraCursor::parse(&cursor)
+                .unwrap()
+                .updated_to,
             crate::time::parse_jira_time("2026-08-22T11:20:00.000+0000"),
             "the watermark is held at the ceiling the run witnessed at its start"
         );

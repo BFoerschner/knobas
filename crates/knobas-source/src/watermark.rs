@@ -272,13 +272,14 @@ mod tests {
         seen.iter().map(|s| s.k.as_str()).collect()
     }
 
+    type RenderFn = fn(DateTime<Utc>, i32) -> String;
+    type AdvanceFn = fn(Bounds, DateTime<Utc>, i32, &[Rec]) -> Advanced<Rec>;
+
     /// Runs `case` for JQL and for CQL.
-    fn both(case: fn(&'static str, fn(DateTime<Utc>, i32) -> String, AdvanceFn)) {
+    fn both(case: fn(&'static str, RenderFn, AdvanceFn)) {
         case("jql", Jql::render, advanced::<Jql, Rec>);
         case("cql", Cql::render, advanced::<Cql, Rec>);
     }
-
-    type AdvanceFn = fn(Bounds, DateTime<Utc>, i32, &[Rec]) -> Advanced<Rec>;
 
     /// The overlap is mandatory: the literal has minute resolution, so a
     /// query starting at the watermark drops every edit sharing its minute.
@@ -286,7 +287,10 @@ mod tests {
     #[test]
     fn the_next_query_starts_two_minutes_before_the_watermark() {
         let w = utc("2026-08-22T10:40:00Z");
-        assert_eq!(since(Some(w), 7200, 7200), Some(utc("2026-08-22T10:38:00Z")));
+        assert_eq!(
+            since(Some(w), 7200, 7200),
+            Some(utc("2026-08-22T10:38:00Z"))
+        );
         assert_eq!(since(None, 7200, 7200), None);
     }
 
@@ -295,8 +299,14 @@ mod tests {
     #[test]
     fn a_changed_offset_widens_the_window_by_more_than_an_hour() {
         let w = utc("2026-10-25T01:30:00Z");
-        assert_eq!(since(Some(w), 7200, 3600), Some(utc("2026-10-25T00:25:00Z")));
-        assert_eq!(since(Some(w), 3600, 7200), Some(utc("2026-10-25T00:25:00Z")));
+        assert_eq!(
+            since(Some(w), 7200, 3600),
+            Some(utc("2026-10-25T00:25:00Z"))
+        );
+        assert_eq!(
+            since(Some(w), 3600, 7200),
+            Some(utc("2026-10-25T00:25:00Z"))
+        );
     }
 
     /// The literal is the minute in the server's zone, and an offset no zone
@@ -347,9 +357,16 @@ mod tests {
                 let offset = hours * 3_600;
                 let known = read_as(&L::render(t, offset), offset);
                 assert!(known <= t, "{name} {hours}: {known} is later than {t}");
-                assert_eq!(known, L::floor(t, offset), "{name} {hours}: floor disagrees");
+                assert_eq!(
+                    known,
+                    L::floor(t, offset),
+                    "{name} {hours}: floor disagrees"
+                );
                 let guessed = read_as(&L::render(t, MIN_UTC_OFFSET_SECS), offset);
-                assert!(guessed <= t, "{name} {hours}: a guessed zone queried from {guessed}");
+                assert!(
+                    guessed <= t,
+                    "{name} {hours}: a guessed zone queried from {guessed}"
+                );
             }
         }
         case::<Jql>("jql");

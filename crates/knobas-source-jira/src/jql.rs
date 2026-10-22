@@ -95,7 +95,9 @@ mod tests {
             r#"project in ("PAY", "OPS") ORDER BY updated DESC"#
         );
         assert_eq!(
-            build_ceiling_jql(&cfg(json!({ "jql_filter": "assignee = currentUser() OR x = 1" }))),
+            build_ceiling_jql(&cfg(
+                json!({ "jql_filter": "assignee = currentUser() OR x = 1" })
+            )),
             "(assignee = currentUser() OR x = 1) ORDER BY updated DESC"
         );
         assert_eq!(build_ceiling_jql(&cfg(json!({}))), "ORDER BY updated DESC");

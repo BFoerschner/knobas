@@ -16,15 +16,16 @@
 //!
 //! # `(id, version)`, not `(id, timestamp)`
 //!
-//! The Jira adapter recognises a re-delivered issue by its `(key, updated)`
-//! pair and documents the hole that leaves: "an issue edited twice within the
-//! same second is missed here". Confluence hands out something better --
+//! A `(id, timestamp)` pair leaves a hole: a page edited twice within the
+//! same second is missed (Jira's cursor had it until #345 keyed `seen` on a
+//! fingerprint instead). Confluence hands out something better --
 //! `version.number` increments on every edit -- so the identity of *this
 //! version of this page* is exact, and two edits inside one second are two
 //! versions. The timestamp is still stored, because it is what the window
 //! filter needs, but it is not what identity is decided on.
 
 use chrono::{DateTime, Utc};
+use knobas_source::watermark::{self, Advanced, Bounds, Cql, Entry};
 
 /// Bump when the envelope's shape changes: an unrecognised version reads as
 /// "no cursor", which is a full sync. Bumped to 2 by #860, whose `body_text`
@@ -34,22 +35,10 @@ use chrono::{DateTime, Utc};
 /// gives every mirrored page its `position` and its `mentioned_users`.
 pub(crate) const CURSOR_VERSION: u8 = 3;
 
-/// How far back of the watermark the next query starts.
-///
-/// CQL's `lastmodified` takes a `"yyyy-MM-dd HH:mm"` literal and therefore
-/// resolves to the minute, so an exact-boundary watermark drops every edit
-/// that shares its minute. Re-delivery is free -- upserts are idempotent, and
-/// `seen` recognises what came back.
-const OVERLAP_MINUTES: i64 = 2;
-
-/// Used for the one run after the instance's UTC offset changed (a daylight
-/// saving shift is at most an hour), so no page falls in the seam.
-const DST_OVERLAP_MINUTES: i64 = 65;
-
-/// How many `(id, version, when)` records the envelope remembers. Beyond this
-/// a mass edit inside one overlap window may be delivered twice -- upserts are
-/// idempotent, so the cost is bandwidth, not correctness.
-pub(crate) const SEEN_CAP: usize = 500;
+// The overlap, the daylight-saving widening and the seen cap are
+// `knobas_source::watermark`'s (#1622), shared with Jira: CQL's
+// `lastmodified` takes a `"yyyy-MM-dd HH:mm"` literal and resolves to the
+// minute, exactly as JQL's `updated` does.
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ConfluenceCursor {
@@ -88,6 +77,21 @@ pub(crate) struct Seen {
     pub u: DateTime<Utc>,
 }
 
+/// The identity is the id and `version.number`; `u` only bounds the window.
+/// An entry stored with no number matches no version.
+impl Entry for Seen {
+    type Version = u64;
+    fn key(&self) -> &str {
+        &self.i
+    }
+    fn stamp(&self) -> DateTime<Utc> {
+        self.u
+    }
+    fn is_version(&self, number: &u64) -> bool {
+        self.n == Some(*number)
+    }
+}
+
 impl ConfluenceCursor {
     /// A cursor for a source that has never delivered anything.
     pub(crate) fn empty(tz_offset_secs: i32) -> Self {
@@ -120,13 +124,9 @@ impl ConfluenceCursor {
         serde_json::to_string(self).expect("a cursor is plain data and always serializes")
     }
 
-    /// The lower bound of the next `lastmodified >=` clause.
-    ///
-    /// On the one run after the instance's offset changed this reaches further
-    /// back than the window [`Self::advanced`] recorded `seen` for, so that run
-    /// re-delivers what falls in between. That is deliberate -- widening is how
-    /// no page falls in the daylight-saving seam, and `advanced` cannot know an
-    /// offset that has not been observed yet.
+    /// The lower bound of the next `lastmodified >=` clause: two minutes
+    /// before the watermark, an hour more on the one run after the instance's
+    /// offset changed ([`knobas_source::watermark::since`]).
     ///
     /// # What the caller owes, in full
     ///
@@ -134,9 +134,10 @@ impl ConfluenceCursor {
     /// following. Either one alone leaves an idle source oscillating, and the
     /// two fail in different places, so neither substitutes for the other:
     ///
-    /// 1. **The new watermark is `max(previous, newest emitted)`, clamped to
-    ///    the run's ceiling.** Otherwise a re-delivered *older* page drags the
-    ///    watermark backwards.
+    /// 1. **[`Self::advanced`] is handed the previous watermark and the
+    ///    ceiling** in its bounds. Otherwise a re-delivered *older* page drags
+    ///    the watermark backwards, or a page edited during the walk carries it
+    ///    past edits the walk never saw.
     /// 2. **`advanced` is handed every record in the window, skipped ones
     ///    included** -- see its own contract. A run that passes only what it
     ///    emitted drops the records it recognised out of `seen`, and they come
@@ -148,13 +149,7 @@ impl ConfluenceCursor {
     /// under it, because a full sync skips nothing. It takes **one edited page
     /// and then an idle poll** to show.
     pub(crate) fn since(&self, current_offset_secs: i32) -> Option<DateTime<Utc>> {
-        let watermark = self.modified_to?;
-        let minutes = if current_offset_secs == self.tz_offset_secs {
-            OVERLAP_MINUTES
-        } else {
-            DST_OVERLAP_MINUTES
-        };
-        Some(watermark - chrono::Duration::minutes(minutes))
+        watermark::since(self.modified_to, self.tz_offset_secs, current_offset_secs)
     }
 
     /// Was this exact version of this page already handed to the sink?
@@ -164,10 +159,7 @@ impl ConfluenceCursor {
     /// is re-delivered on every run rather than skipped on a guess, which is
     /// the direction that costs bandwidth instead of losing an edit.
     pub(crate) fn already_delivered(&self, id: &str, number: Option<u64>) -> bool {
-        let Some(number) = number else {
-            return false;
-        };
-        self.seen.iter().any(|s| s.n == Some(number) && s.i == id)
+        number.is_some_and(|number| watermark::delivered(&self.seen, id, &number))
     }
 
     /// The cursor for a run that emitted something.
@@ -181,41 +173,18 @@ impl ConfluenceCursor {
     /// exactly the items that make an idle poll idle.
     ///
     /// This is why the parameter is not called `delivered`.
+    ///
+    /// `bounds` carries the previous watermark and the run-start ceiling; the
+    /// clamp, the floor, the order and the cap are
+    /// [`knobas_source::watermark::advanced`]'s, shared with Jira.
     pub(crate) fn advanced(
-        watermark: DateTime<Utc>,
+        bounds: Bounds,
+        newest: DateTime<Utc>,
         tz_offset_secs: i32,
         seen_in_window: &[Seen],
     ) -> Self {
-        // The band the next query will really return, not the band the
-        // arithmetic suggests. `since` subtracts whole minutes, but the literal
-        // it is rendered into has minute resolution and truncates *downwards*,
-        // so the query's true lower bound is up to 59 s earlier than
-        // `watermark - OVERLAP_MINUTES`. Filtering `seen` on the un-truncated
-        // value drops every record delivered in that band while the query keeps
-        // returning them: run N+1 re-emits one, run N+2 re-emits another, and
-        // an idle poll never settles -- battery clause 2 failing in steady
-        // state, not at a daylight-saving edge.
-        //
-        // Asking `cql_floor` rather than truncating here keeps the two
-        // definitions from drifting apart: it renders the literal and reads it
-        // back, so the floor is the query's meaning by construction.
-        let floor = crate::time::cql_floor(
-            watermark - chrono::Duration::minutes(OVERLAP_MINUTES),
-            tz_offset_secs,
-        );
-        let mut seen: Vec<Seen> = seen_in_window
-            .iter()
-            .filter(|s| s.u >= floor)
-            .cloned()
-            .collect();
-        // Newest first, so the cap drops the entries least likely to come back,
-        // with the id breaking ties. A page appears at most once per run, so
-        // this is a *total* order on the records -- which is the whole of what
-        // makes the same delivered set encode to the same bytes however the
-        // pages happened to arrive. The engine compares cursors as strings, so
-        // that property is what lets an idle poll be recognised as one.
-        seen.sort_by(|a, b| b.u.cmp(&a.u).then_with(|| a.i.cmp(&b.i)));
-        seen.truncate(SEEN_CAP);
+        let Advanced { watermark, seen } =
+            watermark::advanced::<Cql, Seen>(bounds, newest, tz_offset_secs, seen_in_window);
         Self {
             v: CURSOR_VERSION,
             modified_to: Some(watermark),
@@ -248,11 +217,24 @@ mod tests {
     #[test]
     fn an_unrecognised_envelope_reads_as_no_cursor() {
         let good = ConfluenceCursor::advanced(
+            Bounds::default(),
             utc("2026-08-22T10:40:00Z"),
             7200,
             &[seen("98307", 3, "2026-08-22T10:40:00Z")],
         );
         let encoded = good.encode();
+        // The stored bytes, literally: the shared watermark (#1622) moved the
+        // arithmetic and none of the envelope, so no stored cursor re-syncs.
+        assert_eq!(
+            encoded,
+            r#"{"v":3,"modified_to":"2026-08-22T10:40:00Z","tz_offset_secs":7200,"seen":[{"i":"98307","n":3,"u":"2026-08-22T10:40:00Z"}]}"#
+        );
+        assert_eq!(
+            good.clone()
+                .with_positions(Positions::from([("98307".to_owned(), 0)]))
+                .encode(),
+            r#"{"v":3,"modified_to":"2026-08-22T10:40:00Z","tz_offset_secs":7200,"seen":[{"i":"98307","n":3,"u":"2026-08-22T10:40:00Z"}],"positions":{"98307":0}}"#
+        );
         assert_eq!(ConfluenceCursor::parse(&encoded), Some(good));
         assert_eq!(ConfluenceCursor::parse("not json"), None);
         assert_eq!(ConfluenceCursor::parse(r#"{"v":99}"#), None);
@@ -277,7 +259,8 @@ mod tests {
     /// that shares the watermark's minute.
     #[test]
     fn the_next_query_starts_before_the_watermark() {
-        let cursor = ConfluenceCursor::advanced(utc("2026-08-22T10:40:00Z"), 7200, &[]);
+        let cursor =
+            ConfluenceCursor::advanced(Bounds::default(), utc("2026-08-22T10:40:00Z"), 7200, &[]);
         assert_eq!(cursor.since(7200), Some(utc("2026-08-22T10:38:00Z")));
         // A source that never delivered anything has no lower bound at all,
         // which is what makes its first run a full sync.
@@ -289,7 +272,8 @@ mod tests {
     /// and the zone the next query is read in.
     #[test]
     fn a_changed_offset_widens_the_window_for_one_run() {
-        let cursor = ConfluenceCursor::advanced(utc("2026-10-25T10:40:00Z"), 7200, &[]);
+        let cursor =
+            ConfluenceCursor::advanced(Bounds::default(), utc("2026-10-25T10:40:00Z"), 7200, &[]);
         assert_eq!(cursor.since(3600), Some(utc("2026-10-25T09:35:00Z")));
         assert!(
             cursor.since(3600).unwrap() < cursor.since(7200).unwrap(),
@@ -303,6 +287,7 @@ mod tests {
     #[test]
     fn a_page_is_recognised_by_its_version_not_by_its_timestamp() {
         let cursor = ConfluenceCursor::advanced(
+            Bounds::default(),
             utc("2026-08-22T10:40:00Z"),
             7200,
             &[seen("98307", 3, "2026-08-22T10:40:00Z")],
@@ -328,6 +313,7 @@ mod tests {
         // lower bound is 10:38:00 -- not 10:38:59.
         let watermark = utc("2026-08-22T10:40:59Z");
         let cursor = ConfluenceCursor::advanced(
+            Bounds::default(),
             watermark,
             0,
             &[
@@ -353,8 +339,13 @@ mod tests {
         let b = seen("98311", 1, "2026-08-22T10:39:00Z");
         let c = seen("98299", 7, "2026-08-22T10:40:00Z");
         let watermark = utc("2026-08-22T10:40:00Z");
-        let one = ConfluenceCursor::advanced(watermark, 0, &[a.clone(), b.clone(), c.clone()]);
-        let two = ConfluenceCursor::advanced(watermark, 0, &[c, a, b]);
+        let one = ConfluenceCursor::advanced(
+            Bounds::default(),
+            watermark,
+            0,
+            &[a.clone(), b.clone(), c.clone()],
+        );
+        let two = ConfluenceCursor::advanced(Bounds::default(), watermark, 0, &[c, a, b]);
         assert_eq!(one.encode(), two.encode());
         // Newest first, with the id breaking a tie -- a total order, which is
         // what makes the bytes stable rather than merely usually equal.
@@ -372,15 +363,15 @@ mod tests {
     #[test]
     fn a_window_larger_than_the_cap_keeps_the_newest() {
         let base = utc("2026-08-22T10:40:00Z");
-        let records: Vec<Seen> = (0..SEEN_CAP + 10)
+        let records: Vec<Seen> = (0..knobas_source::watermark::SEEN_CAP + 10)
             .map(|i| Seen {
                 i: format!("{i:06}"),
                 n: Some(1),
                 u: base - chrono::Duration::milliseconds(i as i64),
             })
             .collect();
-        let cursor = ConfluenceCursor::advanced(base, 0, &records);
-        assert_eq!(cursor.seen.len(), SEEN_CAP);
+        let cursor = ConfluenceCursor::advanced(Bounds::default(), base, 0, &records);
+        assert_eq!(cursor.seen.len(), knobas_source::watermark::SEEN_CAP);
         assert_eq!(cursor.seen[0].i, "000000", "the newest survives");
         assert!(cursor.already_delivered("000000", Some(1)));
     }

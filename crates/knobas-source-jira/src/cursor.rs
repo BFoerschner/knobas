@@ -271,7 +271,8 @@ mod tests {
 
     #[test]
     fn round_trips_through_its_json_envelope() {
-        let c = JiraCursor::advanced(Bounds::default(), 
+        let c = JiraCursor::advanced(
+            Bounds::default(),
             t("2026-08-22T11:48:00.000+0000"),
             7_200,
             &[saw("PAY-231", t("2026-08-22T11:48:00.000+0000"))],
@@ -341,7 +342,12 @@ mod tests {
     /// The two-minute overlap, and why it is not optional.
     #[test]
     fn the_query_starts_two_minutes_before_the_watermark() {
-        let c = JiraCursor::advanced(Bounds::default(), t("2026-08-22T11:48:00.000+0000"), 7_200, &[]);
+        let c = JiraCursor::advanced(
+            Bounds::default(),
+            t("2026-08-22T11:48:00.000+0000"),
+            7_200,
+            &[],
+        );
         assert_eq!(c.since(7_200), Some(t("2026-08-22T11:46:00.000+0000")));
     }
 
@@ -350,7 +356,12 @@ mod tests {
     /// shift instead of skipping an hour of issues.
     #[test]
     fn an_offset_change_widens_the_overlap_once() {
-        let c = JiraCursor::advanced(Bounds::default(), t("2026-10-25T01:30:00.000+0000"), 7_200, &[]);
+        let c = JiraCursor::advanced(
+            Bounds::default(),
+            t("2026-10-25T01:30:00.000+0000"),
+            7_200,
+            &[],
+        );
         assert_eq!(c.since(3_600), Some(t("2026-10-25T00:25:00.000+0000")));
     }
 
@@ -388,7 +399,12 @@ mod tests {
     #[test]
     fn a_record_that_changed_within_one_second_is_not_the_one_already_delivered() {
         let one_second = t("2026-09-03T22:54:59.000+0000");
-        let c = JiraCursor::advanced(Bounds::default(), one_second, 0, &[saw("PAY-240", one_second)]);
+        let c = JiraCursor::advanced(
+            Bounds::default(),
+            one_second,
+            0,
+            &[saw("PAY-240", one_second)],
+        );
         assert!(
             c.already_delivered("PAY-240", &h("PAY-240")),
             "the unchanged record is still recognised -- battery clause 2"
@@ -405,7 +421,8 @@ mod tests {
     #[test]
     fn the_seen_set_covers_the_overlap_and_nothing_else() {
         let watermark = t("2026-08-22T11:48:00.000+0000");
-        let c = JiraCursor::advanced(Bounds::default(), 
+        let c = JiraCursor::advanced(
+            Bounds::default(),
             watermark,
             0,
             &[
@@ -440,7 +457,9 @@ mod tests {
                 )
             })
         };
-        let encode = |order: [i64; 3]| JiraCursor::advanced(Bounds::default(), watermark, 0, &pairs(order)).encode();
+        let encode = |order: [i64; 3]| {
+            JiraCursor::advanced(Bounds::default(), watermark, 0, &pairs(order)).encode()
+        };
         assert_eq!(encode([2, 0, 1]), encode([0, 1, 2]));
         assert_eq!(encode([1, 2, 0]), encode([0, 1, 2]));
 
@@ -457,7 +476,13 @@ mod tests {
     fn entries_sharing_a_timestamp_are_still_ordered_deterministically() {
         let watermark = t("2026-08-22T11:48:00.000+0000");
         let encode = |order: [&str; 3]| {
-            JiraCursor::advanced(Bounds::default(), watermark, 0, &order.map(|k| saw(k, watermark))).encode()
+            JiraCursor::advanced(
+                Bounds::default(),
+                watermark,
+                0,
+                &order.map(|k| saw(k, watermark)),
+            )
+            .encode()
         };
         assert_eq!(
             encode(["PAY-240", "PAY-219", "PAY-231"]),
@@ -657,7 +682,8 @@ mod tests {
     /// a day. Re-encoding must therefore be a no-op at the byte level.
     #[test]
     fn re_encoding_an_unchanged_cursor_is_byte_identical() {
-        let encoded = JiraCursor::advanced(Bounds::default(), 
+        let encoded = JiraCursor::advanced(
+            Bounds::default(),
             t("2026-08-22T11:48:00.000+0000"),
             7_200,
             &[

@@ -6,6 +6,8 @@
 
 use chrono::{DateTime, Utc};
 
+use knobas_source::watermark::{Cql, MinuteLiteral};
+
 use crate::ConfluenceConfig;
 
 /// Which direction a query walks, and therefore what it is for.
@@ -26,7 +28,7 @@ pub(crate) enum Order {
 /// Nothing here escapes anything, and nothing needs to:
 /// [`ConfluenceConfig::from_json`] has already refused a space key that is not
 /// `~?[A-Za-z0-9_.-]+`, and the timestamp is rendered by
-/// [`crate::time::format_cql_time`]. A key that reached this function cannot
+/// [`knobas_source::watermark::Cql`]. A key that reached this function cannot
 /// contain a quote, a parenthesis or a comma.
 ///
 /// **A live suite hand-copies the scoped ascending form of this string.**
@@ -145,7 +147,7 @@ fn render_query(
     if let Some(since) = since {
         clauses.push(format!(
             "lastmodified >= \"{}\"",
-            crate::time::format_cql_time(since, offset_secs)
+            <Cql as MinuteLiteral>::render(since, offset_secs)
         ));
     }
     let direction = match order {
