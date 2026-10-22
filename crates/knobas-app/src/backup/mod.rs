@@ -694,11 +694,14 @@ fn prune(state: &BackupState, keep: u32) -> Result<(), ExportError> {
 
 /// Manage the backup state and start the nightly task.
 ///
-/// Called from `spawn_bring_up` once the database is migrated, beside
+/// Called from bring-up once the database is migrated, beside
 /// `sources::start`.
-pub fn start<R: tauri::Runtime>(app: &tauri::AppHandle<R>, db: &knobas_db::EmbeddedDb) {
-    let profile = app.state::<crate::Profile>().inner().clone();
-    // The store `sources::start` built, which ran before this in `spawn_bring_up`
+pub fn start<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    db: &knobas_db::EmbeddedDb,
+    profile: &crate::Profile,
+) {
+    // The store `sources::start` built, which ran before this in bring-up
     // and returns `Err` rather than leaving its state unmanaged -- so the
     // fallback below is unreachable. It is an empty store rather than a panic
     // because of which way the mistake would go: an empty keychain makes

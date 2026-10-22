@@ -469,7 +469,7 @@ mod tests {
     #[test]
     fn only_bring_up_and_the_lifecycles_default_call_for_process() {
         const ALLOWED: [(&str, &str); 2] = [
-            ("sources/mod.rs", "bring-up (`sources::start`)"),
+            ("lib.rs", "bring-up (`spawn_bring_up`)"),
             (
                 "commands/app.rs",
                 "the lifecycle's default (`Lifecycle::new`)",

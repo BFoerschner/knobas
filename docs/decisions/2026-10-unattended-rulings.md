@@ -11859,3 +11859,47 @@ set.
   did. #1728 rules that "a tightening keeps #1630's behaviour", so the PR follows the ticket; the
   gap matters only for turns shorter than about burst/rate seconds. Filed as #1740 (`backlog`).
   *Reversing:* n/a.
+
+### #1632: bring-up and shutdown a test can drive (Opus, 2026-10-22)
+
+- **`bring_up`'s arguments.** *Fork:* the ticket writes `bring_up(handle, profile)`; the database
+  URL comes from `KNOBAS_DB_URL` and the registry from `Registry::for_process()`, neither of which a
+  test can point elsewhere. *Ruling:* `bring_up(handle, profile, db_url, registry)`.
+  `spawn_bring_up` passes the environment variable and the process registry; a test passes its
+  scratch database's URL and a registry of its own. Setting the variable is `unsafe` in edition
+  2024 and reaches every concurrent test in the binary, and a fixture adapter loaded into the
+  process registry would show up in every other test's adapter list. The `for_process` scan's
+  allowed bring-up site moves from `sources/mod.rs` to `lib.rs`. *Reversing:* low.
+- **The profile travels as an argument.** *Ruling:* `sources::start` and `backup::start` take the
+  `&Profile` bring-up was given instead of each reading it from managed state, so a bring-up runs
+  on one profile throughout. *Reversing:* low.
+- **The retry test uses two mock apps over one registry.** *Fork:* bring up one app twice, or two
+  apps. *Ruling:* two apps. A retry follows a failure, and `sources::start` manages its state last,
+  so on a retry the first attempt's sources state was never managed. What the retry inherits is
+  the registry. Bringing one app up twice would leave the second scheduler orphaned, since Tauri
+  keeps the first `manage` and the scheduler never stops. *Reversing:* low.
+- **The "recording stub scheduler" is the real scheduler over a recording adapter.** *Fork:*
+  `SourcesState` holds a concrete `knobas_sync::Scheduler`, so a stub scheduler would need a trait
+  over it, a second scheduler surface. *Ruling:* the shutdown test starts the real scheduler with
+  one adapter whose sync parks until it is dropped, and the drop records whether the application
+  pool (the one `shutdown_database` closes) was closed yet. Swapping the two calls makes it record
+  `true`. *Reversing:* low.
+- **`grep -c 'include_str!' wiring.rs` is 0 cannot pass.** The file holds eight more `include_str!`
+  scans (plugin registration, the handler list, plugin version pins) that order nothing and that
+  the spec does not retire. The two byte-offset tests are gone; the criterion is ticked with that
+  note, and the wording fix is a follow-up. *Reversing:* n/a.
+- **The suggestion-pass scan's replacement witnesses the handover, not the count.** *Ruling:* a
+  mock source synced through the scheduler bring-up started proposes links, and the mutant that
+  takes the pass off the scheduler fails it. "Built exactly once" cannot be seen from outside the
+  process. Since #1611, nothing but the scheduler holds a pass. *Reversing:* low.
+- **`replace` drops a recorded update check.** *Ruling:* acceptable. `sources::start` re-runs the
+  check in the background on every bring-up, a retry included. *Reversing:* n/a.
+- **Merge-manager: the declarations come from bring-up's registry, not the `Lifecycle`'s.**
+  *Fork:* the two could differ, and Settings reads the `Lifecycle`'s. *Ruling:* accepted. Both
+  production callers of `spawn_bring_up` (`setup` and `retry_database`) pass
+  `Registry::for_process()`, and `setup` manages `Lifecycle::new()`, which is the same list;
+  `bring_up` with any other registry exists only behind `test-util`. *Reversing:* low.
+- **Merge-manager: the `include_str!` criterion's intent is met.** *Ruling:* both byte-offset
+  tests are gone and their claims run in `tests/it/bring_up.rs`; the eight scans left in
+  `wiring.rs` pin plugin registration, the handler list and version pins, and order nothing. The
+  tick with a note stands; #1738 (backlog) rewords the criterion. *Reversing:* n/a.

@@ -177,8 +177,26 @@ pub struct AppState {
     db: Mutex<Option<knobas_db::EmbeddedDb>>,
 }
 
+impl AppState {
+    /// The shared state over the server bring-up started, which
+    /// [`shutdown_database`] stops.
+    fn owning(db: knobas_db::EmbeddedDb) -> Self {
+        Self {
+            pool: db.pool().clone(),
+            db: Mutex::new(Some(db)),
+        }
+    }
+}
+
 #[cfg(feature = "test-util")]
 impl AppState {
+    /// The shared state bring-up installs, over `db`. **Tests only**, for
+    /// `tests/it/bring_up.rs`'s shutdown test: [`shutdown`] stops `db` once.
+    #[must_use]
+    pub fn over_db(db: knobas_db::EmbeddedDb) -> Self {
+        Self::owning(db)
+    }
+
     /// The shared state over a pool this process did not start. **Tests only.**
     ///
     /// It exists because a [`tauri::State`] cannot be built by hand, so a
@@ -219,6 +237,12 @@ pub fn run() {
     let log_sink = logging::init();
     install_panic_hook();
 
+    // The flag half of the profile, read **once** (LIFE-8, spec #1619): the
+    // single-instance exemption below and `setup`'s profile are one decision,
+    // so a flag that changed in one place cannot leave the other keyed to the
+    // old one.
+    let demo = Profile::demo_in(std::env::args());
+
     let builder = tauri::Builder::default();
     // The single-instance guard (#748), registered **first**: its setup runs
     // before the builder's `setup` closure, so a second launch exits before it
@@ -228,7 +252,7 @@ pub fn run() {
     // plugin keys its lock by the bundle identifier, which cannot differ per
     // profile without moving `app_data_dir`, so guarding it would stop a demo
     // from running beside a real instance, which it does today.
-    let builder = if std::env::args().any(|arg| arg == DEMO_FLAG) {
+    let builder = if demo {
         builder
     } else {
         builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -274,7 +298,7 @@ pub fn run() {
             // instead of Tauri's bare "state not managed".
             let handle = app.handle().clone();
             start_file_log(&handle, &log_sink);
-            let profile = Profile::from_args(std::env::args(), &handle.path().app_data_dir()?);
+            let profile = Profile::new(demo, &handle.path().app_data_dir()?);
             tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
             handle.manage(profile);
             handle.manage(sources::SecretStoreKind::from_env());
@@ -608,17 +632,38 @@ pub fn run() {
                 event,
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
-                // **Before** the database: the scheduler's runs hold
-                // connections inside transactions, and closing the pool under
-                // them is the stall the M0 carry-over describes. Both calls are
-                // idempotent, so whichever event arrives first does the work.
-                sources::shutdown(app);
-                // Before the pool closes under it, for the reason the sync
-                // scheduler is stopped first: its tick reads `knobas.setting`.
-                backup::shutdown(app);
-                shutdown_database(app);
+                shutdown_app(app);
             }
         });
+}
+
+/// Stop everything bring-up started, in the one order that does not stall:
+/// the sync scheduler, the backup task, then the database.
+///
+/// **The scheduler before the database**: its runs hold connections inside
+/// transactions, and closing the pool under them is the stall the M0
+/// carry-over describes. The backup task before the pool closes under it, for
+/// the same reason: its tick reads `knobas.setting`. Every step is idempotent,
+/// so a second call -- whichever of the two exit events arrives second -- is a
+/// no-op.
+///
+/// Blocks: it runs from the event loop's exit handler, which is not async.
+/// `tests/it/bring_up.rs` drives it through `shutdown`, its `test-util` door.
+fn shutdown_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    sources::shutdown(app);
+    backup::shutdown(app);
+    shutdown_database(app);
+}
+
+/// [`shutdown_app`], for a test on a `tauri::test` mock app. **Tests only**:
+/// the exit handler is its one production caller, and a second would stop
+/// the database while the app still runs on it.
+///
+/// It blocks on Tauri's runtime, so a `#[tokio::test]` calls it inside
+/// `tokio::task::block_in_place`.
+#[cfg(feature = "test-util")]
+pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    shutdown_app(app);
 }
 
 /// Bring the database up on its own task, narrating it on `db:state`.
@@ -636,123 +681,163 @@ pub fn run() {
 pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
         let profile = handle.state::<Profile>().inner().clone();
-        let config = profile.db_config(std::env::var(DB_URL_ENV).ok());
-
-        // A true sentence about what is about to take time, and `None` when
-        // nothing unusual is: the boot screen shows this verbatim, so a
-        // reassuring guess would be a lie in the one place the app is asking
-        // for patience.
-        let detail = if config.existing_url.is_some() {
-            tracing::info!("{DB_URL_ENV} is set: using an externally managed postgres");
-            Some(format!("connecting to the server {DB_URL_ENV} points at"))
-        } else if config.root_dir.exists() {
-            tracing::info!(root_dir = %config.root_dir.display(), "starting the embedded postgres");
-            None
-        } else {
-            tracing::info!(root_dir = %config.root_dir.display(), "first run: provisioning postgres");
-            Some("first run: downloading and initialising PostgreSQL".to_owned())
-        };
-        set_db_state(&handle, DbState::Starting { detail });
-
-        let outcome = async {
-            let db = knobas_db::EmbeddedDb::start(config).await?;
-            set_db_state(&handle, DbState::Migrating);
-            knobas_db::migrate::run(db.pool()).await?;
-            // **Before anything can read the timer row** (#278): a timer that
-            // outlived the last process is closed at the last moment knobas
-            // was alive, flagged, and gone before the shell's first
-            // `current_timer`. Placed here rather than beside `backup::start`
-            // because the order matters and the other two do not: a shell that
-            // read a stranded timer would draw a clock that has been running
-            // all night, and correcting it a moment later is worse than never
-            // showing it.
-            //
-            // A sweep that fails is logged and bring-up goes on. The database
-            // is up, which is the thing the window is waiting for; the row
-            // stays and the next launch tries again. Refusing to start over a
-            // failed sweep would make a forgotten timer a reason knobas cannot
-            // open at all.
-            if let Err(error) = time::close_stranded(db.pool()).await {
-                tracing::error!(%error, "the stranded-timer sweep failed");
-            }
-            // A start-work step a quit left `running` becomes interrupted
-            // (#790), so its ticket's flow can be retried or skipped. Logged,
-            // not fatal, like the sweep above.
-            match start_work::interrupt_stranded(db.pool()).await {
-                Ok(0) => {}
-                Ok(count) => tracing::info!(count, "start-work steps interrupted by a quit"),
-                Err(error) => tracing::error!(%error, "the interrupted-step sweep failed"),
-            }
-            // The adapters' declarations, into the database before the first
-            // sync writes an item (#627): the item trigger resolves each row's
-            // parents from them, so a sync that ran first would resolve against
-            // nothing and be recomputed a moment later. Failure is logged, not
-            // fatal -- every search command writes them again on its way in.
-            if let Err(error) =
-                commands::search::searcher(db.pool(), handle.state::<Lifecycle>().registry()).await
-            {
-                tracing::error!(?error, "the adapters' declarations could not be stored");
-            }
-            // Before `Ready`, and before `AppState` is installed: the sync
-            // engine is part of "the database is up" as far as the frontend is
-            // concerned, and a window that reacted to `ready` by calling
-            // `sync_status` must not race the scheduler into existence.
-            //
-            // The suggestion pass is built here, once, and goes to the
-            // scheduler, which requests a pass after every OK run: two would
-            // mean two passes at once (#745, #1485). Nothing else asks for
-            // one since `detect_suggestions` retired (#1611).
-            let suggestions = suggestion_pass::SuggestionPass::new(
-                std::sync::Arc::new(sources::DbConnections(db.connector())),
-                suggestion_pass::PASS_STATEMENT_TIMEOUT,
-            );
-            sources::start(&handle, &db, suggestions).await?;
-            // Beside the sync scheduler, not inside it: a backup is not a
-            // source (see `backup`'s module docs).
-            backup::start(&handle, &db);
-            // The capture shortcut (#503), from the setting. **Here and not in
-            // `setup`**: the plugin hands its registration to the main thread
-            // and blocks until it answers, so a call from the event loop would
-            // be the event loop waiting on itself. This task is not the main
-            // thread, and it is the first moment there is a pool to read the
-            // setting from. A refusal is recorded rather than fatal -- the
-            // settings pane is where it is read, and no shortcut is a reason
-            // to run without one, never a reason not to start.
-            if let Err(error) = capture::register_stored(
-                db.pool(),
-                &handle.state::<capture::CaptureState>(),
-                &capture::Plugin::new(handle.clone()),
-            )
-            .await
-            {
-                tracing::error!(%error, "the capture shortcut could not be read");
-            }
-            Ok::<_, Box<dyn std::error::Error>>(db)
-        }
+        bring_up_app(
+            &handle,
+            &profile,
+            std::env::var(DB_URL_ENV).ok(),
+            // The process's registry, which a retry finds already holding
+            // every adapter the first attempt loaded (LIFE-1, spec #1619).
+            sources::Registry::for_process(),
+        )
         .await;
-
-        match outcome {
-            Ok(db) => {
-                handle.state::<Lifecycle>().install(AppState {
-                    pool: db.pool().clone(),
-                    db: Mutex::new(Some(db)),
-                });
-                // Installed *before* the state moves to `ready`: a frontend
-                // that reacted to `ready` by fetching would otherwise race the
-                // pool it was told about.
-                set_db_state(&handle, DbState::Ready);
-            }
-            Err(error) => {
-                tracing::error!(%error, "the database did not start");
-                set_db_state(
-                    &handle,
-                    DbState::Failed {
-                        message: error.to_string(),
-                    },
-                );
-            }
-        }
     });
+}
+
+/// [`spawn_bring_up`]'s body, for a test on a `tauri::test` mock app.
+/// **Tests only**, for the reason [`AppState::over_pool`] is: a production
+/// caller would skip `Lifecycle::begin_retry`'s claim and could start two
+/// bring-ups at once.
+///
+/// `db_url` is what `KNOBAS_DB_URL` would say, so a test points bring-up at
+/// its scratch database without setting a process-wide variable under every
+/// other test in the binary; `registry` is the list the installed adapters
+/// load into, the process's in the app, and the one the declarations are
+/// written from. The handle must manage the [`Lifecycle`] (whose registry
+/// the commands read, so the same one) and `capture::CaptureState`, as
+/// `setup` does; the state `sources::start` and `backup::start` manage on
+/// success is managed on it here too.
+///
+/// Answers once the state is `Ready` or `Failed`, which is what
+/// [`Lifecycle::get`] then reads.
+#[cfg(feature = "test-util")]
+pub async fn bring_up<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    profile: &Profile,
+    db_url: Option<String>,
+    registry: sources::Registry,
+) {
+    bring_up_app(handle, profile, db_url, registry).await;
+}
+
+/// The bring-up itself: start the server, migrate, sweep, start the engines,
+/// install the shared state, announce `Ready` -- or `Failed`.
+async fn bring_up_app<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    profile: &Profile,
+    db_url: Option<String>,
+    registry: sources::Registry,
+) {
+    let config = profile.db_config(db_url);
+
+    // A true sentence about what is about to take time, and `None` when
+    // nothing unusual is: the boot screen shows this verbatim, so a
+    // reassuring guess would be a lie in the one place the app is asking
+    // for patience.
+    let detail = if config.existing_url.is_some() {
+        tracing::info!("{DB_URL_ENV} is set: using an externally managed postgres");
+        Some(format!("connecting to the server {DB_URL_ENV} points at"))
+    } else if config.root_dir.exists() {
+        tracing::info!(root_dir = %config.root_dir.display(), "starting the embedded postgres");
+        None
+    } else {
+        tracing::info!(root_dir = %config.root_dir.display(), "first run: provisioning postgres");
+        Some("first run: downloading and initialising PostgreSQL".to_owned())
+    };
+    set_db_state(handle, DbState::Starting { detail });
+
+    let outcome = async {
+        let db = knobas_db::EmbeddedDb::start(config).await?;
+        set_db_state(handle, DbState::Migrating);
+        knobas_db::migrate::run(db.pool()).await?;
+        // **Before anything can read the timer row** (#278): a timer that
+        // outlived the last process is closed at the last moment knobas
+        // was alive, flagged, and gone before the shell's first
+        // `current_timer`. Placed here rather than beside `backup::start`
+        // because the order matters and the other two do not: a shell that
+        // read a stranded timer would draw a clock that has been running
+        // all night, and correcting it a moment later is worse than never
+        // showing it.
+        //
+        // A sweep that fails is logged and bring-up goes on. The database
+        // is up, which is the thing the window is waiting for; the row
+        // stays and the next launch tries again. Refusing to start over a
+        // failed sweep would make a forgotten timer a reason knobas cannot
+        // open at all.
+        if let Err(error) = time::close_stranded(db.pool()).await {
+            tracing::error!(%error, "the stranded-timer sweep failed");
+        }
+        // A start-work step a quit left `running` becomes interrupted
+        // (#790), so its ticket's flow can be retried or skipped. Logged,
+        // not fatal, like the sweep above.
+        match start_work::interrupt_stranded(db.pool()).await {
+            Ok(0) => {}
+            Ok(count) => tracing::info!(count, "start-work steps interrupted by a quit"),
+            Err(error) => tracing::error!(%error, "the interrupted-step sweep failed"),
+        }
+        // The adapters' declarations, into the database before the first
+        // sync writes an item (#627): the item trigger resolves each row's
+        // parents from them, so a sync that ran first would resolve against
+        // nothing and be recomputed a moment later. Failure is logged, not
+        // fatal -- every search command writes them again on its way in.
+        if let Err(error) = commands::search::searcher(db.pool(), &registry).await {
+            tracing::error!(?error, "the adapters' declarations could not be stored");
+        }
+        // Before `Ready`, and before `AppState` is installed: the sync
+        // engine is part of "the database is up" as far as the frontend is
+        // concerned, and a window that reacted to `ready` by calling
+        // `sync_status` must not race the scheduler into existence.
+        //
+        // The suggestion pass is built here, once, and goes to the
+        // scheduler, which requests a pass after every OK run: two would
+        // mean two passes at once (#745, #1485). Nothing else asks for
+        // one since `detect_suggestions` retired (#1611).
+        let suggestions = suggestion_pass::SuggestionPass::new(
+            std::sync::Arc::new(sources::DbConnections(db.connector())),
+            suggestion_pass::PASS_STATEMENT_TIMEOUT,
+        );
+        sources::start(handle, &db, profile, registry, suggestions).await?;
+        // Beside the sync scheduler, not inside it: a backup is not a
+        // source (see `backup`'s module docs).
+        backup::start(handle, &db, profile);
+        // The capture shortcut (#503), from the setting. **Here and not in
+        // `setup`**: the plugin hands its registration to the main thread
+        // and blocks until it answers, so a call from the event loop would
+        // be the event loop waiting on itself. This task is not the main
+        // thread, and it is the first moment there is a pool to read the
+        // setting from. A refusal is recorded rather than fatal -- the
+        // settings pane is where it is read, and no shortcut is a reason
+        // to run without one, never a reason not to start.
+        if let Err(error) = capture::register_stored(
+            db.pool(),
+            &handle.state::<capture::CaptureState>(),
+            &capture::Plugin::new(handle.clone()),
+        )
+        .await
+        {
+            tracing::error!(%error, "the capture shortcut could not be read");
+        }
+        Ok::<_, Box<dyn std::error::Error>>(db)
+    }
+    .await;
+
+    match outcome {
+        Ok(db) => {
+            handle.state::<Lifecycle>().install(AppState::owning(db));
+            // Installed *before* the state moves to `ready`: a frontend
+            // that reacted to `ready` by fetching would otherwise race the
+            // pool it was told about.
+            set_db_state(handle, DbState::Ready);
+        }
+        Err(error) => {
+            tracing::error!(%error, "the database did not start");
+            set_db_state(
+                handle,
+                DbState::Failed {
+                    message: error.to_string(),
+                },
+            );
+        }
+    }
 }
 
 /// Record a transition and tell the frontend about it.
@@ -789,7 +874,7 @@ fn set_db_state<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, state: DbState)
 /// this is reached at all -- `sources::shutdown` cancels them, which is what
 /// keeps Cmd-Q during a thirty-second remote call from being a thirty-second
 /// hang.
-fn shutdown_database(app: &tauri::AppHandle) {
+fn shutdown_database<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(lifecycle) = app.try_state::<Lifecycle>() else {
         // `setup` never ran; nothing was started.
         return;

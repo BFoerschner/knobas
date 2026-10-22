@@ -15,6 +15,10 @@ version.workspace = true
 # `cargo build`, in `tauri build`, and in the `clippy --lib` half of the gate,
 # which turns "a stream used the test constructor in a command" from something a
 # reviewer has to notice into a compile error.
+# The same holds for `bring_up` and `shutdown`, the app's bring-up and exit
+# handler as functions a mock app can run (#1632): a production caller would skip
+# `Lifecycle::begin_retry`'s claim, or stop the database outside the exit
+# handler.
 # It turns on knobas-core's own: the test-only derives on the Builds frame's
 # DTOs, which live there (#1318).
 test-util = ["knobas-core/test-util"]
@@ -139,7 +143,8 @@ knobas-secrets = { path = "../knobas-secrets" }
 # dev-dependency only -- nothing in the shipped binary knows mockd exists.
 knobas-mockd = { path = "../knobas-mockd" }
 # Self-dev-dependency so this crate's own integration tests see
-# `AppState::over_pool` (same convention as `knobas-db`'s `test_util`).
+# `AppState::over_pool`, `bring_up` and `shutdown` (same convention as
+# `knobas-db`'s `test_util`).
 knobas-app = { path = ".", features = ["test-util"] }
 # The fixture component's loader, for the registry's tests and
 # `tests/it/external_adapter.rs`.
