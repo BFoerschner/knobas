@@ -2300,6 +2300,16 @@ knobas-source	lib/knobas_source	url_forms::tests::the_rest_is_compared_as_writte
 knobas-source	lib/knobas_source	view::tests::a_tree_and_a_file_have_the_wire_shape_the_shell_reads
 knobas-source	lib/knobas_source	view::tests::every_block_round_trips
 knobas-source	lib/knobas_source	view::tests::the_wire_shape_is_a_union_on_type
+knobas-source	lib/knobas_source	watermark::tests::a_changed_offset_widens_the_window_by_more_than_an_hour
+knobas-source	lib/knobas_source	watermark::tests::a_literal_is_the_minute_in_the_servers_zone
+knobas-source	lib/knobas_source	watermark::tests::a_record_is_recognised_by_its_version_not_its_stamp
+knobas-source	lib/knobas_source	watermark::tests::a_window_larger_than_the_cap_keeps_the_newest
+knobas-source	lib/knobas_source	watermark::tests::rendering_a_literal_never_shifts_the_query_forward
+knobas-source	lib/knobas_source	watermark::tests::seen_covers_the_band_the_next_query_really_returns
+knobas-source	lib/knobas_source	watermark::tests::the_next_query_starts_two_minutes_before_the_watermark
+knobas-source	lib/knobas_source	watermark::tests::the_watermark_never_falls_below_the_previous_one
+knobas-source	lib/knobas_source	watermark::tests::the_watermark_never_passes_the_ceiling
+knobas-source	lib/knobas_source	watermark::tests::the_window_is_ordered_newest_first_whatever_the_arrival_order
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_code_macro_is_a_code_block_with_its_language
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_jira_macro_is_an_issue_chip_inside_its_sentence
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_jira_macro_with_no_key_is_a_placeholder
@@ -2454,9 +2464,6 @@ knobas-source-confluence	lib/knobas_source_confluence	sync::tests::the_configure
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::the_credential_is_checked_before_anything_that_could_answer_emptily
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::the_positions_sweep_moves_the_reading_and_the_walk_carries_on_from_it
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::the_watermark_never_passes_the_ceiling_the_run_witnessed
-knobas-source-confluence	lib/knobas_source_confluence	time::tests::a_cql_literal_is_minute_resolution_in_the_instances_zone
-knobas-source-confluence	lib/knobas_source_confluence	time::tests::an_unreadable_zone_falls_back_to_the_lowest_real_offset_not_to_utc
-knobas-source-confluence	lib/knobas_source_confluence	time::tests::the_floor_is_the_query_read_back_not_the_instant_asked_for
 knobas-source-confluence	lib/knobas_source_confluence	time::tests::the_offset_is_read_off_the_servers_own_rendering
 knobas-source-confluence	lib/knobas_source_confluence	time::tests::the_response_timestamp_parses_in_every_spelling_confluence_uses
 knobas-source-confluence	lib/knobas_source_confluence	users::tests::the_keys_of_a_body_are_its_user_links_and_not_its_code
@@ -2926,6 +2933,7 @@ knobas-source-jira	lib/knobas_source_jira	jql::tests::a_full_sync_is_scoped_and_
 knobas-source-jira	lib/knobas_source_jira	jql::tests::an_incremental_query_carries_the_watermark_in_the_servers_zone
 knobas-source-jira	lib/knobas_source_jira	jql::tests::an_unscoped_full_sync_is_still_valid_jql
 knobas-source-jira	lib/knobas_source_jira	jql::tests::project_keys_are_quoted
+knobas-source-jira	lib/knobas_source_jira	jql::tests::the_ceiling_probe_is_the_walks_scope_newest_first
 knobas-source-jira	lib/knobas_source_jira	map::tests::a_configured_epic_link_is_stored_as_epic_beside_the_record
 knobas-source-jira	lib/knobas_source_jira	map::tests::a_configured_sprint_field_is_stored_as_sprints_beside_the_record
 knobas-source-jira	lib/knobas_source_jira	map::tests::a_ticket_in_no_sprint_carries_an_empty_list
@@ -2968,6 +2976,7 @@ knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_incremental_emits
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_poll_does_not_reach_back_further_than_the_overlap
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_run_after_the_server_changed_zone_returns_the_same_bytes
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_incremental_run_that_hits_the_page_cap_fails_too
+knobas-source-jira	lib/knobas_source_jira	sync::tests::an_issue_edited_during_the_walk_does_not_carry_the_watermark_past_the_ceiling
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_unchanged_record_inside_the_overlap_window_is_still_skipped
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_unreadable_cursor_falls_back_to_a_full_sync
 knobas-source-jira	lib/knobas_source_jira	sync::tests::completes_a_truncated_comment_container
@@ -2985,13 +2994,9 @@ knobas-source-jira	lib/knobas_source_jira	sync::tests::the_sprint_field_is_appen
 knobas-source-jira	lib/knobas_source_jira	sync::tests::the_watermark_literal_is_read_in_the_servers_zone
 knobas-source-jira	lib/knobas_source_jira	sync::tests::the_watermark_never_moves_backwards
 knobas-source-jira	lib/knobas_source_jira	sync::tests::two_changes_inside_one_second_are_two_versions_and_both_are_delivered
-knobas-source-jira	lib/knobas_source_jira	time::tests::an_impossible_offset_falls_back_to_the_safe_direction
 knobas-source-jira	lib/knobas_source_jira	time::tests::parses_jiras_own_offset_form
 knobas-source-jira	lib/knobas_source_jira	time::tests::reads_the_offset_off_a_server_timestamp
 knobas-source-jira	lib/knobas_source_jira	time::tests::refuses_what_it_cannot_read
-knobas-source-jira	lib/knobas_source_jira	time::tests::rendering_a_literal_never_shifts_the_query_forward
-knobas-source-jira	lib/knobas_source_jira	time::tests::renders_a_jql_literal_in_the_servers_zone
-knobas-source-jira	lib/knobas_source_jira	time::tests::the_query_floor_is_the_start_of_the_rendered_minute
 knobas-source-jira	lib/knobas_source_jira	translate::tests::a_scrum_board_s_active_sprint_is_a_condition_as_jira_adds_it_to_the_board_s_query
 knobas-source-jira	lib/knobas_source_jira	translate::tests::a_second_clause_on_the_same_field_and_sign_is_left_out_knobas_would_read_the_two_as_either
 knobas-source-jira	lib/knobas_source_jira	translate::tests::an_and_inside_parentheses_or_quotes_does_not_split_the_clause
