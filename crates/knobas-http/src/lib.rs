@@ -27,7 +27,10 @@
 //!   on it is bounded by [`SEND_BUDGET`]; when it runs the budget out before
 //!   the first attempt, the call is `Protocol` naming the quota
 //!   ([`LocalQuota`]), not `Unreachable`, since the instance was never asked
-//!   (before a retry, it is what the source said the attempt before).
+//!   (before a retry, it is what the source said the attempt before). A
+//!   caller that has to tell that failure from a refusal runs the call
+//!   under [`watch_local_quota`], which hands back the quota it stopped on
+//!   (#1729).
 //! * **One way out**: [`HttpClient::send`] (and its streamed twin
 //!   [`HttpClient::send_streaming`], the same attempt loop) is the only thing
 //!   that puts a request on the wire. [`HttpClient::request`] hands back a [`Request`],
