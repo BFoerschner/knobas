@@ -1257,9 +1257,11 @@ async fn a_create_whose_ack_is_lost_is_unconfirmed_and_one_monitor() {
     );
 
     // Read past the link, straight from Kuma.
-    let items = until(env.source().as_ref(), "the lost-ack create landed", |items| {
-        items.iter().any(|item| item.title == LOST_ACK)
-    })
+    let items = until(
+        env.source().as_ref(),
+        "the lost-ack create landed",
+        |items| items.iter().any(|item| item.title == LOST_ACK),
+    )
     .await;
     let made = items
         .iter()
