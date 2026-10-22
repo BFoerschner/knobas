@@ -1203,8 +1203,9 @@ mod tests {
     /// Tempting to let it through: no sweep follows an incremental and the
     /// items were delivered. (Under `ORDER BY created ASC` the watermark would
     /// not even mark where the walk stopped: the newest `updated` emitted can
-    /// sit past issues it never reached.) That narrower fix is worse than it looks, for a reason the
-    /// mutation check turned up rather than the argument: with
+    /// sit past issues it never reached.) That narrower fix is worse than it
+    /// looks, for a reason the mutation check turned up rather than the
+    /// argument: with
     /// `&& cursor.is_none()` on the cap, **this test does not terminate**. The
     /// loop's only other exit is the records read reaching `total`, and `total` is the number
     /// the server is inflating -- so an incremental against a mispaging server

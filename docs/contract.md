@@ -1505,7 +1505,8 @@ stands and this entry carries the new truth.
 **§4.2 Jira `cursor` reads, from this commit:**
 `{"v":2,"updated_to":"2026-08-24T09:14:00Z","tz_offset_secs":7200,"seen":[{"k":"PAY-231","u":"…","h":"3f0c1a92be44d7e5"}]}`.
 The JQL is **unchanged** — `updated >= "<watermark − 2 min>" ORDER BY updated ASC`, the two-minute
-overlap still mandatory for the reason the row gives. What changed is the identity inside `seen`:
+overlap still mandatory for the reason the row gives. *Superseded in part by #1623 (2026-10-22,
+"Amendments from the Jira walk order" below): the walk orders by `created`.* What changed is the identity inside `seen`:
 an entry is recognised by `(key, h)` where `h` is a 64-bit fingerprint of the raw `/search` record, and
 `u` is kept only to bound the set to the overlap window.
 

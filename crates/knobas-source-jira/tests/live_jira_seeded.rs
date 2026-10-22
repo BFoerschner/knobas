@@ -3316,10 +3316,10 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
 
 /// **A deletion under the walk shrinks the total the next page reports**
 /// (#1623, ruling A5), and that is the walk's only witness of it. A sub-task is
-/// filed (the corpus grows by one at the end of the created order), the walk's
-/// first page is read, the sub-task is deleted, and the page past the shrunk
-/// end answers `200` with no issues and the smaller total -- the empty last
-/// page the adapter reads the shrink off, not a refusal.
+/// filed, and the page at offset N (the seeded corpus's size) names it alone,
+/// at the end of the created order, with a total of N + 1. Once it is deleted
+/// the same page answers `200` with no issues and a total of N -- the empty
+/// last page the adapter reads the shrink off, not a refusal.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just jira-live`"]
 async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {

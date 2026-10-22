@@ -75,9 +75,10 @@
 //! at the front of the order is edited, moves to the end, every row behind it
 //! shifts down by one, and the walk's next offset lands one past where it
 //! should. The stepped-over page keeps its old timestamp, so no incremental
-//! query reaches it either -- only the next full sync does. That is the same
-//! class the Jira adapter accepts with `startAt` and `ORDER BY updated ASC`
-//! (contract §4.2), and
+//! query reaches it either -- only the next full sync does. The Jira adapter
+//! accepted the same class with `startAt` and `ORDER BY updated ASC` until
+//! #1623 moved its walk to `ORDER BY created ASC` (contract, "Amendments from
+//! the Jira walk order"), and
 //! `a_page_edited_mid_walk_can_shift_a_row_past_the_offset` records it rather
 //! than leaving the next reader to believe the walk is airtight.
 //!
@@ -1520,9 +1521,9 @@ mod tests {
     /// the end; every row behind it shifts down by one, and the walk's next
     /// offset lands one past where it should. The stepped-over page keeps its
     /// old timestamp, so no later incremental query reaches it either -- only
-    /// the next full sync does. This is the same class the Jira adapter
-    /// accepts with `startAt` and `ORDER BY updated ASC` (contract §4.2), and
-    /// it is recorded rather than hidden: a reader who believes the walk is
+    /// the next full sync does. The Jira adapter accepted the same class with
+    /// `startAt` and `ORDER BY updated ASC` until #1623 moved its walk to
+    /// `ORDER BY created ASC`, and it is recorded rather than hidden: a reader who believes the walk is
     /// airtight would build a stronger guarantee on top of it.
     #[tokio::test]
     async fn a_page_edited_mid_walk_can_shift_a_row_past_the_offset() {
