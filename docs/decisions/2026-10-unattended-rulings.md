@@ -12654,3 +12654,44 @@ The measurement came after it.
   the quota and would run none of this, and no live suite seeds two sources at different quotas
   on one server. The change is arithmetic on knobas' own limiter, witnessed at `HttpClient::send`
   against a counting server. *Reversing:* n/a.
+
+### #1740: merge review of PR #1761 (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by merge-manager on Opus: the implementer's frozen-surface
+  ruling.** *Fork:* confirm it, or hold the PR for Björn. *Ruling:* confirmed. *Reasoning:* the
+  diff is private to `limiter.rs` behind the unchanged `InstanceLimiter`, and the §10.8 entry
+  matches it (`Slot::register`'s tightening branch, `Paced::tightened`, `take_left`,
+  `with_left`; `spend` is a private helper the entry need not name). *Reversing:* low.
+- **The seconds-of-refill arithmetic.** *Fork:* keep it, or go back to the ticket's spent share.
+  *Ruling:* keep it. *Reasoning:* `tightened` only runs when neither field loosens, so the rate
+  ratio is at most 1 and the credit never exceeds what the old limiter had. At a ratio of 1 it is
+  `min(left, new burst)`. With nothing left it starts drained. `with_left`'s `saturating_sub`
+  caps it at the stricter burst. The `u64` product cannot overflow. `take_left` starts at the
+  largest power of two within the burst, so it is exact up to a `u32::MAX` burst (TeamCity
+  saturates there) and loops at most 32 times. The floor and governor's partial cell only ever
+  count low. *Reversing:* low.
+- **Whether the stated cost is a felt regression.** *Fork:* accept it, or add an idle-time
+  bound here. *Ruling:* accept it and file #1764 (backlog). *Reasoning:* the cost is pacing
+  only, at the rate the reader configured, at most the stricter burst's refill time minus the
+  looser one's (8 s for Jira 1/s against 5/s, both burst 10), and only on an origin shared by two
+  quotas whose bursts last different numbers of seconds. A scheduled sync does not notice it, and
+  a live read on a 1/s source is already slow by configuration. Before #1728 the same setup paced
+  both sources at the strict quota throughout, so the net is still faster. #1764 gives the
+  last-grant-instant bound that would remove it. *Reversing:* low; #1764 is additive.
+- **A transport test at unequal refill times.** *Fork:* add one, or rely on
+  `a_tightening_credits_seconds_of_refill`. *Ruling:* not owed. *Reasoning:* the module test
+  goes through `InstanceLimiter::for_origin`, `Slot::register` and `Paced::tightened`, the same
+  path a client takes. `HttpClient::send` adds only the wait, which the equal-refill transport
+  test already witnesses. A transport version would only add wall-clock seconds. *Reversing:*
+  low.
+- **Live run.** *Ruling:* none owed, confirmed. Kuma's socket (`socket.rs`) and its HTTP half
+  (`http.rs`) both build from `cfg.rate_per_sec`/`cfg.rate_burst`, so `just kuma-live` never
+  tightens a quota. *Reversing:* n/a.
+- **Taking the old limiter's tokens while others use it.** *Ruling:* sound. *Reasoning:*
+  `register` holds the slot's `std` mutex across `take_left`. That is at most 32 non-blocking
+  `check_n` calls with no await, so `current()` is held off for microseconds. Governor's state is
+  a compare-and-swap cell, so a send on the old limiter racing the count either gets its token
+  (and the count is lower) or finds it taken. A wait already on the old limiter whose token
+  refills just as the count runs can lose that token and wait one more refill interval of the
+  looser rate. That is milliseconds, so "no waiter loses anything" is close enough. *Reversing:*
+  n/a.
