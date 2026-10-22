@@ -11472,3 +11472,19 @@ set.
   driver, never the app, when a driver cannot find an element); the label still tells the boxes
   apart, and the role still excludes the top strip's button. Not run here: this implementer has
   no desktop-witness slot. *Reversing:* low.
+
+## #1666 (PR #1718): shell database state written only on change
+
+- **Is the `App.test.svelte.ts` re-send a test fix or an ordering bug?** (merge-manager on
+  Sonnet). *Ruling:* a test fix. `inbox.start()` subscribes before `lifecycle.start()` arms the
+  database, and the inbox is seeded by `refresh()` at the first `ready`, which reads whatever
+  arrived earlier. An `activity:new` that beats the listener is only possible before `ready`,
+  and the seed then reads it. The old test sent its signal after `ready` with the fake database
+  already up, which raced the listener's registration; the second reseed hid that. *Reversing:*
+  none, test-only.
+- **`retry()` writes `starting` only if the state is still `failed`** (the ticket's second
+  alternative). *Ruling:* kept. A failed-to-failed retry still shows Starting (nothing moved the
+  state, so the write happens), and the poll repairs it as before. A pre-await write was
+  rejected: it would flash Starting before the backend accepts the retry. *Reversing:* low.
+- **The surviving mutant (event handler assigning `state.db` directly).** *Ruling:* owed and
+  cheap: added `the same ready event twice seeds once`; the mutant now dies. *Reversing:* none.

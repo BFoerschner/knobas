@@ -48,12 +48,23 @@ export function createLifecycle(options: { pollMs?: number } = {}): Lifecycle {
   let unlisten: (() => void) | undefined;
   let stopped = false;
 
+  /**
+   * Assign `state.db` only when it says something new. Every payload is a
+   * fresh object and Svelte compares proxies by identity, so an unconditional
+   * write re-runs every effect that follows `ready` (the five boot seeds in
+   * `App.svelte`) on each poll and event; `router.read()` guards the same
+   * way (#703).
+   */
+  function setDb(next: DbState): void {
+    if (JSON.stringify(next) !== JSON.stringify(state.db)) state.db = next;
+  }
+
   async function poll(): Promise<void> {
     if (stopped) return;
     try {
       const status = await appStatus();
       state.status = status;
-      state.db = status.db;
+      setDb(status.db);
     } catch {
       // Not a failed database: `invoke` rejects until Tauri has injected its
       // internals, and on the very first frames it has not. Reporting that as
@@ -97,7 +108,7 @@ export function createLifecycle(options: { pollMs?: number } = {}): Lifecycle {
       // a third call added here is covered without anyone remembering to.
       try {
         const off = await listen<DbState>(EVENTS.dbState, (event) => {
-          state.db = event.payload;
+          setDb(event.payload);
           // `ready` also means the counts are now answerable, and they arrive
           // on `app_status`, not on the event.
           if (event.payload.state === "ready") void poll();
@@ -134,7 +145,10 @@ export function createLifecycle(options: { pollMs?: number } = {}): Lifecycle {
       // re-polled would redraw the same failure for ever, which is a button
       // that lies about what it does.
       await retryDatabase();
-      state.db = { state: "starting", detail: null };
+      // The backend's bring-up emits while that await is open. Write
+      // `starting` only if nothing has moved the state on since: a rewind
+      // would flash an earlier stage until the next poll repaired it.
+      if (state.db.state === "failed") setDb({ state: "starting", detail: null });
       await poll();
     },
   };
