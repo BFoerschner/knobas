@@ -570,6 +570,25 @@ mod tests {
         assert_eq!(strict.slot.current().take_left(), 4);
     }
 
+    /// The quiet is counted from the last request let through, not from when
+    /// the limiter was built (#1764): the same half second as above, ended by
+    /// a request, leaves the stricter quota what the loose one had left in
+    /// seconds -- none -- and what ten a second refills while the test runs,
+    /// at most one in 100 ms. Counted from the build it would have all four.
+    #[tokio::test]
+    async fn a_request_ends_the_quiet() {
+        let url = url::Url::parse("http://ended.invalid:1764").expect("url");
+        let loose = InstanceLimiter::for_origin(&url, Rate::new(100, 4));
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        loose
+            .until_ready_within(std::time::Duration::from_secs(1))
+            .await
+            .expect("a full limiter lets one through");
+        let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
+
+        assert!(strict.slot.current().take_left() <= 1);
+    }
+
     /// A zero reads as one, as it always has: `0/s` means "one", not "never".
     #[test]
     fn a_zero_quota_reads_as_one() {
