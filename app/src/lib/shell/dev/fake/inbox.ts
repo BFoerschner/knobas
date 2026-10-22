@@ -191,7 +191,7 @@ export function handlers(): Handlers {
       kinds = KINDS.filter((kind) => asked.includes(kind));
       return kinds.slice();
     },
-    // *Send a test notification*: the browser has no desktop to show it on.
+    // *Send a test desktop notification*: the browser has no desktop to show it on.
     notify: () => null,
   };
 }
