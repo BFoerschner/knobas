@@ -36,15 +36,15 @@ type DirectLimiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 /// other `InstanceLimiter` built for the same origin.
 #[derive(Clone)]
 pub struct InstanceLimiter {
-    instance: Arc<Instance>,
+    slot: Arc<Slot>,
 }
 
 impl std::fmt::Debug for InstanceLimiter {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let rate = self.instance.current().rate;
+        let rate = self.slot.current().rate;
         formatter
             .debug_struct("InstanceLimiter")
-            .field("origin", &self.instance.origin)
+            .field("origin", &self.slot.origin)
             .field("per_second", &rate.per_second)
             .field("burst", &rate.burst)
             .finish()
@@ -64,12 +64,10 @@ impl InstanceLimiter {
     ///
     /// [`SourceError::Protocol`] if `url` is not an http(s) URL.
     pub fn for_url(url: &str, per_second: u32, burst: u32) -> Result<Self, SourceError> {
-        let parsed = url::Url::parse(url)
-            .map_err(|error| SourceError::protocol(format!("base url {url:?}: {error}")))?;
-        if !matches!(parsed.scheme(), "http" | "https") {
-            return Err(SourceError::protocol(format!("base url {url:?} is not http(s)")));
-        }
-        Ok(Self::for_origin(&parsed, Rate::new(per_second, burst)))
+        Ok(Self::for_origin(
+            &http_url(url)?,
+            Rate::new(per_second, burst),
+        ))
     }
 
     /// [`for_url`](Self::for_url) for a URL already parsed and checked.
@@ -78,21 +76,21 @@ impl InstanceLimiter {
         /// never removed: a quota has to outlive the client that last used
         /// it, or the next client built a moment later starts on a fresh
         /// burst -- the bug this map exists to close.
-        static INSTANCES: LazyLock<Mutex<HashMap<url::Origin, Arc<Instance>>>> =
+        static INSTANCES: LazyLock<Mutex<HashMap<url::Origin, Arc<Slot>>>> =
             LazyLock::new(Mutex::default);
 
         let mut instances = INSTANCES.lock().unwrap_or_else(PoisonError::into_inner);
-        let instance = match instances.entry(url.origin()) {
+        let slot = match instances.entry(url.origin()) {
             Entry::Occupied(known) => {
                 known.get().tighten(rate);
                 Arc::clone(known.get())
             }
-            Entry::Vacant(new) => Arc::clone(new.insert(Arc::new(Instance::new(
+            Entry::Vacant(new) => Arc::clone(new.insert(Arc::new(Slot::new(
                 url.origin().ascii_serialization(),
                 rate,
             )))),
         };
-        Self { instance }
+        Self { slot }
     }
 
     /// Wait until the quota lets one request through, for at most `within`.
@@ -102,7 +100,7 @@ impl InstanceLimiter {
     /// [`LocalQuota`] if `within` ran out first. Nothing was sent: the wait
     /// is knobas' own, and the instance has not been asked anything.
     pub async fn until_ready_within(&self, within: Duration) -> Result<(), LocalQuota> {
-        let paced = self.instance.current();
+        let paced = self.slot.current();
         match tokio::time::timeout(within, paced.limiter.until_ready()).await {
             Ok(()) => Ok(()),
             Err(_) => Err(self.ran_out(within)),
@@ -114,8 +112,8 @@ impl InstanceLimiter {
     /// time left to send in.
     pub(crate) fn ran_out(&self, waited: Duration) -> LocalQuota {
         LocalQuota {
-            origin: self.instance.origin.clone(),
-            rate: self.instance.current().rate,
+            origin: self.slot.origin.clone(),
+            rate: self.slot.current().rate,
             waited,
         }
     }
@@ -180,14 +178,14 @@ impl Rate {
     }
 }
 
-/// One origin: its name, for the message, and the limiter every holder waits
-/// on.
-struct Instance {
+/// One origin's share: its name, for the message, and the limiter every
+/// holder waits on.
+struct Slot {
     origin: String,
     paced: Mutex<Arc<Paced>>,
 }
 
-impl Instance {
+impl Slot {
     fn new(origin: String, rate: Rate) -> Self {
         Self {
             origin,
@@ -233,6 +231,19 @@ impl Paced {
     }
 }
 
+/// `url` parsed, if it is an http(s) URL: what [`InstanceLimiter::for_url`]
+/// and [`HttpClient::new`](crate::HttpClient::new) both accept.
+pub(crate) fn http_url(url: &str) -> Result<url::Url, SourceError> {
+    let parsed = url::Url::parse(url)
+        .map_err(|error| SourceError::protocol(format!("base url {url:?}: {error}")))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(SourceError::protocol(format!(
+            "base url {url:?} is not http(s)"
+        )));
+    }
+    Ok(parsed)
+}
+
 /// Quotas cannot be zero; a misconfigured `0/s` means "one", not "never".
 fn nonzero(value: u32) -> NonZeroU32 {
     NonZeroU32::new(value).unwrap_or(NonZeroU32::MIN)
@@ -248,7 +259,10 @@ mod tests {
     fn the_stricter_quota_takes_the_lower_of_each_field() {
         assert_eq!(Rate::new(5, 10).stricter(Rate::new(10, 5)), Rate::new(5, 5));
         assert_eq!(Rate::new(10, 5).stricter(Rate::new(5, 10)), Rate::new(5, 5));
-        assert_eq!(Rate::new(5, 10).stricter(Rate::new(5, 10)), Rate::new(5, 10));
+        assert_eq!(
+            Rate::new(5, 10).stricter(Rate::new(5, 10)),
+            Rate::new(5, 10)
+        );
     }
 
     /// A zero reads as one, as it always has: `0/s` means "one", not "never".

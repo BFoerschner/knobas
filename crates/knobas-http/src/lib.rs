@@ -21,9 +21,10 @@
 //!   in the client: every [`HttpClient`] built for one instance -- a sync
 //!   run's, a live read's, a flush's -- waits on the same quota, the stricter
 //!   one where two configurations differ ([`InstanceLimiter`], #1630). A wait
-//!   on it is bounded by [`SEND_BUDGET`] and, when it runs out, is
-//!   `Protocol` naming the quota ([`LocalQuota`]), not `Unreachable`: the
-//!   instance was never asked.
+//!   on it is bounded by [`SEND_BUDGET`]; when it runs the budget out before
+//!   the first attempt, the call is `Protocol` naming the quota
+//!   ([`LocalQuota`]), not `Unreachable`, since the instance was never asked
+//!   (before a retry, it is what the source said the attempt before).
 //! * **One way out**: [`HttpClient::send`] (and its streamed twin
 //!   [`HttpClient::send_streaming`], the same attempt loop) is the only thing
 //!   that puts a request on the wire. [`HttpClient::request`] hands back a [`Request`],
@@ -256,15 +257,7 @@ impl HttpClient {
     /// backend cannot be built -- both are configuration failures, and both
     /// must surface when the source is saved rather than mid-sync.
     pub fn new(config: HttpConfig) -> Result<Self, SourceError> {
-        let parsed = url::Url::parse(&config.base_url).map_err(|error| {
-            SourceError::protocol(format!("base url {:?}: {error}", config.base_url))
-        })?;
-        if !matches!(parsed.scheme(), "http" | "https") {
-            return Err(SourceError::protocol(format!(
-                "base url {:?} is not http(s)",
-                config.base_url
-            )));
-        }
+        let parsed = limiter::http_url(&config.base_url)?;
 
         let mut headers = HeaderMap::new();
         // TeamCity answers XML without this and every adapter wants JSON, so
@@ -430,18 +423,22 @@ impl HttpClient {
             // costs, and bounded by what is left of it (SPI-11, #1630).
             let left = self.budget_left(started).unwrap_or_default();
             let ready = self.limiter.until_ready_within(left).await;
+            // Out of budget in the wait, or with none left once it ended:
+            // either way this attempt never left. A retry reports what the
+            // source said the attempt before; a first attempt has only the
+            // wait to report, and it is knobas' own quota -- `Protocol`,
+            // never `Unreachable`, which would back the source off for a wait
+            // it did not impose.
             let attempt_timeout = match (ready, self.attempt_timeout(started)) {
                 (Ok(()), Some(timeout)) => timeout,
-                // The budget ran out in the wait, so this attempt never left.
-                // A retry reports what the source said the attempt before;
-                // a first attempt has only the wait to report, and it is
-                // knobas' own quota -- `Protocol`, never `Unreachable`, which
-                // would back the source off for a wait it did not impose.
                 (ready, _) => {
-                    return Err(previous.unwrap_or_else(|| {
-                        let quota = ready.err().unwrap_or_else(|| self.limiter.ran_out(left));
-                        SourceError::protocol(quota.to_string())
-                    }));
+                    let quota = match ready {
+                        Err(ran_out) => ran_out,
+                        Ok(()) => self.limiter.ran_out(left),
+                    };
+                    return Err(
+                        previous.unwrap_or_else(|| SourceError::protocol(quota.to_string()))
+                    );
                 }
             };
 

@@ -153,6 +153,11 @@ impl CountingServer {
     fn always_with_body(status: u16, extra: &'static str, body: &'static str) -> Self {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("addr").port();
+        // The port stays bound for the rest of the process, so no later
+        // server in this binary is handed it: the rate limit is process-wide
+        // and keyed by origin (#1630), and a later test on a reused port
+        // would inherit whatever quota this one tightened it to.
+        std::mem::forget(listener.try_clone().expect("hold the port"));
         listener.set_nonblocking(true).expect("nonblocking");
         let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
 
@@ -402,23 +407,26 @@ async fn queued_sends(
 #[tokio::test(flavor = "multi_thread")]
 async fn a_limiter_wait_that_outlasts_the_budget_is_the_local_quota() {
     let server = CountingServer::always(200, "");
-    let client = Arc::new(
-        HttpClient::new(HttpConfig {
-            requests_per_second: 1,
-            burst: 1,
-            ..config(server.url())
-        })
-        .expect("client")
-        .with_send_budget(SHORT_BUDGET),
-    );
+    let client = Arc::new(paced_client(&server, 1).with_send_budget(SHORT_BUDGET));
 
     let outcomes = queued_sends(&client, 5).await;
 
-    let sent = outcomes.iter().filter(|(outcome, _)| outcome.is_ok()).count();
+    let sent = outcomes
+        .iter()
+        .filter(|(outcome, _)| outcome.is_ok())
+        .count();
     assert_eq!(sent, 2, "t=0 and t=1s fit the budget: {outcomes:?}");
-    assert_eq!(server.hits(), 2, "nothing past the budget reached the server");
+    assert_eq!(
+        server.hits(),
+        2,
+        "nothing past the budget reached the server"
+    );
     for (outcome, _) in outcomes.iter().filter(|(outcome, _)| outcome.is_err()) {
-        let Err(SourceError::Protocol { status: None, message }) = outcome else {
+        let Err(SourceError::Protocol {
+            status: None,
+            message,
+        }) = outcome
+        else {
             panic!("a wait on the local quota must be Protocol, never Unreachable: {outcome:?}");
         };
         assert!(
@@ -444,15 +452,7 @@ async fn a_limiter_wait_never_outlasts_the_budget() {
     let slack = std::time::Duration::from_millis(400);
 
     let server = CountingServer::always(200, "");
-    let client = Arc::new(
-        HttpClient::new(HttpConfig {
-            requests_per_second: 1,
-            burst: 1,
-            ..config(server.url())
-        })
-        .expect("client")
-        .with_send_budget(SHORT_BUDGET),
-    );
+    let client = Arc::new(paced_client(&server, 1).with_send_budget(SHORT_BUDGET));
     for (outcome, took) in queued_sends(&client, 5).await {
         assert!(
             took <= SHORT_BUDGET + slack,
@@ -461,13 +461,7 @@ async fn a_limiter_wait_never_outlasts_the_budget() {
     }
 
     let busy = CountingServer::always(503, "");
-    let client = HttpClient::new(HttpConfig {
-        requests_per_second: 1,
-        burst: 1,
-        ..config(busy.url())
-    })
-    .expect("client")
-    .with_send_budget(std::time::Duration::from_millis(800));
+    let client = paced_client(&busy, 1).with_send_budget(std::time::Duration::from_millis(800));
     let started = std::time::Instant::now();
     let error = client
         .send(client.request(Method::GET, "/x"))
@@ -475,11 +469,24 @@ async fn a_limiter_wait_never_outlasts_the_budget() {
         .expect_err("503, then no room for a second attempt");
     let took = started.elapsed();
     assert!(
-        matches!(error, SourceError::Protocol { status: Some(503), .. }),
+        matches!(
+            error,
+            SourceError::Protocol {
+                status: Some(503),
+                ..
+            }
+        ),
         "the call ends with what the source said: {error:?}"
     );
-    assert_eq!(busy.hits(), 1, "the second attempt never passed the limiter");
-    assert!(took <= std::time::Duration::from_millis(800) + slack, "{took:?}");
+    assert_eq!(
+        busy.hits(),
+        1,
+        "the second attempt never passed the limiter"
+    );
+    assert!(
+        took <= std::time::Duration::from_millis(800) + slack,
+        "{took:?}"
+    );
 }
 
 /// What reaches `server` within the first 900 ms of `per_client` sends started
@@ -534,6 +541,7 @@ async fn two_clients_for_one_instance_share_one_burst() {
         "{hits} requests reached the instance within its burst of 10: each client \
          had a limiter of its own"
     );
+    assert!(hits >= 1, "the shared burst let nothing through");
 }
 
 /// **Where two configurations name different quotas for one instance, the
@@ -554,6 +562,10 @@ async fn the_stricter_of_two_quotas_for_one_instance_governs() {
         hits <= 2,
         "strict first: {hits} reached the instance; the looser burst of 10 won"
     );
+    assert!(
+        hits >= 1,
+        "strict first: the burst of 2 let nothing through"
+    );
 
     let loose_first = CountingServer::always(200, "");
     let loose = paced_client(&loose_first, 10);
@@ -562,6 +574,10 @@ async fn the_stricter_of_two_quotas_for_one_instance_governs() {
     assert!(
         hits <= 2,
         "loose first: {hits} reached the instance; the stricter burst of 2 was ignored"
+    );
+    assert!(
+        hits >= 1,
+        "loose first: the tightened quota let nothing through"
     );
 }
 
