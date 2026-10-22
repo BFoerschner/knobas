@@ -42,6 +42,14 @@ An acceptance grep for a retired name must not match the names that stay (#1579:
 the call site does (`invoke<…>("clones_root"`, `commands::entity::clones_root,`), never as a bare
 word that surviving names contain.
 
+A criterion that counts arrivals in a time window allows for the limiter's refill inside that window
+(#1737: "at most 10 in the first second" at 5 a second with a burst of 10 admits 15). Count the burst
+within one refill interval (200 ms at the defaults) and state the rest at the default rate.
+
+A "`grep -c X` is 0" criterion counts only the occurrences the ticket retires (#1738: `include_str!` in
+`wiring.rs` kept eight scans that order nothing). Name the retired tests, or grep for the call the
+ticket removes, never for a token the file keeps using elsewhere.
+
 A screenshot criterion that pins the launcher's state after a close uses the × route
 (`… + click:Close + key:Meta+k`) or two `Esc` presses: one `Esc` empties a non-empty box and keeps the
 launcher open (#1567).
