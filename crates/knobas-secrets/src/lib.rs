@@ -60,7 +60,10 @@
 //! CI runs on Linux, where a real keychain needs a live secret service over
 //! D-Bus, and no automated test may ever prompt a developer's macOS keychain.
 //! So the store is a trait, [`MemoryStore`] is what every test and every CI run
-//! gets, and [`KeyringStore`] is exercised by one `#[ignore]`d macOS-local test.
+//! gets, and [`KeyringStore`]'s platform half is exercised by one `#[ignore]`d
+//! macOS-local test. Its envelope half -- `put` encoding, `get` decoding -- runs
+//! in `just check` over `keyring-core`'s in-memory mock store, which opens no
+//! keychain.
 
 pub mod keyring_store;
 pub mod memory;
@@ -259,20 +262,27 @@ const ENVELOPE_VERSION: u8 = 2;
 /// name what it does understand.
 const READABLE_VERSIONS: &[u8] = &[1, 2];
 
-/// The stored account half. Its own type, `Deserialize`d by value, because
-/// [`Envelope`] borrows from the raw string and a borrowed nested struct would
-/// refuse any item whose JSON needed unescaping.
+/// The stored account half, owned for the reason [`Envelope`] is.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredAccount {
     username: String,
     password: String,
 }
 
+/// The stored item.
+///
+/// **Every string is owned** (#1639). serde reads a `&str` field only as a
+/// slice of the raw item, and a JSON string that needed unescaping -- a quote,
+/// a backslash, a tab in a typed password -- has no such slice: the read is
+/// refused, so `put` stored a secret every later `get` called unreadable.
+/// serde writes a `String` and a `&str` as the same bytes, which is why this
+/// is no new version: items written before the fix read now, and items
+/// written after it are what an older build already reads.
 #[derive(serde::Serialize, serde::Deserialize)]
-struct Envelope<'a> {
+struct Envelope {
     v: u8,
-    kind: &'a str,
-    secret: &'a str,
+    kind: String,
+    secret: String,
     /// Absent in v1, and absent in a v2 item for a source with one credential
     /// -- `skip_serializing_if` so the common envelope is byte-for-byte what
     /// it always was but for its `v`.
@@ -313,8 +323,8 @@ fn kind_from_envelope(name: &str) -> Option<AuthMethod> {
 fn encode(secret: &Secret) -> Result<String, SecretError> {
     serde_json::to_string(&Envelope {
         v: ENVELOPE_VERSION,
-        kind: envelope_kind(secret.kind),
-        secret: &secret.value,
+        kind: envelope_kind(secret.kind).to_owned(),
+        secret: secret.value.clone(),
         account: secret.account.as_ref().map(|a| StoredAccount {
             username: a.username.clone(),
             password: a.password.clone(),
@@ -332,7 +342,7 @@ fn encode(secret: &Secret) -> Result<String, SecretError> {
 /// look, and handing an adapter the half it happened to recognise is worse
 /// than saying so.
 fn decode(raw: &str) -> Result<Secret, SecretError> {
-    let envelope: Envelope<'_> = serde_json::from_str(raw)
+    let envelope: Envelope = serde_json::from_str(raw)
         .map_err(|_| SecretError::Backend("unreadable envelope".into()))?;
     if !READABLE_VERSIONS.contains(&envelope.v) {
         return Err(SecretError::Backend(format!(
@@ -341,11 +351,11 @@ fn decode(raw: &str) -> Result<Secret, SecretError> {
             envelope.v
         )));
     }
-    let kind = kind_from_envelope(envelope.kind)
+    let kind = kind_from_envelope(&envelope.kind)
         .ok_or_else(|| SecretError::Backend(format!("unknown auth kind {:?}", envelope.kind)))?;
     Ok(Secret {
         kind,
-        value: envelope.secret.to_owned(),
+        value: envelope.secret,
         account: envelope.account.map(|a| Account {
             username: a.username,
             password: a.password,
@@ -408,6 +418,11 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&json).unwrap(),
             serde_json::json!({ "v": 2, "kind": "pat", "secret": "abc123" })
         );
+        // Byte for byte, not only as JSON: #1639 changed the envelope's field
+        // types without a version, which holds only while a build writes
+        // exactly the bytes an older one reads.
+        assert_eq!(json, r#"{"v":2,"kind":"pat","secret":"abc123"}"#);
+        assert_eq!(READABLE_VERSIONS, [1, 2]);
         let back = decode(&json).unwrap();
         assert_eq!(back.kind, AuthMethod::Pat);
         assert_eq!(back.value, "abc123");
