@@ -48,9 +48,9 @@
 //!   `"first_byte_ms"` and `"post_mib"` bend that request
 //!   ([`fetch::Options`]); `"fetch_times"` runs the fetch that many times
 //!   in a row, as fast as the host lets it, and answers the last one: a
-//!   naive adapter, for the host's pacing (#1631). `mirror` and `username` are config keys it
-//!   declares and never reads, for a manifest's host template and the host's
-//!   basic auth.
+//!   naive adapter, for the host's pacing (#1631). `mirror` and `username`
+//!   are config keys it declares and never reads, for a manifest's host
+//!   template and the host's basic auth.
 //! * **`"download_mib"`** is how many MiB a download of every artifact
 //!   streams (default 1).
 //! * **`translate-query`** (#1208) reads a payload's `"survey_query"`

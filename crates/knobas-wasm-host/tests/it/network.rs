@@ -15,11 +15,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 const TOKEN: &str = "tok-1203-quayside-7f3a";
 const PASSWORD: &str = "pw-1203-harbour-c41d";
 
-/// One request a server saw: its path and its headers, lower-cased names.
+/// One request a server saw: its path, its headers (lower-cased names) and
+/// when it arrived.
 #[derive(Debug, Clone)]
 struct Seen {
     path: String,
     headers: Vec<(String, String)>,
+    at: std::time::Instant,
 }
 
 impl Seen {
@@ -41,8 +43,14 @@ struct Server {
 
 impl Server {
     async fn start(redirect_to: Option<String>) -> Self {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
+        // The port stays bound for the rest of the test process: the rate
+        // limit is process-wide and keyed by origin (#1630), and a later
+        // server handed this port would inherit what this one's quota spent.
+        std::mem::forget(listener.try_clone().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let listener = tokio::net::TcpListener::from_std(listener).unwrap();
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&seen);
         tokio::spawn(async move {
@@ -73,7 +81,11 @@ impl Server {
                         .filter_map(|l| l.split_once(':'))
                         .map(|(n, v)| (n.trim().to_ascii_lowercase(), v.trim().to_owned()))
                         .collect();
-                    let seen = Seen { path, headers };
+                    let seen = Seen {
+                        path,
+                        headers,
+                        at: std::time::Instant::now(),
+                    };
                     log.lock().unwrap().push(seen.clone());
                     let response = match (&*seen.path, &redirect_to) {
                         ("/redirect", Some(to)) => format!(
@@ -105,6 +117,15 @@ impl Server {
 
     fn seen(&self) -> Vec<Seen> {
         self.seen.lock().unwrap().clone()
+    }
+
+    /// When each request for `path` arrived, in order.
+    fn arrivals(&self, path: &str) -> Vec<std::time::Instant> {
+        self.seen()
+            .iter()
+            .filter(|seen| seen.path == path)
+            .map(|seen| seen.at)
+            .collect()
     }
 }
 
@@ -601,66 +622,6 @@ async fn a_short_component_timeout_does_not_cut_the_lookup_before_the_proxy() {
     assert!(local.seen().is_empty(), "{:?}", local.seen());
 }
 
-/// A local HTTP/1.1 server that answers `200` to everything and notes each
-/// request's path and when it arrived. Its port stays bound for the rest of
-/// the test process: the rate limit is process-wide and keyed by origin
-/// (#1630), and a later server handed this port would inherit its quota.
-struct Timed {
-    url: String,
-    arrived: Arc<Mutex<Vec<(String, std::time::Instant)>>>,
-}
-
-impl Timed {
-    fn start() -> Self {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let url = format!("http://{}", listener.local_addr().expect("addr"));
-        std::mem::forget(listener.try_clone().expect("hold the port"));
-        listener.set_nonblocking(true).expect("nonblocking");
-        let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
-        let arrived = Arc::new(Mutex::new(Vec::new()));
-        let log = Arc::clone(&arrived);
-        tokio::spawn(async move {
-            loop {
-                let Ok((mut socket, _)) = listener.accept().await else {
-                    return;
-                };
-                let log = Arc::clone(&log);
-                tokio::spawn(async move {
-                    let mut buf = Vec::new();
-                    let mut chunk = [0u8; 4096];
-                    while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
-                        match socket.read(&mut chunk).await {
-                            Ok(0) | Err(_) => return,
-                            Ok(n) => buf.extend_from_slice(&chunk[..n]),
-                        }
-                    }
-                    let text = String::from_utf8_lossy(&buf);
-                    let path = text.split(' ').nth(1).unwrap_or("/").to_owned();
-                    log.lock().unwrap().push((path, std::time::Instant::now()));
-                    let _ = socket
-                        .write_all(
-                            b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-                        )
-                        .await;
-                    let _ = socket.shutdown().await;
-                });
-            }
-        });
-        Self { url, arrived }
-    }
-
-    /// When each request for `path` arrived, in order.
-    fn arrivals(&self, path: &str) -> Vec<std::time::Instant> {
-        self.arrived
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(p, _)| p == path)
-            .map(|(_, at)| *at)
-            .collect()
-    }
-}
-
 /// How many of `arrivals` came within `window` of `from`.
 fn within(arrivals: &[std::time::Instant], from: std::time::Instant, window: Duration) -> usize {
     arrivals.iter().filter(|at| **at - from <= window).count()
@@ -672,7 +633,7 @@ const BURST_WINDOW: Duration = Duration::from_millis(150);
 
 /// A source of the fixture at `server`, running its fetch of `path`
 /// `times` times in a row.
-fn hammering(server: &Timed, path: &str, times: u32, limits: Limits) -> Box<dyn Source> {
+fn hammering(server: &Server, path: &str, times: u32, limits: Limits) -> Box<dyn Source> {
     let instance = instance(
         &server.url,
         AuthMethod::Pat,
@@ -692,7 +653,7 @@ fn hammering(server: &Timed, path: &str, times: u32, limits: Limits) -> Box<dyn 
 }
 
 /// A built-in client for `server` at `per_second` and `burst`.
-fn built_in(server: &Timed, per_second: u32, burst: u32) -> Arc<knobas_http::HttpClient> {
+fn built_in(server: &Server, per_second: u32, burst: u32) -> Arc<knobas_http::HttpClient> {
     Arc::new(
         knobas_http::HttpClient::new(knobas_http::HttpConfig {
             base_url: server.url.clone(),
@@ -712,7 +673,7 @@ fn built_in(server: &Timed, per_second: u32, burst: u32) -> Arc<knobas_http::Htt
 /// arrive within milliseconds.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_adapter_firing_thirty_requests_reaches_its_instance_at_the_burst() {
-    let server = Timed::start();
+    let server = Server::start(None).await;
     let source = hammering(&server, "/page", 30, Limits::default());
 
     let (ok, text) = answer(&*source).await;
@@ -736,13 +697,16 @@ async fn an_adapter_firing_thirty_requests_reaches_its_instance_at_the_burst() {
 /// **The adapter's quota is the instance's, shared with the built-in
 /// clients for it** (#1631).
 ///
-/// A built-in client spends the instance's burst; the adapter's requests
-/// that follow wait on the same limiter, so about one reaches the instance
-/// before the next refill rather than a burst of its own.
+/// A built-in client at one a second spends the instance's burst of ten; the
+/// adapter's requests that follow wait on the same limiter, one refill
+/// apart, rather than on a burst of their own. Gaps between the adapter's
+/// own arrivals, not a window from the start, so the time the component
+/// takes to start cannot hide an unpaced send or stand in for a paced one.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_adapter_waits_on_the_burst_a_built_in_client_spent() {
-    let server = Timed::start();
-    let client = built_in(&server, 5, 10);
+    let server = Server::start(None).await;
+    let client = built_in(&server, 1, 10);
+    let source = hammering(&server, "/adapter", 3, Limits::default());
     let mut sends = tokio::task::JoinSet::new();
     for _ in 0..10 {
         let client = Arc::clone(&client);
@@ -757,17 +721,15 @@ async fn an_adapter_waits_on_the_burst_a_built_in_client_spent() {
         sent.expect("the built-in client's burst");
     }
 
-    let source = hammering(&server, "/adapter", 5, Limits::default());
-    let started = std::time::Instant::now();
     let (ok, text) = answer(&*source).await;
     assert!(ok, "{text}");
 
     let adapter = server.arrivals("/adapter");
-    assert_eq!(adapter.len(), 5);
+    assert_eq!(adapter.len(), 3);
+    let gaps: Vec<Duration> = adapter.windows(2).map(|w| w[1] - w[0]).collect();
     assert!(
-        within(&adapter, started, BURST_WINDOW) <= 1,
-        "the adapter's requests went within {BURST_WINDOW:?} of a spent burst: {:?}",
-        adapter.iter().map(|at| *at - started).collect::<Vec<_>>()
+        gaps.iter().all(|gap| *gap >= Duration::from_millis(500)),
+        "the adapter's requests went faster than the shared one a second: {gaps:?}"
     );
 }
 
@@ -779,7 +741,7 @@ async fn an_adapter_waits_on_the_burst_a_built_in_client_spent() {
 /// seconds, and the call is stopped at its deadline of one.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_deadline_stops_a_call_waiting_on_the_limiter() {
-    let server = Timed::start();
+    let server = Server::start(None).await;
     let _strict = built_in(&server, 1, 1);
     let source = hammering(
         &server,

@@ -106,6 +106,8 @@ impl InstanceLimiter {
                 rate,
             )))),
         };
+        // The slot has a lock of its own: the map's is not needed past here.
+        drop(instances);
         let registration = slot.register(rate);
         Self {
             slot,

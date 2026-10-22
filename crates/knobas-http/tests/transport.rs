@@ -516,12 +516,7 @@ async fn hits_within_the_burst(
 
 /// A client for `server` at one request a second and the given burst.
 fn paced_client(server: &CountingServer, burst: u32) -> HttpClient {
-    HttpClient::new(HttpConfig {
-        requests_per_second: 1,
-        burst,
-        ..config(server.url())
-    })
-    .expect("client")
+    client_at(server, 1, burst)
 }
 
 /// **Every client built for one instance shares its quota** (SPI-2, #1630).
@@ -619,7 +614,8 @@ async fn a_quota_loosens_once_the_stricter_client_is_gone() {
 /// other, would otherwise get a new burst on every alternation. The limiter
 /// built for a loosening starts drained: at two a second and a burst of
 /// twenty, what reaches the instance in the first 900 ms is the one request
-/// the refill allows at 500 ms, not twenty.
+/// the refill allows at 500 ms, not twenty. That the quota loosened at all
+/// is the test above's; this one is that the loosening sent no burst.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_loosened_quota_starts_drained() {
     let server = CountingServer::always(200, "");

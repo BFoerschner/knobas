@@ -11816,8 +11816,8 @@ set.
   defaults (5/s, burst 10) a correct implementation lets 10 + 5 through in the first second, so
   the criterion cannot pass as worded. *Ruling:* the test asserts the burst (at most 10 within
   150 ms, under one 200 ms refill), all 30 arriving, and the last no sooner than 3.5 s after the
-  first (twenty at five a second). No follow-up: the ticket closes with this PR and no document
-  carries the wording. *Reversing:* n/a.
+  first (twenty at five a second). The wording fix is filed as #1737 (`backlog`). *Reversing:*
+  n/a.
 - **#1729 (the write queue reads a limiter timeout as a refusal).** An external adapter's write
   never fails with `LocalQuota`: the host's wait is bounded by the call's deadline only. What it
   can do is spend some of that deadline waiting, and a call stopped at its deadline was already

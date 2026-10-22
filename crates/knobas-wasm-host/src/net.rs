@@ -309,7 +309,7 @@ struct Bounds {
     body_bytes: usize,
     /// The longest wait on the instance's limiter: the call's whole
     /// deadline, which ends the call first, having started earlier.
-    paced: Duration,
+    pacing_wait: Duration,
 }
 
 impl Bounds {
@@ -324,7 +324,7 @@ impl Bounds {
             head,
             between: options.and_then(|o| o.between_bytes_timeout),
             body_bytes: usize::try_from(limits.memory_bytes()).unwrap_or(usize::MAX),
-            paced: limits.deadline,
+            pacing_wait: limits.deadline,
         }
     }
 }
@@ -368,7 +368,7 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
     // Last before the wire, so the quota is spent on a request that leaves.
     if for_instance && let Some(limiter) = &policy.limiter {
         limiter
-            .until_ready_within(bounds.paced)
+            .until_ready_within(bounds.pacing_wait)
             .await
             .map_err(|quota| {
                 tracing::warn!(source = %policy.source_id, "{quota}");
