@@ -30,6 +30,8 @@ export interface DepViewState {
   change(edit: (draft: DepViewSettings) => void): void;
   /** Take a saved view back: the draft becomes it, and it is on. */
   kept(view: DepView): void;
+  /** Tests only: forget the saved views, the open one, the draft and the opening last drawn (#1743). */
+  reset(): void;
 }
 
 export function createDepViewState(): DepViewState {
@@ -85,6 +87,12 @@ export function createDepViewState(): DepViewState {
       }
       currentId = view.id;
       draft = cloneSettings(view.settings);
+    },
+    reset() {
+      saved = null;
+      currentId = null;
+      draft = null;
+      openedFor = undefined;
     },
   };
 }

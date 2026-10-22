@@ -50,7 +50,7 @@ export interface WriteFollower {
 }
 
 /** A follower over `ports`: one listener and one read per event, shared by every follow. */
-export function createFollower(ports: FollowPorts): WriteFollower {
+export function createFollower(ports: FollowPorts): WriteFollower & { reset(): void } {
   const subscribers = new Set<{ id: number; hear: Hear }>();
   let reading = false;
   let again = false;
@@ -112,6 +112,17 @@ export function createFollower(ports: FollowPorts): WriteFollower {
   }
 
   return {
+    /** Tests only: drop every subscriber and the listener (#1743). */
+    reset() {
+      subscribers.clear();
+      again = false;
+      registering = null;
+      if (listening) {
+        listening = false;
+        unlisten?.();
+        unlisten = null;
+      }
+    },
     follow(id, hear) {
       const subscriber = { id, hear };
       subscribers.add(subscriber);
@@ -129,7 +140,13 @@ export function createFollower(ports: FollowPorts): WriteFollower {
   };
 }
 
-let shared: WriteFollower | null = null;
+let shared: ReturnType<typeof createFollower> | null = null;
+
+/** Tests only: stop the shell's follower and make the next use start a fresh one (#1743). */
+export function resetWriteFollower(): void {
+  shared?.reset();
+  shared = null;
+}
 
 /** The shell's one follower, made on first use. */
 export function writeFollower(): WriteFollower {

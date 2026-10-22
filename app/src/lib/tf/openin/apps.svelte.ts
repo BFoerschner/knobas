@@ -39,6 +39,8 @@ export interface Apps {
   save(applications: readonly CheckoutApplication[], defaultApplication: string | null): Promise<void>;
   /** Run an application (or a command, for *Try it*) and say so in a toast. */
   run(entityId: string, name: string, at: OpenAt): Promise<void>;
+  /** Tests only: forget the settings read (#1743). */
+  reset(): void;
 }
 
 /** The draft the backend takes for an application that has, or has not yet, an id. */
@@ -72,6 +74,10 @@ export function createApps(ports: AppsPorts = realAppsPorts): Apps {
     },
     async save(applications, defaultApplication) {
       settings = await ports.setCheckoutApplications(applications.map(draftOf), defaultApplication);
+    },
+    reset() {
+      settings = null;
+      pending = null;
     },
     async run(entityId, name, at) {
       try {

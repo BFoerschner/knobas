@@ -12234,3 +12234,22 @@ Ruled 2026-10-22 by the implementer on Sonnet; docs only.
 - **The mutant run's `git checkout` lost nothing.** The final head has every fix the PR
   description lists: the set closed at the cancel, one deadline, `spawn_send`, `clone_repo`'s
   `State`, `over_pool`'s doc and a private `SHUTDOWN_GRACE`. *Reversing:* n/a.
+
+## #1743 — reset the remaining module-level stores
+
+- **Shared write follower.** *Fork:* leave `follow-write.ts`'s `shared` out of the registry (it
+  is not `$state`, so the scan cannot see it), or reset it. *Ruling:* reset it. A follower left
+  up keeps its subscribers and its `activity:new` listener into the next test, which is the same
+  leak the other stores had. `createFollower` gets a `reset()` (drops subscribers, the listener,
+  `again`, `registering`) and `resetWriteFollower()` calls it and nulls `shared`. `registering`
+  is a closure variable of each follower, not module state, so only `shared` needs the null.
+  The scan cannot list it, so `UNSCANNED` in `test-resets.ts` names it and test 2 checks the
+  list against `RESETS`. *Reversing:* low.
+- **What a reset stops.** *Fork:* clear state only, or also tear down what `start()`/`begin()`
+  registered. *Ruling:* both; a listener or interval left from a test keeps writing into the
+  next. `inbox.reset` also bumps its answer counter so a read in flight lands nowhere.
+  *Reversing:* low.
+- **Stores with a door already.** *Fork:* add `reset()` to every store. *Ruling:* not where a
+  public door clears it: `tf/job/current` (`set(null)`, `drop()`), `tf/queued` and
+  `tf/repo/queued` (`forgetQueued()`). `NOT_YET_RESET` is now empty and stays as a typed
+  export for the completeness test. *Reversing:* low.

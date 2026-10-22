@@ -31,34 +31,45 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "shell/kind-registry.svelte.ts#kindRegistry": async () => (await import("./kind-registry.svelte")).kindRegistry.reset(),
   // App.test.svelte.ts used to walk this one back by hand.
   "shell/lifecycle.svelte.ts#lifecycle": async () => (await import("./lifecycle.svelte")).lifecycle.reset(),
+  // Each of these also unsubscribes whatever `start()`/`begin()` registered, so
+  // a listener from one test does not keep reading for the next.
+  "assets/alerts.svelte.ts#alerts": async () => (await import("../assets/alerts.svelte")).alerts.reset(),
+  "inbox/inbox.svelte.ts#inbox": async () => (await import("../inbox/inbox.svelte")).inbox.reset(),
+  "inbox/notify.svelte.ts#notifications": async () => (await import("../inbox/notify.svelte")).notifications.reset(),
+  "shell/timer.svelte.ts#timer": async () => (await import("./timer.svelte")).timer.reset(),
+  "tf/badges.svelte.ts#badges": async () => (await import("../tf/badges.svelte")).badges.reset(),
+  "tf/deps/views.svelte.ts#depViewState": async () => (await import("../tf/deps/views.svelte")).depViewState.reset(),
+  // Three stores in one file, each cleared through its own public door.
+  "tf/job/current.svelte.ts#entityId": async () => void (await import("../tf/job/current.svelte")).currentJob.set(null),
+  "tf/job/current.svelte.ts#crumb": async () => (await import("../tf/job/current.svelte")).breadcrumbJob.set(null),
+  "tf/job/current.svelte.ts#asked": async () => (await import("../tf/job/current.svelte")).linkRequest.drop(),
+  "tf/layers.svelte.ts#layers": async () => (await import("../tf/layers.svelte")).layers.reset(),
+  "tf/openin/apps.svelte.ts#apps": async () => (await import("../tf/openin/apps.svelte")).apps.reset(),
+  "tf/openin/clones.svelte.ts#clones": async () => (await import("../tf/openin/clones.svelte")).clones.reset(),
+  // `forgetQueued` also stops the follows a mark started.
+  "tf/queued.svelte.ts#marks": async () => (await import("../tf/queued.svelte")).forgetQueued(),
+  "tf/queued.svelte.ts#asked": async () => (await import("../tf/queued.svelte")).forgetQueued(),
+  "tf/repo/queued.svelte.ts#commits": async () => (await import("../tf/repo/queued.svelte")).forgetQueued(),
+  "tf/repo/queued.svelte.ts#deleted": async () => (await import("../tf/repo/queued.svelte")).forgetQueued(),
+  "tf/repo/queued.svelte.ts#made": async () => (await import("../tf/repo/queued.svelte")).forgetQueued(),
+  "tf/review/decisions.svelte.ts#decisions": async () => (await import("../tf/review/decisions.svelte")).decisions.reset(),
+  "tf/theme.svelte.ts#theme": async () => (await import("../tf/theme.svelte")).theme.reset(),
+  // Not `$state`, so the scan lists it by hand ({@link UNSCANNED}): the shell's
+  // one write follower, with the listener it registered.
+  "shell/follow-write.ts#shared": async () => (await import("./follow-write")).resetWriteFollower(),
 };
 
 /**
- * Module-level stores that predate the rule and have no reset yet. Each is a
- * debt, not a verdict that it is safe: the follow-up ticket for #1674 gives
- * every one a reset and empties this list.
+ * Module-level stores that predate the rule and have no reset yet. Empty since
+ * #1743: a new store takes a reset, not a place on this list.
  */
-export const NOT_YET_RESET: readonly string[] = [
-  "assets/alerts.svelte.ts#alerts",
-  "inbox/inbox.svelte.ts#inbox",
-  "inbox/notify.svelte.ts#notifications",
-  "shell/timer.svelte.ts#timer",
-  "tf/badges.svelte.ts#badges",
-  "tf/deps/views.svelte.ts#depViewState",
-  "tf/job/current.svelte.ts#asked",
-  "tf/job/current.svelte.ts#crumb",
-  "tf/job/current.svelte.ts#entityId",
-  "tf/layers.svelte.ts#layers",
-  "tf/openin/apps.svelte.ts#apps",
-  "tf/openin/clones.svelte.ts#clones",
-  "tf/queued.svelte.ts#asked",
-  "tf/queued.svelte.ts#marks",
-  "tf/repo/queued.svelte.ts#commits",
-  "tf/repo/queued.svelte.ts#deleted",
-  "tf/repo/queued.svelte.ts#made",
-  "tf/review/decisions.svelte.ts#decisions",
-  "tf/theme.svelte.ts#theme",
-];
+export const NOT_YET_RESET: readonly string[] = [];
+
+/**
+ * Stores the source scan cannot see, because they are neither `$state` nor a
+ * `create…()` singleton. Each must still be a key of {@link RESETS}.
+ */
+export const UNSCANNED: readonly string[] = ["shell/follow-write.ts#shared"];
 
 /**
  * A file that mocks a store's dependency with a partial factory cannot load the

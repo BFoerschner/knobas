@@ -48,6 +48,8 @@ export interface Clones {
   readonly finished: number;
   start(subject: CloneSubject): Promise<void>;
   stop(entityId: string): Promise<void>;
+  /** Tests only: drop the marks, the finished count, the subjects and the progress listener (#1743). */
+  reset(): void;
 }
 
 export function createClones(ports: ClonePorts = realClonePorts, apps: Apps = sharedApps): Clones {
@@ -116,6 +118,14 @@ export function createClones(ports: ClonePorts = realClonePorts, apps: Apps = sh
       } catch (cause) {
         failed(subject.entityId, ipcErrorMessage(cause));
       }
+    },
+    reset() {
+      for (const key of Object.keys(marks)) delete marks[key];
+      finished = 0;
+      subjects.clear();
+      const old = listening;
+      listening = null;
+      void old?.then((off) => typeof off === "function" && off());
     },
     async stop(entityId) {
       const subject = subjects.get(entityId);

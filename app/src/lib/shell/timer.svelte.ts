@@ -161,11 +161,14 @@ export interface Timer {
   press(): Promise<TimerPress>;
   /** Subscribe, tick and beat. Returns its teardown. */
   begin(): () => void;
+  /** Tests only: stop the clock and the beat and forget the timer and what the reader has in front (#1743). */
+  reset(): void;
 }
 
 export function createTimer(ports?: Partial<TimerPorts>): Timer {
   /** Whether {@link Timer.begin} is already running. See its guard below. */
   let live = false;
+  let stopLive: (() => void) | null = null;
 
   const io: TimerPorts = {
     currentTimer: realCurrentTimer,
@@ -317,13 +320,24 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
           // the store. What is lost is only news of a change made elsewhere.
         });
 
-      return () => {
+      const stop = () => {
         live = false;
         stopped = true;
         clearInterval(ticking);
         clearInterval(beating);
         unlisten?.();
       };
+      stopLive = stop;
+      return stop;
+    },
+    reset() {
+      stopLive?.();
+      stopLive = null;
+      state.current = null;
+      state.now = io.now();
+      state.foreground = null;
+      state.breadcrumbJob = null;
+      state.roomContext = null;
     },
   };
 }

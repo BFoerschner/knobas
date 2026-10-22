@@ -169,6 +169,8 @@ export interface Notifications {
   saw(items: InboxEntry[]): void;
   /** Subscribe to desktop notification clicks. Returns the teardown. */
   start(): () => void;
+  /** Tests only: unsubscribe, forget what was seen and every stored kind (#1743). */
+  reset(): void;
 }
 
 /** The shape of Tauri's `listen`, narrowed to what the click channel reads. */
@@ -244,6 +246,7 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
   /** Whether the backlog has been recorded. See the module note. */
   let primed = false;
   let live = false;
+  let stopLive: (() => void) | null = null;
 
   async function reseed(): Promise<void> {
     try {
@@ -368,11 +371,24 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
           // fire, they simply have no door behind them.
         });
 
-      return () => {
+      const stop = () => {
         live = false;
         off?.();
         off = null;
       };
+      stopLive = stop;
+      return stop;
+    },
+    reset() {
+      stopLive?.();
+      stopLive = null;
+      seen.clear();
+      primed = false;
+      state.kinds = [];
+      state.loaded = false;
+      state.permission = null;
+      state.error = null;
+      state.busy = false;
     },
   };
 }

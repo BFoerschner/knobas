@@ -54,6 +54,8 @@ export interface Decisions {
   decide(entry: SuggestionEntry, verdict: Verdict, relation: string, onfail: (message: string) => void): void;
   /** Take a decision back. A write still held is cancelled. */
   undo(id: string): void;
+  /** Tests only: cancel every held write and forget the verdicts and entries (#1743). */
+  reset(): void;
 }
 
 export function createDecisions(
@@ -116,6 +118,12 @@ export function createDecisions(
       held.set(id, timer);
     },
     undo,
+    reset() {
+      for (const timer of held.values()) clearTimeout(timer);
+      held.clear();
+      state.verdicts = {};
+      state.entries = [];
+    },
   };
 }
 

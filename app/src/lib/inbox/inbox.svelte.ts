@@ -107,6 +107,8 @@ export interface Inbox {
    * division `health.start()`/`health.reseed()` makes.
    */
   start(): () => void;
+  /** Tests only: unsubscribe and forget every list, count and answer in flight (#1743). */
+  reset(): void;
 }
 
 /**
@@ -154,6 +156,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
   }>({ stream: [], snoozed: [], count: 0, error: null, busy: false, answered: false });
 
   let live = false;
+  let stopLive: (() => void) | null = null;
 
   async function refreshCount(): Promise<void> {
     try {
@@ -313,11 +316,27 @@ export function createInbox(ports?: InboxPorts): Inbox {
           });
       }
 
-      return () => {
+      const stop = () => {
         live = false;
         for (const off of offs) off();
         offs.length = 0;
       };
+      stopLive = stop;
+      return stop;
+    },
+    reset() {
+      stopLive?.();
+      stopLive = null;
+      state.stream = [];
+      state.snoozed = [];
+      state.count = 0;
+      state.error = null;
+      state.busy = false;
+      state.answered = false;
+      // A read or answer still out lands on a store that is no longer its own.
+      answers += 1;
+      inFlight = 0;
+      refusal = null;
     },
   };
 }

@@ -91,6 +91,8 @@ export interface Alerts {
    * `inbox.start()`/`inbox.refresh()` already makes.
    */
   start(): () => void;
+  /** Tests only: unsubscribe and forget the list and the error (#1743). */
+  reset(): void;
 }
 
 export function createAlerts(ports?: Partial<AlertPorts>): Alerts {
@@ -115,6 +117,7 @@ export function createAlerts(ports?: Partial<AlertPorts>): Alerts {
   });
 
   let live = false;
+  let stopLive: (() => void) | null = null;
 
   async function refresh(): Promise<void> {
     try {
@@ -181,11 +184,19 @@ export function createAlerts(ports?: Partial<AlertPorts>): Alerts {
           });
       }
 
-      return () => {
+      const stop = () => {
         live = false;
         for (const off of offs) off();
         offs.length = 0;
       };
+      stopLive = stop;
+      return stop;
+    },
+    reset() {
+      stopLive?.();
+      stopLive = null;
+      state.open = [];
+      state.error = null;
     },
   };
 }

@@ -11,7 +11,7 @@ import { join, relative } from "node:path";
 
 import { expect, test, vi } from "vitest";
 
-import { NOT_YET_RESET, RESETS } from "./test-resets";
+import { NOT_YET_RESET, RESETS, UNSCANNED } from "./test-resets";
 
 const LIB = join(import.meta.dirname, "..");
 
@@ -40,10 +40,15 @@ test("every module-level store has a reset or a named debt", () => {
 });
 
 test("neither list names a store that is gone, and no store is in both", () => {
-  const present = new Set(found());
+  const present = new Set([...found(), ...UNSCANNED]);
   expect(Object.keys(RESETS).filter((id) => !present.has(id)), "RESETS names a store that no longer exists").toEqual([]);
   expect(NOT_YET_RESET.filter((id) => !present.has(id)), "NOT_YET_RESET names a store that is reset or gone").toEqual([]);
   expect(NOT_YET_RESET.filter((id) => id in RESETS)).toEqual([]);
+  expect(UNSCANNED.filter((id) => !(id in RESETS)), "an unscanned store needs its reset").toEqual([]);
+});
+
+test("no store is left on the debt list", () => {
+  expect(NOT_YET_RESET).toEqual([]);
 });
 
 test("the scan sees what it is meant to", () => {
