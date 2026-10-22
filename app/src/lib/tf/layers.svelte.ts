@@ -15,6 +15,8 @@ export interface Layers {
   readonly open: readonly Layer[];
   /** Register an open layer; the answer unregisters it. */
   add(layer: Layer): () => void;
+  /** Tests only: forget every open layer without closing it (#1743). */
+  reset(): void;
 }
 
 export function createLayers(): Layers {
@@ -30,6 +32,9 @@ export function createLayers(): Layers {
       return () => {
         open = open.filter((candidate) => candidate !== layer);
       };
+    },
+    reset() {
+      open = [];
     },
   };
 }

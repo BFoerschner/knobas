@@ -41,6 +41,8 @@ export interface Badges {
   refresh(): Promise<void>;
   /** Subscribe to the events that move the counts. Returns the teardown. */
   start(): () => void;
+  /** Tests only: unsubscribe and forget the three counts (#1743). */
+  reset(): void;
 }
 
 /** Failing configurations, off the Builds tile's own tally. */
@@ -82,6 +84,7 @@ export function createBadges(ports: BadgePorts = REAL_PORTS): Badges {
     proposals: null,
   });
   let live = false;
+  let stopLive: (() => void) | null = null;
 
   async function read(key: keyof typeof state, run: () => Promise<number>) {
     try {
@@ -130,11 +133,20 @@ export function createBadges(ports: BadgePorts = REAL_PORTS): Badges {
       };
       subscribe(EVENTS.syncState, (payload) => !(payload as SourceSyncStatus).running);
       subscribe(EVENTS.activityNew, () => true);
-      return () => {
+      const stop = () => {
         live = false;
         dead = true;
         for (const off of offs.splice(0)) off();
       };
+      stopLive = stop;
+      return stop;
+    },
+    reset() {
+      stopLive?.();
+      stopLive = null;
+      state.builds = null;
+      state.monitors = null;
+      state.proposals = null;
     },
   };
 }

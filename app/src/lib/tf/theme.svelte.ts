@@ -17,6 +17,8 @@ export interface Theme {
    * `system` is what the OS says.
    */
   toggle(prefersDark: boolean): void;
+  /** Tests only: back to following the system (#1743). */
+  reset(): void;
 }
 
 export function createTheme(): Theme {
@@ -27,6 +29,9 @@ export function createTheme(): Theme {
     },
     set(next) {
       choice = next;
+    },
+    reset() {
+      choice = "system";
     },
     toggle(prefersDark) {
       const dark = choice === "system" ? prefersDark : choice === "dark";
