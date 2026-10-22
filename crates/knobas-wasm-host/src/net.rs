@@ -43,6 +43,19 @@
 //! those requests, so the body reaches the redactor decoded. A request to
 //! any other declared host carries nothing of the host's.
 //!
+//! **Pacing** (#1631). A request for the instance waits, before it
+//! leaves, on the instance's own rate limit: `knobas-http`'s
+//! [`InstanceLimiter`] for the instance's origin, asked for at the http
+//! crate's defaults (five a second, a burst of ten). The quota is the
+//! instance's, not the adapter's: every built-in client for the same origin
+//! waits on the same one, and where they ask for different quotas the
+//! stricter of those still held governs. So a naive adapter that pages as
+//! fast as it can sends no more than a built-in one would, and cannot lock
+//! the reader's account. The wait is bounded by the call's deadline and
+//! nothing shorter. A `Retry-After` is the component's to read (ruling A9 of
+//! #1618). A request for another declared host is not paced: it carries
+//! nothing of the reader's, and the instance's quota is not its to spend.
+//!
 //! **Bounds** (#1204). The call's deadline holds every request, since it
 //! stops the whole call. Within it, the component's `request-options` are
 //! honoured: its connect and first-byte timeouts together bound the wait
@@ -67,6 +80,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use bytes::Bytes;
 use http_body_util::BodyExt;
+use knobas_http::{HttpConfig, InstanceLimiter};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, SourceError};
 use wasmtime_wasi_http::{Error as HttpError, RequestOptions, WasiBody, WasiHttpHooks};
@@ -82,6 +96,9 @@ pub struct Policy {
     allowlist: Allowlist,
     /// The source's address, when it is an `http(s)` URL.
     instance: Option<Target>,
+    /// The instance origin's share of the rate limit, held for as long as
+    /// the source is: what a request for the instance waits on.
+    limiter: Option<InstanceLimiter>,
     credential: Option<http::HeaderValue>,
     needles: Needles,
 }
@@ -92,6 +109,7 @@ impl std::fmt::Debug for Policy {
             .field("source_id", &self.source_id)
             .field("allowlist", &self.allowlist)
             .field("instance", &self.instance)
+            .field("limiter", &self.limiter)
             .field(
                 "credential",
                 &self.credential.as_ref().map(|_| "<redacted>"),
@@ -109,6 +127,7 @@ impl Policy {
             source_id: source_id.to_owned(),
             allowlist: Allowlist::default(),
             instance: None,
+            limiter: None,
             credential: None,
             needles: Needles::default(),
         }
@@ -134,10 +153,19 @@ impl Policy {
             &declared_keys(config_schema),
         );
         let (credential, spellings) = credential(instance)?;
+        let defaults = HttpConfig::default();
         Ok(Self {
             source_id: instance.id.clone(),
             allowlist,
             instance: Target::origin_of(&instance.base_url),
+            // `None` exactly when `instance` is: an address that is not an
+            // http(s) URL is no request's destination.
+            limiter: InstanceLimiter::for_url(
+                &instance.base_url,
+                defaults.requests_per_second,
+                defaults.burst,
+            )
+            .ok(),
             credential,
             needles: Needles::new(spellings),
         })
@@ -279,6 +307,9 @@ struct Bounds {
     between: Option<Duration>,
     /// The most an outgoing body may hold.
     body_bytes: usize,
+    /// The longest wait on the instance's limiter: the call's whole
+    /// deadline, which ends the call first, having started earlier.
+    pacing_wait: Duration,
 }
 
 impl Bounds {
@@ -293,6 +324,7 @@ impl Bounds {
             head,
             between: options.and_then(|o| o.between_bytes_timeout),
             body_bytes: usize::try_from(limits.memory_bytes()).unwrap_or(usize::MAX),
+            pacing_wait: limits.deadline,
         }
     }
 }
@@ -333,6 +365,16 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
         .to_bytes();
     let request = reqwest::Request::try_from(http::Request::from_parts(parts, body))
         .map_err(|_| HttpError::HttpRequestUriInvalid)?;
+    // Last before the wire, so the quota is spent on a request that leaves.
+    if for_instance && let Some(limiter) = &policy.limiter {
+        limiter
+            .until_ready_within(bounds.pacing_wait)
+            .await
+            .map_err(|quota| {
+                tracing::warn!(source = %policy.source_id, "{quota}");
+                HttpError::ConnectionLimitReached
+            })?;
+    }
     let sent = client(guarded)?.execute(request);
     let sent = match bounds.head {
         None => sent.await,

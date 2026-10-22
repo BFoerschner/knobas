@@ -516,12 +516,7 @@ async fn hits_within_the_burst(
 
 /// A client for `server` at one request a second and the given burst.
 fn paced_client(server: &CountingServer, burst: u32) -> HttpClient {
-    HttpClient::new(HttpConfig {
-        requests_per_second: 1,
-        burst,
-        ..config(server.url())
-    })
-    .expect("client")
+    client_at(server, 1, burst)
 }
 
 /// **Every client built for one instance shares its quota** (SPI-2, #1630).
@@ -579,6 +574,62 @@ async fn the_stricter_of_two_quotas_for_one_instance_governs() {
         hits >= 1,
         "loose first: the tightened quota let nothing through"
     );
+}
+
+/// A client for `server` at `per_second` and `burst`.
+fn client_at(server: &CountingServer, per_second: u32, burst: u32) -> HttpClient {
+    HttpClient::new(HttpConfig {
+        requests_per_second: per_second,
+        burst,
+        ..config(server.url())
+    })
+    .expect("client")
+}
+
+/// **A quota loosens once no live client asks for the stricter one**
+/// (#1728).
+///
+/// A source edited from one a second to twenty: the run that built its
+/// client at the old quota has ended, so the next client is paced by the new
+/// one. Held to the old quota, one request would reach the instance in the
+/// first 900 ms; at twenty a second, started drained, about seventeen do.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quota_loosens_once_the_stricter_client_is_gone() {
+    let server = CountingServer::always(200, "");
+    drop(client_at(&server, 1, 1));
+    let loose = client_at(&server, 20, 20);
+
+    let hits = hits_within_the_burst(&server, vec![loose], 20).await;
+
+    assert!(
+        hits >= 5,
+        "{hits} reached the instance in 900 ms at twenty a second: the dropped \
+         client's one a second still governs"
+    );
+}
+
+/// **A loosening hands out no fresh burst** (#1728).
+///
+/// Two sources on one server at different quotas, syncing one after the
+/// other, would otherwise get a new burst on every alternation. The limiter
+/// built for a loosening starts drained: at two a second and a burst of
+/// twenty, what reaches the instance in the first 900 ms is the one request
+/// the refill allows at 500 ms, not twenty. That the quota loosened at all
+/// is the test above's; this one is that the loosening sent no burst.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_loosened_quota_starts_drained() {
+    let server = CountingServer::always(200, "");
+    drop(client_at(&server, 1, 1));
+    let loose = client_at(&server, 2, 20);
+
+    let hits = hits_within_the_burst(&server, vec![loose], 20).await;
+
+    assert!(
+        hits <= 2,
+        "{hits} reached the instance in 900 ms right after a loosening: the new \
+         limiter handed out its burst"
+    );
+    assert!(hits >= 1, "the drained limiter never refilled");
 }
 
 /// A server that accepts the connection and then says nothing is

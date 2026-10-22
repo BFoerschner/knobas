@@ -19,6 +19,9 @@ test-util = []
 async-trait.workspace = true
 chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
+# The instance's rate limit, which an external adapter's requests to its
+# instance wait on beside every built-in client for that origin (#1631).
+knobas-http = { path = "../knobas-http" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 serde_json.workspace = true

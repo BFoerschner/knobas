@@ -10,9 +10,23 @@
 //! the server's lockout counts per server, not per source.
 //!
 //! Where two configurations name different quotas for one origin, **the
-//! stricter wins**, field by field: the lower rate and the lower burst. A
-//! quota only tightens for the life of the process; a source edited to a
-//! looser one is paced by it from the next start.
+//! stricter wins**, field by field: the lower rate and the lower burst.
+//!
+//! **A quota loosens once nobody asks for the stricter one** (#1728). Each
+//! [`InstanceLimiter`] -- and so each `HttpClient` -- holds a registration,
+//! and its origin's quota is the stricter of the registrations still alive.
+//! A client lives as long as the run, read or flush that built it, so a
+//! source edited to a looser quota, a quota tried in a draft's *Test
+//! connection*, or a deleted source stops holding the origin down once the
+//! last client built from it is gone. The quota is worked out again when the
+//! next limiter for the origin is built: one already held keeps waiting on
+//! what governed when the last one was.
+//!
+//! A changed quota is a new governor limiter, which every holder waits on
+//! from its next request. A **tightening** starts with its own (stricter)
+//! burst. A **loosening** starts drained: two sources at different quotas on
+//! one server, syncing one after the other, would otherwise be handed a
+//! fresh burst on every alternation.
 //!
 //! [`InstanceLimiter`] is public so a sender outside [`HttpClient`] -- the
 //! wasm host's network policy (#1631) -- can wait on the same quota.
@@ -20,7 +34,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::num::NonZeroU32;
-use std::sync::{Arc, LazyLock, Mutex, PoisonError};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
 use governor::clock::DefaultClock;
@@ -33,10 +47,13 @@ type DirectLimiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 /// One instance origin's share of the process-wide rate limit.
 ///
 /// Cloning is cheap and every clone waits on the same quota, as does every
-/// other `InstanceLimiter` built for the same origin.
+/// other `InstanceLimiter` built for the same origin. A clone is the same
+/// holder: the quota it asked for counts until the last clone is dropped.
 #[derive(Clone)]
 pub struct InstanceLimiter {
     slot: Arc<Slot>,
+    /// What keeps this holder's quota counted ([`Slot::register`]).
+    _registration: Arc<Registration>,
 }
 
 impl std::fmt::Debug for InstanceLimiter {
@@ -56,9 +73,11 @@ impl InstanceLimiter {
     /// `burst` at once. A zero in either reads as one: a misconfigured `0/s`
     /// means "one", not "never".
     ///
-    /// The first caller for an origin sets its quota; a later caller asking for
-    /// less tightens it for every holder (the lower of each field), and one
-    /// asking for more is paced by what is already there.
+    /// The origin's quota becomes the stricter of this one and every other
+    /// still held (the lower of each field): asking for less tightens it for
+    /// every holder, and asking for more is paced by what a live holder
+    /// asked for. Once no holder of a stricter quota is left, the next
+    /// limiter built for the origin loosens it.
     ///
     /// # Errors
     ///
@@ -73,24 +92,27 @@ impl InstanceLimiter {
     /// [`for_url`](Self::for_url) for a URL already parsed and checked.
     pub(crate) fn for_origin(url: &url::Url, rate: Rate) -> Self {
         /// Every origin a client was built for in this process. An entry is
-        /// never removed: a quota has to outlive the client that last used
-        /// it, or the next client built a moment later starts on a fresh
-        /// burst -- the bug this map exists to close.
+        /// never removed: its limiter has to outlive the client that last
+        /// used it, or the next client built a moment later starts on a
+        /// fresh burst -- the bug this map exists to close.
         static INSTANCES: LazyLock<Mutex<HashMap<url::Origin, Arc<Slot>>>> =
             LazyLock::new(Mutex::default);
 
         let mut instances = INSTANCES.lock().unwrap_or_else(PoisonError::into_inner);
         let slot = match instances.entry(url.origin()) {
-            Entry::Occupied(known) => {
-                known.get().tighten(rate);
-                Arc::clone(known.get())
-            }
+            Entry::Occupied(known) => Arc::clone(known.get()),
             Entry::Vacant(new) => Arc::clone(new.insert(Arc::new(Slot::new(
                 url.origin().ascii_serialization(),
                 rate,
             )))),
         };
-        Self { slot }
+        // The slot has a lock of its own: the map's is not needed past here.
+        drop(instances);
+        let registration = slot.register(rate);
+        Self {
+            slot,
+            _registration: registration,
+        }
     }
 
     /// Wait until the quota lets one request through, for at most `within`.
@@ -178,39 +200,78 @@ impl Rate {
     }
 }
 
-/// One origin's share: its name, for the message, and the limiter every
-/// holder waits on.
+/// A holder's stake in its origin's quota: the slot counts the quota it was
+/// registered with for as long as this is alive. It carries nothing; only its
+/// lifetime is read, through the [`Weak`] the slot keeps.
+struct Registration;
+
+/// One origin's share: its name, for the message, the limiter every holder
+/// waits on, and the quotas they asked for.
 struct Slot {
     origin: String,
-    paced: Mutex<Arc<Paced>>,
+    held: Mutex<Held>,
+}
+
+/// What a [`Slot`] guards: the limiter as it stands, and who asked for what.
+struct Held {
+    paced: Arc<Paced>,
+    /// One per registration, alive or not: the dead ones go at the next
+    /// [`Slot::register`].
+    holders: Vec<(Rate, Weak<Registration>)>,
 }
 
 impl Slot {
+    /// A slot with no holder yet: the first [`register`](Self::register)
+    /// finds `rate` governing and changes nothing.
     fn new(origin: String, rate: Rate) -> Self {
         Self {
             origin,
-            paced: Mutex::new(Arc::new(Paced::new(rate))),
+            held: Mutex::new(Held {
+                paced: Arc::new(Paced::new(rate)),
+                holders: Vec::new(),
+            }),
         }
     }
 
-    /// Bring the quota down to `asked` where `asked` is stricter.
+    /// Count `asked` until the returned registration is dropped, and set the
+    /// quota to the stricter of every live holder's.
     ///
     /// A changed quota is a new governor limiter -- governor cannot change
     /// the quota of one it has built -- and every holder waits on it from its
-    /// next request. The new one starts with its own (stricter) burst: at
-    /// most one, once per tightening, and a quota only ever tightens.
-    fn tighten(&self, asked: Rate) {
-        let mut paced = self.paced.lock().unwrap_or_else(PoisonError::into_inner);
-        let rate = paced.rate.stricter(asked);
-        if rate != paced.rate {
-            *paced = Arc::new(Paced::new(rate));
+    /// next request. A stricter one starts with its own burst; one looser in
+    /// either field starts drained, so a loosening never sends a burst the
+    /// limiter it replaces would have held back.
+    fn register(&self, asked: Rate) -> Arc<Registration> {
+        let registration = Arc::new(Registration);
+        let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        held.holders.retain(|(_, holder)| holder.strong_count() > 0);
+        held.holders.push((asked, Arc::downgrade(&registration)));
+        let rate = held
+            .holders
+            .iter()
+            .map(|(rate, _)| *rate)
+            .fold(asked, Rate::stricter);
+        if rate != held.paced.rate {
+            let loosens = rate.stricter(held.paced.rate) != rate;
+            held.paced = Arc::new(if loosens {
+                Paced::drained(rate)
+            } else {
+                Paced::new(rate)
+            });
         }
+        registration
     }
 
     /// The limiter as it stands. Cloned out of the lock, so a wait never holds
     /// it.
     fn current(&self) -> Arc<Paced> {
-        Arc::clone(&self.paced.lock().unwrap_or_else(PoisonError::into_inner))
+        Arc::clone(
+            &self
+                .held
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .paced,
+        )
     }
 }
 
@@ -221,6 +282,7 @@ struct Paced {
 }
 
 impl Paced {
+    /// A limiter at `rate` with its whole burst to hand out.
     fn new(rate: Rate) -> Self {
         Self {
             rate,
@@ -228,6 +290,15 @@ impl Paced {
                 Quota::per_second(rate.per_second).allow_burst(rate.burst),
             ),
         }
+    }
+
+    /// A limiter at `rate` whose burst is already spent: the first request
+    /// waits for the refill.
+    fn drained(rate: Rate) -> Self {
+        let paced = Self::new(rate);
+        // A fresh limiter always has its whole burst: neither error can come.
+        let _ = paced.limiter.check_n(rate.burst);
+        paced
     }
 }
 
@@ -251,7 +322,31 @@ fn nonzero(value: u32) -> NonZeroU32 {
 
 #[cfg(test)]
 mod tests {
-    use super::Rate;
+    use std::sync::Arc;
+
+    use super::{InstanceLimiter, PoisonError, Rate};
+
+    /// One entry per origin, however its quota moves, and a dropped holder
+    /// does not stay on the books: building a limiter prunes the dead.
+    #[test]
+    fn one_origin_keeps_one_slot_and_only_its_live_holders() {
+        let url = url::Url::parse("http://slot.invalid:1728/a").expect("url");
+        let strict = InstanceLimiter::for_origin(&url, Rate::new(1, 1));
+        let same_origin = url::Url::parse("http://slot.invalid:1728/b").expect("url");
+        for _ in 0..50 {
+            drop(InstanceLimiter::for_origin(&same_origin, Rate::new(20, 20)));
+        }
+        let loose = InstanceLimiter::for_origin(&url, Rate::new(20, 20));
+
+        assert!(Arc::ptr_eq(&strict.slot, &loose.slot));
+        let held = loose
+            .slot
+            .held
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        assert_eq!(held.holders.len(), 2, "the strict holder and the loose one");
+        assert_eq!(held.paced.rate, Rate::new(1, 1), "the strict holder lives");
+    }
 
     /// Field by field: a configuration with the higher rate but the lower
     /// burst contributes its burst, and the other its rate.

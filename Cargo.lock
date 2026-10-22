@@ -3424,6 +3424,7 @@ dependencies = [
  "http-body",
  "http-body-util",
  "knobas-core",
+ "knobas-http",
  "knobas-source",
  "knobas-sync",
  "knobas-wasm-host",
