@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- knobas suggestion-pass (light). Hand-authored SVG, checked against the code at main b2a6da08 (2026-10-21). Edit both themes together. -->
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="590" viewBox="0 0 1200 590" role="img" aria-label="Suggestion pass: a sync run that ends OK makes the scheduler request a pass, without waiting; the detect_suggestions command asks for one and waits; a queue coalesces requests into at most one running pass plus one owed; the pass runs seven rules on its own connection and inserts unconfirmed rows into knobas.link; the window reads proposed_link and accept or dismiss updates the same row and writes an activity line.">
+<!-- knobas suggestion-pass (light). Hand-authored SVG, checked against the code at main 42422f13 (2026-10-22). Edit both themes together. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="590" viewBox="0 0 1200 590" role="img" aria-label="Suggestion pass: a sync run that ends OK makes the scheduler request a pass, without waiting; a queue coalesces requests into at most one running pass plus one owed; the pass runs seven rules on its own connection and inserts unconfirmed rows into knobas.link; the window reads proposed_link and accept or dismiss updates the same row and writes an activity line.">
   <defs>
     <marker id="ch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -40,16 +40,12 @@
   <text class="lb" x="379" y="88" text-anchor="middle">SuggestOnSync: request()</text>
   <text class="lb" x="379" y="112" text-anchor="middle">on sync:state ended Ok, no wait</text>
 
-  <line class="ar" x1="470" y1="150" x2="578" y2="150" marker-end="url(#ch)"/>
-  <text class="lb" x="464" y="146" text-anchor="end">detect_suggestions</text>
-  <text class="lb" x="464" y="162" text-anchor="end">manual, waits</text>
-
   <rect class="bx2" x="580" y="60" width="230" height="110" rx="3"/>
   <text class="t" x="594" y="82">SuggestionPass queue</text>
   <text class="mf" x="594" y="98">Mutex&lt;Queue&gt; + watch channel</text>
   <text class="s" x="594" y="120">≤ 1 running, ≤ 1 owed</text>
   <text class="s" x="594" y="138">N calls during a pass → 1 more</text>
-  <text class="s" x="594" y="156">one queue for both callers</text>
+  <text class="s" x="594" y="156">requests share the next pass</text>
 
   <line class="ar" x1="810" y1="95" x2="908" y2="95" marker-end="url(#ch)"/>
   <text class="lb" x="859" y="88" text-anchor="middle">spawn</text>
