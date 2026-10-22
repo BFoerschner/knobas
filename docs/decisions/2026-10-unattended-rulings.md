@@ -11183,3 +11183,9 @@ set.
   `app_status` answers, or if it fails, the page names the keychain: the store every run but a QA
   run uses. `?fake-secret-store=memory` makes the `?fake-ipc` fixture answer as the memory store
   does.
+- **The importer token hint is not this ticket's** (Opus merge-manager, 2026-10-22). *Fork:*
+  `ImportDialog.svelte` and `TfImport.svelte` also say an importer token is "Kept in this
+  machine's keychain", and that is just as untrue under the memory store. *Ruling:* out of scope
+  here, filed as #1615 (`backlog`). *Reasoning:* the ticket names a source's page in Settings ›
+  Sources, and the importer is a different surface. `secrets_in_memory` is now there for #1615 to
+  read. *Reversing:* cheap.
