@@ -415,6 +415,11 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&json).unwrap(),
             serde_json::json!({ "v": 2, "kind": "pat", "secret": "abc123" })
         );
+        // Byte for byte, not only as JSON: #1639 changed the envelope's field
+        // types without a version, which holds only while a build writes
+        // exactly the bytes an older one reads.
+        assert_eq!(json, r#"{"v":2,"kind":"pat","secret":"abc123"}"#);
+        assert_eq!(READABLE_VERSIONS, [1, 2]);
         let back = decode(&json).unwrap();
         assert_eq!(back.kind, AuthMethod::Pat);
         assert_eq!(back.value, "abc123");

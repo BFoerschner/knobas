@@ -175,6 +175,7 @@ impl SecretStore for KeyringStore {
 mod tests {
     use super::*;
     use knobas_source::AuthMethod;
+    use knobas_source::instance::Account;
 
     /// A stand-in for whatever the platform layer boxes up. Its `Display`
     /// carries a marker so the assertions below can tell "the cause was
@@ -319,5 +320,68 @@ mod tests {
         let got = store.get(&id).unwrap().expect("the item was stored");
         assert_eq!((got.kind, got.value.as_str()), (AuthMethod::Pat, ESCAPED));
         assert!(got.account.is_none());
+    }
+
+    /// The account half (the `StoredAccount` path) and the secret beside it
+    /// carry the same escapes through one item.
+    #[test]
+    fn an_account_that_needs_escaping_reads_back_after_put() {
+        let store = mock_backed();
+        let id = KeychainAccount::source("kuma");
+        let user = "o\"brien\\ops\tümlaut";
+        store
+            .put(
+                &id,
+                &Secret {
+                    kind: AuthMethod::ApiToken,
+                    value: ESCAPED.into(),
+                    account: Some(Account {
+                        username: user.into(),
+                        password: ESCAPED.into(),
+                    }),
+                },
+            )
+            .unwrap();
+        let got = store.get(&id).unwrap().expect("the item was stored");
+        assert_eq!(got.value, ESCAPED);
+        let account = got.account.expect("the account survives the item");
+        assert_eq!(
+            (account.username.as_str(), account.password.as_str()),
+            (user, ESCAPED)
+        );
+    }
+
+    /// **An item written before the fix** is read by the fixed reader. The
+    /// bytes are the literal a pre-fix `put` wrote for `p@ss"w0rd` -- v2,
+    /// with the quote escaped -- placed in the store directly rather than
+    /// re-encoded, because a re-encoding would only show that the new writer
+    /// agrees with the new reader.
+    #[test]
+    fn a_pre_fix_item_with_an_escaped_quote_reads_as_its_secret() {
+        let store = mock_backed();
+        let id = KeychainAccount::source("jira");
+        store
+            .entry(&id)
+            .unwrap()
+            .set_password(r#"{"v":2,"kind":"pat","secret":"p@ss\"w0rd"}"#)
+            .unwrap();
+        let got = store.get(&id).unwrap().expect("the item is there");
+        assert_eq!((got.kind, got.value.as_str()), (AuthMethod::Pat, "p@ss\"w0rd"));
+    }
+
+    /// `kind` is read like the secret: a kind spelled with a JSON escape is
+    /// the kind it spells. knobas never writes one -- the names are fixed --
+    /// so this is the reader's half of the claim, from a literal item.
+    #[test]
+    fn a_kind_spelled_with_an_escape_reads_as_that_kind() {
+        let store = mock_backed();
+        let id = KeychainAccount::source("jira");
+        store
+            .entry(&id)
+            .unwrap()
+            .set_password(r#"{"v":2,"kind":"api_token","secret":"x"}"#)
+            .unwrap();
+        let got = store.get(&id).unwrap().expect("the item is there");
+        assert_eq!((got.kind, got.value.as_str()), (AuthMethod::ApiToken, "x"));
     }
 }
