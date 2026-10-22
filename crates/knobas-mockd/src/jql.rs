@@ -5,7 +5,8 @@
 //! lenient:
 //!
 //! ```text
-//! jql      := [ clause { "AND" clause } ] [ "ORDER" "BY" ( "updated" | "created" ) [ "ASC" | "DESC" ] ]
+//! jql      := [ clause { "AND" clause } ] [ order ]
+//! order    := "ORDER" "BY" ( "updated" | "created" ) [ "ASC" | "DESC" ] [ "," "id" "ASC" ]
 //! clause   := "updated" ( ">=" | ">" ) literal
 //!           | "project" ( "=" ident | "IN" "(" ident { "," ident } ")" )
 //! literal  := '"' ( "yyyy-MM-dd HH:mm" | "yyyy/MM/dd HH:mm" | "yyyy-MM-dd" | "yyyy/MM/dd" ) '"'
@@ -15,7 +16,9 @@
 //! The clause list is optional, so a bare `ORDER BY created ASC` with no
 //! `WHERE`-equivalent is valid — that is the full-sync query stream A sends
 //! (`created` since #1623; `updated` stays for the ceiling probe's `DESC` and
-//! for the queries written before it).
+//! for the queries written before it). The `, id ASC` the walk appends since
+//! #1720 is accepted and changes nothing: [`crate::jira`] has always broken a
+//! tie on the first key by id ascending, which is the order it asks for.
 //!
 //! **Date literals are interpreted in the server's zone**
 //! ([`MockState::server_offset`](crate::state::MockState::server_offset),
@@ -79,7 +82,7 @@ impl std::fmt::Display for JqlError {
             Self::Unsupported(t) => write!(
                 f,
                 "Unsupported JQL near {t:?}: mockd accepts only \
-                 [updated >=|> \"date\"] [AND project =|IN (...)] [ORDER BY updated|created ASC|DESC]"
+                 [updated >=|> \"date\"] [AND project =|IN (...)] [ORDER BY updated|created ASC|DESC[, id ASC]]"
             ),
             Self::BadDate(t) => write!(
                 f,
@@ -267,7 +270,7 @@ pub fn parse_jql(raw: &str, off: FixedOffset) -> Result<Jql, JqlError> {
     }
 
     if i < toks.len() {
-        // ORDER BY (updated|created) [ASC|DESC]
+        // ORDER BY (updated|created) [ASC|DESC] [, id ASC]
         i += 1; // "order"
         if !is_kw(toks.get(i), "by") {
             return Err(JqlError::Unsupported(unexpected(&toks, i)));
@@ -282,7 +285,7 @@ pub fn parse_jql(raw: &str, off: FixedOffset) -> Result<Jql, JqlError> {
         };
         i += 1;
         match toks.get(i).and_then(kw).as_deref() {
-            None => {}
+            None | Some(",") => {}
             Some("asc") => {
                 jql.desc = false;
                 i += 1;
@@ -292,6 +295,15 @@ pub fn parse_jql(raw: &str, off: FixedOffset) -> Result<Jql, JqlError> {
                 i += 1;
             }
             Some(other) => return Err(JqlError::Unsupported(other.to_owned())),
+        }
+        // The tiebreak the search already applies, so it is parsed and kept
+        // nowhere (#1720).
+        if toks.get(i).is_some_and(|t| !t.quoted && t.text == ",") {
+            i += 1;
+            if !is_kw(toks.get(i), "id") || !is_kw(toks.get(i + 1), "asc") {
+                return Err(JqlError::Unsupported(unexpected(&toks, i)));
+            }
+            i += 2;
         }
         if i < toks.len() {
             return Err(JqlError::Unsupported(toks[i].text.clone()));

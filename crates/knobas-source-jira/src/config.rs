@@ -178,7 +178,7 @@ impl JiraConfig {
             if mentions_order_by(filter) {
                 return bad(
                     "jql_filter must not carry an ORDER BY: the adapter appends \
-                     ORDER BY created ASC, which is what makes startAt paging safe"
+                     ORDER BY created ASC, id ASC, which is what makes startAt paging safe"
                         .to_owned(),
                 );
             }
@@ -325,9 +325,9 @@ mod tests {
         assert!(msg.contains("not both"), "{msg}");
     }
 
-    /// The adapter appends `ORDER BY created ASC`, which is what makes
+    /// The adapter appends `ORDER BY created ASC, id ASC`, which is what makes
     /// `startAt` paging safe. A filter carrying its own ordering would produce
-    /// `… ORDER BY priority ORDER BY created ASC` -- invalid JQL, and a 400 the
+    /// `… ORDER BY priority ORDER BY created ASC, id ASC` -- invalid JQL, and a 400 the
     /// user cannot explain.
     #[test]
     fn a_filter_with_its_own_ordering_is_refused() {

@@ -672,7 +672,8 @@ async fn search(State(s): State<Arc<MockState>>, req: Request) -> Response {
         .filter(|i| jql.updated_gte.is_none_or(|t| i.updated >= t))
         .filter(|i| jql.projects.is_empty() || jql.projects.contains(&i.project))
         .collect();
-    // Ties broken by id so a page boundary is never ambiguous.
+    // Ties broken by id so a page boundary is never ambiguous: the `, id ASC`
+    // the Jira walk sends since #1720, and the order every other query gets.
     hits.sort_by(|a, b| {
         let by = match jql.order_by {
             SortKey::Updated => a.updated.cmp(&b.updated),

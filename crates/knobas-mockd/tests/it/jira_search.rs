@@ -99,6 +99,37 @@ async fn order_by_created_does_not_move_an_edited_issue() {
     s.assert_no_violations();
 }
 
+/// The Jira adapter's walk order since #1720: `created`, then `id` for the
+/// issues that share a `created` stamp. mockd already broke such ties by id
+/// ascending, so the second key changes no answer; what it adds is that the
+/// adapter's query parses. Any other second key is still outside the subset.
+#[tokio::test]
+async fn order_by_created_then_id_is_accepted_and_nothing_else_after_it() {
+    let s = spawn_mock_jira().await;
+    let (st, v) = search(
+        &s.base_url(),
+        "jql=ORDER%20BY%20created%20ASC%2C%20id%20ASC&maxResults=100",
+    )
+    .await;
+    assert_eq!(st, 200, "{v}");
+    let (_, by_created) = search(
+        &s.base_url(),
+        "jql=ORDER%20BY%20created%20ASC&maxResults=100",
+    )
+    .await;
+    assert_eq!(keys(&v), keys(&by_created));
+    s.assert_no_violations();
+
+    for refused in ["key%20ASC", "id%20DESC", "updated%20ASC"] {
+        let (st, body) = search(
+            &s.base_url(),
+            &format!("jql=ORDER%20BY%20created%20ASC%2C%20{refused}&maxResults=100"),
+        )
+        .await;
+        assert_eq!(st, 400, "{refused}: {body}");
+    }
+}
+
 #[tokio::test]
 async fn project_in_filters() {
     let s = spawn_mock_jira().await;

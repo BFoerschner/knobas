@@ -8,10 +8,10 @@
 //!    scope, `ORDER BY updated DESC` -- the newest `updated` this source's
 //!    corpus held when the run started.
 //! 3. Read the cursor. Unreadable or absent ⇒ full sync (interfaces §4.1).
-//! 4. Query `updated >= watermark − 2 minutes ORDER BY created ASC`, paging
-//!    with `startAt` until `total` is reached -- ordered by the one key an
-//!    edit cannot move, and failed when `total` shrinks under the walk
-//!    ([`refuse_a_shrunk_total`], #1623).
+//! 4. Query `updated >= watermark − 2 minutes ORDER BY created ASC, id ASC`,
+//!    paging with `startAt` until `total` is reached -- ordered by keys an
+//!    edit cannot move (`id` breaks ties on `created`, #1720), and failed
+//!    when `total` shrinks under the walk ([`refuse_a_shrunk_total`], #1623).
 //! 5. Drop what the overlap re-delivered, complete truncated comment/worklog
 //!    containers, push the rest into the sink.
 //! 6. If nothing was pushed, hand back the cursor byte-identically. Otherwise
