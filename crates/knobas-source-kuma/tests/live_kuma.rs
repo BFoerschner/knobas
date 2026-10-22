@@ -1113,3 +1113,161 @@ async fn a_docker_check_is_published_with_the_seeded_docker_host() {
 async fn fills_every_role_it_claims_on_the_seeded_corpus() {
     knobas_source::contract::fills_its_roles(env().source().as_ref()).await;
 }
+
+/// The monitor the lost-ack test makes (#1627): a third name, for
+/// [`CREATED`]'s reason. `monitors.json` names none of the three.
+const LOST_ACK: &str = "knobas-live-lost-ack";
+
+/// **The link to Kuma drops between an emit and its ack** (#1627), in front of
+/// the real server.
+///
+/// ADR-0013 counts a dropped connection among what a live instance can be made
+/// to do, so this fault is witnessed here and not by a fake Kuma: the Kuma
+/// that acts on the `add` is the pinned container. Only the link is staged.
+/// Each request goes to Kuma on a connection of its own, verbatim but for
+/// `Connection: close`, and Kuma's answer comes back verbatim. Once a POST
+/// carrying an `add` emit has gone through and its `ok` has been handed back,
+/// every later request is held open unanswered until the client gives up: the
+/// Wi-Fi gone after the create was accepted.
+struct LosingLink {
+    url: String,
+}
+
+impl LosingLink {
+    fn start(upstream: &str) -> Self {
+        let upstream = upstream
+            .strip_prefix("http://")
+            .expect("the seeded Kuma is plain http")
+            .trim_end_matches('/')
+            .to_owned();
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("a local port for the link");
+        let url = format!(
+            "http://{}",
+            listener.local_addr().expect("the link's own address")
+        );
+        let cut = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        std::thread::spawn(move || {
+            for client in listener.incoming().flatten() {
+                let upstream = upstream.clone();
+                let cut = std::sync::Arc::clone(&cut);
+                // An error ends that one exchange, which is what a dropped
+                // link does to it anyway.
+                std::thread::spawn(move || drop(relay(client, &upstream, &cut)));
+            }
+        });
+        Self { url }
+    }
+}
+
+/// One request through [`LosingLink`].
+fn relay(
+    client: std::net::TcpStream,
+    upstream: &str,
+    cut: &std::sync::atomic::AtomicBool,
+) -> std::io::Result<()> {
+    use std::io::{BufRead, Read, Write};
+    use std::sync::atomic::Ordering;
+
+    let mut reader = std::io::BufReader::new(client.try_clone()?);
+    let mut head = String::new();
+    let mut length = 0;
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            return Ok(());
+        }
+        if line == "\r\n" {
+            break;
+        }
+        let lower = line.to_ascii_lowercase();
+        if let Some(value) = lower.strip_prefix("content-length:") {
+            length = value.trim().parse().unwrap_or(0);
+        }
+        if !lower.starts_with("connection:") {
+            head.push_str(&line);
+        }
+    }
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body)?;
+    if cut.load(Ordering::SeqCst) {
+        // Held until the client times out and closes its end.
+        let _ = reader.read(&mut [0; 1]);
+        return Ok(());
+    }
+    let mut kuma = std::net::TcpStream::connect(upstream)?;
+    kuma.write_all(head.as_bytes())?;
+    kuma.write_all(b"Connection: close\r\n\r\n")?;
+    kuma.write_all(&body)?;
+    let mut answer = Vec::new();
+    kuma.read_to_end(&mut answer)?;
+    const ADD: &[u8] = br#"["add""#;
+    if head.starts_with("POST") && body.windows(ADD.len()).any(|w| w == ADD) {
+        cut.store(true, Ordering::SeqCst);
+    }
+    (&client).write_all(&answer)
+}
+
+/// **#1627 against the real Kuma: one create whose ack is lost is one
+/// monitor, and the write says it may have landed.**
+///
+/// The `add` reaches Kuma, Kuma creates the monitor and acknowledges it, and
+/// the polls that would carry the ack never come back ([`LosingLink`]). The
+/// write answers `Unconfirmed`, which the write queue holds for a create
+/// (`tests/it/write_queue.rs` in `knobas-sync` pins that half), and Kuma has
+/// exactly one monitor by that name. Before #1627 the same run answered
+/// `Unreachable`, which the queue sends again on its next tick.
+///
+/// A two-second request timeout, so the three timed-out polls fit well inside
+/// the call's sixty-second deadline: the failure under test is the transport's,
+/// not the deadline's.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn a_create_whose_ack_is_lost_is_unconfirmed_and_one_monitor() {
+    let env = env();
+    // Armed before the create, for the reason the create test gives. No
+    // delete first, unlike that test: the seed `just kuma-live` runs first
+    // sweeps a name `monitors.json` does not carry, and every helper call is
+    // one of the twenty logins a minute Kuma allows the whole run.
+    let _litter = Scratch::removing(LOST_ACK);
+
+    let link = LosingLink::start(&env.url);
+    let source = knobas_source_kuma::build(SourceInstance {
+        id: "kuma".to_owned(),
+        kind: knobas_source_kuma::ADAPTER_KIND.to_owned(),
+        display_name: "Uptime Kuma".to_owned(),
+        base_url: link.url.clone(),
+        auth: Some(AuthMethod::ApiToken),
+        secret: Some(env.key.clone()),
+        account: Some(env.account.clone()),
+        config: serde_json::json!({ "request_timeout_secs": 2 }),
+    })
+    .expect("the adapter builds against the link");
+
+    let lost = source
+        .write(WriteOp::CreateMonitor {
+            entity: knobas_source::monitor_target("kuma"),
+            name: LOST_ACK.to_owned(),
+            url: SCRATCH_URL.to_owned(),
+            kind: knobas_source::MonitorKind::Http,
+        })
+        .await
+        .expect_err("the ack never reaches knobas");
+    assert!(
+        matches!(lost, SourceError::Unconfirmed { .. }),
+        "a create Kuma took and whose ack was lost may have landed: {lost:?}"
+    );
+
+    // Read past the link, straight from Kuma.
+    let items = until(
+        env.source().as_ref(),
+        "the lost-ack create landed",
+        |items| items.iter().any(|item| item.title == LOST_ACK),
+    )
+    .await;
+    let made = items
+        .iter()
+        .filter(|item| item.title == LOST_ACK && !item.deleted)
+        .count();
+    assert_eq!(made, 1, "one create must make one monitor");
+}

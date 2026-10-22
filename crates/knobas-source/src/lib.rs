@@ -440,13 +440,15 @@ pub enum SourceError {
     /// says whether the source acted (issue #1125): it timed out after the
     /// request went out, or a gateway answered `502`/`504` for it.
     ///
-    /// Raised only by `knobas_http` for a request sent with
+    /// Raised by `knobas_http` for a request sent with
     /// `Request::no_retry`, which is how an adapter says a write must not
     /// arrive twice. Everywhere but the write queue it reads as
     /// [`Unreachable`](Self::Unreachable). An adapter whose write takes more
     /// than one request turns it back into `Unreachable` when the request
     /// that failed came before the write's own (Kuma's login,
-    /// `not_yet_emitted`). The queue does not send such a
+    /// `not_yet_emitted`), and raises it itself for a failure after the
+    /// write's own was accepted and before its answer was read (Kuma's ack
+    /// poll and deadline, `once_emitted`, #1627). The queue does not send such a
     /// write again by itself: it holds it, so a person checks the source and
     /// sends it again or discards it (`knobas_sync::write_queue`).
     ///

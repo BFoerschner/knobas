@@ -11,6 +11,15 @@
 //! cannot be asked to do on cue -- reap a session between two writes, forget
 //! a login, or lose the race a login sent too early can lose (#1472) -- and
 //! for the count of logins, which the real server does not report.
+//!
+//! The lost acknowledgements of #1627 are here at the class level: an ack
+//! poll that times out, a session reaped before its ack is read, an emit
+//! never acknowledged, and a deadline with the emit still on the wire. The
+//! first, which is the ticket's case, is also witnessed against the real
+//! container (`live_kuma.rs`, `a_create_whose_ack_is_lost_is_unconfirmed_and_one_monitor`,
+//! through a link that drops after the `add`, ADR-0013's *drop the
+//! connection*). The other three need Kuma itself to reap or stall on cue
+//! between one packet and the next, and the fake is their witness.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -54,6 +63,19 @@ struct Engine {
     /// When set, the login is answered this late: the client's POST times
     /// out before the write's own packet is sent (#1125).
     stall_login: Option<Duration>,
+    /// When set, every read after Kuma acted on an emit is answered this
+    /// late: the packet landed and its ack is queued, and the poll that
+    /// would carry it times out on the way back -- the Wi-Fi gone between
+    /// the emit and its acknowledgement (#1627).
+    stall_reads_after_acting: Option<Duration>,
+    /// The same, from the moment the login's POST arrives: the login's ack
+    /// is lost, and the write's own packet never goes out.
+    stall_reads_after_login: Option<Duration>,
+    /// How late every read is answered now, once one of the two above fired.
+    reads_stalled: Option<Duration>,
+    /// When set, Kuma acts on an emit and never acknowledges it: the session
+    /// stays up and every read answers a no-op, until the deadline.
+    swallow_acks: bool,
 }
 
 /// The stateful half of the fake, shared by every mock it mounts.
@@ -86,6 +108,11 @@ impl Respond for Kuma {
             return gone();
         }
         if request.method.as_str() == "GET" {
+            if let Some(stall) = engine.reads_stalled {
+                return ResponseTemplate::new(200)
+                    .set_body_string("6")
+                    .set_delay(stall);
+            }
             let registered = match engine.registering.get_mut(&sid) {
                 Some(reads) if *reads > 1 => {
                     *reads -= 1;
@@ -120,13 +147,19 @@ impl Respond for Kuma {
             queued.push_back(reply);
         }
         let ok = ResponseTemplate::new(200).set_body_string("ok");
-        if let Some(stall) = engine.stall_login
-            && packet.contains(r#"["login""#)
-        {
-            return ok.set_delay(stall);
+        if packet.contains(r#"["login""#) {
+            if engine.stall_reads_after_login.is_some() {
+                engine.reads_stalled = engine.stall_reads_after_login;
+            }
+            if let Some(stall) = engine.stall_login {
+                return ok.set_delay(stall);
+            }
         }
         if engine.delivered.len() == delivered_before {
             return ok;
+        }
+        if engine.stall_reads_after_acting.is_some() {
+            engine.reads_stalled = engine.stall_reads_after_acting;
         }
         if engine.reap_after_acting {
             engine.sessions.clear();
@@ -169,6 +202,9 @@ impl Engine {
             }
         } else if self.sessions.get(sid)?.0 {
             self.delivered.push(name);
+            if self.swallow_acks {
+                return None;
+            }
             serde_json::json!({"ok": true, "msg": "successPaused"})
         } else {
             serde_json::json!({"ok": false, "msg": ANONYMOUS})
@@ -408,6 +444,122 @@ async fn a_create_that_landed_before_a_reap_is_not_sent_on_a_fresh_login() {
     );
     assert_eq!(kuma.delivered(), 1, "exactly one create reached Kuma");
     assert_eq!(kuma.logins(), 1, "no fresh login to resend it on");
+}
+
+/// **#1627, the ticket's case.** Kuma accepts the `add`'s POST and acts on it,
+/// and every poll for its ack times out on the way back. The create may have
+/// landed, so it is `Unconfirmed`, which the write queue holds; `Unreachable`
+/// would have it sent again on the next tick and make a second monitor.
+#[tokio::test]
+async fn a_create_whose_ack_was_lost_after_landing_is_unconfirmed() {
+    let (server, kuma) = Kuma::start(20).await;
+    let socket = stalling(&server, &kuma, Duration::ZERO, false);
+    kuma.engine().stall_reads_after_acting = Some(Duration::from_millis(1500));
+    let error = add(&socket).await.expect_err("the ack never arrived");
+    assert!(
+        matches!(error, SourceError::Unconfirmed { status: None, .. }),
+        "{error:?}"
+    );
+    assert_eq!(kuma.delivered(), 1, "exactly one create reached Kuma");
+    assert_eq!(kuma.logins(), 1, "no fresh login to resend it on");
+}
+
+/// **#1627, the other shape of a lost ack.** Kuma acts on the `add` and reaps
+/// the session before its ack is read, so the poll answers `400 Session ID
+/// unknown`. That `400` is about the read, not the packet, which was
+/// accepted: `Unconfirmed` and not a `Protocol` the queue records as refused
+/// while the monitor exists.
+#[tokio::test]
+async fn a_create_whose_session_was_reaped_before_its_ack_is_unconfirmed() {
+    let (server, kuma) = Kuma::start(20).await;
+    let socket = stalling(&server, &kuma, Duration::ZERO, true);
+    let error = add(&socket)
+        .await
+        .expect_err("the session went with the ack");
+    assert!(
+        matches!(
+            error,
+            SourceError::Unconfirmed {
+                status: Some(400),
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(kuma.delivered(), 1, "exactly one create reached Kuma");
+    assert_eq!(kuma.logins(), 1, "no fresh login to resend it on");
+}
+
+/// **#1627, the control.** The login's ack is what is lost: the write's own
+/// packet never went out, so the failure stays `Unreachable` and the queue may
+/// send the create later. `Unconfirmed` here would hold a create Kuma never saw.
+#[tokio::test]
+async fn a_login_whose_ack_was_lost_is_unreachable() {
+    let (server, kuma) = Kuma::start(20).await;
+    let socket = stalling(&server, &kuma, Duration::ZERO, false);
+    kuma.engine().stall_reads_after_login = Some(Duration::from_millis(1500));
+    let error = add(&socket)
+        .await
+        .expect_err("the login's ack never arrived");
+    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
+    assert_eq!(kuma.delivered(), 0, "the create never reached Kuma");
+}
+
+/// **#1627, the deadline after the emit.** Kuma acts on the `add` and never
+/// acknowledges it while the session stays up. The deadline that ends the
+/// wait is `Unconfirmed`: the create landed, and a refusal would record it as
+/// never made.
+#[tokio::test]
+async fn a_create_left_unacknowledged_past_the_deadline_is_unconfirmed() {
+    let (server, kuma) = Kuma::start(20).await;
+    let socket = socket_to(&server).with_budget(Duration::from_millis(500));
+    kuma.engine().swallow_acks = true;
+    let error = add(&socket).await.expect_err("Kuma never acknowledged it");
+    match error {
+        SourceError::Unconfirmed {
+            status: None,
+            message,
+        } => assert!(message.contains("500ms"), "{message}"),
+        other => panic!("expected Unconfirmed, got {other:?}"),
+    }
+    assert_eq!(kuma.delivered(), 1, "exactly one create reached Kuma");
+}
+
+/// **#1627, the deadline with the emit on the wire.** Kuma acted on the `add`
+/// and its answer to the POST is still on the way when the deadline drops
+/// it. A packet already sent may have landed, so this is `Unconfirmed` too.
+#[tokio::test]
+async fn a_create_still_on_the_wire_at_the_deadline_is_unconfirmed() {
+    let (server, kuma) = Kuma::start(20).await;
+    let socket = socket_to(&server).with_budget(Duration::from_millis(500));
+    kuma.engine().stall_after_acting = Some(Duration::from_millis(1500));
+    let error = add(&socket).await.expect_err("the deadline came first");
+    assert!(
+        matches!(error, SourceError::Unconfirmed { status: None, .. }),
+        "{error:?}"
+    );
+    assert_eq!(kuma.delivered(), 1, "exactly one create reached Kuma");
+}
+
+/// **#1627, the deadline before the emit.** The held session is gone, so the
+/// create's first packet was refused unread (`400`), and the deadline falls
+/// on the fresh login that would carry it. Nothing of this write reached
+/// Kuma, so the deadline keeps its own class: status-less `Protocol`.
+#[tokio::test]
+async fn a_deadline_on_the_login_after_a_reaped_session_keeps_its_class() {
+    let (server, kuma) = Kuma::start(20).await;
+    let socket = socket_to(&server).with_budget(Duration::from_millis(500));
+    add(&socket).await.expect("the first create");
+    kuma.reap();
+    kuma.engine().stall_login = Some(Duration::from_millis(1500));
+    let error = add(&socket)
+        .await
+        .expect_err("the fresh login outlasted the deadline");
+    assert!(
+        matches!(error, SourceError::Protocol { status: None, .. }),
+        "{error:?}"
+    );
+    assert_eq!(kuma.delivered(), 1, "only the first create reached Kuma");
 }
 
 /// Adapters built for the same instance and account share one socket, and so

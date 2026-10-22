@@ -11582,3 +11582,65 @@ set.
 **Ruling:** the ticket's fix direction offers "export as pure helpers or fold"; it chose the former and no acceptance criterion asks for a merge. After this PR `parseHash` is read only for asset addresses (`TfAssetTree`, `AssetsView`'s `hashFor`), where `tf/route.ts` has no competing reading, so the disagreement has no live reader. Left alone.
 
 **Cost of reversing:** folding the asset addresses into `tf/route.ts`, a small ticket.
+## #1627: a Kuma write whose acknowledgement was lost (Opus implementer, 2026-10-22)
+
+- **Which failures after the emit become `Unconfirmed`.** The ticket says "any transport failure".
+  *Ruling:* every class the ack poll can fail with: `Unreachable`, `Protocol` with any status or
+  none, `Unauthorized`, and an `Unconfirmed` from a pong. The poll's status is kept
+  (`once_emitted`). A `400 Session ID unknown` on the poll means the session went *after* the
+  packet was taken, and a `401` from a proxy in front of Kuma says nothing about the packet. Left
+  as they were, the first is recorded as refused and the second waits for a credential and then
+  sends the create again. *Reversing:* low, one match.
+- **When the emit "went out", for the deadline.** *Ruling:* from the moment its POST starts, not
+  from when the POST returns `Ok`. A deadline that drops the POST in flight may drop a packet Kuma
+  already took, which is `knobas_http::classify::once_sent`'s reading of a timeout after connect.
+  The flag is cleared again by the two refusals that prove Kuma did nothing (`400` to the emit's
+  own POST, *You are not logged in.*), so a deadline on the fresh login that follows keeps the
+  status-less `Protocol` it had before. *Reversing:* low, one line moves.
+- **An ack that arrived but cannot be read** (`answer()`'s parse failure). *Ruling:* left as
+  status-less `Protocol` here. The ack arrived, so this is not a lost acknowledgement, and the
+  pinned Kuma never produces one. It is the one Kuma path left that can record a write that may
+  have landed as refused, and #1721 (backlog) holds the fork. *Reversing:* low.
+- **Pause and resume after a post-emit deadline.** Before this change they were refused; now they
+  are `Unconfirmed`, which their `resend_harmless` delivery turns into an `unreachable` wait, sent
+  again on a later tick. The socket's old doc argued against exactly that wait (a minute of every
+  tick against a drifted Kuma). *Ruling:* accepted. The ticket asks for it, a pause that landed
+  must not read as refused, and #1628's ladder is what bounds how often it goes again.
+  *Reversing:* low.
+- **The `SourceError::Unconfirmed` doc comment in the frozen crate.** It said the variant is
+  "raised only by `knobas_http`". *Ruling:* rewritten and booked in
+  `docs/contract/10.8/1627-kuma-lost-ack-unconfirmed.md`, because it changes what the clause
+  commits to (who may raise the variant), which #518's rule sends to the gate as code.
+  *Reversing:* low, one comment.
+- **What `just kuma-live` witnesses.** ADR-0013 counts a dropped connection among what a live
+  instance can be made to do, so a fake Kuma alone would not do for the ticket's case. *Ruling:*
+  `live_kuma.rs` puts a relay between the adapter and the real container that drops every request
+  after the `add` has been answered (`LosingLink`). The real Kuma creates the monitor, the write
+  answers `Unconfirmed` (`Unreachable` with the parent's `socket.rs`, run and recorded in the PR),
+  and Kuma holds exactly one monitor by that name. `kuma_write_live.rs` also asserts one attached
+  monitor for the happy-path create. The reaped-before-ack, never-acknowledged and on-the-wire
+  deadline cases need Kuma itself to reap or stall between two packets, and stay with
+  `socket::session_tests`' fake. *Reversing:* low, one test and its relay.
+- **Kuma's login limit in `just kuma-live`.** With the lost-ack test added, one run's second
+  binary had its `kuma-monitor.sh add` refused with *Too frequently, try again later.*: the suite
+  sits near Kuma's twenty logins a minute, and the new test spends logins of its own. *Ruling:*
+  the lost-ack test skips the pre-delete the create test makes (the seed the recipe runs first
+  sweeps the name), and `testenv/kuma-monitor.mjs` waits 61 s and logs in once more when its
+  login is refused for the limit, rather than failing a test on the fixture's budget. The re-run
+  that followed did not need the wait. Re-adding #864's 61 s sleep between the binaries would
+  have cost every run a minute. *Reversing:* low, one branch in the helper.
+- **Merge-manager review (Opus, 2026-10-22): pause and resume sent again after a post-emit
+  deadline.** *Ruling:* right under ADR-0012 as amended by #1125. Kuma's `pauseMonitor` and
+  `resumeMonitor` set the monitor's `active` flag and stop or restart its check, so a second
+  arrival leaves the state the first set; `WriteOp::delivery` already says `resend_harmless: true`
+  for both ("the same state twice is one"). `store::due` takes a source's head write, so a later
+  opposite op stays behind the waiting one. The cost is time, not state: a Kuma that takes the
+  emit and never acknowledges it spends up to `CALL_BUDGET` (60 s) of the sequential `flush_all`
+  per attempt until #1628's ladder spaces the attempts (noted on #1628). *Reversing:* low.
+- **Merge-manager review: the login-limit retry in `testenv/kuma-monitor.mjs`.** *Ruling:* sound.
+  It matches only Kuma's own refusal text inside the login callback, waits once, and a second
+  refusal still fails the helper with Kuma's words; the wait is logged. It cannot hide an adapter
+  that spends too many logins: the adapter's budget is witnessed by
+  `more_writes_in_a_minute_than_kuma_allows_logins_all_land`, which drives the adapter directly,
+  not the helper. It also covers the cause #1727 reports (`Scratch::drop`'s delete refused for the
+  limit), since the delete goes through the same login. *Reversing:* low.

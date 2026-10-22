@@ -3149,10 +3149,16 @@ knobas-source-kuma	lib/knobas_source_kuma	model::tests::kumas_literal_null_label
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::only_the_monitor_families_make_monitors
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::the_response_time_sentinel_is_an_absence
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::the_state_words_are_the_help_lines_own
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_create_left_unacknowledged_past_the_deadline_is_unconfirmed
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_create_still_on_the_wire_at_the_deadline_is_unconfirmed
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_create_that_landed_before_a_reap_is_not_sent_on_a_fresh_login
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_create_whose_ack_was_lost_after_landing_is_unconfirmed
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_create_whose_emit_timed_out_after_landing_is_not_sent_again
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_create_whose_session_was_reaped_before_its_ack_is_unconfirmed
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_deadline_on_the_login_after_a_reaped_session_keeps_its_class
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_login_refused_for_the_rate_limit_is_not_a_wrong_password
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_login_that_timed_out_before_the_write_was_emitted_is_unreachable
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_login_whose_ack_was_lost_is_unreachable
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_reaped_session_is_replaced_and_the_write_lands_once
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_session_idle_past_its_window_is_not_reused
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_session_that_lost_its_login_logs_in_again
@@ -3187,6 +3193,7 @@ knobas-source-kuma	test/it	contract::fills_every_role_it_claims
 knobas-source-kuma	test/it	contract::passes_the_contract_battery
 knobas-source-kuma	test/it	contract::test_connection_reports_the_version_and_the_roster_size
 knobas-source-kuma	test/it	contract::the_declared_ops_are_the_spis_own_identifiers
+knobas-source-kuma	test/live_kuma	a_create_whose_ack_is_lost_is_unconfirmed_and_one_monitor
 knobas-source-kuma	test/live_kuma	a_docker_check_is_published_with_the_seeded_docker_host
 knobas-source-kuma	test/live_kuma	a_full_sync_mirrors_every_seeded_monitor
 knobas-source-kuma	test/live_kuma	a_monitor_created_through_the_write_op_is_published_under_the_id_it_answered
@@ -3754,6 +3761,7 @@ knobas-sync	test/it	write_queue::a_comment_that_landed_and_timed_out_is_held
 knobas-sync	test/it	write_queue::a_commit_into_a_repository_whose_record_moved_is_not_held
 knobas-sync	test/it	write_queue::a_commit_over_a_file_that_moved_is_held_with_both_versions
 knobas-sync	test/it	write_queue::a_create_that_landed_and_timed_out_is_held_and_not_sent_again
+knobas-sync	test/it	write_queue::a_monitor_create_whose_ack_was_lost_is_held_not_pending
 knobas-sync	test/it	write_queue::a_page_created_after_the_user_withdrew_it_is_recorded_with_its_id
 knobas-sync	test/it	write_queue::a_page_whose_version_moved_past_the_edit_holds_it_with_both_versions
 knobas-sync	test/it	write_queue::a_pull_request_opened_after_a_withdrawal_leaves_nothing_unclaimed

@@ -325,6 +325,8 @@ impl Harness {
                 WriteOp::CreateTicket { title, .. } | WriteOp::CreatePage { title, .. } => {
                     title.clone()
                 }
+                // A monitor by its name, which is what attaches it (#453).
+                WriteOp::CreateMonitor { name, .. } => name.clone(),
                 // Except this one, which is looked for by the head branch it
                 // was opened from rather than by its title -- sync's `unclaimed`
                 // argues why that difference matters (#353).
@@ -444,6 +446,23 @@ impl Harness {
                 title: title.to_owned(),
                 body: "why".to_owned(),
                 ticket_type: "Task".to_owned(),
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    /// Queue a monitor create on this harness's source, as the asset pane's
+    /// dialog does (#453).
+    async fn create_monitor(&self, name: &str) -> store::QueuedWrite {
+        flusher::submit(
+            &self.deps,
+            &self.source,
+            WriteOp::CreateMonitor {
+                entity: knobas_source::monitor_target(&self.source),
+                name: name.to_owned(),
+                url: "https://payments.tidewater.test/health".to_owned(),
+                kind: knobas_source::MonitorKind::default(),
             },
         )
         .await
@@ -1637,6 +1656,31 @@ async fn a_comment_that_landed_and_timed_out_is_held() {
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
 
     assert_eq!(h.delivered(), vec!["on it".to_owned()]);
+    assert_eq!(h.reload(write.id).await.state, WriteState::Held);
+}
+
+/// **#1627.** A Kuma create whose ack was lost after the emit answers
+/// `Unconfirmed`, and the queue holds it: a second `add` is a second
+/// `payments-api` monitor. It is not left pending for the next tick.
+#[tokio::test]
+async fn a_monitor_create_whose_ack_was_lost_is_held_not_pending() {
+    let h = harness().await;
+
+    h.answer(Answer::LandsThenTimesOut);
+    let write = h.create_monitor("payments-api").await;
+    let held = h.reload(write.id).await;
+    assert_eq!(held.state, WriteState::Held, "{held:?}");
+    assert_eq!(held.wait_reason, None, "{held:?}");
+
+    h.answer(Answer::Accept);
+    for _ in 0..3 {
+        flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    }
+    assert_eq!(
+        h.delivered(),
+        vec!["payments-api".to_owned()],
+        "a create that may have landed is not sent again on its own"
+    );
     assert_eq!(h.reload(write.id).await.state, WriteState::Held);
 }
 

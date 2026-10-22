@@ -598,10 +598,18 @@ async fn a_monitor_created_through_the_write_queue_is_mirrored_and_attached_to_i
         tokio::time::sleep(Duration::from_secs(2)).await;
     };
 
-    let (_, entity) = watching
+    // One create, one monitor (#1627): the write was sent once, and a second
+    // `add` under the same name would attach a second monitor here.
+    let created: Vec<_> = watching
         .iter()
-        .find(|(name, _)| name == CREATED)
-        .expect("the created monitor is attached");
+        .filter(|(name, _)| name == CREATED)
+        .collect();
+    assert_eq!(
+        created.len(),
+        1,
+        "one create must make one monitor: {watching:?}"
+    );
+    let (_, entity) = created[0];
     assert_eq!(
         entity,
         &format!("{KUMA}:{minted}"),
