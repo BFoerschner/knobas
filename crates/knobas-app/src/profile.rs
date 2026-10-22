@@ -32,17 +32,36 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Read the profile out of the process arguments.
-    ///
-    /// A flag rather than an environment variable: it is what §14a writes
-    /// (`knobas --demo`), it shows up in a process list, and it cannot be
-    /// inherited by accident from a shell that once exported it.
+    /// Read the profile out of the process arguments: [`demo_in`](Self::demo_in)
+    /// and [`new`](Self::new) in one call.
     #[must_use]
     pub fn from_args<I>(args: I, app_data_dir: &Path) -> Self
     where
         I: IntoIterator<Item = String>,
     {
-        let demo = args.into_iter().any(|arg| arg == DEMO_FLAG);
+        Self::new(Self::demo_in(args), app_data_dir)
+    }
+
+    /// Whether `args` select the demo profile: the flag half of a profile.
+    ///
+    /// A flag rather than an environment variable: it is what §14a writes
+    /// (`knobas --demo`), it shows up in a process list, and it cannot be
+    /// inherited by accident from a shell that once exported it.
+    ///
+    /// `run()` asks this **once**, before the Tauri builder, and hands the
+    /// answer both to the single-instance exemption and to `setup` (LIFE-8):
+    /// two reads of the arguments were two copies of the mixing rule.
+    #[must_use]
+    pub fn demo_in<I>(args: I) -> bool
+    where
+        I: IntoIterator<Item = String>,
+    {
+        args.into_iter().any(|arg| arg == DEMO_FLAG)
+    }
+
+    /// The profile `demo` selects, under the platform's `app_data_dir`.
+    #[must_use]
+    pub fn new(demo: bool, app_data_dir: &Path) -> Self {
         Self {
             demo,
             // A subdirectory, so the default profile keeps M0's layout

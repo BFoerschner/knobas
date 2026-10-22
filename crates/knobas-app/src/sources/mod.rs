@@ -500,26 +500,28 @@ pub fn to_ipc(error: &SourcesError, source_id: Option<&str>) -> crate::IpcError 
 /// scheduler's startup reconciliation fails. Both mean the
 /// database is not usable, which the caller reports as a failed bring-up.
 ///
-/// `suggestions` is the process's one suggestion pass, which the caller also
-/// gives `AppState` (#1485): the scheduler requests it after every OK run.
+/// `registry` is the list the installed adapters load into: the process's
+/// ([`Registry::for_process`]) in the app, which a retried bring-up finds
+/// already holding them. `suggestions` is the process's one suggestion pass
+/// (#1485): the scheduler requests it after every OK run.
 pub async fn start<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &knobas_db::EmbeddedDb,
+    profile: &crate::Profile,
+    registry: Registry,
     suggestions: crate::suggestion_pass::SuggestionPass,
 ) -> Result<(), SourcesError> {
     // Its own pool for the scheduler's bookkeeping; the runs themselves take a
     // connection each from the connector, outside every pool (§10.6(c)).
     let sync_pool = db.pool_for(knobas_sync::scheduler::SYNC_POOL_SIZE).await?;
-    let profile = app.state::<crate::Profile>().inner().clone();
-    let process = Registry::for_process();
     let state = bring_up(
         app,
         BringUp {
             pool: db.pool().clone(),
             sync_pool,
             connections: db.connector(),
-            secrets: secret_store(&profile, *app.state::<SecretStoreKind>()),
-            registry: process.clone(),
+            secrets: secret_store(profile, *app.state::<SecretStoreKind>()),
+            registry: registry.clone(),
             store: install::store_dir(&profile.dir),
             suggestions,
         },
@@ -532,7 +534,7 @@ pub async fn start<R: tauri::Runtime>(
     let pool = state.pool.clone();
     tauri::async_runtime::spawn(async move {
         let endpoints = remote::Endpoints::default();
-        if let Err(error) = installed::check_updates(&pool, &process, &endpoints).await {
+        if let Err(error) = installed::check_updates(&pool, &registry, &endpoints).await {
             tracing::warn!(%error, "the external adapters' update check did not run");
         }
     });
@@ -695,7 +697,7 @@ pub async fn test_scheduler<R: tauri::Runtime>(
 /// inside transactions, and closing the database under them is the stall the
 /// carry-over describes. Safe to call twice -- `RunEvent::ExitRequested` can
 /// fire more than once.
-pub fn shutdown(app: &tauri::AppHandle) {
+pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Some(state) = app.try_state::<SourcesState>() else {
         return; // bring-up failed before the scheduler existed
     };
