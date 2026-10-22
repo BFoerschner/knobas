@@ -15,7 +15,7 @@
 //! `#[ignore]`d, so `just check` runs none of it:
 //!
 //! ```text
-//! cd testenv && docker compose up -d gitea && ./seed
+//! cd testenv && docker compose --env-file images.env up -d gitea && ./seed
 //! eval "$(cd testenv && ./seed --env)"
 //! cargo test -p knobas-source-gitea --test live_gitea -- --ignored --nocapture
 //! ```

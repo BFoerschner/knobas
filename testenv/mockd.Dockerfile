@@ -6,7 +6,7 @@
 # fixtures/tidewater/work.json. Neither is reachable from a context rooted at
 # testenv/.
 #
-# Both stages are pinned by digest from testenv/.env (see pin-images.sh). The
+# Both stages are pinned by digest from testenv/images.env (see pin-images.sh). The
 # defaults below keep a bare `docker build -f testenv/mockd.Dockerfile .`
 # working outside compose; compose always passes the pins.
 ARG RUST_IMAGE=rust:1-slim

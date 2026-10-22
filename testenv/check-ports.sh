@@ -34,7 +34,7 @@ show_diff() {
 
 # service|host_ip|published|target|protocol, one line per published port.
 resolved() {
-  docker compose "$@" config --format json \
+  docker compose --env-file images.env "$@" config --format json \
     | jq -r '.services | to_entries[] | .key as $s
              | (.value.ports // [])[]
              | "\($s)|\(.host_ip)|\(.published)|\(.target)|\(.protocol)"' \
@@ -46,11 +46,11 @@ resolved() {
 # fails -- but it blames the port map for what is really a schema error, and
 # the next person debugs the wrong file. Name it here instead. (Found by
 # mutation MP-4, which deleted a `ports:` entry and got exactly that.)
-docker compose config -q 2>&1 \
+docker compose --env-file images.env config -q 2>&1 \
   || { echo "check-ports: docker-compose.yml is not a valid compose file (default profile); fix that first" >&2; exit 1; }
-docker compose --profile seed --profile real-teamcity --profile real-atlassian --profile forgejo config -q 2>&1 \
+docker compose --env-file images.env --profile seed --profile real-teamcity --profile real-atlassian --profile forgejo config -q 2>&1 \
   || { echo "check-ports: docker-compose.yml is not a valid compose file (with all profiles enabled); fix that first" >&2; exit 1; }
-docker compose -f docker-compose.yml -f docker-compose.capped.yml config -q 2>&1 \
+docker compose --env-file images.env -f docker-compose.yml -f docker-compose.capped.yml config -q 2>&1 \
   || { echo "check-ports: docker-compose.capped.yml does not overlay docker-compose.yml cleanly; fix that first" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------

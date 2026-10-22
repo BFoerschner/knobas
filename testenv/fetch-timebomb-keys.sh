@@ -23,7 +23,7 @@
 # forty minutes later.
 #
 # `.env.licences` is covered by the tracked `.gitignore` (`.env.*`). Nothing
-# here is secret, but the seed scripts refuse `.env` for keys on principle, and
+# here is secret, but the seed scripts refuse `images.env` for keys on principle, and
 # a public key today is not a promise about the next one.
 set -eu
 cd "$(dirname "$0")"

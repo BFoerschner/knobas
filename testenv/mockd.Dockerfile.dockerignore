@@ -11,4 +11,4 @@ app/dist/
 mockups/
 docs/
 .superpowers/
-testenv/.env
+testenv/images.env

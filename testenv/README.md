@@ -7,7 +7,9 @@ lock — see *Live products, on demand*) and, until the live suites replace it, 
 
 ```sh
 cd testenv
-docker compose up -d --build   # gitea, uptime-kuma, mockd
+# every compose call passes the pins file: --env-file images.env (never a bare
+# `.env`, which means a token and nothing else in this repo)
+docker compose --env-file images.env up -d --build   # gitea, uptime-kuma, mockd
 ./seed                         # the Tidewater content, idempotent
 ```
 
@@ -215,7 +217,7 @@ does `live-up gitea`.
 **Forgejo, as a Gitea source (#1195, spec #1192 story 18).** Forgejo is the hard
 fork of Gitea and is expected to work through the same adapter. `just
 gitea-live forgejo` is the one switch: it starts the pinned Forgejo image
-(`FORGEJO_IMAGE` in `.env`, version 17.0.0 and its digest; profile `forgejo`, port
+(`FORGEJO_IMAGE` in `images.env`, version 17.0.0 and its digest; profile `forgejo`, port
 3002, volume `forgejo-data`), seeds it with `seed-forgejo.sh` (the Gitea
 seed, `KNOBAS_SEED_SERVICE=forgejo`, its state in the git-ignored
 `seed-state-forgejo.json` so Gitea's token and id map are never touched), prints
@@ -377,7 +379,7 @@ the ways until #684 and is the rule that ended it; the four after it still are:
   `./seed-kuma.sh` creates and repairs. It points at `tcp://docker-proxy:2375`,
   the `docker-proxy` service (tecnativa/docker-socket-proxy: container reads
   only, no POST, no published port, on an internal network shared with Kuma
-  alone). A plain `docker compose up` starts it, as it starts Kuma, and Kuma
+  alone). A plain `docker compose --env-file images.env up` starts it, as it starts Kuma, and Kuma
   depends on it; container reads include every container's environment, which
   is why nothing else reaches it. Kuma deliberately does **not** mount
   `/var/run/docker.sock`: that would give the container control of the Docker
@@ -479,11 +481,11 @@ places:
 
 ## Opt-in profiles
 
-Off by default because they are expensive. Approximate costs are in `.env`.
+Off by default because they are expensive. Approximate costs are in `images.env`.
 
 ```sh
-docker compose --profile real-teamcity  up -d teamcity teamcity-agent   # ~3.5 GB pull, ~10 GB on disk
-docker compose --profile real-atlassian up -d jira-db jira confluence-db confluence
+docker compose --env-file images.env --profile real-teamcity  up -d teamcity teamcity-agent   # ~3.5 GB pull, ~10 GB on disk
+docker compose --env-file images.env --profile real-atlassian up -d jira-db jira confluence-db confluence
 ```
 
 ### TeamCity, with one build agent
@@ -499,7 +501,7 @@ the fix for that refusal is to re-derive the sequence (the recipe is in the
 script's header). About forty seconds from empty volumes, unattended:
 
 ```sh
-docker compose --profile real-teamcity up -d teamcity teamcity-agent
+docker compose --env-file images.env --profile real-teamcity up -d teamcity teamcity-agent
 ./seed --teamcity           # or ./seed-teamcity.sh
 eval "$(./seed --env)"      # adds KNOBAS_TEAMCITY_URL and KNOBAS_TEAMCITY_TOKEN
 ```
@@ -769,9 +771,9 @@ eval "$(./fetch-timebomb-keys.sh)"
 # pushed Jira's post-wizard restart past its wait (issue #314), and that
 # restart is the long pole: Jira writes its schema and re-initialises its
 # whole plugin system before `/status` says RUNNING.
-docker compose --profile real-atlassian up -d --wait jira-db jira
+docker compose --env-file images.env --profile real-atlassian up -d --wait jira-db jira
 ./seed-atlassian.sh jira
-docker compose --profile real-atlassian up -d --wait confluence-db confluence
+docker compose --env-file images.env --profile real-atlassian up -d --wait confluence-db confluence
 ./seed-atlassian.sh confluence
 
 ./seed-atlassian-content.sh # the Tidewater content (next section)
@@ -817,7 +819,7 @@ A state that climbs is a slow start, one state repeated to the cap is a hang,
 and `UNREACHABLE` throughout is a container to read `docker logs` for. A cap
 that fires is a statement about the machine.
 
-The keys live in your **shell**, not in `.env` — that file is tracked
+The keys live in your **shell**, not in `images.env` — that file is tracked
 (`./fetch-timebomb-keys.sh --write` drops them in the git-ignored
 `.env.licences` if you want them to survive a new terminal).
 `CONFLUENCE_LICENSE_KEY` must be set when the container *first starts*, since
@@ -1069,7 +1071,7 @@ Two things about it are not obvious:
   survives.
 - **The cap is sticky, and the default file is what unsticks it.** Gitea's
   `environment-to-ini` only ever *writes* `/data/gitea/conf/app.ini`; dropping
-  the variable does not remove the line, so a plain `docker compose up` after a
+  the variable does not remove the line, so a plain `docker compose --env-file images.env up` after a
   capped run comes back on a container with no such variable and a still-capped
   server. That is why `docker-compose.yml` pins
   `GITEA__api__MAX_RESPONSE_ITEMS: "50"` — Gitea's own default, and
@@ -1077,15 +1079,15 @@ Two things about it are not obvious:
 
 ## Image pinning
 
-No `:latest` anywhere in the compose file. `.env` holds one
+No `:latest` anywhere in the compose file. `images.env` holds one
 `NAME=repo@sha256:…` line per image and is **committed**: it contains public
 image digests and no secrets. The compose file interpolates them with a failing
-default, so a missing pin stops `docker compose config`, not `docker compose up`
+default, so a missing pin stops `docker compose config`, not `docker compose --env-file images.env up`
 three minutes later.
 
 ```sh
-./pin-images.sh   # re-resolve the tags in the script to digests, rewrite .env
-git diff .env     # review it: a digest change is an environment change
+./pin-images.sh   # re-resolve the tags in the script to digests, rewrite images.env
+git diff images.env     # review it: a digest change is an environment change
 ```
 
 `pin-images.sh` resolves digests with `docker buildx imagetools inspect`, which
@@ -1112,7 +1114,7 @@ server's version tag rather than `latest`, because an agent ahead of the server
 is refused at registration (#267's finding, not re-run since). That tag is a
 hand-kept copy of the server's version, the one duplicate here that nothing
 reads for you; `--move TEAMCITY_IMAGE` names it as the thing to bump in the
-same change. A held pin says so on its own comment line in `.env`. `--out PATH`
+same change. A held pin says so on its own comment line in `images.env`. `--out PATH`
 writes elsewhere, to compare.
 
 The two build stages of `mockd.Dockerfile` are pinned the same way — an
@@ -1264,7 +1266,7 @@ and without the line the alias resolves to `0.250.250.254` and reaches a host
 socket bound to `127.0.0.1`, so it is a no-op here.
 
 Adding it did cost one thing, once: a compose service whose definition changes
-is **recreated** on the next `docker compose up -d`, so the shared Kuma was
+is **recreated** on the next `docker compose --env-file images.env up -d`, so the shared Kuma was
 stopped and replaced the first time anyone ran that after 2026-09-06. Its data
 is in the `kuma-data` volume and survived; the cost is the seconds of downtime
 and any live run reading Kuma across them. It is paid once per machine, and it
@@ -2129,7 +2131,7 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
 | `./live-lock-test.sh` | The JVM lock's unit tests (#690), against a stub `docker` and a scratch lock: a second run waits for the first, a stale lock is taken over, the wait times out naming the holder. `just witness-unit`, and part of `just check`. |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
-| `./pin-images.sh` | Re-resolve image tags to digests into `.env`; guarded pins are held, `--move VAR` takes a new one. |
+| `./pin-images.sh` | Re-resolve image tags to digests into `images.env`; guarded pins are held, `--move VAR` takes a new one. |
 | `./check-ports.sh` | Assert the compose file against the §5 port table, default profile, opt-in profiles and the capped overlay. Starts nothing. |
 | `./desktop-witness.sh` | The desktop witness (#500): builds and signs the debug bundle, launches the copy Launch Services registered, runs one driver from `desktop-witness/drivers/` against the real accessibility tree, quits. Takes the screen; one at a time; not part of `just check`. See *The desktop witness (macOS)*. |
 | `./live-shot.sh` | Screenshots of the real app against live products (#1483): `just demo` with in-memory secrets, a steps file of `shot`/`press`/`focus`/`click-at`/`type`/`key`, the knobas window only. Takes the screen and the witness's lock; not part of `just check`. See *Screenshots of the real app*. |

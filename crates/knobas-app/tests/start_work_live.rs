@@ -36,7 +36,7 @@
 //! reason. Run it with the environment up:
 //!
 //! ```text
-//! cd testenv && docker compose up -d --wait gitea && ./seed-gitea.sh && eval "$(./seed --env)"
+//! cd testenv && docker compose --env-file images.env up -d --wait gitea && ./seed-gitea.sh && eval "$(./seed --env)"
 //! cd .. && env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
 //!     -- --ignored --nocapture --test-threads=1
 //! ```

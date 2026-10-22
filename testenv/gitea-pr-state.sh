@@ -20,6 +20,6 @@ gitea_require_open_pr() {
   [ "$_gp_state" = "open" ] && return 0
   _gp_merged=$(printf '%s' "$API_BODY" | jq -r 'if .merged then "merged" else "closed" end')
   die "pull request \"$3\" ($1#$2) is $_gp_merged, but the fixture says it is open. Something merged or closed a seeded pull request (a live test must only touch pull requests it opened). Gitea cannot take it back: put Gitea on a fresh volume and seed again --
-    cd testenv && docker compose rm -sfv gitea && docker volume rm \$(docker volume ls -q --filter name=gitea-data) && rm -f seed-state.json && ./seed-gitea.sh
+    cd testenv && docker compose --env-file images.env rm -sfv gitea && docker volume rm \$(docker volume ls -q --filter name=gitea-data) && rm -f seed-state.json && ./seed-gitea.sh
   (testenv/reset does the same for every product, not only Gitea)"
 }

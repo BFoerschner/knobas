@@ -14,7 +14,7 @@
 # The opt-in profiles bring up the real Jira, Confluence and TeamCity servers.
 # Since ADR-0013 they are the witness for every adapter and every write path,
 # each with a seed and a `just <system>-live` recipe. They are off by default
-# because they are expensive: see the cost note in .env, and the profile
+# because they are expensive: see the cost note in images.env, and the profile
 # comments below.
 #
 # Everything binds 127.0.0.1 only. This environment has developer-grade
@@ -28,7 +28,7 @@ name: knobas-testenv
 services:
   # ---------------------------------------------------------------- real ----
   gitea:
-    image: ${GITEA_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    image: ${GITEA_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     container_name: knobas-gitea
     environment:
       # INSTALL_LOCK skips the first-run web installer, which is otherwise a
@@ -47,7 +47,7 @@ services:
       # that Gitea's environment-to-ini only ever *writes* /data/gitea/conf/
       # app.ini -- it never removes a setting from it. `docker-compose.capped.yml`
       # lowers this to 1, and app.ini keeps that value in the gitea-data volume,
-      # so a plain `docker compose up` afterwards comes back on a container with
+      # so a plain `docker compose --env-file images.env up` afterwards comes back on a container with
       # no such variable and a still-capped server. (Measured, not assumed: the
       # container is recreated, `docker inspect` shows no MAX_RESPONSE_ITEMS, and
       # app.ini still reads `MAX_RESPONSE_ITEMS = 1`.) Naming the default here is
@@ -86,7 +86,7 @@ services:
   # share state and a Forgejo run cannot disturb a Gitea one. Same settings as
   # Gitea above, under Forgejo's FORGEJO__ prefix. SSH is off, as there.
   forgejo:
-    image: ${FORGEJO_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    image: ${FORGEJO_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     container_name: knobas-forgejo
     profiles: ["forgejo"]
     environment:
@@ -135,7 +135,7 @@ services:
   # is why the reach is Kuma's only. The `:ro` on the mount is belt only -- it
   # does not restrict the API -- the filter is the protection.
   docker-proxy:
-    image: ${DOCKER_PROXY_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    image: ${DOCKER_PROXY_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     container_name: knobas-docker-proxy
     environment:
       CONTAINERS: 1
@@ -148,10 +148,10 @@ services:
     restart: unless-stopped
 
   uptime-kuma:
-    image: ${KUMA_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    image: ${KUMA_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     container_name: knobas-uptime-kuma
     environment:
-      # WITHOUT THIS, `docker compose up` GIVES YOU A KUMA THAT NEVER STARTS.
+      # WITHOUT THIS, `docker compose --env-file images.env up` GIVES YOU A KUMA THAT NEVER STARTS.
       # Uptime Kuma v2 added a database-choice step that runs BEFORE the real
       # server: it logs "Starting Setup Database ... Waiting for user action"
       # and serves an entirely different express app on 3001 until a human
@@ -222,8 +222,8 @@ services:
       context: ..
       dockerfile: testenv/mockd.Dockerfile
       args:
-        RUST_IMAGE: ${RUST_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
-        RUNTIME_IMAGE: ${RUNTIME_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+        RUST_IMAGE: ${RUST_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
+        RUNTIME_IMAGE: ${RUNTIME_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     container_name: knobas-mockd
     environment:
       # Scheme and host ONLY -- mockd appends each API's own port, so this
@@ -255,7 +255,7 @@ services:
     # configuration (roadmap §4 gotcha 6) -- setup, login, monitor creation and
     # API-key creation are all socket.io -- which is why this is node and not
     # curl.
-    image: ${NODE_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    image: ${NODE_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     profiles: ["seed"]
     depends_on:
       uptime-kuma:
@@ -297,9 +297,9 @@ services:
     # across upgrades) is nothing `down -v` does not throw away anyway. This is
     # also the container `testenv/specs/fetch.sh --teamcity` needs to extract
     # /app/rest/swagger.json (see specs/README.md's blocker).
-    #   docker compose --profile real-teamcity up -d teamcity teamcity-agent
+    #   docker compose --env-file images.env --profile real-teamcity up -d teamcity teamcity-agent
     #   ./seed --teamcity
-    image: ${TEAMCITY_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    image: ${TEAMCITY_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     profiles: ["real-teamcity"]
     container_name: knobas-teamcity
     ports:
@@ -318,7 +318,7 @@ services:
     # container id, and the conf volume keeps the agent's identity across
     # restarts so the server does not see a second, unauthorised agent after
     # every `up`.
-    image: ${TEAMCITY_AGENT_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    image: ${TEAMCITY_AGENT_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     profiles: ["real-teamcity"]
     container_name: knobas-teamcity-agent
     environment:
@@ -343,7 +343,7 @@ services:
   # which is why the choice is written down rather than left to whoever looks
   # at `docker images` next.
   jira-db:
-    image: ${ATLASSIAN_DB_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    image: ${ATLASSIAN_DB_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     profiles: ["real-atlassian"]
     container_name: knobas-jira-db
     environment:
@@ -362,7 +362,7 @@ services:
       retries: 30
 
   confluence-db:
-    image: ${ATLASSIAN_DB_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    image: ${ATLASSIAN_DB_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     profiles: ["real-atlassian"]
     container_name: knobas-confluence-db
     environment:
@@ -380,14 +380,14 @@ services:
 
   jira:
     # Wants ~4 GB of RAM and a timebomb licence entered by hand.
-    #   docker compose --profile real-atlassian up -d jira
+    #   docker compose --env-file images.env --profile real-atlassian up -d jira
     # Jira has NO licence environment variable: paste the *Jira Software Data
     # Center* timebomb key (10 user, 3 hours) into the setup wizard. When it
     # expires, re-paste at Administration > System > License
     # (/secure/admin/ViewLicense.jspa) -- no restart, no account.
     # The tag is 10.3 LTS rather than the newest release because 11.x is
     # reported to reject that key; pin-images.sh carries the evidence.
-    image: ${JIRA_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    image: ${JIRA_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     profiles: ["real-atlassian"]
     container_name: knobas-jira
     ports:
@@ -418,8 +418,8 @@ services:
     # M3's target. Present now because Atlassian publishes no machine-readable
     # Confluence DC spec at all (specs/README.md), so the real container is the
     # only contract there will ever be.
-    #   docker compose --profile real-atlassian up -d confluence
-    image: ${CONFLUENCE_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    #   docker compose --env-file images.env --profile real-atlassian up -d confluence
+    image: ${CONFLUENCE_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
     profiles: ["real-atlassian"]
     container_name: knobas-confluence
     ports:
@@ -434,16 +434,16 @@ services:
       # Confluence 7.9+ reads its licence here at FIRST-TIME setup and skips
       # the wizard's licence step -- the one half of `real-atlassian` that can
       # be automated (Jira has no equivalent). Export the timebomb key in your
-      # shell; do NOT put it in testenv/.env, which is a tracked file:
+      # shell; do NOT put it in testenv/images.env, which is a tracked file:
       #   export CONFLUENCE_LICENSE_KEY='AAAB...'
       # Unset is the default and changes nothing.
       ATL_LICENSE_KEY: ${CONFLUENCE_LICENSE_KEY:-}
       # The key is written to confluence.cfg.xml on the persisted volume and is
       # NOT re-read on restart, so restarting does not reset the 3-hour timer.
-      # After expiry, either `docker compose --profile real-atlassian down -v jira
+      # After expiry, either `docker compose --env-file images.env --profile real-atlassian down -v jira
       # jira-db confluence confluence-db` for a clean re-setup (name the four:
       # a bare `down -v` takes Gitea and its volume too), or:
-      #   ATL_FORCE_CFG_UPDATE=true docker compose --profile real-atlassian up -d confluence
+      #   ATL_FORCE_CFG_UPDATE=true docker compose --env-file images.env --profile real-atlassian up -d confluence
       ATL_FORCE_CFG_UPDATE: ${ATL_FORCE_CFG_UPDATE:-false}
     volumes:
       - confluence-data:/var/atlassian/application-data/confluence

@@ -19,7 +19,7 @@
 //!
 //! ```text
 //! cd testenv
-//! docker compose --profile real-teamcity up -d teamcity teamcity-agent
+//! docker compose --env-file images.env --profile real-teamcity up -d teamcity teamcity-agent
 //! ./seed && ./seed --teamcity        # Gitea first: the VCS roots point at it
 //! cd .. && just teamcity-live-seeded
 //! ```
@@ -228,7 +228,7 @@ fn seeded() -> Seeded {
             .unwrap_or_else(|| {
                 panic!(
                     "{key} is not set -- start testenv's TeamCity and seed it first \
-                     (`docker compose --profile real-teamcity up -d teamcity teamcity-agent`, \
+                     (`docker compose --env-file images.env --profile real-teamcity up -d teamcity teamcity-agent`, \
                      `./seed`, `./seed --teamcity`), then `eval \"$(cd testenv && ./seed --env)\"` \
                      or run `just teamcity-live-seeded`"
                 )

@@ -8,7 +8,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-docker compose --profile '*' down -v --remove-orphans
+docker compose --env-file images.env --profile '*' down -v --remove-orphans
 
 # Not volumes, so `down -v` does not touch them: these are the seed's outputs,
 # and leaving them would point at credentials that no longer exist.

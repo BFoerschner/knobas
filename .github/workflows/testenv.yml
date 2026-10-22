@@ -6,7 +6,7 @@
 # that gap, and nothing else.
 #
 # It starts no containers and pulls no images -- roadmap §3: CI runs only the
-# docker-free layers. `docker compose config` resolves ${...} from testenv/.env
+# docker-free layers. `docker compose config` resolves ${...} from testenv/images.env
 # and validates the schema locally; it never contacts a registry. That matters
 # beyond speed: the TeamCity, Jira and Confluence images this file references
 # are ~13 GB and are deliberately never pulled anywhere, CI included.
@@ -94,11 +94,11 @@ jobs:
       - name: validate the compose file, default, opt-in profiles and the capped overlay
         working-directory: testenv
         run: |
-          docker compose config -q
-          docker compose --profile seed \
+          docker compose --env-file images.env config -q
+          docker compose --env-file images.env --profile seed \
                          --profile real-teamcity \
                          --profile real-atlassian config -q
-          docker compose -f docker-compose.yml -f docker-compose.capped.yml config -q
+          docker compose --env-file images.env -f docker-compose.yml -f docker-compose.capped.yml config -q
 
       # The port map itself. `config -q` is happy with any port at all, so it
       # cannot see 8210 becoming 8299, a service published on 0.0.0.0 instead

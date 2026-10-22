@@ -3,7 +3,7 @@
 # seed-gitea.sh seeds Gitea: this is that script pointed at the `forgejo`
 # service on its own port, with its own state file. Idempotent, like it.
 #
-#   docker compose --profile forgejo up -d --wait forgejo
+#   docker compose --env-file images.env --profile forgejo up -d --wait forgejo
 #   ./seed-forgejo.sh
 #   eval "$(./seed --env-forgejo)"     # KNOBAS_GITEA_* for the Gitea live suite
 #

@@ -1,7 +1,7 @@
 # The capped-Gitea overlay: a real Gitea that answers FEWER records than the
 # `limit` the adapter asked for.
 #
-#   docker compose -f docker-compose.yml -f docker-compose.capped.yml up -d gitea
+#   docker compose --env-file images.env -f docker-compose.yml -f docker-compose.capped.yml up -d gitea
 #
 # or, with its seed, its test suite and its cleanup, `just gitea-live-capped`.
 #

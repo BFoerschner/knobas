@@ -69,7 +69,7 @@ if [ -s "$KEY_FILE" ]; then
     *)
       echo "seed-kuma: $PROBE_URL answered '$code', so the key in $KEY_FILE can be neither" >&2
       echo "seed-kuma: kept nor replaced -- re-minting on a guess would throw away a key" >&2
-      echo "seed-kuma: that may still work. Is the port up? docker compose up -d --wait uptime-kuma" >&2
+      echo "seed-kuma: that may still work. Is the port up? docker compose --env-file images.env up -d --wait uptime-kuma" >&2
       exit 1 ;;
   esac
 fi
@@ -81,7 +81,7 @@ fi
 # name, and an unset variable reads there as "did not authenticate", so a
 # rename on this side alone re-mints on every run and still passes a single
 # `just kuma-live` (issue #554). Rename both halves or neither.
-out=$(docker compose --profile seed run --rm -T \
+out=$(docker compose --env-file images.env --profile seed run --rm -T \
         -e KNOBAS_KEY_AUTHENTICATED="$KEY_AUTHENTICATED" \
         -e KNOBAS_KEY_NAME="$KEY_NAME" \
         kuma-seed)
