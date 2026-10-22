@@ -11754,3 +11754,11 @@ set.
 **Ruling:** `fake-tauri.test.ts` compares the command names listed in `fake-answers.ts` with `barrelCommands()`, both ways. It is one test beside the existing census, which already reads the barrels; no new parser.
 
 **Cost of reversing:** delete the test.
+- **#1727: is the second half (alert_chain_live clearing leftovers) still owed?** *Fork:* delete
+  `knobas-write-scratch` and the created monitor before the first run, or make the count robust.
+  *Ruling:* the cause is covered by #1722's 61 s login retry, but the assertion still depended on
+  other binaries' cleanup. `alert_chain_live` now counts samples only of monitors still in
+  `sync.live_item`, so a monitor that was sampled by the first run and gone by the last (any
+  binary's leftover) cannot move the count; every live monitor must still be sampled. A
+  pre-clean would spend up to four logins of Kuma's twenty a minute and still race a sibling.
+  *Reversing:* low (one query).

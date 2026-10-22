@@ -803,9 +803,19 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
         "three runs, three samples, and they are the outage this test caused"
     );
 
+    // Only the monitors still live: a monitor another binary's cleanup removes
+    // between the first run and here (`kuma_write_live`'s scratch, when its
+    // delete was refused for Kuma's login limit, #1727) was sampled by the
+    // first run and is no longer in the roster, and counting it would make the
+    // sample count disagree with a roster it was never part of.
     let per_monitor: Vec<i64> = sqlx::query_scalar(
-        "select count(*) from knobas.monitor_sample group by entity_id order by 1",
+        "select count(*) from knobas.monitor_sample s
+          where s.entity_id in (
+                select entity_id from sync.live_item
+                 where source_id = $1 and kind = 'monitor')
+          group by s.entity_id order by 1",
     )
+    .bind(KUMA)
     .fetch_all(pool)
     .await
     .expect("the sample counts");
