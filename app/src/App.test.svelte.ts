@@ -190,6 +190,13 @@ let timerRooms: (string | null)[] = [];
 let timerStops = 0;
 /** Every pair the shell recorded for a capture (#503), in order. */
 let captureRecords: { context: string | null; foreground: string | null }[] = [];
+/** How many capture records existed when the dev bridge was installed (#1673); `null` until it was. */
+let recordsAtInstall: number | null = null;
+vi.mock("./lib/shell/dev/fake-tauri", () => ({
+  installIfRequested: () => {
+    recordsAtInstall = captureRecords.length;
+  },
+}));
 /** What `currentTimer` answers on bring-up — set by a test that needs one running. */
 let timerRunning: unknown = null;
 /** What `get_entity` answers for its own id (the job page's read, #886); others are `not_found`. */
@@ -326,6 +333,7 @@ beforeEach(() => {
   timerRooms = [];
   timerStops = 0;
   captureRecords = [];
+  recordsAtInstall = null;
   timerRunning = null;
   timerClosed = null;
   draftAsks = [];
@@ -695,6 +703,30 @@ test("what a capture would attach is the foreground and the context the timer re
     () => captureRecords.at(-1)?.foreground === null,
     "a page with no job never recorded an empty foreground",
   );
+});
+
+/**
+ * **Under `?fake-ipc` the first capture record waits for the bridge** (#1673):
+ * a record sent before the fake is installed is a swallowed rejection, and a
+ * capture taken from a job route would attach nothing.
+ */
+test("under the fake bridge the first capture record follows the install and carries the job", async () => {
+  dbReady = true;
+  entityAnswer = jobTicket();
+  location.hash = "#/job/mock:PAY-231";
+  history.replaceState(null, "", "/?fake-ipc#/job/mock:PAY-231");
+  try {
+    app = mount(App, { target, props: {} });
+    await until(() => captureRecords.length > 0, "no capture record was ever sent");
+    expect(recordsAtInstall, "the bridge was never installed").not.toBeNull();
+    expect(recordsAtInstall, "a record went out before the bridge was installed").toBe(0);
+    await until(
+      () => captureRecords.at(-1)?.foreground === "mock:PAY-231",
+      "the job never reached the capture record",
+    );
+  } finally {
+    history.replaceState(null, "", "/#/job/mock:PAY-231");
+  }
 });
 
 /**
