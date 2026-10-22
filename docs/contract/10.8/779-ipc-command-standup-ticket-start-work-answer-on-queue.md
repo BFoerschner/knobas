@@ -49,6 +49,18 @@
   `start_work::run`, `retry` and `skip` keep the awaited path for the battery and
   `start_work_live.rs`.
 
+  **Amendment (#1751, 2026-10-23): the run behind the answer is in the scheduler's background
+  set.** No signature, type, refusal or event changes. `start_work::run_in_background` takes the
+  set (`Scheduler::background`, #1633) and spawns the run into it, so the quit waits for a step's
+  send under the scheduler's 3 s grace and its `sent` mark and step outcome land before the pool
+  closes. Once the quit has begun the run takes no further step: the next one stays `pending`. A
+  `start_work_run`, `start_work_retry` or `start_work_skip` that arrives after the quit began
+  still answers the flow as it stands (retry and skip after their first half), but no run is
+  started. The steps stay `pending` for the next start's *Run*. A step whose send finishes within
+  the grace is settled, not left `running`; only one aborted at the grace's end is left for
+  `interrupt_stranded` (ADR-0012's window). Pinned by `tests/it/background_write.rs`'s
+  `a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_nothing`.
+
   **What does not change.** No event is added. Delivery, holds, order and at-least-once are the
   queue's (#752's entry). Publishing a date twice still queues one page (`publication_of`).
 

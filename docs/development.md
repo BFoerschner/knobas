@@ -144,7 +144,10 @@ A write knobas is sending when you quit gets up to three seconds to finish, so
 it is marked sent. A write you make after the quit began is queued and not
 sent; the next start sends it. A send still going after three seconds is
 abandoned: the source may have it while knobas lists it as pending, and the
-next start sends it again (ADR-0012).
+next start sends it again (ADR-0012). A start-work flow is the same: the step
+being sent gets the three seconds, the flow stops before its next step, and a
+*Run* pressed after the quit began starts nothing. *Run* at the next start
+carries the flow on.
 
 A signal or crash (Ctrl-C under `just dev`, `kill`, a reboot) leaves the
 postmaster running. Start knobas again. The next start adopts the running
