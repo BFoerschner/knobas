@@ -9,6 +9,7 @@ use std::time::Duration;
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceError};
 use knobas_wasm_host::allow::HostPattern;
+use knobas_wasm_host::limits::Limits;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const TOKEN: &str = "tok-1203-quayside-7f3a";
@@ -598,4 +599,210 @@ async fn a_short_component_timeout_does_not_cut_the_lookup_before_the_proxy() {
     assert!(!ok && text.contains("ConnectionRefused"), "{text}");
     assert!(proxy.carried().is_empty(), "{:?}", proxy.carried());
     assert!(local.seen().is_empty(), "{:?}", local.seen());
+}
+
+/// A local HTTP/1.1 server that answers `200` to everything and notes each
+/// request's path and when it arrived. Its port stays bound for the rest of
+/// the test process: the rate limit is process-wide and keyed by origin
+/// (#1630), and a later server handed this port would inherit its quota.
+struct Timed {
+    url: String,
+    arrived: Arc<Mutex<Vec<(String, std::time::Instant)>>>,
+}
+
+impl Timed {
+    fn start() -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("http://{}", listener.local_addr().expect("addr"));
+        std::mem::forget(listener.try_clone().expect("hold the port"));
+        listener.set_nonblocking(true).expect("nonblocking");
+        let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+        let arrived = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&arrived);
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let log = Arc::clone(&log);
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match socket.read(&mut chunk).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                        }
+                    }
+                    let text = String::from_utf8_lossy(&buf);
+                    let path = text.split(' ').nth(1).unwrap_or("/").to_owned();
+                    log.lock().unwrap().push((path, std::time::Instant::now()));
+                    let _ = socket
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                        )
+                        .await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        Self { url, arrived }
+    }
+
+    /// When each request for `path` arrived, in order.
+    fn arrivals(&self, path: &str) -> Vec<std::time::Instant> {
+        self.arrived
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(p, _)| p == path)
+            .map(|(_, at)| *at)
+            .collect()
+    }
+}
+
+/// How many of `arrivals` came within `window` of `from`.
+fn within(arrivals: &[std::time::Instant], from: std::time::Instant, window: Duration) -> usize {
+    arrivals.iter().filter(|at| **at - from <= window).count()
+}
+
+/// Shorter than one refill of the http crate's default quota (five a
+/// second, one every 200 ms), so what arrives inside it is the burst alone.
+const BURST_WINDOW: Duration = Duration::from_millis(150);
+
+/// A source of the fixture at `server`, running its fetch of `path`
+/// `times` times in a row.
+fn hammering(server: &Timed, path: &str, times: u32, limits: Limits) -> Box<dyn Source> {
+    let instance = instance(
+        &server.url,
+        AuthMethod::Pat,
+        serde_json::json!({
+            "fetch": format!("{}{path}", server.url),
+            "fetch_times": times,
+        }),
+    );
+    match knobas_wasm_host::load_fixture()
+        .with_hosts(hosts(&["{base_url}"]))
+        .with_limits(limits)
+        .build(instance)
+    {
+        Ok(source) => source,
+        Err(e) => panic!("the fixture must build: {e:?}"),
+    }
+}
+
+/// A built-in client for `server` at `per_second` and `burst`.
+fn built_in(server: &Timed, per_second: u32, burst: u32) -> Arc<knobas_http::HttpClient> {
+    Arc::new(
+        knobas_http::HttpClient::new(knobas_http::HttpConfig {
+            base_url: server.url.clone(),
+            requests_per_second: per_second,
+            burst,
+            ..knobas_http::HttpConfig::default()
+        })
+        .expect("client"),
+    )
+}
+
+/// **A naive adapter is paced at its instance's quota** (SPI-5, #1631).
+///
+/// Thirty requests as fast as the component can send them: at the http
+/// crate's defaults (a burst of ten, five a second) ten reach the instance
+/// at once and the other twenty one every 200 ms. Unpaced, all thirty
+/// arrive within milliseconds.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_adapter_firing_thirty_requests_reaches_its_instance_at_the_burst() {
+    let server = Timed::start();
+    let source = hammering(&server, "/page", 30, Limits::default());
+
+    let (ok, text) = answer(&*source).await;
+    assert!(ok, "{text}");
+
+    let arrivals = server.arrivals("/page");
+    assert_eq!(arrivals.len(), 30, "every request went, in time");
+    let first = arrivals[0];
+    let burst = within(&arrivals, first, BURST_WINDOW);
+    assert!(
+        burst <= 10,
+        "{burst} requests reached the instance within {BURST_WINDOW:?} at a burst of 10"
+    );
+    let spread = arrivals[29] - first;
+    assert!(
+        spread >= Duration::from_millis(3_500),
+        "twenty past the burst at five a second take about four seconds, not {spread:?}"
+    );
+}
+
+/// **The adapter's quota is the instance's, shared with the built-in
+/// clients for it** (#1631).
+///
+/// A built-in client spends the instance's burst; the adapter's requests
+/// that follow wait on the same limiter, so about one reaches the instance
+/// before the next refill rather than a burst of its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_adapter_waits_on_the_burst_a_built_in_client_spent() {
+    let server = Timed::start();
+    let client = built_in(&server, 5, 10);
+    let mut sends = tokio::task::JoinSet::new();
+    for _ in 0..10 {
+        let client = Arc::clone(&client);
+        sends.spawn(async move {
+            client
+                .send(client.request(knobas_http::Method::GET, "/built-in"))
+                .await
+                .map(|_| ())
+        });
+    }
+    for sent in sends.join_all().await {
+        sent.expect("the built-in client's burst");
+    }
+
+    let source = hammering(&server, "/adapter", 5, Limits::default());
+    let started = std::time::Instant::now();
+    let (ok, text) = answer(&*source).await;
+    assert!(ok, "{text}");
+
+    let adapter = server.arrivals("/adapter");
+    assert_eq!(adapter.len(), 5);
+    assert!(
+        within(&adapter, started, BURST_WINDOW) <= 1,
+        "the adapter's requests went within {BURST_WINDOW:?} of a spent burst: {:?}",
+        adapter.iter().map(|at| *at - started).collect::<Vec<_>>()
+    );
+}
+
+/// **The call's deadline still bounds a send waiting on the limiter**
+/// (#1631).
+///
+/// A built-in client for the instance at one a second, alive beside the
+/// adapter, holds the shared quota to it; five requests would take four
+/// seconds, and the call is stopped at its deadline of one.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_deadline_stops_a_call_waiting_on_the_limiter() {
+    let server = Timed::start();
+    let _strict = built_in(&server, 1, 1);
+    let source = hammering(
+        &server,
+        "/slow",
+        5,
+        Limits {
+            deadline: Duration::from_secs(1),
+            ..Limits::default()
+        },
+    );
+
+    let started = std::time::Instant::now();
+    let (ok, text) = answer(&*source).await;
+    let took = started.elapsed();
+
+    assert!(!ok && text.contains("deadline of 1 s"), "{text}");
+    assert!(
+        took < Duration::from_secs(3),
+        "stopped at the deadline: {took:?}"
+    );
+    assert!(
+        server.arrivals("/slow").len() <= 2,
+        "{:?}",
+        server.arrivals("/slow")
+    );
 }

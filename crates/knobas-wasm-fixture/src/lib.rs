@@ -46,7 +46,9 @@
 //!   error that ended the walk) as JSON: in `detail` when the walk ended on
 //!   a response, in an `Unreachable` error when it did not (#1203).
 //!   `"first_byte_ms"` and `"post_mib"` bend that request
-//!   ([`fetch::Options`]). `mirror` and `username` are config keys it
+//!   ([`fetch::Options`]); `"fetch_times"` runs the fetch that many times
+//!   in a row, as fast as the host lets it, and answers the last one: a
+//!   naive adapter, for the host's pacing (#1631). `mirror` and `username` are config keys it
 //!   declares and never reads, for a manifest's host template and the host's
 //!   basic auth.
 //! * **`"download_mib"`** is how many MiB a download of every artifact
@@ -158,6 +160,8 @@ pub struct Adapter {
     /// The URL `test_connection` reads, when the config names one.
     fetch: Option<String>,
     fetch_options: fetch::Options,
+    /// How many times in a row `test_connection` runs the fetch.
+    fetch_times: u64,
     /// The instance record as the host handed it over, for the fetch answer.
     received: serde_json::Value,
     /// The MiB a download of every artifact streams.
@@ -184,6 +188,7 @@ fn read_fault(config: &str) -> Result<Fault, String> {
             "fetch",
             "first_byte_ms",
             "post_mib",
+            "fetch_times",
             "download_mib",
             "mirror",
             "username",
@@ -362,6 +367,7 @@ impl GuestAdapter for Adapter {
             fault: read_fault(&instance.config),
             fetch,
             fetch_options,
+            fetch_times: read("fetch_times").unwrap_or(1).max(1),
             download_mib: read("download_mib").unwrap_or(1),
             received: serde_json::json!({
                 "id": instance.id,
@@ -409,6 +415,7 @@ impl GuestAdapter for Adapter {
                     "fetch": { "type": "string" },
                     "first_byte_ms": { "type": "integer" },
                     "post_mib": { "type": "integer" },
+                    "fetch_times": { "type": "integer" },
                     "download_mib": { "type": "integer" },
                     "mirror": { "type": "string" },
                     "username": { "type": "string" },
@@ -433,7 +440,13 @@ impl GuestAdapter for Adapter {
     fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
         self.healthy()?;
         if let Some(url) = &self.fetch {
-            let trace = fetch::get(url, self.fetch_options);
+            let mut trace = fetch::get(url, self.fetch_options);
+            for _ in 1..self.fetch_times {
+                if trace.error.is_some() {
+                    break;
+                }
+                trace = fetch::get(url, self.fetch_options);
+            }
             let mut answer = trace.to_json();
             answer["instance"] = self.received.clone();
             if trace.error.is_some() {
