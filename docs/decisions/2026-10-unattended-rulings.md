@@ -12784,3 +12784,38 @@ The measurement came after it.
   leave it. *Ruling:* leave it, and file it as a `backlog` follow-up. *Reasoning:* the ticket is
   the tightening. The cost there is one emission interval of the looser rate (at most a second)
   before the first request. *Reversing:* n/a.
+
+### #1764: merge review of PR #1772 (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by the implementer on Opus: the frozen-surface change.** *Fork:*
+  confirm the implementer's ruling, or send it back. *Ruling:* confirmed. The change stays inside
+  `limiter.rs`, every grant goes through `until_ready_within` (the HTTP client, the wasm host's
+  network policy, the write queue's test), and the §10.8 entry names the two fields, the two
+  helpers, the one recording line and the new argument, which is the whole diff. *Reversing:* low.
+- **Per `Slot`, not per `Paced`.** *Fork:* hold the PR to the ticket's per-`Paced` sketch, or take
+  the per-`Slot` instant. *Ruling:* per `Slot`. *Reasoning:* the ticket's sketch is offered as the
+  bound that "would close this", and its own premise is "nothing sent for `idle` seconds". A
+  per-`Paced` instant breaks that premise twice: it misses a request granted to a waiter still on
+  a replaced limiter, and it restarts at a loosening that sent nothing. The criteria are outcomes,
+  and each is met; read "a limiter nobody sent on" as "an origin nobody sent to", which is what
+  the per-`Slot` instant measures. No criterion, spec line or ADR is contradicted, so no
+  follow-up. *Reversing:* low.
+- **`Relaxed` on both sides.** *Fork:* `Relaxed`, or `Release`/`Acquire` (or `SeqCst`).
+  *Ruling:* `Relaxed`. *Reasoning:* the instant publishes no other memory, and the mutex
+  `register` holds does not order it against grants, which never take it. A stale read sees an
+  earlier grant, so it can only over-credit, never under-credit. It can only be stale against a
+  grant that is happening during the read, and `granted` runs after governor's grant in program
+  order, so no ordering closes that window: governor's state can show the token gone before the
+  instant moves. What a stale read over-credits is the requests in flight at that moment, one per
+  racing grant, against what the stricter quota would have had before them. That is the bound the
+  implementer's ruling and #1740 accept. *Reversing:* low.
+- **The clock.** *Ruling:* as it is. *Reasoning:* the instant is stored as `u64` nanoseconds from
+  `Slot::born`, an `Instant`, so it is monotonic and needs no wall clock or process base. A slot
+  is never removed from the origin map, so `born` lasts the whole process. `try_from` saturates
+  after about 584 years, and `idle` uses `saturating_sub`. The credit product is `u128`, at most
+  about 8e28. On macOS `Instant` does not advance while the machine sleeps, so a quiet that spans
+  a sleep is counted short, which only ever under-credits. *Reversing:* n/a.
+- **A tightening before any grant.** *Ruling:* no over-credit. *Reasoning:* the quiet then counts
+  from `born`, when the slot's first limiter was built with its whole burst (`Paced::new`). A
+  stricter quota governing from `born` would have started full too, and the credit is capped at
+  its burst. *Reversing:* n/a.

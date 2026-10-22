@@ -12,6 +12,6 @@
   `fetch_max` by `Slot::granted` on every grant of `InstanceLimiter::until_ready_within`, without
   the slot's lock). `Slot::register`'s tightening branch passes the time since then
   (`Slot::idle`) to `Paced::tightened`, which now starts the new limiter with the larger of the
-  seconds conversion (#1740) and what the stricter rate refills in that time, at most its burst. A
-  loosening still starts drained (#1728) and does not restart the quiet. The module doc and
-  `Slot::register`'s and `Paced::tightened`'s say so.
+  seconds conversion (#1740) and what the stricter rate refills in that time, at most its burst,
+  both now counted in `u128`. A loosening still starts drained (#1728) and does not restart the
+  quiet. The module doc and `Slot`'s, `Slot::register`'s and `Paced::tightened`'s say so.
