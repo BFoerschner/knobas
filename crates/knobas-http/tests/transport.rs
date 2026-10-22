@@ -516,7 +516,11 @@ async fn a_watched_call_the_quota_stopped_is_marked() {
     );
     let quota = quota.expect("the quota that stopped the call is handed back");
     assert!(quota.to_string().contains("1 request a second"), "{quota}");
-    assert_eq!(server.hits(), 1, "the stopped call never reached the server");
+    assert_eq!(
+        server.hits(),
+        1,
+        "the stopped call never reached the server"
+    );
 
     let ((), quota) = knobas_http::watch_local_quota(async {}).await;
     assert_eq!(quota, None, "each watch starts unmarked");

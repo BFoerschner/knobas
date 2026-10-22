@@ -175,7 +175,7 @@ under `docs/contract/10.8/`. `docs/contract.md` is the record.
 | `knobas-core` | The domain: entity addressing (`<namespace>:<key>`), links, the activity stream and their stores. |
 | `knobas-db` | Embedded PostgreSQL lifecycle (start, adopt, stop), the connection pool and the migrations. |
 | `knobas-source` | The adapter SPI: the `Source` trait, the contract battery and the serde data adapters exchange. It has no database dependency. |
-| `knobas-http` | The HTTP stack the adapters share: one reqwest client, retry classes, rate limiting and the status to `SourceError` mapping. |
+| `knobas-http` | The HTTP stack the adapters share: one reqwest client, retry classes, rate limiting and the status to `SourceError` mapping. The write queue in `knobas-sync` also reads its local-quota mark (#1729). |
 | `knobas-source-jira` | Jira Data Center adapter, with status, comment and create writes. |
 | `knobas-source-confluence` | Confluence Data Center adapter, with page writes. |
 | `knobas-source-gitea` | Gitea adapter: repositories, branches, pull requests, commits. |

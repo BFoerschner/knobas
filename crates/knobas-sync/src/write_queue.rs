@@ -43,6 +43,7 @@ use knobas_core::delivery::Projection;
 use knobas_core::entity::EntityRef;
 use knobas_core::payload::StatePath;
 use knobas_core::write_queue::{self as store, QueuedWrite, WaitReason, WriteState};
+use knobas_http::LocalQuota;
 use knobas_source::{Source, SourceError, WriteOp, WriteReceipt};
 
 use crate::config;
@@ -93,7 +94,7 @@ pub enum FlushError {
 ///   [`build`] that
 ///   failed with it, it is `Unreachable`.
 /// * `Protocol` **with no status, when knobas' own rate limit held the
-///   request** before it was sent (`held_by_quota`, #1729) -- nothing reached
+///   request** before it was sent (`held_on`, #1729) -- nothing reached
 ///   the source, so nothing was refused. It passes on its own, like an
 ///   unreachable source. The error alone cannot say so: a status-less
 ///   `Protocol` is also a fault an adapter raised itself, so the mark comes
@@ -105,7 +106,7 @@ pub enum FlushError {
 ///
 /// `Moved` waits on neither: [`attempt`] holds the write before it asks here
 /// (#822), and it is listed only so this match stays exhaustive.
-fn retryable(error: &SourceError, held_by_quota: bool) -> Option<WaitReason> {
+fn retryable(error: &SourceError, held_on: Option<&LocalQuota>) -> Option<WaitReason> {
     match error {
         SourceError::Unauthorized { .. } => Some(WaitReason::Unauthorized),
         SourceError::Unreachable(_) | SourceError::Unconfirmed { .. } => {
@@ -115,7 +116,9 @@ fn retryable(error: &SourceError, held_by_quota: bool) -> Option<WaitReason> {
             status: Some(status),
             ..
         } if *status == 408 || *status == 429 || *status >= 500 => Some(WaitReason::Unreachable),
-        SourceError::Protocol { status: None, .. } if held_by_quota => Some(WaitReason::Unreachable),
+        SourceError::Protocol { status: None, .. } if held_on.is_some() => {
+            Some(WaitReason::Unreachable)
+        }
         SourceError::Protocol { .. } | SourceError::Sink(_) | SourceError::Moved { .. } => None,
     }
 }
@@ -680,7 +683,7 @@ async fn attempt(
     // Watched for knobas' own rate limit (#1729): a request it held past the
     // send budget fails like a refusal and was never sent. See `retryable`.
     // ---------------------------------------------------------------------
-    let (written, held_by_quota) = knobas_http::watch_local_quota(source.write(op)).await;
+    let (written, held_on) = knobas_http::watch_local_quota(source.write(op)).await;
     match written {
         Ok(receipt) => {
             // The receipt, and the settle, in one statement: `sent` is where
@@ -734,7 +737,7 @@ async fn attempt(
             Ok(false)
         }
         Err(error) => {
-            match retryable(&error, held_by_quota.is_some()) {
+            match retryable(&error, held_on.as_ref()) {
                 Some(reason) => waited(deps, seen, write, reason, &error.to_string()).await?,
                 None => refused(deps, write, &error.to_string()).await?,
             }
@@ -773,7 +776,7 @@ async fn build(
             let reason = match &failure {
                 RunFailure::Db(_) => WaitReason::Unreachable,
                 RunFailure::Source(error) => {
-                    retryable(error, false).unwrap_or(WaitReason::Unauthorized)
+                    retryable(error, None).unwrap_or(WaitReason::Unauthorized)
                 }
                 _ => WaitReason::Unauthorized,
             };
@@ -1172,15 +1175,26 @@ mod tests {
                 None,
             ),
         ] {
-            assert_eq!(retryable(&error, false), expected, "{error:?}");
+            assert_eq!(retryable(&error, None), expected, "{error:?}");
         }
     }
 
     /// #1729: the quota's mark turns only a status-less `Protocol` into a
     /// wait. A status the source answered is still what decides, and a
-    /// sink's failure is not the network's.
-    #[test]
-    fn the_quotas_mark_waits_out_only_a_status_less_protocol() {
+    /// sink's failure is not the network's. The quota is a real one: a
+    /// one-a-second limiter whose burst is spent has no room at once.
+    #[tokio::test]
+    async fn the_quotas_mark_waits_out_only_a_status_less_protocol() {
+        let limiter =
+            knobas_http::InstanceLimiter::for_url("http://quota-1729.invalid", 1, 1).unwrap();
+        limiter
+            .until_ready_within(std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+        let quota = limiter
+            .until_ready_within(std::time::Duration::ZERO)
+            .await
+            .expect_err("the burst is spent");
         for (error, expected) in [
             (
                 SourceError::protocol("knobas' local rate limit had no room"),
@@ -1195,7 +1209,7 @@ mod tests {
             ),
             (SourceError::Sink("disk full".to_owned()), None),
         ] {
-            assert_eq!(retryable(&error, true), expected, "{error:?}");
+            assert_eq!(retryable(&error, Some(&quota)), expected, "{error:?}");
         }
     }
 }

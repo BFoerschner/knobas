@@ -231,16 +231,16 @@ impl Source for Fake {
 /// budget. The origin is never reached. The fake wraps the message, as an
 /// adapter may: what the queue reads is the mark, not the words.
 async fn held_by_the_local_quota() -> SourceError {
-    let url = "http://127.0.0.1:9";
+    let (url, per_second, burst) = ("http://127.0.0.1:9", 1, 1);
     let client = knobas_http::HttpClient::new(knobas_http::HttpConfig {
         base_url: url.to_owned(),
-        requests_per_second: 1,
-        burst: 1,
+        requests_per_second: per_second,
+        burst,
         ..knobas_http::HttpConfig::default()
     })
     .unwrap()
     .with_send_budget(std::time::Duration::from_millis(50));
-    knobas_http::InstanceLimiter::for_url(url, 1, 1)
+    knobas_http::InstanceLimiter::for_url(url, per_second, burst)
         .unwrap()
         .until_ready_within(std::time::Duration::from_secs(5))
         .await

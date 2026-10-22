@@ -12530,4 +12530,5 @@ The measurement came after it.
   attempt before, and `retryable` reads that as it always has. The wasm host maps a wait that ran
   out to `connection-limit-reached` and the component decides what that becomes. The wait is
   bounded by the call's deadline, so it cannot outlast the call (#1631's comment on #1729).
-  *Reversing:* low, one `note` call in `net.rs`.
+  *Reversing:* low: make `limiter::stopped_on` public and call it where `net.rs` maps the
+  wait to `connection-limit-reached`.
