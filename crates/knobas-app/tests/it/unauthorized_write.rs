@@ -268,12 +268,18 @@ async fn fixture(name: &str) -> Fixture {
 #[tokio::test]
 async fn a_new_secret_releases_the_unauthorized_write_on_its_own_source() {
     let f = fixture("unauthorized_write_secret").await;
-    let write = f.unauthorized_comment(SOURCE, "after the key was rotated").await;
+    let write = f
+        .unauthorized_comment(SOURCE, "after the key was rotated")
+        .await;
     f.refuses(SOURCE, false);
 
     f.tick().await;
     f.tick().await;
-    assert_eq!(f.asked(SOURCE), 1, "the tick does not re-send a rejected credential");
+    assert_eq!(
+        f.asked(SOURCE),
+        1,
+        "the tick does not re-send a rejected credential"
+    );
 
     f.save(OTHER, SecretInput::of("another-key")).await;
     f.tick().await;
