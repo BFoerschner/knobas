@@ -12019,3 +12019,16 @@ The write side's rung is `attempts`, 1 after the first failure. That is the sync
   `SourcesView`). *Reversing:* n/a.
 - **#1675: the agent cap is dated in `working-model.md` (Model choice) once; `ticket-loop.md`
   *Ceiling* holds the live number.** *Reversing:* low.
+
+## #1674 — reset every module-level store between tests
+
+- **Store imports in `test-resets.ts`.** *Fork:* import the stores at the top, or inside each
+  reset. *Ruling:* inside each reset, skipping a store a file's partial `vi.mock` stops from
+  loading (`[vitest] No "x" export`). The setup file runs before a test file registers its
+  mocks, so a top-level import loaded the real `ipc/app` and broke about sixty tests.
+  *Reversing:* low.
+- **Scope.** *Fork:* reset all 33 module-level stores or the six the ticket names. *Ruling:* the
+  six; the rest sit in `NOT_YET_RESET`, which the completeness test accepts and #1743 empties.
+  *Reversing:* low.
+- **Unwitnessed resets.** `health.reset`'s `phase` and `kindRegistry.reset`'s `loaded` have no
+  mutant-killing test: dirtying them needs a reseed or load against a mocked port. Left as is.
