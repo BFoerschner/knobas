@@ -36,6 +36,7 @@ pub mod role;
 pub mod run;
 pub mod url_forms;
 pub mod view;
+pub mod watermark;
 
 /// The sync-interval floor an adapter declares unless it says otherwise, and
 /// the one a descriptor without [`SourceDescriptor::min_sync_interval_secs`]
