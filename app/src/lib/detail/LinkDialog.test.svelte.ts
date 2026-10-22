@@ -46,6 +46,7 @@ vi.mock("../ipc/entity", () => ({
 }));
 
 const { default: LinkDialog } = await import("./LinkDialog.svelte");
+const { DEBOUNCE_MS } = await import("../launcher/session.svelte");
 
 function hit(over: { id: string; kind?: string; title: string }) {
   return {
@@ -181,8 +182,8 @@ test("closing the dialog within the debounce sends no search", async () => {
 
   screen.type(screen.picker(), "payout");
   screen.done();
-  // Past the 90 ms debounce, on real timers.
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  // Past the debounce, on real timers.
+  await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 60));
 
   expect(queries, "a search was sent after the dialog closed").toEqual([]);
 });

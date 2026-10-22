@@ -2501,12 +2501,14 @@ test("the arrows scroll the newly active row into view, and only as far as it ne
   expect(scrolls.at(-1)?.options).toEqual({ block: "nearest" });
 });
 
-/**
- * The box is a combobox (#1665, FE-1). Focus never leaves the input, so the
- * input is where a screen reader looks for the active option: an
- * `aria-activedescendant` on a listbox that never has focus is announced by
- * nothing. Every assertion below reads the box, not the list.
- */
+// ── The box is a combobox (#1665, FE-1) ────────────────────────────────────
+//
+// Focus never leaves the input, so the input is where a screen reader looks
+// for the active option: an `aria-activedescendant` on a listbox that never
+// has focus is announced by nothing. Every assertion below reads the box, not
+// the list.
+
+/** The launcher's input, which carries the combobox's attributes. */
 function box(): HTMLInputElement {
   return target.querySelector<HTMLInputElement>('input[aria-label="Search or act"]')!;
 }

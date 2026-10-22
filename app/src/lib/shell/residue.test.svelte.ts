@@ -608,13 +608,6 @@ function readyLifecycle() {
   };
 }
 
-/**
- * One component under test.
- *
- * `source` is the file it lives in, and it is what the coverage guard at the
- * bottom matches against — so a new component with an effect fails this suite
- * until somebody puts it here on purpose.
- */
 /** A keystroke into the input `selector` names, so a debounce is armed. */
 function typeInto(target: HTMLElement, selector: string): void {
   const input = target.querySelector<HTMLInputElement>(selector);
@@ -623,6 +616,13 @@ function typeInto(target: HTMLElement, selector: string): void {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+/**
+ * One component under test.
+ *
+ * `source` is the file it lives in, and it is what the coverage guard at the
+ * bottom matches against — so a new component with an effect or a `Session`
+ * fails this suite until somebody puts it here on purpose.
+ */
 interface Case {
   name: string;
   source: string;
@@ -2518,7 +2518,7 @@ test("an unmatched remove does not pay for a later leak", async () => {
  */
 test("every component with an effect or a launcher Session is in the table", () => {
   const root = join(process.cwd(), "src") + "/";
-  const withEffects: string[] = [];
+  const enrolled: string[] = [];
 
   const walk = (dir: string) => {
     for (const item of readdirSync(dir, { withFileTypes: true })) {
@@ -2530,7 +2530,7 @@ test("every component with an effect or a launcher Session is in the table", () 
         // a debounce timer, and only an unmount cleanup cancels it.
         const text = readFileSync(path, "utf8");
         if (text.includes("$effect(") || text.includes("new Session(")) {
-          withEffects.push(path.slice(root.length));
+          enrolled.push(path.slice(root.length));
         }
       }
     }
@@ -2541,7 +2541,7 @@ test("every component with an effect or a launcher Session is in the table", () 
   // teardown matters most was the one component this guard could not see.
   walk(root);
 
-  expect(withEffects.length, "no components were scanned at all").toBeGreaterThan(0);
+  expect(enrolled.length, "no components were scanned at all").toBeGreaterThan(0);
   const covered = new Set(CASES.map((entry) => entry.source));
-  expect(withEffects.filter((file) => !covered.has(file)).sort()).toEqual([]);
+  expect(enrolled.filter((file) => !covered.has(file)).sort()).toEqual([]);
 });
