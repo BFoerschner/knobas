@@ -650,12 +650,13 @@ async fn branches(
     let default_changed = before.default_branch.as_deref() != at.default_branch;
     after.default_branch = at.default_branch.map(str::to_owned);
 
+    let mut records: Vec<Value> = Vec::new();
     let mut walk = PageWalk::new(PageNumber, MAX_BRANCH_PAGES, |page| {
         source.client.branches(at.owner, at.name, page)
     });
     loop {
-        let batch = match walk.next().await? {
-            Walked::Page(batch) => batch,
+        match walk.next().await? {
+            Walked::Page(batch) => records.extend(batch),
             Walked::End => break,
             Walked::Capped => {
                 return Err(RepoError::Fatal(cap_reached(
@@ -663,48 +664,74 @@ async fn branches(
                     walk.rows(),
                 )));
             }
-        };
-        for raw in batch {
-            let branch: model::Branch = match serde_json::from_value(raw.clone()) {
-                Ok(branch) => branch,
-                Err(error) => {
-                    tracing::warn!(
-                        %error,
-                        repository = %at.full_name,
-                        "gitea: skipping an unreadable branch record"
-                    );
-                    continue;
-                }
-            };
-            let head = branch
-                .commit
-                .as_ref()
-                .and_then(|c| c.id.clone())
-                .unwrap_or_default();
-            let head_moved = before.branches.get(&branch.name) != Some(&head);
-            // An unmoved branch under a switched default is re-emitted for
-            // its `repository` (#718), and no commit is walked for it.
-            if head_moved || default_changed {
-                push(
-                    sink,
-                    map::branch_item(&source.id, &raw, at, &branch),
-                    emitted,
-                )
-                .await?;
-            }
-            if head_moved {
-                moved.push(branch.name.clone());
-            }
-            heads.insert(branch.name, head);
         }
     }
 
-    for gone in before
+    // **A name the listing did not return is not yet a deleted branch
+    // (#1624).** Gitea orders its branch listing by commit time, so a push
+    // while the walk is between two pages moves that branch onto a page
+    // already read, and the walk never meets it. Its own read decides: a
+    // 404 is a branch that is gone, a record is a branch that moved, and
+    // anything else ends the repository's walk as any failed read does.
+    let listed: HashSet<&str> = records
+        .iter()
+        .filter_map(|raw| raw.get("name").and_then(Value::as_str))
+        .collect();
+    let unlisted: Vec<String> = before
         .branches
         .keys()
-        .filter(|name| !heads.contains_key(*name))
-    {
-        push(sink, map::branch_tombstone(&source.id, at, gone), emitted).await?;
+        .filter(|name| !listed.contains(name.as_str()))
+        .cloned()
+        .collect();
+    let mut gone = Vec::new();
+    for name in unlisted {
+        match source
+            .client
+            .branch_as::<Value>(at.owner, at.name, &name)
+            .await
+        {
+            Ok(raw) => records.push(raw),
+            Err(error) if error.status() == Some(404) => gone.push(name),
+            Err(error) => return Err(RepoError::from(error)),
+        }
+    }
+
+    for raw in records {
+        let branch: model::Branch = match serde_json::from_value(raw.clone()) {
+            Ok(branch) => branch,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    repository = %at.full_name,
+                    "gitea: skipping an unreadable branch record"
+                );
+                continue;
+            }
+        };
+        let head = branch
+            .commit
+            .as_ref()
+            .and_then(|c| c.id.clone())
+            .unwrap_or_default();
+        let head_moved = before.branches.get(&branch.name) != Some(&head);
+        // An unmoved branch under a switched default is re-emitted for
+        // its `repository` (#718), and no commit is walked for it.
+        if (head_moved || default_changed) && !heads.contains_key(&branch.name) {
+            push(
+                sink,
+                map::branch_item(&source.id, &raw, at, &branch),
+                emitted,
+            )
+            .await?;
+        }
+        if head_moved && !moved.contains(&branch.name) {
+            moved.push(branch.name.clone());
+        }
+        heads.insert(branch.name, head);
+    }
+
+    for name in &gone {
+        push(sink, map::branch_tombstone(&source.id, at, name), emitted).await?;
     }
 
     after.branches = heads;

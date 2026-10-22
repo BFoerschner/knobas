@@ -328,3 +328,92 @@ async fn a_repository_met_on_two_pages_is_walked_once() {
         "the walk ends on the empty page past the last"
     );
 }
+
+const MONOREPO: &str = "tidewater/monorepo";
+
+/// `tidewater/monorepo` with 25 branches, `b-00` to `b-24`, each a minute
+/// newer than the one before, listed ten to a page newest commit first.
+fn twenty_five_branches() -> World {
+    World {
+        cap: Some(10),
+        repos: vec![repository(1, "monorepo", &at(0))],
+        branches: BTreeMap::from([(
+            MONOREPO.to_owned(),
+            (0..25u64)
+                .map(|k| {
+                    support::branch(
+                        &format!("b-{k:02}"),
+                        &sha(k + 1),
+                        "work",
+                        &at(60 * i64::try_from(k).expect("small")),
+                    )
+                })
+                .collect(),
+        )]),
+        ..World::default()
+    }
+}
+
+fn branch_entity(name: &str) -> String {
+    format!("gitea:{MONOREPO}@refs/heads/{name}")
+}
+
+/// A push to `b-08`, which page 2 would list, while page 1 is read: Gitea's
+/// branch listing is ordered by commit time, so `b-08` moves onto page 1 and
+/// the walk never meets it. It is in the previous cursor, so it is read on
+/// its own before anything is said about it -- and it is there, at its new
+/// head: emitted, not tombstoned, and remembered.
+#[tokio::test]
+async fn a_branch_a_push_moved_off_the_listing_is_re_read_and_not_tombstoned() {
+    let (server, moving) = Moving::start(twenty_five_branches()).await;
+    let gitea = gitea(&server, json!({}));
+    let (_, cursor) = run(&*gitea, None).await;
+
+    moving.with(|world| {
+        world.after(&format!("repos/{MONOREPO}/branches"), 1, |world| {
+            let pushed = world
+                .branches
+                .get_mut(MONOREPO)
+                .and_then(|all| all.iter_mut().find(|b| b["name"] == "b-08"))
+                .expect("b-08 is in the fixture");
+            *pushed = support::branch("b-08", &sha(900), "pushed", &at(100_000));
+        });
+    });
+    let (items, after) = run(&*gitea, Some(&cursor)).await;
+
+    assert!(tombstoned(&items, "branch").is_empty(), "{:?}", tombstoned(&items, "branch"));
+    assert_eq!(emitted(&items, "branch"), vec![branch_entity("b-08")], "it moved");
+    assert_eq!(
+        position(&after, MONOREPO)["branches"]["b-08"],
+        json!(sha(900)),
+        "and its new head is remembered"
+    );
+    assert!(
+        moving.with(|w| w.served.iter().any(|s| s.starts_with(&format!("repos/{MONOREPO}/branches/b-08")))),
+        "read on its own"
+    );
+}
+
+/// A branch the listing did not return and its own read answers 404 for is
+/// gone, and tombstoned.
+#[tokio::test]
+async fn a_branch_the_server_no_longer_has_is_tombstoned() {
+    let (server, moving) = Moving::start(twenty_five_branches()).await;
+    let gitea = gitea(&server, json!({}));
+    let (_, cursor) = run(&*gitea, None).await;
+
+    moving.with(|world| {
+        world
+            .branches
+            .get_mut(MONOREPO)
+            .expect("the fixture has branches")
+            .retain(|b| b["name"] != "b-03");
+    });
+    let (items, after) = run(&*gitea, Some(&cursor)).await;
+
+    assert_eq!(
+        tombstoned(&items, "branch"),
+        BTreeSet::from([branch_entity("b-03")])
+    );
+    assert!(position(&after, MONOREPO)["branches"].get("b-03").is_none());
+}
