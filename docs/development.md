@@ -18,25 +18,30 @@ The first test run or `just dev` downloads PostgreSQL 18.6 once into the shared
 
 ## The gate
 
-`just check` is the quality gate. Nothing is pushed without it green. It first
+`just check` is the quality gate. Under the ticket loop the merge-manager runs
+it once, on the head it merges (`just gate`, below). It first
 fails on a stale contract index (`scripts/contract-index.py --check`), then
 runs three halves side by side:
 
 - `front`: `svelte-check`, the Vitest suite and `vite build`.
-- the scripts: `shell`, `test-layout` and `witness-unit`.
-- the cargo chain: `fmt`, `clippy`, `clippy-libs`, `inventory` and `test`.
+- the scripts: `shell`, `test-layout`, `witness-unit` and `conflict-markers`.
+- the cargo chain: `fmt`, `clippy`, `clippy-libs`, `inventory`, `ipc-mirror`
+  and `test`. `test` takes a slot under `$TMPDIR/knobas-gate-slots` (two at
+  once) and starts its tests against one shared test server, not a Postgres per
+  test.
 
 Each half's output is captured and printed when it finishes. A failing half
 prints its whole log. A passing one prints each recipe's wall time, and the
 cargo half adds `test`'s build and run times and its ten slowest test binaries.
 
 `just gate` runs `check-front` instead on a frontend-only head: the
-contract-index check, `svelte-check`, the Vitest files the change can reach
+contract-index check, the conflict-marker scan, `svelte-check`, the Vitest files the change can reach
 (`just front-changed`) and `vite build`.
 
 `just front` alone is the fast loop for frontend work. `just pre-gate` formats,
 refreshes the inventory and the contract index, and runs a few quick checks.
-It does not replace `just check`.
+It does not replace the gate. `just docs-check` is the two cheap checks alone
+(contract index, conflict markers) for a docs-only change.
 
 Clippy runs twice on purpose. `clippy` uses `--all-targets`, which pulls in
 every crate's dev-dependencies. Cargo unifies features across one invocation,
@@ -45,7 +50,10 @@ the library with a feature nothing ships. `clippy-libs` uses `--lib`, which
 drops the dev-dependencies and checks each library the way a dependent builds
 it.
 
-The tests always start their own throwaway Postgres. `KNOBAS_DB_URL` points the
+Under `just test` (and so `just check`) every test binary shares one throwaway
+Postgres, `knobas-test-server`, and gets a database of its own on it; a
+`cargo test -p <crate>` by hand, with `KNOBAS_TEST_DB_URL` unset, starts one per
+binary. `KNOBAS_DB_URL` points the
 app at a server you manage. It has no effect on the tests.
 
 ## CI
@@ -181,11 +189,11 @@ under `docs/contract/10.8/`. `docs/contract.md` is the record.
 | Path | What lives there |
 | --- | --- |
 | `app/src/App.svelte` | The root: the boot gate, the first-run wizard, then the shell. |
-| `app/src/app.css` | The global stylesheet and design tokens. |
+| `app/src/lib/tf/tf.css`, `app/src/lib/tf/css/tokens.css` | The global stylesheet and the design tokens (`tf/css/` holds one stylesheet per page). |
 | `app/src/lib/tf/` | The shell since #881: `TfShell.svelte`, and one folder per page. Routes are `tf/route.ts` (`parseTfHash`, old addresses rewritten in `tf/address.ts`), each folder's `page.ts` registers its page, `tf/pages.ts` collects them. |
-| `app/src/lib/shell/` | Lifecycle, keyboard, toasts, the write queue and shared primitives. Its `router.svelte.ts` is the pre-#881 parser, still used by the asset tree and notification clicks; new routes go in `tf/route.ts`. |
-| `app/src/lib/detail/` | The detail slide-over. |
-| `app/src/lib/sources/` | The sources view, credential health, diagnostics, the first-run wizard. |
+| `app/src/lib/shell/` | Lifecycle, keyboard, toasts, the write queue and shared primitives. Its `router.ts` is the pre-#881 parser, still used by the asset tree and notification clicks; new routes go in `tf/route.ts`. |
+| `app/src/lib/detail/` | Link helpers and dialogs for an item's detail (`LinksPanel`, `LinkDialog`, `links.ts`, `relations.ts`) and the `view/` folder; there is no slide-over component. |
+| `app/src/lib/sources/` | `FirstRun.svelte` (the first-run wizard) and the helpers behind it: account, connection, diagnostics, schema-form and fixtures. There is no sources view. |
 | `app/src/lib/launcher/` | The ⌘K overlay. It binds its own hotkey and handles its own `Esc`. |
 | `app/src/lib/ipc/` | Hand-written mirrors of the command surface, one file per Rust command module in `crates/knobas-app/src/commands/`. |
 | `app/src/lib/{assets,capture,inbox,notes,settings,standup,start-work,time}/` | Feature views. |
@@ -218,7 +226,7 @@ breaks only in a bundled build: `tauri dev` loads the Vite server over
   lifecycle.
 - Secrets are never displayed, logged or read back. No command returns one.
 - Contrast is at least 4.5:1 and reduced motion is respected (spec §14).
-  `lib/shell/app-css.test.ts` checks the palette.
+  `lib/tf/tf-css.test.ts` checks the palette and the motion rules.
 
 ### QA without Tauri
 

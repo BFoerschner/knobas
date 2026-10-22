@@ -41,7 +41,7 @@ Yours is the ticket's only full gate: `just gate` on the **final merge head** (a
 - Start any piped test or gate command with `set -o pipefail;`, or `| tail` turns a red run into exit 0. Never poll with `sleep N; cat log`; foreground or Monitor.
 
 - Contention, not the diff: only `Failed to start forks worker` / `Timeout waiting for worker`, or `initdb` / `pg_ctl` / `shmget: No space left on device` (SysV `shmmni` is 32; each embedded postmaster holds one segment), with zero assertion failures. Check `ipcs -m`; after a killed run, `ipcrm -m` segments with no live postmaster; wait a minute, re-run once, say so.
-- After the rebase, if `app/package-lock.json` changed and now equals the root's, `cp -Rpc` the root's `app/node_modules` over the worktree's before gating. No frontend half, no merge.
+- After the rebase, if `app/package-lock.json` changed and now equals the root's, `cp -Rpc` the root's `app/node_modules` over the worktree's and `touch` its `.package-lock.json` before gating. No frontend half, no merge.
 - Raw cargo: `env -u RUSTUP_TOOLCHAIN cargo …`; one build of yours at a time. `gh pr checks` "no checks reported" is normal (Actions are off). No pagers; macOS has no `timeout` binary.
 
 ## Merge tail (under the lock)

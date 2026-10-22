@@ -173,6 +173,17 @@ check-front base="origin/main":
     just front-changed "{{base}}"
     @echo "check-front: ok"
 
+# The two checks that guard a docs-only change, nothing else: the contract-index
+# check (a new `docs/contract/10.8/` file without a regenerated index) and the
+# conflict-marker scan. Seconds, no `node_modules`, no cargo. What a docs-only
+# self-merge runs in place of a gate (#1691, ruling D5 in
+# `docs/decisions/2026-10-review-planning-rulings.md`); `scripts/docs-check-test.sh`
+# pins both red cases. Calls the script directly, not `just conflict-markers`,
+# so the test can run it from a scratch tree.
+docs-check:
+    python3 -I scripts/contract-index.py --check
+    scripts/conflict-markers.sh
+
 # `front` with vitest narrowed to what a change since BASE can reach (#920).
 # svelte-check and `vite build` stay whole: together under 10 s, and a type
 # error can surface in a file nothing imports from the change.
@@ -530,7 +541,9 @@ shell:
 # until it releases, a holder dead past the grace period is taken over by one
 # waiter, `take` is re-entrant and `assert` names the holder -- against a stub
 # `gh` and a private TMPDIR, about 15 s. And the gate scope's (issue #1543): a
-# head that changes only an app file a testenv script pins answers `full`.
+# head that changes only an app file a testenv script pins answers `full`. And
+# `docs-check` (issue #1691): green on a clean tree, red on a stray section 10.8
+# file and on a conflict marker in prose.
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/bash-guard-test.sh
@@ -541,6 +554,7 @@ witness-unit:
     scripts/test-prefix-guard.sh
     scripts/merge-tail-lock-test.sh
     scripts/gate-scope-test.sh
+    scripts/docs-check-test.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh
     testenv/seed-env-test.sh

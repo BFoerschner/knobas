@@ -15,7 +15,7 @@ ARG RUNTIME_IMAGE=debian:trixie-slim
 FROM ${RUST_IMAGE} AS build
 WORKDIR /src
 COPY . .
-# rust-toolchain.toml pins the channel (1.94), so rustup fetches exactly that
+# rust-toolchain.toml pins the channel (1.99), so rustup fetches exactly that
 # compiler here rather than using whatever the base image happens to ship --
 # the container and `just check` then build with the same rustc.
 #

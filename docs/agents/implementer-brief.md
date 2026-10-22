@@ -65,7 +65,7 @@ The merge-manager runs the ticket's only full gate; you don't run `just gate` or
 5. PR body: what and why; acceptance criteria as a checked list; head SHA the checks passed on and what ran; mutation proof; **Rulings**; one `Closes #N` per ticket **outside backticks** (verify `gh pr view <n> --json closingIssuesReferences`); the footer from *Attribution*.
 6. **Stop.** You never merge unless your dispatch says *self-merge*. Report: PR URL, what ran on which SHA, mutation summary, what the reviewer should look at first, anything left out and why.
 
-**Self-merge** (dispatch says so): once ready, take the lock named in your dispatch, run `just gate` once on the merge head (foreground, Bash timeout 600000; docs-only needs no gate), then follow *Merge and cleanup* in the merge-manager brief named in your dispatch and report the merged commit.
+**Self-merge** (dispatch says so): once ready, take the lock named in your dispatch, run `just gate` once on the merge head (foreground, Bash timeout 600000; docs-only runs `just docs-check` instead, the contract-index and conflict-marker checks, and merges only if it is green), then follow *Merge and cleanup* in the merge-manager brief named in your dispatch and report the merged commit.
 
 **Follow-ups:** `ready-for-agent` if Björn would notice it in the app, else `backlog`.
 

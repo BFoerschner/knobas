@@ -4,7 +4,7 @@ description: One iteration of the general ticket loop. Merge what is open, run m
 
 You orchestrate the knobas ticket loop. This file is one **iteration**: do it once, schedule the next wake-up, end the turn. You never implement or review a ticket yourself; you dispatch agents, sequence merges, and do the mechanical steps below.
 
-This file names no spec, milestone, version or ticket. **The tracker wins over this file.** When sources disagree, the more specific wins: ticket body › milestone description › parent spec (`## Parent`) › `CLAUDE.md`, `docs/agents/working-model.md`, ADRs, `CONTEXT.md`, `docs/decisions/`, Björn's rulings in memory › this file. New rules for a milestone go in its description; rules for implementers or merge-managers go in their brief master; edit this file only when the loop's mechanics change.
+This file names no spec, milestone, version or ticket. **The tracker wins over this file.** When sources disagree, the more specific wins: ticket body › milestone description › parent spec (`## Parent`) › `CLAUDE.md`, `docs/agents/working-model.md`, ADRs, `CONTEXT.md`, `docs/decisions/` › this file. New rules for a milestone go in its description; rules for implementers or merge-managers go in their brief master; edit this file only when the loop's mechanics change.
 
 First iteration of a session: read `docs/agents/working-model.md` and `docs/agents/issue-tracker.md`; keep the Mac awake with `pgrep -x caffeinate -q || (nohup caffeinate -i -w $PPID >/dev/null 2>&1 & disown)` (it dies with this session; a sleeping Mac has cut agents mid-response); then read `.claude/loop/in-flight.tsv` (see *Ledger*).
 
@@ -32,7 +32,7 @@ Masters: `/Users/dev/Projects/knobas/docs/agents/implementer-brief.md` and `merg
 
 ## Ceiling
 
-Defaults unless `docs/agents/working-model.md` or a ruling in memory says otherwise:
+Defaults unless `docs/agents/working-model.md` or a ruling in `docs/decisions/` says otherwise:
 
 - **Five agents at once** (Björn, 2026-10-21; was three from 2026-10-16 for the usage limit); merge-managers, reviewers and splitters count. Seats are not split by role: a PR waiting for review takes the next free seat before a new implementer; with no PR waiting, implementers may fill all five. Raise only on Björn's say.
 - **At most three Rust builders at once** (the 2026-09-05 measurement in `docs/agents/working-model.md`): an agent counts while its worktree touches `crates/` and it has not merged. A fourth Rust ticket waits; a frontend-only ticket takes the seat instead. No pre-warm while five agents run.
@@ -61,7 +61,7 @@ Check blockers per candidate: `gh api repos/{owner}/{repo}/issues/N --jq .issue_
 
 For every open PR without a live merge-manager, ascending PR number, dispatch one (background, model per *Ceiling*). Reviews run in parallel; the merge tail serialises on `/Users/dev/Projects/knobas/scripts/merge-tail-lock.sh` (root checkout's copy; oldest PR first, batching per the brief). The prompt names: brief path, lock script path, PR, issue, worktree `.worktrees/issue-<N>`, slot, open live-fixture issues with their suites. A merge-manager that died mid-turn gets a fresh replacement; never message a dead agent.
 
-After a reported merge: if the PR changed `app/package-lock.json`, fast-forward the root, run `npm --prefix /Users/dev/Projects/knobas/app ci` before creating any worktree, and refresh every live, non-gating worktree whose lockfile now matches the root's but whose `app/node_modules/.package-lock.json` doesn't (`cp -Rpc` from the root). Confirm the issue closed (else close it naming the PR), remove the worktree, log throughput, stop the agent.
+After a reported merge: if the PR changed `app/package-lock.json`, fast-forward the root, run `npm --prefix /Users/dev/Projects/knobas/app ci` before creating any worktree, and refresh every live, non-gating worktree whose lockfile now matches the root's but whose `app/node_modules/.package-lock.json` doesn't (`cp -Rpc` from the root, then `touch` the worktree's `app/node_modules/.package-lock.json`). Confirm the issue closed (else close it naming the PR), remove the worktree, log throughput, stop the agent.
 
 ## Step 3: milestone exits
 
@@ -85,7 +85,7 @@ Fill free seats in this order. A **direct request from Björn** runs beside the 
 
 **Split candidate:** more than 6 ticket-specific criteria (ignore the seven standard TF lines: screenshots, copy, fixture, design system, testenv data, §10.8, gate), or more than one distinct `#/…` route. If the routes are plainly tabs or sub-routes of one screen, rule "not split" yourself from prototype-6's render function and dispatch whole. Only when genuinely unclear, dispatch a splitter (background, Sonnet, no worktree): it decides; "not split" → comment and back to `ready-for-agent`; otherwise one `ready-for-agent` ticket per screen in the same milestone with the original's `## Parent`, criteria carried over word for word with each in exactly one piece, native blocking between pieces, mapping commented on the original, original closed as split, exit's blockers repointed. Pieces enter next iteration.
 
-**Self-merge:** Sonnet-sized, no frozen surface, no live suite, no visible behaviour change, expected diff under ~150 lines; or **docs-only** (`docs/**`, `.claude/**`, Markdown outside `crates/` and `app/`), which also needs no gate, no `node_modules`, no disk reservation. Dispatch says *self-merge* and names both brief paths and the lock script; no merge-manager.
+**Self-merge:** Sonnet-sized, no frozen surface, no live suite, no visible behaviour change, expected diff under ~150 lines; or **docs-only** (`docs/**`, `.claude/**`, Markdown outside `crates/` and `app/`), which needs no full gate, no `node_modules`, no disk reservation, but runs `just docs-check` (contract-index and conflict-marker checks, seconds) on the merge head before merging. Dispatch says *self-merge* and names both brief paths and the lock script; no merge-manager.
 
 **Dispatch extras:** TF* tickets name `docs/specs/2026-10-15-ticket-first-shell-conventions.md` with "These conventions are already ruled; follow them, don't re-record them; a new one you rule goes in that file in your PR." Hot-path tickets (search, queries, `filter_suggestions`) get "Measure on 2–3k items while you work; run the full 22k responsiveness probe once, at the end. Compare warm runs: the first run after a relink is ~2× (macOS assesses each new binary)."
 
@@ -93,7 +93,7 @@ For each ticket N:
 
 1. `gh issue edit N --remove-label ready-for-agent --add-label in-progress`.
 2. `git -C /Users/dev/Projects/knobas fetch`; `SHA=$(git -C /Users/dev/Projects/knobas rev-parse origin/main)`.
-3. `git -C /Users/dev/Projects/knobas worktree add .worktrees/issue-N -b issue-N "$SHA"`; unless docs-only, `cmp` the two `app/package-lock.json` and `cp -Rpc /Users/dev/Projects/knobas/app/node_modules /Users/dev/Projects/knobas/.worktrees/issue-N/app/node_modules`. Never symlink it. Then `mkdir -p /Users/dev/Projects/knobas/.worktrees/issue-N/target && touch /Users/dev/Projects/knobas/.worktrees/issue-N/target/.metadata_never_index`, so Spotlight skips the build tree (a worktree `target` without it kept `mds` busy on every build, 2026-10-19).
+3. `git -C /Users/dev/Projects/knobas worktree add .worktrees/issue-N -b issue-N "$SHA"`; unless docs-only, `cmp` the two `app/package-lock.json` and `cp -Rpc /Users/dev/Projects/knobas/app/node_modules /Users/dev/Projects/knobas/.worktrees/issue-N/app/node_modules`. Never symlink it. Then `touch /Users/dev/Projects/knobas/.worktrees/issue-N/app/node_modules/.package-lock.json`: git stamped the worktree's `app/package-lock.json` newer than the copied stamp, and `just deps` reinstalls on exactly that. Then `mkdir -p /Users/dev/Projects/knobas/.worktrees/issue-N/target && touch /Users/dev/Projects/knobas/.worktrees/issue-N/target/.metadata_never_index`, so Spotlight skips the build tree (a worktree `target` without it kept `mds` busy on every build, 2026-10-19).
 4. Dispatch one implementer (background, general-purpose, model per *Ceiling*) naming: brief path, issue(s), parent spec, worktree, SHA, scratchpad, slot, desktop-witness slot yes/no, open live-fixture issues with suites, *self-merge* if it applies, the extras above. Append its *Ledger* row (same for every merge-manager, reviewer and splitter you dispatch).
 
 **Pre-warm:** when a seat will free soon (a PR is open, or a merge-manager holds the lock) and the next ticket touches Rust (`crates/` in body, or backend milestone), create its worktree now (disk guard applies, no claim) and run `env -C <worktree> nice -n 19 env -u RUSTUP_TOOLCHAIN CARGO_BUILD_JOBS=2 cargo test --workspace --no-run` in the background, logging to the scratchpad. Not while a machine-holding loop ticket runs. The dispatch says the warm-up may still be running. Never hand a `target` between worktrees.

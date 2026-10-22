@@ -55,10 +55,10 @@ const ACTIONABLE: Record<AuthState, boolean> = {
 /**
  * Whether this state is one a person has to resolve.
  *
- * The one spelling of the rule. Four places branch on it — `launcher/format.ts`
+ * The one spelling of the rule. Several places branch on it — `launcher/format.ts`
  * row provenance, `launcher/Board.svelte`'s source strip, `launcher/Chips.svelte`'s
- * chip dot and this module's own {@link Health.failing} — and four inline
- * copies is four chances for them to disagree about what a red dot means.
+ * chip dot and this module's own {@link Health.failing} — and inline
+ * copies are chances for them to disagree about what a red dot means.
  *
  * **`undefined` is a state too, and it is answered here** (#72). A caller can
  * hold a source id the health store has no row for — a `/gitea` chip typed
@@ -77,10 +77,10 @@ const ACTIONABLE: Record<AuthState, boolean> = {
  *
  * The widening costs something, and it is worth naming here rather than
  * discovering later: every *other* caller — `launcher/format.ts`,
- * `launcher/Board.svelte`, `shell/TopStrip.svelte`, `sources/SourceRow.svelte`
- * and {@link Health.failing} — passes a `CredentialHealth.state`, which is
+ * `launcher/Board.svelte` and {@link Health.failing} — passes a
+ * `CredentialHealth.state`, which is
  * required, so for them the parameter is now looser than the value. Were that
- * field ever to become optional, those five would quietly read `false` instead
+ * field ever to become optional, those would quietly read `false` instead
  * of failing `svelte-check` — the same silent-safe direction the table above
  * is a `Record` and not a `Set` to avoid. The trade is taken deliberately: one
  * caller genuinely holds `undefined` (a chip naming a source the store has no
@@ -177,9 +177,8 @@ export interface Health {
    * worth not making the next reader re-derive: a *deleted* source is gone
    * from the incoming set entirely rather than sitting in it with a stale
    * reading. Freshness never gets a say about it, so the deleted chip still
-   * disappears — pinned by `SourcesView`'s "a deleted source leaves the shared
-   * health store, not just the list" and by "replace forgets a source the
-   * authoritative list no longer carries" below it.
+   * disappears — pinned by "replace forgets a source the
+   * authoritative list no longer carries" in `health.test.svelte.ts`.
    *
    * **Why newest-wins is safe to decide here.** Both timestamps are the
    * backend's own `checked_at` for the same source — the `source:health` event
@@ -204,7 +203,7 @@ export interface Health {
    * `credential_health` or `set_source_secret`'s answer. If such a flow ever
    * appears, this rule is the thing to re-open rather than the caller.
    *
-   * The reason the rule lives here rather than in a caller: `SourcesView.load()`
+   * The reason the rule lives here rather than in a caller: the sources load
    * is one door and the shell's boot-time {@link reseed} is the other, and both
    * end in this line. Fixing one caller leaves the other exposed (#148).
    */

@@ -12001,3 +12001,21 @@ The implementer's seven rulings above stand, the `update_source` release beyond 
 ### The ladder reads the row the way the sync side reads its log
 
 The write side's rung is `attempts`, 1 after the first failure. That is the sync side's `failures_since_last_ok`, 1 after the first failed run. Both go through `config::backoff_after`, so the first retry comes at 60 s on both. #1627's `Unconfirmed` on a resend-harmless write classifies `unreachable` and is spaced by this ladder. #1630's limiter `Protocol { status: None }` still settles a write refused (`retryable`), untouched here and never on the ladder. That stays #1729 (backlog).
+
+## #1675, #1691, #1693 (bundle: agent docs, `docs-check`, the node_modules stamp)
+
+- **#1693: touch the stamp in the loop's steps, not a hash comparison in `deps`.** *Fork:* the
+  ticket allows either. *Ruling:* the touch in `ticket-loop.md` steps 2 and 4 (and the
+  merge-manager brief's post-rebase copy, the same `cp -Rpc`); `deps` keeps its mtime test, whose
+  comment explains why a content comparison of npm's hidden lockfile never matches.
+  *Reversing:* low.
+- **#1691: `docs-check` calls `scripts/conflict-markers.sh` directly, not `just conflict-markers`.**
+  *Ruling:* the recipe is two lines and `scripts/docs-check-test.sh` runs it from a scratch tree
+  that has no justfile for a nested `just` to find. *Reversing:* low.
+- **#1675: `router.svelte.ts:254` and `fake-tauri.test.ts:7-10` need no edit.** *Ruling:* #1667
+  renamed the router to `router.ts`; its line 254 holds no cross-reference now, and the
+  `fake-tauri.test.ts` header cites `house-rules.test.ts`, which exists and does what it says.
+  Only `health.svelte.ts` cited files that are gone (`TopStrip.svelte`, `SourceRow.svelte`,
+  `SourcesView`). *Reversing:* n/a.
+- **#1675: the agent cap is dated in `working-model.md` (Model choice) once; `ticket-loop.md`
+  *Ceiling* holds the live number.** *Reversing:* low.
