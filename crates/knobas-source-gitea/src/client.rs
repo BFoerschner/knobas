@@ -414,12 +414,18 @@ impl GiteaClient {
     /// `GET /repos/{o}/{r}/commits`. `stat`, `verification` and `files` all
     /// default to **true** in Gitea; turning them off is the difference between
     /// a listing and a diff dump.
+    ///
+    /// `since` and `until` are both server-side and inclusive (git's
+    /// `--since`/`--until` on the committer date, which is `created`);
+    /// `live_gitea` asserts both. `until` bounds a catch-up's window from
+    /// above (#1624), so it does not re-list the commits the walk it
+    /// continues already delivered.
     pub(crate) async fn commits(
         &self,
         owner: &str,
         repo: &str,
         branch: &str,
-        since: Option<DateTime<Utc>>,
+        (since, until): (Option<DateTime<Utc>>, Option<DateTime<Utc>>),
         page: u32,
     ) -> Result<Vec<Value>, SourceError> {
         let (limit, page) = page_params(page);
@@ -433,6 +439,9 @@ impl GiteaClient {
         ];
         if let Some(since) = since {
             query.push(("since", since.to_rfc3339_opts(SecondsFormat::Secs, true)));
+        }
+        if let Some(until) = until {
+            query.push(("until", until.to_rfc3339_opts(SecondsFormat::Secs, true)));
         }
         let path = format!("/repos/{}/{}/commits", segment(owner)?, segment(repo)?);
         match self.get_json(&path, &query).await {
@@ -861,7 +870,7 @@ mod wire_tests {
             .with_timezone(&Utc);
         let got = client_for(&server)
             .await
-            .commits("tidewater", "payout-service", "main", Some(since), 1)
+            .commits("tidewater", "payout-service", "main", (Some(since), None), 1)
             .await
             .expect("the mock answers only the fully-parameterised request");
         assert_eq!(got.len(), 1);
@@ -883,7 +892,7 @@ mod wire_tests {
             .await;
         client_for(&server)
             .await
-            .commits("tidewater", "payout-service", "main", None, 1)
+            .commits("tidewater", "payout-service", "main", (None, None), 1)
             .await
             .expect("no watermark means no since parameter");
     }
@@ -973,7 +982,7 @@ mod wire_tests {
             .await;
         let got = client_for(&server)
             .await
-            .commits("tidewater", "fresh", "main", None, 1)
+            .commits("tidewater", "fresh", "main", (None, None), 1)
             .await
             .expect("an empty repository is not a failure");
         assert!(got.is_empty());
@@ -1075,7 +1084,7 @@ mod wire_tests {
             .await;
         let error = client_for(&server)
             .await
-            .commits("tidewater", "broken", "main", None, 1)
+            .commits("tidewater", "broken", "main", (None, None), 1)
             .await
             .unwrap_err();
         assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");

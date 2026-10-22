@@ -603,3 +603,149 @@ async fn the_run_that_closes_a_catch_up_also_reads_what_changed_since() {
         instant(&json!(at(9 * DAY)))
     );
 }
+
+/// ADPT-4 for commits: a push of 150 commits on `main` against a budget of
+/// 100. The first incremental run reads the newest 100 and stops; the second
+/// reads the other 50 although `main`'s head has not moved since; the third
+/// is idle.
+#[tokio::test]
+async fn an_incremental_commit_walk_the_budget_stopped_is_continued_by_the_next() {
+    let key = format!("{PAYOUT}@main");
+    let world = World {
+        repos: vec![repository(1, "payout-service", &at(0))],
+        branches: BTreeMap::from([(
+            PAYOUT.to_owned(),
+            vec![support::branch("main", &sha(1), "start", &at(0))],
+        )]),
+        commits: BTreeMap::from([(key.clone(), vec![support::commit(&sha(1), "start", &at(0))])]),
+        ..World::default()
+    };
+    let (server, moving) = Moving::start(world).await;
+    let gitea = gitea(&server, json!({ "prs_per_repo": 0, "commits_per_repo": 100 }));
+    let (_, cursor) = run(&*gitea, None).await;
+
+    let pushed = |k: u64| (sha(1000 + k), at(60 * seconds(k)));
+    moving.with(|world| {
+        let history = world.commits.get_mut(&key).expect("main has history");
+        for k in 1..=150 {
+            let (id, when) = pushed(k);
+            history.insert(0, support::commit(&id, "work", &when));
+        }
+        let (head, when) = pushed(150);
+        world.branches.insert(
+            PAYOUT.to_owned(),
+            vec![support::branch("main", &head, "work", &when)],
+        );
+    });
+
+    let (first, cursor) = run(&*gitea, Some(&cursor)).await;
+    let first_commits = emitted(&first, "commit");
+    assert_eq!(first_commits.len(), 100, "the budget bounds the run");
+    assert_eq!(
+        instant(&position(&cursor, PAYOUT)["commits_since"]),
+        instant(&json!(pushed(51).1)),
+        "the run continues from the oldest record it examined"
+    );
+
+    let (second, cursor) = run(&*gitea, Some(&cursor)).await;
+    let mut all: Vec<String> = first_commits;
+    all.extend(emitted(&second, "commit"));
+    all.sort();
+    let mut expected: Vec<String> = (1..=150)
+        .map(|k| format!("gitea:{PAYOUT}@{}", pushed(k).0))
+        .collect();
+    expected.sort();
+    assert_eq!(all, expected, "all 150 mirrored, each once");
+
+    let (idle, same) = run(&*gitea, Some(&cursor)).await;
+    assert!(idle.is_empty(), "{idle:?}");
+    assert_eq!(same, cursor);
+    assert_eq!(
+        instant(&position(&cursor, PAYOUT)["commits_since"]),
+        instant(&json!(pushed(150).1)),
+        "caught up: the watermark is the newest delivered"
+    );
+}
+
+/// The same cut, with a second branch the cut-short walk never started and a
+/// push to `main` while the catch-up is pending. The next run finishes `main`'s
+/// window, walks `feature` from its head, and then reads `main`'s new commit
+/// from where the cut-short walk's newest commit stood -- not from `feature`'s
+/// newer commits, which would pass over it.
+#[tokio::test]
+async fn a_commit_catch_up_finishes_every_branch_and_then_reads_what_moved() {
+    let main = format!("{PAYOUT}@main");
+    let feature = format!("{PAYOUT}@feature");
+    let base = support::commit(&sha(1), "start", &at(0));
+    let world = World {
+        repos: vec![repository(1, "payout-service", &at(0))],
+        branches: BTreeMap::from([(
+            PAYOUT.to_owned(),
+            vec![
+                support::branch("main", &sha(1), "start", &at(0)),
+                support::branch("feature", &sha(1), "start", &at(0)),
+            ],
+        )]),
+        commits: BTreeMap::from([(main.clone(), vec![base.clone()]), (feature.clone(), vec![base])]),
+        ..World::default()
+    };
+    let (server, moving) = Moving::start(world).await;
+    let gitea = gitea(&server, json!({ "prs_per_repo": 0, "commits_per_repo": 100 }));
+    let (_, cursor) = run(&*gitea, None).await;
+
+    // 150 on main up to 09:30, 30 on feature after that.
+    let on_main = |k: u64| (sha(1000 + k), at(60 * seconds(k)));
+    let on_feature = |j: u64| (sha(2000 + j), at(9_000 + 60 * seconds(j)));
+    moving.with(|world| {
+        for (key, name, pushed) in [
+            (&main, "main", (1..=150).map(on_main).collect::<Vec<_>>()),
+            (&feature, "feature", (1..=30).map(on_feature).collect::<Vec<_>>()),
+        ] {
+            let history = world.commits.get_mut(key).expect("a history");
+            for (id, when) in &pushed {
+                history.insert(0, support::commit(id, "work", when));
+            }
+            let (head, when) = pushed.last().expect("pushed").clone();
+            let branches = world.branches.get_mut(PAYOUT).expect("branches");
+            let branch = branches.iter_mut().find(|b| b["name"] == name).expect("listed");
+            *branch = support::branch(name, &head, "work", &when);
+        }
+    });
+    let (first, cursor) = run(&*gitea, Some(&cursor)).await;
+    assert_eq!(emitted(&first, "commit").len(), 100);
+    assert_eq!(
+        position(&cursor, PAYOUT)["commits_catching_up"]["branches"],
+        json!(["main", "feature"])
+    );
+
+    // A commit on main dated between main's newest and feature's.
+    let late = (sha(3000), at(9_500));
+    moving.with(|world| {
+        world
+            .commits
+            .get_mut(&main)
+            .expect("main")
+            .insert(0, support::commit(&late.0, "late", &late.1));
+        let branches = world.branches.get_mut(PAYOUT).expect("branches");
+        let branch = branches.iter_mut().find(|b| b["name"] == "main").expect("main");
+        *branch = support::branch("main", &late.0, "late", &late.1);
+    });
+    let (second, cursor) = run(&*gitea, Some(&cursor)).await;
+
+    let mut all = emitted(&first, "commit");
+    all.extend(emitted(&second, "commit"));
+    all.sort();
+    let mut expected: Vec<String> = (1..=150)
+        .map(|k| on_main(k).0)
+        .chain((1..=30).map(|j| on_feature(j).0))
+        .chain([late.0.clone()])
+        .map(|id| format!("gitea:{PAYOUT}@{id}"))
+        .collect();
+    expected.sort();
+    assert_eq!(all, expected, "every commit, once each");
+    assert!(position(&cursor, PAYOUT).get("commits_catching_up").is_none());
+
+    let (idle, same) = run(&*gitea, Some(&cursor)).await;
+    assert!(idle.is_empty(), "{idle:?}");
+    assert_eq!(same, cursor);
+}
