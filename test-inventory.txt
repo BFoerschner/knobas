@@ -2701,6 +2701,7 @@ knobas-source-gitea	test/it	sync_moving::a_full_sync_tombstones_no_branch_it_nev
 knobas-source-gitea	test/it	sync_moving::a_one_page_branch_walk_reads_no_names_from_git
 knobas-source-gitea	test/it	sync_moving::a_push_during_a_full_sync_branch_walk_hides_no_branch
 knobas-source-gitea	test/it	sync_moving::a_push_during_the_repository_walk_hides_no_repository
+knobas-source-gitea	test/it	sync_moving::a_repository_emptied_during_its_branch_walk_still_ends_its_walk
 knobas-source-gitea	test/it	sync_moving::a_repository_met_on_two_pages_is_walked_once
 knobas-source-gitea	test/it	sync_moving::an_incremental_commit_walk_the_budget_stopped_is_continued_by_the_next
 knobas-source-gitea	test/it	sync_moving::an_incremental_run_the_budget_stopped_is_continued_by_the_next

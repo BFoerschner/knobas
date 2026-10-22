@@ -630,6 +630,33 @@ async fn a_full_sync_tombstones_no_branch_it_never_emitted() {
     assert!(position(&after, MONOREPO)["branches"].get("b-08").is_none());
 }
 
+/// #1716: git answers `404` for a repository with no branch at all (measured
+/// on 1.27.3), which is what every branch deleted between two pages leaves.
+/// That is an empty list, not a failed walk: what page 1 returned is still
+/// emitted.
+#[tokio::test]
+async fn a_repository_emptied_during_its_branch_walk_still_ends_its_walk() {
+    let (server, moving) = Moving::start(twenty_five_branches()).await;
+    let gitea = gitea(&server, json!({}));
+    moving.with(|world| {
+        world.after(&format!("repos/{MONOREPO}/branches"), 2, |world| {
+            world
+                .branches
+                .get_mut(MONOREPO)
+                .expect("the fixture has branches")
+                .clear();
+        });
+    });
+    let (items, _) = run(&*gitea, None).await;
+
+    assert_eq!(
+        emitted(&items, "branch").len(),
+        20,
+        "pages 1 and 2: {:?}",
+        emitted(&items, "branch")
+    );
+}
+
 /// #1716: a listing that fits on one page is one query, which nothing
 /// reorders, so the walk asks git for no names.
 #[tokio::test]
