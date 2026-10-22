@@ -193,6 +193,39 @@ test("clearing the box drops the answer and goes back to the board", async () =>
   expect(search).toHaveBeenCalledTimes(1);
 });
 
+/**
+ * The clear outranks whatever is still in flight (#1668, FE-4). Without that,
+ * the answer to the text that was just cleared is still the newest request
+ * when it lands, so it is written back under an empty box -- and the next
+ * keystroke draws its rows for one round trip before its own answer arrives.
+ */
+test("clearing the box before an answer lands drops that answer", async () => {
+  const gates: (() => void)[] = [];
+  const search = vi.fn(
+    (q: SearchQuery) =>
+      new Promise<SearchResponse>((resolve) => {
+        gates.push(() => resolve(answer(q.raw, [q.raw])));
+      }),
+  );
+  const session = new Session(ports(search));
+
+  session.set("payouts");
+  expect(session.pending).toBe(true);
+  session.set("");
+  expect(session.pending).toBe(false);
+
+  gates[0]?.();
+  await vi.advanceTimersByTimeAsync(0);
+  flushSync();
+  expect(session.response, "the answer to the cleared text was applied").toBeNull();
+  expect(session.pending).toBe(false);
+
+  // The next keystroke, before its own answer: nothing of `payouts` is drawn.
+  session.type("p");
+  flushSync();
+  expect(session.rows.some((row) => row.kind === "hit")).toBe(false);
+});
+
 test("closing the box cancels a keystroke that has not fired yet", async () => {
   const search = vi.fn(async (q: SearchQuery) => answer(q.raw));
   const session = new Session(ports(search));
