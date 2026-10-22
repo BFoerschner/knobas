@@ -269,10 +269,18 @@ impl Kuma {
     }
 }
 
+/// A socket to the fake, saved at a quota well above the default's five a
+/// second: the polls wait on it (#1723), the pacing is not what these tests
+/// are about, and twenty-five writes at the default would spend ten seconds
+/// of `just check` on the refill.
 fn socket_to(server: &MockServer) -> KumaSocket {
     KumaSocket::new(
         &server.uri(),
-        &crate::KumaConfig::default(),
+        &crate::KumaConfig {
+            rate_per_sec: 100,
+            rate_burst: 100,
+            ..crate::KumaConfig::default()
+        },
         Account {
             username: "knobas".to_owned(),
             password: "knobas-dev".to_owned(),

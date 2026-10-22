@@ -189,11 +189,12 @@ const NOT_LOGGED_IN: &str = "You are not logged in.";
 /// argument one level down: a per-part cap bounds one wait, not their sum.
 ///
 /// The read count stays bounded without a count of its own, because the
-/// transport's rate limiter ([`POLL_RATE_PER_SEC`]) is what decides how many
-/// reads fit inside the deadline: at 25 a second for sixty seconds, a server
-/// that pings instantly and for ever costs at most 1,500 reads and a pong
-/// each -- against one that pings at Kuma's own interval it is three -- so the
-/// deadline bounds the traffic as well as the time.
+/// instance's rate limiter (the source's quota, [`KumaSocket::new`]) is what
+/// decides how many reads fit inside the deadline: at the default five a
+/// second for sixty seconds, a server that pings instantly and for ever costs
+/// at most 300 reads and a pong each -- against one that pings at Kuma's own
+/// interval it is three -- so the deadline bounds the traffic as well as the
+/// time.
 ///
 /// **Sixty seconds, and a constant rather than a [`crate::KumaConfig`]
 /// field.** The measured exchange is twelve reads in a few hundred
@@ -289,18 +290,22 @@ impl KumaSocket {
 
     /// Build the channel for one configured source.
     ///
-    /// **A client of its own, beside [`crate::http::KumaHttp`]**, and the two
-    /// differences are the reason:
+    /// **A client of its own, beside [`crate::http::KumaHttp`]**, because the
+    /// API key is Basic auth on `/metrics` and means nothing here: sending it
+    /// on every polling read would be a credential on the wire for no
+    /// purpose.
     ///
-    /// * **No `Auth`.** The API key is Basic auth on `/metrics` and means
-    ///   nothing here; sending it on every polling read would be a credential
-    ///   on the wire for no purpose.
-    /// * **A much higher rate.** A poll is not a request to a remote corpus,
-    ///   it is how this transport *receives*, and one write makes a dozen of
-    ///   them. At the read half's five per second a pause would take three
-    ///   seconds of pure rate limiting. The budget being protected is Kuma's,
-    ///   and a dozen reads of a buffer it has already filled is not traffic
-    ///   worth spacing out.
+    /// **The read half's quota, not one of its own** (#1723). Every client for
+    /// one origin waits on one limiter, and the stricter of the quotas its
+    /// live clients ask for governs (#1630, spec #1618): one knobas sends a
+    /// Kuma at most what its source was saved with, polls included. So the
+    /// socket asks for exactly that. A rate of its own could only ever
+    /// tighten: the 25 a second this asked for before held a source saved at
+    /// 100 down to 25, syncs and all, for as long as the process kept the
+    /// socket. Measured through a relay in front of the pinned container
+    /// (2026-10-22, default 5/s, burst 10): a pause on a fresh login is eleven
+    /// requests in about 0.2 s, inside the burst, and a write straight after it
+    /// on the held session pays 0.2 s a request for the refill.
     ///
     /// # Errors
     ///
@@ -318,8 +323,8 @@ impl KumaSocket {
                 adapter_kind: crate::ADAPTER_KIND.to_owned(),
                 adapter_version: crate::ADAPTER_VERSION.to_owned(),
                 auth: Auth::None,
-                requests_per_second: POLL_RATE_PER_SEC,
-                burst: POLL_BURST,
+                requests_per_second: cfg.rate_per_sec,
+                burst: cfg.rate_burst,
                 connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
                 request_timeout: Duration::from_secs(cfg.request_timeout_secs),
                 // Engine.io answers a bad session with express's own text and
@@ -642,10 +647,6 @@ fn once_emitted(error: SourceError, event: &str) -> SourceError {
         other @ (SourceError::Sink(_) | SourceError::Moved { .. }) => other,
     }
 }
-
-/// Requests per second for the polling transport. See [`KumaSocket::new`].
-const POLL_RATE_PER_SEC: u32 = 25;
-const POLL_BURST: u32 = 50;
 
 /// One open engine.io session: the socket plus the id the server minted.
 struct Session<'a> {
@@ -1181,6 +1182,40 @@ mod tests {
             emit(2, RESUME_EVENT, &serde_json::json!(8)),
             r#"422["resumeMonitor",8]"#
         );
+    }
+
+    /// **#1723.** The polls ask the instance for the quota its source was
+    /// saved with, the read half's, so the socket neither tightens a quota a
+    /// reader raised nor claims a rate of its own. Read back through a second
+    /// holder of the same origin, whose looser ask the socket's then governs.
+    #[test]
+    fn the_polls_ask_for_the_sources_own_quota() {
+        for (origin, per_second, burst) in [
+            ("http://quota-raised.kuma.test", 100, 200),
+            ("http://quota-default.kuma.test", 5, 10),
+        ] {
+            let _socket = KumaSocket::new(
+                origin,
+                &crate::KumaConfig {
+                    rate_per_sec: per_second,
+                    rate_burst: burst,
+                    ..crate::KumaConfig::default()
+                },
+                Account {
+                    username: "knobas".to_owned(),
+                    password: "knobas-dev".to_owned(),
+                },
+            )
+            .expect("the socket builds against an http url");
+            let probe = knobas_http::InstanceLimiter::for_url(origin, 1_000, 2_000)
+                .expect("an http url");
+            let governs = format!("{probe:?}");
+            assert!(
+                governs.contains(&format!("per_second: {per_second},"))
+                    && governs.contains(&format!("burst: {burst} ")),
+                "{origin}: {governs}"
+            );
+        }
     }
 
     /// The handshake, and the two ways it can fail to carry a session.
