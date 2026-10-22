@@ -437,8 +437,9 @@ pub enum SourceError {
     #[error("unreachable: {0}")]
     Unreachable(String),
     /// A write that may be applied only once reached the source, and no answer
-    /// says whether the source acted (issue #1125): it timed out after the
-    /// request went out, or a gateway answered `502`/`504` for it.
+    /// it can read says whether the source acted (issue #1125): it timed out
+    /// after the request went out, a gateway answered `502`/`504` for it, or
+    /// (Kuma) an acknowledgement arrived in a shape knobas cannot read.
     ///
     /// Raised by `knobas_http` for a request sent with
     /// `Request::no_retry`, which is how an adapter says a write must not
@@ -448,11 +449,18 @@ pub enum SourceError {
     /// that failed came before the write's own (Kuma's login,
     /// `not_yet_emitted`), and raises it itself for a failure after the
     /// write's own was accepted and before its answer was read (Kuma's ack
-    /// poll and deadline, `once_emitted`, #1627). The queue does not send such a
-    /// write again by itself: it holds it, so a person checks the source and
-    /// sends it again or discards it (`knobas_sync::write_queue`).
+    /// poll and deadline, `once_emitted`, #1627), and for an ack that arrived
+    /// but is not a socket.io ack knobas can read or carries no boolean `ok`
+    /// (Kuma's `verdict`, #1721). The queue does not send such a write again
+    /// by itself: it holds it, so a person checks the source and sends it
+    /// again or discards it (`knobas_sync::write_queue`). The exception is a
+    /// write whose delivery says a second arrival is harmless (Kuma's pause
+    /// and resume): that one waits as `Unreachable` and goes again on the
+    /// backoff ladder.
     ///
-    /// `status` is the gateway's, and `None` for a timeout.
+    /// `status` is the gateway's, or the one Kuma's lost ack poll got
+    /// (`once_emitted` keeps it), and `None` for a timeout or an ack knobas
+    /// cannot read.
     #[error("unconfirmed: {message}")]
     Unconfirmed {
         #[serde(default)]
