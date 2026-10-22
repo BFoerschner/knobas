@@ -10,7 +10,8 @@
     *Stop*, disabled: it needs a new write.
   - **Overview**: a failed run leads with its first failed test (the
     details as the source wrote them, *Show it in the log*, *Open the test
-    file* where the details name a path, and the line saying how the runs
+    file* where the details name a path, *Create ticket* or the ticket
+    filed from it (#1451, `TfRunTicket`), and the line saying how the runs
     before it went); a running run says what it is doing; then the *Run*
     panel and the first four *Artifacts*.
   - **Changes**: the commits in the run, each opening its commit.
@@ -61,6 +62,7 @@
   import TfRunDialog from "./TfRunDialog.svelte";
   import TfRunLog from "./TfRunLog.svelte";
   import TfRunTests from "./TfRunTests.svelte";
+  import TfRunTicket from "./TfRunTicket.svelte";
   import { downloadAndSay, stepSegments } from "./run-reads";
   import {
     RUN_TABS,
@@ -77,6 +79,7 @@
     runTabHash,
     runTabOf,
     sectionOf,
+    ticketDraftOf,
     tookLine,
     type FirstFailure,
   } from "./run";
@@ -463,6 +466,14 @@
               {#if failure.location !== null && repoId !== null}
                 <a class="tf-btn tf-sm tf-ghost" href={fileHash(repoId, failure.location.path)}>Open the test file</a>
               {/if}
+              <TfRunTicket
+                {runId}
+                href={runTabHash(pipelineId, runId, "overview")}
+                draft={ticketDraftOf(failure, pipeline.name, run)}
+                {sources}
+                {ports}
+                {rereads}
+              />
             </div>
             {#if context !== ""}<span class="tf-dim">{context}</span>{/if}
           </div>

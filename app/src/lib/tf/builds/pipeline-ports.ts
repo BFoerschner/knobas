@@ -11,6 +11,7 @@ import {
   entityView,
   getEntity,
   listEntities,
+  listProjects,
   olderPipelineRuns,
   pipelineSettings,
   runArtifacts,
@@ -26,7 +27,9 @@ import type {
   ArtifactEntry,
   ArtifactPreview,
   DownloadTarget,
+  LinkEntry,
   PipelineSettings,
+  Project,
   RunLog,
   RunPreset,
   RunRow,
@@ -63,7 +66,8 @@ export interface PipelinePorts {
   syncStatus: () => Promise<SourceSyncStatus[]>;
   /** The names of the branches the job reaches. */
   jobBranches: (job: string) => Promise<string[]>;
-  submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
+  /** Queue a write; `linkTo` links what it makes to that entity once it lands (`submit_write`'s `link_to`, #984, #1451). */
+  submitWrite: (payload: WriteOpPayload, linkTo?: string) => Promise<QueuedWrite>;
   openExternal: (url: string) => Promise<void>;
   /** The pipeline's Run… presets (`run_presets`, #852). */
   presets: (pipelineId: string) => Promise<RunPreset[]>;
@@ -133,7 +137,7 @@ export const BRIDGE: PipelinePorts = {
   sources: () => listSources(),
   syncStatus: () => syncStatus(),
   jobBranches: (job) => readJobBranches(job),
-  submitWrite: (payload) => submitWrite(payload),
+  submitWrite: (payload, linkTo) => submitWrite(payload, linkTo),
   openExternal: (url) => openExternal(url),
   presets: (pipelineId) => runPresets(pipelineId),
   savePreset: (preset) => saveRunPreset(preset),
@@ -160,6 +164,10 @@ export interface RunPorts extends PipelinePorts {
   preview: (runId: string, path: string) => Promise<ArtifactPreview | null>;
   /** Stream one into the downloads folder; the saved path (`download_run_file`, D8). */
   download: (runId: string, target: DownloadTarget) => Promise<string | null>;
+  /** The projects a ticket can go in, for *Create ticket* (`list_projects`, #1451). */
+  projects: () => Promise<Project[]>;
+  /** The run's confirmed links, either direction (`get_entity`'s `links`): the tickets filed from it (#1451). */
+  links: (runId: string) => Promise<LinkEntry[]>;
 }
 
 export const RUN_BRIDGE: RunPorts = {
@@ -171,16 +179,19 @@ export const RUN_BRIDGE: RunPorts = {
   artifacts: (runId, path) => runArtifacts(runId, path === "" ? null : path),
   preview: (runId, path) => artifactPreview(runId, path),
   download: (runId, target) => downloadRunFile(runId, target),
+  projects: () => listProjects(),
+  links: (runId) => getEntity(runId).then((detail) => detail.links),
 };
 
 /**
- * Hear `source`'s sync statuses (#1450): `heard` with each, `finished` once a
- * sync of it ends. Answers the stop, which also stops a listen still being
- * set up, so a page that goes first leaves no listener behind.
+ * Hear `source`'s sync statuses (#1450), every source's where it is `null`
+ * (#1451): `heard` with each, `finished` once a sync of it ends. Answers the
+ * stop, which also stops a listen still being set up, so a page that goes
+ * first leaves no listener behind.
  */
 export function listenSynced(
   ports: Pick<PipelinePorts, "listen">,
-  source: string,
+  source: string | null,
   heard: (row: SourceSyncStatus) => void,
   finished: () => void,
 ): () => void {
@@ -189,7 +200,7 @@ export function listenSynced(
   ports
     .listen(EVENTS.syncState, ({ payload }) => {
       const row = payload as SourceSyncStatus;
-      if (dead || row.source_id !== source) return;
+      if (dead || (source !== null && row.source_id !== source)) return;
       heard(row);
       if (!row.running) finished();
     })

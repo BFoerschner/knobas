@@ -6,7 +6,7 @@
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { DownloadTarget, PipelineRow, RunLog, PipelineSettings, RunRow, SourceView } from "../../ipc/entity";
+import type { DownloadTarget, LinkEntry, PipelineRow, Project, RunLog, PipelineSettings, RunRow, SourceView } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetQueued, queuedMarks } from "../queued.svelte";
@@ -261,6 +261,8 @@ function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<Ru
       return Promise.resolve(() => void handlers.delete(mine));
     },
     follower: () => ({ follow: () => () => {} }),
+    projects: () => Promise.resolve(PROJECTS),
+    links: () => Promise.resolve([]),
     ...overrides,
   };
   const crumbs = createRawSnippet((parts: () => { name: string }[]) => ({
@@ -751,4 +753,132 @@ test("Run in Run again with changes… leaves the run queued on its pipeline too
   [...target.querySelectorAll<HTMLButtonElement>(".tf-run-dialog button")].find((b) => b.textContent?.trim() === "Run")!.click();
   await settle();
   expect(queuedMarks(PIPE, QUEUED_RUN)).toEqual([{ write: 9, kind: QUEUED_RUN, text: "", base: "teamcity:build:1188" }]);
+});
+
+// -- Create ticket (R-9.11, #1451) ---------------------------------------------
+
+const PROJECTS: Project[] = [
+  { source_id: "jira", key: "PAY", name: "Payments" },
+  { source_id: "jira", key: "WEB", name: "Web" },
+] as Project[];
+
+const FILED_TITLE = "sepa::retry::gives_up_after_max_attempts fails in Payout_IntegrationTests #1187";
+
+/** A confirmed link from a ticket to the run, as `get_entity`'s `links` reads it on the run. */
+function ticketLink(key: string, title: string): LinkEntry {
+  return {
+    link: { id: `l-${key}`, from_id: `jira:${key}`, to_id: "teamcity:build:1187", relation: "related" },
+    other: { entity_id: `jira:${key}`, kind: "ticket", title, deleted_at: null },
+  } as unknown as LinkEntry;
+}
+
+/** The run's view with no test failed. */
+function noFailedTests(id: string, section?: string): Promise<SourceView> {
+  const view = viewOf(id === "teamcity:build:1188");
+  return Promise.resolve(
+    section === "tests" ? { actions: [], sections: [] } : { ...view, sections: view.sections.map((s) => (s.id === "tests" ? { ...s, count: 0 } : s)) },
+  );
+}
+
+const dialogButton = (name: string) =>
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find((b) => b.textContent?.trim() === name);
+
+test("a failed run with a failing test offers Create ticket after Open the test file", async () => {
+  draw();
+  await settle();
+  const acts = [...target.querySelectorAll(".tf-problem .tf-acts > *")].map((el) => el.textContent?.trim());
+  expect(acts).toEqual(["Show it in the log", "Open the test file", "Create ticket"]);
+});
+
+test("a green run and a failed run without a failing test draw no Create ticket", async () => {
+  draw("teamcity:build:1186");
+  await settle();
+  expect(button("Create ticket")).toBeUndefined();
+  if (page) unmount(page);
+  page = null;
+  draw("teamcity:build:1185", undefined, { view: noFailedTests });
+  await settle();
+  expect(target.querySelector("h1 .tf-chip.tf-err")).not.toBeNull();
+  expect(button("Create ticket")).toBeUndefined();
+});
+
+test("Create ticket opens the dialog prefilled from the failing test, its assertion and the run's address", async () => {
+  draw();
+  await settle();
+  button("Create ticket")!.click();
+  await settle();
+  const title = document.querySelector<HTMLInputElement>(".tf-dialog input[aria-label='Ticket title']")!;
+  expect(title.value).toBe(FILED_TITLE);
+  const body = document.querySelector<HTMLTextAreaElement>(".tf-dialog textarea[aria-label='Ticket description']")!.value;
+  expect(body).toContain("1 test failed: sepa::retry::gives_up_after_max_attempts");
+  expect(body).toContain("assertion `left == right` failed");
+  expect(body).toContain("Payout_IntegrationTests #1187 on feature/PAY-231-sepa-retry: http://ci.example/build/1187");
+  expect(body).toContain("At tests/sepa_retry.rs:14");
+  const options = [...document.querySelectorAll<HTMLOptionElement>(".tf-dialog select[aria-label='Project the ticket goes in'] option")];
+  expect(options.map((o) => o.textContent)).toEqual(["Choose…", "Payments", "Web"]);
+  expect(dialogButton("Create ticket")!.disabled).toBe(true);
+});
+
+test("filing queues a CreateTicket in the picked project, linked to the run, and the problem block says it is queued", async () => {
+  const linked: (string | undefined)[] = [];
+  const drawn = draw("teamcity:build:1187", undefined, {
+    submitWrite: (payload, linkTo) => {
+      drawn.writes.push(payload);
+      linked.push(linkTo);
+      return Promise.resolve({ id: 41 } as QueuedWrite);
+    },
+  });
+  await settle();
+  button("Create ticket")!.click();
+  await settle();
+  const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
+  select.value = "jira:WEB";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  dialogButton("Create ticket")!.click();
+  await settle();
+  expect(drawn.writes).toHaveLength(1);
+  const create = (drawn.writes[0] as { CreateTicket: Record<string, string> }).CreateTicket;
+  expect(create.entity).toBe("jira:WEB");
+  expect(create.title).toBe(FILED_TITLE);
+  expect(create.ticket_type).toBe("Task");
+  expect(create.body).toContain("assertion `left == right` failed");
+  expect(linked).toEqual(["teamcity:build:1187"]);
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+  expect(toasts.items.at(-1)!.text).toBe(`Queued: ticket ${FILED_TITLE}.`);
+  expect(button("Create ticket")).toBeUndefined();
+  expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket queued");
+  expect(queuedMarks("teamcity:build:1187", "ticket").map((m) => m.text)).toEqual([FILED_TITLE]);
+});
+
+test("once a sync brings the ticket in, the run page draws the linked ticket in place of the queued mark", async () => {
+  let links: LinkEntry[] = [];
+  const drawn = draw("teamcity:build:1187", undefined, { links: () => Promise.resolve(links) });
+  await settle();
+  button("Create ticket")!.click();
+  await settle();
+  const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
+  select.value = "jira:PAY";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  dialogButton("Create ticket")!.click();
+  await settle();
+  links = [ticketLink("PAY-342", FILED_TITLE)];
+  // Jira's sync, not TeamCity's: the ticket's source brought it in.
+  drawn.sync({ source_id: "jira", running: false });
+  await settle();
+  const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-342"));
+  expect(ticket?.getAttribute("href")).toBe("#/job/PAY-342");
+  expect(target.querySelector(".tf-problem .tf-acts")?.textContent).not.toContain("Ticket queued");
+  expect(queuedMarks("teamcity:build:1187", "ticket")).toEqual([]);
+  expect(button("Create ticket")).toBeUndefined();
+});
+
+test("a run a ticket is already linked to draws the ticket and no Create ticket", async () => {
+  draw("teamcity:build:1187", undefined, { links: () => Promise.resolve([ticketLink("PAY-300", "Flaky SEPA retry")]) });
+  await settle();
+  const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-300"));
+  expect(ticket?.getAttribute("href")).toBe("#/job/PAY-300");
+  expect(ticket?.title).toBe("Flaky SEPA retry");
+  expect(button("Create ticket")).toBeUndefined();
 });

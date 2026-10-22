@@ -11,14 +11,14 @@
 
   import type { Project } from "../ipc/entity";
   import { canFile, projectEntity, type TicketDraft } from "./create-ticket";
-  import type { Layers } from "./layers.svelte";
+  import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import TfDialog from "./settings/TfDialog.svelte";
 
   let {
     draft,
     projects,
     words = false,
-    layers,
+    layers = sharedLayers,
     onclose,
     onfile,
   }: {
