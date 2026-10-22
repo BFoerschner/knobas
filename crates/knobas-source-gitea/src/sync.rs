@@ -100,7 +100,9 @@
 //!   position therefore still emits **zero** branch tombstones -- it has
 //!   nothing to compare against -- but it no longer needs to: a cursor-less run
 //!   emits every branch of every walked repository, and the sweep retires the
-//!   rest. That was the recorded window (a re-added source, a cleared or
+//!   rest. "Every" holds while the listing moves too (#1716): a walk of more
+//!   than one page reads each name git lists that the pages missed, so a push
+//!   or a deletion between two pages hides no branch from the sweep. That was the recorded window (a re-added source, a cleared or
 //!   unreadable cursor, a cursor-version bump), and `branch` is precisely the
 //!   kind links hang off (spec §5a). The adapter's own diff still carries the
 //!   *incremental* case, which the sweep never touches.
@@ -127,7 +129,7 @@
 //! reach the sweep at all, because a skip during a cursor-less run is fatal
 //! (above).
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use chrono::{DateTime, Utc};
 use knobas_http::{PageNumber, PageWalk, Walked};
@@ -653,12 +655,16 @@ async fn branches(
     after.default_branch = at.default_branch.map(str::to_owned);
 
     let mut records: Vec<Value> = Vec::new();
+    let mut pages = 0u32;
     let mut walk = PageWalk::new(PageNumber, MAX_BRANCH_PAGES, |page| {
         source.client.branches(at.owner, at.name, page)
     });
     loop {
         match walk.next().await? {
-            Walked::Page(batch) => records.extend(batch),
+            Walked::Page(batch) => {
+                pages += 1;
+                records.extend(batch);
+            }
             Walked::End => break,
             Walked::Capped => {
                 return Err(RepoError::Fatal(cap_reached(
@@ -675,16 +681,34 @@ async fn branches(
     // already read, and the walk never meets it. Its own read decides: a
     // 404 is a branch that is gone, a record is a branch that moved, and
     // anything else ends the repository's walk as any failed read does.
-    let listed: HashSet<&str> = records
+    //
+    // **Nor is a run without a previous cursor safe from it (#1716).** It
+    // has no names to re-read, and the sweep retires every branch it does
+    // not emit. So a walk that took more than one page also asks git for
+    // every branch name at once, a snapshot no push or deletion reorders,
+    // and reads each one the pages missed on its own. (A deletion hides a
+    // branch too: everything below it shifts up a place, and the first
+    // branch of the next page slides onto the page already read.) One
+    // page is one query, and nothing can move inside it.
+    let listed: HashSet<String> = records
         .iter()
         .filter_map(|raw| raw.get("name").and_then(Value::as_str))
+        .map(str::to_owned)
         .collect();
-    let unlisted: Vec<String> = before
+    let mut unlisted: BTreeSet<String> = before
         .branches
         .keys()
         .filter(|name| !listed.contains(name.as_str()))
         .cloned()
         .collect();
+    if pages > 1 {
+        let names = source
+            .client
+            .branch_names(at.owner, at.name)
+            .await
+            .map_err(RepoError::from)?;
+        unlisted.extend(names.into_iter().filter(|name| !listed.contains(name)));
+    }
     let mut gone = Vec::new();
     for name in unlisted {
         match source
@@ -693,7 +717,13 @@ async fn branches(
             .await
         {
             Ok(raw) => records.push(raw),
-            Err(error) if error.status() == Some(404) => gone.push(name),
+            // Only a branch the cursor remembers has a row to retire; one
+            // git named a moment ago and now 404s was never emitted.
+            Err(error) if error.status() == Some(404) => {
+                if before.branches.contains_key(&name) {
+                    gone.push(name);
+                }
+            }
             Err(error) => return Err(RepoError::from(error)),
         }
     }

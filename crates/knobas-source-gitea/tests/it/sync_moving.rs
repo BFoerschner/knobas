@@ -594,6 +594,64 @@ async fn a_deletion_during_a_full_sync_branch_walk_hides_no_other_branch() {
     assert!(position(&after, MONOREPO)["branches"].get("b-14").is_some());
 }
 
+/// #1716: a branch git named, that the pages missed, and that is gone by the
+/// time it is read on its own was never emitted, so there is no row of it to
+/// retire, and a run holding no position still says nothing about a deleted
+/// branch (the module's rule; the sweep is what retires on a full sync).
+#[tokio::test]
+async fn a_full_sync_tombstones_no_branch_it_never_emitted() {
+    let (server, moving) = Moving::start(twenty_five_branches()).await;
+    let gitea = gitea(&server, json!({}));
+    moving.with(|world| {
+        world.after(&format!("repos/{MONOREPO}/branches"), 1, |world| {
+            let pushed = world
+                .branches
+                .get_mut(MONOREPO)
+                .and_then(|all| all.iter_mut().find(|b| b["name"] == "b-08"))
+                .expect("b-08 is in the fixture");
+            *pushed = support::branch("b-08", &sha(900), "pushed", &at(100_000));
+        });
+        world.after(&format!("repos/{MONOREPO}/git/refs/heads"), 1, |world| {
+            world
+                .branches
+                .get_mut(MONOREPO)
+                .expect("the fixture has branches")
+                .retain(|b| b["name"] != "b-08");
+        });
+    });
+    let (items, after) = run(&*gitea, None).await;
+
+    assert!(
+        tombstoned(&items, "branch").is_empty(),
+        "{:?}",
+        tombstoned(&items, "branch")
+    );
+    assert_eq!(emitted(&items, "branch"), every_branch_but(&["b-08"]));
+    assert!(position(&after, MONOREPO)["branches"].get("b-08").is_none());
+}
+
+/// #1716: a listing that fits on one page is one query, which nothing
+/// reorders, so the walk asks git for no names.
+#[tokio::test]
+async fn a_one_page_branch_walk_reads_no_names_from_git() {
+    let mut world = twenty_five_branches();
+    world.cap = None;
+    let (server, moving) = Moving::start(world).await;
+    let gitea = gitea(&server, json!({}));
+    let (items, _) = run(&*gitea, None).await;
+
+    assert_eq!(emitted(&items, "branch"), every_branch_but(&[]));
+    let served = moving.with(|w| w.served.clone());
+    assert!(
+        !served.iter().any(|s| s.contains("/git/refs/")),
+        "{served:?}"
+    );
+    assert!(
+        served.iter().any(|s| s == &format!("repos/{MONOREPO}/branches?page=2")),
+        "the walk ended on an empty second page: {served:?}"
+    );
+}
+
 const PAYOUT: &str = "tidewater/payout-service";
 const DAY: i64 = 86_400;
 
