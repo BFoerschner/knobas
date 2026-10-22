@@ -11399,3 +11399,43 @@ set.
 - **The docker-free fake's single-branch read.** *Ruling:* a branch the state does not hold answers
   404, as Gitea does (measured for #724), not the catch-all empty page. *Reasoning:* `[]` read as
   "still there" once the walk began re-reading unlisted branches. *Reversing:* n/a.
+
+### #1624/#1625 review rulings (merge-manager, Opus, 2026-10-22)
+
+- **#1624's "the watermark after the first run is the oldest examined record".** *Fork:* hold the
+  PR until the code moves `pulls_updated_to` / `commits_since` to the oldest record examined, or
+  accept the catch-up's `below` as meeting it. *Ruling:* met in intent, ticked with this note. The
+  criterion contradicts the same ticket's other clause, "all 260 mirrored after two runs, the 40
+  reading merged": both walks read newest first and stop below the watermark, so a watermark set
+  to the oldest examined (record 61 of 260) makes the second run read 61 to 260 again and never
+  the 60 under it. The code cannot satisfy both, and A6's own reasoning ("the next run must
+  continue, not skip ... the delta complete over several runs") is the clause the catch-up meets.
+  The oldest examined record is stored as the resume point (`*_catching_up.below`) and the tests
+  assert it after the first run; the watermark field keeps its meaning, everything at or before it
+  delivered. A6's wording is #1715, relabelled `ready-for-agent` because the spec ruling is wrong
+  as worded (brief: a wrong spec gets a follow-up). *Reversing:* medium, as the implementer's
+  first ruling above.
+- **"The cursor version stays `3`".** *Ruling:* honestly met. `GiteaCursor::parse` takes any
+  `"v":3` envelope and none of the cursor structs denies unknown fields. A version-3 cursor from
+  before #1624 reads with both catch-ups `None` (serde default), which is today's incremental run;
+  a cursor written by this code and read by an older build parses too, the catch-up ignored, and
+  its watermark is still the conservative one (nothing above it is claimed delivered), so the older
+  build only repeats its own budget bug and loses nothing it would not have lost anyway. A
+  catch-up-free cursor serialises byte-identical to before (`catching_up` absent,
+  `cursor::tests::empty_fields_are_omitted` asserts it). *Reversing:* n/a.
+- **§10.8.** *Ruling:* no entry owed. `crates/knobas-source-gitea/**` and its cursor are not on
+  §10.8's frozen list (the cursor is an opaque adapter string, §4.2), and nothing in
+  `knobas-source`, `knobas-http`, a migration or the IPC changed. The §4.2 Gitea row now says
+  "Amended by #1624" for the catch-ups, the repository order and `until=`, as #764 and #1138 did
+  for theirs. *Reversing:* n/a.
+- **Live re-run after the rebase.** *Ruling:* required, `just gitea-live` and
+  `just gitea-live-capped` re-run on the rebased head. The rebase brought #1709's (issue #1647)
+  `images.env` rename into `seed-gitea.sh`, `live-lib.sh` and the justfile's `gitea-live-capped`
+  compose calls, and #1712's (issue #1622) new `knobas-source` module; both suites use the first
+  and link the second (working model, *A PR at the real systems' edge carries its live run*).
+  *Reversing:* n/a.
+- **A pull-request page hint whose first record sits on `below`'s own second.** *Ruling:* left as
+  is: the walk restarts from page 1, which costs at most one run that reads no new records when
+  more than the page cap lies above the window, and then makes progress from the cap's last page.
+  Trusting `first == below` would be unsafe, because an unread record on that second can sit on an
+  earlier page. *Reversing:* low.
