@@ -23,10 +23,15 @@
 //! what governed when the last one was.
 //!
 //! A changed quota is a new governor limiter, which every holder waits on
-//! from its next request. A **tightening** starts with its own (stricter)
-//! burst. A **loosening** starts drained: two sources at different quotas on
-//! one server, syncing one after the other, would otherwise be handed a
-//! fresh burst on every alternation.
+//! from its next request. Two sources at different quotas on one server,
+//! syncing one after the other, would be handed a fresh burst on every
+//! alternation if either kind of change started full. A **loosening** starts
+//! drained. A **tightening** starts with the credit the limiter it replaces
+//! had left (#1740): as many seconds of the stricter rate as the old
+//! limiter's unspent requests were seconds of its own, at most the stricter
+//! burst. A tightening of a limiter nobody spent from has the whole stricter
+//! burst, as in #1630, wherever the old burst lasts at least as many seconds
+//! of refill as the new one; where it lasts fewer, it has fewer.
 //!
 //! [`InstanceLimiter`] is public so a sender outside [`HttpClient`] -- the
 //! wasm host's network policy (#1631) -- can wait on the same quota.
@@ -277,9 +282,10 @@ impl Slot {
     ///
     /// A changed quota is a new governor limiter -- governor cannot change
     /// the quota of one it has built -- and every holder waits on it from its
-    /// next request. A stricter one starts with its own burst; one looser in
-    /// either field starts drained, so a loosening never sends a burst the
-    /// limiter it replaces would have held back.
+    /// next request. One looser in either field starts drained, so a
+    /// loosening never sends a burst the limiter it replaces would have held
+    /// back; a stricter one takes over what the old one had left
+    /// ([`Paced::tightened`]).
     fn register(&self, asked: Rate) -> Arc<Registration> {
         let registration = Arc::new(Registration);
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
@@ -295,7 +301,7 @@ impl Slot {
             held.paced = Arc::new(if loosens {
                 Paced::drained(rate)
             } else {
-                Paced::new(rate)
+                Paced::tightened(&held.paced, rate)
             });
         }
         registration
@@ -334,10 +340,63 @@ impl Paced {
     /// A limiter at `rate` whose burst is already spent: the first request
     /// waits for the refill.
     fn drained(rate: Rate) -> Self {
+        Self::with_left(rate, 0)
+    }
+
+    /// A limiter at `rate` with `left` requests to send at once, at most its
+    /// whole burst.
+    fn with_left(rate: Rate, left: u32) -> Self {
         let paced = Self::new(rate);
-        // A fresh limiter always has its whole burst: neither error can come.
-        let _ = paced.limiter.check_n(rate.burst);
+        // A fresh limiter has its whole burst, and this is at most that, so
+        // it always fits.
+        paced.spend(rate.burst.get().saturating_sub(left));
         paced
+    }
+
+    /// Send `n` requests' worth through the limiter at once if it has them,
+    /// and say whether it did. Nothing waits; zero always fits.
+    fn spend(&self, n: u32) -> bool {
+        NonZeroU32::new(n).is_none_or(|n| matches!(self.limiter.check_n(n), Ok(Ok(()))))
+    }
+
+    /// A limiter at `rate`, no looser in either field than `old`'s, taking
+    /// over from `old` with the credit it had left (#1740).
+    ///
+    /// The requests `old` could still send at once are counted in seconds of
+    /// its own refill, and the new limiter starts with as many seconds of
+    /// `rate`'s, rounded down, at most its burst. A limiter that started
+    /// drained, was never spent from and has not refilled its burst has
+    /// refilled for as long as the new one is credited with, so the stricter
+    /// quota gets back what it would have refilled itself in that time, never
+    /// a fresh burst. `old` is left spent: what it had now belongs to the new
+    /// limiter.
+    fn tightened(old: &Self, rate: Rate) -> Self {
+        let credit = u64::from(old.take_left()) * u64::from(rate.per_second.get())
+            / u64::from(old.rate.per_second.get());
+        // The new rate is not the higher, so `credit` is at most what `old`
+        // had.
+        Self::with_left(rate, u32::try_from(credit).unwrap_or(u32::MAX))
+    }
+
+    /// Take every request this limiter could send at once, and count them.
+    ///
+    /// Governor has no reading of what a limiter has left, so it is taken in
+    /// halving steps from the largest power of two within the burst: each
+    /// step that fits is kept, and what is left after it is less than the
+    /// step, so the sum is the count. A token that refills between two steps
+    /// can be missed, which only ever counts low.
+    fn take_left(&self) -> u32 {
+        let mut left = 0;
+        let mut step = 1 << self.rate.burst.ilog2();
+        loop {
+            if self.spend(step) {
+                left += step;
+            }
+            if step == 1 {
+                return left;
+            }
+            step /= 2;
+        }
     }
 }
 
@@ -363,7 +422,7 @@ fn nonzero(value: u32) -> NonZeroU32 {
 mod tests {
     use std::sync::Arc;
 
-    use super::{InstanceLimiter, PoisonError, Rate};
+    use super::{InstanceLimiter, Paced, PoisonError, Rate};
 
     /// One entry per origin, however its quota moves, and a dropped holder
     /// does not stay on the books: building a limiter prunes the dead.
@@ -397,6 +456,72 @@ mod tests {
             Rate::new(5, 10).stricter(Rate::new(5, 10)),
             Rate::new(5, 10)
         );
+    }
+
+    /// What a limiter has left is counted exactly, and counting takes it.
+    #[test]
+    fn what_a_limiter_has_left_is_counted_and_taken() {
+        let paced = Paced::new(Rate::new(1, 13));
+        assert!(paced.spend(6));
+
+        assert_eq!(paced.take_left(), 7);
+        assert_eq!(paced.take_left(), 0, "the first count took all seven");
+    }
+
+    /// What a tightening starts with, for a limiter at `loose` that has had
+    /// `spent` requests sent through it, tightened to `strict` (#1740).
+    fn left_after_tightening(origin: &str, loose: Rate, spent: u32, strict: Rate) -> u32 {
+        let url = url::Url::parse(origin).expect("url");
+        let first = InstanceLimiter::for_origin(&url, loose);
+        assert!(first.slot.current().spend(spent));
+        let second = InstanceLimiter::for_origin(&url, strict);
+        assert_eq!(second.slot.current().rate, strict, "the quota tightened");
+        second.slot.current().take_left()
+    }
+
+    /// Two quotas whose bursts both last ten seconds of refill: a tightening
+    /// of a limiter nobody spent from has the stricter quota's whole burst,
+    /// as in #1630, and one half spent has half of it.
+    #[test]
+    fn a_tightening_takes_over_the_seconds_its_predecessor_had_left() {
+        let unspent = left_after_tightening(
+            "http://unspent.invalid:1740",
+            Rate::new(2, 20),
+            0,
+            Rate::new(1, 10),
+        );
+        let half = left_after_tightening(
+            "http://half.invalid:1740",
+            Rate::new(2, 20),
+            10,
+            Rate::new(1, 10),
+        );
+
+        assert_eq!(
+            unspent, 10,
+            "an unspent limiter's tightening keeps its burst"
+        );
+        assert_eq!(
+            half, 5,
+            "ten of twenty left at 2/s is five seconds, five at 1/s"
+        );
+    }
+
+    /// The credit is counted in seconds of refill, not as a share of the
+    /// burst: twenty requests at ten a second are two seconds, which at one a
+    /// second is two requests, not half of a burst of ten. A loose limiter
+    /// that refills in two seconds says nothing about the ten seconds the
+    /// strict one takes.
+    #[test]
+    fn a_tightening_credits_seconds_of_refill() {
+        let left = left_after_tightening(
+            "http://seconds.invalid:1740",
+            Rate::new(10, 20),
+            0,
+            Rate::new(1, 10),
+        );
+
+        assert_eq!(left, 2);
     }
 
     /// A zero reads as one, as it always has: `0/s` means "one", not "never".

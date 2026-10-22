@@ -694,6 +694,38 @@ async fn a_loosened_quota_starts_drained() {
     assert!(hits >= 1, "the drained limiter never refilled");
 }
 
+/// **A tightening after a loosening hands out no fresh burst either**
+/// (#1740).
+///
+/// Two sources on one server at two a second (burst six) and four a second
+/// (burst twelve), their clients never alive at once: the strict one spends
+/// its burst, the loose one is built and dropped, and the strict one is
+/// built again. Had the strict quota governed throughout, the 900 ms after
+/// that would see what two a second refills, one or two requests. Built
+/// with its own burst, the strict limiter sends six more.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tightening_after_a_loosening_starts_with_what_was_left() {
+    let server = CountingServer::always(200, "");
+    let strict = client_at(&server, 2, 6);
+    for _ in 0..6 {
+        let _ = strict.send(strict.request(Method::GET, "/x")).await;
+    }
+    drop(strict);
+    drop(client_at(&server, 4, 12));
+    let spent = server.hits();
+
+    let strict_again = client_at(&server, 2, 6);
+    let hits = hits_within_the_burst(&server, vec![strict_again], 6).await - spent;
+
+    assert_eq!(spent, 6, "the strict burst went out before the alternation");
+    assert!(
+        hits <= 2,
+        "{hits} reached the instance in 900 ms after the strict quota came back: \
+         the tightening handed out a fresh burst"
+    );
+    assert!(hits >= 1, "the strict limiter never refilled");
+}
+
 /// A server that accepts the connection and then says nothing is
 /// **`Unreachable`, not `Protocol`** -- which is the class the scheduler backs
 /// off on, so the classification is the whole assertion.
