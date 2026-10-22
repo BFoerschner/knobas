@@ -1,7 +1,7 @@
-//! The incremental position: `{"v":3,…}`, opaque to everything but this crate.
+//! The incremental position: `{"v":4,…}`, opaque to everything but this crate.
 //!
 //! ```text
-//! {"v":3,
+//! {"v":4,
 //!  "updated_to":"2026-08-22T11:48:00Z",   // the newest `updated` delivered
 //!  "tz_offset_secs":7200,                 // the zone that watermark was queried in
 //!  "seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"3f0c1a92be44d7e5"}]}
@@ -35,6 +35,7 @@
 //!   cap dropped entries the next query still returns.
 
 use chrono::{DateTime, Utc};
+use knobas_source::watermark::{self, Advanced, Bounds, Entry, Jql};
 
 /// Bump when the envelope's shape changes: an unrecognised version reads as
 /// "no cursor", which is a full sync.
@@ -60,19 +61,10 @@ use chrono::{DateTime, Utc};
 /// so without the bump no stored ticket would gain the key.
 pub(crate) const CURSOR_VERSION: u8 = 4;
 
-/// Interfaces §4.2: "**JQL time resolution is one minute**, so an
-/// exact-boundary watermark drops items. Re-delivery is free -- upserts are
-/// idempotent."
-const OVERLAP_MINUTES: i64 = 2;
-
-/// Used for the one run after the server's UTC offset changed (a daylight
-/// saving shift is at most an hour), so no item falls in the seam.
-const DST_OVERLAP_MINUTES: i64 = 65;
-
-/// How many `(key, updated)` pairs the envelope remembers. Beyond this a mass
-/// edit inside one overlap window may be delivered twice -- upserts are
-/// idempotent, so the cost is bandwidth, not correctness.
-pub(crate) const SEEN_CAP: usize = 500;
+// The overlap, the daylight-saving widening and the seen cap are
+// `knobas_source::watermark`'s (#1622), shared with Confluence. Interfaces
+// §4.2: "**JQL time resolution is one minute**, so an exact-boundary
+// watermark drops items. Re-delivery is free -- upserts are idempotent."
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct JiraCursor {
@@ -110,6 +102,21 @@ pub(crate) struct Seen {
     pub h: String,
 }
 
+/// The identity is the key and the fingerprint (#345); `u` only bounds the
+/// window.
+impl Entry for Seen {
+    type Version = str;
+    fn key(&self) -> &str {
+        &self.k
+    }
+    fn stamp(&self) -> DateTime<Utc> {
+        self.u
+    }
+    fn is_version(&self, fingerprint: &str) -> bool {
+        self.h == fingerprint
+    }
+}
+
 impl JiraCursor {
     /// A cursor for a source that has never delivered anything.
     pub(crate) fn empty(tz_offset_secs: i32) -> Self {
@@ -136,13 +143,9 @@ impl JiraCursor {
         serde_json::to_string(self).expect("a cursor is plain data and always serializes")
     }
 
-    /// The lower bound of the next `updated >=` clause.
-    ///
-    /// On the one run after the server's offset changed this reaches further
-    /// back than the window [`Self::advanced`] recorded `seen` for, so that run
-    /// re-delivers what falls in between. That is deliberate -- widening is how
-    /// no item falls in the daylight-saving seam, and `advanced` cannot know an
-    /// offset that has not been observed yet.
+    /// The lower bound of the next `updated >=` clause: two minutes before
+    /// the watermark, an hour more on the one run after the server's offset
+    /// changed ([`knobas_source::watermark::since`]).
     ///
     /// # What the caller owes, in full
     ///
@@ -150,10 +153,9 @@ impl JiraCursor {
     /// following. Either one alone leaves an idle source oscillating, and the
     /// two fail in different places, so neither substitutes for the other:
     ///
-    /// 1. **The new watermark is `max(previous, newest emitted)`.** Otherwise a
-    ///    re-delivered *older* item drags the watermark backwards -- the same
-    ///    oscillation the minute-flooring in [`Self::advanced`] exists to
-    ///    prevent, arriving by a different door.
+    /// 1. **[`Self::advanced`] is handed the previous watermark** in its
+    ///    bounds, so a re-delivered *older* item cannot drag the watermark
+    ///    backwards.
     /// 2. **`advanced` is handed every pair in the window, skipped ones
     ///    included** -- see its own contract. A run that passes only what it
     ///    emitted drops the pairs it recognised out of `seen`, and they come
@@ -165,13 +167,7 @@ impl JiraCursor {
     /// under it, because a full sync skips nothing. It takes **one new issue
     /// and then an idle poll** to show.
     pub(crate) fn since(&self, current_offset_secs: i32) -> Option<DateTime<Utc>> {
-        let watermark = self.updated_to?;
-        let minutes = if current_offset_secs == self.tz_offset_secs {
-            OVERLAP_MINUTES
-        } else {
-            DST_OVERLAP_MINUTES
-        };
-        Some(watermark - chrono::Duration::minutes(minutes))
+        watermark::since(self.updated_to, self.tz_offset_secs, current_offset_secs)
     }
 
     /// Was this exact version of this issue already handed to the sink?
@@ -191,66 +187,42 @@ impl JiraCursor {
     /// clocks said, so re-adding `u` to this comparison could only ever make it
     /// wrong again in the same direction.
     pub(crate) fn already_delivered(&self, key: &str, fingerprint: &str) -> bool {
-        self.seen.iter().any(|s| s.k == key && s.h == fingerprint)
+        watermark::delivered(&self.seen, key, fingerprint)
     }
 
     /// The cursor for a run that emitted something.
     ///
     /// # `seen_in_window` is every record the run *saw*, not every one it sent
     ///
-    /// The run must pass every [`Seen`] it observed inside the overlap window -- **the ones it skipped as already-delivered just as much as the
-    /// ones it pushed to the sink**. `seen` is a record of what the *window*
+    /// The run must pass every [`Seen`] it observed inside the overlap window --
+    /// **the ones it skipped as already-delivered just as much as the ones it
+    /// pushed to the sink**. `seen` is a record of what the *window*
     /// contained, not of what crossed the SPI, and the two differ on exactly
     /// the items that make an idle poll idle.
     ///
     /// Pass only the emitted pairs and the cursor forgets, every run, whatever
-    /// it recognised that run. Concretely, with the `max()` watermark from
-    /// [`Self::since`] correctly applied: run 3 emits PAY-3 and skips PAY-2, so
+    /// it recognised that run. Concretely, with the previous watermark
+    /// correctly passed: run 3 emits PAY-3 and skips PAY-2, so
     /// PAY-2 leaves `seen`; run 4 no longer recognises PAY-2 and emits it,
     /// which pushes PAY-3 out; run 5 emits PAY-3 again. The watermark never
     /// moves and the source still emits an item on every poll, forever.
     ///
     /// This is why the parameter is not called `delivered`.
+    ///
+    /// # The watermark is held at the ceiling (#1622)
+    ///
+    /// `bounds` carries the previous watermark and the run-start ceiling:
+    /// an issue edited during the walk is not where the watermark lands, and
+    /// the watermark never moves back. The floor, the order and the cap are
+    /// [`knobas_source::watermark::advanced`]'s, shared with Confluence.
     pub(crate) fn advanced(
-        watermark: DateTime<Utc>,
+        bounds: Bounds,
+        newest: DateTime<Utc>,
         tz_offset_secs: i32,
         seen_in_window: &[Seen],
     ) -> Self {
-        // The band the next query will really return, not the band the
-        // arithmetic suggests. `since` subtracts whole minutes, but the literal
-        // it is rendered into has minute resolution and truncates *downwards*,
-        // so the query's true lower bound is up to 59 s earlier than
-        // `watermark - OVERLAP_MINUTES`. Filtering `seen` on the un-truncated
-        // value drops every pair delivered in that band while the query keeps
-        // returning them: run N+1 re-emits one, its watermark moves *backwards*
-        // to that item, run N+2 moves it forward again, and an idle poll
-        // oscillates between two cursors forever -- battery clause 2 failing in
-        // steady state, not at a DST edge.
-        //
-        // Asking `jql_floor` rather than truncating here keeps the two
-        // definitions from drifting apart again: it renders the literal and
-        // reads it back, so the floor is the query's meaning by construction.
-        let floor = crate::time::jql_floor(
-            watermark - chrono::Duration::minutes(OVERLAP_MINUTES),
-            tz_offset_secs,
-        );
-        let mut seen: Vec<Seen> = seen_in_window
-            .iter()
-            .filter(|s| s.u >= floor)
-            .cloned()
-            .collect();
-        // Newest first, so the cap drops the entries least likely to come back,
-        // with the key breaking ties. A key appears at most once, so this is a
-        // *total* order on the entries -- which is the whole of what makes the
-        // same delivered set encode to the same bytes however the pages
-        // happened to arrive. The engine compares cursors as strings, so that
-        // property is what lets an idle poll be recognised as one.
-        //
-        // A second pass sorting by key alone used to follow this one, claiming
-        // to be what stabilised the bytes. It was not: it was redundant, and a
-        // mutation check found no test that could tell whether it was there.
-        seen.sort_by(|a, b| b.u.cmp(&a.u).then_with(|| a.k.cmp(&b.k)));
-        seen.truncate(SEEN_CAP);
+        let Advanced { watermark, seen } =
+            watermark::advanced::<Jql, Seen>(bounds, newest, tz_offset_secs, seen_in_window);
         Self {
             v: CURSOR_VERSION,
             updated_to: Some(watermark),
@@ -300,13 +272,19 @@ mod tests {
     #[test]
     fn round_trips_through_its_json_envelope() {
         let c = JiraCursor::advanced(
+            Bounds::default(),
             t("2026-08-22T11:48:00.000+0000"),
             7_200,
             &[saw("PAY-231", t("2026-08-22T11:48:00.000+0000"))],
         );
         let back = JiraCursor::parse(&c.encode()).unwrap();
         assert_eq!(back, c);
-        assert!(c.encode().starts_with(r#"{"v":4,"#), "{}", c.encode());
+        // The stored bytes, literally: the shared watermark (#1622) moved the
+        // arithmetic and none of the envelope, so no stored cursor re-syncs.
+        assert_eq!(
+            c.encode(),
+            r#"{"v":4,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":7200,"seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"h-PAY-231"}]}"#
+        );
     }
 
     /// Interfaces §4.1: "an unrecognised version means full sync". A corrupt or
@@ -364,7 +342,12 @@ mod tests {
     /// The two-minute overlap, and why it is not optional.
     #[test]
     fn the_query_starts_two_minutes_before_the_watermark() {
-        let c = JiraCursor::advanced(t("2026-08-22T11:48:00.000+0000"), 7_200, &[]);
+        let c = JiraCursor::advanced(
+            Bounds::default(),
+            t("2026-08-22T11:48:00.000+0000"),
+            7_200,
+            &[],
+        );
         assert_eq!(c.since(7_200), Some(t("2026-08-22T11:46:00.000+0000")));
     }
 
@@ -373,7 +356,12 @@ mod tests {
     /// shift instead of skipping an hour of issues.
     #[test]
     fn an_offset_change_widens_the_overlap_once() {
-        let c = JiraCursor::advanced(t("2026-10-25T01:30:00.000+0000"), 7_200, &[]);
+        let c = JiraCursor::advanced(
+            Bounds::default(),
+            t("2026-10-25T01:30:00.000+0000"),
+            7_200,
+            &[],
+        );
         assert_eq!(c.since(3_600), Some(t("2026-10-25T00:25:00.000+0000")));
     }
 
@@ -387,7 +375,7 @@ mod tests {
     #[test]
     fn issues_already_delivered_at_the_watermark_are_recognised() {
         let updated = t("2026-08-22T11:48:00.000+0000");
-        let c = JiraCursor::advanced(updated, 0, &[saw("PAY-231", updated)]);
+        let c = JiraCursor::advanced(Bounds::default(), updated, 0, &[saw("PAY-231", updated)]);
         assert!(c.already_delivered("PAY-231", &h("PAY-231")));
         // Edited since: a different record, so a real change.
         assert!(!c.already_delivered("PAY-231", &edited("PAY-231", updated).h));
@@ -411,7 +399,12 @@ mod tests {
     #[test]
     fn a_record_that_changed_within_one_second_is_not_the_one_already_delivered() {
         let one_second = t("2026-09-03T22:54:59.000+0000");
-        let c = JiraCursor::advanced(one_second, 0, &[saw("PAY-240", one_second)]);
+        let c = JiraCursor::advanced(
+            Bounds::default(),
+            one_second,
+            0,
+            &[saw("PAY-240", one_second)],
+        );
         assert!(
             c.already_delivered("PAY-240", &h("PAY-240")),
             "the unchanged record is still recognised -- battery clause 2"
@@ -429,6 +422,7 @@ mod tests {
     fn the_seen_set_covers_the_overlap_and_nothing_else() {
         let watermark = t("2026-08-22T11:48:00.000+0000");
         let c = JiraCursor::advanced(
+            Bounds::default(),
             watermark,
             0,
             &[
@@ -463,11 +457,13 @@ mod tests {
                 )
             })
         };
-        let encode = |order: [i64; 3]| JiraCursor::advanced(watermark, 0, &pairs(order)).encode();
+        let encode = |order: [i64; 3]| {
+            JiraCursor::advanced(Bounds::default(), watermark, 0, &pairs(order)).encode()
+        };
         assert_eq!(encode([2, 0, 1]), encode([0, 1, 2]));
         assert_eq!(encode([1, 2, 0]), encode([0, 1, 2]));
 
-        let c = JiraCursor::advanced(watermark, 0, &pairs([2, 0, 1]));
+        let c = JiraCursor::advanced(Bounds::default(), watermark, 0, &pairs([2, 0, 1]));
         let keys: Vec<&str> = c.seen.iter().map(|s| s.k.as_str()).collect();
         assert_eq!(keys, vec!["PAY-2", "PAY-1", "PAY-0"]);
     }
@@ -480,7 +476,13 @@ mod tests {
     fn entries_sharing_a_timestamp_are_still_ordered_deterministically() {
         let watermark = t("2026-08-22T11:48:00.000+0000");
         let encode = |order: [&str; 3]| {
-            JiraCursor::advanced(watermark, 0, &order.map(|k| saw(k, watermark))).encode()
+            JiraCursor::advanced(
+                Bounds::default(),
+                watermark,
+                0,
+                &order.map(|k| saw(k, watermark)),
+            )
+            .encode()
         };
         assert_eq!(
             encode(["PAY-240", "PAY-219", "PAY-231"]),
@@ -494,13 +496,13 @@ mod tests {
 
     /// The instant Jira will read this cursor's next `updated >=` literal as.
     ///
-    /// Deliberately goes *through* [`crate::time::format_jql_time`] and parses
-    /// the literal back by hand, rather than calling `jql_floor` or
+    /// Deliberately goes *through* the JQL rendering the query uses and parses
+    /// the literal back by hand, rather than calling `Jql::floor` or
     /// recomputing a constant: the property under test is that the `seen`
     /// filter and the rendered query agree, so a test that recomputed the
     /// floor its own way could agree with neither and still pass.
     fn query_floor(c: &JiraCursor, offset: i32) -> DateTime<Utc> {
-        let literal = crate::time::format_jql_time(
+        let literal = <Jql as knobas_source::watermark::MinuteLiteral>::render(
             c.since(offset).expect("this cursor has a watermark"),
             offset,
         );
@@ -537,7 +539,7 @@ mod tests {
             // Genuinely older than the window; the query will not return it.
             saw("PAY-0", t("2026-08-22T11:40:00.000+0000")),
         ];
-        let c = JiraCursor::advanced(watermark, offset, &delivered);
+        let c = JiraCursor::advanced(Bounds::default(), watermark, offset, &delivered);
         let floor = query_floor(&c, offset);
 
         for record in &delivered {
@@ -572,7 +574,7 @@ mod tests {
                         )
                     })
                     .collect();
-                let c = JiraCursor::advanced(watermark, offset, &delivered);
+                let c = JiraCursor::advanced(Bounds::default(), watermark, offset, &delivered);
                 let floor = query_floor(&c, offset);
                 for record in &delivered {
                     let (key, updated) = (&record.k, record.u);
@@ -622,7 +624,7 @@ mod tests {
 
         // Run 3 emitted PAY-3 and skipped PAY-2, having recognised it from run
         // 2. Contract honoured: `advanced` is handed both.
-        let honoured = JiraCursor::advanced(newer, 0, &window);
+        let honoured = JiraCursor::advanced(Bounds::default(), newer, 0, &window);
         assert!(
             would_emit(&honoured, &window).is_empty(),
             "an idle poll must emit nothing"
@@ -630,13 +632,13 @@ mod tests {
         // And it stays settled: the same window yields the same cursor, so the
         // engine reads "same cursor, no items" and writes no activity line.
         assert_eq!(
-            JiraCursor::advanced(newer, 0, &window).encode(),
+            JiraCursor::advanced(Bounds::default(), newer, 0, &window).encode(),
             honoured.encode()
         );
 
         // The same run passing only what it *emitted* -- the reading the old
         // parameter name invited.
-        let run3 = JiraCursor::advanced(newer, 0, &window[1..]);
+        let run3 = JiraCursor::advanced(Bounds::default(), newer, 0, &window[1..]);
         assert_eq!(
             would_emit(&run3, &window),
             vec!["PAY-2"],
@@ -646,7 +648,7 @@ mod tests {
         // It does not converge. Run 4 emits PAY-2; its watermark is still
         // max(newer, older) == newer, so nothing looks wrong -- but its seen
         // now holds only PAY-2, so run 5 emits PAY-3, and so on forever.
-        let run4 = JiraCursor::advanced(newer, 0, &[saw("PAY-2", older)]);
+        let run4 = JiraCursor::advanced(Bounds::default(), newer, 0, &[saw("PAY-2", older)]);
         assert_eq!(run4.updated_to, Some(newer), "the watermark never moved");
         assert_eq!(would_emit(&run4, &window), vec!["PAY-3"]);
     }
@@ -656,7 +658,7 @@ mod tests {
     #[test]
     fn the_seen_set_is_capped_at_the_newest_entries() {
         let watermark = t("2026-08-22T11:48:00.000+0000");
-        let delivered: Vec<Seen> = (0..SEEN_CAP + 50)
+        let delivered: Vec<Seen> = (0..knobas_source::watermark::SEEN_CAP + 50)
             .map(|i| {
                 saw(
                     &format!("PAY-{i}"),
@@ -664,12 +666,12 @@ mod tests {
                 )
             })
             .collect();
-        let c = JiraCursor::advanced(watermark, 0, &delivered);
-        assert_eq!(c.seen.len(), SEEN_CAP);
+        let c = JiraCursor::advanced(Bounds::default(), watermark, 0, &delivered);
+        assert_eq!(c.seen.len(), knobas_source::watermark::SEEN_CAP);
         // The newest survive the cap: they are the ones the next overlap query
         // will hand back again.
         assert!(c.already_delivered("PAY-0", &h("PAY-0")));
-        let oldest = &delivered[SEEN_CAP + 49];
+        let oldest = &delivered[knobas_source::watermark::SEEN_CAP + 49];
         assert!(!c.already_delivered(&oldest.k, &oldest.h));
     }
 
@@ -681,6 +683,7 @@ mod tests {
     #[test]
     fn re_encoding_an_unchanged_cursor_is_byte_identical() {
         let encoded = JiraCursor::advanced(
+            Bounds::default(),
             t("2026-08-22T11:48:00.000+0000"),
             7_200,
             &[
