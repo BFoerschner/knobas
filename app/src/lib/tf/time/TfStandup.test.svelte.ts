@@ -114,6 +114,8 @@ function open(
     links?: LinkEntry[];
     /** The day the address names (`#/time/standup/<date>`). */
     date?: string;
+    /** The first write stalls until `release()`, and `body` is what the store holds when each write lands: a slow database. */
+    slowFirstWrite?: boolean;
   } = {},
 ) {
   const calls: {
@@ -123,7 +125,11 @@ function open(
     tickets: unknown[][];
     days: string[];
     digests: string[];
+    reads: number;
+    writes: number;
   } = {
+    reads: 0,
+    writes: 0,
     saved: [],
     published: [],
     copied: [],
@@ -134,6 +140,8 @@ function open(
   const links = over.links ?? [];
   const hears = new Map<number, (row: QueuedWrite | undefined) => void>();
   let body = BODY;
+  let release = () => {};
+  const stalled = new Promise<void>((done) => (release = done));
   const protocol = (publication: Protocol["publication"] = over.publication ?? null): Protocol => ({
     day: DAY,
     note_id: "note:p",
@@ -156,12 +164,17 @@ function open(
           calls.days.push(day);
           return protocol();
         },
-        getNote: async () => ({
-          note: { id: "note:p", title: `Standup ${DAY}`, body_md: body, created_at: "", updated_at: "" },
-          refs: [],
-          links: [...links],
-        }),
+        getNote: async () => {
+          calls.reads += 1;
+          return {
+            note: { id: "note:p", title: `Standup ${DAY}`, body_md: body, created_at: "", updated_at: "" },
+            refs: [],
+            links: [...links],
+          };
+        },
         saveNote: async (_id: string, _title: string, text: string) => {
+          calls.writes += 1;
+          if (over.slowFirstWrite && calls.writes === 1) await stalled;
           body = text;
           calls.saved.push(text);
           return { note: { id: "note:p", title: "", body_md: text, created_at: "", updated_at: "" }, refs: [], links: [] };
@@ -194,7 +207,7 @@ function open(
       } as never,
     },
   });
-  return { calls, hears };
+  return { calls, hears, release: () => release(), stored: () => body };
 }
 
 const text = () => target.textContent?.replace(/\s+/g, " ") ?? "";
@@ -389,4 +402,22 @@ test("a date in the address opens that day's protocol and digest, not today's (#
   expect(calls.days).toEqual(["2026-08-03"]);
   expect(calls.digests).toEqual(["2026-08-03"]);
   expect(target.querySelector(".tf-su-day")?.textContent).toBe("Monday 3 August");
+});
+
+test("two overlapping saves land in order, the newer body last, and no save reads the note back (#1679)", async () => {
+  const { calls, release, stored } = open({ slowFirstWrite: true });
+  await settle();
+  const reads = calls.reads;
+  const box = () => target.querySelectorAll<HTMLTextAreaElement>(".tf-su-pn textarea")[1]!;
+  for (const typed of ["first", "second"]) {
+    box().value = typed;
+    box().dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((done) => setTimeout(done, 5));
+  }
+  release();
+  await settle();
+  await new Promise((done) => setTimeout(done, 5));
+  await settle();
+  expect(stored()).toContain("Tomasz Wójcik: second");
+  expect(calls.reads).toBe(reads);
 });
