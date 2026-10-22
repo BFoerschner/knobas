@@ -2189,6 +2189,8 @@ const CASES: Case[] = [
           placeholder: "Search",
           pending: false,
           footnote: "mirror",
+          controls: "results",
+          active: undefined,
           oninput: () => {},
           onkeydown: () => {},
           onclose: () => {},
