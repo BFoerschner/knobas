@@ -98,7 +98,9 @@
 //!
 //! Any other failure on a held session drops it and is the write's failure:
 //! an emit that was accepted and then went unanswered may have been acted on,
-//! and sending a create twice would make two monitors.
+//! and sending a create twice would make two monitors. That failure, and the
+//! deadline once the packet is out, is `Unconfirmed` (#1627), which the write
+//! queue holds rather than sends again.
 //!
 //! The socket itself is **shared per instance and account across the
 //! process** ([`KumaSocket::shared`]): the write queue builds an adapter per
@@ -369,15 +371,22 @@ impl KumaSocket {
     /// on a later tick. [`SourceError::Protocol`] when
     /// Kuma refuses the call itself (a monitor that is not there, an account
     /// that may not touch it), carrying Kuma's own words; when the session
-    /// stays open past [`CALL_BUDGET`] without acknowledging anything; and
-    /// whatever [`knobas_http`] classified a transport failure as.
+    /// stays open past [`CALL_BUDGET`] without acknowledging anything **before
+    /// the write's own packet went out**; and whatever [`knobas_http`]
+    /// classified a transport failure on the way there as.
+    /// [`SourceError::Unconfirmed`] for **every failure after that packet
+    /// went out** and before its ack was read -- a lost poll, a reaped
+    /// session, the deadline (#1627): Kuma may have acted on it, and the write
+    /// queue holds a create rather than make a second monitor.
     ///
-    /// The deadline's error is **status-less `Protocol`, which the write queue
-    /// classes as a permanent refusal of this write** (`retryable`), and that
-    /// is the deliberate reading: a session that answers its pings but never
-    /// acks is a Kuma whose protocol has moved, not a Kuma that is down, and
-    /// an `Unreachable` would spend a minute of every tick waiting for the
-    /// drift to fix itself.
+    /// The deadline before the emit is **status-less `Protocol`, which the
+    /// write queue classes as a permanent refusal of this write**
+    /// (`retryable`), and that is the deliberate reading: a session that
+    /// answers its pings but never acknowledges a login is a Kuma whose
+    /// protocol has moved, not a Kuma that is down, and an `Unreachable`
+    /// would spend a minute of every tick waiting for the drift to fix
+    /// itself. After the emit the same deadline cannot be that refusal,
+    /// because the write may have landed.
     pub(crate) async fn call(
         &self,
         event: &str,
@@ -404,12 +413,27 @@ impl KumaSocket {
         build: impl Fn(&Pushed) -> Result<serde_json::Value, SourceError>,
     ) -> Result<serde_json::Value, SourceError> {
         let mut held = self.held.lock().await;
-        let Ok(answered) =
-            tokio::time::timeout(self.budget, self.exchange(&mut held, event, &build)).await
+        let mut emitted = false;
+        let Ok(answered) = tokio::time::timeout(
+            self.budget,
+            self.exchange(&mut held, &mut emitted, event, &build),
+        )
+        .await
         else {
             // `{:?}` and not `as_secs()`, which is how `knobas_http` prints
             // its own budget: this one is shortened to milliseconds by a test,
             // and `as_secs()` would render that deadline as `0s`.
+            if emitted {
+                // The write's own packet went out, so Kuma may have acted
+                // on it (#1627): held by the queue, never sent again by it.
+                return Err(SourceError::Unconfirmed {
+                    status: None,
+                    message: format!(
+                        "Uptime Kuma was sent {event} and did not acknowledge it within {:?},                          so it may have acted on it",
+                        self.budget
+                    ),
+                });
+            }
             return Err(SourceError::protocol(format!(
                 "Uptime Kuma held its socket.io session open for {:?} without acknowledging \
                  {event}: the session stayed up and answered its pings, so this reads as a change \
@@ -436,6 +460,7 @@ impl KumaSocket {
     async fn exchange(
         &self,
         held: &mut Option<LoggedIn>,
+        emitted: &mut bool,
         event: &str,
         build: &impl Fn(&Pushed) -> Result<serde_json::Value, SourceError>,
     ) -> Result<String, SourceError> {
@@ -444,7 +469,7 @@ impl KumaSocket {
             .take()
             .filter(|session| session.idle_since.elapsed() < self.idle_reuse)
         {
-            match self.emit_on(&mut session, event, build).await? {
+            match self.emit_on(&mut session, emitted, event, build).await? {
                 Emitted::Answered(answered) => reused = Some((session, answered)),
                 Emitted::NotDelivered(reason) => {
                     tracing::debug!(%reason, "the held Uptime Kuma session is gone; logging in again");
@@ -455,7 +480,7 @@ impl KumaSocket {
             Some(done) => done,
             None => {
                 let mut session = self.log_in().await.map_err(not_yet_emitted)?;
-                match self.emit_on(&mut session, event, build).await? {
+                match self.emit_on(&mut session, emitted, event, build).await? {
                     Emitted::Answered(answered) => (session, answered),
                     Emitted::NotDelivered(reason) => return Err(reason),
                 }
@@ -500,13 +525,20 @@ impl KumaSocket {
     /// nothing: engine.io's `400` to the emit's own POST (the session is
     /// unknown, so the packet was dropped), and *You are not logged in.*
     /// (Kuma checks the login before it acts). Everything else is an error:
-    /// an emit that was accepted and then went unanswered may have landed.
+    /// an emit that was accepted and then went unanswered may have landed,
+    /// so a failure while its ack is awaited is [`once_emitted`]'s
+    /// `Unconfirmed`.
+    ///
+    /// `emitted` is set as the packet goes out and cleared by either refusal,
+    /// so that [`KumaSocket::call_with`] can tell a deadline before the write
+    /// was sent from one after (#1627).
     ///
     /// The `400` proves only that *this* POST was dropped, which is why
     /// [`Session::send`] never resends a POST that may have landed (#1122): the `400` can then only be the first POST's.
     async fn emit_on(
         &self,
         logged_in: &mut LoggedIn,
+        emitted: &mut bool,
         event: &str,
         build: &impl Fn(&Pushed) -> Result<serde_json::Value, SourceError>,
     ) -> Result<Emitted, SourceError> {
@@ -514,20 +546,30 @@ impl KumaSocket {
         let ack = logged_in.next_ack;
         logged_in.next_ack += 1;
         let session = self.session(&logged_in.sid);
+        // Set before the POST, not after it: a deadline that drops the POST
+        // in flight drops a packet that may already have arrived.
+        *emitted = true;
         match session.send(emit(ack, event, &argument)).await {
             Ok(()) => {}
             Err(
                 error @ SourceError::Protocol {
                     status: Some(400), ..
                 },
-            ) => return Ok(Emitted::NotDelivered(error)),
+            ) => {
+                *emitted = false;
+                return Ok(Emitted::NotDelivered(error));
+            }
             Err(error) => return Err(error),
         }
-        let payload = session.wait_for(ack, &mut logged_in.pushed).await?;
+        let payload = session
+            .wait_for(ack, &mut logged_in.pushed)
+            .await
+            .map_err(|error| once_emitted(error, event))?;
         if answer(&payload).is_ok_and(|answered| {
             !went_well(&answered)
                 && answered.get("msg").and_then(serde_json::Value::as_str) == Some(NOT_LOGGED_IN)
         }) {
+            *emitted = false;
             return Ok(Emitted::NotDelivered(SourceError::protocol(format!(
                 "Uptime Kuma refused {event}: {NOT_LOGGED_IN}"
             ))));
@@ -565,6 +607,35 @@ fn not_yet_emitted(error: SourceError) -> SourceError {
     match error {
         SourceError::Unconfirmed { message, .. } => SourceError::Unreachable(message),
         other => other,
+    }
+}
+
+/// A failure on the way to the write's ack, after its own packet was
+/// accepted (#1627): whatever the transport says about the poll, nothing says
+/// whether Kuma acted on the packet, so it is [`SourceError::Unconfirmed`] --
+/// `knobas_http::classify::once_sent`'s reading of a request that went out and
+/// got no answer. The write queue holds a write a second arrival would
+/// duplicate (a create) and sends one that would not (a pause) again later.
+///
+/// Every class, not only `Unreachable`: a `400 Session ID unknown` on the poll
+/// says the session went *after* the packet was taken, and a `401` from a proxy
+/// in front of Kuma says nothing about the packet either. The poll's status is
+/// kept, so the message still says what the transport saw.
+fn once_emitted(error: SourceError, event: &str) -> SourceError {
+    let lost = |status, message: &dyn std::fmt::Display| SourceError::Unconfirmed {
+        status,
+        message: format!(
+            "Uptime Kuma accepted {event} and its acknowledgement was lost, so it may have \
+             acted on it: {message}"
+        ),
+    };
+    match error {
+        SourceError::Unreachable(message) => lost(None, &message),
+        SourceError::Protocol { status, message } | SourceError::Unconfirmed { status, message } => {
+            lost(status, &message)
+        }
+        SourceError::Unauthorized { status } => lost(status, &"unauthorized"),
+        other @ (SourceError::Sink(_) | SourceError::Moved { .. }) => other,
     }
 }
 
