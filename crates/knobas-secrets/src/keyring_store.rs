@@ -47,6 +47,20 @@ impl KeyringStore {
         }
     }
 
+    /// A store over a credential store the caller supplies, for tests.
+    ///
+    /// The tests hand it `keyring_core::mock::Store`, an in-memory store that
+    /// keeps what an entry was given, so `put` and `get` run their real
+    /// envelope path -- [`encode`] into the item, [`decode`] out of it --
+    /// without opening any keychain. `just check` must never touch one.
+    #[cfg(test)]
+    fn over(service: &str, store: Arc<CredentialStore>) -> Self {
+        Self {
+            service: service.to_owned(),
+            store: OnceLock::from(store),
+        }
+    }
+
     /// The service name this store writes under. For diagnostics only -- it is
     /// not a secret, and printing it is how a "why did it re-prompt" question
     /// gets answered.
@@ -160,6 +174,7 @@ impl SecretStore for KeyringStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use knobas_source::AuthMethod;
 
     /// A stand-in for whatever the platform layer boxes up. Its `Display`
     /// carries a marker so the assertions below can tell "the cause was
@@ -278,5 +293,31 @@ mod tests {
             !message.contains("Boxed"),
             "the cause was Debug-formatted, which can print payload bytes: {message}"
         );
+    }
+
+    /// What a reader can type into a credential field and the JSON writer
+    /// has to escape: a quote, a backslash, a tab. The non-ASCII character
+    /// is written unescaped, and is here so it stays that way.
+    const ESCAPED: &str = "p@ss\"w0rd \\ back\\slash \t tab ümlaut";
+
+    fn mock_backed() -> KeyringStore {
+        KeyringStore::over(
+            "dev.knobas.test.mock",
+            keyring_core::mock::Store::new().expect("the mock store opens"),
+        )
+    }
+
+    /// **#1639 (SPI-1).** A secret `put` stores must be one `get` can read.
+    /// Through the store's own `put` and `get`, so the envelope is written
+    /// and read the way a keychain item is: an escaped secret used to be
+    /// stored and then refused on every read as "unreadable envelope".
+    #[test]
+    fn a_secret_that_needs_escaping_reads_back_after_put() {
+        let store = mock_backed();
+        let id = KeychainAccount::source("jira");
+        store.put(&id, &Secret::just(AuthMethod::Pat, ESCAPED)).unwrap();
+        let got = store.get(&id).unwrap().expect("the item was stored");
+        assert_eq!((got.kind, got.value.as_str()), (AuthMethod::Pat, ESCAPED));
+        assert!(got.account.is_none());
     }
 }
