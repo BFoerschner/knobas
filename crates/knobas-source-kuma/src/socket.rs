@@ -100,7 +100,9 @@
 //! an emit that was accepted and then went unanswered may have been acted on,
 //! and sending a create twice would make two monitors. That failure, and the
 //! deadline once the packet is out, is `Unconfirmed` (#1627), which the write
-//! queue holds rather than sends again.
+//! queue holds rather than sends again. So is an ack that arrived in a shape
+//! knobas cannot read (#1721): Kuma took the packet, and nothing it said reads
+//! as a refusal.
 //!
 //! The socket itself is **shared per instance and account across the
 //! process** ([`KumaSocket::shared`]): the write queue builds an adapter per
@@ -377,7 +379,9 @@ impl KumaSocket {
     /// [`SourceError::Unconfirmed`] for **every failure after that packet
     /// went out** and before its ack was read -- a lost poll, a reaped
     /// session, the deadline (#1627): Kuma may have acted on it, and the write
-    /// queue holds a create rather than make a second monitor.
+    /// queue holds a create rather than make a second monitor. And for an
+    /// ack that arrived and says neither that Kuma acted nor that it refused
+    /// (#1721, [`verdict`]).
     ///
     /// The deadline before the emit is **status-less `Protocol`, which the
     /// write queue classes as a permanent refusal of this write**
@@ -815,14 +819,26 @@ fn ack_of(packet: &str, ack: u32) -> Option<&str> {
     (id.parse::<u32>().ok()? == ack).then_some(payload)
 }
 
-/// What Kuma answered, as one object: `[{"ok":true,"msg":"successPaused"}]`.
-fn answer(payload: &str) -> Result<serde_json::Value, SourceError> {
-    let arguments: Vec<serde_json::Value> = serde_json::from_str(payload)
-        .map_err(|_| SourceError::protocol("Uptime Kuma's answer was not a socket.io ack"))?;
+/// What Kuma answered, as one object: `[{"ok":true,"msg":"successPaused"}]`,
+/// or why the ack cannot be read as one.
+///
+/// **The reason, not the error class**, because the class depends on what
+/// was acknowledged (#1721). An unreadable ack to the **login** is a refusal
+/// of the write ([`login_verdict`]): nothing of the write was sent, and a Kuma
+/// whose ack shape moved will answer every login the same way, which is the
+/// reading the deadline before the emit takes too ([`KumaSocket::call`]). An
+/// unreadable ack to the **write's own emit** is [`SourceError::Unconfirmed`]
+/// ([`verdict`]): the ack arrived, so Kuma took the packet, and nothing it said
+/// can be read as having refused it. A create recorded as refused there would
+/// leave a monitor knobas says it never made, and a reader who sends it again
+/// makes a second one.
+fn answer(payload: &str) -> Result<serde_json::Value, &'static str> {
+    let arguments: Vec<serde_json::Value> =
+        serde_json::from_str(payload).map_err(|_| "Uptime Kuma's answer was not a socket.io ack")?;
     arguments
         .into_iter()
         .next()
-        .ok_or_else(|| SourceError::protocol("Uptime Kuma acknowledged with no answer at all"))
+        .ok_or("Uptime Kuma acknowledged with no answer at all")
 }
 
 fn said(answered: &serde_json::Value) -> String {
@@ -855,7 +871,7 @@ fn went_well(answered: &serde_json::Value) -> bool {
 /// retries on a later tick, rather than `Unauthorized`, which would put
 /// *Re-enter* on a credential that is right.
 fn login_verdict(payload: &str, username: &str) -> Result<(), SourceError> {
-    let answered = answer(payload)?;
+    let answered = answer(payload).map_err(SourceError::protocol)?;
     if went_well(&answered) {
         return Ok(());
     }
@@ -873,23 +889,44 @@ fn login_verdict(payload: &str, username: &str) -> Result<(), SourceError> {
     Err(SourceError::unauthorized())
 }
 
-/// The call's verdict: Kuma's own answer, or [`SourceError::Protocol`]
-/// carrying Kuma's own words.
+/// The call's verdict: Kuma's own answer, [`SourceError::Protocol`] carrying
+/// Kuma's own words, or [`SourceError::Unconfirmed`] for an ack that says
+/// neither (#1721).
 ///
 /// Protocol and not `Unauthorized`, even for *You do not own this monitor* --
 /// the account logged in, so re-entering it changes nothing, and a write that
 /// waits for a credential that is already right would wait for ever. It is a
 /// refusal of this write, which is what the queue records and shows.
+///
+/// **Only `ok: false` is a refusal.** An ack knobas cannot read ([`answer`]),
+/// or one with no boolean `ok`, arrived after Kuma took the packet and says
+/// nothing about what it did with it, so it is `Unconfirmed`: the queue holds
+/// a create for the reader and sends a pause or resume again on its ladder.
+/// The pinned 2.5.3 never answers that way; a Kuma whose ack shape changed
+/// does, on every write.
 fn verdict(payload: &str, event: &str) -> Result<serde_json::Value, SourceError> {
-    let answered = answer(payload)?;
-    if went_well(&answered) {
-        return Ok(answered);
+    let unread = |why: &str| SourceError::Unconfirmed {
+        status: None,
+        message: format!(
+            "Uptime Kuma acknowledged {event} in a shape knobas cannot read, so it may have \
+             acted on it: {why} ({})",
+            payload.chars().take(ACK_EXCERPT).collect::<String>()
+        ),
+    };
+    let answered = answer(payload).map_err(unread)?;
+    match answered.get("ok").and_then(serde_json::Value::as_bool) {
+        Some(true) => Ok(answered),
+        Some(false) => Err(SourceError::protocol(format!(
+            "Uptime Kuma refused {event}: {}",
+            said(&answered)
+        ))),
+        None => Err(unread("its answer carries no `ok`")),
     }
-    Err(SourceError::protocol(format!(
-        "Uptime Kuma refused {event}: {}",
-        said(&answered)
-    )))
 }
+
+/// How much of an unreadable ack its error quotes: enough to name the shape
+/// a changed Kuma answers in, and no more of a document that may be large.
+const ACK_EXCERPT: usize = 120;
 
 #[cfg(test)]
 #[path = "socket_session_tests.rs"]
@@ -1228,22 +1265,33 @@ mod tests {
         assert!(message.contains(PAUSE_EVENT), "{message}");
     }
 
-    /// An answer knobas cannot read is a protocol fault by name, never a
-    /// silent success -- a write reported as landed because its ack was
-    /// unparseable is the one failure a reader could not recover from.
+    /// An answer knobas cannot read is never a silent success -- a write
+    /// reported as landed because its ack was unparseable is the one failure a
+    /// reader could not recover from. To the write's own emit it is
+    /// `Unconfirmed`, because Kuma took the packet (#1721); to the login it is
+    /// a protocol fault, because nothing of the write was sent.
     #[test]
     fn an_unreadable_answer_is_a_fault_rather_than_a_success() {
         for unreadable in ["", "null", "[]", "{\"ok\":true}", "not json"] {
             assert!(
-                verdict(unreadable, PAUSE_EVENT).is_err(),
-                "{unreadable:?} must not read as a successful pause"
+                matches!(
+                    verdict(unreadable, PAUSE_EVENT),
+                    Err(SourceError::Unconfirmed { status: None, .. })
+                ),
+                "{unreadable:?} must not read as a successful pause, nor as a refused one"
             );
             assert!(
-                login_verdict(unreadable, "knobas").is_err(),
+                matches!(
+                    login_verdict(unreadable, "knobas"),
+                    Err(SourceError::Protocol { status: None, .. })
+                ),
                 "{unreadable:?} must not read as a successful login"
             );
         }
-        // An ack with no `ok` at all is a refusal, not an assumption.
-        assert!(verdict(r#"[{"msg":"who knows"}]"#, PAUSE_EVENT).is_err());
+        // An ack with no `ok` at all is no verdict, not an assumption either way.
+        assert!(matches!(
+            verdict(r#"[{"msg":"who knows"}]"#, PAUSE_EVENT),
+            Err(SourceError::Unconfirmed { .. })
+        ));
     }
 }
