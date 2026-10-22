@@ -180,3 +180,27 @@ test("a raw follower hears its write's row on every read, and nothing once it le
   await settle();
   expect(heard).toHaveLength(2);
 });
+
+test("a write held while the listener is still registering is toasted at once (FE-12)", async () => {
+  // A bridge whose `listen` answers late: the registration is in flight while
+  // the queue moves. No event reaches a handler registered after the move.
+  let register: () => void = () => {};
+  const slow = {
+    listen: (_event: string, handler: () => void) => {
+      handlers.push(handler);
+      return new Promise<() => void>((resolve) => {
+        register = () => resolve(() => {});
+      });
+    },
+    pendingWrites: ports.pendingWrites,
+  };
+  open = [write("pending")];
+  followWrite(write("pending"), { name: "Comment" }, createFollower(slow));
+  await settle();
+  // The write is held in the window; the event for it fired before the listener existed.
+  open = [write("held", "no network")];
+  register();
+  await settle();
+  expect(toasts.items).toHaveLength(1);
+  expect(toasts.items[0].text).toBe("Comment was held: no network");
+});
