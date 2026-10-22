@@ -570,7 +570,7 @@ pub struct BringUp {
     pub store: std::path::PathBuf,
     /// The process's one suggestion pass, requested after every run that
     /// ends OK ([`SuggestOnSync`](crate::suggestion_pass::SuggestOnSync),
-    /// #1485). The same handle `AppState` holds, never one of its own.
+    /// #1485): the one bring-up built, never one of the scheduler's own.
     pub suggestions: crate::suggestion_pass::SuggestionPass,
 }
 

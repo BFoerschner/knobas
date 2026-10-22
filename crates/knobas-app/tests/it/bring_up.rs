@@ -66,7 +66,7 @@ fn shutdown(app: &tauri::App<MockRuntime>) {
     tokio::task::block_in_place(|| knobas_app::shutdown(app.handle()));
 }
 
-/// LIFE-1: Retry after a failed bring-up runs bring-up again over the
+/// LIFE-1 (spec #1619): Retry after a failed bring-up runs bring-up again over the
 /// process's registry, which already holds every adapter the first attempt
 /// loaded. Loading with `add` filed each one under refused ("an adapter of
 /// that kind is already installed"), and Settings said so for the rest of the

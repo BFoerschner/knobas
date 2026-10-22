@@ -49,7 +49,7 @@ impl Profile {
     /// inherited by accident from a shell that once exported it.
     ///
     /// `run()` asks this **once**, before the Tauri builder, and hands the
-    /// answer both to the single-instance exemption and to `setup` (LIFE-8):
+    /// answer both to the single-instance exemption and to `setup` (LIFE-8, spec #1619):
     /// two reads of the arguments were two copies of the mixing rule.
     #[must_use]
     pub fn demo_in<I>(args: I) -> bool

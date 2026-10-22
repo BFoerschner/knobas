@@ -314,7 +314,7 @@ pub type Loaded = (String, Result<(), String>);
 /// loads. Each refusal is logged and recorded on the registry.
 ///
 /// Each adapter **replaces** the loaded one of its kind, as a restore's
-/// reinstall does (LIFE-1): the app's registry is the process's, so a
+/// reinstall does (LIFE-1, spec #1619): the app's registry is the process's, so a
 /// bring-up retried after a failure finds every adapter the first attempt
 /// loaded, and `add` refused each one as a kind already installed.
 ///

@@ -237,7 +237,7 @@ pub fn run() {
     let log_sink = logging::init();
     install_panic_hook();
 
-    // The flag half of the profile, read **once** (LIFE-8): the
+    // The flag half of the profile, read **once** (LIFE-8, spec #1619): the
     // single-instance exemption below and `setup`'s profile are one decision,
     // so a flag that changed in one place cannot leave the other keyed to the
     // old one.
@@ -648,16 +648,16 @@ pub fn run() {
 /// no-op.
 ///
 /// Blocks: it runs from the event loop's exit handler, which is not async.
-/// `tests/it/bring_up.rs` drives it through [`shutdown`].
+/// `tests/it/bring_up.rs` drives it through `shutdown`, its `test-util` door.
 fn shutdown_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     sources::shutdown(app);
     backup::shutdown(app);
     shutdown_database(app);
 }
 
-/// [`shutdown_app`], for a test on a `tauri::test` mock app. **Tests only**,
-/// for the reason [`AppState::over_pool`] is: the exit handler is its one
-/// production caller.
+/// [`shutdown_app`], for a test on a `tauri::test` mock app. **Tests only**:
+/// the exit handler is its one production caller, and a second would stop
+/// the database while the app still runs on it.
 ///
 /// It blocks on Tauri's runtime, so a `#[tokio::test]` calls it inside
 /// `tokio::task::block_in_place`.
@@ -686,7 +686,7 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             &profile,
             std::env::var(DB_URL_ENV).ok(),
             // The process's registry, which a retry finds already holding
-            // every adapter the first attempt loaded (LIFE-1).
+            // every adapter the first attempt loaded (LIFE-1, spec #1619).
             sources::Registry::for_process(),
         )
         .await;
@@ -701,8 +701,9 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
 /// `db_url` is what `KNOBAS_DB_URL` would say, so a test points bring-up at
 /// its scratch database without setting a process-wide variable under every
 /// other test in the binary; `registry` is the list the installed adapters
-/// load into, the process's in the app. The handle must manage the
-/// [`Lifecycle`] (over the same registry) and `capture::CaptureState`, as
+/// load into, the process's in the app, and the one the declarations are
+/// written from. The handle must manage the [`Lifecycle`] (whose registry
+/// the commands read, so the same one) and `capture::CaptureState`, as
 /// `setup` does; the state `sources::start` and `backup::start` manage on
 /// success is managed on it here too.
 ///
@@ -778,9 +779,7 @@ async fn bring_up_app<R: tauri::Runtime>(
         // parents from them, so a sync that ran first would resolve against
         // nothing and be recomputed a moment later. Failure is logged, not
         // fatal -- every search command writes them again on its way in.
-        if let Err(error) =
-            commands::search::searcher(db.pool(), handle.state::<Lifecycle>().registry()).await
-        {
+        if let Err(error) = commands::search::searcher(db.pool(), &registry).await {
             tracing::error!(?error, "the adapters' declarations could not be stored");
         }
         // Before `Ready`, and before `AppState` is installed: the sync
