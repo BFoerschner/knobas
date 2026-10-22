@@ -555,33 +555,34 @@ pub async fn run_in_background<S: Steps + 'static>(
     background: &Background,
 ) -> Result<Vec<FlowStep>, IpcError> {
     if let Some(claim) = Behind::claim(pool, ticket) {
-        let (task_pool, task_ticket, set) = (pool.clone(), ticket.clone(), background.clone());
-        // Refused, the task is dropped unrun and its claim with it.
-        let spawned = background.spawn(async move {
-            let (pool, ticket) = (task_pool, task_ticket);
-            let quitting = || set.is_closed();
-            let mut claim = Some(claim);
-            while claim.is_some() {
-                if let Err(error) = run_until(&pool, steps.as_ref(), &ticket, &quitting).await {
-                    tracing::warn!(%ticket, %error, "a start-work run behind its answer failed");
-                    stop_where_it_was(&pool, &ticket, &error.message).await;
-                }
-                drop(claim.take());
-                // A retry or skip that landed while this run was finishing
-                // found the claim held and started nothing: its step is
-                // pending with no loop to take it. Take it here -- but not
-                // once the quit has begun, when the step waits for the next
-                // start and taking it would only loop.
-                let again = !quitting()
-                    && store::flow(&pool, &ticket)
-                        .await
-                        .is_ok_and(|flow| matches!(store::advance(&flow), Advance::Run(_)));
-                if again {
-                    claim = Behind::claim(&pool, &ticket);
+        let task = {
+            let (pool, ticket, set) = (pool.clone(), ticket.clone(), background.clone());
+            async move {
+                let quitting = || set.is_closed();
+                let mut claim = Some(claim);
+                while claim.is_some() {
+                    if let Err(error) = run_until(&pool, steps.as_ref(), &ticket, &quitting).await {
+                        tracing::warn!(%ticket, %error, "a start-work run behind its answer failed");
+                        stop_where_it_was(&pool, &ticket, &error.message).await;
+                    }
+                    drop(claim.take());
+                    // A retry or skip that landed while this run was finishing
+                    // found the claim held and started nothing: its step is
+                    // pending with no loop to take it. Take it here -- but not
+                    // once the quit has begun, when the step waits for the next
+                    // start and taking it would only loop.
+                    let again = !quitting()
+                        && store::flow(&pool, &ticket)
+                            .await
+                            .is_ok_and(|flow| matches!(store::advance(&flow), Advance::Run(_)));
+                    if again {
+                        claim = Behind::claim(&pool, &ticket);
+                    }
                 }
             }
-        });
-        if !spawned {
+        };
+        // Refused, the task is dropped unrun and its claim with it.
+        if !background.spawn(task) {
             tracing::info!(%ticket, "knobas is quitting: the start-work run waits for the next start");
         }
     }

@@ -1737,9 +1737,10 @@ impl Scheduler {
             .remove(source_id);
     }
 
-    /// Where a task on this scheduler's pool that is not a run goes -- a
-    /// write's send behind an answer already given -- so the quit waits for
-    /// it before closing the pool, and refuses it once the quit has begun.
+    /// Where a task on this scheduler's pool that is not a sync run goes -- a
+    /// write's send behind an answer already given, a start-work flow's
+    /// steps -- so the quit waits for it before closing the pool, and refuses
+    /// it once the quit has begun.
     #[must_use]
     pub fn background(&self) -> &Background {
         &self.inner.background

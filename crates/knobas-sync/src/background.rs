@@ -1,6 +1,7 @@
-//! The tasks that use the scheduler's pool without being runs: a write's
-//! send behind an answer that has already gone back (#752), and the owed
-//! links resolved after a run (#1050).
+//! The tasks that use the scheduler's pool without being sync runs: a write's
+//! send behind an answer that has already gone back (#752), the owed links
+//! resolved after a sync run (#1050), and a start-work flow's steps behind
+//! the stepper's answer (#1751).
 //!
 //! Held so the quit can wait for them (#1633, spec #1619 ruling B1). Cancel
 //! first: once [`Background::close`] has begun, nothing new is spawned, and a
@@ -63,7 +64,7 @@ impl Background {
 
     /// Whether [`close`](Self::close) has begun: from then on nothing is
     /// spawned. For a task in the set that does its work in steps -- a
-    /// start-work run (#1751) -- to stop before the next one rather than
+    /// start-work flow (#1751) -- to stop before the next one rather than
     /// start a send the quit would abort.
     #[must_use]
     pub fn is_closed(&self) -> bool {
@@ -92,7 +93,7 @@ impl Background {
             if tokio::time::timeout_at(deadline, drained).await.is_err() {
                 tracing::warn!(
                     left = tasks.len(),
-                    "a background send did not finish within the grace period: aborting it"
+                    "a background task did not finish within the grace period: aborting it"
                 );
                 tasks.abort_all();
             }
