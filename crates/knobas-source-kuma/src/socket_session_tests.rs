@@ -570,7 +570,12 @@ async fn a_create_acknowledged_in_a_shape_knobas_cannot_read_is_unconfirmed() {
 async fn an_ack_with_no_verdict_is_unconfirmed_and_a_refusal_is_not() {
     let (server, kuma) = Kuma::start(20).await;
     let socket = socket_to(&server);
-    for arguments in ["[]", "[null]", r#"[{"msg":"who knows"}]"#, r#"[{"ok":"true"}]"#] {
+    for arguments in [
+        "[]",
+        "[null]",
+        r#"[{"msg":"who knows"}]"#,
+        r#"[{"ok":"true"}]"#,
+    ] {
         kuma.engine().ack_arguments = Some(arguments.to_owned());
         let error = add(&socket).await.expect_err("no verdict");
         assert!(

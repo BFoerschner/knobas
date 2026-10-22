@@ -836,8 +836,8 @@ fn ack_of(packet: &str, ack: u32) -> Option<&str> {
 /// leave a monitor knobas says it never made, and a reader who sends it again
 /// makes a second one.
 fn answer(payload: &str) -> Result<serde_json::Value, &'static str> {
-    let arguments: Vec<serde_json::Value> =
-        serde_json::from_str(payload).map_err(|_| "Uptime Kuma's answer was not a socket.io ack")?;
+    let arguments: Vec<serde_json::Value> = serde_json::from_str(payload)
+        .map_err(|_| "Uptime Kuma's answer was not a socket.io ack")?;
     arguments
         .into_iter()
         .next()
@@ -1209,8 +1209,8 @@ mod tests {
                 },
             )
             .expect("the socket builds against an http url");
-            let probe = knobas_http::InstanceLimiter::for_url(origin, 1_000, 2_000)
-                .expect("an http url");
+            let probe =
+                knobas_http::InstanceLimiter::for_url(origin, 1_000, 2_000).expect("an http url");
             let governs = format!("{probe:?}");
             assert!(
                 governs.contains(&format!("per_second: {per_second},"))
