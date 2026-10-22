@@ -11204,3 +11204,43 @@ set.
   test's port bag for a copy-only change. *Reversing:* cheap.
 - **Memory wording.** "Kept for this session only — never in the database and never in a share
   export. You are asked once." (the keychain wording otherwise unchanged).
+## #1611: the uncalled `detect_suggestions` command retires (Opus implementer, 2026-10-22)
+
+- **Wire or delete.** *Ruling:* delete. Re-checked on `42422f13`: the ticket's grep prints
+  nothing, and no open issue names a surface that should run a pass by hand. Since #1485 (PR
+  #1597) the scheduler requests a pass after every OK run, with no IPC. *Reversing:* medium. The
+  command comes back from git, with a §10.8 entry.
+- **`detect_suggestions_inner`.** *Ruling:* deleted too. The ticket keeps it only if the scheduler
+  or tests need it; the scheduler never called it, and all it did was call `SuggestionPass::run`
+  and narrow the `u64` to `u32`. The tests call `run` directly. *Reversing:* low.
+- **`AppState::suggestions` and `Lifecycle::suggestions`.** *Ruling:* both go: the command was
+  their one reader. Bring-up still builds the pass once and hands it to `sources::start` alone,
+  so #745's "one pass per process" holds with one owner fewer. `wiring.rs`' pin keeps the
+  "built once, handed to the scheduler" half and drops the `AppState` half. *Reversing:* low.
+- **`SuggestionPass::run`.** *Ruling:* kept. It is the waiting half of the queue, and the
+  coalescing, timeout and panic tests drive it. *Reversing:* n/a.
+- **README and `docs/diagrams/suggestion-pass-*.svg`.** *Ruling:* in this PR. Both drew the
+  manual pass as a second caller; the arrow, its label and the alt text go, and the queue box
+  reads "requests share the next pass". *Reversing:* low.
+
+### Reserved for Björn, ruled by implementer on Opus
+
+- **Sign-off on the §10.8 entry** (`docs/contract/10.8/1611-retire-detect-suggestions.md`).
+  *Ruling:* signed off, on #1481's and #1578's grounds. The entry only removes from the frozen
+  surface, the removed command had no caller outside the fake and tests, the generated mirror is
+  unchanged (the command answered a bare `u32`), and the parts it supersedes (#41, #745, #771,
+  #1485's `AppState` half, #1578's `source_statuses` sentence) are named and left unedited.
+  *Reversing:* medium, revert the PR.
+
+## #1612: `knobas_core::mini_board::source_statuses` retires (Opus implementer, 2026-10-22)
+
+- **Delete or keep.** *Ruling:* delete. Re-checked on `42422f13`: no caller outside its own tests,
+  and no open issue names a surface that needs one source's statuses without a board.
+  *Reversing:* low, from git.
+- **Its tests.** *Ruling:* the offer test stays and reads through `mini_board::read` (the source's
+  live corpus in the board's order, no other source's, nothing tombstoned, nothing for a source
+  with no tickets), so `OBSERVED_STATUSES` keeps a witness. Its prepared-statement test goes:
+  `the_boards_statements_are_never_kept_as_prepared_statements` already reads the same
+  `status_paths` statement through the board. *Reversing:* low.
+- **Shipped with #1611.** *Ruling:* one PR. #1611's §10.8 entry names #1578's sentence that the
+  function stays, so the two land together. *Reversing:* n/a.
