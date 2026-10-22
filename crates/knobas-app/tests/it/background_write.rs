@@ -657,13 +657,7 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
     tokio::time::sleep(Duration::from_millis(200)).await;
     gate.add_permits(1);
     quitting.join().expect("the quit finishes");
-    // The quit's grace is 3 s; a run still in the set at its end is aborted.
-    // This one ends once its send lands, ~200 ms in, so a quit that waited
-    // out the grace had a run looping in the set.
-    assert!(
-        began.elapsed() < Duration::from_millis(2500),
-        "the quit waited out its grace: the run did not end after its step"
-    );
+    let quit_took = began.elapsed();
 
     let reader = connector.pool(1).await.unwrap();
     let flow_of = async |id: &str| {
@@ -722,5 +716,12 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
             .expect("the start-up pass runs"),
         0,
         "the quit left a step running"
+    );
+    // The quit's grace is 3 s, and a run still in the set at its end is
+    // aborted. This one ends once its send lands, ~200 ms in, so a quit that
+    // waited out the grace had a run looping in the set.
+    assert!(
+        quit_took < Duration::from_millis(2500),
+        "the quit waited out its grace ({quit_took:?}): the run did not end after its step"
     );
 }
