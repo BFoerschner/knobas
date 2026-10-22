@@ -570,9 +570,9 @@ async fn the_end_of_a_run_resolves_what_the_source_owes() {
 /// job that is not an id, and a job the mirror does not hold. A new branch,
 /// pull request or page (#1121) may carry one.
 #[tokio::test]
-async fn only_a_new_branch_pull_request_or_page_is_linked_and_only_to_a_mirrored_job() {
+async fn only_a_new_branch_pull_request_page_or_ticket_is_linked_and_only_to_a_mirrored_job() {
     let pool = corpus("arrival_check").await;
-    for made in [new_branch(), new_pull_request(), new_page()] {
+    for made in [new_branch(), new_pull_request(), new_page(), new_ticket()] {
         arrival_linkable(&pool, &made, TICKET).await.unwrap();
     }
 
@@ -686,5 +686,94 @@ async fn a_new_page_that_lands_on_a_later_tick_is_linked_to_its_job() {
         vec![("documents".to_owned(), true)]
     );
     assert!(relations(&pool, "wiki:999").await.is_empty());
+    assert_eq!(owed(&pool, id).await, None, "drawn, so no longer owed");
+}
+
+// -- *Create ticket* on a failed run (#1451) ----------------------------------
+
+const RUN: &str = "teamcity:build:Payout_IntegrationTests-1187";
+const NEW_TICKET: &str = "jira:PAY-342";
+const FAILED_TITLE: &str = "sepa_retry_backs_off fails in Payout_IntegrationTests #1187";
+
+fn new_ticket() -> serde_json::Value {
+    serde_json::json!({ "CreateTicket": {
+        "entity": "jira:PAY", "title": FAILED_TITLE, "body": "assertion failed", "ticket_type": "Task"
+    }})
+}
+
+/// A `CreateTicket` as `queue` leaves it, in its project.
+async fn queued_ticket(pool: &PgPool) -> i64 {
+    knobas_core::write_queue::queue(
+        pool,
+        "jira",
+        &EntityRef::parse("jira:PAY").unwrap(),
+        "create_ticket",
+        new_ticket(),
+        serde_json::json!({}),
+    )
+    .await
+    .unwrap()
+    .id
+}
+
+/// When the source says it last changed the item.
+async fn changed(pool: &PgPool, id: &str, ago: &str) {
+    sqlx::query("update sync.item set item_updated_at = now() - $2::interval where entity_id = $1")
+        .bind(id)
+        .bind(ago)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// The issue's link criterion: a ticket filed from a failed run is linked to
+/// the run, `related`, by the first sync that brings the ticket in. Jira
+/// names no key in its receipt, so the ticket is found by its title in the
+/// write's source; one of the same title that the source last changed before
+/// the write was queued (the same failure filed last week) is not it.
+#[tokio::test]
+async fn a_new_ticket_is_linked_to_the_run_it_was_filed_from_once_it_is_mirrored() {
+    let pool = corpus("arrival_ticket").await;
+    item(
+        &pool,
+        RUN,
+        "build",
+        "Payout_IntegrationTests #1187",
+        serde_json::json!({}),
+    )
+    .await;
+    item(&pool, "jira:PAY-300", "ticket", FAILED_TITLE, serde_json::json!({})).await;
+    changed(&pool, "jira:PAY-300", "7 days").await;
+    arrival_linkable(&pool, &new_ticket(), RUN).await.unwrap();
+    let id = queued_ticket(&pool).await;
+    hold_arrival_link(&pool, id, RUN).await.unwrap();
+    knobas_core::write_queue::sent(&pool, id, None)
+        .await
+        .unwrap();
+
+    assert!(
+        link_arrivals(&pool, &declarations(), "jira")
+            .await
+            .unwrap()
+            .is_empty(),
+        "the ticket is not mirrored yet, and last week's of the same title is not it"
+    );
+    assert_eq!(owed(&pool, id).await.as_deref(), Some(RUN), "still owed");
+
+    item(&pool, NEW_TICKET, "ticket", FAILED_TITLE, serde_json::json!({})).await;
+    changed(&pool, NEW_TICKET, "0 seconds").await;
+    assert_eq!(
+        link_arrivals(&pool, &declarations(), "jira").await.unwrap(),
+        vec![NEW_TICKET.to_owned()]
+    );
+    let drawn: Vec<(String, String, bool)> = sqlx::query_as(
+        "select from_id, relation, confirmed_at is not null from knobas.link
+          where to_id = $1 and deleted_at is null order by from_id",
+    )
+    .bind(RUN)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(drawn, vec![(NEW_TICKET.to_owned(), "related".to_owned(), true)]);
     assert_eq!(owed(&pool, id).await, None, "drawn, so no longer owed");
 }

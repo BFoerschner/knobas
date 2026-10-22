@@ -374,12 +374,13 @@ pub async fn unlink<R: tauri::Runtime>(
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
 ///
 /// **`link_to`** (#984, a ticket's entity id) asks for a link from what a
-/// `CreateBranch` or `CreatePullRequest` makes to that ticket, drawn once the
-/// write has been sent and a sync of the source brings it in, on this send or
-/// a later tick (#1050: the intent is held on the queued row,
-/// `sources::write_queue::submit_linked_in_background`); `invalid` for any
-/// other op, `not_found` for a ticket the mirror does not hold. Absent, the
-/// command is what it was.
+/// `CreateBranch`, `CreatePullRequest` or `CreatePage` makes to that ticket,
+/// or from the ticket a `CreateTicket` files to `link_to` (#1451, the failed
+/// run it was filed from), drawn once the write has been sent and a sync of
+/// the source brings it in, on this send or a later tick (#1050: the intent is
+/// held on the queued row, `sources::write_queue::submit_linked_in_background`);
+/// `invalid` for any other op, `not_found` for an entity the mirror does not
+/// hold. Absent, the command is what it was.
 #[tauri::command]
 pub async fn submit_write<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,

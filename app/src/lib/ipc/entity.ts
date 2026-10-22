@@ -613,10 +613,11 @@ export function proposalEvidence(linkId: string): Promise<ProposalEvidence> {
  * configured.
  *
  * `linkTo` (#984, a ticket's entity id) links the branch a `CreateBranch`
- * makes, or the pull request a `CreatePullRequest` opens, to that ticket once
- * the write has been sent and a sync has brought it in; it rejects with
- * `invalid` on any other op and `not_found` for a ticket the mirror does not
- * hold.
+ * makes, the pull request a `CreatePullRequest` opens or the page a
+ * `CreatePage` makes to that ticket, and the ticket a `CreateTicket` files to
+ * that entity (#1451, the failed run it was filed from), once the write has
+ * been sent and a sync has brought it in; it rejects with `invalid` on any
+ * other op and `not_found` for an entity the mirror does not hold.
  */
 export function submitWrite(payload: WriteOpPayload, linkTo?: string): Promise<QueuedWrite> {
   return invoke<QueuedWrite>("submit_write", linkTo === undefined ? { payload } : { payload, linkTo });
