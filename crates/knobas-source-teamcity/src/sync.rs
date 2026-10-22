@@ -2113,7 +2113,10 @@ mod tests {
             "the listing the queries came from also gives the configurations that moved"
         );
         assert_eq!(
-            keys(&items).iter().filter(|k| k.starts_with("buildType:")).count(),
+            keys(&items)
+                .iter()
+                .filter(|k| k.starts_with("buildType:"))
+                .count(),
             2,
             "both configurations moved and each is emitted once"
         );
@@ -2936,7 +2939,10 @@ mod tests {
         )
         .await;
         assert_eq!(
-            keys(&items).iter().filter(|k| k.starts_with("build:")).count(),
+            keys(&items)
+                .iter()
+                .filter(|k| k.starts_with("build:"))
+                .count(),
             12,
             "the twelve builds above the watermark: {:?}",
             keys(&items)
