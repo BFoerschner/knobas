@@ -9,7 +9,8 @@
  * (#1004); what the view says is read by its shape: the pipeline as the row
  * whose id is one of the declared pipelines, the tabs by their section ids.
  */
-import type { PipelineSettings, RunRow, SourceView, ViewRow, ViewSection } from "../../ipc/entity";
+import type { LinkEntry, PipelineSettings, RunRow, SourceView, ViewRow, ViewSection } from "../../ipc/entity";
+import type { TicketDraft } from "../create-ticket";
 import { duration, runHash, runTone } from "./builds";
 import { branchName, defaultBranch, shortSha } from "./pipeline";
 import { fieldsOf, overridesOf, runPayload, valuesFrom, type RunRequest, type StartValue } from "./run-dialog";
@@ -121,6 +122,32 @@ export function firstFailure(section: ViewSection | null): FirstFailure | null {
 export function failureHeading(failure: FirstFailure): string {
   if (failure.count <= 1) return `1 test failed: ${failure.name}`;
   return `${failure.count} tests failed. The first: ${failure.name}`;
+}
+
+/**
+ * *Create ticket*'s draft for a failed run (#1451, R-9.11): titled by the
+ * first failed test and the run, the body the failure heading, the details as
+ * the source wrote them, the file and line, and the run with its address at
+ * the source, so the ticket reads without knobas. No project yet: the
+ * reader picks one.
+ */
+export function ticketDraftOf(
+  failure: FirstFailure,
+  pipelineName: string,
+  run: Pick<RunRow, "number" | "branch" | "web_url">,
+): TicketDraft {
+  const named = run.number !== null ? `${pipelineName} #${run.number}` : pipelineName;
+  const where = `${named}${run.branch !== null ? ` on ${run.branch}` : ""}${run.web_url !== null ? `: ${run.web_url}` : ""}`;
+  const lines = [failureHeading(failure)];
+  if (failure.details !== null) lines.push("", failure.details);
+  if (failure.location !== null) lines.push("", `At ${failure.location.path}:${failure.location.line}`);
+  lines.push("", where);
+  return { project: null, type: "Task", title: `${failure.name} fails in ${named}`, body: lines.join("\n") };
+}
+
+/** The tickets a run's confirmed links reach (`get_entity`'s `links`), the newest first, gone ones left out. */
+export function linkedTickets(links: readonly LinkEntry[]): LinkEntry["other"][] {
+  return links.filter((entry) => entry.other.kind === "ticket" && entry.other.deleted_at === null).map((entry) => entry.other);
 }
 
 /**

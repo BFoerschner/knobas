@@ -45,6 +45,7 @@ import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, expect, test, vi } from "vitest";
 
 import type { CaptureShortcut, EntityDetail, EntityPage, EntityRow } from "../ipc/entity";
+import type { QueuedWrite } from "../ipc/sources";
 
 // ---------------------------------------------------------------------------
 // Answers the test hands over on command, never on a timer.
@@ -333,6 +334,8 @@ const TfBuilds = (await import("../tf/builds/TfBuilds.svelte")).default;
 const TfPipeline = (await import("../tf/builds/TfPipeline.svelte")).default;
 const TfRun = (await import("../tf/builds/TfRun.svelte")).default;
 const TfRunChain = (await import("../tf/builds/TfRunChain.svelte")).default;
+const TfRunTicket = (await import("../tf/builds/TfRunTicket.svelte")).default;
+const { markQueued } = await import("../tf/queued.svelte");
 const TfRunLog = (await import("../tf/builds/TfRunLog.svelte")).default;
 const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
 const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).default;
@@ -918,6 +921,36 @@ const CASES: Case[] = [
     open: (target) => ({
       app: mount(TfRunChain, { target, props: { runId: "teamcity:build:1", branch: "main" } }),
     }),
+  },
+  {
+    /**
+     * *Create ticket* on a failed run (#1451): its links and projects reads
+     * answering late, and the sync listen it holds while a ticket filed from
+     * the run is queued.
+     */
+    name: "TfRunTicket",
+    source: "lib/tf/builds/TfRunTicket.svelte",
+    open: (target) => {
+      markQueued("teamcity:build:1", "ticket", "A failing test fails in A #1");
+      return {
+        app: mount(TfRunTicket, {
+          target,
+          props: {
+            runId: "teamcity:build:1",
+            href: "#/build/teamcity%3AbuildType%3AA/teamcity%3Abuild%3A1",
+            draft: { project: null, type: "Task", title: "A failing test fails in A #1", body: "" },
+            sources: [],
+            ports: {
+              projects: () => deferred([]),
+              links: () => deferred([]),
+              submitWrite: () => deferred({ id: 1 } as QueuedWrite),
+              listen: (event, handler) => mockedListen(event, handler),
+              follower: () => ({ follow: () => () => {} }),
+            },
+          },
+        }),
+      };
+    },
   },
   {
     /** The run's Log tab (#854): the log and a download answering late. */

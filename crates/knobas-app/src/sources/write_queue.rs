@@ -289,7 +289,8 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
 
 /// Whether `payload` may carry a link on arrival to `ticket` (#984): a
 /// `CreateBranch`, a `CreatePullRequest` or a `CreatePage` (#1121), the
-/// writes that make something a job reaches, and a ticket the mirror holds,
+/// writes that make something a job reaches, or a `CreateTicket`, linked to
+/// the failed run it was filed from (#1451); and an entity the mirror holds,
 /// since `create_link` refuses an end it does not hold.
 ///
 /// # Errors
@@ -306,7 +307,7 @@ pub async fn arrival_linkable(
         .map_err(|error| IpcError::invalid(format!("not a write operation: {error}")))?;
     if op.delivery().link.is_none() {
         return Err(IpcError::invalid(format!(
-            "only a new branch, pull request or page is linked once it arrives, not {:?}",
+            "only a new branch, pull request, page or ticket is linked once it arrives, not {:?}",
             op.identifier()
         )));
     }
@@ -328,7 +329,8 @@ pub async fn arrival_linkable(
 /// sent `CreateBranch` named, or the pull request open on a sent
 /// `CreatePullRequest`'s head, as the mirror holds them (#984), or the page a
 /// sent `CreatePage` made, by the id its settle stamped
-/// (`docs::created_page`, #1121) and drawn as the relation its op's `delivery()` states. Answers
+/// (`docs::created_page`, #1121), or the ticket a sent `CreateTicket` filed
+/// ([`ticket_filed`], #1451), drawn as the relation its op's `delivery()` states. Answers
 /// the entity linked, or `None` where the write was not sent or what it made
 /// is not mirrored yet.
 ///
@@ -366,6 +368,9 @@ pub async fn link_on_arrival(
             crate::start_work::queue::branch_named(pool, &repo_of(entity)?, name).await?
         }
         WriteOp::CreatePage { .. } => crate::docs::created_page(pool, write_id).await?,
+        WriteOp::CreateTicket { title, .. } => {
+            ticket_filed(pool, &write.source_id, title, write.queued_at).await?
+        }
         WriteOp::CreatePullRequest { entity, head, .. } => {
             match crate::start_work::queue::pull_request_on_head(
                 pool,
@@ -386,6 +391,43 @@ pub async fn link_on_arrival(
     };
     crate::protocol::draw_link(pool, &made, ticket, link.relation()).await?;
     Ok(Some(made))
+}
+
+/// How long before a write was queued the source may have stamped the ticket
+/// it made: the machine's clock and the source's do not agree to the second.
+const CLOCK_SLACK: &str = "5 minutes";
+
+/// The ticket a sent `CreateTicket` made (#1451): the newest ticket in
+/// `source_id` titled `title` that the source changed after the write was
+/// queued at `queued`, within [`CLOCK_SLACK`].
+///
+/// Jira's receipt names no key: Jira answers one, and the adapter drops it,
+/// a created ticket being a mirrored entity (#1754 resolves the ticket from
+/// the receipt instead). So the arrival is looked up by its title, as an
+/// action item's ticket is (`commands::entity::standup`). A ticket of the
+/// same title the source last changed before the write was queued is
+/// somebody else's -- a title the reader made generic, filed before --
+/// never this one.
+async fn ticket_filed(
+    pool: &sqlx::PgPool,
+    source_id: &str,
+    title: &str,
+    queued: chrono::DateTime<chrono::Utc>,
+) -> Result<Option<String>, IpcError> {
+    sqlx::query_scalar(
+        "select entity_id from sync.live_item
+          where source_id = $1 and kind = 'ticket' and title = $2
+            and item_updated_at >= $3 - $4::interval
+          order by item_updated_at desc, entity_id
+          limit 1",
+    )
+    .bind(source_id)
+    .bind(title)
+    .bind(queued)
+    .bind(CLOCK_SLACK)
+    .fetch_optional(pool)
+    .await
+    .map_err(IpcError::internal)
 }
 
 /// [`flush`] spawned onto the scheduler's background set with a copy of the

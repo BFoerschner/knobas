@@ -1491,9 +1491,12 @@ impl WriteOp {
                 can_leave_unclaimed: false,
                 ..conservative
             },
-            // A ticket's title is no address (#336).
+            // A ticket's title is no address to resend against (#336). The
+            // arrival is linked to what it was filed from, a failed run
+            // (#1451), found by its title once a sync brings it in.
             WriteOp::CreateTicket { .. } => Delivery {
                 projection: Projection::Liveness,
+                link: Some(ArrivalLink::Related),
                 ..conservative
             },
             // The head branch is the address, the source refuses the repeat,
