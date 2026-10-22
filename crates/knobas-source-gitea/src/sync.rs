@@ -495,8 +495,11 @@ async fn select_repos(
         }
     }
 
-    // Deterministic: the commit budget is spent in this order.
+    // Deterministic: the commit budget is spent in this order. A stable sort,
+    // so of a row the listing repeated (`client::search_repos`, #1624) the
+    // first read is the one kept, and it is walked once.
     out.sort_by(|a, b| a.full_name.cmp(&b.full_name));
+    out.dedup_by(|later, first| later.full_name == first.full_name);
     Ok(Selection {
         walk: out,
         skipped,

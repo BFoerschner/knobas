@@ -244,6 +244,18 @@ impl GiteaClient {
     }
 
     /// `GET /api/v1/repos/search` -- every repository the token can see.
+    ///
+    /// **Paged over `id` ascending, a key no push can move (#1624).** This
+    /// was `sort=updated&order=desc`, and a push into a repository not yet
+    /// read moved it onto a page already read: the run walked another one
+    /// twice, this one not at all, returned `Ok`, and handed the sweep a
+    /// corpus without it. An id never changes and a new repository takes a
+    /// higher one, so what is left to move a row across a page boundary is a
+    /// repository appearing below the walk (shared with the token, say),
+    /// which repeats a row rather than hiding one -- and `sync::select_repos`
+    /// walks a repeated row once. Gitea 1.27.3 offers `id`
+    /// (`swagger.v1.json`, `repoSearch`; spec #1618 ruling A1 asked for it
+    /// where offered), and `live_gitea` asserts the order it answers.
     pub(crate) async fn search_repos(&self, page: u32) -> Result<Vec<Value>, SourceError> {
         #[derive(serde::Deserialize)]
         struct Envelope {
@@ -256,8 +268,8 @@ impl GiteaClient {
             .get_json(
                 "/repos/search",
                 &[
-                    ("sort", "updated".to_owned()),
-                    ("order", "desc".to_owned()),
+                    ("sort", "id".to_owned()),
+                    ("order", "asc".to_owned()),
                     limit,
                     page,
                 ],
@@ -907,8 +919,8 @@ mod wire_tests {
         let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/repos/search"))
-            .and(query_param("sort", "updated"))
-            .and(query_param("order", "desc"))
+            .and(query_param("sort", "id"))
+            .and(query_param("order", "asc"))
             .and(query_param("limit", "50"))
             .and(query_param("page", "1"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
