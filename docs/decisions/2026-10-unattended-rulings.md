@@ -12196,3 +12196,41 @@ Ruled 2026-10-22 by the implementer on Sonnet; docs only.
   argument the frontend never passes. *Reversing:* n/a.
 - **Contract §10.4 amended in place.** Its description of `over_pool` named the `db` field this
   change removes. A dated *Amended by #1634* note says where the server lives now. *Reversing:* n/a.
+
+#### #1749's review (merge-manager on Opus, 2026-10-22)
+
+- **The door cannot deadlock or stall a trigger past the grace.** *Fork:* keep the `RwLock<()>`
+  beside the re-check, or drop it. *Ruling:* keep it. `shutdown` holds nothing while it waits for
+  the write half, and the write guard is dropped at the end of the `if` condition, before the
+  runs are awaited. A trigger holds the read half across the claims lock, the task-list lock,
+  its database awaits and, on the refusing path, the inline `run_task`; `shutdown` holds none of
+  those and waits on none of them before the door, and nothing under the read guard calls
+  `trigger` again. Tokio's `RwLock` is write-preferring, so a trigger that arrives after the
+  cancel waits at most until the deadline and then answers `ShuttingDown`. When the door times
+  out, a trigger still on its way meets the closed pool, which is the old race, bounded by the
+  grace. #1629's flush task can join `tasks` without touching the door, and the refusing
+  trigger's `run_task` goes through `settle`, so #1629's cancelled-run path covers it too.
+  *Reversing:* the lock and one await.
+- **Every send the ticket names goes through the set.** `send_in_background`,
+  `send_in_background_then` (through `spawn_send`) and `ArrivalLinks`' resolver spawn into
+  `Background`; no bare `tokio::spawn` is left in `sources/`. `start_work::run_in_background`
+  still sends from a bare task. The ticket does not name it, so it is #1751 (backlog), not a fix
+  here. *Reversing:* n/a.
+- **One 3 s grace for the door, the runs and the sends.** *Ruling:* stands. The ticket asks for
+  the sends to be awaited "under the scheduler's shutdown grace", and ADR-0012 discloses the
+  window an aborted send leaves. The sends run while the door is waited for, so a send in flight
+  gets the whole 3 s. *Reversing:* low.
+- **A clone refused during the quit is owed a §10.8 note.** *Fork:* the implementer's "no entry",
+  or an entry. *Ruling:* overruled: the #823 entry lists `clone_repo`'s refusals and says a quit
+  may leave a half-made folder, and both are now out of date. #1628 booked a behaviour change with
+  no signature change in §10.8, which is the precedent. The #823 entry gets an
+  `Amendment (#1633, 2026-10-22)` paragraph rather than a new file, because it is the same
+  command's entry. The §10.4 dated note stands: §10.4 is prose, not a frozen-surface entry.
+  *Reversing:* one paragraph.
+- **The three kept smells stand.** The pool and connector as a pair are two arguments.
+  `Clones::closed` is an `AtomicBool` read and written under the map's lock, which is correct; a
+  `bool` inside the mutex would be tidier but is not worth a round. `Scheduler::is_shutting_down`
+  is documented and harmless as public API. *Reversing:* low.
+- **The mutant run's `git checkout` lost nothing.** The final head has every fix the PR
+  description lists: the set closed at the cancel, one deadline, `spawn_send`, `clone_repo`'s
+  `State`, `over_pool`'s doc and a private `SHUTDOWN_GRACE`. *Reversing:* n/a.
