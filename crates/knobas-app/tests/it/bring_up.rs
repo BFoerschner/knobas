@@ -143,7 +143,8 @@ async fn bring_up_closes_a_stranded_timer_before_it_announces_ready() {
     let registry = Registry::default();
     let app = mock_app(&profile, &registry);
 
-    let at_ready: Arc<Mutex<Option<i64>>> = Arc::default();
+    // One entry per `Ready` announced: the running timers at that moment.
+    let at_ready: Arc<Mutex<Vec<i64>>> = Arc::default();
     let seen = Arc::clone(&at_ready);
     let reader = connector.clone();
     app.listen(knobas_app::events::DB_STATE, move |event| {
@@ -169,7 +170,7 @@ async fn bring_up_closes_a_stranded_timer_before_it_announces_ready() {
         })
         .join()
         .unwrap();
-        *seen.lock().unwrap() = Some(timers);
+        seen.lock().unwrap().push(timers);
     });
 
     assert_eq!(
@@ -180,9 +181,8 @@ async fn bring_up_closes_a_stranded_timer_before_it_announces_ready() {
 
     assert_eq!(
         *at_ready.lock().unwrap(),
-        Some(0),
-        "the stranded timer was still running when the state read ready \
-         (None: `Ready` was never announced)"
+        [0],
+        "`Ready` is announced once, with the stranded timer already closed"
     );
     let closed: i64 = sqlx::query_scalar(
         "select count(*) from knobas.block
@@ -199,7 +199,7 @@ async fn bring_up_closes_a_stranded_timer_before_it_announces_ready() {
 /// synced through the scheduler bring-up started proposes links, with nobody
 /// else asking for a pass.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_scheduler_bring_up_starts_runs_the_suggestion_pass_after_a_sync() {
+async fn bring_up_hands_its_suggestion_pass_to_the_scheduler() {
     let (pool, connector) = scratch("bring-up-suggestions").await;
     let input: knobas_app::sources::NewSource = serde_json::from_value(serde_json::json!({
         "id": "mock",
