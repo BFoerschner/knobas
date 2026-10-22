@@ -90,6 +90,19 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
 ///
 /// `None` means the run witnessed nothing (a server with no builds at all),
 /// which is the same server on which `max_finished` is `None` too.
+///
+/// **A ceiling below `previous` is ignored** (ADPT-7). It means the opening
+/// pages showed nothing as new as the watermark -- routine on a server whose
+/// pages are unordered (issue #91). Applied, `min(ceiling)` lands below
+/// `previous` and the floor lifts it back to exactly `previous`, so a run that
+/// emitted finished builds above the watermark leaves it where it was, and
+/// every later poll re-fetches and re-emits the same builds for as long as the
+/// opening pages keep missing them. What ignoring it gives up is the clamp's
+/// protection for that one run: a build queued after the in-flight poll, still
+/// running while a build queued after it finished before the finished query
+/// went out. On an incremental run that window is the few requests between the
+/// two queries, against a re-emission on every poll. A ceiling at or above
+/// `previous` clamps as before.
 /// What one run observed, as three build ids that are **not** interchangeable
 /// -- each is compared in a different direction, and all three are `i64`, so
 /// nothing but a name distinguishes them at a call site.
@@ -110,7 +123,7 @@ pub(crate) fn advance(previous: i64, seen: Seen) -> i64 {
         ceiling,
     } = seen;
     let mut next = max_finished.map_or(previous, |newest| previous.max(newest));
-    if let Some(highest_at_start) = ceiling {
+    if let Some(highest_at_start) = ceiling.filter(|&c| c >= previous) {
         next = next.min(highest_at_start);
     }
     if let Some(oldest_in_flight) = min_unfinished {
@@ -236,26 +249,41 @@ mod tests {
         assert_eq!(advance(0, Some(1200), Some(500), Some(1000)), 499);
     }
 
-    /// A ceiling below where the watermark already stands is an ordinary
-    /// answer, and the floor is what makes it harmless.
+    /// The floor: no argument moves the watermark below where it stood.
+    ///
+    /// An in-flight build under the watermark, or a newest finished build
+    /// under it, leaves it exactly where it was. Clamping *down* is the
+    /// expensive direction -- a watermark dragged back re-offers every build
+    /// above it on every run afterwards -- so it is the one direction this
+    /// function refuses.
+    #[test]
+    fn the_watermark_has_a_floor_under_every_argument() {
+        assert_eq!(advance(1187, Some(400), Some(2), Some(1200)), 1187);
+        assert_eq!(advance(1187, None, Some(2), Some(1200)), 1187);
+        assert_eq!(advance(1187, Some(400), None, Some(500)), 1187);
+    }
+
+    /// A ceiling below where the watermark already stands is ignored, not
+    /// applied and then floored (ADPT-7).
     ///
     /// It reaches here whenever the two opening pages happen not to show a
     /// build as new as the watermark -- routine on a server whose pages are
     /// unordered, which is what issue #91 measured. `sync` asks the server
     /// about the watermark's own build before believing anything worse of it
     /// (`sync::refuse_a_replaced_server`); when the build is there the run
-    /// carries on and lands here, and the floor keeps the watermark exactly
-    /// where it was. Clamping *down* is the expensive direction -- a watermark
-    /// dragged back re-offers every build above it on every run afterwards --
-    /// so it is the one direction this function refuses.
+    /// carries on and lands here. Applying the ceiling would leave the
+    /// watermark at 1187 under the builds up to 1200 the run just emitted, and
+    /// the next run would emit them again. The in-flight clamp still holds.
     #[test]
-    fn the_watermark_has_a_floor_under_every_argument() {
+    fn a_ceiling_below_the_watermark_is_ignored() {
         assert_eq!(
             advance(1187, Some(1200), None, Some(500)),
-            1187,
-            "a ceiling under the watermark clamps nothing and drags nothing back"
+            1200,
+            "a ceiling under the watermark holds nothing back"
         );
-        assert_eq!(advance(1187, Some(400), Some(2), Some(1200)), 1187);
+        assert_eq!(advance(1187, Some(1200), Some(1195), Some(500)), 1194);
+        // At the watermark it is still a witness and still clamps.
+        assert_eq!(advance(1187, Some(1200), None, Some(1187)), 1187);
     }
 
     /// No ceiling is the server with no builds on it at all -- which is the

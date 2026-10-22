@@ -673,8 +673,9 @@ fn ceiling(probe: &[Rec<Build>], in_flight: &[Rec<Build>]) -> Option<i64> {
 /// * **Found** -- the watermark stands and the run carries on. The opening
 ///   pages simply did not happen to show it, which is the ordinary case on a
 ///   server whose pages are not ordered. The ceiling is then below the
-///   watermark, which [`cursor::advance`]'s floor already handles: it clamps
-///   nothing and drags nothing back.
+///   watermark, which [`cursor::advance`] ignores (ADPT-7): it clamps
+///   nothing, drags nothing back, and does not hold the watermark under the
+///   builds this run emits.
 /// * **Not found** -- a replacement or a deleted newest build, refused. And
 ///   the remedy works now: after a backfill the ceiling comes from ids this
 ///   run witnessed rather than from a stale row 0, so the loop cannot restart.
@@ -2762,8 +2763,7 @@ mod tests {
     /// refused for ever, and resetting the cursor only restarted the loop.
     ///
     /// The watermark stands rather than being dragged down to the ceiling:
-    /// [`cursor::advance`] never regresses, so a ceiling below the watermark
-    /// clamps nothing.
+    /// [`cursor::advance`] ignores a ceiling below the watermark.
     #[tokio::test]
     async fn a_watermark_the_pages_did_not_show_is_confirmed_by_id_and_the_run_proceeds() {
         let rest = a_page_that_cannot_reach_the_top(Some(5_000));
@@ -2779,6 +2779,50 @@ mod tests {
             "the run asked, rather than inferring a replacement from a page: {:?}",
             rest.calls()
         );
+    }
+
+    /// **A ceiling below the watermark does not pin it under builds the run
+    /// just emitted** (ADPT-7).
+    ///
+    /// The opening page holds builds 401 to 500 and nothing newer, so the
+    /// ceiling is 500 while the watermark stands at 1187 -- the routine
+    /// picture on a server whose pages are unordered. Twelve builds, 1188 to
+    /// 1199, finished above the watermark and the incremental query returns
+    /// them. They are emitted, so the watermark moves to the newest of them:
+    /// held at 1187, every later poll would re-fetch and re-emit the same
+    /// twelve, an upsert and an activity line each time.
+    #[tokio::test]
+    async fn a_ceiling_below_the_watermark_does_not_hold_it_under_builds_just_emitted() {
+        let mut builds: Vec<serde_json::Value> = (401..=500)
+            .map(|n| build(n, "Payout_Build", "Payout", "finished"))
+            .collect();
+        builds.extend((1187..=1199).map(|n| build(n, "Payout_Build", "Payout", "finished")));
+        let rest =
+            FakeRest::new(vec![build_type("Payout_Build", "Payout")], builds).fixture_order();
+        let cfg = TeamCityConfig::default();
+        let (items, cursor) = run(
+            &rest,
+            &cfg,
+            Some(r#"{"v":2,"since_build_id":1187}"#.to_owned()),
+        )
+        .await;
+        assert_eq!(
+            keys(&items).iter().filter(|k| k.starts_with("build:")).count(),
+            12,
+            "the twelve builds above the watermark: {:?}",
+            keys(&items)
+        );
+        assert_eq!(
+            cursor, r#"{"v":2,"since_build_id":1199}"#,
+            "the watermark moves past the builds this run emitted"
+        );
+        let (again, still) = run(&rest, &cfg, Some(cursor.clone())).await;
+        assert!(
+            again.is_empty(),
+            "the next run emits none of them again: {:?}",
+            keys(&again)
+        );
+        assert_eq!(still, cursor, "byte-identical");
     }
 
     /// Somebody deletes the newest build (#1477): the case the refusal's
