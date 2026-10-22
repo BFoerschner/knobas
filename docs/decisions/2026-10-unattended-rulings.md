@@ -12561,3 +12561,47 @@ The measurement came after it.
   `retryable` looks at the mark. A mark on such a write therefore never resends a packet Kuma
   may have acted on. A quota stop before the emit is a write that went nowhere, and waiting on
   the ladder is right for it. *Reversing:* none needed.
+## #1751: start-work's run behind the answer in the background set (Opus implementer, 2026-10-23)
+
+- **Spawn through the set, or document the gap.** *Fork:* the ticket's two options. *Ruling:*
+  spawn through the set. `start_work::run_in_background` takes a `&Background` and the commands
+  pass `Scheduler::background()`, so the quit waits for a step's send as it waits for
+  `send_in_background`'s. *Reasoning:* the docs-only option would leave ADR-0012's window open on
+  a clean quit, which is what #1633 closed for every other background send. *Reversing:* low.
+- **A run in the set when the quit begins.** *Fork:* let it run on to the end of the flow inside
+  the grace, or stop it before its next step. *Ruling:* stop it before the next step; that step
+  stays `pending`. *Reasoning:* `docs/development.md` says a write made after the quit began is
+  not sent. A step started during the quit would send such a write, and it could be aborted
+  mid-send at the grace's end, which is the duplicate this ticket removes. A pending step is
+  resumable with *Run*. *Reversing:* drop one match arm.
+- **Where the run reads the quit.** *Fork:* the scheduler's cancel token through a new `Steps`
+  method, or the set itself. *Ruling:* `Background::is_closed()`, read through a closure that a
+  private `run_until` takes; `run` passes `|| false`. *Reasoning:* the set is what the run is in,
+  and it closes at the cancel under the lock a spawn takes. The `Steps` trait and its fakes stay
+  as they are. *Reversing:* low.
+- **The check sits at the step boundary only.** *Fork:* also check between a step's read and its
+  dispatch. *Ruling:* no. A step whose read began before the quit sends during the grace, as a
+  send already spawned does. *Reasoning:* the read is local (the mirror and the declarations), so
+  the window is milliseconds wide, and threading the closure through `perform` would add a second
+  check for it. *Reversing:* pass the closure into `perform`.
+- **The run's re-claim loop during the quit.** *Ruling:* skipped once the set is closed. Without
+  that, a run that stopped before a pending step finds that step on its way out, claims it again,
+  and loops until the grace aborts it, so every quit would wait the full 3 s (mutant m3).
+  *Reversing:* n/a.
+- **§10.8.** *Ruling:* an `Amendment (#1751, 2026-10-23)` paragraph on #779's entry, which
+  describes the run behind the answer. #1633 amended #823 the same way. No signature, refusal or
+  event changes; a run asked for during the quit answers the flow and starts nothing.
+  *Reversing:* one paragraph.
+- **The witness.** *Ruling:* `background_write.rs`, beside LIFE-2's test, over the real `Queue`
+  and the app's `shutdown`. The fake declares `create_pull_request` too, so a run that went on
+  past the quit would reach the source and be counted. The quit's length is asserted under
+  `SHUTDOWN_GRACE` less 500 ms: in the passing run the quit ends about 200 ms in, and a run that
+  loops in the set holds it to the grace. *Reversing:* n/a.
+- **The quit's bound reads the grace, not a copy of it** (merge-manager, Opus). *Fork:* keep the
+  2.5 s literal, or make `knobas_sync::scheduler::SHUTDOWN_GRACE` public and bound against it.
+  *Ruling:* public. *Reasoning:* a literal restating a private 3 s goes stale silently when the
+  grace moves; `knobas-sync` is not frozen (contract §10.8), so the constant costs no §10.8 entry.
+  *Reversing:* trivial.
+- **The seam tests hold their own set.** `tests/it/start_work.rs` makes a `Background` per test
+  rather than a temporary. A dropped `JoinSet` aborts its tasks, and only the run's own clone of
+  the set would otherwise keep it alive. *Reversing:* n/a.

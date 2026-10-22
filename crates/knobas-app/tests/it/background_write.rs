@@ -107,6 +107,7 @@ fn descriptor() -> SourceDescriptor {
         write_ops: vec![
             "comment".to_owned(),
             "create_branch".to_owned(),
+            "create_pull_request".to_owned(),
             "create_page".to_owned(),
         ],
         entity_kinds: vec![KindInfo {
@@ -556,5 +557,171 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
         bodies,
         ["before the quit", "after the quit began"],
         "each comment reaches the source once across both starts"
+    );
+}
+
+/// #1751: LIFE-2 for a start-work run. Cmd-Q while the run behind *Run* has
+/// its branch step at the source. The run is in the scheduler's background
+/// set, so the quit waits for that send and its `sent` mark lands, and the
+/// run stops before its next step: the pull request stays pending for the
+/// next start. A *Run* asked for once the quit has begun answers the flow and
+/// sends nothing. Nothing is left `running`, so the next start's
+/// `interrupt_stranded` has nothing to interrupt.
+///
+/// Before, the run was a bare task: the quit neither waited for it nor
+/// stopped it, so the pool could close under the step's send and the next
+/// start sent the branch again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_nothing() {
+    use knobas_core::entity::EntityRef;
+    use knobas_core::start_work::{Step, StepOutcome};
+    use tauri::Manager as _;
+
+    const BEFORE: &str = "jira:PAY-231";
+    const AFTER: &str = "jira:PAY-232";
+    const REPO: &str = "gitea:knobas/app";
+
+    let connector =
+        knobas_db::test_util::scratch_database("background_write_quit_start_work").await;
+    let Fixture {
+        state, wrote, gate, ..
+    } = fixture_on(connector.clone()).await;
+    for (id, kind, title, payload) in [
+        (BEFORE, "ticket", "payout latency", json!({})),
+        (AFTER, "ticket", "refund latency", json!({})),
+        (
+            REPO,
+            "repo",
+            "knobas/app",
+            json!({"default_branch": "main"}),
+        ),
+    ] {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $3)")
+            .bind(id)
+            .bind(kind)
+            .bind(title)
+            .execute(&state.pool)
+            .await
+            .expect("the entity is written");
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1, $2, $3, $4, '', $5)",
+        )
+        .bind(id)
+        .bind(id.split(':').next().unwrap())
+        .bind(kind)
+        .bind(title)
+        .bind(payload)
+        .execute(&state.pool)
+        .await
+        .expect("the item is mirrored");
+    }
+    let entity = |id: &str| EntityRef::parse(id).unwrap();
+    for ticket in [BEFORE, AFTER] {
+        knobas_app::start_work::begin(&state.pool, &entity(ticket), &entity(REPO))
+            .await
+            .expect("a flow is proposed");
+    }
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("a mock app");
+    app.manage(state.clone());
+
+    knobas_app::commands::entity::start_work_run(app.handle().clone(), BEFORE.to_owned())
+        .await
+        .expect("the first run starts");
+    tokio::time::timeout(PATIENCE, async {
+        while *wrote.entered.lock().unwrap() == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the first flow's branch reaches the source");
+
+    let quitting = std::thread::spawn({
+        let handle = app.handle().clone();
+        move || knobas_app::shutdown(&handle)
+    });
+    tokio::time::timeout(PATIENCE, async {
+        while !state.scheduler.is_shutting_down() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the quit begins");
+    let began = std::time::Instant::now();
+    knobas_app::commands::entity::start_work_run(app.handle().clone(), AFTER.to_owned())
+        .await
+        .expect("a run asked for during the quit still answers the flow");
+    // Give a run that was spawned for it the time to queue its branch.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    gate.add_permits(1);
+    quitting.join().expect("the quit finishes");
+    let quit_took = began.elapsed();
+
+    let reader = connector.pool(1).await.unwrap();
+    let flow_of = async |id: &str| {
+        knobas_app::start_work::flow(&reader, &entity(id))
+            .await
+            .expect("the flow reads")
+    };
+    let outcome = |flow: &[knobas_core::start_work::FlowStep], kind: Step| {
+        flow.iter()
+            .find(|step| step.step == kind)
+            .map(|step| (step.outcome, step.write_id))
+            .unwrap_or_else(|| panic!("no {kind} step"))
+    };
+    let before = flow_of(BEFORE).await;
+    let (branch, branch_write) = outcome(&before, Step::CreateBranch);
+    assert_eq!(
+        branch,
+        StepOutcome::Succeeded,
+        "the step in flight at the quit did not land"
+    );
+    let branch_write = branch_write.expect("the branch step names its write");
+    assert_eq!(
+        knobas_core::write_queue::get(&reader, branch_write)
+            .await
+            .unwrap()
+            .expect("the row is there")
+            .state,
+        WriteState::Sent,
+        "the send in flight at the quit did not land its sent mark"
+    );
+    assert_eq!(
+        outcome(&before, Step::CreatePullRequest).0,
+        StepOutcome::Pending,
+        "the run went on past the quit to its next step"
+    );
+    assert!(
+        flow_of(AFTER)
+            .await
+            .iter()
+            .all(|step| step.outcome == StepOutcome::Pending && step.write_id.is_none()),
+        "the run asked for after the quit began touched its flow"
+    );
+    let queued: i64 = sqlx::query_scalar("select count(*) from knobas.write_queue")
+        .fetch_one(&reader)
+        .await
+        .expect("the queue reads");
+    assert_eq!(queued, 1, "a write was queued after the quit began");
+    assert_eq!(
+        *wrote.entered.lock().unwrap(),
+        1,
+        "only the send in flight at the quit reached the source"
+    );
+    assert_eq!(
+        knobas_app::start_work::interrupt_stranded(&reader)
+            .await
+            .expect("the start-up pass runs"),
+        0,
+        "the quit left a step running"
+    );
+    // A run still in the set at the grace's end is aborted. This one ends
+    // once its send lands, ~200 ms in, so a quit that waited out the grace
+    // had a run looping in the set.
+    assert!(
+        quit_took < knobas_sync::scheduler::SHUTDOWN_GRACE - Duration::from_millis(500),
+        "the quit waited out its grace ({quit_took:?}): the run did not end after its step"
     );
 }

@@ -78,6 +78,7 @@ async fn run_behind(
             state: state.clone(),
         }),
         ticket,
+        state.scheduler.background(),
     )
     .await
 }

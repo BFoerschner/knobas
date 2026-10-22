@@ -1119,7 +1119,9 @@ const STARTUP_DELAY: Duration = Duration::from_secs(2);
 /// them, and for a background send to finish (#1633, ruling B1). A cancelled
 /// run only has to unwind to its next await point; a send at the source is
 /// let finish so its `sent` mark lands before the pool closes.
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+///
+/// Public so a test can bound a quit against it rather than restate it.
+pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
 /// Upper bound on closing the scheduler's pool. Belt and braces: the runs are
 /// already cancelled by the time this is reached.
@@ -1737,9 +1739,10 @@ impl Scheduler {
             .remove(source_id);
     }
 
-    /// Where a task on this scheduler's pool that is not a run goes -- a
-    /// write's send behind an answer already given -- so the quit waits for
-    /// it before closing the pool, and refuses it once the quit has begun.
+    /// Where a task on this scheduler's pool that is not a sync run goes -- a
+    /// write's send behind an answer already given, a start-work flow's
+    /// steps -- so the quit waits for it before closing the pool, and refuses
+    /// it once the quit has begun.
     #[must_use]
     pub fn background(&self) -> &Background {
         &self.inner.background
