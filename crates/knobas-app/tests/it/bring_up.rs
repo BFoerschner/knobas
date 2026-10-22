@@ -194,6 +194,64 @@ async fn bring_up_closes_a_stranded_timer_before_it_announces_ready() {
     assert_eq!(closed, 1, "the stranded timer became a closed block");
 }
 
+/// D8 (#1703, spec #1619): `migrating` is the schema and nothing else. Once
+/// `migrate::run` returns, the steps after it -- the two sweeps, the
+/// declarations, the engines, the shortcut -- are `starting`, each naming
+/// itself, so a slow disk's boot screen says what it is waiting on rather
+/// than *Bringing the schema up to date* for seconds after it is.
+///
+/// Read off `db:state` as the boot screen hears it: every state announced, in
+/// order.
+#[tokio::test(flavor = "multi_thread")]
+async fn bring_up_reports_starting_with_the_step_once_the_schema_is_up() {
+    use tauri::Listener as _;
+
+    let (_pool, connector) = scratch("bring-up-states").await;
+    let data = tempfile::tempdir().unwrap();
+    let profile = Profile::new(false, data.path());
+    let registry = Registry::default();
+    let app = mock_app(&profile, &registry);
+    let heard: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
+    let seen = Arc::clone(&heard);
+    app.listen(knobas_app::events::DB_STATE, move |event| {
+        seen.lock()
+            .unwrap()
+            .push(serde_json::from_str(event.payload()).unwrap());
+    });
+
+    assert_eq!(
+        bring_up(&app, &profile, &connector, &registry),
+        DbState::Ready
+    );
+    shutdown(&app);
+
+    let heard = heard.lock().unwrap().clone();
+    let migrating = heard
+        .iter()
+        .position(|state| state["state"] == "migrating")
+        .expect("bring-up announced the migration");
+    let after: Vec<String> = heard[migrating + 1..]
+        .iter()
+        .map(|state| match state["detail"].as_str() {
+            Some(detail) => format!("{}: {detail}", state["state"].as_str().unwrap()),
+            None => state["state"].as_str().unwrap().to_owned(),
+        })
+        .collect();
+    assert_eq!(
+        after,
+        [
+            "starting: closing any timer left running",
+            "starting: interrupting start-work steps a quit left running",
+            "starting: storing the adapters' declarations",
+            "starting: starting the sync engine",
+            "starting: starting the nightly backup",
+            "starting: registering the capture shortcut",
+            "ready",
+        ],
+        "after the migration: {heard:?}"
+    );
+}
+
 /// #1485: bring-up builds the suggestion pass and hands it to the scheduler
 /// it starts, which requests it after every run that ends OK. A mock source
 /// synced through the scheduler bring-up started proposes links, with nobody

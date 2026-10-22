@@ -725,6 +725,18 @@ async fn bring_up_app<R: tauri::Runtime>(
         lifecycle.hold_server(db);
         set_db_state(handle, DbState::Migrating);
         knobas_db::migrate::run(&pool).await?;
+        // `migrating` is the schema and nothing else (#1703, ruling D8):
+        // every step from here on is `starting`, naming itself, so a slow
+        // disk's boot screen says what it is waiting on.
+        let step = |detail: &str| {
+            set_db_state(
+                handle,
+                DbState::Starting {
+                    detail: Some(detail.to_owned()),
+                },
+            );
+        };
+        step("closing any timer left running");
         // **Before anything can read the timer row** (#278): a timer that
         // outlived the last process is closed at the last moment knobas
         // was alive, flagged, and gone before the shell's first
@@ -742,6 +754,7 @@ async fn bring_up_app<R: tauri::Runtime>(
         if let Err(error) = time::close_stranded(&pool).await {
             tracing::error!(%error, "the stranded-timer sweep failed");
         }
+        step("interrupting start-work steps a quit left running");
         // A start-work step a quit left `running` becomes interrupted
         // (#790), so its ticket's flow can be retried or skipped. Logged,
         // not fatal, like the sweep above.
@@ -750,6 +763,7 @@ async fn bring_up_app<R: tauri::Runtime>(
             Ok(count) => tracing::info!(count, "start-work steps interrupted by a quit"),
             Err(error) => tracing::error!(%error, "the interrupted-step sweep failed"),
         }
+        step("storing the adapters' declarations");
         // The adapters' declarations, into the database before the first
         // sync writes an item (#627): the item trigger resolves each row's
         // parents from them, so a sync that ran first would resolve against
@@ -771,10 +785,13 @@ async fn bring_up_app<R: tauri::Runtime>(
             std::sync::Arc::new(sources::DbConnections(connector.clone())),
             suggestion_pass::PASS_STATEMENT_TIMEOUT,
         );
+        step("starting the sync engine");
         sources::start(handle, &pool, &connector, profile, registry, suggestions).await?;
         // Beside the sync scheduler, not inside it: a backup is not a
         // source (see `backup`'s module docs).
+        step("starting the nightly backup");
         backup::start(handle, &pool, connector, profile);
+        step("registering the capture shortcut");
         // The capture shortcut (#503), from the setting. **Here and not in
         // `setup`**: the plugin hands its registration to the main thread
         // and blocks until it answers, so a call from the event loop would
