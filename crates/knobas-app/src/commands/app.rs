@@ -85,6 +85,13 @@ pub struct Lifecycle {
     /// `Arc`, and not a `OnceLock`: a failed bring-up can be retried, so this
     /// slot is written more than once over a process's life.
     app: Mutex<Option<Arc<AppState>>>,
+    /// The server this process started or adopted, from the moment it is up
+    /// until the exit handler stops it (#1634): held here and not on
+    /// [`AppState`], which exists only once bring-up has finished, so a quit
+    /// during the migration stops the server too. `Option` because the stop
+    /// consumes the handle, and the take is what makes the second of the two
+    /// exit events a no-op.
+    server: Mutex<Option<knobas_db::EmbeddedDb>>,
     /// The adapter registry every read takes, as the trait object (#1321).
     /// Here rather than on `AppState`, because the reads that answer before
     /// the database is up (the Add-source form's adapter list) need it too.
@@ -114,6 +121,7 @@ impl Lifecycle {
         Self {
             db: Mutex::new(DbState::Starting { detail: None }),
             app: Mutex::new(None),
+            server: Mutex::new(None),
             registry,
         }
     }
@@ -157,6 +165,23 @@ impl Lifecycle {
     /// Hand over the shared state, once the pool is live and migrated.
     pub fn install(&self, state: AppState) {
         *self.app.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(state));
+    }
+
+    /// Hold `db` until [`take_server`](Self::take_server): bring-up's first
+    /// step once the server is up, so the exit handler stops it whatever
+    /// stage bring-up reached. A test that installs an [`AppState`] by hand
+    /// holds its server here for the same reason.
+    pub fn hold_server(&self, db: knobas_db::EmbeddedDb) {
+        *self.server.lock().unwrap_or_else(PoisonError::into_inner) = Some(db);
+    }
+
+    /// The server [`hold_server`](Self::hold_server) was given, once: for the
+    /// one caller that stops it -- the exit handler, or a bring-up that failed.
+    pub(crate) fn take_server(&self) -> Option<knobas_db::EmbeddedDb> {
+        self.server
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
     }
 
     /// The shared state, if the database came up.

@@ -38,6 +38,7 @@
 pub mod alerts;
 pub mod analyze;
 pub mod attach;
+pub mod background;
 pub mod config;
 pub mod health;
 pub mod progress;

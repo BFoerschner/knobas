@@ -29,11 +29,13 @@
 //! - **No credentials from knobas.** git uses the person's ssh agent or
 //!   credential helper. `GIT_TERMINAL_PROMPT=0` makes a missing credential a
 //!   failure git reports instead of a prompt nobody can answer.
-//! - **Cancellable**, by [`stop`].
+//! - **Cancellable**, by [`stop`], and by the quit ([`stop_all`], #1633), which
+//!   removes the half-made folder the same way.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -154,6 +156,10 @@ pub trait CloneEvents: Send + Sync {
 #[derive(Default)]
 pub struct Clones {
     running: Mutex<HashMap<String, Running>>,
+    /// Set by [`stop_all`]: no clone starts after the quit has stopped the
+    /// running ones. Written and read under `running`'s lock, so a start
+    /// either has its entry in the map the quit empties or is refused.
+    closed: AtomicBool,
 }
 
 struct Running {
@@ -173,7 +179,7 @@ struct Running {
 type Reply = oneshot::Sender<Option<bool>>;
 
 impl Clones {
-    /// The one registry the app's command uses.
+    /// The one registry the app manages, which its command and the quit use.
     #[must_use]
     pub fn global() -> Arc<Clones> {
         static GLOBAL: LazyLock<Arc<Clones>> = LazyLock::new(Arc::default);
@@ -209,6 +215,8 @@ impl Clones {
 /// [`Conflict`](crate::IpcErrorCode::Conflict) if the folder exists and is not
 /// a clone of this repository, or another repository of the same name is
 /// cloning into it;
+/// [`NotReady`](crate::IpcErrorCode::NotReady) once the quit has stopped the
+/// running clones ([`stop_all`]);
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query or filesystem
 /// failure.
 pub async fn start(
@@ -286,6 +294,48 @@ pub async fn stop(
     })
 }
 
+/// How long the quit waits for the running clones to be stopped and their
+/// folders removed: [`remove`]'s own five seconds, and a moment for git to die.
+const STOP_ALL_PATIENCE: Duration = Duration::from_secs(6);
+
+/// Stop every running clone and remove its half-made folder, as [`stop`]
+/// does, and start none after: the quit's (#1633, IPC-10). Without it the
+/// runtime's end dropped the runners, git died with them (`kill_on_drop`),
+/// and the folder stayed for the next *Clone* to refuse as a clone that did
+/// not finish.
+///
+/// Bounded by [`STOP_ALL_PATIENCE`]: a folder a helper keeps writing into is
+/// left after that, as [`stop`] reports `removed: false` for it.
+pub async fn stop_all(clones: &Clones) {
+    let senders: Vec<oneshot::Sender<Reply>> = {
+        let mut running = clones.lock();
+        clones.closed.store(true, Ordering::Relaxed);
+        running
+            .values_mut()
+            .filter_map(|entry| entry.stop.take())
+            .collect()
+    };
+    let mut answers = Vec::new();
+    for sender in senders {
+        let (reply, removed) = oneshot::channel();
+        // A runner that ended in between has nothing left to remove.
+        if sender.send(reply).is_ok() {
+            answers.push(removed);
+        }
+    }
+    let answered = async {
+        for removed in answers {
+            let _ = removed.await;
+        }
+    };
+    if tokio::time::timeout(STOP_ALL_PATIENCE, answered)
+        .await
+        .is_err()
+    {
+        tracing::warn!("a clone's folder was not removed before the quit gave up on it");
+    }
+}
+
 async fn repo_id(pool: &PgPool, entity_id: &str) -> Result<String, IpcError> {
     super::repo_of(pool, entity_id)
         .await?
@@ -352,6 +402,11 @@ async fn start_with(
     let (stop_tx, stop_rx) = oneshot::channel();
     {
         let mut running = clones.lock();
+        if clones.closed.load(Ordering::Relaxed) {
+            return Err(IpcError::not_ready(
+                "knobas is quitting, so no clone starts",
+            ));
+        }
         if running.contains_key(&repo_id) {
             return Ok(CloneAnswer::Cloning { path: shown });
         }

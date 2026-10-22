@@ -698,7 +698,8 @@ fn prune(state: &BackupState, keep: u32) -> Result<(), ExportError> {
 /// `sources::start`.
 pub fn start<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-    db: &knobas_db::EmbeddedDb,
+    pool: &sqlx::PgPool,
+    connector: knobas_db::embedded::Connector,
     profile: &crate::Profile,
 ) {
     // The store `sources::start` built, which ran before this in bring-up
@@ -715,12 +716,7 @@ pub fn start<R: tauri::Runtime>(
         },
         |sources| Arc::clone(&sources.secrets),
     );
-    let state = BackupState::new(
-        db.pool().clone(),
-        db.connector(),
-        profile.backup_dir(),
-        secrets,
-    );
+    let state = BackupState::new(pool.clone(), connector, profile.backup_dir(), secrets);
     // The registry the installed adapters are restored into is the sources
     // state's (#1323). Without it a restore brings back no adapters, the
     // same way it brings back no secrets above.

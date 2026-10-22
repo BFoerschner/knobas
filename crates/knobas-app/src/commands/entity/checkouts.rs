@@ -253,11 +253,12 @@ pub async fn set_checkout_applications(
 pub async fn clone_repo<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
+    clones: State<'_, std::sync::Arc<crate::checkout::clone::Clones>>,
     entity_id: String,
     stop: Option<bool>,
 ) -> Result<crate::checkout::clone::CloneAnswer, IpcError> {
     let pool = lifecycle.pool()?;
-    let clones = crate::checkout::clone::Clones::global();
+    let clones = std::sync::Arc::clone(&clones);
     if stop.unwrap_or(false) {
         return crate::checkout::clone::stop(&pool, &clones, &entity_id).await;
     }

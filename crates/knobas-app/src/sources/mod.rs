@@ -506,20 +506,24 @@ pub fn to_ipc(error: &SourcesError, source_id: Option<&str>) -> crate::IpcError 
 /// (#1485): the scheduler requests it after every OK run.
 pub async fn start<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-    db: &knobas_db::EmbeddedDb,
+    pool: &PgPool,
+    connector: &knobas_db::embedded::Connector,
     profile: &crate::Profile,
     registry: Registry,
     suggestions: crate::suggestion_pass::SuggestionPass,
 ) -> Result<(), SourcesError> {
     // Its own pool for the scheduler's bookkeeping; the runs themselves take a
     // connection each from the connector, outside every pool (§10.6(c)).
-    let sync_pool = db.pool_for(knobas_sync::scheduler::SYNC_POOL_SIZE).await?;
+    let sync_pool = connector
+        .pool(knobas_sync::scheduler::SYNC_POOL_SIZE)
+        .await
+        .map_err(knobas_db::DbError::from)?;
     let state = bring_up(
         app,
         BringUp {
-            pool: db.pool().clone(),
+            pool: pool.clone(),
             sync_pool,
-            connections: db.connector(),
+            connections: connector.clone(),
             secrets: secret_store(profile, *app.state::<SecretStoreKind>()),
             registry: registry.clone(),
             store: install::store_dir(&profile.dir),
@@ -593,23 +597,30 @@ pub async fn bring_up<R: tauri::Runtime>(
     install::load_installed(&deps.pool, &deps.registry, &deps.store).await?;
     archive_done_contexts(&deps.pool, &deps.registry).await;
     let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> = Arc::new(deps.registry);
-    let scheduler = Scheduler::start(SchedulerDeps {
-        pool: deps.sync_pool,
-        connections: Arc::new(DbConnections(deps.connections)),
-        registry: Arc::clone(&registry),
-        secrets: Arc::clone(&deps.secrets),
-        // The owed links of #1050 resolved after every run (`ArrivalLinks`),
-        // and a suggestion pass requested after every OK one (#1485).
-        events: Arc::new(crate::suggestion_pass::SuggestOnSync::new(
-            write_queue::ArrivalLinks::new(
-                TauriEvents::new(app.clone()),
-                deps.pool.clone(),
-                Arc::clone(&registry),
-            ),
-            deps.suggestions,
-        )),
-        timing: SchedulerTiming::default(),
-    })
+    // One set for the background sends and the owed-link resolutions, which
+    // the scheduler's shutdown awaits before it closes the pool (#1633).
+    let background = knobas_sync::background::Background::new();
+    let scheduler = Scheduler::start_with_background(
+        SchedulerDeps {
+            pool: deps.sync_pool,
+            connections: Arc::new(DbConnections(deps.connections)),
+            registry: Arc::clone(&registry),
+            secrets: Arc::clone(&deps.secrets),
+            // The owed links of #1050 resolved after every run (`ArrivalLinks`),
+            // and a suggestion pass requested after every OK one (#1485).
+            events: Arc::new(crate::suggestion_pass::SuggestOnSync::new(
+                write_queue::ArrivalLinks::new(
+                    TauriEvents::new(app.clone()),
+                    deps.pool.clone(),
+                    Arc::clone(&registry),
+                    background.clone(),
+                ),
+                deps.suggestions,
+            )),
+            timing: SchedulerTiming::default(),
+        },
+        background,
+    )
     .await?;
     Ok(SourcesState {
         pool: deps.pool,
@@ -676,18 +687,23 @@ pub async fn test_scheduler<R: tauri::Runtime>(
     pool: PgPool,
     registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
 ) -> Result<Scheduler, sqlx::Error> {
-    Scheduler::start(SchedulerDeps {
-        connections: Arc::new(DbConnections(connections)),
-        pool: pool.clone(),
-        registry: Arc::clone(&registry),
-        secrets: Arc::new(knobas_secrets::MemoryStore::new()),
-        events: Arc::new(write_queue::ArrivalLinks::new(
-            TauriEvents::new(app.clone()),
-            pool,
-            registry,
-        )),
-        timing: SchedulerTiming::default(),
-    })
+    let background = knobas_sync::background::Background::new();
+    Scheduler::start_with_background(
+        SchedulerDeps {
+            connections: Arc::new(DbConnections(connections)),
+            pool: pool.clone(),
+            registry: Arc::clone(&registry),
+            secrets: Arc::new(knobas_secrets::MemoryStore::new()),
+            events: Arc::new(write_queue::ArrivalLinks::new(
+                TauriEvents::new(app.clone()),
+                pool,
+                registry,
+                background.clone(),
+            )),
+            timing: SchedulerTiming::default(),
+        },
+        background,
+    )
     .await
 }
 

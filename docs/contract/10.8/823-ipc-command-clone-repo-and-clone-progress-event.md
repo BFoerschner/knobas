@@ -62,3 +62,14 @@
   `the_clone_shapes_serialise_as_the_mirror_declares`; `lib.rs`'s
   `the_event_names_match_their_typescript_mirror`; eleven in `tests/it/clone_ipc.rs`; and five
   live in `tests/clone_live.rs`, run by `just gitea-live`.
+
+  **Amendment (#1633, 2026-10-22): the quit stops a clone and removes its folder.** No signature,
+  type or event changes. The exit handler calls `checkout::clone::stop_all` before it stops the
+  scheduler: every running clone is stopped as `stop: true` stops it, its half-made folder is
+  removed and `clone:progress` says `stopped { removed }`, waiting up to 6 s. The sentence above
+  that a quit "may leave a half-made folder" now holds only for a crash, a signal, or a folder
+  still being written after those 6 s; the not-finished refusal stays for those. `clone_repo`
+  gains one refusal: `not_ready` ("knobas is quitting, so no clone starts") for a start that
+  arrives after `stop_all` began. The registry is now managed state (`State<'_, Arc<Clones>>`,
+  `Clones::global()` managed in `setup`), an injected argument the frontend never passes. Pinned
+  by `tests/it/clone_ipc.rs`'s `a_quit_during_a_clone_removes_its_folder_and_the_next_clone_starts`.

@@ -60,7 +60,7 @@
 //! has no other way to shut itself.
 
 use std::str::FromStr;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::Serialize;
 use sqlx::PgPool;
@@ -329,11 +329,11 @@ async fn wanted(pool: &PgPool) -> Result<Option<String>, IpcError> {
 pub async fn set_shown(
     pool: &PgPool,
     capture: &CaptureState,
-    registrar: &dyn Registrar,
+    registrar: Arc<dyn Registrar>,
     shown: bool,
 ) -> Result<ShortcutView, IpcError> {
     settings::write(pool, SHOWN_KEY, shown.then_some("true")).await?;
-    capture.set_refusal(apply(registrar, wanted(pool).await?.as_deref()));
+    capture.set_refusal(apply_off_runtime(registrar, wanted(pool).await?).await);
     shortcut(pool, capture).await
 }
 
@@ -353,12 +353,12 @@ pub async fn set_shown(
 pub async fn set_shortcut(
     pool: &PgPool,
     capture: &CaptureState,
-    registrar: &dyn Registrar,
+    registrar: Arc<dyn Registrar>,
     accelerator: Option<&str>,
 ) -> Result<ShortcutView, IpcError> {
     let accelerator = settings::settable(accelerator);
     settings::write(pool, SHORTCUT_KEY, accelerator).await?;
-    capture.set_refusal(apply(registrar, wanted(pool).await?.as_deref()));
+    capture.set_refusal(apply_off_runtime(registrar, wanted(pool).await?).await);
     shortcut(pool, capture).await
 }
 
@@ -377,16 +377,30 @@ pub async fn set_shortcut(
 pub async fn register_stored(
     pool: &PgPool,
     capture: &CaptureState,
-    registrar: &dyn Registrar,
+    registrar: Arc<dyn Registrar>,
 ) -> Result<(), IpcError> {
-    capture.set_refusal(apply(registrar, wanted(pool).await?.as_deref()));
+    capture.set_refusal(apply_off_runtime(registrar, wanted(pool).await?).await);
     Ok(())
+}
+
+/// [`apply`] on the blocking pool, for the three callers above, which are
+/// async (#1634, LIFE-6): the plugin hands its work to the main thread and
+/// blocks on a channel until it answers, so a call on the runtime would hold
+/// a worker for as long as the main thread is busy.
+async fn apply_off_runtime(
+    registrar: Arc<dyn Registrar>,
+    accelerator: Option<String>,
+) -> Option<String> {
+    tokio::task::spawn_blocking(move || apply(registrar.as_ref(), accelerator.as_deref()))
+        .await
+        .unwrap_or_else(|panicked| Some(format!("the shortcut registration panicked: {panicked}")))
 }
 
 /// Ask the registrar for `accelerator`, and answer the refusal if there is one.
 ///
-/// One function because the two callers above must not be able to disagree
-/// about what *stored but not registered* means.
+/// One function because the three callers above must not be able to disagree
+/// about what *stored but not registered* means. Blocking: they reach it
+/// through [`apply_off_runtime`].
 fn apply(registrar: &dyn Registrar, accelerator: Option<&str>) -> Option<String> {
     match accelerator {
         Some(accelerator) => registrar.register(accelerator).err(),

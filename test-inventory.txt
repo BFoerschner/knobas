@@ -434,6 +434,7 @@ knobas-app	test/it	assets_ipc::the_type_table_answers_with_no_pool_and_carries_t
 knobas-app	test/it	assets_ipc::what_breaks_below_an_asset_is_everything_it_holds_nearest_first
 knobas-app	test/it	background_write::a_linked_submit_holds_its_ticket_on_the_row_before_the_send
 knobas-app	test/it	background_write::a_new_page_with_link_it_to_holds_its_ticket_on_the_row_before_the_send
+knobas-app	test/it	background_write::a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_next_start
 knobas-app	test/it	background_write::submit_answers_before_the_adapter_is_called_and_the_settle_names_the_write
 knobas-app	test/it	background_write::two_writes_queued_back_to_back_are_sent_in_order
 knobas-app	test/it	backup::a_restore_brings_back_no_mirror_rows_of_its_own
@@ -474,9 +475,13 @@ knobas-app	test/it	backup_ipc::switching_the_saved_lists_part_off_leaves_the_lis
 knobas-app	test/it	backup_ipc::the_archive_list_is_ordered_by_date_and_not_by_the_share_prefix
 knobas-app	test/it	backup_ipc::the_archive_list_says_which_archives_are_share_exports
 knobas-app	test/it	backup_ipc::the_nightly_job_exports_once_and_then_leaves_it_alone
+knobas-app	test/it	bring_up::a_failed_migration_stops_the_server_without_holding_the_runtime
+knobas-app	test/it	bring_up::a_quit_while_migrating_stops_the_server
 knobas-app	test/it	bring_up::a_second_bring_up_over_one_registry_refuses_no_installed_adapter
+knobas-app	test/it	bring_up::a_trigger_that_reaches_the_spawn_after_the_quit_ends_its_row
 knobas-app	test/it	bring_up::bring_up_closes_a_stranded_timer_before_it_announces_ready
 knobas-app	test/it	bring_up::bring_up_hands_its_suggestion_pass_to_the_scheduler
+knobas-app	test/it	bring_up::bring_up_reports_starting_with_the_step_once_the_schema_is_up
 knobas-app	test/it	bring_up::shutdown_stops_the_scheduler_before_the_database_and_a_second_does_nothing
 knobas-app	test/it	builds_ipc::a_pin_is_kept_until_it_is_taken_back
 knobas-app	test/it	builds_ipc::a_pipeline_carries_its_chain_of_groups_outermost_first
@@ -507,6 +512,7 @@ knobas-app	test/it	capture_ipc::every_capture_command_is_registered_and_its_argu
 knobas-app	test/it	capture_ipc::nothing_is_registered_until_a_shortcut_is_chosen
 knobas-app	test/it	capture_ipc::the_recorded_pair_crosses_the_bridge_before_the_database_is_up
 knobas-app	test/it	capture_ipc::the_recorded_room_and_foreground_are_what_the_capture_reads
+knobas-app	test/it	capture_ipc::the_registrar_is_called_off_the_runtime
 knobas-app	test/it	capture_ipc::the_view_counts_the_notes
 knobas-app	test/it	checkout_ipc::a_branch_answers_its_repositorys_checkout
 knobas-app	test/it	checkout_ipc::a_branch_opens_its_repositorys_checkout
@@ -541,6 +547,7 @@ knobas-app	test/it	clone_ipc::a_failed_clone_says_gits_last_line_and_leaves_noth
 knobas-app	test/it	clone_ipc::a_folder_another_repository_is_cloning_into_is_refused
 knobas-app	test/it	clone_ipc::a_folder_that_is_not_a_clone_of_it_is_refused_and_left_alone
 knobas-app	test/it	clone_ipc::a_name_outside_the_pattern_is_refused_before_anything_is_made
+knobas-app	test/it	clone_ipc::a_quit_during_a_clone_removes_its_folder_and_the_next_clone_starts
 knobas-app	test/it	clone_ipc::a_repository_clones_only_with_a_root_set_and_from_an_address_its_adapter_names
 knobas-app	test/it	clone_ipc::a_repository_of_any_code_host_source_clones
 knobas-app	test/it	clone_ipc::an_existing_clone_of_the_repository_is_adopted
@@ -3566,6 +3573,8 @@ knobas-sync	lib/knobas_sync	alerts::tests::a_word_this_build_does_not_know_decid
 knobas-sync	lib/knobas_sync	alerts::tests::every_alert_state_is_a_state_a_sample_can_hold
 knobas-sync	lib/knobas_sync	alerts::tests::the_rule_is_the_whole_table
 knobas-sync	lib/knobas_sync	alerts::tests::the_states_are_the_ones_the_column_accepts
+knobas-sync	lib/knobas_sync	background::tests::a_closed_set_spawns_nothing_and_close_waits_for_what_runs
+knobas-sync	lib/knobas_sync	background::tests::what_outlives_the_grace_is_aborted
 knobas-sync	lib/knobas_sync	config::tests::an_auth_kind_round_trips_and_an_unrecognised_one_reads_as_none
 knobas-sync	lib/knobas_sync	config::tests::an_auth_state_round_trips_and_an_unrecognised_one_reads_as_unknown
 knobas-sync	lib/knobas_sync	config::tests::the_states_the_schedule_excludes_are_spelled_the_way_the_enum_spells_them

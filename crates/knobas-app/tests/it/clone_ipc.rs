@@ -690,6 +690,71 @@ async fn stopping_kills_git_and_removes_the_half_made_folder() {
     server.abort();
 }
 
+/// IPC-10 (#1633, spec #1619): Cmd-Q during a clone stops git and removes the
+/// half-made folder, as *Stop* does. Before, the quit dropped the runner with
+/// the runtime: git was killed, the folder stayed, and the next *Clone* of
+/// the repository refused it as a clone that did not finish.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quit_during_a_clone_removes_its_folder_and_the_next_clone_starts() {
+    use tauri::Manager as _;
+
+    let pool = pool().await;
+    let (base, server) = silent_server().await;
+    let id = repo(&pool, "gitea", &base, "tidewater/quit").await;
+    let (_dir, root) = root(&pool).await;
+    let seen = Arc::new(Seen::default());
+    let clones = Arc::new(Clones::default());
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("a mock app");
+    app.manage(Arc::clone(&clones));
+
+    start_admitting(
+        &pool,
+        &Registry::for_process(),
+        &clones,
+        seen.clone(),
+        &id,
+        &["http"],
+    )
+    .await
+    .unwrap();
+    let target = root.join("quit");
+    assert!(target.is_dir(), "the folder is made before git starts");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    tokio::task::block_in_place(|| knobas_app::shutdown(app.handle()));
+    let left = target.exists();
+
+    // The next launch: a registry of its own, as a new process has.
+    let next = Arc::new(Clones::default());
+    let again = start_admitting(
+        &pool,
+        &Registry::for_process(),
+        &next,
+        Arc::new(Seen::default()),
+        &id,
+        &["http"],
+    )
+    .await;
+    let _ = stop(&pool, &next, &id).await;
+    let _ = stop(&pool, &clones, &id).await;
+    server.abort();
+
+    assert!(!left, "the quit left the half-made folder");
+    assert_eq!(
+        seen.end().await.state,
+        CloneState::Stopped { removed: true }
+    );
+    assert_eq!(
+        again.map_err(|error| error.code),
+        Ok(CloneAnswer::Cloning {
+            path: target.to_string_lossy().into_owned()
+        }),
+        "the next Clone of the repository after the quit"
+    );
+}
+
 /// Two starts at once: one clone, and both answer `cloning`. Neither finds the
 /// other's new folder and refuses it as not a clone.
 #[tokio::test]

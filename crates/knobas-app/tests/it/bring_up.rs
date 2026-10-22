@@ -194,6 +194,64 @@ async fn bring_up_closes_a_stranded_timer_before_it_announces_ready() {
     assert_eq!(closed, 1, "the stranded timer became a closed block");
 }
 
+/// D8 (#1703, spec #1619): `migrating` is the schema and nothing else. Once
+/// `migrate::run` returns, the steps after it -- the two sweeps, the
+/// declarations, the engines, the shortcut -- are `starting`, each naming
+/// itself, so a slow disk's boot screen says what it is waiting on rather
+/// than *Bringing the schema up to date* for seconds after it is.
+///
+/// Read off `db:state` as the boot screen hears it: every state announced, in
+/// order.
+#[tokio::test(flavor = "multi_thread")]
+async fn bring_up_reports_starting_with_the_step_once_the_schema_is_up() {
+    use tauri::Listener as _;
+
+    let (_pool, connector) = scratch("bring-up-states").await;
+    let data = tempfile::tempdir().unwrap();
+    let profile = Profile::new(false, data.path());
+    let registry = Registry::default();
+    let app = mock_app(&profile, &registry);
+    let heard: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
+    let seen = Arc::clone(&heard);
+    app.listen(knobas_app::events::DB_STATE, move |event| {
+        seen.lock()
+            .unwrap()
+            .push(serde_json::from_str(event.payload()).unwrap());
+    });
+
+    assert_eq!(
+        bring_up(&app, &profile, &connector, &registry),
+        DbState::Ready
+    );
+    shutdown(&app);
+
+    let heard = heard.lock().unwrap().clone();
+    let migrating = heard
+        .iter()
+        .position(|state| state["state"] == "migrating")
+        .expect("bring-up announced the migration");
+    let after: Vec<String> = heard[migrating + 1..]
+        .iter()
+        .map(|state| match state["detail"].as_str() {
+            Some(detail) => format!("{}: {detail}", state["state"].as_str().unwrap()),
+            None => state["state"].as_str().unwrap().to_owned(),
+        })
+        .collect();
+    assert_eq!(
+        after,
+        [
+            "starting: closing any timer left running",
+            "starting: interrupting start-work steps a quit left running",
+            "starting: storing the adapters' declarations",
+            "starting: starting the sync engine",
+            "starting: starting the nightly backup",
+            "starting: registering the capture shortcut",
+            "ready",
+        ],
+        "after the migration: {heard:?}"
+    );
+}
+
 /// #1485: bring-up builds the suggestion pass and hands it to the scheduler
 /// it starts, which requests it after every run that ends OK. A mock source
 /// synced through the scheduler bring-up started proposes links, with nobody
@@ -465,7 +523,8 @@ async fn shutdown_stops_the_scheduler_before_the_database_and_a_second_does_noth
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("a mock app");
     let lifecycle = Lifecycle::with_registry(Arc::clone(&registry));
-    lifecycle.install(AppState::over_db(db));
+    lifecycle.hold_server(db);
+    lifecycle.install(AppState::over_pool(app_pool.clone()));
     app.manage(lifecycle);
     app.manage(SourcesState {
         pool: app_pool.clone(),
@@ -496,5 +555,318 @@ async fn shutdown_stops_the_scheduler_before_the_database_and_a_second_does_noth
         *stops.lock().unwrap(),
         [false],
         "a second shutdown stopped something again"
+    );
+}
+
+// -- the server between start and install (#1634) ---------------------------
+
+/// The port the server serving `root_dir` recorded in `postmaster.pid` (line 4).
+fn port_of(root_dir: &std::path::Path) -> u16 {
+    let pid_file = std::fs::read_to_string(root_dir.join("data").join("postmaster.pid"))
+        .expect("a running server's postmaster.pid");
+    pid_file.lines().nth(3).unwrap().trim().parse().unwrap()
+}
+
+fn port_answers(port: u16) -> bool {
+    std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        Duration::from_millis(500),
+    )
+    .is_ok()
+}
+
+/// `profile`'s own server, started, migrated and left as `then` says.
+async fn provisioned(
+    profile: &Profile,
+    then: impl AsyncFnOnce(&knobas_db::EmbeddedDb),
+) -> knobas_db::EmbeddedDb {
+    let db = knobas_db::EmbeddedDb::start(profile.db_config(None))
+        .await
+        .expect("the profile's server starts");
+    knobas_db::migrate::run(db.pool())
+        .await
+        .expect("the schema is applied");
+    then(&db).await;
+    db
+}
+
+/// LIFE-5 (spec #1619): Cmd-Q while bring-up is migrating stops the server.
+/// Until the shared state is installed the server lived in the bring-up task
+/// alone, so the exit handler found nothing to stop and the postmaster
+/// outlived the quit, against `docs/development.md`'s *Shutting down*.
+///
+/// The migration waits on a signal: the migrations table, locked by a
+/// connection of the test's. The server is the profile's own, orphaned the
+/// way a `kill -9` leaves it, so bring-up adopts it and takes ownership: the
+/// one way a test holds a connection on it before bring-up's migration runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quit_while_migrating_stops_the_server() {
+    let data = tempfile::tempdir().unwrap();
+    let profile = Profile::new(false, data.path());
+    let root = profile.db_config(None).root_dir;
+    let orphan = provisioned(&profile, async |_| {}).await;
+    let connector = orphan.connector();
+    orphan.abandon();
+    let port = port_of(&root);
+
+    let mut holder = connector
+        .connect()
+        .await
+        .expect("a connection of the test's");
+    sqlx::query("begin").execute(&mut holder).await.unwrap();
+    sqlx::query("lock table _sqlx_migrations in access exclusive mode")
+        .execute(&mut holder)
+        .await
+        .expect("the migrations table is locked");
+
+    let registry = Registry::default();
+    let app = mock_app(&profile, &registry);
+    let bringing = tokio::spawn({
+        let handle = app.handle().clone();
+        let profile = profile.clone();
+        async move { knobas_app::bring_up(&handle, &profile, None, registry).await }
+    });
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while app.state::<Lifecycle>().get() != DbState::Migrating {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("bring-up reaches the migration");
+    // Long enough for the migration to be parked on the lock.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    shutdown(&app);
+    let still_up = port_answers(port);
+
+    // Whatever happened: the lock goes, bring-up ends, and a second quit
+    // stops a server a red run left behind.
+    drop(holder);
+    tokio::time::timeout(Duration::from_secs(60), bringing)
+        .await
+        .expect("bring-up ends")
+        .unwrap();
+    shutdown(&app);
+
+    assert!(
+        !still_up,
+        "the server answered on its port after a quit during the migration"
+    );
+    assert!(
+        matches!(app.state::<Lifecycle>().get(), DbState::Failed { .. }),
+        "a bring-up whose server was stopped under it ends failed, not ready"
+    );
+}
+
+/// LIFE-6 (spec #1619): a bring-up whose migration fails stops the server
+/// with the asynchronous stop, not by dropping it. Dropping a server this
+/// process started runs `pg_ctl stop` synchronously in `PostgreSQL`'s `Drop`,
+/// on the runtime's thread, for the shutdown checkpoint: `pg_ctl` polls every
+/// tenth of a second, so the thread is held for at least that.
+///
+/// A runtime of one thread, and a task on it that ticks every five
+/// milliseconds: while bring-up says *migrating* the tick never stops for
+/// long. The migration fails because an applied migration's checksum no
+/// longer matches its file.
+#[tokio::test]
+async fn a_failed_migration_stops_the_server_without_holding_the_runtime() {
+    let data = tempfile::tempdir().unwrap();
+    let profile = Profile::new(false, data.path());
+    let root = profile.db_config(None).root_dir;
+    let stopped = provisioned(&profile, async |db| {
+        sqlx::query(
+            "update _sqlx_migrations set checksum = '\\x00'::bytea
+              where version = (select min(version) from _sqlx_migrations)",
+        )
+        .execute(db.pool())
+        .await
+        .expect("an applied migration no longer matches its file");
+    })
+    .await;
+    stopped.stop().await.expect("the provisioning server stops");
+
+    let registry = Registry::default();
+    let app = mock_app(&profile, &registry);
+    let ticks: Arc<Mutex<Vec<(std::time::Instant, DbState)>>> = Arc::default();
+    let ticker = tokio::spawn({
+        let ticks = Arc::clone(&ticks);
+        let handle = app.handle().clone();
+        async move {
+            loop {
+                let state = handle.state::<Lifecycle>().get();
+                ticks
+                    .lock()
+                    .unwrap()
+                    .push((std::time::Instant::now(), state));
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+    });
+
+    knobas_app::bring_up(app.handle(), &profile, None, registry).await;
+    // A few more ticks, so the one after a held thread is recorded.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    ticker.abort();
+
+    assert!(
+        matches!(app.state::<Lifecycle>().get(), DbState::Failed { .. }),
+        "the mismatched migration fails bring-up"
+    );
+    assert!(
+        !root.join("data").join("postmaster.pid").exists(),
+        "the failed bring-up stopped its server"
+    );
+    let ticks = ticks.lock().unwrap();
+    let held = ticks
+        .windows(2)
+        .filter(|pair| pair[0].1 == DbState::Migrating)
+        .map(|pair| pair[1].0 - pair[0].0)
+        .max()
+        .expect("the ticker ran while bring-up was migrating");
+    assert!(
+        held < Duration::from_millis(80),
+        "the runtime's one thread was held for {held:?} while bring-up said migrating"
+    );
+}
+
+// -- a trigger racing the quit (#1633) --------------------------------------
+
+/// Events that hold the first `running` announcement -- the one a trigger
+/// makes after it has opened the run's row and before it spawns the run --
+/// until the test lets it go.
+struct HoldsTheStart {
+    entered: std::sync::mpsc::SyncSender<()>,
+    release: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+}
+
+impl SyncEvents for HoldsTheStart {
+    fn sync_state(&self, status: knobas_sync::SourceSyncStatus) {
+        if !status.running {
+            return;
+        }
+        let Some(release) = self.release.lock().unwrap().take() else {
+            return;
+        };
+        let _ = self.entered.send(());
+        let _ = release.recv_timeout(Duration::from_secs(30));
+    }
+    fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
+    fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
+}
+
+/// SYNC-5 (#1633, spec #1619): *Sync now* is being processed when Cmd-Q
+/// arrives. The trigger opened the run's row before the quit began and
+/// reaches the spawn after it: it answers `ShuttingDown` and ends the row,
+/// with the database still open for it. Before, it spawned a run the quit had
+/// already stopped waiting for, which settled on a closed pool and left the
+/// row open until the next start reconciled it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_trigger_that_reaches_the_spawn_after_the_quit_ends_its_row() {
+    let connector = knobas_db::test_util::scratch_database("trigger-racing-quit").await;
+    let app_pool = connector.pool(2).await.unwrap();
+    knobas_sync::config::insert(
+        &app_pool,
+        &knobas_sync::config::InsertConfig {
+            id: PARKED.to_owned(),
+            adapter_kind: PARKED.to_owned(),
+            display_name: "Parked".to_owned(),
+            base_url: "https://parked.example".to_owned(),
+            auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::Pat),
+            config: serde_json::json!({}),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .expect("the source row");
+    let secrets: Arc<dyn knobas_secrets::SecretStore> =
+        Arc::new(knobas_secrets::MemoryStore::new());
+    knobas_secrets::spawn::put(
+        &secrets,
+        &knobas_secrets::KeychainAccount::source(PARKED),
+        knobas_secrets::Secret::just(AuthMethod::Pat, "a token"),
+    )
+    .await
+    .unwrap();
+    let registry: Arc<dyn AdapterRegistry> = Arc::new(Recording {
+        entered: Arc::new(tokio::sync::Notify::new()),
+        stops: Stops::default(),
+        app_pool: app_pool.clone(),
+    });
+    let (entered, held) = std::sync::mpsc::sync_channel(1);
+    let (release, released) = std::sync::mpsc::channel();
+    let scheduler = knobas_sync::scheduler::Scheduler::start(SchedulerDeps {
+        pool: connector.pool(2).await.unwrap(),
+        connections: Arc::new(Connections(connector.clone())),
+        registry: Arc::clone(&registry),
+        secrets: Arc::clone(&secrets),
+        events: Arc::new(HoldsTheStart {
+            entered,
+            release: Mutex::new(Some(released)),
+        }),
+        timing: knobas_sync::scheduler::SchedulerTiming {
+            startup_delay: Duration::from_secs(3600),
+            tick: Duration::from_secs(3600),
+        },
+    })
+    .await
+    .expect("a scheduler");
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("a mock app");
+    app.manage(SourcesState {
+        pool: app_pool,
+        scheduler: scheduler.clone(),
+        secrets,
+        registry,
+    });
+
+    let triggered = tokio::spawn({
+        let scheduler = scheduler.clone();
+        async move {
+            scheduler
+                .trigger(PARKED, knobas_sync::SyncTrigger::Manual, None)
+                .await
+        }
+    });
+    tokio::task::block_in_place(|| held.recv_timeout(Duration::from_secs(30)))
+        .expect("the trigger opens its row and announces it");
+
+    let quitting = std::thread::spawn({
+        let handle = app.handle().clone();
+        move || knobas_app::shutdown(&handle)
+    });
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !scheduler.is_shutting_down() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the quit begins");
+    // Time for a quit that does not wait on the trigger to finish.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    release.send(()).unwrap();
+
+    let answered = tokio::time::timeout(Duration::from_secs(30), triggered)
+        .await
+        .expect("the trigger answers")
+        .unwrap();
+    quitting.join().expect("the quit finishes");
+
+    let mut reader = connector.connect().await.unwrap();
+    let open: i64 = sqlx::query_scalar(
+        "select count(*) from knobas.sync_run where source_id = $1 and finished_at is null",
+    )
+    .bind(PARKED)
+    .fetch_one(&mut reader)
+    .await
+    .unwrap();
+    assert_eq!(open, 0, "the trigger left its run row open");
+    assert!(
+        matches!(
+            answered,
+            Err(knobas_sync::scheduler::TriggerError::ShuttingDown)
+        ),
+        "a trigger that reached the spawn after the quit answered {answered:?}"
     );
 }
