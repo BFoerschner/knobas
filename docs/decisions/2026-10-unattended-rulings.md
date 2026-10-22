@@ -12710,3 +12710,13 @@ The measurement came after it.
   an ack that is no timeout. Same paragraph, same entry. *Reversing:* low.
 - **"not JSON knobas can read".** *Ruling:* "not a socket.io ack knobas can read".
   *Reasoning:* `answer` also turns away an empty argument list, which is JSON. *Reversing:* low.
+### #1679: merge review of PR #1768 (Sonnet merge-manager, 2026-10-23)
+
+- **A stale title written back.** *Ruling:* accepted. *Reasoning:* the protocol note's title is
+  "Standup <day>", set by the backend when the day's protocol is created, and the ticket names it
+  the protocol's identity. `TfStandup` has no rename, and the protocol note is not offered
+  elsewhere for a rename, so the title read once in `openProtocol` is the title a save must
+  write. *Reversing:* low (read the title inside the chained step again).
+- **A failed save and the chain.** *Ruling:* the try/catch inside the chained step keeps the
+  chain alive; no test pinned it, so one was added (`a refused save does not break the chain`),
+  and a mutant that rethrows in the catch kills it. *Reversing:* n/a.

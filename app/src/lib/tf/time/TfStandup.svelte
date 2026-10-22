@@ -177,6 +177,8 @@
   let addText = $state("");
   let target = $state<{ stored: PublishTarget; reading: string } | null>(null);
   let timer: ReturnType<typeof setTimeout> | null = null;
+  /** The protocol note's title, read once on open: its identity, which a save writes back unchanged. */
+  let title = "";
 
   const form = $derived(readProtocol(bodyMd));
   const publication = $derived(protocol?.publication ?? null);
@@ -186,6 +188,7 @@
       const opened = await io.standupProtocol(day);
       const note = await io.getNote(opened.note_id);
       protocol = opened;
+      title = note.note.title;
       bodyMd = note.note.body_md;
       const read = readProtocol(bodyMd);
       known = [...read.attendees];
@@ -235,21 +238,31 @@
     timer = setTimeout(() => void save(), saveAfterMs);
   }
 
+  /**
+   * Saves run one after another, so a slow write cannot land after a newer one
+   * and put the older body back. Each takes the body when its turn comes, so
+   * the last to run writes what is on screen.
+   */
+  let chain: Promise<unknown> = Promise.resolve();
+
   /** Write the body; answers whether it landed. The title is the protocol's identity and stays. */
-  async function save(): Promise<boolean> {
+  function save(): Promise<boolean> {
     if (timer !== null) clearTimeout(timer);
     timer = null;
     const current = protocol;
-    if (!current) return false;
-    try {
-      const note = await io.getNote(current.note_id);
-      await io.saveNote(current.note_id, note.note.title, bodyMd);
-      failure = null;
-      return true;
-    } catch (cause) {
-      failure = ipcErrorMessage(cause);
-      return false;
-    }
+    if (!current) return Promise.resolve(false);
+    const turn = chain.then(async () => {
+      try {
+        await io.saveNote(current.note_id, title, bodyMd);
+        failure = null;
+        return true;
+      } catch (cause) {
+        failure = ipcErrorMessage(cause);
+        return false;
+      }
+    });
+    chain = turn;
+    return turn;
   }
 
   function toggle(name: string) {
