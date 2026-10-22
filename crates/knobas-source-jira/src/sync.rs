@@ -1471,6 +1471,38 @@ mod tests {
         );
     }
 
+    /// **A ceiling below the previous watermark does not drag it back**
+    /// (#1622). PAY-231, which set the watermark at 11:48, is deleted, so the
+    /// probe's newest is PAY-999 at 11:47, newly visible inside the window.
+    /// Emitting it must leave the watermark at 11:48: clamping to the 11:47
+    /// ceiling would move the position backwards, which only
+    /// `Bounds::previous` prevents here.
+    #[tokio::test]
+    async fn a_ceiling_below_the_previous_watermark_does_not_move_it_back() {
+        let mut api = FakeApi {
+            issues: five_issues(),
+            ..FakeApi::default()
+        };
+        let config = cfg(serde_json::json!({}));
+        let (_, cursor) = keys_of(&api, &config, None).await;
+        let before = crate::cursor::JiraCursor::parse(&cursor)
+            .unwrap()
+            .updated_to;
+
+        api.issues.retain(|i| i["key"] != "PAY-231");
+        api.issues
+            .push(issue("PAY-999", "2026-08-22T11:47:00.000+0000", 0, 0));
+        let (keys, advanced) = keys_of(&api, &config, Some(cursor)).await;
+        assert_eq!(keys, vec!["PAY-999".to_owned()]);
+        assert_eq!(
+            crate::cursor::JiraCursor::parse(&advanced)
+                .unwrap()
+                .updated_to,
+            before,
+            "the 11:47 ceiling does not pull the 11:48 watermark back"
+        );
+    }
+
     /// **The ceiling** (#1622). While the walk pages, PAY-3 (not reached yet)
     /// is edited and arrives on the second page stamped 11:44:30, past the
     /// newest issue the probe saw at the run's start (11:20). PAY-1, on the
