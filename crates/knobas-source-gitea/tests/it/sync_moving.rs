@@ -467,11 +467,13 @@ async fn a_branch_met_twice_with_two_heads_is_mirrored_at_the_head_remembered() 
     let last = during
         .iter()
         .chain(&after)
-        .filter(|i| i.entity.to_string() == branch_entity("b-24"))
-        .last()
+        .rfind(|i| i.entity.to_string() == branch_entity("b-24"))
         .expect("the force-push is mirrored by one of the two runs");
     assert_eq!(last.payload["commit"]["id"], json!(sha(700)));
-    assert_eq!(position(&cursor, MONOREPO)["branches"]["b-24"], json!(sha(700)));
+    assert_eq!(
+        position(&cursor, MONOREPO)["branches"]["b-24"],
+        json!(sha(700))
+    );
 }
 
 /// A branch the listing did not return and its own read answers 404 for is
