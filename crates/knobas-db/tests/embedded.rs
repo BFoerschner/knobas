@@ -369,6 +369,145 @@ async fn a_lock_naming_a_strangers_port_is_cleared_instead_of_reported_as_a_conf
     stranger.stop().await.unwrap();
 }
 
+/// A second embedded server on a profile of its own, standing in for a
+/// PostgreSQL that is not ours: its superuser password is its own invention,
+/// so ours is refused there with `28P01`.
+///
+/// A guard, so the server stops on every path, a failed assertion included:
+/// dropping the handle runs `postgresql_embedded`'s own `pg_ctl stop -m fast`.
+/// The happy path calls [`Squatter::stop`] instead, which reports a failure.
+struct Squatter {
+    db: Option<EmbeddedDb>,
+    _root: tempfile::TempDir,
+    port: u16,
+}
+
+impl Squatter {
+    async fn start() -> Squatter {
+        let root = tempfile::tempdir().unwrap();
+        let db = EmbeddedDb::start(DbConfig {
+            root_dir: root.path().to_path_buf(),
+            existing_url: None,
+        })
+        .await
+        .expect("the squatter's own server starts");
+        let port = running_port(root.path());
+        Squatter {
+            db: Some(db),
+            _root: root,
+            port,
+        }
+    }
+
+    fn pool(&self) -> &sqlx::PgPool {
+        self.db.as_ref().expect("the squatter is running").pool()
+    }
+
+    async fn stop(mut self) {
+        if let Some(db) = self.db.take() {
+            db.stop().await.expect("stop the squatter");
+        }
+    }
+}
+
+impl Drop for Squatter {
+    fn drop(&mut self) {
+        // Explicit rather than left to field order: the handle goes before
+        // the root it lives in is removed.
+        drop(self.db.take());
+    }
+}
+
+/// CORE-2 (spec #1619, ruling B5): our lock file names a process that is gone
+/// and a port another PostgreSQL now holds, one that refuses our password.
+/// That is a stale lock: a postmaster of ours accepts our password, so a
+/// refusal beside a dead pid is the same evidence the wire-level arm takes.
+///
+/// knobas only reads the lock when a start has failed, and PostgreSQL's own
+/// `CreateLockFile` removes a lock whose process is gone before it can fail
+/// on it. So the lock reaches `adopt` when the start fails for some other
+/// reason, here a parameter PostgreSQL refuses before it touches the lock.
+/// That start used to end in `AlreadyRunning`, "another knobas instance",
+/// which is false and hides the real error. Now the lock is cleared and the
+/// real error is what comes back. Repaired, the next start is a clean one.
+#[tokio::test]
+async fn a_lock_naming_a_foreign_postgres_and_a_dead_process_is_cleared() {
+    let ours = tempfile::tempdir().unwrap();
+    let cfg = DbConfig {
+        root_dir: ours.path().to_path_buf(),
+        existing_url: None,
+    };
+    EmbeddedDb::start(cfg.clone())
+        .await
+        .unwrap()
+        .stop()
+        .await
+        .unwrap();
+    let data_dir = ours.path().join("data");
+    let conf = data_dir.join("postgresql.conf");
+    let good_conf = std::fs::read_to_string(&conf).unwrap();
+    std::fs::write(&conf, format!("{good_conf}\nknobas_cannot_start = on\n")).unwrap();
+
+    let squatter = Squatter::start().await;
+    let pid_file = data_dir.join("postmaster.pid");
+    let forge = || {
+        std::fs::write(
+            &pid_file,
+            format!(
+                "{}\n{}\n1700000000\n{}\n",
+                dead_pid(),
+                data_dir.display(),
+                squatter.port
+            ),
+        )
+        .unwrap();
+    };
+
+    forge();
+    let error = match EmbeddedDb::start(cfg.clone()).await {
+        Ok(_) => panic!("a parameter PostgreSQL refuses cannot start"),
+        Err(error) => error,
+    };
+    assert!(
+        !matches!(error, knobas_db::DbError::AlreadyRunning { .. }),
+        "a dead process and a server that refuses our password is no knobas instance: {error}"
+    );
+    assert!(!pid_file.exists(), "the stale lock is cleared");
+
+    std::fs::write(&conf, good_conf).unwrap();
+    forge();
+    let db = EmbeddedDb::start(cfg)
+        .await
+        .expect("the repaired profile starts past the same lock");
+    let (serving,): (String,) = sqlx::query_as("show data_directory")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::canonicalize(&serving).unwrap(),
+        std::fs::canonicalize(&data_dir).unwrap(),
+        "the start came up on its own data directory"
+    );
+    assert!(db.owns_server());
+
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(squatter.pool())
+        .await
+        .expect("clearing our own stale lock leaves the squatter serving");
+    assert_eq!(one.0, 1);
+
+    db.stop().await.unwrap();
+    squatter.stop().await;
+}
+
+/// A pid that is certainly not running: a child that has already been reaped.
+fn dead_pid() -> u32 {
+    let mut reaped = std::process::Command::new("true").spawn().unwrap();
+    let pid = reaped.id();
+    reaped.wait().unwrap();
+    pid
+}
+
 /// A second `start()` on a data directory a **live** server already holds must
 /// join that server, and must leave it standing.
 ///
