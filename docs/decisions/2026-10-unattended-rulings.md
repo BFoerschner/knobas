@@ -12458,8 +12458,9 @@ The measurement came after it.
   (`socket_session_tests.rs`, `ack_arguments`) is its witness under ADR-0013's carve-out for a
   fault the real container cannot be made to produce. *Reversing:* low, one `map_err` and one
   match arm in `verdict`; the two session tests flip.
-- **The polls' quota since the shared limiter (#1723): exempt them, or correct the doc.**
-  Reserved for Björn, ruled by the implementer on Opus (spec #1618's waiver). *Ruling:* no
+- **Reserved for Björn, ruled by implementer on Opus: the polls' quota since the shared limiter
+  (#1723).** *Fork:* exempt the polling transport from the shared quota (a spec change, spec #1618
+  ruling A3, waived to the Opus implementer), or correct the doc. *Ruling:* no
   exemption. The socket now asks for the source's own quota (`rate_per_sec`, `rate_burst`) in
   place of its fixed 25/s, burst 50, and `KumaSocket::new` says the polls share the instance's
   quota. *Reasoning:* measured under `just kuma-live`'s container through a counting relay

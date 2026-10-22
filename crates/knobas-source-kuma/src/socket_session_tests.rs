@@ -20,6 +20,12 @@
 //! through a link that drops after the `add`, ADR-0013's *drop the
 //! connection*). The other three need Kuma itself to reap or stall on cue
 //! between one packet and the next, and the fake is their witness.
+//!
+//! So is an ack that arrives in a shape knobas cannot read (#1721): 2.5.3
+//! always answers `[{"ok":…}]`, only a changed Kuma answers otherwise, and a
+//! relay rewriting the real ack would be forging Kuma's answer rather than
+//! staging a link. ADR-0013's carve-out for a fault the real instance cannot
+//! produce is what makes the fake the witness there.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
