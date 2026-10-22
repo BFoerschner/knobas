@@ -74,9 +74,22 @@ impl InstanceLimiter {
 
     /// [`for_url`](Self::for_url) for a URL already parsed and checked.
     pub(crate) fn for_origin(url: &url::Url, rate: Rate) -> Self {
-        Self {
-            instance: Arc::new(Instance::new(url.origin().ascii_serialization(), rate)),
-        }
+        /// Every origin a client was built for in this process. An entry is
+        /// never removed: a quota has to outlive the client that last used
+        /// it, or the next client built a moment later starts on a fresh
+        /// burst -- the bug this map exists to close.
+        static INSTANCES: LazyLock<Mutex<HashMap<url::Origin, Arc<Instance>>>> =
+            LazyLock::new(Mutex::default);
+
+        let mut instances = INSTANCES.lock().unwrap_or_else(PoisonError::into_inner);
+        let instance = match instances.entry(url.origin()) {
+            Entry::Occupied(known) => Arc::clone(known.get()),
+            Entry::Vacant(new) => Arc::clone(new.insert(Arc::new(Instance::new(
+                url.origin().ascii_serialization(),
+                rate,
+            )))),
+        };
+        Self { instance }
     }
 
     /// Wait until the quota lets one request through, for at most `within`.

@@ -482,6 +482,60 @@ async fn a_limiter_wait_never_outlasts_the_budget() {
     assert!(took <= std::time::Duration::from_millis(800) + slack, "{took:?}");
 }
 
+/// What reaches `server` within the first 900 ms of `per_client` sends started
+/// at once on each of `clients` -- under the second at which a one-a-second
+/// quota adds a token, so the burst is all that can pass. The sends still
+/// queued are abandoned.
+async fn hits_within_the_burst(
+    server: &CountingServer,
+    clients: Vec<HttpClient>,
+    per_client: usize,
+) -> usize {
+    let mut sends = tokio::task::JoinSet::new();
+    for client in clients {
+        let client = Arc::new(client);
+        for _ in 0..per_client {
+            let client = Arc::clone(&client);
+            sends.spawn(async move {
+                let _ = client.send(client.request(Method::GET, "/x")).await;
+            });
+        }
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    let hits = server.hits();
+    sends.abort_all();
+    hits
+}
+
+/// A client for `server` at one request a second and the given burst.
+fn paced_client(server: &CountingServer, burst: u32) -> HttpClient {
+    HttpClient::new(HttpConfig {
+        requests_per_second: 1,
+        burst,
+        ..config(server.url())
+    })
+    .expect("client")
+}
+
+/// **Every client built for one instance shares its quota** (SPI-2, #1630).
+///
+/// A sync run, a live read and a flush each build their own client, and they
+/// run at once. Two clients for one origin at a burst of ten, ten sends each:
+/// the instance sees ten in the first second, not twenty.
+#[tokio::test(flavor = "multi_thread")]
+async fn two_clients_for_one_instance_share_one_burst() {
+    let server = CountingServer::always(200, "");
+    let clients = vec![paced_client(&server, 10), paced_client(&server, 10)];
+
+    let hits = hits_within_the_burst(&server, clients, 10).await;
+
+    assert!(
+        hits <= 10,
+        "{hits} requests reached the instance within its burst of 10: each client \
+         had a limiter of its own"
+    );
+}
+
 /// A server that accepts the connection and then says nothing is
 /// **`Unreachable`, not `Protocol`** -- which is the class the scheduler backs
 /// off on, so the classification is the whole assertion.
