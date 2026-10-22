@@ -11903,3 +11903,60 @@ set.
   tests are gone and their claims run in `tests/it/bring_up.rs`; the eight scans left in
   `wiring.rs` pin plugin registration, the handler list and version pins, and order nothing. The
   tick with a note stands; #1738 (backlog) rewords the criterion. *Reversing:* n/a.
+## #1628: a write refused its credential waits for a new one; an unreachable one climbs the ladder (implementer, Opus)
+
+### What clears the wait for a source with both a secret and an account
+
+**The fork:** Kuma stores an API key (its reads) and an account (its writes) in one keychain entry, saved by one `set_source_secret`. Release on the half the writes use, or on any save?
+
+**Ruling:** any save through `set_source_secret` releases the source's `unauthorized` writes: the secret, the account, or both, whatever the connection test answers afterwards. The form cannot show which half changed (absent means keep, #452), Kuma's test reads with the key and never logs in with the account, and a test that fails leaves the health needing a human, which the tick skips anyway.
+
+**Cost of reversing:** low. One call in `crud::set_secret`.
+
+### A source edit of its address or configuration releases too
+
+**The fork:** a write whose adapter would not build (a configuration the adapter refuses) waits as `unauthorized`, the "a person has to act" reason. With the tick no longer re-sending those, fixing the configuration would leave the write waiting until *Flush now*.
+
+**Ruling:** `crud::update` releases when the patch carries `base_url` or `config`. A rename, an interval or the enable switch releases nothing. This adds a release the ticket does not list; it contradicts nothing, because it is a person acting, never the tick.
+
+**Cost of reversing:** low. One condition in `crud::update`.
+
+### A release clears `wait_reason`; no activity line, no migration
+
+**The fork:** how a released row is told apart from a refused one: a new column or timestamp, or the reason itself.
+
+**Ruling:** `release_unauthorized` sets `wait_reason = null` and keeps `detail` and `attempted_at`. The flush loop reads null as owed. The panel reads "Waiting." until the next flush, at most one tick. A release writes no activity line: the attempt after it does (`waiting` again if refused, `sent` if not).
+
+**Cost of reversing:** medium. A column would need a migration.
+
+### A 401 that answered a replaced credential is not recorded
+
+**The fork:** a credential saved while a flush is in flight: the 401 that comes back was the answer to the old credential, and recording it would re-reason the released row `unauthorized` with nothing left to release it.
+
+**Ruling:** a per-source change count, process-wide beside the flush lock. `credential_changed` bumps it, and the flush reads it before building its adapter. `waited` skips recording an `unauthorized` whose count moved, holding the count across its statement so a change lands wholly before or after. The credential save never waits for an in-flight flush. Worst case: one extra attempt with the new credential.
+
+**Cost of reversing:** low. Removing it brings back the race.
+
+### The ladder's rung is the row's `attempts`; the clock is the process's
+
+**The fork:** the sync side counts consecutive failed runs. A write row has `attempts`, which also counts a hold that was released.
+
+**Ruling:** `attempts` is the rung, `config::backoff_after` the ladder, `Utc::now()` against the database-stamped `attempted_at` the clock. The embedded server runs on the same host (ADR-0001). A write that was held, released and then failed starts a rung or two higher. That is acceptable for a write that has already failed more than once.
+
+**Cost of reversing:** low.
+
+### *Flush now* skips nothing, once
+
+**The fork:** whether *Flush now* for every source still skips a source whose health needs a human, and whether its later passes also ignore the waits.
+
+**Ruling:** it skips no source and ignores every wait on its first pass only. Later passes, which let an entity's next write follow one that just landed, use the tick's test, so a press sends each refused write at most once. A press is the reader asking. The lockout risk is one request per press.
+
+**Cost of reversing:** low.
+
+### `write_queue_flush_all.rs` moves to scratch databases
+
+**The fork:** a sibling test's `flush_all` fails to build this file's sources (its secret store lacks their credential) and records `unauthorized`. That used to last one tick; now it lasts for good.
+
+**Ruling:** each test there takes `scratch_database`, as `background_write.rs` does.
+
+**Cost of reversing:** low.
