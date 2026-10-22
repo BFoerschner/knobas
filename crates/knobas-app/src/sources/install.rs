@@ -313,6 +313,11 @@ pub type Loaded = (String, Result<(), String>);
 /// that is missing, whose hash is no longer its row's, or that no longer
 /// loads. Each refusal is logged and recorded on the registry.
 ///
+/// Each adapter **replaces** the loaded one of its kind, as a restore's
+/// reinstall does (LIFE-1): the app's registry is the process's, so a
+/// bring-up retried after a failure finds every adapter the first attempt
+/// loaded, and `add` refused each one as a kind already installed.
+///
 /// # Errors
 ///
 /// [`sqlx::Error`] when the rows cannot be read.
@@ -347,7 +352,7 @@ pub async fn load_installed(
                 .unwrap_or_else(|e| Err(e.to_string()))
             }
         }
-        .and_then(|adapter| registry.add(adapter).map_err(|e| e.to_string()));
+        .and_then(|adapter| registry.replace(adapter).map_err(|e| e.to_string()));
         match &outcome {
             Ok(()) => tracing::info!(%kind, "external adapter loaded"),
             Err(reason) => {

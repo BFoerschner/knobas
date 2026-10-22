@@ -355,7 +355,7 @@ pub(crate) async fn scratch(label: &str) -> (PgPool, knobas_db::embedded::Connec
     (pool, connector)
 }
 
-async fn install_fixture(
+pub(crate) async fn install_fixture(
     pool: &PgPool,
     registry: &Registry,
     store: &Path,
