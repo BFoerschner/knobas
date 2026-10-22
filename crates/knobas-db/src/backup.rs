@@ -436,6 +436,14 @@ fn is_description_word(word: &str) -> bool {
 /// off for the load and enforced again after. This is the documented use of the
 /// flag and needs a superuser, which the embedded server's connection is.
 ///
+/// # A failed load
+///
+/// Leaves the bookkeeping rows as they were (#1635): they are read before the
+/// clear and put back when `pg_restore` fails, and the rename shim's column is
+/// dropped either way. The load's own error is returned after that. Nothing
+/// else needs recovering: every other table was empty, and `pg_restore`'s
+/// single transaction leaves it so.
+///
 /// # Errors
 ///
 /// [`BackupError::TargetNotMigrated`], [`BackupError::TargetNotEmpty`],
@@ -462,6 +470,12 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
     // this machine's own schedule, first-run flag and retention stamp and put
     // nothing back in their place -- a restore that quietly resets the
     // settings of the knobas doing the restoring.
+    //
+    // The clears autocommit here, before `pg_restore` opens its own
+    // transaction on another connection, so a failed load cannot roll them
+    // back (#1635). The rows are read first and put back by
+    // [`put_back_bookkeeping`] when the load fails (spec #1619, ruling B3).
+    let snapshot = snapshot_bookkeeping(&mut conn).await?;
     for table in BOOKKEEPING_TABLES {
         if carries(archive, table).await? {
             // Both halves of the name are crate constants; nothing from a
@@ -489,6 +503,11 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
 
     let loaded = load(connector, archive).await;
     let mut conn = connector.connect().await?;
+    // The rows first: a fold-up that failed after them would leave a column
+    // the next restore drops anyway, while rows lost here have no way back.
+    if loaded.is_err() {
+        put_back_bookkeeping(&mut conn, &snapshot).await?;
+    }
     for (table, old, new, _) in RENAMED_COLUMNS {
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "update {OWNED_SCHEMA}.{table} set {new} = {old} where {old} is not null"
@@ -503,6 +522,60 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
     }
     let _ = conn.close().await;
     loaded
+}
+
+/// Every row of each of the [`BOOKKEEPING_TABLES`], as the text of a `jsonb`
+/// array per table, in that order.
+///
+/// All four, not only the ones the archive carries: clearing `dep_layer`
+/// cascades into `dep_layer_kind`, so a table the restore never names can
+/// still lose rows. `to_jsonb` and `jsonb_populate_recordset` are the two
+/// halves of one row-type round trip, so no column list is written here and
+/// a column a later migration adds is carried with no change.
+async fn snapshot_bookkeeping(
+    conn: &mut sqlx::PgConnection,
+) -> Result<Vec<String>, sqlx::Error> {
+    let mut snapshot = Vec::with_capacity(BOOKKEEPING_TABLES.len());
+    for table in BOOKKEEPING_TABLES {
+        // Crate constants only, as for the clears in [`restore`].
+        let rows: String = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb)::text from {OWNED_SCHEMA}.{table} t"
+        )))
+        .fetch_one(&mut *conn)
+        .await?;
+        snapshot.push(rows);
+    }
+    Ok(snapshot)
+}
+
+/// Put the bookkeeping tables back as [`snapshot_bookkeeping`] read them, in
+/// one transaction.
+///
+/// Each table is cleared first, children before parents, so whatever a failed
+/// load left in them gives way to exactly the rows they held; the inserts run
+/// parents before children, so `dep_layer_kind` finds its layer.
+async fn put_back_bookkeeping(
+    conn: &mut sqlx::PgConnection,
+    snapshot: &[String],
+) -> Result<(), sqlx::Error> {
+    let mut tx = conn.begin().await?;
+    for table in BOOKKEEPING_TABLES {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "delete from {OWNED_SCHEMA}.{table}"
+        )))
+        .execute(&mut *tx)
+        .await?;
+    }
+    for (table, rows) in BOOKKEEPING_TABLES.iter().zip(snapshot).rev() {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "insert into {OWNED_SCHEMA}.{table}
+             select * from jsonb_populate_recordset(null::{OWNED_SCHEMA}.{table}, $1::jsonb)"
+        )))
+        .bind(rows)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await
 }
 
 /// Columns of the `knobas` schema a migration renamed after archives were
