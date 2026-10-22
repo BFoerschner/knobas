@@ -116,6 +116,8 @@ function open(
     date?: string;
     /** The first write stalls until `release()`, and `body` is what the store holds when each write lands: a slow database. */
     slowFirstWrite?: boolean;
+    /** The first write is refused. */
+    failFirstWrite?: boolean;
   } = {},
 ) {
   const calls: {
@@ -175,6 +177,7 @@ function open(
         saveNote: async (_id: string, _title: string, text: string) => {
           calls.writes += 1;
           if (over.slowFirstWrite && calls.writes === 1) await stalled;
+          if (over.failFirstWrite && calls.writes === 1) throw new Error("disk full");
           body = text;
           calls.saved.push(text);
           return { note: { id: "note:p", title: "", body_md: text, created_at: "", updated_at: "" }, refs: [], links: [] };
@@ -420,4 +423,18 @@ test("two overlapping saves land in order, the newer body last, and no save read
   await settle();
   expect(stored()).toContain("Tomasz Wójcik: second");
   expect(calls.reads).toBe(reads);
+});
+
+test("a refused save does not break the chain: the next save still lands (#1679)", async () => {
+  const { stored } = open({ failFirstWrite: true });
+  await settle();
+  const box = () => target.querySelectorAll<HTMLTextAreaElement>(".tf-su-pn textarea")[1]!;
+  for (const typed of ["first", "second"]) {
+    box().value = typed;
+    box().dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((done) => setTimeout(done, 5));
+  }
+  await new Promise((done) => setTimeout(done, 20));
+  await settle();
+  expect(stored()).toContain("Tomasz Wójcik: second");
 });
