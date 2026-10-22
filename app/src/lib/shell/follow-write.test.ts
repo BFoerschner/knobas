@@ -40,8 +40,18 @@ const ports = {
 const { createFollower, followWrite } = await import("./follow-write");
 const { toasts } = await import("./toasts.svelte");
 
-function write(state: QueuedWrite["state"], detail: string | null = null, id = 7): QueuedWrite {
-  return { id, state, detail, op: "comment", entity_id: "jira:PAY-1" } as QueuedWrite;
+function write(
+  state: QueuedWrite["state"],
+  detail: string | null = null,
+  id = 7,
+): QueuedWrite {
+  return {
+    id,
+    state,
+    detail,
+    op: "comment",
+    entity_id: "jira:PAY-1",
+  } as QueuedWrite;
 }
 
 async function settle() {
@@ -84,7 +94,9 @@ test("a refused write says why, offers the queue and Edit and resend, and stops"
   open = [write("refused", "403 Forbidden")];
   event();
   await settle();
-  expect(toasts.items.map((t) => [t.text, t.tone])).toEqual([["Comment was refused: 403 Forbidden", "err"]]);
+  expect(toasts.items.map((t) => [t.text, t.tone])).toEqual([
+    ["Comment was refused: 403 Forbidden", "err"],
+  ]);
   const toast = toasts.items[0]!;
   expect(toast.action?.label).toBe("Open write queue");
   expect(toast.more?.map((a) => a.label)).toEqual(["Edit and resend"]);
@@ -102,7 +114,9 @@ test("a held write from a surface that cannot reopen offers only the queue", asy
   followWrite(write("pending"), { name: "Worklog" }, follower);
   await settle();
   // Settled before anything was heard: the first ask finds it.
-  expect(toasts.items.map((t) => t.text)).toEqual(["Worklog was held: the ticket moved"]);
+  expect(toasts.items.map((t) => t.text)).toEqual([
+    "Worklog was held: the ticket moved",
+  ]);
   expect(toasts.items[0]!.more ?? []).toEqual([]);
 });
 
@@ -118,7 +132,8 @@ test("a write still pending keeps listening", async () => {
 
 test("N followed writes cost one queue read per event, and one listener", async () => {
   open = [1, 2, 3, 4, 5].map((id) => write("pending", null, id));
-  for (const id of [1, 2, 3, 4, 5]) followWrite({ id }, { name: "Worklog" }, follower);
+  for (const id of [1, 2, 3, 4, 5])
+    followWrite({ id }, { name: "Worklog" }, follower);
   await settle();
   expect(handlers).toHaveLength(1);
   const before = reads;
@@ -126,7 +141,10 @@ test("N followed writes cost one queue read per event, and one listener", async 
   await settle();
   expect(reads - before).toBe(1);
   // The fan-out still reaches each one by its id.
-  open = [write("refused", "no", 3), ...[1, 2, 4, 5].map((id) => write("pending", null, id))];
+  open = [
+    write("refused", "no", 3),
+    ...[1, 2, 4, 5].map((id) => write("pending", null, id)),
+  ];
   event();
   await settle();
   expect(reads - before).toBe(2);
@@ -179,4 +197,62 @@ test("a raw follower hears its write's row on every read, and nothing once it le
   event();
   await settle();
   expect(heard).toHaveLength(2);
+});
+
+test("a write held while the listener is still registering is toasted at once (FE-12)", async () => {
+  // A bridge whose `listen` answers late: the registration is in flight while
+  // the queue moves. No event reaches a handler registered after the move.
+  let register: () => void = () => {};
+  const slow = {
+    listen: (_event: string, handler: () => void) => {
+      handlers.push(handler);
+      return new Promise<() => void>((resolve) => {
+        register = () => resolve(() => {});
+      });
+    },
+    pendingWrites: ports.pendingWrites,
+  };
+  open = [write("pending")];
+  followWrite(write("pending"), { name: "Comment" }, createFollower(slow));
+  await settle();
+  // The write is held in the window; the event for it fired before the listener existed.
+  open = [write("held", "no network")];
+  register();
+  await settle();
+  expect(toasts.items).toHaveLength(1);
+  expect(toasts.items[0]?.text).toBe("Comment was held: no network");
+});
+
+test("a listener that fails to register still gets the follow its read (FE-12)", async () => {
+  const broken = {
+    listen: () => Promise.reject(new Error("no channel")),
+    pendingWrites: ports.pendingWrites,
+  };
+  open = [write("held", "no network")];
+  followWrite(write("pending"), { name: "Comment" }, createFollower(broken));
+  await settle();
+  expect(toasts.items).toHaveLength(1);
+});
+
+test("two follows during one registration both get their read (FE-12)", async () => {
+  let register: () => void = () => {};
+  const slow = {
+    listen: () =>
+      new Promise<() => void>(
+        (resolve) => (register = () => resolve(() => {})),
+      ),
+    pendingWrites: ports.pendingWrites,
+  };
+  const f = createFollower(slow);
+  open = [write("held", "a", 1), write("held", "b", 2)];
+  followWrite(write("pending", null, 1), { name: "One" }, f);
+  followWrite(write("pending", null, 2), { name: "Two" }, f);
+  await settle();
+  expect(toasts.items).toHaveLength(0);
+  register();
+  await settle();
+  expect(toasts.items.map((t) => t.text).sort()).toEqual([
+    "One was held: a",
+    "Two was held: b",
+  ]);
 });

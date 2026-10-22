@@ -56,6 +56,8 @@ export function createFollower(ports: FollowPorts): WriteFollower {
   let again = false;
   let unlisten: (() => void) | null = null;
   let listening = false;
+  /** Settles once the listener in flight is registered (or failed); null when none is. */
+  let registering: Promise<void> | null = null;
 
   async function read() {
     if (reading) {
@@ -86,7 +88,7 @@ export function createFollower(ports: FollowPorts): WriteFollower {
   function listenIfNeeded() {
     if (listening) return;
     listening = true;
-    ports
+    const pending: Promise<void> = ports
       .listen(EVENTS.activityNew, () => void read())
       .then((off) => {
         if (listening && unlisten === null) unlisten = off;
@@ -95,7 +97,11 @@ export function createFollower(ports: FollowPorts): WriteFollower {
       .catch(() => {
         // No event channel: the queue panel still says where the write is.
         listening = false;
+      })
+      .finally(() => {
+        if (registering === pending) registering = null;
       });
+    registering = pending;
   }
 
   function stopIfIdle() {
@@ -110,7 +116,11 @@ export function createFollower(ports: FollowPorts): WriteFollower {
       const subscriber = { id, hear };
       subscribers.add(subscriber);
       listenIfNeeded();
-      void read();
+      // Read only once the listener is in place: a transition between an
+      // earlier read's answer and the registration would be heard by neither
+      // (FE-12). With a listener already up, read at once.
+      if (registering) void registering.then(read);
+      else void read();
       return () => {
         if (!subscribers.delete(subscriber)) return;
         stopIfIdle();
