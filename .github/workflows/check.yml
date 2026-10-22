@@ -62,7 +62,7 @@ jobs:
       #
       # The real proof is not any of that reasoning: it is this workflow's own
       # run coming back green with no Node-20 annotation on it.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # A stock ubuntu-latest runner has ~14 GB free, and this workspace's test
       # binaries plus an embedded PostgreSQL data directory exceed it. These
       # toolchains are not used by any job step.
@@ -101,20 +101,20 @@ jobs:
 
       # Installs that channel up front (with a `--profile minimal` install's
       # missing components) instead of leaving rustup to fetch it mid-build.
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (same commit as master)
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
 
-      - uses: taiki-e/install-action@just
+      - uses: taiki-e/install-action@40895b01b2f2cea6a044171e57070a91013b8dd3 # just (the tool tag; no release tag shares this commit)
 
       # `hashFiles` returns the empty string when its pattern matches nothing,
       # and the cache step below would take that quietly: the key collapses to
@@ -149,7 +149,7 @@ jobs:
       # keeps hitting, so `actions/cache` restores the old version and, because
       # an exact-key hit skips the save, never stores the new one. A wasted
       # download now beats a permanent one.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.theseus
           key: postgres-${{ hashFiles('crates/knobas-db/src/embedded.rs') }}-linux
