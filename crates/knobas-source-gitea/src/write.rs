@@ -207,7 +207,8 @@ impl PullEnd {
 
 /// How many pages of open pull requests [`holds_open_pull`] reads: Gitea refuses a
 /// second one per pair, so the one it refused over is open, and recently
-/// updated, which is the listing's order.
+/// updated, which is the listing's order. The readback ends on an empty page
+/// or here, whichever comes first.
 const OPEN_PULL_PAGES: u32 = 3;
 
 /// Whether an open pull request from `head` into `base` carries `title` and
@@ -236,7 +237,11 @@ async fn holds_open_pull(
             };
             return pull.title == title && is_this_account(client, by).await;
         }
-        if pulls.len() < crate::client::PAGE_SIZE as usize {
+        // The end is an empty page, never a short one: a Gitea capped below
+        // the 50 asked for answers short with more behind it (issue #81), and
+        // reading that as the end turned a landed create into a refusal
+        // (#1625).
+        if pulls.is_empty() {
             return false;
         }
     }

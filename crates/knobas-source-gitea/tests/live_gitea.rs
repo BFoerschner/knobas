@@ -5615,3 +5615,99 @@ async fn a_run_reports_its_walk_over_the_real_repositories_even_when_unchanged()
     assert_eq!(unchanged.items.len(), 0);
     assert_eq!(unchanged.readings, of_two);
 }
+
+/// GET `path` under `/api/v1` with the seeded token, as JSON.
+async fn api_json(env: &Env, path: &str) -> serde_json::Value {
+    let response = reqwest::Client::new()
+        .get(format!("{}/api/v1/{path}", env.url))
+        .header("Authorization", format!("token {}", env.token))
+        .send()
+        .await
+        .unwrap_or_else(|error| panic!("{path}: {error}"));
+    assert!(
+        response.status().is_success(),
+        "{path}: {}",
+        response.status()
+    );
+    response.json().await.expect("a JSON body")
+}
+
+/// #1624: the repository walk pages over `sort=id&order=asc`, the one key a
+/// push cannot move, and relies on the server answering in that order across
+/// page boundaries. Two to a page, so the seeded corpus spans several.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_repository_listing_pages_in_ascending_id_order() {
+    let env = env();
+    let mut ids: Vec<u64> = Vec::new();
+    for page in 1.. {
+        let body = api_json(
+            &env,
+            &format!("repos/search?sort=id&order=asc&limit=2&page={page}"),
+        )
+        .await;
+        let data = body["data"].as_array().expect("the {ok,data} envelope");
+        if data.is_empty() {
+            break;
+        }
+        ids.extend(
+            data.iter()
+                .map(|r| r["id"].as_u64().expect("a repository id")),
+        );
+        assert!(page < 100, "the listing never ended: {ids:?}");
+    }
+    assert!(
+        ids.len() >= 3,
+        "the seed creates more than one page of two: {ids:?}"
+    );
+    assert!(
+        ids.windows(2).all(|w| w[0] < w[1]),
+        "repositories arrived out of id order: {ids:?}"
+    );
+}
+
+/// #1624: a commit catch-up bounds its window from above with `until=`, which
+/// the adapter takes to be server-side and inclusive like `since=`. Checked:
+/// every commit at or before a commit's own `created` comes back, it among
+/// them, and nothing after it.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_commit_listings_until_is_server_side_and_inclusive() {
+    let env = env();
+    let base = format!(
+        "repos/{}/commits?sha=main&stat=false&verification=false&files=false&limit=50",
+        env.full_name()
+    );
+    let created = |c: &serde_json::Value| {
+        chrono::DateTime::parse_from_rfc3339(c["created"].as_str().expect("created"))
+            .expect("RFC 3339")
+            .with_timezone(&chrono::Utc)
+    };
+    let all = api_json(&env, &base).await;
+    let all = all.as_array().expect("a commit list");
+    let times: std::collections::BTreeSet<_> = all.iter().map(created).collect();
+    assert!(
+        times.len() >= 2,
+        "the seed's main has commits on two seconds: {times:?}"
+    );
+    // The older of the two newest seconds, so something lies after it.
+    let cut = *times.iter().rev().nth(1).expect("two seconds");
+    let until = cut.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let bounded = api_json(&env, &format!("{base}&until={until}")).await;
+    let bounded: Vec<String> = bounded
+        .as_array()
+        .expect("a commit list")
+        .iter()
+        .map(|c| c["sha"].as_str().expect("sha").to_owned())
+        .collect();
+    let expected: Vec<String> = all
+        .iter()
+        .filter(|c| created(c) <= cut)
+        .map(|c| c["sha"].as_str().expect("sha").to_owned())
+        .collect();
+    assert!(!expected.is_empty());
+    assert_eq!(
+        bounded, expected,
+        "until={until} is inclusive and nothing after it comes back"
+    );
+}

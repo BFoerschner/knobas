@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source};
 use serde_json::{Value, json};
-use wiremock::matchers::{any, header, method, path, query_param};
+use wiremock::matchers::{any, header, method, path, path_regex, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// The only token the fake accepts. Anything else gets Gitea's 401.
@@ -1012,6 +1012,18 @@ impl Fake {
             .mount(&self.server)
             .await;
         }
+
+        // A branch read on its own that the state does not hold is Gitea's
+        // 404, not the empty page below: the walk re-reads a branch the
+        // listing did not return before tombstoning it (#1624), and a `[]`
+        // here would read as "still there".
+        authed(
+            Mock::given(method("GET")).and(path_regex(r"^/api/v1/repos/[^/]+/[^/]+/branches/.+$")),
+        )
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })))
+        .with_priority(EMPTY_PAGE_PRIORITY - 1)
+        .mount(&self.server)
+        .await;
 
         // Anything past the last page answers empty, the way Gitea does --
         // never a 401, which would read as a credential fault. `/user` and

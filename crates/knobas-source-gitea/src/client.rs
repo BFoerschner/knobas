@@ -55,7 +55,8 @@ mod repo;
 /// means "the collection ran out" *or* "we were capped", with nothing in the
 /// answer to say which. No walk in `sync.rs` ends a *listing* on a short page:
 /// it ends one on an **empty** page (`knobas_http::PageWalk`), and the two budgeted
-/// walks stop on their own budget or watermark before they get that far.
+/// walks stop on their own budget or watermark before they get that far. Nor
+/// does `write.rs`'s 409 readback of open pull requests (#1625).
 /// Reading a short page as the end is a run that reports success while its
 /// watermark advances past records it never saw. Issue #81, ruled 2026-08-29.
 /// `sync.rs` no longer **reads** this constant -- it does not import it, and
@@ -243,6 +244,18 @@ impl GiteaClient {
     }
 
     /// `GET /api/v1/repos/search` -- every repository the token can see.
+    ///
+    /// **Paged over `id` ascending, a key no push can move (#1624).** This
+    /// was `sort=updated&order=desc`, and a push into a repository not yet
+    /// read moved it onto a page already read: the run walked another one
+    /// twice, this one not at all, returned `Ok`, and handed the sweep a
+    /// corpus without it. An id never changes and a new repository takes a
+    /// higher one, so what is left to move a row across a page boundary is a
+    /// repository appearing below the walk (shared with the token, say),
+    /// which repeats a row rather than hiding one -- and `sync::select_repos`
+    /// walks a repeated row once. Gitea 1.27.3 offers `id`
+    /// (`swagger.v1.json`, `repoSearch`; spec #1618 ruling A1 asked for it
+    /// where offered), and `live_gitea` asserts the order it answers.
     pub(crate) async fn search_repos(&self, page: u32) -> Result<Vec<Value>, SourceError> {
         #[derive(serde::Deserialize)]
         struct Envelope {
@@ -255,8 +268,8 @@ impl GiteaClient {
             .get_json(
                 "/repos/search",
                 &[
-                    ("sort", "updated".to_owned()),
-                    ("order", "desc".to_owned()),
+                    ("sort", "id".to_owned()),
+                    ("order", "asc".to_owned()),
                     limit,
                     page,
                 ],
@@ -401,12 +414,18 @@ impl GiteaClient {
     /// `GET /repos/{o}/{r}/commits`. `stat`, `verification` and `files` all
     /// default to **true** in Gitea; turning them off is the difference between
     /// a listing and a diff dump.
+    ///
+    /// `since` and `until` are both server-side and inclusive (git's
+    /// `--since`/`--until` on the committer date, which is `created`);
+    /// `live_gitea` asserts both. `until` bounds a catch-up's window from
+    /// above (#1624), so it does not re-list the commits the walk it
+    /// continues already delivered.
     pub(crate) async fn commits(
         &self,
         owner: &str,
         repo: &str,
         branch: &str,
-        since: Option<DateTime<Utc>>,
+        (since, until): (Option<DateTime<Utc>>, Option<DateTime<Utc>>),
         page: u32,
     ) -> Result<Vec<Value>, SourceError> {
         let (limit, page) = page_params(page);
@@ -420,6 +439,9 @@ impl GiteaClient {
         ];
         if let Some(since) = since {
             query.push(("since", since.to_rfc3339_opts(SecondsFormat::Secs, true)));
+        }
+        if let Some(until) = until {
+            query.push(("until", until.to_rfc3339_opts(SecondsFormat::Secs, true)));
         }
         let path = format!("/repos/{}/{}/commits", segment(owner)?, segment(repo)?);
         match self.get_json(&path, &query).await {
@@ -848,7 +870,13 @@ mod wire_tests {
             .with_timezone(&Utc);
         let got = client_for(&server)
             .await
-            .commits("tidewater", "payout-service", "main", Some(since), 1)
+            .commits(
+                "tidewater",
+                "payout-service",
+                "main",
+                (Some(since), None),
+                1,
+            )
             .await
             .expect("the mock answers only the fully-parameterised request");
         assert_eq!(got.len(), 1);
@@ -870,7 +898,7 @@ mod wire_tests {
             .await;
         client_for(&server)
             .await
-            .commits("tidewater", "payout-service", "main", None, 1)
+            .commits("tidewater", "payout-service", "main", (None, None), 1)
             .await
             .expect("no watermark means no since parameter");
     }
@@ -906,8 +934,8 @@ mod wire_tests {
         let server = MockServer::builder().start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/repos/search"))
-            .and(query_param("sort", "updated"))
-            .and(query_param("order", "desc"))
+            .and(query_param("sort", "id"))
+            .and(query_param("order", "asc"))
             .and(query_param("limit", "50"))
             .and(query_param("page", "1"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -960,7 +988,7 @@ mod wire_tests {
             .await;
         let got = client_for(&server)
             .await
-            .commits("tidewater", "fresh", "main", None, 1)
+            .commits("tidewater", "fresh", "main", (None, None), 1)
             .await
             .expect("an empty repository is not a failure");
         assert!(got.is_empty());
@@ -1062,7 +1090,7 @@ mod wire_tests {
             .await;
         let error = client_for(&server)
             .await
-            .commits("tidewater", "broken", "main", None, 1)
+            .commits("tidewater", "broken", "main", (None, None), 1)
             .await
             .unwrap_err();
         assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");

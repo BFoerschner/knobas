@@ -9,7 +9,7 @@
 
 use knobas_source::{MergeStyle, Source, SourceError, WriteOp};
 use serde_json::{Value, json};
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::support::{TOKEN, instance};
@@ -347,4 +347,105 @@ async fn a_pull_request_somebody_else_merged_is_still_refused() {
         .await
         .expect_err("the merge is not this write's");
     assert_eq!(error.status(), Some(405), "{error:?}");
+}
+
+/// `n` open pull requests for pairs this write did not ask about.
+fn others(n: u64, from: u64) -> Value {
+    json!(
+        (from..from + n)
+            .map(|number| open_pull(number, "Bump deps", &format!("chore/deps-{number}"), "main"))
+            .collect::<Vec<_>>()
+    )
+}
+
+/// Answer `GET <repo>/pulls?page=<page>` with `body`, and every other page
+/// with the empty page that ends Gitea's listings.
+async fn pulls_page(server: &MockServer, page: u32, body: Value) {
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/pulls")))
+        .and(query_param("page", page.to_string().as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .with_priority(1)
+        .mount(server)
+        .await;
+}
+
+async fn pulls_pages_end_empty(server: &MockServer) {
+    holds(server, "/pulls", json!([])).await;
+}
+
+/// How many pages of open pull requests the readback asked for.
+async fn pull_pages_read(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .expect("the mock server records requests")
+        .iter()
+        .filter(|r| r.method.as_str() == "GET" && r.url.path() == format!("{REPO}/pulls"))
+        .count()
+}
+
+/// Issue #1625: a Gitea capped at 30 records a page answers a page shorter
+/// than the 50 the readback asks for, with more behind it. The open pull
+/// request this write made is on page 2, so a readback that ends on a short
+/// page reads it as a refusal although it landed.
+#[tokio::test]
+async fn a_pull_request_on_the_second_page_of_a_capped_server_is_delivered() {
+    let server = lands_then_refuses("/pulls", 409, ALREADY_OPEN).await;
+    pulls_page(&server, 1, others(30, 200)).await;
+    pulls_page(
+        &server,
+        2,
+        json!([open_pull(
+            145,
+            "SEPA retry with exponential backoff",
+            "feature/PAY-231-sepa-retry",
+            "main"
+        )]),
+    )
+    .await;
+    pulls_pages_end_empty(&server).await;
+    token_is_bjoern(&server).await;
+
+    source(&server)
+        .write(create_pull_request())
+        .await
+        .expect("the pull request this write opened is on page 2");
+}
+
+/// The readback ends on an empty page, and reads no further.
+#[tokio::test]
+async fn the_readback_stops_on_an_empty_page() {
+    let server = lands_then_refuses("/pulls", 409, ALREADY_OPEN).await;
+    pulls_page(&server, 1, others(30, 200)).await;
+    pulls_pages_end_empty(&server).await;
+
+    let error = source(&server)
+        .write(create_pull_request())
+        .await
+        .expect_err("no open pull request is this write's");
+    assert_eq!(error.status(), Some(409), "{error:?}");
+    assert_eq!(
+        pull_pages_read(&server).await,
+        2,
+        "page 1 and the empty page 2"
+    );
+}
+
+/// The readback honours its page cap: ten full pages of other pull requests
+/// are read three pages deep, and Gitea's refusal stands.
+#[tokio::test]
+async fn the_readback_stops_at_its_page_cap() {
+    let server = lands_then_refuses("/pulls", 409, ALREADY_OPEN).await;
+    for page in 1..=10 {
+        pulls_page(&server, page, others(30, u64::from(page) * 100)).await;
+    }
+    pulls_pages_end_empty(&server).await;
+
+    let error = source(&server)
+        .write(create_pull_request())
+        .await
+        .expect_err("no open pull request is this write's");
+    assert_eq!(error.status(), Some(409), "{error:?}");
+    assert_eq!(pull_pages_read(&server).await, 3, "the cap is three pages");
 }

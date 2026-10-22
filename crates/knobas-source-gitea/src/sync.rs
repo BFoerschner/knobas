@@ -135,7 +135,7 @@ use knobas_source::{Cursor, Sink, SourceError, SyncItem};
 use serde_json::Value;
 
 use crate::client::is_repo_scoped;
-use crate::cursor::{GiteaCursor, RepoCursor};
+use crate::cursor::{CommitsCatchUp, GiteaCursor, PullsCatchUp, RepoCursor};
 use crate::map::{self, RepoRef};
 use crate::model;
 
@@ -176,7 +176,9 @@ const MAX_BRANCH_PAGES: u32 = 21;
 // corpus, so stopping short of one has to fail the run rather than report a
 // mirror it never finished; `pr` and `commit` promise only the newest
 // `*_per_repo` of theirs and are never swept, so stopping is the normal case
-// and cannot be read downstream as a deletion.
+// and cannot be read downstream as a deletion. On an incremental run a
+// reached cap cuts the walk short exactly as the budget does, and the next run
+// continues it (#1624, [`pulls`]).
 //
 // The empty page costs these two nothing, unlike the exhaustive pair: a budget
 // of 1,000 is spent by the last record of page 20 and breaks the walk there,
@@ -495,8 +497,11 @@ async fn select_repos(
         }
     }
 
-    // Deterministic: the commit budget is spent in this order.
+    // Deterministic: the commit budget is spent in this order. A stable sort,
+    // so of a row the listing repeated (`client::search_repos`, #1624) the
+    // first read is the one kept, and it is walked once.
     out.sort_by(|a, b| a.full_name.cmp(&b.full_name));
+    out.dedup_by(|later, first| later.full_name == first.full_name);
     Ok(Selection {
         walk: out,
         skipped,
@@ -647,12 +652,13 @@ async fn branches(
     let default_changed = before.default_branch.as_deref() != at.default_branch;
     after.default_branch = at.default_branch.map(str::to_owned);
 
+    let mut records: Vec<Value> = Vec::new();
     let mut walk = PageWalk::new(PageNumber, MAX_BRANCH_PAGES, |page| {
         source.client.branches(at.owner, at.name, page)
     });
     loop {
-        let batch = match walk.next().await? {
-            Walked::Page(batch) => batch,
+        match walk.next().await? {
+            Walked::Page(batch) => records.extend(batch),
             Walked::End => break,
             Walked::Capped => {
                 return Err(RepoError::Fatal(cap_reached(
@@ -660,48 +666,80 @@ async fn branches(
                     walk.rows(),
                 )));
             }
-        };
-        for raw in batch {
-            let branch: model::Branch = match serde_json::from_value(raw.clone()) {
-                Ok(branch) => branch,
-                Err(error) => {
-                    tracing::warn!(
-                        %error,
-                        repository = %at.full_name,
-                        "gitea: skipping an unreadable branch record"
-                    );
-                    continue;
-                }
-            };
-            let head = branch
-                .commit
-                .as_ref()
-                .and_then(|c| c.id.clone())
-                .unwrap_or_default();
-            let head_moved = before.branches.get(&branch.name) != Some(&head);
-            // An unmoved branch under a switched default is re-emitted for
-            // its `repository` (#718), and no commit is walked for it.
-            if head_moved || default_changed {
-                push(
-                    sink,
-                    map::branch_item(&source.id, &raw, at, &branch),
-                    emitted,
-                )
-                .await?;
-            }
-            if head_moved {
-                moved.push(branch.name.clone());
-            }
-            heads.insert(branch.name, head);
         }
     }
 
-    for gone in before
+    // **A name the listing did not return is not yet a deleted branch
+    // (#1624).** Gitea orders its branch listing by commit time, so a push
+    // while the walk is between two pages moves that branch onto a page
+    // already read, and the walk never meets it. Its own read decides: a
+    // 404 is a branch that is gone, a record is a branch that moved, and
+    // anything else ends the repository's walk as any failed read does.
+    let listed: HashSet<&str> = records
+        .iter()
+        .filter_map(|raw| raw.get("name").and_then(Value::as_str))
+        .collect();
+    let unlisted: Vec<String> = before
         .branches
         .keys()
-        .filter(|name| !heads.contains_key(*name))
-    {
-        push(sink, map::branch_tombstone(&source.id, at, gone), emitted).await?;
+        .filter(|name| !listed.contains(name.as_str()))
+        .cloned()
+        .collect();
+    let mut gone = Vec::new();
+    for name in unlisted {
+        match source
+            .client
+            .branch_as::<Value>(at.owner, at.name, &name)
+            .await
+        {
+            Ok(raw) => records.push(raw),
+            Err(error) if error.status() == Some(404) => gone.push(name),
+            Err(error) => return Err(RepoError::from(error)),
+        }
+    }
+
+    for raw in records {
+        let branch: model::Branch = match serde_json::from_value(raw.clone()) {
+            Ok(branch) => branch,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    repository = %at.full_name,
+                    "gitea: skipping an unreadable branch record"
+                );
+                continue;
+            }
+        };
+        // A branch the listing returned twice keeps its first record, so
+        // the head emitted and the head remembered are the same; a head that
+        // moved between the two reads is the next run's.
+        if heads.contains_key(&branch.name) {
+            continue;
+        }
+        let head = branch
+            .commit
+            .as_ref()
+            .and_then(|c| c.id.clone())
+            .unwrap_or_default();
+        let head_moved = before.branches.get(&branch.name) != Some(&head);
+        // An unmoved branch under a switched default is re-emitted for
+        // its `repository` (#718), and no commit is walked for it.
+        if head_moved || default_changed {
+            push(
+                sink,
+                map::branch_item(&source.id, &raw, at, &branch),
+                emitted,
+            )
+            .await?;
+        }
+        if head_moved {
+            moved.push(branch.name.clone());
+        }
+        heads.insert(branch.name, head);
+    }
+
+    for name in &gone {
+        push(sink, map::branch_tombstone(&source.id, at, name), emitted).await?;
     }
 
     after.branches = heads;
@@ -725,6 +763,21 @@ async fn branches(
 /// `full_sync_exhaustive: false` (ADR-0003): a budgeted kind is never swept, so
 /// stopping at the budget can never be read downstream as "the rest was
 /// deleted".
+///
+/// # On an incremental run the budget bounds the run, never the delta (#1624)
+///
+/// ADR-0003's budget is a bound on what a **full** sync mirrors. Applied to
+/// an incremental run it used to lose updates: a week away with 260 pull
+/// requests changed, the walk read the newest 200, the watermark moved to the
+/// newest, and the other 60 sat below it for good -- a merged pull request
+/// stayed open in the mirror. Now a walk heading for a watermark that the
+/// budget (or the page cap) stops first leaves a [`PullsCatchUp`]: the next
+/// run reads the window between the oldest record examined and that
+/// watermark, under the same budget, and when it reaches the watermark it
+/// adopts the newest instant the cut-short walk examined and walks on from
+/// the top with what is left of the budget. Spec #1618 ruling A6; the cursor
+/// type says why the oldest examined is where the next run continues and the
+/// watermark stays put.
 async fn pulls(
     source: &crate::GiteaSource,
     at: RepoRef<'_>,
@@ -738,96 +791,258 @@ async fn pulls(
     // in with rather than a blank one.
     after.pulls_updated_to = before.pulls_updated_to;
     after.pulls_seen_at_watermark = before.pulls_seen_at_watermark.clone();
+    after.pulls_catching_up = before.pulls_catching_up.clone();
     if source.config.prs_per_repo == 0 || !repo.can_have_pulls() {
         return Ok(());
     }
-
-    let watermark = before.pulls_updated_to;
     let mut budget = source.config.prs_per_repo;
-    // Every pull request this run looked at -- delivered, or recognised as
-    // already delivered. The new watermark is computed from this, so a pull
-    // request skipped as already-delivered still holds the boundary open.
-    let mut examined: Vec<(u64, Option<DateTime<Utc>>)> = Vec::new();
-    // What each examined pull request fingerprinted as this run, which is what
-    // the closing position records for the ones on the new mark.
-    let mut fingerprints: BTreeMap<u64, String> = BTreeMap::new();
+    let mut watermark = before.pulls_updated_to;
+    let mut seen = before.pulls_seen_at_watermark.clone();
 
-    // A reached cap ends this walk quietly: see the note on the caps.
-    let mut walk = PageWalk::new(PageNumber, MAX_PR_PAGES, |page| {
-        source.client.pulls(at.owner, at.name, page)
-    });
-    'paging: loop {
-        let batch = match walk.next().await? {
-            Walked::Page(batch) => batch,
-            Walked::End | Walked::Capped => break,
+    if let Some(catch_up) = &before.pulls_catching_up {
+        let window = Window {
+            lower: before.pulls_updated_to,
+            lower_seen: &before.pulls_seen_at_watermark,
+            upper: catch_up.below,
+            upper_seen: &catch_up.seen_at_below,
         };
-        for raw in batch {
-            let pr: model::PullRequest = match serde_json::from_value(raw.clone()) {
-                Ok(pr) => pr,
-                Err(error) => {
-                    tracing::warn!(
-                        %error,
-                        repository = %at.full_name,
-                        "gitea: skipping an unreadable pull request"
-                    );
-                    continue;
+        let walk = walk_pulls(
+            source,
+            at,
+            &window,
+            catch_up.page,
+            &mut budget,
+            sink,
+            emitted,
+        )
+        .await?;
+        if let Some(page) = walk.stopped_on {
+            let carried: Vec<u64> = catch_up.seen_at_below.keys().copied().collect();
+            let (below, on_below) = resume_below(&walk.examined, window.upper, &carried);
+            after.pulls_catching_up = Some(PullsCatchUp {
+                below,
+                seen_at_below: fingerprints_of(
+                    on_below,
+                    &walk.fingerprints,
+                    &catch_up.seen_at_below,
+                ),
+                page,
+                ..catch_up.clone()
+            });
+            return Ok(());
+        }
+        // Reached the watermark: everything up to `newest` is delivered, and
+        // the run walks on from the top as an ordinary incremental run.
+        watermark = Some(catch_up.newest);
+        seen.clone_from(&catch_up.seen_at_newest);
+        for (number, when) in &walk.examined {
+            if *when == watermark
+                && let Some(fingerprint) = walk.fingerprints.get(number)
+            {
+                seen.insert(*number, fingerprint.clone());
+            }
+        }
+        after.pulls_updated_to = watermark;
+        after.pulls_seen_at_watermark.clone_from(&seen);
+        after.pulls_catching_up = None;
+    }
+
+    let none = BTreeMap::new();
+    let window = Window {
+        lower: watermark,
+        lower_seen: &seen,
+        upper: None,
+        upper_seen: &none,
+    };
+    let walk = walk_pulls(source, at, &window, 1, &mut budget, sink, emitted).await?;
+    let carried: Vec<u64> = seen.keys().copied().collect();
+    let (newest, on_newest) = close_watermark(&walk.examined, watermark, &carried);
+    let on_newest = fingerprints_of(on_newest, &walk.fingerprints, &seen);
+    match (walk.stopped_on, watermark, newest) {
+        // An incremental walk cut short before its watermark: continue below
+        // the oldest record it examined next time.
+        // The watermark stays where it is.
+        (Some(page), Some(_), Some(newest)) => {
+            let (below, on_below) = resume_below(&walk.examined, None, &[]);
+            after.pulls_catching_up = Some(PullsCatchUp {
+                below,
+                seen_at_below: fingerprints_of(on_below, &walk.fingerprints, &seen),
+                newest,
+                seen_at_newest: on_newest,
+                page,
+            });
+        }
+        // A full sync (the budget bounds the mirror, ADR-0003), or a walk
+        // that reached its watermark.
+        _ => {
+            after.pulls_updated_to = newest;
+            after.pulls_seen_at_watermark = on_newest;
+        }
+    }
+    Ok(())
+}
+
+/// The span of a budgeted walk, newest first: from `upper` (inclusive) down to
+/// `lower` (inclusive), each boundary second with the records already
+/// delivered on it. `None` is no bound on that side.
+struct Window<'a, S> {
+    lower: Option<DateTime<Utc>>,
+    lower_seen: &'a S,
+    upper: Option<DateTime<Utc>>,
+    upper_seen: &'a S,
+}
+
+/// What one pull-request walk read.
+struct PullWalk {
+    /// Every pull request looked at -- delivered, or recognised as already
+    /// delivered on the lower boundary.
+    examined: Vec<(u64, Option<DateTime<Utc>>)>,
+    fingerprints: BTreeMap<u64, String>,
+    /// The page the budget or the page cap stopped the walk on, before it
+    /// reached `lower` or the end of the listing.
+    stopped_on: Option<u32>,
+}
+
+/// One walk over `window`, starting at page `start`.
+///
+/// **`start` is a hint, checked before it is trusted.** A catch-up's window
+/// lies below every record the cut-short walk delivered, and re-reading those
+/// pages from page 1 would spend the page cap on records it then skips -- at
+/// a budget of 1,000, the whole cap. So it starts on the page the cut fell
+/// on. That is safe only if every record above that page is newer than
+/// `upper`, which holds when the page's first record is: the listing is
+/// ordered. An edit moves a record up, which shifts the rest down and only
+/// repeats a row; a deletion, or a server answering more per page than it
+/// did, can shift unread records above the page. Either shows as a first
+/// record at or below `upper`, or an empty page, and the walk starts again
+/// from page 1.
+async fn walk_pulls(
+    source: &crate::GiteaSource,
+    at: RepoRef<'_>,
+    window: &Window<'_, BTreeMap<u64, String>>,
+    start: u32,
+    budget: &mut u32,
+    sink: &mut (dyn Sink + Send),
+    emitted: &mut u64,
+) -> Result<PullWalk, RepoError> {
+    let mut out = PullWalk {
+        examined: Vec::new(),
+        fingerprints: BTreeMap::new(),
+        stopped_on: None,
+    };
+    let client = &source.client;
+    let mut start = start.max(1);
+    'restart: loop {
+        let offset = start - 1;
+        // A reached cap ends this walk quietly: see the note on the caps.
+        let mut walk = PageWalk::new(PageNumber, MAX_PR_PAGES, |page| {
+            client.pulls(at.owner, at.name, page + offset)
+        });
+        let mut page = offset;
+        loop {
+            let batch = match walk.next().await? {
+                Walked::Page(batch) => batch,
+                Walked::End if page == offset && offset > 0 => {
+                    start = 1;
+                    continue 'restart;
+                }
+                Walked::End => return Ok(out),
+                Walked::Capped => {
+                    out.stopped_on = Some(page);
+                    return Ok(out);
                 }
             };
-            let updated = map::real_time(pr.updated_at).or_else(|| map::real_time(pr.created_at));
-            // Taken from the listing record before the discussion is read, so
-            // deciding to skip costs no request.
-            let fingerprint = crate::fingerprint::of_pull(&raw);
-            if let (Some(mark), Some(when)) = (watermark, updated) {
-                if when < mark {
-                    break 'paging;
-                }
-                // The watermark second is re-read on every run; a pull request
-                // on it is skipped only if it is the record already delivered.
-                // By number alone, a merge inside that second was skipped for
-                // good (#764).
-                if when == mark
-                    && before.pulls_seen_at_watermark.get(&pr.number) == Some(&fingerprint)
-                {
-                    examined.push((pr.number, updated));
-                    fingerprints.insert(pr.number, fingerprint);
-                    continue;
+            if page == offset && offset > 0 {
+                let first = batch
+                    .first()
+                    .and_then(|raw| serde_json::from_value::<model::PullRequest>(raw.clone()).ok())
+                    .and_then(|pr| {
+                        map::real_time(pr.updated_at).or_else(|| map::real_time(pr.created_at))
+                    });
+                if !matches!((first, window.upper), (Some(first), Some(upper)) if first > upper) {
+                    start = 1;
+                    continue 'restart;
                 }
             }
-            let Some(comments) = fetch_comments(source, at, &pr).await? else {
-                // Deleted since the listing (#724): nothing to mirror, and
-                // nothing to hold the watermark open either.
-                continue;
-            };
-            examined.push((pr.number, updated));
-            fingerprints.insert(pr.number, fingerprint);
-            push(
-                sink,
-                map::pr_item(&source.id, &raw, at, &pr, &comments),
-                emitted,
-            )
-            .await?;
-            budget -= 1;
-            if budget == 0 {
-                break 'paging;
+            page += 1;
+            for raw in batch {
+                let pr: model::PullRequest = match serde_json::from_value(raw.clone()) {
+                    Ok(pr) => pr,
+                    Err(error) => {
+                        tracing::warn!(
+                            %error,
+                            repository = %at.full_name,
+                            "gitea: skipping an unreadable pull request"
+                        );
+                        continue;
+                    }
+                };
+                let updated =
+                    map::real_time(pr.updated_at).or_else(|| map::real_time(pr.created_at));
+                // Taken from the listing record before the discussion is read, so
+                // deciding to skip costs no request.
+                let fingerprint = crate::fingerprint::of_pull(&raw);
+                if let (Some(top), Some(when)) = (window.upper, updated) {
+                    // Above the window: delivered by the walk that was cut
+                    // short, or changed since and read once the window closes.
+                    if when > top
+                        || (when == top && window.upper_seen.get(&pr.number) == Some(&fingerprint))
+                    {
+                        continue;
+                    }
+                }
+                if let (Some(mark), Some(when)) = (window.lower, updated) {
+                    if when < mark {
+                        return Ok(out);
+                    }
+                    // The watermark second is re-read on every run; a pull request
+                    // on it is skipped only if it is the record already delivered.
+                    // By number alone, a merge inside that second was skipped for
+                    // good (#764).
+                    if when == mark && window.lower_seen.get(&pr.number) == Some(&fingerprint) {
+                        out.examined.push((pr.number, updated));
+                        out.fingerprints.insert(pr.number, fingerprint);
+                        continue;
+                    }
+                }
+                let Some(comments) = fetch_comments(source, at, &pr).await? else {
+                    // Deleted since the listing (#724): nothing to mirror, and
+                    // nothing to hold the watermark open either.
+                    continue;
+                };
+                out.examined.push((pr.number, updated));
+                out.fingerprints.insert(pr.number, fingerprint);
+                push(
+                    sink,
+                    map::pr_item(&source.id, &raw, at, &pr, &comments),
+                    emitted,
+                )
+                .await?;
+                *budget -= 1;
+                if *budget == 0 {
+                    out.stopped_on = Some(page);
+                    return Ok(out);
+                }
             }
         }
     }
+}
 
-    let carried: Vec<u64> = before.pulls_seen_at_watermark.keys().copied().collect();
-    let (mark, on_mark) = close_watermark(&examined, watermark, &carried);
-    after.pulls_updated_to = mark;
-    // This run's fingerprint where it read the pull request, the previous
-    // run's where the budget stopped before re-reading it.
-    after.pulls_seen_at_watermark = on_mark
+/// This run's fingerprint for each of `numbers` where it read the pull
+/// request, `carried`'s where it did not.
+fn fingerprints_of(
+    numbers: Vec<u64>,
+    read: &BTreeMap<u64, String>,
+    carried: &BTreeMap<u64, String>,
+) -> BTreeMap<u64, String> {
+    numbers
         .into_iter()
         .filter_map(|number| {
-            fingerprints
-                .get(&number)
-                .or_else(|| before.pulls_seen_at_watermark.get(&number))
+            read.get(&number)
+                .or_else(|| carried.get(&number))
                 .map(|fingerprint| (number, fingerprint.clone()))
         })
-        .collect();
-    Ok(())
+        .collect()
 }
 
 /// Issues changed since the watermark, as tickets (#1206).
@@ -987,6 +1202,39 @@ fn close_watermark<K: Ord + Clone>(
     keys.sort();
     keys.dedup();
     (mark, keys)
+}
+
+/// Where a walk the budget cut short continues next time: the oldest instant
+/// it examined, and the keys on it (#1624).
+///
+/// `upper` is the top of the window it walked, if it had one, and `carried`
+/// the keys already delivered on that instant: when everything this walk
+/// examined sat on `upper`, they still sit on the resume point. A walk that
+/// examined nothing resumes where it began.
+fn resume_below<K: Ord + Clone>(
+    examined: &[(K, Option<DateTime<Utc>>)],
+    upper: Option<DateTime<Utc>>,
+    carried: &[K],
+) -> (Option<DateTime<Utc>>, Vec<K>) {
+    let point = examined
+        .iter()
+        .filter_map(|(_, when)| *when)
+        .min()
+        .or(upper);
+    let Some(at) = point else {
+        return (None, Vec::new());
+    };
+    let mut keys: Vec<K> = examined
+        .iter()
+        .filter(|(_, when)| *when == Some(at))
+        .map(|(key, _)| key.clone())
+        .collect();
+    if point == upper {
+        keys.extend(carried.iter().cloned());
+    }
+    keys.sort();
+    keys.dedup();
+    (point, keys)
 }
 
 /// The discussion, when there is any and the source wants it indexed.
@@ -1226,6 +1474,16 @@ async fn issue_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, number: u64
 /// older history filtered out by `since=`. It arrives with the next full sync
 /// (`cursor: None`). Fetching it eagerly would mean walking every new branch to
 /// its root, which is exactly the cost `commits_per_repo` exists to bound.
+///
+/// **A walk the budget cuts short on an incremental run is continued (#1624).**
+/// A push of 150 commits against a budget of 100 used to lose the oldest 50
+/// for good: the watermark moved past them, and the branch head the cursor
+/// remembered had already moved, so nothing walked that branch again. Now
+/// the cut leaves a [`CommitsCatchUp`] naming the branches not finished; the
+/// next run walks them first, the cut one from below the oldest commit
+/// examined down to the watermark and the rest from their heads,
+/// and then the branches that moved since, as [`pulls`] does. A full sync's
+/// budget is unchanged (ADR-0003).
 #[expect(
     clippy::too_many_arguments,
     reason = "the whole per-repository walk state, threaded explicitly: a struct \
@@ -1243,31 +1501,203 @@ async fn commits(
 ) -> Result<(), RepoError> {
     after.commits_since = before.commits_since;
     after.commits_at_watermark = before.commits_at_watermark.clone();
+    after.commits_catching_up = before.commits_catching_up.clone();
     // `repo.empty` is the one that saves a request rather than a mistake:
     // Gitea answers `/commits` on a repository with no commits at all with a
     // 409, which `client::commits` already reads as "none".
-    if source.config.commits_per_repo == 0 || repo.empty || moved.is_empty() {
+    if source.config.commits_per_repo == 0
+        || repo.empty
+        || (moved.is_empty() && before.commits_catching_up.is_none())
+    {
         return Ok(());
     }
 
-    let since = before.commits_since;
     let mut budget = source.config.commits_per_repo;
-    let mut examined: Vec<(String, Option<DateTime<Utc>>)> = Vec::new();
     // One object id can be reachable from several branches; it is one entity
     // and must cost one slot of the budget.
     let mut seen: HashSet<String> = HashSet::new();
+    let mut since = before.commits_since;
+    let mut at_mark = before.commits_at_watermark.clone();
+    // Branches this run walked from their heads to the watermark already, and
+    // what it examined doing so.
+    let mut finished: Vec<String> = Vec::new();
+    let mut examined: Vec<(String, Option<DateTime<Utc>>)> = Vec::new();
 
-    'branches: for branch in walk_order(repo.default_branch.as_deref(), moved) {
-        // A reached cap ends this branch quietly: see the note on the caps.
+    if let Some(catch_up) = &before.commits_catching_up {
+        let none = Vec::new();
+        let legs: Vec<Leg<'_>> = catch_up
+            .branches
+            .iter()
+            .enumerate()
+            .map(|(index, branch)| {
+                // The cut branch is read below where the cut fell, the rest
+                // from their heads.
+                let (upper, upper_seen) = if index == 0 {
+                    (catch_up.below, &catch_up.seen_at_below)
+                } else {
+                    (None, &none)
+                };
+                Leg {
+                    branch: branch.clone(),
+                    window: Window {
+                        lower: before.commits_since,
+                        lower_seen: &before.commits_at_watermark,
+                        upper,
+                        upper_seen,
+                    },
+                }
+            })
+            .collect();
+        let walk = walk_commits(source, at, &legs, &mut budget, &mut seen, sink, emitted).await?;
+        if let Some(stop) = walk.stopped {
+            let (newest, seen_at_newest) = close_watermark(
+                &walk.examined,
+                Some(catch_up.newest),
+                &catch_up.seen_at_newest,
+            );
+            let leg = &legs[stop.leg];
+            let (below, seen_at_below) =
+                resume_below(&stop.examined, leg.window.upper, leg.window.upper_seen);
+            let mut branches: Vec<String> =
+                legs[stop.leg..].iter().map(|l| l.branch.clone()).collect();
+            // What moved this run is walked from its head next time, unless
+            // this run already walked it from its head to the watermark.
+            for name in walk_order(repo.default_branch.as_deref(), moved) {
+                let done = legs.iter().take(stop.leg).skip(1).any(|l| l.branch == name);
+                if !done && !branches.contains(&name) {
+                    branches.push(name);
+                }
+            }
+            after.commits_catching_up = Some(CommitsCatchUp {
+                below,
+                seen_at_below,
+                newest: newest.unwrap_or(catch_up.newest),
+                seen_at_newest,
+                branches,
+            });
+            return Ok(());
+        }
+        // Reached the watermark on every branch: everything up to `newest` is
+        // delivered. What moved since is walked from `newest`, not from the
+        // newest commit just read on a branch walked from its head, which
+        // would pass over a moved branch's commits between the two. (A commit
+        // pushed later with an older committer date is passed over all the
+        // same: the known limitation every `since=` walk here has.)
+        since = Some(catch_up.newest);
+        at_mark.clone_from(&catch_up.seen_at_newest);
+        finished.extend(legs.iter().skip(1).map(|l| l.branch.clone()));
+        // Only what reaches `newest` can move the watermark; the window's own
+        // commits sit below it.
+        examined = walk
+            .examined
+            .into_iter()
+            .filter(|(_, when)| *when >= since)
+            .collect();
+    }
+
+    let none = Vec::new();
+    let legs: Vec<Leg<'_>> = walk_order(repo.default_branch.as_deref(), moved)
+        .into_iter()
+        .filter(|name| !finished.contains(name))
+        .map(|branch| Leg {
+            branch,
+            window: Window {
+                lower: since,
+                lower_seen: &at_mark,
+                upper: None,
+                upper_seen: &none,
+            },
+        })
+        .collect();
+    let walk = walk_commits(source, at, &legs, &mut budget, &mut seen, sink, emitted).await?;
+    examined.extend(walk.examined);
+    let (newest, on_newest) = close_watermark(&examined, since, &at_mark);
+    after.commits_catching_up = None;
+    match (walk.stopped, since, newest) {
+        // An incremental walk cut short before its watermark: continue below
+        // the oldest commit it examined on that branch next time. The
+        // watermark stays where it is.
+        (Some(stop), Some(_), Some(newest)) => {
+            let (below, seen_at_below) = resume_below(&stop.examined, None, &[]);
+            after.commits_since = since;
+            after.commits_at_watermark.clone_from(&at_mark);
+            after.commits_catching_up = Some(CommitsCatchUp {
+                below,
+                seen_at_below,
+                newest,
+                seen_at_newest: on_newest,
+                branches: legs[stop.leg..].iter().map(|l| l.branch.clone()).collect(),
+            });
+        }
+        _ => {
+            after.commits_since = newest;
+            after.commits_at_watermark = on_newest;
+        }
+    }
+    Ok(())
+}
+
+/// One branch of a commit walk, and the span of its history to read.
+struct Leg<'a> {
+    branch: String,
+    window: Window<'a, Vec<String>>,
+}
+
+/// What one commit walk read.
+struct CommitWalk {
+    /// Every commit looked at -- delivered, or recognised as delivered on the
+    /// lower boundary.
+    examined: Vec<(String, Option<DateTime<Utc>>)>,
+    /// Where an incremental walk was cut short, if it was.
+    stopped: Option<Stop>,
+}
+
+/// The leg a budget or a page cap cut short, and what was examined on it.
+struct Stop {
+    leg: usize,
+    examined: Vec<(String, Option<DateTime<Utc>>)>,
+}
+
+async fn walk_commits(
+    source: &crate::GiteaSource,
+    at: RepoRef<'_>,
+    legs: &[Leg<'_>],
+    budget: &mut u32,
+    seen: &mut HashSet<String>,
+    sink: &mut (dyn Sink + Send),
+    emitted: &mut u64,
+) -> Result<CommitWalk, RepoError> {
+    let mut out = CommitWalk {
+        examined: Vec::new(),
+        stopped: None,
+    };
+    'legs: for (index, leg) in legs.iter().enumerate() {
+        let window = &leg.window;
+        let branch = leg.branch.as_str();
+        let mut on_leg: Vec<(String, Option<DateTime<Utc>>)> = Vec::new();
+        // A reached cap ends a full sync's branch quietly (see the note on
+        // the caps), and cuts an incremental walk short like the budget.
         let mut walk = PageWalk::new(PageNumber, MAX_COMMIT_PAGES, |page| {
-            source
-                .client
-                .commits(at.owner, at.name, &branch, since, page)
+            source.client.commits(
+                at.owner,
+                at.name,
+                branch,
+                (window.lower, window.upper),
+                page,
+            )
         });
         loop {
             let batch = match walk.next().await {
                 Ok(Walked::Page(batch)) => batch,
-                Ok(Walked::End | Walked::Capped) => break,
+                Ok(Walked::End) => break,
+                Ok(Walked::Capped) if window.lower.is_none() => break,
+                Ok(Walked::Capped) => {
+                    out.stopped = Some(Stop {
+                        leg: index,
+                        examined: on_leg,
+                    });
+                    return Ok(out);
+                }
                 // Listed a moment ago and gone now (#724): a merge with
                 // delete-branch on a busy repository. Gitea answers `404
                 // object does not exist` for the ref, and the branch's own
@@ -1277,7 +1707,7 @@ async fn commits(
                 // list it tombstones it. Not a hole, so not a skip of the
                 // repository, and not fatal on a full sync.
                 Err(error)
-                    if error.status() == Some(404) && branch_is_gone(source, at, &branch).await =>
+                    if error.status() == Some(404) && branch_is_gone(source, at, branch).await =>
                 {
                     tracing::info!(
                         repository = %at.full_name,
@@ -1285,10 +1715,12 @@ async fn commits(
                         %error,
                         "gitea: branch deleted since the listing; skipping its commits"
                     );
-                    continue 'branches;
+                    continue 'legs;
                 }
                 Err(error) => return Err(RepoError::from(error)),
             };
+            // Records on this page that were not already-delivered history:
+            // new ones, and the ones above a catch-up's window.
             let mut fresh = 0usize;
             for raw in batch {
                 let commit: model::Commit = match serde_json::from_value(raw.clone()) {
@@ -1303,22 +1735,32 @@ async fn commits(
                     }
                 };
                 let happened = map::real_time(commit.happened_at());
-                if let (Some(mark), Some(when)) = (since, happened) {
+                if let (Some(top), Some(when)) = (window.upper, happened)
+                    && (when > top || (when == top && window.upper_seen.contains(&commit.sha)))
+                {
+                    // `until=` is server-side too, and the same reasoning
+                    // as `since=` below applies: not trusted to have held.
+                    fresh += 1;
+                    continue;
+                }
+                if let (Some(mark), Some(when)) = (window.lower, happened) {
                     // Not a `break`: `since=` is a server-side filter this walk
                     // does not control, and a server that ignored it would put
                     // the whole history in front of the new commits.
                     if when < mark {
                         continue;
                     }
-                    if when == mark && before.commits_at_watermark.contains(&commit.sha) {
-                        examined.push((commit.sha.clone(), happened));
+                    if when == mark && window.lower_seen.contains(&commit.sha) {
+                        out.examined.push((commit.sha.clone(), happened));
+                        on_leg.push((commit.sha.clone(), happened));
                         continue;
                     }
                 }
                 if !seen.insert(commit.sha.clone()) {
                     continue;
                 }
-                examined.push((commit.sha.clone(), happened));
+                out.examined.push((commit.sha.clone(), happened));
+                on_leg.push((commit.sha.clone(), happened));
                 push(
                     sink,
                     map::commit_item(&source.id, &raw, at, &commit),
@@ -1326,9 +1768,15 @@ async fn commits(
                 )
                 .await?;
                 fresh += 1;
-                budget -= 1;
-                if budget == 0 {
-                    break 'branches;
+                *budget -= 1;
+                if *budget == 0 {
+                    if window.lower.is_some() {
+                        out.stopped = Some(Stop {
+                            leg: index,
+                            examined: on_leg,
+                        });
+                    }
+                    return Ok(out);
                 }
             }
             // A page with nothing new on it is the end of this branch's new
@@ -1339,10 +1787,7 @@ async fn commits(
             }
         }
     }
-
-    (after.commits_since, after.commits_at_watermark) =
-        close_watermark(&examined, since, &before.commits_at_watermark);
-    Ok(())
+    Ok(out)
 }
 
 /// Default branch first, then by name: on a first sync the budget should go to
