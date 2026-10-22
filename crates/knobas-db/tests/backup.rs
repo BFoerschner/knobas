@@ -153,12 +153,125 @@ async fn an_archive_from_before_the_saved_view_rename_restores() {
             .await
             .unwrap();
     assert_eq!(shows.as_deref(), Some("jira:board-7"));
-    let old: i64 = sqlx::query_scalar(
-        "select count(*) from information_schema.columns
-          where table_schema = 'knobas' and table_name = 'ticket_view' and column_name = 'jira_ref'",
+    assert!(
+        !has_the_rename_shim(&pool).await,
+        "the restore left the old column behind"
+    );
+}
+
+/// Whether `knobas.ticket_view` has `jira_ref`, the old name the rename shim
+/// adds for the length of a load.
+async fn has_the_rename_shim(pool: &sqlx::PgPool) -> bool {
+    sqlx::query_scalar(
+        "select exists (select 1 from information_schema.columns
+          where table_schema = 'knobas' and table_name = 'ticket_view' and column_name = 'jira_ref')",
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// Every row of a `knobas` table, in a stable order, as one text value: what
+/// "the rows it held before" means for the bookkeeping tables below.
+async fn rows_of(pool: &sqlx::PgPool, table: &str) -> String {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text), '[]')::text
+           from knobas.{table} t"
+    )))
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// An archive from a "newer build": its `COPY` of `knobas.entity` names a
+/// column this schema lacks, so a load of it refuses. `tables` restricts it
+/// the way a share export is restricted; `None` is a whole backup.
+async fn an_archive_from_a_newer_build(
+    label: &str,
+    tables: Option<&[&str]>,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let from = knobas_db::test_util::scratch_database(label).await;
+    let source = from.pool(2).await.expect("a pool on the source database");
+    sqlx::raw_sql(
+        "alter table knobas.entity add column from_a_newer_build text;
+         insert into knobas.setting (key, value) values ('archive-only', '1'::jsonb);",
+    )
+    .execute(&source)
     .await
     .unwrap();
-    assert_eq!(old, 0, "the restore left the old column behind");
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let archive = dir.path().join(format!("{label}.knobas"));
+    match tables {
+        None => backup::dump(&from, &archive).await,
+        Some(tables) => backup::dump_tables(&from, &archive, tables).await,
+    }
+    .expect("a dump");
+    (dir, archive)
+}
+
+/// Restore `archive`, which must fail to load, into a fresh target holding
+/// rows of its own in the bookkeeping tables, and assert the failure left the
+/// target as it found it (#1635, spec #1619 ruling B3): the bookkeeping rows
+/// the restore cleared to make room for the archive's own -- settings, and
+/// the Dependencies layers and views only migrations seed -- are back, and
+/// the column the rename shim added for the load is gone.
+async fn a_failed_restore_of(archive: &std::path::Path, label: &str) {
+    let into = knobas_db::test_util::scratch_database(label).await;
+    let target = into.pool(2).await.expect("a pool on the target");
+    // Rows of this machine's own, so "held before" is more than the seed.
+    sqlx::raw_sql(
+        "insert into knobas.setting (key, value) values ('this-machine', '\"kept\"'::jsonb);
+         insert into knobas.dep_layer (id, name, position) values ('mine', 'Mine', 99);
+         insert into knobas.dep_layer_kind (kind, layer_id, position) values ('mine-kind', 'mine', 0);",
+    )
+    .execute(&target)
+    .await
+    .unwrap();
+    let tables = ["setting", "dep_layer_kind", "dep_layer", "dep_view"];
+    let mut before = Vec::new();
+    for table in tables {
+        let rows = rows_of(&target, table).await;
+        assert_ne!(
+            rows, "[]",
+            "knobas.{table} is empty, so this test would assert nothing"
+        );
+        before.push(rows);
+    }
+
+    let refused = backup::restore(&into, archive).await;
+    assert!(
+        matches!(refused, Err(backup::BackupError::Tool { .. })),
+        "a COPY naming a column this schema lacks fails the load: {refused:?}"
+    );
+
+    for (table, held) in tables.iter().zip(&before) {
+        assert_eq!(
+            &rows_of(&target, table).await,
+            held,
+            "knobas.{table} lost or changed rows in a failed restore"
+        );
+    }
+    assert!(
+        !has_the_rename_shim(&target).await,
+        "the failed restore left the rename shim's column behind"
+    );
+}
+
+/// A whole backup that fails to load: every bookkeeping table was cleared for
+/// the archive's own rows, and every one is put back.
+#[tokio::test]
+async fn a_failed_restore_leaves_the_bookkeeping_rows_in_place() {
+    let (_dir, archive) = an_archive_from_a_newer_build("newer-build", None).await;
+    a_failed_restore_of(&archive, "failed-restore").await;
+}
+
+/// A share export that fails to load. It carries `dep_layer` and no other
+/// bookkeeping table, so the restore clears that one alone -- which cascades
+/// into `dep_layer_kind` -- and leaves `setting` and `dep_view` standing,
+/// where putting their rows back without clearing them first would collide.
+#[tokio::test]
+async fn a_failed_restore_of_a_partial_archive_leaves_the_bookkeeping_rows_in_place() {
+    let (_dir, archive) =
+        an_archive_from_a_newer_build("newer-share", Some(&["entity", "dep_layer"])).await;
+    a_failed_restore_of(&archive, "failed-partial-restore").await;
 }

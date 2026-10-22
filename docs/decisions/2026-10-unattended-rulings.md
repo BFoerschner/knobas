@@ -12073,3 +12073,47 @@ Ruled 2026-10-22 by the implementer on Opus. Spec #1620, ruling C1 (owned `Strin
   names, so no quote, backslash or tab can round-trip in it. *Ruling:* read it as the reader's
   half: a stored item whose kind is spelled with a JSON escape (`api\u005ftoken`) reads as that
   kind, which is the case the borrowed field refused. *Reversing:* low.
+## #1635: put the bookkeeping rows back when a restore fails
+
+Ruled 2026-10-22 by the implementer on Opus, inside spec #1619's ruling B3 (snapshot and re-insert).
+
+- **Snapshot all four bookkeeping tables, not only the ones the archive carries.** *Fork:* the
+  ticket says "reads the bookkeeping rows"; the clears touch only the carried tables. *Ruling:*
+  read all four. Clearing `dep_layer` cascades into `dep_layer_kind`, so a partial archive that
+  carries `dep_layer` alone still empties a table the restore never names. *Reversing:* low.
+- **The put-back clears each table before it inserts, in one transaction.** *Ruling:* a share
+  export carries no `setting` or `dep_view`, so those rows were never cleared, and inserting the
+  snapshot on top of them collides on the primary key. Children are cleared first and parents
+  inserted first, so `dep_layer_kind` finds its layer. Witnessed by the partial-archive test.
+  *Reversing:* low.
+- **The put-back runs before the rename shim's fold-up, and its own error wins.** *Fork:* the
+  ticket says "returns the load error after the recovery" and does not say what happens when the
+  recovery fails. *Ruling:* a failed put-back or fold-up returns its `sqlx` error, as the fold-up
+  already did before this change. Rows lost here have no way back from the UI; a shim column left
+  by a failed fold-up is dropped by the next restore. So the rows go first. *Reversing:* low.
+- **The snapshot is `to_jsonb` text read back through `jsonb_populate_recordset`.** *Ruling:* no
+  column list in Rust, so a column a later migration adds is carried with no edit, and no new
+  dependency (`serde_json` is optional in `knobas-db`). *Reversing:* low.
+
+Merge-manager review of #1745, on Opus:
+
+- **A put-back that fails names the load's error too.** *Fork:* the implementer returned the
+  put-back's bare `sqlx` error in place of the load's. *Ruling:* a new `BackupError::NotPutBack
+  { load, source }` whose message says the restore failed, why, and that putting the settings
+  and Dependencies layers back failed after it. That is the one outcome where rows are gone, so
+  the user is told both. It reaches the UI as `internal`, the code every other restore failure
+  already gets, so no IPC shape changes. A fold-up failure still returns its own error: a
+  leftover shim column loses nothing. *Reversing:* low.
+- **The archive's table of contents is read once, before anything is cleared.** *Fork:* the
+  clears called `pg_restore --list` once per bookkeeping table, so a listing that failed after
+  the first clear returned with no put-back. *Ruling:* one `carried_bookkeeping` call before the
+  snapshot. A failed `delete` or `alter table` between the clears and the load still returns
+  without a put-back; that is a statement on a local server that just answered, and wrapping it
+  would need a partial-shim fold-up for no witnessed case. *Reversing:* low.
+- **A put-back that cannot reconnect after a failed load is accepted, no follow-up.** *Ruling:*
+  the rows are lost only when the embedded server stops answering in the moment between a failed
+  `pg_restore` and the reconnect; before #1635 they were lost on every failed load. A durable
+  snapshot (a scratch table or database) costs more than that window. *Reversing:* medium.
+- **The `jsonb` round trip holds for every column these tables have.** `text`, `integer`,
+  `boolean`, `jsonb` and `timestamptz` (microseconds kept), none nullable, no identity or
+  generated column and no trigger; the tests compare `to_jsonb` text, timestamps included.
