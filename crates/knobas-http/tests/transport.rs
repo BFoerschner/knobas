@@ -364,6 +364,124 @@ async fn a_retry_after_longer_than_the_budget_ends_the_call() {
     );
 }
 
+/// The budget the limiter tests run on: long enough for the second of a
+/// 1-a-second queue to go (at t=1 s), short enough that the third (t=2 s)
+/// cannot, and far short of the real 45 s.
+const SHORT_BUDGET: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// `count` sends of `GET /x` started at once on `client`: what each ended in,
+/// and how long it took.
+async fn queued_sends(
+    client: &Arc<HttpClient>,
+    count: usize,
+) -> Vec<(Result<u16, SourceError>, std::time::Duration)> {
+    let mut sends = tokio::task::JoinSet::new();
+    for _ in 0..count {
+        let client = Arc::clone(client);
+        sends.spawn(async move {
+            let started = std::time::Instant::now();
+            let outcome = client
+                .send(client.request(Method::GET, "/x"))
+                .await
+                .map(|response| response.status().as_u16());
+            (outcome, started.elapsed())
+        });
+    }
+    sends.join_all().await
+}
+
+/// **A limiter wait that outlasts the budget is the local quota, not the
+/// instance** (SPI-11, #1630).
+///
+/// Five sends queued at once behind one a second with a burst of one: the
+/// first goes at once, the second at t=1 s, and the other three cannot go
+/// before the 1.5 s budget runs out. Not one of the three reached the
+/// instance, so `Unreachable` -- the class the scheduler backs a source off
+/// on -- would blame it for a wait knobas imposed. Each is `Protocol`, naming
+/// the quota it waited on.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_limiter_wait_that_outlasts_the_budget_is_the_local_quota() {
+    let server = CountingServer::always(200, "");
+    let client = Arc::new(
+        HttpClient::new(HttpConfig {
+            requests_per_second: 1,
+            burst: 1,
+            ..config(server.url())
+        })
+        .expect("client")
+        .with_send_budget(SHORT_BUDGET),
+    );
+
+    let outcomes = queued_sends(&client, 5).await;
+
+    let sent = outcomes.iter().filter(|(outcome, _)| outcome.is_ok()).count();
+    assert_eq!(sent, 2, "t=0 and t=1s fit the budget: {outcomes:?}");
+    assert_eq!(server.hits(), 2, "nothing past the budget reached the server");
+    for (outcome, _) in outcomes.iter().filter(|(outcome, _)| outcome.is_err()) {
+        let Err(SourceError::Protocol { status: None, message }) = outcome else {
+            panic!("a wait on the local quota must be Protocol, never Unreachable: {outcome:?}");
+        };
+        assert!(
+            message.contains("local rate limit") && message.contains("1 request a second"),
+            "the message names the quota it waited on: {message}"
+        );
+    }
+}
+
+/// **The limiter wait never outlasts what is left of the budget** -- the
+/// limiter's half of [`SEND_BUDGET`](knobas_http::SEND_BUDGET), beside
+/// `a_retry_after_longer_than_the_budget_ends_the_call`'s half for the waits
+/// between attempts.
+///
+/// Unbounded, the five queued sends above end at t=0, 1, 2, 3 and 4 s; bounded,
+/// none ends later than the 1.5 s budget, plus the scheduling slack of a
+/// loaded test machine. The retry half: a `503` at t=0 asks for a second
+/// attempt, which cannot pass the limiter before the budget runs out, so the
+/// call ends at the budget with the `503` it had -- what the source said --
+/// and not with the quota, which only kept it from asking again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_limiter_wait_never_outlasts_the_budget() {
+    let slack = std::time::Duration::from_millis(400);
+
+    let server = CountingServer::always(200, "");
+    let client = Arc::new(
+        HttpClient::new(HttpConfig {
+            requests_per_second: 1,
+            burst: 1,
+            ..config(server.url())
+        })
+        .expect("client")
+        .with_send_budget(SHORT_BUDGET),
+    );
+    for (outcome, took) in queued_sends(&client, 5).await {
+        assert!(
+            took <= SHORT_BUDGET + slack,
+            "a send ended {took:?} in, past the {SHORT_BUDGET:?} budget: {outcome:?}"
+        );
+    }
+
+    let busy = CountingServer::always(503, "");
+    let client = HttpClient::new(HttpConfig {
+        requests_per_second: 1,
+        burst: 1,
+        ..config(busy.url())
+    })
+    .expect("client")
+    .with_send_budget(std::time::Duration::from_millis(800));
+    let started = std::time::Instant::now();
+    let error = client
+        .send(client.request(Method::GET, "/x"))
+        .await
+        .expect_err("503, then no room for a second attempt");
+    let took = started.elapsed();
+    assert!(
+        matches!(error, SourceError::Protocol { status: Some(503), .. }),
+        "the call ends with what the source said: {error:?}"
+    );
+    assert_eq!(busy.hits(), 1, "the second attempt never passed the limiter");
+    assert!(took <= std::time::Duration::from_millis(800) + slack, "{took:?}");
+}
+
 /// A server that accepts the connection and then says nothing is
 /// **`Unreachable`, not `Protocol`** -- which is the class the scheduler backs
 /// off on, so the classification is the whole assertion.
