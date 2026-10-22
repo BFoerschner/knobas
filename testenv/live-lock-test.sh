@@ -151,7 +151,7 @@ lines=$(grep -c 'is held by' "$scratch/second.out" || true)
 sleep 0.5
 lines2=$(grep -c 'is held by' "$scratch/second.out" || true)
 checks=$((checks + 1))
-[ "$lines" = 1 ] && [ "$lines2" = 1 ] || fail "the holder is printed once" "$(cat "$scratch/second.out")"
+if [ "$lines" != 1 ] || [ "$lines2" != 1 ]; then fail "the holder is printed once" "$(cat "$scratch/second.out")"; fi
 # A second past the waiter's start, so a lock stamped when it began waiting
 # rather than when it took the lock reads earlier than the release.
 sleep 1
@@ -161,9 +161,10 @@ rc=$(wait_rc second)
 out=$(cat "$scratch/second.out")
 taken_at=$(sed -n 's/^target: [0-9]* \([0-9]*\) .*/\1/p' "$scratch/second.out")
 checks=$((checks + 1))
-[ -n "$taken_at" ] && [ "$taken_at" -ge "$released_at" ] ||
+if [ -z "$taken_at" ] || [ "$taken_at" -lt "$released_at" ]; then
   fail "the lock says when it was taken, not when the wait began" \
     "released at $released_at, lock stamped ${taken_at:-?}"
+fi
 check "the second run goes on once the first lets go" "$rc" "0"
 check "the second run held the lock" "$out" "held by second"
 check "the second run says how long it waited" "$out" "after"
