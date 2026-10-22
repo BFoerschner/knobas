@@ -98,9 +98,13 @@
    * What a capture will attach (#503): the foreground, pushed to the backend
    * so the capture window can read it. There is no stored context to stand in
    * any more, so that half is `null`. A rejected record is swallowed: it can
-   * only fail when there is no bridge at all.
+   * only fail when there is no bridge at all. Under `?fake-ipc` it waits for
+   * the bridge to be installed (below), so the first record is not that
+   * swallowed rejection.
    */
+  let bridgeReady = $state(!(import.meta.env.DEV && new URLSearchParams(location.search).has("fake-ipc")));
   $effect(() => {
+    if (!bridgeReady) return;
     void recordCaptureContext(null, foreground?.entity_id ?? null).catch(() => {});
   });
 
@@ -225,6 +229,7 @@
         const dev = await import("./lib/shell/dev/fake-tauri");
         dev.installIfRequested();
       }
+      bridgeReady = true;
       if (disposed) return;
 
       // Subscribed for the whole session; each is seeded below once the
