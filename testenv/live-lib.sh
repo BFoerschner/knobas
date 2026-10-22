@@ -308,7 +308,7 @@ live_left_up() {
 }
 
 _live_compose() {
-  (cd "$LIVE_TESTENV" && docker compose "$@")
+  (cd "$LIVE_TESTENV" && docker compose --env-file images.env "$@")
 }
 
 # The timebomb keys, fetched once per shell. Before either Atlassian `up`:

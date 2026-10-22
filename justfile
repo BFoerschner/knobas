@@ -1652,9 +1652,9 @@ gitea-live-capped:
     # Registered with the session, which runs it from its own EXIT, INT and
     # TERM traps -- so the container is uncapped whichever way this ends, and
     # left up after (no run stops Gitea, #698).
-    uncap() { (cd "$LIVE_TESTENV" && docker compose up -d --wait gitea >/dev/null); }
+    uncap() { (cd "$LIVE_TESTENV" && docker compose --env-file images.env up -d --wait gitea >/dev/null); }
     live_on_exit uncap
-    (cd "$LIVE_TESTENV" && docker compose -f docker-compose.yml -f docker-compose.capped.yml up -d --wait gitea)
+    (cd "$LIVE_TESTENV" && docker compose --env-file images.env -f docker-compose.yml -f docker-compose.capped.yml up -d --wait gitea)
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea_capped \
       -- --ignored --nocapture --test-threads=1
 
@@ -1750,7 +1750,7 @@ start-work-live:
 # (testenv/README.md, "One environment, one owner at a time"). `--env-kuma` is
 # that half.
 kuma_live_env := "testenv/, which is what the lines above this one do:
-  docker compose up -d --wait uptime-kuma
+  docker compose --env-file images.env up -d --wait uptime-kuma
   ./seed-kuma.sh
   eval \"$(./seed --env-kuma)\""
 
@@ -1830,7 +1830,7 @@ kuma-live:
     # fail exactly when it is most needed.
     root=$PWD
     cd testenv
-    docker compose up -d --wait uptime-kuma
+    docker compose --env-file images.env up -d --wait uptime-kuma
     ./seed-kuma.sh
     eval "$(./seed --env-kuma)"
     just _require-live-env {{ quote(kuma_live_env) }} KNOBAS_KUMA_URL KNOBAS_KUMA_API_KEY \

@@ -600,14 +600,14 @@ for row in $ISSUES; do
     have_summary=$(printf '%s' "$API_BODY" | jq -r .fields.summary)
     want_summary=$(printf '%s' "$d" | jq -r .summary)
     [ "$have_summary" = "$want_summary" ] || die "$key exists but is \"$have_summary\", not the fixture's \"$want_summary\" --
-  the keys cannot be trusted. \`docker compose --profile real-atlassian down -v jira
+  the keys cannot be trusted. \`docker compose --env-file images.env --profile real-atlassian down -v jira
   jira-db confluence confluence-db\` and seed again."
     skip "issue $key"
   else
     cur=$(max_key "$pkey")
     [ "$cur" -lt "$num" ] || die "$key cannot be $key: project $pkey is already at $pkey-$cur.
   Keys come from a counter that never rewinds, so the fixture's keys are reachable
-  only in a project this script created from empty. \`docker compose --profile
+  only in a project this script created from empty. \`docker compose --env-file images.env --profile
   real-atlassian down -v jira jira-db confluence confluence-db\` and seed again."
     if [ $((num - cur - 1)) -gt 0 ]; then
       say "burning $pkey-$((cur + 1))..$pkey-$((num - 1)) so the next issue is $key"
@@ -629,7 +629,7 @@ for row in $ISSUES; do
     got=$(printf '%s' "$API_BODY" | jq -r .key)
     [ "$got" = "$key" ] || die "created the fixture's $key but Jira keyed it $got -- the key counter
   is not where this script believed; nothing downstream can trust the keys now.
-  \`docker compose --profile real-atlassian down -v jira jira-db confluence
+  \`docker compose --env-file images.env --profile real-atlassian down -v jira jira-db confluence
   confluence-db\` and seed again."
     created "issue $key ($(printf '%s' "$d" | jq -r .type): $(printf '%s' "$d" | jq -r .summary))"
     jira GET "/rest/api/2/issue/$key?fields=summary,status"
@@ -975,7 +975,7 @@ for row in $(jq -r --arg k "$SPACE_KEY" --arg n "$NESTED_PAGE" \
     # ancestors at all is not one this script created, and the suites that read
     # parent_id would otherwise fail three layers away on a blank id.
     [ -n "$parent" ] || die "page \"$title\" (id $pid) is already in $SPACE_KEY with no
-  ancestors at all, so it is not a page this script created. \`docker compose --profile
+  ancestors at all, so it is not a page this script created. \`docker compose --env-file images.env --profile
   real-atlassian down -v jira jira-db confluence confluence-db\` and seed again."
     skip "page \"$title\" (id $pid, under $parent)"
   else

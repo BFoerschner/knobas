@@ -27,7 +27,7 @@ case "${1:-}" in
     echo "usage: ./kuma-monitor.sh add <name> <url> | delete <name>" >&2; exit 2 ;;
 esac
 
-docker compose --profile seed run --rm -T kuma-seed sh -c '
+docker compose --env-file images.env --profile seed run --rm -T kuma-seed sh -c '
   mkdir -p /tmp/k &&
   cp /seed/kuma-monitor.mjs /tmp/k/ &&
   npm --prefix /tmp/k i --no-save --silent socket.io-client@4 &&

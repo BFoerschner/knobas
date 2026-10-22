@@ -136,7 +136,7 @@ wait_for() {  # wait_for <name> <url>
   i=0
   until curl -fsS -o /dev/null "$2"; do
     i=$((i + 1))
-    [ "$i" -lt 60 ] || { echo " timeout after 120s -- is 'docker compose up -d' running?"; exit 1; }
+    [ "$i" -lt 60 ] || { echo " timeout after 120s -- is 'docker compose --env-file images.env up -d' running?"; exit 1; }
     printf '.'; sleep 2
   done
   echo ' ok'

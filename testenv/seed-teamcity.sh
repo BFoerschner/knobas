@@ -4,7 +4,7 @@
 # the Tidewater build content, which is seed-teamcity-builds.sh's job and
 # runs at the end of this script.
 #
-#   docker compose --profile real-teamcity up -d teamcity teamcity-agent
+#   docker compose --env-file images.env --profile real-teamcity up -d teamcity teamcity-agent
 #   ./seed-teamcity.sh [--running]   # or ./seed --teamcity [--running]
 #
 # `--running` is passed through to seed-teamcity-builds.sh and is the switch
@@ -115,11 +115,11 @@ done
 #
 # Compared by digest rather than by the version the product reports, because
 # the digest is what `pin-images.sh` pins and what a rebuild would move. Read
-# from the container rather than from `.env` so that editing `.env` without
+# from the container rather than from `images.env` so that editing `images.env` without
 # recreating the container cannot make the check pass.
 guard_image() {  # guard_image <container> <expected digest> <product>
   _running=$(docker inspect -f '{{.Config.Image}}' "$1" 2>/dev/null) \
-    || die "$1 is not running -- 'docker compose --profile real-teamcity up -d teamcity teamcity-agent'"
+    || die "$1 is not running -- 'docker compose --env-file images.env --profile real-teamcity up -d teamcity teamcity-agent'"
   case "$_running" in
     *"$2") ;;
     *)
@@ -360,7 +360,7 @@ _i=0
 until _code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "$TC_URL/" 2>/dev/null) \
       && [ "$_code" != "000" ]; do
   _i=$((_i + 1))
-  [ "$_i" -lt 120 ] || { echo; die "teamcity never answered on 8111 (600s) -- is 'docker compose --profile real-teamcity up -d teamcity teamcity-agent' running?"; }
+  [ "$_i" -lt 120 ] || { echo; die "teamcity never answered on 8111 (600s) -- is 'docker compose --env-file images.env --profile real-teamcity up -d teamcity teamcity-agent' running?"; }
   printf '.'; sleep 5
 done
 echo ' ok'
@@ -397,7 +397,7 @@ if [ -z "$TOKEN" ]; then
       wizard_begin
       create_admin || die "the server has an administrator, but it is not $ADMIN_USER/$ADMIN_PASS.
   Either export TEAMCITY_ADMIN_USER/TEAMCITY_ADMIN_PASS to match, or start over:
-    docker compose --profile real-teamcity down -v"
+    docker compose --env-file images.env --profile real-teamcity down -v"
       wizard_end ;;
     *)
       wizard_begin
@@ -462,7 +462,7 @@ while :; do
   rest GET "/app/rest/agents?locator=name:$AGENT_NAME,authorized:any,connected:any"
   [ "$REST_STATUS" = "200" ] && [ "$(printf '%s' "$REST_BODY" | jq -r '.count // 0')" -ge 1 ] && break
   _i=$((_i + 1))
-  [ "$_i" -lt 60 ] || { echo; die "no agent named $AGENT_NAME registered in 300s -- is knobas-teamcity-agent running? 'docker compose --profile real-teamcity up -d teamcity-agent'"; }
+  [ "$_i" -lt 60 ] || { echo; die "no agent named $AGENT_NAME registered in 300s -- is knobas-teamcity-agent running? 'docker compose --env-file images.env --profile real-teamcity up -d teamcity-agent'"; }
   printf '.'; sleep 5
 done
 echo ' ok'

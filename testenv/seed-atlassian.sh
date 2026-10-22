@@ -34,7 +34,7 @@
 # under "Data Center host product licenses". They are free and need no
 # my.atlassian.com account, which since 2026-03-30 is the only free door left.
 # Three hours is the shape of this environment: it is stand up, run what needs
-# a real instance, then `docker compose --profile real-atlassian down -v jira
+# a real instance, then `docker compose --env-file images.env --profile real-atlassian down -v jira
 # jira-db confluence confluence-db` -- the four services NAMED, because a bare
 # profile-scoped `down -v` also takes the default profile's containers and
 # volumes, Gitea and its seeded corpus included (README.md, "Jira and
@@ -42,10 +42,10 @@
 # Gitea's.
 #
 # The keys are public and `fetch-timebomb-keys.sh` pulls them off Atlassian's
-# page. Run it BEFORE `docker compose up`, because Confluence reads its key at
+# page. Run it BEFORE `docker compose --env-file images.env up`, because Confluence reads its key at
 # first start:
 #   eval "$(./fetch-timebomb-keys.sh)"
-# Never put them in `testenv/.env` -- that file is tracked. Jira's key goes in
+# Never put them in `testenv/images.env` -- that file is tracked. Jira's key goes in
 # through the wizard, so an unset JIRA_LICENSE_KEY is fetched here on the spot;
 # an unset CONFLUENCE_LICENSE_KEY is fetched too, but the container must have
 # been started with it, which is checked below against the container's own
@@ -206,11 +206,11 @@ done
 #
 # Compared by digest rather than by the version the product reports, because
 # the digest is what `pin-images.sh` pins and what a rebuild would move. Read
-# from the container rather than from `.env` so that editing `.env` without
+# from the container rather than from `images.env` so that editing `images.env` without
 # recreating the container cannot make the check pass.
 guard_image() {  # guard_image <container> <expected digest> <product>
   _running=$(docker inspect -f '{{.Config.Image}}' "$1" 2>/dev/null) \
-    || die "$1 is not running -- 'docker compose --profile real-atlassian up -d $1'"
+    || die "$1 is not running -- 'docker compose --env-file images.env --profile real-atlassian up -d $1'"
   case "$_running" in
     *"$2") ;;
     *)
@@ -592,7 +592,7 @@ wait_for_jira_wizard() {  # wait_for_jira_wizard <cap seconds>
   part-walked by an earlier run: that is the half-set-up state this file's
   header refuses to guess at, so tear the pair down and seed a fresh one rather
   than resuming it --
-    docker compose --profile real-atlassian down -v jira jira-db confluence confluence-db
+    docker compose --env-file images.env --profile real-atlassian down -v jira jira-db confluence confluence-db
   the four services named. Any other form means the wizard moved, and the
   sequence has to be re-derived against the new image."
     sleep "$POLL_S"
@@ -654,8 +654,8 @@ setup_confluence() {
   It reads ATL_LICENSE_KEY at first-time setup only, so export the key and
   recreate the container:
     eval \"\$(./fetch-timebomb-keys.sh)\"
-    docker compose --profile real-atlassian down -v confluence
-    docker compose --profile real-atlassian up -d confluence"
+    docker compose --env-file images.env --profile real-atlassian down -v confluence
+    docker compose --env-file images.env --profile real-atlassian up -d confluence"
 
   wizard_begin
   wizard_read "$CONFLUENCE_URL/"

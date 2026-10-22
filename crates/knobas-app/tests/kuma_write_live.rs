@@ -89,7 +89,7 @@ fn env() -> Env {
             .unwrap_or_else(|| {
                 panic!(
                     "{key} is not set -- start testenv's Uptime Kuma and seed it first \
-                     (`cd testenv && docker compose up -d --wait uptime-kuma && ./seed-kuma.sh`), \
+                     (`cd testenv && docker compose --env-file images.env up -d --wait uptime-kuma && ./seed-kuma.sh`), \
                      then run `just kuma-live`"
                 )
             })

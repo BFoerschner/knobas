@@ -83,7 +83,7 @@ jqf() { jq -r "$1" "$FIXTURE"; }
 api "$ADMIN" GET /user
 if [ "$API_STATUS" != "200" ]; then
   say "creating the admin account $ADMIN_USER"
-  docker compose exec -T -u git "$SERVICE" "$CLI" admin user create \
+  docker compose --env-file images.env exec -T -u git "$SERVICE" "$CLI" admin user create \
     --admin --username "$ADMIN_USER" --password "$ADMIN_PASS" \
     --email "$ADMIN_USER@tidewater.test" --must-change-password=false >/dev/null 2>&1 || true
   api "$ADMIN" GET /user

@@ -1,8 +1,8 @@
 #!/bin/sh
-# Resolve the mutable tags below to immutable digests and rewrite testenv/.env.
+# Resolve the mutable tags below to immutable digests and rewrite testenv/images.env.
 # Run deliberately; review the diff; a digest change is an environment change.
 #
-#   ./pin-images.sh                    # rewrite .env
+#   ./pin-images.sh                    # rewrite images.env
 #   ./pin-images.sh --move VAR         # take a guarded pin's new digest (see below)
 #   ./pin-images.sh --out PATH         # write somewhere else, e.g. to compare
 #
@@ -34,7 +34,7 @@ usage() {
   echo "usage: ./pin-images.sh [--move VAR]... [--out PATH]"
   echo "  --move VAR   write VAR's freshly resolved digest even though a seed guards on"
   echo "               another one (VAR is one of the guarded pins; repeatable)"
-  echo "  --out PATH   write PATH instead of testenv/.env"
+  echo "  --out PATH   write PATH instead of testenv/images.env"
 }
 
 out=
@@ -48,12 +48,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 # A relative --out is relative to where the caller stands, so it is resolved
-# before the cd; the default is testenv/.env itself, so that one is resolved
+# before the cd; the default is testenv/images.env itself, so that one is resolved
 # after it.
 case "$out" in ''|/*) ;; *) out="$PWD/$out" ;; esac
 
 cd "$(dirname "$0")"
-[ -n "$out" ] || out="$PWD/.env"
+[ -n "$out" ] || out="$PWD/images.env"
 
 command -v docker >/dev/null || { echo "pin-images: docker is required" >&2; exit 1; }
 docker buildx version >/dev/null 2>&1 || {
@@ -67,7 +67,7 @@ resolve() {  # resolve <repo:tag>  -> the tag's current digest on stdout
     return 1
   }
   # A tag that resolves to an empty or non-sha256 string would otherwise be
-  # written into .env as `NAME=repo@`, which compose accepts at `config` time
+  # written into images.env as `NAME=repo@`, which compose accepts at `config` time
   # and only fails on at `up`. Refuse it here instead.
   case "$_d" in
     sha256:*) printf '%s\n' "$_d" ;;
@@ -75,8 +75,8 @@ resolve() {  # resolve <repo:tag>  -> the tag's current digest on stdout
   esac
 }
 
-line() {  # line <VAR> <repo:tag> <digest> [note]  -> the two .env lines for one image
-  # The note rides on the comment line, so a held pin says so in .env itself:
+line() {  # line <VAR> <repo:tag> <digest> [note]  -> the two images.env lines for one image
+  # The note rides on the comment line, so a held pin says so in images.env itself:
   # `# repo:tag` alone above a digest the tag no longer resolves to would be
   # a stale claim in a tracked file.
   printf '# %s%s\n%s=%s@%s\n' "$2" "${4:+ ($4)}" "$1" "${2%%:*}" "$3"
@@ -114,7 +114,7 @@ guarded_vars=
 # pin_guarded <VAR> <repo:tag> <seed script> [note printed on --move]
 #
 # Writes the seed's guarded digest. If the tag has moved on, says so with both
-# digests -- to stderr, because stdout inside the block below IS the .env
+# digests -- to stderr, because stdout inside the block below IS the images.env
 # file. With `--move VAR` the fresh digest is written instead and the owed
 # re-derivation is named. The seed's variable is VERIFIED_<VAR minus _IMAGE>_IMAGE:
 # CONFLUENCE_IMAGE here is VERIFIED_CONFLUENCE_IMAGE there.
@@ -154,10 +154,10 @@ pin_guarded() {
   fi
 }
 
-# WRITE TO A TEMPORARY FILE, MOVE IT INTO PLACE ONLY ON SUCCESS. `> .env`
+# WRITE TO A TEMPORARY FILE, MOVE IT INTO PLACE ONLY ON SUCCESS. `> images.env`
 # truncates the destination the instant the block starts, and every `pin` in it
 # is a network round trip that can fail -- a Docker Hub 429 mid-run (observed
-# 2026-08-31) therefore left a .env holding the header comment and none of the
+# 2026-08-31) therefore left an images.env holding the header comment and none of the
 # seventeen digests, which `docker compose` reports as a missing-variable error
 # somewhere else entirely. Same reasoning as `just inventory`, which learned it
 # the same way.

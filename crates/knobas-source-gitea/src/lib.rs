@@ -62,7 +62,7 @@
 //! or by hand, against an environment that is already up and seeded:
 //!
 //! ```text
-//! cd testenv && docker compose up -d --wait gitea && ./seed-gitea.sh
+//! cd testenv && docker compose --env-file images.env up -d --wait gitea && ./seed-gitea.sh
 //! eval "$(cd testenv && ./seed --env)"
 //! cargo test -p knobas-source-gitea --test live_gitea -- --ignored --nocapture
 //! ```
