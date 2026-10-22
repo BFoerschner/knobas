@@ -244,6 +244,10 @@ pub struct ArrivalLinks<E> {
     inner: E,
     pool: sqlx::PgPool,
     registry: std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    /// The scheduler's background set, which a resolution goes into so the
+    /// quit waits for it (#1633). Handed in rather than read off the
+    /// scheduler, which is built after its events are.
+    background: knobas_sync::background::Background,
 }
 
 impl<E> ArrivalLinks<E> {
@@ -251,11 +255,13 @@ impl<E> ArrivalLinks<E> {
         inner: E,
         pool: sqlx::PgPool,
         registry: std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+        background: knobas_sync::background::Background,
     ) -> ArrivalLinks<E> {
         ArrivalLinks {
             inner,
             pool,
             registry,
+            background,
         }
     }
 }
@@ -266,7 +272,8 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
             let pool = self.pool.clone();
             let registry = std::sync::Arc::clone(&self.registry);
             let source_id = status.source_id.clone();
-            tokio::spawn(async move {
+            // Refused once the quit has begun: the next sync resolves it.
+            self.background.spawn(async move {
                 resolve_arrivals(&pool, registry.as_ref(), &source_id).await;
             });
         }
@@ -381,12 +388,18 @@ pub async fn link_on_arrival(
     Ok(Some(made))
 }
 
-/// [`flush`] spawned onto the runtime with a copy of the state: the send
-/// behind [`submit_in_background`]'s answer, and behind a worklog's (#775).
+/// [`flush`] spawned onto the scheduler's background set with a copy of the
+/// state: the send behind [`submit_in_background`]'s answer, and behind a
+/// worklog's (#775).
+///
+/// **Not spawned once the quit has begun** (#1633, ruling B1): the row is
+/// queued and stays pending, and the next start's tick sends it. A send
+/// spawned before is awaited by the quit, under the scheduler's grace, before
+/// the pool closes.
 pub(crate) fn send_in_background(state: &crate::sources::SourcesState, source_id: String, id: i64) {
-    let state = state.clone();
-    tokio::spawn(async move {
-        if let Err(error) = flush(&state, &source_id, id).await {
+    let task = state.clone();
+    let spawned = state.scheduler.background().spawn(async move {
+        if let Err(error) = flush(&task, &source_id, id).await {
             tracing::warn!(
                 source = %source_id,
                 write_id = id,
@@ -395,6 +408,9 @@ pub(crate) fn send_in_background(state: &crate::sources::SourcesState, source_id
             );
         }
     });
+    if !spawned {
+        tracing::info!(write_id = id, "knobas is quitting: the write waits for the next start");
+    }
 }
 
 /// [`send_in_background`], and then, once the mirror has been re-read for the
@@ -404,6 +420,9 @@ pub(crate) fn send_in_background(state: &crate::sources::SourcesState, source_id
 /// protocol's page and an action item's ticket have an address only once a
 /// sync has seen them, so the link they owe is drawn after that read rather
 /// than by the command, which has already answered.
+///
+/// Not spawned once the quit has begun, as [`send_in_background`] is not;
+/// `then` is then not run either, as after a send that fails.
 pub(crate) fn send_in_background_then<F, Fut>(
     state: &crate::sources::SourcesState,
     source_id: String,
@@ -414,9 +433,9 @@ pub(crate) fn send_in_background_then<F, Fut>(
     F: FnOnce(crate::sources::SourcesState) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = ()> + Send,
 {
-    let state = state.clone();
-    tokio::spawn(async move {
-        if let Err(error) = flush(&state, &source_id, id).await {
+    let task = state.clone();
+    let spawned = state.scheduler.background().spawn(async move {
+        if let Err(error) = flush(&task, &source_id, id).await {
             tracing::warn!(
                 source = %source_id,
                 write_id = id,
@@ -425,9 +444,12 @@ pub(crate) fn send_in_background_then<F, Fut>(
             );
             return;
         }
-        sync_after_write(&state, &reread).await;
-        then(state).await;
+        sync_after_write(&task, &reread).await;
+        then(task).await;
     });
+    if !spawned {
+        tracing::info!(write_id = id, "knobas is quitting: the write waits for the next start");
+    }
 }
 
 /// [`submit`]'s first half: everything it decides, and the row, **without

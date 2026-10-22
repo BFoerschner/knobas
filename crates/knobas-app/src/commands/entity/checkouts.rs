@@ -257,7 +257,9 @@ pub async fn clone_repo<R: tauri::Runtime>(
     stop: Option<bool>,
 ) -> Result<crate::checkout::clone::CloneAnswer, IpcError> {
     let pool = lifecycle.pool()?;
-    let clones = crate::checkout::clone::Clones::global();
+    let clones = std::sync::Arc::clone(&tauri::Manager::state::<
+        std::sync::Arc<crate::checkout::clone::Clones>,
+    >(&app));
     if stop.unwrap_or(false) {
         return crate::checkout::clone::stop(&pool, &clones, &entity_id).await;
     }

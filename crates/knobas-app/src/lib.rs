@@ -285,6 +285,9 @@ pub fn run() {
             // before the database is up, and "state not managed" is not an
             // answer anything can branch on.
             handle.manage(capture::CaptureState::new());
+            // The clones running in this process, which `clone_repo` starts
+            // and stops and the quit stops with their folders (#1633).
+            handle.manage(checkout::clone::Clones::global());
 
             // And the database comes up on its own task. M0 blocked here,
             // which froze the event loop for the length of a first run -- a
@@ -606,7 +609,12 @@ pub fn run() {
 }
 
 /// Stop everything bring-up started, in the one order that does not stall:
-/// the sync scheduler, the backup task, then the database.
+/// the running clones, the sync scheduler, the backup task, then the
+/// database.
+///
+/// **The clones first**, and with their folders (#1633): a runner the
+/// runtime drops kills git and leaves the half-made folder behind. They need
+/// no database, so where they go is only a matter of not being last.
 ///
 /// **The scheduler before the database**: its runs hold connections inside
 /// transactions, and closing the pool under them is the stall the M0
@@ -618,6 +626,9 @@ pub fn run() {
 /// Blocks: it runs from the event loop's exit handler, which is not async.
 /// `tests/it/bring_up.rs` drives it through `shutdown`, its `test-util` door.
 fn shutdown_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(clones) = app.try_state::<std::sync::Arc<checkout::clone::Clones>>() {
+        tauri::async_runtime::block_on(checkout::clone::stop_all(&clones));
+    }
     sources::shutdown(app);
     backup::shutdown(app);
     shutdown_database(app);

@@ -597,7 +597,10 @@ pub async fn bring_up<R: tauri::Runtime>(
     install::load_installed(&deps.pool, &deps.registry, &deps.store).await?;
     archive_done_contexts(&deps.pool, &deps.registry).await;
     let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> = Arc::new(deps.registry);
-    let scheduler = Scheduler::start(SchedulerDeps {
+    // One set for the background sends and the owed-link resolutions, which
+    // the scheduler's shutdown awaits before it closes the pool (#1633).
+    let background = knobas_sync::background::Background::new();
+    let scheduler = Scheduler::start_with_background(SchedulerDeps {
         pool: deps.sync_pool,
         connections: Arc::new(DbConnections(deps.connections)),
         registry: Arc::clone(&registry),
@@ -609,11 +612,12 @@ pub async fn bring_up<R: tauri::Runtime>(
                 TauriEvents::new(app.clone()),
                 deps.pool.clone(),
                 Arc::clone(&registry),
+                background.clone(),
             ),
             deps.suggestions,
         )),
         timing: SchedulerTiming::default(),
-    })
+    }, background)
     .await?;
     Ok(SourcesState {
         pool: deps.pool,
@@ -680,7 +684,8 @@ pub async fn test_scheduler<R: tauri::Runtime>(
     pool: PgPool,
     registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
 ) -> Result<Scheduler, sqlx::Error> {
-    Scheduler::start(SchedulerDeps {
+    let background = knobas_sync::background::Background::new();
+    Scheduler::start_with_background(SchedulerDeps {
         connections: Arc::new(DbConnections(connections)),
         pool: pool.clone(),
         registry: Arc::clone(&registry),
@@ -689,9 +694,10 @@ pub async fn test_scheduler<R: tauri::Runtime>(
             TauriEvents::new(app.clone()),
             pool,
             registry,
+            background.clone(),
         )),
         timing: SchedulerTiming::default(),
-    })
+    }, background)
     .await
 }
 

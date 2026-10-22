@@ -170,7 +170,11 @@ struct Fixture {
 }
 
 async fn fixture(name: &str) -> Fixture {
-    let connector = knobas_db::test_util::scratch_database(name).await;
+    fixture_on(knobas_db::test_util::scratch_database(name).await).await
+}
+
+/// [`fixture`] on `connector`'s database.
+async fn fixture_on(connector: knobas_db::embedded::Connector) -> Fixture {
     let pool = connector.pool(4).await.expect("a pool");
 
     let secrets = Arc::new(MemoryStore::new());
@@ -212,10 +216,7 @@ async fn fixture(name: &str) -> Fixture {
         // The tick held off for the whole test: it flushes the queue too, and
         // a send the tick made would pass these tests with no background send
         // at all. So whatever delivers below is `submit_in_background`'s.
-        timing: knobas_sync::scheduler::SchedulerTiming {
-            startup_delay: Duration::from_secs(3600),
-            tick: Duration::from_secs(3600),
-        },
+        timing: HELD_OFF,
     })
     .await
     .expect("a scheduler");
@@ -232,6 +233,11 @@ async fn fixture(name: &str) -> Fixture {
         heard,
     }
 }
+
+const HELD_OFF: knobas_sync::scheduler::SchedulerTiming = knobas_sync::scheduler::SchedulerTiming {
+    startup_delay: Duration::from_secs(3600),
+    tick: Duration::from_secs(3600),
+};
 
 fn comment(body: &str) -> serde_json::Value {
     json!({ "Comment": { "entity": PR, "body": body } })
@@ -424,4 +430,131 @@ async fn a_new_page_with_link_it_to_holds_its_ticket_on_the_row_before_the_send(
     for (id, _) in &owes {
         sent_line(&mut heard, *id).await;
     }
+}
+
+/// LIFE-2 (#1633, spec #1619 ruling B1): Cmd-Q while a background send is at
+/// the source. The quit waits for it under the scheduler's grace, so its
+/// `sent` mark lands before the pool closes, and a submit made once the quit
+/// has begun is queued and not sent: the next start's tick sends it, once.
+///
+/// Before, the quit neither waited for the send nor stopped new ones: the
+/// pool closed under the send, `sent` failed, the row stayed pending and the
+/// next start sent the comment again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_next_start() {
+    use tauri::Manager as _;
+
+    let connector = knobas_db::test_util::scratch_database("background_write_quit").await;
+    let Fixture {
+        state, wrote, gate, ..
+    } = fixture_on(connector.clone()).await;
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("a mock app");
+    app.manage(state.clone());
+
+    let first =
+        knobas_app::sources::write_queue::submit_in_background(&state, comment("before the quit"))
+            .await
+            .expect("the first comment is queued");
+    tokio::time::timeout(PATIENCE, async {
+        while *wrote.entered.lock().unwrap() == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the first comment reaches the source");
+
+    let quitting = std::thread::spawn({
+        let handle = app.handle().clone();
+        move || knobas_app::shutdown(&handle)
+    });
+    tokio::time::timeout(PATIENCE, async {
+        while !state.scheduler.is_shutting_down() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the quit begins");
+    let after = knobas_app::sources::write_queue::submit_in_background(
+        &state,
+        comment("after the quit began"),
+    )
+    .await
+    .expect("a submit during the quit is still queued");
+    // Give a send that was spawned for it the time to reach the source.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let entered_during_quit = *wrote.entered.lock().unwrap();
+    gate.add_permits(1);
+    quitting.join().expect("the quit finishes");
+
+    let reader = connector.pool(1).await.unwrap();
+    let state_of = async |id: i64| {
+        knobas_core::write_queue::get(&reader, id)
+            .await
+            .unwrap()
+            .expect("the row is there")
+            .state
+    };
+    assert_eq!(
+        entered_during_quit, 1,
+        "the submit made after the quit began was sent"
+    );
+    assert_eq!(
+        state_of(first.id).await,
+        WriteState::Sent,
+        "the send in flight at the quit did not land its sent mark"
+    );
+    assert_eq!(state_of(after.id).await, WriteState::Pending);
+
+    // The next start: its tick sends what is owed.
+    let secrets = Arc::new(MemoryStore::new());
+    secrets
+        .put(
+            &knobas_secrets::KeychainAccount::source(SOURCE),
+            &Secret::just(AuthMethod::Pat, "a-token"),
+        )
+        .expect("the credential is stored");
+    let (tell, _heard) = mpsc::unbounded_channel();
+    let next = knobas_sync::scheduler::Scheduler::start(SchedulerDeps {
+        pool: connector.pool(2).await.unwrap(),
+        connections: Arc::new(Connections(connector.clone())),
+        registry: Arc::new(Registry {
+            wrote: Arc::clone(&wrote),
+            gate: Arc::clone(&gate),
+        }),
+        secrets,
+        events: Arc::new(Heard(tell)),
+        timing: knobas_sync::scheduler::SchedulerTiming {
+            startup_delay: Duration::from_millis(10),
+            tick: Duration::from_millis(50),
+        },
+    })
+    .await
+    .expect("the next start's scheduler");
+    gate.add_permits(10);
+    tokio::time::timeout(PATIENCE, async {
+        while state_of(after.id).await != WriteState::Sent {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the next start's tick sends the comment the quit left queued");
+    next.shutdown().await;
+
+    let bodies: Vec<String> = wrote
+        .ops
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|op| match op {
+            WriteOp::Comment { body, .. } => body.clone(),
+            other => panic!("not a comment: {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        bodies,
+        ["before the quit", "after the quit began"],
+        "each comment reaches the source once across both starts"
+    );
 }

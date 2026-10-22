@@ -135,10 +135,16 @@ configuration is edited, or the reader presses *Flush now*.
 
 ## Shutting down
 
-Quitting the app (Cmd-Q, or closing the last window) stops the sync scheduler,
-cancels in-flight runs and stops the embedded server, also while the boot
-screen is still up. Both steps are bounded, so a quit does not wait out a slow
-remote call.
+Quitting the app (Cmd-Q, or closing the last window) stops a running clone and
+removes its half-made folder, stops the sync scheduler, cancels in-flight runs
+and stops the embedded server, also while the boot screen is still up. Every
+step is bounded, so a quit does not wait out a slow remote call.
+
+A write knobas is sending when you quit gets up to three seconds to finish, so
+it is marked sent. A write you make after the quit began is queued and not
+sent; the next start sends it. A send still going after three seconds is
+abandoned: the source may have it while knobas lists it as pending, and the
+next start sends it again (ADR-0012).
 
 A signal or crash (Ctrl-C under `just dev`, `kill`, a reboot) leaves the
 postmaster running. Start knobas again. The next start adopts the running

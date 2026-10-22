@@ -34,9 +34,10 @@ use knobas_secrets::SecretStore;
 use knobas_source::instance::SourceInstance;
 use knobas_source::{Source, SourceDescriptor, SourceError};
 use sqlx::{PgConnection, PgPool};
-use tokio::sync::{Mutex, Notify, Semaphore};
+use tokio::sync::{Mutex, Notify, RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
 
+use crate::background::Background;
 use crate::config::{self, AuthState, CredentialHealth};
 use crate::progress::{Attach, Observed, ProgressSink, SyncPhase, SyncProgress, Watchers};
 use crate::run_log::{self, RunResult, SyncOutcome, SyncTrigger};
@@ -1115,8 +1116,10 @@ const TICK: Duration = Duration::from_secs(5);
 const STARTUP_DELAY: Duration = Duration::from_secs(2);
 
 /// How long shutdown waits for runs to notice the cancellation before aborting
-/// them. A cancelled run only has to unwind to its next await point.
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+/// them, and for a background send to finish (#1633, ruling B1). A cancelled
+/// run only has to unwind to its next await point; a send at the source is
+/// let finish so its `sent` mark lands before the pool closes.
+pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
 /// Upper bound on closing the scheduler's pool. Belt and braces: the runs are
 /// already cancelled by the time this is reached.
@@ -1288,6 +1291,16 @@ struct Inner {
     /// thousands of finished handles for the sake of a shutdown that only
     /// cares about the live ones.
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// The sends and link resolutions on this scheduler's pool that are not
+    /// runs ([`Scheduler::background`]): awaited by `shutdown` beside the
+    /// runs, before the pool closes.
+    background: Background,
+    /// Held for reading by every [`trigger`](Inner::trigger) from its first
+    /// cancellation check until its run is spawned and in `tasks` (#1633,
+    /// SYNC-5); `shutdown` takes it for writing once, after cancelling, so it
+    /// never takes `tasks` while a trigger that began before the quit has a
+    /// run row open and no task yet.
+    door: RwLock<()>,
     /// Asked for a pass after every run that committed (#778): the mirror
     /// tables a sync grew by more than a fifth are analyzed, on a connection
     /// of their own, so a fresh install's reads plan with statistics within
@@ -1304,6 +1317,19 @@ impl Scheduler {
     /// predicate, and a database that cannot serve it will not serve a run
     /// either.
     pub async fn start(deps: SchedulerDeps) -> Result<Scheduler, sqlx::Error> {
+        Self::start_with_background(deps, Background::new()).await
+    }
+
+    /// [`start`](Self::start), holding `background` as its
+    /// [`background`](Self::background) set: for a caller whose
+    /// [`SyncEvents`] spawn into it and are built before the scheduler is.
+    ///
+    /// # Errors
+    /// As [`start`](Self::start).
+    pub async fn start_with_background(
+        deps: SchedulerDeps,
+        background: Background,
+    ) -> Result<Scheduler, sqlx::Error> {
         // **Before the first tick, and only then.** It closes every run row
         // with no `finished_at`, which after this point would include the runs
         // this scheduler is itself about to open.
@@ -1324,6 +1350,8 @@ impl Scheduler {
             wake: Notify::new(),
             cancel: CancellationToken::new(),
             tasks: Mutex::new(Vec::new()),
+            background,
+            door: RwLock::new(()),
         });
 
         let ticker = tokio::spawn(tick_loop(Arc::clone(&inner)));
@@ -1709,18 +1737,46 @@ impl Scheduler {
             .remove(source_id);
     }
 
+    /// Where a task on this scheduler's pool that is not a run goes -- a
+    /// write's send behind an answer already given -- so the quit waits for
+    /// it before closing the pool, and refuses it once the quit has begun.
+    #[must_use]
+    pub fn background(&self) -> &Background {
+        &self.inner.background
+    }
+
+    /// Whether [`shutdown`](Self::shutdown) has begun: from its first step on,
+    /// nothing new starts.
+    #[must_use]
+    pub fn is_shutting_down(&self) -> bool {
+        self.inner.cancel.is_cancelled()
+    }
+
     /// Look for due sources now rather than at the next tick.
     pub fn wake(&self) {
         self.inner.wake.notify_one();
     }
 
-    /// Stop ticking, cancel every run, and close the scheduler's pool --
-    /// **bounded**, so quitting during a 30-second remote call is not a
-    /// 30-second hang (carry-over).
+    /// Stop ticking, cancel every run, wait for the background sends, and
+    /// close the scheduler's pool -- **bounded**, so quitting during a
+    /// 30-second remote call is not a 30-second hang (carry-over).
+    ///
+    /// Cancel first (#1633, ruling B1): no trigger starts a run and no
+    /// background task is spawned after it. Then every trigger that began
+    /// before it is let reach its spawn (the door), so its run is in `tasks`
+    /// or its row ended. Then the runs and the [`background`](Self::background)
+    /// set are awaited together under [`SHUTDOWN_GRACE`], and what is left is
+    /// aborted. Only then the pool.
     ///
     /// Idempotent: `RunEvent::ExitRequested` can fire more than once.
     pub async fn shutdown(&self) {
         self.inner.cancel.cancel();
+        if tokio::time::timeout(SHUTDOWN_GRACE, self.inner.door.write())
+            .await
+            .is_err()
+        {
+            tracing::warn!("a trigger did not reach its spawn within the grace period");
+        }
 
         let handles = std::mem::take(&mut *self.inner.tasks.lock().await);
         let aborts: Vec<_> = handles
@@ -1732,12 +1788,15 @@ impl Scheduler {
                 let _ = handle.await;
             }
         };
-        if tokio::time::timeout(SHUTDOWN_GRACE, joined).await.is_err() {
-            tracing::warn!("a sync run did not stop within the grace period: aborting it");
-            for abort in aborts {
-                abort.abort();
+        let runs = async {
+            if tokio::time::timeout(SHUTDOWN_GRACE, joined).await.is_err() {
+                tracing::warn!("a sync run did not stop within the grace period: aborting it");
+                for abort in aborts {
+                    abort.abort();
+                }
             }
-        }
+        };
+        tokio::join!(runs, self.inner.background.close(SHUTDOWN_GRACE));
 
         // Only now, with every run's task stopped: `close()` waits for
         // in-flight queries, and waiting for one parked on a remote system is
@@ -1822,6 +1881,8 @@ impl Inner {
         // RunMode`. This is what makes "the log says `backfill`" and "the run
         // was forbidden to sweep" the same statement.
         let mode = RunMode::from(trigger);
+        // Held until the run is in `tasks`: see `door`.
+        let _door = self.door.read().await;
         if self.cancel.is_cancelled() {
             return Err(TriggerError::ShuttingDown);
         }
@@ -1903,8 +1964,18 @@ impl Inner {
 
         let inner = Arc::clone(self);
         let id = source_id.to_owned();
-        let handle = tokio::spawn(async move { inner.run_task(id, run_id, mode, watchers).await });
         let mut tasks = self.tasks.lock().await;
+        // **The quit began while this trigger was on its way here** (#1633,
+        // SYNC-5): no run is spawned, and the row this trigger opened is
+        // ended here, the way a run cancelled before its permit ends --
+        // settled, its watchers told, the source released. `shutdown` is
+        // waiting at the door, so the pool is still open for it.
+        if self.cancel.is_cancelled() {
+            drop(tasks);
+            inner.run_task(id, run_id, mode, watchers).await;
+            return Err(TriggerError::ShuttingDown);
+        }
+        let handle = tokio::spawn(async move { inner.run_task(id, run_id, mode, watchers).await });
         tasks.retain(|task| !task.is_finished());
         tasks.push(handle);
         Ok(Triggered::Started(run_id))

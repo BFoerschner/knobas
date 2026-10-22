@@ -527,6 +527,7 @@ async fn the_end_of_a_run_resolves_what_the_source_owes() {
         Told(std::sync::Arc::clone(&told)),
         pool.clone(),
         std::sync::Arc::new(knobas_app::sources::Registry::for_process()),
+        knobas_sync::background::Background::new(),
     );
     let id = queued(&pool, new_branch()).await;
     hold_arrival_link(&pool, id, TICKET).await.unwrap();

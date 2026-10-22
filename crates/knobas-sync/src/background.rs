@@ -1,0 +1,125 @@
+//! The tasks that use the scheduler's pool without being runs: a write's
+//! send behind an answer that has already gone back (#752), and the owed
+//! links resolved after a run (#1050).
+//!
+//! Held so the quit can wait for them (#1633, spec #1619 ruling B1). Cancel
+//! first: once [`Background::close`] has begun, nothing new is spawned, and a
+//! write queued after that stays pending for the next start's tick. Then the
+//! ones running are awaited for a grace period, and only then is the pool
+//! closed. A send that outlives the grace is aborted: that is ADR-0012's
+//! window, a write the source may have received while its row still says
+//! pending.
+
+use std::future::Future;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
+
+use tokio::task::JoinSet;
+
+/// The background tasks, shared: every clone is a handle onto one set.
+#[derive(Clone)]
+pub struct Background {
+    /// `None` once [`close`](Self::close) has taken the set: the closed state
+    /// and the set are one value under one lock, so a spawn either lands in
+    /// the set the quit awaits or is refused.
+    tasks: Arc<Mutex<Option<JoinSet<()>>>>,
+}
+
+impl Default for Background {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Background {
+    /// An open set with nothing in it.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            tasks: Arc::new(Mutex::new(Some(JoinSet::new()))),
+        }
+    }
+
+    /// Run `task` in the background, unless the quit has begun. Answers
+    /// whether it was spawned; a caller whose work is on a row has nothing to
+    /// undo when it was not, since the row is the record and the next start
+    /// picks it up.
+    ///
+    /// Must be called inside a Tokio runtime, as `tokio::spawn` must.
+    pub fn spawn<F>(&self, task: F) -> bool
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let mut tasks = self.tasks.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(tasks) = tasks.as_mut() else {
+            return false;
+        };
+        // Reaped on every spawn: a finished task's slot is kept until it is
+        // joined, and a week-long session spawns one per write.
+        while tasks.try_join_next().is_some() {}
+        tasks.spawn(task);
+        true
+    }
+
+    /// Refuse every later spawn, then wait up to `grace` for the tasks
+    /// running and abort what is left. Idempotent: a second call finds the
+    /// set already taken.
+    pub async fn close(&self, grace: Duration) {
+        let taken = self
+            .tasks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        let Some(mut tasks) = taken else {
+            return;
+        };
+        let drained = async { while tasks.join_next().await.is_some() {} };
+        if tokio::time::timeout(grace, drained).await.is_err() {
+            tracing::warn!(
+                left = tasks.len(),
+                "a background send did not finish within the grace period: aborting it"
+            );
+            tasks.abort_all();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_closed_set_spawns_nothing_and_close_waits_for_what_runs() {
+        let background = Background::new();
+        let (tell, mut heard) = tokio::sync::mpsc::unbounded_channel();
+        let early = tell.clone();
+        assert!(background.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let _ = early.send("ran to its end");
+        }));
+
+        background.close(Duration::from_secs(5)).await;
+        assert_eq!(heard.try_recv(), Ok("ran to its end"), "close awaited it");
+
+        assert!(!background.spawn(async move {
+            let _ = tell.send("spawned after the close");
+        }));
+        tokio::task::yield_now().await;
+        assert!(heard.try_recv().is_err(), "nothing runs after the close");
+    }
+
+    #[tokio::test]
+    async fn what_outlives_the_grace_is_aborted() {
+        let background = Background::new();
+        let (tell, mut heard) = tokio::sync::mpsc::unbounded_channel::<()>();
+        assert!(background.spawn(async move {
+            tokio::time::sleep(Duration::from_secs(3600)).await;
+            let _ = tell.send(());
+        }));
+        background.close(Duration::from_millis(20)).await;
+        assert!(
+            heard.recv().await.is_none(),
+            "the aborted task dropped its sender without sending"
+        );
+    }
+}

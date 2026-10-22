@@ -722,3 +722,145 @@ async fn a_failed_migration_stops_the_server_without_holding_the_runtime() {
         "the runtime's one thread was held for {held:?} while bring-up said migrating"
     );
 }
+
+// -- a trigger racing the quit (#1633) --------------------------------------
+
+/// Events that hold the first `running` announcement -- the one a trigger
+/// makes after it has opened the run's row and before it spawns the run --
+/// until the test lets it go.
+struct HoldsTheStart {
+    entered: std::sync::mpsc::SyncSender<()>,
+    release: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+}
+
+impl SyncEvents for HoldsTheStart {
+    fn sync_state(&self, status: knobas_sync::SourceSyncStatus) {
+        if !status.running {
+            return;
+        }
+        let Some(release) = self.release.lock().unwrap().take() else {
+            return;
+        };
+        let _ = self.entered.send(());
+        let _ = release.recv_timeout(Duration::from_secs(30));
+    }
+    fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
+    fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
+}
+
+/// SYNC-5 (#1633, spec #1619): *Sync now* is being processed when Cmd-Q
+/// arrives. The trigger opened the run's row before the quit began and
+/// reaches the spawn after it: it answers `ShuttingDown` and ends the row,
+/// with the database still open for it. Before, it spawned a run the quit had
+/// already stopped waiting for, which settled on a closed pool and left the
+/// row open until the next start reconciled it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_trigger_that_reaches_the_spawn_after_the_quit_ends_its_row() {
+    let connector = knobas_db::test_util::scratch_database("trigger-racing-quit").await;
+    let app_pool = connector.pool(2).await.unwrap();
+    knobas_sync::config::insert(
+        &app_pool,
+        &knobas_sync::config::InsertConfig {
+            id: PARKED.to_owned(),
+            adapter_kind: PARKED.to_owned(),
+            display_name: "Parked".to_owned(),
+            base_url: "https://parked.example".to_owned(),
+            auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::Pat),
+            config: serde_json::json!({}),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .expect("the source row");
+    let secrets: Arc<dyn knobas_secrets::SecretStore> =
+        Arc::new(knobas_secrets::MemoryStore::new());
+    knobas_secrets::spawn::put(
+        &secrets,
+        &knobas_secrets::KeychainAccount::source(PARKED),
+        knobas_secrets::Secret::just(AuthMethod::Pat, "a token"),
+    )
+    .await
+    .unwrap();
+    let registry: Arc<dyn AdapterRegistry> = Arc::new(Recording {
+        entered: Arc::new(tokio::sync::Notify::new()),
+        stops: Stops::default(),
+        app_pool: app_pool.clone(),
+    });
+    let (entered, held) = std::sync::mpsc::sync_channel(1);
+    let (release, released) = std::sync::mpsc::channel();
+    let scheduler = knobas_sync::scheduler::Scheduler::start(SchedulerDeps {
+        pool: connector.pool(2).await.unwrap(),
+        connections: Arc::new(Connections(connector.clone())),
+        registry: Arc::clone(&registry),
+        secrets: Arc::clone(&secrets),
+        events: Arc::new(HoldsTheStart {
+            entered,
+            release: Mutex::new(Some(released)),
+        }),
+        timing: knobas_sync::scheduler::SchedulerTiming {
+            startup_delay: Duration::from_secs(3600),
+            tick: Duration::from_secs(3600),
+        },
+    })
+    .await
+    .expect("a scheduler");
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("a mock app");
+    app.manage(SourcesState {
+        pool: app_pool,
+        scheduler: scheduler.clone(),
+        secrets,
+        registry,
+    });
+
+    let triggered = tokio::spawn({
+        let scheduler = scheduler.clone();
+        async move {
+            scheduler
+                .trigger(PARKED, knobas_sync::SyncTrigger::Manual, None)
+                .await
+        }
+    });
+    tokio::task::block_in_place(|| held.recv_timeout(Duration::from_secs(30)))
+        .expect("the trigger opens its row and announces it");
+
+    let quitting = std::thread::spawn({
+        let handle = app.handle().clone();
+        move || knobas_app::shutdown(&handle)
+    });
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !scheduler.is_shutting_down() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the quit begins");
+    // Time for a quit that does not wait on the trigger to finish.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    release.send(()).unwrap();
+
+    let answered = tokio::time::timeout(Duration::from_secs(30), triggered)
+        .await
+        .expect("the trigger answers")
+        .unwrap();
+    quitting.join().expect("the quit finishes");
+
+    let mut reader = connector.connect().await.unwrap();
+    let open: i64 = sqlx::query_scalar(
+        "select count(*) from knobas.sync_run where source_id = $1 and finished_at is null",
+    )
+    .bind(PARKED)
+    .fetch_one(&mut reader)
+    .await
+    .unwrap();
+    assert_eq!(open, 0, "the trigger left its run row open");
+    assert!(
+        matches!(
+            answered,
+            Err(knobas_sync::scheduler::TriggerError::ShuttingDown)
+        ),
+        "a trigger that reached the spawn after the quit answered {answered:?}"
+    );
+}

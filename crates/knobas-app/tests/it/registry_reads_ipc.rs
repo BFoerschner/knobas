@@ -383,7 +383,12 @@ async fn sent(pool: &PgPool, repo: &str, op: &str, payload: Value, ticket: &str)
 /// answers once the branch, queued last, is linked: the pass that links it
 /// has looked at the pull request already.
 async fn run_ends(pool: &PgPool, registry: Arc<dyn AdapterRegistry>, ticket: &str, until: &str) {
-    let events = ArrivalLinks::new(Quiet, pool.clone(), registry);
+    let events = ArrivalLinks::new(
+        Quiet,
+        pool.clone(),
+        registry,
+        knobas_sync::background::Background::new(),
+    );
     let started = knobas_sync::SourceSyncStatus::started(SRC, 1);
     events.sync_state(knobas_sync::SourceSyncStatus {
         running: false,
