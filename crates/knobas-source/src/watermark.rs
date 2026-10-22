@@ -180,6 +180,7 @@ pub struct Bounds {
 /// The position a run that emitted something ends on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Advanced<E> {
+    /// The new watermark: held at the ceiling, never below the previous one.
     pub watermark: DateTime<Utc>,
     /// The window's records, newest first and capped.
     pub seen: Vec<E>,

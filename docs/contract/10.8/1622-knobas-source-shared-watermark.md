@@ -55,7 +55,7 @@
     number matches none). `JiraCursor::advanced` and `ConfluenceCursor::advanced` take
     `(Bounds, newest, tz_offset_secs, seen_in_window)`.
   - Confluence: the ceiling clamp and its never-backwards floor move out of `sync.rs` into
-    `Bounds`; the run-start probe is unchanged.
+    `watermark::advanced`, fed through `Bounds`; the run-start probe is unchanged.
   - **Jira: one more request per sync run**, the ceiling probe: `GET rest/api/2/search` with
     `jql=<scope> ORDER BY updated DESC`, `startAt=0`, `maxResults=1`, `fields=updated` and the
     walk's `expand=changelog` (`jql::build_ceiling_jql`, the walk's scope), sent after

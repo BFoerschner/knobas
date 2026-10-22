@@ -29,7 +29,7 @@ pub(crate) fn build_jql(
     if let Some(since) = since {
         clauses.push(format!(
             "updated >= \"{}\"",
-            <Jql as MinuteLiteral>::render(since, server_offset_secs)
+            Jql::render(since, server_offset_secs)
         ));
     }
     // ASC is what makes startAt paging safe over a live index; see the tests.
@@ -82,12 +82,8 @@ mod tests {
         crate::time::parse_jira_time("2026-08-22T11:46:00.000+0000").unwrap()
     }
 
-    /// ORDER BY updated **ASC** is load-bearing, not cosmetic: with startAt
-    /// paging over a live index, an issue edited mid-pagination moves *later*
-    /// in an ascending order (so it is still reached) and *earlier* in a
-    /// descending one (so it pushes an unread issue past the cursor and is
-    /// lost).
-    /// The ceiling probe reads the walk's scope, newest first.
+    /// The ceiling probe reads the walk's scope, newest first. One row, so
+    /// the descending order the walk must never use is harmless here.
     #[test]
     fn the_ceiling_probe_is_the_walks_scope_newest_first() {
         assert_eq!(
@@ -103,6 +99,11 @@ mod tests {
         assert_eq!(build_ceiling_jql(&cfg(json!({}))), "ORDER BY updated DESC");
     }
 
+    /// ORDER BY updated **ASC** is load-bearing, not cosmetic: with startAt
+    /// paging over a live index, an issue edited mid-pagination moves *later*
+    /// in an ascending order (so it is still reached) and *earlier* in a
+    /// descending one (so it pushes an unread issue past the cursor and is
+    /// lost).
     #[test]
     fn a_full_sync_is_scoped_and_ordered() {
         assert_eq!(

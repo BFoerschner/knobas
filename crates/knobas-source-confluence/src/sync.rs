@@ -28,7 +28,7 @@
 //!    pages whose swept place differs from the cursor's record, less those
 //!    already pushed, are read again whole and pushed.
 //! 8. If nothing was pushed, hand back the cursor byte-identically. Otherwise
-//!    advance the watermark to `min(max(previous, newest emitted), ceiling)`.
+//!    advance the watermark to `max(previous, min(newest emitted, ceiling))`.
 //!
 //! # Why the mention walk is a second query and not a wider first one
 //!
@@ -87,7 +87,7 @@
 //! honoured; they fail in different places, so neither substitutes for the
 //! other.
 //!
-//! * **`max(previous, …)`** on the watermark, so a re-delivered *older* page
+//! * **The previous watermark in [`Bounds`]**, so a re-delivered *older* page
 //!   cannot drag the position backwards.
 //! * **`seen_in_window` is every record the run saw**, skipped ones included.
 //!   A run that reports only what it emitted forgets, every run, whatever it
@@ -313,8 +313,10 @@ impl SyncRun<'_> {
         // Every record this run *saw* in the window -- see the module docs.
         // Skipped ones belong here as much as emitted ones.
         let mut seen_in_window: Vec<Seen> = Vec::new();
-        // Seeded from the previous position, which is what makes the new one
-        // `max(previous, newest emitted)` rather than "newest emitted".
+        // Seeded from the previous position, so `None` here means neither
+        // the run nor the previous cursor carries a stamp. That the new
+        // position never falls below the previous one is `Bounds::previous`'s
+        // job in `advanced`, which holds it after the ceiling clamp too.
         let mut watermark: Option<DateTime<Utc>> = previous.as_ref().and_then(|c| c.modified_to);
         // Every walked page's place among its siblings. A full sync walks
         // every page, so this is the whole map and it needs no sweep (#1138).

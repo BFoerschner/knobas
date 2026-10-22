@@ -147,7 +147,7 @@ fn render_query(
     if let Some(since) = since {
         clauses.push(format!(
             "lastmodified >= \"{}\"",
-            <Cql as MinuteLiteral>::render(since, offset_secs)
+            Cql::render(since, offset_secs)
         ));
     }
     let direction = match order {

@@ -34,7 +34,7 @@
 //! [`JiraCursor::since`] documents them and this is where they are honoured;
 //! they fail in different places, so neither substitutes for the other.
 //!
-//! * **`max(previous, …)`** on the watermark, so a re-delivered *older* item
+//! * **The previous watermark in [`Bounds`]**, so a re-delivered *older* item
 //!   cannot drag the position backwards.
 //! * **`seen_in_window` is every record the run saw**, skipped ones included --
 //!   `seen` records what the *window* contained, not what crossed the SPI. A
@@ -175,8 +175,10 @@ impl SyncRun<'_> {
         // Every record this run *saw* in the window -- see the module docs.
         // Skipped ones belong here as much as emitted ones.
         let mut seen_in_window: Vec<crate::cursor::Seen> = Vec::new();
-        // Seeded from the previous position, which is what makes the new one
-        // `max(previous, newest emitted)` rather than "newest emitted".
+        // Seeded from the previous position, so `None` here means neither
+        // the run nor the previous cursor carries a stamp. That the new
+        // position never falls below the previous one is `Bounds::previous`'s
+        // job in `advanced`, which holds it after the ceiling clamp too.
         let mut watermark: Option<DateTime<Utc>> = previous.as_ref().and_then(|c| c.updated_to);
 
         let mut walk = PageWalk::new(Offset, MAX_PAGES, |start_at| {
