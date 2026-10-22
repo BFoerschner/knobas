@@ -19,6 +19,8 @@ export interface OpenJob {
 export interface JobIndex {
   /** The job key the row names, or `null` for *no job*. */
   jobOf(item: { entity_id: string | null; kind: string | null }): string | null;
+  /** The entity id of the job {@link jobOf} names, which tells two sources' same key apart (#1676). */
+  jobIdOf(item: { entity_id: string | null; kind: string | null }): string | null;
   /** Whether the job with this key holds the item: its own ticket, or what it reaches. */
   holds(job: string, item: { entity_id: string | null }): boolean;
 }
@@ -29,18 +31,28 @@ export interface JobIndex {
  */
 export function jobIndex(jobs: readonly OpenJob[]): JobIndex {
   const owner = new Map<string, string>();
+  const ownerId = new Map<string, string>();
   const held = new Map<string, Set<string>>();
   for (const job of jobs) {
     const key = keyOf(job.id);
     const ids = new Set([job.id, ...job.reached.map((row) => row.entity_id)]);
     if (!held.has(key)) held.set(key, ids);
-    for (const id of ids) if (!owner.has(id)) owner.set(id, key);
+    for (const id of ids) {
+      if (owner.has(id)) continue;
+      owner.set(id, key);
+      ownerId.set(id, job.id);
+    }
   }
   return {
     jobOf(item) {
       if (item.entity_id === null) return null;
       if (item.kind === "ticket") return keyOf(item.entity_id);
       return owner.get(item.entity_id) ?? null;
+    },
+    jobIdOf(item) {
+      if (item.entity_id === null) return null;
+      if (item.kind === "ticket") return item.entity_id;
+      return ownerId.get(item.entity_id) ?? null;
     },
     holds(job, item) {
       return item.entity_id !== null && (held.get(job)?.has(item.entity_id) ?? false);

@@ -24,6 +24,15 @@ function cell(tracked: number, logged = 0, held = 0): WeekCell {
   };
 }
 
+/** The kind each entity target reads as; a target not listed fails its read. */
+const KINDS: Record<string, string> = {
+  "jira:PAY-228": "ticket",
+  "gitea:acme/payouts#144": "ticket",
+  "knobas:page-1": "page",
+  "gitea:acme/payouts": "repo",
+};
+let extraTargets: string[] = [];
+
 function answer(days: DayWindow[]): Week {
   const zero = [cell(0), cell(0)];
   return {
@@ -39,6 +48,7 @@ function answer(days: DayWindow[]): Week {
         title: null,
         cells: [cell(30, 30), cell(30, 30), cell(30, 30), cell(30, 30), cell(48), ...zero],
       },
+      ...extraTargets.map((id) => ({ target: { kind: "entity" as const, entity_id: id }, title: null, cells: [cell(10), ...zero, ...zero, cell(0)] })),
       { target: null, title: null, cells: [cell(18), cell(12), cell(36), cell(6), cell(35), ...zero] },
     ],
     past_horizon: days.map(() => false),
@@ -66,6 +76,7 @@ const HELD: QueuedWrite = {
 let target: HTMLDivElement;
 let view: Record<string, unknown> | undefined;
 beforeEach(() => {
+  extraTargets = [];
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -91,6 +102,11 @@ async function render(over: { week?: string | null; running?: RunningTimer | nul
           return answer(days);
         },
         pendingWrites: async () => over.writes ?? [],
+        getEntity: async (id: string) => {
+          const kind = KINDS[id];
+          if (kind === undefined) throw { code: "not_found", message: "no", source_id: null };
+          return { row: { entity_id: id, kind } } as never;
+        },
       },
     },
   });
@@ -150,7 +166,21 @@ test("a cell links to its day and says what is left; weekend columns are shaded"
   expect(cells[6]!.classList.contains("tf-tm-we")).toBe(true);
   expect(cells[1]!.classList.contains("tf-tm-we")).toBe(false);
   expect(text(cells[8])).toBe("7h 45m");
-  expect(row.querySelector('a[href="#/job/jira:PAY-228"]')).not.toBeNull();
+  expect(row.querySelector('a[href="#/job/jira%3APAY-228"]')).not.toBeNull();
+});
+
+test("a Gitea ticket's slash does not split its address, and a page or repo opens at its kind's address (#1676)", async () => {
+  extraTargets = ["gitea:acme/payouts#144", "knobas:page-1", "gitea:acme/payouts", "jira:UNKNOWN-1"];
+  await render();
+  const hrefOf = (words: string) =>
+    [...target.querySelectorAll("tbody tr")].find((tr) => text(tr).includes(words))?.querySelector(".tf-tm-t a")?.getAttribute("href");
+  expect(hrefOf("acme/payouts#144")).toBe("#/job/gitea%3Aacme%2Fpayouts%23144");
+  expect(hrefOf("page-1")).toBe("#/page/knobas%3Apage-1");
+  expect(
+    [...target.querySelectorAll("tbody tr")].filter((tr) => text(tr).includes("acme/payouts") && !text(tr).includes("#144"))[0]?.querySelector(".tf-tm-t a")?.getAttribute("href"),
+  ).toBe("#/repo/gitea%3Aacme%2Fpayouts");
+  // A target whose kind cannot be read is plain text, never a link that may open the wrong thing.
+  expect(hrefOf("UNKNOWN-1")).toBeUndefined();
 });
 
 test("the no-target row says what it is, and has no bar", async () => {

@@ -509,7 +509,7 @@
             <div class="tf-blocked">
               <strong>Blocked by {blocker.key} {blocker.title}</strong>
               {#if blocker.note}<span>{blocker.note}</span>{/if}
-              <a class="tf-btn tf-sm" href="#/job/{encodeURIComponent(blocker.key)}">Open {blocker.key}</a>
+              <a class="tf-btn tf-sm" href={jobHash(blocker.entityId)}>Open {blocker.key}</a>
             </div>
           {/each}
           {#if starting}

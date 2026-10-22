@@ -12041,3 +12041,18 @@ The write side's rung is `attempts`, 1 after the first failure. That is the sync
 - **Skipped stores (merge-manager).** `resetStores` swallows only `[vitest] No "x" export`; a
   store a file's partial mock stops from loading is not in that file's graph, so it holds no state
   there, and a file that does load it resets it. *Reversing:* low.
+
+## #1676 Build every job address from the entity id
+
+- **Week row has no kind.** *Fork:* a Week target carries an entity id and no kind, so a page or
+  repo cannot be told from a ticket. *Ruling:* read the kind with `getEntity` once per id and link
+  through `entityAddress(kind, id, true)`; until it answers, or if it fails, draw plain text. No IPC
+  change, §10.8 untouched. *Reversing:* low; a `kind` on the week row would drop the read.
+- **Old ticket bookmarks.** *Ruling:* `#/ticket/<id>` and the `#/entity/<id>` resolver now land on
+  `#/job/<entity id>` (the job page reads both forms since #1476). *Reversing:* low.
+- **Week link appears after the kind read (merge-manager).** *Fork:* the key is plain text for
+  the moment the read takes, which the ticket's "No visual change" line does not name. *Ruling:*
+  accepted; `just shot` of `#/time/week` under `?fake-ipc`, before and after a 1.5 s settle, shows
+  the same table and the same underlined keys. The reads are cached per entity id (`asked`, kept
+  across weeks), so a re-render issues none; a failed read is retried on the next render. No
+  follow-up for a `kind` on the week row: three reads a week, once each. *Reversing:* low.
