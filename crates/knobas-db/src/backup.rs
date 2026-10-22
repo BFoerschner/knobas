@@ -159,6 +159,22 @@ pub enum BackupError {
     )]
     TargetNotMigrated,
 
+    /// A restore whose load failed, and whose putting back of the
+    /// [`BOOKKEEPING_TABLES`] failed after it (#1635).
+    ///
+    /// Both are named: the load's error says why the restore failed, and the
+    /// second says this machine's settings and Dependencies layers and views
+    /// may now be missing.
+    #[error(
+        "the restore failed ({load}), and putting this knobas's settings and Dependencies \
+         layers back failed too: {source}"
+    )]
+    NotPutBack {
+        load: Box<BackupError>,
+        #[source]
+        source: sqlx::Error,
+    },
+
     #[error("postgres: {0}")]
     Sqlx(#[from] sqlx::Error),
 }
@@ -336,19 +352,30 @@ pub async fn archive_sql(archive: &Path) -> Result<String, BackupError> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// Whether `archive` carries the rows of `table` in [`OWNED_SCHEMA`].
+/// The [`BOOKKEEPING_TABLES`] whose rows `archive` carries in [`OWNED_SCHEMA`].
 ///
 /// A **data** entry, not a declaration: a share export's DDL and its contents
 /// are the same list today, but "the restore will write this table" is the
 /// question being asked, and `TABLE` without `TABLE DATA` answers it *no*.
 ///
+/// One `pg_restore --list` for all four, read before [`restore`] clears
+/// anything: a listing that failed between two clears would return with no
+/// put-back (#1635).
+///
 /// # Errors
 ///
 /// Whatever [`archive_contents`] refuses with.
-async fn carries(archive: &Path, table: &str) -> Result<bool, BackupError> {
-    Ok(archive_contents(archive).await?.iter().any(|entry| {
-        entry.kind == "TABLE DATA" && entry.schema == OWNED_SCHEMA && entry.name == table
-    }))
+async fn carried_bookkeeping(archive: &Path) -> Result<Vec<&'static str>, BackupError> {
+    let contents = archive_contents(archive).await?;
+    Ok(BOOKKEEPING_TABLES
+        .iter()
+        .copied()
+        .filter(|table| {
+            contents.iter().any(|entry| {
+                entry.kind == "TABLE DATA" && entry.schema == OWNED_SCHEMA && entry.name == *table
+            })
+        })
+        .collect())
 }
 
 /// One `pg_restore --list` line, or `None` for a comment or a header.
@@ -448,8 +475,9 @@ fn is_description_word(word: &str) -> bool {
 ///
 /// [`BackupError::TargetNotMigrated`], [`BackupError::TargetNotEmpty`],
 /// [`BackupError::ToolMissing`], [`BackupError::Tool`]; [`BackupError::Sqlx`]
-/// when a statement around the load fails, which after a failed load includes
-/// putting the bookkeeping rows back, and then replaces the load's error.
+/// when a statement around the load fails; [`BackupError::NotPutBack`], naming
+/// the load's error too, when the load failed and putting the bookkeeping rows
+/// back failed after it.
 pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), BackupError> {
     let mut conn = connector.connect().await?;
     match owned_rows(&mut conn).await? {
@@ -477,18 +505,17 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
     // transaction on another connection, so a failed load cannot roll them
     // back (#1635). The rows are read first and put back by
     // `put_back_bookkeeping` when the load fails (spec #1619, ruling B3).
+    let carried = carried_bookkeeping(archive).await?;
     let snapshot = snapshot_bookkeeping(&mut conn).await?;
-    for table in BOOKKEEPING_TABLES {
-        if carries(archive, table).await? {
-            // Both halves of the name are crate constants; nothing from a
-            // caller reaches this string, which is what `AssertSqlSafe` is
-            // asserting (the same use `test_util::scratch_database` makes of it).
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "delete from {OWNED_SCHEMA}.{table}"
-            )))
-            .execute(&mut conn)
-            .await?;
-        }
+    for table in carried {
+        // Both halves of the name are crate constants; nothing from a
+        // caller reaches this string, which is what `AssertSqlSafe` is
+        // asserting (the same use `test_util::scratch_database` makes of it).
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "delete from {OWNED_SCHEMA}.{table}"
+        )))
+        .execute(&mut conn)
+        .await?;
     }
     // An archive taken before a column was renamed names the old column in
     // its `COPY`, and a data-only load into the renamed table fails the whole
@@ -507,9 +534,18 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
     let mut conn = connector.connect().await?;
     // The rows first: a fold-up that failed after them would leave a column
     // the next restore drops anyway, while rows lost here have no way back.
-    if loaded.is_err() {
-        put_back_bookkeeping(&mut conn, &snapshot).await?;
-    }
+    let loaded = match loaded {
+        Err(load) => {
+            if let Err(source) = put_back_bookkeeping(&mut conn, &snapshot).await {
+                return Err(BackupError::NotPutBack {
+                    load: Box::new(load),
+                    source,
+                });
+            }
+            Err(load)
+        }
+        ok => ok,
+    };
     for (table, old, new, _) in RENAMED_COLUMNS {
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "update {OWNED_SCHEMA}.{table} set {new} = {old} where {old} is not null"

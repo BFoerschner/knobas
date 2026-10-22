@@ -12094,3 +12094,26 @@ Ruled 2026-10-22 by the implementer on Opus, inside spec #1619's ruling B3 (snap
 - **The snapshot is `to_jsonb` text read back through `jsonb_populate_recordset`.** *Ruling:* no
   column list in Rust, so a column a later migration adds is carried with no edit, and no new
   dependency (`serde_json` is optional in `knobas-db`). *Reversing:* low.
+
+Merge-manager review of #1745, on Opus:
+
+- **A put-back that fails names the load's error too.** *Fork:* the implementer returned the
+  put-back's bare `sqlx` error in place of the load's. *Ruling:* a new `BackupError::NotPutBack
+  { load, source }` whose message says the restore failed, why, and that putting the settings
+  and Dependencies layers back failed after it. That is the one outcome where rows are gone, so
+  the user is told both. It reaches the UI as `internal`, the code every other restore failure
+  already gets, so no IPC shape changes. A fold-up failure still returns its own error: a
+  leftover shim column loses nothing. *Reversing:* low.
+- **The archive's table of contents is read once, before anything is cleared.** *Fork:* the
+  clears called `pg_restore --list` once per bookkeeping table, so a listing that failed after
+  the first clear returned with no put-back. *Ruling:* one `carried_bookkeeping` call before the
+  snapshot. A failed `delete` or `alter table` between the clears and the load still returns
+  without a put-back; that is a statement on a local server that just answered, and wrapping it
+  would need a partial-shim fold-up for no witnessed case. *Reversing:* low.
+- **A put-back that cannot reconnect after a failed load is accepted, no follow-up.** *Ruling:*
+  the rows are lost only when the embedded server stops answering in the moment between a failed
+  `pg_restore` and the reconnect; before #1635 they were lost on every failed load. A durable
+  snapshot (a scratch table or database) costs more than that window. *Reversing:* medium.
+- **The `jsonb` round trip holds for every column these tables have.** `text`, `integer`,
+  `boolean`, `jsonb` and `timestamptz` (microseconds kept), none nullable, no identity or
+  generated column and no trigger; the tests compare `to_jsonb` text, timestamps included.
