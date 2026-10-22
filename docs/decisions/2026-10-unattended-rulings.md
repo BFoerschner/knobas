@@ -12436,3 +12436,64 @@ The measurement came after it.
   it. The alternative is the adapter's mockd-backed tests answering 400 to the walk's query. The
   growth is one optional token pair that no answer depends on, because the search already broke
   ties by id ascending, `DESC` included. This is the same precedent #1623 set. *Reversing:* low.
+### #1721, #1723: Kuma's unreadable ack and the polls' quota (Opus implementer, 2026-10-22)
+
+- **What a Kuma write answers when its ack arrived unreadable (#1721).** *Fork:* `Unconfirmed`,
+  or status-less `Protocol` (a permanent refusal) with the reason written beside `answer()`.
+  *Ruling:* `Unconfirmed`, for the write's own emit and every event; the login keeps `Protocol`.
+  "Unreadable" is an ack whose arguments are not a JSON array, an empty one, or a first argument
+  with no boolean `ok`; only `ok: false` is Kuma's refusal. *Reasoning:* the ack arrived, so Kuma
+  took the packet, and nothing it said reads as a refusal. A create recorded as refused while the
+  monitor exists is the #1122/#1125 failure the queue's hold exists for: a reader who sends it
+  again makes a second monitor. The cost on the pause side is smaller than #1721's body put it:
+  since #1628 a pause or resume answered `Unconfirmed` is re-sent on the ladder (1, 2, 5, 15,
+  60 min, then hourly), not every tick, each attempt one cheap exchange whose ack arrives at once,
+  at most one login per rung against Kuma's twenty a minute. A refusal would block the entity's
+  later writes just as a wait does (`store::due` yields nothing behind a refused head), so
+  `Protocol` buys no unblocking either. The adapter states the fact (the packet was taken, the
+  outcome unread), and `resend_harmless` keeps the per-op policy where it already lives. The
+  login is different: nothing of the write went out, and a Kuma whose ack shape moved answers
+  every login so, which is the reading #1627 gave the deadline before the emit. The pinned 2.5.3
+  always answers `[{"ok":…}]`, so this path is reached only by a changed Kuma, and the fake
+  (`socket_session_tests.rs`, `ack_arguments`) is its witness under ADR-0013's carve-out for a
+  fault the real container cannot be made to produce. *Reversing:* low, one `map_err` and one
+  match arm in `verdict`; the two session tests flip.
+- **Reserved for Björn, ruled by implementer on Opus: the polls' quota since the shared limiter
+  (#1723).** *Fork:* exempt the polling transport from the shared quota (a spec change, spec #1618
+  ruling A3, waived to the Opus implementer), or correct the doc. *Ruling:* no
+  exemption. The socket now asks for the source's own quota (`rate_per_sec`, `rate_burst`) in
+  place of its fixed 25/s, burst 50, and `KumaSocket::new` says the polls share the instance's
+  quota. *Reasoning:* measured under `just kuma-live`'s container through a counting relay
+  (2026-10-22, before and after the change): at the default 5/s, burst 10, a pause on a fresh
+  login is 10 or 11 requests in 0.1 to 0.2 s, inside the burst, and a resume straight after it on
+  the held session pays 0.2 s a request for the refill (2 requests, 0.3 to 0.4 s). With the read
+  half saved at 1/s, burst 2, the polls ran 1 s apart, so the read half's quota is what governs
+  the socket, and it always does in the app: `build` makes the read half's client beside the
+  socket for every adapter, and the shared limiter takes the stricter of the live holders. The
+  fixed 25/50 therefore never sped a poll up, and it held a source saved above 25/s down to 25,
+  syncs included, for as long as the process kept the socket (`the_polls_ask_for_the_sources_own_quota`
+  was red on that). An exemption would contradict spec #1618's "one rate limiter exists per
+  instance, shared by every client built for that instance" and story 19, need a new
+  `HttpConfig` field in frozen `knobas-http` with its §10.8 entry, and buy a fraction of a
+  second per write. *Reversing:* low for the quota (two fields in `KumaSocket::new`); an
+  exemption later is the spec change above.
+
+#### #1721 and #1723's review (merge-manager on Opus, 2026-10-22)
+
+- **Whether a Kuma whose ack shape changed can keep a pause or resume on the ladder for ever.**
+  *Fork:* add a give-up to the queue for an `Unconfirmed` that repeats, or rely on what is there.
+  *Ruling:* no give-up. *Reasoning:* the ladder's shortest rung (`BACKOFF_LADDER_SECS`, 60 s) is
+  longer than the socket's `IDLE_REUSE` (15 s), so each resend on the ladder logs in afresh. A Kuma
+  whose acks all changed fails that login with status-less `Protocol`, and the queue records the
+  write as refused on its first resend. A Kuma that changed only its write acks costs one login
+  and one exchange an hour, which is what any unreachable write costs. The row shows Kuma's answer
+  and the reader can withdraw it. A give-up count would be a write-queue change for every source,
+  and spec #1618 A2 gave unreachable writes the ladder without one. *Reversing:* a queue-wide
+  change, out of this PR.
+- **The quota test reads `InstanceLimiter`'s `Debug`** (`the_polls_ask_for_the_sources_own_quota`).
+  *Fork:* keep it, or file a backlog follow-up for an accessor in frozen `knobas-http`.
+  *Ruling:* keep it, no follow-up. *Reasoning:* the `Debug` impl is hand-written in `knobas-http`
+  and names `per_second` and `burst` on purpose. The assertion needs both exact numbers, with
+  their delimiters, so it cannot pass by accident; a change to the format turns it red, loudly.
+  An accessor would add a frozen-crate surface and a §10.8 entry that only this one test reads.
+  *Reversing:* low; swap the `format!` for the accessor if one is ever added for a real reader.

@@ -100,7 +100,9 @@
 //! an emit that was accepted and then went unanswered may have been acted on,
 //! and sending a create twice would make two monitors. That failure, and the
 //! deadline once the packet is out, is `Unconfirmed` (#1627), which the write
-//! queue holds rather than sends again.
+//! queue holds rather than sends again. So is an ack that arrived in a shape
+//! knobas cannot read (#1721): Kuma took the packet, and nothing it said reads
+//! as a refusal.
 //!
 //! The socket itself is **shared per instance and account across the
 //! process** ([`KumaSocket::shared`]): the write queue builds an adapter per
@@ -187,11 +189,12 @@ const NOT_LOGGED_IN: &str = "You are not logged in.";
 /// argument one level down: a per-part cap bounds one wait, not their sum.
 ///
 /// The read count stays bounded without a count of its own, because the
-/// transport's rate limiter ([`POLL_RATE_PER_SEC`]) is what decides how many
-/// reads fit inside the deadline: at 25 a second for sixty seconds, a server
-/// that pings instantly and for ever costs at most 1,500 reads and a pong
-/// each -- against one that pings at Kuma's own interval it is three -- so the
-/// deadline bounds the traffic as well as the time.
+/// instance's rate limiter (the source's quota, [`KumaSocket::new`]) is what
+/// decides how many reads fit inside the deadline: at the default five a
+/// second for sixty seconds, a server that pings instantly and for ever costs
+/// at most 300 reads and a pong each -- against one that pings at Kuma's own
+/// interval it is three -- so the deadline bounds the traffic as well as the
+/// time.
 ///
 /// **Sixty seconds, and a constant rather than a [`crate::KumaConfig`]
 /// field.** The measured exchange is twelve reads in a few hundred
@@ -287,18 +290,24 @@ impl KumaSocket {
 
     /// Build the channel for one configured source.
     ///
-    /// **A client of its own, beside [`crate::http::KumaHttp`]**, and the two
-    /// differences are the reason:
+    /// **A client of its own, beside [`crate::http::KumaHttp`]**, because the
+    /// API key is Basic auth on `/metrics` and means nothing here: sending it
+    /// on every polling read would be a credential on the wire for no
+    /// purpose.
     ///
-    /// * **No `Auth`.** The API key is Basic auth on `/metrics` and means
-    ///   nothing here; sending it on every polling read would be a credential
-    ///   on the wire for no purpose.
-    /// * **A much higher rate.** A poll is not a request to a remote corpus,
-    ///   it is how this transport *receives*, and one write makes a dozen of
-    ///   them. At the read half's five per second a pause would take three
-    ///   seconds of pure rate limiting. The budget being protected is Kuma's,
-    ///   and a dozen reads of a buffer it has already filled is not traffic
-    ///   worth spacing out.
+    /// **The read half's quota, not one of its own** (#1723). Every client for
+    /// one origin waits on one limiter, and the stricter of the quotas its
+    /// live clients ask for governs (#1630, spec #1618): one knobas sends a
+    /// Kuma at most what its source was saved with, polls included. So the
+    /// socket asks for exactly that. A rate of its own could only ever
+    /// tighten: the 25 a second this asked for before never sped a poll up,
+    /// since every write's adapter holds the read half's client beside it, and
+    /// it held a source saved at 100 down to 25, syncs and all, for as long as
+    /// the process kept the socket. Measured through a relay in front of the
+    /// pinned container (2026-10-22, default 5/s, burst 10): a pause on a
+    /// fresh login is ten or eleven requests in 0.1 to 0.2 s, inside the
+    /// burst, and a write straight after it on the held session pays 0.2 s a
+    /// request for the refill.
     ///
     /// # Errors
     ///
@@ -316,8 +325,8 @@ impl KumaSocket {
                 adapter_kind: crate::ADAPTER_KIND.to_owned(),
                 adapter_version: crate::ADAPTER_VERSION.to_owned(),
                 auth: Auth::None,
-                requests_per_second: POLL_RATE_PER_SEC,
-                burst: POLL_BURST,
+                requests_per_second: cfg.rate_per_sec,
+                burst: cfg.rate_burst,
                 connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
                 request_timeout: Duration::from_secs(cfg.request_timeout_secs),
                 // Engine.io answers a bad session with express's own text and
@@ -377,7 +386,9 @@ impl KumaSocket {
     /// [`SourceError::Unconfirmed`] for **every failure after that packet
     /// went out** and before its ack was read -- a lost poll, a reaped
     /// session, the deadline (#1627): Kuma may have acted on it, and the write
-    /// queue holds a create rather than make a second monitor.
+    /// queue holds a create rather than make a second monitor. And for an
+    /// ack that arrived and says neither that Kuma acted nor that it refused
+    /// (#1721, [`verdict`]).
     ///
     /// The deadline before the emit is **status-less `Protocol`, which the
     /// write queue classes as a permanent refusal of this write**
@@ -639,10 +650,6 @@ fn once_emitted(error: SourceError, event: &str) -> SourceError {
     }
 }
 
-/// Requests per second for the polling transport. See [`KumaSocket::new`].
-const POLL_RATE_PER_SEC: u32 = 25;
-const POLL_BURST: u32 = 50;
-
 /// One open engine.io session: the socket plus the id the server minted.
 struct Session<'a> {
     socket: &'a KumaSocket,
@@ -815,14 +822,19 @@ fn ack_of(packet: &str, ack: u32) -> Option<&str> {
     (id.parse::<u32>().ok()? == ack).then_some(payload)
 }
 
-/// What Kuma answered, as one object: `[{"ok":true,"msg":"successPaused"}]`.
-fn answer(payload: &str) -> Result<serde_json::Value, SourceError> {
+/// What Kuma answered, as one object: `[{"ok":true,"msg":"successPaused"}]`,
+/// or why the ack cannot be read as one.
+///
+/// **The reason, not the error class**, because the class depends on what
+/// was acknowledged (#1721): [`login_verdict`] and [`verdict`] each say which
+/// they make of it, and why.
+fn answer(payload: &str) -> Result<serde_json::Value, &'static str> {
     let arguments: Vec<serde_json::Value> = serde_json::from_str(payload)
-        .map_err(|_| SourceError::protocol("Uptime Kuma's answer was not a socket.io ack"))?;
+        .map_err(|_| "Uptime Kuma's answer was not a socket.io ack")?;
     arguments
         .into_iter()
         .next()
-        .ok_or_else(|| SourceError::protocol("Uptime Kuma acknowledged with no answer at all"))
+        .ok_or("Uptime Kuma acknowledged with no answer at all")
 }
 
 fn said(answered: &serde_json::Value) -> String {
@@ -834,7 +846,12 @@ fn said(answered: &serde_json::Value) -> String {
 }
 
 fn went_well(answered: &serde_json::Value) -> bool {
-    answered.get("ok").and_then(serde_json::Value::as_bool) == Some(true)
+    ok_of(answered) == Some(true)
+}
+
+/// Kuma's verdict in an answer, `ok`, if it is the boolean 2.5.3 sends.
+fn ok_of(answered: &serde_json::Value) -> Option<bool> {
+    answered.get("ok").and_then(serde_json::Value::as_bool)
 }
 
 /// The login's verdict.
@@ -854,8 +871,13 @@ fn went_well(answered: &serde_json::Value) -> bool {
 /// the password: it is [`SourceError::Unreachable`], which the write queue
 /// retries on a later tick, rather than `Unauthorized`, which would put
 /// *Re-enter* on a credential that is right.
+///
+/// **An ack it cannot read ([`answer`]) is a refusal of the write**, status-less
+/// `Protocol` (#1721): nothing of the write was sent, and a Kuma whose ack
+/// shape moved answers every login so, which is the reading the deadline
+/// before the emit takes too ([`KumaSocket::call`]).
 fn login_verdict(payload: &str, username: &str) -> Result<(), SourceError> {
-    let answered = answer(payload)?;
+    let answered = answer(payload).map_err(SourceError::protocol)?;
     if went_well(&answered) {
         return Ok(());
     }
@@ -873,23 +895,46 @@ fn login_verdict(payload: &str, username: &str) -> Result<(), SourceError> {
     Err(SourceError::unauthorized())
 }
 
-/// The call's verdict: Kuma's own answer, or [`SourceError::Protocol`]
-/// carrying Kuma's own words.
+/// The call's verdict: Kuma's own answer, [`SourceError::Protocol`] carrying
+/// Kuma's own words, or [`SourceError::Unconfirmed`] for an ack that says
+/// neither (#1721).
 ///
 /// Protocol and not `Unauthorized`, even for *You do not own this monitor* --
 /// the account logged in, so re-entering it changes nothing, and a write that
 /// waits for a credential that is already right would wait for ever. It is a
 /// refusal of this write, which is what the queue records and shows.
+///
+/// **Only `ok: false` is a refusal.** An ack knobas cannot read ([`answer`]),
+/// or one with no boolean `ok`, arrived after Kuma took the packet and says
+/// nothing about what it did with it, so it is `Unconfirmed`: the queue holds
+/// a create for the reader and sends a pause or resume again on its ladder.
+/// A create recorded as refused would leave a monitor knobas says it never
+/// made, and a reader who sends it again makes a second one.
+/// The pinned 2.5.3 never answers that way; a Kuma whose ack shape changed
+/// does, on every write.
 fn verdict(payload: &str, event: &str) -> Result<serde_json::Value, SourceError> {
-    let answered = answer(payload)?;
-    if went_well(&answered) {
-        return Ok(answered);
+    let unread = |why: &str| SourceError::Unconfirmed {
+        status: None,
+        message: format!(
+            "Uptime Kuma acknowledged {event} in a shape knobas cannot read, so it may have \
+             acted on it: {why} ({})",
+            payload.chars().take(ACK_EXCERPT).collect::<String>()
+        ),
+    };
+    let answered = answer(payload).map_err(unread)?;
+    match ok_of(&answered) {
+        Some(true) => Ok(answered),
+        Some(false) => Err(SourceError::protocol(format!(
+            "Uptime Kuma refused {event}: {}",
+            said(&answered)
+        ))),
+        None => Err(unread("its answer carries no `ok`")),
     }
-    Err(SourceError::protocol(format!(
-        "Uptime Kuma refused {event}: {}",
-        said(&answered)
-    )))
 }
+
+/// How much of an unreadable ack its error quotes: enough to name the shape
+/// a changed Kuma answers in, and no more of a document that may be large.
+const ACK_EXCERPT: usize = 120;
 
 #[cfg(test)]
 #[path = "socket_session_tests.rs"]
@@ -1146,6 +1191,40 @@ mod tests {
         );
     }
 
+    /// **#1723.** The polls ask the instance for the quota its source was
+    /// saved with, the read half's, so the socket neither tightens a quota a
+    /// reader raised nor claims a rate of its own. Read back through a second
+    /// holder of the same origin, whose looser ask the socket's then governs.
+    #[test]
+    fn the_polls_ask_for_the_sources_own_quota() {
+        for (origin, per_second, burst) in [
+            ("http://quota-raised.kuma.test", 100, 200),
+            ("http://quota-default.kuma.test", 5, 10),
+        ] {
+            let _socket = KumaSocket::new(
+                origin,
+                &crate::KumaConfig {
+                    rate_per_sec: per_second,
+                    rate_burst: burst,
+                    ..crate::KumaConfig::default()
+                },
+                Account {
+                    username: "knobas".to_owned(),
+                    password: "knobas-dev".to_owned(),
+                },
+            )
+            .expect("the socket builds against an http url");
+            let probe =
+                knobas_http::InstanceLimiter::for_url(origin, 1_000, 2_000).expect("an http url");
+            let governs = format!("{probe:?}");
+            assert!(
+                governs.contains(&format!("per_second: {per_second},"))
+                    && governs.contains(&format!("burst: {burst} ")),
+                "{origin}: {governs}"
+            );
+        }
+    }
+
     /// The handshake, and the two ways it can fail to carry a session.
     #[test]
     fn the_session_id_comes_out_of_the_open_packet() {
@@ -1228,22 +1307,33 @@ mod tests {
         assert!(message.contains(PAUSE_EVENT), "{message}");
     }
 
-    /// An answer knobas cannot read is a protocol fault by name, never a
-    /// silent success -- a write reported as landed because its ack was
-    /// unparseable is the one failure a reader could not recover from.
+    /// An answer knobas cannot read is never a silent success -- a write
+    /// reported as landed because its ack was unparseable is the one failure a
+    /// reader could not recover from. To the write's own emit it is
+    /// `Unconfirmed`, because Kuma took the packet (#1721); to the login it is
+    /// a protocol fault, because nothing of the write was sent.
     #[test]
     fn an_unreadable_answer_is_a_fault_rather_than_a_success() {
         for unreadable in ["", "null", "[]", "{\"ok\":true}", "not json"] {
             assert!(
-                verdict(unreadable, PAUSE_EVENT).is_err(),
-                "{unreadable:?} must not read as a successful pause"
+                matches!(
+                    verdict(unreadable, PAUSE_EVENT),
+                    Err(SourceError::Unconfirmed { status: None, .. })
+                ),
+                "{unreadable:?} must not read as a successful pause, nor as a refused one"
             );
             assert!(
-                login_verdict(unreadable, "knobas").is_err(),
+                matches!(
+                    login_verdict(unreadable, "knobas"),
+                    Err(SourceError::Protocol { status: None, .. })
+                ),
                 "{unreadable:?} must not read as a successful login"
             );
         }
-        // An ack with no `ok` at all is a refusal, not an assumption.
-        assert!(verdict(r#"[{"msg":"who knows"}]"#, PAUSE_EVENT).is_err());
+        // An ack with no `ok` at all is no verdict, not an assumption either way.
+        assert!(matches!(
+            verdict(r#"[{"msg":"who knows"}]"#, PAUSE_EVENT),
+            Err(SourceError::Unconfirmed { .. })
+        ));
     }
 }

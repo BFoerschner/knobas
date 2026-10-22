@@ -20,6 +20,12 @@
 //! through a link that drops after the `add`, ADR-0013's *drop the
 //! connection*). The other three need Kuma itself to reap or stall on cue
 //! between one packet and the next, and the fake is their witness.
+//!
+//! So is an ack that arrives in a shape knobas cannot read (#1721): 2.5.3
+//! always answers `[{"ok":…}]`, only a changed Kuma answers otherwise, and a
+//! relay rewriting the real ack would be forging Kuma's answer rather than
+//! staging a link. ADR-0013's carve-out for a fault the real instance cannot
+//! produce is what makes the fake the witness there.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -76,6 +82,10 @@ struct Engine {
     /// When set, Kuma acts on an emit and never acknowledges it: the session
     /// stays up and every read answers a no-op, until the deadline.
     swallow_acks: bool,
+    /// When set, Kuma acts on an emit and acknowledges it with these
+    /// arguments verbatim, in place of `[{"ok":true,…}]`: the ack arrives,
+    /// in a shape knobas cannot read (#1721).
+    ack_arguments: Option<String>,
 }
 
 /// The stateful half of the fake, shared by every mock it mounts.
@@ -205,6 +215,9 @@ impl Engine {
             if self.swallow_acks {
                 return None;
             }
+            if let Some(arguments) = &self.ack_arguments {
+                return Some(format!("43{ack}{arguments}"));
+            }
             serde_json::json!({"ok": true, "msg": "successPaused"})
         } else {
             serde_json::json!({"ok": false, "msg": ANONYMOUS})
@@ -262,10 +275,18 @@ impl Kuma {
     }
 }
 
+/// A socket to the fake, saved at a quota well above the default's five a
+/// second: the polls wait on it (#1723), the pacing is not what these tests
+/// are about, and twenty-five writes at the default would spend ten seconds
+/// of `just check` on the refill.
 fn socket_to(server: &MockServer) -> KumaSocket {
     KumaSocket::new(
         &server.uri(),
-        &crate::KumaConfig::default(),
+        &crate::KumaConfig {
+            rate_per_sec: 100,
+            rate_burst: 100,
+            ..crate::KumaConfig::default()
+        },
         Account {
             username: "knobas".to_owned(),
             password: "knobas-dev".to_owned(),
@@ -523,6 +544,59 @@ async fn a_create_left_unacknowledged_past_the_deadline_is_unconfirmed() {
         other => panic!("expected Unconfirmed, got {other:?}"),
     }
     assert_eq!(kuma.delivered(), 1, "exactly one create reached Kuma");
+}
+
+/// **#1721, the ticket's case.** Kuma acts on the `add` and acknowledges it,
+/// and the ack's arguments are not the array 2.5.3 sends: a Kuma whose ack
+/// shape changed. The monitor exists, so the write is `Unconfirmed`, which the
+/// queue holds; a `Protocol` would record as refused a create that landed.
+#[tokio::test]
+async fn a_create_acknowledged_in_a_shape_knobas_cannot_read_is_unconfirmed() {
+    let (server, kuma) = Kuma::start(20).await;
+    let socket = socket_to(&server);
+    kuma.engine().ack_arguments =
+        Some(r#"{"ok":true,"msg":"successAdded","monitorID":31}"#.to_owned());
+    let error = add(&socket).await.expect_err("the ack cannot be read");
+    match error {
+        SourceError::Unconfirmed {
+            status: None,
+            message,
+        } => assert!(message.contains(ADD_EVENT), "{message}"),
+        other => panic!("expected Unconfirmed, got {other:?}"),
+    }
+    assert_eq!(kuma.delivered(), 1, "exactly one create reached Kuma");
+    assert_eq!(kuma.logins(), 1);
+}
+
+/// **#1721, every ack that carries no verdict.** An empty ack, and an answer
+/// with no boolean `ok`, say neither that Kuma acted nor that it refused, so
+/// they are `Unconfirmed` too. Kuma's own refusal, `ok: false`, stays the
+/// refusal it is.
+#[tokio::test]
+async fn an_ack_with_no_verdict_is_unconfirmed_and_a_refusal_is_not() {
+    let (server, kuma) = Kuma::start(20).await;
+    let socket = socket_to(&server);
+    for arguments in [
+        "[]",
+        "[null]",
+        r#"[{"msg":"who knows"}]"#,
+        r#"[{"ok":"true"}]"#,
+    ] {
+        kuma.engine().ack_arguments = Some(arguments.to_owned());
+        let error = add(&socket).await.expect_err("no verdict");
+        assert!(
+            matches!(error, SourceError::Unconfirmed { status: None, .. }),
+            "{arguments}: {error:?}"
+        );
+    }
+    kuma.engine().ack_arguments = Some(r#"[{"ok":false,"msg":"Invalid URL"}]"#.to_owned());
+    let refused = add(&socket).await.expect_err("Kuma refused it");
+    assert!(
+        matches!(refused, SourceError::Protocol { status: None, .. }),
+        "{refused:?}"
+    );
+    assert_eq!(kuma.delivered(), 5);
+    assert_eq!(kuma.logins(), 1, "an ack that arrived keeps the session");
 }
 
 /// **#1627, the deadline with the emit on the wire.** Kuma acted on the `add`

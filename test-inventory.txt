@@ -3188,6 +3188,7 @@ knobas-source-kuma	lib/knobas_source_kuma	model::tests::kumas_literal_null_label
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::only_the_monitor_families_make_monitors
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::the_response_time_sentinel_is_an_absence
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::the_state_words_are_the_help_lines_own
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_create_acknowledged_in_a_shape_knobas_cannot_read_is_unconfirmed
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_create_left_unacknowledged_past_the_deadline_is_unconfirmed
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_create_still_on_the_wire_at_the_deadline_is_unconfirmed
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_create_that_landed_before_a_reap_is_not_sent_on_a_fresh_login
@@ -3202,6 +3203,7 @@ knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_reaped_sessio
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_session_idle_past_its_window_is_not_reused
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_session_that_lost_its_login_logs_in_again
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::adapters_for_one_account_share_a_socket_and_another_password_does_not
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::an_ack_with_no_verdict_is_unconfirmed_and_a_refusal_is_not
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::more_writes_than_kuma_allows_logins_all_land_on_one_login
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::the_login_waits_until_kuma_listens_for_it
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::a_refused_account_waits_and_a_refused_write_does_not
@@ -3211,6 +3213,7 @@ knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_emit_is_a_packet_typ
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_unreadable_answer_is_a_fault_rather_than_a_success
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::only_kuma_s_invitation_lets_the_login_go
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::the_docker_hosts_come_out_of_the_pushed_list
+knobas-source-kuma	lib/knobas_source_kuma	socket::tests::the_polls_ask_for_the_sources_own_quota
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::the_session_id_comes_out_of_the_open_packet
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::a_configuration_that_cannot_work_is_refused_at_build_time
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::a_create_without_an_account_is_refused_by_the_same_sentence
