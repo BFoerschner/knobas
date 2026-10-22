@@ -12497,3 +12497,67 @@ The measurement came after it.
   their delimiters, so it cannot pass by accident; a change to the format turns it red, loudly.
   An accessor would add a frozen-crate surface and a §10.8 entry that only this one test reads.
   *Reversing:* low; swap the `format!` for the accessor if one is ever added for a real reader.
+
+### #1729: a write the local quota held is left waiting (Opus implementer, 2026-10-22)
+
+- **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): where the mark
+  lives.** *Fork:* a new `SourceError` variant, a field on `SourceError::Protocol`, a mark the
+  http crate keeps outside `SourceError`, or the queue reading the `LocalQuota` message.
+  *Ruling:* `SourceError` is unchanged. `knobas-http` gains `watch_local_quota`, which runs a
+  future and returns, beside its output, the `LocalQuota` an `HttpClient` call inside it failed
+  with before its first attempt. The mark is a tokio task-local, set where `send` returns the quota
+  failure. The write queue runs its one `Source::write` call inside it. *Reasoning:* spec #1618
+  says the wait fails `Protocol`, so a new variant contradicts the spec. A field on `Protocol`
+  changes about 230 construction and pattern sites in every adapter, the Kuma bundle beside this
+  among them. A message parse is what the ticket's acceptance list rules out. *Reversing:* low,
+  one function in `limiter.rs`, one call in the queue, and the §10.8 entry.
+- **Which wait.** *Fork:* `WaitReason::Unreachable` or a reason of its own. *Ruling:*
+  `Unreachable`. *Reasoning:* a new reason is a new value in the `wait_reason` column and in the
+  generated `sources.ts` barrel, so a migration and an IPC entry for a case the #1631 comment
+  shows is not reachable today. `Unreachable` means "it passes on its own, try again on the sync
+  ladder", which is what a quota wait does. The row's detail is the quota's message, so a reader
+  sees that knobas held the request and the instance did not refuse it. *Reversing:* medium, a
+  new `WaitReason` with its IPC and migration entries.
+- **What the mark covers.** *Fork:* the mark only when the write's error is the quota's exact
+  message, or whenever the write ends in a status-less `Protocol` after a quota failure inside it.
+  *Ruling:* the second. *Reasoning:* an adapter that wraps the message before returning it would
+  lose the write under the first. The second's false positive, an adapter that swallows a quota
+  failure and then refuses on its own account, costs one rung of the ladder: the next attempt is
+  not held by the quota, its refusal carries no mark, and it is refused. A status-carrying
+  `Protocol` is classified as before whatever the mark says. *Reversing:* low.
+- **The wasm host and retries are not marked.** *Ruling:* only `HttpClient`'s first-attempt
+  quota failure sets the mark. A retry the quota stopped reports what the source answered on the
+  attempt before, and `retryable` reads that as it always has. The wasm host maps a wait that ran
+  out to `connection-limit-reached` and the component decides what that becomes. The wait is
+  bounded by the call's deadline, so it cannot outlast the call (#1631's comment on #1729).
+  *Reversing:* low: make `limiter::stopped_on` public and call it where `net.rs` maps the
+  wait to `connection-limit-reached`.
+
+#### #1729's review (merge-manager on Opus, 2026-10-23)
+
+- **Reserved for Björn, ruled by merge-manager on Opus: the implementer's ruling on where the
+  mark lives.** *Fork:* uphold the task-local `watch_local_quota`, or send it back for a field on
+  `SourceError::Protocol`. *Ruling:* upheld. *Reasoning:* `TaskLocalFuture` swaps its value in
+  on each poll and out after it, so two watched writes on one task, joined or not, keep separate
+  marks. Each watch starts at `None` and takes its mark before the scope ends, so one write's
+  mark cannot reach the next. No adapter's `write` sends from a spawned task: no adapter crate
+  calls `tokio::spawn` or `spawn_blocking`. The wasm host is the one source that runs its write
+  on another thread, and it does not send through `HttpClient`. *Reversing:* low, as the
+  implementer's ruling says.
+- **An adapter that swallows a quota stop and then refuses on its own account.** *Fork:* accept
+  one ladder rung before the refusal, or clear the mark on every later send. *Ruling:* accept.
+  *Reasoning:* the cost is one resend a minute later. The next attempt carries no mark unless
+  the quota stops it again, and in that case nothing was sent again either. Clearing the mark
+  on each send would lose it for an adapter that makes a second request after the stopped one.
+  *Reversing:* low.
+- **knobas-sync now depends on knobas-http.** *Fork:* accept, or move the mark to
+  `knobas-source` to keep reqwest out of the engine. *Ruling:* accept. *Reasoning:* knobas-http
+  depends on neither knobas-sync nor anything above it, so there is no cycle. No ADR or contract
+  line keeps knobas-sync HTTP-free. It never builds for `wasm32-wasip2` (it needs sqlx), and
+  `knobas-app` already links both crates, so the app binary gains nothing. Putting the mark in
+  `knobas-source` would put a transport concern into the SPI crate. *Reversing:* low.
+- **How it composes with #1721 (Kuma).** *Ruling:* no conflict. Every Kuma failure after the
+  emit goes through `once_emitted` and becomes `Unconfirmed`, which `attempt` holds before
+  `retryable` looks at the mark. A mark on such a write therefore never resends a packet Kuma
+  may have acted on. A quota stop before the emit is a write that went nowhere, and waiting on
+  the ladder is right for it. *Reversing:* none needed.

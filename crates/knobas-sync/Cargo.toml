@@ -17,6 +17,10 @@ knobas-core = { path = "../knobas-core" }
 # credential, so it holds the store behind its trait. The trait, never a
 # concrete store: `just check` must never reach a real keychain.
 knobas-secrets = { path = "../knobas-secrets" }
+# The flush asks whether a write's error was knobas' own rate limit holding
+# its request (`watch_local_quota`, #1729): the one mark `SourceError` does
+# not carry.
+knobas-http = { path = "../knobas-http" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 serde_json.workspace = true
@@ -39,6 +43,8 @@ tracing = "0.1"
 [dev-dependencies]
 # A real PostgreSQL, and the reference adapter to sync out of it.
 knobas-db = { path = "../knobas-db", features = ["test-util"] }
+# A real send the local rate limit holds past a shortened budget (#1729).
+knobas-http = { path = "../knobas-http", features = ["test-util"] }
 knobas-source-mock = { path = "../knobas-source-mock" }
 tokio = { workspace = true }
 uuid.workspace = true

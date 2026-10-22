@@ -31,6 +31,7 @@
 //! [`InstanceLimiter`] is public so a sender outside [`HttpClient`] -- the
 //! wasm host's network policy (#1631) -- can wait on the same quota.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::num::NonZeroU32;
@@ -173,6 +174,44 @@ impl std::fmt::Display for LocalQuota {
 }
 
 impl std::error::Error for LocalQuota {}
+
+tokio::task_local! {
+    /// The quota a call under [`watch_local_quota`] stopped on, if one did.
+    static STOPPED: Cell<Option<LocalQuota>>;
+}
+
+/// Run `call`, and hand back beside its output the [`LocalQuota`] an
+/// [`HttpClient`](crate::HttpClient) send inside it stopped on before its
+/// first attempt, if one did (#1729).
+///
+/// Such a send fails [`SourceError::Protocol`] with no status, which is also
+/// what a refusal an adapter raises on its own account looks like. The write
+/// queue has to tell the two apart -- the first sent nothing, so nothing was
+/// refused -- and `SourceError` is frozen, so the mark travels here rather
+/// than in the error. It is the quota itself, never a reading of the
+/// message, so an adapter that wraps the message keeps it.
+///
+/// The mark is the call's, not the error's: it says a send inside `call`
+/// stopped on the quota, and the last one to do so wins. A send that reached
+/// the source and then ran out of budget on the limiter before a retry is
+/// not marked: it ends with what the source answered. A send on a task
+/// spawned from `call`, a wait in the wasm host, or a send outside any watch
+/// is not seen. A watch inside a watch keeps its mark to itself.
+pub async fn watch_local_quota<F: Future>(call: F) -> (F::Output, Option<LocalQuota>) {
+    STOPPED
+        .scope(Cell::new(None), async move {
+            let output = call.await;
+            (output, STOPPED.with(Cell::take))
+        })
+        .await
+}
+
+/// Mark the [`watch_local_quota`] this send runs under, if any, as stopped
+/// on `quota`.
+pub(crate) fn stopped_on(quota: &LocalQuota) {
+    // Outside a watch nobody is asking, which is not an error.
+    let _ = STOPPED.try_with(|stopped| stopped.set(Some(quota.clone())));
+}
 
 /// A quota: sustained requests a second and how many may go at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

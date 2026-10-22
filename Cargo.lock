@@ -3387,6 +3387,7 @@ dependencies = [
  "chrono",
  "knobas-core",
  "knobas-db",
+ "knobas-http",
  "knobas-secrets",
  "knobas-source",
  "knobas-source-mock",
