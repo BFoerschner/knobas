@@ -910,6 +910,9 @@ async fn a_second_demo_launch_on_a_live_owner_is_refused_naming_the_profile_and_
     );
 
     shutdown(&app);
-    assert!(port_answers(port), "the refused window's quit stops nothing");
+    assert!(
+        port_answers(port),
+        "the refused window's quit stops nothing"
+    );
     owner.stop().await.unwrap();
 }

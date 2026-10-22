@@ -408,10 +408,9 @@ impl EmbeddedDb {
     /// A `postmaster.pid` whose port turns out to be answered by some *other*
     /// server -- or, once the process it names is gone, by something that is
     /// not a PostgreSQL at all, or by one that refuses our password -- is
-    /// proof that no postmaster holds this data
-    /// directory: one that did would have recorded its own port. That lock is
-    /// removed and the start is retried, rather than reported as a conflict
-    /// that does not exist.
+    /// proof that no postmaster holds this data directory: one that did would
+    /// have recorded its own port. That lock is removed and the start is
+    /// retried, rather than reported as a conflict that does not exist.
     ///
     /// The first `setup()` and `start()` for a `root_dir` run under an
     /// exclusive file lock in it, so two processes launching against one
@@ -767,8 +766,8 @@ enum Ownership {
 
 /// Claim responsibility for the server serving `root_dir`, if nobody else has.
 ///
-/// Non-blocking on purpose: a live sibling holding this lock is the answer,
-/// not a delay. [`Ownership::Held`] means "somebody else owns it", which is
+/// Non-blocking on purpose: a live sibling holding this lock is the answer --
+/// the start is refused -- not a delay. [`Ownership::Held`] means "somebody else owns it", which is
 /// exactly when stopping the server would take a running instance's database
 /// down with it.
 ///
@@ -1125,9 +1124,11 @@ async fn adopt(
         .await
         {
             // 42P04 = duplicate_database. `create database` has no `if not
-            // exists`, so the lookup above is a check-then-act two adopters
-            // can interleave: the loser gets this, and the outcome it wanted
-            // -- a database that exists -- is exactly what happened.
+            // exists`, so the lookup above is a check-then-act. No second
+            // knobas runs it beside this one (both the bring-up and the
+            // ownership lock are held here), but anything else on the server
+            // can create the database in between, and the outcome wanted --
+            // a database that exists -- is then exactly what happened.
             let raced = source
                 .as_database_error()
                 .and_then(sqlx::error::DatabaseError::code)
@@ -1137,7 +1138,7 @@ async fn adopt(
                     "cannot create the {DATABASE_NAME} database: {source}"
                 )));
             }
-            tracing::info!("another adopter created the {DATABASE_NAME} database first");
+            tracing::info!("the {DATABASE_NAME} database appeared before this adoption created it");
         }
     }
     let _ = admin.close().await;
