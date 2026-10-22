@@ -25,8 +25,8 @@ use knobas_source::{
 use knobas_sync::scheduler::{AdapterRegistry, RunConnections, SchedulerDeps, SyncEvents};
 use serde_json::json;
 
-const SOURCE: &str = "kuma";
-const OTHER: &str = "kuma-two";
+/// The adapter kind every source of this file is built from.
+const KIND: &str = "kuma";
 
 /// What one source's fake does and has been asked.
 #[derive(Default)]
@@ -82,8 +82,8 @@ impl Source for Fake {
 
 fn descriptor() -> SourceDescriptor {
     SourceDescriptor {
-        id: SOURCE.to_owned(),
-        adapter_kind: SOURCE.to_owned(),
+        id: KIND.to_owned(),
+        adapter_kind: KIND.to_owned(),
         name: "Uptime Kuma".to_owned(),
         capabilities: vec![knobas_source::Capability::Write],
         adapter_version: "0".to_owned(),
@@ -145,6 +145,13 @@ impl SyncEvents for Silent {
 }
 
 struct Fixture {
+    /// This test's source. The write queue's flush gate is process-wide and
+    /// keyed by source id, so tests that share an id share a release count
+    /// and one test's credential save reads as a stale refusal in another's
+    /// flush (#1752): each fixture names its own.
+    source: String,
+    /// A second source of this test's, whose credential is not `source`'s.
+    other: String,
     state: SourcesState,
     lines: HashMap<String, Arc<Line>>,
 }
@@ -208,9 +215,11 @@ async fn fixture(name: &str) -> Fixture {
     let connector = knobas_db::test_util::scratch_database(name).await;
     let pool = connector.pool(4).await.expect("a pool");
 
+    let source = format!("kuma-{name}");
+    let other = format!("kuma-{name}-two");
     let secrets = Arc::new(MemoryStore::new());
     let mut lines = HashMap::new();
-    for id in [SOURCE, OTHER] {
+    for id in [&source, &other] {
         secrets
             .put(
                 &knobas_secrets::KeychainAccount::source(id),
@@ -220,9 +229,9 @@ async fn fixture(name: &str) -> Fixture {
         knobas_sync::config::insert(
             &pool,
             &knobas_sync::config::InsertConfig {
-                id: id.to_owned(),
-                adapter_kind: SOURCE.to_owned(),
-                display_name: id.to_owned(),
+                id: id.clone(),
+                adapter_kind: KIND.to_owned(),
+                display_name: id.clone(),
                 base_url: "https://kuma.example".to_owned(),
                 auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::Pat),
                 config: json!({}),
@@ -232,7 +241,7 @@ async fn fixture(name: &str) -> Fixture {
         )
         .await
         .expect("the source row is written");
-        lines.insert(id.to_owned(), Arc::new(Line::default()));
+        lines.insert(id.clone(), Arc::new(Line::default()));
     }
 
     let registry: Arc<dyn AdapterRegistry> = Arc::new(Registry {
@@ -253,6 +262,8 @@ async fn fixture(name: &str) -> Fixture {
     .expect("a scheduler");
 
     Fixture {
+        source,
+        other,
         state: SourcesState {
             pool,
             scheduler,
@@ -269,29 +280,29 @@ async fn fixture(name: &str) -> Fixture {
 async fn a_new_secret_releases_the_unauthorized_write_on_its_own_source() {
     let f = fixture("unauthorized_write_secret").await;
     let write = f
-        .unauthorized_comment(SOURCE, "after the key was rotated")
+        .unauthorized_comment(&f.source, "after the key was rotated")
         .await;
-    f.refuses(SOURCE, false);
+    f.refuses(&f.source, false);
 
     f.tick().await;
     f.tick().await;
     assert_eq!(
-        f.asked(SOURCE),
+        f.asked(&f.source),
         1,
         "the tick does not re-send a rejected credential"
     );
 
-    f.save(OTHER, SecretInput::of("another-key")).await;
+    f.save(&f.other, SecretInput::of("another-key")).await;
     f.tick().await;
     assert_eq!(
-        f.asked(SOURCE),
+        f.asked(&f.source),
         1,
         "another source's credential is not this one's"
     );
 
-    f.save(SOURCE, SecretInput::of("a-new-key")).await;
+    f.save(&f.source, SecretInput::of("a-new-key")).await;
     f.tick().await;
-    assert_eq!(f.asked(SOURCE), 2);
+    assert_eq!(f.asked(&f.source), 2);
     assert_eq!(f.row(write).await.state, WriteState::Sent);
 }
 
@@ -301,15 +312,15 @@ async fn a_new_secret_releases_the_unauthorized_write_on_its_own_source() {
 async fn a_new_account_releases_the_unauthorized_write() {
     let f = fixture("unauthorized_write_account").await;
     let write = f
-        .unauthorized_comment(SOURCE, "after the password changed")
+        .unauthorized_comment(&f.source, "after the password changed")
         .await;
-    f.refuses(SOURCE, false);
+    f.refuses(&f.source, false);
 
     f.tick().await;
-    assert_eq!(f.asked(SOURCE), 1);
+    assert_eq!(f.asked(&f.source), 1);
 
     f.save(
-        SOURCE,
+        &f.source,
         SecretInput {
             value: None,
             account: Some(AccountInput {
@@ -320,7 +331,7 @@ async fn a_new_account_releases_the_unauthorized_write() {
     )
     .await;
     f.tick().await;
-    assert_eq!(f.asked(SOURCE), 2);
+    assert_eq!(f.asked(&f.source), 2);
     assert_eq!(f.row(write).await.state, WriteState::Sent);
 }
 
@@ -329,25 +340,25 @@ async fn a_new_account_releases_the_unauthorized_write() {
 #[tokio::test]
 async fn flush_now_sends_an_unauthorized_write_once() {
     let f = fixture("unauthorized_write_flush_now").await;
-    let write = f.unauthorized_comment(SOURCE, "pressed").await;
+    let write = f.unauthorized_comment(&f.source, "pressed").await;
 
-    knobas_app::sources::write_queue::flush_now(&f.state, Some(SOURCE.to_owned()))
+    knobas_app::sources::write_queue::flush_now(&f.state, Some(f.source.clone()))
         .await
         .expect("the flush runs");
-    assert_eq!(f.asked(SOURCE), 2, "one send for the press");
+    assert_eq!(f.asked(&f.source), 2, "one send for the press");
     assert_eq!(
         f.row(write).await.wait_reason,
         Some(WaitReason::Unauthorized)
     );
 
-    f.refuses(SOURCE, false);
+    f.refuses(&f.source, false);
     f.tick().await;
-    assert_eq!(f.asked(SOURCE), 2, "a press is not a release");
+    assert_eq!(f.asked(&f.source), 2, "a press is not a release");
 
     knobas_app::sources::write_queue::flush_now(&f.state, None)
         .await
         .expect("the flush runs");
-    assert_eq!(f.asked(SOURCE), 3);
+    assert_eq!(f.asked(&f.source), 3);
     assert_eq!(f.row(write).await.state, WriteState::Sent);
 }
 
@@ -357,11 +368,16 @@ async fn flush_now_sends_an_unauthorized_write_once() {
 #[tokio::test]
 async fn an_edit_of_where_the_source_is_releases_the_unauthorized_write() {
     let f = fixture("unauthorized_write_edit").await;
-    let write = f.unauthorized_comment(SOURCE, "after the move").await;
-    f.refuses(SOURCE, false);
+    let write = f.unauthorized_comment(&f.source, "after the move").await;
+    f.refuses(&f.source, false);
 
     let edit = |patch: knobas_app::sources::SourcePatch| {
-        knobas_app::sources::crud::update(&f.state.pool, f.state.registry.as_ref(), SOURCE, patch)
+        knobas_app::sources::crud::update(
+            &f.state.pool,
+            f.state.registry.as_ref(),
+            &f.source,
+            patch,
+        )
     };
     edit(knobas_app::sources::SourcePatch {
         display_name: Some("Kuma, renamed".to_owned()),
@@ -373,7 +389,7 @@ async fn an_edit_of_where_the_source_is_releases_the_unauthorized_write() {
     .await
     .expect("the rename is saved");
     f.tick().await;
-    assert_eq!(f.asked(SOURCE), 1, "a rename releases nothing");
+    assert_eq!(f.asked(&f.source), 1, "a rename releases nothing");
 
     edit(knobas_app::sources::SourcePatch {
         display_name: None,
@@ -385,6 +401,6 @@ async fn an_edit_of_where_the_source_is_releases_the_unauthorized_write() {
     .await
     .expect("the address is saved");
     f.tick().await;
-    assert_eq!(f.asked(SOURCE), 2);
+    assert_eq!(f.asked(&f.source), 2);
     assert_eq!(f.row(write).await.state, WriteState::Sent);
 }
