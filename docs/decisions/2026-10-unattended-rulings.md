@@ -11621,3 +11621,11 @@ set.
   monitor for the happy-path create. The reaped-before-ack, never-acknowledged and on-the-wire
   deadline cases need Kuma itself to reap or stall between two packets, and stay with
   `socket::session_tests`' fake. *Reversing:* low, one test and its relay.
+- **Kuma's login limit in `just kuma-live`.** With the lost-ack test added, one run's second
+  binary had its `kuma-monitor.sh add` refused with *Too frequently, try again later.*: the suite
+  sits near Kuma's twenty logins a minute, and the new test spends logins of its own. *Ruling:*
+  the lost-ack test skips the pre-delete the create test makes (the seed the recipe runs first
+  sweeps the name), and `testenv/kuma-monitor.mjs` waits 61 s and logs in once more when its
+  login is refused for the limit, rather than failing a test on the fixture's budget. The re-run
+  that followed did not need the wait. Re-adding #864's 61 s sleep between the binaries would
+  have cost every run a minute. *Reversing:* low, one branch in the helper.
