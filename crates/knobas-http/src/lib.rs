@@ -16,7 +16,15 @@
 //!   *before* the retry it applies to, up to [`classify::RETRY_AFTER_CAP`].
 //!   A write that must not arrive twice opts out with [`Request::no_retry`].
 //! * **Rate limiting**: per instance, so two Jiras do not share a budget, and
-//!   **every attempt passes it**, retries included.
+//!   **every attempt passes it**, retries included. The limiter lives in a
+//!   process-wide map keyed by the base URL's origin (scheme, host, port), not
+//!   in the client: every [`HttpClient`] built for one instance -- a sync
+//!   run's, a live read's, a flush's -- waits on the same quota, the stricter
+//!   one where two configurations differ ([`InstanceLimiter`], #1630). A wait
+//!   on it is bounded by [`SEND_BUDGET`]; when it runs the budget out before
+//!   the first attempt, the call is `Protocol` naming the quota
+//!   ([`LocalQuota`]), not `Unreachable`, since the instance was never asked
+//!   (before a retry, it is what the source said the attempt before).
 //! * **One way out**: [`HttpClient::send`] (and its streamed twin
 //!   [`HttpClient::send_streaming`], the same attempt loop) is the only thing
 //!   that puts a request on the wire. [`HttpClient::request`] hands back a [`Request`],
@@ -43,21 +51,18 @@
 
 pub mod classify;
 mod credential;
+mod limiter;
 pub mod retry;
 mod walk;
 
-use std::num::NonZeroU32;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use governor::clock::DefaultClock;
-use governor::state::{InMemoryState, NotKeyed};
-use governor::{Quota, RateLimiter};
 use knobas_source::SourceError;
 use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
 
 pub use classify::{BodyMessage, ForbiddenReading, reqwest_error, response_error, status_error};
 pub use credential::{CredentialRules, TokenSpelling, credential};
+pub use limiter::{InstanceLimiter, LocalQuota};
 pub use walk::{NextLink, Offset, PageNumber, PageWalk, Paged, Protocol, Walked};
 
 // Every type this crate's signatures name, re-exported: an adapter depends on
@@ -117,8 +122,6 @@ pub const SEND_BUDGET: Duration = Duration::from_secs(45);
 /// anyone still there?" -- about one read instead of about the whole body.
 pub const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
-type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
-
 /// How an adapter authenticates. The secret lives in the OS keychain and
 /// arrives here per instance; it is never logged and never stored.
 ///
@@ -166,9 +169,12 @@ pub struct HttpConfig {
     /// How this instance authenticates.
     pub auth: Auth,
     /// Sustained requests per second (§4.1 defaults: Jira 5, Gitea 10,
-    /// TeamCity 5). Overridable per source in its config.
+    /// TeamCity 5). Overridable per source in its config. Shared with every
+    /// other client for the same origin, and the lower of the two where they
+    /// differ ([`InstanceLimiter`]).
     pub requests_per_second: u32,
     /// Burst allowance (§4.1 defaults: Jira 10, Gitea 20, TeamCity 10).
+    /// Shared and merged the same way.
     pub burst: u32,
     /// How long to wait for a connection before calling the source
     /// unreachable.
@@ -215,10 +221,14 @@ pub struct HttpClient {
     /// The per-request timeout, kept so [`HttpClient::send`] can shorten it to
     /// whatever is left of [`SEND_BUDGET`].
     request_timeout: Duration,
+    /// [`SEND_BUDGET`], except in a test that cannot wait 45 s to see it run
+    /// out ([`HttpClient::with_send_budget`], `test-util` only).
+    send_budget: Duration,
     /// Trailing slash trimmed; see [`HttpClient::url_for`].
     base_url: String,
     auth: Auth,
-    limiter: Arc<Limiter>,
+    /// The instance origin's quota, shared with every other client for it.
+    limiter: InstanceLimiter,
     /// The adapter's reading of a failing response body; see
     /// [`HttpConfig::body_message`].
     body_message: Option<classify::BodyMessage>,
@@ -247,15 +257,7 @@ impl HttpClient {
     /// backend cannot be built -- both are configuration failures, and both
     /// must surface when the source is saved rather than mid-sync.
     pub fn new(config: HttpConfig) -> Result<Self, SourceError> {
-        let parsed = url::Url::parse(&config.base_url).map_err(|error| {
-            SourceError::protocol(format!("base url {:?}: {error}", config.base_url))
-        })?;
-        if !matches!(parsed.scheme(), "http" | "https") {
-            return Err(SourceError::protocol(format!(
-                "base url {:?} is not http(s)",
-                config.base_url
-            )));
-        }
+        let parsed = limiter::http_url(&config.base_url)?;
 
         let mut headers = HeaderMap::new();
         // TeamCity answers XML without this and every adapter wants JSON, so
@@ -291,15 +293,18 @@ impl HttpClient {
             .build()
             .map_err(|error| SourceError::protocol(format!("building the http client: {error}")))?;
 
-        let quota = Quota::per_second(nonzero(config.requests_per_second))
-            .allow_burst(nonzero(config.burst));
+        let limiter = InstanceLimiter::for_origin(
+            &parsed,
+            limiter::Rate::new(config.requests_per_second, config.burst),
+        );
 
         Ok(Self {
             inner: client,
             request_timeout: config.request_timeout,
+            send_budget: SEND_BUDGET,
             base_url: config.base_url.trim_end_matches('/').to_owned(),
             auth: config.auth,
-            limiter: Arc::new(RateLimiter::direct(quota)),
+            limiter,
             body_message: config.body_message,
             forbidden: config.forbidden,
         })
@@ -357,7 +362,9 @@ impl HttpClient {
     /// The [`SourceError`] the failure maps to (see [`classify`]). A retryable
     /// failure that exhausts the attempts, or the budget, surfaces as the
     /// *last* failure rather than as a retry-specific one: what the caller
-    /// needs to know is what the source finally said.
+    /// needs to know is what the source finally said. A first attempt the
+    /// limiter holds past the budget is [`SourceError::Protocol`] with the
+    /// [`LocalQuota`]'s message: the source said nothing, and was not asked.
     pub async fn send(&self, request: Request) -> Result<reqwest::Response, SourceError> {
         self.send_with(request, Deadline::Whole).await
     }
@@ -400,6 +407,9 @@ impl HttpClient {
         // no byte of it reached the source.
         let retry = request.retry;
         let mut request = request.inner;
+        // What the attempt before this one ended in, once there was one: what
+        // the call reports if the budget runs out before the next goes.
+        let mut previous: Option<SourceError> = None;
 
         for attempt in 1..=MAX_ATTEMPTS {
             // Cloned before sending, because sending consumes it. `None` for a
@@ -408,16 +418,28 @@ impl HttpClient {
             let last = attempt == MAX_ATTEMPTS;
 
             // Every attempt, not just the first: a retry that skips the
-            // limiter is the burst this crate exists to prevent. Before the
-            // budget is measured out, because waiting for a token is part of
-            // what the call costs.
-            self.limiter.until_ready().await;
-
-            let Some(attempt_timeout) = self.attempt_timeout(started) else {
-                return Err(SourceError::Unreachable(format!(
-                    "no answer within {}s",
-                    SEND_BUDGET.as_secs()
-                )));
+            // limiter is the burst this crate exists to prevent. Inside the
+            // budget, because waiting for a token is part of what the call
+            // costs, and bounded by what is left of it (SPI-11, #1630).
+            let left = self.budget_left(started).unwrap_or_default();
+            let ready = self.limiter.until_ready_within(left).await;
+            // Out of budget in the wait, or with none left once it ended:
+            // either way this attempt never left. A retry reports what the
+            // source said the attempt before; a first attempt has only the
+            // wait to report, and it is knobas' own quota -- `Protocol`,
+            // never `Unreachable`, which would back the source off for a wait
+            // it did not impose.
+            let attempt_timeout = match (ready, self.attempt_timeout(started)) {
+                (Ok(()), Some(timeout)) => timeout,
+                (ready, _) => {
+                    let quota = match ready {
+                        Err(ran_out) => ran_out,
+                        Ok(()) => self.limiter.ran_out(left),
+                    };
+                    return Err(
+                        previous.unwrap_or_else(|| SourceError::protocol(quota.to_string()))
+                    );
+                }
             };
 
             // A transport failure, mapped, and whether it is transient: worth
@@ -509,6 +531,7 @@ impl HttpClient {
             tracing::debug!(attempt, ?delay, "retrying");
             tokio::time::sleep(delay).await;
             request = next;
+            previous = Some(give_up);
         }
 
         // `MAX_ATTEMPTS` is a non-zero constant, so the loop always returns.
@@ -522,7 +545,7 @@ impl HttpClient {
     /// there room to wait this long before retrying?", where the per-request
     /// timeout is irrelevant.
     fn budget_left(&self, started: Instant) -> Option<Duration> {
-        SEND_BUDGET
+        self.send_budget
             .checked_sub(started.elapsed())
             .filter(|left| !left.is_zero())
     }
@@ -706,6 +729,20 @@ impl std::fmt::Debug for Request {
 }
 
 #[cfg(feature = "test-util")]
+impl HttpClient {
+    /// The same client with a shorter [`SEND_BUDGET`]. **Tests only**: a test
+    /// that watches the budget run out should not take 45 s to do it, and
+    /// nothing outside a test may give a call more or less than the budget.
+    #[must_use]
+    pub fn with_send_budget(self, budget: Duration) -> Self {
+        Self {
+            send_budget: budget,
+            ..self
+        }
+    }
+}
+
+#[cfg(feature = "test-util")]
 impl Request {
     /// The request as `reqwest` would send it. **Tests only.**
     ///
@@ -852,9 +889,4 @@ impl Request {
 /// ever used to build an error message.
 async fn body_of(response: reqwest::Response) -> String {
     response.text().await.unwrap_or_default()
-}
-
-/// Quotas cannot be zero; a misconfigured `0/s` means "one", not "never".
-fn nonzero(value: u32) -> NonZeroU32 {
-    NonZeroU32::new(value).unwrap_or(NonZeroU32::MIN)
 }

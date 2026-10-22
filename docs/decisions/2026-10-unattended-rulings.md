@@ -11644,3 +11644,79 @@ set.
   `more_writes_in_a_minute_than_kuma_allows_logins_all_land`, which drives the adapter directly,
   not the helper. It also covers the cause #1727 reports (`Scratch::drop`'s delete refused for the
   limit), since the delete goes through the same login. *Reversing:* low.
+## #1630: one rate limiter per instance, and a limiter wait reported as the local quota (Opus implementer, 2026-10-22)
+
+- **Reserved for Björn, ruled by implementer on Opus: the frozen-surface change to
+  `crates/knobas-http/**`** (waived by Björn 2026-10-22, review handoff). *Ruling:* one new
+  module, `limiter.rs`, with an additive public `InstanceLimiter` and `LocalQuota`, plus a
+  `test-util` `HttpClient::with_send_budget`; booked in
+  `docs/contract/10.8/1630-knobas-http-one-limiter-per-instance.md`. No `HttpConfig` field or
+  adapter changes. *Reversing:* low; the limiter goes back into the client.
+- **"Governor's keyed form".** Governor's `RateLimiter::keyed` holds one quota for every key, so
+  it cannot give a Jira origin 5/s and a Gitea origin 10/s, or let the stricter of two
+  configurations govern one origin. Both are requirements of the spec. *Ruling:* a process-wide
+  map keyed by `url::Origin`, holding one governor direct limiter per origin. That is still a
+  keyed limiter in `knobas-http`, which is A3's actual fork (as against a cached `Source`). The
+  spec's requirement wins over its parenthesis. *Reversing:* low, inside one module.
+- **What "stricter" means when the two quotas cross** (one has the higher rate, the other the
+  higher burst). *Ruling:* field by field: the lower rate and the lower burst. A server that
+  tolerates one configuration's burst says nothing about the other's. *Reversing:* low, one
+  function.
+- **Whether a quota can loosen again.** *Ruling:* no, not for the life of the process. A source
+  edited to a looser quota gets it from the next start. The quota has to outlive the clients that
+  use it: if the entry died with its last client, the next client built a moment later would get
+  a fresh burst, which is SPI-2 again. Nothing identifies a configuration to the http crate, so it
+  cannot retire a stale one. *Reversing:* moderate; it needs a configuration identity passed in.
+- **What a tightening does to the limiter it replaces.** Governor cannot change the quota of a
+  limiter it has already built. *Ruling:* a new limiter at the merged quota, which every holder
+  waits on from its next request. It starts with its own (stricter) burst, so a tightening hands
+  out at most one stricter burst, and there are only a few tightenings in a process's life.
+  Draining the new limiter was rejected: it buys nothing in practice and makes the first request
+  after a tightening wait. *Reversing:* low, one line.
+- **A limiter wait that runs the budget out before a retry.** *Ruling:* the call fails with the
+  previous attempt's failure, not with the local quota, the same rule as for a retry delay that
+  does not fit the budget. Only a first attempt reports `Protocol` naming the quota. The source
+  has already answered by then, and if that answer was a timeout, `Unreachable` is the
+  instance's own failure. *Reversing:* low, one branch.
+- **How a test sees the budget run out without waiting 45 s.** *Ruling:* `with_send_budget`
+  behind the existing `test-util` feature, off in every build an adapter compiles against.
+  `SEND_BUDGET` stays the only budget anywhere else. *Reversing:* low.
+- **Whether the change owes a live suite** (working model, "a PR at the real systems' edge").
+  `knobas-http` sits under every adapter, and the shared limiter changes pacing for everything
+  that builds clients for one origin. *Ruling:* yes, and `just kuma-live` is the cheapest that
+  exercises it: Kuma's read half (5/s, burst 10) and its polling transport (25/s, burst 50) share
+  an origin, so the run covers sharing and stricter-wins against the real product. Green.
+- **Kuma's polling transport now runs at the read half's quota.** The spec's rule, but
+  `KumaSocket::new`'s doc gives the reason for the higher rate. *Ruling:* the shared limiter
+  follows the spec. The Kuma crate is left alone (#1627 is in flight there), and the question is
+  filed as #1723 (`backlog`). *Reversing:* n/a.
+- **Test servers on reused ports** (Standards review). The map never forgets an origin, so a test
+  server handed a port an earlier test tightened to one a second would inherit that quota.
+  *Ruling:* `CountingServer` keeps its port bound for the rest of the test process (a forgotten
+  duplicate of the listener), so no later server in the binary gets it. The quota map stays
+  without a test-only reset. *Reversing:* low, test code.
+
+### #1630: merge-manager review (Opus, PR #1724, 2026-10-22)
+
+- **A quota that only tightens until restart.** The rate fields are on every source's settings
+  form, so a raised quota is silently not used until restart, and a quota tried in a draft's
+  *Test connection* holds the origin down too. Before #1630 an edit applied from the next client.
+  *Ruling:* merge as built, because it closes SPI-2, and file #1728 (`ready-for-agent`, since the
+  form shows a value the app does not use): loosen once no live client asks for the stricter
+  quota (weak registrations, no configuration identity needed), with a loosened limiter starting
+  drained so that alternating sources get no fresh burst. *Reversing:* the follow-up is the
+  reversal, inside `limiter.rs`.
+- **#1723 (Kuma's polling transport at the read half's 5/s, burst 10).** *Ruling:* it stays
+  `backlog`. The socket carries only writes, and they go through the queue, so nobody waits on
+  one in the UI. A single write's dozen polls mostly fit the shared burst, `just kuma-live`'s
+  `more_writes_in_a_minute_than_kuma_allows_logins_all_land` is green, and the pacing is the
+  spec's stricter-wins rule. *Reversing:* relabel.
+- **A local-quota failure in the write queue.** `Protocol` with no status is a refusal in
+  `write_queue::retryable`, so a write the limiter held past the budget would now be refused
+  instead of waiting. The spec says `Protocol`, and with serial adapters a write cannot wait that
+  long today. *Ruling:* follow the spec and file #1729 (`backlog`). *Reversing:* n/a.
+- **The implementer's other rulings** (origin map of direct limiters, field-by-field stricter,
+  tightening without a drain, a retry keeping the previous failure, the public seam for #1631,
+  `with_send_budget`, held test ports) are upheld. Lock order is `INSTANCES` then the slot's
+  `paced`, and no path takes them in reverse. Nothing is awaited under either: the limiter is
+  cloned out before the wait. The map holds one entry per origin. *Reversing:* n/a.

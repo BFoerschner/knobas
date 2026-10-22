@@ -153,6 +153,11 @@ impl CountingServer {
     fn always_with_body(status: u16, extra: &'static str, body: &'static str) -> Self {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("addr").port();
+        // The port stays bound for the rest of the process, so no later
+        // server in this binary is handed it: the rate limit is process-wide
+        // and keyed by origin (#1630), and a later test on a reused port
+        // would inherit whatever quota this one tightened it to.
+        std::mem::forget(listener.try_clone().expect("hold the port"));
         listener.set_nonblocking(true).expect("nonblocking");
         let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
 
@@ -361,6 +366,218 @@ async fn a_retry_after_longer_than_the_budget_ends_the_call() {
         elapsed < std::time::Duration::from_secs(30),
         "the call must end at once rather than serving out two 60s waits; \
          took {elapsed:?}"
+    );
+}
+
+/// The budget the limiter tests run on: long enough for the second of a
+/// 1-a-second queue to go (at t=1 s), short enough that the third (t=2 s)
+/// cannot, and far short of the real 45 s.
+const SHORT_BUDGET: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// `count` sends of `GET /x` started at once on `client`: what each ended in,
+/// and how long it took.
+async fn queued_sends(
+    client: &Arc<HttpClient>,
+    count: usize,
+) -> Vec<(Result<u16, SourceError>, std::time::Duration)> {
+    let mut sends = tokio::task::JoinSet::new();
+    for _ in 0..count {
+        let client = Arc::clone(client);
+        sends.spawn(async move {
+            let started = std::time::Instant::now();
+            let outcome = client
+                .send(client.request(Method::GET, "/x"))
+                .await
+                .map(|response| response.status().as_u16());
+            (outcome, started.elapsed())
+        });
+    }
+    sends.join_all().await
+}
+
+/// **A limiter wait that outlasts the budget is the local quota, not the
+/// instance** (SPI-11, #1630).
+///
+/// Five sends queued at once behind one a second with a burst of one: the
+/// first goes at once, the second at t=1 s, and the other three cannot go
+/// before the 1.5 s budget runs out. Not one of the three reached the
+/// instance, so `Unreachable` -- the class the scheduler backs a source off
+/// on -- would blame it for a wait knobas imposed. Each is `Protocol`, naming
+/// the quota it waited on.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_limiter_wait_that_outlasts_the_budget_is_the_local_quota() {
+    let server = CountingServer::always(200, "");
+    let client = Arc::new(paced_client(&server, 1).with_send_budget(SHORT_BUDGET));
+
+    let outcomes = queued_sends(&client, 5).await;
+
+    let sent = outcomes
+        .iter()
+        .filter(|(outcome, _)| outcome.is_ok())
+        .count();
+    assert_eq!(sent, 2, "t=0 and t=1s fit the budget: {outcomes:?}");
+    assert_eq!(
+        server.hits(),
+        2,
+        "nothing past the budget reached the server"
+    );
+    for (outcome, _) in outcomes.iter().filter(|(outcome, _)| outcome.is_err()) {
+        let Err(SourceError::Protocol {
+            status: None,
+            message,
+        }) = outcome
+        else {
+            panic!("a wait on the local quota must be Protocol, never Unreachable: {outcome:?}");
+        };
+        assert!(
+            message.contains("local rate limit") && message.contains("1 request a second"),
+            "the message names the quota it waited on: {message}"
+        );
+    }
+}
+
+/// **The limiter wait never outlasts what is left of the budget** -- the
+/// limiter's half of [`SEND_BUDGET`](knobas_http::SEND_BUDGET), beside
+/// `a_retry_after_longer_than_the_budget_ends_the_call`'s half for the waits
+/// between attempts.
+///
+/// Unbounded, the five queued sends above end at t=0, 1, 2, 3 and 4 s; bounded,
+/// none ends later than the 1.5 s budget, plus the scheduling slack of a
+/// loaded test machine. The retry half: a `503` at t=0 asks for a second
+/// attempt, which cannot pass the limiter before the budget runs out, so the
+/// call ends at the budget with the `503` it had -- what the source said --
+/// and not with the quota, which only kept it from asking again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_limiter_wait_never_outlasts_the_budget() {
+    let slack = std::time::Duration::from_millis(400);
+
+    let server = CountingServer::always(200, "");
+    let client = Arc::new(paced_client(&server, 1).with_send_budget(SHORT_BUDGET));
+    for (outcome, took) in queued_sends(&client, 5).await {
+        assert!(
+            took <= SHORT_BUDGET + slack,
+            "a send ended {took:?} in, past the {SHORT_BUDGET:?} budget: {outcome:?}"
+        );
+    }
+
+    let busy = CountingServer::always(503, "");
+    let client = paced_client(&busy, 1).with_send_budget(std::time::Duration::from_millis(800));
+    let started = std::time::Instant::now();
+    let error = client
+        .send(client.request(Method::GET, "/x"))
+        .await
+        .expect_err("503, then no room for a second attempt");
+    let took = started.elapsed();
+    assert!(
+        matches!(
+            error,
+            SourceError::Protocol {
+                status: Some(503),
+                ..
+            }
+        ),
+        "the call ends with what the source said: {error:?}"
+    );
+    assert_eq!(
+        busy.hits(),
+        1,
+        "the second attempt never passed the limiter"
+    );
+    assert!(
+        took <= std::time::Duration::from_millis(800) + slack,
+        "{took:?}"
+    );
+}
+
+/// What reaches `server` within the first 900 ms of `per_client` sends started
+/// at once on each of `clients` -- under the second at which a one-a-second
+/// quota adds a token, so the burst is all that can pass. The sends still
+/// queued are abandoned.
+async fn hits_within_the_burst(
+    server: &CountingServer,
+    clients: Vec<HttpClient>,
+    per_client: usize,
+) -> usize {
+    let mut sends = tokio::task::JoinSet::new();
+    for client in clients {
+        let client = Arc::new(client);
+        for _ in 0..per_client {
+            let client = Arc::clone(&client);
+            sends.spawn(async move {
+                let _ = client.send(client.request(Method::GET, "/x")).await;
+            });
+        }
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    let hits = server.hits();
+    sends.abort_all();
+    hits
+}
+
+/// A client for `server` at one request a second and the given burst.
+fn paced_client(server: &CountingServer, burst: u32) -> HttpClient {
+    HttpClient::new(HttpConfig {
+        requests_per_second: 1,
+        burst,
+        ..config(server.url())
+    })
+    .expect("client")
+}
+
+/// **Every client built for one instance shares its quota** (SPI-2, #1630).
+///
+/// A sync run, a live read and a flush each build their own client, and they
+/// run at once. Two clients for one origin at a burst of ten, ten sends each:
+/// the instance sees ten in the first second, not twenty.
+#[tokio::test(flavor = "multi_thread")]
+async fn two_clients_for_one_instance_share_one_burst() {
+    let server = CountingServer::always(200, "");
+    let clients = vec![paced_client(&server, 10), paced_client(&server, 10)];
+
+    let hits = hits_within_the_burst(&server, clients, 10).await;
+
+    assert!(
+        hits <= 10,
+        "{hits} requests reached the instance within its burst of 10: each client \
+         had a limiter of its own"
+    );
+    assert!(hits >= 1, "the shared burst let nothing through");
+}
+
+/// **Where two configurations name different quotas for one instance, the
+/// stricter governs**, in either order (#1630).
+///
+/// A burst of ten and a burst of two at one origin: the instance sees two in
+/// the first second, whichever client the sends go through and whichever was
+/// built first. Built loose-first, the stricter one tightens the quota under
+/// the client that already holds it -- which is why the sends go through the
+/// loose client in both halves.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_stricter_of_two_quotas_for_one_instance_governs() {
+    let strict_first = CountingServer::always(200, "");
+    let _strict = paced_client(&strict_first, 2);
+    let loose = paced_client(&strict_first, 10);
+    let hits = hits_within_the_burst(&strict_first, vec![loose], 10).await;
+    assert!(
+        hits <= 2,
+        "strict first: {hits} reached the instance; the looser burst of 10 won"
+    );
+    assert!(
+        hits >= 1,
+        "strict first: the burst of 2 let nothing through"
+    );
+
+    let loose_first = CountingServer::always(200, "");
+    let loose = paced_client(&loose_first, 10);
+    let _strict = paced_client(&loose_first, 2);
+    let hits = hits_within_the_burst(&loose_first, vec![loose], 10).await;
+    assert!(
+        hits <= 2,
+        "loose first: {hits} reached the instance; the stricter burst of 2 was ignored"
+    );
+    assert!(
+        hits >= 1,
+        "loose first: the tightened quota let nothing through"
     );
 }
 

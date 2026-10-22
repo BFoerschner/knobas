@@ -1678,6 +1678,8 @@ knobas-http	lib/knobas_http	classify::tests::no_retry_after_header_is_no_delay
 knobas-http	lib/knobas_http	classify::tests::retry_after_is_read_in_its_delay_seconds_form
 knobas-http	lib/knobas_http	classify::tests::statuses_map_to_the_fault_the_user_sees
 knobas-http	lib/knobas_http	classify::tests::the_caller_maps_a_failing_body_into_the_message
+knobas-http	lib/knobas_http	limiter::tests::a_zero_quota_reads_as_one
+knobas-http	lib/knobas_http	limiter::tests::the_stricter_quota_takes_the_lower_of_each_field
 knobas-http	lib/knobas_http	retry::tests::a_broken_request_or_a_broken_server_is_not_tried_again
 knobas-http	lib/knobas_http	retry::tests::a_busy_server_is_tried_again
 knobas-http	lib/knobas_http	retry::tests::the_delay_doubles_and_never_wraps
@@ -1687,6 +1689,8 @@ knobas-http	test/transport	a_configured_method_maps_to_one_credential_or_one_ref
 knobas-http	test/transport	a_deterministic_failure_is_asked_once
 knobas-http	test/transport	a_dribbled_body_outlasts_the_request_timeout
 knobas-http	test/transport	a_json_body_and_its_content_type_both_reach_the_request
+knobas-http	test/transport	a_limiter_wait_never_outlasts_the_budget
+knobas-http	test/transport	a_limiter_wait_that_outlasts_the_budget_is_the_local_quota
 knobas-http	test/transport	a_once_sent_write_that_never_connected_is_unreachable
 knobas-http	test/transport	a_once_sent_write_turned_away_as_busy_is_not_unconfirmed
 knobas-http	test/transport	a_path_is_appended_to_the_whole_base_url
@@ -1708,6 +1712,8 @@ knobas-http	test/transport	every_attempt_waits_for_the_rate_limiter
 knobas-http	test/transport	retry_after_is_waited_out_before_the_retry
 knobas-http	test/transport	the_callers_reading_of_a_failing_body_reaches_the_message
 knobas-http	test/transport	the_excerpt_leaves_a_failing_status_and_a_good_body_alone
+knobas-http	test/transport	the_stricter_of_two_quotas_for_one_instance_governs
+knobas-http	test/transport	two_clients_for_one_instance_share_one_burst
 knobas-http	test/transport	walk::a_failing_fetch_fails_the_walk
 knobas-http	test/transport	walk::a_next_link_walk_follows_the_link_through_an_empty_page
 knobas-http	test/transport	walk::a_page_number_walk_continues_past_a_short_page_and_ends_on_an_empty_one
