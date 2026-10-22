@@ -13,9 +13,11 @@
 //!
 //! Then a **full sync** (`cursor: None`) lists the build configurations in
 //! scope and, for each, the newest `builds_per_config` finished builds. An
-//! **incremental** run skips the listing and asks once, globally, for
-//! `state:finished,sinceBuild:(id:N)` -- build ids are server-wide, so one
-//! query covers every configuration -- then narrows to the scope client-side.
+//! **incremental** run asks for `state:finished,sinceBuild:(id:N)`: once per
+//! configuration for a source scoped to a configuration list, off the same
+//! listing (ADPT-6), and otherwise once, globally -- build ids are
+//! server-wide, so one query covers every configuration -- narrowing to the
+//! scope client-side.
 //!
 //! Those two are the run's **item-producing** queries, and both carry
 //! `canceled:any,failedToStart:any` (issue #105) and `branch:default:any`
@@ -112,6 +114,8 @@ pub(crate) async fn execute(
     // that needs it -- one that lists configurations, or a scoped one that
     // has builds to place. See [`crate::projects`].
     let mut tree: Option<ProjectTree> = None;
+    // Whether `configs` already holds this run's listing of the scope.
+    let mut listed = false;
 
     // 1. The opening probe: one page of builds, whatever their state.
     //
@@ -165,6 +169,7 @@ pub(crate) async fn execute(
             for t in scope(rest, cfg, read_tree(rest, &mut tree).await?).await? {
                 configs.insert(t.rec.id.clone(), t);
             }
+            listed = true;
             let ids: Vec<String> = configs.keys().cloned().collect();
             let mut out = Vec::new();
             // The walk reading (#1382): before each configuration's builds are
@@ -215,9 +220,30 @@ pub(crate) async fn execute(
             sink.walked(of, Some(of), BUILD_CONFIGURATIONS).await;
             out
         }
-        // Build ids are server-wide and monotonic, so one query covers every
-        // configuration; the scope is applied client-side below.
-        Some(state) => since(rest, state.since_build_id).await?,
+        // A source scoped to a configuration list asks once per configuration
+        // (ADPT-6): the global query carries every build the whole server
+        // finished since the watermark, so a busy server fills it past
+        // `MAX_BUILDS_PER_QUERY` however narrow this source is, and every run
+        // afterwards refuses. The configurations come from the same listing a
+        // full sync reads, so a configuration the list names and the server no
+        // longer has is not asked about; step 6 reuses the listing.
+        Some(state) if !cfg.build_type_ids.is_empty() => {
+            for t in scope(rest, cfg, read_tree(rest, &mut tree).await?).await? {
+                configs.insert(t.rec.id.clone(), t);
+            }
+            listed = true;
+            let mut out = Vec::new();
+            for id in configs.keys() {
+                out.extend(since(rest, Some(id), state.since_build_id).await?);
+            }
+            out
+        }
+        // Unscoped, or scoped by project only: build ids are server-wide and
+        // monotonic, so one query covers every configuration and the scope is
+        // applied client-side below. A project scope has no locator dimension
+        // in the contract, and asking per configuration of a whole project
+        // trades one query for as many as the project holds.
+        Some(state) => since(rest, None, state.since_build_id).await?,
     };
 
     // 5. Scope, watermarks, items.
@@ -293,8 +319,10 @@ pub(crate) async fn execute(
     // 6. The configurations of the builds that moved. Fetched from the same
     //    listing a full sync uses, so a configuration's payload never
     //    alternates between a rich and a lean shape -- and only when something
-    //    moved, so an idle poll stays silent.
-    if previous.is_some() && !touched.is_empty() {
+    //    moved, so an idle poll stays silent. A run that already listed the
+    //    scope in step 4 (a full sync, or a source scoped to a configuration
+    //    list) reuses that listing.
+    if !listed && !touched.is_empty() {
         for t in scope(rest, cfg, read_tree(rest, &mut tree).await?).await? {
             configs.insert(t.rec.id.clone(), t);
         }
@@ -771,10 +799,29 @@ async fn refuse_a_replaced_server(
 /// (CONTEXT.md calls it a backfill); anything older than
 /// `builds_per_config` back is gone. That is the permanence issue #105
 /// measured, now bounded instead of ongoing.
-async fn since(rest: &dyn Rest, since_build_id: i64) -> Result<Vec<Rec<Build>>, SourceError> {
+///
+/// # One configuration, or the whole server
+///
+/// `build_type_id` is `Some` for a source scoped to a configuration list,
+/// which asks once per configuration (ADPT-6), and `None` for any other
+/// source, which asks once for the whole server.
+///
+/// Either refusal at [`MAX_BUILDS_PER_QUERY`] names *Backfill* (CONTEXT.md)
+/// as the way out, because it is the only one: a failed run leaves the
+/// watermark where it is, so the gap only grows, and a global query is the
+/// same size whatever the source's scope. A backfill runs with no position,
+/// reads each configuration's newest `builds_per_config`, and keeps the
+/// position it ends on. The global refusal also says how to keep it from
+/// recurring: a configuration list, whose queries carry only its own builds.
+async fn since(
+    rest: &dyn Rest,
+    build_type_id: Option<&str>,
+    since_build_id: i64,
+) -> Result<Vec<Rec<Build>>, SourceError> {
     all_of(
         rest,
         &Locator {
+            build_type_id: build_type_id.map(str::to_owned),
             state: Some(StateFilter::Finished),
             since_build_id: Some(since_build_id),
             canceled_any: true,
@@ -782,13 +829,21 @@ async fn since(rest: &dyn Rest, since_build_id: i64) -> Result<Vec<Rec<Build>>, 
             branch_any: true,
             ..Locator::default()
         },
-        || {
-            format!(
-                "teamcity: more than {MAX_BUILDS_PER_QUERY} builds have finished since build \
-                 {since_build_id}; this run would have had to drop the oldest of them, which \
-                 `sinceBuild` could never offer again. Sync more often, or narrow the source's \
-                 build configurations."
-            )
+        || match build_type_id {
+            Some(id) => format!(
+                "teamcity: more than {MAX_BUILDS_PER_QUERY} builds of {id} have finished since \
+                 build {since_build_id}; this run would have had to drop the oldest of them, \
+                 which `sinceBuild` could never offer again. Backfill on this source's page \
+                 starts over from each configuration's newest builds."
+            ),
+            None => format!(
+                "teamcity: more than {MAX_BUILDS_PER_QUERY} builds have finished on this server \
+                 since build {since_build_id}; this run would have had to drop the oldest of \
+                 them, which `sinceBuild` could never offer again. Backfill on this source's \
+                 page starts over from each configuration's newest builds. Scoping the source \
+                 to a list of build configurations keeps it from recurring: such a source asks \
+                 per configuration, for its own builds only."
+            ),
         },
     )
     .await
@@ -1965,8 +2020,10 @@ mod tests {
         .await
         .expect_err("a run that cannot carry them all must fail");
         assert!(
-            matches!(&err, SourceError::Protocol { message: m, .. } if m.contains("1000")),
-            "{err:?}"
+            matches!(&err, SourceError::Protocol { message: m, .. }
+                if m.contains("1000") && m.contains("Backfill") && !m.contains("Sync more often")),
+            "an unscoped source asks globally, so narrowing or syncing more often moves nothing \
+             and the refusal names the way out that does: {err:?}"
         );
         assert!(
             sink.0.is_empty(),
@@ -1987,6 +2044,78 @@ mod tests {
                 "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:800",
                 "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:1001",
             ]
+        );
+    }
+
+    /// **A source scoped to a configuration list asks per configuration**
+    /// (ADPT-6), so a busy server's builds do not fill its incremental query.
+    ///
+    /// 1,500 builds finished server-wide since the watermark, 20 of them in
+    /// the two configurations this source names. The global query would
+    /// carry all 1,500 and refuse the run at the 1,000 cap, on every run
+    /// afterwards, whatever the source's scope; one `buildType`-scoped query
+    /// per configuration carries ten each.
+    #[tokio::test]
+    async fn a_scoped_source_asks_per_configuration_past_a_busy_server() {
+        let scope = ["Payout_Build", "Payout_IntegrationTests"];
+        let builds: Vec<serde_json::Value> = (1..=1_500)
+            .map(|n| match n % 150 {
+                0 => build(n, scope[0], "Payout", "finished"),
+                1 => build(n, scope[1], "Payout", "finished"),
+                _ => build(n, "Ledger_Deploy_Staging", "Ledger", "finished"),
+            })
+            .collect();
+        let rest = FakeRest::new(
+            vec![
+                build_type(scope[0], "Payout"),
+                build_type(scope[1], "Payout"),
+                build_type("Ledger_Deploy_Staging", "Ledger"),
+            ],
+            builds,
+        );
+        // `Gone_Config` is named and not on the server: a configuration that
+        // was deleted. It is not asked about, as a full sync would not.
+        let cfg = TeamCityConfig::from_json(&serde_json::json!({
+            "build_type_ids": [scope[0], scope[1], "Gone_Config"]
+        }))
+        .expect("config");
+        let (items, cursor) = run(
+            &rest,
+            &cfg,
+            Some(r#"{"v":2,"since_build_id":0}"#.to_owned()),
+        )
+        .await;
+        let built: Vec<String> = keys(&items)
+            .into_iter()
+            .filter(|k| k.starts_with("build:"))
+            .collect();
+        assert_eq!(built.len(), 20, "the twenty in scope: {built:?}");
+        assert_eq!(
+            cursor, r#"{"v":2,"since_build_id":1500}"#,
+            "the newest build in scope"
+        );
+        let asked: Vec<String> = rest
+            .calls()
+            .into_iter()
+            .filter(|c| c.contains("sinceBuild"))
+            .collect();
+        assert_eq!(
+            asked,
+            [
+                "buildType:(id:Payout_Build),state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:100",
+                "buildType:(id:Payout_IntegrationTests),state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:100",
+            ],
+            "one query per configuration on the server, each answered on its first page"
+        );
+        assert_eq!(
+            rest.calls().iter().filter(|c| *c == "buildTypes").count(),
+            1,
+            "the listing the queries came from also gives the configurations that moved"
+        );
+        assert_eq!(
+            keys(&items).iter().filter(|k| k.starts_with("buildType:")).count(),
+            2,
+            "both configurations moved and each is emitted once"
         );
     }
 
