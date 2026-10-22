@@ -36,6 +36,9 @@ struct Shrinking {
     /// which is what makes absence proof of deletion -- **for that kind
     /// alone**.
     kinds: Vec<(&'static str, bool)>,
+    /// Fail the run after emitting, the way an adapter refuses a walk it
+    /// cannot vouch for (a reached page cap, a `total` that shrank: #1623).
+    fails: bool,
 }
 
 #[async_trait]
@@ -105,6 +108,11 @@ impl Source for Shrinking {
                 deleted: false,
             })
             .await?;
+        }
+        if self.fails {
+            return Err(SourceError::protocol(
+                "the search's total shrank from 3 to 2 issues while the walk paged",
+            ));
         }
         // Battery clause 2: a run that emitted nothing returns the cursor it
         // was handed, byte-identical.
@@ -180,6 +188,7 @@ fn source_of(
             id: id.to_owned(),
             keys: Arc::clone(&corpus),
             kinds: kinds.to_vec(),
+            fails: false,
         },
         corpus,
     )
@@ -269,6 +278,34 @@ async fn a_source_whose_full_sync_is_bounded_is_never_swept() {
         "an old build that fell out of the window is still a real build"
     );
     assert_eq!(live_count(&pool, &id).await, 3, "all three are still live");
+}
+
+/// **A failed full sync sweeps nothing** (#1623). The Jira walk fails a run
+/// whose `total` shrank, because the walk may have stepped over a live issue;
+/// that refusal only protects the mirror if the engine never reconciles on a
+/// failed run's word. Here the run emits two of three and then fails: the one
+/// it did not return keeps its row, and the two it did are rolled back with
+/// the rest of the run.
+#[tokio::test]
+async fn a_full_sync_that_fails_after_emitting_sweeps_nothing() {
+    let pool = pool().await;
+    let id = unique();
+    let (mut src, keys) = source(&id, &["F-1", "F-2", "F-3"]);
+    let first = knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(first.upserted, 3);
+
+    // F-2 was stepped over, and the adapter says it cannot vouch for the walk.
+    *keys.lock().unwrap() = tickets(&["F-1", "F-3"]);
+    src.fails = true;
+    a_moment_passes().await;
+    let got = knobas_sync::run_once(&pool, &src, None).await;
+    assert!(got.is_err(), "the adapter's refusal fails the run: {got:?}");
+
+    assert!(
+        deleted_at(&pool, &format!("{id}:F-2")).await.is_none(),
+        "a failed run's absences are not deletions"
+    );
+    assert_eq!(live_count(&pool, &id).await, 3);
 }
 
 #[tokio::test]

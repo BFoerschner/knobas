@@ -12,8 +12,12 @@ use knobas_source::watermark::{Jql, MinuteLiteral};
 
 use crate::JiraConfig;
 
-/// `<scope> AND updated >= "<since>" ORDER BY updated ASC`, with either half
+/// `<scope> AND updated >= "<since>" ORDER BY created ASC`, with either half
 /// omitted when it does not apply.
+///
+/// The filter is on `updated` and the order on `created` (#1623, ruling A1):
+/// the walk pages with `startAt`, and offset paging is only as sound as its
+/// sort key is still. See the tests for the arithmetic.
 ///
 /// Nothing here escapes anything, and nothing needs to:
 /// [`JiraConfig::from_json`] has already refused a project key that is not
@@ -32,11 +36,12 @@ pub(crate) fn build_jql(
             Jql::render(since, server_offset_secs)
         ));
     }
-    // ASC is what makes startAt paging safe over a live index; see the tests.
+    // `created`, the one key an edit cannot move, is what makes startAt
+    // paging safe over a live index; see the tests.
     if clauses.is_empty() {
-        "ORDER BY updated ASC".to_owned()
+        "ORDER BY created ASC".to_owned()
     } else {
-        format!("{} ORDER BY updated ASC", clauses.join(" AND "))
+        format!("{} ORDER BY created ASC", clauses.join(" AND "))
     }
 }
 
@@ -99,22 +104,27 @@ mod tests {
         assert_eq!(build_ceiling_jql(&cfg(json!({}))), "ORDER BY updated DESC");
     }
 
-    /// ORDER BY updated **ASC** is load-bearing, not cosmetic: with startAt
-    /// paging over a live index, an issue edited mid-pagination moves *later*
-    /// in an ascending order (so it is still reached) and *earlier* in a
-    /// descending one (so it pushes an unread issue past the cursor and is
-    /// lost).
+    /// ORDER BY **created** is load-bearing, not cosmetic (#1623). The walk
+    /// pages with `startAt`, advanced by the rows it has read, over a live
+    /// index. Over `updated`, an issue on a page already read that is edited
+    /// mid-walk moves to the end, every row behind it shifts up by one, and
+    /// the first unread issue lands inside the window already read: no later
+    /// request returns it, `total` does not move, and the run ends `Ok` with
+    /// a hole the sweep then tombstones. `created` never changes, so an edit
+    /// moves nothing; an issue filed mid-walk joins the end, where the walk
+    /// still reads it. What is left is a deletion, which shrinks `total` and
+    /// fails the run (`sync::tests::a_total_that_shrank_between_pages_fails_the_run`).
     #[test]
     fn a_full_sync_is_scoped_and_ordered() {
         assert_eq!(
             build_jql(&cfg(json!({ "projects": ["PAY", "OPS"] })), None, 0),
-            r#"project in ("PAY", "OPS") ORDER BY updated ASC"#
+            r#"project in ("PAY", "OPS") ORDER BY created ASC"#
         );
     }
 
     #[test]
     fn an_unscoped_full_sync_is_still_valid_jql() {
-        assert_eq!(build_jql(&cfg(json!({})), None, 0), "ORDER BY updated ASC");
+        assert_eq!(build_jql(&cfg(json!({})), None, 0), "ORDER BY created ASC");
     }
 
     /// The literal is rendered in the server's zone, because JQL has none.
@@ -126,11 +136,11 @@ mod tests {
                 Some(watermark()),
                 7_200
             ),
-            r#"project in ("PAY") AND updated >= "2026-08-22 13:46" ORDER BY updated ASC"#
+            r#"project in ("PAY") AND updated >= "2026-08-22 13:46" ORDER BY created ASC"#
         );
         assert_eq!(
             build_jql(&cfg(json!({})), Some(watermark()), 0),
-            r#"updated >= "2026-08-22 11:46" ORDER BY updated ASC"#
+            r#"updated >= "2026-08-22 11:46" ORDER BY created ASC"#
         );
     }
 
@@ -144,7 +154,7 @@ mod tests {
                 Some(watermark()),
                 0
             ),
-            r#"(labels = sepa OR priority = High) AND updated >= "2026-08-22 11:46" ORDER BY updated ASC"#
+            r#"(labels = sepa OR priority = High) AND updated >= "2026-08-22 11:46" ORDER BY created ASC"#
         );
     }
 

@@ -3245,3 +3245,123 @@ async fn a_run_reports_its_walk_over_the_real_search_total() {
     let (done, of, unit) = idle.readings.last().cloned().expect("the idle run reports");
     assert_eq!((of, unit.as_str()), (Some(done), "issues"));
 }
+
+/// One raw `/search` page, as the adapter's walk asks for it: `(total, keys)`.
+async fn search_page(seeded: &Seeded, jql: &str, start_at: u32, max: u32) -> (u64, Vec<String>) {
+    let (status, body) = seeded
+        .get(&format!(
+            "rest/api/2/search?jql={}&startAt={start_at}&maxResults={max}&fields=key",
+            url_encode(jql)
+        ))
+        .await;
+    assert_eq!(status, 200, "JQL {jql:?} at {start_at} answered {body}");
+    let keys = body["issues"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|i| i["key"].as_str().expect("an issue has a key").to_owned())
+        .collect();
+    (
+        body["total"].as_u64().expect("a search page has a total"),
+        keys,
+    )
+}
+
+/// **The walk's order is one an edit cannot move** (#1623). The adapter pages
+/// `/search` with `startAt` over `ORDER BY created ASC`, and its unit tests
+/// stand a fake in for how Jira orders; this is where Jira says whether the
+/// fake is right. One label edit sends the oldest-updated issue to the end of
+/// `ORDER BY updated ASC` -- the shift that used to step over an unread issue
+/// -- and leaves `ORDER BY created ASC` exactly as it was.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_one() {
+    let seeded = seeded();
+    let mut guard = Labeled::new(&seeded).await;
+    let total = seeded.seeded_keys().len() as u32;
+    let order = |rows: Vec<serde_json::Value>| -> Vec<String> {
+        rows.iter()
+            .map(|r| r["key"].as_str().expect("a key").to_owned())
+            .collect()
+    };
+
+    let created = order(seeded.jql("ORDER BY created ASC", "key").await);
+    let mut every = created.clone();
+    every.sort();
+    assert_eq!(
+        every,
+        seeded.seeded_keys(),
+        "one page holds the whole corpus"
+    );
+    let by_updated = order(seeded.jql("ORDER BY updated ASC", "key").await);
+    let edited = by_updated[0].clone();
+    // Later than every stamp, so the edit lands at the end and nowhere else.
+    after_the_second_of(stamp_of(&seeded, &by_updated[by_updated.len() - 1]).await).await;
+    guard.label(&seeded, &edited).await;
+
+    // The index is updated asynchronously: poll for the edit to show.
+    let deadline = std::time::Instant::now() + INDEX_BUDGET;
+    loop {
+        let (_, last) = search_page(&seeded, "ORDER BY updated ASC", total - 1, 1).await;
+        if last == std::slice::from_ref(&edited) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the edit to {edited} did not reach the end of the updated order within \
+             {INDEX_BUDGET:?}; the last row is {last:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    println!("order: {edited} edited; created order {created:?}");
+    assert_eq!(
+        order(seeded.jql("ORDER BY created ASC", "key").await),
+        created,
+        "the edit to {edited} moved nothing in the created order"
+    );
+}
+
+/// **A deletion under the walk shrinks the total the next page reports**
+/// (#1623, ruling A5), and that is the walk's only witness of it. A sub-task is
+/// filed, and the page at offset N (the seeded corpus's size) names it alone,
+/// at the end of the created order, with a total of N + 1. Once it is deleted
+/// the same page answers `200` with no issues and a total of N -- the empty
+/// last page the adapter reads the shrink off, not a refusal.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {
+    const WALK: &str = "ORDER BY created ASC";
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let seeded_total = seeded.seeded_keys().len() as u64;
+    let sub_task = SubTask::file(&seeded, "PAY-219").await;
+    let key = sub_task.key().to_owned();
+
+    let deadline = std::time::Instant::now() + INDEX_BUDGET;
+    let (grown, last) = loop {
+        let page = search_page(&seeded, WALK, seeded_total as u32, 1).await;
+        if page.0 == seeded_total + 1 {
+            break page;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{key} was filed but the search total stayed {} within {INDEX_BUDGET:?}",
+            page.0
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+    assert_eq!(
+        last,
+        std::slice::from_ref(&key),
+        "a filed issue joins the end of the created order"
+    );
+
+    // The guard deletes it and waits for the index to stop naming it.
+    drop(sub_task);
+    let (shrunk, past_the_end) = search_page(&seeded, WALK, seeded_total as u32, 1).await;
+    println!(
+        "shrink: total {grown} with {key}, {shrunk} after its deletion; page past the end {past_the_end:?}"
+    );
+    assert_eq!(shrunk, seeded_total, "the deletion shrank the total");
+    assert!(past_the_end.is_empty(), "{past_the_end:?}");
+}

@@ -1770,6 +1770,7 @@ knobas-mockd	test/it	jira_search::an_unparseable_date_literal_is_a_400
 knobas-mockd	test/it	jira_search::an_unsupported_jql_clause_is_a_400_and_a_violation
 knobas-mockd	test/it	jira_search::fields_and_expand_are_projected_and_typos_are_refused
 knobas-mockd	test/it	jira_search::max_results_is_capped_by_the_server_and_the_response_says_so
+knobas-mockd	test/it	jira_search::order_by_created_does_not_move_an_edited_issue
 knobas-mockd	test/it	jira_search::project_in_filters
 knobas-mockd	test/it	jira_search::search_serves_comments_and_worklogs_when_fields_asks_for_them
 knobas-mockd	test/it	jira_search::the_issue_envelope_is_the_data_center_shape
@@ -2987,6 +2988,9 @@ knobas-source-jira	lib/knobas_source_jira	sync::tests::a_changed_issue_is_the_on
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_full_sync_walks_the_whole_total_not_just_the_first_page
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_page_that_arrives_empty_while_total_still_claims_more_ends_the_run
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_sink_failure_aborts_the_run
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_total_that_grew_between_pages_is_read_to_its_end
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_total_that_shrank_between_pages_fails_the_run
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_total_that_shrank_on_the_empty_last_page_fails_the_run_too
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_walk_that_hits_the_page_cap_fails_instead_of_reporting_a_completed_sync
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_auth_failure_mid_sync_keeps_its_classification
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_empty_page_ends_the_run
@@ -2994,6 +2998,7 @@ knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_incremental_emits
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_poll_does_not_reach_back_further_than_the_overlap
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_run_after_the_server_changed_zone_returns_the_same_bytes
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_incremental_run_that_hits_the_page_cap_fails_too
+knobas-source-jira	lib/knobas_source_jira	sync::tests::an_issue_edited_behind_the_walk_does_not_shift_an_unread_one_past_it
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_issue_edited_during_the_walk_does_not_carry_the_watermark_past_the_ceiling
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_unchanged_record_inside_the_overlap_window_is_still_skipped
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_unreadable_cursor_falls_back_to_a_full_sync
@@ -3075,12 +3080,14 @@ knobas-source-jira	test/it	mockd::pages_across_more_than_one_response
 knobas-source-jira	test/it	mockd::passes_the_contract_battery
 knobas-source-jira	test/it	mockd::test_connection_reports_the_account_and_the_server
 knobas-source-jira	test/it	mockd::the_reachable_transitions_read_answers_the_statuses_moves_land_on
+knobas-source-jira	test/live_jira_seeded	a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports
 knobas-source-jira	test/live_jira_seeded	a_full_sync_mirrors_every_seeded_issue_across_both_projects
 knobas-source-jira	test/live_jira_seeded	a_long_history_comes_back_whole_from_search
 knobas-source-jira	test/live_jira_seeded	a_reassignment_through_the_assignee_endpoint_reaches_the_next_incremental_run
 knobas-source-jira	test/live_jira_seeded	a_rejected_credential_is_a_real_401_and_only_basic_auth_carries_the_seraph_header
 knobas-source-jira	test/live_jira_seeded	a_run_reports_its_walk_over_the_real_search_total
 knobas-source-jira	test/live_jira_seeded	a_sub_task_names_its_parent_in_fields_parent_and_under_reaches_it
+knobas-source-jira	test/live_jira_seeded	an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_one
 knobas-source-jira	test/live_jira_seeded	an_incremental_run_after_one_edit_returns_that_issue_and_moves_the_watermark_to_it
 knobas-source-jira	test/live_jira_seeded	an_untouched_source_is_still_quiet_after_many_polls
 knobas-source-jira	test/live_jira_seeded	each_issue_carries_its_comments_and_worklogs_as_seeded
@@ -3727,6 +3734,7 @@ knobas-sync	test/it	stats::db_stats_reports_a_size_counts_and_a_per_source_break
 knobas-sync	test/it	stats::reindexing_leaves_the_fts_index_usable
 knobas-sync	test/it	stats::the_index_it_rebuilds_is_the_one_the_schema_declares
 knobas-sync	test/it	sweep::a_full_sync_that_emitted_nothing_sweeps_nothing
+knobas-sync	test/it	sweep::a_full_sync_that_fails_after_emitting_sweeps_nothing
 knobas-sync	test/it	sweep::a_full_sync_that_sweeps_cannot_reach_a_note
 knobas-sync	test/it	sweep::a_full_sync_tombstones_what_the_source_stopped_returning_and_keeps_its_mirror_row
 knobas-sync	test/it	sweep::a_kind_that_emitted_nothing_is_not_swept_even_when_another_kind_did

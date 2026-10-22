@@ -8,8 +8,10 @@
 //!    scope, `ORDER BY updated DESC` -- the newest `updated` this source's
 //!    corpus held when the run started.
 //! 3. Read the cursor. Unreadable or absent ⇒ full sync (interfaces §4.1).
-//! 4. Query `updated >= watermark − 2 minutes ORDER BY updated ASC`, paging
-//!    with `startAt` until `total` is reached.
+//! 4. Query `updated >= watermark − 2 minutes ORDER BY created ASC`, paging
+//!    with `startAt` until `total` is reached -- ordered by the one key an
+//!    edit cannot move, and failed when `total` shrinks under the walk
+//!    ([`refuse_a_shrunk_total`], #1623).
 //! 5. Drop what the overlap re-delivered, complete truncated comment/worklog
 //!    containers, push the rest into the sink.
 //! 6. If nothing was pushed, hand back the cursor byte-identically. Otherwise
@@ -62,6 +64,8 @@
 //! recorded, that run skips it. That is narrower than the hole it replaced:
 //! `(key, updated)` was blind to the same change and to every change that
 //! needed no such coincidence.
+
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use chrono::{DateTime, Utc};
 use knobas_http::{Offset, PageWalk, Walked};
@@ -123,8 +127,8 @@ comment,worklog";
 /// this adapter emits claims `full_sync_exhaustive: true`, which is the
 /// engine's licence to tombstone every row a `cursor: None` run did not
 /// return -- so a truncated walk reported as `Ok` authorises deleting whatever
-/// fell off the end. The query is `ORDER BY updated ASC`, so what falls off
-/// the end is the *most recently updated* work: the tickets someone is looking
+/// fell off the end. The query is `ORDER BY created ASC`, so what falls off
+/// the end is the *most recently filed* work: the tickets someone is looking
 /// at today. And it is not a first-sync-only hazard, because any later
 /// `cursor: None` run re-enters the same path against a populated mirror.
 ///
@@ -145,6 +149,35 @@ comment,worklog";
 /// A source genuinely this large is narrowed with `projects` or `jql_filter`,
 /// which is what the message says.
 const MAX_PAGES: u32 = 5_000;
+
+/// Refuse a walk whose `total` fell below the largest one it reported before
+/// (#1623, ruling A5).
+///
+/// The walk is ordered by `created`, so an edit cannot move a row across a
+/// page boundary; a deletion still can. An issue deleted from a page already
+/// read -- or moved out of a `jql_filter` by an edit -- shifts every row
+/// behind it up by one, and the first unread issue lands in the window the
+/// walk has passed. Nothing in the rows says so; the falling `total` is the
+/// one witness. The run fails, as a reached [`MAX_PAGES`] does, because
+/// `ticket` is `full_sync_exhaustive` and an `Ok` over the hole licenses the
+/// sweep to tombstone the issue stepped over. A failed run costs one re-fetch
+/// on the next tick.
+///
+/// Against the peak, not the first page: an issue filed and another deleted
+/// mid-walk leave the end total where it started, with the hole still there.
+/// A deletion behind the cursor, which skips nothing, fails the run too; the
+/// total cannot tell the two apart, and the re-fetch is the cheap side.
+fn refuse_a_shrunk_total(peak: u32, total: u32) -> Result<(), SourceError> {
+    if total < peak {
+        return Err(SourceError::protocol(format!(
+            "the Jira search's total shrank from {peak} to {total} issues while the walk paged: \
+             an issue deleted under the walk, or moved out of this source's scope, shifts an \
+             unread one onto a page already read. Refusing to report a walk that may have \
+             stepped over an issue as a completed sync; the next run reads it again."
+        )));
+    }
+    Ok(())
+}
 
 /// The unit of the walk reading: the UI prints "120 of 300 issues".
 const ISSUES: &str = "issues";
@@ -181,8 +214,20 @@ impl SyncRun<'_> {
         // job in `advanced`, which holds it after the ceiling clamp too.
         let mut watermark: Option<DateTime<Utc>> = previous.as_ref().and_then(|c| c.updated_to);
 
+        // The largest `total` any answer of this walk has reported (#1623).
+        let peak = AtomicU32::new(0);
         let mut walk = PageWalk::new(Offset, MAX_PAGES, |start_at| {
-            self.api.search(&jql, start_at, self.cfg.page_size, &fields)
+            let (jql, fields, peak) = (&jql, &fields, &peak);
+            async move {
+                let page = self
+                    .api
+                    .search(jql, start_at, self.cfg.page_size, fields)
+                    .await?;
+                // Inside the fetch, so the empty page that ends the walk is
+                // read too: it is the one answer the walk never hands out.
+                refuse_a_shrunk_total(peak.fetch_max(page.total, Ordering::Relaxed), page.total)?;
+                Ok(page)
+            }
         });
         // The last page's own total, which the refusal quotes and the walk
         // reading draws against (#1381).
@@ -678,7 +723,7 @@ mod tests {
     }
 
     async fn run(
-        api: &FakeApi,
+        api: &dyn JiraApi,
         cfg: &crate::JiraConfig,
         cursor: Option<String>,
         sink: &mut (dyn Sink + Send),
@@ -695,7 +740,7 @@ mod tests {
 
     /// One run, returning the keys it emitted and the cursor it handed back.
     async fn keys_of(
-        api: &FakeApi,
+        api: &dyn JiraApi,
         cfg: &crate::JiraConfig,
         cursor: Option<String>,
     ) -> (Vec<String>, String) {
@@ -1123,7 +1168,7 @@ mod tests {
     /// `cursor: None` run did not return. An `Ok` here is therefore not "we
     /// synced a bit less" -- it is authorisation to delete everything past the
     /// cap. And because
-    /// the query is `ORDER BY updated ASC`, what falls off the end is the
+    /// the query is `ORDER BY created ASC`, what falls off the end is the
     /// newest work, so the rows offered up for deletion are exactly the ones
     /// someone is looking at today.
     ///
@@ -1155,11 +1200,12 @@ mod tests {
 
     /// An incremental run gets the same refusal.
     ///
-    /// Tempting to let it through: no sweep follows an incremental, the items
-    /// were delivered, and the watermark advanced honestly under
-    /// `ORDER BY updated ASC`, so the next run would resume where this one
-    /// stopped. That narrower fix is worse than it looks, for a reason the
-    /// mutation check turned up rather than the argument: with
+    /// Tempting to let it through: no sweep follows an incremental and the
+    /// items were delivered. (Under `ORDER BY created ASC` the watermark would
+    /// not even mark where the walk stopped: the newest `updated` emitted can
+    /// sit past issues it never reached.) That narrower fix is worse than it
+    /// looks, for a reason the mutation check turned up rather than the
+    /// argument: with
     /// `&& cursor.is_none()` on the cap, **this test does not terminate**. The
     /// loop's only other exit is the records read reaching `total`, and `total` is the number
     /// the server is inflating -- so an incremental against a mispaging server
@@ -1542,6 +1588,248 @@ mod tests {
             keys,
             vec!["PAY-1"],
             "the edit behind the walk is delivered; the one it saw is recognised"
+        );
+    }
+
+    /// What upstream does to the listing between two of the walk's pages.
+    type Upstream = Box<dyn FnOnce(&mut Vec<serde_json::Value>) + Send>;
+
+    /// A server whose listing **changes under the walk** (#1623). It sorts by
+    /// the key the JQL's `ORDER BY` names, as Jira does, and once it has
+    /// served the walk `n` pages it applies `between[n]` before answering the
+    /// next, so an edit or a deletion lands between two requests the way a
+    /// colleague's does. Every call that is not `/search` goes to a plain
+    /// [`FakeApi`].
+    struct LiveIndex {
+        issues: Mutex<Vec<serde_json::Value>>,
+        between: Mutex<HashMap<u32, Upstream>>,
+        served: Mutex<u32>,
+        rest: FakeApi,
+    }
+
+    impl LiveIndex {
+        fn new(
+            issues: Vec<serde_json::Value>,
+            between: impl IntoIterator<Item = (u32, Upstream)>,
+        ) -> Self {
+            Self {
+                issues: Mutex::new(issues),
+                between: Mutex::new(between.into_iter().collect()),
+                served: Mutex::new(0),
+                rest: FakeApi::default(),
+            }
+        }
+    }
+
+    fn stamp(issue: &serde_json::Value, field: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+        issue["fields"][field]
+            .as_str()
+            .and_then(crate::time::parse_jira_time)
+    }
+
+    /// [`issue`] with the `created` stamp an ordering over it reads.
+    fn filed(key: &str, created: &str, updated: &str) -> serde_json::Value {
+        let mut raw = issue(key, updated, 0, 0);
+        raw["fields"]["created"] = serde_json::json!(created);
+        raw
+    }
+
+    /// PAY-1 to PAY-5, created a day apart and last updated ten minutes
+    /// apart, in the same order: before anything changes, both orderings
+    /// agree.
+    fn five_filed() -> Vec<serde_json::Value> {
+        (1..=5)
+            .map(|n| {
+                filed(
+                    &format!("PAY-{n}"),
+                    &format!("2026-08-0{n}T09:00:00.000+0000"),
+                    &format!("2026-08-22T11:{}0:00.000+0000", n - 1),
+                )
+            })
+            .collect()
+    }
+
+    /// An edit upstream: `key`'s `updated` moves to `updated`.
+    fn edit_to(key: &'static str, updated: &'static str) -> Upstream {
+        Box::new(move |issues| {
+            for hit in issues.iter_mut().filter(|i| i["key"] == key) {
+                hit["fields"]["updated"] = serde_json::json!(updated);
+            }
+        })
+    }
+
+    /// A deletion upstream.
+    fn delete(keys: &'static [&'static str]) -> Upstream {
+        Box::new(move |issues| issues.retain(|i| !keys.iter().any(|k| i["key"] == *k)))
+    }
+
+    #[async_trait::async_trait]
+    impl JiraApi for LiveIndex {
+        async fn server_info(&self) -> Result<ServerInfo, SourceError> {
+            self.rest.server_info().await
+        }
+        async fn myself(&self) -> Result<Myself, SourceError> {
+            self.rest.myself().await
+        }
+        async fn fields(&self) -> Result<Vec<crate::model::FieldMeta>, SourceError> {
+            self.rest.fields().await
+        }
+        async fn search(
+            &self,
+            jql: &str,
+            start_at: u32,
+            max_results: u32,
+            _fields: &str,
+        ) -> Result<SearchPage, SourceError> {
+            let page = {
+                let mut issues = self.issues.lock().unwrap();
+                if jql.ends_with("ORDER BY updated DESC") {
+                    let newest = issues.iter().max_by_key(|i| stamp(i, "updated")).cloned();
+                    serde_json::json!({
+                        "startAt": 0, "maxResults": max_results, "total": issues.len(),
+                        "issues": newest.into_iter().collect::<Vec<_>>()
+                    })
+                } else {
+                    let mut served = self.served.lock().unwrap();
+                    if let Some(change) = self.between.lock().unwrap().remove(&served) {
+                        change(&mut issues);
+                    }
+                    *served += 1;
+                    let key = if jql.ends_with("ORDER BY created ASC") {
+                        "created"
+                    } else if jql.ends_with("ORDER BY updated ASC") {
+                        "updated"
+                    } else {
+                        panic!("an order this server does not model: {jql}")
+                    };
+                    let since = since_of(jql, self.rest.offset_secs);
+                    let mut matching: Vec<serde_json::Value> = issues
+                        .iter()
+                        .filter(|i| since.is_none_or(|s| stamp(i, "updated") >= Some(s)))
+                        .cloned()
+                        .collect();
+                    matching.sort_by_key(|i| stamp(i, key));
+                    let window: Vec<serde_json::Value> = matching
+                        .iter()
+                        .skip(start_at as usize)
+                        .take(max_results as usize)
+                        .cloned()
+                        .collect();
+                    serde_json::json!({
+                        "startAt": start_at, "maxResults": max_results,
+                        "total": matching.len(), "issues": window
+                    })
+                }
+            };
+            Ok(serde_json::from_value(page).unwrap())
+        }
+        async fn comments(
+            &self,
+            key: &str,
+            start_at: u32,
+            max_results: u32,
+        ) -> Result<CommentPage, SourceError> {
+            self.rest.comments(key, start_at, max_results).await
+        }
+        async fn worklogs(&self, key: &str) -> Result<WorklogPage, SourceError> {
+            self.rest.worklogs(key).await
+        }
+    }
+
+    /// **An edit cannot move a row across a page boundary** (#1623, ADPT-1).
+    /// Five issues, two to a page; between the first page and the second,
+    /// PAY-1 -- on the page already read -- is edited. Over `updated` that
+    /// edit moves PAY-1 to the end and shifts every row behind it up by one,
+    /// so PAY-3, the first unread issue, lands on the page already read and no
+    /// request returns it: `total` is unchanged, the walk ends `Ok`, and the
+    /// engine's sweep tombstones a live ticket. Over `created` nothing moves.
+    #[tokio::test]
+    async fn an_issue_edited_behind_the_walk_does_not_shift_an_unread_one_past_it() {
+        let api = LiveIndex::new(
+            five_filed(),
+            [(1, edit_to("PAY-1", "2026-08-22T11:50:00.000+0000"))],
+        );
+        let (keys, cursor) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5"]);
+        assert_eq!(
+            crate::cursor::JiraCursor::parse(&cursor)
+                .unwrap()
+                .updated_to,
+            crate::time::parse_jira_time("2026-08-22T11:40:00.000+0000"),
+            "held at the ceiling: PAY-1's edit came after the run started"
+        );
+    }
+
+    /// **A shrinking total fails the walk** (#1623, ruling A5). PAY-1 is
+    /// deleted after the first page; the second page starts at offset 2 of a
+    /// listing that now holds four, so PAY-3 is stepped over. The page that
+    /// says so is refused before its rows reach the sink, and the run fails
+    /// as a reached cap does, so the engine sweeps nothing on its word.
+    #[tokio::test]
+    async fn a_total_that_shrank_between_pages_fails_the_run() {
+        let api = LiveIndex::new(five_filed(), [(1, delete(&["PAY-1"]))]);
+        let mut sink = VecSink(Vec::new());
+        let got = run(
+            &api,
+            &cfg(serde_json::json!({ "page_size": 2 })),
+            None,
+            &mut sink,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&got, SourceError::Protocol { message: m, .. }
+                if m.contains("total shrank from 5 to 4")),
+            "{got:?}"
+        );
+        let keys: Vec<&str> = sink.0.iter().map(|i| i.entity.key.as_str()).collect();
+        assert_eq!(keys, vec!["PAY-1", "PAY-2"]);
+    }
+
+    /// The same when the shrink shows only on the page that ends the walk:
+    /// four rows read of five, two of them deleted, and the third page asks
+    /// for offset 4 of a listing of three. It comes back empty, which on its
+    /// own reads as the end; its total is what says PAY-5 was stepped over.
+    #[tokio::test]
+    async fn a_total_that_shrank_on_the_empty_last_page_fails_the_run_too() {
+        let api = LiveIndex::new(five_filed(), [(2, delete(&["PAY-1", "PAY-2"]))]);
+        let mut sink = VecSink(Vec::new());
+        let got = run(
+            &api,
+            &cfg(serde_json::json!({ "page_size": 2 })),
+            None,
+            &mut sink,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&got, SourceError::Protocol { message: m, .. }
+                if m.contains("total shrank from 5 to 3")),
+            "{got:?}"
+        );
+    }
+
+    /// A total that **grew** is not a hole: over `created`, an issue filed
+    /// during the walk joins the end and is read there.
+    #[tokio::test]
+    async fn a_total_that_grew_between_pages_is_read_to_its_end() {
+        let api = LiveIndex::new(
+            five_filed(),
+            [(
+                1,
+                Box::new(|issues: &mut Vec<serde_json::Value>| {
+                    issues.push(filed(
+                        "PAY-6",
+                        "2026-08-22T11:45:00.000+0000",
+                        "2026-08-22T11:45:00.000+0000",
+                    ));
+                }) as Upstream,
+            )],
+        );
+        let (keys, _) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        assert_eq!(
+            keys,
+            vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5", "PAY-6"]
         );
     }
 
