@@ -92,13 +92,20 @@ pub enum FlushError {
 ///   delivery says a resend is harmless; for those, and for an adapter
 ///   [`build`] that
 ///   failed with it, it is `Unreachable`.
+/// * `Protocol` **with no status, when knobas' own rate limit held the
+///   request** before it was sent (`held_by_quota`, #1729) -- nothing reached
+///   the source, so nothing was refused. It passes on its own, like an
+///   unreachable source. The error alone cannot say so: a status-less
+///   `Protocol` is also a fault an adapter raised itself, so the mark comes
+///   from [`knobas_http::watch_local_quota`] around the call, never from the
+///   message.
 /// * anything else -- the source refused *this write*. A 400, a 404, a 422, or
 ///   a fault knobas raised itself. Retrying it forever would be pretending a
 ///   permanent answer is a temporary one, which is what story 19 forbids.
 ///
 /// `Moved` waits on neither: [`attempt`] holds the write before it asks here
 /// (#822), and it is listed only so this match stays exhaustive.
-fn retryable(error: &SourceError) -> Option<WaitReason> {
+fn retryable(error: &SourceError, held_by_quota: bool) -> Option<WaitReason> {
     match error {
         SourceError::Unauthorized { .. } => Some(WaitReason::Unauthorized),
         SourceError::Unreachable(_) | SourceError::Unconfirmed { .. } => {
@@ -108,6 +115,7 @@ fn retryable(error: &SourceError) -> Option<WaitReason> {
             status: Some(status),
             ..
         } if *status == 408 || *status == 429 || *status >= 500 => Some(WaitReason::Unreachable),
+        SourceError::Protocol { status: None, .. } if held_by_quota => Some(WaitReason::Unreachable),
         SourceError::Protocol { .. } | SourceError::Sink(_) | SourceError::Moved { .. } => None,
     }
 }
@@ -668,8 +676,12 @@ async fn attempt(
     // A send that never got an answer is a different window (#1125): the
     // source may have acted, and a write a second arrival would duplicate is
     // held for the reader rather than re-sent. See the `Unconfirmed` arm.
+    //
+    // Watched for knobas' own rate limit (#1729): a request it held past the
+    // send budget fails like a refusal and was never sent. See `retryable`.
     // ---------------------------------------------------------------------
-    match source.write(op).await {
+    let (written, held_by_quota) = knobas_http::watch_local_quota(source.write(op)).await;
+    match written {
         Ok(receipt) => {
             // The receipt, and the settle, in one statement: `sent` is where
             // a worklog's local copy learns the id Jira gave it (#280), and
@@ -722,7 +734,7 @@ async fn attempt(
             Ok(false)
         }
         Err(error) => {
-            match retryable(&error) {
+            match retryable(&error, held_by_quota.is_some()) {
                 Some(reason) => waited(deps, seen, write, reason, &error.to_string()).await?,
                 None => refused(deps, write, &error.to_string()).await?,
             }
@@ -760,7 +772,9 @@ async fn build(
             // means to the shell.
             let reason = match &failure {
                 RunFailure::Db(_) => WaitReason::Unreachable,
-                RunFailure::Source(error) => retryable(error).unwrap_or(WaitReason::Unauthorized),
+                RunFailure::Source(error) => {
+                    retryable(error, false).unwrap_or(WaitReason::Unauthorized)
+                }
                 _ => WaitReason::Unauthorized,
             };
             (reason, failure.message())
@@ -1158,7 +1172,30 @@ mod tests {
                 None,
             ),
         ] {
-            assert_eq!(retryable(&error), expected, "{error:?}");
+            assert_eq!(retryable(&error, false), expected, "{error:?}");
+        }
+    }
+
+    /// #1729: the quota's mark turns only a status-less `Protocol` into a
+    /// wait. A status the source answered is still what decides, and a
+    /// sink's failure is not the network's.
+    #[test]
+    fn the_quotas_mark_waits_out_only_a_status_less_protocol() {
+        for (error, expected) in [
+            (
+                SourceError::protocol("knobas' local rate limit had no room"),
+                Some(WaitReason::Unreachable),
+            ),
+            (
+                SourceError::Protocol {
+                    status: Some(400),
+                    message: "no comments on this issue type".to_owned(),
+                },
+                None,
+            ),
+            (SourceError::Sink("disk full".to_owned()), None),
+        ] {
+            assert_eq!(retryable(&error, true), expected, "{error:?}");
         }
     }
 }

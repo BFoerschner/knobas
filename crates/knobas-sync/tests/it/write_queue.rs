@@ -45,6 +45,14 @@ enum Answer {
     /// The fake records the write, then fails with
     /// [`SourceError::Unconfirmed`].
     LandsThenTimesOut,
+    /// knobas' own rate limit had no room for the write's request within
+    /// its budget, so nothing was sent (#1729). The fake makes a real
+    /// `knobas_http` send that the limiter holds, as an adapter's would be.
+    HeldByQuota,
+    /// The source said no to the operation in a fault knobas raised itself:
+    /// a status-less `Protocol`, the shape [`Answer::HeldByQuota`] fails in
+    /// too, with no quota behind it.
+    RefuseWithoutStatus,
 }
 
 /// What settles a queue row while the write it belongs to is still in flight.
@@ -190,6 +198,10 @@ impl Source for Fake {
             });
         }
         Err(match answer {
+            Answer::HeldByQuota => held_by_the_local_quota().await,
+            Answer::RefuseWithoutStatus => {
+                SourceError::protocol("this fake cannot spell a comment for this ticket")
+            }
             Answer::Unreachable => SourceError::Unreachable("connection timed out".to_owned()),
             Answer::Unauthorized => SourceError::Unauthorized { status: Some(401) },
             _ => SourceError::Protocol {
@@ -208,6 +220,41 @@ impl Source for Fake {
         Err(knobas_source::SourceError::protocol(format!(
             "this fake has no workflow, so there are no reachable transitions for {entity:?}"
         )))
+    }
+}
+
+/// What an adapter's write answers when `knobas_http`'s limiter holds its
+/// request past the send budget (#1729).
+///
+/// The quota is one a second with a burst of one, and the burst is taken
+/// before the send, so the send cannot pass the limiter within its 50 ms
+/// budget. The origin is never reached. The fake wraps the message, as an
+/// adapter may: what the queue reads is the mark, not the words.
+async fn held_by_the_local_quota() -> SourceError {
+    let url = "http://127.0.0.1:9";
+    let client = knobas_http::HttpClient::new(knobas_http::HttpConfig {
+        base_url: url.to_owned(),
+        requests_per_second: 1,
+        burst: 1,
+        ..knobas_http::HttpConfig::default()
+    })
+    .unwrap()
+    .with_send_budget(std::time::Duration::from_millis(50));
+    knobas_http::InstanceLimiter::for_url(url, 1, 1)
+        .unwrap()
+        .until_ready_within(std::time::Duration::from_secs(5))
+        .await
+        .unwrap();
+    let error = client
+        .send(client.request(knobas_http::Method::POST, "/comment"))
+        .await
+        .expect_err("the limiter holds the send past its budget");
+    match error {
+        SourceError::Protocol {
+            status: None,
+            message,
+        } => SourceError::protocol(format!("posting the comment: {message}")),
+        other => panic!("the limiter's failure is a status-less Protocol: {other:?}"),
     }
 }
 
@@ -1940,4 +1987,51 @@ async fn flush_now_does_not_wait_out_the_ladder() {
     h.answer(Answer::Accept);
     flusher::flush_now(&h.deps, Some(&h.source)).await.unwrap();
     assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+}
+
+/// #1729: a write the local rate limit held before it was sent waits on the
+/// sync ladder, as an unreachable one does. Its error is a status-less
+/// `Protocol`, the shape of a refusal, but nothing reached the source, so
+/// nothing was refused.
+#[tokio::test]
+async fn a_write_the_local_quota_held_waits_on_the_ladder() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-47", "a payout fails").await;
+
+    h.answer(Answer::HeldByQuota);
+    let write = h.comment(&ticket, "held by knobas").await;
+    let waiting = h.reload(write.id).await;
+    assert_eq!(waiting.state, WriteState::Pending);
+    assert_eq!(waiting.wait_reason, Some(WaitReason::Unreachable));
+    let detail = waiting.detail.unwrap_or_default();
+    assert!(
+        detail.contains("local rate limit") && detail.contains("was not sent"),
+        "the row says the quota held it: {detail}"
+    );
+
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.asked(), 1, "not before the first rung, one minute");
+
+    h.rewind(60).await;
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.asked(), 2, "on the first rung");
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+}
+
+/// #1729's other half: a status-less `Protocol` with no quota behind it is
+/// still the source, or the adapter, refusing this write.
+#[tokio::test]
+async fn a_status_less_refusal_with_no_quota_behind_it_is_refused() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-48", "a payout fails").await;
+
+    h.answer(Answer::RefuseWithoutStatus);
+    let write = h.comment(&ticket, "no spelling for this").await;
+    let refused = h.reload(write.id).await;
+    assert_eq!(refused.state, WriteState::Refused);
+    assert_eq!(
+        refused.detail.as_deref(),
+        Some("protocol: this fake cannot spell a comment for this ticket")
+    );
 }
