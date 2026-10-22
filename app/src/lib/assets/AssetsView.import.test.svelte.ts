@@ -18,7 +18,7 @@
  * chose, and that the Tree re-reads afterwards rather than patching itself.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type {
   AssetDetail,
@@ -31,6 +31,13 @@ import type {
 import type { IpcError } from "../ipc";
 import { createRouter } from "../shell/router.svelte";
 import { layers } from "../tf/layers.svelte";
+
+// `app_status` says where credentials live (#1615); the flag flips it per test.
+const store = vi.hoisted(() => ({ inMemory: false }));
+vi.mock("../ipc/app", async (original) => ({
+  ...(await original<typeof import("../ipc/app")>()),
+  appStatus: () => Promise.resolve({ secrets_in_memory: store.inMemory }),
+}));
 
 const { default: AssetsView } = await import("./AssetsView.svelte");
 
@@ -281,6 +288,7 @@ beforeEach(() => {
   document.body.append(target);
   script = [];
   rejectNextProduce = false;
+  store.inMemory = false;
 });
 
 afterEach(() => {
@@ -892,4 +900,23 @@ test("a token the far end refuses puts the field back, and another fault does no
   expect(target.textContent).toContain("hetzner did not answer");
   expect(tokenField()).toBeNull();
   expect(calls.produces.length).toBe(4);
+});
+
+/** #1615: the token hint names the keychain, or the session when the store is in memory. */
+test.each([
+  [false, "Kept in this machine's keychain"],
+  [true, "Kept for this session only"],
+])("the token hint follows the secret store (in memory: %s)", async (inMemory, words) => {
+  store.inMemory = inMemory;
+  script = [{ state: "token_needed" }];
+  render();
+  await settle();
+  button("Import")?.click();
+  flushSync();
+  chooseImporter();
+  button("Read Hetzner Cloud")?.click();
+  await settle();
+  const hint = target.querySelector(".dlg .hint")?.textContent ?? "";
+  expect(hint).toContain(words);
+  expect(hint).not.toContain(inMemory ? "keychain" : "session only");
 });

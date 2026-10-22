@@ -11189,3 +11189,18 @@ set.
   here, filed as #1615 (`backlog`). *Reasoning:* the ticket names a source's page in Settings ›
   Sources, and the importer is a different surface. `secrets_in_memory` is now there for #1615 to
   read. *Reversing:* cheap.
+
+## #1615: the importer token hint reads the store the source page reads (Sonnet implementer, 2026-10-22)
+
+- **Where the words and the reading live.** *Fork:* the source page kept the keychain name and
+  the memory wording inline; the two importers need the same reading. *Ruling:* a small
+  `shell/secret-store.ts` holds the keychain name, `storedWhere` (the source page's line, same
+  text), `tokenKeptHint` and `readSecretsInMemory` (`app_status`, keychain wording if it fails).
+  The source page keeps its own `appStatus` port and only takes its words from there.
+  *Reasoning:* "no second table". *Reversing:* cheap.
+- **How the importers read `app_status`.** *Fork:* a new port on `ImportPorts`/`AssetsView` or a
+  direct call. *Ruling:* a direct call through `readSecretsInMemory`; tests stand in via
+  `vi.mock("ipc/app")`. *Reasoning:* a port would thread through `AssetsView`, `TfDeps` and every
+  test's port bag for a copy-only change. *Reversing:* cheap.
+- **Memory wording.** "Kept for this session only — never in the database and never in a share
+  export. You are asked once." (the keychain wording otherwise unchanged).

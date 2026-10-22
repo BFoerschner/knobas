@@ -14,6 +14,7 @@
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import { IMPORT_PRODUCERS, type AssetRow, type ImportOutcome, type ImportPreview } from "../../ipc/assets";
   import { latestRead } from "../../shell/latest-read";
+  import { readSecretsInMemory, tokenKeptHint } from "../../shell/secret-store";
   import TfDialog from "../settings/TfDialog.svelte";
   import type { ImportPorts } from "./ports";
   import TfImportPreview from "./TfImportPreview.svelte";
@@ -37,6 +38,18 @@
   let failure = $state<string | null>(null);
   let busy = $state(false);
   let tokenWanted = $state(false);
+  // Where a token is kept (#1615): the keychain unless this process keeps
+  // credentials in memory. The keychain wording stands until `app_status` says otherwise.
+  let secretsInMemory = $state(false);
+  $effect(() => {
+    let dead = false;
+    void readSecretsInMemory().then((read) => {
+      if (!dead) secretsInMemory = read;
+    });
+    return () => {
+      dead = true;
+    };
+  });
   let token = $state("");
   /** The servers `landing_needed` named, or `null` while none is owed. */
   let landing = $state.raw<string[] | null>(null);
@@ -186,7 +199,7 @@
     </div>
     {#if entry.importer && tokenWanted}
       <p class="tf-dim tf-note">
-        Kept in this machine's keychain, under this importer's own name — never in the database and never in a share export. You are asked once.
+        {tokenKeptHint(secretsInMemory)}
       </p>
     {/if}
     {#if entry.importer && landing !== null}
