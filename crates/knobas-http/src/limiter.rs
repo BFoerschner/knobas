@@ -310,8 +310,9 @@ impl Slot {
     /// next request. One looser in either field starts with what its rate
     /// refilled since the origin's last request ([`Paced::loosened`]), so a
     /// loosening hands out what the quiet earned and nothing the limiter it
-    /// replaces had left; a stricter one takes over what the old one had left, or what
-    /// the stricter rate refilled since then ([`Paced::tightened`]).
+    /// replaces had left; a stricter one takes over what the old one had
+    /// left, or what the stricter rate refilled since then
+    /// ([`Paced::tightened`]).
     fn register(&self, asked: Rate) -> Arc<Registration> {
         let registration = Arc::new(Registration);
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
@@ -390,15 +391,13 @@ impl Paced {
     /// refilled that much had it governed throughout. Right after a request
     /// the quiet is milliseconds and the limiter starts drained.
     fn loosened(rate: Rate, idle: Duration) -> Self {
-        Self::with_left(
-            rate,
-            u32::try_from(rate.refilled_in(idle)).unwrap_or(u32::MAX),
-        )
+        Self::with_left(rate, rate.refilled_in(idle))
     }
 
     /// A limiter at `rate` with `left` requests to send at once, at most its
     /// whole burst.
-    fn with_left(rate: Rate, left: u32) -> Self {
+    fn with_left(rate: Rate, left: u128) -> Self {
+        let left = u32::try_from(left).unwrap_or(u32::MAX);
         let paced = Self::new(rate);
         // A fresh limiter has its whole burst, and this is at most that, so
         // it always fits.
@@ -433,7 +432,7 @@ impl Paced {
             / u128::from(old.rate.per_second.get());
         let refilled = rate.refilled_in(idle);
         // `with_left` caps it at the new burst.
-        Self::with_left(rate, u32::try_from(left.max(refilled)).unwrap_or(u32::MAX))
+        Self::with_left(rate, left.max(refilled))
     }
 
     /// Take every request this limiter could send at once, and count them.
