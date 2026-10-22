@@ -155,8 +155,8 @@
   async function save(row: QueuedWrite) {
     const payload = withBody(row.payload, draft, row.held_snapshot);
     if (payload === null) return;
-    await queue.amend(row.id, payload);
-    editing = null;
+    // Only a skipped amend (the store was busy) keeps the editor and its draft.
+    if (await queue.amend(row.id, payload)) editing = null;
   }
 
   /**
@@ -416,7 +416,7 @@
       <p>Retries the waiting writes. Held writes are untouched.</p>
       {@render guarantee()}
     </div>
-    <button class="tf-btn" disabled={queue.busy} onclick={() => queue.flush(null)}>Flush now</button>
+    <button class="tf-btn" disabled={queue.busy || queue.flushing} onclick={() => queue.flush(null)}>Flush now</button>
     <button class="tf-btn tf-ghost" onclick={onclose}>Close</button>
   {/snippet}
 </TfDialog>

@@ -108,11 +108,12 @@ const queue = {
   error: null,
   answered: true,
   busy: false,
+  flushing: false,
   refresh: () => Promise.resolve(),
   flush: () => Promise.resolve(),
   apply: () => Promise.resolve(),
   discard: () => Promise.resolve(),
-  amend: () => Promise.resolve(),
+  amend: () => Promise.resolve(true),
 } satisfies WriteQueue;
 
 function health(id: string, state: CredentialHealth["state"]): CredentialHealth {
