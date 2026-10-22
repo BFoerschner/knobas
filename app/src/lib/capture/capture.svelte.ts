@@ -156,7 +156,10 @@ export function createCapture(ports?: Partial<CapturePorts>): Capture {
    * for the create it has to save into, in the order the reader made them.
    */
   let chain: Promise<void> = Promise.resolve();
+  /** Works queued and not yet settled; `busy` is this above zero. */
+  let outstanding = 0;
   function queue(work: () => Promise<void>): Promise<void> {
+    outstanding += 1;
     state.busy = true;
     chain = chain
       .then(async () => {
@@ -168,7 +171,8 @@ export function createCapture(ports?: Partial<CapturePorts>): Capture {
         }
       })
       .finally(() => {
-        state.busy = false;
+        outstanding -= 1;
+        state.busy = outstanding > 0;
       });
     return chain;
   }

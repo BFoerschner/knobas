@@ -259,6 +259,41 @@ test("Escape during the first write still saves into the note that write made", 
   expect(calls).toEqual(["captureContext", "createNote", "saveNote", "close"]);
 });
 
+/**
+ * *Open in knobas* is disabled on `busy`. Two queued works must keep it true
+ * until the second settles, or a second click lands on a window already closing.
+ */
+test("busy stays true until the last queued write settles", async () => {
+  let releaseCreate: (value: NoteDetail) => void = () => {};
+  const slowCreate = new Promise<NoteDetail>((resolve) => {
+    releaseCreate = resolve;
+  });
+  let releaseSave: (value: NoteDetail) => void = () => {};
+  const slowSave = new Promise<NoteDetail>((resolve) => {
+    releaseSave = resolve;
+  });
+  const capture = createCapture({
+    captureContext: async () => ({ context: null, foreground: null }),
+    createNote: () => slowCreate,
+    saveNote: () => slowSave,
+    revealNote: async () => {},
+    close: async () => {},
+  });
+
+  expect(capture.busy).toBe(false);
+  const typing = capture.typed("Retry storm");
+  const closing = capture.finish();
+  expect(capture.busy).toBe(true);
+
+  releaseCreate(detail());
+  await typing;
+  expect(capture.busy).toBe(true);
+
+  releaseSave(detail());
+  await closing;
+  expect(capture.busy).toBe(false);
+});
+
 // --- failures ----------------------------------------------------------------
 
 test("a note that could not be written says so and leaves the window up", async () => {
