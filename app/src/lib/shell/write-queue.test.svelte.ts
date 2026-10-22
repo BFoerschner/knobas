@@ -1091,11 +1091,11 @@ test("a queue whose first read failed shows the reason, not 'Nothing is queued'"
 });
 
 /**
- * Nothing is disabled while a send runs (#775): *Flush now* is the send, and
- * the panel's other answers -- withdraw, edit, send anyway -- stay pressable
- * while it is out.
+ * Only *Flush now* is disabled while a send runs (#775, #1671): it is the send,
+ * and the panel's other answers -- withdraw, edit, send anyway -- stay
+ * pressable while it is out.
  */
-test("flush now disables nothing while the send it asked for is out", async () => {
+test("flush now disables only itself while the send it asked for is out", async () => {
   rows = [held(), write()];
   counts = { pending: 1, held: 1, refused: 0 };
   const screen = await render();

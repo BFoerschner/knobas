@@ -11762,3 +11762,14 @@ set.
   binary's leftover) cannot move the count; every live monitor must still be sampled. A
   pre-clean would spend up to four logins of Kuma's twenty a minute and still race a sibling.
   *Reversing:* low (one query).
+
+### #1671: merge-manager review (Sonnet, 2026-10-22)
+
+- **The busy-save test lifts Save's `disabled` by hand.** *Ruling:* kept. Save is disabled while
+  `busy`, so only a click already queued before the re-render can reach `save()` busy; that path is
+  near-unreachable in the app, and the guard is harmless there. The test witnesses the store
+  contract (`amend` resolves `false` when skipped, `save()` keeps the draft), not a user path.
+  *Reversing:* low.
+- **The #775 test now expects Flush now disabled while out.** *Ruling:* that is the ticket's intent
+  (a double click sends one `flush_writes`), not a weakened assertion; the other buttons stay
+  asserted enabled. The test is retitled "disables only itself". *Reversing:* low.
