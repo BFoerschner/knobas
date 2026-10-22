@@ -447,7 +447,9 @@ fn is_description_word(word: &str) -> bool {
 /// # Errors
 ///
 /// [`BackupError::TargetNotMigrated`], [`BackupError::TargetNotEmpty`],
-/// [`BackupError::ToolMissing`], [`BackupError::Tool`].
+/// [`BackupError::ToolMissing`], [`BackupError::Tool`]; [`BackupError::Sqlx`]
+/// when a statement around the load fails, which after a failed load includes
+/// putting the bookkeeping rows back, and then replaces the load's error.
 pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), BackupError> {
     let mut conn = connector.connect().await?;
     match owned_rows(&mut conn).await? {
@@ -474,7 +476,7 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
     // The clears autocommit here, before `pg_restore` opens its own
     // transaction on another connection, so a failed load cannot roll them
     // back (#1635). The rows are read first and put back by
-    // [`put_back_bookkeeping`] when the load fails (spec #1619, ruling B3).
+    // `put_back_bookkeeping` when the load fails (spec #1619, ruling B3).
     let snapshot = snapshot_bookkeeping(&mut conn).await?;
     for table in BOOKKEEPING_TABLES {
         if carries(archive, table).await? {
@@ -525,7 +527,7 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
 }
 
 /// Every row of each of the [`BOOKKEEPING_TABLES`], as the text of a `jsonb`
-/// array per table, in that order.
+/// array beside the table it was read from.
 ///
 /// All four, not only the ones the archive carries: clearing `dep_layer`
 /// cascades into `dep_layer_kind`, so a table the restore never names can
@@ -534,16 +536,16 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
 /// a column a later migration adds is carried with no change.
 async fn snapshot_bookkeeping(
     conn: &mut sqlx::PgConnection,
-) -> Result<Vec<String>, sqlx::Error> {
+) -> Result<Vec<(&'static str, String)>, sqlx::Error> {
     let mut snapshot = Vec::with_capacity(BOOKKEEPING_TABLES.len());
     for table in BOOKKEEPING_TABLES {
-        // Crate constants only, as for the clears in [`restore`].
+        // Crate constants only, as for the clears in `restore`.
         let rows: String = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb)::text from {OWNED_SCHEMA}.{table} t"
         )))
         .fetch_one(&mut *conn)
         .await?;
-        snapshot.push(rows);
+        snapshot.push((*table, rows));
     }
     Ok(snapshot)
 }
@@ -556,17 +558,17 @@ async fn snapshot_bookkeeping(
 /// parents before children, so `dep_layer_kind` finds its layer.
 async fn put_back_bookkeeping(
     conn: &mut sqlx::PgConnection,
-    snapshot: &[String],
+    snapshot: &[(&'static str, String)],
 ) -> Result<(), sqlx::Error> {
     let mut tx = conn.begin().await?;
-    for table in BOOKKEEPING_TABLES {
+    for (table, _) in snapshot {
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "delete from {OWNED_SCHEMA}.{table}"
         )))
         .execute(&mut *tx)
         .await?;
     }
-    for (table, rows) in BOOKKEEPING_TABLES.iter().zip(snapshot).rev() {
+    for (table, rows) in snapshot.iter().rev() {
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "insert into {OWNED_SCHEMA}.{table}
              select * from jsonb_populate_recordset(null::{OWNED_SCHEMA}.{table}, $1::jsonb)"

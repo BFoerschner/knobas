@@ -153,14 +153,22 @@ async fn an_archive_from_before_the_saved_view_rename_restores() {
             .await
             .unwrap();
     assert_eq!(shows.as_deref(), Some("jira:board-7"));
-    let old: i64 = sqlx::query_scalar(
-        "select count(*) from information_schema.columns
-          where table_schema = 'knobas' and table_name = 'ticket_view' and column_name = 'jira_ref'",
+    assert!(
+        !has_the_rename_shim(&pool).await,
+        "the restore left the old column behind"
+    );
+}
+
+/// Whether `knobas.ticket_view` has `jira_ref`, the old name the rename shim
+/// adds for the length of a load.
+async fn has_the_rename_shim(pool: &sqlx::PgPool) -> bool {
+    sqlx::query_scalar(
+        "select exists (select 1 from information_schema.columns
+          where table_schema = 'knobas' and table_name = 'ticket_view' and column_name = 'jira_ref')",
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
-    .unwrap();
-    assert_eq!(old, 0, "the restore left the old column behind");
+    .unwrap()
 }
 
 /// Every row of a `knobas` table, in a stable order, as one text value: what
@@ -223,7 +231,10 @@ async fn a_failed_restore_of(archive: &std::path::Path, label: &str) {
     let mut before = Vec::new();
     for table in tables {
         let rows = rows_of(&target, table).await;
-        assert_ne!(rows, "[]", "knobas.{table} is empty, so this test would assert nothing");
+        assert_ne!(
+            rows, "[]",
+            "knobas.{table} is empty, so this test would assert nothing"
+        );
         before.push(rows);
     }
 
@@ -240,14 +251,10 @@ async fn a_failed_restore_of(archive: &std::path::Path, label: &str) {
             "knobas.{table} lost or changed rows in a failed restore"
         );
     }
-    let shim: i64 = sqlx::query_scalar(
-        "select count(*) from information_schema.columns
-          where table_schema = 'knobas' and table_name = 'ticket_view' and column_name = 'jira_ref'",
-    )
-    .fetch_one(&target)
-    .await
-    .unwrap();
-    assert_eq!(shim, 0, "the failed restore left the rename shim's column behind");
+    assert!(
+        !has_the_rename_shim(&target).await,
+        "the failed restore left the rename shim's column behind"
+    );
 }
 
 /// A whole backup that fails to load: every bookkeeping table was cleared for
