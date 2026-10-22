@@ -44,9 +44,10 @@
     `crates/knobas-core/tests/it/mini_board.rs` reads one source's offer through `mini_board::read`,
     and its prepared-statement test goes: the board's own one reads the same `status_paths`
     statement.
-  - Prose only: the module docs of `suggestion_pass.rs`, one doc comment in
-    `commands/entity/start_work.rs`, `README.md` and `docs/diagrams/suggestion-pass-{light,dark}.svg`
-    drop the manual pass.
+  - Prose only: the module docs of `suggestion_pass.rs` and `SuggestOnSync::new`'s doc, the
+    module comment of `commands/entity/suggestions.rs` (four commands to three), one doc comment
+    in `commands/entity/start_work.rs`, the bring-up comment in `lib.rs`, the fake's handler
+    comment, `README.md` and `docs/diagrams/suggestion-pass-{light,dark}.svg` drop the manual pass.
 
   **What is not touched.** No migration, no event, no `WriteOp`, nothing under
   `crates/knobas-source/src/**` or `crates/knobas-http/**`, `crates/knobas-app/src/{error,
