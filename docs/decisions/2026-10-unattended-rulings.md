@@ -11629,3 +11629,18 @@ set.
   login is refused for the limit, rather than failing a test on the fixture's budget. The re-run
   that followed did not need the wait. Re-adding #864's 61 s sleep between the binaries would
   have cost every run a minute. *Reversing:* low, one branch in the helper.
+- **Merge-manager review (Opus, 2026-10-22): pause and resume sent again after a post-emit
+  deadline.** *Ruling:* right under ADR-0012 as amended by #1125. Kuma's `pauseMonitor` and
+  `resumeMonitor` set the monitor's `active` flag and stop or restart its check, so a second
+  arrival leaves the state the first set; `WriteOp::delivery` already says `resend_harmless: true`
+  for both ("the same state twice is one"). `store::due` takes a source's head write, so a later
+  opposite op stays behind the waiting one. The cost is time, not state: a Kuma that takes the
+  emit and never acknowledges it spends up to `CALL_BUDGET` (60 s) of the sequential `flush_all`
+  per attempt until #1628's ladder spaces the attempts (noted on #1628). *Reversing:* low.
+- **Merge-manager review: the login-limit retry in `testenv/kuma-monitor.mjs`.** *Ruling:* sound.
+  It matches only Kuma's own refusal text inside the login callback, waits once, and a second
+  refusal still fails the helper with Kuma's words; the wait is logged. It cannot hide an adapter
+  that spends too many logins: the adapter's budget is witnessed by
+  `more_writes_in_a_minute_than_kuma_allows_logins_all_land`, which drives the adapter directly,
+  not the helper. It also covers the cause #1727 reports (`Scratch::drop`'s delete refused for the
+  limit), since the delete goes through the same login. *Reversing:* low.
