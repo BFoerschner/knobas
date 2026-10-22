@@ -2,7 +2,8 @@
  * `?fake-ipc`: The timer, the day's blocks and their edits (#826, #827), the worklog draft, and the rooms
  * UI's week timesheet.
  */
-import type { Handler } from "../fake-tauri";
+import type { Candidate, Week, WeekRow } from "../../../ipc/time";
+import type { Handlers } from "../fake-tauri";
 import { dayKey } from "../../../time/day";
 import { CORPUS } from "./corpus";
 
@@ -50,7 +51,7 @@ const WEEK_PLAN: {
 /** Prototype-6's "No target, app open" row, in minutes per day. */
 const WEEK_OPEN = [18, 12, 36, 6, 35];
 
-function fakeWeek(args: Record<string, unknown>) {
+function fakeWeek(args: Record<string, unknown>): Week {
   const windows = (args["days"] as { day: string }[] | undefined) ?? [];
   const days = windows.map((window) => window.day);
   const cell = (tracked: number, logged: number, held: number) => ({
@@ -60,7 +61,7 @@ function fakeWeek(args: Record<string, unknown>) {
     held_seconds: held * 60,
     unlogged_seconds: Math.max(0, tracked - logged - held) * 60,
   });
-  const rows: unknown[] = WEEK_PLAN.map((row) => ({
+  const rows: WeekRow[] = WEEK_PLAN.map((row) => ({
     target: row.target,
     title: row.title,
     cells: windows.map((_, index) => cell(...(row.days[index] ?? [0, 0, 0]))),
@@ -166,7 +167,7 @@ function fakeHorizon(): string {
  * blocks: the sum of the day's unlogged blocks on the ticket, and a fixed set
  * of candidates on PAY-231 so the dialog has boxes to draw.
  */
-function fakeTime(params: URLSearchParams): Record<string, Handler> {
+function fakeTime(params: URLSearchParams): Handlers {
   const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
   let nextBlock = 501;
   let nextWorklog = 71;
@@ -195,14 +196,15 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
     blocks.filter(
       (block) => block.worklog_id === null && block.target.kind === "entity" && block.target.entity_id === entityId,
     );
-  const candidates = (from: string) => {
+  const candidates = (from: string): Candidate[] => {
     const at = (minutes: number) => new Date(new Date(from).getTime() + minutes * 60_000).toISOString();
-    return [
+    const offered: Candidate[] = [
       { id: "item:mock:9f2c1ab", source: "mirror", at: at(22), entity_id: "mock:9f2c1ab", bullet: "- commit 9f2c1ab payout: key the retry on the mandate id" },
       { id: "write:31", source: "write", at: at(40), entity_id: "mock:payout-service#142", bullet: "- replied to Jonas on PR #142" },
       { id: "activity:4211", source: "activity", at: at(125), entity_id: "mock:payout-service#318", bullet: "- ran payout-service #318" },
       { id: "item:mock:ENG-SEPA", source: "mirror", at: at(60), entity_id: "mock:ENG-SEPA", bullet: "- edited SEPA retry design" },
-    ].sort((a, b) => a.at.localeCompare(b.at));
+    ];
+    return offered.sort((a, b) => a.at.localeCompare(b.at));
   };
   return {
     current_timer: () => running,
@@ -470,7 +472,7 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
 }
 
 /** This feature's commands. */
-export function handlers(params: URLSearchParams): Record<string, Handler> {
+export function handlers(params: URLSearchParams): Handlers {
   return {
     // The timer, the day's blocks and the worklog draft (#826), so a stop under
     // `?fake-ipc` opens the draft a screenshot is taken of. `fake-timer` starts

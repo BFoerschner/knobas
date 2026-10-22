@@ -2,8 +2,8 @@
  * `?fake-ipc`: One entity: the detail and the job page's reads, the reachable
  * transitions, the conversation, and the URL resolver.
  */
-import type { LinkEntry, LinkRow } from "../../../ipc/entity";
-import type { Handler } from "../fake-tauri";
+import type { LinkEntry, LinkRow, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
+import type { Handlers } from "../fake-tauri";
 import { CORPUS, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
@@ -233,7 +233,7 @@ function fakeTransitions(args: Record<string, unknown>): string[] {
  * them. A deliberate divergence, for the same reason `kind_info` above is one:
  * the shell under test is the same either way.
  */
-function entityView(args: Record<string, unknown>) {
+function entityView(args: Record<string, unknown>): SourceView | null {
   const id = String(args["entityId"] ?? "");
   // A repository, its branches and its commits: the repository page (#838).
   const drawn = repoView(id, (args["section"] as string | null | undefined) ?? null);
@@ -246,7 +246,7 @@ function entityView(args: Record<string, unknown>) {
   if (ran !== undefined) return ran;
   if (id !== "mock:9f2c1ab") return null;
   const section = (args["section"] as string | null | undefined) ?? null;
-  const overview = {
+  const overview: ViewSection = {
     id: "overview",
     title: "Overview",
     count: null,
@@ -273,8 +273,8 @@ function entityView(args: Record<string, unknown>) {
       },
     ],
   };
-  const line = (kind: string, old: number | null, nu: number | null, text: string) => ({ kind, old, new: nu, text });
-  const diff = {
+  const line = (kind: DiffLine["kind"], old: number | null, nu: number | null, text: string): DiffLine => ({ kind, old, new: nu, text });
+  const diff: ViewSection = {
     id: "diff",
     title: "Diff",
     count: 2,
@@ -283,6 +283,8 @@ function entityView(args: Record<string, unknown>) {
       {
         type: "diff",
         truncated: false,
+        commentable: null,
+        gone: [],
         files: [
           {
             path: "src/payout/retry.rs",
@@ -291,6 +293,7 @@ function entityView(args: Record<string, unknown>) {
             additions: 3,
             deletions: 1,
             truncated: false,
+            threads: [],
             hunks: [
               {
                 header: "@@ -41,7 +41,9 @@ impl Retry {",
@@ -314,6 +317,7 @@ function entityView(args: Record<string, unknown>) {
             deletions: 0,
             truncated: false,
             hunks: [],
+            threads: [],
           },
         ],
       },
@@ -328,7 +332,7 @@ function entityView(args: Record<string, unknown>) {
  * vocabulary, its id the fixed value, one field the source asks for, so the
  * item page's toolbar and its dialog can be looked at under `?fake-ipc`.
  */
-const ADD_NOTE = {
+const ADD_NOTE: ViewAction = {
   write_op: "source_action",
   label: "Add note…",
   fields: [{ name: "note", label: "Note", kind: { type: "long_text" }, value: null, required: true, placeholder: "What a reader of this commit should know" }],
@@ -400,7 +404,7 @@ function fixtureTime(said: string): string {
 /** A thread change with nothing said yet (#929): each line fills in its own. */
 const QUIET = { status: null, from: null, by: null, mine: false, number: null, repo: null };
 
-function entityThread(args: Record<string, unknown>) {
+function entityThread(args: Record<string, unknown>): Thread {
   const id = String(args["entityId"] ?? "");
   if (!CORPUS.some((candidate) => candidate.entity_id === id)) {
     throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
@@ -444,7 +448,7 @@ function visitEntity(args: Record<string, unknown>): string | null {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     get_entity: (args) => getEntity(args),
     entity_thread: (args) => entityThread(args),

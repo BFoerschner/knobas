@@ -10,7 +10,7 @@ import type {
   SuggestionEntry,
   SuggestionPage,
 } from "../../../ipc/entity";
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 import { CORPUS, FAKE_CONTEXTS } from "./corpus";
 
 /**
@@ -193,7 +193,7 @@ function proposalEvidence(args: Record<string, unknown>): ProposalEvidence {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
 
     // Suggestions (#237): the proposals read and its two answers. Stateful

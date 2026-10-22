@@ -2,7 +2,8 @@
  * `?fake-ipc`: The launcher (#504): its home board, the Tree's search box (#430), the
  * `>` palette (#1417) and the query box's suggestions (#601).
  */
-import type { Handler } from "../fake-tauri";
+import type { SearchResponse } from "../../../ipc/search";
+import type { Handlers } from "../fake-tauri";
 import { fakeNotesAreShown } from "./capture";
 import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE, assetPathText } from "./estate";
@@ -16,7 +17,7 @@ import { FIXTURE_QUEUE } from "./write-queue";
  * hold can be looked at. Any other words keep the refusal below; this is a
  * key lookup, not the corpus's full-text search.
  */
-function ticketsByKey(raw: string) {
+function ticketsByKey(raw: string): SearchResponse | null {
   if (!/^[A-Za-z][A-Za-z0-9]*-\d+$/.test(raw)) return null;
   const key = raw.toUpperCase();
   const hits = CORPUS.filter(
@@ -43,7 +44,7 @@ function ticketsByKey(raw: string) {
  * search). The launcher draws its navigation palette from that, so the
  * palette can be looked at under `?fake-ipc`.
  */
-function actionPalette(raw: string) {
+function actionPalette(raw: string): SearchResponse | null {
   if (!raw.startsWith(">")) return null;
   return {
     interpreted: {
@@ -70,7 +71,7 @@ function actionPalette(raw: string) {
  * taking one opens the columns. What certifies the query itself is
  * `crates/knobas-app/tests/it/search_ipc.rs`, against a real database.
  */
-function estateSearch(args: Record<string, unknown>) {
+function estateSearch(args: Record<string, unknown>): SearchResponse {
   const query = (args.query ?? {}) as {
     raw?: string;
     filters?: { kinds?: string[] };
@@ -104,6 +105,7 @@ function estateSearch(args: Record<string, unknown>) {
     synced_at: SYNCED_AT,
     title: asset.name,
     path: assetPathText(asset),
+    state: null,
     rank: 1 - index / 10,
     snippet: [],
   }));
@@ -134,7 +136,7 @@ function estateSearch(args: Record<string, unknown>) {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     // The launcher board (#504). Until now `launcher_home` had no handler at
     // all, so `⌘K` under `?fake-ipc` drew a red "command not found" over the

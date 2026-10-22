@@ -3,8 +3,8 @@
  * the Add-source dialog's writes.
  */
 import { GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "../../../sources/fixtures";
-import type { AdapterStatus } from "../../../ipc/sources";
-import type { Handler } from "../fake-tauri";
+import type { AdapterStatus, AuthMethod, AuthState, KindPaths, SourceDescriptor, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../../ipc/sources";
+import type { Handlers } from "../fake-tauri";
 import { CORPUS, ROLE_CLAIMERS, SYNCED_AT } from "./corpus";
 
 // -- the sources cockpit's fixture -------------------------------------------
@@ -16,7 +16,7 @@ const KIND_INFO = [
 ];
 
 /** The five sources the sources view draws. */
-export const FIXTURE_SOURCES = [
+export const FIXTURE_SOURCES: (SourceSummary & { roles: { role: string; reads: string[] }[] })[] = [
   {
     ...fixtureSource("mock", "mock", "Tidewater (mock)", "https://mock.tidewater.example", "ok", 21, 90, null),
     // The fixture's repositories, pull requests and tickets are the mock's
@@ -121,7 +121,7 @@ function fixtureSource(
   adapterKind: string,
   displayName: string,
   baseUrl: string,
-  state: string,
+  state: AuthState,
   itemCount: number,
   runId: number,
   /**
@@ -130,8 +130,8 @@ function fixtureSource(
    * default would put one word in the credential column of every row and the
    * column exists to tell them apart.
    */
-  authKind: string | null,
-) {
+  authKind: AuthMethod | null,
+): SourceSummary & { roles: { role: string; reads: string[] }[] } {
   return {
     id,
     adapter_kind: adapterKind,
@@ -178,8 +178,15 @@ function fixtureSource(
 }
 
 /** One descriptor template per adapter the Add-source form can offer. */
-const FIXTURE_ADAPTERS = [
-  {
+type Declared = Omit<SourceDescriptor, "accepts_account" | "payload_paths" | "source_actions" | "clone_from" | "url_forms">;
+
+/** A descriptor as the wire sends it: what a fixture does not declare takes the empty value (#1670). */
+function descriptor(declared: Declared & Partial<SourceDescriptor>): SourceDescriptor {
+  return { accepts_account: false, payload_paths: [], source_actions: [], clone_from: [], url_forms: [], ...declared };
+}
+
+const FIXTURE_ADAPTERS: SourceDescriptor[] = [
+  descriptor({
     id: "mock",
     adapter_kind: "mock",
     name: "Tidewater mock",
@@ -193,8 +200,8 @@ const FIXTURE_ADAPTERS = [
     entity_kinds: KIND_INFO,
     // The mock needs no configuration, which is the empty-form case.
     config_schema: { type: "object", properties: {} },
-  },
-  {
+  }),
+  descriptor({
     id: "jira",
     adapter_kind: "jira",
     name: "Jira Data Center",
@@ -212,8 +219,8 @@ const FIXTURE_ADAPTERS = [
     // agreeing with nothing — and this is the import that makes `fixtures.ts`'s
     // "not test-only" true rather than aspirational.
     config_schema: JIRA_SCHEMA,
-  },
-  {
+  }),
+  descriptor({
     id: "gitea",
     adapter_kind: "gitea",
     name: "Gitea",
@@ -229,8 +236,8 @@ const FIXTURE_ADAPTERS = [
     write_ops: [],
     entity_kinds: KIND_INFO,
     config_schema: GITEA_SCHEMA,
-  },
-  {
+  }),
+  descriptor({
     id: "teamcity",
     adapter_kind: "teamcity",
     name: "TeamCity",
@@ -249,11 +256,12 @@ const FIXTURE_ADAPTERS = [
       { id: "build_config", label: "Build configuration", plural: "Build configurations", monogram: "BC", full_sync_exhaustive: false },
     ],
     payload_paths: [
-      { kind: "build", frame: "run" },
-      { kind: "build_config", frame: "pipeline" },
+      // Only the two fields the frames read; the rest of a `KindPaths` is for the sync.
+      { kind: "build", frame: "run" } as KindPaths,
+      { kind: "build_config", frame: "pipeline" } as KindPaths,
     ],
     config_schema: TEAMCITY_SCHEMA,
-  },
+  }),
 ];
 
 // The role a faked read asks for (#1294) is answered from these sources'
@@ -275,7 +283,7 @@ const FIXTURE_DB_STATS = {
 };
 
 /** `sync_status` for one fixture source, derived from its last run. */
-function fakeStatus(source: (typeof FIXTURE_SOURCES)[number]) {
+function fakeStatus(source: (typeof FIXTURE_SOURCES)[number]): SourceSyncStatus {
   return {
     source_id: source.id,
     running: false,
@@ -290,9 +298,9 @@ function fakeStatus(source: (typeof FIXTURE_SOURCES)[number]) {
 }
 
 /** `list_sync_runs`, newest first, optionally scoped to one source. */
-function fakeRuns(args: Record<string, unknown>) {
+function fakeRuns(args: Record<string, unknown>): SyncRunRow[] {
   const sourceId = args["sourceId"];
-  const runs = [
+  const runs: SyncRunRow[] = [
     ...FIXTURE_SOURCES.map((source) => source.last_run).filter((run) => run !== null),
     // An older TeamCity run the server never answered (#1478): the source
     // crate's "unreachable: …" around the HTTP client's message, whole request
@@ -336,7 +344,7 @@ function fakeRuns(args: Record<string, unknown>) {
  * path ending in `knobas-adapter.json` installs it, and `list_adapters`
  * offers it from then on; any other path is refused with a reason.
  */
-const FIXTURE_EXTERNAL = {
+const FIXTURE_EXTERNAL: SourceDescriptor = descriptor({
   id: "wasm-fixture",
   adapter_kind: "wasm-fixture",
   name: "Harbour surveys",
@@ -353,7 +361,7 @@ const FIXTURE_EXTERNAL = {
     properties: { fault: { type: "string", enum: ["none", "unauthorized", "unreachable", "swallow_sink"] } },
     additionalProperties: false,
   },
-};
+});
 
 function installAdapter(args: Record<string, unknown>) {
   const manifest = String(args["manifest"] ?? "");
@@ -434,7 +442,7 @@ function uninstallOne(args: Record<string, unknown>) {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     // The sources cockpit. Five sources, one of them refusing its credential
     // and one with a PAT running out, because those are the two rows a person
@@ -505,7 +513,7 @@ export function handlers(): Record<string, Handler> {
         throw { code: "conflict", message: `a source called ${id} already exists`, source_id: id };
       }
       const adapter = FIXTURE_ADAPTERS.find((row) => row.adapter_kind === input["adapter_kind"]);
-      const row = {
+      const row: SourceSummary & { roles: { role: string; reads: string[] }[] } = {
         ...FIXTURE_SOURCES[0]!,
         id,
         adapter_kind: String(input["adapter_kind"] ?? "mock"),
@@ -515,7 +523,7 @@ export function handlers(): Record<string, Handler> {
         // `auth_kind` and the row it draws afterwards has to be the source the
         // person just described, or the QA harness disagrees with itself one
         // render apart.
-        auth_kind: input["auth_kind"] ?? null,
+        auth_kind: (input["auth_kind"] ?? null) as AuthMethod | null,
         config: (input["config"] ?? {}) as Record<string, unknown>,
         sync_interval_secs: Number(input["sync_interval_secs"] ?? 900),
         health: { source_id: id, state: "ok", checked_at: SYNCED_AT, detail: null, secret_expires_at: null },

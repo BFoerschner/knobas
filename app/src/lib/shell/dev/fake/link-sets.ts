@@ -37,7 +37,7 @@ import type {
   RuleTicket,
   StateChip,
 } from "../../../ipc/entity";
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 import { fakePipelines } from "./builds";
 import { CORPUS } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
@@ -397,7 +397,7 @@ function fakeHints(): LinkSetHint[] {
   ];
 }
 
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     link_sets: () => [...SETS].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())).map(rowOf),
     link_set: (args) => detailOf(found(String(args["id"] ?? ""))),

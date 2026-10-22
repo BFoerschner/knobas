@@ -3,7 +3,7 @@
  * session; one note is there from the start (#1504).
  */
 import type { LinkEnd, NoteLinkInput } from "../../../ipc/entity";
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 import { CORPUS, FAKE_CONTEXTS, SYNCED_AT } from "./corpus";
 
 /* ----------------------------------------------------------------- notes */
@@ -200,7 +200,7 @@ function noteLinkEnd(entityId: string): LinkEnd | null {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     create_note: (args) => createNote(args),
     get_note: (args) => getNote(args),

@@ -5,7 +5,9 @@
 // The monitors the seeded Uptime Kuma holds -- the roster's rows. See
 // `fakeMonitorRoster`.
 import SEEDED_MONITORS from "../../../../../../testenv/monitors.json";
-import type { Handler } from "../fake-tauri";
+import type { OpenAlert } from "../../../ipc/assets";
+import type { QueuedWrite, WriteOpPayload } from "../../../ipc/sources";
+import type { Handlers } from "../fake-tauri";
 import { fakeRoleScope } from "./corpus";
 import { FIXTURE_ESTATE, FIXTURE_ROUTES, assetPathText } from "./estate";
 
@@ -84,7 +86,7 @@ function fakeSamples(state: string, seed: number, now: number) {
  * build agree, and the first one is acked so the list can show what *seen, not
  * fixed* looks like without anything here having to remember a click.
  */
-export function fakeOpenAlerts() {
+export function fakeOpenAlerts(): OpenAlert[] {
   const now = Date.now();
   return fakeMonitorRoster()
     .filter((row) => row.state === "down" || row.state === "warn")
@@ -92,7 +94,7 @@ export function fakeOpenAlerts() {
       id: index + 1,
       monitor_id: row.entity_id,
       monitor_name: row.name,
-      state: row.state,
+      state: row.state as OpenAlert["state"],
       opened_at: new Date(now - (index + 1) * 37 * 60_000).toISOString(),
       acked_at:
         index === 0 || FIXTURE_ACKED.has(row.entity_id)
@@ -110,7 +112,7 @@ export function fakeOpenAlerts() {
  * *pending* for ever, which is what a `pending` row with nothing to flush it
  * would look like.
  */
-function fakeQueuedWrite(args: Record<string, unknown>) {
+function fakeQueuedWrite(args: Record<string, unknown>): QueuedWrite {
   const payload = (args.payload ?? {}) as Record<string, { entity?: string; repo?: string }>;
   const [tag, body] = Object.entries(payload)[0] ?? ["PauseMonitor", {}];
   // `CommitFile` names its repository as `repo` (#822), every other op `entity`.
@@ -123,7 +125,7 @@ function fakeQueuedWrite(args: Record<string, unknown>) {
     // The table's own ops, else `WriteOp::identifier()`'s snake case of the
     // tag: the repository page's writes (#839, #840, #845) come through here too.
     op: FIXTURE_OPS[tag] ?? tag.replace(/[A-Z]/g, (letter, at: number) => (at === 0 ? "" : "_") + letter.toLowerCase()),
-    payload,
+    payload: payload as WriteOpPayload,
     target_snapshot: null,
     state: "sent",
     wait_reason: null,
@@ -314,7 +316,7 @@ export function fakeMonitorRoster() {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     // The Monitors tab (#448). Derived from the seed's monitor list and the
     // estate file's names -- see `fakeMonitorRoster` -- so the roster a

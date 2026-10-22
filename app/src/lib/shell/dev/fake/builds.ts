@@ -28,8 +28,13 @@ import type {
   RunPreset,
   RunRow,
   Setting,
+  SourceView,
+  Fact,
+  ViewBlock,
+  ViewRow,
+  ViewSection,
 } from "../../../ipc/entity";
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 import { fakeRoleScope } from "./corpus";
 
 /** The role `pipelines` is read for, as `knobas_source::role::CI` spells it. */
@@ -453,7 +458,7 @@ function artifactRows(config: string, no: number) {
 }
 
 /** prototype-6's failing test of #1187 and #1185, as the adapter's *Tests* draws one. */
-const FAILED_TEST = [
+const FAILED_TEST: ViewBlock[] = [
   {
     type: "entities",
     title: null,
@@ -482,7 +487,7 @@ export function fixtureRun(id: string): { config: string; no: number; st: Latest
   return { config, no, st };
 }
 
-export function runView(id: string, section: string | null) {
+export function runView(id: string, section: string | null): SourceView | undefined {
   const found = fixtureRun(id);
   if (found === undefined) return undefined;
   const { config, no, st } = found;
@@ -499,22 +504,22 @@ export function runView(id: string, section: string | null) {
     description: null,
   }));
   const failing = config === "Payout_IntegrationTests" && st === "failed";
-  const facts = [
+  const facts: Fact[] = [
     { label: "Outcome", value: st === "success" ? "passed" : st, tone: st === "success" ? "ok" : st === "failed" ? "err" : "info" },
     { label: "Number", value: `#${no}`, tone: null },
     { label: "Triggered by", value: story.by, tone: null },
     ...(st === "running" ? [{ label: "Now", value: "Step 3 of 5 is running.", tone: null }] : []),
     { label: "Agent", value: story.agent, tone: null },
   ];
-  const changes =
+  const changes: [string, string][] =
     config === "Payout_IntegrationTests" && no === 1187
       ? [
           ["a41f2c", "PAY-231 backoff jitter"],
           ["7be0e4", "PAY-231: retry SEPA payouts on transient PSP errors"],
         ]
       : [[story.commit, PR_TITLES[no % PR_TITLES.length]!]];
-  const entities = (rows: unknown[], title: string | null = null) => ({ type: "entities", title, rows });
-  const tab = (tabId: string, title: string, count: number | null, blocks: unknown[], deferred = false) => ({ id: tabId, title, count, deferred, blocks });
+  const entities = (rows: ViewRow[], title: string | null = null): ViewBlock => ({ type: "entities", title, rows });
+  const tab = (tabId: string, title: string, count: number | null, blocks: ViewBlock[], deferred = false): ViewSection => ({ id: tabId, title, count, deferred, blocks });
   const sections = [
     tab("overview", "Overview", null, [
       { type: "facts", facts },
@@ -631,7 +636,7 @@ function configOf(id: string): string {
   return config;
 }
 
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     older_pipeline_runs: (args) => {
       const config = configOf(String(args["pipelineId"] ?? ""));

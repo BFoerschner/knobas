@@ -4,9 +4,9 @@
  * heads never move, so nothing resets them; PR #142's design note starts
  * viewed, so *Files changed* draws one collapsed file and its tick.
  */
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   const viewed = new Map<string, Set<string>>([["mock:payout-service#142", new Set(["docs/backoff.md"])]]);
   const sorted = (id: string) => [...(viewed.get(id) ?? [])].sort();
   return {

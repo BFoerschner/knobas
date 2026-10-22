@@ -7,7 +7,8 @@
  * `FIXTURE_SAVED` declared after `fakeSmartLists` as its negative control. It
  * is its own module so the rest of the fixture is frontend-only.
  */
-import type { Handler } from "../fake-tauri";
+import type { SearchResponse } from "../../../ipc/search";
+import type { Handlers } from "../fake-tauri";
 import { FAKE_CONTEXTS, FAKE_CONTEXT_ASSETS, SYNCED_AT } from "./corpus";
 import { FIXTURE_ESTATE, assetPathText } from "./estate";
 import { fakeMonitorRoster, fakeOpenAlerts, fakeUnmonitored } from "./monitors";
@@ -288,7 +289,7 @@ function fakeJobAlerts(): string[] {
  * in step and the walk asserts nothing about it. What a browser sees is which
  * rows, not which first.
  */
-export function fakeSmartListItems(args: Record<string, unknown>) {
+export function fakeSmartListItems(args: Record<string, unknown>): SearchResponse {
   const id = String(args["id"] ?? "");
   const known = fakeSmartLists().some((list) => list.id === id);
   if (!known) {
@@ -308,6 +309,7 @@ export function fakeSmartListItems(args: Record<string, unknown>) {
     synced_at: SYNCED_AT,
     title: asset.name,
     path: assetPathText(asset),
+    state: null,
     // A list row was matched against nothing, so it carries no rank and no
     // excerpt -- the rule the real response follows.
     rank: 0,
@@ -341,7 +343,7 @@ export function fakeSmartListItems(args: Record<string, unknown>) {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     smart_lists: () => fakeSmartLists(),
     // *Save as list* and the two writes that keep the rail tidy (#506).

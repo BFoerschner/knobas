@@ -3,7 +3,8 @@
  * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
  * `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
-import type { FakeBridge, Handler } from "../fake-tauri";
+import type { CheckoutSettings, CheckoutView, CloneAnswer, DiffRead } from "../../../ipc/entity";
+import type { FakeBridge, Handlers } from "../fake-tauri";
 import { CORPUS } from "./corpus";
 
 /**
@@ -60,7 +61,7 @@ function fakeRepoOf(entityId: string): string | null {
 }
 
 /** `entity_checkout`, including the refusal a non-repo kind gets. */
-function fakeCheckout(entityId: string) {
+function fakeCheckout(entityId: string): CheckoutView {
   const entry = CORPUS.find((candidate) => candidate.entity_id === entityId);
   if (!entry) {
     throw { code: "not_found", message: `${entityId} is not in the mirror`, source_id: null };
@@ -114,7 +115,7 @@ function fakeCheckout(entityId: string) {
  * tree counts, as `git diff` would draw it, and nothing staged or untracked.
  * Refused as the backend refuses an entity with no checkout.
  */
-function fakeCheckoutDiff(entityId: string) {
+function fakeCheckoutDiff(entityId: string): DiffRead {
   const checkout = fakeCheckout(entityId);
   if (checkout.path === null) {
     throw {
@@ -220,7 +221,7 @@ function slug(name: string): string {
 }
 
 /** `checkout_settings`. */
-function fakeSettings() {
+function fakeSettings(): CheckoutSettings {
   return {
     clones_root: fakeClonesRoot,
     git: fakeNoGit ? { status: "no_git" } : { status: "found", path: "/usr/bin/git" },
@@ -317,7 +318,7 @@ function emit(entityId: string, path: string, state: Record<string, unknown>): v
   bridge?.emit("clone:progress", { entity_id: entityId, path, ...state });
 }
 
-function fakeClone(args: Record<string, unknown>) {
+function fakeClone(args: Record<string, unknown>): CloneAnswer {
   const id = String(args["entityId"] ?? "");
   const entry = CORPUS.find((candidate) => candidate.entity_id === id);
   if (!entry || entry.kind !== "repo") {
@@ -354,7 +355,7 @@ function fakeClone(args: Record<string, unknown>) {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     // Checkouts (#499). The fixture has no filesystem, so what stands in for
     // the scan is `FAKE_SCANNED`, what a clone made (`fakeCloned`) and the

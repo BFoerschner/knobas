@@ -6,7 +6,7 @@
  * draws.
  */
 import type { ArtifactEntry, LogLine, LogStep, RunTest, TestOutcome } from "../../../ipc/entity";
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 import { fixtureRun } from "./builds";
 
 const REPOS = ["payout-service", "ledger-core", "psp-client", "fx-rates", "batch-runner", "notify-hub", "api-gateway"];
@@ -173,7 +173,7 @@ function entries(config: string, st: string, path: string): ArtifactEntry[] | un
   return folder === undefined ? undefined : files(folder.d, folder.f);
 }
 
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     run_log: (args) => {
       const run = runOf(args);

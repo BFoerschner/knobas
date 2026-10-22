@@ -2,11 +2,11 @@
  * `?fake-ipc`: Stored contexts (#47): list and promote. The store itself lives
  * in `corpus.ts`, which `list_entities` reads it from.
  */
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 import { CORPUS, FAKE_CONTEXTS, fakeContext } from "./corpus";
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     // Contexts (#47). Stateful within the session, so *Promote* can be walked
     // in QA; `list_entities` answers a context scope with an empty page

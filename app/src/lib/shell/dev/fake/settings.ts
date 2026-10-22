@@ -25,7 +25,7 @@
  */
 import type { BackupRecord, BackupSchedule, BackupStatus } from "../../../ipc/backup";
 import type { MonitoringSettings } from "../../../ipc/assets";
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 
 const DIRECTORY = "~/Library/Application Support/knobas/backups";
 
@@ -46,7 +46,7 @@ function record(at: Date, bytes: number): BackupRecord {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   let passive = true;
   let monitoring: MonitoringSettings = { sample_retention_days: 30, response_time_warn_ms: 2000 };
   let schedule: BackupSchedule = { enabled: true, hour: 2, minute: 0, keep: 14 };

@@ -11720,3 +11720,37 @@ set.
   `with_send_budget`, held test ports) are upheld. Lock order is `INSTANCES` then the slot's
   `paced`, and no path takes them in reverse. Nothing is awaited under either: the limiter is
   cloned out before the wait. The map holds one entry per origin. *Reversing:* n/a.
+
+## #1670 (implementer)
+
+### One derived map, not a `satisfies` per fixture
+
+**The fork:** the ticket offers `satisfies` on each fixture or a handler map whose return types come from the barrel's functions.
+
+**Ruling:** the derived map. `fake-answers.ts` holds `Answers`, one line per `invoke("<command>")` in the barrels, each `Awaited<ReturnType<typeof barrelFn>>`; `Handlers` in `fake-tauri.ts` is `{ [K in keyof Answers]?: ... } & Record<string, Handler>`. A rename in the generated mirror reaches the barrel function, then the map, then every handler. It sits outside `fake/` because that directory is globbed for feature modules. Fixture constants carry `satisfies` or an annotation only where inference widens a literal.
+
+**Cost of reversing:** delete one file and restore `Record<string, Handler>` in 27 signatures. A command missing from `Answers` stays untyped, so a new command needs its line.
+
+### Fields the wire sends and a fixture left out are filled with the empty value
+
+**The fork:** typing the fixtures showed answers short of the generated type: `SourceDescriptor` (`accepts_account`, `payload_paths`, `source_actions`, `clone_from`, `url_forms`), `DiffFile.threads`, the diff block's `commentable` and `gone`, `SearchHit.state`.
+
+**Ruling:** add them as `false`, `[]` or `null`. No reader treats the absent field differently from the empty one (`accepts_account ?? false`, `payload_paths ?? []`), so `?fake-ipc` draws what it drew. The two TeamCity `payload_paths` entries stay sparse (`kind`, `frame`) behind a cast, as `kind-registry.test.svelte.ts` does.
+
+**Cost of reversing:** delete the added lines.
+
+### Three casts remain where the fixture echoes the client
+
+**The fork:** `submit_write`'s payload, `edit_asset`/`edit_route`'s property value, and `add_source`'s `auth_kind` arrive as `unknown`.
+
+**Ruling:** cast to the generated type at the echo. The fixture sends back what the client sent; the cast says so.
+
+**Cost of reversing:** none worth the name.
+
+### A census test forces a line in `Answers` for every barrel command (merge-manager)
+
+**The fork:** a command the barrels gain, with no line in `fake-answers.ts`, stays untyped and the rename guard has a hole.
+
+**Ruling:** `fake-tauri.test.ts` compares the command names listed in `fake-answers.ts` with `barrelCommands()`, both ways. It is one test beside the existing census, which already reads the barrels; no new parser.
+
+**Cost of reversing:** delete the test.

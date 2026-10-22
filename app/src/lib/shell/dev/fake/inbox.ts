@@ -38,7 +38,7 @@
  * - *Done* removes a row for the session, and a snooze moves it to the
  *   snoozed shelf until `until`. Neither survives a reload.
  */
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 import { CORPUS } from "./corpus";
 import { signInFails } from "../../health.svelte";
 import { fakeOpenAlerts } from "./monitors";
@@ -153,7 +153,7 @@ function acked(entry: InboxEntry): boolean {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   let live = stream();
   let later = snoozed();
   let kinds: InboxCategory[] = KINDS.slice();
