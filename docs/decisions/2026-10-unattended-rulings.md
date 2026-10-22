@@ -12213,7 +12213,7 @@ Ruled 2026-10-22 by the implementer on Sonnet; docs only.
   *Reversing:* the lock and one await.
 - **Every send the ticket names goes through the set.** `send_in_background`,
   `send_in_background_then` (through `spawn_send`) and `ArrivalLinks`' resolver spawn into
-  `Background`; no bare `tokio::spawn` is left in `sources/`. `start_work::run_in_background`
+  `Background`; no write in `sources/` is sent from a task outside it. `start_work::run_in_background`
   still sends from a bare task. The ticket does not name it, so it is #1751 (backlog), not a fix
   here. *Reversing:* n/a.
 - **One 3 s grace for the door, the runs and the sends.** *Ruling:* stands. The ticket asks for
