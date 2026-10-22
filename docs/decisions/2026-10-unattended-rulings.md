@@ -12477,3 +12477,23 @@ The measurement came after it.
   `HttpConfig` field in frozen `knobas-http` with its §10.8 entry, and buy a fraction of a
   second per write. *Reversing:* low for the quota (two fields in `KumaSocket::new`); an
   exemption later is the spec change above.
+
+#### #1721 and #1723's review (merge-manager on Opus, 2026-10-22)
+
+- **Whether a Kuma whose ack shape changed can keep a pause or resume on the ladder for ever.**
+  *Fork:* add a give-up to the queue for an `Unconfirmed` that repeats, or rely on what is there.
+  *Ruling:* no give-up. *Reasoning:* the ladder's shortest rung (`BACKOFF_LADDER_SECS`, 60 s) is
+  longer than the socket's `IDLE_REUSE` (15 s), so each resend on the ladder logs in afresh. A Kuma
+  whose acks all changed fails that login with status-less `Protocol`, and the queue records the
+  write as refused on its first resend. A Kuma that changed only its write acks costs one login
+  and one exchange an hour, which is what any unreachable write costs. The row shows Kuma's answer
+  and the reader can withdraw it. A give-up count would be a write-queue change for every source,
+  and spec #1618 A2 gave unreachable writes the ladder without one. *Reversing:* a queue-wide
+  change, out of this PR.
+- **The quota test reads `InstanceLimiter`'s `Debug`** (`the_polls_ask_for_the_sources_own_quota`).
+  *Fork:* keep it, or file a backlog follow-up for an accessor in frozen `knobas-http`.
+  *Ruling:* keep it, no follow-up. *Reasoning:* the `Debug` impl is hand-written in `knobas-http`
+  and names `per_second` and `burst` on purpose. The assertion needs both exact numbers, with
+  their delimiters, so it cannot pass by accident; a change to the format turns it red, loudly.
+  An accessor would add a frozen-crate surface and a §10.8 entry that only this one test reads.
+  *Reversing:* low; swap the `format!` for the accessor if one is ever added for a real reader.
