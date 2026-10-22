@@ -157,7 +157,7 @@
     void jobPorts
       .getEntity(legacy.resolve)
       .then((detail) => {
-        if (location.hash === from) replaceHash(entityAddress(detail.row.kind, detail.row.entity_id));
+        if (location.hash === from) replaceHash(entityAddress(detail.row.kind, detail.row.entity_id, true));
       })
       // Not found, or not readable: the address stays, and the page says so.
       .catch(() => {});

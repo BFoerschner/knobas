@@ -15,6 +15,7 @@
   import { onMount } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
+  import { getEntity as realGetEntity } from "../../ipc/entity";
   import { pendingWrites as realPendingWrites } from "../../ipc/sources";
   import { weekTimesheet as realWeekTimesheet, type Week } from "../../ipc/time";
   import { targetReading } from "../../shell/timer";
@@ -22,12 +23,15 @@
   import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { MONTHS, dayKey, shiftDay } from "../../time/day";
   import { columnHeading, mondayOf, weekWindows } from "../../time/week";
+  import { entityAddress } from "../address";
   import { hm } from "./day-view";
   import { heldNotes, weekView, type WeekCellView } from "./week-view";
 
   interface WeekPorts {
     weekTimesheet: typeof realWeekTimesheet;
     pendingWrites: typeof realPendingWrites;
+    /** Reads a target's kind, which the week's rows do not carry. */
+    getEntity: typeof realGetEntity;
   }
 
   let {
@@ -54,7 +58,7 @@
 
   // svelte-ignore state_referenced_locally
   // Read once, as the Day tab's ports are.
-  const io: WeekPorts = { weekTimesheet: realWeekTimesheet, pendingWrites: realPendingWrites, ...ports };
+  const io: WeekPorts = { weekTimesheet: realWeekTimesheet, pendingWrites: realPendingWrites, getEntity: realGetEntity, ...ports };
 
   /** The clock, moved every thirty seconds so the running timer's minutes move. */
   // svelte-ignore state_referenced_locally
@@ -99,6 +103,28 @@
 
   const ready = $derived(loaded !== null && loaded.monday === monday ? loaded : null);
   const shown = $derived(ready === null ? null : weekView(ready.week, timer.current, clock));
+
+  /**
+   * The kind of each entity target, read once per id (#1676): a week row
+   * carries an entity id and no kind, and the address is the kind's (a ticket
+   * by its entity id, a page at its page). Until the read answers, or when it
+   * fails, the key is drawn as plain text rather than as a link that may open
+   * the wrong thing.
+   */
+  let kinds = $state<Record<string, string>>({});
+  const asked = new Set<string>();
+  $effect(() => {
+    for (const row of shown?.rows ?? []) {
+      if (row.target === null || row.target.kind !== "entity") continue;
+      const id = row.target.entity_id;
+      if (asked.has(id)) continue;
+      asked.add(id);
+      io.getEntity(id).then(
+        (detail) => (kinds[id] = detail.row.kind),
+        () => asked.delete(id),
+      );
+    }
+  });
 
   function heading(key: string): string {
     const [year, month, day] = key.split("-").map(Number);
@@ -168,7 +194,12 @@
               {:else if row.target.kind === "label"}
                 {row.target.label} <span class="tf-dim">(label)</span>
               {:else}
-                <a href="#/job/{row.target.entity_id}"><span class="tf-mono">{targetReading(row.target)}</span></a>
+                {@const kind = kinds[row.target.entity_id]}
+                {#if kind !== undefined}
+                  <a href={entityAddress(kind, row.target.entity_id, true)}><span class="tf-mono">{targetReading(row.target)}</span></a>
+                {:else}
+                  <span class="tf-mono">{targetReading(row.target)}</span>
+                {/if}
                 {row.title ?? ""}
               {/if}
             </td>

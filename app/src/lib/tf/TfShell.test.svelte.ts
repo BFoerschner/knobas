@@ -325,7 +325,7 @@ test("a rooms-UI address is replaced by the ticket-first one", async () => {
   await at("#/ctx/all");
   expect(location.hash).toBe("#/tickets");
   await at("#/ticket/jira:PAY-231");
-  expect(location.hash).toBe("#/job/PAY-231");
+  expect(location.hash).toBe("#/job/jira%3APAY-231");
   await at("#/sources");
   expect(location.hash).toBe("#/settings/sources");
   expect(target.textContent).not.toContain("Nothing lives at");

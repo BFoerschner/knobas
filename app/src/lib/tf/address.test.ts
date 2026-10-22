@@ -58,8 +58,14 @@ test("a branch or commit opens its own address, which the repository page's redi
 });
 
 test("a rooms-UI detail address is read as the entity it names", () => {
-  expect(legacyAddress("#/ticket/jira:PAY-231")).toEqual({ go: "#/job/PAY-231" });
+  expect(legacyAddress("#/ticket/jira:PAY-231")).toEqual({ go: "#/job/jira%3APAY-231" });
   expect(legacyAddress("#/build/teamcity%3A77")).toEqual({ go: "#/build/teamcity%3A77" });
+});
+
+test("a bookmark to a ticket names its source when two sources hold the key (#1676)", () => {
+  expect(legacyAddress("#/ticket/gitea:PAY-231")).toEqual({ go: "#/job/gitea%3APAY-231" });
+  expect(legacyAddress("#/ticket/gitea:acme%2Fpayouts%23144")).toEqual({ go: "#/job/gitea%3Aacme%2Fpayouts%23144" });
+  expect(legacyAddress("#/start-work/gitea:PAY-231")).toEqual({ go: "#/job/gitea%3APAY-231" });
 });
 
 test("#/entity/<id> has no kind on hand, so it is resolved", () => {

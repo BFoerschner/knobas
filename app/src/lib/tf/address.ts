@@ -73,7 +73,8 @@ export function legacyAddress(hash: string): Legacy {
   if (head === "assets" && rest[0] === "monitors") return { go: "#/monitors" };
   if (id === "") return null;
   if (head === "entity") return { resolve: id };
-  if (head === "start-work") return { go: jobHash(id) };
+  // The id the rooms UI held is the entity id, which names the source (#1676).
+  if (head === "start-work" || head === "ticket") return { go: jobHash(id) };
   if (ROOM_KINDS.has(head)) return { go: entityAddress(head, id) };
   return null;
 }

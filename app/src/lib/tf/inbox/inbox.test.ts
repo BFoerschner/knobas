@@ -186,6 +186,12 @@ describe("the job a row belongs to", () => {
     expect(index.jobOf(item({}))).toBe("PAY-231");
     expect(index.jobOf(item({ entity_id: "gitea:payouts#150" }))).toBe("PAY-236");
   });
+  test("jobIdOf is the owning job's entity id, the ticket's own for a ticket", () => {
+    expect(index.jobIdOf(item({}))).toBe("jira:PAY-231");
+    expect(index.jobIdOf(item({ entity_id: "gitea:payouts#150" }))).toBe("jira:PAY-236");
+    expect(index.jobIdOf(item({ entity_id: "gitea:PAY-198", kind: "ticket" }))).toBe("gitea:PAY-198");
+    expect(index.jobIdOf(item({ entity_id: "gitea:other#1" }))).toBeNull();
+  });
   test("is the ticket itself for an item about a ticket", () => {
     expect(index.jobOf(item({ entity_id: "jira:PAY-198", kind: "ticket" }))).toBe("PAY-198");
   });

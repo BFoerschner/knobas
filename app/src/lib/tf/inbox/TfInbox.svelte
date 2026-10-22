@@ -36,6 +36,7 @@
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import type { SourceFacts } from "../job/job";
+  import { jobHash } from "../route";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import {
     expiryOf,
@@ -217,6 +218,7 @@
       {@const item = entry.item}
       {@const open = opener(item)}
       {@const belongs = index.jobOf(item)}
+      {@const belongsId = index.jobIdOf(item)}
       <div class="tf-ib">
         <time datetime={item.occurred_at}>{when(item.occurred_at, now)}</time>
         <div class="tf-what">
@@ -237,7 +239,7 @@
           {/each}
         </div>
         <div class="tf-ctx">
-          {kindOf(item.category)}{#if belongs !== null}, job <a href="#/job/{encodeURIComponent(belongs)}" class="tf-mono"
+          {kindOf(item.category)}{#if belongs !== null}, job <a href={jobHash(belongsId ?? belongs)} class="tf-mono"
               >{belongs}</a
             >{:else}, no job{/if}
         </div>
