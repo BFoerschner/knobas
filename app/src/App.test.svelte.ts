@@ -859,10 +859,11 @@ test("the same arrival on a focused window sends nothing", async () => {
     // attempt: the inbox subscribes after the mount's awaits, and an arrival
     // before it listens used to be caught by a second ready-reseed, which the
     // shell no longer does (#1666).
-    await until(() => {
-      emit(EVENTS.activityNew, activityRow());
-      return inbox.stream.some((entry) => entry.item.key.endsWith("tidewater-payouts-43"));
-    },
+    await until(
+      () => {
+        emit(EVENTS.activityNew, activityRow());
+        return inbox.stream.some((entry) => entry.item.key.endsWith("tidewater-payouts-43"));
+      },
       "the inbox never re-read after the activity signal",
     );
     expect(notified, "the reader was told about something already on screen").toEqual([]);
