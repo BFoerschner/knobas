@@ -12532,3 +12532,32 @@ The measurement came after it.
   bounded by the call's deadline, so it cannot outlast the call (#1631's comment on #1729).
   *Reversing:* low: make `limiter::stopped_on` public and call it where `net.rs` maps the
   wait to `connection-limit-reached`.
+
+#### #1729's review (merge-manager on Opus, 2026-10-23)
+
+- **Reserved for Björn, ruled by merge-manager on Opus: the implementer's ruling on where the
+  mark lives.** *Fork:* uphold the task-local `watch_local_quota`, or send it back for a field on
+  `SourceError::Protocol`. *Ruling:* upheld. *Reasoning:* `TaskLocalFuture` swaps its value in
+  on each poll and out after it, so two watched writes on one task, joined or not, keep separate
+  marks. Each watch starts at `None` and takes its mark before the scope ends, so one write's
+  mark cannot reach the next. No adapter's `write` sends from a spawned task: no adapter crate
+  calls `tokio::spawn` or `spawn_blocking`. The wasm host is the one source that runs its write
+  on another thread, and it does not send through `HttpClient`. *Reversing:* low, as the
+  implementer's ruling says.
+- **An adapter that swallows a quota stop and then refuses on its own account.** *Fork:* accept
+  one ladder rung before the refusal, or clear the mark on every later send. *Ruling:* accept.
+  *Reasoning:* the cost is one resend a minute later. The next attempt carries no mark unless
+  the quota stops it again, and in that case nothing was sent again either. Clearing the mark
+  on each send would lose it for an adapter that makes a second request after the stopped one.
+  *Reversing:* low.
+- **knobas-sync now depends on knobas-http.** *Fork:* accept, or move the mark to
+  `knobas-source` to keep reqwest out of the engine. *Ruling:* accept. *Reasoning:* knobas-http
+  depends on neither knobas-sync nor anything above it, so there is no cycle. No ADR or contract
+  line keeps knobas-sync HTTP-free. It never builds for `wasm32-wasip2` (it needs sqlx), and
+  `knobas-app` already links both crates, so the app binary gains nothing. Putting the mark in
+  `knobas-source` would put a transport concern into the SPI crate. *Reversing:* low.
+- **How it composes with #1721 (Kuma).** *Ruling:* no conflict. Every Kuma failure after the
+  emit goes through `once_emitted` and becomes `Unconfirmed`, which `attempt` holds before
+  `retryable` looks at the mark. A mark on such a write therefore never resends a packet Kuma
+  may have acted on. A quota stop before the emit is a write that went nowhere, and waiting on
+  the ladder is right for it. *Reversing:* none needed.
