@@ -1,5 +1,5 @@
 <!--
-  Settings › Notifications (#831, R-13a.5): prototype-6's
+  Settings › Desktop notifications (#831, R-13a.5): prototype-6's
   `STGV.notifications` over the one store the inbox notifier reads
   (`inbox/notify.svelte.ts`), so the switch on screen is the switch that fires.
   Switching the first one on asks the OS (story 72); a refusal leaves it off
@@ -28,25 +28,25 @@
     try {
       await ports.notify({
         title: "knobas",
-        body: "A test notification. An inbox item you chose here arrives like this.",
+        body: "A test desktop notification. An inbox item you chose here arrives like this.",
         address: "#/settings/notifications",
       });
-      push({ text: "Sent a test notification" });
+      push({ text: "Sent a test desktop notification" });
     } catch (cause) {
-      push({ text: `Could not send a test notification: ${ipcErrorMessage(cause)}`, tone: "err" });
+      push({ text: `Could not send a test desktop notification: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
   }
 </script>
 
 <header class="tf-stg-h">
-  <h1>Notifications</h1>
+  <h1>Desktop notifications</h1>
   <p>
     A desktop notification for each new inbox item you choose here, only while knobas is not in front. Clicking it
     opens the item.
   </p>
 </header>
 {#if store.error !== null && !store.loaded}
-  <p class="tf-stg-p tf-stg-errt">Could not read the notification settings: {store.error}</p>
+  <p class="tf-stg-p tf-stg-errt">Could not read the desktop notification settings: {store.error}</p>
   <div class="tf-stg-acts"><button class="tf-btn" onclick={() => void store.reseed()}>Try again</button></div>
 {:else if store.loaded}
   {#each NOTIFY_KINDS as kind (kind.id)}
@@ -73,5 +73,5 @@
   {:else if store.error !== null}
     <p class="tf-stg-note tf-stg-errt" role="status">Could not save: {store.error}</p>
   {/if}
-  <div class="tf-stg-acts"><button class="tf-btn tf-sm" onclick={() => void test()}>Send a test notification</button></div>
+  <div class="tf-stg-acts"><button class="tf-btn tf-sm" onclick={() => void test()}>Send a test desktop notification</button></div>
 {/if}

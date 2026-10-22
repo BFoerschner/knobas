@@ -215,9 +215,10 @@ test("Time: the passive switch writes passive_attribution and draws what came ba
   expect(switchFor("Passive blocks").getAttribute("aria-checked")).toBe("false");
 });
 
-test("Notifications: a switch per inbox kind over the notifier's store, and a test notification", async () => {
+test("Desktop notifications: a switch per inbox kind over the notifier's store, and a test notification", async () => {
   const store = notificationsStub(["review_request", "mention"]);
   const p = await open("notifications", sectionPorts(), { notifications: store });
+  expect(target.querySelector("h1")?.textContent).toBe("Desktop notifications");
   expect([...target.querySelectorAll('[role="switch"]')].map((el) => el.getAttribute("aria-label"))).toEqual([
     "Review asked of you",
     "You are mentioned",
@@ -238,9 +239,11 @@ test("Notifications: a switch per inbox kind over the notifier's store, and a te
   expect(store.choose).toHaveBeenCalledWith("mention", false);
   expect(switchFor("You are mentioned").getAttribute("aria-checked")).toBe("false");
 
-  button("Send a test notification").click();
+  const before = toasts.items.length;
+  button("Send a test desktop notification").click();
   await settle();
   expect(p.notify).toHaveBeenCalledWith(expect.objectContaining({ address: "#/settings/notifications" }));
+  expect(toasts.items.slice(before).map((toast) => toast.text)).toEqual(["Sent a test desktop notification"]);
 });
 
 test("Standup: the target named by its page, and Change… asks with the publish picker", async () => {

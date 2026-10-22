@@ -33,7 +33,7 @@ export const SETTINGS_SECTIONS: readonly (readonly [SettingsSection, string])[] 
   ["sources", "Sources"],
   ["checkouts", "Checkouts and Open in…"],
   ["time", "Time"],
-  ["notifications", "Notifications"],
+  ["notifications", "Desktop notifications"],
   ["standup", "Standup"],
   ["monitoring", "Monitoring"],
   ["notes", "Notes and capture"],
