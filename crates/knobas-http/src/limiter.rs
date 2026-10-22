@@ -28,10 +28,12 @@
 //! alternation if either kind of change started full. A **loosening** starts
 //! drained. A **tightening** starts with the credit the limiter it replaces
 //! had left (#1740): as many seconds of the stricter rate as the old
-//! limiter's unspent requests were seconds of its own, at most the stricter
-//! burst. A tightening of a limiter nobody spent from has the whole stricter
-//! burst, as in #1630, wherever the old burst lasts at least as many seconds
-//! of refill as the new one; where it lasts fewer, it has fewer.
+//! limiter's unspent requests were seconds of its own, or, if more, what the
+//! stricter rate refills in the time since any of the origin's limiters last
+//! let a request through (#1764), at most the stricter burst. A tightening
+//! after a quiet at least as long as the stricter burst's refill therefore
+//! has the whole stricter burst, as in #1630, however fast the old quota
+//! refills; one right after the old quota's requests has what they left.
 //!
 //! [`InstanceLimiter`] is public so a sender outside [`HttpClient`] -- the
 //! wasm host's network policy (#1631) -- can wait on the same quota.
@@ -298,7 +300,8 @@ impl Slot {
     /// the quota of one it has built -- and every holder waits on it from its
     /// next request. One looser in either field starts drained, so a
     /// loosening never sends a burst the limiter it replaces would have held
-    /// back; a stricter one takes over what the old one had left
+    /// back; a stricter one takes over what the old one had left, or what
+    /// the stricter rate refilled since the origin's last request
     /// ([`Paced::tightened`]).
     fn register(&self, asked: Rate) -> Arc<Registration> {
         let registration = Arc::new(Registration);
@@ -390,7 +393,8 @@ impl Paced {
     }
 
     /// A limiter at `rate`, no looser in either field than `old`'s, taking
-    /// over from `old` with the credit it had left (#1740).
+    /// over from `old` with the credit it had left (#1740), for an origin
+    /// that has let nothing through for `idle`.
     ///
     /// The requests `old` could still send at once are counted in seconds of
     /// its own refill, and the new limiter starts with as many seconds of
@@ -400,6 +404,12 @@ impl Paced {
     /// quota gets back what it would have refilled itself in that time, never
     /// a fresh burst. `old` is left spent: what it had now belongs to the new
     /// limiter.
+    ///
+    /// A full `old` only says nobody sent for its own burst's worth of
+    /// refill, which can be fewer seconds than `rate`'s burst takes, so the
+    /// new limiter starts with at least what `rate` refills in `idle`, rounded
+    /// down (#1764): nothing sent for that long, so the stricter quota would
+    /// have refilled that much had it governed throughout.
     fn tightened(old: &Self, rate: Rate, idle: Duration) -> Self {
         let left = u128::from(old.take_left()) * u128::from(rate.per_second.get())
             / u128::from(old.rate.per_second.get());
@@ -540,8 +550,8 @@ mod tests {
     /// The credit is counted in seconds of refill, not as a share of the
     /// burst: twenty requests at ten a second are two seconds, which at one a
     /// second is two requests, not half of a burst of ten. A loose limiter
-    /// that refills in two seconds says nothing about the ten seconds the
-    /// strict one takes.
+    /// built a moment before, which refills in two seconds, says nothing
+    /// about the ten seconds the strict one takes (#1764).
     #[test]
     fn a_tightening_credits_seconds_of_refill() {
         let left = left_after_tightening(
@@ -587,6 +597,21 @@ mod tests {
         let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
 
         assert!(strict.slot.current().take_left() <= 1);
+    }
+
+    /// A loosening does not end the quiet (#1764): its limiter starts
+    /// drained, but nothing was sent, so the stricter quota coming back half
+    /// a second later has refilled its whole burst all the same.
+    #[test]
+    fn a_loosening_does_not_end_the_quiet() {
+        let url = url::Url::parse("http://loosened.invalid:1764").expect("url");
+        drop(InstanceLimiter::for_origin(&url, Rate::new(10, 4)));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let loose = InstanceLimiter::for_origin(&url, Rate::new(100, 4));
+        assert_eq!(loose.slot.current().rate, Rate::new(100, 4), "it loosened");
+        let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
+
+        assert_eq!(strict.slot.current().take_left(), 4);
     }
 
     /// A zero reads as one, as it always has: `0/s` means "one", not "never".
