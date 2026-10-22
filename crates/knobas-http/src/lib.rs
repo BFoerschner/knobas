@@ -16,7 +16,14 @@
 //!   *before* the retry it applies to, up to [`classify::RETRY_AFTER_CAP`].
 //!   A write that must not arrive twice opts out with [`Request::no_retry`].
 //! * **Rate limiting**: per instance, so two Jiras do not share a budget, and
-//!   **every attempt passes it**, retries included.
+//!   **every attempt passes it**, retries included. The limiter lives in a
+//!   process-wide map keyed by the base URL's origin (scheme, host, port), not
+//!   in the client: every [`HttpClient`] built for one instance -- a sync
+//!   run's, a live read's, a flush's -- waits on the same quota, the stricter
+//!   one where two configurations differ ([`InstanceLimiter`], #1630). A wait
+//!   on it is bounded by [`SEND_BUDGET`] and, when it runs out, is
+//!   `Protocol` naming the quota ([`LocalQuota`]), not `Unreachable`: the
+//!   instance was never asked.
 //! * **One way out**: [`HttpClient::send`] (and its streamed twin
 //!   [`HttpClient::send_streaming`], the same attempt loop) is the only thing
 //!   that puts a request on the wire. [`HttpClient::request`] hands back a [`Request`],
@@ -161,9 +168,12 @@ pub struct HttpConfig {
     /// How this instance authenticates.
     pub auth: Auth,
     /// Sustained requests per second (§4.1 defaults: Jira 5, Gitea 10,
-    /// TeamCity 5). Overridable per source in its config.
+    /// TeamCity 5). Overridable per source in its config. Shared with every
+    /// other client for the same origin, and the lower of the two where they
+    /// differ ([`InstanceLimiter`]).
     pub requests_per_second: u32,
     /// Burst allowance (§4.1 defaults: Jira 10, Gitea 20, TeamCity 10).
+    /// Shared and merged the same way.
     pub burst: u32,
     /// How long to wait for a connection before calling the source
     /// unreachable.
@@ -359,7 +369,9 @@ impl HttpClient {
     /// The [`SourceError`] the failure maps to (see [`classify`]). A retryable
     /// failure that exhausts the attempts, or the budget, surfaces as the
     /// *last* failure rather than as a retry-specific one: what the caller
-    /// needs to know is what the source finally said.
+    /// needs to know is what the source finally said. A first attempt the
+    /// limiter holds past the budget is [`SourceError::Protocol`] with the
+    /// [`LocalQuota`]'s message: the source said nothing, and was not asked.
     pub async fn send(&self, request: Request) -> Result<reqwest::Response, SourceError> {
         self.send_with(request, Deadline::Whole).await
     }

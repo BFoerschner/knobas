@@ -536,6 +536,35 @@ async fn two_clients_for_one_instance_share_one_burst() {
     );
 }
 
+/// **Where two configurations name different quotas for one instance, the
+/// stricter governs**, in either order (#1630).
+///
+/// A burst of ten and a burst of two at one origin: the instance sees two in
+/// the first second, whichever client the sends go through and whichever was
+/// built first. Built loose-first, the stricter one tightens the quota under
+/// the client that already holds it -- which is why the sends go through the
+/// loose client in both halves.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_stricter_of_two_quotas_for_one_instance_governs() {
+    let strict_first = CountingServer::always(200, "");
+    let _strict = paced_client(&strict_first, 2);
+    let loose = paced_client(&strict_first, 10);
+    let hits = hits_within_the_burst(&strict_first, vec![loose], 10).await;
+    assert!(
+        hits <= 2,
+        "strict first: {hits} reached the instance; the looser burst of 10 won"
+    );
+
+    let loose_first = CountingServer::always(200, "");
+    let loose = paced_client(&loose_first, 10);
+    let _strict = paced_client(&loose_first, 2);
+    let hits = hits_within_the_burst(&loose_first, vec![loose], 10).await;
+    assert!(
+        hits <= 2,
+        "loose first: {hits} reached the instance; the stricter burst of 2 was ignored"
+    );
+}
+
 /// A server that accepts the connection and then says nothing is
 /// **`Unreachable`, not `Protocol`** -- which is the class the scheduler backs
 /// off on, so the classification is the whole assertion.

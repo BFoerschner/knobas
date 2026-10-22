@@ -83,7 +83,10 @@ impl InstanceLimiter {
 
         let mut instances = INSTANCES.lock().unwrap_or_else(PoisonError::into_inner);
         let instance = match instances.entry(url.origin()) {
-            Entry::Occupied(known) => Arc::clone(known.get()),
+            Entry::Occupied(known) => {
+                known.get().tighten(rate);
+                Arc::clone(known.get())
+            }
             Entry::Vacant(new) => Arc::clone(new.insert(Arc::new(Instance::new(
                 url.origin().ascii_serialization(),
                 rate,
@@ -165,6 +168,16 @@ impl Rate {
             burst: nonzero(burst),
         }
     }
+
+    /// The stricter of two quotas, field by field: the lower rate and the
+    /// lower burst. A quota the server tolerates from one configuration says
+    /// nothing about the other's, so neither field is taken from the looser.
+    fn stricter(self, other: Self) -> Self {
+        Self {
+            per_second: self.per_second.min(other.per_second),
+            burst: self.burst.min(other.burst),
+        }
+    }
 }
 
 /// One origin: its name, for the message, and the limiter every holder waits
@@ -179,6 +192,20 @@ impl Instance {
         Self {
             origin,
             paced: Mutex::new(Arc::new(Paced::new(rate))),
+        }
+    }
+
+    /// Bring the quota down to `asked` where `asked` is stricter.
+    ///
+    /// A changed quota is a new governor limiter -- governor cannot change
+    /// the quota of one it has built -- and every holder waits on it from its
+    /// next request. The new one starts with its own (stricter) burst: at
+    /// most one, once per tightening, and a quota only ever tightens.
+    fn tighten(&self, asked: Rate) {
+        let mut paced = self.paced.lock().unwrap_or_else(PoisonError::into_inner);
+        let rate = paced.rate.stricter(asked);
+        if rate != paced.rate {
+            *paced = Arc::new(Paced::new(rate));
         }
     }
 
@@ -209,4 +236,24 @@ impl Paced {
 /// Quotas cannot be zero; a misconfigured `0/s` means "one", not "never".
 fn nonzero(value: u32) -> NonZeroU32 {
     NonZeroU32::new(value).unwrap_or(NonZeroU32::MIN)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Rate;
+
+    /// Field by field: a configuration with the higher rate but the lower
+    /// burst contributes its burst, and the other its rate.
+    #[test]
+    fn the_stricter_quota_takes_the_lower_of_each_field() {
+        assert_eq!(Rate::new(5, 10).stricter(Rate::new(10, 5)), Rate::new(5, 5));
+        assert_eq!(Rate::new(10, 5).stricter(Rate::new(5, 10)), Rate::new(5, 5));
+        assert_eq!(Rate::new(5, 10).stricter(Rate::new(5, 10)), Rate::new(5, 10));
+    }
+
+    /// A zero reads as one, as it always has: `0/s` means "one", not "never".
+    #[test]
+    fn a_zero_quota_reads_as_one() {
+        assert_eq!(Rate::new(0, 0), Rate::new(1, 1));
+    }
 }
