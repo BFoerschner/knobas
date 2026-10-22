@@ -7,8 +7,8 @@
 -->
 <script lang="ts">
   import type { DocPage } from "../../ipc/entity";
+  import { clockLabel } from "../../time/format";
   import { jobHash } from "../route";
-  import { when } from "../tickets/tickets";
   import { inlineWords, pageHash, sectionMatches, sectionsOf, shortWho } from "./docs";
 
   let {
@@ -73,7 +73,7 @@
       {#each page.history as version, i (i)}
         <div>
           {version.message ?? (version.number === 1 ? "Created" : "Edited")}<span class="tf-s"
-            >{shortWho(version.by, version.by_name, page.me)}, {when(version.at)}</span
+            >{shortWho(version.by, version.by_name, page.me)}, {clockLabel(version.at)}</span
           >
         </div>
       {/each}

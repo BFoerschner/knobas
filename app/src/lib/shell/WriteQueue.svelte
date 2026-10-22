@@ -30,9 +30,10 @@
   in words by `writeWords`, mono only for keys, paths and bodies.
 -->
 <script lang="ts">
+  import { minutesLabel } from "../time/format";
   import { getEntity } from "../ipc/entity";
   import type { QueuedWrite } from "../ipc/sources";
-  import { clockReading, dayKey, dayLabel, durationReading } from "../time/day";
+  import { clockReading, dayKey, dayLabel } from "../time/day";
   import { minutesOf } from "../time/week";
   import { layers as sharedLayers, type Layers } from "../tf/layers.svelte";
   import TfDialog from "../tf/settings/TfDialog.svelte";
@@ -188,7 +189,7 @@
 
   /** `2 h 15 min` -- minute-granular and never rounded up (CONTEXT.md). */
   function worked(seconds: number): string {
-    return durationReading(minutesOf(seconds));
+    return minutesLabel(minutesOf(seconds));
   }
 </script>
 

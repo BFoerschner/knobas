@@ -7,9 +7,9 @@
  * and a pipeline is named by its declared name (ADR-0022).
  */
 import type { JobPipeline, PipelineReason, PipelineRow, RunRow } from "../../ipc/entity";
+import { clockLabel } from "../../time/format";
 import { matchesAll } from "../filter/filter";
 import { originLabel } from "../job/job";
-import { when } from "../tickets/tickets";
 
 /** How many runs the strip under a pipeline's name shows (R-9.4a). */
 export const STRIP = 12;
@@ -46,7 +46,7 @@ export function stripOf(pipeline: PipelineRow): RunRow[] {
 
 /**
  * When the latest run started, or was last touched if it has not started,
- * as prototype-6's row writes it: *11:45* today, *yest. 16:20*, else the
+ * as prototype-6's row writes it: *11:45* today, *yesterday 16:20*, else the
  * date. Empty for a pipeline nothing ran.
  */
 export function latestTime(pipeline: PipelineRow, now: Date = new Date()): string {
@@ -55,9 +55,9 @@ export function latestTime(pipeline: PipelineRow, now: Date = new Date()): strin
   return at === null ? "" : shortTime(at, now);
 }
 
-/** An instant as a row writes it: *11:45* today, *yest. 16:20*, else the date. */
+/** An instant as a row writes it: *11:45* today, *yesterday 16:20*, else the date. */
 export function shortTime(iso: string, now: Date = new Date()): string {
-  return when(iso, now).replace("today ", "").replace("yesterday", "yest.");
+  return clockLabel(iso, now, true);
 }
 
 /** A run's address: its pipeline's entity id, then its own (#853 draws it). */
@@ -96,12 +96,6 @@ export function pipelineOf(
   // With *This job* on, the job's own failure first, else its first (#850).
   if (onJob.length > 0) return onJob.find(isFailing) ?? onJob[0] ?? null;
   return list.find(isFailing) ?? list[0] ?? null;
-}
-
-/** A duration as prototype-6 writes one: *38 s*, *4 m 12 s*. */
-export function duration(seconds: number): string {
-  if (seconds < 60) return `${seconds} s`;
-  return `${Math.floor(seconds / 60)} m ${String(seconds % 60).padStart(2, "0")} s`;
 }
 
 // ---------------------------------------------------------------------------

@@ -39,6 +39,7 @@
   with what was typed.
 -->
 <script lang="ts">
+  import { clockLabel } from "../../time/format";
   import { tick, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -70,7 +71,7 @@
   import type { JobPorts } from "../job/ports";
   import { askAgain, markQueued, queuedMarks, sameWords, settleQueued, takeAgain } from "../queued.svelte";
   import { jobHash } from "../route";
-  import { initials, when } from "../tickets/tickets";
+  import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocBody from "./TfDocBody.svelte";
   import TfDocHits from "./TfDocHits.svelte";
@@ -790,7 +791,7 @@
         </h1>
         <div class="tf-rd-meta">
           {#if p.editor !== null || p.updated_at !== null}
-            <span>{person(p.editor, p.editor_name, p.me)} edited {when(p.updated_at)}</span>
+            <span>{person(p.editor, p.editor_name, p.me)} edited {clockLabel(p.updated_at)}</span>
           {/if}
           {#if p.version !== null}<span>version {p.version}</span>{/if}
           {#if p.readable}<span>{readingMinutes(p)} min read</span>{/if}
@@ -854,7 +855,7 @@
                 <div class="tf-cmt-body">
                   <div class="tf-who">
                     <b>{mine ? "You" : firstName(person(c.author, c.author_name, p.me))}</b>
-                    {c.at === null ? "" : when(c.at)}
+                    {c.at === null ? "" : clockLabel(c.at)}
                   </div>
                   <TfDocBlocks
                     blocks={c.blocks}

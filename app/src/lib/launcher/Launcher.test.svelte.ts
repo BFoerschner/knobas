@@ -2912,7 +2912,7 @@ test("the board previews the inbox: the count and its newest three, and nothing 
   expect(rows).toEqual([
     "jonas asked for your review: Retry SEPA batches 13:30",
     // The Inbox page's err dot on a failure.
-    "\u25cf Build failed: payments main #88 yest. 17:10",
+    "\u25cf Build failed: payments main #88 yesterday 17:10",
     "Mara mentioned you: Reconcile mandates 13:30",
   ]);
   if (app) unmount(app);

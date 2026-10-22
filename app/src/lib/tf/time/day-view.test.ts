@@ -9,7 +9,7 @@
 import { expect, test } from "vitest";
 
 import type { AdHocBlock, Block, DayBlock, RunningTimer } from "../../ipc/time";
-import { dayFigures, dayRows, fitLabel, hm, offerRuns, place, stripWindow, type DayInput, type DayRow } from "./day-view";
+import { dayFigures, dayRows, fitLabel, offerRuns, place, stripWindow, type DayInput, type DayRow } from "./day-view";
 
 const DAY = "2026-08-22";
 
@@ -161,10 +161,6 @@ test("the five figures: tracked counts the running timer, offered and open stand
     offered: 15,
     open: 35,
   });
-});
-
-test("durations read the prototype's way: minutes, never rounded", () => {
-  expect([hm(0), hm(45), hm(60), hm(130), hm(257)]).toEqual(["0m", "45m", "1h", "2h 10m", "4h 17m"]);
 });
 
 test("the strip runs 08:00 to 18:00 and widens by whole hours to hold a day outside it", () => {

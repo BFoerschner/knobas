@@ -4,11 +4,11 @@
  * `run_artifacts`): the log's blocks and what shows of them, the tests'
  * order and history line, and the artifact tree's words.
  */
+import { secondsLabel } from "../../time/format";
 import { ipcErrorMessage } from "../../ipc";
 import type { ArtifactEntry, DownloadTarget, LogLine, LogStep, RunLog, RunTest, TestOutcome } from "../../ipc/entity";
 import { push } from "../../shell/toasts.svelte";
 import { marks, matchesAll } from "../filter/filter";
-import { duration } from "./builds";
 
 // -- the log (#854) -----------------------------------------------------------
 
@@ -50,7 +50,7 @@ export function stepState(log: RunLog, index: number, inFlight: boolean): StepSt
 /** The fold's right-hand words: "2m 08s, 31 lines", or "running, 4 lines". */
 export function stepSummary(step: LogStep, state: StepState): string {
   const lines = step.last - step.first + 1;
-  const took = state === "run" ? "running" : step.seconds === null ? null : duration(step.seconds);
+  const took = state === "run" ? "running" : step.seconds === null ? null : secondsLabel(step.seconds);
   const count = `${lines.toLocaleString("en-US")} line${lines === 1 ? "" : "s"}`;
   return took === null ? count : `${took}, ${count}`;
 }
@@ -128,7 +128,7 @@ export function stepSegments(log: RunLog | null, inFlight: boolean, planned: rea
   };
   const drawn = log.steps.map((step, index) => {
     const state = stepState(log, index, inFlight);
-    return place(index, step.name, state, state === "run" ? "running" : step.seconds === null ? null : duration(step.seconds));
+    return place(index, step.name, state, state === "run" ? "running" : step.seconds === null ? null : secondsLabel(step.seconds));
   });
   return [...drawn, ...waiting.map((name, i) => place(log.steps.length + i, name, "wait", "not started"))];
 }
@@ -221,7 +221,7 @@ export function historyLine(history: readonly TestOutcome[], branch: string | nu
 /** A test's time: "42 ms", or "1m 02s" past a minute. */
 export function testTime(ms: number | null): string | null {
   if (ms === null) return null;
-  return ms < 60_000 ? `${ms} ms` : duration(Math.round(ms / 1000));
+  return ms < 60_000 ? `${ms} ms` : secondsLabel(Math.round(ms / 1000));
 }
 
 // -- the artifacts (#856) -----------------------------------------------------

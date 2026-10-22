@@ -10,6 +10,7 @@
  */
 import type { PipelineRow, PipelineSettings, PipelineTrigger, RunRow } from "../../ipc/entity";
 import type { QueuedWrite, SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
+import { secondsLabel } from "../../time/format";
 import { signInFails } from "../../shell/health.svelte";
 import type { WriteSource } from "../../shell/queued-toast";
 import { matchesAll } from "../filter/filter";
@@ -17,7 +18,7 @@ import type { WriteFollower } from "../../shell/follow-write";
 import { markQueued, type Mark } from "../queued.svelte";
 import { age } from "../job/job";
 import { reenterWords, secretNoun } from "../settings/settings";
-import { duration, pipelineHash, runTone, shortTime } from "./builds";
+import { pipelineHash, runTone, shortTime } from "./builds";
 
 /**
  * A run started from this page, drawn *queued* until a read holds it
@@ -228,7 +229,7 @@ export function resultWord(run: RunRow): string {
 /** A bar's tip: *#1187 FAILURE, main · 4 m 12 s, today 10:05*. */
 export function barTip(run: RunRow, now: Date = new Date()): string {
   const head = `${run.number !== null ? `#${run.number}` : "queued"} ${resultWord(run)}${run.branch ? `, ${run.branch}` : ""}`;
-  const took = run.duration_seconds !== null ? duration(run.duration_seconds) : resultWord(run);
+  const took = run.duration_seconds !== null ? secondsLabel(run.duration_seconds) : resultWord(run);
   const at = run.started ?? run.updated_at;
   return `${head} · ${took}${at ? `, ${shortTime(at, now)}` : ""}`;
 }

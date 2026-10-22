@@ -12,6 +12,7 @@
   row belongs to. No new command.
 -->
 <script lang="ts">
+  import { clockLabel } from "../../time/format";
   import { onDestroy } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -38,19 +39,7 @@
   import type { SourceFacts } from "../job/job";
   import { jobHash } from "../route";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
-  import {
-    expiryOf,
-    failed,
-    KIND_CHIPS,
-    kindOf,
-    opener,
-    rowActions,
-    sentence,
-    snoozedLine,
-    untilLabel,
-    visible,
-    when,
-  } from "./inbox";
+  import { expiryOf, failed, KIND_CHIPS, kindOf, opener, rowActions, sentence, snoozedLine, untilLabel, visible } from "./inbox";
 
   /** The reads and the write this view makes beside the inbox store. */
   export interface InboxPorts {
@@ -220,7 +209,7 @@
       {@const belongs = index.jobOf(item)}
       {@const belongsId = index.jobIdOf(item)}
       <div class="tf-ib">
-        <time datetime={item.occurred_at}>{when(item.occurred_at, now)}</time>
+        <time datetime={item.occurred_at}>{clockLabel(item.occurred_at, now, true)}</time>
         <div class="tf-what">
           {#if failed(item)}<span class="tf-dot tf-err"></span>{" "}{/if}<Marked text={sentence(item)} typed={filter.text} />
         </div>

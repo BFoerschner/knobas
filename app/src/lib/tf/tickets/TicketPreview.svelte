@@ -6,7 +6,8 @@
 -->
 <script lang="ts">
   import type { MiniBoardCard } from "../../ipc/entity";
-  import { columnName, epicLine, previewAction, when, type AroundLine } from "./tickets";
+  import { clockLabel } from "../../time/format";
+  import { columnName, epicLine, previewAction, type AroundLine } from "./tickets";
 
   let {
     card,
@@ -46,7 +47,7 @@
     {#if epic}<dt>Epic</dt>
       <dd>{epic}</dd>{/if}
     <dt>Updated</dt>
-    <dd>{when(card.updated_at)}</dd>
+    <dd>{clockLabel(card.updated_at)}</dd>
   </dl>
   {#if description}<p class="tf-desc">{description}</p>{/if}
   <div>

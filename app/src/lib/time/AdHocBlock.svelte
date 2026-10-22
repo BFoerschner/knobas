@@ -27,6 +27,7 @@
   `dialogs` so `.tf`'s rules reach it, and is rung 1 of the `Esc` ladder.
 -->
 <script lang="ts">
+  import { minutesLabel } from "./format";
   import {
     updateBlock as realUpdateBlock,
     worklogDraft as realWorklogDraft,
@@ -38,7 +39,7 @@
   import { targetReading } from "../shell/timer";
   import { layers as sharedLayers, type Layers } from "../tf/layers.svelte";
   import TfDialog from "../tf/settings/TfDialog.svelte";
-  import { dayOffsetMinutes, durationReading, minutesBetween } from "./day";
+  import { dayOffsetMinutes, minutesBetween } from "./day";
   import { localDay } from "./draft";
 
   let {
@@ -106,15 +107,8 @@
 
   const because = $derived(suggestion ? reasonFor(suggestion.rule) : "");
 
-  /**
-   * `45 min`, `2 h 15 min` — how long the block was, **in the Day tab's own
-   * reading**.
-   *
-   * `durationReading` rather than a second formatter: this dialog opens over
-   * the strip that draws the same block, and two spellings of one length side
-   * by side read as two different numbers.
-   */
-  const length = $derived(durationReading(minutesBetween(block.started_at, block.ended_at)));
+  /** `45m`, `2h 15m`: how long the block was, as every other page writes a length. */
+  const length = $derived(minutesLabel(minutesBetween(block.started_at, block.ended_at)));
 
   let sending = $state(false);
   /**

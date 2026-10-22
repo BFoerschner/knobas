@@ -141,20 +141,6 @@ export function minutesBetween(from: string, to: string): number {
 }
 
 /**
- * `"45 min"`, `"1 h"`, `"2 h 15 min"`.
- *
- * Minutes, never decimal hours: `CONTEXT.md`'s timesheet is minute-granular
- * with no rounding, because knobas must never invent a rounding policy a
- * person's Jira may not have. `"1.25 h"` is that invention in miniature.
- */
-export function durationReading(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
-}
-
-/**
  * What either surface says about a day past the observation horizon (#337).
  *
  * **One sentence, two subjects**, and that is the whole of the decision: the

@@ -82,6 +82,7 @@
 </script>
 
 <script lang="ts">
+  import { clockLabel } from "../../time/format";
   import { flushSync, onMount, untrack } from "svelte";
 
   import {
@@ -114,20 +115,7 @@
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
-  import {
-    columnName,
-    LANE_FIELDS,
-    moreLanesLine,
-    moreLine,
-    nextSort,
-    sharedKeys,
-    sortRows,
-    statusOrder,
-    ticketAddress,
-    when,
-    type LaneField,
-    type SortColumn,
-  } from "./tickets";
+  import { columnName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sharedKeys, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -806,7 +794,7 @@
                   {:else if column === "assignee"}
                     <td>{card.assignee ?? "Unassigned"}</td>
                   {:else if column === "updated"}
-                    <td class="tf-dim">{when(card.updated_at)}</td>
+                    <td class="tf-dim">{clockLabel(card.updated_at)}</td>
                   {:else if column === "epic"}
                     <td class="tf-mono tf-nowrap">{card.path ?? ""}</td>
                   {:else}

@@ -90,16 +90,6 @@ const pad = (n: number) => String(n).padStart(2, "0");
 const clock = (at: Date) => `${pad(at.getHours())}:${pad(at.getMinutes())}`;
 const day = (at: Date) => `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 
-/** The time column: the clock today, `yest. 16:30` yesterday, else the date. */
-export function when(iso: string, now: Date): string {
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return "";
-  if (day(at) === day(now)) return clock(at);
-  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-  if (day(at) === day(yesterday)) return `yest. ${clock(at)}`;
-  return day(at);
-}
-
 /** Where a snoozed item comes back, for its toast: the weekday within a week, else the date. */
 export function untilLabel(at: Date, now: Date): string {
   const days = (at.getTime() - now.getTime()) / 86_400_000;

@@ -18,7 +18,6 @@ import {
   splitLanes,
   statusOrder,
   ticketAddress,
-  when,
 } from "./tickets";
 
 function card(n: number, status: string | null = null): MiniBoardCard {
@@ -86,14 +85,6 @@ test("initials are the account's two parts, or its first two letters, or a dash 
   expect(initials("mara.lindqvist")).toBe("ML");
   expect(initials("jonas")).toBe("JO");
   expect(initials(null)).toBe("–");
-});
-
-test("a ticket's update reads today, yesterday or the date, as the prototype writes it", () => {
-  const now = new Date("2026-08-22T15:00:00+02:00");
-  expect(when("2026-08-22T11:48:00+02:00", now)).toBe("today 11:48");
-  expect(when("2026-08-21T16:05:00+02:00", now)).toBe("yesterday 16:05");
-  expect(when("2026-08-18T10:00:00+02:00", now)).toBe("2026-08-18");
-  expect(when(null, now)).toBe("never");
 });
 
 test("the preview's button: Start work, Resume work or Open job by the ticket's state", () => {

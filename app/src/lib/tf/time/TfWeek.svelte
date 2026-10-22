@@ -12,6 +12,7 @@
   attributes that take percentages.
 -->
 <script lang="ts">
+  import { minutesLabel } from "../../time/format";
   import { onMount } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -24,7 +25,6 @@
   import { MONTHS, dayKey, shiftDay } from "../../time/day";
   import { columnHeading, mondayOf, weekWindows } from "../../time/week";
   import { entityAddress } from "../address";
-  import { hm } from "./day-view";
   import { heldNotes, weekView, type WeekCellView } from "./week-view";
 
   interface WeekPorts {
@@ -160,10 +160,10 @@
 
 {#if ready !== null && shown !== null}
   <div class="tf-tm-sum">
-    <div><b>{hm(shown.figures.tracked)}</b><span>tracked</span></div>
-    <div><b>{hm(shown.figures.logged)}</b><span>logged</span></div>
-    <div class={shown.figures.toLog > 0 ? "tf-warn" : ""}><b>{hm(shown.figures.toLog)}</b><span>to log</span></div>
-    <div class={shown.figures.held > 0 ? "tf-warn" : ""}><b>{hm(shown.figures.held)}</b><span>held</span></div>
+    <div><b>{minutesLabel(shown.figures.tracked)}</b><span>tracked</span></div>
+    <div><b>{minutesLabel(shown.figures.logged)}</b><span>logged</span></div>
+    <div class={shown.figures.toLog > 0 ? "tf-warn" : ""}><b>{minutesLabel(shown.figures.toLog)}</b><span>to log</span></div>
+    <div class={shown.figures.held > 0 ? "tf-warn" : ""}><b>{minutesLabel(shown.figures.held)}</b><span>held</span></div>
   </div>
 
   {#each ready.held as note (note)}
@@ -210,7 +210,7 @@
                 {:else}
                   {@const [logged, held, toLog] = shares(cell)}
                   <a href="#/time/{cell.day}">
-                    <b>{hm(cell.tracked)}</b>
+                    <b>{minutesLabel(cell.tracked)}</b>
                     {#if cell.bar}
                       <svg class="tf-tm-bar" width="72" height="4" aria-hidden="true">
                         <rect class="tf-tm-bar-bed" width="100%" height="100%" />
@@ -224,15 +224,15 @@
                 {/if}
               </td>
             {/each}
-            <td class="tf-tm-c tf-tm-tot"><b>{hm(row.total)}</b></td>
+            <td class="tf-tm-c tf-tm-tot"><b>{minutesLabel(row.total)}</b></td>
           </tr>
         {/each}
         <tr class="tf-tm-total">
           <td>Every day</td>
           {#each shown.dayTotals as total, index (index)}
-            <td class="tf-tm-c {index > 4 ? 'tf-tm-we' : ''}"><b>{total > 0 ? hm(total) : "–"}</b></td>
+            <td class="tf-tm-c {index > 4 ? 'tf-tm-we' : ''}"><b>{total > 0 ? minutesLabel(total) : "–"}</b></td>
           {/each}
-          <td class="tf-tm-c tf-tm-tot"><b>{hm(shown.figures.tracked)}</b></td>
+          <td class="tf-tm-c tf-tm-tot"><b>{minutesLabel(shown.figures.tracked)}</b></td>
         </tr>
       </tbody>
     </table>

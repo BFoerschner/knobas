@@ -21,7 +21,6 @@ import {
   dayKey,
   dayLabel,
   dayOffsetMinutes,
-  durationReading,
   horizonNote,
   segmentsOf,
   shiftDay,
@@ -107,13 +106,6 @@ test("an instant on another day says which day", () => {
   expect(clockReading(at(1, 0, 4), "2026-09-03")).toBe("01:00 (+1)");
   // ...and the direction that shows the marker is not simply always drawn.
   expect(clockReading(at(9, 5), "2026-09-03")).toBe("09:05");
-});
-
-test("a span reads in hours and minutes, and never in bare minutes past an hour", () => {
-  expect(durationReading(0)).toBe("0 min");
-  expect(durationReading(45)).toBe("45 min");
-  expect(durationReading(60)).toBe("1 h");
-  expect(durationReading(135)).toBe("2 h 15 min");
 });
 
 // -- the strip ---------------------------------------------------------------

@@ -1,0 +1,55 @@
+/**
+ * The one place a duration, a clock reading or an entity key is spelled
+ * (#1678).
+ *
+ * Before this module five functions each wrote a length their own way and two
+ * wrote "when": two of them were both called `hm` and took different units
+ * (seconds in one, minutes in the other), so a page importing the wrong one
+ * was off by sixty and the type checker could not tell. The names here carry
+ * the unit instead.
+ *
+ * Minutes, never decimal hours, and never days: the timesheet is
+ * minute-granular with no rounding (CONTEXT.md, *Timesheet*), and how long a
+ * working day is belongs to the source's settings.
+ */
+
+/** The key half of an entity id: `jira:PAY-231` reads `PAY-231`. */
+export function keyOf(entityId: string): string {
+  return entityId.slice(entityId.indexOf(":") + 1);
+}
+
+/** A length given in **minutes**: `2h 10m`, `45m`, `3h`. */
+export function minutesLabel(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${rest}m`;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
+
+/** A length given in **seconds**, as a run's: `38 s`, `4 m 12 s`. */
+export function secondsLabel(seconds: number): string {
+  if (seconds < 60) return `${seconds} s`;
+  return `${Math.floor(seconds / 60)} m ${String(seconds % 60).padStart(2, "0")} s`;
+}
+
+const pad = (n: number) => String(n).padStart(2, "0");
+const dateOf = (at: Date) => `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+
+/**
+ * An instant against `now`: `today 11:48`, `yesterday 16:05`, else the date.
+ * `never` for a source that never said; `""` for an instant that is not one.
+ *
+ * `bare` drops the word on today (`11:48`) for a column that is only ever
+ * read as recent. Yesterday is worded the same either way, so two surfaces
+ * showing one instant never disagree about which day it was.
+ */
+export function clockLabel(iso: string | null, now: Date = new Date(), bare = false): string {
+  if (iso === null) return "never";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  if (dateOf(at) === dateOf(now)) return bare ? time : `today ${time}`;
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (dateOf(at) === dateOf(yesterday)) return `yesterday ${time}`;
+  return dateOf(at);
+}

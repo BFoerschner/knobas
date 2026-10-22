@@ -22,6 +22,7 @@
   *queued* at once, never as started (R-9.8).
 -->
 <script lang="ts">
+  import { secondsLabel } from "../../time/format";
   import { onDestroy, onMount, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -35,7 +36,7 @@
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
   import { queuedMarks, settleQueued } from "../queued.svelte";
-  import { duration, runHash, runTone, shortTime } from "./builds";
+  import { runHash, runTone, shortTime } from "./builds";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
   import { fieldsOf, type RunRequest } from "./run-dialog";
@@ -470,7 +471,7 @@
     </div>
     <div class="tf-facts2">
       <div><b>Passed</b>{facts.passed} of the last {facts.finished}</div>
-      <div><b>Usual duration</b>{facts.usual !== null ? duration(facts.usual) : "none"}</div>
+      <div><b>Usual duration</b>{facts.usual !== null ? secondsLabel(facts.usual) : "none"}</div>
       <div>
         <b>Last passing</b>{#if facts.lastPassing !== null}<a href={runHash(id, facts.lastPassing.entity_id)}
             >#{facts.lastPassing.number}</a
@@ -535,7 +536,7 @@
                 {#if run.duration_seconds !== null}
                   <svg class="tf-durbar" width={DURBAR_WIDTH} height="4" aria-hidden="true"
                     ><rect width={durbarWidth(run.duration_seconds, max)} height="4" rx="2" /></svg
-                  >{duration(run.duration_seconds)}
+                  >{secondsLabel(run.duration_seconds)}
                 {:else if tone === "run"}
                   <progress class="tf-progress" aria-label="Running"></progress> running
                 {:else}

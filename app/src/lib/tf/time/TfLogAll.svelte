@@ -21,6 +21,7 @@
   its own write, and the copies of the ones that went stay (ADR-0012).
 -->
 <script lang="ts">
+  import { minutesLabel } from "../../time/format";
   import { onMount } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -39,8 +40,7 @@
   import { dayOffsetMinutes } from "../../time/day";
   import { columnHeading, minutesOf } from "../../time/week";
   import type { Layers } from "../layers.svelte";
-  import { hm } from "./day-view";
-
+  
   interface LogAllPorts {
     logAllPreview: typeof realLogAllPreview;
     worklogDraft: typeof realWorklogDraft;
@@ -203,7 +203,7 @@
                 <td><input type="checkbox" aria-label="Log this" bind:checked={row.ticked} /></td>
                 <td class="tf-nowrap">{dayHeading(row.plan.day)}</td>
                 <td class="tf-mono tf-nowrap">{ticket}</td>
-                <td class="tf-nowrap tf-tm-num">{hm(minutesOf(row.plan.seconds))}</td>
+                <td class="tf-nowrap tf-tm-num">{minutesLabel(minutesOf(row.plan.seconds))}</td>
                 <td class="tf-tm-comment">
                   <textarea
                     rows="2"

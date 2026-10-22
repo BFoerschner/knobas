@@ -15,6 +15,7 @@
   ticket you are on"). Only the `running` row carries `tf-tm-run`.
 -->
 <script lang="ts">
+  import { keyOf, minutesLabel } from "../../time/format";
   import { onMount } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -35,17 +36,7 @@
   import { clockReading, dayBounds, dayKey, dayLabel, shiftDay } from "../../time/day";
   import { atClock, clockOf } from "../../time/draft";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
-  import {
-    dayFigures,
-    dayRows,
-    fitLabel,
-    hm,
-    offerRuns,
-    place,
-    stripWindow,
-    type DayRow,
-    type OfferRun,
-  } from "./day-view";
+  import { dayFigures, dayRows, fitLabel, offerRuns, place, stripWindow, type DayRow, type OfferRun } from "./day-view";
   import { readDay, type DayRecord } from "./day-read";
   import TfBlockDialog, { type BlockForm } from "./TfBlockDialog.svelte";
 
@@ -266,8 +257,7 @@
   const hourLabel = (hour: number) => String(hour).padStart(2, "0");
   const span = (row: DayRow) =>
     `${clockReading(row.from, key)} to ${row.state === "running" ? "now" : clockReading(row.to, key)}`;
-  const durationOf = ({ ms }: { ms: number }) => hm(Math.floor(ms / 60_000));
-  const keyOf = (entityId: string) => entityId.slice(entityId.indexOf(":") + 1);
+  const durationOf = ({ ms }: { ms: number }) => minutesLabel(Math.floor(ms / 60_000));
 
   /** The ticket an offered block is linked to, when that is not the block's own. */
   function linkedTo(row: DayRow): string | null {
@@ -481,11 +471,11 @@
   </div>
 {:else if ready !== null}
   <div class="tf-tm-sum">
-    <div><b>{hm(figures.tracked)}</b><span>tracked</span></div>
-    <div><b>{hm(figures.logged)}</b><span>logged</span></div>
-    <div class={figures.toLog > 0 ? "tf-warn" : ""}><b>{hm(figures.toLog)}</b><span>to log</span></div>
-    <div><b>{unknown.offered ? "–" : hm(figures.offered)}</b><span>offered by knobas</span></div>
-    <div><b>{unknown.open ? "–" : hm(figures.open)}</b><span>open, app in front</span></div>
+    <div><b>{minutesLabel(figures.tracked)}</b><span>tracked</span></div>
+    <div><b>{minutesLabel(figures.logged)}</b><span>logged</span></div>
+    <div class={figures.toLog > 0 ? "tf-warn" : ""}><b>{minutesLabel(figures.toLog)}</b><span>to log</span></div>
+    <div><b>{unknown.offered ? "–" : minutesLabel(figures.offered)}</b><span>offered by knobas</span></div>
+    <div><b>{unknown.open ? "–" : minutesLabel(figures.open)}</b><span>open, app in front</span></div>
   </div>
 
   {#if ready.pastHorizon}

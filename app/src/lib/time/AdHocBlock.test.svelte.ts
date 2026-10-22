@@ -263,6 +263,6 @@ test("it draws in the ticket-first dialog and names no room and no day review", 
 test("the header says how long the block was and what it was on", () => {
   render();
   expect(target.querySelector(".tf-dialog header .tf-dsub")?.textContent).toBe(
-    "1 h 30 min on ENG:SEPA payout retry design",
+    "1h 30m on ENG:SEPA payout retry design",
   );
 });

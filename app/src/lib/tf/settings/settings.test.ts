@@ -156,7 +156,7 @@ test("a sync run reads as started, took and what it did", () => {
   // The suite runs in Europe/Berlin (vite.config.ts), two hours ahead in October.
   expect(runRow(run, JIRA, NOW)).toEqual({ id: 7, started: "14:28", took: "4 s", result: "12 updated", detail: null, tone: "ok" });
   expect(runRow({ ...run, trigger: "backfill", finished_at: "2026-10-15T12:31:12Z" }, JIRA, NOW)).toMatchObject({
-    took: "3 min 12 s",
+    took: "3 m 12 s",
     result: "12 updated, backfill",
   });
   expect(runRow({ ...run, outcome: "unauthorized", error: "401 Unauthorized" }, JIRA, NOW)).toMatchObject({

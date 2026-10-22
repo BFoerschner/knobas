@@ -10,8 +10,8 @@
 -->
 <script lang="ts">
   import type { DocsHits } from "../../ipc/entity";
-  import { when } from "../tickets/tickets";
   import TfMarked from "./TfMarked.svelte";
+  import { clockLabel } from "../../time/format";
   import { hitLine, hitsLine, pageHash, snippetLabel, stem } from "./docs";
 
   let {
@@ -63,7 +63,7 @@
       >{#if label}<b>{label}</b>{" "}{/if}{#each hit.snippet.segments as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark
           >{:else}{seg.text}{/if}{/each}</span
     >
-    <span class="tf-n">{hitLine(hit, me, when)}</span>
+    <span class="tf-n">{hitLine(hit, me, (iso) => clockLabel(iso))}</span>
   </a>
 {:else}
   <p class="tf-dl-note">

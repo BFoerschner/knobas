@@ -10,10 +10,10 @@
   live.
 -->
 <script lang="ts">
+  import { clockLabel } from "../../time/format";
   import { ipcErrorMessage } from "../../ipc";
   import type { ChoiceOption, DiffFile, EntityDetail } from "../../ipc/entity";
   import TfDiff from "../code/TfDiff.svelte";
-  import { when } from "../tickets/tickets";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { branchFrom, repoHash, shaOf } from "./repo";
 
@@ -74,7 +74,7 @@
   {detail?.row.title ?? ""}
   {#if detail !== null}
     <span class="tf-dim tf-rc-who"
-      >{[detail.author, detail.row.updated_at ? when(detail.row.updated_at, now) : null].filter(Boolean).join(", ")}</span
+      >{[detail.author, detail.row.updated_at ? clockLabel(detail.row.updated_at, now) : null].filter(Boolean).join(", ")}</span
     >
   {/if}
   <span class="tf-acts">

@@ -34,7 +34,7 @@
     type Worklog,
   } from "../ipc/time";
   import { clockReading, dayBounds, dayKey, dayLabel, dayOffsetMinutes } from "../time/day";
-    import { DraftForm } from "../time/draft-form.svelte";
+  import { DraftForm } from "../time/draft-form.svelte";
   import type { DraftOutcome } from "./drafting.svelte";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
 
