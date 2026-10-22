@@ -112,7 +112,7 @@ A per-kind declaration that a full sync emits that kind's complete corpus. Only 
 _Avoid_: complete, full
 
 **Budget**:
-A cap on how much of a kind a full sync emits per container (e.g. commits per repo). A budget makes its kind non-exhaustive.
+A cap on how much of a kind a full sync emits per container (e.g. commits per repo). A budget makes its kind non-exhaustive. On an incremental run it bounds what one run reads, never the delta: what it leaves unread, the next run reads (spec #1618 ruling A6).
 _Avoid_: limit, cap
 
 **Sweep**:

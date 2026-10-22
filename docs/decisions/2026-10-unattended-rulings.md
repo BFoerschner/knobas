@@ -11357,16 +11357,18 @@ set.
 ## #1624/#1625: Gitea listings that move and budgets on incremental runs (Opus implementer, 2026-10-22)
 
 - **What "the watermark is the oldest examined record" (spec #1618 ruling A6) stores.** *Ruling:*
-  the oldest record examined goes where the watermark lives (`pulls_updated_to`,
-  `commits_since`), as A6 says, and an optional catch-up beside it keeps the watermark the
-  cut-short walk was heading for (`floor`) and the newest record it examined (`then`). The next run
-  reads only the window between the two, under the same budget, and adopts `then` once it reaches
-  `floor`. *Reasoning:* both walks read newest first, so the records a budget leaves unread are the
-  older ones, between the old watermark and the oldest examined. A watermark moved to the oldest
-  examined and nothing else would have the next walk stop exactly where they begin, and re-reading
-  from the old watermark would spend each run's budget on the same newest 200 again. The catch-up
-  fields are optional, so the cursor stays version 3. *Reversing:* medium, the two walks and the
-  two cursor structs; a cursor holding a catch-up would then lose its window once.
+  the oldest record examined is where the next run continues (`below`, in an optional catch-up
+  beside the watermark); the watermark itself (`pulls_updated_to`, `commits_since`) stays where it
+  was, and the catch-up also keeps the newest record examined (`newest`). The next run reads only
+  the window from `below` down to the watermark, under the same budget, and adopts `newest` as the
+  watermark once it reaches it. *Reasoning:* both walks read newest first, so the records a budget
+  leaves unread are the older ones, between the old watermark and the oldest examined. A watermark
+  moved to the oldest examined would have the next walk stop exactly where they begin; one left
+  alone with nothing else would have each run spend its budget on the same newest 200 again; and
+  `CONTEXT.md` defines a watermark as a position that only advances as work completes, which a
+  watermark moved back to the oldest examined is not. A6's wording is #1715. The catch-up fields are
+  optional, so the cursor stays version 3. *Reversing:* medium, the two walks and the two cursor
+  structs; a cursor holding a catch-up would then lose its window once.
 - **Where a pull-request catch-up starts.** *Ruling:* on the page the budget stopped on, trusted
   only when that page's first record is newer than the resume point; otherwise from page 1.
   *Reasoning:* from page 1 the window is reached only after skipping every record the cut-short walk
@@ -11375,12 +11377,12 @@ set.
   deletion or a larger page shifts unread records above the hint, which the first-record check
   catches. *Reversing:* low, `walk_pulls`'s start.
 - **What a run holding a catch-up reads above it.** *Ruling:* nothing until the window closes; the
-  run that closes it walks on from `then` with what is left of the budget. *Reasoning:* one window
+  run that closes it walks on from `newest` with what is left of the budget. *Reasoning:* one window
   at a time keeps the cursor to one gap. Two gaps would need a list of windows. *Reversing:* low.
 - **Commits.** *Ruling:* the catch-up names the branches not finished in walk order. The cut one is
-  read from its head bounded by `until=` (server-side and inclusive, now live-asserted) down to the
-  floor, the rest from their heads. Branches that move while a catch-up is pending are walked from
-  `then`, not from the newest commit the catch-up just read on another branch. *Reasoning:* the head
+  read from `below` (the `until=` bound, server-side and inclusive, now live-asserted) down to the
+  watermark, the rest from their heads. Branches that move while a catch-up is pending are walked from
+  `newest`, not from the newest commit the catch-up just read on another branch. *Reasoning:* the head
   the cursor stores has already moved, so without the list nothing walks the cut branch again;
   without `until=` the catch-up re-lists every commit already delivered and has the cap problem
   above. *Reversing:* medium, as the first ruling.
