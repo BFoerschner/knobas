@@ -12863,3 +12863,25 @@ The measurement came after it.
   ownership claim and `setup()`, under the bring-up guard, and its tests can reuse `dead_pid` and
   `Squatter` in `tests/embedded.rs`. *Reasoning:* a hook with no caller is dead code. *Reversing:*
   n/a.
+
+### #1636, merge-manager review (Opus, 2026-10-23)
+
+- **A live owner whose postmaster crashed.** *Fork:* refuse the second launch, or let it start a
+  server. *Ruling:* refuse, as the PR does. *Reasoning:* the owner still holds `.owner.lock`, and
+  its quit runs `pg_ctl stop` on the data directory, so a server the second launch started would
+  be stopped under it. The message names the pid to quit, so the user can act on it. Once the owner
+  quits, the next launch starts clean, because PostgreSQL removes a `postmaster.pid` whose process
+  is gone. The owner does not recover its own server in-process: nothing watches the server after
+  `ready`, and *Retry* is only offered from `failed`. That was already true before this PR. It is
+  filed as #1779 (backlog). *Reversing:* low.
+- **Atomicity of the pid in `.owner.lock`.** *Fork:* write-then-rename, or truncate and write in
+  place under the lock. *Ruling:* in place, as the PR does. *Reasoning:* the winner writes under
+  both its `flock` and the bring-up lock. A loser reads only after `WouldBlock`, and also under the
+  bring-up lock, so it never sees a half-written or previous pid. A rename would swap the inode
+  under the `flock`, so the next claimant would lock a different file and two owners could
+  coexist. A crashed owner's pid is never read: the kernel releases the `flock` when the process
+  dies, so the next claim succeeds and overwrites it. A reboot clears `flock`s too, so pid reuse
+  after a reboot cannot make a dead owner look live through this file. The pid-reuse case #1775
+  asks about is `postmaster.pid`'s, and #1775 states it correctly. *Reversing:* low.
+- **The `owner_lock: None` grep criterion.** *Ruling:* ticked. The one hit is `existing_url`'s
+  arm, a server knobas does not manage. It is no adoption arm and no borrower. *Reversing:* n/a.

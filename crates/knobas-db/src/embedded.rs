@@ -767,9 +767,9 @@ enum Ownership {
 /// Claim responsibility for the server serving `root_dir`, if nobody else has.
 ///
 /// Non-blocking on purpose: a live sibling holding this lock is the answer --
-/// the start is refused -- not a delay. [`Ownership::Held`] means "somebody else owns it", which is
-/// exactly when stopping the server would take a running instance's database
-/// down with it.
+/// the start is refused -- not a delay. [`Ownership::Held`] means "somebody
+/// else owns it", which is exactly when stopping the server would take a
+/// running instance's database down with it.
 ///
 /// The winner writes its pid into the file, so a refused second launch can
 /// name the window to quit (ruling B2). The file is opened without truncating
@@ -792,7 +792,11 @@ fn claim_ownership(root_dir: &Path) -> Result<Ownership, DbError> {
                 .and_then(|()| file.rewind())
                 .and_then(|()| writeln!(file, "{}", std::process::id()));
             if let Err(error) = named {
-                tracing::warn!(%error, lock = %path.display(), "could not write our pid into the ownership lock");
+                tracing::warn!(
+                    %error,
+                    lock = %path.display(),
+                    "could not write our pid into the ownership lock"
+                );
             }
             Ok(Ownership::Ours(file))
         }
