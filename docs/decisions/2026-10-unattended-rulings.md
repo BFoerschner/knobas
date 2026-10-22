@@ -11582,3 +11582,38 @@ set.
 **Ruling:** the ticket's fix direction offers "export as pure helpers or fold"; it chose the former and no acceptance criterion asks for a merge. After this PR `parseHash` is read only for asset addresses (`TfAssetTree`, `AssetsView`'s `hashFor`), where `tf/route.ts` has no competing reading, so the disagreement has no live reader. Left alone.
 
 **Cost of reversing:** folding the asset addresses into `tf/route.ts`, a small ticket.
+## #1627: a Kuma write whose acknowledgement was lost (Opus implementer, 2026-10-22)
+
+- **Which failures after the emit become `Unconfirmed`.** The ticket says "any transport failure".
+  *Ruling:* every class the ack poll can fail with: `Unreachable`, `Protocol` with any status or
+  none, `Unauthorized`, and an `Unconfirmed` from a pong. The poll's status is kept
+  (`once_emitted`). A `400 Session ID unknown` on the poll means the session went *after* the
+  packet was taken, and a `401` from a proxy in front of Kuma says nothing about the packet. Left
+  as they were, the first is recorded as refused and the second waits for a credential and then
+  sends the create again. *Reversing:* low, one match.
+- **When the emit "went out", for the deadline.** *Ruling:* from the moment its POST starts, not
+  from when the POST returns `Ok`. A deadline that drops the POST in flight may drop a packet Kuma
+  already took, which is `knobas_http::classify::once_sent`'s reading of a timeout after connect.
+  The flag is cleared again by the two refusals that prove Kuma did nothing (`400` to the emit's
+  own POST, *You are not logged in.*), so a deadline on the fresh login that follows keeps the
+  status-less `Protocol` it had before. *Reversing:* low, one line moves.
+- **An ack that arrived but cannot be read** (`answer()`'s parse failure). *Ruling:* left as
+  status-less `Protocol` here. The ack arrived, so this is not a lost acknowledgement, and the
+  pinned Kuma never produces one. It is the one Kuma path left that can record a write that may
+  have landed as refused, and #1721 (backlog) holds the fork. *Reversing:* low.
+- **Pause and resume after a post-emit deadline.** Before this change they were refused; now they
+  are `Unconfirmed`, which their `resend_harmless` delivery turns into an `unreachable` wait, sent
+  again on a later tick. The socket's old doc argued against exactly that wait (a minute of every
+  tick against a drifted Kuma). *Ruling:* accepted. The ticket asks for it, a pause that landed
+  must not read as refused, and #1628's ladder is what bounds how often it goes again.
+  *Reversing:* low.
+- **The `SourceError::Unconfirmed` doc comment in the frozen crate.** It said the variant is
+  "raised only by `knobas_http`". *Ruling:* rewritten and booked in
+  `docs/contract/10.8/1627-kuma-lost-ack-unconfirmed.md`, because it changes what the clause
+  commits to (who may raise the variant), which #518's rule sends to the gate as code.
+  *Reversing:* low, one comment.
+- **What `just kuma-live` can witness.** The real container cannot be made to lose an ack on cue.
+  *Ruling:* the lost-ack and deadline cases are witnessed by `socket::session_tests`' fake, on the
+  ADR-0013 consequence already ruled for the deadline fake (2026-09-07). The live run witnesses
+  "one create ends as one monitor": `kuma_write_live.rs` now asserts that exactly one monitor
+  under the created name is attached. *Reversing:* low.
