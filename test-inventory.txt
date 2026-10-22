@@ -1157,7 +1157,7 @@ knobas-app	test/it	week_ipc::discarding_a_queued_worklog_gives_the_afternoon_bac
 knobas-app	test/it	week_ipc::log_all_makes_one_worklog_per_day_and_ticket
 knobas-app	test/it	week_ipc::log_all_touches_neither_a_passive_block_nor_a_label_one
 knobas-app	test/it	week_ipc::the_no_target_row_tells_app_open_from_app_closed_and_from_claimed_time
-knobas-app	test/it	wiring::bring_up_builds_one_suggestion_pass_for_the_scheduler_and_the_app_state
+knobas-app	test/it	wiring::bring_up_builds_one_suggestion_pass_for_the_scheduler
 knobas-app	test/it	wiring::each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge
 knobas-app	test/it	wiring::every_command_is_in_the_handler_list
 knobas-app	test/it	wiring::no_grant_reaches_further_than_the_app_does
@@ -1420,7 +1420,7 @@ knobas-core	test/it	mini_board::a_disabled_sources_ticket_is_off_a_project_rooms
 knobas-core	test/it	mini_board::a_laned_board_caps_each_lanes_cell_and_counts_them_all
 knobas-core	test/it	mini_board::a_laned_board_sends_only_its_first_lanes_and_counts_the_rest
 knobas-core	test/it	mini_board::a_project_room_draws_only_that_projects_tickets
-knobas-core	test/it	mini_board::a_sources_statuses_are_the_boards_offer_without_the_board
+knobas-core	test/it	mini_board::a_sources_offered_statuses_are_its_live_corpus_in_the_boards_order
 knobas-core	test/it	mini_board::a_ticket_with_no_readable_project_is_on_no_project_rooms_board
 knobas-core	test/it	mini_board::a_ticket_with_no_recognizable_priority_carries_none
 knobas-core	test/it	mini_board::a_ticket_with_no_recognizable_status_lands_in_the_terminal_group
@@ -1435,7 +1435,6 @@ knobas-core	test/it	mini_board::the_boards_statements_are_never_kept_as_prepared
 knobas-core	test/it	mini_board::the_columns_are_the_observed_statuses_with_the_four_leading
 knobas-core	test/it	mini_board::the_mock_sources_flat_spelling_reads_as_well_as_jiras
 knobas-core	test/it	mini_board::the_offered_statuses_are_the_sources_corpus_not_the_rooms_columns
-knobas-core	test/it	mini_board::the_sources_statuses_statement_is_never_kept_as_a_prepared_statement
 knobas-core	test/it	mini_board::the_status_select_still_offers_the_whole_sources_corpus
 knobas-core	test/it	notes::a_hand_drawn_link_out_of_a_note_survives_the_body_changing
 knobas-core	test/it	notes::a_note_is_an_entity_and_renaming_it_renames_that_entity
