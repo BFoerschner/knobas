@@ -459,10 +459,12 @@ fn last_page(page: &Page<Build>, asked: u32) -> bool {
 /// remedy.** Widening is the only lever this query has. Against an instance
 /// whose own per-request ceiling sits below the number of builds one run needs
 /// to see, every widening comes back at that ceiling with more still reported,
-/// and the run ends here -- for as long as the query stays that big. That is a
-/// source which cannot sync until it is narrowed (`build_type_ids`,
-/// `project_ids`, a shorter interval) or until the ceiling is raised, and it is
-/// deliberately preferred to the alternative: mirroring the ceiling's worth of
+/// and the run ends here -- for as long as the query stays that big. A failed
+/// run leaves the watermark where it is, so the query only grows: the way out
+/// is a Backfill, which reads each configuration's newest builds without this
+/// query, and a configuration list (`build_type_ids`, whose queries carry only
+/// their own builds, #1626) or a raised ceiling keeps it from recurring. That
+/// is deliberately preferred to the alternative: mirroring the ceiling's worth of
 /// builds, advancing the watermark past the rest, and reporting success. The
 /// failure names the ceiling ([`capped_short`]) so nobody spends the outage
 /// narrowing a source that was never too big.
@@ -519,8 +521,8 @@ async fn all_of(
 /// caller's "this query is too big".
 ///
 /// `None` when the last request came back filled: then the query really is
-/// bigger than one run can carry, and the caller's own message -- sync more
-/// often, narrow the configurations -- is the true one.
+/// bigger than one run can carry, and the caller's own message -- the cap of
+/// [`MAX_BUILDS_PER_QUERY`], and Backfill as the way out -- is the true one.
 ///
 /// `Some` when it came back **short and the server still reported more**. That
 /// is a per-request ceiling on the instance rather than a large query, and the
@@ -534,8 +536,13 @@ async fn all_of(
 /// exactly the ceiling's worth of matches -- the run *did* see everything, so
 /// "below what this run has to see in one query" is then a claim about the page
 /// rather than about the corpus. The remedy it names still works, and naming
-/// the ceiling still beats the caller's "narrow this source", which is wrong in
-/// both cases.
+/// the ceiling still beats the caller's "more than a thousand builds", which is
+/// wrong in both cases.
+///
+/// The way out is Backfill, as in the caller's message (#1626): a failed run
+/// leaves the watermark where it is, so syncing more often moves nothing, and a
+/// project scope leaves the query global. A raised limit, or a configuration
+/// list, keeps it from recurring.
 fn capped_short(served: usize, asked: u32) -> Option<String> {
     (served < asked as usize).then(|| {
         format!(
@@ -544,9 +551,10 @@ fn capped_short(served: usize, asked: u32) -> Option<String> {
              one REST list returns -- below what this run has to see in one query. Widening \
              `count:` is the only lever this query has and it is spent. Carrying on would mean \
              mirroring {served} builds and advancing the watermark past every one after them, \
-             which `sinceBuild` could never offer again. Raise the server's per-request limit, \
-             or narrow this source with build_type_ids/project_ids, or sync more often, so that \
-             one query needs fewer than {served} builds."
+             which `sinceBuild` could never offer again. Backfill on this source's page starts \
+             over from each configuration's newest builds. To keep it from recurring, raise the \
+             server's per-request limit, or scope the source to a list of build configurations: \
+             such a source asks per configuration, for its own builds only."
         )
     })
 }
@@ -2264,7 +2272,9 @@ mod tests {
         assert!(
             matches!(&error, SourceError::Protocol { message: m, .. }
                 if m.contains("answered a request for 1001 builds with 50 of them")
-                    && m.contains("still reported a further page")),
+                    && m.contains("still reported a further page")
+                    && m.contains("Backfill")
+                    && !m.contains("sync more often")),
             "the refusal has to name the server's own ceiling with the two numbers the server \
              produced: {error:?}"
         );
