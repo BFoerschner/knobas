@@ -42,6 +42,19 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
     (state.v == VERSION).then_some(state)
 }
 
+/// What one run observed, as three build ids that are **not** interchangeable
+/// -- each is compared in a different direction, and all three are `i64`, so
+/// nothing but a name distinguishes them at a call site.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Seen {
+    /// The newest **finished** build the run saw, in scope or not.
+    pub max_finished: Option<i64>,
+    /// The oldest **in-scope** build the run saw queued or running.
+    pub min_unfinished: Option<i64>,
+    /// The highest build id the run **witnessed** while opening.
+    pub ceiling: Option<i64>,
+}
+
 /// Where the watermark stands after a run.
 ///
 /// * `previous` -- where it stood before.
@@ -60,7 +73,9 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
 /// The asymmetry between the first two of those is deliberate and is the run's
 /// job to honour: `max_finished` counts **every** finished build the run saw,
 /// in scope or not, because a build outside the scope will never be emitted
-/// and so never needs to be reachable again; `min_unfinished` counts only
+/// and so never needs to be reachable again (a source scoped to a
+/// configuration list asks per configuration and sees only its own builds,
+/// #1626); `min_unfinished` counts only
 /// in-scope builds, because clamping for a build that will never be emitted is
 /// a watermark held back for nothing. See `sync::execute`.
 ///
@@ -77,7 +92,8 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
 /// Ids are assigned at queue time and are monotonic, so **every** build queued
 /// after the run started has an id above every build that existed when it
 /// started. One number therefore covers all of them at once: any id known to
-/// have existed at that instant, which the watermark may not pass. The cost is
+/// have existed at that instant, which the watermark may not pass -- unless it
+/// lies below `previous`, which the last paragraph here covers. The cost is
 /// re-fetching the builds that finished inside this run on the next one, and
 /// upserts are idempotent -- the same trade the clamp above already makes.
 ///
@@ -85,13 +101,13 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
 /// matters here because it decides which direction is dangerous. `sync`
 /// supplies the highest id it witnessed across the two pages that open a run;
 /// see `sync::ceiling` for why the pages it does *not* use are the finished
-/// ones. A ceiling lower than the true top of the id space costs a re-fetch;
-/// one above it loses a build.
+/// ones. A ceiling lower than the true top of the id space, and not below
+/// `previous`, costs a re-fetch; one above it loses a build.
 ///
 /// `None` means the run witnessed nothing (a server with no builds at all),
 /// which is the same server on which `max_finished` is `None` too.
 ///
-/// **A ceiling below `previous` is ignored** (ADPT-7). It means the opening
+/// **A ceiling below `previous` is ignored** (#1626). It means the opening
 /// pages showed nothing as new as the watermark -- routine on a server whose
 /// pages are unordered (issue #91). Applied, `min(ceiling)` lands below
 /// `previous` and the floor lifts it back to exactly `previous`, so a run that
@@ -103,19 +119,6 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
 /// went out. On an incremental run that window is the few requests between the
 /// two queries, against a re-emission on every poll. A ceiling at or above
 /// `previous` clamps as before.
-/// What one run observed, as three build ids that are **not** interchangeable
-/// -- each is compared in a different direction, and all three are `i64`, so
-/// nothing but a name distinguishes them at a call site.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct Seen {
-    /// The newest **finished** build the run saw, in scope or not.
-    pub max_finished: Option<i64>,
-    /// The oldest **in-scope** build the run saw queued or running.
-    pub min_unfinished: Option<i64>,
-    /// The highest build id the run **witnessed** while opening.
-    pub ceiling: Option<i64>,
-}
-
 pub(crate) fn advance(previous: i64, seen: Seen) -> i64 {
     let Seen {
         max_finished,
@@ -264,7 +267,7 @@ mod tests {
     }
 
     /// A ceiling below where the watermark already stands is ignored, not
-    /// applied and then floored (ADPT-7).
+    /// applied and then floored (#1626).
     ///
     /// It reaches here whenever the two opening pages happen not to show a
     /// build as new as the watermark -- routine on a server whose pages are

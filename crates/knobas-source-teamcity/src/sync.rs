@@ -15,7 +15,7 @@
 //! scope and, for each, the newest `builds_per_config` finished builds. An
 //! **incremental** run asks for `state:finished,sinceBuild:(id:N)`: once per
 //! configuration for a source scoped to a configuration list, off the same
-//! listing (ADPT-6), and otherwise once, globally -- build ids are
+//! listing (#1626), and otherwise once, globally -- build ids are
 //! server-wide, so one query covers every configuration -- narrowing to the
 //! scope client-side.
 //!
@@ -221,7 +221,7 @@ pub(crate) async fn execute(
             out
         }
         // A source scoped to a configuration list asks once per configuration
-        // (ADPT-6): the global query carries every build the whole server
+        // (#1626): the global query carries every build the whole server
         // finished since the watermark, so a busy server fills it past
         // `MAX_BUILDS_PER_QUERY` however narrow this source is, and every run
         // afterwards refuses. The configurations come from the same listing a
@@ -289,9 +289,11 @@ pub(crate) async fn execute(
         if StateFilter::Finished.matches(b.rec.state.as_deref()) {
             // Counted whether or not it is in scope. A finished build outside
             // the scope will never be emitted, so it never needs to be
-            // reachable again -- and *not* counting it would pin a scoped
-            // source's watermark below every foreign build that finishes,
-            // growing the incremental query without bound.
+            // reachable again -- and *not* counting it would pin a
+            // project-scoped source's watermark below every foreign build
+            // that finishes, growing its global incremental query without
+            // bound. A source scoped to a configuration list asks per
+            // configuration (#1626), so no foreign build reaches it here.
             max_finished = Some(max_finished.map_or(b.rec.id, |m: i64| m.max(b.rec.id)));
         } else if in_scope {
             // Queued, running, or -- if the server sent no state at all --
@@ -701,7 +703,7 @@ fn ceiling(probe: &[Rec<Build>], in_flight: &[Rec<Build>]) -> Option<i64> {
 /// * **Found** -- the watermark stands and the run carries on. The opening
 ///   pages simply did not happen to show it, which is the ordinary case on a
 ///   server whose pages are not ordered. The ceiling is then below the
-///   watermark, which [`cursor::advance`] ignores (ADPT-7): it clamps
+///   watermark, which [`cursor::advance`] ignores (#1626): it clamps
 ///   nothing, drags nothing back, and does not hold the watermark under the
 ///   builds this run emits.
 /// * **Not found** -- a replacement or a deleted newest build, refused. And
@@ -803,7 +805,7 @@ async fn refuse_a_replaced_server(
 /// # One configuration, or the whole server
 ///
 /// `build_type_id` is `Some` for a source scoped to a configuration list,
-/// which asks once per configuration (ADPT-6), and `None` for any other
+/// which asks once per configuration (#1626), and `None` for any other
 /// source, which asks once for the whole server.
 ///
 /// Either refusal at [`MAX_BUILDS_PER_QUERY`] names *Backfill* (CONTEXT.md)
@@ -2048,7 +2050,7 @@ mod tests {
     }
 
     /// **A source scoped to a configuration list asks per configuration**
-    /// (ADPT-6), so a busy server's builds do not fill its incremental query.
+    /// (#1626), so a busy server's builds do not fill its incremental query.
     ///
     /// 1,500 builds finished server-wide since the watermark, 20 of them in
     /// the two configurations this source names. The global query would
@@ -2914,7 +2916,7 @@ mod tests {
     }
 
     /// **A ceiling below the watermark does not pin it under builds the run
-    /// just emitted** (ADPT-7).
+    /// just emitted** (#1626).
     ///
     /// The opening page holds builds 401 to 500 and nothing newer, so the
     /// ceiling is 500 while the watermark stands at 1187 -- the routine
