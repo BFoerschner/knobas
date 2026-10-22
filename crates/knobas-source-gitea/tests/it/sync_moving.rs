@@ -417,3 +417,189 @@ async fn a_branch_the_server_no_longer_has_is_tombstoned() {
     );
     assert!(position(&after, MONOREPO)["branches"].get("b-03").is_none());
 }
+
+const PAYOUT: &str = "tidewater/payout-service";
+const DAY: i64 = 86_400;
+
+fn instant(value: &Value) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339(value.as_str().expect("a timestamp"))
+        .expect("RFC 3339")
+        .with_timezone(&chrono::Utc)
+}
+
+fn pr_entity(number: u64) -> String {
+    format!("gitea:{PAYOUT}#{number}")
+}
+
+fn seconds(n: u64) -> i64 {
+    i64::try_from(n).expect("small")
+}
+
+/// When each of the 260 was last updated after the week away: 1-40 merged on
+/// day one, 41-260 updated across days two to six.
+fn edited(n: u64) -> String {
+    if n <= 40 {
+        at(DAY + seconds(n))
+    } else {
+        at(2 * DAY + 600 * seconds(n))
+    }
+}
+
+/// 260 pull requests synced once (the budget of 200 kept the newest), then a
+/// week away in which every one of them changed. The cursor is the one the
+/// full sync left.
+async fn a_week_away(cap: Option<usize>) -> (MockServer, Moving, Box<dyn Source>, String) {
+    let world = World {
+        cap,
+        repos: vec![repository(1, "payout-service", &at(0))],
+        pulls: BTreeMap::from([(
+            PAYOUT.to_owned(),
+            (1..=260u64)
+                .map(|n| support::pull(n, "Work", "", &at(seconds(n)), 0))
+                .collect(),
+        )]),
+        ..World::default()
+    };
+    let (server, moving) = Moving::start(world).await;
+    let gitea = gitea(&server, json!({ "prs_per_repo": 200, "commits_per_repo": 0 }));
+    let (_, cursor) = run(&*gitea, None).await;
+    moving.with(|world| {
+        for pull in world.pulls.get_mut(PAYOUT).expect("the fixture has pulls") {
+            let n = pull["number"].as_u64().expect("a number");
+            pull["updated_at"] = json!(edited(n));
+            if n <= 40 {
+                pull["state"] = json!("closed");
+                pull["merged"] = json!(true);
+                pull["merged_at"] = json!(edited(n));
+            }
+        }
+    });
+    (server, moving, gitea, cursor)
+}
+
+fn every_pr() -> Vec<String> {
+    let mut all: Vec<String> = (1..=260).map(pr_entity).collect();
+    all.sort();
+    all
+}
+
+/// ADPT-4 for pull requests. A week away: 260 pull requests updated since the
+/// watermark, the 40 merged on day one the oldest of them, and a budget of
+/// 200. The first incremental run reads the newest 200 and stops; its
+/// position continues from the oldest it examined, so the second reads the
+/// other 60 -- the 40 merged ones among them -- and the third is idle.
+#[tokio::test]
+async fn an_incremental_run_the_budget_stopped_is_continued_by_the_next() {
+    let (_server, _moving, gitea, cursor) = a_week_away(None).await;
+
+    let (first, cursor) = run(&*gitea, Some(&cursor)).await;
+    let first_prs = emitted(&first, "pr");
+    assert_eq!(first_prs.len(), 200, "the budget bounds the run");
+    assert!(
+        !first_prs.contains(&pr_entity(60)) && first_prs.contains(&pr_entity(61)),
+        "the newest 200: 61 to 260"
+    );
+    assert_eq!(
+        instant(&position(&cursor, PAYOUT)["pulls_updated_to"]),
+        instant(&json!(edited(61))),
+        "the run continues from the oldest record it examined"
+    );
+
+    let (second, cursor) = run(&*gitea, Some(&cursor)).await;
+    let mut all: Vec<String> = first_prs;
+    all.extend(emitted(&second, "pr"));
+    all.sort();
+    assert_eq!(all, every_pr(), "all 260 mirrored, each once");
+    for n in 1..=40 {
+        let item = second
+            .iter()
+            .find(|i| i.entity.to_string() == pr_entity(n))
+            .unwrap_or_else(|| panic!("#{n} is read on the second run"));
+        assert_eq!(item.payload["merged"], json!(true), "#{n} reads as merged");
+    }
+
+    let (idle, same) = run(&*gitea, Some(&cursor)).await;
+    assert!(emitted(&idle, "pr").is_empty(), "{:?}", emitted(&idle, "pr"));
+    assert_eq!(same, cursor, "an idle run returns its cursor");
+    assert_eq!(
+        instant(&position(&cursor, PAYOUT)["pulls_updated_to"]),
+        instant(&json!(edited(260))),
+        "caught up: the watermark is the newest delivered"
+    );
+    assert!(position(&cursor, PAYOUT).get("pulls_catching_up").is_none());
+}
+
+/// The same week against a Gitea answering ten a page: the 200 the first run
+/// read fill the whole page cap, so a second run that walked down to its
+/// window from page 1 would spend the cap skipping them and never get
+/// there. It starts on the page the cut fell on.
+#[tokio::test]
+async fn a_catch_up_starts_on_the_page_the_budget_stopped_on() {
+    let (_server, moving, gitea, cursor) = a_week_away(Some(10)).await;
+    let (first, cursor) = run(&*gitea, Some(&cursor)).await;
+    assert_eq!(position(&cursor, PAYOUT)["pulls_catching_up"]["page"], json!(20));
+
+    moving.with(|world| world.served.clear());
+    let (second, _) = run(&*gitea, Some(&cursor)).await;
+    let mut all = emitted(&first, "pr");
+    all.extend(emitted(&second, "pr"));
+    all.sort();
+    assert_eq!(all, every_pr());
+    let pages = moving.with(|world| {
+        world
+            .served
+            .iter()
+            .filter(|s| s.starts_with(&format!("repos/{PAYOUT}/pulls?")))
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(
+        pages.first().map(String::as_str),
+        Some(format!("repos/{PAYOUT}/pulls?page=20").as_str()),
+        "{pages:?}"
+    );
+}
+
+/// A hint the server no longer honours is not trusted: the same week, but
+/// the instance stops capping its pages between the two runs, so page 20 is
+/// past the end of the listing. The catch-up starts again from page 1 and
+/// still reads the 60.
+#[tokio::test]
+async fn a_catch_up_whose_page_moved_starts_from_the_first_page() {
+    let (_server, moving, gitea, cursor) = a_week_away(Some(10)).await;
+    let (first, cursor) = run(&*gitea, Some(&cursor)).await;
+    moving.with(|world| world.cap = None);
+
+    let (second, _) = run(&*gitea, Some(&cursor)).await;
+    let mut all = emitted(&first, "pr");
+    all.extend(emitted(&second, "pr"));
+    all.sort();
+    assert_eq!(all, every_pr());
+}
+
+/// A pull request updated while the catch-up is under way is not held back
+/// by it: the run that closes the window walks on from the top with what is
+/// left of its budget.
+#[tokio::test]
+async fn the_run_that_closes_a_catch_up_also_reads_what_changed_since() {
+    let (_server, moving, gitea, cursor) = a_week_away(None).await;
+    let (_, cursor) = run(&*gitea, Some(&cursor)).await;
+    moving.with(|world| {
+        let pull = world
+            .pulls
+            .get_mut(PAYOUT)
+            .and_then(|all| all.iter_mut().find(|p| p["number"] == 250))
+            .expect("#250 is in the fixture");
+        pull["updated_at"] = json!(at(9 * DAY));
+        pull["title"] = json!("Work, reviewed");
+    });
+
+    let (second, cursor) = run(&*gitea, Some(&cursor)).await;
+    let second_prs = emitted(&second, "pr");
+    assert_eq!(second_prs.len(), 61, "the 60 and #250: {second_prs:?}");
+    assert!(second_prs.contains(&pr_entity(250)));
+    assert_eq!(
+        instant(&position(&cursor, PAYOUT)["pulls_updated_to"]),
+        instant(&json!(at(9 * DAY)))
+    );
+}

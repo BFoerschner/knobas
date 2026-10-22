@@ -135,7 +135,7 @@ use knobas_source::{Cursor, Sink, SourceError, SyncItem};
 use serde_json::Value;
 
 use crate::client::is_repo_scoped;
-use crate::cursor::{GiteaCursor, RepoCursor};
+use crate::cursor::{CommitsCatchUp, GiteaCursor, PullsCatchUp, RepoCursor};
 use crate::map::{self, RepoRef};
 use crate::model;
 
@@ -755,6 +755,21 @@ async fn branches(
 /// `full_sync_exhaustive: false` (ADR-0003): a budgeted kind is never swept, so
 /// stopping at the budget can never be read downstream as "the rest was
 /// deleted".
+///
+/// # On an incremental run the budget bounds the run, never the delta (#1624)
+///
+/// ADR-0003's budget is a bound on what a **full** sync mirrors. Applied to
+/// an incremental run it used to lose updates: a week away with 260 pull
+/// requests changed, the walk read the newest 200, the watermark moved to the
+/// newest, and the other 60 sat below it for good -- a merged pull request
+/// stayed open in the mirror. Now a walk heading for a watermark that the
+/// budget (or the page cap) stops first leaves a [`PullsCatchUp`]: the next
+/// run reads the window between the oldest record examined and that
+/// watermark, under the same budget, and when it reaches the watermark it
+/// adopts the newest instant the cut-short walk examined and walks on from
+/// the top with what is left of the budget. Spec #1618 ruling A6; the cursor
+/// type says why the oldest examined is the resume point and not the
+/// watermark.
 async fn pulls(
     source: &crate::GiteaSource,
     at: RepoRef<'_>,
@@ -768,96 +783,245 @@ async fn pulls(
     // in with rather than a blank one.
     after.pulls_updated_to = before.pulls_updated_to;
     after.pulls_seen_at_watermark = before.pulls_seen_at_watermark.clone();
+    after.pulls_catching_up = before.pulls_catching_up.clone();
     if source.config.prs_per_repo == 0 || !repo.can_have_pulls() {
         return Ok(());
     }
-
-    let watermark = before.pulls_updated_to;
     let mut budget = source.config.prs_per_repo;
-    // Every pull request this run looked at -- delivered, or recognised as
-    // already delivered. The new watermark is computed from this, so a pull
-    // request skipped as already-delivered still holds the boundary open.
-    let mut examined: Vec<(u64, Option<DateTime<Utc>>)> = Vec::new();
-    // What each examined pull request fingerprinted as this run, which is what
-    // the closing position records for the ones on the new mark.
-    let mut fingerprints: BTreeMap<u64, String> = BTreeMap::new();
+    let mut watermark = before.pulls_updated_to;
+    let mut seen = before.pulls_seen_at_watermark.clone();
 
-    // A reached cap ends this walk quietly: see the note on the caps.
-    let mut walk = PageWalk::new(PageNumber, MAX_PR_PAGES, |page| {
-        source.client.pulls(at.owner, at.name, page)
-    });
-    'paging: loop {
-        let batch = match walk.next().await? {
-            Walked::Page(batch) => batch,
-            Walked::End | Walked::Capped => break,
+    if let Some(catch_up) = &before.pulls_catching_up {
+        let window = Window {
+            lower: Some(catch_up.floor),
+            lower_seen: &catch_up.seen_at_floor,
+            upper: before.pulls_updated_to,
+            upper_seen: &before.pulls_seen_at_watermark,
         };
-        for raw in batch {
-            let pr: model::PullRequest = match serde_json::from_value(raw.clone()) {
-                Ok(pr) => pr,
-                Err(error) => {
-                    tracing::warn!(
-                        %error,
-                        repository = %at.full_name,
-                        "gitea: skipping an unreadable pull request"
-                    );
-                    continue;
+        let walk = walk_pulls(source, at, &window, catch_up.page, &mut budget, sink, emitted).await?;
+        if let Some(page) = walk.stopped_on {
+            let carried: Vec<u64> = before.pulls_seen_at_watermark.keys().copied().collect();
+            let (resume, on_resume) = resume_below(&walk.examined, window.upper, &carried);
+            after.pulls_updated_to = resume;
+            after.pulls_seen_at_watermark =
+                fingerprints_of(on_resume, &walk.fingerprints, &before.pulls_seen_at_watermark);
+            after.pulls_catching_up = Some(PullsCatchUp {
+                page,
+                ..catch_up.clone()
+            });
+            return Ok(());
+        }
+        // Reached the floor: everything up to `then` is delivered, and the
+        // run walks on from the top as an ordinary incremental run.
+        watermark = Some(catch_up.then);
+        seen.clone_from(&catch_up.seen_at_then);
+        for (number, when) in &walk.examined {
+            if *when == watermark
+                && let Some(fingerprint) = walk.fingerprints.get(number)
+            {
+                seen.insert(*number, fingerprint.clone());
+            }
+        }
+        after.pulls_updated_to = watermark;
+        after.pulls_seen_at_watermark.clone_from(&seen);
+        after.pulls_catching_up = None;
+    }
+
+    let none = BTreeMap::new();
+    let window = Window {
+        lower: watermark,
+        lower_seen: &seen,
+        upper: None,
+        upper_seen: &none,
+    };
+    let walk = walk_pulls(source, at, &window, 1, &mut budget, sink, emitted).await?;
+    let carried: Vec<u64> = seen.keys().copied().collect();
+    let (newest, on_newest) = close_watermark(&walk.examined, watermark, &carried);
+    let on_newest = fingerprints_of(on_newest, &walk.fingerprints, &seen);
+    match (walk.stopped_on, watermark, newest) {
+        // An incremental walk cut short before its watermark: continue below
+        // the oldest record it examined next time.
+        (Some(page), Some(floor), Some(then)) => {
+            let (resume, on_resume) = resume_below(&walk.examined, None, &[]);
+            after.pulls_updated_to = resume;
+            after.pulls_seen_at_watermark = fingerprints_of(on_resume, &walk.fingerprints, &seen);
+            after.pulls_catching_up = Some(PullsCatchUp {
+                floor,
+                seen_at_floor: seen,
+                then,
+                seen_at_then: on_newest,
+                page,
+            });
+        }
+        // A full sync (the budget bounds the mirror, ADR-0003), or a walk
+        // that reached its watermark.
+        _ => {
+            after.pulls_updated_to = newest;
+            after.pulls_seen_at_watermark = on_newest;
+        }
+    }
+    Ok(())
+}
+
+/// The span of a budgeted walk, newest first: from `upper` (inclusive) down to
+/// `lower` (inclusive), each boundary second with the records already
+/// delivered on it. `None` is no bound on that side.
+struct Window<'a, S> {
+    lower: Option<DateTime<Utc>>,
+    lower_seen: &'a S,
+    upper: Option<DateTime<Utc>>,
+    upper_seen: &'a S,
+}
+
+/// What one pull-request walk read.
+struct PullWalk {
+    /// Every pull request looked at -- delivered, or recognised as already
+    /// delivered on the lower boundary.
+    examined: Vec<(u64, Option<DateTime<Utc>>)>,
+    fingerprints: BTreeMap<u64, String>,
+    /// The page the budget or the page cap stopped the walk on, before it
+    /// reached `lower` or the end of the listing.
+    stopped_on: Option<u32>,
+}
+
+/// One walk over `window`, starting at page `start`.
+///
+/// **`start` is a hint, checked before it is trusted.** A catch-up's window
+/// lies below every record the cut-short walk delivered, and re-reading those
+/// pages from page 1 would spend the page cap on records it then skips -- at
+/// a budget of 1,000, the whole cap. So it starts on the page the cut fell
+/// on. That is safe only if every record above that page is newer than
+/// `upper`, which holds when the page's first record is: the listing is
+/// ordered. An edit moves a record up, which shifts the rest down and only
+/// repeats a row; a deletion, or a server answering more per page than it
+/// did, can shift unread records above the page. Either shows as a first
+/// record at or below `upper`, or an empty page, and the walk starts again
+/// from page 1.
+async fn walk_pulls(
+    source: &crate::GiteaSource,
+    at: RepoRef<'_>,
+    window: &Window<'_, BTreeMap<u64, String>>,
+    start: u32,
+    budget: &mut u32,
+    sink: &mut (dyn Sink + Send),
+    emitted: &mut u64,
+) -> Result<PullWalk, RepoError> {
+    let mut out = PullWalk {
+        examined: Vec::new(),
+        fingerprints: BTreeMap::new(),
+        stopped_on: None,
+    };
+    let client = &source.client;
+    let mut start = start.max(1);
+    'restart: loop {
+        let offset = start - 1;
+        // A reached cap ends this walk quietly: see the note on the caps.
+        let mut walk = PageWalk::new(PageNumber, MAX_PR_PAGES, |page| {
+            client.pulls(at.owner, at.name, page + offset)
+        });
+        let mut page = offset;
+        loop {
+            let batch = match walk.next().await? {
+                Walked::Page(batch) => batch,
+                Walked::End if page == offset && offset > 0 => {
+                    start = 1;
+                    continue 'restart;
+                }
+                Walked::End => return Ok(out),
+                Walked::Capped => {
+                    out.stopped_on = Some(page);
+                    return Ok(out);
                 }
             };
-            let updated = map::real_time(pr.updated_at).or_else(|| map::real_time(pr.created_at));
-            // Taken from the listing record before the discussion is read, so
-            // deciding to skip costs no request.
-            let fingerprint = crate::fingerprint::of_pull(&raw);
-            if let (Some(mark), Some(when)) = (watermark, updated) {
-                if when < mark {
-                    break 'paging;
-                }
-                // The watermark second is re-read on every run; a pull request
-                // on it is skipped only if it is the record already delivered.
-                // By number alone, a merge inside that second was skipped for
-                // good (#764).
-                if when == mark
-                    && before.pulls_seen_at_watermark.get(&pr.number) == Some(&fingerprint)
-                {
-                    examined.push((pr.number, updated));
-                    fingerprints.insert(pr.number, fingerprint);
-                    continue;
+            if page == offset && offset > 0 {
+                let first = batch
+                    .first()
+                    .and_then(|raw| serde_json::from_value::<model::PullRequest>(raw.clone()).ok())
+                    .and_then(|pr| map::real_time(pr.updated_at).or_else(|| map::real_time(pr.created_at)));
+                if !matches!((first, window.upper), (Some(first), Some(upper)) if first > upper) {
+                    start = 1;
+                    continue 'restart;
                 }
             }
-            let Some(comments) = fetch_comments(source, at, &pr).await? else {
-                // Deleted since the listing (#724): nothing to mirror, and
-                // nothing to hold the watermark open either.
-                continue;
-            };
-            examined.push((pr.number, updated));
-            fingerprints.insert(pr.number, fingerprint);
-            push(
-                sink,
-                map::pr_item(&source.id, &raw, at, &pr, &comments),
-                emitted,
-            )
-            .await?;
-            budget -= 1;
-            if budget == 0 {
-                break 'paging;
+            page += 1;
+            for raw in batch {
+                let pr: model::PullRequest = match serde_json::from_value(raw.clone()) {
+                    Ok(pr) => pr,
+                    Err(error) => {
+                        tracing::warn!(
+                            %error,
+                            repository = %at.full_name,
+                            "gitea: skipping an unreadable pull request"
+                        );
+                        continue;
+                    }
+                };
+                let updated =
+                    map::real_time(pr.updated_at).or_else(|| map::real_time(pr.created_at));
+                // Taken from the listing record before the discussion is read, so
+                // deciding to skip costs no request.
+                let fingerprint = crate::fingerprint::of_pull(&raw);
+                if let (Some(top), Some(when)) = (window.upper, updated) {
+                    // Above the window: delivered by the walk that was cut
+                    // short, or changed since and read once the window closes.
+                    if when > top
+                        || (when == top && window.upper_seen.get(&pr.number) == Some(&fingerprint))
+                    {
+                        continue;
+                    }
+                }
+                if let (Some(mark), Some(when)) = (window.lower, updated) {
+                    if when < mark {
+                        return Ok(out);
+                    }
+                    // The watermark second is re-read on every run; a pull request
+                    // on it is skipped only if it is the record already delivered.
+                    // By number alone, a merge inside that second was skipped for
+                    // good (#764).
+                    if when == mark && window.lower_seen.get(&pr.number) == Some(&fingerprint) {
+                        out.examined.push((pr.number, updated));
+                        out.fingerprints.insert(pr.number, fingerprint);
+                        continue;
+                    }
+                }
+                let Some(comments) = fetch_comments(source, at, &pr).await? else {
+                    // Deleted since the listing (#724): nothing to mirror, and
+                    // nothing to hold the watermark open either.
+                    continue;
+                };
+                out.examined.push((pr.number, updated));
+                out.fingerprints.insert(pr.number, fingerprint);
+                push(
+                    sink,
+                    map::pr_item(&source.id, &raw, at, &pr, &comments),
+                    emitted,
+                )
+                .await?;
+                *budget -= 1;
+                if *budget == 0 {
+                    out.stopped_on = Some(page);
+                    return Ok(out);
+                }
             }
         }
     }
+}
 
-    let carried: Vec<u64> = before.pulls_seen_at_watermark.keys().copied().collect();
-    let (mark, on_mark) = close_watermark(&examined, watermark, &carried);
-    after.pulls_updated_to = mark;
-    // This run's fingerprint where it read the pull request, the previous
-    // run's where the budget stopped before re-reading it.
-    after.pulls_seen_at_watermark = on_mark
+/// This run's fingerprint for each of `numbers` where it read the pull
+/// request, `carried`'s where it did not.
+fn fingerprints_of(
+    numbers: Vec<u64>,
+    read: &BTreeMap<u64, String>,
+    carried: &BTreeMap<u64, String>,
+) -> BTreeMap<u64, String> {
+    numbers
         .into_iter()
         .filter_map(|number| {
-            fingerprints
-                .get(&number)
-                .or_else(|| before.pulls_seen_at_watermark.get(&number))
+            read.get(&number)
+                .or_else(|| carried.get(&number))
                 .map(|fingerprint| (number, fingerprint.clone()))
         })
-        .collect();
-    Ok(())
+        .collect()
 }
 
 /// Issues changed since the watermark, as tickets (#1206).
@@ -1017,6 +1181,39 @@ fn close_watermark<K: Ord + Clone>(
     keys.sort();
     keys.dedup();
     (mark, keys)
+}
+
+/// Where a walk the budget cut short continues next time: the oldest instant
+/// it examined, and the keys on it (#1624).
+///
+/// `upper` is the top of the window it walked, if it had one, and `carried`
+/// the keys already delivered on that instant: when everything this walk
+/// examined sat on `upper`, they still sit on the resume point. A walk that
+/// examined nothing resumes where it began.
+fn resume_below<K: Ord + Clone>(
+    examined: &[(K, Option<DateTime<Utc>>)],
+    upper: Option<DateTime<Utc>>,
+    carried: &[K],
+) -> (Option<DateTime<Utc>>, Vec<K>) {
+    let point = examined
+        .iter()
+        .filter_map(|(_, when)| *when)
+        .min()
+        .or(upper);
+    let Some(at) = point else {
+        return (None, Vec::new());
+    };
+    let mut keys: Vec<K> = examined
+        .iter()
+        .filter(|(_, when)| *when == Some(at))
+        .map(|(key, _)| key.clone())
+        .collect();
+    if point == upper {
+        keys.extend(carried.iter().cloned());
+    }
+    keys.sort();
+    keys.dedup();
+    (point, keys)
 }
 
 /// The discussion, when there is any and the source wants it indexed.
