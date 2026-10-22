@@ -854,11 +854,15 @@ test("the same arrival on a focused window sends nothing", async () => {
     );
 
     inboxRows = [inboxEntry("failed_build", "tidewater-payouts-43")];
-    emit(EVENTS.activityNew, activityRow());
     // Waiting on the key rather than on the length: the test above leaves an
-    // item in the window's one store.
-    await until(
-      () => inbox.stream.some((entry) => entry.item.key.endsWith("tidewater-payouts-43")),
+    // item in the window's one store. The signal is sent again on every
+    // attempt: the inbox subscribes after the mount's awaits, and an arrival
+    // before it listens used to be caught by a second ready-reseed, which the
+    // shell no longer does (#1666).
+    await until(() => {
+      emit(EVENTS.activityNew, activityRow());
+      return inbox.stream.some((entry) => entry.item.key.endsWith("tidewater-payouts-43"));
+    },
       "the inbox never re-read after the activity signal",
     );
     expect(notified, "the reader was told about something already on screen").toEqual([]);
