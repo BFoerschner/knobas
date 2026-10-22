@@ -678,7 +678,7 @@ mod tests {
     }
 
     async fn run(
-        api: &FakeApi,
+        api: &dyn JiraApi,
         cfg: &crate::JiraConfig,
         cursor: Option<String>,
         sink: &mut (dyn Sink + Send),
@@ -695,7 +695,7 @@ mod tests {
 
     /// One run, returning the keys it emitted and the cursor it handed back.
     async fn keys_of(
-        api: &FakeApi,
+        api: &dyn JiraApi,
         cfg: &crate::JiraConfig,
         cursor: Option<String>,
     ) -> (Vec<String>, String) {
@@ -1542,6 +1542,248 @@ mod tests {
             keys,
             vec!["PAY-1"],
             "the edit behind the walk is delivered; the one it saw is recognised"
+        );
+    }
+
+    /// What upstream does to the listing between two of the walk's pages.
+    type Upstream = Box<dyn FnOnce(&mut Vec<serde_json::Value>) + Send>;
+
+    /// A server whose listing **changes under the walk** (#1623). It sorts by
+    /// the key the JQL's `ORDER BY` names, as Jira does, and once it has
+    /// served the walk `n` pages it applies `between[n]` before answering the
+    /// next, so an edit or a deletion lands between two requests the way a
+    /// colleague's does. Every call that is not `/search` goes to a plain
+    /// [`FakeApi`].
+    struct LiveIndex {
+        issues: Mutex<Vec<serde_json::Value>>,
+        between: Mutex<HashMap<u32, Upstream>>,
+        served: Mutex<u32>,
+        rest: FakeApi,
+    }
+
+    impl LiveIndex {
+        fn new(
+            issues: Vec<serde_json::Value>,
+            between: impl IntoIterator<Item = (u32, Upstream)>,
+        ) -> Self {
+            Self {
+                issues: Mutex::new(issues),
+                between: Mutex::new(between.into_iter().collect()),
+                served: Mutex::new(0),
+                rest: FakeApi::default(),
+            }
+        }
+    }
+
+    fn stamp(issue: &serde_json::Value, field: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+        issue["fields"][field]
+            .as_str()
+            .and_then(crate::time::parse_jira_time)
+    }
+
+    /// [`issue`] with the `created` stamp an ordering over it reads.
+    fn filed(key: &str, created: &str, updated: &str) -> serde_json::Value {
+        let mut raw = issue(key, updated, 0, 0);
+        raw["fields"]["created"] = serde_json::json!(created);
+        raw
+    }
+
+    /// PAY-1 to PAY-5, created a day apart and last updated ten minutes
+    /// apart, in the same order: before anything changes, both orderings
+    /// agree.
+    fn five_filed() -> Vec<serde_json::Value> {
+        (1..=5)
+            .map(|n| {
+                filed(
+                    &format!("PAY-{n}"),
+                    &format!("2026-08-0{n}T09:00:00.000+0000"),
+                    &format!("2026-08-22T11:{}0:00.000+0000", n - 1),
+                )
+            })
+            .collect()
+    }
+
+    /// An edit upstream: `key`'s `updated` moves to `updated`.
+    fn edit_to(key: &'static str, updated: &'static str) -> Upstream {
+        Box::new(move |issues| {
+            for hit in issues.iter_mut().filter(|i| i["key"] == key) {
+                hit["fields"]["updated"] = serde_json::json!(updated);
+            }
+        })
+    }
+
+    /// A deletion upstream.
+    fn delete(keys: &'static [&'static str]) -> Upstream {
+        Box::new(move |issues| issues.retain(|i| !keys.iter().any(|k| i["key"] == *k)))
+    }
+
+    #[async_trait::async_trait]
+    impl JiraApi for LiveIndex {
+        async fn server_info(&self) -> Result<ServerInfo, SourceError> {
+            self.rest.server_info().await
+        }
+        async fn myself(&self) -> Result<Myself, SourceError> {
+            self.rest.myself().await
+        }
+        async fn fields(&self) -> Result<Vec<crate::model::FieldMeta>, SourceError> {
+            self.rest.fields().await
+        }
+        async fn search(
+            &self,
+            jql: &str,
+            start_at: u32,
+            max_results: u32,
+            _fields: &str,
+        ) -> Result<SearchPage, SourceError> {
+            let page = {
+                let mut issues = self.issues.lock().unwrap();
+                if jql.ends_with("ORDER BY updated DESC") {
+                    let newest = issues.iter().max_by_key(|i| stamp(i, "updated")).cloned();
+                    serde_json::json!({
+                        "startAt": 0, "maxResults": max_results, "total": issues.len(),
+                        "issues": newest.into_iter().collect::<Vec<_>>()
+                    })
+                } else {
+                    let mut served = self.served.lock().unwrap();
+                    if let Some(change) = self.between.lock().unwrap().remove(&served) {
+                        change(&mut issues);
+                    }
+                    *served += 1;
+                    let key = if jql.ends_with("ORDER BY created ASC") {
+                        "created"
+                    } else if jql.ends_with("ORDER BY updated ASC") {
+                        "updated"
+                    } else {
+                        panic!("an order this server does not model: {jql}")
+                    };
+                    let since = since_of(jql, self.rest.offset_secs);
+                    let mut matching: Vec<serde_json::Value> = issues
+                        .iter()
+                        .filter(|i| since.is_none_or(|s| stamp(i, "updated") >= Some(s)))
+                        .cloned()
+                        .collect();
+                    matching.sort_by_key(|i| stamp(i, key));
+                    let window: Vec<serde_json::Value> = matching
+                        .iter()
+                        .skip(start_at as usize)
+                        .take(max_results as usize)
+                        .cloned()
+                        .collect();
+                    serde_json::json!({
+                        "startAt": start_at, "maxResults": max_results,
+                        "total": matching.len(), "issues": window
+                    })
+                }
+            };
+            Ok(serde_json::from_value(page).unwrap())
+        }
+        async fn comments(
+            &self,
+            key: &str,
+            start_at: u32,
+            max_results: u32,
+        ) -> Result<CommentPage, SourceError> {
+            self.rest.comments(key, start_at, max_results).await
+        }
+        async fn worklogs(&self, key: &str) -> Result<WorklogPage, SourceError> {
+            self.rest.worklogs(key).await
+        }
+    }
+
+    /// **An edit cannot move a row across a page boundary** (#1623, ADPT-1).
+    /// Five issues, two to a page; between the first page and the second,
+    /// PAY-1 -- on the page already read -- is edited. Over `updated` that
+    /// edit moves PAY-1 to the end and shifts every row behind it up by one,
+    /// so PAY-3, the first unread issue, lands on the page already read and no
+    /// request returns it: `total` is unchanged, the walk ends `Ok`, and the
+    /// engine's sweep tombstones a live ticket. Over `created` nothing moves.
+    #[tokio::test]
+    async fn an_issue_edited_behind_the_walk_does_not_shift_an_unread_one_past_it() {
+        let api = LiveIndex::new(
+            five_filed(),
+            [(1, edit_to("PAY-1", "2026-08-22T11:50:00.000+0000"))],
+        );
+        let (keys, cursor) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5"]);
+        assert_eq!(
+            crate::cursor::JiraCursor::parse(&cursor)
+                .unwrap()
+                .updated_to,
+            crate::time::parse_jira_time("2026-08-22T11:40:00.000+0000"),
+            "held at the ceiling: PAY-1's edit came after the run started"
+        );
+    }
+
+    /// **A shrinking total fails the walk** (#1623, ruling A5). PAY-1 is
+    /// deleted after the first page; the second page starts at offset 2 of a
+    /// listing that now holds four, so PAY-3 is stepped over. The page that
+    /// says so is refused before its rows reach the sink, and the run fails
+    /// as a reached cap does, so the engine sweeps nothing on its word.
+    #[tokio::test]
+    async fn a_total_that_shrank_between_pages_fails_the_run() {
+        let api = LiveIndex::new(five_filed(), [(1, delete(&["PAY-1"]))]);
+        let mut sink = VecSink(Vec::new());
+        let got = run(
+            &api,
+            &cfg(serde_json::json!({ "page_size": 2 })),
+            None,
+            &mut sink,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&got, SourceError::Protocol { message: m, .. }
+                if m.contains("total shrank from 5 to 4")),
+            "{got:?}"
+        );
+        let keys: Vec<&str> = sink.0.iter().map(|i| i.entity.key.as_str()).collect();
+        assert_eq!(keys, vec!["PAY-1", "PAY-2"]);
+    }
+
+    /// The same when the shrink shows only on the page that ends the walk:
+    /// four rows read of five, two of them deleted, and the third page asks
+    /// for offset 4 of a listing of three. It comes back empty, which on its
+    /// own reads as the end; its total is what says PAY-5 was stepped over.
+    #[tokio::test]
+    async fn a_total_that_shrank_on_the_empty_last_page_fails_the_run_too() {
+        let api = LiveIndex::new(five_filed(), [(2, delete(&["PAY-1", "PAY-2"]))]);
+        let mut sink = VecSink(Vec::new());
+        let got = run(
+            &api,
+            &cfg(serde_json::json!({ "page_size": 2 })),
+            None,
+            &mut sink,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&got, SourceError::Protocol { message: m, .. }
+                if m.contains("total shrank from 5 to 3")),
+            "{got:?}"
+        );
+    }
+
+    /// A total that **grew** is not a hole: over `created`, an issue filed
+    /// during the walk joins the end and is read there.
+    #[tokio::test]
+    async fn a_total_that_grew_between_pages_is_read_to_its_end() {
+        let api = LiveIndex::new(
+            five_filed(),
+            [(
+                1,
+                Box::new(|issues: &mut Vec<serde_json::Value>| {
+                    issues.push(filed(
+                        "PAY-6",
+                        "2026-08-22T11:45:00.000+0000",
+                        "2026-08-22T11:45:00.000+0000",
+                    ));
+                }) as Upstream,
+            )],
+        );
+        let (keys, _) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        assert_eq!(
+            keys,
+            vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5", "PAY-6"]
         );
     }
 
