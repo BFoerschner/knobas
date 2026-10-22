@@ -429,7 +429,8 @@ impl KumaSocket {
                 return Err(SourceError::Unconfirmed {
                     status: None,
                     message: format!(
-                        "Uptime Kuma was sent {event} and did not acknowledge it within {:?},                          so it may have acted on it",
+                        "Uptime Kuma was sent {event} and did not acknowledge it within {:?}, so it \
+                         may have acted on it",
                         self.budget
                     ),
                 });
@@ -631,9 +632,8 @@ fn once_emitted(error: SourceError, event: &str) -> SourceError {
     };
     match error {
         SourceError::Unreachable(message) => lost(None, &message),
-        SourceError::Protocol { status, message } | SourceError::Unconfirmed { status, message } => {
-            lost(status, &message)
-        }
+        SourceError::Protocol { status, message }
+        | SourceError::Unconfirmed { status, message } => lost(status, &message),
         SourceError::Unauthorized { status } => lost(status, &"unauthorized"),
         other @ (SourceError::Sink(_) | SourceError::Moved { .. }) => other,
     }

@@ -11,6 +11,15 @@
 //! cannot be asked to do on cue -- reap a session between two writes, forget
 //! a login, or lose the race a login sent too early can lose (#1472) -- and
 //! for the count of logins, which the real server does not report.
+//!
+//! The lost acknowledgements of #1627 are here at the class level: an ack
+//! poll that times out, a session reaped before its ack is read, an emit
+//! never acknowledged, and a deadline with the emit still on the wire. The
+//! first, which is the ticket's case, is also witnessed against the real
+//! container (`live_kuma.rs`, `a_create_whose_ack_is_lost_is_unconfirmed_and_one_monitor`,
+//! through a link that drops after the `add`, ADR-0013's *drop the
+//! connection*). The other three need Kuma itself to reap or stall on cue
+//! between one packet and the next, and the fake is their witness.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -464,9 +473,17 @@ async fn a_create_whose_ack_was_lost_after_landing_is_unconfirmed() {
 async fn a_create_whose_session_was_reaped_before_its_ack_is_unconfirmed() {
     let (server, kuma) = Kuma::start(20).await;
     let socket = stalling(&server, &kuma, Duration::ZERO, true);
-    let error = add(&socket).await.expect_err("the session went with the ack");
+    let error = add(&socket)
+        .await
+        .expect_err("the session went with the ack");
     assert!(
-        matches!(error, SourceError::Unconfirmed { status: Some(400), .. }),
+        matches!(
+            error,
+            SourceError::Unconfirmed {
+                status: Some(400),
+                ..
+            }
+        ),
         "{error:?}"
     );
     assert_eq!(kuma.delivered(), 1, "exactly one create reached Kuma");
@@ -481,7 +498,9 @@ async fn a_login_whose_ack_was_lost_is_unreachable() {
     let (server, kuma) = Kuma::start(20).await;
     let socket = stalling(&server, &kuma, Duration::ZERO, false);
     kuma.engine().stall_reads_after_login = Some(Duration::from_millis(1500));
-    let error = add(&socket).await.expect_err("the login's ack never arrived");
+    let error = add(&socket)
+        .await
+        .expect_err("the login's ack never arrived");
     assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
     assert_eq!(kuma.delivered(), 0, "the create never reached Kuma");
 }

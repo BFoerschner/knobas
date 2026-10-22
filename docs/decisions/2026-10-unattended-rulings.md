@@ -11612,8 +11612,12 @@ set.
   `docs/contract/10.8/1627-kuma-lost-ack-unconfirmed.md`, because it changes what the clause
   commits to (who may raise the variant), which #518's rule sends to the gate as code.
   *Reversing:* low, one comment.
-- **What `just kuma-live` can witness.** The real container cannot be made to lose an ack on cue.
-  *Ruling:* the lost-ack and deadline cases are witnessed by `socket::session_tests`' fake, on the
-  ADR-0013 consequence already ruled for the deadline fake (2026-09-07). The live run witnesses
-  "one create ends as one monitor": `kuma_write_live.rs` now asserts that exactly one monitor
-  under the created name is attached. *Reversing:* low.
+- **What `just kuma-live` witnesses.** ADR-0013 counts a dropped connection among what a live
+  instance can be made to do, so a fake Kuma alone would not do for the ticket's case. *Ruling:*
+  `live_kuma.rs` puts a relay between the adapter and the real container that drops every request
+  after the `add` has been answered (`LosingLink`). The real Kuma creates the monitor, the write
+  answers `Unconfirmed` (`Unreachable` with the parent's `socket.rs`, run and recorded in the PR),
+  and Kuma holds exactly one monitor by that name. `kuma_write_live.rs` also asserts one attached
+  monitor for the happy-path create. The reaped-before-ack, never-acknowledged and on-the-wire
+  deadline cases need Kuma itself to reap or stall between two packets, and stay with
+  `socket::session_tests`' fake. *Reversing:* low, one test and its relay.
