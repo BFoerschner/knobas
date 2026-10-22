@@ -57,6 +57,7 @@
   import { keyOf } from "../job/job";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
+  import TfCreateTicket from "../TfCreateTicket.svelte";
   import {
     digestText,
     alertSince,
@@ -405,10 +406,9 @@
     }
   }
 
-  async function fileTicket() {
-    const asked = ticketFor;
+  async function fileTicket(asked: { text: string; project: string; type: string }) {
     const current = protocol;
-    if (!asked || !current || asked.project === null) return;
+    if (!current) return;
     try {
       const made = await io.createActionItemTicket(
         current.note_id,
@@ -667,39 +667,11 @@
 {/if}
 
 {#if ticketFor}
-  <TfDialog title="Create a ticket" {layers} onclose={() => (ticketFor = null)}>
-    {#snippet body()}
-      <p class="tf-dlg-note">{ticketFor!.text}</p>
-      <div class="tf-formgrid">
-        <span>Project</span>
-        <select
-          aria-label="Project the ticket goes in"
-          value={ticketFor!.project ?? ""}
-          onchange={(event) => (ticketFor!.project = event.currentTarget.value || null)}
-        >
-          <option value="">Choose…</option>
-          {#each projects as project (`${project.source_id}:${project.key}`)}
-            <option value={`${project.source_id}:${project.key}`}>{project.name ?? project.key}</option>
-          {/each}
-        </select>
-        <span>Type</span>
-        <input
-          type="text"
-          aria-label="Ticket type"
-          value={ticketFor!.type}
-          oninput={(event) => (ticketFor!.type = event.currentTarget.value)}
-        />
-      </div>
-    {/snippet}
-    {#snippet footer()}
-      <button class="tf-btn tf-ghost" onclick={() => (ticketFor = null)}>Cancel</button>
-      <button
-        class="tf-btn tf-primary"
-        disabled={ticketFor!.project === null || ticketFor!.type.trim() === ""}
-        onclick={() => void fileTicket()}
-      >
-        Create ticket
-      </button>
-    {/snippet}
-  </TfDialog>
+  <TfCreateTicket
+    draft={{ project: ticketFor.project, type: ticketFor.type, title: ticketFor.text, body: "" }}
+    {projects}
+    {layers}
+    onclose={() => (ticketFor = null)}
+    onfile={(draft) => void fileTicket({ text: ticketFor!.text, project: draft.project, type: draft.type })}
+  />
 {/if}
