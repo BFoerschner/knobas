@@ -3347,6 +3347,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::every_build_a_run
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::every_configuration_a_run_emits_carries_a_url_composed_from_the_base_url
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::exactly_the_ceiling_is_not_an_overflow
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::foreign_builds_advance_the_watermark_but_do_not_clamp_it
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::one_configuration_over_the_cap_refuses_and_names_backfill
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::overflowing_one_run_is_an_error_not_a_silent_truncation
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::the_ceiling_counts_a_build_the_default_filter_would_hide
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::the_ceiling_counts_the_builds_in_flight_at_run_start
