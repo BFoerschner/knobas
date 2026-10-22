@@ -11961,3 +11961,43 @@ set.
 **Ruling:** each test there takes `scratch_database`, as `background_write.rs` does.
 
 **Cost of reversing:** low.
+
+## #1628: merge review of PR #1736 (Opus merge-manager, 2026-10-22)
+
+The implementer's seven rulings above stand, the `update_source` release beyond the ticket included: a person edits the address or configuration, and the tick never releases anything on its own.
+
+### A live run is owed, and `just kuma-live` is it
+
+**The fork:** the PR changes no adapter, only the write queue, which lives in `knobas-sync`. The working model's live-run rule names "the sync engine", and its re-run list names `knobas-sync`.
+
+**Ruling:** owed. `knobas-sync` is on the re-run list. `just kuma-live` drives the queue end to end (`kuma_write_live`: submit, flush, mirror re-read) and covers the Kuma path that #1627's `Unconfirmed` waits sit on. It needs no JVM product. It ran green on the rebased head `5527b61b`: 14, 3 and 1 passed.
+
+**Cost of reversing:** none. It is a run, not a change.
+
+### `write_queue_flush_all.rs`'s scratch databases are test isolation, not a hidden leak
+
+**The fork:** whether giving each test its own database hides a real cross-source fault in `flush_all`.
+
+**Ruling:** it does not. The leak needed two tests' sources in one database, with a `flush_all` that holds one test's registry and secret store but iterates every source. In the app there is one registry and one secret store for every source, so a sibling's build failure cannot happen there. Each source still has its own gate and its own errors, and `a_source_that_cannot_write_does_not_stop_another_source` still pins that.
+
+**Cost of reversing:** low.
+
+### A refusal skipped as stale can go once more inside the same flush
+
+**The fork:** `waited` leaves a stale 401's row released. If another write of the source lands in the same pass, the loop's next pass finds the released row owed. It sends it again with the adapter built before the save, so with the old credential.
+
+**Ruling:** accepted, no change. It needs one source's credential to be refused for one write and accepted for another in the same flush, which a single credential does not do. The extra sends are bounded by the writes that land in that flush. The next flush builds with the new credential.
+
+**Cost of reversing:** low. One check of the count between passes.
+
+### A keychain fault during a flush waits for a person now; follow-up, not fixed here
+
+**The fork:** `build` maps `RunFailure::Secret` to `unauthorized`. A locked macOS keychain lands there (`SecretError::Backend`). Since this PR, that write waits for a person, while the sync side climbs the ladder for the same failure.
+
+**Ruling:** not fixed in this PR. The classification predates it. Both fixes cost more than the review: `unreachable` mislabels the panel, and a new reason needs a migration. Re-entering the credential, which the panel's "The credential was rejected." leads to, releases the write, and so does *Flush now*. Filed as #1741 (`ready-for-agent`).
+
+**Cost of reversing:** low.
+
+### The ladder reads the row the way the sync side reads its log
+
+The write side's rung is `attempts`, 1 after the first failure. That is the sync side's `failures_since_last_ok`, 1 after the first failed run. Both go through `config::backoff_after`, so the first retry comes at 60 s on both. #1627's `Unconfirmed` on a resend-harmless write classifies `unreachable` and is spaced by this ladder. #1630's limiter `Protocol { status: None }` still settles a write refused (`retryable`), untouched here and never on the ladder. That stays #1729 (backlog).
