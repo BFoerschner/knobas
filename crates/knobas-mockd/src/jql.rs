@@ -5,15 +5,17 @@
 //! lenient:
 //!
 //! ```text
-//! jql      := [ clause { "AND" clause } ] [ "ORDER" "BY" "updated" [ "ASC" | "DESC" ] ]
+//! jql      := [ clause { "AND" clause } ] [ "ORDER" "BY" ( "updated" | "created" ) [ "ASC" | "DESC" ] ]
 //! clause   := "updated" ( ">=" | ">" ) literal
 //!           | "project" ( "=" ident | "IN" "(" ident { "," ident } ")" )
 //! literal  := '"' ( "yyyy-MM-dd HH:mm" | "yyyy/MM/dd HH:mm" | "yyyy-MM-dd" | "yyyy/MM/dd" ) '"'
 //! ```
 //!
 //! Keywords are case-insensitive. An empty or absent `jql` matches every issue.
-//! The clause list is optional, so a bare `ORDER BY updated ASC` with no
-//! `WHERE`-equivalent is valid — that is the full-sync query stream A sends.
+//! The clause list is optional, so a bare `ORDER BY created ASC` with no
+//! `WHERE`-equivalent is valid — that is the full-sync query stream A sends
+//! (`created` since #1623; `updated` stays for the ceiling probe's `DESC` and
+//! for the queries written before it).
 //!
 //! **Date literals are interpreted in the server's zone**
 //! ([`MockState::server_offset`](crate::state::MockState::server_offset),
@@ -34,9 +36,21 @@ pub struct Jql {
     pub updated_gte: Option<DateTime<Utc>>,
     /// Project keys to keep; empty means every project.
     pub projects: Vec<String>,
-    /// `true` unless the query said `ORDER BY updated ASC`. Newest-first is
-    /// Jira's own default for an unordered query.
-    pub order_by_updated_desc: bool,
+    /// The field the query sorts by: `updated` unless it said `ORDER BY
+    /// created`.
+    pub order_by: SortKey,
+    /// `true` unless the query said `ASC`. Newest-first is Jira's own default
+    /// for an unordered query.
+    pub desc: bool,
+}
+
+/// What `ORDER BY` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortKey {
+    Updated,
+    /// The one key an edit cannot move (#1623): what the Jira adapter's walk
+    /// pages over.
+    Created,
 }
 
 impl Default for Jql {
@@ -44,7 +58,8 @@ impl Default for Jql {
         Self {
             updated_gte: None,
             projects: Vec::new(),
-            order_by_updated_desc: true,
+            order_by: SortKey::Updated,
+            desc: true,
         }
     }
 }
@@ -64,7 +79,7 @@ impl std::fmt::Display for JqlError {
             Self::Unsupported(t) => write!(
                 f,
                 "Unsupported JQL near {t:?}: mockd accepts only \
-                 [updated >=|> \"date\"] [AND project =|IN (...)] [ORDER BY updated ASC|DESC]"
+                 [updated >=|> \"date\"] [AND project =|IN (...)] [ORDER BY updated|created ASC|DESC]"
             ),
             Self::BadDate(t) => write!(
                 f,
@@ -252,24 +267,28 @@ pub fn parse_jql(raw: &str, off: FixedOffset) -> Result<Jql, JqlError> {
     }
 
     if i < toks.len() {
-        // ORDER BY updated [ASC|DESC]
+        // ORDER BY (updated|created) [ASC|DESC]
         i += 1; // "order"
         if !is_kw(toks.get(i), "by") {
             return Err(JqlError::Unsupported(unexpected(&toks, i)));
         }
         i += 1;
-        if !is_kw(toks.get(i), "updated") {
+        jql.order_by = if is_kw(toks.get(i), "updated") {
+            SortKey::Updated
+        } else if is_kw(toks.get(i), "created") {
+            SortKey::Created
+        } else {
             return Err(JqlError::Unsupported(unexpected(&toks, i)));
-        }
+        };
         i += 1;
         match toks.get(i).and_then(kw).as_deref() {
             None => {}
             Some("asc") => {
-                jql.order_by_updated_desc = false;
+                jql.desc = false;
                 i += 1;
             }
             Some("desc") => {
-                jql.order_by_updated_desc = true;
+                jql.desc = true;
                 i += 1;
             }
             Some(other) => return Err(JqlError::Unsupported(other.to_owned())),

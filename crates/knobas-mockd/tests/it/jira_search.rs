@@ -70,6 +70,35 @@ async fn a_bare_order_by_with_no_clause_parses_and_sorts() {
     s.assert_no_violations();
 }
 
+/// The Jira adapter's walk order (#1623). An edit moves an issue to the end of
+/// `ORDER BY updated ASC` and leaves it where it was in `ORDER BY created ASC`;
+/// a mock that sorted both by `updated` would hide the skip the change fixes.
+#[tokio::test]
+async fn order_by_created_does_not_move_an_edited_issue() {
+    let s = spawn_mock_jira().await;
+    let by = |order: &'static str| {
+        let base = s.base_url();
+        async move {
+            let q = format!("jql=ORDER%20BY%20{order}%20ASC&maxResults=100");
+            let (st, v) = search(&base, &q).await;
+            assert_eq!(st, 200, "{v}");
+            keys(&v)
+        }
+    };
+    let created = by("created").await;
+    assert_eq!(created, by("updated").await, "created is updated - 14 days");
+    let oldest = created.first().unwrap().clone();
+
+    s.touch_issue(&oldest);
+    assert_eq!(by("created").await, created, "an edit moves nothing");
+    assert_eq!(
+        by("updated").await.last(),
+        Some(&oldest),
+        "an edit moves the issue to the end of the updated order"
+    );
+    s.assert_no_violations();
+}
+
 #[tokio::test]
 async fn project_in_filters() {
     let s = spawn_mock_jira().await;

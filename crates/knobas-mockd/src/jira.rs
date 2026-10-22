@@ -16,7 +16,7 @@ use axum::{Json, Router};
 use chrono::FixedOffset;
 use serde_json::{Value, json};
 
-use crate::jql::parse_jql;
+use crate::jql::{SortKey, parse_jql};
 use crate::state::{JiraComment, JiraIssue, JiraWorklog, MockState, jira_date};
 use crate::validate::{jira_error, jira_guard, unimplemented, unknown_field, unsupported_query};
 
@@ -673,10 +673,16 @@ async fn search(State(s): State<Arc<MockState>>, req: Request) -> Response {
         .filter(|i| jql.projects.is_empty() || jql.projects.contains(&i.project))
         .collect();
     // Ties broken by id so a page boundary is never ambiguous.
-    hits.sort_by(|a, b| match a.updated.cmp(&b.updated) {
-        std::cmp::Ordering::Equal => a.id.cmp(&b.id),
-        other if jql.order_by_updated_desc => other.reverse(),
-        other => other,
+    hits.sort_by(|a, b| {
+        let by = match jql.order_by {
+            SortKey::Updated => a.updated.cmp(&b.updated),
+            SortKey::Created => a.created.cmp(&b.created),
+        };
+        match by {
+            std::cmp::Ordering::Equal => a.id.cmp(&b.id),
+            other if jql.desc => other.reverse(),
+            other => other,
+        }
     });
 
     let total = hits.len();

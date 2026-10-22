@@ -8,8 +8,10 @@
 //!    scope, `ORDER BY updated DESC` -- the newest `updated` this source's
 //!    corpus held when the run started.
 //! 3. Read the cursor. Unreadable or absent ⇒ full sync (interfaces §4.1).
-//! 4. Query `updated >= watermark − 2 minutes ORDER BY updated ASC`, paging
-//!    with `startAt` until `total` is reached.
+//! 4. Query `updated >= watermark − 2 minutes ORDER BY created ASC`, paging
+//!    with `startAt` until `total` is reached -- ordered by the one key an
+//!    edit cannot move, and failed when `total` shrinks under the walk
+//!    ([`refuse_a_shrunk_total`], #1623).
 //! 5. Drop what the overlap re-delivered, complete truncated comment/worklog
 //!    containers, push the rest into the sink.
 //! 6. If nothing was pushed, hand back the cursor byte-identically. Otherwise
@@ -62,6 +64,8 @@
 //! recorded, that run skips it. That is narrower than the hole it replaced:
 //! `(key, updated)` was blind to the same change and to every change that
 //! needed no such coincidence.
+
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use chrono::{DateTime, Utc};
 use knobas_http::{Offset, PageWalk, Walked};
@@ -123,8 +127,8 @@ comment,worklog";
 /// this adapter emits claims `full_sync_exhaustive: true`, which is the
 /// engine's licence to tombstone every row a `cursor: None` run did not
 /// return -- so a truncated walk reported as `Ok` authorises deleting whatever
-/// fell off the end. The query is `ORDER BY updated ASC`, so what falls off
-/// the end is the *most recently updated* work: the tickets someone is looking
+/// fell off the end. The query is `ORDER BY created ASC`, so what falls off
+/// the end is the *most recently filed* work: the tickets someone is looking
 /// at today. And it is not a first-sync-only hazard, because any later
 /// `cursor: None` run re-enters the same path against a populated mirror.
 ///
@@ -145,6 +149,35 @@ comment,worklog";
 /// A source genuinely this large is narrowed with `projects` or `jql_filter`,
 /// which is what the message says.
 const MAX_PAGES: u32 = 5_000;
+
+/// Refuse a walk whose `total` fell below the largest one it reported before
+/// (#1623, ruling A5).
+///
+/// The walk is ordered by `created`, so an edit cannot move a row across a
+/// page boundary; a deletion still can. An issue deleted from a page already
+/// read -- or moved out of a `jql_filter` by an edit -- shifts every row
+/// behind it up by one, and the first unread issue lands in the window the
+/// walk has passed. Nothing in the rows says so; the falling `total` is the
+/// one witness. The run fails, as a reached [`MAX_PAGES`] does, because
+/// `ticket` is `full_sync_exhaustive` and an `Ok` over the hole licenses the
+/// sweep to tombstone the issue stepped over. A failed run costs one re-fetch
+/// on the next tick.
+///
+/// Against the peak, not the first page: an issue filed and another deleted
+/// mid-walk leave the end total where it started, with the hole still there.
+/// A deletion behind the cursor, which skips nothing, fails the run too; the
+/// total cannot tell the two apart, and the re-fetch is the cheap side.
+fn refuse_a_shrunk_total(peak: u32, total: u32) -> Result<(), SourceError> {
+    if total < peak {
+        return Err(SourceError::protocol(format!(
+            "the Jira search's total shrank from {peak} to {total} issues while the walk paged: \
+             an issue deleted under the walk, or moved out of this source's scope, shifts an \
+             unread one onto a page already read. Refusing to report a walk that may have \
+             stepped over an issue as a completed sync; the next run reads it again."
+        )));
+    }
+    Ok(())
+}
 
 /// The unit of the walk reading: the UI prints "120 of 300 issues".
 const ISSUES: &str = "issues";
@@ -181,8 +214,20 @@ impl SyncRun<'_> {
         // job in `advanced`, which holds it after the ceiling clamp too.
         let mut watermark: Option<DateTime<Utc>> = previous.as_ref().and_then(|c| c.updated_to);
 
+        // The largest `total` any answer of this walk has reported (#1623).
+        let peak = AtomicU32::new(0);
         let mut walk = PageWalk::new(Offset, MAX_PAGES, |start_at| {
-            self.api.search(&jql, start_at, self.cfg.page_size, &fields)
+            let (jql, fields, peak) = (&jql, &fields, &peak);
+            async move {
+                let page = self
+                    .api
+                    .search(jql, start_at, self.cfg.page_size, fields)
+                    .await?;
+                // Inside the fetch, so the empty page that ends the walk is
+                // read too: it is the one answer the walk never hands out.
+                refuse_a_shrunk_total(peak.fetch_max(page.total, Ordering::Relaxed), page.total)?;
+                Ok(page)
+            }
         });
         // The last page's own total, which the refusal quotes and the walk
         // reading draws against (#1381).
@@ -1123,7 +1168,7 @@ mod tests {
     /// `cursor: None` run did not return. An `Ok` here is therefore not "we
     /// synced a bit less" -- it is authorisation to delete everything past the
     /// cap. And because
-    /// the query is `ORDER BY updated ASC`, what falls off the end is the
+    /// the query is `ORDER BY created ASC`, what falls off the end is the
     /// newest work, so the rows offered up for deletion are exactly the ones
     /// someone is looking at today.
     ///
@@ -1155,10 +1200,10 @@ mod tests {
 
     /// An incremental run gets the same refusal.
     ///
-    /// Tempting to let it through: no sweep follows an incremental, the items
-    /// were delivered, and the watermark advanced honestly under
-    /// `ORDER BY updated ASC`, so the next run would resume where this one
-    /// stopped. That narrower fix is worse than it looks, for a reason the
+    /// Tempting to let it through: no sweep follows an incremental and the
+    /// items were delivered. (Under `ORDER BY created ASC` the watermark would
+    /// not even mark where the walk stopped: the newest `updated` emitted can
+    /// sit past issues it never reached.) That narrower fix is worse than it looks, for a reason the
     /// mutation check turned up rather than the argument: with
     /// `&& cursor.is_none()` on the cap, **this test does not terminate**. The
     /// loop's only other exit is the records read reaching `total`, and `total` is the number
