@@ -12117,3 +12117,12 @@ Merge-manager review of #1745, on Opus:
 - **The `jsonb` round trip holds for every column these tables have.** `text`, `integer`,
   `boolean`, `jsonb` and `timestamptz` (microseconds kept), none nullable, no identity or
   generated column and no trigger; the tests compare `to_jsonb` text, timestamps included.
+## #1715, #1737, #1738 — wording fixes to a ruling and two closed criteria
+
+Ruled 2026-10-22 by the implementer on Sonnet; docs only.
+
+- **Closed tickets #1631 and #1632.** *Fork:* rewrite the closed bodies or leave them. *Ruling:* leave the
+  bodies (history); a comment on each records the corrected criterion and links the follow-up, and the
+  general lesson sits in `docs/agents/issue-tracker.md`, *Acceptance greps*. No ticket template in
+  `docs/` or `.claude/` produced either criterion (grep for `include_str` and `first second`), so there
+  was none to fix. *Reversing:* none.
