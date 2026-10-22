@@ -1542,11 +1542,7 @@ impl Scheduler {
         }
         let mut ids = Vec::new();
         for cfg in config::list(&self.inner.deps.pool).await? {
-            let needs_human = matches!(
-                cfg.health.state,
-                AuthState::Unauthorized | AuthState::MissingSecret
-            );
-            if !cfg.enabled || needs_human {
+            if !cfg.enabled || cfg.health.state.needs_human() {
                 continue;
             }
             ids.push(

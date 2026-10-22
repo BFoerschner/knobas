@@ -11904,6 +11904,7 @@ set.
   `wiring.rs` pin plugin registration, the handler list and version pins, and order nothing. The
   tick with a note stands; #1738 (backlog) rewords the criterion. *Reversing:* n/a.
 ## #1628: a write refused its credential waits for a new one; an unreachable one climbs the ladder (implementer, Opus)
+## #1628: a write whose credential was rejected waits for a new one; an unreachable one climbs the ladder (implementer, Opus)
 
 ### What clears the wait for a source with both a secret and an account
 
@@ -11925,7 +11926,7 @@ set.
 
 **The fork:** how a released row is told apart from a refused one: a new column or timestamp, or the reason itself.
 
-**Ruling:** `release_unauthorized` sets `wait_reason = null` and keeps `detail` and `attempted_at`. The flush loop reads null as owed. The panel reads "Waiting." until the next flush, at most one tick. A release writes no activity line: the attempt after it does (`waiting` again if refused, `sent` if not).
+**Ruling:** `release_unauthorized` sets `wait_reason = null` and keeps `detail` and `attempted_at`. The flush loop reads null as owed. The panel reads "Waiting." until the next flush sends it: one tick, or, where the connection test after a save failed and left the health needing a human, until that health clears or the reader presses *Flush now*. A release writes no activity line: the attempt after it does (`waiting` again if refused, `sent` if not).
 
 **Cost of reversing:** medium. A column would need a migration.
 
@@ -11933,7 +11934,7 @@ set.
 
 **The fork:** a credential saved while a flush is in flight: the 401 that comes back was the answer to the old credential, and recording it would re-reason the released row `unauthorized` with nothing left to release it.
 
-**Ruling:** a per-source change count, process-wide beside the flush lock. `credential_changed` bumps it, and the flush reads it before building its adapter. `waited` skips recording an `unauthorized` whose count moved, holding the count across its statement so a change lands wholly before or after. The credential save never waits for an in-flight flush. Worst case: one extra attempt with the new credential.
+**Ruling:** a per-source change count, process-wide beside the flush lock. `knobas_sync::write_queue::release_unauthorized` bumps it, and the flush reads it before building its adapter. `waited` skips recording an `unauthorized` whose count moved, holding the count across its statement so a change lands wholly before or after. The credential save never waits for an in-flight flush. Worst case: one extra attempt with the new credential.
 
 **Cost of reversing:** low. Removing it brings back the race.
 
@@ -11949,7 +11950,7 @@ set.
 
 **The fork:** whether *Flush now* for every source still skips a source whose health needs a human, and whether its later passes also ignore the waits.
 
-**Ruling:** it skips no source and ignores every wait on its first pass only. Later passes, which let an entity's next write follow one that just landed, use the tick's test, so a press sends each refused write at most once. A press is the reader asking. The lockout risk is one request per press.
+**Ruling:** it skips no source and ignores every wait on its first pass only. Later passes, which let an entity's next write follow one that just landed, use the tick's test, so a press sends each unauthorized write at most once. A press is the reader asking. The lockout risk is one request per press.
 
 **Cost of reversing:** low.
 

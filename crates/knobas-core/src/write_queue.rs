@@ -106,12 +106,12 @@ crate::closed_vocabulary! {
     /// or refused row from also claiming to be waiting on a network. So a
     /// row's `wait_reason` is `null` on every row that is not `pending`, on a
     /// pending one that has not been tried yet, which `attempted_at` is what
-    /// distinguishes, and on one a new credential released
+    /// distinguishes, and on one a person acting on the source released
     /// ([`release_unauthorized`]).
     ///
     /// The two are waited out differently (#1628): an `unreachable` write is
     /// tried again on the sync side's backoff ladder, an `unauthorized` one
-    /// only after a credential change or an explicit *Flush now*.
+    /// only after a person acts on the source or presses *Flush now*.
     ///
     /// The reasons are documented here and not on each variant because the
     /// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
@@ -237,7 +237,8 @@ pub struct QueuedWrite {
     pub target_snapshot: serde_json::Value,
     pub state: WriteState,
     /// Why a pending write is waiting; `None` while nothing has been tried,
-    /// and again once a new credential has released an `unauthorized` wait.
+    /// and again once a person acting on the source -- a new credential, a
+    /// new address or configuration -- has released an `unauthorized` wait.
     pub wait_reason: Option<WaitReason>,
     /// What the source said, in its own words. Untrusted source text: render
     /// it as text, never as markup.
@@ -902,8 +903,9 @@ pub async fn wait(
     Ok(row)
 }
 
-/// A new credential for `source_id`: its writes waiting on a refused one are
-/// owed again (#1628). Each comes back pending with `wait_reason` null, which
+/// A person acted on `source_id` -- a new credential, a new address or
+/// configuration: its writes waiting on a refused credential are owed again
+/// (#1628). Each comes back pending with `wait_reason` null, which
 /// the flush loop reads as "nothing known in its way", so the next flush sends
 /// it with whatever credential is stored now.
 ///

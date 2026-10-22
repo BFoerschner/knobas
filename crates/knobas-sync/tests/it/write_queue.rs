@@ -158,7 +158,7 @@ impl Source for Fake {
             renewed
         };
         if renewed {
-            flusher::credential_changed(&self.pool, &self.id)
+            flusher::release_unauthorized(&self.pool, &self.id)
                 .await
                 .unwrap();
         }
@@ -760,9 +760,9 @@ async fn an_undeliverable_write_is_kept_and_flushes_when_the_source_returns() {
     h.flush_later().await;
     assert!(
         h.delivered().is_empty(),
-        "a refused credential is not re-sent"
+        "a rejected credential is not re-sent"
     );
-    flusher::credential_changed(h.pool(), &h.source)
+    flusher::release_unauthorized(h.pool(), &h.source)
         .await
         .unwrap();
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
@@ -1778,7 +1778,7 @@ async fn a_write_the_source_refuses_on_repeat_waits_rather_than_holds() {
 /// The fake dwells, as a real source does, so each flush that sends spends
 /// time the count would show.
 #[tokio::test]
-async fn a_write_refused_its_credential_is_not_sent_again_by_the_next_flushes() {
+async fn a_write_whose_credential_was_rejected_is_not_sent_again_by_the_next_flushes() {
     let h = harness().await;
     let ticket = h.mirror("PAY-40", "a payout fails").await;
     *h.dwell.lock().unwrap() = std::time::Duration::from_millis(20);
@@ -1797,11 +1797,11 @@ async fn a_write_refused_its_credential_is_not_sent_again_by_the_next_flushes() 
         h.rewind(86_400).await;
         flusher::flush_source(&h.deps, &h.source).await.unwrap();
     }
-    assert_eq!(h.asked(), 1, "no flush re-sends a refused credential");
+    assert_eq!(h.asked(), 1, "no flush re-sends a rejected credential");
     assert_eq!(h.reload(write.id).await.state, WriteState::Pending);
 }
 
-/// #1628: a credential change on the source releases its refused writes, and
+/// #1628: a credential change on the source releases its unauthorized writes, and
 /// the next flush sends them. A change on another source releases nothing.
 #[tokio::test]
 async fn a_new_credential_releases_the_wait_on_its_own_source_only() {
@@ -1815,7 +1815,7 @@ async fn a_new_credential_releases_the_wait_on_its_own_source_only() {
     let write = h.comment(&ticket, "re-entered").await;
     let theirs = other.comment(&elsewhere, "still refused").await;
 
-    let released = flusher::credential_changed(h.pool(), &h.source)
+    let released = flusher::release_unauthorized(h.pool(), &h.source)
         .await
         .unwrap();
     assert_eq!(
@@ -1897,11 +1897,11 @@ async fn an_unreachable_write_is_tried_again_on_the_sync_ladder() {
     assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
 }
 
-/// #1628: *Flush now* is the reader saying "try it": it sends a refused
-/// write once per press, and leaves the wait in place when the source
+/// #1628: *Flush now* is the reader saying "try it": it sends a
+/// write waiting on a rejected credential once per press, and leaves the wait in place when the source
 /// refuses again, so the tick after it sends nothing.
 #[tokio::test]
-async fn flush_now_sends_a_refused_write_once_and_the_tick_after_it_does_not() {
+async fn flush_now_sends_an_unauthorized_write_once_and_the_tick_after_it_does_not() {
     let h = harness().await;
     let ticket = h.mirror("PAY-45", "a payout fails").await;
 

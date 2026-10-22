@@ -121,9 +121,9 @@ minutes. A 401 does not retry at all: only a new credential fixes it, and
 retrying a rejected credential on a timer can lock the account.
 
 Queued writes follow the same rules. A write to a source that did not answer
-is tried again on the same ladder. A write refused its credential waits until
-a credential is saved for that source, its address or configuration is
-edited, or the reader presses *Flush now*.
+is tried again on the same ladder. A write whose credential was rejected
+waits until a credential is saved for that source, its address or
+configuration is edited, or the reader presses *Flush now*.
 
 ## Shutting down
 

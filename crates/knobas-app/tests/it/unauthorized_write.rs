@@ -1,4 +1,4 @@
-//! A write the source refused the credential for waits for a person (#1628):
+//! A write whose credential the source rejected waits for a person (#1628):
 //! a new credential on its source, or *Flush now* from the queue panel. The
 //! tick never sends it again on its own.
 //!
@@ -165,7 +165,7 @@ impl Fixture {
 
     /// A comment on a monitor of `source`, submitted while the source refuses
     /// the credential: it comes back waiting `unauthorized`.
-    async fn refused_comment(&self, source: &str, body: &str) -> i64 {
+    async fn unauthorized_comment(&self, source: &str, body: &str) -> i64 {
         let entity = format!("{source}:7");
         sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'monitor', 'api')")
             .bind(&entity)
@@ -263,17 +263,17 @@ async fn fixture(name: &str) -> Fixture {
     }
 }
 
-/// A new secret on the source releases its refused write and the next tick
+/// A new secret on the source releases its unauthorized write and the next tick
 /// sends it; a new secret on another source releases nothing.
 #[tokio::test]
-async fn a_new_secret_releases_the_refused_write_on_its_own_source() {
-    let f = fixture("refused_write_secret").await;
-    let write = f.refused_comment(SOURCE, "after the key was rotated").await;
+async fn a_new_secret_releases_the_unauthorized_write_on_its_own_source() {
+    let f = fixture("unauthorized_write_secret").await;
+    let write = f.unauthorized_comment(SOURCE, "after the key was rotated").await;
     f.refuses(SOURCE, false);
 
     f.tick().await;
     f.tick().await;
-    assert_eq!(f.asked(SOURCE), 1, "the tick does not re-send a refusal");
+    assert_eq!(f.asked(SOURCE), 1, "the tick does not re-send a rejected credential");
 
     f.save(OTHER, SecretInput::of("another-key")).await;
     f.tick().await;
@@ -292,10 +292,10 @@ async fn a_new_secret_releases_the_refused_write_on_its_own_source() {
 /// Kuma's case: the account is what its writes log in with, and saving it
 /// alone (the API key kept) releases the write too.
 #[tokio::test]
-async fn a_new_account_releases_the_refused_write() {
-    let f = fixture("refused_write_account").await;
+async fn a_new_account_releases_the_unauthorized_write() {
+    let f = fixture("unauthorized_write_account").await;
     let write = f
-        .refused_comment(SOURCE, "after the password changed")
+        .unauthorized_comment(SOURCE, "after the password changed")
         .await;
     f.refuses(SOURCE, false);
 
@@ -318,12 +318,12 @@ async fn a_new_account_releases_the_refused_write() {
     assert_eq!(f.row(write).await.state, WriteState::Sent);
 }
 
-/// *Flush now* sends a refused write once per press, and the tick after a
+/// *Flush now* sends an unauthorized write once per press, and the tick after a
 /// press that was refused again still sends nothing.
 #[tokio::test]
-async fn flush_now_sends_a_refused_write_once() {
-    let f = fixture("refused_write_flush_now").await;
-    let write = f.refused_comment(SOURCE, "pressed").await;
+async fn flush_now_sends_an_unauthorized_write_once() {
+    let f = fixture("unauthorized_write_flush_now").await;
+    let write = f.unauthorized_comment(SOURCE, "pressed").await;
 
     knobas_app::sources::write_queue::flush_now(&f.state, Some(SOURCE.to_owned()))
         .await
@@ -349,9 +349,9 @@ async fn flush_now_sends_a_refused_write_once() {
 /// would not build waits under the same reason as a refused credential, and
 /// the edit is the person acting on it. A rename is not.
 #[tokio::test]
-async fn an_edit_of_where_the_source_is_releases_the_refused_write() {
-    let f = fixture("refused_write_edit").await;
-    let write = f.refused_comment(SOURCE, "after the move").await;
+async fn an_edit_of_where_the_source_is_releases_the_unauthorized_write() {
+    let f = fixture("unauthorized_write_edit").await;
+    let write = f.unauthorized_comment(SOURCE, "after the move").await;
     f.refuses(SOURCE, false);
 
     let edit = |patch: knobas_app::sources::SourcePatch| {

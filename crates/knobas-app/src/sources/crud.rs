@@ -416,7 +416,7 @@ pub async fn update(
     .await?
     .ok_or_else(|| SourcesError::NotFound(id.to_owned()))?;
     if reaches_it_anew {
-        release_refused_writes(pool, id).await;
+        release_unauthorized_writes(pool, id).await;
     }
 
     let template = template_for(registry, &row.adapter_kind)?;
@@ -502,7 +502,7 @@ pub async fn set_secret(
         },
     )
     .await?;
-    release_refused_writes(pool, id).await;
+    release_unauthorized_writes(pool, id).await;
 
     let source = registry.build(instance_from(
         id,
@@ -556,9 +556,9 @@ pub async fn set_secret(
 /// A failure is logged, not raised: the credential is stored by now, and an
 /// error here would tell the reader their save failed. The writes stay
 /// waiting, and *Flush now* still sends them.
-async fn release_refused_writes(pool: &PgPool, id: &str) {
-    if let Err(error) = knobas_sync::write_queue::credential_changed(pool, id).await {
-        tracing::warn!(source = %id, %error, "the write queue kept its refused writes waiting");
+async fn release_unauthorized_writes(pool: &PgPool, id: &str) {
+    if let Err(error) = knobas_sync::write_queue::release_unauthorized(pool, id).await {
+        tracing::warn!(source = %id, %error, "the write queue kept its unauthorized writes waiting");
     }
 }
 
