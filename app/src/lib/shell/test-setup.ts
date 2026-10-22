@@ -12,23 +12,16 @@ import { afterAll, afterEach, beforeEach, expect, vi } from "vitest";
 // First: it must run before any module that looks for a storage is evaluated.
 import "./test-no-storage";
 
-import { viewMemory } from "../detail/view-read";
-import { pendingComments } from "../detail/view/pending-comments.svelte";
-import { sourceRoles } from "../tf/roles.svelte";
+import { resetStores } from "./test-resets";
 import { settleRejections, takeUnhandled, watchRejections } from "./unhandled";
 
 /**
- * The detail's session memory (#693) is a module singleton, like the session
- * it remembers; each test is a fresh session, or a test would open on the
- * entity the previous one left drawn.
+ * Every module-level store goes back to a fresh window after each test
+ * (`test-resets.ts` lists them; `test-resets.test.ts` fails on one missing).
+ * Each is a singleton like the session it remembers, so without this a test
+ * would inherit what the previous one left (FE-14, #1674).
  */
-afterEach(() => viewMemory.clear());
-
-/** The pending line comments (#709) are a module singleton too. */
-afterEach(() => pendingComments.forget());
-
-/** The source list's role claims (#1196) are the shell's, held once per window. */
-afterEach(() => sourceRoles.forget());
+afterEach(resetStores);
 
 /**
  * The zone is pinned in `vite.config.ts`; this is what makes the pin a fact

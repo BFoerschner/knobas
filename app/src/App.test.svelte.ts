@@ -500,10 +500,6 @@ gate below untestable",
     expect(saw.mock.calls[0]![0]!.map((entry) => entry.item.key)).toEqual(["mention:PAY-231"]);
   } finally {
     saw.mockRestore();
-    // The lifecycle store outlives a test: walk the database back, or the
-    // next mount is `ready` before its first `app_status`.
-    dbReady = false;
-    emit(EVENTS.dbState, { state: "starting", detail: null });
   }
 });
 

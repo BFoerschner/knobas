@@ -225,6 +225,12 @@ export interface Health {
    * on `reseed`.
    */
   start(): () => void;
+  /**
+   * Back to a store nobody has touched: no rows, `loading`, no retry armed,
+   * and unsubscribed, so the next {@link start} subscribes afresh. The
+   * module-level one outlives a test, so a test calls this between runs.
+   */
+  reset(): void;
 }
 
 /**
@@ -313,6 +319,14 @@ export function createHealth(ports?: HealthPorts): Health {
       return state.by[sourceId] ?? null;
     },
     patch: apply,
+    reset() {
+      stopRetrying();
+      live = false;
+      state.by = {};
+      phase = "loading";
+      error = null;
+      retryMs = RETRY_MIN_MS;
+    },
     replace(rows: CredentialHealth[]) {
       const by: Record<string, CredentialHealth> = {};
       for (const row of rows) {
