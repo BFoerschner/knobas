@@ -23,7 +23,7 @@
  */
 import type { DepLayer, Dependencies, DepItem, DepRelation, DepView, DepViews, DepViewSettings, LayerInView } from "../../../ipc/assets";
 import type { Tone } from "../../../ipc/entity";
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 import { CORPUS } from "./corpus";
 import { FIXTURE_ESTATE, FIXTURE_ROUTES } from "./estate";
 import { fakePipelines } from "./builds";
@@ -229,7 +229,7 @@ function viewsAnswer(): DepViews {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     dependencies: () => fakeDependencies(),
     create_dep_layer: (args) => {

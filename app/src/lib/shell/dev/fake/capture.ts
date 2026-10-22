@@ -3,7 +3,7 @@
  * `seed` reads the stored shortcut from the query.
  */
 import { keyCaps } from "../../../tf/settings/notes";
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 
 /**
  * The pair the capture window reads its two born links from (#503).
@@ -70,7 +70,7 @@ function fakeSetShortcut(accelerator: unknown) {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     // The capture window (#503). Its own document (`capture.html?fake-ipc`),
     // so these five are what that page's walk answers from: the shortcut the

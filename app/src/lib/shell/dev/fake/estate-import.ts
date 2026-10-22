@@ -2,7 +2,8 @@
  * `?fake-ipc`: The estate Import (#439): produce, preview and apply, as a replay of the
  * file over `estate.ts`'s estate.
  */
-import type { Handler } from "../fake-tauri";
+import type { Produced } from "../../../ipc/assets";
+import type { Handlers } from "../fake-tauri";
 import {
   type EstateFileAsset,
   type EstateFileRoute,
@@ -124,7 +125,7 @@ let PRODUCED_FILE: string | null = null;
  * `crates/knobas-app/tests/it/assets_ipc.rs` drives a stub docker and
  * `just estate-live` drives the real context.
  */
-function dockerProduce() {
+function dockerProduce(): Produced {
   PRODUCED_FILE = JSON.stringify(
     {
       version: 1,
@@ -150,7 +151,7 @@ function dockerProduce() {
   };
 }
 
-function estateProduce(args: Record<string, unknown>) {
+function estateProduce(args: Record<string, unknown>): Produced {
   if (args.producer === "docker") return dockerProduce();
   const token = typeof args.token === "string" ? args.token.trim() : "";
   if (token !== "") IMPORTER_TOKEN = token;
@@ -295,7 +296,7 @@ function estateApply(args: Record<string, unknown>) {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     // The Import (#439), as a **replay** and not as a second implementation of
     // the merge rule -- see `estatePreview`. It exists because the estate this

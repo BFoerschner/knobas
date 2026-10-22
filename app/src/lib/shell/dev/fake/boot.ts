@@ -4,7 +4,8 @@
  * the wizard's two writes. `?fake-secret-store=memory` answers as a process under
  * `KNOBAS_SECRET_STORE=memory` does: credentials for this session only (#1585).
  */
-import type { Handler } from "../fake-tauri";
+import type { DbState } from "../../../ipc/app";
+import type { Handlers } from "../fake-tauri";
 
 /** Everything in `AppStatus` that is not the lifecycle state. */
 const DEMO_STATUS = {
@@ -22,7 +23,7 @@ const DEMO_STATUS = {
  * every other screen and useless for QA of this one — the loading screen would
  * be gone before the shutter opened.
  */
-function fakeDbState(params: URLSearchParams): unknown {
+function fakeDbState(params: URLSearchParams): DbState {
   switch (params.get("fake-db")) {
     case "starting":
       return { state: "starting", detail: "first run: downloading and initialising PostgreSQL" };
@@ -36,7 +37,7 @@ function fakeDbState(params: URLSearchParams): unknown {
 }
 
 /** This feature's commands. */
-export function handlers(params: URLSearchParams): Record<string, Handler> {
+export function handlers(params: URLSearchParams): Handlers {
   // `?fake-first-run` opens the §14a wizard, which the fixture otherwise never
   // shows: a first run with no source yet, until the wizard finishes (#1396).
   let firstRun = params.has("fake-first-run");

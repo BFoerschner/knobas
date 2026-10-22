@@ -38,7 +38,8 @@
  *   a quote naming its kind, `> **Info**`, as the Confluence projection
  *   spells it (#975).
  */
-import type { Handler } from "../fake-tauri";
+import type { QueuedWrite, WriteOpPayload } from "../../../ipc/sources";
+import type { Handlers } from "../fake-tauri";
 import type {
   DocBlock,
   DocHit,
@@ -595,7 +596,7 @@ function search(args: Record<string, unknown>): DocsHits | null {
   };
 }
 
-function queued(op: string, entity: string, payload: Record<string, unknown>) {
+function queued(op: string, entity: string, payload: WriteOpPayload): QueuedWrite {
   return {
     id: Math.floor(Math.random() * 1e6),
     source_id: "confluence",
@@ -616,7 +617,7 @@ function queued(op: string, entity: string, payload: Record<string, unknown>) {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     docs_tree: () => tree(),
     docs_page: (args) => page(args),
@@ -627,7 +628,7 @@ export function handlers(): Record<string, Handler> {
       return { file, folder: "/Users/you/Downloads" };
     },
     docs_edit_section: (args) =>
-      queued("update_page", String(args["entityId"] ?? ""), { UpdatePage: { entity: args["entityId"], base_version: args["version"], body: "" } }),
+      queued("update_page", String(args["entityId"] ?? ""), { UpdatePage: { entity: String(args["entityId"] ?? ""), base_version: Number(args["version"] ?? 0), body: "" } }),
     docs_create_page: (args) => {
       const next = args["page"] as { parent: string; title: string };
       return queued("create_page", next.parent, { CreatePage: { parent: next.parent, space: "", title: next.title, body: "" } });

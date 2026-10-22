@@ -37,7 +37,7 @@
  *   second ask, which is what the write queue does between a click and a
  *   sync; nothing is written anywhere.
  */
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 import type { ActionItemTicket, DigestLine, Protocol, PublishTarget } from "../../../ipc/entity";
 import { CORPUS } from "./corpus";
 import { seedNote } from "./notes";
@@ -101,7 +101,7 @@ function on(day: string, hour: number, minute: number): string {
   return at.toISOString();
 }
 
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   let target: PublishTarget | null = { source_id: "mock", parent: "mock:ENG-STANDUPS" };
   const published = new Map<string, Protocol["publication"]>();
   let nextWrite = 801;

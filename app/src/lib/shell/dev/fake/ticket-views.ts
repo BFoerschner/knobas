@@ -17,9 +17,9 @@
  * here are wider than the real ones would be. *Blocked* is `has:blocker`.
  */
 import type { LaneColumn, LaneField, MiniBoardCard, MiniBoardLane, SourceStatuses } from "../../../ipc/entity";
-import type { QueryKey, QueryTranslation, SavedViewSource } from "../../../ipc/search";
+import type { QueryKey, QueryTranslation, SavedViewSource, ViewLanes, CardField, ListColumn, ListSort } from "../../../ipc/search";
 import { laneOf } from "../../../tf/tickets/tickets";
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 import { fakeTicketCount, fakeTicketKeys } from "./corpus";
 
 type LanedCard = Pick<
@@ -86,15 +86,15 @@ interface View {
   query: string;
   layout: "board" | "list";
   columns: { name: string; statuses: string[]; limit: number | null }[];
-  lanes: string;
-  card_fields: string[];
-  list_columns: string[];
-  list_sort: { column: string; direction: string } | null;
+  lanes: ViewLanes;
+  card_fields: CardField[];
+  list_columns: ListColumn[];
+  list_sort: ListSort | null;
   saved_view: string | null;
 }
 
-const CARD = ["type", "signals", "comments", "assignee"];
-const LIST = ["key", "summary", "status", "priority", "signals", "assignee", "updated"];
+const CARD: CardField[] = ["type", "signals", "comments", "assignee"];
+const LIST: ListColumn[] = ["key", "summary", "status", "priority", "signals", "assignee", "updated"];
 
 function seeded(id: string, name: string, group: string, query: string, layout: "board" | "list" = "list"): View {
   return { id, name, group, position: 0, query, layout, columns: [], lanes: "none", card_fields: CARD, list_columns: LIST, list_sort: null, saved_view: null };
@@ -141,7 +141,7 @@ function jiraBoard(
   type: string,
   jql: string,
   columns: View["columns"],
-  lanes: string,
+  lanes: ViewLanes,
   member: (key: string) => boolean,
   copy: QueryTranslation,
   extra: { sub?: string; sprint?: string; outside?: { project: string; count: number } } = {},
@@ -285,7 +285,7 @@ function slug(name: string): string {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     ticket_views: () =>
       VIEWS.slice()

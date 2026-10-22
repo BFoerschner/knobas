@@ -22,7 +22,7 @@
  * cycle would read `CORPUS` before it exists.
  */
 import type { Reached, StartWorkStep } from "../../../ipc/entity";
-import type { Handler } from "../fake-tauri";
+import type { Handlers } from "../fake-tauri";
 
 const HOST = "http://127.0.0.1:5399";
 
@@ -233,7 +233,7 @@ function flowOf(step: StartWorkStep): StartWorkStep[] {
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     job_reach: (args) => fakeReach(String(args["entityId"] ?? "")),
     parent_links: () => parentLinks,

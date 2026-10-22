@@ -2,7 +2,8 @@
  * `?fake-ipc`: The write queue (#42): one held write, one refused, one waiting, a refused worklog (#828),
  * and a monitor pause refused with a second pause waiting behind it (#1473).
  */
-import type { Handler } from "../fake-tauri";
+import type { QueuedWrite } from "../../../ipc/sources";
+import type { Handlers } from "../fake-tauri";
 
 /** Thursday of this week at 14:00, by the browser's clock: the held worklog's day. */
 function thisThursday(): string {
@@ -33,7 +34,7 @@ const HELD_WORKLOG = {
   held_snapshot: null,
   settled_at: null,
   source_enabled: true,
-};
+} satisfies QueuedWrite;
 
 /** The monitor both pauses target: a PAY-231 monitor the mirror knows by name. */
 const PAUSED_MONITOR = "mock:payouts-stage-health";
@@ -79,7 +80,7 @@ const BLOCKED_PAUSES = [
     settled_at: null,
     source_enabled: true,
   },
-];
+] satisfies QueuedWrite[];
 
 /**
  * The write queue a QA pass sees: one write held on a changed target, one the
@@ -160,10 +161,10 @@ export const FIXTURE_QUEUE = [
   },
   HELD_WORKLOG,
   ...BLOCKED_PAUSES,
-];
+] satisfies QueuedWrite[];
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     // The write queue (issue #42). Three rows, and the mix is the point: one
     // held write, one refused, one merely waiting -- because the whole surface

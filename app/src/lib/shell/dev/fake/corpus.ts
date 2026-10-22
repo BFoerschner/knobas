@@ -3,8 +3,8 @@
  * one link graph, and the reads that list it (`list_entities`, the mini
  * board, the project census). Other feature modules read `CORPUS` from here.
  */
-import type { CodeFacts, LaneField } from "../../../ipc/entity";
-import type { Handler } from "../fake-tauri";
+import type { AttentionGroup, CodeFacts, ContextKind, ContextRow, LaneField, Signal, StateChip } from "../../../ipc/entity";
+import type { Handlers } from "../fake-tauri";
 import { JOB_ROWS, fakeReach } from "./job-reach";
 import { fakeJiraBoard, fakeLanes } from "./ticket-views";
 
@@ -296,7 +296,7 @@ export const CORPUS: {
       state: state === "open" ? "open" : "closed",
       merged: state === "merged",
       ...(reviewers ? { requested_reviewers: reviewers } : {}),
-      chip: { text: state, tone: state === "open" ? "info" : state === "merged" ? "ok" : "muted" },
+      chip: { text: state, tone: state === "open" ? "info" : state === "merged" ? "ok" : "muted" } satisfies StateChip,
       path: `tidewater/${repo}`,
     }),
   ),
@@ -341,14 +341,7 @@ function row(
  * job context, PAY-231's (#1503: the *Open alerts on my jobs* smart list is
  * computed over the unarchived ones, and a fixture with none could not be
  * walked); *Promote* adds to it. */
-export const FAKE_CONTEXTS: {
-  id: string;
-  kind: string;
-  title: string;
-  anchor_id: string | null;
-  created_at: string;
-  archived_at: string | null;
-}[] = [];
+export const FAKE_CONTEXTS: ContextRow[] = [];
 
 /**
  * The estate assets a context holds, by the context's anchor (#1503). The
@@ -361,7 +354,7 @@ export const FAKE_CONTEXT_ASSETS: Record<string, string[]> = {
 };
 
 let nextContext = 1;
-export function fakeContext(kind: string, title: string, anchor_id: string | null) {
+export function fakeContext(kind: ContextKind, title: string, anchor_id: string | null): ContextRow {
   return {
     id: `ctx:fake-${nextContext++}`,
     kind,
@@ -382,7 +375,7 @@ FAKE_CONTEXTS.push(fakeContext("ticket", "Retry failed SEPA payouts", "mock:PAY-
  */
 export function mirrorRow(entry: (typeof CORPUS)[number]) {
   const text = (value: unknown) => (typeof value === "string" ? value : null);
-  const chip = entry.payload["chip"] as { text: string; tone: string } | undefined;
+  const chip = entry.payload["chip"] as StateChip | undefined;
   return {
     entity_id: entry.entity_id,
     kind: entry.kind,
@@ -677,7 +670,7 @@ function fakeSignals(id: string) {
   const direct = near(id);
   const reach = [...new Set([...direct, ...direct.flatMap(near)])].filter((other) => other !== id);
   const prs = direct.map(entry).filter((pr) => pr?.kind === "pr" && pr.payload["state"] === "open");
-  const signals: { kind: string; text: string; tone: string }[] = [];
+  const signals: Signal[] = [];
   if (reach.some((other) => entry(other)?.kind === "build" && entry(other)?.payload["status"] === "failed")) {
     signals.push({ kind: "failing-build", text: "build failed", tone: "err" });
   }
@@ -914,7 +907,7 @@ function fakeGroups(rows: (typeof CORPUS)[number][]) {
     if (Array.isArray(asked) && asked.includes(ME)) return "review_requested";
     return entry.author === ME ? "my_pull_requests" : "open_pull_requests";
   };
-  const order = ["review_requested", "my_pull_requests", "open_pull_requests"];
+  const order: AttentionGroup[] = ["review_requested", "my_pull_requests", "open_pull_requests"];
   const open = rows.filter((entry) => !settled(entry));
   const grouped = order.map((group) => open.filter((entry) => groupOf(entry) === group));
   return {
@@ -979,7 +972,7 @@ function codeFacts(args: Record<string, unknown>): CodeFacts[] {
 export const CODE_FACTS: ((ids: ReadonlySet<string>) => CodeFacts[])[] = [];
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     code_facts: (args) => codeFacts(args),
     list_entities: (args) => listEntities(args),

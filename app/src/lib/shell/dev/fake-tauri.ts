@@ -53,8 +53,16 @@
  * feature adds a file and a new command edits only its feature's file; two
  * modules answering the same command is an error, not a silent override.
  */
+import type { Answers } from "./fake-answers";
+
 /** One fake command. Arguments arrive camelCased, exactly as Tauri sends them. */
 export type Handler = (args: Record<string, unknown>) => unknown;
+
+/**
+ * A feature's handler map. Any command the barrels wrap (`fake-answers.ts`) must answer with the
+ * shape its barrel function resolves to; a command only the fake knows stays free-form (#1670).
+ */
+export type Handlers = { [K in keyof Answers]?: (args: Record<string, unknown>) => Answers[K] } & Record<string, Handler>;
 
 /**
  * A registered event listener, as `@tauri-apps/api/event` sets one up.

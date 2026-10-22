@@ -5,7 +5,8 @@
 // The estate itself. See `FIXTURE_ESTATE` below for why it is read and not
 // copied, and for the check that it reaches no production bundle.
 import ESTATE_FILE from "../../../../../../testenv/estate.json";
-import type { Handler } from "../fake-tauri";
+import type { AssetProperty, AssetRow, DependsOnRow, PropertyValue } from "../../../ipc/assets";
+import type { Handlers } from "../fake-tauri";
 import { SYNCED_AT } from "./corpus";
 
 // -- the estate -------------------------------------------------------------
@@ -218,7 +219,7 @@ interface FixtureAsset {
   status: "up" | "warn" | "down" | "none";
   environment: "dev" | "stage" | "prod" | "shared" | null;
   owner: string | null;
-  properties: { key: string; label: string; value: unknown; custom: boolean }[];
+  properties: AssetProperty[];
   /** The Uptime Kuma names an import kept on the asset (#439). */
   monitors: string[];
 }
@@ -231,7 +232,7 @@ interface FixtureRoute {
   name: string;
   url: string;
   visibility: "internal" | "public";
-  properties: { key: string; label: string; value: unknown; custom: boolean }[];
+  properties: AssetProperty[];
 }
 
 /**
@@ -260,9 +261,9 @@ function bagOf(entry: {
  * with values somebody typed out would draw the right words over a pane
  * reading the wrong field.
  */
-function valueOf(kind: string | null, raw: string | number | undefined) {
+function valueOf(kind: PropertyValue["kind"] | null, raw: string | number | undefined): PropertyValue | null {
   if (raw === undefined) return null;
-  return { kind: kind ?? (typeof raw === "number" ? "number" : "text"), value: raw };
+  return { kind: kind ?? (typeof raw === "number" ? "number" : "text"), value: raw } as PropertyValue;
 }
 
 /** The bag's keys, as the pane's custom rows: by key, labelled by the key. */
@@ -306,7 +307,7 @@ export function typeOf(typeId: string) {
       id: typeId,
       label: typeId,
       monogram: "??",
-      properties: [] as { key: string; label: string; kind: string }[],
+      properties: [] as { key: string; label: string; kind: PropertyValue["kind"] }[],
       suggests: [] as string[],
     }
   );
@@ -555,9 +556,9 @@ function editAsset(args: Record<string, unknown>) {
       if (at !== -1 && asset.properties[at]!.custom) asset.properties.splice(at, 1);
       else if (at !== -1) asset.properties[at]!.value = null;
     } else if (at === -1) {
-      asset.properties.push({ key, label: key, value: edit.value, custom: true });
+      asset.properties.push({ key, label: key, value: edit.value as PropertyValue, custom: true });
     } else {
-      asset.properties[at]!.value = edit.value;
+      asset.properties[at]!.value = edit.value as PropertyValue;
     }
     ASSET_HISTORY.push({
       entity_id: asset.id,
@@ -639,7 +640,7 @@ function deleteAsset(args: Record<string, unknown>) {
  * One asset as a column row -- everything but its properties and its path,
  * plus the rollup `assets::ROLLUP` computes (#431).
  */
-function assetRow(asset: FixtureAsset) {
+function assetRow(asset: FixtureAsset): AssetRow {
   const { properties: _properties, ...row } = asset;
   const under = descendants(asset);
   const inside = worst(under.map((held) => held.status));
@@ -819,7 +820,7 @@ function dependsOnThis(args: Record<string, unknown>) {
 
   const seen = new Set([id]);
   let frontier = [id];
-  const assets: { asset: unknown; path: string | null; relation: string | null }[] = [];
+  const assets: DependsOnRow[] = [];
   while (frontier.length > 0) {
     const reached = new Map<string, string | null>();
     /**
@@ -910,7 +911,7 @@ function createRoute(args: Record<string, unknown>) {
     name,
     url,
     visibility: (args.visibility as "internal" | "public" | null) ?? "internal",
-    properties: ((args.properties ?? []) as [string, unknown][]).map(([key, value]) => ({
+    properties: ((args.properties ?? []) as [string, PropertyValue | null][]).map(([key, value]) => ({
       key,
       label: key,
       value,
@@ -939,8 +940,8 @@ function editRoute(args: Record<string, unknown>) {
       const at = route.properties.findIndex((property) => property.key === key);
       if (edit.value === null) {
         if (at !== -1) route.properties.splice(at, 1);
-      } else if (at === -1) route.properties.push({ key, label: key, value: edit.value, custom: true });
-      else route.properties[at]!.value = edit.value;
+      } else if (at === -1) route.properties.push({ key, label: key, value: edit.value as PropertyValue, custom: true });
+      else route.properties[at]!.value = edit.value as PropertyValue;
     }
     // `monitors` (#976) names a monitor the poll will attach; the fixture
     // mirrors no monitor, so there is nothing to record.
@@ -971,7 +972,7 @@ export function assetPathText(asset: (typeof FIXTURE_ESTATE)[number]): string | 
 }
 
 /** This feature's commands. */
-export function handlers(): Record<string, Handler> {
+export function handlers(): Handlers {
   return {
     // The estate (#428, writable since #429). Stateful within the session,
     // like the stored contexts: an asset created, renamed, moved or deleted
