@@ -37,6 +37,7 @@
     keyIn,
     proposal,
     repoHash,
+    sourceName,
     type BranchOption,
     type BranchStanding,
     type ProposedFrom,
@@ -178,7 +179,7 @@
         {#if ticket !== null}
           <span></span><label class="tf-ck"><input type="checkbox" bind:checked={link} /> Link the PR to {ticket.key} in knobas</label>
         {/if}
-        <span></span><span class="tf-dim tf-small">Reviewers are asked on Gitea after it opens.</span>
+        <span></span><span class="tf-dim tf-small">Reviewers are asked on {sourceName(source)} after it opens.</span>
       </div>
       <div class="tf-cgo">
         {#if standing?.pr}
@@ -198,7 +199,7 @@
     {#if failed !== null}
       <p class="tf-cfail">{failed}</p>
     {:else if listed === null || listed.entityId === null}
-      <div class="tf-empty">This branch is not on Gitea yet, or knobas has not synced it. What it changes shows here once it has.</div>
+      <div class="tf-empty">This branch is not on {sourceName(source)} yet, or knobas has not synced it. What it changes shows here once it has.</div>
     {:else if files !== null && files.length === 0}
       <div class="tf-empty">This branch has no commits that {defaultBranch ?? into} lacks.</div>
     {:else if files !== null}

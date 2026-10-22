@@ -32,7 +32,7 @@
   import TfDialog from "../settings/TfDialog.svelte";
   import { isDeleteQueued, madeNotListed, markDeleted } from "./queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { branchStanding, compareHash, viewRows, visibleBranches, type BranchRow, type BranchStanding } from "./repo";
+  import { branchStanding, compareHash, sourceName, viewRows, visibleBranches, type BranchRow, type BranchStanding } from "./repo";
 
   let {
     ports,
@@ -235,9 +235,9 @@
         </div>
       {/if}
       {#if standing.pr !== null}
-        <p class="tf-dim">PR {standing.pr.number ?? ""} is open from this branch. Gitea closes it when the branch goes.</p>
+        <p class="tf-dim">PR {standing.pr.number ?? ""} is open from this branch. {source ? sourceName(source) : "The code host"} closes it when the branch goes.</p>
       {/if}
-      <p class="tf-dim tf-note">This deletes the branch on Gitea. Your local checkout keeps its copy.</p>
+      <p class="tf-dim tf-note">This deletes the branch on {sourceName(source)}. Your local checkout keeps its copy.</p>
     {/snippet}
     {#snippet footer()}
       <button type="button" class="tf-btn tf-ghost" onclick={() => (deleting = null)}>Cancel</button>

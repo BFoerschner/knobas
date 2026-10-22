@@ -31,7 +31,7 @@
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { ancestors, commitRefusal, editHash, fileHash, fileLines, pickDefaultFile, repoHash } from "./repo";
+  import { ancestors, commitRefusal, editHash, fileHash, fileLines, pickDefaultFile, repoHash, sourceName } from "./repo";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -273,7 +273,7 @@
         </span>
       </header>
       <div class="tf-banner tf-info">
-        <span>The edit is committed to <span class="tf-mono">{branch}</span> on Gitea. Your local checkout is never written to.</span>
+        <span>The edit is committed to <span class="tf-mono">{branch}</span> on {sourceName(source)}. Your local checkout is never written to.</span>
       </div>
       <div class="tf-editor">
         <div class="tf-nums" aria-hidden="true">{numbers}</div>
@@ -303,7 +303,7 @@
       </header>
       {#if queued !== null}
         <div class="tf-banner tf-warn">
-          A commit of this file is queued: “{queued.message}”. It shows here once Gitea has it.
+          A commit of this file is queued: “{queued.message}”. It shows here once {sourceName(source)} has it.
         </div>
       {/if}
       {#if changed.has(file.path)}
