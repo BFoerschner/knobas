@@ -11746,3 +11746,11 @@ set.
 **Ruling:** cast to the generated type at the echo. The fixture sends back what the client sent; the cast says so.
 
 **Cost of reversing:** none worth the name.
+
+### A census test forces a line in `Answers` for every barrel command (merge-manager)
+
+**The fork:** a command the barrels gain, with no line in `fake-answers.ts`, stays untyped and the rename guard has a hole.
+
+**Ruling:** `fake-tauri.test.ts` compares the command names listed in `fake-answers.ts` with `barrelCommands()`, both ways. It is one test beside the existing census, which already reads the barrels; no new parser.
+
+**Cost of reversing:** delete the test.
