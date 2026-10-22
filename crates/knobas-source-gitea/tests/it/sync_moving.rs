@@ -624,6 +624,27 @@ async fn a_catch_up_whose_page_moved_starts_from_the_first_page() {
     assert_eq!(all, every_pr());
 }
 
+/// A hint that lands below unread records is not trusted either: the
+/// instance now answers twelve a page, so page 20 starts at the 229th pull
+/// request and the 201st to the 228th sit above it, unread. Its first record
+/// is older than the resume point, so the catch-up starts again from page 1
+/// (and, the cap reached on the way, finishes on the run after).
+#[tokio::test]
+async fn a_catch_up_whose_page_lands_below_unread_records_starts_from_the_first_page() {
+    let (_server, moving, gitea, cursor) = a_week_away(Some(10)).await;
+    let (first, mut cursor) = run(&*gitea, Some(&cursor)).await;
+    moving.with(|world| world.cap = Some(12));
+
+    let mut all = emitted(&first, "pr");
+    for _ in 0..3 {
+        let (more, next) = run(&*gitea, Some(&cursor)).await;
+        all.extend(emitted(&more, "pr"));
+        cursor = next;
+    }
+    all.sort();
+    assert_eq!(all, every_pr());
+}
+
 /// A pull request updated while the catch-up is under way is not held back
 /// by it: the run that closes the window walks on from the top with what is
 /// left of its budget.
