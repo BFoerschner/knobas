@@ -2124,6 +2124,37 @@ mod tests {
         );
     }
 
+    /// ...and one configuration over the cap on its own still refuses, naming
+    /// the configuration and the same way out.
+    #[tokio::test]
+    async fn one_configuration_over_the_cap_refuses_and_names_backfill() {
+        let many: Vec<serde_json::Value> = (1..=1_500)
+            .map(|n| build(n, "Payout_Build", "Payout", "finished"))
+            .collect();
+        let rest = FakeRest::new(vec![build_type("Payout_Build", "Payout")], many);
+        let cfg = TeamCityConfig::from_json(&serde_json::json!({
+            "build_type_ids": ["Payout_Build"]
+        }))
+        .expect("config");
+        let mut sink = VecSink(Vec::new());
+        let err = execute(
+            "teamcity",
+            TEST_BASE_URL,
+            &cfg,
+            &rest,
+            Some(r#"{"v":2,"since_build_id":0}"#.to_owned()),
+            &mut sink,
+        )
+        .await
+        .expect_err("a configuration that cannot be carried in one run must fail");
+        assert!(
+            matches!(&err, SourceError::Protocol { message: m, .. }
+                if m.contains("builds of Payout_Build") && m.contains("Backfill")),
+            "{err:?}"
+        );
+        assert!(sink.0.is_empty(), "nothing is emitted from a refused run");
+    }
+
     /// Exactly at the ceiling is a success: the last probe asks for one more
     /// than the ceiling, so a full page at 1 000 is distinguishable from a
     /// truncated one.
