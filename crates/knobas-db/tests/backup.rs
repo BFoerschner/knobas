@@ -175,15 +175,14 @@ async fn rows_of(pool: &sqlx::PgPool, table: &str) -> String {
     .unwrap()
 }
 
-/// A restore whose `pg_restore` fails leaves the target as it found it (#1635,
-/// spec #1619 ruling B3). The archive comes from a "newer build": its `COPY`
-/// of `knobas.entity` names a column this schema lacks, so the load refuses.
-/// The bookkeeping rows the restore cleared to make room for the archive's own
-/// -- settings, and the Dependencies layers and views only migrations seed --
-/// are back, and the column the rename shim added for the load is gone.
-#[tokio::test]
-async fn a_failed_restore_leaves_the_bookkeeping_rows_in_place() {
-    let from = knobas_db::test_util::scratch_database("newer-build").await;
+/// An archive from a "newer build": its `COPY` of `knobas.entity` names a
+/// column this schema lacks, so a load of it refuses. `tables` restricts it
+/// the way a share export is restricted; `None` is a whole backup.
+async fn an_archive_from_a_newer_build(
+    label: &str,
+    tables: Option<&[&str]>,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let from = knobas_db::test_util::scratch_database(label).await;
     let source = from.pool(2).await.expect("a pool on the source database");
     sqlx::raw_sql(
         "alter table knobas.entity add column from_a_newer_build text;
@@ -193,10 +192,23 @@ async fn a_failed_restore_leaves_the_bookkeeping_rows_in_place() {
     .await
     .unwrap();
     let dir = tempfile::tempdir().expect("a scratch directory");
-    let archive = dir.path().join("newer-build.knobas");
-    backup::dump(&from, &archive).await.expect("a dump");
+    let archive = dir.path().join(format!("{label}.knobas"));
+    match tables {
+        None => backup::dump(&from, &archive).await,
+        Some(tables) => backup::dump_tables(&from, &archive, tables).await,
+    }
+    .expect("a dump");
+    (dir, archive)
+}
 
-    let into = knobas_db::test_util::scratch_database("failed-restore").await;
+/// Restore `archive`, which must fail to load, into a fresh target holding
+/// rows of its own in the bookkeeping tables, and assert the failure left the
+/// target as it found it (#1635, spec #1619 ruling B3): the bookkeeping rows
+/// the restore cleared to make room for the archive's own -- settings, and
+/// the Dependencies layers and views only migrations seed -- are back, and
+/// the column the rename shim added for the load is gone.
+async fn a_failed_restore_of(archive: &std::path::Path, label: &str) {
+    let into = knobas_db::test_util::scratch_database(label).await;
     let target = into.pool(2).await.expect("a pool on the target");
     // Rows of this machine's own, so "held before" is more than the seed.
     sqlx::raw_sql(
@@ -215,7 +227,7 @@ async fn a_failed_restore_leaves_the_bookkeeping_rows_in_place() {
         before.push(rows);
     }
 
-    let refused = backup::restore(&into, &archive).await;
+    let refused = backup::restore(&into, archive).await;
     assert!(
         matches!(refused, Err(backup::BackupError::Tool { .. })),
         "a COPY naming a column this schema lacks fails the load: {refused:?}"
@@ -236,4 +248,23 @@ async fn a_failed_restore_leaves_the_bookkeeping_rows_in_place() {
     .await
     .unwrap();
     assert_eq!(shim, 0, "the failed restore left the rename shim's column behind");
+}
+
+/// A whole backup that fails to load: every bookkeeping table was cleared for
+/// the archive's own rows, and every one is put back.
+#[tokio::test]
+async fn a_failed_restore_leaves_the_bookkeeping_rows_in_place() {
+    let (_dir, archive) = an_archive_from_a_newer_build("newer-build", None).await;
+    a_failed_restore_of(&archive, "failed-restore").await;
+}
+
+/// A share export that fails to load. It carries `dep_layer` and no other
+/// bookkeeping table, so the restore clears that one alone -- which cascades
+/// into `dep_layer_kind` -- and leaves `setting` and `dep_view` standing,
+/// where putting their rows back without clearing them first would collide.
+#[tokio::test]
+async fn a_failed_restore_of_a_partial_archive_leaves_the_bookkeeping_rows_in_place() {
+    let (_dir, archive) =
+        an_archive_from_a_newer_build("newer-share", Some(&["entity", "dep_layer"])).await;
+    a_failed_restore_of(&archive, "failed-partial-restore").await;
 }
