@@ -11244,3 +11244,16 @@ set.
   `status_paths` statement through the board. *Reversing:* low.
 - **Shipped with #1611.** *Ruling:* one PR. #1611's §10.8 entry names #1578's sentence that the
   function stays, so the two land together. *Reversing:* n/a.
+
+### #1611/#1612: merge-manager review (Opus, 2026-10-22)
+
+- **Reserved for Björn, ruled by merge-manager on Opus: sign-off on the §10.8 entry.** *Ruling:*
+  confirmed. The entry matches the diff surface by surface; the retired names have no call site
+  left in `app/`, `crates/`, `testenv/` or `scripts/` beyond history comments; the gate's
+  `ipc-mirror` step leaves the mirror unchanged; the superseded parts are named, not edited.
+  *Reversing:* medium, revert the PR.
+- **`SuggestionPass::run` public but called only by tests.** *Ruling:* kept, as the implementer
+  ruled. Integration tests under `tests/` need it public, and it is the only path that hands a
+  pass's error (statement timeout, panic) back to a caller, which those tests witness;
+  `SuggestionPass::beside`, `passes` and `idle` are test-facing in the same way. *Reversing:*
+  low.
