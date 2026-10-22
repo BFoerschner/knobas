@@ -12695,3 +12695,18 @@ The measurement came after it.
   refills just as the count runs can lose that token and wait one more refill interval of the
   looser rate. That is milliseconds, so "no waiter loses anything" is close enough. *Reversing:*
   n/a.
+
+### #1758: merge review of PR #1765 (Opus merge-manager, 2026-10-23)
+
+- **The doc's "it holds it" against `write_queue::attempt`.** *Fork:* leave the sentence, or
+  name the exception. *Ruling:* name it in the same paragraph and the same §10.8 entry.
+  *Reasoning:* `attempt` holds an `Unconfirmed` write only when `Delivery::resend_harmless` is
+  `false`; Kuma's pause and resume are `true` and go on the ladder as `Unreachable`, which is
+  what `verdict`'s and `once_emitted`'s own docs say. The PR rewrapped that sentence and claimed
+  every other line still held, and the ticket asks for a true doc. Doc only. *Reversing:* low.
+- **The doc's "`status` is the gateway's, and `None` for a timeout".** *Fork:* leave it, or
+  name the other sources. *Ruling:* name them. *Reasoning:* `once_emitted` keeps the poll's
+  status (a `400 Session ID unknown`, a proxy's `401`), and `verdict` raises it with `None` for
+  an ack that is no timeout. Same paragraph, same entry. *Reversing:* low.
+- **"not JSON knobas can read".** *Ruling:* "not a socket.io ack knobas can read".
+  *Reasoning:* `answer` also turns away an empty argument list, which is JSON. *Reversing:* low.
