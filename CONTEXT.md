@@ -345,7 +345,7 @@ A curated export — links, assets, contexts and [source](#source) configuration
 ## Surfaces
 
 **Launcher**:
-The ⌘K box; one search over everything, under 100 ms.
+The ⌘K box; one search over everything, under 100 ms. Its text search, and every other full-text read of the [mirror](#mirror), runs under PostgreSQL's `english` configuration with no `unaccent`, over a German and English corpus, on purpose and with named gaps (ADR-0030).
 _Avoid_: command palette, spotlight
 
 **Coverage**:
