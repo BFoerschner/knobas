@@ -39,7 +39,7 @@
     /** The entity whose detail this is — which end of each link is "here". */
     entityId: string;
     links: LinkEntry[];
-    /** Navigate to an address (spec §2). The shell's router is the only one. */
+    /** Navigate to an address (spec §2). The shell sets `location.hash`. */
     onopen: (hash: string) => void;
     onunlink: (entry: LinkEntry) => void;
     /** Open *Link to…*. The empty state's invitation is the same action. */

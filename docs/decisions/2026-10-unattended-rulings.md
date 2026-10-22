@@ -11556,3 +11556,29 @@ set.
 **Ruling:** the implementer's no-tiebreak ruling stands, because the ticket pins the literal `ORDER BY created ASC`. The open question is filed as #1720 (`backlog`): check on the seeded Jira, then add a unique tiebreak if one is needed.
 
 **Cost of reversing:** low.
+
+## #1667 (merge-manager, PR #1725)
+
+### The view's `router` prop renamed `nav`, kept
+
+**The fork:** the implementer renamed `AssetsView`'s `router` prop to `nav` (`AssetsNav`: `route`, `go`) so the ticket's `router.go(` grep would not match.
+
+**Ruling:** kept. The view only ever read those two members and the rest of `Router` was a stub in `TfAssetTree`; the narrower type says so. Not a bend of the grep: no `Router` type remains for the old name to point at.
+
+**Cost of reversing:** a rename.
+
+### A test owed for `TfAssetTree`'s `go`, added
+
+**The fork:** the implementer's mutant (`go` emptied) survived because no test mounted the page with a real `go`; asset-tree navigation is user-visible.
+
+**Ruling:** owed and cheap. `TfAssetTree.test.svelte.ts` mounts the page over a stub view that exposes its `nav`, asserts `route` and that `go` sets `location.hash`. The emptied-`go` mutant now dies.
+
+**Cost of reversing:** delete two files.
+
+### `parseHash` and `tf/route.ts` left as two parsers
+
+**The fork:** the review (FE-3) noted they can disagree on time and inbox addresses.
+
+**Ruling:** the ticket's fix direction offers "export as pure helpers or fold"; it chose the former and no acceptance criterion asks for a merge. After this PR `parseHash` is read only for asset addresses (`TfAssetTree`, `AssetsView`'s `hashFor`), where `tf/route.ts` has no competing reading, so the disagreement has no live reader. Left alone.
+
+**Cost of reversing:** folding the asset addresses into `tf/route.ts`, a small ticket.

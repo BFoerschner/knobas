@@ -24,7 +24,17 @@
  */
 import { type SearchQuery, type SearchResponse, noFilters } from "../ipc";
 import type { AssetDetail, AssetRow, AssetStatus, Inherited, RouteRow } from "../ipc/assets";
-import { hashFor } from "../shell/router.svelte";
+import { hashFor, type Route } from "../shell/router";
+
+/**
+ * What the Assets view needs of the shell's navigation: the address it was
+ * handed, parsed, and a way to move to another. `TfAssetTree` implements it
+ * over `location.hash`; the view's tests, over a state of their own.
+ */
+export interface AssetsNav {
+  readonly route: Route;
+  go(hash: string): void;
+}
 
 /** The top of the estate: the column whose parent is nobody. */
 export const TOP: null = null;

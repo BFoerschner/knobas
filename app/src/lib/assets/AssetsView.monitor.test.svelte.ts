@@ -26,7 +26,7 @@ import type {
   RouteRow,
 } from "../ipc/assets";
 import type { WriteOpPayload } from "../ipc/sources";
-import { createRouter } from "../shell/router.svelte";
+import { createTestNav } from "./test-nav.svelte";
 import { layers } from "../tf/layers.svelte";
 import AssetsView from "./AssetsView.svelte";
 
@@ -155,10 +155,10 @@ let app: Record<string, unknown> | undefined;
 
 function render(ports: ReturnType<typeof estate>) {
   location.hash = "#/asset/asset:knobas-gitea";
-  const router = createRouter();
+  const nav = createTestNav();
   app = mount(AssetsView, {
     target,
-    props: { router, now: () => NOW, ports: ports as never },
+    props: { nav, now: () => NOW, ports: ports as never },
   });
   flushSync();
 }

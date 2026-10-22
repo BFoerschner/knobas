@@ -94,7 +94,6 @@ import {
   type NotificationClicked,
   type NotificationDraft as WireDraft,
 } from "../ipc/entity";
-import { router } from "../shell/router.svelte";
 import { addressOf } from "./address";
 
 /**
@@ -226,7 +225,9 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
     send: sendThrough(),
     onAction: clickChannel(),
     focused: () => document.hasFocus(),
-    navigate: (hash) => router.go(hash),
+    navigate: (hash) => {
+      location.hash = hash;
+    },
     ...ports,
   };
 

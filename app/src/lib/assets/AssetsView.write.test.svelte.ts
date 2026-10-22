@@ -43,7 +43,7 @@ import type {
   Visibility,
 } from "../ipc/assets";
 import type { ActivityRow } from "../ipc/entity";
-import { createRouter } from "../shell/router.svelte";
+import { createTestNav } from "./test-nav.svelte";
 import { layers } from "../tf/layers.svelte";
 import AssetsView from "./AssetsView.svelte";
 
@@ -537,10 +537,10 @@ let app: Record<string, unknown> | undefined;
 
 function render(hash: string, ports: ReturnType<typeof estate>) {
   location.hash = hash;
-  const router = createRouter();
-  app = mount(AssetsView, { target, props: { router, now: () => NOW, ports } });
+  const nav = createTestNav();
+  app = mount(AssetsView, { target, props: { nav, now: () => NOW, ports } });
   flushSync();
-  return { router };
+  return { nav };
 }
 
 function text(): string {
@@ -697,7 +697,7 @@ afterEach(() => {
  */
 test("the first column's plus creates at the top of the estate", async () => {
   const store = estate(seed());
-  const { router } = render("#/assets/tree", store);
+  const { nav } = render("#/assets/tree", store);
   await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
   click("New asset in Estate");
@@ -708,7 +708,7 @@ test("the first column's plus creates at the top of the estate", async () => {
   click("Create");
 
   await vi.waitFor(() => expect(columns()).toEqual([["fsn1", "hel1"]]));
-  expect(router.route).toEqual({
+  expect(nav.route).toEqual({
     view: "assets",
     tab: "tree",
     assetId: "asset:new-1",
@@ -811,7 +811,7 @@ test("a typed and a custom property are edited in the pane and the history says 
  *
  * Criterion 3's first half. The address does not change — the asset keeps its
  * id — so what redraws the Tree is the re-read, and the assertion is on the
- * columns and the held-by line rather than on the router.
+ * columns and the held-by line rather than on the nav.
  */
 test("moving an asset redraws the columns at its new path", async () => {
   const store = estate(seed());
@@ -886,7 +886,7 @@ test("a cycle is refused with the message the command gives, and nothing moves",
  */
 test("deleting a leaf asks first, then lands on what held it", async () => {
   const store = estate(seed());
-  const { router } = render("#/asset/asset:postgres", store);
+  const { nav } = render("#/asset/asset:postgres", store);
   await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
   click("Delete");
@@ -899,7 +899,7 @@ test("deleting a leaf asks first, then lands on what held it", async () => {
   click("Delete");
 
   await vi.waitFor(() =>
-    expect(router.route).toEqual({
+    expect(nav.route).toEqual({
       view: "assets",
       tab: "tree",
       assetId: "asset:vm-db-01",
@@ -1027,18 +1027,18 @@ test.each([
  * on it, so one still standing after the address moved would offer to move or
  * delete something other than the thing it names. The address can move while a
  * dialog is up without anybody clicking past the scrim — a launcher hit, a
- * notification's deep link — which is what `router.go` stands in for here, and
+ * notification's deep link — which is what `nav.go` stands in for here, and
  * a headless walk of this branch is where it was found.
  */
 test("an open dialog closes when the address names another asset", async () => {
   const store = estate(seed());
-  const { router } = render("#/asset/asset:postgres", store);
+  const { nav } = render("#/asset/asset:postgres", store);
   await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
   click("Move…");
   expect(text()).toContain("Move into vm-db-01");
 
-  router.go("#/asset/asset:vm-app-02");
+  nav.go("#/asset/asset:vm-app-02");
   flushSync();
 
   expect(target.querySelector('[role="dialog"]')).toBeNull();
@@ -1160,7 +1160,7 @@ test("a custom property is stored as the kind the picker was set to", async () =
  */
 test("a route is exposed from the pane and lands where the picker was walked", async () => {
   const store = estate(seed());
-  const { router } = render("#/asset/asset:vm-db-01", store);
+  const { nav } = render("#/asset/asset:vm-db-01", store);
   await vi.waitFor(() => expect(text()).toContain("Exposes No routes."));
 
   click("Add a route");
@@ -1187,7 +1187,7 @@ test("a route is exposed from the pane and lands where the picker was walked", a
   });
   // The route's own address, kept: a reader who copies this link gets the
   // route rather than the asset.
-  expect(router.route).toEqual({
+  expect(nav.route).toEqual({
     view: "assets",
     tab: "tree",
     assetId: null,
@@ -1247,7 +1247,7 @@ test("a route is edited and then deleted from the pane", async () => {
       properties: {},
     },
   ]);
-  const { router } = render("#/asset/asset:vm-db-01", store);
+  const { nav } = render("#/asset/asset:vm-db-01", store);
   await vi.waitFor(() => expect(text()).toContain("Postgres UI"));
 
   click("Edit…");
@@ -1261,7 +1261,7 @@ test("a route is edited and then deleted from the pane", async () => {
   await vi.waitFor(() => expect(text()).toContain("Postgres console"));
   expect(store.routes[0]).toMatchObject({ name: "Postgres console", target_id: null });
   expect(text()).toContain("lands on nothing knobas knows");
-  expect(router.route).toEqual({
+  expect(nav.route).toEqual({
     view: "assets",
     tab: "tree",
     assetId: null,
@@ -1273,7 +1273,7 @@ test("a route is edited and then deleted from the pane", async () => {
   await vi.waitFor(() => expect(text()).toContain("Exposes No routes."));
   expect(store.routes).toHaveLength(0);
   // Back at the asset that exposed it, not at an address that is now gone.
-  expect(router.route).toEqual({
+  expect(nav.route).toEqual({
     view: "assets",
     tab: "tree",
     assetId: "asset:vm-db-01",

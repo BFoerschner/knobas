@@ -23,7 +23,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AssetDetail, AssetRow } from "../ipc/assets";
 import type { LinkEntry } from "../ipc/entity";
-import { createRouter } from "../shell/router.svelte";
+import { createTestNav } from "./test-nav.svelte";
 import { layers } from "../tf/layers.svelte";
 
 /**
@@ -216,11 +216,11 @@ function render(hash: string) {
   const reads: string[] = [];
   const unlinked: string[] = [];
   location.hash = hash;
-  const router = createRouter();
+  const nav = createTestNav();
   app = mount(AssetsView, {
     target,
     props: {
-      router,
+      nav,
       now: () => NOW,
       ports: {
         assetTypes: () => Promise.resolve([]),
@@ -246,7 +246,7 @@ function render(hash: string) {
     },
   });
   flushSync();
-  return { router, reads, unlinked };
+  return { nav, reads, unlinked };
 }
 
 beforeEach(() => {

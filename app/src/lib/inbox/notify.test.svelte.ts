@@ -58,7 +58,7 @@ function entry(
  * what an unfocused window does; the focus test sets it the other way round
  * and says so.
  */
-function bench(overrides: Partial<NotifyPorts> = {}) {
+function bench(overrides: Partial<NotifyPorts> = {}, defaultNavigate = false) {
   const calls = {
     sent: [] as NotificationDraft[],
     stored: [] as InboxCategory[][],
@@ -97,6 +97,8 @@ function bench(overrides: Partial<NotifyPorts> = {}) {
     navigate: (hash) => calls.navigated.push(hash),
     ...overrides,
   };
+  // The default port is the one under test: take the bench's away.
+  if (defaultNavigate) delete ports.navigate;
 
   const store = createNotifications(ports);
   return {
@@ -303,6 +305,18 @@ test("a desktop notification carries the entity's address and its click navigate
 
   b.click(sent);
   expect(b.calls.navigated).toEqual(["#/pr/gitea%3Aacme%2Fpayouts%23144"]);
+});
+
+/** Without a port of its own, a click sets `location.hash`, as the rest of the shell does (#1667). */
+test("the default navigation sets location.hash", async () => {
+  location.hash = "#/inbox";
+  const b = bench({}, true);
+  cleanup = b.store.start();
+  await b.primed(["review_request"]);
+  b.store.saw([entry("review_request", "pr-12")]);
+
+  b.click(b.calls.sent[0]!);
+  expect(location.hash).toBe("#/pr/gitea%3Aacme%2Fpayouts%23144");
 });
 
 /**
