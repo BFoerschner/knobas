@@ -11488,3 +11488,37 @@ set.
   rejected: it would flash Starting before the backend accepts the retry. *Reversing:* low.
 - **The surviving mutant (event handler assigning `state.db` directly).** *Ruling:* owed and
   cheap: added `the same ready event twice seeds once`; the mutant now dies. *Reversing:* none.
+
+## #1623: the Jira walk orders by `created` and fails on a shrinking total (Opus implementer, 2026-10-22)
+
+- **What the shrink is measured against.** The ticket says "the total at the end of the walk is
+  below the total at its start". *Ruling:* every answer is compared with the largest `total` the
+  walk has seen, and the first one below it fails the run then. It catches every case the ticket's
+  rule catches, plus an issue filed and another deleted mid-walk, which leave the end total equal
+  to the start with the hole still there. Failing at the first such answer saves the rest of the
+  walk's requests. *Reversing:* low, one comparison in `refuse_a_shrunk_total`.
+- **Where the check sits.** `PageWalk` ends on an empty page without handing it out, and
+  `crates/knobas-http/**` is frozen. *Ruling:* the check sits inside the adapter's fetch closure,
+  so it reads the empty last page's total too; `knobas-http` is untouched. *Reversing:* low.
+- **A deletion behind the cursor, which skips nothing, fails the run too.** *Ruling:* accepted.
+  `total` cannot tell the two apart, and A5 already weighs it: a failed run costs one re-fetch, a
+  false `Ok` costs a tombstoned live ticket. *Reversing:* none needed.
+- **Incremental runs.** *Ruling:* the refusal is unconditional, as the page cap's is. A stepped-over
+  issue on an incremental run sits below the advanced watermark and is lost for good, so the
+  incremental case is worse than the full one, not safer. *Reversing:* low.
+- **A tiebreak after `created`.** *Ruling:* none. The ticket pins the literal `ORDER BY created
+  ASC`, `created` has millisecond resolution, and a second key would also need mockd's grammar to
+  grow. *Reversing:* low, one clause.
+- **mockd.** Its JQL subset accepted only `ORDER BY updated`, so every adapter test against it
+  would have been a 400. *Ruling:* the subset gains `ORDER BY created ASC|DESC`, sorted on
+  `created`, recorded in `docs/contract.md`'s "Amendments from the Jira walk order" with pointers
+  at §4.2, the #345 amendment's row and §5. *Reversing:* low.
+- **Where the engine's sweep gate is asserted.** `knobas-sync` has no dependency on the Jira crate.
+  *Ruling:* `sweep.rs`'s own fake gains a `fails` switch, and the test asserts that a full sync
+  failing after it emitted tombstones nothing. The adapter's own tests assert that the shrink
+  fails the run, and `Source::sync`'s `Err` is the wire between the two. *Reversing:* low.
+- **What the live run witnesses.** Nothing lets a test edit an issue between two of the adapter's
+  own page requests. *Ruling:* two raw-`/search` tests on the seeded Jira check what the fake
+  claims about Jira: a label edit moves an issue to the end of `ORDER BY updated ASC` and nowhere
+  in `ORDER BY created ASC`, and after a filed sub-task is deleted, a page past the new end
+  answers 200 with no issues and the smaller total. *Reversing:* low.
