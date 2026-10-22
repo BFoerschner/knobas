@@ -435,6 +435,7 @@ async fn a_branch_a_push_moved_off_the_listing_is_re_read_and_not_tombstoned() {
 /// force-pushed to an older commit that sorts it onto page 3 -- is mirrored at
 /// the head the cursor remembers: the mirror is never left on one head while
 /// the cursor holds the other, which would leave the move unnoticed for good.
+/// `b-00` takes an ordinary push in the same run.
 #[tokio::test]
 async fn a_branch_met_twice_with_two_heads_is_mirrored_at_the_head_remembered() {
     let (server, moving) = Moving::start(twenty_five_branches()).await;
@@ -449,6 +450,15 @@ async fn a_branch_met_twice_with_two_heads_is_mirrored_at_the_head_remembered() 
                 .and_then(|all| all.iter_mut().find(|b| b["name"] == "b-24"))
                 .expect("b-24 is in the fixture");
             *forced = support::branch("b-24", &sha(700), "rewound", &at(60 * 2 + 30));
+            // And an ordinary push on page 3, so the run emits something and
+            // its cursor is written (an idle run returns the one it was
+            // handed).
+            let pushed = world
+                .branches
+                .get_mut(MONOREPO)
+                .and_then(|all| all.iter_mut().find(|b| b["name"] == "b-00"))
+                .expect("b-00 is in the fixture");
+            *pushed = support::branch("b-00", &sha(800), "work", &at(1));
         });
     });
     let (during, cursor) = run(&*gitea, Some(&cursor)).await;
