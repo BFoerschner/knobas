@@ -104,9 +104,14 @@ crate::closed_vocabulary! {
     /// it is a reason to stop, and it has its own [`WriteState::Refused`];
     /// `write_queue_reason_state_chk` in migration 0005 is what keeps a held
     /// or refused row from also claiming to be waiting on a network. So a
-    /// row's `wait_reason` is `null` on every row that is not `pending`, and
-    /// on a pending one that has not been tried yet, which `attempted_at` is
-    /// what distinguishes.
+    /// row's `wait_reason` is `null` on every row that is not `pending`, on a
+    /// pending one that has not been tried yet, which `attempted_at` is what
+    /// distinguishes, and on one a new credential released
+    /// ([`release_unauthorized`]).
+    ///
+    /// The two are waited out differently (#1628): an `unreachable` write is
+    /// tried again on the sync side's backoff ladder, an `unauthorized` one
+    /// only after a credential change or an explicit *Flush now*.
     ///
     /// The reasons are documented here and not on each variant because the
     /// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
@@ -231,7 +236,8 @@ pub struct QueuedWrite {
     #[ts(type = "unknown")]
     pub target_snapshot: serde_json::Value,
     pub state: WriteState,
-    /// Why a pending write is waiting; `None` while nothing has been tried.
+    /// Why a pending write is waiting; `None` while nothing has been tried,
+    /// and again once a new credential has released an `unauthorized` wait.
     pub wait_reason: Option<WaitReason>,
     /// What the source said, in its own words. Untrusted source text: render
     /// it as text, never as markup.
@@ -894,6 +900,39 @@ pub async fn wait(
     .fetch_optional(pool)
     .await?;
     Ok(row)
+}
+
+/// A new credential for `source_id`: its writes waiting on a refused one are
+/// owed again (#1628). Each comes back pending with `wait_reason` null, which
+/// the flush loop reads as "nothing known in its way", so the next flush sends
+/// it with whatever credential is stored now.
+///
+/// Nothing else ends an `unauthorized` wait on its own: the flush loop does
+/// not send such a write on a timer, because re-sending a refused credential
+/// is how an instance with a login-failure lockout locks the account the user
+/// is about to re-enter. `detail` is kept: it is still what the last attempt
+/// was told.
+///
+/// Whole-source rather than `where id = $1`, so it is not one of the
+/// [`transition!`]s below; the state guard is theirs.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the statement fails.
+pub async fn release_unauthorized(
+    pool: &PgPool,
+    source_id: &str,
+) -> Result<Vec<QueuedWrite>, CoreError> {
+    let rows = sqlx::query_as::<_, QueuedWrite>(concat!(
+        "update knobas.write_queue set wait_reason = null
+          where source_id = $1 and state = 'pending' and wait_reason = 'unauthorized'
+         returning ",
+        queue_columns!()
+    ))
+    .bind(source_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
 }
 
 /// The source rejected the write outright: it stops being offered.

@@ -201,14 +201,58 @@ pub async fn queue(
     Ok(queued)
 }
 
-/// Flush every source that owes something.
+/// Flush every source that owes something: the scheduler's tick.
 ///
 /// One source's failure never stops another's: each is flushed on its own and
 /// its errors are logged rather than raised, which is what story 21 asks for
 /// -- one broken credential must not stop everything. Sequential rather than
 /// concurrent, deliberately: the queue is small, and each source's flush takes
-/// its own lock anyway (see [`source_lock`]).
+/// its own lock anyway (see [`gate`]).
+///
+/// A source whose health needs a human -- the credential was refused, or
+/// there is none -- is skipped whole, the test `Scheduler::trigger_all` makes
+/// before a sync (#1628). That is a cheap first filter, not the rule: a Kuma
+/// write can be refused while its sync is healthy (the account is a second
+/// credential), so what keeps a refused write from going again is
+/// [`owed`], read per row.
 pub async fn flush_all(deps: &SchedulerDeps) {
+    flush_every(deps, Pass::Owed).await;
+}
+
+/// *Flush now* from the queue panel (#1628): one source, or every source when
+/// `source_id` is `None`, sending each head write **once, whatever it is
+/// waiting on** -- a refused credential, the ladder after an unreachable
+/// server. It is a person saying "try it", so nothing is skipped for the
+/// source's health either.
+///
+/// Once per press: only the first pass ignores the waits. A write that fails
+/// again is recorded as waiting and is not sent again by the passes that
+/// follow, nor by the tick.
+///
+/// # Errors
+///
+/// As [`flush_source`], for one source. Every source's errors are logged, as
+/// [`flush_all`]'s are.
+pub async fn flush_now(deps: &SchedulerDeps, source_id: Option<&str>) -> Result<(), FlushError> {
+    match source_id {
+        Some(id) => flush(deps, id, Pass::Now).await,
+        None => {
+            flush_every(deps, Pass::Now).await;
+            Ok(())
+        }
+    }
+}
+
+/// Which head writes a pass sends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pass {
+    /// Those [`owed`] says are due: the tick, a submit, a release.
+    Owed,
+    /// Every one, once: *Flush now*.
+    Now,
+}
+
+async fn flush_every(deps: &SchedulerDeps, pass: Pass) {
     let sources = match config::list(&deps.pool).await {
         Ok(sources) => sources,
         Err(error) => {
@@ -217,10 +261,79 @@ pub async fn flush_all(deps: &SchedulerDeps) {
         }
     };
     for source in sources {
-        if let Err(error) = flush_source(deps, &source.id).await {
+        let needs_human = matches!(
+            source.health.state,
+            config::AuthState::Unauthorized | config::AuthState::MissingSecret
+        );
+        if pass == Pass::Owed && needs_human {
+            continue;
+        }
+        if let Err(error) = flush(deps, &source.id, pass).await {
             tracing::warn!(source = %source.id, %error, "write queue flush failed");
         }
     }
+}
+
+/// Whether a pending head write is due at `now`, or is waiting something out
+/// (#1628, spec #1618 ruling A2).
+///
+/// * Never tried, or released since -- due.
+/// * `unauthorized` -- **never** due on a clock. A refused credential stays
+///   refused; only a new one ([`credential_changed`]) or *Flush now* sends it
+///   again. This is `docs/development.md`'s rule for syncs, "a 401 never
+///   retries", for the same reason: the lockout.
+/// * `unreachable` -- due once the sync side's backoff ladder
+///   ([`config::backoff_after`]) has passed since `attempted_at`, with the
+///   row's `attempts` as the rung. That includes a write whose answer was
+///   lost and whose resend is harmless (Kuma's pause and resume, #1627),
+///   each attempt of which may spend a minute.
+fn owed(write: &QueuedWrite, now: chrono::DateTime<chrono::Utc>) -> bool {
+    match write.wait_reason {
+        None => true,
+        Some(WaitReason::Unauthorized) => false,
+        Some(WaitReason::Unreachable) => write.attempted_at.is_none_or(|at| {
+            let rung = config::backoff_after(i64::from(write.attempts));
+            chrono::Duration::from_std(rung).is_ok_and(|rung| now - at >= rung)
+        }),
+    }
+}
+
+/// The head writes of `source_id` this pass sends.
+async fn heads(
+    deps: &SchedulerDeps,
+    source_id: &str,
+    pass: Pass,
+) -> Result<Vec<QueuedWrite>, FlushError> {
+    let mut due = store::due(&deps.pool, source_id).await?;
+    if pass == Pass::Owed {
+        let now = chrono::Utc::now();
+        due.retain(|write| owed(write, now));
+    }
+    Ok(due)
+}
+
+/// A new credential for `source_id`: the secret or, for Kuma, the account
+/// beside it. Its writes waiting on a refused credential are owed again, and
+/// the next flush sends them (#1628).
+///
+/// Also what tells a flush already under way that a refusal it is about to
+/// record is stale: the 401 it holds was the answer to the credential just
+/// replaced, so the write is left released rather than re-reasoned
+/// `unauthorized` -- which would have it wait for a change that has already
+/// happened. The two serialise on the source's credential count (see
+/// [`gate`]); a flush never waits for this, nor this for a flush.
+///
+/// # Errors
+///
+/// [`FlushError::Store`] if the release fails.
+pub async fn credential_changed(
+    pool: &sqlx::PgPool,
+    source_id: &str,
+) -> Result<Vec<QueuedWrite>, FlushError> {
+    let gate = gate(source_id);
+    let mut generation = gate.credential.lock().await;
+    *generation += 1;
+    Ok(store::release_unauthorized(pool, source_id).await?)
 }
 
 /// One flush of a source at a time, process-wide.
@@ -244,25 +357,43 @@ pub async fn flush_all(deps: &SchedulerDeps) {
 ///
 /// Per source, not global: two sources must still flush independently
 /// (story 21).
-fn source_lock(source_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
-    let locks = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut locks = locks
+///
+/// The gate also counts the source's credential changes (#1628), which
+/// [`credential_changed`] bumps and [`waited`] reads before it records a
+/// refusal. A lock of its own rather than the flush lock: a credential saved
+/// while a flush is out must not wait for that flush's HTTP calls.
+fn gate(source_id: &str) -> Arc<Gate> {
+    static GATES: OnceLock<Mutex<HashMap<String, Arc<Gate>>>> = OnceLock::new();
+    let gates = GATES.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut gates = gates
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    Arc::clone(
-        locks
-            .entry(source_id.to_owned())
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
-    )
+    Arc::clone(gates.entry(source_id.to_owned()).or_default())
 }
 
-/// Flush what one source is owed.
+/// One source's share of the flush loop's process-wide state; see [`gate`].
+#[derive(Default)]
+struct Gate {
+    /// Held for a whole flush of the source.
+    flush: tokio::sync::Mutex<()>,
+    /// How many times the source's credential has changed in this process.
+    credential: tokio::sync::Mutex<u64>,
+}
+
+/// The credential a flush built its adapter with, by its place in the
+/// source's count of changes.
+struct Built<'a> {
+    gate: &'a Gate,
+    generation: u64,
+}
+
+/// Flush what one source is owed: every head write [`owed`] says is due.
 ///
 /// Loops while it makes progress: `due` hands out one write per entity, so a
 /// second pass is what lets an entity's *next* write follow the one that just
 /// landed. It stops the moment a pass delivers nothing, which is what keeps a
-/// stuck queue from spinning.
+/// stuck queue from spinning; and a write that failed in one pass is not owed
+/// in the next, because its wait was just recorded.
 ///
 /// # Errors
 ///
@@ -271,39 +402,54 @@ fn source_lock(source_id: &str) -> Arc<tokio::sync::Mutex<()>> {
 /// credential -- is **not** an error: its writes wait, with the reason
 /// recorded, which is the whole point of the queue.
 pub async fn flush_source(deps: &SchedulerDeps, source_id: &str) -> Result<(), FlushError> {
-    let lock = source_lock(source_id);
-    let _flushing = lock.lock().await;
+    flush(deps, source_id, Pass::Owed).await
+}
 
-    if store::due(&deps.pool, source_id).await?.is_empty() {
-        // Nothing owed: do not build an adapter or touch the keychain.
+async fn flush(deps: &SchedulerDeps, source_id: &str, pass: Pass) -> Result<(), FlushError> {
+    let gate = gate(source_id);
+    let _flushing = gate.flush.lock().await;
+
+    let mut due = heads(deps, source_id, pass).await?;
+    if due.is_empty() {
+        // Nothing owed: do not build an adapter or touch the keychain. A
+        // source whose every write waits on a refused credential stops here.
         return Ok(());
     }
 
+    // Read before the build, which reads the keychain: a change after this
+    // may not be in the adapter.
+    let built = Built {
+        gate: &gate,
+        generation: *gate.credential.lock().await,
+    };
     let source = match build(deps, source_id).await {
         Ok(source) => source,
         Err(reason) => {
             // The adapter could not be built at all. Every write this source
             // owes waits for the same reason, rather than one of them failing
             // and the rest silently not being tried.
-            for write in store::due(&deps.pool, source_id).await? {
-                waited(deps, &write, reason.0, &reason.1).await?;
+            for write in due {
+                waited(deps, &built, &write, reason.0, &reason.1).await?;
             }
             return Ok(());
         }
     };
 
     loop {
-        let due = store::due(&deps.pool, source_id).await?;
-        if due.is_empty() {
-            return Ok(());
-        }
         let mut progressed = false;
         for write in due {
-            if attempt(deps, source.as_ref(), &write).await? {
+            if attempt(deps, &built, source.as_ref(), &write).await? {
                 progressed = true;
             }
         }
         if !progressed {
+            return Ok(());
+        }
+        // Only the first pass of a *Flush now* sends what is waiting: the
+        // writes it just failed are not owed now, so this is not a second
+        // send of anything.
+        due = heads(deps, source_id, Pass::Owed).await?;
+        if due.is_empty() {
             return Ok(());
         }
     }
@@ -460,8 +606,8 @@ async fn project_now(
 /// where a second arrival changes nothing or is refused by the source,
 /// which is the #1122 audit's "retried" column plus Kuma's pause and resume
 /// (setting a state that is already set). Such a write answered
-/// [`SourceError::Unconfirmed`] waits as `Unreachable` and goes on a later
-/// tick. `false` where the source would make a second one: a second comment,
+/// [`SourceError::Unconfirmed`] waits as `Unreachable` and goes on the ladder
+/// ([`owed`]). `false` where the source would make a second one: a second comment,
 /// ticket, page, worklog, monitor, approval, review or build. Those are held,
 /// and the reader checks the source, then sends again or discards.
 ///
@@ -475,6 +621,7 @@ async fn project_now(
 /// until one exists.
 async fn attempt(
     deps: &SchedulerDeps,
+    built: &Built<'_>,
     source: &dyn Source,
     write: &QueuedWrite,
 ) -> Result<bool, FlushError> {
@@ -577,7 +724,7 @@ async fn attempt(
         }
         Err(error) => {
             match retryable(&error) {
-                Some(reason) => waited(deps, write, reason, &error.to_string()).await?,
+                Some(reason) => waited(deps, built, write, reason, &error.to_string()).await?,
                 None => refused(deps, write, &error.to_string()).await?,
             }
             Ok(false)
@@ -680,18 +827,32 @@ async fn announce_with(
 }
 
 /// The write could not be delivered, but the fault will pass.
+///
+/// A refusal is not recorded when the source's credential changed since the
+/// adapter was built (#1628): it answered the credential that was replaced,
+/// and the write [`credential_changed`] released stays released for the next
+/// flush to try with the new one. The count is held across the statement, so
+/// a change lands wholly before it or wholly after.
 async fn waited(
     deps: &SchedulerDeps,
+    built: &Built<'_>,
     write: &QueuedWrite,
     reason: WaitReason,
     detail: &str,
 ) -> Result<(), FlushError> {
-    if let Some(waiting) = store::wait(&deps.pool, write.id, reason, Some(detail)).await? {
+    let generation = built.gate.credential.lock().await;
+    if reason == WaitReason::Unauthorized && *generation != built.generation {
+        return Ok(());
+    }
+    let waiting = store::wait(&deps.pool, write.id, reason, Some(detail)).await?;
+    drop(generation);
+    if let Some(waiting) = waiting {
         // The row always records the attempt (`attempted_at`, `attempts`,
         // `detail`); the activity stream gets a line only when the *reason* is
-        // news. Story 20 promises a line per change, and the scheduler retries
-        // every tick, so announcing each attempt would bury the day's record
-        // under hundreds of identical lines an hour while a laptop is offline.
+        // news. Story 20 promises a line per change, and a source that stays
+        // down is tried again on every rung of the ladder, so announcing each
+        // attempt would bury the day's record under a line an hour, for ever,
+        // while a source is gone.
         // `write` is the row before this attempt, so a first failure (no
         // reason yet) and a change of fault both still announce.
         if write.wait_reason != Some(reason) {
@@ -893,6 +1054,58 @@ async fn refused(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn waiting(reason: Option<WaitReason>, attempts: i32, at: &str) -> QueuedWrite {
+        let at: chrono::DateTime<chrono::Utc> = at.parse().unwrap();
+        QueuedWrite {
+            id: 1,
+            source_id: "jira".to_owned(),
+            entity_id: "jira:PAY-1".to_owned(),
+            op: "comment".to_owned(),
+            payload: serde_json::Value::Null,
+            target_snapshot: serde_json::Value::Null,
+            state: WriteState::Pending,
+            wait_reason: reason,
+            detail: None,
+            queued_at: at,
+            attempted_at: (attempts > 0).then_some(at),
+            attempts,
+            held_snapshot: None,
+            settled_at: None,
+            source_enabled: true,
+        }
+    }
+
+    fn at(time: &str) -> chrono::DateTime<chrono::Utc> {
+        time.parse().unwrap()
+    }
+
+    /// #1628: an unreachable write is due on P7's ladder -- one minute after
+    /// its first failure, two after its second, an hour from the fifth on --
+    /// and a refused one is never due on a clock.
+    #[test]
+    fn an_unreachable_wait_is_owed_on_the_ladder_and_a_refused_one_never() {
+        let failed = "2026-10-22T10:00:00Z";
+        for (attempts, not_yet, due) in [
+            (1, "2026-10-22T10:00:59Z", "2026-10-22T10:01:00Z"),
+            (2, "2026-10-22T10:01:59Z", "2026-10-22T10:02:00Z"),
+            (5, "2026-10-22T10:59:59Z", "2026-10-22T11:00:00Z"),
+            (40, "2026-10-22T10:59:59Z", "2026-10-22T11:00:00Z"),
+        ] {
+            let write = waiting(Some(WaitReason::Unreachable), attempts, failed);
+            assert!(!owed(&write, at(not_yet)), "{attempts} failures, {not_yet}");
+            assert!(owed(&write, at(due)), "{attempts} failures, {due}");
+        }
+
+        let refused = waiting(Some(WaitReason::Unauthorized), 1, failed);
+        assert!(!owed(&refused, at("2027-10-22T10:00:00Z")));
+
+        assert!(owed(&waiting(None, 0, failed), at(failed)), "never tried");
+        assert!(
+            owed(&waiting(None, 3, failed), at(failed)),
+            "released by a new credential"
+        );
+    }
 
     /// ADR-0004's distinction is the one this feature rests on, so it is
     /// pinned rather than left to the reader of a `match`: a credential and a

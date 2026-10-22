@@ -60,12 +60,18 @@ enum Interrupt {
     /// the source lock. It is here so the disclosure below is pinned to the
     /// row's own state rather than to an empty settle.
     Hold(i64),
+    /// A new credential is saved for the source while a write it is about to
+    /// refuse is in flight (#1628): the 401 that comes back is about the
+    /// credential that was replaced.
+    NewCredential,
 }
 
 /// A `Source` that records every write it is handed and answers to order.
 struct Fake {
     id: String,
     answer: Arc<Mutex<Answer>>,
+    /// Every `write` call, whatever it answered: what a cadence is counted in.
+    asked: Arc<Mutex<usize>>,
     written: Arc<Mutex<Vec<WriteOp>>>,
     /// How long the fake takes to answer. Zero everywhere but the concurrency
     /// test, which needs the window between reading the queue and settling it
@@ -137,10 +143,24 @@ impl Source for Fake {
                 base: theirs,
             });
         }
+        *self.asked.lock().unwrap() += 1;
         let answer = *self.answer.lock().unwrap();
         let dwell = *self.dwell.lock().unwrap();
         if !dwell.is_zero() {
             tokio::time::sleep(dwell).await;
+        }
+        let renewed = {
+            let mut interrupt = self.interrupt.lock().unwrap();
+            let renewed = matches!(*interrupt, Some(Interrupt::NewCredential));
+            if renewed {
+                *interrupt = None;
+            }
+            renewed
+        };
+        if renewed {
+            flusher::credential_changed(&self.pool, &self.id)
+                .await
+                .unwrap();
         }
         if answer == Answer::LandsThenTimesOut {
             self.written.lock().unwrap().push(op);
@@ -160,7 +180,7 @@ impl Source for Fake {
                         .await
                         .unwrap();
                 }
-                None => {}
+                Some(Interrupt::NewCredential) | None => {}
             }
             self.written.lock().unwrap().push(op);
             let receipt = self.receipt.lock().unwrap().clone();
@@ -193,6 +213,7 @@ impl Source for Fake {
 
 struct FakeRegistry {
     answer: Arc<Mutex<Answer>>,
+    asked: Arc<Mutex<usize>>,
     written: Arc<Mutex<Vec<WriteOp>>>,
     dwell: Arc<Mutex<std::time::Duration>>,
     receipt: Arc<Mutex<Option<String>>>,
@@ -210,6 +231,7 @@ impl AdapterRegistry for FakeRegistry {
         Ok(Box::new(Fake {
             id: instance.id,
             answer: Arc::clone(&self.answer),
+            asked: Arc::clone(&self.asked),
             written: Arc::clone(&self.written),
             dwell: Arc::clone(&self.dwell),
             receipt: Arc::clone(&self.receipt),
@@ -290,6 +312,7 @@ struct Harness {
     deps: SchedulerDeps,
     events: Arc<Recorder>,
     answer: Arc<Mutex<Answer>>,
+    asked: Arc<Mutex<usize>>,
     written: Arc<Mutex<Vec<WriteOp>>>,
     dwell: Arc<Mutex<std::time::Duration>>,
     receipt: Arc<Mutex<Option<String>>>,
@@ -593,6 +616,37 @@ impl Harness {
     async fn reload(&self, id: i64) -> store::QueuedWrite {
         store::get(self.pool(), id).await.unwrap().unwrap()
     }
+
+    /// How many times the fake has been asked to write, whatever it answered.
+    fn asked(&self) -> usize {
+        *self.asked.lock().unwrap()
+    }
+
+    /// The fake clock the ladder is read against (#1628): this source's last
+    /// attempts moved `secs` into the past. `attempted_at` is the database's
+    /// `now()`, so it is the past that moves rather than the present.
+    async fn rewind(&self, secs: i64) {
+        sqlx::query(
+            "update knobas.write_queue
+                set attempted_at = attempted_at - make_interval(secs => $2)
+              where source_id = $1 and attempted_at is not null",
+        )
+        .bind(&self.source)
+        .bind(secs as f64)
+        .execute(self.pool())
+        .await
+        .unwrap();
+    }
+
+    /// The tick's flush, once every rung of the ladder has passed: what "the
+    /// source came back and the queue drained on its own" looks like now that
+    /// an unreachable write is not tried again every tick.
+    async fn flush_later(&self) {
+        self.rewind(86_400).await;
+        flusher::flush_source(&self.deps, &self.source)
+            .await
+            .unwrap();
+    }
 }
 
 /// A migrated database, a configured source whose adapter is the fake, and a
@@ -627,6 +681,7 @@ async fn harness() -> Harness {
         .unwrap();
 
     let answer = Arc::new(Mutex::new(Answer::Accept));
+    let asked = Arc::new(Mutex::new(0));
     let written = Arc::new(Mutex::new(Vec::new()));
     let dwell = Arc::new(Mutex::new(std::time::Duration::ZERO));
     let receipt = Arc::new(Mutex::new(None));
@@ -639,6 +694,7 @@ async fn harness() -> Harness {
             connections: Arc::new(TestConnections(connector)),
             registry: Arc::new(FakeRegistry {
                 answer: Arc::clone(&answer),
+                asked: Arc::clone(&asked),
                 written: Arc::clone(&written),
                 dwell: Arc::clone(&dwell),
                 receipt: Arc::clone(&receipt),
@@ -652,6 +708,7 @@ async fn harness() -> Harness {
         },
         events,
         answer,
+        asked,
         written,
         dwell,
         receipt,
@@ -692,13 +749,19 @@ async fn an_undeliverable_write_is_kept_and_flushes_when_the_source_returns() {
 
     // A rejected credential is a different sentence from a silent server.
     h.answer(Answer::Unauthorized);
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
     assert_eq!(
         h.reload(write.id).await.wait_reason,
         Some(WaitReason::Unauthorized)
     );
 
+    // And it waits for a new credential rather than a clock (#1628).
     h.answer(Answer::Accept);
+    h.flush_later().await;
+    assert!(h.delivered().is_empty(), "a refused credential is not re-sent");
+    flusher::credential_changed(h.pool(), &h.source)
+        .await
+        .unwrap();
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
     assert_eq!(h.delivered(), vec!["typed on a train".to_owned()]);
     assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
@@ -762,7 +825,7 @@ async fn a_target_that_changed_holds_the_write_and_one_that_did_not_does_not() {
     mirror_pull(&h, "o/r#6", "Bound the retry jitter", "closed").await;
 
     h.answer(Answer::Accept);
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
 
     assert_eq!(
         h.delivered(),
@@ -874,7 +937,7 @@ async fn a_page_whose_version_moved_past_the_edit_holds_it_with_both_versions() 
     h.mirror_page("98311", "base 60 s.", 4).await;
 
     h.answer(Answer::Accept);
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
 
     assert_eq!(
         h.delivered(),
@@ -968,7 +1031,7 @@ async fn a_source_action_is_held_sent_and_refused_as_a_typed_write_is() {
     mirror_pull(&h, "o/r#8", "Bound the retry jitter, retitled", "open").await;
 
     h.answer(Answer::Accept);
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
     assert_eq!(h.delivered(), ["add_label: 7"]);
     assert_eq!(h.reload(sent.id).await.state, WriteState::Sent);
     let held = h.reload(held.id).await;
@@ -985,7 +1048,7 @@ async fn a_source_action_is_held_sent_and_refused_as_a_typed_write_is() {
         Some("protocol: this issue type does not accept comments")
     );
     h.answer(Answer::Accept);
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
     assert_eq!(h.delivered(), ["add_label: 7"], "a refusal is not retried");
 }
 
@@ -1004,7 +1067,7 @@ async fn a_source_action_left_in_doubt_is_held_or_disclosed() {
     h.answer(Answer::LandsThenTimesOut);
     let unanswered = add_label(&h, &pull, "1").await;
     h.answer(Answer::Accept);
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
     assert_eq!(h.delivered(), ["add_label: 1"], "not sent a second time");
     assert_eq!(h.reload(unanswered.id).await.state, WriteState::Held);
 
@@ -1012,7 +1075,7 @@ async fn a_source_action_left_in_doubt_is_held_or_disclosed() {
     let withdrawn = add_label(&h, &other, "2").await;
     h.answer(Answer::Accept);
     h.interrupt(Interrupt::Withdraw(withdrawn.id));
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
     assert_eq!(h.delivered(), ["add_label: 1", "add_label: 2"]);
     assert_eq!(h.reload(withdrawn.id).await.state, WriteState::Discarded);
     let line = h.line("unclaimed");
@@ -1050,7 +1113,7 @@ async fn a_title_edit_holds_on_a_retitle_and_not_on_a_close() {
     mirror_pull(&h, "o/r#2", "Bound the jitter", "open").await;
 
     h.answer(Answer::Accept);
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
 
     assert_eq!(
         h.delivered(),
@@ -1098,7 +1161,7 @@ async fn a_close_holds_on_the_declared_state_and_not_on_a_retitle() {
     mirror_pull(&h, "o/r#4", "Bound the retry jitter", "closed").await;
 
     h.answer(Answer::Accept);
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
 
     assert_eq!(
         h.delivered(),
@@ -1135,7 +1198,7 @@ async fn one_entitys_writes_keep_their_order_without_blocking_another() {
     // state, #752). Its successor must not overtake it.
     mirror_pull(&h, "o/r#7", "Bound the retry jitter", "closed").await;
     h.answer(Answer::Accept);
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
 
     assert_eq!(h.reload(first.id).await.state, WriteState::Held);
     assert_eq!(
@@ -1205,7 +1268,7 @@ async fn an_edited_held_write_sends_what_the_user_wrote() {
     let write = h.comment(&pull, "on it").await;
     mirror_pull(&h, "o/r#12", "Bound the retry jitter", "closed").await;
     h.answer(Answer::Accept);
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
     assert_eq!(h.reload(write.id).await.state, WriteState::Held);
 
     flusher::amend(
@@ -1296,7 +1359,7 @@ async fn a_commit_into_a_repository_whose_record_moved_is_not_held() {
         .await;
 
     h.answer(Answer::Accept);
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
     assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
     assert_eq!(h.delivered(), vec!["b1: mine\n".to_owned()]);
 }
@@ -1378,6 +1441,7 @@ async fn two_flushes_of_one_source_deliver_a_write_once() {
 
     h.answer(Answer::Accept);
     *h.dwell.lock().unwrap() = std::time::Duration::from_millis(300);
+    h.rewind(86_400).await;
     let (a, b) = tokio::join!(
         flusher::flush_source(&h.deps, &h.source),
         flusher::flush_source(&h.deps, &h.source),
@@ -1417,7 +1481,7 @@ async fn a_page_created_after_the_user_withdrew_it_is_recorded_with_its_id() {
     h.answer(Answer::Accept);
     h.receipt(Some("9007"));
     h.interrupt(Interrupt::Withdraw(write.id));
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
 
     assert_eq!(
         h.delivered(),
@@ -1459,7 +1523,7 @@ async fn a_ticket_created_after_the_user_withdrew_it_is_recorded_without_one() {
     h.answer(Answer::Accept);
     h.receipt(None);
     h.interrupt(Interrupt::Withdraw(write.id));
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
 
     assert_eq!(h.delivered(), vec!["Reconcile the SEPA batch".to_owned()]);
     assert_eq!(h.reload(write.id).await.state, WriteState::Discarded);
@@ -1503,7 +1567,7 @@ async fn a_row_that_settled_some_other_way_is_not_called_withdrawn() {
     h.answer(Answer::Accept);
     h.receipt(Some("9008"));
     h.interrupt(Interrupt::Hold(write.id));
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
 
     assert_eq!(h.reload(write.id).await.state, WriteState::Held);
     assert!(
@@ -1526,7 +1590,7 @@ async fn a_comment_that_landed_after_a_withdrawal_leaves_nothing_unclaimed() {
 
     h.answer(Answer::Accept);
     h.interrupt(Interrupt::Withdraw(write.id));
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
 
     assert_eq!(
         h.delivered(),
@@ -1572,7 +1636,7 @@ async fn a_pull_request_opened_after_a_withdrawal_leaves_nothing_unclaimed() {
     // away, because knobas never had it.
     h.receipt(None);
     h.interrupt(Interrupt::Withdraw(write.id));
-    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.flush_later().await;
 
     assert_eq!(
         h.delivered(),
@@ -1699,6 +1763,174 @@ async fn a_write_the_source_refuses_on_repeat_waits_rather_than_holds() {
     assert_eq!(waiting.wait_reason, Some(WaitReason::Unreachable));
 
     h.answer(Answer::Accept);
+    h.flush_later().await;
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+}
+
+/// #1628, SYNC-1: a write whose credential was refused is not sent again by
+/// the flushes after it, however long ago the refusal was. Re-sending a dead
+/// credential on a timer is how an instance with a login-failure lockout
+/// locks the account the user is about to re-enter.
+///
+/// The fake dwells, as a real source does, so each flush that sends spends
+/// time the count would show.
+#[tokio::test]
+async fn a_write_refused_its_credential_is_not_sent_again_by_the_next_flushes() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-40", "a payout fails").await;
+    *h.dwell.lock().unwrap() = std::time::Duration::from_millis(20);
+
+    h.answer(Answer::Unauthorized);
+    let write = h.comment(&ticket, "after the password expired").await;
+    assert_eq!(
+        h.reload(write.id).await.wait_reason,
+        Some(WaitReason::Unauthorized)
+    );
+    assert_eq!(h.asked(), 1, "submit tries the write once");
+
+    h.answer(Answer::Accept);
+    for _ in 0..2 {
+        // Not a matter of the ladder: a day later it is still not owed.
+        h.rewind(86_400).await;
+        flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    }
+    assert_eq!(h.asked(), 1, "no flush re-sends a refused credential");
+    assert_eq!(h.reload(write.id).await.state, WriteState::Pending);
+}
+
+/// #1628: a credential change on the source releases its refused writes, and
+/// the next flush sends them. A change on another source releases nothing.
+#[tokio::test]
+async fn a_new_credential_releases_the_wait_on_its_own_source_only() {
+    let h = harness().await;
+    let other = harness().await;
+    let ticket = h.mirror("PAY-41", "a payout fails").await;
+    let elsewhere = other.mirror("PAY-42", "a payout fails").await;
+
+    h.answer(Answer::Unauthorized);
+    other.answer(Answer::Unauthorized);
+    let write = h.comment(&ticket, "re-entered").await;
+    let theirs = other.comment(&elsewhere, "still refused").await;
+
+    let released = flusher::credential_changed(h.pool(), &h.source)
+        .await
+        .unwrap();
+    assert_eq!(
+        released.iter().map(|w| w.id).collect::<Vec<_>>(),
+        vec![write.id]
+    );
+    assert_eq!(h.reload(write.id).await.wait_reason, None);
+
+    h.answer(Answer::Accept);
+    other.answer(Answer::Accept);
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    flusher::flush_source(&other.deps, &other.source)
+        .await
+        .unwrap();
+
+    assert_eq!(h.delivered(), vec!["re-entered".to_owned()]);
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+    assert_eq!(other.asked(), 1, "the other source's write still waits");
+    assert_eq!(
+        other.reload(theirs.id).await.wait_reason,
+        Some(WaitReason::Unauthorized)
+    );
+}
+
+/// #1628: a refusal that comes back after a new credential was saved is
+/// about the credential that was replaced, so it does not re-reason the
+/// write `unauthorized` -- that would leave it waiting for a change that has
+/// already happened. The next flush tries it with the new one.
+#[tokio::test]
+async fn a_refusal_in_flight_when_the_credential_changes_does_not_keep_the_write_waiting() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-43", "a payout fails").await;
+
+    h.answer(Answer::Unauthorized);
+    *h.interrupt.lock().unwrap() = Some(Interrupt::NewCredential);
+    let write = h.comment(&ticket, "saved mid-flight").await;
+    assert_eq!(h.asked(), 1);
+    assert_eq!(
+        h.reload(write.id).await.wait_reason,
+        None,
+        "the stale refusal is not recorded"
+    );
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.delivered(), vec!["saved mid-flight".to_owned()]);
+}
+
+/// #1628, story 14: an unreachable write climbs the sync side's ladder
+/// (P7: one minute, then two) rather than going every tick. The clock is
+/// the row's own `attempted_at`, moved back by hand.
+#[tokio::test]
+async fn an_unreachable_write_is_tried_again_on_the_sync_ladder() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-44", "a payout fails").await;
+
+    h.answer(Answer::Unreachable);
+    let write = h.comment(&ticket, "typed offline").await;
+    assert_eq!(h.asked(), 1);
+
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    h.rewind(50).await;
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.asked(), 1, "not before the first rung, one minute");
+
+    h.rewind(10).await;
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.asked(), 2, "on the first rung");
+    assert_eq!(h.reload(write.id).await.attempts, 2);
+
+    h.rewind(60).await;
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.asked(), 2, "the second rung is two minutes");
+
+    h.rewind(60).await;
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.asked(), 3);
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+}
+
+/// #1628: *Flush now* is the reader saying "try it": it sends a refused
+/// write once per press, and leaves the wait in place when the source
+/// refuses again, so the tick after it sends nothing.
+#[tokio::test]
+async fn flush_now_sends_a_refused_write_once_and_the_tick_after_it_does_not() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-45", "a payout fails").await;
+
+    h.answer(Answer::Unauthorized);
+    let write = h.comment(&ticket, "pressed").await;
+    assert_eq!(h.asked(), 1);
+
+    flusher::flush_now(&h.deps, Some(&h.source)).await.unwrap();
+    assert_eq!(h.asked(), 2, "one send per press");
+    assert_eq!(
+        h.reload(write.id).await.wait_reason,
+        Some(WaitReason::Unauthorized)
+    );
+
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.asked(), 2, "the tick does not take the press as a release");
+
+    h.answer(Answer::Accept);
+    flusher::flush_now(&h.deps, Some(&h.source)).await.unwrap();
+    assert_eq!(h.delivered(), vec!["pressed".to_owned()]);
+}
+
+/// #1628: *Flush now* does not wait out the ladder either -- "I know the
+/// source is back" (story 10).
+#[tokio::test]
+async fn flush_now_does_not_wait_out_the_ladder() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-46", "a payout fails").await;
+
+    h.answer(Answer::Unreachable);
+    let write = h.comment(&ticket, "back now").await;
+    h.answer(Answer::Accept);
+    flusher::flush_now(&h.deps, Some(&h.source)).await.unwrap();
     assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
 }
