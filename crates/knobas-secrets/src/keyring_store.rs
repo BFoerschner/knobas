@@ -379,7 +379,7 @@ mod tests {
         store
             .entry(&id)
             .unwrap()
-            .set_password(r#"{"v":2,"kind":"api_token","secret":"x"}"#)
+            .set_password(r#"{"v":2,"kind":"api\u005ftoken","secret":"x"}"#)
             .unwrap();
         let got = store.get(&id).unwrap().expect("the item is there");
         assert_eq!((got.kind, got.value.as_str()), (AuthMethod::ApiToken, "x"));
