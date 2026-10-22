@@ -3261,7 +3261,10 @@ async fn search_page(seeded: &Seeded, jql: &str, start_at: u32, max: u32) -> (u6
         .flatten()
         .map(|i| i["key"].as_str().expect("an issue has a key").to_owned())
         .collect();
-    (body["total"].as_u64().expect("a search page has a total"), keys)
+    (
+        body["total"].as_u64().expect("a search page has a total"),
+        keys,
+    )
 }
 
 /// **The walk's order is one an edit cannot move** (#1623). The adapter pages
@@ -3285,7 +3288,11 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
     let created = order(seeded.jql("ORDER BY created ASC", "key").await);
     let mut every = created.clone();
     every.sort();
-    assert_eq!(every, seeded.seeded_keys(), "one page holds the whole corpus");
+    assert_eq!(
+        every,
+        seeded.seeded_keys(),
+        "one page holds the whole corpus"
+    );
     let by_updated = order(seeded.jql("ORDER BY updated ASC", "key").await);
     let edited = by_updated[0].clone();
     // Later than every stamp, so the edit lands at the end and nowhere else.
@@ -3296,7 +3303,7 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
     loop {
         let (_, last) = search_page(&seeded, "ORDER BY updated ASC", total - 1, 1).await;
-        if last == [edited.clone()] {
+        if last == std::slice::from_ref(&edited) {
             break;
         }
         assert!(
@@ -3343,12 +3350,18 @@ async fn a_deletion_under_the_walk_shrinks_the_total_the_next_page_reports() {
         );
         tokio::time::sleep(Duration::from_millis(250)).await;
     };
-    assert_eq!(last, [key.clone()], "a filed issue joins the end of the created order");
+    assert_eq!(
+        last,
+        std::slice::from_ref(&key),
+        "a filed issue joins the end of the created order"
+    );
 
     // The guard deletes it and waits for the index to stop naming it.
     drop(sub_task);
     let (shrunk, past_the_end) = search_page(&seeded, WALK, seeded_total as u32, 1).await;
-    println!("shrink: total {grown} with {key}, {shrunk} after its deletion; page past the end {past_the_end:?}");
+    println!(
+        "shrink: total {grown} with {key}, {shrunk} after its deletion; page past the end {past_the_end:?}"
+    );
     assert_eq!(shrunk, seeded_total, "the deletion shrank the total");
     assert!(past_the_end.is_empty(), "{past_the_end:?}");
 }
