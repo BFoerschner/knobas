@@ -649,6 +649,7 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
     })
     .await
     .expect("the quit begins");
+    let began = std::time::Instant::now();
     knobas_app::commands::entity::start_work_run(app.handle().clone(), AFTER.to_owned())
         .await
         .expect("a run asked for during the quit still answers the flow");
@@ -656,6 +657,13 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
     tokio::time::sleep(Duration::from_millis(200)).await;
     gate.add_permits(1);
     quitting.join().expect("the quit finishes");
+    // The quit's grace is 3 s; a run still in the set at its end is aborted.
+    // This one ends once its send lands, ~200 ms in, so a quit that waited
+    // out the grace had a run looping in the set.
+    assert!(
+        began.elapsed() < Duration::from_millis(2500),
+        "the quit waited out its grace: the run did not end after its step"
+    );
 
     let reader = connector.pool(1).await.unwrap();
     let flow_of = async |id: &str| {
