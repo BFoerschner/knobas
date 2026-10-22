@@ -12384,3 +12384,34 @@ Ruled 2026-10-22 by the implementer on Sonnet; docs only.
   `live_gitea_capped` now asserts that it names every branch the hand walk found where each page
   holds one record. Gitea serves it without `ListOptions`, so `MAX_RESPONSE_ITEMS` does not apply.
   *Reversing:* n/a.
+
+## #1720: `id` breaks ties on `created` in the Jira walk (Opus implementer, 2026-10-22)
+
+The ticket's first step measured that an edit reorders issues tied on `created`, so the
+#1623 ruling "A tiebreak after `created`: none" is superseded. That ruling followed its ticket.
+The measurement came after it.
+
+- **How the tie was made.** Jira's REST API stamps `created` with the moment of the request and
+  lets nothing change it. Bulk-filed issues *look* tied, because `/search` renders `created` to the
+  second, but `jiraissue.created` and the index hold milliseconds, and an edit left them in place.
+  *Ruling:* write one stamp, truncated to the minute, into `jiraissue.created` with `psql` in the
+  `knobas-jira-db` container, then reindex each issue through `POST /rest/api/2/reindex/issue`.
+  That is the state an import at minute resolution leaves. The live test does it the same way,
+  through `docker exec`, which ties the test to testenv's local compose project. Every
+  `*-live` recipe already assumes that project. *Reversing:* low, one helper (`Tied::file`).
+- **`id`, not `key`.** DC accepts both and orders them stably. *Ruling:* `id`. It is unique and
+  immutable, while a key changes when the issue moves to another project. *Reversing:* one constant
+  (`WALK_ORDER`).
+- **mockd's grammar.** *Ruling:* accept exactly a trailing `, id ASC` and refuse any other second
+  key or direction. The clause is parsed and stored nowhere, because mockd's search has always
+  broken ties on the first key by id ascending. The subset stays as narrow as the adapter's need.
+  *Reversing:* low.
+- **What `LiveIndex` models.** *Ruling:* its listing is the index order. A tie on every `ORDER BY`
+  key comes back in that order, and an edit moves the edited issue to the end, as measured. The
+  #1623 tests use distinct `created` stamps, so the change does not reach them. *Reversing:* low.
+- **The live test asserts the reorder, not just the tiebreak.** *Ruling:* it asserts both that the
+  tie comes back in index order and moves on an edit, and that `created ASC, id ASC` does not. If a
+  later Jira stops reordering, the test goes red. That is the fake's claim failing, and it is meant
+  to be seen. *Reversing:* drop two assertions.
+- **Where the contract records it.** *Ruling:* a dated paragraph inside "Amendments from the Jira
+  walk order", as the ticket says. The diff touches no surface §10.8 freezes. *Reversing:* none.

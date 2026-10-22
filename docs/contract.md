@@ -2350,6 +2350,21 @@ tests in `live_jira_seeded.rs`: a label edit moves an issue to the end of the `u
 nowhere in the `created` one, and a page past a deletion's new end answers empty with the smaller
 total.
 
+**Amended by #1720 (2026-10-22, binding): `id` breaks ties on `created`.** The walk's JQL reads
+`<scope> AND updated >= "<watermark − 2 min>" ORDER BY created ASC, id ASC`. Issues that share one
+`created` value come back in Jira's own tiebreak, the index's document order, and an edit reindexes
+the issue to the end of its group. Measured on the seeded Jira 10.3.24: four issues given one
+`created` stamp through the database and reindexed newest first come back newest first, and after
+an edit to the first, that issue is last. Across a page boundary that is the edit shift again, inside
+the group, with `total` unchanged. `id` is unique and nothing changes it. `key` changes when an issue
+moves to another project, so it is not the tiebreak. Ties are rare for issues filed by hand (the
+column and the index hold milliseconds, though `/search` renders `created` to the second) and common
+after an import at minute or day resolution. **§5 mockd's subset gains a trailing `, id ASC`**, which
+changes no answer: mockd has always broken a tie on the first key by id ascending. No §10.8 entry is
+owed, for the reason the #1623 paragraph above gives. Witnessed by `sync::tests`'
+`an_issue_edited_in_a_tie_group_does_not_shift_an_unread_one_past_it` and `live_jira_seeded`'s
+`an_edit_reorders_issues_tied_on_created_and_id_holds_them_still`.
+
 ---
 
 ## 10. As built — the contract PR (2026-08-24)
