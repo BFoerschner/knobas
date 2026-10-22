@@ -398,6 +398,10 @@ pub async fn update(
         let floor = template_for(registry, &kind)?.min_sync_interval_secs;
         config::check_interval(secs, floor).map_err(SourcesError::Invalid)?;
     }
+    // Where the source is, or how it is configured: what an adapter that
+    // would not build was waiting on, which the write queue records as a
+    // wait for a person, as it does a refused credential (#1628).
+    let reaches_it_anew = patch.base_url.is_some() || patch.config.is_some();
     let row = config::patch(
         pool,
         id,
@@ -411,6 +415,9 @@ pub async fn update(
     )
     .await?
     .ok_or_else(|| SourcesError::NotFound(id.to_owned()))?;
+    if reaches_it_anew {
+        release_refused_writes(pool, id).await;
+    }
 
     let template = template_for(registry, &row.adapter_kind)?;
     summarize(pool, row, &template).await
@@ -495,6 +502,7 @@ pub async fn set_secret(
         },
     )
     .await?;
+    release_refused_writes(pool, id).await;
 
     let source = registry.build(instance_from(
         id,
@@ -530,6 +538,28 @@ pub async fn set_secret(
         config::clear_backoff(pool, id).await?;
     }
     Ok(health)
+}
+
+/// A person acted on what source `id`'s writes wait for: the writes waiting
+/// on a refused credential are owed again, and the next flush sends them
+/// (#1628).
+///
+/// [`set_secret`] calls it for any credential saved -- the secret, the
+/// account beside it, or both -- whether or not the test that follows
+/// passes: Kuma's test reads with the API key and never logs in with the
+/// account its writes use, so a passing test is not the write side's answer,
+/// and a failing one leaves the source's health needing a human, which the
+/// tick skips anyway. [`update`] calls it for a new address or
+/// configuration, because an adapter that would not build waits under the
+/// same reason.
+///
+/// A failure is logged, not raised: the credential is stored by now, and an
+/// error here would tell the reader their save failed. The writes stay
+/// waiting, and *Flush now* still sends them.
+async fn release_refused_writes(pool: &PgPool, id: &str) {
+    if let Err(error) = knobas_sync::write_queue::credential_changed(pool, id).await {
+        tracing::warn!(source = %id, %error, "the write queue kept its refused writes waiting");
+    }
 }
 
 /// Whether a re-entered credential earns an immediate retry.

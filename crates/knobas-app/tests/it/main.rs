@@ -56,6 +56,7 @@ mod probe_snapshot;
 mod project_census;
 mod protocol_ipc;
 mod read_plans;
+mod refused_write;
 mod registry_reads_ipc;
 mod responsiveness_probe;
 mod run_presets_ipc;

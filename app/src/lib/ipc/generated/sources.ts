@@ -784,7 +784,8 @@ payload: WriteOpPayload,
  */
 target_snapshot: unknown, state: WriteState, 
 /**
- * Why a pending write is waiting; `None` while nothing has been tried.
+ * Why a pending write is waiting; `None` while nothing has been tried,
+ * and again once a new credential has released an `unauthorized` wait.
  */
 wait_reason: WaitReason | null, 
 /**
@@ -1592,9 +1593,14 @@ fields: Array<PayloadPath>, };
  * it is a reason to stop, and it has its own [`WriteState::Refused`];
  * `write_queue_reason_state_chk` in migration 0005 is what keeps a held
  * or refused row from also claiming to be waiting on a network. So a
- * row's `wait_reason` is `null` on every row that is not `pending`, and
- * on a pending one that has not been tried yet, which `attempted_at` is
- * what distinguishes.
+ * row's `wait_reason` is `null` on every row that is not `pending`, on a
+ * pending one that has not been tried yet, which `attempted_at` is what
+ * distinguishes, and on one a new credential released
+ * ([`release_unauthorized`]).
+ *
+ * The two are waited out differently (#1628): an `unreachable` write is
+ * tried again on the sync side's backoff ladder, an `unauthorized` one
+ * only after a credential change or an explicit *Flush now*.
  *
  * The reasons are documented here and not on each variant because the
  * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
