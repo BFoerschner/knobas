@@ -300,12 +300,14 @@ impl KumaSocket {
     /// live clients ask for governs (#1630, spec #1618): one knobas sends a
     /// Kuma at most what its source was saved with, polls included. So the
     /// socket asks for exactly that. A rate of its own could only ever
-    /// tighten: the 25 a second this asked for before held a source saved at
-    /// 100 down to 25, syncs and all, for as long as the process kept the
-    /// socket. Measured through a relay in front of the pinned container
-    /// (2026-10-22, default 5/s, burst 10): a pause on a fresh login is eleven
-    /// requests in about 0.2 s, inside the burst, and a write straight after it
-    /// on the held session pays 0.2 s a request for the refill.
+    /// tighten: the 25 a second this asked for before never sped a poll up,
+    /// since every write's adapter holds the read half's client beside it, and
+    /// it held a source saved at 100 down to 25, syncs and all, for as long as
+    /// the process kept the socket. Measured through a relay in front of the
+    /// pinned container (2026-10-22, default 5/s, burst 10): a pause on a
+    /// fresh login is ten or eleven requests in 0.1 to 0.2 s, inside the
+    /// burst, and a write straight after it on the held session pays 0.2 s a
+    /// request for the refill.
     ///
     /// # Errors
     ///
