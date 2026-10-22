@@ -12126,3 +12126,65 @@ Ruled 2026-10-22 by the implementer on Sonnet; docs only.
   general lesson sits in `docs/agents/issue-tracker.md`, *Acceptance greps*. No ticket template in
   `docs/` or `.claude/` produced either criterion (grep for `include_str` and `first second`), so there
   was none to fix. *Reversing:* none.
+
+### #1634, #1703, #1633: bring-up and quit on the lifecycle seam (Opus implementer, 2026-10-22)
+
+- **Where the server lives during bring-up.** *Fork:* stash the `EmbeddedDb` on `AppState`, or
+  somewhere that exists before bring-up ends. *Ruling:* on `Lifecycle` (`hold_server`,
+  `take_server`), from the moment `start` returns. `AppState` is now just the pool, so
+  `AppState::over_db` is gone and the shutdown test holds its server with `hold_server`.
+  `sources::start` and `backup::start` take the pool and the connector instead of
+  `&EmbeddedDb`, because the handle is in the lifecycle by then. *Reversing:* low.
+- **A failed bring-up calls `stop`, not `abandon`.** *Ruling:* `abandon` is `test-util` only and
+  leaves the server running, owned by nobody. `stop` is async and leaves `PostgreSQL`'s `Drop`
+  nothing to do. It runs before `Failed`, so a Retry starts from a stopped server. *Reversing:* n/a.
+- **LIFE-6's witness is a test, not a scan.** *Ruling:* a one-thread runtime with a ticker every
+  5 ms; while the state is `Migrating`, no gap between ticks reaches 80 ms. A dropped server holds
+  the thread for at least `pg_ctl`'s 100 ms poll, and the mutant measured 109 ms. The test held
+  under a full parallel `it` run. *Reversing:* low.
+- **The registrar's seam.** *Ruling:* `set_shown`, `set_shortcut` and `register_stored` take
+  `Arc<dyn Registrar>`, and one helper runs the sync `apply` under `spawn_blocking`. The trait
+  stays synchronous. The test checks that the stub runs on a thread other than the
+  `#[tokio::test]` runtime's only thread. *Reversing:* low.
+- **The migration that waits on a signal.** *Ruling:* the test orphans the profile's own server
+  (migrated, then `abandon`), locks `_sqlx_migrations` from its own connection, and lets bring-up
+  adopt the server, which also takes ownership. That is the one way to hold a connection on the
+  server before bring-up's migration runs. *Reversing:* n/a.
+- **D8's step names.** *Ruling:* "closing any timer left running", "interrupting start-work steps
+  a quit left running", "storing the adapters' declarations", "starting the sync engine",
+  "starting the nightly backup", "registering the capture shortcut". Lowercase, like the existing
+  first-run detail. `DbState`'s docs are unchanged, so the generated mirror is too. *Reversing:* a
+  few strings.
+- **Where the join set lives.** *Fork:* on `SourcesState`, as LIFE-2's fix direction says, or on
+  the scheduler. *Ruling:* `knobas_sync::background::Background`, held by the scheduler and
+  awaited by `Scheduler::shutdown`. The sends write through the scheduler's pool, and that
+  shutdown is what closes it. `SourcesState` is built by struct literal at about 30 sites.
+  `ArrivalLinks` is built before the scheduler, so it gets the set handed in, and
+  `Scheduler::start_with_background` gives the scheduler the same one. *Reversing:* low.
+- **What "cancel" means for a send.** *Ruling:* the set closes under the same lock a spawn takes,
+  so a spawn either lands in the set the quit awaits or is refused and leaves its row pending. The
+  order is: the cancel token, the door, then the runs and the set awaited together under one
+  `SHUTDOWN_GRACE` (now `pub`). One grace for both keeps a quit to 3 s, not 6. A send still
+  running after the grace is aborted rather than left to fail against a closed pool: that is
+  ADR-0012's window. *Reversing:* low.
+- **The door beside SYNC-5's re-check.** *Fork:* the re-check alone, as the ticket's fix
+  direction says. *Ruling:* both. Without a door the quit closes the pool while the trigger is
+  between its row and its spawn, and the re-check's own settle then fails on the closed pool and
+  leaves the row open (mutant m7). The door is a `RwLock<()>`: every trigger holds it for reading
+  from its first cancel check to its push, and shutdown takes it for writing once, after
+  cancelling, under the grace. *Reversing:* the lock and one `await`.
+- **How the refusing trigger ends its row.** *Ruling:* it runs the run's own task inline with the
+  cancel set, the way a run cancelled before its permit ends: settled, its watchers told
+  (ADR-0005), the source released. Then it answers `ShuttingDown`. *Reversing:* low.
+- **`send_in_background_then`'s `then` when the quit refused the send.** *Ruling:* not run, as
+  after a send that fails. Before this change the runtime's end dropped the task, so `then` never
+  ran on a quit either. *Reversing:* n/a.
+- **Clones at quit.** *Ruling:* setup manages `Clones::global()` and `clone_repo` reads the managed
+  registry, so the exit handler stops the same clones the command started. `stop_all` closes the
+  registry (a start during the quit answers `not_ready`), sends every runner its stop, and waits up
+  to 6 s: `remove`'s 5 s plus a moment for git to die. *Reversing:* low.
+- **Where LIFE-2 and SYNC-5 are reproduced.** *Ruling:* through the app's `shutdown` on a mock app
+  over a hand-built scheduler with a fake adapter, as #1632's shutdown test does. `bring_up` cannot
+  take a fake adapter. LIFE-2's red run showed the pool closed under the send in flight: the
+  submit during the quit failed with "attempted to acquire a connection on a closed pool". It
+  did not reach the `sent` assertion. *Reversing:* n/a.
