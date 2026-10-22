@@ -2660,6 +2660,7 @@ knobas-source-gitea	test/it	sync::the_position_after_one_change_is_itself_idle_s
 knobas-source-gitea	test/it	sync::the_pull_request_budget_keeps_the_newest
 knobas-source-gitea	test/it	sync::two_pull_requests_on_the_same_second_are_delivered_once_each
 knobas-source-gitea	test/it	sync_moving::a_branch_a_push_moved_off_the_listing_is_re_read_and_not_tombstoned
+knobas-source-gitea	test/it	sync_moving::a_branch_met_twice_with_two_heads_is_mirrored_at_the_head_remembered
 knobas-source-gitea	test/it	sync_moving::a_branch_the_server_no_longer_has_is_tombstoned
 knobas-source-gitea	test/it	sync_moving::a_catch_up_starts_on_the_page_the_budget_stopped_on
 knobas-source-gitea	test/it	sync_moving::a_catch_up_whose_page_lands_below_unread_records_starts_from_the_first_page
