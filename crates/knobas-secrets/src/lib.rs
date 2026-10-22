@@ -60,7 +60,10 @@
 //! CI runs on Linux, where a real keychain needs a live secret service over
 //! D-Bus, and no automated test may ever prompt a developer's macOS keychain.
 //! So the store is a trait, [`MemoryStore`] is what every test and every CI run
-//! gets, and [`KeyringStore`] is exercised by one `#[ignore]`d macOS-local test.
+//! gets, and [`KeyringStore`]'s platform half is exercised by one `#[ignore]`d
+//! macOS-local test. Its envelope half -- `put` encoding, `get` decoding -- runs
+//! in `just check` over `keyring-core`'s in-memory mock store, which opens no
+//! keychain.
 
 pub mod keyring_store;
 pub mod memory;

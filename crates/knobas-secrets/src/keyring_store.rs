@@ -8,9 +8,10 @@ use crate::{KeychainAccount, Secret, SecretError, SecretStore, decode, encode};
 
 /// The OS keychain, under one service name.
 ///
-/// Never exercised by `just check` -- see the crate docs. The `#[ignore]`d test
-/// in `tests/it/keyring_local.rs` is what proves this half works, run by hand on
-/// macOS.
+/// Its platform store is never opened by `just check` -- see the crate docs.
+/// The `#[ignore]`d test in `tests/it/keyring_local.rs` is what proves that
+/// half works, run by hand on macOS; the envelope path runs in `just check`
+/// over `keyring_core::mock::Store` (the tests' `KeyringStore::over`).
 ///
 /// The service name is **taken, not computed**: `new` is handed whatever
 /// `knobas_app::Profile::keychain_service()` produced and keeps it verbatim.
@@ -299,13 +300,22 @@ mod tests {
     /// What a reader can type into a credential field and the JSON writer
     /// has to escape: a quote, a backslash, a tab. The non-ASCII character
     /// is written unescaped, and is here so it stays that way.
-    const ESCAPED: &str = "p@ss\"w0rd \\ back\\slash \t tab ümlaut";
+    const NEEDS_ESCAPING: &str = "p@ss\"w0rd \\ back\\slash \t tab ümlaut";
 
     fn mock_backed() -> KeyringStore {
         KeyringStore::over(
             "dev.knobas.test.mock",
             keyring_core::mock::Store::new().expect("the mock store opens"),
         )
+    }
+
+    /// `raw` placed in an item as the bytes a keychain holds, then read back
+    /// through `get` -- for items no current `put` would write.
+    fn read_stored(raw: &str) -> Secret {
+        let store = mock_backed();
+        let id = KeychainAccount::source("jira");
+        store.entry(&id).unwrap().set_password(raw).unwrap();
+        store.get(&id).unwrap().expect("the item is there")
     }
 
     /// **#1639 (SPI-1).** A secret `put` stores must be one `get` can read.
@@ -316,9 +326,14 @@ mod tests {
     fn a_secret_that_needs_escaping_reads_back_after_put() {
         let store = mock_backed();
         let id = KeychainAccount::source("jira");
-        store.put(&id, &Secret::just(AuthMethod::Pat, ESCAPED)).unwrap();
+        store
+            .put(&id, &Secret::just(AuthMethod::Pat, NEEDS_ESCAPING))
+            .unwrap();
         let got = store.get(&id).unwrap().expect("the item was stored");
-        assert_eq!((got.kind, got.value.as_str()), (AuthMethod::Pat, ESCAPED));
+        assert_eq!(
+            (got.kind, got.value.as_str()),
+            (AuthMethod::Pat, NEEDS_ESCAPING)
+        );
         assert!(got.account.is_none());
     }
 
@@ -334,20 +349,20 @@ mod tests {
                 &id,
                 &Secret {
                     kind: AuthMethod::ApiToken,
-                    value: ESCAPED.into(),
+                    value: NEEDS_ESCAPING.into(),
                     account: Some(Account {
                         username: user.into(),
-                        password: ESCAPED.into(),
+                        password: NEEDS_ESCAPING.into(),
                     }),
                 },
             )
             .unwrap();
         let got = store.get(&id).unwrap().expect("the item was stored");
-        assert_eq!(got.value, ESCAPED);
+        assert_eq!(got.value, NEEDS_ESCAPING);
         let account = got.account.expect("the account survives the item");
         assert_eq!(
             (account.username.as_str(), account.password.as_str()),
-            (user, ESCAPED)
+            (user, NEEDS_ESCAPING)
         );
     }
 
@@ -358,15 +373,11 @@ mod tests {
     /// agrees with the new reader.
     #[test]
     fn a_pre_fix_item_with_an_escaped_quote_reads_as_its_secret() {
-        let store = mock_backed();
-        let id = KeychainAccount::source("jira");
-        store
-            .entry(&id)
-            .unwrap()
-            .set_password(r#"{"v":2,"kind":"pat","secret":"p@ss\"w0rd"}"#)
-            .unwrap();
-        let got = store.get(&id).unwrap().expect("the item is there");
-        assert_eq!((got.kind, got.value.as_str()), (AuthMethod::Pat, "p@ss\"w0rd"));
+        let got = read_stored(r#"{"v":2,"kind":"pat","secret":"p@ss\"w0rd"}"#);
+        assert_eq!(
+            (got.kind, got.value.as_str()),
+            (AuthMethod::Pat, "p@ss\"w0rd")
+        );
     }
 
     /// `kind` is read like the secret: a kind spelled with a JSON escape is
@@ -374,14 +385,7 @@ mod tests {
     /// so this is the reader's half of the claim, from a literal item.
     #[test]
     fn a_kind_spelled_with_an_escape_reads_as_that_kind() {
-        let store = mock_backed();
-        let id = KeychainAccount::source("jira");
-        store
-            .entry(&id)
-            .unwrap()
-            .set_password(r#"{"v":2,"kind":"api\u005ftoken","secret":"x"}"#)
-            .unwrap();
-        let got = store.get(&id).unwrap().expect("the item is there");
+        let got = read_stored(r#"{"v":2,"kind":"api\u005ftoken","secret":"x"}"#);
         assert_eq!((got.kind, got.value.as_str()), (AuthMethod::ApiToken, "x"));
     }
 }
