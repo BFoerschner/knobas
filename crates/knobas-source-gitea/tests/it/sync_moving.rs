@@ -156,7 +156,9 @@ impl wiremock::Respond for Moving {
                         .cmp(text(a, "/commit/timestamp"))
                         .then_with(|| text(a, "/name").cmp(text(b, "/name")))
                 });
-                ok(page_of(branches, page, size))
+                // Gitea counts the whole listing on every page (1.27.3).
+                let total = branches.len().to_string();
+                ok(page_of(branches, page, size)).insert_header("X-Total-Count", total.as_str())
             }
             ["repos", owner, name, "branches", branch] => world
                 .branches
@@ -644,6 +646,50 @@ async fn a_repository_emptied_during_its_branch_walk_still_ends_its_walk() {
         20,
         "pages 1 and 2: {:?}",
         emitted(&items, "branch")
+    );
+}
+
+/// #1716: one more branch than a page holds, and the newest deleted while
+/// page 1 is read. Page 2 is then empty, so the walk saw one page; but `b-00`,
+/// the one branch page 2 held, slid onto page 1 and was never read. Page 1's
+/// own count said the listing was longer than the page, so git is asked and
+/// `b-00` is emitted.
+#[tokio::test]
+async fn a_deletion_that_empties_page_two_hides_no_branch() {
+    let mut world = twenty_five_branches();
+    world
+        .branches
+        .get_mut(MONOREPO)
+        .expect("the fixture has branches")
+        .truncate(11);
+    let (server, moving) = Moving::start(world).await;
+    let gitea = gitea(&server, json!({}));
+    moving.with(|world| {
+        world.after(&format!("repos/{MONOREPO}/branches"), 1, |world| {
+            world
+                .branches
+                .get_mut(MONOREPO)
+                .expect("the fixture has branches")
+                .retain(|b| b["name"] != "b-10");
+        });
+    });
+    let (items, _) = run(&*gitea, None).await;
+
+    let mut expected: Vec<String> = (0..11u64)
+        .map(|k| branch_entity(&format!("b-{k:02}")))
+        .collect();
+    expected.sort();
+    assert_eq!(
+        emitted(&items, "branch"),
+        expected,
+        "b-10 too: page 1 returned it before the deletion"
+    );
+    assert!(
+        moving.with(|w| w
+            .served
+            .iter()
+            .any(|s| s == &format!("repos/{MONOREPO}/branches?page=2"))),
+        "page 2 was asked for and was empty"
     );
 }
 

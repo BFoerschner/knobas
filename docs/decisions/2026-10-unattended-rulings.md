@@ -12363,3 +12363,24 @@ Ruled 2026-10-22 by the implementer on Sonnet; docs only.
   or a counter in `sync::branches`. *Ruling:* the counter. *Reasoning:* `crates/knobas-http/**` is
   frozen by §10.8, and an accessor would need a ledger entry for one integer the caller already
   sees page by page. *Reversing:* low.
+
+### #1716, merge-manager review (Opus, 2026-10-22)
+
+- **A walk that read one page is not always a one-page listing.** *Fork:* keep `pages > 1` as
+  the trigger, or also catch the walk whose second page came back empty. *Ruling:* the trigger is
+  `pages > 1`, or page 1's own `X-Total-Count` larger than the rows page 1 returned. *Reasoning:*
+  the branch walk ends on an empty page and an empty page is not counted, so with one branch more
+  than a page holds (51 at the default cap, 11 at a cap of 10) a deletion on page 1 between the two
+  requests empties page 2: the walk counts one page, and the branch page 2 held has slid onto
+  page 1 after it was read, which is the implementer's measured case C with no read from git.
+  `sync_moving::a_deletion_that_empties_page_two_hides_no_branch` was red on `aad84d7c` (`b-00`
+  missing). Gitea sends the count on every page (61 on page 1 of the 61-branch probe); a server
+  that sends none keeps the `pages > 1` rule. The walk's own end rule is unchanged: the count only
+  decides whether git is asked. *Reversing:* low, one condition in `sync::branches`.
+- **One extra request per multi-page repository, incremental runs included.** *Ruling:* upheld.
+  One unpaged request against a walk of two or more pages, and an incremental run mirrors a
+  hidden branch now instead of a run later. *Reversing:* low.
+- **`git/refs/heads` under a cap.** *Ruling:* pinned live, not assumed:
+  `live_gitea_capped` now asserts that it names every branch the hand walk found where each page
+  holds one record. Gitea serves it without `ListOptions`, so `MAX_RESPONSE_ITEMS` does not apply.
+  *Reversing:* n/a.

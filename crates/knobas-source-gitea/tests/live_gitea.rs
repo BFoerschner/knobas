@@ -5765,4 +5765,23 @@ async fn the_branch_refs_name_every_branch_in_one_answer() {
         })
         .collect();
     assert_eq!(refs, listed);
+
+    // And page 1 counts the whole listing, which is how a walk whose page 2
+    // a deletion emptied still knows it was more than one page.
+    let first = reqwest::Client::new()
+        .get(format!(
+            "{}/api/v1/repos/{}/branches?limit=1&page=1",
+            env.url,
+            env.full_name()
+        ))
+        .header("Authorization", format!("token {}", env.token))
+        .send()
+        .await
+        .expect("page 1 of the branch listing");
+    let total = first
+        .headers()
+        .get("x-total-count")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok());
+    assert_eq!(total, Some(listed.len()), "X-Total-Count on page 1");
 }

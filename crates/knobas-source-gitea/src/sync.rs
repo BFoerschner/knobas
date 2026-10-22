@@ -131,6 +131,7 @@
 //! (above).
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc};
 use knobas_http::{PageNumber, PageWalk, Walked};
@@ -657,8 +658,17 @@ async fn branches(
 
     let mut records: Vec<Value> = Vec::new();
     let mut pages = 0u32;
+    // A lock only because the walk's future must be `Send`; page 1 sets it.
+    let first_count: OnceLock<Option<usize>> = OnceLock::new();
     let mut walk = PageWalk::new(PageNumber, MAX_BRANCH_PAGES, |page| {
-        source.client.branches(at.owner, at.name, page)
+        let first_count = &first_count;
+        async move {
+            let (batch, total) = source.client.branches(at.owner, at.name, page).await?;
+            if page == 1 {
+                let _ = first_count.set(total);
+            }
+            Ok::<_, SourceError>(batch)
+        }
     });
     loop {
         match walk.next().await? {
@@ -690,7 +700,10 @@ async fn branches(
     // and reads each one the pages missed on its own. (A deletion hides a
     // branch too: everything below it shifts up a place, and the first
     // branch of the next page slides onto the page already read.) One
-    // page is one query, and nothing can move inside it.
+    // page is one query, and nothing can move inside it -- but a walk that
+    // read one page is not always a one-page listing: where a deletion
+    // empties page 2, the branch page 2 held slid onto page 1 after it was
+    // read. Page 1's own count of the listing tells the two apart.
     let listed: HashSet<String> = records
         .iter()
         .filter_map(|raw| raw.get("name").and_then(Value::as_str))
@@ -702,7 +715,13 @@ async fn branches(
         .filter(|name| !listed.contains(name.as_str()))
         .cloned()
         .collect();
-    if pages > 1 {
+    let more_than_a_page = pages > 1
+        || first_count
+            .get()
+            .copied()
+            .flatten()
+            .is_some_and(|total| total > records.len());
+    if more_than_a_page {
         let names = source
             .client
             .branch_names(at.owner, at.name)

@@ -321,17 +321,19 @@ impl GiteaClient {
         owner: &str,
         repo: &str,
         page: u32,
-    ) -> Result<Vec<Value>, SourceError> {
+    ) -> Result<(Vec<Value>, Option<usize>), SourceError> {
         let (limit, page) = page_params(page);
         // An empty repository's listing is `200 null`, not `[]` (Gitea
         // 1.27.3, measured 2026-10-12): no branches, which is an empty page.
-        let batch: Option<Vec<Value>> = self
-            .get_json(
+        // The count beside it is `X-Total-Count`, the whole listing's size
+        // when this page was read (61 on a 61-branch page 1, 1.27.3, #1716).
+        let (batch, total): (Option<Vec<Value>>, _) = self
+            .get_json_counted(
                 &format!("/repos/{}/{}/branches", segment(owner)?, segment(repo)?),
                 &[limit, page],
             )
             .await?;
-        Ok(batch.unwrap_or_default())
+        Ok((batch.unwrap_or_default(), total))
     }
 
     /// `GET /repos/{owner}/{repo}/git/refs/heads` -- the name of every branch,

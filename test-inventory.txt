@@ -2697,6 +2697,7 @@ knobas-source-gitea	test/it	sync_moving::a_catch_up_whose_page_lands_below_unrea
 knobas-source-gitea	test/it	sync_moving::a_catch_up_whose_page_moved_starts_from_the_first_page
 knobas-source-gitea	test/it	sync_moving::a_commit_catch_up_finishes_every_branch_and_then_reads_what_moved
 knobas-source-gitea	test/it	sync_moving::a_deletion_during_a_full_sync_branch_walk_hides_no_other_branch
+knobas-source-gitea	test/it	sync_moving::a_deletion_that_empties_page_two_hides_no_branch
 knobas-source-gitea	test/it	sync_moving::a_full_sync_tombstones_no_branch_it_never_emitted
 knobas-source-gitea	test/it	sync_moving::a_one_page_branch_walk_reads_no_names_from_git
 knobas-source-gitea	test/it	sync_moving::a_push_during_a_full_sync_branch_walk_hides_no_branch

@@ -118,7 +118,7 @@ pub(super) async fn all_branches(
 ) -> Result<Paged<ListedBranch>, SourceError> {
     let mut items = Vec::new();
     for page in 1..=BRANCH_PAGES {
-        let batch = source.client.branches(owner, repo, page).await?;
+        let (batch, _) = source.client.branches(owner, repo, page).await?;
         if batch.is_empty() {
             return Ok(Paged { items, cut: false });
         }
