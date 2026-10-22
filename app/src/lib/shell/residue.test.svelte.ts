@@ -1254,8 +1254,9 @@ const CASES: Case[] = [
   },
   {
     /**
-     * The Inbox (#834): the filter bar's `/` on the window, the store's read
-     * and the jobs' reach reads behind a ready database, answering late.
+     * The Inbox (#834): the filter bar's `/` on the window, its clock interval
+     * (#1681), the store's read and the jobs' reach reads behind a ready
+     * database, answering late.
      */
     name: "TfInbox",
     source: "lib/tf/inbox/TfInbox.svelte",
