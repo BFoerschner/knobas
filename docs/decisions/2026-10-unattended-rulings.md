@@ -12729,3 +12729,93 @@ The measurement came after it.
 - **The inbox's two-line yesterday rows (merge-manager).** *Fork:* keep the inbox's short `yest.` or make the time column fit. *Ruling:* make it fit (column 76px to 108px, `white-space: nowrap`). *Reasoning:* the ticket asks the inbox and the ticket board to agree on yesterday; a second spelling would keep the divergence. *Reversing:* low, one CSS line.
 - **`3 m 12 s`, blank for an unparseable date, `2h 15m` (merge-manager).** *Ruling:* all three stand. *Reasoning:* Builds already read `4 m 12 s`; `est. 6h` and prototype-6 use the compact hours form (conventions, Copy and display); an empty string beats printing `NaN`. *Reversing:* low.
 - **Standards review's kept calls (merge-manager).** *Ruling:* the `keyOf` re-export, `clockLabel`'s `bare` flag and inbox.ts's own pad/day/clock stand. *Reasoning:* each is the smaller change and none is a second spelling of a user-visible string. *Reversing:* low.
+
+### #1764: a tightening after a quiet has what the quiet refilled (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): the frozen-surface
+  change to `crates/knobas-http/**`.** *Fork:* change the frozen crate's limiter, or leave #1764
+  open until Björn signs it off. *Ruling:* change it, private to `limiter.rs` behind the
+  unchanged public `InstanceLimiter`: two `Slot` fields and two helpers, one line in
+  `until_ready_within`, and one more argument to `Paced::tightened`. No signature, `HttpConfig`
+  field or adapter change, and #1729's `watch_local_quota` mark is untouched. Booked in
+  `docs/contract/10.8/1764-knobas-http-tightening-after-a-quiet-has-what-it-refilled.md`.
+  *Reasoning:* as for #1740: the waiver covers this spec's frozen-surface steps, and the change
+  is the limiter's own arithmetic. *Reversing:* low, one module.
+- **Where the last-grant instant lives.** *Fork:* per `Paced`, starting when it was built (the
+  ticket's wording), or per `Slot`, starting when the slot was built and moved by a grant on any
+  of the origin's limiters. *Ruling:* per `Slot`. *Reasoning:* a holder that took
+  `Slot::current()` before a quota change is still granted on the replaced limiter, and a
+  per-`Paced` instant never sees that grant, so a later tightening would count a quiet that had a
+  request in it. And a loosening builds a drained limiter without anything being sent, so a
+  per-`Paced` instant would restart the quiet there: strict quota, ten minutes of quiet, a
+  loosening, the strict quota back a moment later, and it would start with nothing. The credit is
+  what the stricter rate refills since the origin's last real request, which is what the stricter
+  quota would have had if it had governed throughout. The looser quota's bucket over the same
+  requests holds at least as much, so neither quota is passed even where the credit is more than
+  the drained limiter had. *Cost:* one `Instant` and one `AtomicU64` per origin. The #1740
+  merge review's "the credit never exceeds what the old limiter had" now holds only for the seconds
+  conversion. *Reversing:* low.
+- **The hot-path write.** *Fork:* under the slot's lock, or lock-free. *Ruling:* lock-free:
+  `Slot::granted` does a `fetch_max` (`Relaxed`) of nanoseconds since `Slot::born` after each grant
+  of `until_ready_within`. `Slot::register` reads it with a `Relaxed` load under the slot lock it
+  already holds. *Reasoning:* `until_ready_within` already takes the lock once in `current()`; a
+  second lock per request would serialise every sender on the origin for a value that publishes no
+  other memory. `fetch_max` keeps the latest of two racing grants whichever stores first. A grant
+  racing a tightening can be missed by the read and over-credit by that one request, the same
+  bound #1740 accepted for requests sent in between. *Reversing:* low.
+- **Which clock.** *Ruling:* `std::time::Instant`, not governor's clock. *Reasoning:* the quiet is
+  only compared with itself, never with governor's state, and `u64` nanoseconds last centuries.
+  *Reversing:* low.
+- **How the tests wait.** *Fork:* real sleeps, or an injectable clock. *Ruling:* real sleeps, in
+  four module tests (at most 0.5 s each, run in parallel). *Reasoning:* a clock seam would widen a
+  frozen module for its tests' sake, and the real sleep also witnesses the clock. Each assertion
+  leaves a slow run room: `a_request_ends_the_quiet` allows two requests (300 ms at ten a second,
+  against four if the grant were not recorded), and `a_quiet_is_counted_at_the_stricter_rate`
+  sleeps 100 ms against the second one a second needs for one request. *Reversing:* low.
+- **`a_tightening_credits_seconds_of_refill`.** *Ruling:* kept as it was, with its comment saying
+  the loose limiter was built a moment before. *Reasoning:* its quiet is microseconds, which at one
+  a second credits nothing, so the idle bound only changes it after a three-second stall between
+  two lines. *Reversing:* n/a.
+- **Live suite and transport test.** *Ruling:* none owed, as for #1740. *Reasoning:* no live
+  suite seeds two quotas on one server, and the module tests go through `for_origin`,
+  `Slot::register` and `Paced::tightened`, which is the path a client takes. The criterion names a
+  module test. *Reversing:* n/a.
+- **A loosening after a quiet still starts drained.** *Fork:* credit it with the quiet too, or
+  leave it. *Ruling:* leave it, and file it as a `backlog` follow-up. *Reasoning:* the ticket is
+  the tightening. The cost there is one emission interval of the looser rate (at most a second)
+  before the first request. *Reversing:* n/a.
+
+### #1764: merge review of PR #1772 (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by the implementer on Opus: the frozen-surface change.** *Fork:*
+  confirm the implementer's ruling, or send it back. *Ruling:* confirmed. The change stays inside
+  `limiter.rs`, every grant goes through `until_ready_within` (the HTTP client, the wasm host's
+  network policy, the write queue's test), and the §10.8 entry names the two fields, the two
+  helpers, the one recording line and the new argument, which is the whole diff. *Reversing:* low.
+- **Per `Slot`, not per `Paced`.** *Fork:* hold the PR to the ticket's per-`Paced` sketch, or take
+  the per-`Slot` instant. *Ruling:* per `Slot`. *Reasoning:* the ticket's sketch is offered as the
+  bound that "would close this", and its own premise is "nothing sent for `idle` seconds". A
+  per-`Paced` instant breaks that premise twice: it misses a request granted to a waiter still on
+  a replaced limiter, and it restarts at a loosening that sent nothing. The criteria are outcomes,
+  and each is met; read "a limiter nobody sent on" as "an origin nobody sent to", which is what
+  the per-`Slot` instant measures. No criterion, spec line or ADR is contradicted, so no
+  follow-up. *Reversing:* low.
+- **`Relaxed` on both sides.** *Fork:* `Relaxed`, or `Release`/`Acquire` (or `SeqCst`).
+  *Ruling:* `Relaxed`. *Reasoning:* the instant publishes no other memory, and the mutex
+  `register` holds does not order it against grants, which never take it. A stale read sees an
+  earlier grant, so it can only over-credit, never under-credit. It can only be stale against a
+  grant that is happening during the read, and `granted` runs after governor's grant in program
+  order, so no ordering closes that window: governor's state can show the token gone before the
+  instant moves. What a stale read over-credits is the requests in flight at that moment, one per
+  racing grant, against what the stricter quota would have had before them. That is the bound the
+  implementer's ruling and #1740 accept. *Reversing:* low.
+- **The clock.** *Ruling:* as it is. *Reasoning:* the instant is stored as `u64` nanoseconds from
+  `Slot::born`, an `Instant`, so it is monotonic and needs no wall clock or process base. A slot
+  is never removed from the origin map, so `born` lasts the whole process. `try_from` saturates
+  after about 584 years, and `idle` uses `saturating_sub`. The credit product is `u128`, at most
+  about 8e28. On macOS `Instant` does not advance while the machine sleeps, so a quiet that spans
+  a sleep is counted short, which only ever under-credits. *Reversing:* n/a.
+- **A tightening before any grant.** *Ruling:* no over-credit. *Reasoning:* the quiet then counts
+  from `born`, when the slot's first limiter was built with its whole burst (`Paced::new`). A
+  stricter quota governing from `born` would have started full too, and the credit is capped at
+  its burst. *Reversing:* n/a.
