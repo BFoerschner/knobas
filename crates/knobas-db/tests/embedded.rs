@@ -118,20 +118,19 @@ async fn a_lock_naming_a_live_process_is_reported_until_that_process_is_gone() {
 }
 
 /// Two first launches on one profile at the same time: exactly one `initdb`
-/// happens, and both callers end up on one working server.
+/// happens, one launch brings the server up, and the other is refused.
 ///
 /// Nothing on disk lets the second process see the first coming -- `setup()`
 /// decides whether to initialise by looking at an empty directory, and there is
 /// no `postmaster.pid` to adopt yet -- so without the bring-up lock the two
 /// interleave inside one data directory. This is the shape of a double-click on
-/// the app icon, or `just dev` started beside a packaged build.
+/// the app icon, or `just dev` started beside a packaged build. The loser waits
+/// for the bring-up lock, finds the winner holding the ownership lock, and is
+/// refused before it touches the directory (ruling B2): a second window on a
+/// live owner is never let in.
 ///
-/// Both halves of the loser's story are covered, and neither depends on how
-/// warm the machine is: `start_managed` yields before `setup()`, so the two
-/// launches really are both in flight here whether or not the binaries had to
-/// be downloaded, and the credential half -- settings built before the winner
-/// wrote `.pgpass` -- is pinned deterministically by
-/// `a_launch_that_started_cold_authenticates_with_the_recorded_password`.
+/// Both launches really are in flight whether or not the binaries had to be
+/// downloaded: `start_managed` yields before `setup()`.
 #[tokio::test]
 async fn two_concurrent_first_launches_serialise_instead_of_racing() {
     let dir = tempfile::tempdir().unwrap();
@@ -144,27 +143,26 @@ async fn two_concurrent_first_launches_serialise_instead_of_racing() {
         EmbeddedDb::start(cfg.clone()),
         EmbeddedDb::start(cfg.clone())
     );
-    let first = first.expect("the first launch must bring the database up");
-    let second = second.expect("the second launch must join it, not corrupt it");
+    let (winner, refused) = match (first, second) {
+        (Ok(winner), Err(refused)) | (Err(refused), Ok(winner)) => (winner, refused),
+        (Ok(one), Ok(two)) => {
+            one.stop().await.unwrap();
+            two.stop().await.unwrap();
+            panic!("both launches came up on one profile");
+        }
+        (Err(one), Err(two)) => panic!("neither launch came up: {one}; {two}"),
+    };
+    assert!(
+        matches!(refused, knobas_db::DbError::AlreadyRunning { .. }),
+        "the loser is refused as a second window, not broken by the race: {refused}"
+    );
 
-    // One server, not two: a table created through one handle is visible
-    // through the other.
-    sqlx::query("create table if not exists race_probe (n int)")
-        .execute(second.pool())
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(winner.pool())
         .await
         .unwrap();
-    let (probes,): (i64,) =
-        sqlx::query_as("select count(*) from information_schema.tables where table_name = $1")
-            .bind("race_probe")
-            .fetch_one(first.pool())
-            .await
-            .unwrap();
-    assert_eq!(probes, 1, "the two launches ended up on different servers");
-
-    // Whichever adopted owns nothing, so stopping it leaves the server up; the
-    // owner's stop is what actually shuts it down.
-    second.stop().await.unwrap();
-    first.stop().await.unwrap();
+    assert_eq!(one.0, 1);
+    winner.stop().await.unwrap();
 }
 
 /// A start that fails *after* clearing a stale lock must not shut down a
@@ -508,18 +506,17 @@ fn dead_pid() -> u32 {
     pid
 }
 
-/// A second `start()` on a data directory a **live** server already holds must
-/// join that server, and must leave it standing.
+/// A second `start()` on a profile a **live** owner has open is refused, and
+/// leaves the owner's server standing.
 ///
-/// This is the shape of two real situations: a knobas killed by a signal, whose
-/// PostgreSQL outlives it and is still there at the next launch, and a second
-/// instance opened on the same profile. Both used to end the same way --
-/// `postgresql_embedded`'s `Drop` runs `pg_ctl stop -m fast` whenever
-/// `postmaster.pid` merely exists, so the *failed* second handle killed the
-/// first one's database on its way out. The assertion that the first pool still
-/// answers afterwards is what pins that down.
+/// The refusal used to be an adoption: the second handle borrowed the server,
+/// and the owner's quit stopped it under the borrower (CORE-3). Before that,
+/// it was worse: `postgresql_embedded`'s `Drop` runs `pg_ctl stop -m fast`
+/// whenever `postmaster.pid` merely exists, so the *failed* second handle
+/// killed the first one's database on its way out. The assertion that the
+/// first pool still answers afterwards is what pins that down.
 #[tokio::test]
-async fn a_second_start_adopts_the_running_server_instead_of_killing_it() {
+async fn a_second_start_on_a_live_owner_is_refused_and_never_stops_its_server() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = DbConfig {
         root_dir: dir.path().to_path_buf(),
@@ -528,36 +525,19 @@ async fn a_second_start_adopts_the_running_server_instead_of_killing_it() {
 
     let first = EmbeddedDb::start(cfg.clone()).await.unwrap();
 
-    // Same root_dir, server already up: this is the path that used to fail.
-    let second = EmbeddedDb::start(cfg)
-        .await
-        .expect("second start should adopt");
-    let one: (i32,) = sqlx::query_as("select 1")
-        .fetch_one(second.pool())
-        .await
-        .unwrap();
-    assert_eq!(one.0, 1);
+    match EmbeddedDb::start(cfg).await {
+        Err(knobas_db::DbError::AlreadyRunning { .. }) => {}
+        Err(other) => panic!("expected AlreadyRunning, got {other}"),
+        Ok(second) => {
+            second.stop().await.unwrap();
+            panic!("a second start on a live owner was let in");
+        }
+    }
 
-    // Both handles talk to the same server, so a write through one is visible
-    // through the other -- adoption, not a second server on a second port.
-    sqlx::query("create table if not exists adoption_probe (n int)")
-        .execute(second.pool())
-        .await
-        .unwrap();
-    let (probes,): (i64,) =
-        sqlx::query_as("select count(*) from information_schema.tables where table_name = $1")
-            .bind("adoption_probe")
-            .fetch_one(first.pool())
-            .await
-            .unwrap();
-    assert_eq!(probes, 1, "the two handles are on different servers");
-
-    // Dropping the adopted handle must not take the server with it.
-    second.stop().await.unwrap();
     let one: (i32,) = sqlx::query_as("select 1")
         .fetch_one(first.pool())
         .await
-        .expect("adopting a running server must never stop it");
+        .expect("a refused second start must never stop the owner's server");
     assert_eq!(one.0, 1);
 
     first.stop().await.unwrap();
@@ -581,11 +561,13 @@ async fn adoption_creates_the_database_when_the_running_server_has_none() {
         existing_url: None,
     };
 
-    let owner = EmbeddedDb::start(cfg.clone()).await.unwrap();
+    // An orphan, as a signal-kill leaves one: a live owner would refuse the
+    // second start before adoption is reached.
+    EmbeddedDb::start(cfg.clone()).await.unwrap().abandon();
 
     // Take the database away from under the running server. `with (force)`
-    // terminates the pool's sessions, which is what makes the drop possible at
-    // all while `owner` is connected.
+    // terminates the orphan's sessions, which is what makes the drop possible
+    // at all while its leaked pool is connected.
     let mut admin = sqlx::PgConnection::connect(&maintenance_url(dir.path()))
         .await
         .unwrap();
@@ -604,9 +586,9 @@ async fn adoption_creates_the_database_when_the_running_server_has_none() {
         .unwrap();
     assert_eq!(current, "knobas");
 
-    // The adopted handle owns nothing; the original still owns the server.
+    // Adopted from an orphan, so this handle's stop is the one that stops it.
+    assert!(adopted.owns_server());
     adopted.stop().await.unwrap();
-    owner.stop().await.unwrap();
 }
 
 /// `existing_url` must connect to a server we do not own -- and `stop()` must
@@ -781,11 +763,14 @@ async fn a_launch_that_adopts_an_orphaned_server_takes_ownership_and_can_stop_it
     assert!(!port_answers(port), "and a clean quit actually stops it");
 }
 
-/// The other half of the same rule: a server a *live* instance owns must never
-/// be stopped by an adopter. Two knobas windows on one profile share the
-/// database; the one that started it is the one that stops it.
+/// The other half of the same rule (ruling B2, spec #1619): a server a *live*
+/// instance owns is never adopted. Two knobas windows on one profile used to
+/// share it, and the owner's quit stopped the server under the guest, whose
+/// every command then failed (CORE-3). The second launch is refused instead,
+/// with a message naming the window to quit and the profile it has open, and
+/// once that window has quit the next launch is an ordinary start.
 #[tokio::test]
-async fn an_adopter_does_not_take_ownership_from_a_live_owner() {
+async fn a_second_launch_on_a_live_owner_is_refused_naming_the_owner() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = DbConfig {
         root_dir: dir.path().to_path_buf(),
@@ -794,22 +779,39 @@ async fn an_adopter_does_not_take_ownership_from_a_live_owner() {
 
     let owner = EmbeddedDb::start(cfg.clone()).await.unwrap();
     let port = port_of(dir.path());
-    let guest = EmbeddedDb::start(cfg).await.unwrap();
-
     assert!(owner.owns_server());
-    assert!(
-        !guest.owns_server(),
-        "the owner is still alive; the guest only borrows"
-    );
 
-    guest.stop().await.unwrap();
+    let refused = match EmbeddedDb::start(cfg.clone()).await {
+        Err(refused) => refused,
+        Ok(guest) => {
+            guest.stop().await.unwrap();
+            panic!("a second launch on a live owner was let in");
+        }
+    };
+    let message = refused.to_string();
     assert!(
-        port_answers(port),
-        "a guest's quit must not take the owner's database down"
+        matches!(refused, knobas_db::DbError::AlreadyRunning { .. }),
+        "{message}"
     );
+    // The owner is this test's own handle, so its pid is this process's.
+    assert!(
+        message.contains(&format!("knobas process {} ", std::process::id())),
+        "the message names the owning process: {message}"
+    );
+    assert!(
+        message.contains(&dir.path().join("data").display().to_string()),
+        "the message names the profile's data directory: {message}"
+    );
+    assert!(port_answers(port), "the refusal left the owner's server up");
 
     owner.stop().await.unwrap();
     assert!(!port_answers(port));
+
+    let next = EmbeddedDb::start(cfg)
+        .await
+        .expect("once the owner has quit, the profile starts normally");
+    assert!(next.owns_server());
+    next.stop().await.unwrap();
 }
 
 /// A server knobas does not manage at all is never owned, whatever the locks

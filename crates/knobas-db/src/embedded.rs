@@ -9,8 +9,8 @@
 //! `~/Library/Application Support/...` would blow past macOS' 103-byte
 //! `sun_path` limit.
 
-use std::fs::{File, TryLockError};
-use std::io;
+use std::fs::{File, OpenOptions, TryLockError};
+use std::io::{self, Read, Seek, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -133,14 +133,19 @@ pub enum DbError {
         source: io::Error,
     },
 
-    /// A live PostgreSQL already serves this data directory and we could not
-    /// join it either.
+    /// The data directory is in use, and this start leaves it alone.
     ///
-    /// The usual cause is a second knobas window on the same profile. Note
-    /// what this error does *not* do: it never stops that server. Anything
-    /// that shuts a stranger's postmaster down risks taking a running
-    /// instance's database with it.
-    #[error("another knobas instance is using the database at {data_dir} ({reason})")]
+    /// The usual cause is a second knobas window on the same profile: a live
+    /// process holds the ownership lock, and `reason` names its pid (ruling
+    /// B2, spec #1619). A second window is refused rather than let in beside
+    /// the first, because the first one's quit stops the server under it.
+    /// The other causes are a lock file whose process is still alive but
+    /// whose server cannot be reached as ours, and `reason` says which.
+    ///
+    /// Note what this error does *not* do: it never stops that server.
+    /// Anything that shuts a stranger's postmaster down risks taking a
+    /// running instance's database with it.
+    #[error("the database at {data_dir} is in use: {reason}")]
     AlreadyRunning { data_dir: PathBuf, reason: String },
 }
 
@@ -155,9 +160,9 @@ impl DbError {
 
 /// A running database and a pool connected to it.
 ///
-/// When `DbConfig::existing_url` was set, or when an already-running server was
-/// adopted, no server is owned; the handle is then just the pool and `stop`
-/// only closes it.
+/// When `DbConfig::existing_url` was set, no server is owned; the handle is
+/// then just the pool and `stop` only closes it. Every managed handle owns its
+/// server, adopted or started here: a live owner refuses a second one (B2).
 pub struct EmbeddedDb {
     pool: PgPool,
     /// How to reach the running server, for callers that need connections of
@@ -179,8 +184,9 @@ pub struct EmbeddedDb {
     /// to stop.
     stop_settings: Option<Settings>,
     /// Held for this handle's life when this process is responsible for
-    /// stopping the server. `None` when a live sibling owns it, and when
-    /// `existing_url` points at a server knobas does not manage at all.
+    /// stopping the server. `None` only when `existing_url` points at a
+    /// server knobas does not manage at all: a managed start either takes
+    /// the lock or is refused.
     owner_lock: Option<File>,
 }
 
@@ -393,13 +399,16 @@ impl EmbeddedDb {
     /// first time, starts the server on an ephemeral loopback port and creates
     /// the `knobas` database if it does not exist yet.
     ///
-    /// A server that is already up and serving this very data directory -- one
-    /// a signal-killed run left behind, or a second instance's -- is *adopted*
-    /// rather than fought over: see [`adopt`].
+    /// A server that is already up and serving this very data directory, one
+    /// a signal-killed run left behind, is *adopted* rather than fought over:
+    /// see [`adopt`]. A second instance on a profile a live knobas already has
+    /// open is refused instead, before it touches anything: see
+    /// [`claim_ownership`].
     ///
     /// A `postmaster.pid` whose port turns out to be answered by some *other*
     /// server -- or, once the process it names is gone, by something that is
-    /// not a PostgreSQL at all -- is proof that no postmaster holds this data
+    /// not a PostgreSQL at all, or by one that refuses our password -- is
+    /// proof that no postmaster holds this data
     /// directory: one that did would have recorded its own port. That lock is
     /// removed and the start is retried, rather than reported as a conflict
     /// that does not exist.
@@ -413,7 +422,8 @@ impl EmbeddedDb {
     ///
     /// Returns [`DbError`] if the install, `initdb`, start, database creation
     /// or the initial connection fails, or [`DbError::AlreadyRunning`] if a
-    /// live server holds the data directory and cannot be joined.
+    /// live knobas has this profile open, or a live process's server holds
+    /// the data directory and cannot be reached as ours.
     pub async fn start(cfg: DbConfig) -> Result<EmbeddedDb, DbError> {
         if let Some(url) = cfg.existing_url.as_deref() {
             tracing::info!("connecting to externally managed postgres");
@@ -493,8 +503,8 @@ impl EmbeddedDb {
 
     /// Whether this process is responsible for stopping the server.
     ///
-    /// False for an externally managed server (`existing_url`), and for a
-    /// server a live sibling instance owns.
+    /// False for an externally managed server (`existing_url`) only: a
+    /// managed start that cannot take ownership is refused instead.
     #[must_use]
     pub fn owns_server(&self) -> bool {
         self.owner_lock.is_some()
@@ -746,19 +756,55 @@ async fn launch(root_dir: &Path, settings: Settings) -> Result<EmbeddedDb, DbErr
 /// *and take responsibility for it*.
 const OWNER_LOCK: &str = ".owner.lock";
 
+/// Who is responsible for stopping the server serving a `root_dir`.
+enum Ownership {
+    /// This process: the lock is held for as long as the file is.
+    Ours(File),
+    /// A live process holds the lock. `by` is the pid it wrote into the
+    /// file, `None` when it has not written one yet or it cannot be read.
+    Held { by: Option<u32> },
+}
+
 /// Claim responsibility for the server serving `root_dir`, if nobody else has.
 ///
 /// Non-blocking on purpose: a live sibling holding this lock is the answer,
-/// not a delay. `None` means "somebody else owns it" -- which is exactly when
-/// stopping the server would take a running instance's database down with it.
-fn claim_ownership(root_dir: &Path) -> Result<Option<File>, DbError> {
+/// not a delay. [`Ownership::Held`] means "somebody else owns it", which is
+/// exactly when stopping the server would take a running instance's database
+/// down with it.
+///
+/// The winner writes its pid into the file, so a refused second launch can
+/// name the window to quit (ruling B2). The file is opened without truncating
+/// it, since a loser that truncated it would erase the name it is about to
+/// read. Writing the pid is best-effort: a lock whose holder is not named
+/// still excludes every other process.
+fn claim_ownership(root_dir: &Path) -> Result<Ownership, DbError> {
     let path = root_dir.join(OWNER_LOCK);
-    let file = File::create(&path).map_err(|source| DbError::io(&path, source))?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|source| DbError::io(&path, source))?;
     match file.try_lock() {
-        Ok(()) => Ok(Some(file)),
+        Ok(()) => {
+            let named = file
+                .set_len(0)
+                .and_then(|()| file.rewind())
+                .and_then(|()| writeln!(file, "{}", std::process::id()));
+            if let Err(error) = named {
+                tracing::warn!(%error, lock = %path.display(), "could not write our pid into the ownership lock");
+            }
+            Ok(Ownership::Ours(file))
+        }
         Err(TryLockError::WouldBlock) => {
-            tracing::info!("another knobas instance owns this server; it will stop it");
-            Ok(None)
+            let mut contents = String::new();
+            let by = file
+                .read_to_string(&mut contents)
+                .ok()
+                .and_then(|_| contents.trim().parse::<u32>().ok());
+            tracing::info!(?by, "another knobas instance owns this server");
+            Ok(Ownership::Held { by })
         }
         Err(TryLockError::Error(source)) => Err(DbError::io(&path, source)),
     }
@@ -796,11 +842,31 @@ enum Started {
 ///
 /// The superuser password is read **here**, under that lock, and deliberately
 /// not by [`build_settings`]: see [`adopt_recorded_password`].
+///
+/// **Ownership is claimed first**, before anything on disk is read or
+/// changed. A live process holding the lock is a knobas that has this profile
+/// open, and the start is refused naming its pid (ruling B2, spec #1619): no
+/// second window borrows a server whose owner's quit would stop it under the
+/// borrower. The kernel releases the lock however its holder dies, so a held
+/// lock always means a live holder, whatever state its server is in.
 async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Started, DbError> {
     let _guard = bring_up_lock(root_dir).await?;
+    let data_dir = settings.data_dir.clone();
+    let owner_lock = match claim_ownership(root_dir)? {
+        Ownership::Ours(file) => file,
+        Ownership::Held { by } => {
+            let holder = by.map_or_else(
+                || "another knobas process".to_owned(),
+                |pid| format!("knobas process {pid}"),
+            );
+            return Err(DbError::AlreadyRunning {
+                data_dir,
+                reason: format!("{holder} has this profile open; quit that window first"),
+            });
+        }
+    };
     adopt_recorded_password(&mut settings)?;
 
-    let data_dir = settings.data_dir.clone();
     // `PostgreSQL::new` consumes the settings, and the adoption path needs
     // them after the handle is gone.
     let adoption = settings.clone();
@@ -851,7 +917,7 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
             Lock::Absent => return Err(error.into()),
             Lock::Live { port, pid } => {
                 std::mem::forget(postgresql);
-                return adopt(root_dir, adoption, port, pid).await;
+                return adopt(adoption, port, pid, owner_lock).await;
             }
             Lock::LiveProcess { pid } => {
                 std::mem::forget(postgresql);
@@ -874,11 +940,6 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
     let connector = Connector::parse(&url)?;
     let pool = connector.app_pool().await?;
 
-    // We started it, so we stop it -- but the claim still goes through the
-    // lock, so `owns_server` has exactly one meaning and a sibling that later
-    // adopts this server can see that somebody is already responsible for it.
-    let owner_lock = claim_ownership(root_dir)?;
-
     tracing::info!(port = postgresql.settings().port, "embedded postgres ready");
 
     Ok(Started::Ready(Box::new(EmbeddedDb {
@@ -886,7 +947,7 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
         connector,
         postgresql: Some(postgresql),
         stop_settings: None,
-        owner_lock,
+        owner_lock: Some(owner_lock),
     })))
 }
 
@@ -901,53 +962,60 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
 /// distinguishes the two. Adopting it does neither: the orphan becomes this
 /// run's warm start, skipping `initdb` and the start entirely.
 ///
-/// **Ownership is decided here, and M1 changed the answer.** M0 adopted
-/// without owning: `postgresql` stayed `None` and `stop` left the server up,
-/// so a server orphaned by a signal-kill was never stopped by anybody -- "from
-/// then until the machine reboots there is one PostgreSQL running per
-/// profile". Now the adopter tries [`claim_ownership`]:
-///
-/// * **Nobody holds the lock** -- the orphan case. This process takes
-///   responsibility and stops the server on a clean quit, which closes M0's
-///   one-way door.
-/// * **A live sibling holds it** -- two knobas windows on one profile. The
-///   adopter borrows only; the instance that started the server is the one
-///   that stops it, and taking it down under a live sibling is precisely what
-///   the lock prevents.
+/// **The adopter owns what it adopts.** M0 adopted without owning: `stop` left
+/// the server up, so a server orphaned by a signal-kill was never stopped by
+/// anybody -- "from then until the machine reboots there is one PostgreSQL
+/// running per profile". M1 let the adopter take the ownership lock when it
+/// was free and borrow when a live sibling held it. The borrower had no way
+/// back when the owner quit and stopped the server under it (CORE-3), so a
+/// live owner now refuses the second launch before this is reached
+/// ([`start_managed`], ruling B2). What gets here is an **orphan**: the lock
+/// was free, `owner_lock` is it, and the clean quit of this process stops the
+/// server.
 ///
 /// # The last uncovered corner
 ///
 /// A **live recycled PID** whose recorded port is answered by something that
-/// is not PostgreSQL still yields [`DbError::AlreadyRunning`]: the pid check
-/// says the lock may still be owned, and nothing else identifies what
-/// answered. Accepted as documented rather than covered by more machinery --
-/// the recovery is to delete `data/postmaster.pid` by hand. Every other shape
-/// of stale lock is handled above.
+/// is not ours -- not PostgreSQL, or a PostgreSQL that refuses our password
+/// -- still yields [`DbError::AlreadyRunning`]: the pid check says the lock
+/// may still be owned, and nothing else identifies what answered. Accepted as
+/// documented rather than covered by more machinery (ruling B5) -- the
+/// recovery is to delete `data/postmaster.pid` by hand, and the error's reason
+/// says so. Every other shape of stale lock is handled above.
 ///
 /// # Errors
 ///
-/// [`DbError::AlreadyRunning`] if the server answered as a PostgreSQL and then
-/// could not be queried, or if the [`DATABASE_NAME`] database cannot be created
-/// on it. Two outcomes are *not* errors, and both come back as
-/// [`Started::StaleLock`] so the caller clears the lock and starts normally:
+/// [`DbError::AlreadyRunning`] if the server could not be reached as ours, or
+/// answered as a PostgreSQL and then could not be queried, or if the
+/// [`DATABASE_NAME`] database cannot be created on it. Two outcomes are *not*
+/// errors, and both come back as [`Started::StaleLock`] so the caller clears
+/// the lock and starts normally:
 ///
 /// * a PostgreSQL that turns out to serve a **different** data directory, and
-/// * a listener on the recorded port that does not speak PostgreSQL at all,
-///   provided the process the lock file names is gone.
+/// * a listener on the recorded port that is not a server of ours -- it does
+///   not speak PostgreSQL at all, or it refuses our password -- provided the
+///   process the lock file names is gone.
 ///
-/// The second is the recycled-ephemeral-port case: some unrelated program now
-/// owns the port a dead postmaster recorded. Reporting that as "another knobas
-/// instance" is both false and unrecoverable -- the user has no way to make the
-/// stranger release the port, and knobas would refuse to launch until they
-/// found and deleted `postmaster.pid` by hand. The pid check is what keeps the
-/// recovery honest: while the recorded process is still alive, the lock may
-/// still be owned, and a non-PostgreSQL answer on its port is not enough to
-/// condemn it.
+/// The second is the recycled-ephemeral-port case: some unrelated program, or
+/// another PostgreSQL (a second profile's, a test's scratch server), now owns
+/// the port a dead postmaster recorded. Reporting that as a conflict is both
+/// false and unrecoverable -- the user has no way to make the stranger release
+/// the port, and knobas would refuse to launch until they found and deleted
+/// `postmaster.pid` by hand. A postmaster of ours accepts our password, so a
+/// refusal is the same evidence a non-PostgreSQL answer is (ruling B5). The
+/// pid check is what keeps the recovery honest: while the recorded process is
+/// still alive, the lock may still be owned, and an answer that is not ours
+/// is not enough to condemn it.
+///
+/// PostgreSQL removes a lock whose process is gone by itself when it starts,
+/// so a dead pid gets here only when the start failed for another reason. The
+/// recovery then hands that reason back instead of a conflict that does not
+/// exist.
 async fn adopt(
-    root_dir: &Path,
     mut settings: Settings,
     port: u16,
     pid: Option<u32>,
+    owner_lock: File,
 ) -> Result<Started, DbError> {
     let data_dir = settings.data_dir.clone();
     // The recorded port, not the 0 that `build_settings` asks a fresh start to
@@ -966,22 +1034,37 @@ async fn adopt(
     let admin = PgConnection::connect(&settings.url(MAINTENANCE_DATABASE)).await;
     let mut admin = match admin {
         Ok(admin) => admin,
-        Err(source) if is_wire_level(&source) && !recorded_pid_alive(pid) => {
-            tracing::warn!(
-                port,
-                %source,
-                "the recorded port is held by something that does not speak postgres, and the \
-                 recorded process is gone: the lock is stale"
-            );
-            return Ok(Started::StaleLock {
-                port,
-                serving: format!("something that does not speak postgres ({source})"),
-            });
-        }
         Err(source) => {
-            return Err(unreachable(format!(
-                "cannot connect on port {port}: {source}"
-            )));
+            let stranger = if is_wire_level(&source) {
+                Some("something that does not speak postgres")
+            } else if refuses_our_credentials(&source) {
+                Some("a postgres that refuses our password")
+            } else {
+                None
+            };
+            return match stranger {
+                Some(stranger) if !recorded_pid_alive(pid) => {
+                    tracing::warn!(
+                        port,
+                        %source,
+                        "the recorded port is held by {stranger}, and the recorded process is \
+                         gone: the lock is stale"
+                    );
+                    Ok(Started::StaleLock {
+                        port,
+                        serving: format!("{stranger} ({source})"),
+                    })
+                }
+                Some(_) => Err(unreachable(format!(
+                    "postmaster.pid names a live process, and port {port}, where the answer is \
+                     not a server of ours ({source}); if no knobas has this profile open, \
+                     delete {} and start again",
+                    data_dir.join("postmaster.pid").display()
+                ))),
+                None => Err(unreachable(format!(
+                    "cannot connect on port {port}: {source}"
+                ))),
+            };
         }
     };
 
@@ -1066,11 +1149,9 @@ async fn adopt(
         ))
     })?;
 
-    let owner_lock = claim_ownership(root_dir)?;
     tracing::warn!(
         port,
-        owned = owner_lock.is_some(),
-        "adopting the postgres already serving this data directory"
+        "adopting the orphaned postgres serving this data directory, and its stop"
     );
     Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
@@ -1080,7 +1161,7 @@ async fn adopt(
         // `adopt_recorded_password` gave it the password `initdb` burned in,
         // so this is a handle over the server we are actually connected to.
         stop_settings: Some(settings),
-        owner_lock,
+        owner_lock: Some(owner_lock),
     })))
 }
 
@@ -1347,6 +1428,21 @@ fn process_alive(_pid: u32) -> bool {
 /// still running. An unparseable or absent pid is no evidence of life.
 fn recorded_pid_alive(pid: Option<u32>) -> bool {
     pid.is_some_and(process_alive)
+}
+
+/// Whether a PostgreSQL answered and refused our credentials: SQLSTATE class
+/// `28`, `invalid_password` (`28P01`) or `invalid_authorization_specification`
+/// (`28000`, no such role or no `pg_hba` entry).
+///
+/// A server of ours has the `postgres` role with the password this profile
+/// recorded and admits it on loopback, so a refusal says the server is not
+/// ours. Any other database error (a missing database, a server still
+/// starting) says nothing about whose it is.
+fn refuses_our_credentials(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .and_then(sqlx::error::DatabaseError::code)
+        .is_some_and(|code| code.starts_with("28"))
 }
 
 /// Whether a connection failure happened *below* the PostgreSQL protocol.
@@ -1628,17 +1724,21 @@ mod tests {
         assert!(!settings.password.is_empty());
     }
 
-    /// The loser of a first-launch race joins the winner's server, using the
-    /// password `initdb` recorded rather than the one it invented.
+    /// A launch whose settings were built before another process initialised
+    /// the profile adopts that process's orphaned server with the password
+    /// `initdb` recorded, not the one it invented.
     ///
     /// This is the cold machine, deterministically: `build_settings` runs
-    /// while the profile is empty -- which is all a loser has to do to be
+    /// while the profile is empty -- which is all a launch has to do to be
     /// holding a random password nothing accepts -- and only then does the
-    /// winner initialise the directory. If the recorded password were read
-    /// anywhere but under the bring-up lock, the loser would fail
-    /// `start()` against the winner's live server, reach `adopt`, and be told
-    /// its own profile belongs to another instance. Permanently: every later
-    /// launch that lost by a microsecond does the same thing.
+    /// winner initialise the directory, and die. If the recorded password
+    /// were read anywhere but under the bring-up lock, the launch would fail
+    /// `start()` against the orphan, reach `adopt`, be refused by its own
+    /// server and, the orphan's postmaster being alive, report the profile as
+    /// in use. Permanently: every later launch built that way does the same.
+    ///
+    /// The winner is orphaned rather than left running: a live owner refuses
+    /// the second launch before the password is read at all (ruling B2).
     #[tokio::test]
     async fn a_launch_that_started_cold_authenticates_with_the_recorded_password() {
         let dir = tempfile::tempdir().unwrap();
@@ -1652,6 +1752,7 @@ mod tests {
         })
         .await
         .expect("the winner brings the profile up");
+        winner.abandon();
         let recorded = read_password(&cold.password_file)
             .unwrap()
             .expect("initdb records a password");
@@ -1666,7 +1767,7 @@ mod tests {
             Ok(Started::StaleLock { serving, .. }) => {
                 panic!("the winner serves this very directory, not {serving:?}")
             }
-            Err(error) => panic!("the loser must join the winner's server: {error}"),
+            Err(error) => panic!("the launch must adopt the winner's orphan: {error}"),
         };
         let one: (i32,) = sqlx::query_as("select 1")
             .fetch_one(db.pool())
@@ -1674,9 +1775,9 @@ mod tests {
             .unwrap();
         assert_eq!(one.0, 1);
 
-        // Adopted, so it owns nothing; the winner still owns the server.
+        // Adopted from an orphan, so it owns the server and its stop stops it.
+        assert!(db.owns_server());
         (*db).stop().await.unwrap();
-        winner.stop().await.unwrap();
     }
 
     /// ...and an absent one too, which is the winner's own first launch:
@@ -1842,56 +1943,131 @@ mod tests {
         ));
     }
 
-    /// The recycled-port lockout: a dead postmaster's port now belongs to some
-    /// unrelated program. That is not another knobas instance, and reporting it
-    /// as one leaves the user with an app that refuses to launch until they
-    /// delete `postmaster.pid` by hand.
-    #[tokio::test]
-    async fn adopt_treats_a_non_postgres_listener_as_a_stale_lock() {
-        let dir = tempfile::tempdir().unwrap();
-        let port = squatter();
+    /// A listener that answers every connection the way a PostgreSQL that
+    /// does not know our password does: it takes the startup packet and
+    /// replies with a `FATAL` `28P01`. The real one is witnessed by the
+    /// squatter test in `tests/embedded.rs`; this one keeps the live-pid half
+    /// from needing a second server. Returns the port; the accept loop lives
+    /// until the process exits.
+    fn refusing_postgres() -> u16 {
+        use std::io::{Read as _, Write as _};
 
-        match adopt(
-            dir.path(),
-            adoption_settings(dir.path()),
-            port,
-            Some(dead_pid()),
-        )
-        .await
-        {
-            Ok(Started::StaleLock { port: p, .. }) => assert_eq!(p, port),
-            Ok(Started::Ready(_)) => panic!("nothing on that port could have been adopted"),
-            Err(error) => panic!("a stranger on the port is a stale lock, not {error:?}"),
+        fn packet(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
+            let mut len = [0u8; 4];
+            stream.read_exact(&mut len)?;
+            let mut body = vec![0u8; (u32::from_be_bytes(len) as usize).saturating_sub(4)];
+            stream.read_exact(&mut body)?;
+            Ok(body)
+        }
+
+        fn refuse(stream: &mut TcpStream) -> io::Result<()> {
+            // An `SSLRequest` (code 80877103) first, when the client sends
+            // one: decline it, and the startup packet follows.
+            if packet(stream)? == 80_877_103u32.to_be_bytes() {
+                stream.write_all(b"N")?;
+                packet(stream)?;
+            }
+            let mut fields = Vec::new();
+            for (tag, value) in [
+                (b'S', "FATAL"),
+                (b'V', "FATAL"),
+                (b'C', "28P01"),
+                (b'M', "password authentication failed for user \"postgres\""),
+            ] {
+                fields.push(tag);
+                fields.extend_from_slice(value.as_bytes());
+                fields.push(0);
+            }
+            fields.push(0);
+            let len = u32::try_from(fields.len() + 4).unwrap_or(u32::MAX);
+            stream.write_all(b"E")?;
+            stream.write_all(&len.to_be_bytes())?;
+            stream.write_all(&fields)
+        }
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let _ = refuse(&mut stream);
+            }
+        });
+        port
+    }
+
+    /// An ownership lock of this test's own, for `adopt` to take over.
+    fn owner_lock(dir: &Path) -> File {
+        match claim_ownership(dir).unwrap() {
+            Ownership::Ours(file) => file,
+            Ownership::Held { by } => panic!("a fresh directory's lock is held by {by:?}"),
         }
     }
 
-    /// The same stranger, while the recorded process is still alive: the lock
+    /// The two strangers that can sit on a recycled port: a program that does
+    /// not speak PostgreSQL, and a PostgreSQL that is not ours.
+    fn strangers() -> [(&'static str, u16); 2] {
+        [
+            ("a non-postgres listener", squatter()),
+            ("a postgres that refuses our password", refusing_postgres()),
+        ]
+    }
+
+    /// The recycled-port lockout: a dead postmaster's port now belongs to some
+    /// unrelated program, or to another PostgreSQL (CORE-2, ruling B5). That
+    /// is not a server of ours, and reporting it as in use leaves the user
+    /// with an app that refuses to launch until they delete `postmaster.pid`
+    /// by hand.
+    #[tokio::test]
+    async fn adopt_treats_a_stranger_on_a_dead_process_port_as_a_stale_lock() {
+        for (stranger, port) in strangers() {
+            let dir = tempfile::tempdir().unwrap();
+            match adopt(
+                adoption_settings(dir.path()),
+                port,
+                Some(dead_pid()),
+                owner_lock(dir.path()),
+            )
+            .await
+            {
+                Ok(Started::StaleLock { port: p, .. }) => assert_eq!(p, port, "{stranger}"),
+                Ok(Started::Ready(_)) => panic!("{stranger} could not have been adopted"),
+                Err(error) => panic!("{stranger} on the port is a stale lock, not {error:?}"),
+            }
+        }
+    }
+
+    /// The same strangers, while the recorded process is still alive: the lock
     /// may still be owned -- a postmaster that has not opened its socket yet
-    /// looks exactly like this -- so it is reported, not cleared.
+    /// looks exactly like this -- so it is reported, not cleared, and the
+    /// report says how to recover if it is stale after all.
     #[tokio::test]
     async fn adopt_refuses_while_the_recorded_process_is_alive() {
-        let dir = tempfile::tempdir().unwrap();
-        let port = squatter();
-
-        // `Started` carries an `EmbeddedDb`, which is not `Debug`, so the
-        // success arm is matched rather than unwrapped.
-        match adopt(
-            dir.path(),
-            adoption_settings(dir.path()),
-            port,
-            Some(std::process::id()),
-        )
-        .await
-        {
-            Err(DbError::AlreadyRunning { .. }) => {}
-            Err(other) => panic!("expected AlreadyRunning, got {other:?}"),
-            Ok(_) => panic!("a live recorded process must not have its lock cleared"),
+        for (stranger, port) in strangers() {
+            let dir = tempfile::tempdir().unwrap();
+            // `Started` carries an `EmbeddedDb`, which is not `Debug`, so the
+            // success arm is matched rather than unwrapped.
+            match adopt(
+                adoption_settings(dir.path()),
+                port,
+                Some(std::process::id()),
+                owner_lock(dir.path()),
+            )
+            .await
+            {
+                Err(DbError::AlreadyRunning { reason, .. }) => assert!(
+                    reason.contains("postmaster.pid") && reason.contains("delete"),
+                    "{stranger}: {reason}"
+                ),
+                Err(other) => panic!("{stranger}: expected AlreadyRunning, got {other:?}"),
+                Ok(_) => panic!("{stranger}: a live recorded process must keep its lock"),
+            }
         }
     }
 
-    /// A failure the *PostgreSQL protocol* produced -- a wrong password, say --
-    /// means there is a postmaster on that port. Clearing the lock under it
-    /// would start a second server on the same data directory.
+    /// A failure the *PostgreSQL protocol* produced means a postmaster answered
+    /// on that port. Only a refusal of our credentials says it is not ours
+    /// (`refuses_our_credentials`); anything else, a missing database or a
+    /// server still starting, leaves the lock alone.
     #[test]
     fn only_sub_protocol_failures_count_as_a_stranger_on_the_port() {
         assert!(is_wire_level(&sqlx::Error::Io(io::Error::from(
