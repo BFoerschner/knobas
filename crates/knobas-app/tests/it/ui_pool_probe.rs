@@ -21,9 +21,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use knobas_app::commands::entity::{
-    create_note_inner, detect_suggestions_inner, get_entity_inner, room_suggestions_inner,
-};
+use knobas_app::commands::entity::{create_note_inner, get_entity_inner, room_suggestions_inner};
 use knobas_app::commands::search::{launcher_home_inner, search_inner};
 use knobas_app::suggestion_pass::{PASS_STATEMENT_TIMEOUT, SuggestionPass};
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
@@ -476,9 +474,9 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
                         // The pass itself is not a UI read: it is timed and
                         // printed, never counted against the one-second line.
                         let start = Instant::now();
-                        let pass = detect_suggestions_inner(&pass).await;
+                        let pass = pass.run().await;
                         println!(
-                            "[{:>6.1}] PASS detect_suggestions {} ms: {:?}",
+                            "[{:>6.1}] PASS suggestion pass {} ms: {:?}",
                             t0.elapsed().as_secs_f32(),
                             start.elapsed().as_millis(),
                             pass.map_err(|e| e.to_string())

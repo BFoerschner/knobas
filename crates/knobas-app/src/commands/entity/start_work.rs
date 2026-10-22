@@ -144,9 +144,9 @@ pub async fn start_work_amend(
 /// The reverse direction: move every ticket whose linked pull request has been
 /// merged, and answer how many moved.
 ///
-/// A pass over the mirror, invoked the way `detect_suggestions` is -- there is
-/// no per-item hook in the sync engine, and adding one to serve this would be a
-/// second mechanism. The count is what the shell announces, so an automatic
+/// A pass over the mirror, asked for by a command -- there is no per-item hook
+/// in the sync engine, and adding one to serve this would be a second
+/// mechanism. The count is what the shell announces, so an automatic
 /// change is visible rather than mysterious.
 ///
 /// # Errors

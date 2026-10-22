@@ -196,18 +196,12 @@ function proposalEvidence(args: Record<string, unknown>): ProposalEvidence {
 export function handlers(): Record<string, Handler> {
   return {
 
-    // Suggestions (#237). The tray awaits `detect_suggestions` and then
-    // `room_suggestions` on every room, and it renders a rejection rather than
-    // an empty state -- so a table without these keys was a standing red line
-    // on every room under `?fake-ipc`. Stateful within the session like the
-    // stored contexts: a row answered here leaves every later read for as long
-    // as the page lives. No event is emitted: the real command emits
-    // `activity:new`, but the tray re-reads on its own after answering, and
-    // the fixture emits nothing at all.
-    //
-    // A pass over an unchanged mirror writes nothing, and this mirror never
-    // changes, so 0 is the honest constant. The tray discards the number.
-    detect_suggestions: () => 0,
+    // Suggestions (#237): the proposals read and its two answers. Stateful
+    // within the session like the stored contexts: a row answered here leaves
+    // every later read for as long as the page lives. No event is emitted: the
+    // real command emits `activity:new`, and the fixture emits nothing at all.
+    // No detection pass: the sync scheduler requests one in Rust (#1485), and
+    // `detect_suggestions` retired (#1611).
     room_suggestions: (args) => roomSuggestions(args),
     // Answered, never performed: there is no link graph to accept into and no
     // tombstone to remember a dismissal by. The two are one thing here -- the

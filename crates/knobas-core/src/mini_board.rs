@@ -1016,30 +1016,6 @@ async fn signals_of(
     Ok(out)
 }
 
-/// The statuses one source's live ticket corpus shows (#760), in the board's
-/// order: the ticket detail's fallback offer (#179, #498).
-///
-/// [`MiniBoard::sources`]' answer for one source, without the board: the same
-/// statement ([`OBSERVED_STATUSES`], so the same `status_paths` and the same
-/// rule), and no card list to read, group and send to learn it.
-///
-/// # Errors
-///
-/// [`CoreError::Db`] if the query fails.
-pub async fn source_statuses(
-    pool: &PgPool,
-    source_id: &str,
-    declarations: &crate::payload::Declarations,
-) -> Result<Vec<String>, CoreError> {
-    let wanted = BTreeSet::from([source_id.to_owned()]);
-    Ok(observed_statuses(pool, &wanted, declarations)
-        .await?
-        .into_iter()
-        .next()
-        .map(|entry| entry.statuses)
-        .unwrap_or_default())
-}
-
 /// The second half of the grant: what each of these sources' corpora show.
 async fn observed_statuses(
     pool: &PgPool,

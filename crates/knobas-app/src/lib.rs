@@ -165,10 +165,6 @@ pub struct AppState {
     /// [`EmbeddedDb`]: knobas_db::EmbeddedDb
     pub pool: PgPool,
 
-    /// The suggestion detection pass (#745): one at a time, on a connection
-    /// of its own and never on [`pool`](Self::pool).
-    pub suggestions: suggestion_pass::SuggestionPass,
-
     /// The server this process started, until it is shut down.
     ///
     /// `Option` because shutdown *consumes* the handle: `EmbeddedDb::stop`
@@ -205,7 +201,6 @@ impl AppState {
     #[must_use]
     pub fn over_pool(pool: PgPool) -> Self {
         Self {
-            suggestions: suggestion_pass::SuggestionPass::beside(&pool),
             pool,
             db: Mutex::new(None),
         }
@@ -337,7 +332,6 @@ pub fn run() {
             commands::entity::list_entities,
             commands::entity::save_note,
             commands::entity::unlink,
-            commands::entity::detect_suggestions,
             commands::entity::room_suggestions,
             commands::entity::accept_suggestion,
             commands::entity::dismiss_suggestion,
@@ -704,15 +698,15 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             // concerned, and a window that reacted to `ready` by calling
             // `sync_status` must not race the scheduler into existence.
             //
-            // The suggestion pass is built here, once, and the same handle
-            // goes to the scheduler (which requests a pass after every OK
-            // run) and to `AppState` (whose `detect_suggestions` runs one
-            // now): two would mean two passes at once (#745, #1485).
+            // The suggestion pass is built here, once, and goes to the
+            // scheduler, which requests a pass after every OK run: two would
+            // mean two passes at once (#745, #1485). Nothing else asks for
+            // one since `detect_suggestions` retired (#1611).
             let suggestions = suggestion_pass::SuggestionPass::new(
                 std::sync::Arc::new(sources::DbConnections(db.connector())),
                 suggestion_pass::PASS_STATEMENT_TIMEOUT,
             );
-            sources::start(&handle, &db, suggestions.clone()).await?;
+            sources::start(&handle, &db, suggestions).await?;
             // Beside the sync scheduler, not inside it: a backup is not a
             // source (see `backup`'s module docs).
             backup::start(&handle, &db);
@@ -733,15 +727,14 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             {
                 tracing::error!(%error, "the capture shortcut could not be read");
             }
-            Ok::<_, Box<dyn std::error::Error>>((db, suggestions))
+            Ok::<_, Box<dyn std::error::Error>>(db)
         }
         .await;
 
         match outcome {
-            Ok((db, suggestions)) => {
+            Ok(db) => {
                 handle.state::<Lifecycle>().install(AppState {
                     pool: db.pool().clone(),
-                    suggestions,
                     db: Mutex::new(Some(db)),
                 });
                 // Installed *before* the state moves to `ready`: a frontend

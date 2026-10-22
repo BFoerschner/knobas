@@ -4,7 +4,7 @@ use super::*;
 
 // -- suggestions -----------------------------------------------------------
 //
-// Four commands, and #836's evidence read, in this module and not a new one:
+// Three commands, and #836's evidence read, in this module and not a new one:
 // a suggestion **is** a link row (#41), these are the writes that move it
 // between the two states the link store already has, and the reads are the
 // same graph the panel above reads from the other side. The reads serve the
@@ -29,32 +29,6 @@ pub struct SuggestionPage {
     /// Items holding more proposals than one item shows (#774), most hidden
     /// first. The bound is applied by `suggest::proposals`.
     pub more: Vec<suggest::SuggestionMore>,
-}
-
-/// Run a detection pass, returning how many proposals it wrote.
-///
-/// Idempotent, and cheap to repeat since #745: a pass over an unchanged mirror
-/// writes nothing and compares nothing, and a pass after a sync writes only
-/// what the new items justify. It never creates a confirmed link and never
-/// writes to a source.
-///
-/// Through the process's one [`SuggestionPass`]: a call while a pass runs is
-/// answered by the next pass rather than starting a third, and the pass runs
-/// on a connection of its own, never on the UI pool (#745).
-///
-/// [`SuggestionPass`]: crate::suggestion_pass::SuggestionPass
-///
-/// # Errors
-///
-/// [`Internal`](crate::IpcErrorCode::Internal) if a statement fails or runs
-/// past the pass's statement timeout.
-pub async fn detect_suggestions_inner(
-    pass: &crate::suggestion_pass::SuggestionPass,
-) -> Result<u32, IpcError> {
-    let written = pass.run().await?;
-    // A pass that proposed more than four billion links is not a number the
-    // frontend needs to be exact about.
-    Ok(u32::try_from(written).unwrap_or(u32::MAX))
 }
 
 /// The proposals a room holds, newest first, with both ends resolved.
@@ -180,22 +154,6 @@ fn suggestion_id(link_id: &str) -> Result<Uuid, IpcError> {
     link_id
         .parse()
         .map_err(|_| IpcError::invalid(format!("{link_id} is not a link id")))
-}
-
-/// Run a detection pass over the mirror, now, and answer what it wrote.
-///
-/// The manual *run a pass now*: no surface calls it since the room's tray went
-/// (#881). Passes happen without it, because the sync scheduler requests one
-/// after every run that ends OK (`suggestion_pass::SuggestOnSync`, #1485);
-/// this waits on the same pass and queue.
-///
-/// # Errors
-///
-/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
-/// is still coming up, and whatever [`detect_suggestions_inner`] refuses with.
-#[tauri::command]
-pub async fn detect_suggestions(lifecycle: State<'_, Lifecycle>) -> Result<u32, IpcError> {
-    detect_suggestions_inner(&lifecycle.suggestions()?).await
 }
 
 /// One page of a room's proposals, newest first, and the room's total.

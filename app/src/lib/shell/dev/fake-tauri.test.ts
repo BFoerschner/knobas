@@ -1,12 +1,9 @@
 /**
  * The fixture's suggestion handlers (#237).
  *
- * The tray's refresh awaits `detect_suggestions` and then `room_suggestions`,
- * and renders a rejection rather than an empty state — so a fixture missing
- * either key put a standing red line on every room under `?fake-ipc`. These
- * tests pin the table itself, and the two properties the tray's own contract
- * rests on: a proposal is a link with `confirmed_at: null`, and a proposal
- * with no reason is not shippable.
+ * These tests pin the table itself, and the two properties the tray's own
+ * contract rests on: a proposal is a link with `confirmed_at: null`, and a
+ * proposal with no reason is not shippable.
  *
  * This file lives under `dev/` on purpose. `house-rules.test.ts` resolves
  * every importer of the dev harness and requires the set to be exactly
@@ -26,9 +23,9 @@ import { demoHandlers } from "./fake-tauri";
 import { FAKE_CONTEXTS } from "./fake/corpus";
 import { FIXTURE_SOURCES } from "./fake/sources";
 
-test("the four commands the tray calls are answered", () => {
+test("the three suggestion commands are answered", () => {
   const handlers = demoHandlers();
-  for (const cmd of ["detect_suggestions", "room_suggestions", "accept_suggestion", "dismiss_suggestion"]) {
+  for (const cmd of ["room_suggestions", "accept_suggestion", "dismiss_suggestion"]) {
     expect(typeof handlers[cmd], `no handler for ${cmd}`).toBe("function");
   }
 });

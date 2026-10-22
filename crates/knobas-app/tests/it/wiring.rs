@@ -330,16 +330,16 @@ fn the_stranded_timer_sweep_runs_before_the_database_is_announced_ready() {
 }
 
 /// One suggestion pass in the running app (#1485): bring-up builds it once
-/// and hands the same handle to the scheduler (`sources::start`, which
-/// requests a pass after every OK run) and to `AppState` (whose
-/// `detect_suggestions` runs one now). A second construction would be a second
-/// queue, and two passes at once are what #745 ended.
+/// and hands it to the scheduler (`sources::start`, which requests a pass
+/// after every OK run). A second construction would be a second queue, and two
+/// passes at once are what #745 ended. `AppState` holds none since
+/// `detect_suggestions` retired (#1611).
 ///
 /// Read from the source, like the sweep above: `spawn_bring_up` needs a Tauri
 /// app and a real server. `tests/it/suggestion_pass.rs` shows `bring_up`
 /// requests the pass it is handed.
 #[test]
-fn bring_up_builds_one_suggestion_pass_for_the_scheduler_and_the_app_state() {
+fn bring_up_builds_one_suggestion_pass_for_the_scheduler() {
     let code = strip_comments(include_str!("../../src/lib.rs"));
     let start = code
         .find("fn spawn_bring_up")
@@ -356,13 +356,8 @@ fn bring_up_builds_one_suggestion_pass_for_the_scheduler_and_the_app_state() {
         "bring-up builds the suggestion pass exactly once"
     );
     assert!(
-        body.contains("sources::start(&handle, &db, suggestions.clone())"),
+        body.contains("sources::start(&handle, &db, suggestions)"),
         "the scheduler is handed the pass bring-up built"
-    );
-    let installed = &body[body.find("AppState {").expect("bring-up installs AppState")..];
-    assert!(
-        installed.contains("suggestions,"),
-        "AppState holds the pass bring-up built, not one of its own"
     );
 }
 
