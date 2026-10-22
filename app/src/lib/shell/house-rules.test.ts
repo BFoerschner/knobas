@@ -12,7 +12,8 @@
  * The scan reads the files off disk rather than importing them, so a rule
  * applies to code no test happens to mount.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 
 import { expect, test } from "vitest";
@@ -39,21 +40,47 @@ const ROOT = join(process.cwd(), "src") + "/";
  */
 const SELF = "house-rules.test.ts";
 
-/** Every `.svelte` and `.ts` file under `app/src/`, absolute, sorted. */
-function sources(): string[] {
+/** Every file under `dir` whose name matches `pattern`, absolute, sorted. */
+function walkFiles(dir: string, pattern: RegExp): string[] {
   const found: string[] = [];
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const path = join(dir, entry.name);
+  const walk = (current: string) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const path = join(current, entry.name);
       if (entry.isDirectory()) {
         walk(path);
-      } else if (/\.(svelte|ts)$/.test(entry.name) && entry.name !== SELF) {
+      } else if (pattern.test(entry.name) && entry.name !== SELF) {
         found.push(path);
       }
     }
   };
-  walk(ROOT);
+  walk(dir);
   return found.sort();
+}
+
+/** Every `.svelte` and `.ts` file under `app/src/`, absolute, sorted. */
+function sources(): string[] {
+  return walkFiles(ROOT, /\.(svelte|ts)$/);
+}
+
+/** The two HTML documents the bundle is entered through, beside `src/`. */
+const ENTRY_HTML = ["index.html", "capture.html"].map((name) => join(ROOT, "..", name));
+
+/**
+ * What the network rule reads: the code, and also the files a remote font or
+ * script would be spelled in without a `.ts` in sight — stylesheets, JSON and
+ * HTML under `root`, plus the two entry documents when `root` is the real
+ * `app/src/`.
+ */
+function networkSources(root: string = ROOT, entries: string[] = ENTRY_HTML): string[] {
+  return [...walkFiles(root, /\.(svelte|ts|css|json|html)$/), ...entries].sort();
+}
+
+/** True when `text` names a host that is neither loopback nor reserved. */
+function hasRemoteReference(text: string): boolean {
+  for (const match of text.matchAll(/https?:\/\/([^\s"'`/)\]}>]+)/g)) {
+    if (!RESERVED_HOST.test(match[1]!)) return true;
+  }
+  return false;
 }
 
 /**
@@ -193,13 +220,38 @@ const RESERVED_HOST =
 
 test("no runtime network references (default-src 'self')", () => {
   expect(
-    offenders((text) => {
-      for (const match of text.matchAll(/https?:\/\/([^\s"'`/)\]}>]+)/g)) {
-        if (!RESERVED_HOST.test(match[1]!)) return true;
-      }
-      return false;
-    }),
+    networkSources()
+      .filter((file) => hasRemoteReference(readFileSync(file, "utf8")))
+      .map((file) => resolve(file).slice(resolve(ROOT, "..").length + 1)),
   ).toEqual([]);
+});
+
+test("the network walk reads stylesheets, JSON and the two entry documents", () => {
+  const walked = networkSources().map((file) => resolve(file));
+  const count = (pattern: RegExp) => walked.filter((file) => pattern.test(file)).length;
+  // 30 stylesheets at the time of writing; a floor, not a census.
+  expect(count(/\.css$/), "stylesheets in the network walk").toBeGreaterThanOrEqual(29);
+  expect(walked).toContain(join(ROOT, "lib/launcher/syntax.json"));
+  expect(walked).toContain(resolve(ROOT, "../index.html"));
+  expect(walked).toContain(resolve(ROOT, "../capture.html"));
+  // Reported so a narrowed walk shows in the output, not only in a count.
+  console.info(`network walk: ${walked.length} files (${sources().length} .svelte/.ts)`);
+});
+
+test("a remote @import in a stylesheet fails the network rule", () => {
+  const dir = mkdtempSync(join(tmpdir(), "house-rules-"));
+  try {
+    mkdirSync(join(dir, "tf/css"), { recursive: true });
+    const css = join(dir, "tf/css/tokens.css");
+    writeFileSync(css, '@import url("https://fonts.googleapis.com/css2?family=Inter");\n');
+    writeFileSync(join(dir, "ok.css"), '@import url("http://localhost:5301/x.css");\n');
+    const verdicts = networkSources(dir, [])
+      .filter((file) => hasRemoteReference(readFileSync(file, "utf8")))
+      .map((file) => file.slice(dir.length + 1));
+    expect(verdicts).toEqual(["tf/css/tokens.css"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 /**
