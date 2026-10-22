@@ -12333,3 +12333,54 @@ Ruled 2026-10-22 by the implementer on Sonnet; docs only.
   public door clears it: `tf/job/current` (`set(null)`, `drop()`), `tf/queued` and
   `tf/repo/queued` (`forgetQueued()`). `NOT_YET_RESET` is now empty and stays as a typed
   export for the completeness test. *Reversing:* low.
+## #1716: a full sync's paged branch walk while the listing moves (Opus implementer, 2026-10-22)
+
+- **How the walk learns what its pages missed.** *Fork:* the ticket's two directions (walk again
+  when a listed head is newer than the walk's start; or walk again and re-read what the second walk
+  dropped), or a third. *Ruling:* after a walk of more than one page, one `GET
+  /repos/{o}/{r}/git/refs/heads`, and each name it lists that the pages did not is read on its own,
+  as #1624 reads a remembered one. *Reasoning:* measured on the pinned 1.27.3: a deletion on page 1
+  hid an unmoved branch (`b-51`, the first of page 2, slid onto page 1), and a push of a commit dated
+  before the walk began hid `b-00` too, so the head-newer-than-the-start trigger misses both; a
+  second walk doubles every page of a full sync and still misses a branch hidden in both walks.
+  `git/refs/heads` reads git, not the paged table: all 60 names of a 60-branch repository in one
+  array, `limit`/`page` ignored, so nothing moves inside it. *Reversing:* low, one call in
+  `sync::branches`.
+- **Which runs read it.** *Ruling:* every walk of more than one page, incremental ones too, not
+  only cursor-less ones. *Reasoning:* one request per such repository, and an incremental run then
+  mirrors a new branch a push hid instead of a run later; one rule, not two. A one-page walk reads
+  nothing: one query, nothing moves inside it. *Reversing:* low, a `before.branches.is_empty()`
+  gate.
+- **A name git lists that answers 404 on its own read.** *Ruling:* skipped, tombstoned only when
+  the cursor remembers it. *Reasoning:* it was never emitted, so there is no row to retire, and a
+  run holding no position still emits no branch tombstone (the module's rule; the sweep retires on
+  a full sync). *Reversing:* low.
+- **A failed refs read.** *Ruling:* `404` is no branches (the repository emptied mid-walk; the
+  own reads decide); anything else takes `RepoError::from`, as #1624's failed re-read does.
+  *Reasoning:* a walk that cannot show its pages complete must not hand the sweep a short list.
+  *Reversing:* low.
+- **Counting the pages.** *Fork:* a `pages()` accessor on `knobas_http::PageWalk` beside `rows()`,
+  or a counter in `sync::branches`. *Ruling:* the counter. *Reasoning:* `crates/knobas-http/**` is
+  frozen by §10.8, and an accessor would need a ledger entry for one integer the caller already
+  sees page by page. *Reversing:* low.
+
+### #1716, merge-manager review (Opus, 2026-10-22)
+
+- **A walk that read one page is not always a one-page listing.** *Fork:* keep `pages > 1` as
+  the trigger, or also catch the walk whose second page came back empty. *Ruling:* the trigger is
+  `pages > 1`, or page 1's own `X-Total-Count` larger than the rows page 1 returned. *Reasoning:*
+  the branch walk ends on an empty page and an empty page is not counted, so with one branch more
+  than a page holds (51 at the default cap, 11 at a cap of 10) a deletion on page 1 between the two
+  requests empties page 2: the walk counts one page, and the branch page 2 held has slid onto
+  page 1 after it was read, which is the implementer's measured case C with no read from git.
+  `sync_moving::a_deletion_that_empties_page_two_hides_no_branch` was red on `aad84d7c` (`b-00`
+  missing). Gitea sends the count on every page (61 on page 1 of the 61-branch probe); a server
+  that sends none keeps the `pages > 1` rule. The walk's own end rule is unchanged: the count only
+  decides whether git is asked. *Reversing:* low, one condition in `sync::branches`.
+- **One extra request per multi-page repository, incremental runs included.** *Ruling:* upheld.
+  One unpaged request against a walk of two or more pages, and an incremental run mirrors a
+  hidden branch now instead of a run later. *Reversing:* low.
+- **`git/refs/heads` under a cap.** *Ruling:* pinned live, not assumed:
+  `live_gitea_capped` now asserts that it names every branch the hand walk found where each page
+  holds one record. Gitea serves it without `ListOptions`, so `MAX_RESPONSE_ITEMS` does not apply.
+  *Reversing:* n/a.

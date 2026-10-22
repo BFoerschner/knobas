@@ -321,17 +321,58 @@ impl GiteaClient {
         owner: &str,
         repo: &str,
         page: u32,
-    ) -> Result<Vec<Value>, SourceError> {
+    ) -> Result<(Vec<Value>, Option<usize>), SourceError> {
         let (limit, page) = page_params(page);
         // An empty repository's listing is `200 null`, not `[]` (Gitea
         // 1.27.3, measured 2026-10-12): no branches, which is an empty page.
-        let batch: Option<Vec<Value>> = self
-            .get_json(
+        // The count beside it is `X-Total-Count`, the whole listing's size
+        // when this page was read (61 on a 61-branch page 1, 1.27.3, #1716).
+        let (batch, total): (Option<Vec<Value>>, _) = self
+            .get_json_counted(
                 &format!("/repos/{}/{}/branches", segment(owner)?, segment(repo)?),
                 &[limit, page],
             )
             .await?;
-        Ok(batch.unwrap_or_default())
+        Ok((batch.unwrap_or_default(), total))
+    }
+
+    /// `GET /repos/{owner}/{repo}/git/refs/heads` -- the name of every branch,
+    /// in one answer (#1716).
+    ///
+    /// Read from git rather than the branch table [`Self::branches`] pages
+    /// over, so it is one snapshot that a push or a deletion cannot reorder
+    /// between two pages. Measured on 1.27.3 (2026-10-22): all 60 of a
+    /// 60-branch repository in one array, `limit`/`page` ignored and no
+    /// `Link`; an array for a single branch too; `404` where the repository
+    /// has no branch at all, which is an empty list here.
+    pub(crate) async fn branch_names(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<String>, SourceError> {
+        #[derive(serde::Deserialize)]
+        struct Ref {
+            #[serde(rename = "ref")]
+            name: String,
+        }
+        let refs: Result<Vec<Ref>, SourceError> = self
+            .get_json(
+                &format!(
+                    "/repos/{}/{}/git/refs/heads",
+                    segment(owner)?,
+                    segment(repo)?
+                ),
+                &[],
+            )
+            .await;
+        match refs {
+            Ok(refs) => Ok(refs
+                .into_iter()
+                .filter_map(|r| r.name.strip_prefix("refs/heads/").map(str::to_owned))
+                .collect()),
+            Err(error) if error.status() == Some(404) => Ok(Vec::new()),
+            Err(error) => Err(error),
+        }
     }
 
     pub(crate) async fn pulls(

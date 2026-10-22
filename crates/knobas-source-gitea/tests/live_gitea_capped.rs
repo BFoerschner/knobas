@@ -319,6 +319,27 @@ async fn every_listing_is_walked_to_the_end_against_a_server_that_caps_its_pages
         .await;
     branches.must_be_capped_with_more_behind_it();
 
+    // #1716: a branch walk of more than one page asks `git/refs/heads` for
+    // every name at once. A cap on that answer would leave the same hole the
+    // read closes, so it must name every branch here, where each page holds
+    // one.
+    let refs = sorted(
+        raw.page(&format!("/repos/{repo}/git/refs/heads"), &[])
+            .await
+            .iter()
+            .map(|r| {
+                text(r, "ref")
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or_else(|| panic!("a ref outside refs/heads/: {r}"))
+                    .to_owned()
+            }),
+    );
+    assert_eq!(
+        refs,
+        sorted(branches.keys.iter().cloned()),
+        "git/refs/heads of {repo} is capped like a page"
+    );
+
     let pulls = raw
         .walk(
             &format!("the pull-request listing of {repo}"),

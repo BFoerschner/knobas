@@ -5711,3 +5711,77 @@ async fn the_commit_listings_until_is_server_side_and_inclusive() {
         "until={until} is inclusive and nothing after it comes back"
     );
 }
+
+/// #1716: a branch walk of more than one page asks `git/refs/heads` for every
+/// branch name at once, and relies on it being one unpaged answer naming
+/// exactly what the paged listing names, at the same heads. Asked with
+/// `limit=1`, so a paged endpoint would answer one.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_branch_refs_name_every_branch_in_one_answer() {
+    let env = env();
+    let mut listed = std::collections::BTreeMap::new();
+    for page in 1.. {
+        let body = api_json(
+            &env,
+            &format!("repos/{}/branches?limit=1&page={page}", env.full_name()),
+        )
+        .await;
+        let batch = body.as_array().expect("a branch list");
+        if batch.is_empty() {
+            break;
+        }
+        for b in batch {
+            listed.insert(
+                b["name"].as_str().expect("a name").to_owned(),
+                b["commit"]["id"].as_str().expect("a head").to_owned(),
+            );
+        }
+        assert!(page < 1000, "the listing never ended: {listed:?}");
+    }
+    assert!(
+        listed.len() >= 2,
+        "the seed gives {} more than one branch: {listed:?}",
+        env.full_name()
+    );
+    let refs = api_json(
+        &env,
+        &format!("repos/{}/git/refs/heads?limit=1&page=1", env.full_name()),
+    )
+    .await;
+    let refs: std::collections::BTreeMap<String, String> = refs
+        .as_array()
+        .expect("an array of refs")
+        .iter()
+        .map(|r| {
+            (
+                r["ref"]
+                    .as_str()
+                    .and_then(|name| name.strip_prefix("refs/heads/"))
+                    .expect("a refs/heads/ name")
+                    .to_owned(),
+                r["object"]["sha"].as_str().expect("a sha").to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(refs, listed);
+
+    // And page 1 counts the whole listing, which is how a walk whose page 2
+    // a deletion emptied still knows it was more than one page.
+    let first = reqwest::Client::new()
+        .get(format!(
+            "{}/api/v1/repos/{}/branches?limit=1&page=1",
+            env.url,
+            env.full_name()
+        ))
+        .header("Authorization", format!("token {}", env.token))
+        .send()
+        .await
+        .expect("page 1 of the branch listing");
+    let total = first
+        .headers()
+        .get("x-total-count")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok());
+    assert_eq!(total, Some(listed.len()), "X-Total-Count on page 1");
+}

@@ -103,7 +103,10 @@
 //!   rest. That was the recorded window (a re-added source, a cleared or
 //!   unreadable cursor, a cursor-version bump), and `branch` is precisely the
 //!   kind links hang off (spec §5a). The adapter's own diff still carries the
-//!   *incremental* case, which the sweep never touches.
+//!   *incremental* case, which the sweep never touches. "Every branch" holds
+//!   while the listing moves too (#1716): a walk of more than one page reads
+//!   each name git lists that the pages missed, so a push or a deletion
+//!   between two pages hides no branch from the sweep.
 //!   `tests/it/sync.rs::a_run_holding_no_position_cannot_tombstone_a_deleted_branch`
 //!   pins the adapter half, so the division of labour cannot drift silently.
 //!
@@ -127,7 +130,8 @@
 //! reach the sweep at all, because a skip during a cursor-less run is fatal
 //! (above).
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc};
 use knobas_http::{PageNumber, PageWalk, Walked};
@@ -653,12 +657,25 @@ async fn branches(
     after.default_branch = at.default_branch.map(str::to_owned);
 
     let mut records: Vec<Value> = Vec::new();
+    let mut pages = 0u32;
+    // A lock only because the walk's future must be `Send`; page 1 sets it.
+    let first_count: OnceLock<Option<usize>> = OnceLock::new();
     let mut walk = PageWalk::new(PageNumber, MAX_BRANCH_PAGES, |page| {
-        source.client.branches(at.owner, at.name, page)
+        let first_count = &first_count;
+        async move {
+            let (batch, total) = source.client.branches(at.owner, at.name, page).await?;
+            if page == 1 {
+                let _ = first_count.set(total);
+            }
+            Ok::<_, SourceError>(batch)
+        }
     });
     loop {
         match walk.next().await? {
-            Walked::Page(batch) => records.extend(batch),
+            Walked::Page(batch) => {
+                pages += 1;
+                records.extend(batch);
+            }
             Walked::End => break,
             Walked::Capped => {
                 return Err(RepoError::Fatal(cap_reached(
@@ -675,16 +692,43 @@ async fn branches(
     // already read, and the walk never meets it. Its own read decides: a
     // 404 is a branch that is gone, a record is a branch that moved, and
     // anything else ends the repository's walk as any failed read does.
-    let listed: HashSet<&str> = records
+    //
+    // **Nor is a run without a previous cursor safe from it (#1716).** It
+    // has no names to re-read, and the sweep retires every branch it does
+    // not emit. So a walk that took more than one page also asks git for
+    // every branch name at once, a snapshot no push or deletion reorders,
+    // and reads each one the pages missed on its own. (A deletion hides a
+    // branch too: everything below it shifts up a place, and the first
+    // branch of the next page slides onto the page already read.) One
+    // page is one query, and nothing can move inside it -- but a walk that
+    // read one page is not always a one-page listing: where a deletion
+    // empties page 2, the branch page 2 held slid onto page 1 after it was
+    // read. Page 1's own count of the listing tells the two apart.
+    let listed: HashSet<String> = records
         .iter()
         .filter_map(|raw| raw.get("name").and_then(Value::as_str))
+        .map(str::to_owned)
         .collect();
-    let unlisted: Vec<String> = before
+    let mut unlisted: BTreeSet<String> = before
         .branches
         .keys()
         .filter(|name| !listed.contains(name.as_str()))
         .cloned()
         .collect();
+    let more_than_a_page = pages > 1
+        || first_count
+            .get()
+            .copied()
+            .flatten()
+            .is_some_and(|total| total > records.len());
+    if more_than_a_page {
+        let names = source
+            .client
+            .branch_names(at.owner, at.name)
+            .await
+            .map_err(RepoError::from)?;
+        unlisted.extend(names.into_iter().filter(|name| !listed.contains(name)));
+    }
     let mut gone = Vec::new();
     for name in unlisted {
         match source
@@ -693,7 +737,13 @@ async fn branches(
             .await
         {
             Ok(raw) => records.push(raw),
-            Err(error) if error.status() == Some(404) => gone.push(name),
+            // Only a branch the cursor remembers has a row to retire; one
+            // git named a moment ago and now 404s was never emitted.
+            Err(error) if error.status() == Some(404) => {
+                if before.branches.contains_key(&name) {
+                    gone.push(name);
+                }
+            }
             Err(error) => return Err(RepoError::from(error)),
         }
     }
