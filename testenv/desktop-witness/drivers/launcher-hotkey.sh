@@ -67,8 +67,15 @@ field() {
 # it on is a WebKit detail, not a promise knobas makes, and a driver that
 # insisted on one would fail on a correct app for a reason that has nothing to
 # do with ⌘K. The role is asserted either way, so this cannot pass on a button.
+#
+# The box is `role="combobox"` (#1665), which WebKit exposes as `AXComboBox`;
+# `AXTextField` is still taken for the same reason the label is read off two
+# fields: the mapping is WebKit's, and the label is what tells the boxes apart.
 focus_is_query_box() {
-    [ "$(field role)" = AXTextField ] || return 1
+    case "$(field role)" in
+        AXComboBox | AXTextField) ;;
+        *) return 1 ;;
+    esac
     [ "$(field description)" = "$QUERY_BOX_LABEL" ] || [ "$(field title)" = "$QUERY_BOX_LABEL" ]
 }
 
@@ -126,7 +133,7 @@ say "pressing ⌘K"
 "$ax" key "$KEY_K" command
 wait_until "⌘K did not put focus in the launcher's query box within ${SETTLE_SECONDS} s" \
     focus_is_query_box
-say "the launcher's query box has focus: role AXTextField, labelled '$QUERY_BOX_LABEL'"
+say "the launcher's query box has focus: role $(field role), labelled '$QUERY_BOX_LABEL'"
 
 # The box is in the tree exactly once. Two would mean something else under this
 # window carries the same label -- WebKit exposing an input and a wrapper of it

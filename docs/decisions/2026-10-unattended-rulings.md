@@ -11466,3 +11466,9 @@ set.
   `tf/job/TfLinkTo.svelte`, which the ticket does not name. *Ruling:* fixed here, the same
   one-line `onMount(() => () => session.dispose())`: same class, same fix, and leaving it would
   have meant exempting it from the rule this PR adds. *Reversing:* low.
+- **The `launcher-hotkey` witness driver.** *Fork:* the driver asserts the focused box's role is
+  `AXTextField`, and WebKit exposes `role="combobox"` as `AXComboBox`, so a correct app would
+  fail the witness. *Ruling:* the driver takes `AXComboBox` or `AXTextField` (the brief: fix the
+  driver, never the app, when a driver cannot find an element); the label still tells the boxes
+  apart, and the role still excludes the top strip's button. Not run here: this implementer has
+  no desktop-witness slot. *Reversing:* low.
