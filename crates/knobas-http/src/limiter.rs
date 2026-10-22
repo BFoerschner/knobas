@@ -568,16 +568,21 @@ mod tests {
     /// a second of any stricter quota (#1764). The loose quota refills its
     /// burst of four in 40 ms, so its four unspent requests are 0.04 s, none
     /// at all at ten a second; ten a second for 0.5 s is five, so the
-    /// stricter quota starts with its whole burst of four.
+    /// stricter quota starts with its whole burst of four. The quiet is
+    /// counted at the stricter rate: one a second refills nothing in it.
     #[test]
     fn a_tightening_after_a_quiet_starts_with_what_the_quiet_refilled() {
         let url = url::Url::parse("http://quiet.invalid:1764").expect("url");
+        let slow = url::Url::parse("http://slow.invalid:1764").expect("url");
         let _loose = InstanceLimiter::for_origin(&url, Rate::new(100, 4));
+        let _loose_too = InstanceLimiter::for_origin(&slow, Rate::new(100, 4));
         std::thread::sleep(std::time::Duration::from_millis(500));
         let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
+        let slower = InstanceLimiter::for_origin(&slow, Rate::new(1, 4));
 
         assert_eq!(strict.slot.current().rate, Rate::new(10, 4), "it tightened");
         assert_eq!(strict.slot.current().take_left(), 4);
+        assert_eq!(slower.slot.current().take_left(), 0, "half a second at 1/s");
     }
 
     /// The quiet is counted from the last request let through, not from when
