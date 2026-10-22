@@ -21,9 +21,9 @@ import type {
   ViewSection,
 } from "../../ipc/entity";
 import type { WriteSource } from "../../shell/queued-toast";
+import { clockLabel } from "../../time/format";
 import { checkoutLine, prNumber } from "../code/code";
 import { matchesAll } from "../filter/filter";
-import { when } from "../tickets/tickets";
 
 /**
  * The header's first line (R-8.3), prototype-6's `repoHead`: the declared
@@ -36,7 +36,7 @@ export function headLine(
   now: Date,
 ): string {
   const lead = [...(facts?.teams ?? []), ...(facts?.language ? [facts.language] : [])];
-  const pushed = when(pushedAt, now);
+  const pushed = clockLabel(pushedAt, now);
   return lead.length > 0 ? `${lead.join(", ")}, last push ${pushed}.` : `Last push ${pushed}.`;
 }
 

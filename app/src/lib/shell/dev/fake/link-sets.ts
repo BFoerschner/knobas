@@ -37,6 +37,7 @@ import type {
   RuleTicket,
   StateChip,
 } from "../../../ipc/entity";
+import { keyOf } from "../../../time/format";
 import type { Handlers } from "../fake-tauri";
 import { fakePipelines } from "./builds";
 import { CORPUS } from "./corpus";
@@ -258,10 +259,6 @@ function preview(pattern: LinkSetPattern): LinkSetPatternPreview {
 
 function tickets() {
   return CORPUS.filter((row) => row.kind === "ticket" && row.deleted_at === null);
-}
-
-function keyOf(id: string): string {
-  return id.slice(id.indexOf(":") + 1);
 }
 
 function matches(rule: LinkSetRule, ticket: (typeof CORPUS)[number]): boolean {

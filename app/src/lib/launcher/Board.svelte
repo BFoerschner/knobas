@@ -20,8 +20,8 @@
 -->
 <script lang="ts">
   import type { LauncherHome } from "../ipc";
-  import { failed, sentence, when } from "../tf/inbox/inbox";
-  import { hm } from "../tf/time/day-view";
+  import { clockLabel, minutesLabel } from "../time/format";
+  import { failed, sentence } from "../tf/inbox/inbox";
   import type { CredentialHealth, SourceSyncStatus } from "../ipc/sources";
   import { isActionable, type HealthPhase } from "../shell/health.svelte";
   import { sourceMonogram } from "../shell/monogram";
@@ -323,7 +323,7 @@
           onclick={() => onopen(row)}
         >
           <span class="tf-ln-nm">{#if failed(item)}<span class="tf-ln-errdot" aria-hidden="true">●</span>{" "}{/if}{sentence(item)}</span>
-          <span class="tf-ln-c">{when(item.occurred_at, now ?? new Date())}</span>
+          <span class="tf-ln-c">{clockLabel(item.occurred_at, now ?? new Date(), true)}</span>
         </button>
       </div>
     {/each}
@@ -336,8 +336,8 @@
   <div class="tf-ln-today">
     <div class="tf-ln-slrow" class:tf-ln-on={index === selected} role="presentation" onmouseenter={() => onhover(index)}>
       <button id={optionId(index)} class="tf-ln-sl" role="option" aria-selected={index === selected} onclick={() => onopen(row)}>
-        <span class="tf-ln-nm"><b>{hm(today.tracked)}</b> tracked</span>
-        <span class="tf-ln-c" class:tf-ln-warn={today.toLog > 0}>{hm(today.toLog)} to log</span>
+        <span class="tf-ln-nm"><b>{minutesLabel(today.tracked)}</b> tracked</span>
+        <span class="tf-ln-c" class:tf-ln-warn={today.toLog > 0}>{minutesLabel(today.toLog)} to log</span>
       </button>
     </div>
   </div>

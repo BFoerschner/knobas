@@ -239,14 +239,6 @@ export function dayFigures(rows: DayRow[]): DayFigures {
   };
 }
 
-/** `"2h 10m"`: prototype-6's duration, minutes and never rounded. */
-export function hm(total: number): string {
-  const hours = Math.floor(total / 60);
-  const rest = total % 60;
-  if (hours === 0) return `${rest}m`;
-  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
-}
-
 /** The strip's hours, `from` to `to`. */
 export interface StripWindow {
   from: number;

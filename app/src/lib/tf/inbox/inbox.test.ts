@@ -19,7 +19,6 @@ import {
   snoozedLine,
   untilLabel,
   visible,
-  when,
 } from "./inbox";
 
 function item(over: Partial<InboxItem>): InboxItem {
@@ -93,19 +92,6 @@ test("the kind word is the chip's word for each category", () => {
   expect(kindOf("alert")).toBe("Monitor");
   expect(kindOf("credential_expiry")).toBe("Credential");
   expect(kindOf("failed_sign_in")).toBe("Sign-in");
-});
-
-describe("the time column", () => {
-  const now = new Date(2026, 7, 22, 15, 0);
-  test("today is the clock", () => {
-    expect(when(new Date(2026, 7, 22, 13, 50).toISOString(), now)).toBe("13:50");
-  });
-  test("yesterday is shortened as prototype-6 does", () => {
-    expect(when(new Date(2026, 7, 21, 16, 30).toISOString(), now)).toBe("yest. 16:30");
-  });
-  test("older is the date", () => {
-    expect(when(new Date(2026, 7, 18, 9, 5).toISOString(), now)).toBe("2026-08-18");
-  });
 });
 
 describe("where a row opens", () => {

@@ -344,7 +344,7 @@ test("the fixture's rows are named in words, never by op or raw id", () => {
     "Comment on PAY-231",
     "Comment on PAY-228",
     "Comment on PAY-300",
-    "1 h worklog on PAY-228",
+    "1h worklog on PAY-228",
     "Pause a monitor",
   ]);
   for (const [index, heading] of headings.entries()) {
@@ -791,7 +791,7 @@ test("discarding a queued worklog asks first, and cancelling leaves it queued", 
   const asking = screen.dialogs()[1]!.textContent!.replace(/\s+/g, " ");
   expect(asking).toContain("PAY-231");
   expect(asking).toContain("27 August 2026");
-  expect(asking).toContain("2 h 15 min");
+  expect(asking).toContain("2h 15m");
   expect(asking).toContain("8100 seconds");
   expect(asking).toContain("traced the payout retry");
 

@@ -11,7 +11,8 @@
  */
 import type { LinkEntry, PipelineSettings, RunRow, SourceView, ViewRow, ViewSection } from "../../ipc/entity";
 import type { TicketDraft } from "../create-ticket";
-import { duration, runHash, runTone } from "./builds";
+import { secondsLabel } from "../../time/format";
+import { runHash, runTone } from "./builds";
 import { branchName, defaultBranch, shortSha } from "./pipeline";
 import { fieldsOf, overridesOf, runPayload, valuesFrom, type RunRequest, type StartValue } from "./run-dialog";
 
@@ -51,10 +52,10 @@ export function previousOnBranch(runs: readonly RunRow[], run: RunRow): RunRow |
 /** *Took*: *4 m 12 s, −16 s against #1185*; a run in flight is *still running*. */
 export function tookLine(run: RunRow, previous: RunRow | null): string {
   if (run.duration_seconds === null) return run.started !== null ? "still running" : "not started";
-  const took = duration(run.duration_seconds);
+  const took = secondsLabel(run.duration_seconds);
   if (previous === null || previous.duration_seconds === null) return took;
   const diff = run.duration_seconds - previous.duration_seconds;
-  return `${took}, ${diff > 0 ? "+" : "−"}${duration(Math.abs(diff))} against #${previous.number ?? ""}`;
+  return `${took}, ${diff > 0 ? "+" : "−"}${secondsLabel(Math.abs(diff))} against #${previous.number ?? ""}`;
 }
 
 /** How a finished run went, for the context line: `null` for one that neither passed nor failed. */

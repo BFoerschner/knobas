@@ -7,7 +7,8 @@
 import { expect, test, vi } from "vitest";
 
 import type { AdHocBlock, Block, DayBlock, DayRecord as Wire } from "../../ipc/time";
-import { readTodayFigures, type DayReads } from "./day-read";
+import { dayOffsetMinutes } from "../../time/day";
+import { readDay, readTodayFigures, type DayReads } from "./day-read";
 
 const at = (hour: number, minute = 0) => new Date(2026, 7, 22, hour, minute).toISOString();
 
@@ -56,4 +57,24 @@ test("today's figures are the Day tab's: tracked counts the timer, to log only w
   const [from, to] = dayBlocks.mock.calls[0]!;
   expect(new Date(from).getDate()).toBe(22);
   expect(new Date(to).getTime() - new Date(from).getTime()).toBe(24 * 3_600_000);
+});
+
+test("the Day tab asks for each offer with the offset the draft sends for that day", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date(2026, 10, 5, 12));
+    const asked: number[] = [];
+    const io: DayReads = {
+      dayBlocks: async () => ({ blocks: [block(1, new Date(2026, 9, 20, 9).toISOString(), new Date(2026, 9, 20, 10).toISOString())], open: [], past_horizon: false }),
+      adHocBlock: async (_id, when) => {
+        asked.push(when.offsetMinutes);
+        return null;
+      },
+    };
+    await readDay(io, "2026-10-20");
+    expect(asked).toEqual([120]);
+    expect(asked[0]).toBe(dayOffsetMinutes("2026-10-20"));
+  } finally {
+    vi.useRealTimers();
+  }
 });

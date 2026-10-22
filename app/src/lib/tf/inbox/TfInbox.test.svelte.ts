@@ -152,7 +152,7 @@ test("each row is a time, a sentence, its actions and its kind and job", async (
     "Assigned to you: Payout dashboard latency",
   ]);
   expect(ctxs()).toEqual(["Review, job PAY-231", "Monitor, job PAY-231", "Build, job PAY-231", "Assignment, job PAY-240"]);
-  expect(rows().map((row) => text(row.querySelector("time")))).toEqual(["13:50", "12:40", "10:14", "yest. 16:30"]);
+  expect(rows().map((row) => text(row.querySelector("time")))).toEqual(["13:50", "12:40", "10:14", "yesterday 16:30"]);
   expect(rows().map((row) => row.querySelector(".tf-dot.tf-err") !== null)).toEqual([false, true, true, false]);
   expect(rows().map((row) => [...row.querySelectorAll(".tf-acts > *")].map((each) => text(each)).join(" "))).toEqual([
     "Review Snooze Done",

@@ -30,6 +30,7 @@
     log, or a log without steps, draws no bar.
 -->
 <script lang="ts">
+  import { clockLabel, secondsLabel } from "../../time/format";
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -39,8 +40,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { settleQueued } from "../queued.svelte";
   import { commitHash, fileHash } from "../repo/repo";
-  import { when } from "../tickets/tickets";
-  import { duration, pipelineHash, runTone } from "./builds";
+  import { pipelineHash, runTone } from "./builds";
   import {
     chipTone,
     defaultBranch,
@@ -388,8 +388,8 @@
       </h1>
       <div class="tf-sub">
         {#if run.branch !== null}<span class="tf-mono">{run.branch}</span>{/if}{startedBy !== null ? `, started by ${startedBy}` : ""}{at !== null
-          ? `, ${when(at)}`
-          : ""}{run.duration_seconds !== null ? `, took ${duration(run.duration_seconds)}` : ""}
+          ? `, ${clockLabel(at)}`
+          : ""}{run.duration_seconds !== null ? `, took ${secondsLabel(run.duration_seconds)}` : ""}
       </div>
     </div>
     <div class="tf-acts">
@@ -498,7 +498,7 @@
               <dt>Agent</dt>
               <dd class="tf-mono">{agent ?? ""}</dd>
               <dt>Started</dt>
-              <dd>{run.started !== null ? when(run.started) : "not yet"}</dd>
+              <dd>{run.started !== null ? clockLabel(run.started) : "not yet"}</dd>
               <dt>Took</dt>
               <dd>{tookLine(run, previous)}</dd>
             </dl>

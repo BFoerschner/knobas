@@ -106,26 +106,6 @@ export function initials(assignee: string | null): string {
 }
 
 /**
- * When a ticket changed, as prototype-6 writes it: *today 11:48*,
- * *yesterday 16:05*, else the date. *never* for a source that never said.
- */
-export function when(iso: string | null, now: Date = new Date()): string {
-  if (iso === null) return "never";
-  const at = new Date(iso);
-  const day = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
-  if (day(at) === day(now)) return `today ${time}`;
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (day(at) === day(yesterday)) return `yesterday ${time}`;
-  return day(at);
-}
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-/**
  * The preview's one primary button and the line under it (R-3.9), by the
  * ticket's state as prototype-6 decides it: *Start work* on a To Do ticket of
  * mine, *Open job* on a done one or somebody else's, *Resume work* on the

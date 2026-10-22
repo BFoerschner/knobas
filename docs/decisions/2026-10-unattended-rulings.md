@@ -12720,3 +12720,12 @@ The measurement came after it.
 - **A failed save and the chain.** *Ruling:* the try/catch inside the chained step keeps the
   chain alive; no test pinned it, so one was added (`a refused save does not break the chain`),
   and a mutant that rethrows in the catch kills it. *Reversing:* n/a.
+## #1678 and #1680: one formatter module, and a day's offset at its own midnight (Sonnet implementer, 2026-10-23)
+
+- **Which spelling wins.** *Ruling:* `minutesLabel` reads `2h 15m`, a run's length `3 m 12 s`, and yesterday is the word `yesterday`. *Reasoning:* the majority spelling and prototype-6's. The strings that changed are listed in the PR. *Reversing:* low, one function body and the table in `lib/time/format.test.ts`.
+- **Where `keyOf` lives.** *Ruling:* defined in `lib/time/format.ts`, re-exported from `tf/job/job.ts`. *Reasoning:* one definition without touching 25 importers; `tickets/editor.ts`'s unrelated `keyOf(field)` is renamed `fieldKey`. *Reversing:* low, delete the re-export and fix imports.
+- **The inbox column.** *Ruling:* `clockLabel` takes a `bare` flag that drops `today` only. *Reasoning:* the inbox never says `today`, but yesterday must read the same on every surface. *Reversing:* low.
+- **Two of four callers were already right.** *Ruling:* `day-read.ts` and `TfLogAll` moved onto the helper anyway, with tests. *Reasoning:* one helper beside `dayBounds`, as the ticket asks. *Reversing:* low.
+- **The inbox's two-line yesterday rows (merge-manager).** *Fork:* keep the inbox's short `yest.` or make the time column fit. *Ruling:* make it fit (column 76px to 108px, `white-space: nowrap`). *Reasoning:* the ticket asks the inbox and the ticket board to agree on yesterday; a second spelling would keep the divergence. *Reversing:* low, one CSS line.
+- **`3 m 12 s`, blank for an unparseable date, `2h 15m` (merge-manager).** *Ruling:* all three stand. *Reasoning:* Builds already read `4 m 12 s`; `est. 6h` and prototype-6 use the compact hours form (conventions, Copy and display); an empty string beats printing `NaN`. *Reversing:* low.
+- **Standards review's kept calls (merge-manager).** *Ruling:* the `keyOf` re-export, `clockLabel`'s `bare` flag and inbox.ts's own pad/day/clock stand. *Reasoning:* each is the smaller change and none is a second spelling of a user-visible string. *Reversing:* low.

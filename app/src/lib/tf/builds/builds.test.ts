@@ -6,7 +6,6 @@ import { expect, test } from "vitest";
 
 import type { PipelineReason, PipelineRow, RunRow } from "../../ipc/entity";
 import {
-  duration,
   foldOpen,
   pinnedOf,
   reasonsLine,
@@ -92,11 +91,11 @@ test("the strip is the last twelve runs oldest first, so the newest is on the ri
   expect(strip[0]?.entity_id).toBe("r11");
 });
 
-test("the latest time reads as prototype-6 writes it: a time today, yest. and a time, else the date", () => {
+test("the latest time reads as prototype-6 writes it: a time today, yesterday and a time, else the date", () => {
   const now = new Date(2026, 7, 22, 14, 32);
   const at = (d: Date) => pipeline("A", [run({ started: d.toISOString(), updated_at: d.toISOString() })]);
   expect(latestTime(at(new Date(2026, 7, 22, 11, 45)), now)).toBe("11:45");
-  expect(latestTime(at(new Date(2026, 7, 21, 16, 20)), now)).toBe("yest. 16:20");
+  expect(latestTime(at(new Date(2026, 7, 21, 16, 20)), now)).toBe("yesterday 16:20");
   expect(latestTime(at(new Date(2026, 7, 19, 9, 0)), now)).toBe("2026-08-19");
   expect(latestTime(pipeline("B", []), now)).toBe("");
   // A queued run has not started: its time is when the source last touched it.
@@ -127,12 +126,6 @@ test("the address carries the entity id, and a bare #/builds selects the first f
   expect(pipelineOf([pipeline("A", [run()])], [])?.name).toBe("A");
   expect(pipelineOf(list, ["teamcity:buildType:Gone"])).toBeNull();
   expect(pipelineOf([], [])).toBeNull();
-});
-
-test("a duration reads as prototype-6's: seconds under a minute, else minutes and padded seconds", () => {
-  expect(duration(38)).toBe("38 s");
-  expect(duration(252)).toBe("4 m 12 s");
-  expect(duration(65)).toBe("1 m 05 s");
 });
 
 test("a run's address carries its pipeline's entity id and its own", () => {

@@ -9,6 +9,7 @@
 import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import type { ExpiryNote } from "../../shell/health.svelte";
 import { ago } from "../../shell/time";
+import { secondsLabel } from "../../time/format";
 import { CI, CODE_HOST, MONITORING, TICKET_SYSTEM, WIKI } from "../roles.svelte";
 import { IDENTITY_FIELD } from "../../sources/new-source";
 import type { Walk } from "../../sources/walk";
@@ -306,14 +307,6 @@ export function startedWords(iso: string, now: Date = new Date()): string {
   return at.toDateString() === now.toDateString() ? hhmm(at) : `${at.getDate()} ${MONTHS[at.getMonth()]} ${hhmm(at)}`;
 }
 
-/** *4 s*, *3 min 12 s*. */
-export function tookWords(ms: number): string {
-  const secs = Math.max(0, Math.round(ms / 1000));
-  if (secs < 60) return `${secs} s`;
-  const rest = secs % 60;
-  return rest === 0 ? `${Math.floor(secs / 60)} min` : `${Math.floor(secs / 60)} min ${rest} s`;
-}
-
 /**
  * A watched run's line (#1384), the wizard's reading on a source's page:
  * *120 of 300 repositories · 1,240 items · 83 s*, without the walk until the
@@ -350,7 +343,7 @@ export function runRow(
   if (run.finished_at === null || run.outcome === null) {
     return { ...row, took: "—", result: "Running…", tone: "run" };
   }
-  const took = tookWords(new Date(run.finished_at).getTime() - new Date(run.started_at).getTime());
+  const took = secondsLabel(Math.max(0, Math.round((new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000)));
   if (run.outcome === "unauthorized") {
     return { ...row, took, result: `${run.error ?? "401 Unauthorized"}. Re-enter the ${secretNoun(source.auth_kind)}.`, tone: "err" };
   }

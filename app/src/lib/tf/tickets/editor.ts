@@ -60,7 +60,7 @@ const BY_KEY = new Map(CONDITION_FIELDS.map((entry) => [entry.key, entry]));
 const KEY_OF = new Map(CONDITION_FIELDS.map((entry) => [entry.field, entry.key]));
 
 /** The grammar key a field writes. */
-export function keyOf(field: ConditionField): string {
+export function fieldKey(field: ConditionField): string {
   return KEY_OF.get(field)!;
 }
 
@@ -153,7 +153,7 @@ function parses(field: ConditionField, negated: boolean, value: string): boolean
 export function searchParts(read: Conditions): SearchPart[] {
   const parts: SearchPart[] = read.conditions.flatMap((condition) =>
     condition.values.map((value) => ({
-      text: `${condition.negated ? "-" : ""}${grammarToken(keyOf(condition.field), value)}`,
+      text: `${condition.negated ? "-" : ""}${grammarToken(fieldKey(condition.field), value)}`,
       parses: parses(condition.field, condition.negated, value),
     })),
   );

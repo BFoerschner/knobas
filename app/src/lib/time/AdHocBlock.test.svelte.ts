@@ -1,3 +1,16 @@
+test("Log to a ticket… asks for the draft with the offset at the block's day, not today's", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date(2026, 10, 5, 12));
+    const { asked, onlog } = render();
+    button("Log to").click();
+    await vi.waitFor(() => expect(onlog).toHaveBeenCalled());
+    expect(asked[0]?.when.offsetMinutes).toBe(120);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 /**
  * *Log an ad-hoc block*: the two ways out, and the reason on screen (#281).
  *
@@ -250,6 +263,6 @@ test("it draws in the ticket-first dialog and names no room and no day review", 
 test("the header says how long the block was and what it was on", () => {
   render();
   expect(target.querySelector(".tf-dialog header .tf-dsub")?.textContent).toBe(
-    "1 h 30 min on ENG:SEPA payout retry design",
+    "1h 30m on ENG:SEPA payout retry design",
   );
 });

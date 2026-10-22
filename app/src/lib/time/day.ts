@@ -19,6 +19,8 @@
  */
 import type { DayBlock } from "../ipc/time";
 
+import { offsetMinutes } from "./draft";
+
 /** Weekday and month names, so a date reads the same in every locale. */
 const WEEKDAYS = [
   "Sunday",
@@ -86,6 +88,15 @@ export function dayBounds(key: string): { from: Date; to: Date } {
   return { from, to };
 }
 
+/**
+ * The UTC offset, in minutes, in force at `key`'s own local midnight. Every
+ * caller that tells the backend "this day" sends this, never today's offset:
+ * across a daylight-saving change the two differ by an hour.
+ */
+export function dayOffsetMinutes(key: string): number {
+  return offsetMinutes(dayBounds(key).from);
+}
+
 /** The day `days` away from `key`, month and year ends included. */
 export function shiftDay(key: string, days: number): string {
   const at = midnight(key);
@@ -127,20 +138,6 @@ export function clockReading(iso: string, on?: string): string {
 /** Whole minutes between two instants, rounded down. */
 export function minutesBetween(from: string, to: string): number {
   return Math.max(0, Math.floor((new Date(to).getTime() - new Date(from).getTime()) / 60_000));
-}
-
-/**
- * `"45 min"`, `"1 h"`, `"2 h 15 min"`.
- *
- * Minutes, never decimal hours: `CONTEXT.md`'s timesheet is minute-granular
- * with no rounding, because knobas must never invent a rounding policy a
- * person's Jira may not have. `"1.25 h"` is that invention in miniature.
- */
-export function durationReading(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
 }
 
 /**

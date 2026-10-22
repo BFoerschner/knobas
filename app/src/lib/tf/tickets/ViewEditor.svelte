@@ -20,6 +20,7 @@
   dialog open and says why.
 -->
 <script lang="ts">
+  import { clockLabel } from "../../time/format";
   import { untrack } from "svelte";
 
   import type { MiniBoard } from "../../ipc/entity";
@@ -38,7 +39,7 @@
     CONDITION_FIELDS,
     conditionsText,
     editColumns,
-    keyOf,
+    fieldKey,
     looseStatuses,
     moveColumn,
     onePerStatus,
@@ -51,7 +52,7 @@
     type ConditionField,
     type EditColumn,
   } from "./editor";
-  import { columnName, LANE_FIELDS, splitLanes, when } from "./tickets";
+  import { columnName, LANE_FIELDS, splitLanes } from "./tickets";
   import { counted } from "../counted";
   import { copyKeeps, drawnJiraColumns, LIST_COLUMN_ORDER, savedViewKindWords, type CopiedFrom } from "./views";
 
@@ -181,7 +182,7 @@
     else if (field === "epic")
       offered = parents.filter((parent) => parent.kind === "ticket").map((parent) => [parent.name, parent.name]);
     else {
-      const key = keyOf(field);
+      const key = fieldKey(field);
       offered = fields
         .filter((suggestion) => suggestion.key === key)
         .map((suggestion): [string, string] => {
@@ -668,7 +669,7 @@
                       {:else if column === "priority"}<td>{card.priority ?? ""}</td>
                       {:else if column === "signals"}<td>{card.signals.length}</td>
                       {:else if column === "assignee"}<td>{card.assignee ?? "Unassigned"}</td>
-                      {:else if column === "updated"}<td>{when(card.updated_at)}</td>
+                      {:else if column === "updated"}<td>{clockLabel(card.updated_at)}</td>
                       {:else if column === "epic"}<td>{card.path ?? ""}</td>
                       {:else}<td>{card.labels.join(", ")}</td>{/if}
                     {/each}

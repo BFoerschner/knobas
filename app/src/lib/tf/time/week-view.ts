@@ -22,11 +22,11 @@
  */
 import type { QueuedWrite } from "../../ipc/sources";
 import type { RunningTimer, TimerTarget, Week, WeekCell } from "../../ipc/time";
+import { minutesLabel } from "../../time/format";
 import { withdrawnWorklog } from "../../shell/write-queue.svelte";
 import { targetReading } from "../../shell/timer";
 import { dayBounds, dayKey, dayLabel } from "../../time/day";
 import { isWeekend, minutesOf } from "../../time/week";
-import { hm } from "./day-view";
 
 export interface WeekCellView {
   /** `YYYY-MM-DD`. */
@@ -91,7 +91,7 @@ function cellView(
   const held = minutesOf(cell?.held_seconds ?? 0);
   const toLog = minutesOf((cell?.unlogged_seconds ?? 0) + runningSeconds);
   const empty = tracked === 0 && logged === 0 && held === 0;
-  const note = noTarget || empty ? null : toLog > 0 ? `${hm(toLog)} to log` : held > 0 ? `${hm(held)} held` : "logged";
+  const note = noTarget || empty ? null : toLog > 0 ? `${minutesLabel(toLog)} to log` : held > 0 ? `${minutesLabel(held)} held` : "logged";
   return { day, weekend: isWeekend(index), tracked, logged, held, toLog, bar: !noTarget && !empty, note };
 }
 
@@ -160,7 +160,7 @@ export function heldNotes(writes: QueuedWrite[], days: string[]): string[] {
     const index = days.indexOf(dayKey(new Date(worklog.started)));
     if (index < 0) continue;
     const key = targetReading({ kind: "entity", entity_id: worklog.entity });
-    notes.push(`${hm(minutesOf(worklog.seconds))} of ${key} on ${weekday(days[index]!)} is held: ${reasonOf(write)}`);
+    notes.push(`${minutesLabel(minutesOf(worklog.seconds))} of ${key} on ${weekday(days[index]!)} is held: ${reasonOf(write)}`);
   }
   return notes;
 }

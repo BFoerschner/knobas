@@ -21,6 +21,7 @@
   its own write, and the copies of the ones that went stay (ADR-0012).
 -->
 <script lang="ts">
+  import { minutesLabel } from "../../time/format";
   import { onMount } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -36,11 +37,10 @@
   import { push } from "../../shell/toasts.svelte";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
-  import { offsetMinutes } from "../../time/draft";
+  import { dayOffsetMinutes } from "../../time/day";
   import { columnHeading, minutesOf } from "../../time/week";
   import type { Layers } from "../layers.svelte";
-  import { hm } from "./day-view";
-
+  
   interface LogAllPorts {
     logAllPreview: typeof realLogAllPreview;
     worklogDraft: typeof realWorklogDraft;
@@ -89,8 +89,7 @@
   const id = (plan: Pick<PlannedWorklog, "day" | "entity_id">) => `${plan.day} ${plan.entity_id}`;
 
   function when(day: string) {
-    const window = days.find((candidate) => candidate.day === day);
-    return { day, offsetMinutes: offsetMinutes(window ? new Date(window.from) : new Date()) };
+    return { day, offsetMinutes: dayOffsetMinutes(day) };
   }
 
   onMount(() => {
@@ -204,7 +203,7 @@
                 <td><input type="checkbox" aria-label="Log this" bind:checked={row.ticked} /></td>
                 <td class="tf-nowrap">{dayHeading(row.plan.day)}</td>
                 <td class="tf-mono tf-nowrap">{ticket}</td>
-                <td class="tf-nowrap tf-tm-num">{hm(minutesOf(row.plan.seconds))}</td>
+                <td class="tf-nowrap tf-tm-num">{minutesLabel(minutesOf(row.plan.seconds))}</td>
                 <td class="tf-tm-comment">
                   <textarea
                     rows="2"

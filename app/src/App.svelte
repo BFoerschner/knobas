@@ -32,7 +32,7 @@
   import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
   import { createDraftFlow } from "./lib/tf/drafting.svelte";
   import { offsetMinutes } from "./lib/time/draft";
-  import { hoursAndMinutes } from "./lib/time/draft-form.svelte";
+  import { minutesLabel } from "./lib/time/format";
 
   /**
    * The window draws the ticket-first shell, and nothing else (#881): the
@@ -159,7 +159,7 @@
     timeRevision += 1;
     const key = targetReading({ kind: "entity", entity_id: logged.entity_id });
     // A worklog carries no source to name (`Worklog` has its entity only), so no sign-in sentence.
-    toastQueued(`log ${hoursAndMinutes(Math.floor(logged.seconds / 60))} to ${key}`, null);
+    toastQueued(`log ${minutesLabel(Math.floor(logged.seconds / 60))} to ${key}`, null);
     if (logged.write_queue_id !== null) followWrite({ id: logged.write_queue_id }, { name: "Worklog" });
   }
 

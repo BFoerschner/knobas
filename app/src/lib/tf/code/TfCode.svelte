@@ -37,6 +37,7 @@
 </script>
 
 <script lang="ts">
+  import { clockLabel } from "../../time/format";
   import { ipcErrorMessage } from "../../ipc";
   import { codeFacts, entityCheckout, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
@@ -49,7 +50,6 @@
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { itemHash, keyOf } from "../job/job";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
-  import { when } from "../tickets/tickets";
   import {
     checkoutLine,
     compareHash,
@@ -410,7 +410,7 @@
               <td><Marked text={fact?.language ?? ""} typed={repoFilter.text} /></td>
               <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
               <td class:tf-dim={local?.dim}>{local?.text ?? ""}</td>
-              <td class="tf-dim tf-nowrap">{row.updated_at ? when(row.updated_at, now) : ""}</td>
+              <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
               <td class="tf-nowrap"><TfOpenIn entityId={row.entity_id} title={row.title} checkout={checkouts[row.entity_id]} variant="ghost" /></td>
             </tr>
           {/each}
@@ -441,7 +441,7 @@
               >
               <td>{#if row.state}<span class="tf-chip tf-{row.state.tone}">{row.state.text}</span>{/if}</td>
               <td class="tf-mono tf-dim">{belongs ?? ""}</td>
-              <td class="tf-dim tf-nowrap">{row.updated_at ? when(row.updated_at, now) : ""}</td>
+              <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
             </tr>
           {/each}
         </tbody>

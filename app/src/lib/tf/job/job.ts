@@ -27,6 +27,8 @@ import type { AuthMethod, RoleClaim } from "../../ipc/sources";
 import { signInFails } from "../../shell/health.svelte";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { protocolDayOf } from "../../standup/protocol";
+import { keyOf, minutesLabel } from "../../time/format";
+import { minutesOf } from "../../time/week";
 import { CI, claims } from "../roles.svelte";
 import { reenterWords, secretNoun } from "../settings/settings";
 
@@ -35,10 +37,7 @@ export function isEntityId(segment: string): boolean {
   return segment.includes(":");
 }
 
-/** The key half of an entity id: `jira:PAY-231` reads `PAY-231`. */
-export function keyOf(entityId: string): string {
-  return entityId.slice(entityId.indexOf(":") + 1);
-}
+export { keyOf };
 
 /**
  * The ticket a job address names, given how to read one entity.
@@ -151,28 +150,13 @@ export function blockerEntries(detail: Pick<EntityDetail, "row" | "links">): Blo
     }));
 }
 
-/**
- * A duration as prototype-6 writes one: `7h 30m`, `45m`, `3h`. Whole minutes,
- * floored, as the timesheet counts them (CONTEXT.md, *Timesheet*).
- *
- * Minutes, never decimal hours, and never days: how long a working day is
- * belongs to the source's settings, which knobas does not read.
- */
-export function hm(seconds: number): string {
-  const minutes = Math.max(0, Math.floor(seconds / 60));
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  if (hours === 0) return `${rest}m`;
-  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
-}
-
 /** The card's facts line: `Story, High, est. 3h`, each part only where known. */
 export function factsLine(detail: Pick<EntityDetail, "issue_type" | "priority" | "estimate_seconds">): string {
   const parts: string[] = [];
   if (detail.issue_type) parts.push(detail.issue_type);
   if (detail.priority) parts.push(detail.priority);
   if (detail.estimate_seconds !== null && detail.estimate_seconds > 0) {
-    parts.push(`est. ${hm(detail.estimate_seconds)}`);
+    parts.push(`est. ${minutesLabel(minutesOf(detail.estimate_seconds))}`);
   }
   return parts.join(", ");
 }
@@ -214,8 +198,8 @@ export function weekReading(week: Week, entityId: string, today: string): WeekRe
 /** The line under *Time this week*. */
 export function weekLine(reading: WeekReading): string {
   const parts: string[] = [];
-  if (reading.logged >= 60) parts.push(`${hm(reading.logged)} logged`);
-  if (reading.unlogged >= 60) parts.push(`${hm(reading.unlogged)} to log`);
+  if (reading.logged >= 60) parts.push(`${minutesLabel(minutesOf(reading.logged))} logged`);
+  if (reading.unlogged >= 60) parts.push(`${minutesLabel(minutesOf(reading.unlogged))} to log`);
   return parts.length === 0 ? "Nothing yet" : parts.join(", ");
 }
 

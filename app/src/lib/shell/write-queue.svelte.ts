@@ -24,6 +24,7 @@
  * nothing in this file may do it either. `write-queue.test.svelte.ts` runs the
  * clock forward over a held write and asserts it is still held.
  */
+import { minutesLabel } from "../time/format";
 import {
   amendWrite,
   applyHeldWrite,
@@ -36,7 +37,6 @@ import {
   type WriteOpPayload,
   type WriteState,
 } from "../ipc/sources";
-import { durationReading } from "../time/day";
 import { minutesOf } from "../time/week";
 
 /**
@@ -455,7 +455,7 @@ export function writeWords(
       case "LogWork": {
         const seconds = op?.seconds;
         if (typeof seconds !== "number") return null;
-        return [{ text: `${durationReading(minutesOf(seconds))} worklog on ` }, key];
+        return [{ text: `${minutesLabel(minutesOf(seconds))} worklog on ` }, key];
       }
       case "CreateTicket":
         return quoted("New ticket", "title");
