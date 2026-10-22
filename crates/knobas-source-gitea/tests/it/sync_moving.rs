@@ -403,6 +403,17 @@ fn twenty_five_branches() -> World {
     }
 }
 
+/// A push to `b-08`, which page 2 lists, newer than every other head: Gitea
+/// then lists it first, on page 1.
+fn push_b08(world: &mut World) {
+    let pushed = world
+        .branches
+        .get_mut(MONOREPO)
+        .and_then(|all| all.iter_mut().find(|b| b["name"] == "b-08"))
+        .expect("b-08 is in the fixture");
+    *pushed = support::branch("b-08", &sha(900), "pushed", &at(100_000));
+}
+
 fn branch_entity(name: &str) -> String {
     format!("gitea:{MONOREPO}@refs/heads/{name}")
 }
@@ -419,14 +430,7 @@ async fn a_branch_a_push_moved_off_the_listing_is_re_read_and_not_tombstoned() {
     let (_, cursor) = run(&*gitea, None).await;
 
     moving.with(|world| {
-        world.after(&format!("repos/{MONOREPO}/branches"), 1, |world| {
-            let pushed = world
-                .branches
-                .get_mut(MONOREPO)
-                .and_then(|all| all.iter_mut().find(|b| b["name"] == "b-08"))
-                .expect("b-08 is in the fixture");
-            *pushed = support::branch("b-08", &sha(900), "pushed", &at(100_000));
-        });
+        world.after(&format!("repos/{MONOREPO}/branches"), 1, push_b08);
     });
     let (items, after) = run(&*gitea, Some(&cursor)).await;
 
@@ -544,14 +548,7 @@ async fn a_push_during_a_full_sync_branch_walk_hides_no_branch() {
     let (server, moving) = Moving::start(twenty_five_branches()).await;
     let gitea = gitea(&server, json!({}));
     moving.with(|world| {
-        world.after(&format!("repos/{MONOREPO}/branches"), 1, |world| {
-            let pushed = world
-                .branches
-                .get_mut(MONOREPO)
-                .and_then(|all| all.iter_mut().find(|b| b["name"] == "b-08"))
-                .expect("b-08 is in the fixture");
-            *pushed = support::branch("b-08", &sha(900), "pushed", &at(100_000));
-        });
+        world.after(&format!("repos/{MONOREPO}/branches"), 1, push_b08);
     });
     let (items, after) = run(&*gitea, None).await;
 
@@ -603,14 +600,7 @@ async fn a_full_sync_tombstones_no_branch_it_never_emitted() {
     let (server, moving) = Moving::start(twenty_five_branches()).await;
     let gitea = gitea(&server, json!({}));
     moving.with(|world| {
-        world.after(&format!("repos/{MONOREPO}/branches"), 1, |world| {
-            let pushed = world
-                .branches
-                .get_mut(MONOREPO)
-                .and_then(|all| all.iter_mut().find(|b| b["name"] == "b-08"))
-                .expect("b-08 is in the fixture");
-            *pushed = support::branch("b-08", &sha(900), "pushed", &at(100_000));
-        });
+        world.after(&format!("repos/{MONOREPO}/branches"), 1, push_b08);
         world.after(&format!("repos/{MONOREPO}/git/refs/heads"), 1, |world| {
             world
                 .branches
@@ -674,7 +664,9 @@ async fn a_one_page_branch_walk_reads_no_names_from_git() {
         "{served:?}"
     );
     assert!(
-        served.iter().any(|s| s == &format!("repos/{MONOREPO}/branches?page=2")),
+        served
+            .iter()
+            .any(|s| s == &format!("repos/{MONOREPO}/branches?page=2")),
         "the walk ended on an empty second page: {served:?}"
     );
 }

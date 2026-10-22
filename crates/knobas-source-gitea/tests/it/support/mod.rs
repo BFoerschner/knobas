@@ -712,7 +712,8 @@ impl Fake {
                 .await;
             }
             // Every name at once, as git answers it whatever the page size
-            // (#1716); a walk of more than one page reads it.
+            // (#1716), and 404 where there is none; a walk of more than one
+            // page reads it.
             let refs: Vec<Value> = branches
                 .iter()
                 .map(|b| {
@@ -722,11 +723,16 @@ impl Fake {
                     })
                 })
                 .collect();
+            let answer = if refs.is_empty() {
+                ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" }))
+            } else {
+                ok(json!(refs))
+            };
             authed(
                 Mock::given(method("GET"))
                     .and(path(format!("/api/v1/repos/{full_name}/git/refs/heads"))),
             )
-            .respond_with(ok(json!(refs)))
+            .respond_with(answer)
             .mount(&self.server)
             .await;
         }

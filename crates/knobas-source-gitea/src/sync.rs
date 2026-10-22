@@ -100,12 +100,13 @@
 //!   position therefore still emits **zero** branch tombstones -- it has
 //!   nothing to compare against -- but it no longer needs to: a cursor-less run
 //!   emits every branch of every walked repository, and the sweep retires the
-//!   rest. "Every" holds while the listing moves too (#1716): a walk of more
-//!   than one page reads each name git lists that the pages missed, so a push
-//!   or a deletion between two pages hides no branch from the sweep. That was the recorded window (a re-added source, a cleared or
+//!   rest. That was the recorded window (a re-added source, a cleared or
 //!   unreadable cursor, a cursor-version bump), and `branch` is precisely the
 //!   kind links hang off (spec §5a). The adapter's own diff still carries the
-//!   *incremental* case, which the sweep never touches.
+//!   *incremental* case, which the sweep never touches. "Every branch" holds
+//!   while the listing moves too (#1716): a walk of more than one page reads
+//!   each name git lists that the pages missed, so a push or a deletion
+//!   between two pages hides no branch from the sweep.
 //!   `tests/it/sync.rs::a_run_holding_no_position_cannot_tombstone_a_deleted_branch`
 //!   pins the adapter half, so the division of labour cannot drift silently.
 //!

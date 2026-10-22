@@ -12359,3 +12359,7 @@ Ruled 2026-10-22 by the implementer on Sonnet; docs only.
   own reads decide); anything else takes `RepoError::from`, as #1624's failed re-read does.
   *Reasoning:* a walk that cannot show its pages complete must not hand the sweep a short list.
   *Reversing:* low.
+- **Counting the pages.** *Fork:* a `pages()` accessor on `knobas_http::PageWalk` beside `rows()`,
+  or a counter in `sync::branches`. *Ruling:* the counter. *Reasoning:* `crates/knobas-http/**` is
+  frozen by §10.8, and an accessor would need a ledger entry for one integer the caller already
+  sees page by page. *Reversing:* low.
