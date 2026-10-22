@@ -12050,3 +12050,9 @@ The write side's rung is `attempts`, 1 after the first failure. That is the sync
   change, §10.8 untouched. *Reversing:* low; a `kind` on the week row would drop the read.
 - **Old ticket bookmarks.** *Ruling:* `#/ticket/<id>` and the `#/entity/<id>` resolver now land on
   `#/job/<entity id>` (the job page reads both forms since #1476). *Reversing:* low.
+- **Week link appears after the kind read (merge-manager).** *Fork:* the key is plain text for
+  the moment the read takes, which the ticket's "No visual change" line does not name. *Ruling:*
+  accepted; `just shot` of `#/time/week` under `?fake-ipc`, before and after a 1.5 s settle, shows
+  the same table and the same underlined keys. The reads are cached per entity id (`asked`, kept
+  across weeks), so a re-render issues none; a failed read is retried on the next render. No
+  follow-up for a `kind` on the week row: three reads a week, once each. *Reversing:* low.
