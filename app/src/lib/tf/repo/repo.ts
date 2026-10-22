@@ -20,6 +20,7 @@ import type {
   ViewRow,
   ViewSection,
 } from "../../ipc/entity";
+import type { WriteSource } from "../../shell/queued-toast";
 import { checkoutLine, prNumber } from "../code/code";
 import { matchesAll } from "../filter/filter";
 import { when } from "../tickets/tickets";
@@ -470,7 +471,7 @@ export function commitRefusal(section: ViewSection | undefined): string | null {
   return null;
 }
 
-/** What the repository page calls its source in a sentence: the display name, else the id, else a role word. */
-export function sourceName(source: { id: string; display_name: string } | null | undefined): string {
+/** What the repository page calls its source in a sentence: the display name, else the id, else a role word ("the code host", lower case; a sentence that opens with it spells its own capital). */
+export function sourceName(source: WriteSource | null | undefined): string {
   return source?.display_name || source?.id || "the code host";
 }

@@ -235,7 +235,7 @@
         </div>
       {/if}
       {#if standing.pr !== null}
-        <p class="tf-dim">PR {standing.pr.number ?? ""} is open from this branch. {sourceName(source)} closes it when the branch goes.</p>
+        <p class="tf-dim">PR {standing.pr.number ?? ""} is open from this branch. {source ? sourceName(source) : "The code host"} closes it when the branch goes.</p>
       {/if}
       <p class="tf-dim tf-note">This deletes the branch on {sourceName(source)}. Your local checkout keeps its copy.</p>
     {/snippet}
