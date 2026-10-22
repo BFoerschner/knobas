@@ -350,7 +350,9 @@ mod tests {
         );
         assert_eq!(pulls.seen_at_floor.keys().collect::<Vec<_>>(), vec![&120]);
         assert_eq!(pulls.seen_at_then.keys().collect::<Vec<_>>(), vec![&150]);
-        let commits = repo.commits_catching_up.expect("the commit catch-up survives");
+        let commits = repo
+            .commits_catching_up
+            .expect("the commit catch-up survives");
         assert_eq!(
             (commits.floor, commits.then),
             (at("2026-08-21T08:00:00Z"), at("2026-08-22T11:50:00Z"))

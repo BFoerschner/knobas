@@ -44,7 +44,12 @@ pub struct World {
 
 impl World {
     /// Run `change` once the walk has read `page` of `path` (under `/api/v1`).
-    pub fn after(&mut self, path: &str, page: u32, change: impl FnOnce(&mut World) + Send + 'static) {
+    pub fn after(
+        &mut self,
+        path: &str,
+        page: u32,
+        change: impl FnOnce(&mut World) + Send + 'static,
+    ) {
         self.hooks.push((path.to_owned(), page, Box::new(change)));
     }
 }
@@ -77,7 +82,10 @@ fn not_found() -> ResponseTemplate {
 }
 
 fn text<'a>(record: &'a Value, pointer: &str) -> &'a str {
-    record.pointer(pointer).and_then(Value::as_str).unwrap_or_default()
+    record
+        .pointer(pointer)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
 }
 
 fn page_of(records: Vec<Value>, page: u32, size: usize) -> Value {
@@ -97,20 +105,26 @@ impl wiremock::Respond for Moving {
             .get("Authorization")
             .is_some_and(|v| v.to_str().ok() == Some(&format!("token {TOKEN}")));
         if !authed {
-            return ResponseTemplate::new(401).set_body_json(json!({ "message": "token does not exist" }));
+            return ResponseTemplate::new(401)
+                .set_body_json(json!({ "message": "token does not exist" }));
         }
         let query: BTreeMap<String, String> = request.url.query_pairs().into_owned().collect();
         let page: u32 = query.get("page").and_then(|p| p.parse().ok()).unwrap_or(1);
-        let asked: usize = query.get("limit").and_then(|l| l.parse().ok()).unwrap_or(50);
+        let asked: usize = query
+            .get("limit")
+            .and_then(|l| l.parse().ok())
+            .unwrap_or(50);
         let path = request.url.path().trim_start_matches("/api/v1/").to_owned();
-        let segments: Vec<String> = path
-            .split('/')
-            .map(|s| s.replace("%2F", "/"))
-            .collect();
+        let segments: Vec<String> = path.split('/').map(|s| s.replace("%2F", "/")).collect();
         let mut world = self.0.lock().expect("the world is not poisoned");
         let size = world.cap.map_or(asked, |cap| cap.min(asked));
 
-        let answer = match segments.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        let answer = match segments
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .as_slice()
+        {
             ["user"] => ok(json!({ "login": "mara", "id": 7 })),
             ["repos", "search"] => {
                 let mut repos = world.repos.clone();
@@ -174,7 +188,8 @@ impl wiremock::Respond for Moving {
                     .into_iter()
                     .filter(|c| {
                         let at = text(c, "/created").to_owned();
-                        since.as_ref().is_none_or(|s| at >= *s) && until.as_ref().is_none_or(|u| at <= *u)
+                        since.as_ref().is_none_or(|s| at >= *s)
+                            && until.as_ref().is_none_or(|u| at <= *u)
                     })
                     .collect();
                 ok(page_of(commits, page, size))
@@ -186,8 +201,9 @@ impl wiremock::Respond for Moving {
         world.served.push(format!("{path}?page={page}"));
         let due: Vec<Change> = {
             let hooks = std::mem::take(&mut world.hooks);
-            let (now, later): (Vec<_>, Vec<_>) =
-                hooks.into_iter().partition(|(at, p, _)| *at == path && *p == page);
+            let (now, later): (Vec<_>, Vec<_>) = hooks
+                .into_iter()
+                .partition(|(at, p, _)| *at == path && *p == page);
             world.hooks = later;
             now.into_iter().map(|(_, _, change)| change).collect()
         };
@@ -261,7 +277,13 @@ fn thirty() -> World {
     World {
         cap: Some(10),
         repos: (1..=30)
-            .map(|id| repository(id, &format!("svc-{id:03}"), &at(60 * i64::try_from(id).expect("small"))))
+            .map(|id| {
+                repository(
+                    id,
+                    &format!("svc-{id:03}"),
+                    &at(60 * i64::try_from(id).expect("small")),
+                )
+            })
             .collect(),
         ..World::default()
     }
@@ -296,7 +318,11 @@ async fn a_push_during_the_repository_walk_hides_no_repository() {
         all.sort();
         all
     };
-    assert_eq!(emitted(&items, "repo"), expected, "every repository, once each");
+    assert_eq!(
+        emitted(&items, "repo"),
+        expected,
+        "every repository, once each"
+    );
 }
 
 /// A row the walk meets on two pages is walked once. Here a repository older
@@ -381,15 +407,26 @@ async fn a_branch_a_push_moved_off_the_listing_is_re_read_and_not_tombstoned() {
     });
     let (items, after) = run(&*gitea, Some(&cursor)).await;
 
-    assert!(tombstoned(&items, "branch").is_empty(), "{:?}", tombstoned(&items, "branch"));
-    assert_eq!(emitted(&items, "branch"), vec![branch_entity("b-08")], "it moved");
+    assert!(
+        tombstoned(&items, "branch").is_empty(),
+        "{:?}",
+        tombstoned(&items, "branch")
+    );
+    assert_eq!(
+        emitted(&items, "branch"),
+        vec![branch_entity("b-08")],
+        "it moved"
+    );
     assert_eq!(
         position(&after, MONOREPO)["branches"]["b-08"],
         json!(sha(900)),
         "and its new head is remembered"
     );
     assert!(
-        moving.with(|w| w.served.iter().any(|s| s.starts_with(&format!("repos/{MONOREPO}/branches/b-08")))),
+        moving.with(|w| w
+            .served
+            .iter()
+            .any(|s| s.starts_with(&format!("repos/{MONOREPO}/branches/b-08")))),
         "read on its own"
     );
 }
@@ -461,7 +498,10 @@ async fn a_week_away(cap: Option<usize>) -> (MockServer, Moving, Box<dyn Source>
         ..World::default()
     };
     let (server, moving) = Moving::start(world).await;
-    let gitea = gitea(&server, json!({ "prs_per_repo": 200, "commits_per_repo": 0 }));
+    let gitea = gitea(
+        &server,
+        json!({ "prs_per_repo": 200, "commits_per_repo": 0 }),
+    );
     let (_, cursor) = run(&*gitea, None).await;
     moving.with(|world| {
         for pull in world.pulls.get_mut(PAYOUT).expect("the fixture has pulls") {
@@ -519,7 +559,11 @@ async fn an_incremental_run_the_budget_stopped_is_continued_by_the_next() {
     }
 
     let (idle, same) = run(&*gitea, Some(&cursor)).await;
-    assert!(emitted(&idle, "pr").is_empty(), "{:?}", emitted(&idle, "pr"));
+    assert!(
+        emitted(&idle, "pr").is_empty(),
+        "{:?}",
+        emitted(&idle, "pr")
+    );
     assert_eq!(same, cursor, "an idle run returns its cursor");
     assert_eq!(
         instant(&position(&cursor, PAYOUT)["pulls_updated_to"]),
@@ -537,7 +581,10 @@ async fn an_incremental_run_the_budget_stopped_is_continued_by_the_next() {
 async fn a_catch_up_starts_on_the_page_the_budget_stopped_on() {
     let (_server, moving, gitea, cursor) = a_week_away(Some(10)).await;
     let (first, cursor) = run(&*gitea, Some(&cursor)).await;
-    assert_eq!(position(&cursor, PAYOUT)["pulls_catching_up"]["page"], json!(20));
+    assert_eq!(
+        position(&cursor, PAYOUT)["pulls_catching_up"]["page"],
+        json!(20)
+    );
 
     moving.with(|world| world.served.clear());
     let (second, _) = run(&*gitea, Some(&cursor)).await;
@@ -621,7 +668,10 @@ async fn an_incremental_commit_walk_the_budget_stopped_is_continued_by_the_next(
         ..World::default()
     };
     let (server, moving) = Moving::start(world).await;
-    let gitea = gitea(&server, json!({ "prs_per_repo": 0, "commits_per_repo": 100 }));
+    let gitea = gitea(
+        &server,
+        json!({ "prs_per_repo": 0, "commits_per_repo": 100 }),
+    );
     let (_, cursor) = run(&*gitea, None).await;
 
     let pushed = |k: u64| (sha(1000 + k), at(60 * seconds(k)));
@@ -686,11 +736,17 @@ async fn a_commit_catch_up_finishes_every_branch_and_then_reads_what_moved() {
                 support::branch("feature", &sha(1), "start", &at(0)),
             ],
         )]),
-        commits: BTreeMap::from([(main.clone(), vec![base.clone()]), (feature.clone(), vec![base])]),
+        commits: BTreeMap::from([
+            (main.clone(), vec![base.clone()]),
+            (feature.clone(), vec![base]),
+        ]),
         ..World::default()
     };
     let (server, moving) = Moving::start(world).await;
-    let gitea = gitea(&server, json!({ "prs_per_repo": 0, "commits_per_repo": 100 }));
+    let gitea = gitea(
+        &server,
+        json!({ "prs_per_repo": 0, "commits_per_repo": 100 }),
+    );
     let (_, cursor) = run(&*gitea, None).await;
 
     // 150 on main up to 09:30, 30 on feature after that.
@@ -699,7 +755,11 @@ async fn a_commit_catch_up_finishes_every_branch_and_then_reads_what_moved() {
     moving.with(|world| {
         for (key, name, pushed) in [
             (&main, "main", (1..=150).map(on_main).collect::<Vec<_>>()),
-            (&feature, "feature", (1..=30).map(on_feature).collect::<Vec<_>>()),
+            (
+                &feature,
+                "feature",
+                (1..=30).map(on_feature).collect::<Vec<_>>(),
+            ),
         ] {
             let history = world.commits.get_mut(key).expect("a history");
             for (id, when) in &pushed {
@@ -707,7 +767,10 @@ async fn a_commit_catch_up_finishes_every_branch_and_then_reads_what_moved() {
             }
             let (head, when) = pushed.last().expect("pushed").clone();
             let branches = world.branches.get_mut(PAYOUT).expect("branches");
-            let branch = branches.iter_mut().find(|b| b["name"] == name).expect("listed");
+            let branch = branches
+                .iter_mut()
+                .find(|b| b["name"] == name)
+                .expect("listed");
             *branch = support::branch(name, &head, "work", &when);
         }
     });
@@ -727,7 +790,10 @@ async fn a_commit_catch_up_finishes_every_branch_and_then_reads_what_moved() {
             .expect("main")
             .insert(0, support::commit(&late.0, "late", &late.1));
         let branches = world.branches.get_mut(PAYOUT).expect("branches");
-        let branch = branches.iter_mut().find(|b| b["name"] == "main").expect("main");
+        let branch = branches
+            .iter_mut()
+            .find(|b| b["name"] == "main")
+            .expect("main");
         *branch = support::branch("main", &late.0, "late", &late.1);
     });
     let (second, cursor) = run(&*gitea, Some(&cursor)).await;
@@ -743,7 +809,11 @@ async fn a_commit_catch_up_finishes_every_branch_and_then_reads_what_moved() {
         .collect();
     expected.sort();
     assert_eq!(all, expected, "every commit, once each");
-    assert!(position(&cursor, PAYOUT).get("commits_catching_up").is_none());
+    assert!(
+        position(&cursor, PAYOUT)
+            .get("commits_catching_up")
+            .is_none()
+    );
 
     let (idle, same) = run(&*gitea, Some(&cursor)).await;
     assert!(idle.is_empty(), "{idle:?}");

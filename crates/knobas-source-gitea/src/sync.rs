@@ -176,7 +176,9 @@ const MAX_BRANCH_PAGES: u32 = 21;
 // corpus, so stopping short of one has to fail the run rather than report a
 // mirror it never finished; `pr` and `commit` promise only the newest
 // `*_per_repo` of theirs and are never swept, so stopping is the normal case
-// and cannot be read downstream as a deletion.
+// and cannot be read downstream as a deletion. On an incremental run a
+// reached cap cuts the walk short exactly as the budget does, and the next run
+// continues it (#1624, [`pulls`]).
 //
 // The empty page costs these two nothing, unlike the exhaustive pair: a budget
 // of 1,000 is spent by the last record of page 20 and breaks the walk there,
@@ -798,13 +800,25 @@ async fn pulls(
             upper: before.pulls_updated_to,
             upper_seen: &before.pulls_seen_at_watermark,
         };
-        let walk = walk_pulls(source, at, &window, catch_up.page, &mut budget, sink, emitted).await?;
+        let walk = walk_pulls(
+            source,
+            at,
+            &window,
+            catch_up.page,
+            &mut budget,
+            sink,
+            emitted,
+        )
+        .await?;
         if let Some(page) = walk.stopped_on {
             let carried: Vec<u64> = before.pulls_seen_at_watermark.keys().copied().collect();
             let (resume, on_resume) = resume_below(&walk.examined, window.upper, &carried);
             after.pulls_updated_to = resume;
-            after.pulls_seen_at_watermark =
-                fingerprints_of(on_resume, &walk.fingerprints, &before.pulls_seen_at_watermark);
+            after.pulls_seen_at_watermark = fingerprints_of(
+                on_resume,
+                &walk.fingerprints,
+                &before.pulls_seen_at_watermark,
+            );
             after.pulls_catching_up = Some(PullsCatchUp {
                 page,
                 ..catch_up.clone()
@@ -937,7 +951,9 @@ async fn walk_pulls(
                 let first = batch
                     .first()
                     .and_then(|raw| serde_json::from_value::<model::PullRequest>(raw.clone()).ok())
-                    .and_then(|pr| map::real_time(pr.updated_at).or_else(|| map::real_time(pr.created_at)));
+                    .and_then(|pr| {
+                        map::real_time(pr.updated_at).or_else(|| map::real_time(pr.created_at))
+                    });
                 if !matches!((first, window.upper), (Some(first), Some(upper)) if first > upper) {
                     start = 1;
                     continue 'restart;
@@ -1513,8 +1529,16 @@ async fn commits(
                 window: Window {
                     lower: Some(catch_up.floor),
                     lower_seen: &catch_up.at_floor,
-                    upper: if index == 0 { before.commits_since } else { None },
-                    upper_seen: if index == 0 { &before.commits_at_watermark } else { &none },
+                    upper: if index == 0 {
+                        before.commits_since
+                    } else {
+                        None
+                    },
+                    upper_seen: if index == 0 {
+                        &before.commits_at_watermark
+                    } else {
+                        &none
+                    },
                 },
             })
             .collect();
@@ -1530,11 +1554,7 @@ async fn commits(
             // What moved this run is walked from the floor next time, unless
             // this run already walked it from its head to the floor.
             for name in walk_order(repo.default_branch.as_deref(), moved) {
-                let done = legs
-                    .iter()
-                    .take(stop.leg)
-                    .skip(1)
-                    .any(|l| l.branch == name);
+                let done = legs.iter().take(stop.leg).skip(1).any(|l| l.branch == name);
                 if !done && !branches.contains(&name) {
                     branches.push(name);
                 }
@@ -1647,9 +1667,13 @@ async fn walk_commits(
         // A reached cap ends a full sync's branch quietly (see the note on
         // the caps), and cuts an incremental walk short like the budget.
         let mut walk = PageWalk::new(PageNumber, MAX_COMMIT_PAGES, |page| {
-            source
-                .client
-                .commits(at.owner, at.name, branch, (window.lower, window.upper), page)
+            source.client.commits(
+                at.owner,
+                at.name,
+                branch,
+                (window.lower, window.upper),
+                page,
+            )
         });
         loop {
             let batch = match walk.next().await {

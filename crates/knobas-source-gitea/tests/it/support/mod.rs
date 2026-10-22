@@ -1018,8 +1018,7 @@ impl Fake {
         // listing did not return before tombstoning it (#1624), and a `[]`
         // here would read as "still there".
         authed(
-            Mock::given(method("GET"))
-                .and(path_regex(r"^/api/v1/repos/[^/]+/[^/]+/branches/.+$")),
+            Mock::given(method("GET")).and(path_regex(r"^/api/v1/repos/[^/]+/[^/]+/branches/.+$")),
         )
         .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })))
         .with_priority(EMPTY_PAGE_PRIORITY - 1)

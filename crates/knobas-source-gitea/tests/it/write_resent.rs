@@ -351,9 +351,11 @@ async fn a_pull_request_somebody_else_merged_is_still_refused() {
 
 /// `n` open pull requests for pairs this write did not ask about.
 fn others(n: u64, from: u64) -> Value {
-    json!((from..from + n)
-        .map(|number| open_pull(number, "Bump deps", &format!("chore/deps-{number}"), "main"))
-        .collect::<Vec<_>>())
+    json!(
+        (from..from + n)
+            .map(|number| open_pull(number, "Bump deps", &format!("chore/deps-{number}"), "main"))
+            .collect::<Vec<_>>()
+    )
 }
 
 /// Answer `GET <repo>/pulls?page=<page>` with `body`, and every other page
@@ -423,7 +425,11 @@ async fn the_readback_stops_on_an_empty_page() {
         .await
         .expect_err("no open pull request is this write's");
     assert_eq!(error.status(), Some(409), "{error:?}");
-    assert_eq!(pull_pages_read(&server).await, 2, "page 1 and the empty page 2");
+    assert_eq!(
+        pull_pages_read(&server).await,
+        2,
+        "page 1 and the empty page 2"
+    );
 }
 
 /// The readback honours its page cap: ten full pages of other pull requests

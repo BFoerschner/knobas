@@ -870,7 +870,13 @@ mod wire_tests {
             .with_timezone(&Utc);
         let got = client_for(&server)
             .await
-            .commits("tidewater", "payout-service", "main", (Some(since), None), 1)
+            .commits(
+                "tidewater",
+                "payout-service",
+                "main",
+                (Some(since), None),
+                1,
+            )
             .await
             .expect("the mock answers only the fully-parameterised request");
         assert_eq!(got.len(), 1);
