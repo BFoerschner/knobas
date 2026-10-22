@@ -710,6 +710,12 @@ async fn branches(
                 continue;
             }
         };
+        // A branch the listing returned twice keeps its first record, so
+        // the head emitted and the head remembered are the same; a head that
+        // moved between the two reads is the next run's.
+        if heads.contains_key(&branch.name) {
+            continue;
+        }
         let head = branch
             .commit
             .as_ref()
@@ -718,7 +724,7 @@ async fn branches(
         let head_moved = before.branches.get(&branch.name) != Some(&head);
         // An unmoved branch under a switched default is re-emitted for
         // its `repository` (#718), and no commit is walked for it.
-        if (head_moved || default_changed) && !heads.contains_key(&branch.name) {
+        if head_moved || default_changed {
             push(
                 sink,
                 map::branch_item(&source.id, &raw, at, &branch),
@@ -726,7 +732,7 @@ async fn branches(
             )
             .await?;
         }
-        if head_moved && !moved.contains(&branch.name) {
+        if head_moved {
             moved.push(branch.name.clone());
         }
         heads.insert(branch.name, head);
@@ -770,8 +776,8 @@ async fn branches(
 /// watermark, under the same budget, and when it reaches the watermark it
 /// adopts the newest instant the cut-short walk examined and walks on from
 /// the top with what is left of the budget. Spec #1618 ruling A6; the cursor
-/// type says why the oldest examined is the resume point and not the
-/// watermark.
+/// type says why the oldest examined is where the next run continues and the
+/// watermark stays put.
 async fn pulls(
     source: &crate::GiteaSource,
     at: RepoRef<'_>,
@@ -795,10 +801,10 @@ async fn pulls(
 
     if let Some(catch_up) = &before.pulls_catching_up {
         let window = Window {
-            lower: Some(catch_up.floor),
-            lower_seen: &catch_up.seen_at_floor,
-            upper: before.pulls_updated_to,
-            upper_seen: &before.pulls_seen_at_watermark,
+            lower: before.pulls_updated_to,
+            lower_seen: &before.pulls_seen_at_watermark,
+            upper: catch_up.below,
+            upper_seen: &catch_up.seen_at_below,
         };
         let walk = walk_pulls(
             source,
@@ -811,24 +817,24 @@ async fn pulls(
         )
         .await?;
         if let Some(page) = walk.stopped_on {
-            let carried: Vec<u64> = before.pulls_seen_at_watermark.keys().copied().collect();
-            let (resume, on_resume) = resume_below(&walk.examined, window.upper, &carried);
-            after.pulls_updated_to = resume;
-            after.pulls_seen_at_watermark = fingerprints_of(
-                on_resume,
-                &walk.fingerprints,
-                &before.pulls_seen_at_watermark,
-            );
+            let carried: Vec<u64> = catch_up.seen_at_below.keys().copied().collect();
+            let (below, on_below) = resume_below(&walk.examined, window.upper, &carried);
             after.pulls_catching_up = Some(PullsCatchUp {
+                below,
+                seen_at_below: fingerprints_of(
+                    on_below,
+                    &walk.fingerprints,
+                    &catch_up.seen_at_below,
+                ),
                 page,
                 ..catch_up.clone()
             });
             return Ok(());
         }
-        // Reached the floor: everything up to `then` is delivered, and the
-        // run walks on from the top as an ordinary incremental run.
-        watermark = Some(catch_up.then);
-        seen.clone_from(&catch_up.seen_at_then);
+        // Reached the watermark: everything up to `newest` is delivered, and
+        // the run walks on from the top as an ordinary incremental run.
+        watermark = Some(catch_up.newest);
+        seen.clone_from(&catch_up.seen_at_newest);
         for (number, when) in &walk.examined {
             if *when == watermark
                 && let Some(fingerprint) = walk.fingerprints.get(number)
@@ -855,15 +861,14 @@ async fn pulls(
     match (walk.stopped_on, watermark, newest) {
         // An incremental walk cut short before its watermark: continue below
         // the oldest record it examined next time.
-        (Some(page), Some(floor), Some(then)) => {
-            let (resume, on_resume) = resume_below(&walk.examined, None, &[]);
-            after.pulls_updated_to = resume;
-            after.pulls_seen_at_watermark = fingerprints_of(on_resume, &walk.fingerprints, &seen);
+        // The watermark stays where it is.
+        (Some(page), Some(_), Some(newest)) => {
+            let (below, on_below) = resume_below(&walk.examined, None, &[]);
             after.pulls_catching_up = Some(PullsCatchUp {
-                floor,
-                seen_at_floor: seen,
-                then,
-                seen_at_then: on_newest,
+                below,
+                seen_at_below: fingerprints_of(on_below, &walk.fingerprints, &seen),
+                newest,
+                seen_at_newest: on_newest,
                 page,
             });
         }
@@ -1475,8 +1480,8 @@ async fn issue_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, number: u64
 /// for good: the watermark moved past them, and the branch head the cursor
 /// remembered had already moved, so nothing walked that branch again. Now
 /// the cut leaves a [`CommitsCatchUp`] naming the branches not finished; the
-/// next run walks them first, the cut one from `commits_since` (the oldest
-/// commit examined) down to the old watermark and the rest from their heads,
+/// next run walks them first, the cut one from below the oldest commit
+/// examined down to the watermark and the rest from their heads,
 /// and then the branches that moved since, as [`pulls`] does. A full sync's
 /// budget is unchanged (ADR-0003).
 #[expect(
@@ -1513,7 +1518,7 @@ async fn commits(
     let mut seen: HashSet<String> = HashSet::new();
     let mut since = before.commits_since;
     let mut at_mark = before.commits_at_watermark.clone();
-    // Branches this run walked from their heads to the floor already, and
+    // Branches this run walked from their heads to the watermark already, and
     // what it examined doing so.
     let mut finished: Vec<String> = Vec::new();
     let mut examined: Vec<(String, Option<DateTime<Utc>>)> = Vec::new();
@@ -1524,59 +1529,64 @@ async fn commits(
             .branches
             .iter()
             .enumerate()
-            .map(|(index, branch)| Leg {
-                branch: branch.clone(),
-                window: Window {
-                    lower: Some(catch_up.floor),
-                    lower_seen: &catch_up.at_floor,
-                    upper: if index == 0 {
-                        before.commits_since
-                    } else {
-                        None
+            .map(|(index, branch)| {
+                // The cut branch is read below where the cut fell, the rest
+                // from their heads.
+                let (upper, upper_seen) = if index == 0 {
+                    (catch_up.below, &catch_up.seen_at_below)
+                } else {
+                    (None, &none)
+                };
+                Leg {
+                    branch: branch.clone(),
+                    window: Window {
+                        lower: before.commits_since,
+                        lower_seen: &before.commits_at_watermark,
+                        upper,
+                        upper_seen,
                     },
-                    upper_seen: if index == 0 {
-                        &before.commits_at_watermark
-                    } else {
-                        &none
-                    },
-                },
+                }
             })
             .collect();
         let walk = walk_commits(source, at, &legs, &mut budget, &mut seen, sink, emitted).await?;
         if let Some(stop) = walk.stopped {
-            let (then, at_then) =
-                close_watermark(&walk.examined, Some(catch_up.then), &catch_up.at_then);
+            let (newest, seen_at_newest) = close_watermark(
+                &walk.examined,
+                Some(catch_up.newest),
+                &catch_up.seen_at_newest,
+            );
             let leg = &legs[stop.leg];
-            let (resume, on_resume) =
+            let (below, seen_at_below) =
                 resume_below(&stop.examined, leg.window.upper, leg.window.upper_seen);
             let mut branches: Vec<String> =
                 legs[stop.leg..].iter().map(|l| l.branch.clone()).collect();
-            // What moved this run is walked from the floor next time, unless
-            // this run already walked it from its head to the floor.
+            // What moved this run is walked from its head next time, unless
+            // this run already walked it from its head to the watermark.
             for name in walk_order(repo.default_branch.as_deref(), moved) {
                 let done = legs.iter().take(stop.leg).skip(1).any(|l| l.branch == name);
                 if !done && !branches.contains(&name) {
                     branches.push(name);
                 }
             }
-            after.commits_since = resume;
-            after.commits_at_watermark = on_resume;
             after.commits_catching_up = Some(CommitsCatchUp {
-                then: then.unwrap_or(catch_up.then),
-                at_then,
+                below,
+                seen_at_below,
+                newest: newest.unwrap_or(catch_up.newest),
+                seen_at_newest,
                 branches,
-                ..catch_up.clone()
             });
             return Ok(());
         }
-        // Reached the floor on every branch: everything up to `then` is
-        // delivered. What moved since is walked from `then`, not from the
-        // newest commit just read on another branch, which would pass over a
-        // moved branch's commits between the two.
-        since = Some(catch_up.then);
-        at_mark.clone_from(&catch_up.at_then);
+        // Reached the watermark on every branch: everything up to `newest` is
+        // delivered. What moved since is walked from `newest`, not from the
+        // newest commit just read on a branch walked from its head, which
+        // would pass over a moved branch's commits between the two. (A commit
+        // pushed later with an older committer date is passed over all the
+        // same: the known limitation every `since=` walk here has.)
+        since = Some(catch_up.newest);
+        at_mark.clone_from(&catch_up.seen_at_newest);
         finished.extend(legs.iter().skip(1).map(|l| l.branch.clone()));
-        // Only what reaches `then` can move the watermark; the window's own
+        // Only what reaches `newest` can move the watermark; the window's own
         // commits sit below it.
         examined = walk
             .examined
@@ -1605,16 +1615,17 @@ async fn commits(
     after.commits_catching_up = None;
     match (walk.stopped, since, newest) {
         // An incremental walk cut short before its watermark: continue below
-        // the oldest commit it examined on that branch next time.
-        (Some(stop), Some(floor), Some(then)) => {
-            let (resume, on_resume) = resume_below(&stop.examined, None, &[]);
-            after.commits_since = resume;
-            after.commits_at_watermark = on_resume;
+        // the oldest commit it examined on that branch next time. The
+        // watermark stays where it is.
+        (Some(stop), Some(_), Some(newest)) => {
+            let (below, seen_at_below) = resume_below(&stop.examined, None, &[]);
+            after.commits_since = since;
+            after.commits_at_watermark.clone_from(&at_mark);
             after.commits_catching_up = Some(CommitsCatchUp {
-                floor,
-                at_floor: at_mark.clone(),
-                then,
-                at_then: on_newest,
+                below,
+                seen_at_below,
+                newest,
+                seen_at_newest: on_newest,
                 branches: legs[stop.leg..].iter().map(|l| l.branch.clone()).collect(),
             });
         }

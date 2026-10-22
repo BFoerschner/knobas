@@ -75,9 +75,10 @@ pub(crate) struct RepoCursor {
     /// once rather than costing a version bump.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo_fingerprint: Option<String>,
-    /// The newest pull-request `updated_at` delivered so far -- or, while
-    /// [`Self::pulls_catching_up`] is set, the oldest one the interrupted walk
-    /// examined, which the next run continues below (#1624).
+    /// The newest pull-request `updated_at` delivered so far, with
+    /// everything before it delivered too. While [`Self::pulls_catching_up`]
+    /// is set, records between the two are still to read (#1624); this field
+    /// does not move until they are.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pulls_updated_to: Option<DateTime<Utc>>,
     /// The pull requests sitting exactly on that instant, already delivered:
@@ -112,10 +113,8 @@ pub(crate) struct RepoCursor {
     pub issues_updated_to: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub issues_seen_at_watermark: BTreeMap<u64, String>,
-    /// The newest commit time delivered so far -- or, while
-    /// [`Self::commits_catching_up`] is set, the oldest one the interrupted
-    /// walk examined on the first branch it names, which the next run
-    /// continues below (#1624).
+    /// The newest commit time delivered so far, as `pulls_updated_to`, and
+    /// likewise held while [`Self::commits_catching_up`] is set (#1624).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commits_since: Option<DateTime<Utc>>,
     /// The object ids on that instant, already delivered -- the same boundary
@@ -143,42 +142,48 @@ pub(crate) struct RepoCursor {
 ///
 /// The walk reads newest-updated first, so the records it did not reach are
 /// the **older** ones, between the watermark it was heading for and the
-/// oldest record it examined. Moving the watermark to that oldest record, as
-/// A6 words it, would have the next walk stop exactly where the unread ones
-/// begin; so the cursor keeps all three instants. `pulls_updated_to` holds
-/// the oldest examined (the point the next run continues below), `floor` the
-/// watermark the walk is still heading for, and `then` the newest it
-/// examined, which becomes the watermark once the walk reaches `floor`.
+/// oldest record it examined. Moving the watermark to that oldest record
+/// would have the next walk stop exactly where the unread ones begin, and a
+/// watermark only advances as work completes (`CONTEXT.md`). So the watermark
+/// stays where it was, and this records the rest: `below`, the oldest record
+/// examined, which the next run continues below, and `newest`, the newest
+/// record examined, which becomes the watermark once the walk reaches it.
+/// Each instant carries the records already delivered on it, as the
+/// watermark does.
 ///
-/// A run holding one walks only the window from `pulls_updated_to` down to
-/// `floor`, under the same budget: anything newer was delivered by the walk
+/// A run holding one walks only the window from `below` down to the
+/// watermark, under the same budget: anything newer was delivered by the walk
 /// that was cut short or changed since, and is read once the window closes,
 /// in the same run when the budget allows. `page` is where the cut fell, so
-/// that run does not re-read every page above it (see `sync::pulls`).
+/// that run does not re-read every page above it (see `sync::walk_pulls`).
+/// `below` is `None` only where the cut walk examined nothing, and then the
+/// window has no top.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct PullsCatchUp {
-    pub floor: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub below: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub seen_at_floor: BTreeMap<u64, String>,
-    pub then: DateTime<Utc>,
+    pub seen_at_below: BTreeMap<u64, String>,
+    pub newest: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub seen_at_then: BTreeMap<u64, String>,
+    pub seen_at_newest: BTreeMap<u64, String>,
     pub page: u32,
 }
 
 /// Where an incremental commit walk the budget stopped picks up (#1624). As
 /// [`PullsCatchUp`], per branch: `branches` are the ones the walk had not
-/// finished, in walk order. The first was cut short and is read from
-/// `commits_since` down to `floor`; the rest were never started and are
-/// read from their heads down to `floor`.
+/// finished, in walk order. The first was cut short and is read from `below`
+/// down to the watermark; the rest were never started and are read from
+/// their heads down to it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CommitsCatchUp {
-    pub floor: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub below: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub at_floor: Vec<String>,
-    pub then: DateTime<Utc>,
+    pub seen_at_below: Vec<String>,
+    pub newest: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub at_then: Vec<String>,
+    pub seen_at_newest: Vec<String>,
     pub branches: Vec<String>,
 }
 
@@ -270,10 +275,10 @@ mod tests {
                 pulls_updated_to: Some(at("2026-08-22T13:50:00Z")),
                 pulls_seen_at_watermark: BTreeMap::from([(144, "00000000000000bb".to_owned())]),
                 pulls_catching_up: Some(PullsCatchUp {
-                    floor: at("2026-08-20T09:00:00Z"),
-                    seen_at_floor: BTreeMap::from([(120, "00000000000000dd".to_owned())]),
-                    then: at("2026-08-22T14:10:00Z"),
-                    seen_at_then: BTreeMap::from([(150, "00000000000000ee".to_owned())]),
+                    below: Some(at("2026-08-20T09:00:00Z")),
+                    seen_at_below: BTreeMap::from([(120, "00000000000000dd".to_owned())]),
+                    newest: at("2026-08-22T14:10:00Z"),
+                    seen_at_newest: BTreeMap::from([(150, "00000000000000ee".to_owned())]),
                     page: 4,
                 }),
                 issues_updated_to: Some(at("2026-08-22T12:00:00Z")),
@@ -281,10 +286,10 @@ mod tests {
                 commits_since: Some(at("2026-08-22T11:42:00Z")),
                 commits_at_watermark: vec!["c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192".to_owned()],
                 commits_catching_up: Some(CommitsCatchUp {
-                    floor: at("2026-08-21T08:00:00Z"),
-                    at_floor: vec!["2222222222222222222222222222222222222222".to_owned()],
-                    then: at("2026-08-22T11:50:00Z"),
-                    at_then: vec!["3333333333333333333333333333333333333333".to_owned()],
+                    below: Some(at("2026-08-21T08:00:00Z")),
+                    seen_at_below: vec!["2222222222222222222222222222222222222222".to_owned()],
+                    newest: at("2026-08-22T11:50:00Z"),
+                    seen_at_newest: vec!["3333333333333333333333333333333333333333".to_owned()],
                     branches: vec!["main".to_owned(), "release/1.4".to_owned()],
                 }),
                 branches: BTreeMap::from([(
@@ -345,20 +350,24 @@ mod tests {
         // #1624's catch-ups, each instant and set in its own slot.
         let pulls = repo.pulls_catching_up.expect("the pull catch-up survives");
         assert_eq!(
-            (pulls.floor, pulls.then, pulls.page),
-            (at("2026-08-20T09:00:00Z"), at("2026-08-22T14:10:00Z"), 4)
+            (pulls.below, pulls.newest, pulls.page),
+            (
+                Some(at("2026-08-20T09:00:00Z")),
+                at("2026-08-22T14:10:00Z"),
+                4
+            )
         );
-        assert_eq!(pulls.seen_at_floor.keys().collect::<Vec<_>>(), vec![&120]);
-        assert_eq!(pulls.seen_at_then.keys().collect::<Vec<_>>(), vec![&150]);
+        assert_eq!(pulls.seen_at_below.keys().collect::<Vec<_>>(), vec![&120]);
+        assert_eq!(pulls.seen_at_newest.keys().collect::<Vec<_>>(), vec![&150]);
         let commits = repo
             .commits_catching_up
             .expect("the commit catch-up survives");
         assert_eq!(
-            (commits.floor, commits.then),
-            (at("2026-08-21T08:00:00Z"), at("2026-08-22T11:50:00Z"))
+            (commits.below, commits.newest),
+            (Some(at("2026-08-21T08:00:00Z")), at("2026-08-22T11:50:00Z"))
         );
-        assert_eq!(commits.at_floor[0].as_bytes()[0], b'2');
-        assert_eq!(commits.at_then[0].as_bytes()[0], b'3');
+        assert_eq!(commits.seen_at_below[0].as_bytes()[0], b'2');
+        assert_eq!(commits.seen_at_newest[0].as_bytes()[0], b'3');
         assert_eq!(commits.branches, vec!["main", "release/1.4"]);
     }
 

@@ -431,6 +431,39 @@ async fn a_branch_a_push_moved_off_the_listing_is_re_read_and_not_tombstoned() {
     );
 }
 
+/// A branch the walk meets twice with two heads -- `b-24`, read on page 1,
+/// force-pushed to an older commit that sorts it onto page 3 -- is mirrored at
+/// the head the cursor remembers: the mirror is never left on one head while
+/// the cursor holds the other, which would leave the move unnoticed for good.
+#[tokio::test]
+async fn a_branch_met_twice_with_two_heads_is_mirrored_at_the_head_remembered() {
+    let (server, moving) = Moving::start(twenty_five_branches()).await;
+    let gitea = gitea(&server, json!({}));
+    let (_, cursor) = run(&*gitea, None).await;
+
+    moving.with(|world| {
+        world.after(&format!("repos/{MONOREPO}/branches"), 1, |world| {
+            let forced = world
+                .branches
+                .get_mut(MONOREPO)
+                .and_then(|all| all.iter_mut().find(|b| b["name"] == "b-24"))
+                .expect("b-24 is in the fixture");
+            *forced = support::branch("b-24", &sha(700), "rewound", &at(60 * 2 + 30));
+        });
+    });
+    let (during, cursor) = run(&*gitea, Some(&cursor)).await;
+    let (after, cursor) = run(&*gitea, Some(&cursor)).await;
+
+    let last = during
+        .iter()
+        .chain(&after)
+        .filter(|i| i.entity.to_string() == branch_entity("b-24"))
+        .last()
+        .expect("the force-push is mirrored by one of the two runs");
+    assert_eq!(last.payload["commit"]["id"], json!(sha(700)));
+    assert_eq!(position(&cursor, MONOREPO)["branches"]["b-24"], json!(sha(700)));
+}
+
 /// A branch the listing did not return and its own read answers 404 for is
 /// gone, and tombstoned.
 #[tokio::test]
@@ -540,9 +573,14 @@ async fn an_incremental_run_the_budget_stopped_is_continued_by_the_next() {
         "the newest 200: 61 to 260"
     );
     assert_eq!(
-        instant(&position(&cursor, PAYOUT)["pulls_updated_to"]),
+        instant(&position(&cursor, PAYOUT)["pulls_catching_up"]["below"]),
         instant(&json!(edited(61))),
-        "the run continues from the oldest record it examined"
+        "the next run continues below the oldest record this one examined"
+    );
+    assert_eq!(
+        instant(&position(&cursor, PAYOUT)["pulls_updated_to"]),
+        instant(&json!(at(260))),
+        "and the watermark stays until the 60 below it are read"
     );
 
     let (second, cursor) = run(&*gitea, Some(&cursor)).await;
@@ -713,9 +751,14 @@ async fn an_incremental_commit_walk_the_budget_stopped_is_continued_by_the_next(
     let first_commits = emitted(&first, "commit");
     assert_eq!(first_commits.len(), 100, "the budget bounds the run");
     assert_eq!(
-        instant(&position(&cursor, PAYOUT)["commits_since"]),
+        instant(&position(&cursor, PAYOUT)["commits_catching_up"]["below"]),
         instant(&json!(pushed(51).1)),
-        "the run continues from the oldest record it examined"
+        "the next run continues below the oldest commit this one examined"
+    );
+    assert_eq!(
+        instant(&position(&cursor, PAYOUT)["commits_since"]),
+        instant(&json!(at(0))),
+        "and the watermark stays until the 50 below it are read"
     );
 
     let (second, cursor) = run(&*gitea, Some(&cursor)).await;
