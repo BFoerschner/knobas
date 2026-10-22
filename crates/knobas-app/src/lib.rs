@@ -145,7 +145,6 @@ pub mod events {
     }
 }
 
-use std::sync::{Mutex, PoisonError};
 
 use sqlx::PgPool;
 use tauri::Manager;
@@ -159,45 +158,22 @@ pub const DB_URL_ENV: &str = "KNOBAS_DB_URL";
 
 /// Everything a command needs, managed by Tauri and shared by every window.
 pub struct AppState {
-    /// The pool commands run their queries on. Cloned out of [`EmbeddedDb`], so
-    /// it stays usable without touching the mutex below.
-    ///
-    /// [`EmbeddedDb`]: knobas_db::EmbeddedDb
+    /// The pool commands run their queries on: the server's, which
+    /// [`Lifecycle`] holds from the moment it starts (#1634) so a quit at any
+    /// stage of bring-up stops it.
     pub pool: PgPool,
-
-    /// The server this process started, until it is shut down.
-    ///
-    /// `Option` because shutdown *consumes* the handle: `EmbeddedDb::stop`
-    /// takes `self`. `ExitRequested` can fire more than once -- a handler that
-    /// vetoes the exit leaves the user free to quit again -- so the take is
-    /// what makes the second attempt a no-op rather than a panic.
-    ///
-    /// Private: taking it is this module's business, and a second taker would
-    /// mean a live pool over a stopped server.
-    db: Mutex<Option<knobas_db::EmbeddedDb>>,
 }
 
 impl AppState {
-    /// The shared state over the server bring-up started, which
-    /// [`shutdown_database`] stops.
-    fn owning(db: knobas_db::EmbeddedDb) -> Self {
-        Self {
-            pool: db.pool().clone(),
-            db: Mutex::new(Some(db)),
-        }
+    /// The shared state bring-up installs, over the migrated server's pool.
+    fn over(pool: PgPool) -> Self {
+        Self { pool }
     }
 }
 
 #[cfg(feature = "test-util")]
 impl AppState {
-    /// The shared state bring-up installs, over `db`. **Tests only**, for
-    /// `tests/it/bring_up.rs`'s shutdown test: [`shutdown`] stops `db` once.
-    #[must_use]
-    pub fn over_db(db: knobas_db::EmbeddedDb) -> Self {
-        Self::owning(db)
-    }
-
-    /// The shared state over a pool this process did not start. **Tests only.**
+    /// The shared state over a pool, **for tests**.
     ///
     /// It exists because a [`tauri::State`] cannot be built by hand, so a
     /// command body is unreachable from a mock app until its state is managed
@@ -207,21 +183,13 @@ impl AppState {
     /// their commands through this one blessed path rather than each inventing
     /// a way in.
     ///
-    /// `db` is `None`, which is the truth: [`shutdown_database`] stops only a
-    /// server knobas owns, and there is none here. That is also why the
-    /// constructor is behind `test-util` and not merely `#[doc(hidden)]`: a
-    /// production caller would build an `AppState` whose server nothing ever
-    /// stops, leaving a postmaster running after every quit. Hidden-but-present
-    /// makes that a review catch; absent from the shipping build makes it a
-    /// compile error. `cargo build`, `tauri build` and the `clippy --lib` half
-    /// of `just check` all see the crate without this feature, so a stream that
-    /// reaches for it outside `tests/` cannot get the gate green.
+    /// The server is not here: [`Lifecycle::hold_server`] is what makes
+    /// [`shutdown`] stop one, and a test that wants that holds its server
+    /// there. Behind `test-util` because the one production caller is
+    /// bring-up, which installs only a pool it has migrated.
     #[must_use]
     pub fn over_pool(pool: PgPool) -> Self {
-        Self {
-            pool,
-            db: Mutex::new(None),
-        }
+        Self::over(pool)
     }
 }
 
@@ -745,10 +713,18 @@ async fn bring_up_app<R: tauri::Runtime>(
     };
     set_db_state(handle, DbState::Starting { detail });
 
+    let lifecycle = handle.state::<Lifecycle>();
     let outcome = async {
         let db = knobas_db::EmbeddedDb::start(config).await?;
+        let pool = db.pool().clone();
+        let connector = db.connector();
+        // **Held the moment it is up** (#1634): the exit handler stops what the
+        // lifecycle holds, so a quit during the migration, the sweeps or the
+        // engines' start stops this server too. Bring-up goes on over the pool
+        // and the connector, which the handle hands out but does not need.
+        lifecycle.hold_server(db);
         set_db_state(handle, DbState::Migrating);
-        knobas_db::migrate::run(db.pool()).await?;
+        knobas_db::migrate::run(&pool).await?;
         // **Before anything can read the timer row** (#278): a timer that
         // outlived the last process is closed at the last moment knobas
         // was alive, flagged, and gone before the shell's first
@@ -763,13 +739,13 @@ async fn bring_up_app<R: tauri::Runtime>(
         // stays and the next launch tries again. Refusing to start over a
         // failed sweep would make a forgotten timer a reason knobas cannot
         // open at all.
-        if let Err(error) = time::close_stranded(db.pool()).await {
+        if let Err(error) = time::close_stranded(&pool).await {
             tracing::error!(%error, "the stranded-timer sweep failed");
         }
         // A start-work step a quit left `running` becomes interrupted
         // (#790), so its ticket's flow can be retried or skipped. Logged,
         // not fatal, like the sweep above.
-        match start_work::interrupt_stranded(db.pool()).await {
+        match start_work::interrupt_stranded(&pool).await {
             Ok(0) => {}
             Ok(count) => tracing::info!(count, "start-work steps interrupted by a quit"),
             Err(error) => tracing::error!(%error, "the interrupted-step sweep failed"),
@@ -779,7 +755,7 @@ async fn bring_up_app<R: tauri::Runtime>(
         // parents from them, so a sync that ran first would resolve against
         // nothing and be recomputed a moment later. Failure is logged, not
         // fatal -- every search command writes them again on its way in.
-        if let Err(error) = commands::search::searcher(db.pool(), &registry).await {
+        if let Err(error) = commands::search::searcher(&pool, &registry).await {
             tracing::error!(?error, "the adapters' declarations could not be stored");
         }
         // Before `Ready`, and before `AppState` is installed: the sync
@@ -792,13 +768,13 @@ async fn bring_up_app<R: tauri::Runtime>(
         // mean two passes at once (#745, #1485). Nothing else asks for
         // one since `detect_suggestions` retired (#1611).
         let suggestions = suggestion_pass::SuggestionPass::new(
-            std::sync::Arc::new(sources::DbConnections(db.connector())),
+            std::sync::Arc::new(sources::DbConnections(connector.clone())),
             suggestion_pass::PASS_STATEMENT_TIMEOUT,
         );
-        sources::start(handle, &db, profile, registry, suggestions).await?;
+        sources::start(handle, &pool, &connector, profile, registry, suggestions).await?;
         // Beside the sync scheduler, not inside it: a backup is not a
         // source (see `backup`'s module docs).
-        backup::start(handle, &db, profile);
+        backup::start(handle, &pool, connector, profile);
         // The capture shortcut (#503), from the setting. **Here and not in
         // `setup`**: the plugin hands its registration to the main thread
         // and blocks until it answers, so a call from the event loop would
@@ -808,36 +784,43 @@ async fn bring_up_app<R: tauri::Runtime>(
         // settings pane is where it is read, and no shortcut is a reason
         // to run without one, never a reason not to start.
         if let Err(error) = capture::register_stored(
-            db.pool(),
+            &pool,
             &handle.state::<capture::CaptureState>(),
-            &capture::Plugin::new(handle.clone()),
+            std::sync::Arc::new(capture::Plugin::new(handle.clone())),
         )
         .await
         {
             tracing::error!(%error, "the capture shortcut could not be read");
         }
-        Ok::<_, Box<dyn std::error::Error>>(db)
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(pool)
     }
     .await;
 
-    match outcome {
-        Ok(db) => {
-            handle.state::<Lifecycle>().install(AppState::owning(db));
+    let message = match outcome {
+        Ok(pool) => {
+            lifecycle.install(AppState::over(pool));
             // Installed *before* the state moves to `ready`: a frontend
             // that reacted to `ready` by fetching would otherwise race the
             // pool it was told about.
             set_db_state(handle, DbState::Ready);
+            return;
         }
         Err(error) => {
             tracing::error!(%error, "the database did not start");
-            set_db_state(
-                handle,
-                DbState::Failed {
-                    message: error.to_string(),
-                },
-            );
+            error.to_string()
         }
+    };
+    // **Stopped, never dropped** (#1634, LIFE-6), and before `Failed`, so a
+    // Retry starts from a stopped server. Dropping a server this process
+    // started runs `pg_ctl stop` synchronously in `PostgreSQL`'s `Drop`,
+    // holding a runtime thread for the shutdown checkpoint while the window
+    // polls `app_status`. `None` when a quit took it first.
+    if let Some(db) = lifecycle.take_server()
+        && let Err(error) = db.stop().await
+    {
+        tracing::error!(%error, "stopping the server of a failed bring-up failed");
     }
+    set_db_state(handle, DbState::Failed { message });
 }
 
 /// Record a transition and tell the frontend about it.
@@ -879,22 +862,14 @@ fn shutdown_database<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         // `setup` never ran; nothing was started.
         return;
     };
-    let Some(state) = lifecycle.app_state() else {
-        // Bring-up is still running or failed; there is no server to stop.
-        // A quit during a first-run download therefore leaves the download
-        // half-finished, which the next start resumes -- the same as any other
-        // interrupted first run.
-        return;
-    };
-    // The guard is dropped before `block_on`: nothing may hold a lock across
-    // an await point, and the take is all the mutex is protecting.
-    let db = state
-        .db
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .take();
-
-    if let Some(db) = db {
+    // Whatever stage bring-up reached (#1634): the lifecycle holds the
+    // server from the moment it is up, so a quit during the migration stops
+    // it too, and the bring-up that was using it fails on the closed pool.
+    // `None` before the server is up -- a quit during a first-run download
+    // leaves the download half-finished, which the next start resumes, the
+    // same as any other interrupted first run -- and after a failed bring-up,
+    // which stopped its own.
+    if let Some(db) = lifecycle.take_server() {
         tracing::info!("stopping the embedded postgres");
         if let Err(error) = tauri::async_runtime::block_on(db.stop()) {
             tracing::error!(%error, "stopping the embedded postgres failed");

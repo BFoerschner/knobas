@@ -29,7 +29,7 @@
 //! measured there: a global setting cannot be namespaced by a fixture id, so
 //! sharing this file's database would put the tests in each other's setting.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use knobas_app::capture::{
     CaptureState, Recorded, Registrar, SHOWN_KEY, ShortcutView, context, record, register_stored,
@@ -76,23 +76,33 @@ fn view(accelerator: Option<String>, refusal: Option<String>) -> ShortcutView {
 struct Stub {
     refuse: Option<&'static str>,
     calls: Mutex<Vec<String>>,
+    /// The thread each call ran on.
+    threads: Mutex<Vec<std::thread::ThreadId>>,
 }
 
 impl Stub {
     fn refusing(accelerator: &'static str) -> Self {
         Self {
             refuse: Some(accelerator),
-            calls: Mutex::default(),
+            ..Self::default()
         }
     }
 
     fn calls(&self) -> Vec<String> {
         self.calls.lock().expect("the stub's log").clone()
     }
+
+    fn on_this_thread(&self) {
+        self.threads
+            .lock()
+            .expect("the stub's log")
+            .push(std::thread::current().id());
+    }
 }
 
 impl Registrar for Stub {
     fn register(&self, accelerator: &str) -> Result<(), String> {
+        self.on_this_thread();
         self.calls
             .lock()
             .expect("the stub's log")
@@ -106,6 +116,7 @@ impl Registrar for Stub {
     }
 
     fn clear(&self) -> Result<(), String> {
+        self.on_this_thread();
         self.calls
             .lock()
             .expect("the stub's log")
@@ -117,6 +128,36 @@ impl Registrar for Stub {
 const SHORTCUT: &str = "CmdOrCtrl+Shift+N";
 const OTHER: &str = "Alt+Space";
 
+/// LIFE-6 (#1634): the plugin hands a registration to the main thread and
+/// blocks until it answers, so all three ways in call the registrar on the
+/// blocking pool and never on the runtime. The runtime here is a
+/// `#[tokio::test]`'s, one thread, the test's own: a call made on it is a
+/// call on that thread.
+#[tokio::test]
+async fn the_registrar_is_called_off_the_runtime() {
+    let pool = pool().await;
+    let capture = CaptureState::new();
+    let stub = Arc::new(Stub::default());
+    let runtime = std::thread::current().id();
+
+    register_stored(&pool, &capture, stub.clone())
+        .await
+        .expect("bring-up reads the setting");
+    set_shortcut(&pool, &capture, stub.clone(), Some(SHORTCUT))
+        .await
+        .expect("the shortcut is stored");
+    set_shown(&pool, &capture, stub.clone(), true)
+        .await
+        .expect("notes are shown");
+
+    let threads = stub.threads.lock().unwrap().clone();
+    assert_eq!(threads.len(), 3, "one registrar call per way in");
+    assert!(
+        threads.iter().all(|thread| *thread != runtime),
+        "a registrar call ran on the runtime's thread"
+    );
+}
+
 /// A fresh knobas holds no key at all.
 ///
 /// The ticket's first criterion, and the assertion is on **both** halves: the
@@ -127,9 +168,9 @@ const OTHER: &str = "Alt+Space";
 async fn nothing_is_registered_until_a_shortcut_is_chosen() {
     let pool = pool().await;
     let capture = CaptureState::new();
-    let stub = Stub::default();
+    let stub = Arc::new(Stub::default());
 
-    register_stored(&pool, &capture, &stub)
+    register_stored(&pool, &capture, stub.clone())
         .await
         .expect("bring-up reads the setting");
 
@@ -153,9 +194,9 @@ async fn nothing_is_registered_until_a_shortcut_is_chosen() {
 async fn a_stored_shortcut_is_registered_now_and_again_at_the_next_start() {
     let pool = shown_pool().await;
     let capture = CaptureState::new();
-    let stub = Stub::default();
+    let stub = Arc::new(Stub::default());
 
-    let answered = set_shortcut(&pool, &capture, &stub, Some(SHORTCUT))
+    let answered = set_shortcut(&pool, &capture, stub.clone(), Some(SHORTCUT))
         .await
         .expect("the write");
     assert_eq!(answered, view(Some(SHORTCUT.to_owned()), None));
@@ -164,8 +205,8 @@ async fn a_stored_shortcut_is_registered_now_and_again_at_the_next_start() {
     // A second process, over the same database: the setting is the only thing
     // that survived, and it is enough.
     let restarted = CaptureState::new();
-    let after = Stub::default();
-    register_stored(&pool, &restarted, &after)
+    let after = Arc::new(Stub::default());
+    register_stored(&pool, &restarted, after.clone())
         .await
         .expect("bring-up");
     assert_eq!(after.calls(), [format!("register {SHORTCUT}")]);
@@ -187,9 +228,9 @@ async fn a_stored_shortcut_is_registered_now_and_again_at_the_next_start() {
 async fn a_refused_shortcut_is_stored_and_the_answer_says_why() {
     let pool = shown_pool().await;
     let capture = CaptureState::new();
-    let stub = Stub::refusing(SHORTCUT);
+    let stub = Arc::new(Stub::refusing(SHORTCUT));
 
-    let answered = set_shortcut(&pool, &capture, &stub, Some(SHORTCUT))
+    let answered = set_shortcut(&pool, &capture, stub.clone(), Some(SHORTCUT))
         .await
         .expect("a refused registration is not a refused write");
     assert_eq!(
@@ -216,13 +257,13 @@ async fn a_refused_shortcut_is_stored_and_the_answer_says_why() {
 async fn a_refusal_does_not_outlive_the_shortcut_that_earned_it() {
     let pool = shown_pool().await;
     let capture = CaptureState::new();
-    let stub = Stub::refusing(SHORTCUT);
+    let stub = Arc::new(Stub::refusing(SHORTCUT));
 
-    set_shortcut(&pool, &capture, &stub, Some(SHORTCUT))
+    set_shortcut(&pool, &capture, stub.clone(), Some(SHORTCUT))
         .await
         .expect("the refused write");
 
-    let replaced = set_shortcut(&pool, &capture, &stub, Some(OTHER))
+    let replaced = set_shortcut(&pool, &capture, stub.clone(), Some(OTHER))
         .await
         .expect("the second write");
     assert_eq!(
@@ -231,7 +272,7 @@ async fn a_refusal_does_not_outlive_the_shortcut_that_earned_it() {
         "the new shortcut registered, so there is nothing left to explain"
     );
 
-    let cleared = set_shortcut(&pool, &capture, &stub, Some("   "))
+    let cleared = set_shortcut(&pool, &capture, stub.clone(), Some("   "))
         .await
         .expect("a blank field clears");
     assert_eq!(
@@ -260,9 +301,9 @@ async fn a_refusal_does_not_outlive_the_shortcut_that_earned_it() {
 async fn a_stored_shortcut_is_held_only_while_notes_are_shown() {
     let pool = pool().await;
     let capture = CaptureState::new();
-    let stub = Stub::default();
+    let stub = Arc::new(Stub::default());
 
-    let stored = set_shortcut(&pool, &capture, &stub, Some(SHORTCUT))
+    let stored = set_shortcut(&pool, &capture, stub.clone(), Some(SHORTCUT))
         .await
         .expect("the write");
     assert_eq!(
@@ -273,8 +314,8 @@ async fn a_stored_shortcut_is_held_only_while_notes_are_shown() {
         },
         "the shortcut is stored while notes are hidden"
     );
-    let restarted = Stub::default();
-    register_stored(&pool, &CaptureState::new(), &restarted)
+    let restarted = Arc::new(Stub::default());
+    register_stored(&pool, &CaptureState::new(), restarted.clone())
         .await
         .expect("bring-up");
     assert_eq!(
@@ -288,7 +329,7 @@ async fn a_stored_shortcut_is_held_only_while_notes_are_shown() {
         "hidden, bring-up asks for no key"
     );
 
-    let on = set_shown(&pool, &capture, &stub, true)
+    let on = set_shown(&pool, &capture, stub.clone(), true)
         .await
         .expect("turn notes on");
     assert_eq!(on, view(Some(SHORTCUT.to_owned()), None));
@@ -296,8 +337,8 @@ async fn a_stored_shortcut_is_held_only_while_notes_are_shown() {
         stub.calls(),
         ["clear".to_owned(), format!("register {SHORTCUT}")]
     );
-    let after = Stub::default();
-    register_stored(&pool, &CaptureState::new(), &after)
+    let after = Arc::new(Stub::default());
+    register_stored(&pool, &CaptureState::new(), after.clone())
         .await
         .expect("bring-up");
     assert_eq!(
@@ -306,7 +347,7 @@ async fn a_stored_shortcut_is_held_only_while_notes_are_shown() {
         "shown survives a restart"
     );
 
-    let off = set_shown(&pool, &capture, &stub, false)
+    let off = set_shown(&pool, &capture, stub.clone(), false)
         .await
         .expect("turn notes off");
     assert!(!off.shown);
@@ -327,11 +368,11 @@ async fn a_stored_shortcut_is_held_only_while_notes_are_shown() {
 async fn a_refusal_is_not_reported_while_notes_are_hidden() {
     let pool = shown_pool().await;
     let capture = CaptureState::new();
-    let stub = Stub::refusing(SHORTCUT);
-    set_shortcut(&pool, &capture, &stub, Some(SHORTCUT))
+    let stub = Arc::new(Stub::refusing(SHORTCUT));
+    set_shortcut(&pool, &capture, stub.clone(), Some(SHORTCUT))
         .await
         .expect("the refused write");
-    let hidden = set_shown(&pool, &capture, &stub, false)
+    let hidden = set_shown(&pool, &capture, stub.clone(), false)
         .await
         .expect("hide");
     assert_eq!(hidden.refusal, None);

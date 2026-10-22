@@ -506,20 +506,24 @@ pub fn to_ipc(error: &SourcesError, source_id: Option<&str>) -> crate::IpcError 
 /// (#1485): the scheduler requests it after every OK run.
 pub async fn start<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-    db: &knobas_db::EmbeddedDb,
+    pool: &PgPool,
+    connector: &knobas_db::embedded::Connector,
     profile: &crate::Profile,
     registry: Registry,
     suggestions: crate::suggestion_pass::SuggestionPass,
 ) -> Result<(), SourcesError> {
     // Its own pool for the scheduler's bookkeeping; the runs themselves take a
     // connection each from the connector, outside every pool (§10.6(c)).
-    let sync_pool = db.pool_for(knobas_sync::scheduler::SYNC_POOL_SIZE).await?;
+    let sync_pool = connector
+        .pool(knobas_sync::scheduler::SYNC_POOL_SIZE)
+        .await
+        .map_err(knobas_db::DbError::from)?;
     let state = bring_up(
         app,
         BringUp {
-            pool: db.pool().clone(),
+            pool: pool.clone(),
             sync_pool,
-            connections: db.connector(),
+            connections: connector.clone(),
             secrets: secret_store(profile, *app.state::<SecretStoreKind>()),
             registry: registry.clone(),
             store: install::store_dir(&profile.dir),

@@ -51,7 +51,7 @@ pub async fn set_capture_shortcut<R: tauri::Runtime>(
     crate::capture::set_shortcut(
         &pool,
         &capture,
-        &crate::capture::Plugin::new(app),
+        std::sync::Arc::new(crate::capture::Plugin::new(app)),
         accelerator.as_deref(),
     )
     .await
@@ -130,7 +130,13 @@ pub async fn set_notes_shown<R: tauri::Runtime>(
     shown: bool,
 ) -> Result<crate::capture::ShortcutView, IpcError> {
     let pool = lifecycle.pool()?;
-    crate::capture::set_shown(&pool, &capture, &crate::capture::Plugin::new(app), shown).await
+    crate::capture::set_shown(
+        &pool,
+        &capture,
+        std::sync::Arc::new(crate::capture::Plugin::new(app)),
+        shown,
+    )
+    .await
 }
 
 /// *Export notes as Markdown* (#832, D10): one `.md` per note in
