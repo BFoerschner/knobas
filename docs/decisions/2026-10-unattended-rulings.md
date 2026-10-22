@@ -12595,8 +12595,13 @@ The measurement came after it.
 - **The witness.** *Ruling:* `background_write.rs`, beside LIFE-2's test, over the real `Queue`
   and the app's `shutdown`. The fake declares `create_pull_request` too, so a run that went on
   past the quit would reach the source and be counted. The quit's length is asserted under
-  2.5 s against the 3 s grace: in the passing run the quit ends about 200 ms in, and a run that
+  `SHUTDOWN_GRACE` less 500 ms: in the passing run the quit ends about 200 ms in, and a run that
   loops in the set holds it to the grace. *Reversing:* n/a.
+- **The quit's bound reads the grace, not a copy of it** (merge-manager, Opus). *Fork:* keep the
+  2.5 s literal, or make `knobas_sync::scheduler::SHUTDOWN_GRACE` public and bound against it.
+  *Ruling:* public. *Reasoning:* a literal restating a private 3 s goes stale silently when the
+  grace moves; `knobas-sync` is not frozen (contract §10.8), so the constant costs no §10.8 entry.
+  *Reversing:* trivial.
 - **The seam tests hold their own set.** `tests/it/start_work.rs` makes a `Background` per test
   rather than a temporary. A dropped `JoinSet` aborts its tasks, and only the run's own clone of
   the set would otherwise keep it alive. *Reversing:* n/a.

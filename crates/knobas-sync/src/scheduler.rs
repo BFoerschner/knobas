@@ -1119,7 +1119,9 @@ const STARTUP_DELAY: Duration = Duration::from_secs(2);
 /// them, and for a background send to finish (#1633, ruling B1). A cancelled
 /// run only has to unwind to its next await point; a send at the source is
 /// let finish so its `sent` mark lands before the pool closes.
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+///
+/// Public so a test can bound a quit against it rather than restate it.
+pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
 /// Upper bound on closing the scheduler's pool. Belt and braces: the runs are
 /// already cancelled by the time this is reached.

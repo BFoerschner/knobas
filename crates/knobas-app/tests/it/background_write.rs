@@ -717,11 +717,11 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
         0,
         "the quit left a step running"
     );
-    // The quit's grace is 3 s, and a run still in the set at its end is
-    // aborted. This one ends once its send lands, ~200 ms in, so a quit that
-    // waited out the grace had a run looping in the set.
+    // A run still in the set at the grace's end is aborted. This one ends
+    // once its send lands, ~200 ms in, so a quit that waited out the grace
+    // had a run looping in the set.
     assert!(
-        quit_took < Duration::from_millis(2500),
+        quit_took < knobas_sync::scheduler::SHUTDOWN_GRACE - Duration::from_millis(500),
         "the quit waited out its grace ({quit_took:?}): the run did not end after its step"
     );
 }
