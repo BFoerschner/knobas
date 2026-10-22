@@ -1,0 +1,15 @@
+- **`crates/knobas-http/**` — issue #1771 (2026-10-23): a loosening after a quiet starts with
+  what the looser quota refilled in it.** Parent spec #1618 (rulings A3, A9; SPI-2); follows
+  #1728 and #1764. Since #1728 a loosened quota starts drained, so after a long quiet its first
+  request waited one emission interval of the looser rate though nothing had been sent. No change
+  to the SPI, the commands, `HttpConfig`, any adapter, or any public signature; #1729's
+  `watch_local_quota` mark is untouched.
+
+  **`crates/knobas-http/src/limiter.rs` — private, behind the public `InstanceLimiter`:**
+  `Slot::register`'s loosening branch builds `Paced::loosened(rate, Slot::idle())` in place of
+  `Paced::drained(rate)`, which is removed. `Paced::loosened` starts the new limiter with what
+  the looser rate refills in the time since any of the origin's limiters last let a request
+  through (#1764's `Slot::last_grant`), at most its burst, and nothing of what the replaced
+  limiter had left. The refill count both branches use moves into `Rate::refilled_in`. The module
+  doc, `Slot::register`'s and `Paced::loosened`'s say so, and a comment in
+  `crates/knobas-http/tests/transport.rs` (`a_loosened_quota_starts_drained`) names the credit.
