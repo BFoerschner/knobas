@@ -11690,3 +11690,8 @@ set.
   `KumaSocket::new`'s doc gives the reason for the higher rate. *Ruling:* the shared limiter
   follows the spec. The Kuma crate is left alone (#1627 is in flight there), and the question is
   filed as #1723 (`backlog`). *Reversing:* n/a.
+- **Test servers on reused ports** (Standards review). The map never forgets an origin, so a test
+  server handed a port an earlier test tightened to one a second would inherit that quota.
+  *Ruling:* `CountingServer` keeps its port bound for the rest of the test process (a forgotten
+  duplicate of the listener), so no later server in the binary gets it. The quota map stays
+  without a test-only reset. *Reversing:* low, test code.
