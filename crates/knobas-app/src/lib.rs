@@ -184,8 +184,16 @@ impl AppState {
     ///
     /// The server is not here: [`Lifecycle::hold_server`] is what makes
     /// [`shutdown`] stop one, and a test that wants that holds its server
-    /// there. Behind `test-util` because the one production caller is
-    /// bring-up, which installs only a pool it has migrated.
+    /// there (#1634).
+    ///
+    /// Behind `test-util` and not merely `#[doc(hidden)]`: the one production
+    /// caller is bring-up, which installs only a pool it has migrated, and a
+    /// second would hand commands a pool nothing migrated and nothing
+    /// stops. Hidden-but-present makes that a review catch; absent from the
+    /// shipping build makes it a compile error. `cargo build`, `tauri build`
+    /// and the `clippy --lib` half of `just check` all see the crate without
+    /// this feature, so a stream that reaches for it outside `tests/` cannot
+    /// get the gate green.
     #[must_use]
     pub fn over_pool(pool: PgPool) -> Self {
         Self::over(pool)

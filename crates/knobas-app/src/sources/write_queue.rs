@@ -397,23 +397,7 @@ pub async fn link_on_arrival(
 /// spawned before is awaited by the quit, under the scheduler's grace, before
 /// the pool closes.
 pub(crate) fn send_in_background(state: &crate::sources::SourcesState, source_id: String, id: i64) {
-    let task = state.clone();
-    let spawned = state.scheduler.background().spawn(async move {
-        if let Err(error) = flush(&task, &source_id, id).await {
-            tracing::warn!(
-                source = %source_id,
-                write_id = id,
-                %error,
-                "the background send of a queued write failed; the scheduler's tick retries it"
-            );
-        }
-    });
-    if !spawned {
-        tracing::info!(
-            write_id = id,
-            "knobas is quitting: the write waits for the next start"
-        );
-    }
+    spawn_send(state, source_id, id, |_| async {});
 }
 
 /// [`send_in_background`], and then, once the mirror has been re-read for the
@@ -436,6 +420,19 @@ pub(crate) fn send_in_background_then<F, Fut>(
     F: FnOnce(crate::sources::SourcesState) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = ()> + Send,
 {
+    spawn_send(state, source_id, id, move |state| async move {
+        sync_after_write(&state, &reread).await;
+        then(state).await;
+    });
+}
+
+/// The two above: [`flush`] on the scheduler's background set, and once the
+/// write went, `after`. Refused, and logged, once the quit has begun.
+fn spawn_send<F, Fut>(state: &crate::sources::SourcesState, source_id: String, id: i64, after: F)
+where
+    F: FnOnce(crate::sources::SourcesState) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send,
+{
     let task = state.clone();
     let spawned = state.scheduler.background().spawn(async move {
         if let Err(error) = flush(&task, &source_id, id).await {
@@ -447,8 +444,7 @@ pub(crate) fn send_in_background_then<F, Fut>(
             );
             return;
         }
-        sync_after_write(&task, &reread).await;
-        then(task).await;
+        after(task).await;
     });
     if !spawned {
         tracing::info!(

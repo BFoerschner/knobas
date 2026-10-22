@@ -12163,9 +12163,10 @@ Ruled 2026-10-22 by the implementer on Sonnet; docs only.
   `Scheduler::start_with_background` gives the scheduler the same one. *Reversing:* low.
 - **What "cancel" means for a send.** *Ruling:* the set closes under the same lock a spawn takes,
   so a spawn either lands in the set the quit awaits or is refused and leaves its row pending. The
-  order is: the cancel token, the door, then the runs and the set awaited together under one
-  `SHUTDOWN_GRACE` (now `pub`). One grace for both keeps a quit to 3 s, not 6. A send still
-  running after the grace is aborted rather than left to fail against a closed pool: that is
+  set closes at the cancel, not when its wait begins. The order is: the cancel token and the set's
+  close, the door, then the runs and the set awaited together. One `SHUTDOWN_GRACE` deadline from
+  the cancel covers the door and both waits, so a quit stays at 3 s, not 6 or 9. A send still
+  running at the deadline is aborted rather than left to fail against a closed pool: that is
   ADR-0012's window. *Reversing:* low.
 - **The door beside SYNC-5's re-check.** *Fork:* the re-check alone, as the ticket's fix
   direction says. *Ruling:* both. Without a door the quit closes the pool while the trigger is
@@ -12188,3 +12189,10 @@ Ruled 2026-10-22 by the implementer on Sonnet; docs only.
   take a fake adapter. LIFE-2's red run showed the pool closed under the send in flight: the
   submit during the quit failed with "attempted to acquire a connection on a closed pool". It
   did not reach the `sent` assertion. *Reversing:* n/a.
+- **A clone started during the quit answers `not_ready`, with no §10.8 entry.** *Ruling:* not an
+  IPC change. No command, argument, type or event changes; `not_ready` is already in the error
+  vocabulary; and the refusal is reachable only while the exit handler runs, when no window is
+  left to read it. `clone_repo` takes the registry as `State<'_, Arc<Clones>>`, an injected
+  argument the frontend never passes. *Reversing:* n/a.
+- **Contract §10.4 amended in place.** Its description of `over_pool` named the `db` field this
+  change removes. A dated *Amended by #1634* note says where the server lives now. *Reversing:* n/a.

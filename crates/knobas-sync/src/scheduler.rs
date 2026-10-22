@@ -1119,7 +1119,7 @@ const STARTUP_DELAY: Duration = Duration::from_secs(2);
 /// them, and for a background send to finish (#1633, ruling B1). A cancelled
 /// run only has to unwind to its next await point; a send at the source is
 /// let finish so its `sent` mark lands before the pool closes.
-pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
 /// Upper bound on closing the scheduler's pool. Belt and braces: the runs are
 /// already cancelled by the time this is reached.
@@ -1761,17 +1761,20 @@ impl Scheduler {
     /// close the scheduler's pool -- **bounded**, so quitting during a
     /// 30-second remote call is not a 30-second hang (carry-over).
     ///
-    /// Cancel first (#1633, ruling B1): no trigger starts a run and no
-    /// background task is spawned after it. Then every trigger that began
-    /// before it is let reach its spawn (the door), so its run is in `tasks`
-    /// or its row ended. Then the runs and the [`background`](Self::background)
-    /// set are awaited together under [`SHUTDOWN_GRACE`], and what is left is
-    /// aborted. Only then the pool.
+    /// Cancel first (#1633, ruling B1): no trigger starts a run and the
+    /// [`background`](Self::background) set takes no task after it. Then
+    /// every trigger that began before it is let reach its spawn (the door),
+    /// so its run is in `tasks` or its row ended. Then the runs and the set
+    /// are awaited together. One [`SHUTDOWN_GRACE`] from the cancel covers
+    /// the door and both waits, and what is left at its end is aborted. Only
+    /// then the pool.
     ///
     /// Idempotent: `RunEvent::ExitRequested` can fire more than once.
     pub async fn shutdown(&self) {
         self.inner.cancel.cancel();
-        if tokio::time::timeout(SHUTDOWN_GRACE, self.inner.door.write())
+        let deadline = tokio::time::Instant::now() + SHUTDOWN_GRACE;
+        let background = self.inner.background.close(deadline);
+        if tokio::time::timeout_at(deadline, self.inner.door.write())
             .await
             .is_err()
         {
@@ -1789,14 +1792,14 @@ impl Scheduler {
             }
         };
         let runs = async {
-            if tokio::time::timeout(SHUTDOWN_GRACE, joined).await.is_err() {
+            if tokio::time::timeout_at(deadline, joined).await.is_err() {
                 tracing::warn!("a sync run did not stop within the grace period: aborting it");
                 for abort in aborts {
                     abort.abort();
                 }
             }
         };
-        tokio::join!(runs, self.inner.background.close(SHUTDOWN_GRACE));
+        tokio::join!(runs, background);
 
         // Only now, with every run's task stopped: `close()` waits for
         // in-flight queries, and waiting for one parked on a remote system is

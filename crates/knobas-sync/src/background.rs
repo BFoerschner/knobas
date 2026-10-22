@@ -12,9 +12,9 @@
 
 use std::future::Future;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
 
 use tokio::task::JoinSet;
+use tokio::time::Instant;
 
 /// The background tasks, shared: every clone is a handle onto one set.
 #[derive(Clone)]
@@ -61,31 +61,37 @@ impl Background {
         true
     }
 
-    /// Refuse every later spawn, then wait up to `grace` for the tasks
-    /// running and abort what is left. Idempotent: a second call finds the
-    /// set already taken.
-    pub async fn close(&self, grace: Duration) {
+    /// Refuse every later spawn **now**, and answer the wait: until
+    /// `deadline` for the tasks running, then abort what is left. The refusal
+    /// is not deferred to the first poll, so a caller can close the set at
+    /// the start of a quit and await it later. Idempotent: a second call finds
+    /// the set already taken and its wait is empty.
+    pub fn close(&self, deadline: Instant) -> impl Future<Output = ()> + Send + 'static {
         let taken = self
             .tasks
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        let Some(mut tasks) = taken else {
-            return;
-        };
-        let drained = async { while tasks.join_next().await.is_some() {} };
-        if tokio::time::timeout(grace, drained).await.is_err() {
-            tracing::warn!(
-                left = tasks.len(),
-                "a background send did not finish within the grace period: aborting it"
-            );
-            tasks.abort_all();
+        async move {
+            let Some(mut tasks) = taken else {
+                return;
+            };
+            let drained = async { while tasks.join_next().await.is_some() {} };
+            if tokio::time::timeout_at(deadline, drained).await.is_err() {
+                tracing::warn!(
+                    left = tasks.len(),
+                    "a background send did not finish within the grace period: aborting it"
+                );
+                tasks.abort_all();
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[tokio::test]
@@ -98,7 +104,9 @@ mod tests {
             let _ = early.send("ran to its end");
         }));
 
-        background.close(Duration::from_secs(5)).await;
+        background
+            .close(Instant::now() + Duration::from_secs(5))
+            .await;
         assert_eq!(heard.try_recv(), Ok("ran to its end"), "close awaited it");
 
         assert!(!background.spawn(async move {
@@ -116,7 +124,9 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(3600)).await;
             let _ = tell.send(());
         }));
-        background.close(Duration::from_millis(20)).await;
+        background
+            .close(Instant::now() + Duration::from_millis(20))
+            .await;
         assert!(
             heard.recv().await.is_none(),
             "the aborted task dropped its sender without sending"
