@@ -265,10 +265,13 @@ test("apps.reset forgets the settings, so the next ensure reads again", async ()
 
 test("clones.reset drops the marks and the finished count and unlistens", async () => {
   const { off, listen } = listener();
+  const answers = [{ status: "adopted", path: "/q" }, { status: "cloning", path: "/p" }];
   const clones = createClones(
-    { cloneRepo: async () => ({ status: "cloning", path: "/p" }) as never, entityCheckout: vi.fn(), listen },
-    createApps({ checkoutSettings: vi.fn(), setCheckoutApplications: vi.fn(), openCheckout: vi.fn() }),
+    { cloneRepo: async () => answers.shift() as never, entityCheckout: async () => ({}) as never, listen },
+    createApps({ checkoutSettings: async () => ({ applications: [], default_application: null }) as never, setCheckoutApplications: vi.fn(), openCheckout: vi.fn() }),
   );
+  await clones.start({ entityId: "done", name: "n", repoUrl: null, root: null });
+  expect(clones.finished).toBe(1);
   await clones.start({ entityId: "e", name: "n", repoUrl: null, root: null });
   expect(Object.keys(clones.marks)).toEqual(["e"]);
   clones.reset();
