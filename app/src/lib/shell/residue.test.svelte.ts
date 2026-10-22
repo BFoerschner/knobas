@@ -404,6 +404,9 @@ const ModalFixture = (await import("./Modal.fixture.svelte")).default;
 const TimerPicker = (await import("./TimerPicker.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
+const LinkDialog = (await import("../detail/LinkDialog.svelte")).default;
+const TfLinkTo = (await import("../tf/job/TfLinkTo.svelte")).default;
+const TfBlockDialog = (await import("../tf/time/TfBlockDialog.svelte")).default;
 const TfDay = (await import("../tf/time/TfDay.svelte")).default;
 const TfWeek = (await import("../tf/time/TfWeek.svelte")).default;
 const TfStandup = (await import("../tf/time/TfStandup.svelte")).default;
@@ -612,6 +615,14 @@ function readyLifecycle() {
  * bottom matches against — so a new component with an effect fails this suite
  * until somebody puts it here on purpose.
  */
+/** A keystroke into the input `selector` names, so a debounce is armed. */
+function typeInto(target: HTMLElement, selector: string): void {
+  const input = target.querySelector<HTMLInputElement>(selector);
+  if (!input) throw new Error(`no input matches ${selector}`);
+  input.value = "sep";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 interface Case {
   name: string;
   source: string;
@@ -2186,6 +2197,64 @@ const CASES: Case[] = [
     }),
   },
   {
+    /**
+     * The three pickers that drive the launcher's `Session` (#1668). None has
+     * a `$effect`; each is enrolled because a `Session` owns a debounce
+     * timer, and a keystroke left unfired at a close is the timer it can
+     * leave behind. `exercise` types so there is one to leave.
+     */
+    name: "LinkDialog",
+    source: "lib/detail/LinkDialog.svelte",
+    open: (target) => ({
+      app: mount(LinkDialog, {
+        target,
+        props: { fromId: "mock:PAY-231", fromTitle: "Retry failed SEPA payouts", onclose: () => {}, oncreated: () => {} },
+      }),
+    }),
+    exercise: (target) => typeInto(target, 'input[placeholder="Search everything"]'),
+  },
+  {
+    name: "TfLinkTo",
+    source: "lib/tf/job/TfLinkTo.svelte",
+    open: (target) => ({
+      app: mount(TfLinkTo, {
+        target,
+        props: {
+          jobKey: "PAY-231",
+          entityId: "mock:PAY-231",
+          ports: { ...LAUNCHER_PORTS, createLink: () => new Promise(() => {}) },
+          layers: createLayers(),
+          onclose: () => {},
+          onlinked: () => {},
+        },
+      }),
+    }),
+    exercise: (target) => typeInto(target, 'input[aria-label="Search for a ticket, PR, build, page, asset"]'),
+  },
+  {
+    name: "TfBlockDialog",
+    source: "lib/tf/time/TfBlockDialog.svelte",
+    open: (target) => ({
+      app: mount(TfBlockDialog, {
+        target,
+        props: {
+          mode: "add",
+          from: "09:00",
+          to: "10:00",
+          target: null,
+          span: null,
+          refusal: null,
+          layers: createLayers(),
+          ports: LAUNCHER_PORTS,
+          onsave: () => {},
+          ondelete: () => {},
+          onclose: () => {},
+        },
+      }),
+    }),
+    exercise: (target) => typeInto(target, 'input[aria-label="Search for a ticket"]'),
+  },
+  {
     name: "FirstRun",
     source: "lib/sources/FirstRun.svelte",
     open: (target) => ({ app: mount(FirstRun, { target, props: { onfinish: () => {} } }) }),
@@ -2445,7 +2514,7 @@ test("an unmatched remove does not pay for a later leak", async () => {
  * it — is caught by whoever reviews it or by nobody. Growing the table is
  * allowed; growing the codebase past it without noticing is not.
  */
-test("every component with an effect is in the table", () => {
+test("every component with an effect or a launcher Session is in the table", () => {
   const root = join(process.cwd(), "src") + "/";
   const withEffects: string[] = [];
 
@@ -2455,7 +2524,10 @@ test("every component with an effect is in the table", () => {
       if (item.isDirectory()) {
         walk(path);
       } else if (item.name.endsWith(".svelte") && !item.name.endsWith(".fixture.svelte")) {
-        if (readFileSync(path, "utf8").includes("$effect(")) {
+        // A `Session` is enrolled with or without an effect (#1668): it owns
+        // a debounce timer, and only an unmount cleanup cancels it.
+        const text = readFileSync(path, "utf8");
+        if (text.includes("$effect(") || text.includes("new Session(")) {
           withEffects.push(path.slice(root.length));
         }
       }

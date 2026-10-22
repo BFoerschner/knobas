@@ -22,6 +22,8 @@
   never unwinds two ladders.
 -->
 <script lang="ts">
+  import { onMount } from "svelte";
+
   import type { SearchHit } from "../ipc/search";
   import { launcherHome, search } from "../ipc/search";
   import { createLink } from "../ipc/entity";
@@ -52,6 +54,9 @@
   // Read once, like the launcher's: a `Session` owns a debounce timer and a
   // request counter, and swapping its ports mid-life would drop both.
   const session = new Session({ search, launcherHome });
+  // Disposed on unmount, as the launcher's is (#1668): a close inside the
+  // debounce would otherwise fire a search for a dialog that is gone.
+  onMount(() => () => session.dispose());
 
   let target = $state<SearchHit | null>(null);
   let relation = $state(DEFAULT_RELATION);

@@ -172,6 +172,22 @@ test("the target picker searches what is typed", async () => {
 });
 
 /**
+ * A close inside the debounce takes the keystroke with it (#1668, FE-6): the
+ * dialog's `Session` is disposed on unmount, as the launcher's is, so its
+ * timer never fires a search for a component that is gone.
+ */
+test("closing the dialog within the debounce sends no search", async () => {
+  const screen = render();
+
+  screen.type(screen.picker(), "payout");
+  screen.done();
+  // Past the 90 ms debounce, on real timers.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  expect(queries, "a search was sent after the dialog closed").toEqual([]);
+});
+
+/**
  * Story 1 and 23 together: found by typing, picked with the arrow keys and
  * Enter, written with the arguments the dialog was holding — no mouse.
  */
