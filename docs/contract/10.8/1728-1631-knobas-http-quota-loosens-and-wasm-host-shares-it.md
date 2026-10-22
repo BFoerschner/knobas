@@ -13,8 +13,8 @@
   and the new one. While any holder of the stricter quota is alive it still governs. A tighter
   quota is a new governor limiter with its own burst, as in #1630; one looser in either field is
   a new limiter that starts drained (its burst taken before anyone waits on it), so a loosening
-  hands out no fresh burst. The map still holds one entry per origin, never removed, and nothing
-  is awaited under a lock. The crate, `HttpConfig` and `InstanceLimiter::for_url` docs say so:
+  hands out no fresh burst. The map still holds one entry per origin, never removed; its lock is
+  released before the slot's is taken, so no two locks nest, and nothing is awaited under a lock. The crate, `HttpConfig` and `InstanceLimiter::for_url` docs say so:
   a caller asking for more than the origin's quota is paced by what a live holder asked for, and
   the next limiter built once that holder is gone loosens it.
 

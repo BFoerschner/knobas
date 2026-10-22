@@ -11825,3 +11825,37 @@ set.
   the limiter needs a wait as long as the manifest's deadline (default ten minutes, at least one
   second) behind a quota other clients are spending. *Ruling:* not reachable in practice, and the
   deadline half is #1729's question, not this PR's; said so on #1729. *Reversing:* n/a.
+
+## #1728 and #1631: merge review of PR #1735 (Opus merge-manager, 2026-10-22)
+
+- **Pacing only the requests for the instance.** #1618 says the host "awaits the same limiter for
+  the instance origin before each send"; read alone, every send. *Ruling:* the implementer's
+  reading stands and meets #1631's intent. The paced set is exactly the requests the host puts the
+  credential on; A9 places the quota with the host because "the host attaches the credential and
+  owns the socket", and #1631's failure is a lockout of the reader's account, which only the
+  instance holds. The component never sees the secret, so a request to another declared host
+  cannot spend the reader's account. *Reversing:* low, pace those on their own origin's limiter.
+- **The quota is worked out again only when a limiter is built.** *Ruling:* accepted. #1728's
+  first criterion holds (`a_quota_loosens_once_the_stricter_client_is_gone`). The reader cases hold
+  because every source is built per run, flush, live read and test and dropped after
+  (`scheduler::build_source`, the write queue, `crud.rs`); nothing caches a source or an
+  `HttpClient` (#1618 rules a registry cache out of scope). The save-then-sync path is witnessed
+  at the limiter seam, not end to end in the app: a run still in flight at the save keeps the old
+  quota until a client is built after it ends. Kuma's process-long socket asks for 25/50, so a Kuma
+  source set above 25/s stays capped at 25, no worse than before; #1723 owns the socket.
+  *Reversing:* low.
+- **A change looser in one field and stricter in the other is a loosening.** *Ruling:* accepted;
+  it costs one refill and hands out no burst. *Reversing:* low.
+- **The host's wait is bounded by the call's deadline only.** *Ruling:* accepted. `limits::bounded`
+  drops the whole call at the deadline, wait included
+  (`the_deadline_stops_a_call_waiting_on_the_limiter`); the component's timeouts start after the
+  wait and bound the server's answer. *Reversing:* low.
+- **#1631's "at most 10 within the first second".** *Ruling:* the substituted test is honest. At
+  5/s and burst 10 a correct limiter lets about 15 through in the first second; at most 10 within
+  150 ms bounds the burst, a spread of at least 3.5 s for 30 bounds the rate, and before the change
+  all 30 came within 150 ms. Criterion ticked with that note; #1737 fixes the wording.
+- **A tightening after a loosening hands out a fresh burst.** Two sources at 5/10 and 10/20 whose
+  clients alternate get A's burst of 10 on every B→A turn, which #1630's monotone quota never
+  did. #1728 rules that "a tightening keeps #1630's behaviour", so the PR follows the ticket; the
+  gap matters only for turns shorter than about burst/rate seconds. Filed as #1740 (`backlog`).
+  *Reversing:* n/a.
