@@ -1633,12 +1633,29 @@ async fn the_feature_branch_build_is_served_by_both_item_producing_locators() {
         "an incremental run from below everything mirrors every seeded build of the scope, \
          the feature-branch one included"
     );
-    // The watermark is the server's, not the scope's: the chain's builds are
-    // the newest.
+    // The watermark is the scope's: a source scoped to a configuration list
+    // asks per configuration (#1626), so the chain's builds, newer and out of
+    // scope, are never in its answers.
     assert_eq!(
         since_build_id(&cursor),
-        *seeded.seeded_ids().last().expect("seeded")
+        *quiet.last().expect("seeded"),
+        "an incremental run scoped to a configuration list lands on its own newest build"
     );
+    let asked: Vec<String> = QUIET_CONFIGURATIONS
+        .iter()
+        .map(|c| format!("buildType:(id:{c}),{incremental},branch:default:any,count:100"))
+        .collect();
+    for (locator, c) in asked.iter().zip(QUIET_CONFIGURATIONS) {
+        let mut ids = seeded.build_ids(locator).await;
+        ids.sort_unstable();
+        let mut own = seeded.seeded_ids_of(c);
+        own.sort_unstable();
+        assert_eq!(
+            ids, own,
+            "the per-configuration incremental locator, as `sync::since` sends it, answers \
+             exactly {c}'s builds"
+        );
+    }
 }
 
 /// A synced build carries its configuration, and `under:` finds it by both

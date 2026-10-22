@@ -42,6 +42,19 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
     (state.v == VERSION).then_some(state)
 }
 
+/// What one run observed, as three build ids that are **not** interchangeable
+/// -- each is compared in a different direction, and all three are `i64`, so
+/// nothing but a name distinguishes them at a call site.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Seen {
+    /// The newest **finished** build the run saw, in scope or not.
+    pub max_finished: Option<i64>,
+    /// The oldest **in-scope** build the run saw queued or running.
+    pub min_unfinished: Option<i64>,
+    /// The highest build id the run **witnessed** while opening.
+    pub ceiling: Option<i64>,
+}
+
 /// Where the watermark stands after a run.
 ///
 /// * `previous` -- where it stood before.
@@ -60,7 +73,9 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
 /// The asymmetry between the first two of those is deliberate and is the run's
 /// job to honour: `max_finished` counts **every** finished build the run saw,
 /// in scope or not, because a build outside the scope will never be emitted
-/// and so never needs to be reachable again; `min_unfinished` counts only
+/// and so never needs to be reachable again (a source scoped to a
+/// configuration list asks per configuration and sees only its own builds,
+/// #1626); `min_unfinished` counts only
 /// in-scope builds, because clamping for a build that will never be emitted is
 /// a watermark held back for nothing. See `sync::execute`.
 ///
@@ -77,7 +92,8 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
 /// Ids are assigned at queue time and are monotonic, so **every** build queued
 /// after the run started has an id above every build that existed when it
 /// started. One number therefore covers all of them at once: any id known to
-/// have existed at that instant, which the watermark may not pass. The cost is
+/// have existed at that instant, which the watermark may not pass -- unless it
+/// lies below `previous`, which the last paragraph here covers. The cost is
 /// re-fetching the builds that finished inside this run on the next one, and
 /// upserts are idempotent -- the same trade the clamp above already makes.
 ///
@@ -85,24 +101,24 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
 /// matters here because it decides which direction is dangerous. `sync`
 /// supplies the highest id it witnessed across the two pages that open a run;
 /// see `sync::ceiling` for why the pages it does *not* use are the finished
-/// ones. A ceiling lower than the true top of the id space costs a re-fetch;
-/// one above it loses a build.
+/// ones. A ceiling lower than the true top of the id space, and not below
+/// `previous`, costs a re-fetch; one above it loses a build.
 ///
 /// `None` means the run witnessed nothing (a server with no builds at all),
 /// which is the same server on which `max_finished` is `None` too.
-/// What one run observed, as three build ids that are **not** interchangeable
-/// -- each is compared in a different direction, and all three are `i64`, so
-/// nothing but a name distinguishes them at a call site.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct Seen {
-    /// The newest **finished** build the run saw, in scope or not.
-    pub max_finished: Option<i64>,
-    /// The oldest **in-scope** build the run saw queued or running.
-    pub min_unfinished: Option<i64>,
-    /// The highest build id the run **witnessed** while opening.
-    pub ceiling: Option<i64>,
-}
-
+///
+/// **A ceiling below `previous` is ignored** (#1626). It means the opening
+/// pages showed nothing as new as the watermark -- routine on a server whose
+/// pages are unordered (issue #91). Applied, `min(ceiling)` lands below
+/// `previous` and the floor lifts it back to exactly `previous`, so a run that
+/// emitted finished builds above the watermark leaves it where it was, and
+/// every later poll re-fetches and re-emits the same builds for as long as the
+/// opening pages keep missing them. What ignoring it gives up is the clamp's
+/// protection for that one run: a build queued after the in-flight poll, still
+/// running while a build queued after it finished before the finished query
+/// went out. On an incremental run that window is the few requests between the
+/// two queries, against a re-emission on every poll. A ceiling at or above
+/// `previous` clamps as before.
 pub(crate) fn advance(previous: i64, seen: Seen) -> i64 {
     let Seen {
         max_finished,
@@ -110,7 +126,7 @@ pub(crate) fn advance(previous: i64, seen: Seen) -> i64 {
         ceiling,
     } = seen;
     let mut next = max_finished.map_or(previous, |newest| previous.max(newest));
-    if let Some(highest_at_start) = ceiling {
+    if let Some(highest_at_start) = ceiling.filter(|&c| c >= previous) {
         next = next.min(highest_at_start);
     }
     if let Some(oldest_in_flight) = min_unfinished {
@@ -236,26 +252,41 @@ mod tests {
         assert_eq!(advance(0, Some(1200), Some(500), Some(1000)), 499);
     }
 
-    /// A ceiling below where the watermark already stands is an ordinary
-    /// answer, and the floor is what makes it harmless.
+    /// The floor: no argument moves the watermark below where it stood.
+    ///
+    /// An in-flight build under the watermark, or a newest finished build
+    /// under it, leaves it exactly where it was. Clamping *down* is the
+    /// expensive direction -- a watermark dragged back re-offers every build
+    /// above it on every run afterwards -- so it is the one direction this
+    /// function refuses.
+    #[test]
+    fn the_watermark_has_a_floor_under_every_argument() {
+        assert_eq!(advance(1187, Some(400), Some(2), Some(1200)), 1187);
+        assert_eq!(advance(1187, None, Some(2), Some(1200)), 1187);
+        assert_eq!(advance(1187, Some(400), None, Some(500)), 1187);
+    }
+
+    /// A ceiling below where the watermark already stands is ignored, not
+    /// applied and then floored (#1626).
     ///
     /// It reaches here whenever the two opening pages happen not to show a
     /// build as new as the watermark -- routine on a server whose pages are
     /// unordered, which is what issue #91 measured. `sync` asks the server
     /// about the watermark's own build before believing anything worse of it
     /// (`sync::refuse_a_replaced_server`); when the build is there the run
-    /// carries on and lands here, and the floor keeps the watermark exactly
-    /// where it was. Clamping *down* is the expensive direction -- a watermark
-    /// dragged back re-offers every build above it on every run afterwards --
-    /// so it is the one direction this function refuses.
+    /// carries on and lands here. Applying the ceiling would leave the
+    /// watermark at 1187 under the builds up to 1200 the run just emitted, and
+    /// the next run would emit them again. The in-flight clamp still holds.
     #[test]
-    fn the_watermark_has_a_floor_under_every_argument() {
+    fn a_ceiling_below_the_watermark_is_ignored() {
         assert_eq!(
             advance(1187, Some(1200), None, Some(500)),
-            1187,
-            "a ceiling under the watermark clamps nothing and drags nothing back"
+            1200,
+            "a ceiling under the watermark holds nothing back"
         );
-        assert_eq!(advance(1187, Some(400), Some(2), Some(1200)), 1187);
+        assert_eq!(advance(1187, Some(1200), Some(1195), Some(500)), 1194);
+        // At the watermark it is still a witness and still clamps.
+        assert_eq!(advance(1187, Some(1200), None, Some(1187)), 1187);
     }
 
     /// No ceiling is the server with no builds on it at all -- which is the

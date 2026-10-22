@@ -13,9 +13,11 @@
 //!
 //! Then a **full sync** (`cursor: None`) lists the build configurations in
 //! scope and, for each, the newest `builds_per_config` finished builds. An
-//! **incremental** run skips the listing and asks once, globally, for
-//! `state:finished,sinceBuild:(id:N)` -- build ids are server-wide, so one
-//! query covers every configuration -- then narrows to the scope client-side.
+//! **incremental** run asks for `state:finished,sinceBuild:(id:N)`: once per
+//! configuration for a source scoped to a configuration list, off the same
+//! listing (#1626), and otherwise once, globally -- build ids are
+//! server-wide, so one query covers every configuration -- narrowing to the
+//! scope client-side.
 //!
 //! Those two are the run's **item-producing** queries, and both carry
 //! `canceled:any,failedToStart:any` (issue #105) and `branch:default:any`
@@ -112,6 +114,8 @@ pub(crate) async fn execute(
     // that needs it -- one that lists configurations, or a scoped one that
     // has builds to place. See [`crate::projects`].
     let mut tree: Option<ProjectTree> = None;
+    // Whether `configs` already holds this run's listing of the scope.
+    let mut listed = false;
 
     // 1. The opening probe: one page of builds, whatever their state.
     //
@@ -165,6 +169,7 @@ pub(crate) async fn execute(
             for t in scope(rest, cfg, read_tree(rest, &mut tree).await?).await? {
                 configs.insert(t.rec.id.clone(), t);
             }
+            listed = true;
             let ids: Vec<String> = configs.keys().cloned().collect();
             let mut out = Vec::new();
             // The walk reading (#1382): before each configuration's builds are
@@ -215,9 +220,30 @@ pub(crate) async fn execute(
             sink.walked(of, Some(of), BUILD_CONFIGURATIONS).await;
             out
         }
-        // Build ids are server-wide and monotonic, so one query covers every
-        // configuration; the scope is applied client-side below.
-        Some(state) => since(rest, state.since_build_id).await?,
+        // A source scoped to a configuration list asks once per configuration
+        // (#1626): the global query carries every build the whole server
+        // finished since the watermark, so a busy server fills it past
+        // `MAX_BUILDS_PER_QUERY` however narrow this source is, and every run
+        // afterwards refuses. The configurations come from the same listing a
+        // full sync reads, so a configuration the list names and the server no
+        // longer has is not asked about; step 6 reuses the listing.
+        Some(state) if !cfg.build_type_ids.is_empty() => {
+            for t in scope(rest, cfg, read_tree(rest, &mut tree).await?).await? {
+                configs.insert(t.rec.id.clone(), t);
+            }
+            listed = true;
+            let mut out = Vec::new();
+            for id in configs.keys() {
+                out.extend(since(rest, Some(id), state.since_build_id).await?);
+            }
+            out
+        }
+        // Unscoped, or scoped by project only: build ids are server-wide and
+        // monotonic, so one query covers every configuration and the scope is
+        // applied client-side below. A project scope has no locator dimension
+        // in the contract, and asking per configuration of a whole project
+        // trades one query for as many as the project holds.
+        Some(state) => since(rest, None, state.since_build_id).await?,
     };
 
     // 5. Scope, watermarks, items.
@@ -263,9 +289,11 @@ pub(crate) async fn execute(
         if StateFilter::Finished.matches(b.rec.state.as_deref()) {
             // Counted whether or not it is in scope. A finished build outside
             // the scope will never be emitted, so it never needs to be
-            // reachable again -- and *not* counting it would pin a scoped
-            // source's watermark below every foreign build that finishes,
-            // growing the incremental query without bound.
+            // reachable again -- and *not* counting it would pin a
+            // project-scoped source's watermark below every foreign build
+            // that finishes, growing its global incremental query without
+            // bound. A source scoped to a configuration list asks per
+            // configuration (#1626), so no foreign build reaches it here.
             max_finished = Some(max_finished.map_or(b.rec.id, |m: i64| m.max(b.rec.id)));
         } else if in_scope {
             // Queued, running, or -- if the server sent no state at all --
@@ -293,8 +321,10 @@ pub(crate) async fn execute(
     // 6. The configurations of the builds that moved. Fetched from the same
     //    listing a full sync uses, so a configuration's payload never
     //    alternates between a rich and a lean shape -- and only when something
-    //    moved, so an idle poll stays silent.
-    if previous.is_some() && !touched.is_empty() {
+    //    moved, so an idle poll stays silent. A run that already listed the
+    //    scope in step 4 (a full sync, or a source scoped to a configuration
+    //    list) reuses that listing.
+    if !listed && !touched.is_empty() {
         for t in scope(rest, cfg, read_tree(rest, &mut tree).await?).await? {
             configs.insert(t.rec.id.clone(), t);
         }
@@ -429,10 +459,12 @@ fn last_page(page: &Page<Build>, asked: u32) -> bool {
 /// remedy.** Widening is the only lever this query has. Against an instance
 /// whose own per-request ceiling sits below the number of builds one run needs
 /// to see, every widening comes back at that ceiling with more still reported,
-/// and the run ends here -- for as long as the query stays that big. That is a
-/// source which cannot sync until it is narrowed (`build_type_ids`,
-/// `project_ids`, a shorter interval) or until the ceiling is raised, and it is
-/// deliberately preferred to the alternative: mirroring the ceiling's worth of
+/// and the run ends here -- for as long as the query stays that big. A failed
+/// run leaves the watermark where it is, so the query only grows: the way out
+/// is a Backfill, which reads each configuration's newest builds without this
+/// query, and a configuration list (`build_type_ids`, whose queries carry only
+/// their own builds, #1626) or a raised ceiling keeps it from recurring. That
+/// is deliberately preferred to the alternative: mirroring the ceiling's worth of
 /// builds, advancing the watermark past the rest, and reporting success. The
 /// failure names the ceiling ([`capped_short`]) so nobody spends the outage
 /// narrowing a source that was never too big.
@@ -489,8 +521,8 @@ async fn all_of(
 /// caller's "this query is too big".
 ///
 /// `None` when the last request came back filled: then the query really is
-/// bigger than one run can carry, and the caller's own message -- sync more
-/// often, narrow the configurations -- is the true one.
+/// bigger than one run can carry, and the caller's own message -- the cap of
+/// [`MAX_BUILDS_PER_QUERY`], and Backfill as the way out -- is the true one.
 ///
 /// `Some` when it came back **short and the server still reported more**. That
 /// is a per-request ceiling on the instance rather than a large query, and the
@@ -504,8 +536,13 @@ async fn all_of(
 /// exactly the ceiling's worth of matches -- the run *did* see everything, so
 /// "below what this run has to see in one query" is then a claim about the page
 /// rather than about the corpus. The remedy it names still works, and naming
-/// the ceiling still beats the caller's "narrow this source", which is wrong in
-/// both cases.
+/// the ceiling still beats the caller's "more than a thousand builds", which is
+/// wrong in both cases.
+///
+/// The way out is Backfill, as in the caller's message (#1626): a failed run
+/// leaves the watermark where it is, so syncing more often moves nothing, and a
+/// project scope leaves the query global. A raised limit, or a configuration
+/// list, keeps it from recurring.
 fn capped_short(served: usize, asked: u32) -> Option<String> {
     (served < asked as usize).then(|| {
         format!(
@@ -514,9 +551,10 @@ fn capped_short(served: usize, asked: u32) -> Option<String> {
              one REST list returns -- below what this run has to see in one query. Widening \
              `count:` is the only lever this query has and it is spent. Carrying on would mean \
              mirroring {served} builds and advancing the watermark past every one after them, \
-             which `sinceBuild` could never offer again. Raise the server's per-request limit, \
-             or narrow this source with build_type_ids/project_ids, or sync more often, so that \
-             one query needs fewer than {served} builds."
+             which `sinceBuild` could never offer again. Backfill on this source's page starts \
+             over from each configuration's newest builds. To keep it from recurring, raise the \
+             server's per-request limit, or scope the source to a list of build configurations: \
+             such a source asks per configuration, for its own builds only."
         )
     })
 }
@@ -673,8 +711,9 @@ fn ceiling(probe: &[Rec<Build>], in_flight: &[Rec<Build>]) -> Option<i64> {
 /// * **Found** -- the watermark stands and the run carries on. The opening
 ///   pages simply did not happen to show it, which is the ordinary case on a
 ///   server whose pages are not ordered. The ceiling is then below the
-///   watermark, which [`cursor::advance`]'s floor already handles: it clamps
-///   nothing and drags nothing back.
+///   watermark, which [`cursor::advance`] ignores (#1626): it clamps
+///   nothing, drags nothing back, and does not hold the watermark under the
+///   builds this run emits.
 /// * **Not found** -- a replacement or a deleted newest build, refused. And
 ///   the remedy works now: after a backfill the ceiling comes from ids this
 ///   run witnessed rather than from a stale row 0, so the loop cannot restart.
@@ -770,10 +809,29 @@ async fn refuse_a_replaced_server(
 /// (CONTEXT.md calls it a backfill); anything older than
 /// `builds_per_config` back is gone. That is the permanence issue #105
 /// measured, now bounded instead of ongoing.
-async fn since(rest: &dyn Rest, since_build_id: i64) -> Result<Vec<Rec<Build>>, SourceError> {
+///
+/// # One configuration, or the whole server
+///
+/// `build_type_id` is `Some` for a source scoped to a configuration list,
+/// which asks once per configuration (#1626), and `None` for any other
+/// source, which asks once for the whole server.
+///
+/// Either refusal at [`MAX_BUILDS_PER_QUERY`] names *Backfill* (CONTEXT.md)
+/// as the way out, because it is the only one: a failed run leaves the
+/// watermark where it is, so the gap only grows, and a global query is the
+/// same size whatever the source's scope. A backfill runs with no position,
+/// reads each configuration's newest `builds_per_config`, and keeps the
+/// position it ends on. The global refusal also says how to keep it from
+/// recurring: a configuration list, whose queries carry only its own builds.
+async fn since(
+    rest: &dyn Rest,
+    build_type_id: Option<&str>,
+    since_build_id: i64,
+) -> Result<Vec<Rec<Build>>, SourceError> {
     all_of(
         rest,
         &Locator {
+            build_type_id: build_type_id.map(str::to_owned),
             state: Some(StateFilter::Finished),
             since_build_id: Some(since_build_id),
             canceled_any: true,
@@ -781,13 +839,21 @@ async fn since(rest: &dyn Rest, since_build_id: i64) -> Result<Vec<Rec<Build>>, 
             branch_any: true,
             ..Locator::default()
         },
-        || {
-            format!(
-                "teamcity: more than {MAX_BUILDS_PER_QUERY} builds have finished since build \
-                 {since_build_id}; this run would have had to drop the oldest of them, which \
-                 `sinceBuild` could never offer again. Sync more often, or narrow the source's \
-                 build configurations."
-            )
+        || match build_type_id {
+            Some(id) => format!(
+                "teamcity: more than {MAX_BUILDS_PER_QUERY} builds of {id} have finished since \
+                 build {since_build_id}; this run would have had to drop the oldest of them, \
+                 which `sinceBuild` could never offer again. Backfill on this source's page \
+                 starts over from each configuration's newest builds."
+            ),
+            None => format!(
+                "teamcity: more than {MAX_BUILDS_PER_QUERY} builds have finished on this server \
+                 since build {since_build_id}; this run would have had to drop the oldest of \
+                 them, which `sinceBuild` could never offer again. Backfill on this source's \
+                 page starts over from each configuration's newest builds. Scoping the source \
+                 to a list of build configurations keeps it from recurring: such a source asks \
+                 per configuration, for its own builds only."
+            ),
         },
     )
     .await
@@ -1964,8 +2030,10 @@ mod tests {
         .await
         .expect_err("a run that cannot carry them all must fail");
         assert!(
-            matches!(&err, SourceError::Protocol { message: m, .. } if m.contains("1000")),
-            "{err:?}"
+            matches!(&err, SourceError::Protocol { message: m, .. }
+                if m.contains("1000") && m.contains("Backfill") && !m.contains("Sync more often")),
+            "an unscoped source asks globally, so narrowing or syncing more often moves nothing \
+             and the refusal names the way out that does: {err:?}"
         );
         assert!(
             sink.0.is_empty(),
@@ -1987,6 +2055,112 @@ mod tests {
                 "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:1001",
             ]
         );
+    }
+
+    /// **A source scoped to a configuration list asks per configuration**
+    /// (#1626), so a busy server's builds do not fill its incremental query.
+    ///
+    /// 1,500 builds finished server-wide since the watermark, 20 of them in
+    /// the two configurations this source names. The global query would
+    /// carry all 1,500 and refuse the run at the 1,000 cap, on every run
+    /// afterwards, whatever the source's scope; one `buildType`-scoped query
+    /// per configuration carries ten each.
+    #[tokio::test]
+    async fn a_scoped_source_asks_per_configuration_past_a_busy_server() {
+        let scope = ["Payout_Build", "Payout_IntegrationTests"];
+        let builds: Vec<serde_json::Value> = (1..=1_500)
+            .map(|n| match n % 150 {
+                0 => build(n, scope[0], "Payout", "finished"),
+                1 => build(n, scope[1], "Payout", "finished"),
+                _ => build(n, "Ledger_Deploy_Staging", "Ledger", "finished"),
+            })
+            .collect();
+        let rest = FakeRest::new(
+            vec![
+                build_type(scope[0], "Payout"),
+                build_type(scope[1], "Payout"),
+                build_type("Ledger_Deploy_Staging", "Ledger"),
+            ],
+            builds,
+        );
+        // `Gone_Config` is named and not on the server: a configuration that
+        // was deleted. It is not asked about, as a full sync would not.
+        let cfg = TeamCityConfig::from_json(&serde_json::json!({
+            "build_type_ids": [scope[0], scope[1], "Gone_Config"]
+        }))
+        .expect("config");
+        let (items, cursor) = run(
+            &rest,
+            &cfg,
+            Some(r#"{"v":2,"since_build_id":0}"#.to_owned()),
+        )
+        .await;
+        let built: Vec<String> = keys(&items)
+            .into_iter()
+            .filter(|k| k.starts_with("build:"))
+            .collect();
+        assert_eq!(built.len(), 20, "the twenty in scope: {built:?}");
+        assert_eq!(
+            cursor, r#"{"v":2,"since_build_id":1500}"#,
+            "the newest build in scope"
+        );
+        let asked: Vec<String> = rest
+            .calls()
+            .into_iter()
+            .filter(|c| c.contains("sinceBuild"))
+            .collect();
+        assert_eq!(
+            asked,
+            [
+                "buildType:(id:Payout_Build),state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:100",
+                "buildType:(id:Payout_IntegrationTests),state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:100",
+            ],
+            "one query per configuration on the server, each answered on its first page"
+        );
+        assert_eq!(
+            rest.calls().iter().filter(|c| *c == "buildTypes").count(),
+            1,
+            "the listing the queries came from also gives the configurations that moved"
+        );
+        assert_eq!(
+            keys(&items)
+                .iter()
+                .filter(|k| k.starts_with("buildType:"))
+                .count(),
+            2,
+            "both configurations moved and each is emitted once"
+        );
+    }
+
+    /// ...and one configuration over the cap on its own still refuses, naming
+    /// the configuration and the same way out.
+    #[tokio::test]
+    async fn one_configuration_over_the_cap_refuses_and_names_backfill() {
+        let many: Vec<serde_json::Value> = (1..=1_500)
+            .map(|n| build(n, "Payout_Build", "Payout", "finished"))
+            .collect();
+        let rest = FakeRest::new(vec![build_type("Payout_Build", "Payout")], many);
+        let cfg = TeamCityConfig::from_json(&serde_json::json!({
+            "build_type_ids": ["Payout_Build"]
+        }))
+        .expect("config");
+        let mut sink = VecSink(Vec::new());
+        let err = execute(
+            "teamcity",
+            TEST_BASE_URL,
+            &cfg,
+            &rest,
+            Some(r#"{"v":2,"since_build_id":0}"#.to_owned()),
+            &mut sink,
+        )
+        .await
+        .expect_err("a configuration that cannot be carried in one run must fail");
+        assert!(
+            matches!(&err, SourceError::Protocol { message: m, .. }
+                if m.contains("builds of Payout_Build") && m.contains("Backfill")),
+            "{err:?}"
+        );
+        assert!(sink.0.is_empty(), "nothing is emitted from a refused run");
     }
 
     /// Exactly at the ceiling is a success: the last probe asks for one more
@@ -2098,7 +2272,9 @@ mod tests {
         assert!(
             matches!(&error, SourceError::Protocol { message: m, .. }
                 if m.contains("answered a request for 1001 builds with 50 of them")
-                    && m.contains("still reported a further page")),
+                    && m.contains("still reported a further page")
+                    && m.contains("Backfill")
+                    && !m.contains("sync more often")),
             "the refusal has to name the server's own ceiling with the two numbers the server \
              produced: {error:?}"
         );
@@ -2762,8 +2938,7 @@ mod tests {
     /// refused for ever, and resetting the cursor only restarted the loop.
     ///
     /// The watermark stands rather than being dragged down to the ceiling:
-    /// [`cursor::advance`] never regresses, so a ceiling below the watermark
-    /// clamps nothing.
+    /// [`cursor::advance`] ignores a ceiling below the watermark.
     #[tokio::test]
     async fn a_watermark_the_pages_did_not_show_is_confirmed_by_id_and_the_run_proceeds() {
         let rest = a_page_that_cannot_reach_the_top(Some(5_000));
@@ -2779,6 +2954,53 @@ mod tests {
             "the run asked, rather than inferring a replacement from a page: {:?}",
             rest.calls()
         );
+    }
+
+    /// **A ceiling below the watermark does not pin it under builds the run
+    /// just emitted** (#1626).
+    ///
+    /// The opening page holds builds 401 to 500 and nothing newer, so the
+    /// ceiling is 500 while the watermark stands at 1187 -- the routine
+    /// picture on a server whose pages are unordered. Twelve builds, 1188 to
+    /// 1199, finished above the watermark and the incremental query returns
+    /// them. They are emitted, so the watermark moves to the newest of them:
+    /// held at 1187, every later poll would re-fetch and re-emit the same
+    /// twelve, an upsert and an activity line each time.
+    #[tokio::test]
+    async fn a_ceiling_below_the_watermark_does_not_hold_it_under_builds_just_emitted() {
+        let mut builds: Vec<serde_json::Value> = (401..=500)
+            .map(|n| build(n, "Payout_Build", "Payout", "finished"))
+            .collect();
+        builds.extend((1187..=1199).map(|n| build(n, "Payout_Build", "Payout", "finished")));
+        let rest =
+            FakeRest::new(vec![build_type("Payout_Build", "Payout")], builds).fixture_order();
+        let cfg = TeamCityConfig::default();
+        let (items, cursor) = run(
+            &rest,
+            &cfg,
+            Some(r#"{"v":2,"since_build_id":1187}"#.to_owned()),
+        )
+        .await;
+        assert_eq!(
+            keys(&items)
+                .iter()
+                .filter(|k| k.starts_with("build:"))
+                .count(),
+            12,
+            "the twelve builds above the watermark: {:?}",
+            keys(&items)
+        );
+        assert_eq!(
+            cursor, r#"{"v":2,"since_build_id":1199}"#,
+            "the watermark moves past the builds this run emitted"
+        );
+        let (again, still) = run(&rest, &cfg, Some(cursor.clone())).await;
+        assert!(
+            again.is_empty(),
+            "the next run emits none of them again: {:?}",
+            keys(&again)
+        );
+        assert_eq!(still, cursor, "byte-identical");
     }
 
     /// Somebody deletes the newest build (#1477): the case the refusal's

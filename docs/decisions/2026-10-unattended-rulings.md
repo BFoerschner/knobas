@@ -11257,3 +11257,58 @@ set.
   pass's error (statement timeout, panic) back to a caller, which those tests witness;
   `SuggestionPass::beside`, `passes` and `idle` are test-facing in the same way. *Reversing:*
   low.
+
+## #1626: TeamCity per-configuration incremental query and the ceiling below the watermark (Opus implementer, 2026-10-22)
+
+- **Which sources ask per configuration.** *Ruling:* a source with a non-empty `build_type_ids`,
+  whether or not it also names projects. A project-only scope keeps the global query, as the
+  spec's "an unscoped source keeps the global query" reads for anything without a configuration
+  list: a project has no locator dimension in the contract, and asking per configuration of a
+  whole project trades one query for as many as it holds. *Reversing:* low, one match arm.
+- **Where the per-configuration list comes from.** *Ruling:* the same `/buildTypes` listing a full
+  sync reads, filtered by `scope`, not `cfg.build_type_ids` as typed. A configuration the list
+  names and the server no longer has is then not asked about, which a `buildType:(id:…)` locator
+  on a missing id would otherwise turn into a failed run every poll; step 6 reuses the listing.
+  The cost, on every incremental run of such a source, idle ones included, is `/projects` and
+  `/buildTypes` (the scope needs the tree) plus one `sinceBuild` query per configuration: three
+  requests become four plus one per configuration. (Cost corrected by the merge-manager, which
+  found the implementer's "one `/buildTypes` request" short of the `/projects` read.)
+  *Reversing:* low.
+- **The scoped source's watermark.** *Ruling:* the newest in-scope finished build. A foreign
+  finished build is no longer in any answer, so it no longer moves the watermark; that rule kept
+  the *global* query from growing, and a per-configuration query carries only its own builds. The
+  seeded live test that asserted the server's newest id for a scoped incremental run now asserts
+  the scope's. *Reversing:* low.
+- **The per-configuration refusal.** *Ruling:* it names Backfill as well, and the configuration.
+  The global refusal also says a configuration list keeps it from recurring, the one narrowing
+  that now changes the query. *Reversing:* low, a string.
+- **The walk reading.** *Ruling:* unchanged: an incremental run reports its walk over the builds
+  it listed, and the per-configuration queries before it report none. *Reversing:* low.
+- **What ignoring a ceiling below the watermark gives up.** *Ruling:* accepted as the spec states
+  it, and written down in `cursor::advance`'s docs: for that one run, the clamp no longer covers a
+  build queued after the in-flight poll and still running while a later-queued build finished
+  before the finished query. On an incremental run that window is the few requests between the
+  two queries; against it stands a re-emission of the same builds on every poll. A ceiling equal
+  to the watermark still clamps. *Reversing:* low, one `filter`.
+- **Glossary.** *Ruling:* CONTEXT.md's *Backfill* also names the cap refusal as a case it is the
+  way out of. *Reversing:* low.
+
+### #1626 review rulings (merge-manager, Opus, 2026-10-22)
+
+- **`capped_short`'s remedies.** *Fork:* fix the capping-server refusal here or file it. *Ruling:*
+  in scope, fixed. It replaces the caller's refusal on the same `all_of` path, and the ticket asks
+  that refusal to name Backfill instead of remedies that do nothing; it still told users to sync
+  more often (a failed run leaves the watermark where it is) and to narrow by `project_ids`
+  (the query stays global). It now names Backfill, and a raised limit or a configuration list
+  against recurrence; `a_short_page_from_a_capping_server_is_not_read_as_the_end_of_the_query`
+  asserts `Backfill` and the absence of "sync more often". *Reversing:* low, a string.
+- **The seeded live assertion on a scoped source's watermark.** *Ruling:* honest, kept. It moved
+  from one exact value (the server's newest id) to another (the scope's newest id), which is the
+  design change itself, not a looser check; the chain's builds are newer than the quiet
+  configurations', so the new value is distinguishable from the old. The per-configuration
+  locator gained its own live check beside it. *Reversing:* n/a.
+- **Live re-run after the rebase.** *Ruling:* required. The rebase brought #1709's (issue #1647)
+  `testenv/images.env` rename, which changed `seed-teamcity.sh`, `live-lib.sh`, the justfile's
+  compose calls and `live_teamcity_seeded.rs`, all of which `just teamcity-live-seeded` uses
+  (working model, *A PR at the real systems' edge carries its live run*). *Reversing:* n/a.
+

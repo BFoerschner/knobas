@@ -138,10 +138,10 @@ An item that is not tombstoned **and whose source is enabled** — what a reader
 Those four, and a fifth needs a reason of its own and a line here. (Amended 2026-09-07, #448; amended 2026-09-08, #496, when the second and third readers were counted — the entry had claimed one since #204 shipped the detail's own exemption; amended 2026-09-08, #499, with the checkout read.)
 
 **Watermark**:
-A sync position that only advances as work completes. Its **ceiling** is the newest position the run *witnessed* at its start, which the watermark may never pass within that run. Witnessed, not the newest that exists: a ceiling too low costs a re-fetch, one too high loses work.
+A sync position that only advances as work completes. Its **ceiling** is the newest position the run *witnessed* at its start, which the watermark may never pass within that run. Witnessed, not the newest that exists: a ceiling too low costs a re-fetch, one too high loses work. A ceiling below where the watermark already stands witnessed nothing new and is ignored, since holding the watermark there would re-emit the run's own items on every run (TeamCity, #1626).
 
 **Backfill**:
-A deliberate full sync whose purpose is re-fetching unchanged items after the fetched payload widened. It runs with no stored position and keeps the one it ends on, so it is also the way out when an adapter refuses to sync on from a position the server no longer has (TeamCity's deleted newest build, #1477). There is no separate cursor reset.
+A deliberate full sync whose purpose is re-fetching unchanged items after the fetched payload widened. It runs with no stored position and keeps the one it ends on, so it is also the way out when an adapter refuses to sync on from a position the server no longer has (TeamCity's deleted newest build, #1477) or one too far behind for one run to catch up (TeamCity's 1,000-build cap, #1626). There is no separate cursor reset.
 _Avoid_: refetch
 
 **Credential health**:
