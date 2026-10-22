@@ -1287,3 +1287,13 @@ test("the fixture's resolve_url opens the SEPA page from the forms Confluence de
     expect(resolve({ url }), url).toBeNull();
   }
 });
+
+/**
+ * The typing half (#1670): `fake-answers.ts` holds one line per barrel command, so a command the
+ * barrels gain cannot stay untyped, and a line cannot outlive its command.
+ */
+test("fake-answers.ts types every barrel command, and only those", () => {
+  const source = readFileSync(join(REPO_ROOT, "app/src/lib/shell/dev/fake-answers.ts"), "utf8");
+  const typed = [...source.matchAll(/^ {2}([a-z0-9_]+): Answer</gm)].map((match) => match[1]!).sort();
+  expect(typed).toEqual([...barrelCommands().keys()].sort());
+});
