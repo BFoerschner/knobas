@@ -2112,8 +2112,9 @@ async fn tick_loop(inner: Arc<Inner>) {
         // the next scheduled run.
         //
         // Nearly free when nothing is owed: `flush_source` returns before
-        // building an adapter or touching the keychain if the source's queue
-        // is empty. Cancellation is not checked between the two -- a flush
+        // building an adapter or touching the keychain if nothing in the
+        // source's queue is owed (a write waiting on a refused credential
+        // never is, #1628). Cancellation is not checked between the two -- a flush
         // that has started is one write against one source, and `shutdown`'s
         // grace window covers it.
         crate::write_queue::flush_all(&inner.deps).await;
