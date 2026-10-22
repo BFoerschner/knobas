@@ -12819,3 +12819,47 @@ The measurement came after it.
   from `born`, when the slot's first limiter was built with its whole burst (`Paced::new`). A
   stricter quota governing from `born` would have started full too, and the credit is capped at
   its burst. *Reversing:* n/a.
+
+### #1636: a stale lock a foreign PostgreSQL answers, and a second launch on a live owner (Opus implementer, 2026-10-23)
+
+- **CORE-2 as filed.** *Fork:* reproduce "every start fails" with a dead recorded pid, or refute
+  it. *Ruling:* refuted end to end, and the reachable form reproduced. *Reasoning:* PostgreSQL's
+  `CreateLockFile` removes a lock whose process is gone (`ESRCH`, also `EPERM`) before it can
+  fail on it, so with a dead pid the start succeeds and `adopt` is never reached: the first repro
+  was green before any fix. The lock reaches `adopt` when the start fails for another reason. Then
+  the 28P01 came back as `AlreadyRunning`, "another knobas instance", hiding the real error. That
+  is the red test (`a_lock_naming_a_foreign_postgres_and_a_dead_process_is_cleared`). *Reversing:*
+  n/a.
+- **What counts as an authentication refusal (B5).** *Ruling:* SQLSTATE class `28`
+  (`28P01`, `28000`), not every `sqlx::Error::Database`. *Reasoning:* B5 names authentication. A
+  server of ours always admits `postgres` with the recorded password on loopback. A missing
+  database or a server still starting says nothing about whose server it is. *Reversing:* one
+  predicate.
+- **Where the live-owner refusal sits (B2).** *Fork:* in `adopt`, after the identity check, or
+  first in `start_managed`. *Ruling:* first, under the bring-up lock, before setup or start.
+  *Reasoning:* the kernel releases `.owner.lock` however its holder dies, so a held lock always
+  means a live knobas. Refusing there touches nothing. It also covers a live owner whose
+  postmaster has crashed, where a later start would bring up a server the owner's quit stops.
+  `adopt` now only sees orphans and always owns what it adopts. *Reversing:* low.
+- **Naming the owner.** *Ruling:* the owner writes its pid into `.owner.lock`, which is opened
+  without truncating. A loser reads it. The write is best-effort, and an unnamed holder reads
+  "another knobas process". *Reasoning:* the ticket asks for the owning pid, and nothing else
+  records the knobas process (`postmaster.pid` names the postmaster). *Reversing:* low.
+- **`AlreadyRunning`'s text.** *Ruling:* `the database at <dir> is in use: <reason>`, replacing
+  "another knobas instance is using…". *Reasoning:* its other causes (a live recorded pid whose
+  port is not ours) are not knobas instances. The text reaches the boot screen, so it is booked in
+  §10.8 (`docs/contract/10.8/1636-…`), as #1628 booked a behaviour change. *Reversing:* a string.
+- **Where the profile is named.** *Ruling:* `knobas-app`'s `naming_the_profile` puts `demo
+  profile: ` or `default profile: ` in front of an `AlreadyRunning`. *Reasoning:* only the app
+  knows the profile, and `profile.rs` is frozen. *Reversing:* low.
+- **The live-pid corner keeps its refusal (B5), with a hint.** *Ruling:* a live recorded pid
+  beside an answer that is not ours stays `AlreadyRunning`, and the reason says to delete
+  `postmaster.pid` if no knobas has the profile open. A follow-up asks whether ownership-first
+  makes the pid check redundant there. *Reversing:* a string.
+- **Tests that pinned the borrower.** *Ruling:* the race, adoption-creates-the-database and
+  cold-password tests now run against an orphan or assert the refusal, and the adopter test
+  became `a_second_launch_on_a_live_owner_is_refused_naming_the_owner`. *Reversing:* n/a.
+- **Seam for #1637.** *Ruling:* none added in code. Its check goes in `start_managed` between the
+  ownership claim and `setup()`, under the bring-up guard, and its tests can reuse `dead_pid` and
+  `Squatter` in `tests/embedded.rs`. *Reasoning:* a hook with no caller is dead code. *Reversing:*
+  n/a.

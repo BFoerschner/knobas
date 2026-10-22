@@ -226,7 +226,10 @@ pub fn run() {
     // profile (`--demo`, its own data dir and database) is left out: the
     // plugin keys its lock by the bundle identifier, which cannot differ per
     // profile without moving `app_data_dir`, so guarding it would stop a demo
-    // from running beside a real instance, which it does today.
+    // from running beside a real instance, which it does today. A second
+    // `--demo` launch gets past this and is refused by the embedded lifecycle
+    // instead, before the scheduler starts (ruling B6, spec #1619): the boot
+    // screen names the demo profile and the window holding it.
     let builder = if demo {
         builder
     } else {
@@ -733,7 +736,9 @@ async fn bring_up_app<R: tauri::Runtime>(
 
     let lifecycle = handle.state::<Lifecycle>();
     let outcome = async {
-        let db = knobas_db::EmbeddedDb::start(config).await?;
+        let db = knobas_db::EmbeddedDb::start(config)
+            .await
+            .map_err(|error| naming_the_profile(error, profile))?;
         let pool = db.pool().clone();
         let connector = db.connector();
         // **Held the moment it is up** (#1634): the exit handler stops what the
@@ -858,6 +863,26 @@ async fn bring_up_app<R: tauri::Runtime>(
     set_db_state(handle, DbState::Failed { message });
 }
 
+/// A start refused because the data directory is in use, prefixed with the
+/// profile it was refused on; any other error as it is.
+///
+/// Ruling B2 (spec #1619): a second window on a live owner is refused with a
+/// message naming the owner and the profile. `knobas-db` names the owner's
+/// pid and the data directory; only the app knows which profile that is, and
+/// a second `--demo` launch, which the single-instance guard lets through
+/// (ruling B6), says *demo* here.
+fn naming_the_profile(
+    error: knobas_db::DbError,
+    profile: &Profile,
+) -> Box<dyn std::error::Error + Send + Sync> {
+    if matches!(error, knobas_db::DbError::AlreadyRunning { .. }) {
+        let name = if profile.demo { "demo" } else { "default" };
+        format!("{name} profile: {error}").into()
+    } else {
+        error.into()
+    }
+}
+
 /// Record a transition and tell the frontend about it.
 ///
 /// An emit that nobody is listening to is not a failure -- during `setup`
@@ -882,10 +907,10 @@ fn set_db_state<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, state: DbState)
 ///
 /// **Adoption is no longer a one-way door.** M0's adopted handle owned nothing,
 /// so no clean quit ever stopped that server and every later run adopted it in
-/// turn. An adopter now takes the ownership lock when nobody else holds it, so
-/// the next clean quit stops the server for good -- while a server a *live*
-/// sibling owns is still left alone. `EmbeddedDb::stop` reports which case it
-/// was.
+/// turn. An adopter now takes the ownership lock, so the next clean quit stops
+/// the server for good. A server a *live* sibling owns is never adopted: that
+/// start is refused (ruling B2), so the only handle that stops nothing is one
+/// over `KNOBAS_DB_URL`.
 ///
 /// `db.stop()` closes the pool first, and that close is **bounded**: a quit
 /// during a long query no longer waits it out. The sync runs are stopped before

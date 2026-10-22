@@ -870,3 +870,46 @@ async fn a_trigger_that_reaches_the_spawn_after_the_quit_ends_its_row() {
         "a trigger that reached the spawn after the quit answered {answered:?}"
     );
 }
+
+/// LIFE-4 and CORE-3 (spec #1619, rulings B2 and B6): a second `--demo` launch
+/// gets past the single-instance guard, which leaves the demo profile out, and
+/// used to borrow the first one's server: its scheduler start interrupted the
+/// first window's runs, and the first window's quit stopped the server under
+/// it. Bring-up now ends in `Failed`, and the boot screen's message names the
+/// profile and the process to quit, before anything touched the database.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_demo_launch_on_a_live_owner_is_refused_naming_the_profile_and_the_owner() {
+    let data = tempfile::tempdir().unwrap();
+    let profile = Profile::new(true, data.path());
+    let owner = knobas_db::EmbeddedDb::start(profile.db_config(None))
+        .await
+        .expect("the first window's server");
+    let port = port_of(&profile.db_config(None).root_dir);
+
+    let registry = Registry::default();
+    let app = mock_app(&profile, &registry);
+    knobas_app::bring_up(app.handle(), &profile, None, registry).await;
+
+    let message = match app.state::<Lifecycle>().get() {
+        DbState::Failed { message } => message,
+        other => panic!("a second launch on a live owner must fail, not reach {other:?}"),
+    };
+    assert!(
+        message.starts_with("demo profile: "),
+        "the message names the profile: {message}"
+    );
+    // The first window is this test's own handle, so its pid is this
+    // process's.
+    assert!(
+        message.contains(&format!("knobas process {} ", std::process::id())),
+        "the message names the window to quit: {message}"
+    );
+    assert!(
+        port_answers(port),
+        "the refused launch left the first window's server up"
+    );
+
+    shutdown(&app);
+    assert!(port_answers(port), "the refused window's quit stops nothing");
+    owner.stop().await.unwrap();
+}

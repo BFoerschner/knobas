@@ -153,8 +153,13 @@ A signal or crash (Ctrl-C under `just dev`, `kill`, a reboot) leaves the
 postmaster running. Start knobas again. The next start adopts the running
 server and takes ownership of it, so the next clean quit stops it.
 
-A second launch on the same profile focuses the running instance and exits
-before it touches the database.
+A second launch on the default profile focuses the running instance and exits
+before it touches the database. A second `--demo` launch is not caught that
+way, because the guard would also keep a demo from running beside a real
+instance. It opens a window, and the boot screen says the demo profile is in
+use and names the knobas process to quit. It touches nothing on the way. Any
+other second launch that gets past the guard on a live profile ends the same
+way.
 
 To stop an orphaned server by hand, use its own `pg_ctl`. It is not on `PATH`:
 
