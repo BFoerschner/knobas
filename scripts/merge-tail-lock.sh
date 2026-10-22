@@ -29,7 +29,7 @@ LOCK="${TMPDIR:-/tmp}/knobas-merge-tail.lock"
 QUEUE="${TMPDIR:-/tmp}/knobas-merge-tail.queue"
 READY="${TMPDIR:-/tmp}/knobas-merge-tail.ready"
 cmd="${1:-}"; pr="${2:-}"; arg="${3:-}"
-[ -n "$cmd" ] && [ -n "$pr" ] || { echo "usage: $0 ready|take|partner|merged|release <PR> [SHA]"; exit 2; }
+if [ -z "$cmd" ] || [ -z "$pr" ]; then echo "usage: $0 ready|take|partner|merged|release <PR> [SHA]"; exit 2; fi
 oldest_live_waiter() {
   local f n best='' now; now=$(date +%s)
   for f in "$QUEUE"/*; do
@@ -58,7 +58,8 @@ partner)
     case $n in *.merged) continue ;; esac
     [ "$n" != "$pr" ] || continue
     [ ! -e "$READY/$n.merged" ] || continue
-    [ -e "$QUEUE/$n" ] && [ $((now - $(mtime "$QUEUE/$n"))) -le 120 ] || continue
+    [ -e "$QUEUE/$n" ] || continue
+    [ $((now - $(mtime "$QUEUE/$n"))) -le 120 ] || continue
     if [ -z "$best" ] || [ "$n" -lt "$best" ]; then best=$n; fi
   done
   [ -n "$best" ] && echo "$best $(cat "$READY/$best")"

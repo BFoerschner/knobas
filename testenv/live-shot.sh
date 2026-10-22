@@ -111,7 +111,7 @@ cleanup() {
         say "quitting knobas (pid $app_pid)"
         # ⌘Q, as the witness does: the app stops its embedded PostgreSQL on
         # the way out, and a SIGTERM'd Rust process runs no exit handler.
-        "$ax" activate "$app_pid" 2>/dev/null && "$ax" key 12 command 2>/dev/null || true
+        if "$ax" activate "$app_pid" 2>/dev/null; then "$ax" key 12 command 2>/dev/null || true; fi
         for _ in $(seq 1 40); do kill -0 "$app_pid" 2>/dev/null || break; sleep 0.5; done
         kill -TERM "$app_pid" 2>/dev/null || true
     fi

@@ -70,7 +70,7 @@ for route in "$@"; do
   file="$out/$(printf '%s' "$path" | tr '/?&=' '____' | sed 's/^$/root/').png"
   case $route in
     *' > '*|*' + '*)
-      name=$(printf '%s' "$route" | sed 's/#\/\{0,1\}//g; s/ [>+] /--/g; s/click://g' | tr -c 'A-Za-z0-9._-\n' '_')
+      name=$(printf '%s' "$route" | sed 's/#\/\{0,1\}//g; s/ [>+] /--/g; s/click://g' | tr -c 'A-Za-z0-9._\n-' '_')
       # Cut at 120, with the route's checksum when cut: two long routes that
       # share their first 120 characters overwrote each other's image (#1396).
       [ "${#name}" -le 120 ] || name="${name:0:111}-$(printf '%s' "$route" | cksum | awk '{ printf "%08x", $1 }')"
