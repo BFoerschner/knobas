@@ -3193,6 +3193,7 @@ knobas-source-kuma	test/it	contract::fills_every_role_it_claims
 knobas-source-kuma	test/it	contract::passes_the_contract_battery
 knobas-source-kuma	test/it	contract::test_connection_reports_the_version_and_the_roster_size
 knobas-source-kuma	test/it	contract::the_declared_ops_are_the_spis_own_identifiers
+knobas-source-kuma	test/live_kuma	a_create_whose_ack_is_lost_is_unconfirmed_and_one_monitor
 knobas-source-kuma	test/live_kuma	a_docker_check_is_published_with_the_seeded_docker_host
 knobas-source-kuma	test/live_kuma	a_full_sync_mirrors_every_seeded_monitor
 knobas-source-kuma	test/live_kuma	a_monitor_created_through_the_write_op_is_published_under_the_id_it_answered
