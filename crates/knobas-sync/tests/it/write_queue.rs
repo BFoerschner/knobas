@@ -758,7 +758,10 @@ async fn an_undeliverable_write_is_kept_and_flushes_when_the_source_returns() {
     // And it waits for a new credential rather than a clock (#1628).
     h.answer(Answer::Accept);
     h.flush_later().await;
-    assert!(h.delivered().is_empty(), "a refused credential is not re-sent");
+    assert!(
+        h.delivered().is_empty(),
+        "a refused credential is not re-sent"
+    );
     flusher::credential_changed(h.pool(), &h.source)
         .await
         .unwrap();
@@ -1914,7 +1917,11 @@ async fn flush_now_sends_a_refused_write_once_and_the_tick_after_it_does_not() {
     );
 
     flusher::flush_source(&h.deps, &h.source).await.unwrap();
-    assert_eq!(h.asked(), 2, "the tick does not take the press as a release");
+    assert_eq!(
+        h.asked(),
+        2,
+        "the tick does not take the press as a release"
+    );
 
     h.answer(Answer::Accept);
     flusher::flush_now(&h.deps, Some(&h.source)).await.unwrap();

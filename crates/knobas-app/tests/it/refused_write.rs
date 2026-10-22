@@ -277,7 +277,11 @@ async fn a_new_secret_releases_the_refused_write_on_its_own_source() {
 
     f.save(OTHER, SecretInput::of("another-key")).await;
     f.tick().await;
-    assert_eq!(f.asked(SOURCE), 1, "another source's credential is not this one's");
+    assert_eq!(
+        f.asked(SOURCE),
+        1,
+        "another source's credential is not this one's"
+    );
 
     f.save(SOURCE, SecretInput::of("a-new-key")).await;
     f.tick().await;
@@ -290,7 +294,9 @@ async fn a_new_secret_releases_the_refused_write_on_its_own_source() {
 #[tokio::test]
 async fn a_new_account_releases_the_refused_write() {
     let f = fixture("refused_write_account").await;
-    let write = f.refused_comment(SOURCE, "after the password changed").await;
+    let write = f
+        .refused_comment(SOURCE, "after the password changed")
+        .await;
     f.refuses(SOURCE, false);
 
     f.tick().await;
