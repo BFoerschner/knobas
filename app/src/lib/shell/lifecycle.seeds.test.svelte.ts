@@ -87,3 +87,26 @@ test("a state the listener advanced during retry's await is not rewound", async 
   expect(life.db.state).toBe("migrating");
   life.stop();
 });
+
+test("the same ready event twice seeds once", async () => {
+  // Only the listener writes: the poll cannot answer.
+  vi.mocked(appStatus).mockRejectedValue(new Error("not up"));
+  const life = createLifecycle({ pollMs: 1000 });
+  let seeds = 0;
+  const stop = $effect.root(() => {
+    $effect(() => {
+      if (life.ready) seeds += 1;
+    });
+  });
+  await life.start();
+
+  for (let i = 0; i < 2; i += 1) {
+    for (const handler of delivered) handler({ payload: { state: "ready" } });
+    flushSync();
+  }
+
+  expect(life.ready).toBe(true);
+  expect(seeds).toBe(1);
+  life.stop();
+  stop();
+});
