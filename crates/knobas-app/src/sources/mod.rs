@@ -39,9 +39,35 @@ use events::TauriEvents;
 /// written to the OS store. It is deliberately **not** the default anywhere.
 pub const SECRET_STORE_ENV: &str = "KNOBAS_SECRET_STORE";
 
-fn secret_store(profile: &crate::Profile) -> Arc<dyn SecretStore> {
-    let memory = std::env::var(SECRET_STORE_ENV).is_ok_and(|v| v.eq_ignore_ascii_case("memory"));
-    if memory {
+/// Where this process keeps credentials, read once from [`SECRET_STORE_ENV`]
+/// at start and managed, so the store bring-up builds and what `app_status`
+/// reports to the frontend are one decision (#1585).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretStoreKind {
+    /// The OS keychain, under the profile's service name. The default.
+    Keychain,
+    /// [`knobas_secrets::MemoryStore`]: gone when the process exits.
+    Memory,
+}
+
+impl SecretStoreKind {
+    /// The store [`SECRET_STORE_ENV`] asks for.
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self::from_value(std::env::var(SECRET_STORE_ENV).ok().as_deref())
+    }
+
+    fn from_value(value: Option<&str>) -> Self {
+        if value.is_some_and(|v| v.eq_ignore_ascii_case("memory")) {
+            Self::Memory
+        } else {
+            Self::Keychain
+        }
+    }
+}
+
+fn secret_store(profile: &crate::Profile, kind: SecretStoreKind) -> Arc<dyn SecretStore> {
+    if kind == SecretStoreKind::Memory {
         tracing::warn!("{SECRET_STORE_ENV}=memory: credentials will not survive this process");
         return Arc::new(knobas_secrets::MemoryStore::new());
     }
@@ -492,7 +518,7 @@ pub async fn start<R: tauri::Runtime>(
             pool: db.pool().clone(),
             sync_pool,
             connections: db.connector(),
-            secrets: secret_store(&profile),
+            secrets: secret_store(&profile, *app.state::<SecretStoreKind>()),
             registry: process.clone(),
             store: install::store_dir(&profile.dir),
             suggestions,
@@ -675,4 +701,30 @@ pub fn shutdown(app: &tauri::AppHandle) {
     };
     tracing::info!("stopping the sync scheduler");
     tauri::async_runtime::block_on(state.scheduler.shutdown());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SecretStoreKind;
+
+    #[test]
+    fn memory_in_any_case_is_the_memory_store_and_anything_else_the_keychain() {
+        assert_eq!(
+            SecretStoreKind::from_value(Some("memory")),
+            SecretStoreKind::Memory
+        );
+        assert_eq!(
+            SecretStoreKind::from_value(Some("MEMORY")),
+            SecretStoreKind::Memory
+        );
+        assert_eq!(SecretStoreKind::from_value(None), SecretStoreKind::Keychain);
+        assert_eq!(
+            SecretStoreKind::from_value(Some("keychain")),
+            SecretStoreKind::Keychain
+        );
+        assert_eq!(
+            SecretStoreKind::from_value(Some("")),
+            SecretStoreKind::Keychain
+        );
+    }
 }

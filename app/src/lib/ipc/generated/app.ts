@@ -11,7 +11,13 @@ first_run: boolean,
 /**
  * The `--demo` profile: its own data dir, port and keychain suffix (P13).
  */
-demo: boolean, source_count: number, app_version: string, };
+demo: boolean, source_count: number, app_version: string, 
+/**
+ * Credentials live in this process's memory, not the OS keychain, and
+ * are gone when it exits: `KNOBAS_SECRET_STORE=memory`, the headless-QA
+ * store (#1585). A source's page says so instead of naming the keychain.
+ */
+secrets_in_memory: boolean, };
 
 /**
  * How far the database has got.

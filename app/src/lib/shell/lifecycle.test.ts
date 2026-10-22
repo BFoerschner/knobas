@@ -38,6 +38,7 @@ function status(db: DbState, extra: Partial<AppStatus> = {}): AppStatus {
     demo: true,
     source_count: 0,
     app_version: "0.1.0",
+    secrets_in_memory: false,
     ...extra,
   };
 }

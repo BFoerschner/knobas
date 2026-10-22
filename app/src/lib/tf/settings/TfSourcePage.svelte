@@ -127,6 +127,24 @@
   // The countdown on the credential row (#1499): the date the source reported, never typed.
   const expiry = $derived(expiryNote(health?.secret_expires_at, now));
   const keychain = /Mac/.test(navigator.userAgent) ? "the macOS keychain" : "the system keychain";
+  // Where the credential went (#1585): the keychain, unless this process keeps
+  // credentials in memory (`KNOBAS_SECRET_STORE=memory`, headless QA). Until
+  // `app_status` answers, or if it fails, the line names the keychain, the
+  // store every other run uses.
+  let secretsInMemory = $state(false);
+  $effect(() => {
+    let dead = false;
+    ports
+      .appStatus()
+      .then((status) => {
+        if (!dead) secretsInMemory = status.secrets_in_memory;
+      })
+      .catch(() => {});
+    return () => {
+      dead = true;
+    };
+  });
+  const stored = $derived(secretsInMemory ? "Stored for this session only" : `Stored in ${keychain}`);
   const showsUser = $derived(adapter !== null && declaresUser(adapter.config_schema));
   const acceptsAccount = $derived(adapter?.accepts_account ?? false);
   // The adapter's floor (#1188); an adapter this build does not know offers the
@@ -508,7 +526,7 @@
     <div class="tf-stg-row">
       <div class="tf-stg-l">{word}</div>
       <div class="tf-stg-c tf-stg-inl">
-        <span>{health?.state === "missing_secret" ? "None stored" : `Stored in ${keychain}`}</span>
+        <span>{health?.state === "missing_secret" ? "None stored" : stored}</span>
         {#if expiry !== null}
           <span class="tf-stg-exp {EXPIRY_CLASS[expiry.tone]}">{expiry.text}</span>
         {/if}
@@ -681,7 +699,7 @@
       {#if half}<p class="tf-dlg-note tf-stg-errt">{ACCOUNT_INCOMPLETE}</p>{/if}
       {#if secretError !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{secretError}</p>{/if}
       <p class="tf-dlg-note">
-        Stored in {keychain}. Writes waiting for {name} go out once it signs in.{acceptsAccount
+        {stored}. Writes waiting for {name} go out once it signs in.{acceptsAccount
           ? " A field left empty keeps what is stored."
           : ""}
       </p>

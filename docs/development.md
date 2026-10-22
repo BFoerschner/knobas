@@ -106,7 +106,8 @@ again rewrites the same rows. Outside the demo profile the command refuses and
 says to start knobas with `--demo`.
 
 `KNOBAS_SECRET_STORE=memory` keeps credentials out of the OS keychain for a
-throwaway run. They then last as long as the process.
+throwaway run. They then last as long as the process, and a source's page
+says *Stored for this session only* instead of naming the keychain.
 
 ## Sync
 

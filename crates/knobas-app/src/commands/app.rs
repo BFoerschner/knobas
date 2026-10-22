@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use knobas_sync::scheduler::AdapterRegistry;
 use tauri::Manager;
 
+use crate::sources::SecretStoreKind;
 use crate::{AppState, IpcError, Profile};
 
 /// How far the database has got.
@@ -54,6 +55,10 @@ pub struct AppStatus {
     pub demo: bool,
     pub source_count: u32,
     pub app_version: String,
+    /// Credentials live in this process's memory, not the OS keychain, and
+    /// are gone when it exits: `KNOBAS_SECRET_STORE=memory`, the headless-QA
+    /// store (#1585). A source's page says so instead of naming the keychain.
+    pub secrets_in_memory: bool,
 }
 
 /// The database's bring-up state, and the shared state once there is one.
@@ -224,6 +229,7 @@ pub fn ping() -> &'static str {
 pub async fn app_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppStatus {
     let db = app.state::<Lifecycle>().get();
     let demo = app.state::<Profile>().demo;
+    let secrets_in_memory = *app.state::<SecretStoreKind>() == SecretStoreKind::Memory;
     let app_version = app.package_info().version.to_string();
 
     // Counted live rather than cached, so adding a source is reflected without
@@ -242,6 +248,7 @@ pub async fn app_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppStatu
         demo,
         source_count,
         app_version,
+        secrets_in_memory,
     }
 }
 

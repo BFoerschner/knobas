@@ -11160,3 +11160,32 @@ set.
   witnessed by each file's tree test. #141's and #448's entries mention `smart_list_items` and
   `context_assets` only in passing, describing those commands; nothing there needs to hold, so
   the entry need not name them. *Reversing:* medium, revert the PR.
+
+## #1585: a source's page names the store its credential is in (Opus implementer, 2026-10-21)
+
+- **How does the frontend learn the store?** *Fork:* the ticket offers telling the frontend which
+  store is in use, or having the page say "Stored for this session only" for the memory store; the
+  page cannot tell on its own, so either way a fact crosses the bridge. *Ruling:* `AppStatus` gains
+  `secrets_in_memory: bool` (§10.8 entry `1585-app-status-secrets-in-memory.md`), and the page says
+  *Stored for this session only* when it is `true`, on the credential row and in the Re-enter
+  note. *Reasoning:* `app_status` already carries app-level facts (`demo`, the version) and answers
+  before the database is up; a per-source field (`CredentialHealth`) would repeat one process-wide
+  fact on every row. A bool, not a store name: the frontend has one decision to make, and the
+  keychain's name already comes from the platform. *Reversing:* cheap, one field and one line.
+- **One decision, not two reads of the environment.** *Fork:* `app_status` could read
+  `KNOBAS_SECRET_STORE` again. *Ruling:* `sources::SecretStoreKind` is decided once in `setup`,
+  managed, and both the store bring-up and `app_status` read it. *Reasoning:* the report and the
+  store cannot disagree, and a test manages either value without touching the process
+  environment. `profile.rs` is frozen (§10.8), so the kind is its own managed value, not a
+  `Profile` field. *Reversing:* cheap.
+- **The keychain line is unchanged for the real store.** It reads "Stored in the macOS keychain"
+  on a Mac and "Stored in the system keychain" elsewhere (the user agent decides, as before). Until
+  `app_status` answers, or if it fails, the page names the keychain: the store every run but a QA
+  run uses. `?fake-secret-store=memory` makes the `?fake-ipc` fixture answer as the memory store
+  does.
+- **The importer token hint is not this ticket's** (Opus merge-manager, 2026-10-22). *Fork:*
+  `ImportDialog.svelte` and `TfImport.svelte` also say an importer token is "Kept in this
+  machine's keychain", and that is just as untrue under the memory store. *Ruling:* out of scope
+  here, filed as #1615 (`backlog`). *Reasoning:* the ticket names a source's page in Settings ›
+  Sources, and the importer is a different surface. `secrets_in_memory` is now there for #1615 to
+  read. *Reversing:* cheap.
