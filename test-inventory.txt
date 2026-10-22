@@ -1696,7 +1696,7 @@ knobas-http	lib/knobas_http	classify::tests::retry_after_is_read_in_its_delay_se
 knobas-http	lib/knobas_http	classify::tests::statuses_map_to_the_fault_the_user_sees
 knobas-http	lib/knobas_http	classify::tests::the_caller_maps_a_failing_body_into_the_message
 knobas-http	lib/knobas_http	limiter::tests::a_tightening_credits_seconds_of_refill
-knobas-http	lib/knobas_http	limiter::tests::a_tightening_takes_over_the_share_its_predecessor_had_left
+knobas-http	lib/knobas_http	limiter::tests::a_tightening_takes_over_the_seconds_its_predecessor_had_left
 knobas-http	lib/knobas_http	limiter::tests::a_zero_quota_reads_as_one
 knobas-http	lib/knobas_http	limiter::tests::one_origin_keeps_one_slot_and_only_its_live_holders
 knobas-http	lib/knobas_http	limiter::tests::the_stricter_quota_takes_the_lower_of_each_field

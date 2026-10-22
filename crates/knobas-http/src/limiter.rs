@@ -29,8 +29,9 @@
 //! drained. A **tightening** starts with the credit the limiter it replaces
 //! had left (#1740): as many seconds of the stricter rate as the old
 //! limiter's unspent requests were seconds of its own, at most the stricter
-//! burst. A tightening of a limiter nobody spent from has the whole burst,
-//! as in #1630.
+//! burst. A tightening of a limiter nobody spent from has the whole stricter
+//! burst, as in #1630, wherever the old burst lasts at least as many seconds
+//! of refill as the new one; where it lasts fewer, it has fewer.
 //!
 //! [`InstanceLimiter`] is public so a sender outside [`HttpClient`] -- the
 //! wasm host's network policy (#1631) -- can wait on the same quota.
@@ -346,28 +347,34 @@ impl Paced {
     /// whole burst.
     fn with_left(rate: Rate, left: u32) -> Self {
         let paced = Self::new(rate);
-        if let Some(spent) = NonZeroU32::new(rate.burst.get().saturating_sub(left)) {
-            // A fresh limiter has its whole burst, and `spent` is at most
-            // that: neither error can come.
-            let _ = paced.limiter.check_n(spent);
-        }
+        // A fresh limiter has its whole burst, and this is at most that, so
+        // it always fits.
+        paced.spend(rate.burst.get().saturating_sub(left));
         paced
     }
 
-    /// A limiter at `rate`, stricter in both fields than `old`'s, taking
+    /// Send `n` requests' worth through the limiter at once if it has them,
+    /// and say whether it did. Nothing waits; zero always fits.
+    fn spend(&self, n: u32) -> bool {
+        NonZeroU32::new(n).is_none_or(|n| matches!(self.limiter.check_n(n), Ok(Ok(()))))
+    }
+
+    /// A limiter at `rate`, no looser in either field than `old`'s, taking
     /// over from `old` with the credit it had left (#1740).
     ///
     /// The requests `old` could still send at once are counted in seconds of
     /// its own refill, and the new limiter starts with as many seconds of
-    /// `rate`'s, at most its burst. A limiter that started drained and was
-    /// never spent from has refilled for exactly as long as the new one is
-    /// credited with, so the stricter quota gets back what it would have
-    /// refilled itself in that time, never a fresh burst. `old` is left
-    /// spent: what it had now belongs to the new limiter.
+    /// `rate`'s, rounded down, at most its burst. A limiter that started
+    /// drained, was never spent from and has not refilled its burst has
+    /// refilled for as long as the new one is credited with, so the stricter
+    /// quota gets back what it would have refilled itself in that time, never
+    /// a fresh burst. `old` is left spent: what it had now belongs to the new
+    /// limiter.
     fn tightened(old: &Self, rate: Rate) -> Self {
         let credit = u64::from(old.take_left()) * u64::from(rate.per_second.get())
             / u64::from(old.rate.per_second.get());
-        // The new rate is the lower, so `credit` is at most what `old` had.
+        // The new rate is not the higher, so `credit` is at most what `old`
+        // had.
         Self::with_left(rate, u32::try_from(credit).unwrap_or(u32::MAX))
     }
 
@@ -382,9 +389,7 @@ impl Paced {
         let mut left = 0;
         let mut step = 1 << self.rate.burst.ilog2();
         loop {
-            if let Some(n) = NonZeroU32::new(step)
-                && let Ok(Ok(())) = self.limiter.check_n(n)
-            {
+            if self.spend(step) {
                 left += step;
             }
             if step == 1 {
@@ -416,8 +421,6 @@ fn nonzero(value: u32) -> NonZeroU32 {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-
-    use std::num::NonZeroU32;
 
     use super::{InstanceLimiter, Paced, PoisonError, Rate};
 
@@ -459,7 +462,7 @@ mod tests {
     #[test]
     fn what_a_limiter_has_left_is_counted_and_taken() {
         let paced = Paced::new(Rate::new(1, 13));
-        let _ = paced.limiter.check_n(NonZeroU32::new(6).expect("six"));
+        assert!(paced.spend(6));
 
         assert_eq!(paced.take_left(), 7);
         assert_eq!(paced.take_left(), 0, "the first count took all seven");
@@ -470,18 +473,17 @@ mod tests {
     fn left_after_tightening(origin: &str, loose: Rate, spent: u32, strict: Rate) -> u32 {
         let url = url::Url::parse(origin).expect("url");
         let first = InstanceLimiter::for_origin(&url, loose);
-        if let Some(spent) = NonZeroU32::new(spent) {
-            let _ = first.slot.current().limiter.check_n(spent);
-        }
+        assert!(first.slot.current().spend(spent));
         let second = InstanceLimiter::for_origin(&url, strict);
         assert_eq!(second.slot.current().rate, strict, "the quota tightened");
         second.slot.current().take_left()
     }
 
-    /// A tightening of a limiter nobody spent from has the stricter quota's
-    /// whole burst, as in #1630; one half spent has half of it.
+    /// Two quotas whose bursts both last ten seconds of refill: a tightening
+    /// of a limiter nobody spent from has the stricter quota's whole burst,
+    /// as in #1630, and one half spent has half of it.
     #[test]
-    fn a_tightening_takes_over_the_share_its_predecessor_had_left() {
+    fn a_tightening_takes_over_the_seconds_its_predecessor_had_left() {
         let unspent = left_after_tightening(
             "http://unspent.invalid:1740",
             Rate::new(2, 20),

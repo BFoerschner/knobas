@@ -12609,11 +12609,13 @@ The measurement came after it.
 ### #1740: a tightened quota takes over what was left (Opus implementer, 2026-10-23)
 
 - **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): the frozen-surface
-  change to `crates/knobas-http/**`.** *Ruling:* private to `limiter.rs` behind the unchanged
-  public `InstanceLimiter`: `Slot::register`'s tightening branch and three `Paced` helpers. No
-  signature, `HttpConfig` field or adapter change. Booked in
+  change to `crates/knobas-http/**`.** *Fork:* change the frozen crate's limiter, or leave
+  #1740 open until Björn signs it off. *Ruling:* change it, private to `limiter.rs` behind the
+  unchanged public `InstanceLimiter`: `Slot::register`'s tightening branch and four `Paced`
+  helpers. No signature, `HttpConfig` field or adapter change. Booked in
   `docs/contract/10.8/1740-knobas-http-tightening-takes-over-what-was-left.md`.
-  *Reversing:* low, one module.
+  *Reasoning:* the waiver covers this spec's frozen-surface steps, and the change is the
+  limiter's own arithmetic, which no caller sees. *Reversing:* low, one module.
 - **What a tightening carries over.** *Fork:* the old limiter's spent share of its burst (the
   ticket's example), drained whenever the old limiter was built by a loosening (its other
   example), or the old limiter's unspent requests counted in seconds of its refill.
@@ -12629,19 +12631,24 @@ The measurement came after it.
   burst (10/s burst 20 to 1/s burst 10 starts with 2), so the first few requests after it are
   slower; never more than the server was configured for. *Reversing:* low, one expression in
   `Paced::tightened`.
-- **Requests the loose client sent in between.** *Ruling:* accepted as the bound. They are off
-  the old limiter already, so the new one never gets them back, but each is counted at the loose
-  rate rather than the strict one, so the total across a turn can pass what the strict quota
-  alone would have let through by at most what the loose client sent within one strict refill
-  period. Charging them at the strict rate needs every limiter's history kept per quota, for a
-  case that needs two sources on one server sending within seconds of each other.
-  *Reversing:* moderate; a ledger per origin.
-- **Reading what the old limiter has left.** Governor has no peek. *Ruling:* take it in halving
-  steps from the largest power of two within the burst and count what was taken, leaving the old
-  limiter spent. A holder can only be waiting on the old limiter when it has nothing left, so
-  the count takes nothing a waiter was owed. A token refilled mid-count and the fractional part
-  of the conversion are dropped, which only ever counts low. *Reversing:* low.
-- **Whether the change owes a live suite.** *Ruling:* no. The changed branch runs only when two
+- **Requests the loose client sent in between.** *Fork:* count them at the loose rate, as the
+  conversion does, or charge them at the strict rate. *Ruling:* the loose rate, accepted as the
+  bound. *Reasoning:* they are off the old limiter already, so the new one never gets them back,
+  but each is counted at the loose rate rather than the strict one, so the total across a turn
+  can pass what the strict quota alone would have let through by at most what the loose client
+  sent within one strict refill period. Charging them at the strict rate needs every limiter's
+  history kept per quota, for a case that needs two sources on one server sending within
+  seconds of each other. *Reversing:* moderate; a ledger per origin.
+- **Reading what the old limiter has left.** *Fork:* governor has no peek, so either take the
+  tokens to count them, or keep a count of our own beside every limiter. *Ruling:* take them in
+  halving steps from the largest power of two within the burst and count what was taken,
+  leaving the old limiter spent. *Reasoning:* the old limiter is being replaced, and a holder
+  can only be waiting on it when it has nothing left, so the count takes nothing a waiter was
+  owed. A token refilled mid-count and the fractional part of the conversion are dropped, which
+  only ever counts low. A count of our own would duplicate governor's refill arithmetic.
+  *Reversing:* low.
+- **Whether the change owes a live suite.** *Fork:* run `just kuma-live` as #1630 and #1728
+  did, or none. *Ruling:* none. *Reasoning:* the changed branch runs only when two
   configurations at different quotas share an origin and the stricter one comes back. Kuma's
   socket asks for its read half's quota since #1723 (PR #1757), so `just kuma-live` never changes
   the quota and would run none of this, and no live suite seeds two sources at different quotas
