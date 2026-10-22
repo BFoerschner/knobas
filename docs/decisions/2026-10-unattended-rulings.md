@@ -12073,3 +12073,24 @@ Ruled 2026-10-22 by the implementer on Opus. Spec #1620, ruling C1 (owned `Strin
   names, so no quote, backslash or tab can round-trip in it. *Ruling:* read it as the reader's
   half: a stored item whose kind is spelled with a JSON escape (`api\u005ftoken`) reads as that
   kind, which is the case the borrowed field refused. *Reversing:* low.
+## #1635: put the bookkeeping rows back when a restore fails
+
+Ruled 2026-10-22 by the implementer on Opus, inside spec #1619's ruling B3 (snapshot and re-insert).
+
+- **Snapshot all four bookkeeping tables, not only the ones the archive carries.** *Fork:* the
+  ticket says "reads the bookkeeping rows"; the clears touch only the carried tables. *Ruling:*
+  read all four. Clearing `dep_layer` cascades into `dep_layer_kind`, so a partial archive that
+  carries `dep_layer` alone still empties a table the restore never names. *Reversing:* low.
+- **The put-back clears each table before it inserts, in one transaction.** *Ruling:* a share
+  export carries no `setting` or `dep_view`, so those rows were never cleared, and inserting the
+  snapshot on top of them collides on the primary key. Children are cleared first and parents
+  inserted first, so `dep_layer_kind` finds its layer. Witnessed by the partial-archive test.
+  *Reversing:* low.
+- **The put-back runs before the rename shim's fold-up, and its own error wins.** *Fork:* the
+  ticket says "returns the load error after the recovery" and does not say what happens when the
+  recovery fails. *Ruling:* a failed put-back or fold-up returns its `sqlx` error, as the fold-up
+  already did before this change. Rows lost here have no way back from the UI; a shim column left
+  by a failed fold-up is dropped by the next restore. So the rows go first. *Reversing:* low.
+- **The snapshot is `to_jsonb` text read back through `jsonb_populate_recordset`.** *Ruling:* no
+  column list in Rust, so a column a later migration adds is carried with no edit, and no new
+  dependency (`serde_json` is optional in `knobas-db`). *Reversing:* low.
