@@ -11522,3 +11522,37 @@ set.
   claims about Jira: a label edit moves an issue to the end of `ORDER BY updated ASC` and nowhere
   in `ORDER BY created ASC`, and after a filed sub-task is deleted, a page past the new end
   answers 200 with no issues and the smaller total. *Reversing:* low.
+
+## #1623: merge review of #1719 (Opus merge-manager, 2026-10-22)
+
+### Failing an incremental run on a shrunk total, confirmed
+
+**The fork:** the refusal applies to incremental runs too, so any deletion (or exit from a `jql_filter`) between two of a run's `/search` requests fails that run. Can a busy Jira fail every run?
+
+**Ruling:** confirmed. The next run recovers: a failed run commits neither cursor nor items, so the next one repeats the same `since`, and a deletion happens once. Only a shrink between two requests of the same run fails it. An incremental run that fits on one page (`page_size` 100 by default) makes one `/search` request, because `Offset` stops when the rows read reach `total`, so a shrink can't happen inside it. Every run fails only when a shrink falls inside each multi-page walk. That fits a full sync of a large instance under a `jql_filter` on a field that changes often. Spec #1618 ruling A5 weighed that case and rejected an in-run re-walk, and the run's `Protocol` error is `SyncOutcome::Error`, which the next tick retries. Letting incremental runs through would lose the stepped-over issue for good: it sits below the advanced watermark.
+
+**Cost of reversing:** low, one condition on the refusal.
+
+### The contract amendment belongs in the contract body, not §10.8
+
+**The fork:** a §10.8 entry is one file under `docs/contract/10.8/`, or a body amendment with #112 pointers.
+
+**Ruling:** the body. The diff touches no surface §10.8 freezes: no `crates/knobas-source/src/**`, `crates/knobas-http/**`, migration, IPC schema, or `knobas-app` `error.rs`/`profile.rs`. The change supersedes the §4.2 Jira cursor row, the #345 amendment's JQL line, and §5's mockd JQL subset. Under #112's convention the old text stays and gets an italic pointer, which the #345 amendment already did to the same row. The rebase's hand-resolved conflict keeps main's #1624 text in the Gitea cell and the #1623 pointer in the Jira cell. No conflict markers remain.
+
+**Cost of reversing:** none.
+
+### No `just jira-live` re-run after the rebase, confirmed
+
+**The fork:** the live run is from `0ee671f3` (base `c949263a`). The branch was then rebased onto `cf2b4193`.
+
+**Ruling:** no re-run. `c949263a..cf2b4193` is #1714 (Gitea), #1717 (frontend) and #1666 (frontend), plus `CONTEXT.md`, `testenv/README.md` and a desktop-witness driver. None of these is something `jira-live` exercises (working model, amended 2026-10-12). #1709's `images.env`/`live-lib.sh` change (`6240852d`) is already in `c949263a`, so the run used it.
+
+**Cost of reversing:** one `just jira-live`.
+
+### Ties on `created` stay open, filed as #1720
+
+**The fork:** among issues that share a `created` stamp, Jira's order is its index's tiebreak, and an edit may change it.
+
+**Ruling:** the implementer's no-tiebreak ruling stands, because the ticket pins the literal `ORDER BY created ASC`. The open question is filed as #1720 (`backlog`): check on the seeded Jira, then add a unique tiebreak if one is needed.
+
+**Cost of reversing:** low.
