@@ -9907,6 +9907,40 @@ unchanged.
   details give one, and `<pipeline> #<number> on <branch>: <the run's URL at the source>`, so the
   ticket can be read without knobas. The type is `Task`, as Standup's. *Reversing:* low; one pure
   function (`ticketDraftOf`).
+
+### #1451, 2026-10-22: review (Opus merge-manager, PR #1750)
+
+- **Finding the filed ticket by its title, while Jira's create answers its key.** *Ruling:*
+  accepted for this PR. The title match is the wrong long-term design, and #1754
+  (`ready-for-agent`) replaces it. The implementer's premise is half right. Jira's REST v2
+  `POST /rest/api/2/issue` does answer `{id, key, self}`, and `knobas-source-jira`'s
+  `write::create_ticket` reads `key` and refuses a create without one. The adapter's
+  `CreateTicket` arm then drops it (`WriteReceipt::none()`, on #280's reasoning). So it is the
+  receipt that names no key, not Jira. A comment in the adapter does not rule out putting the key
+  in the receipt, and `docs::created_page` (#1121) already resolves an arrival from
+  `write_queue.remote_id`. *Reasoning for merging anyway:* (1) Standup's action item
+  (`standup.rs` `ticket_titled`) has matched by title, unbounded, since #779. This PR's match is
+  bounded, so it adds no new kind of risk. (2) The prefilled title carries the run number
+  (`… fails in <pipeline> #<n>`), so an earlier run's ticket does not share it. The realistic
+  collision is the same run filed twice, or a reader-edited generic title. Either way the link goes
+  to a sibling ticket, never to another run's. The implementer's "same failing test filed from an
+  earlier run" is therefore not the likeliest case; the bound guards the edited title. (3) Fixing it
+  properly spans two adapters: Gitea's receipt is an issue number, not its entity's local part
+  `owner/repo/issues/<n>`. It also changes Standup's path. That is a ticket's scope, with its own
+  §10.8 entry and `just jira-live`, not a merge-manager fix. *Cost of reversing:* low; #1754
+  replaces one query in each place.
+- **`CreateTicket`'s delivery class (ADR-0012).** *Ruling:* unchanged and correct. The arm
+  sets only `link: Some(ArrivalLink::Related)` over `conservative`. `resend_harmless` stays `false`
+  and `can_leave_unclaimed` stays `true`, and only `knobas-app`'s `arrival_linkable` and
+  `link_on_arrival` read `link`. A create is still not resend-harmless. *Cost of reversing:* n/a.
+- **Reserved for Björn (the frozen-surface sign-off), ruled by implementer on Opus: reviewed.**
+  *Ruling:* upheld. The §10.8 entry matches the diff (the `delivery()` arm, the `link_on_arrival`
+  arm, the refusal's wording, the `entity.ts` doc), and nothing on the wire changes. *Cost of
+  reversing:* low.
+- **The new ticket-first convention.** *Ruling:* kept as a real convention, since it says where
+  any future create-ticket site goes. Reworded so that Standup, which files through
+  `create_action_item_ticket` and not `link_to`, is not left non-conforming. *Cost of
+  reversing:* trivial.
 ## #1445: ligatures off on the mono surfaces (Sonnet implementer, 2026-10-21)
 
 - **Scope of the rule** (delegated). *Ruling:* the wide form: `font-variant-ligatures: none` on every

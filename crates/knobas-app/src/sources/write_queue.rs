@@ -401,11 +401,13 @@ const CLOCK_SLACK: &str = "5 minutes";
 /// `source_id` titled `title` that the source changed after the write was
 /// queued at `queued`, within [`CLOCK_SLACK`].
 ///
-/// Jira's receipt names no key (a created ticket is a mirrored entity), so
-/// the arrival is looked up by its title, as an action item's ticket is
-/// (`commands::entity::standup`). A ticket of the same title the source last
-/// changed before the write was queued is somebody else's -- the same failed
-/// test filed from an earlier run -- never this one.
+/// Jira's receipt names no key: Jira answers one, and the adapter drops it,
+/// a created ticket being a mirrored entity (#1754 resolves the ticket from
+/// the receipt instead). So the arrival is looked up by its title, as an
+/// action item's ticket is (`commands::entity::standup`). A ticket of the
+/// same title the source last changed before the write was queued is
+/// somebody else's -- a title the reader made generic, filed before --
+/// never this one.
 async fn ticket_filed(
     pool: &sqlx::PgPool,
     source_id: &str,
