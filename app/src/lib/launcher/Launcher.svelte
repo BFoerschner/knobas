@@ -428,7 +428,8 @@
   });
 
   /**
-   * The ids the options carry, so a listbox can name its active one (#1411).
+   * The ids the options carry, so the box can name the active one (#1411,
+   * #1665).
    *
    * By index in the flat list rather than by row id: an index is what
    * `session.selected` is, and a row id (`confluence:ENG:SEPA design`) is
@@ -437,9 +438,14 @@
   const uid = $props.id();
   const optionId = (index: number) => `${uid}-opt-${index}`;
   const chainOptionId = (index: number) => `${uid}-chain-${index}`;
+  const suggestionId = (index: number) => `${uid}-sug-${index}`;
+  /** The three listboxes, which the box names as the one it controls (#1665). */
+  const resultsId = `${uid}-results`;
+  const chainId = `${uid}-actions`;
+  const suggestionsId = `${uid}-suggestions`;
 
   /**
-   * The result the listbox names as current, or `undefined` when no option
+   * The result the box names as current, or `undefined` when no option
    * is drawn for it: no row, a failed read that draws its reason instead, or
    * the saved list whose name is a text field while it is being renamed.
    */
@@ -450,6 +456,17 @@
     return optionId(session.selected);
   });
   const activeChainOption = $derived(chain ? chainOptionId(chain.selected) : undefined);
+
+  /**
+   * The list the box controls and the option it names: whichever list the
+   * arrows walk, in the order `onkeydown` asks -- the value suggestions while
+   * they are open, then the Tab chain, then the results.
+   */
+  const controlled = $derived.by(() => {
+    if (offer.length > 0) return { list: suggestionsId, option: suggestionId(suggestionPicked) };
+    if (chain) return { list: chainId, option: activeChainOption };
+    return { list: resultsId, option: activeOption };
+  });
 
   /**
    * The selected row stays on screen (#1411, spec §4's ↑↓): whenever it
@@ -747,6 +764,8 @@
         {placeholder}
         pending={session.pending}
         {footnote}
+        controls={controlled.list}
+        active={controlled.option}
         oninput={(value) => session.type(value)}
         {onkeydown}
         onclose={close}
@@ -757,9 +776,10 @@
           Directly under the box, over the chips and the results: it completes
           the word being typed, and it is what the keyboard drives while open.
         -->
-        <div class="tf-ln-suggest" role="listbox" aria-label="Suggestions">
+        <div id={suggestionsId} class="tf-ln-suggest" role="listbox" aria-label="Suggestions">
           {#each offer as suggestion, index (`${suggestion.value}\u0000${suggestion.detail}`)}
             <button
+              id={suggestionId(index)}
               class="tf-ln-opt tf-ln-sug"
               class:tf-ln-on={index === suggestionPicked}
               role="option"
@@ -779,13 +799,7 @@
         <Chips {interpreted} sources={health} sourcesRead={sourcesPhase === "ready"} />
       {/if}
 
-      <div
-        class="tf-ln-list"
-        role="listbox"
-        tabindex="-1"
-        aria-label="Results"
-        aria-activedescendant={activeOption}
-      >
+      <div id={resultsId} class="tf-ln-list" role="listbox" tabindex="-1" aria-label="Results">
         {#if session.error}
           <p class="tf-ln-none tf-ln-err">{session.error}</p>
           <!-- A board that failed to load has nothing else to offer; a failed
@@ -886,11 +900,11 @@
 
       {#if chain}
         <div
+          id={chainId}
           class="tf-ln-chain"
           role="listbox"
           tabindex="-1"
           aria-label="Actions on the selected result"
-          aria-activedescendant={activeChainOption}
         >
           {#each chain.actions as action, index (action.id)}
             <button

@@ -11439,3 +11439,36 @@ set.
   more than the page cap lies above the window, and then makes progress from the cap's last page.
   Trusting `first == below` would be unsafe, because an unread record on that second can sit on an
   earlier page. *Reversing:* low.
+
+## #1665/#1668: the launcher box as a combobox, and the Session lifecycle fixes (Opus implementer, 2026-10-22)
+
+- **The value suggestions list.** *Fork:* the ticket names the results and the chain as the lists
+  the box controls; the suggestion list under the box is a third one the arrows walk. *Ruling:*
+  included. While suggestions are open the arrows and `Enter` drive them (`suggestionKey` runs
+  first in `onkeydown`), so a box that still named a results row would announce a row `Enter`
+  does not open. The box controls the list in `onkeydown`'s order: suggestions, then the chain,
+  then the results. *Reversing:* low, one branch in `controlled`.
+- **`aria-expanded`.** *Ruling:* always `"true"`. The results listbox is drawn whenever the box
+  is, so the popup is never collapsed; an expanded flag that tracked "has an active option"
+  would say the list was gone while it is on screen saying *Searching…*. *Reversing:* low.
+- **`aria-autocomplete="list"`.** *Ruling:* added beside the attributes the ticket names: the
+  lists are filtered by what is typed and the box's text is never completed inline, which is
+  what `list` says. *Reversing:* low.
+- **`tabindex="-1"` on the results and chain lists.** *Ruling:* kept; the ticket asks only that
+  the lists keep `role="listbox"`, and dropping it would change what a click on a list's padding
+  does. *Reversing:* low.
+- **What the residue test enrols.** *Fork:* add LinkDialog to the table by hand, or widen the
+  rule. *Ruling:* widened: a component is enrolled when it has a `$effect` **or** constructs a
+  `Session`, since a `Session` owns a debounce timer that only an unmount cleanup cancels. That
+  enrols LinkDialog, TfLinkTo and TfBlockDialog, each with an `exercise` that types.
+  *Reversing:* low.
+- **TfLinkTo's undisposed Session.** *Fork:* the widened rule found the same hole in
+  `tf/job/TfLinkTo.svelte`, which the ticket does not name. *Ruling:* fixed here, the same
+  one-line `onMount(() => () => session.dispose())`: same class, same fix, and leaving it would
+  have meant exempting it from the rule this PR adds. *Reversing:* low.
+- **The `launcher-hotkey` witness driver.** *Fork:* the driver asserts the focused box's role is
+  `AXTextField`, and WebKit exposes `role="combobox"` as `AXComboBox`, so a correct app would
+  fail the witness. *Ruling:* the driver takes `AXComboBox` or `AXTextField` (the brief: fix the
+  driver, never the app, when a driver cannot find an element); the label still tells the boxes
+  apart, and the role still excludes the top strip's button. Not run here: this implementer has
+  no desktop-witness slot. *Reversing:* low.

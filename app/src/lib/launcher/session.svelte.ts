@@ -376,6 +376,10 @@ export class Session {
    */
   async run(): Promise<void> {
     if (this.raw.trim() === "") {
+      // The clear is the newest answer (#1668): a search still in flight for
+      // the text just cleared is older than it, so when it lands it is
+      // dropped rather than written back under an empty box.
+      this.#applied = ++this.#issued;
       this.#clear();
       this.pending = false;
       return;

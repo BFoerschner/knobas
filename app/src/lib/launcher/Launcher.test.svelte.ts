@@ -2501,12 +2501,36 @@ test("the arrows scroll the newly active row into view, and only as far as it ne
   expect(scrolls.at(-1)?.options).toEqual({ block: "nearest" });
 });
 
-test("the results listbox names the active option, and names nothing with no row", async () => {
+// ── The box is a combobox (#1665, FE-1) ────────────────────────────────────
+//
+// Focus never leaves the input, so the input is where a screen reader looks
+// for the active option: an `aria-activedescendant` on a listbox that never
+// has focus is announced by nothing. Every assertion below reads the box, not
+// the list.
+
+/** The launcher's input, which carries the combobox's attributes. */
+function box(): HTMLInputElement {
+  return target.querySelector<HTMLInputElement>('input[aria-label="Search or act"]')!;
+}
+
+function listbox(label: string): Element {
+  return target.querySelector(`[role="listbox"][aria-label="${label}"]`)!;
+}
+
+test("the box is a combobox that names the active result, and names nothing with no row", async () => {
   openSaved();
   await settle();
-  const listbox = target.querySelector('[role="listbox"][aria-label="Results"]')!;
-  const named = () => listbox.getAttribute("aria-activedescendant");
+  const results = listbox("Results");
+  const named = () => box().getAttribute("aria-activedescendant");
   const active = () => target.querySelector('[aria-label="Results"] [aria-selected="true"]');
+
+  expect(box().getAttribute("role")).toBe("combobox");
+  expect(box().getAttribute("aria-expanded")).toBe("true");
+  expect(box().getAttribute("aria-autocomplete")).toBe("list");
+  expect(results.id).not.toBe("");
+  expect(box().getAttribute("aria-controls")).toBe(results.id);
+  // On the box and only there: a second copy on the list is a second answer.
+  expect(results.hasAttribute("aria-activedescendant")).toBe(false);
 
   expect(named()).toBeTruthy();
   expect(named()).toBe(active()?.id);
@@ -2514,6 +2538,7 @@ test("the results listbox names the active option, and names nothing with no row
     press(key);
     expect(named(), key).toBe(active()?.id);
   }
+  expect(named()).toBe(resultOptions()[1]!.id);
   // Every option has an id of its own, so the name points at exactly one row.
   const ids = resultOptions().map((el) => el.id);
   expect(new Set(ids).size).toBe(ids.length);
@@ -2528,41 +2553,71 @@ test("the results listbox names the active option, and names nothing with no row
     },
   });
   await settle();
-  expect(
-    target.querySelector('[role="listbox"][aria-label="Results"]')!.hasAttribute("aria-activedescendant"),
-  ).toBe(false);
+  expect(box().hasAttribute("aria-activedescendant")).toBe(false);
+  expect(box().getAttribute("aria-controls")).toBe(listbox("Results").id);
 });
 
-test("a list being renamed has no option, so the listbox names none", async () => {
+test("a list being renamed has no option, so the box names none", async () => {
   openSaved();
   await settle();
   press("ArrowDown");
   press("Tab");
   press("Enter");
-  const listbox = target.querySelector('[role="listbox"][aria-label="Results"]')!;
   expect(target.querySelector("input.tf-ln-ren")).not.toBeNull();
-  expect(listbox.hasAttribute("aria-activedescendant")).toBe(false);
+  expect(box().hasAttribute("aria-activedescendant")).toBe(false);
 });
 
-test("the Tab chain's active row is scrolled into view and named by its listbox", async () => {
+test("the Tab chain's active row is scrolled into view and named by the box", async () => {
   openSaved();
   await settle();
   press("ArrowDown");
+  const row = box().getAttribute("aria-activedescendant");
   const scrolls = recordScrolls();
   press("Tab");
-  const chain = target.querySelector('[role="listbox"][aria-label="Actions on the selected result"]')!;
+  const chain = listbox("Actions on the selected result");
   const rows = [...chain.querySelectorAll('[role="option"]')];
   expect(rows).toHaveLength(2);
-  expect(chain.getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
+  // The box controls the list the arrows now walk.
+  expect(chain.id).not.toBe("");
+  expect(box().getAttribute("aria-controls")).toBe(chain.id);
+  expect(box().getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
+  expect(chain.hasAttribute("aria-activedescendant")).toBe(false);
   expect(scrolls.at(-1)).toEqual({ el: rows[0], options: { block: "nearest" } });
 
   press("ArrowDown");
-  expect(chain.getAttribute("aria-activedescendant")).toBe(rows[1]!.id);
+  expect(box().getAttribute("aria-activedescendant")).toBe(rows[1]!.id);
   expect(scrolls.at(-1)).toEqual({ el: rows[1], options: { block: "nearest" } });
 
   press("ArrowUp");
-  expect(chain.getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
+  expect(box().getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
   expect(scrolls.at(-1)).toEqual({ el: rows[0], options: { block: "nearest" } });
+
+  // Closing the chain hands the box back to the results, on the same row.
+  press("Tab");
+  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
+  expect(box().getAttribute("aria-controls")).toBe(listbox("Results").id);
+  expect(box().getAttribute("aria-activedescendant")).toBe(row);
+});
+
+test("while value suggestions are open the box names the suggestion the arrows walk", async () => {
+  openSuggesting();
+  await settle();
+  await typeInto("kind:");
+  const list = listbox("Suggestions");
+  const options = [...list.querySelectorAll('[role="option"]')];
+  expect(options).toHaveLength(3);
+  expect(list.id).not.toBe("");
+  expect(box().getAttribute("aria-controls")).toBe(list.id);
+  expect(box().getAttribute("aria-activedescendant")).toBe(options[0]!.id);
+
+  press("ArrowDown");
+  expect(box().getAttribute("aria-activedescendant")).toBe(options[1]!.id);
+  expect(new Set(options.map((el) => el.id)).size).toBe(3);
+
+  // Esc closes the list, and the box goes back to naming the results.
+  press("Escape");
+  expect(target.querySelector('[aria-label="Suggestions"]')).toBeNull();
+  expect(box().getAttribute("aria-controls")).toBe(listbox("Results").id);
 });
 
 test("typing resets the selection to the first row, and that row is scrolled back into view", async () => {
@@ -2607,9 +2662,7 @@ test("the palette's rows are followed as well", async () => {
   const rows = resultOptions();
   expect(rows.length).toBeGreaterThan(1);
   expect(scrolls.at(-1)).toEqual({ el: rows[1], options: { block: "nearest" } });
-  expect(
-    target.querySelector('[role="listbox"][aria-label="Results"]')!.getAttribute("aria-activedescendant"),
-  ).toBe(rows[1]!.id);
+  expect(box().getAttribute("aria-activedescendant")).toBe(rows[1]!.id);
 });
 
 // ── `>` is the app's navigation menu (#1417) ───────────────────────────────

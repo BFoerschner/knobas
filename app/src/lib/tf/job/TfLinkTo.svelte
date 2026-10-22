@@ -11,6 +11,8 @@
   so only the relation and the note are left to pick.
 -->
 <script lang="ts">
+  import { onMount } from "svelte";
+
   import type { LinkRow } from "../../ipc/entity";
   import type { SearchHit } from "../../ipc/search";
   import { Session, type SessionPorts } from "../../launcher/session.svelte";
@@ -55,6 +57,9 @@
   // svelte-ignore state_referenced_locally
   // Read once: a `Session` owns a debounce timer and a request counter.
   const session = new Session({ search: ports.search, launcherHome: ports.launcherHome });
+  // Disposed on unmount, as the launcher's is (#1668): a close inside the
+  // debounce would otherwise fire a search for a dialog that is gone.
+  onMount(() => () => session.dispose());
 
   // svelte-ignore state_referenced_locally
   // The preset is where the dialog starts; *Change* picks another.

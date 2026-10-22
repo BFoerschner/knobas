@@ -46,6 +46,7 @@ vi.mock("../ipc/entity", () => ({
 }));
 
 const { default: LinkDialog } = await import("./LinkDialog.svelte");
+const { DEBOUNCE_MS } = await import("../launcher/session.svelte");
 
 function hit(over: { id: string; kind?: string; title: string }) {
   return {
@@ -169,6 +170,22 @@ test("the target picker searches what is typed", async () => {
   expect(screen.text()).toContain("Payout retries pile up");
 
   screen.done();
+});
+
+/**
+ * A close inside the debounce takes the keystroke with it (#1668, FE-6): the
+ * dialog's `Session` is disposed on unmount, as the launcher's is, so its
+ * timer never fires a search for a component that is gone.
+ */
+test("closing the dialog within the debounce sends no search", async () => {
+  const screen = render();
+
+  screen.type(screen.picker(), "payout");
+  screen.done();
+  // Past the debounce, on real timers.
+  await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 60));
+
+  expect(queries, "a search was sent after the dialog closed").toEqual([]);
 });
 
 /**

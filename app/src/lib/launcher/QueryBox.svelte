@@ -6,6 +6,13 @@
   launcher is a list the keyboard walks, so a click that moved focus to a row
   would make the next keystroke go nowhere. Rows are `<button>`s for the
   accessibility tree and the pointer; focus stays here.
+
+  Which is why the input is a combobox (#1665): `aria-activedescendant` is
+  read off the element that has focus, so the active row is named here and
+  nowhere else. `controls` is the list the arrows walk right now -- the value
+  suggestions, the Tab chain or the results -- and the launcher switches it.
+  `aria-expanded` is always true: the results list is drawn whenever the box
+  is.
 -->
 <script lang="ts">
   let {
@@ -13,6 +20,8 @@
     placeholder,
     pending,
     footnote,
+    controls,
+    active,
     oninput,
     onkeydown,
     onclose,
@@ -23,6 +32,10 @@
     pending: boolean;
     /** The right-hand note: "mirror · 0 pending writes". */
     footnote: string;
+    /** The id of the listbox the arrows walk. */
+    controls: string;
+    /** The id of its active option, or `undefined` when no option is drawn for it. */
+    active: string | undefined;
     oninput: (value: string) => void;
     onkeydown: (event: KeyboardEvent) => void;
     onclose: () => void;
@@ -62,6 +75,11 @@
     autocomplete="off"
     spellcheck="false"
     aria-label="Search or act"
+    role="combobox"
+    aria-expanded="true"
+    aria-autocomplete="list"
+    aria-controls={controls}
+    aria-activedescendant={active}
     oninput={(event) => oninput(event.currentTarget.value)}
     {onkeydown}
   />

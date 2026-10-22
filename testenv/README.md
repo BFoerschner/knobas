@@ -1627,8 +1627,9 @@ the app with ⌘Q. Drivers live in `testenv/desktop-witness/drivers/`, and there
 are three.
 
 `launcher-hotkey` (#500) presses ⌘K, asserts through the accessibility tree
-that the launcher's query box has focus (`AXTextField`, labelled *Search or
-act*, which is the `aria-label` in `QueryBox.svelte`), and presses Escape --
+that the launcher's query box has focus (`AXComboBox` or `AXTextField`,
+labelled *Search or act*, which is the `aria-label` in `QueryBox.svelte`), and
+presses Escape --
 after which the box must be gone from the tree, because `Launcher.svelte`
 renders the overlay under `{#if open}` and a closed launcher takes its input
 out of the DOM.
