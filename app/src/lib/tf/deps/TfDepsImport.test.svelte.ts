@@ -6,9 +6,16 @@
  * previews what it produced. What the commands answer is `assets_ipc.rs`'.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AssetRow, Dependencies, DepItem, DepViews, ImportPreview, Produced } from "../../ipc/assets";
+// `app_status` says where credentials live (#1615); the flag flips it per test.
+const store = vi.hoisted(() => ({ inMemory: false }));
+vi.mock("../../ipc/app", async (original) => ({
+  ...(await original<typeof import("../../ipc/app")>()),
+  appStatus: () => Promise.resolve({ secrets_in_memory: store.inMemory }),
+}));
+
 import { toasts } from "../../shell/toasts.svelte";
 import { createDepViewState } from "./views.svelte";
 import { settingsOf } from "./views";
@@ -254,4 +261,24 @@ test("an importer asks for a token, then where to land, then previews what it pr
   ]);
   expect(dialog()!.textContent).toContain("Download hcloud-estate.json");
   expect(dialog()!.textContent).toContain("New — 1");
+});
+
+/** #1615: the token hint names the keychain, or the session when the store is in memory. */
+test.each([
+  [false, "Kept in this machine's keychain"],
+  [true, "Kept for this session only"],
+])("the token hint follows the secret store (in memory: %s)", async (inMemory, words) => {
+  store.inMemory = inMemory;
+  produced = [{ state: "token_needed" }];
+  await openImport();
+  const from = field("Import from");
+  from.value = "hcloud";
+  from.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  button("Read Hetzner Cloud", dialog()!).click();
+  await settle();
+  const note = dialog()!.textContent ?? "";
+  expect(note).toContain(words);
+  expect(note).not.toContain(inMemory ? "keychain" : "session only");
+  store.inMemory = false;
 });

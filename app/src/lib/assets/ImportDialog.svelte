@@ -120,6 +120,7 @@
   } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
   import Modal from "../shell/Modal.svelte";
+  import { readSecretsInMemory, tokenKeptHint } from "../shell/secret-store";
 
   let {
     preview: previewImport,
@@ -165,6 +166,18 @@
    */
   let tokenWanted = $state(false);
   let token = $state("");
+  // Where a token is kept (#1615): the keychain unless this process keeps
+  // credentials in memory. The keychain wording stands until `app_status` says otherwise.
+  let secretsInMemory = $state(false);
+  $effect(() => {
+    let dead = false;
+    void readSecretsInMemory().then((read) => {
+      if (!dead) secretsInMemory = read;
+    });
+    return () => {
+      dead = true;
+    };
+  });
   /** The servers `landing_needed` named, or `null` while none is owed. */
   let landing = $state<string[] | null>(null);
   /** What the last successful run said it would create. */
@@ -409,9 +422,7 @@
               bind:value={token}
             />
             <p class="hint">
-              Kept in this machine's keychain, under this importer's own name —
-              never in the database and never in a share export. You are asked
-              once.
+              {tokenKeptHint(secretsInMemory)}
             </p>
           </div>
         {/if}

@@ -62,6 +62,7 @@
   import TfSchemaForm from "./TfSchemaForm.svelte";
   import type { SettingsPorts } from "./ports";
   import { expiryNote } from "../../shell/health.svelte";
+  import { storedWhere } from "../../shell/secret-store";
   import {
     BACKFILL_HINT,
     EXPIRY_CLASS,
@@ -126,7 +127,6 @@
   const word = $derived(secretWord(source.auth_kind));
   // The countdown on the credential row (#1499): the date the source reported, never typed.
   const expiry = $derived(expiryNote(health?.secret_expires_at, now));
-  const keychain = /Mac/.test(navigator.userAgent) ? "the macOS keychain" : "the system keychain";
   // Where the credential went (#1585): the keychain, unless this process keeps
   // credentials in memory (`KNOBAS_SECRET_STORE=memory`, headless QA). Until
   // `app_status` answers, or if it fails, the line names the keychain, the
@@ -144,7 +144,7 @@
       dead = true;
     };
   });
-  const stored = $derived(secretsInMemory ? "Stored for this session only" : `Stored in ${keychain}`);
+  const stored = $derived(storedWhere(secretsInMemory));
   const showsUser = $derived(adapter !== null && declaresUser(adapter.config_schema));
   const acceptsAccount = $derived(adapter?.accepts_account ?? false);
   // The adapter's floor (#1188); an adapter this build does not know offers the
