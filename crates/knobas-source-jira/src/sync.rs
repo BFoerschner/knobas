@@ -4,15 +4,30 @@
 //!
 //! 1. `GET serverInfo` -- the server's UTC offset, because JQL date literals
 //!    carry no zone.
-//! 2. Read the cursor. Unreadable or absent ⇒ full sync (interfaces §4.1).
-//! 3. Query `updated >= watermark − 2 minutes ORDER BY updated ASC`, paging
+//! 2. **The ceiling probe** ([`SyncRun::ceiling`], #1622): one row, the same
+//!    scope, `ORDER BY updated DESC` -- the newest `updated` this source's
+//!    corpus held when the run started.
+//! 3. Read the cursor. Unreadable or absent ⇒ full sync (interfaces §4.1).
+//! 4. Query `updated >= watermark − 2 minutes ORDER BY updated ASC`, paging
 //!    with `startAt` until `total` is reached.
-//! 4. Drop what the overlap re-delivered, complete truncated comment/worklog
+//! 5. Drop what the overlap re-delivered, complete truncated comment/worklog
 //!    containers, push the rest into the sink.
-//! 5. If nothing was pushed, hand back the cursor byte-identically. Otherwise
-//!    advance the watermark to `max(previous, newest updated emitted)` -- never
-//!    to `now()`, because Jira's search index lags its own writes by seconds
-//!    and an issue updated in that gap would be skipped forever.
+//! 6. If nothing was pushed, hand back the cursor byte-identically. Otherwise
+//!    advance the watermark to `max(previous, min(newest updated emitted,
+//!    ceiling))` ([`knobas_source::watermark::advanced`]) -- never to `now()`,
+//!    because Jira's search index lags its own writes by seconds and an issue
+//!    updated in that gap would be skipped forever.
+//!
+//! # The ceiling (`CONTEXT.md`, *Watermark*)
+//!
+//! A run is not instantaneous. An issue edited while the walk pages carries a
+//! stamp later than anything the run saw at its start; advancing the
+//! watermark to it would put the run's whole duration below the next query's
+//! bound, and every other issue edited during the run, on a page the walk had
+//! already passed, would never be offered again. Held at the ceiling, the next
+//! run re-walks from just before the run started; the edited issue is in
+//! `seen`, so that re-walk does not emit it twice. Witnessed by the probe, not
+//! clocked: a ceiling too low costs a re-fetch, one too high loses work.
 //!
 //! # The two things the cursor layer is owed
 //!
@@ -50,11 +65,12 @@
 
 use chrono::{DateTime, Utc};
 use knobas_http::{Offset, PageWalk, Walked};
+use knobas_source::watermark::Bounds;
 use knobas_source::{Sink, SourceError};
 
 use crate::api::JiraApi;
 use crate::cursor::JiraCursor;
-use crate::jql::build_jql;
+use crate::jql::{build_ceiling_jql, build_jql};
 use crate::map;
 use crate::model::{RawIssue, SearchPage, ServerInfo};
 use crate::{JiraConfig, time::parse_jira_time};
@@ -149,6 +165,7 @@ impl SyncRun<'_> {
     ) -> Result<String, SourceError> {
         let server: ServerInfo = self.api.server_info().await?;
         let offset = server.offset_secs();
+        let ceiling = self.ceiling().await?;
         let previous = cursor.as_deref().and_then(JiraCursor::parse);
         let since = previous.as_ref().and_then(|c| c.since(offset));
         let jql = build_jql(self.cfg, since, offset);
@@ -282,6 +299,10 @@ impl SyncRun<'_> {
         {
             return Ok(cursor);
         }
+        let bounds = Bounds {
+            previous: previous.as_ref().and_then(|c| c.updated_to),
+            ceiling,
+        };
         let mut next = match (emitted, watermark) {
             // No issue moved: the issue half of the position is where it was.
             // Also where items arrived but neither they nor the previous
@@ -293,10 +314,25 @@ impl SyncRun<'_> {
             // it for the fixture's one null, so this is a tolerated shape and
             // not a supported one.
             (0, _) | (_, None) => previous.unwrap_or_else(|| JiraCursor::empty(offset)),
-            (_, Some(w)) => JiraCursor::advanced(w, offset, &seen_in_window),
+            (_, Some(w)) => JiraCursor::advanced(bounds, w, offset, &seen_in_window),
         };
         next.views = now;
         Ok(next.encode())
+    }
+
+    /// The run-start probe (#1622): the newest `updated` in this source's
+    /// scope, which the watermark may not pass this run. One row and one
+    /// field; `None` for an empty corpus, which clamps nothing.
+    async fn ceiling(&self) -> Result<Option<DateTime<Utc>>, SourceError> {
+        let page = self
+            .api
+            .search(&build_ceiling_jql(self.cfg), 0, 1, "updated")
+            .await?;
+        Ok(page
+            .issues
+            .first()
+            .and_then(|raw| raw.issue.fields.updated.as_deref())
+            .and_then(parse_jira_time))
     }
 
     /// Fill in what `/search` truncated.
@@ -401,6 +437,10 @@ mod tests {
         /// fresh issue and a `total` the walk can never reach.
         endless: bool,
         unauthorized: bool,
+        /// Edits made while the walk pages: `(key, updated)` applied to every
+        /// page after the first, so an issue the walk has not reached yet
+        /// arrives edited and one it already passed does not.
+        edited_mid_walk: Vec<(&'static str, &'static str)>,
         calls: Mutex<Vec<String>>,
     }
 
@@ -414,6 +454,7 @@ mod tests {
                 phantom_total: 0,
                 endless: false,
                 unauthorized: false,
+                edited_mid_walk: Vec::new(),
                 calls: Mutex::new(Vec::new()),
             }
         }
@@ -523,6 +564,22 @@ mod tests {
             if self.unauthorized {
                 return Err(SourceError::unauthorized());
             }
+            // The ceiling probe: the newest issue, as the walk would first
+            // see it. Recorded apart from the walk's pages so the page
+            // sequences below read as the walk alone.
+            if jql.ends_with("ORDER BY updated DESC") {
+                self.calls.lock().unwrap().push("ceiling".to_owned());
+                let newest = self.issues.iter().max_by_key(|i| {
+                    i["fields"]["updated"]
+                        .as_str()
+                        .and_then(crate::time::parse_jira_time)
+                });
+                return Ok(serde_json::from_value(serde_json::json!({
+                    "startAt": 0, "maxResults": max_results,
+                    "total": self.issues.len(), "issues": newest.into_iter().collect::<Vec<_>>()
+                }))
+                .unwrap());
+            }
             self.calls
                 .lock()
                 .unwrap()
@@ -552,12 +609,19 @@ mod tests {
                 })
                 .cloned()
                 .collect();
-            let window: Vec<serde_json::Value> = matching
+            let mut window: Vec<serde_json::Value> = matching
                 .iter()
                 .skip(start_at as usize)
                 .take(max_results as usize)
                 .cloned()
                 .collect();
+            if start_at > 0 {
+                for (key, updated) in &self.edited_mid_walk {
+                    for hit in window.iter_mut().filter(|i| i["key"] == *key) {
+                        hit["fields"]["updated"] = serde_json::json!(updated);
+                    }
+                }
+            }
             Ok(serde_json::from_value(serde_json::json!({
                 "startAt": start_at, "maxResults": max_results,
                 "total": matching.len() as u32 + self.phantom_total, "issues": window
@@ -1402,6 +1466,46 @@ mod tests {
                 .updated_to,
             before,
             "emitting an item older than the watermark must not move the watermark back to it"
+        );
+    }
+
+    /// **The ceiling** (#1622). While the walk pages, PAY-3 (not reached yet)
+    /// is edited and arrives on the second page stamped 11:44:30, past the
+    /// newest issue the probe saw at the run's start (11:20). PAY-1, on the
+    /// page already walked, is edited at 11:30 in the same minutes.
+    ///
+    /// Advancing to 11:44:30 would put the next query's bound at 11:42 and
+    /// lose PAY-1's edit for good. Held at the ceiling, the next run queries
+    /// from 11:18, delivers PAY-1 and recognises PAY-3, which it already has.
+    #[tokio::test]
+    async fn an_issue_edited_during_the_walk_does_not_carry_the_watermark_past_the_ceiling() {
+        let mut api = FakeApi {
+            issues: vec![
+                issue("PAY-1", "2026-08-22T11:00:00.000+0000", 0, 0),
+                issue("PAY-2", "2026-08-22T11:10:00.000+0000", 0, 0),
+                issue("PAY-3", "2026-08-22T11:20:00.000+0000", 0, 0),
+            ],
+            edited_mid_walk: vec![("PAY-3", "2026-08-22T11:44:30.000+0000")],
+            ..FakeApi::default()
+        };
+        let config = cfg(serde_json::json!({ "page_size": 2 }));
+        let (keys, cursor) = keys_of(&api, &config, None).await;
+        assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3"]);
+        assert_eq!(
+            crate::cursor::JiraCursor::parse(&cursor).unwrap().updated_to,
+            crate::time::parse_jira_time("2026-08-22T11:20:00.000+0000"),
+            "the watermark is held at the ceiling the run witnessed at its start"
+        );
+
+        // The world after that run: both edits landed.
+        api.edited_mid_walk.clear();
+        api.edit("PAY-3", "2026-08-22T11:44:30.000+0000");
+        api.edit("PAY-1", "2026-08-22T11:30:00.000+0000");
+        let (keys, _) = keys_of(&api, &config, Some(cursor)).await;
+        assert_eq!(
+            keys,
+            vec!["PAY-1"],
+            "the edit behind the walk is delivered; the one it saw is recognised"
         );
     }
 

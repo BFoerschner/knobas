@@ -320,6 +320,42 @@ mod tests {
         assert_eq!(Cql::floor(exact, 7200), exact);
     }
 
+    /// Read a literal the way a server in `offset_secs` would. Independent of
+    /// [`MinuteLiteral::floor`] on purpose: using that here would test the
+    /// implementation against itself.
+    fn read_as(literal: &str, offset_secs: i32) -> DateTime<Utc> {
+        let zone = FixedOffset::east_opt(offset_secs).expect("a real offset");
+        NaiveDateTime::parse_from_str(literal, "%Y-%m-%d %H:%M")
+            .expect("a literal this module rendered")
+            .and_local_timezone(zone)
+            .single()
+            .expect("a fixed offset has no ambiguous local times")
+            .with_timezone(&Utc)
+    }
+
+    /// **The invariant the whole watermark rests on.** A literal is read back
+    /// as an instant no *later* than the one it was rendered from: later
+    /// means the query starts past edits never delivered, and nothing goes
+    /// back for them. Across every real zone, and with the zone unknown
+    /// (rendered at the fallback, read in the real one), which is the case a
+    /// UTC fallback gets wrong.
+    #[test]
+    fn rendering_a_literal_never_shifts_the_query_forward() {
+        fn case<L: MinuteLiteral>(name: &str) {
+            let t = utc("2026-08-22T11:46:40Z");
+            for hours in -12..=14 {
+                let offset = hours * 3_600;
+                let known = read_as(&L::render(t, offset), offset);
+                assert!(known <= t, "{name} {hours}: {known} is later than {t}");
+                assert_eq!(known, L::floor(t, offset), "{name} {hours}: floor disagrees");
+                let guessed = read_as(&L::render(t, MIN_UTC_OFFSET_SECS), offset);
+                assert!(guessed <= t, "{name} {hours}: a guessed zone queried from {guessed}");
+            }
+        }
+        case::<Jql>("jql");
+        case::<Cql>("cql");
+    }
+
     /// **The floor.** `seen` covers the band the next query really returns:
     /// the literal truncates `watermark - 2 min` down to its minute, so a
     /// watermark 59 s past a minute boundary queries from 10:38:00, not
