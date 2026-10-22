@@ -6,7 +6,7 @@
  * Instants are local, for `day.test.ts`'s reason.
  */
 import { flushSync, mount, tick, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { DayWindow, Draft, LoggedWork, PlannedWorklog, ReaderDay, RunningTimer, Worklog } from "../../ipc/time";
 import { weekWindows } from "../../time/week";
@@ -122,6 +122,17 @@ test("one ticked row per day and ticket, with the draft's comment to edit", asyn
   ]);
   expect(drafts[0]![1].day).toBe("2026-08-20");
   expect(text(send())).toBe("Log 3 worklogs");
+});
+
+test("asks for each draft with the offset at that day's midnight, in November too", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date(2026, 10, 5, 12));
+    const { drafts } = await render();
+    expect(drafts.map(([, when]) => when.offsetMinutes)).toEqual([120, 120, 120]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("says it leaves out no-target time, and the running timer while it runs", async () => {

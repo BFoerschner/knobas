@@ -12,7 +12,7 @@
  * set to, and a fixture written as `"2026-09-03T09:00:00Z"` would assert
  * `"09:00"` only in UTC.
  */
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import type { Block, DayBlock } from "../ipc/time";
 import {
@@ -20,6 +20,7 @@ import {
   dayBounds,
   dayKey,
   dayLabel,
+  dayOffsetMinutes,
   durationReading,
   horizonNote,
   segmentsOf,
@@ -227,4 +228,18 @@ test("the horizon note says knobas has no observations, never that it lost them"
     "knobas keeps a month of observations and has none for Mon 24, Tue 25, Wed 26: " +
       "what was open is absent, not zero.",
   );
+});
+
+test("a day's offset is the one at that day's own midnight, whatever today is", () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    // In November (+60) the late-October summer-time day still reads +120.
+    vi.setSystemTime(new Date(2026, 10, 5, 12));
+    expect(dayOffsetMinutes("2026-10-20")).toBe(120);
+    expect(dayOffsetMinutes("2026-11-05")).toBe(60);
+    // The day the clocks go back starts in summer time.
+    expect(dayOffsetMinutes("2026-10-25")).toBe(120);
+  } finally {
+    vi.useRealTimers();
+  }
 });

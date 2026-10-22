@@ -208,6 +208,19 @@ test("Log sends the work for the reader's day and answers logged", async () => {
   expect(onlogged).toHaveBeenCalledWith(WORKLOG);
 });
 
+test("Log sends the offset at the draft day's midnight, not today's", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date(2026, 10, 5, 12));
+    const { sent, outcomes } = render();
+    button("Log 2h 44m to PAY-231")!.click();
+    await vi.waitFor(() => expect(outcomes).toEqual(["logged"]));
+    expect(sent[0]!.offsetMinutes).toBe(120);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 const ODD: Draft = { ...DRAFT, seconds: 163 };
 
 test("a 163 s draft reads Log 2m and sends 120 s, never the 163", async () => {

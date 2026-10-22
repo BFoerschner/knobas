@@ -36,7 +36,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
-  import { offsetMinutes } from "../../time/draft";
+  import { dayOffsetMinutes } from "../../time/day";
   import { columnHeading, minutesOf } from "../../time/week";
   import type { Layers } from "../layers.svelte";
   import { hm } from "./day-view";
@@ -89,8 +89,7 @@
   const id = (plan: Pick<PlannedWorklog, "day" | "entity_id">) => `${plan.day} ${plan.entity_id}`;
 
   function when(day: string) {
-    const window = days.find((candidate) => candidate.day === day);
-    return { day, offsetMinutes: offsetMinutes(window ? new Date(window.from) : new Date()) };
+    return { day, offsetMinutes: dayOffsetMinutes(day) };
   }
 
   onMount(() => {

@@ -19,6 +19,8 @@
  */
 import type { DayBlock } from "../ipc/time";
 
+import { offsetMinutes } from "./draft";
+
 /** Weekday and month names, so a date reads the same in every locale. */
 const WEEKDAYS = [
   "Sunday",
@@ -84,6 +86,15 @@ export function dayBounds(key: string): { from: Date; to: Date } {
   const to = new Date(from);
   to.setDate(to.getDate() + 1);
   return { from, to };
+}
+
+/**
+ * The UTC offset, in minutes, in force at `key`'s own local midnight. Every
+ * caller that tells the backend "this day" sends this, never today's offset:
+ * across a daylight-saving change the two differ by an hour.
+ */
+export function dayOffsetMinutes(key: string): number {
+  return offsetMinutes(dayBounds(key).from);
 }
 
 /** The day `days` away from `key`, month and year ends included. */
