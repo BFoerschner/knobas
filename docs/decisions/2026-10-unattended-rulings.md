@@ -11773,3 +11773,55 @@ set.
 - **The #775 test now expects Flush now disabled while out.** *Ruling:* that is the ticket's intent
   (a double click sends one `flush_writes`), not a weakened assertion; the other buttons stay
   asserted enabled. The test is retitled "disables only itself". *Reversing:* low.
+## #1728 and #1631: a quota that loosens, and external adapters on the instance's limiter (Opus implementer, 2026-10-22)
+
+- **Reserved for Björn, ruled by implementer on Opus: the frozen-surface change to
+  `crates/knobas-http/**`** (waived by Björn 2026-10-22). *Ruling:* private to `limiter.rs`
+  behind the unchanged public `InstanceLimiter`; no signature, `HttpConfig` field or adapter
+  changes. Booked in `docs/contract/10.8/1728-1631-knobas-http-quota-loosens-and-wasm-host-shares-it.md`.
+  *Reversing:* low, one module.
+- **#1728's "Ruled up front" section** (registration tokens, loosening when no live holder asks
+  for the stricter quota, a drained limiter on loosening, a tightening as in #1630) is built as
+  ruled. Nothing in the work showed it wrong.
+- **When the quota is worked out again.** *Ruling:* only when a limiter for the origin is built,
+  as the ticket says (the prune is in `for_origin`). A holder's drop does not loosen anything by
+  itself, so a long-lived holder (Kuma's socket) stays at the stricter quota until the next run,
+  read or flush builds a client for the origin, which is seconds to minutes in practice. A drop
+  hook would need the registration to point back at its slot for a gain nobody would see.
+  *Reversing:* low, a `Drop` on the registration.
+- **A change that loosens one field and tightens the other.** *Ruling:* it counts as a loosening
+  and starts drained. The burst it would hand out is the one the ticket forbids, and a drained
+  limiter at a lower burst costs one refill. *Reversing:* low, one comparison.
+- **Which of an external adapter's requests wait on the limiter.** The spec says the host awaits
+  "the same limiter for the instance origin before each send". *Ruling:* requests for the
+  instance only (the ones the credential goes on). A request to another host the manifest
+  declares carries nothing of the reader's, so no account of theirs can be locked by it, and
+  spending the instance's quota on it would slow the built-in clients for traffic that never
+  reaches the instance. *Reversing:* low; pace those on their own origin's limiter.
+- **The quota the host asks for.** *Ruling:* `HttpConfig::default()`'s rate and burst (5/s, 10),
+  read from that, so no new public constant enters the frozen crate. *Reversing:* low.
+- **What bounds the host's wait on the limiter.** *Ruling:* the call's deadline, not the
+  component's connect and first-byte timeouts. Those bound the server's answer. A component with
+  a short timeout would otherwise get an error for every request the pacing delays and, being
+  naive, ask again at once. A wait that outlasted the deadline (it cannot: the deadline ends the
+  call first) would reach the component as `connection-limit-reached`, logged on the host's side
+  with the `LocalQuota` message. *Reversing:* low.
+- **Where in `send` the wait sits.** *Ruling:* last before the request goes out, after the
+  allowlist, the lookup guard and the buffered body, so a token is spent only on a request that
+  leaves. *Reversing:* low.
+- **How long the host's registration lives.** *Ruling:* as long as the built source's
+  `net::Policy`. The registry builds a source per run, read and test, as it builds an
+  `HttpClient`, so an external adapter's registration ages the same way. *Reversing:* low.
+- **#1631's first criterion: "at most 10 arrive within the first second".** At the http crate's
+  defaults (5/s, burst 10) a correct implementation lets 10 + 5 through in the first second, so
+  the criterion cannot pass as worded. *Ruling:* the test asserts the burst (at most 10 within
+  150 ms, under one 200 ms refill), all 30 arriving, and the last no sooner than 3.5 s after the
+  first (twenty at five a second). No follow-up: the ticket closes with this PR and no document
+  carries the wording. *Reversing:* n/a.
+- **#1729 (the write queue reads a limiter timeout as a refusal).** An external adapter's write
+  never fails with `LocalQuota`: the host's wait is bounded by the call's deadline only. What it
+  can do is spend some of that deadline waiting, and a call stopped at its deadline was already
+  `Protocol` with no status before #1631, which the queue reads as a refusal. Reaching it through
+  the limiter needs a wait as long as the manifest's deadline (default ten minutes, at least one
+  second) behind a quota other clients are spending. *Ruling:* not reachable in practice, and the
+  deadline half is #1729's question, not this PR's; said so on #1729. *Reversing:* n/a.

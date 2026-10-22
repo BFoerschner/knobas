@@ -19,8 +19,11 @@
 //!   **every attempt passes it**, retries included. The limiter lives in a
 //!   process-wide map keyed by the base URL's origin (scheme, host, port), not
 //!   in the client: every [`HttpClient`] built for one instance -- a sync
-//!   run's, a live read's, a flush's -- waits on the same quota, the stricter
-//!   one where two configurations differ ([`InstanceLimiter`], #1630). A wait
+//!   run's, a live read's, a flush's -- waits on the same quota, as do the
+//!   wasm host's requests for an external adapter's instance (#1631). Where
+//!   configurations differ, the stricter of those a live client still holds
+//!   governs, so an edited quota applies once the clients built at the old
+//!   one are gone ([`InstanceLimiter`], #1630, #1728). A wait
 //!   on it is bounded by [`SEND_BUDGET`]; when it runs the budget out before
 //!   the first attempt, the call is `Protocol` naming the quota
 //!   ([`LocalQuota`]), not `Unreachable`, since the instance was never asked
@@ -170,8 +173,8 @@ pub struct HttpConfig {
     pub auth: Auth,
     /// Sustained requests per second (§4.1 defaults: Jira 5, Gitea 10,
     /// TeamCity 5). Overridable per source in its config. Shared with every
-    /// other client for the same origin, and the lower of the two where they
-    /// differ ([`InstanceLimiter`]).
+    /// other client for the same origin, and the lowest asked for by a client
+    /// still alive where they differ ([`InstanceLimiter`]).
     pub requests_per_second: u32,
     /// Burst allowance (§4.1 defaults: Jira 10, Gitea 20, TeamCity 10).
     /// Shared and merged the same way.
