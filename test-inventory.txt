@@ -1695,9 +1695,12 @@ knobas-http	lib/knobas_http	classify::tests::no_retry_after_header_is_no_delay
 knobas-http	lib/knobas_http	classify::tests::retry_after_is_read_in_its_delay_seconds_form
 knobas-http	lib/knobas_http	classify::tests::statuses_map_to_the_fault_the_user_sees
 knobas-http	lib/knobas_http	classify::tests::the_caller_maps_a_failing_body_into_the_message
+knobas-http	lib/knobas_http	limiter::tests::a_tightening_credits_seconds_of_refill
+knobas-http	lib/knobas_http	limiter::tests::a_tightening_takes_over_the_share_its_predecessor_had_left
 knobas-http	lib/knobas_http	limiter::tests::a_zero_quota_reads_as_one
 knobas-http	lib/knobas_http	limiter::tests::one_origin_keeps_one_slot_and_only_its_live_holders
 knobas-http	lib/knobas_http	limiter::tests::the_stricter_quota_takes_the_lower_of_each_field
+knobas-http	lib/knobas_http	limiter::tests::what_a_limiter_has_left_is_counted_and_taken
 knobas-http	lib/knobas_http	retry::tests::a_broken_request_or_a_broken_server_is_not_tried_again
 knobas-http	lib/knobas_http	retry::tests::a_busy_server_is_tried_again
 knobas-http	lib/knobas_http	retry::tests::the_delay_doubles_and_never_wraps
@@ -1723,6 +1726,7 @@ knobas-http	test/transport	a_silent_server_is_unreachable_rather_than_a_protocol
 knobas-http	test/transport	a_streamed_body_slower_than_the_request_timeout_arrives_whole
 knobas-http	test/transport	a_streamed_body_that_stalls_breaks_off_as_unreachable
 knobas-http	test/transport	a_streamed_send_with_no_headers_is_unreachable
+knobas-http	test/transport	a_tightening_after_a_loosening_starts_with_what_was_left
 knobas-http	test/transport	a_transient_failure_costs_exactly_the_documented_attempts
 knobas-http	test/transport	a_watched_call_the_quota_stopped_is_marked
 knobas-http	test/transport	a_write_that_opted_out_of_retries_is_not_retried_on_a_busy_answer

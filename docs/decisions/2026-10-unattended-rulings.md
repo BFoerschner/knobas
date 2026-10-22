@@ -12605,3 +12605,45 @@ The measurement came after it.
 - **The seam tests hold their own set.** `tests/it/start_work.rs` makes a `Background` per test
   rather than a temporary. A dropped `JoinSet` aborts its tasks, and only the run's own clone of
   the set would otherwise keep it alive. *Reversing:* n/a.
+
+### #1740: a tightened quota takes over what was left (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): the frozen-surface
+  change to `crates/knobas-http/**`.** *Ruling:* private to `limiter.rs` behind the unchanged
+  public `InstanceLimiter`: `Slot::register`'s tightening branch and three `Paced` helpers. No
+  signature, `HttpConfig` field or adapter change. Booked in
+  `docs/contract/10.8/1740-knobas-http-tightening-takes-over-what-was-left.md`.
+  *Reversing:* low, one module.
+- **What a tightening carries over.** *Fork:* the old limiter's spent share of its burst (the
+  ticket's example), drained whenever the old limiter was built by a loosening (its other
+  example), or the old limiter's unspent requests counted in seconds of its refill.
+  *Ruling:* seconds of refill: the new limiter starts with `left × new rate ÷ old rate`
+  requests, at most its burst. *Reasoning:* a loosened limiter starts drained, so if nobody
+  sends on it, what it has left after `t` seconds is `old rate × t`, and the conversion hands the
+  stricter quota `new rate × t`: exactly what it would have refilled itself, whatever the two
+  bursts. The burst share is exact only when both quotas take as long to refill their burst; when
+  the strict one takes longer (1/s burst 10 against 10/s burst 20) it hands out five times what
+  the strict quota would have refilled. "Drained after a loosening" makes the first request of a
+  tightening wait even after an hour of quiet. *Cost:* where the looser quota refills its burst
+  faster than the stricter one does, a tightening from a full limiter starts below the stricter
+  burst (10/s burst 20 to 1/s burst 10 starts with 2), so the first few requests after it are
+  slower; never more than the server was configured for. *Reversing:* low, one expression in
+  `Paced::tightened`.
+- **Requests the loose client sent in between.** *Ruling:* accepted as the bound. They are off
+  the old limiter already, so the new one never gets them back, but each is counted at the loose
+  rate rather than the strict one, so the total across a turn can pass what the strict quota
+  alone would have let through by at most what the loose client sent within one strict refill
+  period. Charging them at the strict rate needs every limiter's history kept per quota, for a
+  case that needs two sources on one server sending within seconds of each other.
+  *Reversing:* moderate; a ledger per origin.
+- **Reading what the old limiter has left.** Governor has no peek. *Ruling:* take it in halving
+  steps from the largest power of two within the burst and count what was taken, leaving the old
+  limiter spent. A holder can only be waiting on the old limiter when it has nothing left, so
+  the count takes nothing a waiter was owed. A token refilled mid-count and the fractional part
+  of the conversion are dropped, which only ever counts low. *Reversing:* low.
+- **Whether the change owes a live suite.** *Ruling:* no. The changed branch runs only when two
+  configurations at different quotas share an origin and the stricter one comes back. Kuma's
+  socket asks for its read half's quota since #1723 (PR #1757), so `just kuma-live` never changes
+  the quota and would run none of this, and no live suite seeds two sources at different quotas
+  on one server. The change is arithmetic on knobas' own limiter, witnessed at `HttpClient::send`
+  against a counting server. *Reversing:* n/a.
