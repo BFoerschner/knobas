@@ -12766,11 +12766,12 @@ The measurement came after it.
 - **Which clock.** *Ruling:* `std::time::Instant`, not governor's clock. *Reasoning:* the quiet is
   only compared with itself, never with governor's state, and `u64` nanoseconds last centuries.
   *Reversing:* low.
-- **How the tests wait.** *Fork:* real half-second sleeps, or an injectable clock. *Ruling:* real
-  sleeps, in three module tests (about 0.7 s, run in parallel). *Reasoning:* a clock seam would
-  widen a frozen module for its tests' sake, and the real sleep also witnesses the clock.
-  `a_request_ends_the_quiet` allows one request, which ten a second refills in 100 ms of a slow
-  run. *Reversing:* low.
+- **How the tests wait.** *Fork:* real sleeps, or an injectable clock. *Ruling:* real sleeps, in
+  four module tests (at most 0.5 s each, run in parallel). *Reasoning:* a clock seam would widen a
+  frozen module for its tests' sake, and the real sleep also witnesses the clock. Each assertion
+  leaves a slow run room: `a_request_ends_the_quiet` allows two requests (300 ms at ten a second,
+  against four if the grant were not recorded), and `a_quiet_is_counted_at_the_stricter_rate`
+  sleeps 100 ms against the second one a second needs for one request. *Reversing:* low.
 - **`a_tightening_credits_seconds_of_refill`.** *Ruling:* kept as it was, with its comment saying
   the loose limiter was built a moment before. *Reasoning:* its quiet is microseconds, which at one
   a second credits nothing, so the idle bound only changes it after a three-second stall between
