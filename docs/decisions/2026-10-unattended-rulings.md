@@ -12056,3 +12056,20 @@ The write side's rung is `attempts`, 1 after the first failure. That is the sync
   the same table and the same underlined keys. The reads are cached per entity id (`asked`, kept
   across weeks), so a re-render issues none; a failed read is retried on the next render. No
   follow-up for a `kind` on the week row: three reads a week, once each. *Reversing:* low.
+## #1639 — read back a keychain secret that holds a quote, a backslash or a tab
+
+Ruled 2026-10-22 by the implementer on Opus. Spec #1620, ruling C1 (owned `String`s, no v3).
+
+- **Where the round trip runs.** *Fork:* the ticket wants a test "through `put` then `get`" that is
+  red before the fix, but `MemoryStore` keeps the `Secret` itself and never encodes, so it cannot
+  go red; `KeyringStore` encodes, but its only round-trip test writes to the real keychain.
+  *Ruling:* a `#[cfg(test)]` constructor, `KeyringStore::over`, hands the store
+  `keyring_core::mock::Store`, the in-memory credential store `keyring-core` ships (no new
+  dependency). `put` and `get` then run their real `encode`/`decode` path and no keychain is
+  opened. `MemoryStore` is left as it is: making it store the envelope would change what every
+  `knobas-app` test runs against, which is a separate ticket. *Reversing:* low; one test
+  constructor and four tests.
+- **"The same escapes round-trip in `kind`".** *Fork:* knobas writes `kind` only from four fixed
+  names, so no quote, backslash or tab can round-trip in it. *Ruling:* read it as the reader's
+  half: a stored item whose kind is spelled with a JSON escape (`api\u005ftoken`) reads as that
+  kind, which is the case the borrowed field refused. *Reversing:* low.
