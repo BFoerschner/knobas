@@ -1595,11 +1595,17 @@ mod tests {
     type Upstream = Box<dyn FnOnce(&mut Vec<serde_json::Value>) + Send>;
 
     /// A server whose listing **changes under the walk** (#1623). It sorts by
-    /// the key the JQL's `ORDER BY` names, as Jira does, and once it has
+    /// the keys the JQL's `ORDER BY` names, as Jira does, and once it has
     /// served the walk `n` pages it applies `between[n]` before answering the
     /// next, so an edit or a deletion lands between two requests the way a
     /// colleague's does. Every call that is not `/search` goes to a plain
     /// [`FakeApi`].
+    ///
+    /// `issues` is kept in **index order**: rows the sort keys leave tied come
+    /// back in it, and an edit moves the edited issue to its end. That is what
+    /// the seeded Jira does (#1720, measured on 10.3.24): an edit reindexes the
+    /// issue, a delete plus an add, and a group tied on `created` comes back in
+    /// document order.
     struct LiveIndex {
         issues: Mutex<Vec<serde_json::Value>>,
         between: Mutex<HashMap<u32, Upstream>>,
@@ -1627,10 +1633,25 @@ mod tests {
             .and_then(crate::time::parse_jira_time)
     }
 
-    /// [`issue`] with the `created` stamp an ordering over it reads.
+    /// Jira's numeric issue id, which `ORDER BY id` sorts on.
+    fn id_of(issue: &serde_json::Value) -> u64 {
+        issue["id"]
+            .as_str()
+            .and_then(|id| id.parse().ok())
+            .expect("a filed issue has a numeric id")
+    }
+
+    /// [`issue`] with the `created` stamp an ordering over it reads, and an id
+    /// that follows the key's number, as Jira's do for issues filed in turn.
     fn filed(key: &str, created: &str, updated: &str) -> serde_json::Value {
         let mut raw = issue(key, updated, 0, 0);
         raw["fields"]["created"] = serde_json::json!(created);
+        let number: u64 = key
+            .rsplit('-')
+            .next()
+            .and_then(|n| n.parse().ok())
+            .expect("a key ends in its number");
+        raw["id"] = serde_json::json!((10_000 + number).to_string());
         raw
     }
 
@@ -1649,12 +1670,17 @@ mod tests {
             .collect()
     }
 
-    /// An edit upstream: `key`'s `updated` moves to `updated`.
+    /// An edit upstream: `key`'s `updated` moves to `updated`, and the issue,
+    /// reindexed, moves to the end of the index order.
     fn edit_to(key: &'static str, updated: &'static str) -> Upstream {
         Box::new(move |issues| {
-            for hit in issues.iter_mut().filter(|i| i["key"] == key) {
-                hit["fields"]["updated"] = serde_json::json!(updated);
-            }
+            let at = issues
+                .iter()
+                .position(|i| i["key"] == key)
+                .unwrap_or_else(|| panic!("no {key} to edit"));
+            let mut hit = issues.remove(at);
+            hit["fields"]["updated"] = serde_json::json!(updated);
+            issues.push(hit);
         })
     }
 
@@ -1695,20 +1721,32 @@ mod tests {
                         change(&mut issues);
                     }
                     *served += 1;
-                    let key = if jql.ends_with("ORDER BY created ASC") {
-                        "created"
-                    } else if jql.ends_with("ORDER BY updated ASC") {
-                        "updated"
-                    } else {
-                        panic!("an order this server does not model: {jql}")
-                    };
+                    let keys: Vec<&str> = jql
+                        .rsplit_once("ORDER BY ")
+                        .map_or("", |(_, order)| order)
+                        .split(", ")
+                        .map(|key| match key {
+                            "created ASC" => "created",
+                            "updated ASC" => "updated",
+                            "id ASC" => "id",
+                            _ => panic!("an order this server does not model: {jql}"),
+                        })
+                        .collect();
                     let since = since_of(jql, self.rest.offset_secs);
                     let mut matching: Vec<serde_json::Value> = issues
                         .iter()
                         .filter(|i| since.is_none_or(|s| stamp(i, "updated") >= Some(s)))
                         .cloned()
                         .collect();
-                    matching.sort_by_key(|i| stamp(i, key));
+                    // Stable, so what the keys leave tied stays in index order.
+                    matching.sort_by(|a, b| {
+                        keys.iter().fold(std::cmp::Ordering::Equal, |o, &key| {
+                            o.then_with(|| match key {
+                                "id" => id_of(a).cmp(&id_of(b)),
+                                stamp_key => stamp(a, stamp_key).cmp(&stamp(b, stamp_key)),
+                            })
+                        })
+                    });
                     let window: Vec<serde_json::Value> = matching
                         .iter()
                         .skip(start_at as usize)
@@ -1758,6 +1796,32 @@ mod tests {
             crate::time::parse_jira_time("2026-08-22T11:40:00.000+0000"),
             "held at the ceiling: PAY-1's edit came after the run started"
         );
+    }
+
+    /// **An edit cannot move a row out of a tie group either** (#1720). Five
+    /// issues filed in one import share one `created` stamp, so `created`
+    /// leaves the whole group to Jira's own tiebreak, the index order. Between
+    /// the first page and the second PAY-1, on the page already read, is
+    /// edited and reindexed to the end of the group; without a second sort key
+    /// PAY-3 shifts onto the page already read and no request returns it, with
+    /// `total` unchanged. `id` breaks the tie on a value nothing changes.
+    #[tokio::test]
+    async fn an_issue_edited_in_a_tie_group_does_not_shift_an_unread_one_past_it() {
+        let imported = (1..=5)
+            .map(|n| {
+                filed(
+                    &format!("PAY-{n}"),
+                    "2026-08-01T09:00:00.000+0000",
+                    &format!("2026-08-22T11:{}0:00.000+0000", n - 1),
+                )
+            })
+            .collect();
+        let api = LiveIndex::new(
+            imported,
+            [(1, edit_to("PAY-1", "2026-08-22T11:50:00.000+0000"))],
+        );
+        let (keys, _) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5"]);
     }
 
     /// **A shrinking total fails the walk** (#1623, ruling A5). PAY-1 is

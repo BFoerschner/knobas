@@ -12,12 +12,16 @@ use knobas_source::watermark::{Jql, MinuteLiteral};
 
 use crate::JiraConfig;
 
-/// `<scope> AND updated >= "<since>" ORDER BY created ASC`, with either half
-/// omitted when it does not apply.
+/// The walk's order: two keys, both of which an edit leaves where they were.
+const WALK_ORDER: &str = "ORDER BY created ASC, id ASC";
+
+/// `<scope> AND updated >= "<since>" ORDER BY created ASC, id ASC`, with
+/// either half omitted when it does not apply.
 ///
 /// The filter is on `updated` and the order on `created` (#1623, ruling A1):
 /// the walk pages with `startAt`, and offset paging is only as sound as its
-/// sort key is still. See the tests for the arithmetic.
+/// sort key is still. `id` breaks ties on `created` (#1720): see the tests for
+/// the arithmetic.
 ///
 /// Nothing here escapes anything, and nothing needs to:
 /// [`JiraConfig::from_json`] has already refused a project key that is not
@@ -36,12 +40,12 @@ pub(crate) fn build_jql(
             Jql::render(since, server_offset_secs)
         ));
     }
-    // `created`, the one key an edit cannot move, is what makes startAt
-    // paging safe over a live index; see the tests.
+    // `created`, which an edit cannot move, then `id`, which nothing can, is
+    // what makes startAt paging safe over a live index; see the tests.
     if clauses.is_empty() {
-        "ORDER BY created ASC".to_owned()
+        WALK_ORDER.to_owned()
     } else {
-        format!("{} ORDER BY created ASC", clauses.join(" AND "))
+        format!("{} {WALK_ORDER}", clauses.join(" AND "))
     }
 }
 
@@ -114,17 +118,29 @@ mod tests {
     /// moves nothing; an issue filed mid-walk joins the end, where the walk
     /// still reads it. What is left is a deletion, which shrinks `total` and
     /// fails the run (`sync::tests::a_total_that_shrank_between_pages_fails_the_run`).
+    ///
+    /// **`id ASC` after it is load-bearing too** (#1720). Issues that share
+    /// one `created` stamp -- an import at minute or day resolution files a
+    /// whole batch that way -- come back in Jira's index order, and an edit
+    /// reindexes the issue to the end of its group, which is the same shift
+    /// inside the group. `id` is unique and nothing changes it; `key` would
+    /// change on a move to another project. Measured on the seeded Jira:
+    /// `live_jira_seeded`'s
+    /// `an_edit_reorders_issues_tied_on_created_and_id_holds_them_still`.
     #[test]
     fn a_full_sync_is_scoped_and_ordered() {
         assert_eq!(
             build_jql(&cfg(json!({ "projects": ["PAY", "OPS"] })), None, 0),
-            r#"project in ("PAY", "OPS") ORDER BY created ASC"#
+            r#"project in ("PAY", "OPS") ORDER BY created ASC, id ASC"#
         );
     }
 
     #[test]
     fn an_unscoped_full_sync_is_still_valid_jql() {
-        assert_eq!(build_jql(&cfg(json!({})), None, 0), "ORDER BY created ASC");
+        assert_eq!(
+            build_jql(&cfg(json!({})), None, 0),
+            "ORDER BY created ASC, id ASC"
+        );
     }
 
     /// The literal is rendered in the server's zone, because JQL has none.
@@ -136,11 +152,11 @@ mod tests {
                 Some(watermark()),
                 7_200
             ),
-            r#"project in ("PAY") AND updated >= "2026-08-22 13:46" ORDER BY created ASC"#
+            r#"project in ("PAY") AND updated >= "2026-08-22 13:46" ORDER BY created ASC, id ASC"#
         );
         assert_eq!(
             build_jql(&cfg(json!({})), Some(watermark()), 0),
-            r#"updated >= "2026-08-22 11:46" ORDER BY created ASC"#
+            r#"updated >= "2026-08-22 11:46" ORDER BY created ASC, id ASC"#
         );
     }
 
@@ -154,7 +170,7 @@ mod tests {
                 Some(watermark()),
                 0
             ),
-            r#"(labels = sepa OR priority = High) AND updated >= "2026-08-22 11:46" ORDER BY created ASC"#
+            r#"(labels = sepa OR priority = High) AND updated >= "2026-08-22 11:46" ORDER BY created ASC, id ASC"#
         );
     }
 
