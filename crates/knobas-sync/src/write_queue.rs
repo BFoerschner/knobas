@@ -371,6 +371,13 @@ pub async fn release_unauthorized(
 /// [`release_unauthorized`] bumps and [`waited`] reads before it records a
 /// refusal. A lock of its own rather than the flush lock: a credential saved
 /// while a flush is out must not wait for that flush's HTTP calls.
+///
+/// Process-wide per source id, and the id alone: not per database or per
+/// pool. Production has one database and unique source ids, so that is
+/// right there. In tests every test in a binary shares the map, so tests
+/// that flush or release the same id share one release count, and one
+/// test's credential save makes another's 401 look stale (#1752, #1769).
+/// Give each test its own source id.
 fn gate(source_id: &str) -> Arc<Gate> {
     static GATES: OnceLock<Mutex<HashMap<String, Arc<Gate>>>> = OnceLock::new();
     let gates = GATES.get_or_init(|| Mutex::new(HashMap::new()));
