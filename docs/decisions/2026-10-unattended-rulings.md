@@ -11695,3 +11695,28 @@ set.
   *Ruling:* `CountingServer` keeps its port bound for the rest of the test process (a forgotten
   duplicate of the listener), so no later server in the binary gets it. The quota map stays
   without a test-only reset. *Reversing:* low, test code.
+
+### #1630: merge-manager review (Opus, PR #1724, 2026-10-22)
+
+- **A quota that only tightens until restart.** The rate fields are on every source's settings
+  form, so a raised quota is silently not used until restart, and a quota tried in a draft's
+  *Test connection* holds the origin down too. Before #1630 an edit applied from the next client.
+  *Ruling:* merge as built, because it closes SPI-2, and file #1728 (`ready-for-agent`, since the
+  form shows a value the app does not use): loosen once no live client asks for the stricter
+  quota (weak registrations, no configuration identity needed), with a loosened limiter starting
+  drained so that alternating sources get no fresh burst. *Reversing:* the follow-up is the
+  reversal, inside `limiter.rs`.
+- **#1723 (Kuma's polling transport at the read half's 5/s, burst 10).** *Ruling:* it stays
+  `backlog`. The socket carries only writes, and they go through the queue, so nobody waits on
+  one in the UI. A single write's dozen polls mostly fit the shared burst, `just kuma-live`'s
+  `more_writes_in_a_minute_than_kuma_allows_logins_all_land` is green, and the pacing is the
+  spec's stricter-wins rule. *Reversing:* relabel.
+- **A local-quota failure in the write queue.** `Protocol` with no status is a refusal in
+  `write_queue::retryable`, so a write the limiter held past the budget would now be refused
+  instead of waiting. The spec says `Protocol`, and with serial adapters a write cannot wait that
+  long today. *Ruling:* follow the spec and file #1729 (`backlog`). *Reversing:* n/a.
+- **The implementer's other rulings** (origin map of direct limiters, field-by-field stricter,
+  tightening without a drain, a retry keeping the previous failure, the public seam for #1631,
+  `with_send_budget`, held test ports) are upheld. Lock order is `INSTANCES` then the slot's
+  `paced`, and no path takes them in reverse. Nothing is awaited under either: the limiter is
+  cloned out before the wait. The map holds one entry per origin. *Reversing:* n/a.
