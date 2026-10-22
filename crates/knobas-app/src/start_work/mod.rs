@@ -66,6 +66,7 @@ pub mod queue;
 use async_trait::async_trait;
 use knobas_core::entity::EntityRef;
 use knobas_core::start_work::{self as store, Advance, FlowStep, Step, StepOutcome};
+use knobas_sync::background::Background;
 
 pub use knobas_core::start_work::flow;
 use sqlx::PgPool;
@@ -322,10 +323,25 @@ pub async fn run(
     steps: &dyn Steps,
     ticket: &EntityRef,
 ) -> Result<Vec<FlowStep>, IpcError> {
+    run_until(pool, steps, ticket, &|| false).await
+}
+
+/// [`run`], stopping before a step once `quitting` says so (#1751): the step
+/// stays pending, and the flow as it stands is the answer.
+async fn run_until(
+    pool: &PgPool,
+    steps: &dyn Steps,
+    ticket: &EntityRef,
+    quitting: &(dyn Fn() -> bool + Sync),
+) -> Result<Vec<FlowStep>, IpcError> {
     let mut last: Option<i64> = None;
     loop {
         let flow = store::flow(pool, ticket).await?;
         let id = match store::advance(&flow) {
+            // The quit has begun: a step started now would send a write the
+            // quit may abort mid-send (ADR-0012). Left pending, it is the next
+            // start's *Run*.
+            Advance::Run(_) if quitting() => return Ok(flow),
             Advance::Run(step) => step.id,
             // Waiting, stopped or done: in every case the sequence goes no
             // further without the user, and the flow as it stands is the
@@ -522,6 +538,13 @@ impl Drop for Behind {
 /// stepper stops on a step the reader can retry instead of a pending one that
 /// never moves.
 ///
+/// **The run is in `background`, the scheduler's set (#1751)**, as a write's
+/// send behind its answer is (#1633): the quit waits for it, under the
+/// scheduler's grace, before the pool closes, so a step's send in flight at
+/// the quit lands its `sent` mark and its step's outcome. Once the quit has
+/// begun the run takes no further step, and a run asked for then is not
+/// started: its steps stay pending for the next start's *Run*.
+///
 /// # Errors
 ///
 /// [`IpcError`] if the flow cannot be read for the answer.
@@ -529,28 +552,38 @@ pub async fn run_in_background<S: Steps + 'static>(
     pool: &PgPool,
     steps: std::sync::Arc<S>,
     ticket: &EntityRef,
+    background: &Background,
 ) -> Result<Vec<FlowStep>, IpcError> {
     if let Some(claim) = Behind::claim(pool, ticket) {
-        let (pool, ticket) = (pool.clone(), ticket.clone());
-        tokio::spawn(async move {
+        let (task_pool, task_ticket, set) = (pool.clone(), ticket.clone(), background.clone());
+        // Refused, the task is dropped unrun and its claim with it.
+        let spawned = background.spawn(async move {
+            let (pool, ticket) = (task_pool, task_ticket);
+            let quitting = || set.is_closed();
             let mut claim = Some(claim);
             while claim.is_some() {
-                if let Err(error) = run(&pool, steps.as_ref(), &ticket).await {
+                if let Err(error) = run_until(&pool, steps.as_ref(), &ticket, &quitting).await {
                     tracing::warn!(%ticket, %error, "a start-work run behind its answer failed");
                     stop_where_it_was(&pool, &ticket, &error.message).await;
                 }
                 drop(claim.take());
                 // A retry or skip that landed while this run was finishing
                 // found the claim held and started nothing: its step is
-                // pending with no loop to take it. Take it here.
-                let again = store::flow(&pool, &ticket)
-                    .await
-                    .is_ok_and(|flow| matches!(store::advance(&flow), Advance::Run(_)));
+                // pending with no loop to take it. Take it here -- but not
+                // once the quit has begun, when the step waits for the next
+                // start and taking it would only loop.
+                let again = !quitting()
+                    && store::flow(&pool, &ticket)
+                        .await
+                        .is_ok_and(|flow| matches!(store::advance(&flow), Advance::Run(_)));
                 if again {
                     claim = Behind::claim(&pool, &ticket);
                 }
             }
         });
+        if !spawned {
+            tracing::info!(%ticket, "knobas is quitting: the start-work run waits for the next start");
+        }
     }
     Ok(store::flow(pool, ticket).await?)
 }

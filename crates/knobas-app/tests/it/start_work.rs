@@ -1379,6 +1379,7 @@ async fn read_until(pool: &PgPool, done: impl Fn(&[FlowStep]) -> bool) -> Vec<Fl
 #[tokio::test(flavor = "multi_thread")]
 async fn run_answers_before_the_first_send_and_the_steps_land_behind_it() {
     let pool = corpus("start_work_behind").await;
+    let background = knobas_sync::background::Background::new();
     let flow = planned(&pool).await;
     let branch = proposed_branch(&flow);
     let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
@@ -1386,7 +1387,7 @@ async fn run_answers_before_the_first_send_and_the_steps_land_behind_it() {
 
     let answered = tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket()),
+        start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket(), &background),
     )
     .await
     .expect("the run answers while its first send is held open")
@@ -1406,7 +1407,7 @@ async fn run_answers_before_the_first_send_and_the_steps_land_behind_it() {
     .await;
     tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket()),
+        start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket(), &background),
     )
     .await
     .expect("a second ask answers, and does not wait on the first")
@@ -1432,6 +1433,7 @@ async fn run_answers_before_the_first_send_and_the_steps_land_behind_it() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refusal_behind_the_answer_stops_the_flow_where_it_happened() {
     let pool = corpus("start_work_behind_refused").await;
+    let background = knobas_sync::background::Background::new();
     planned(&pool).await;
     let fake = std::sync::Arc::new(Fake::new().answering(
         "create_branch",
@@ -1439,7 +1441,7 @@ async fn a_refusal_behind_the_answer_stops_the_flow_where_it_happened() {
             detail: "branch name taken".to_owned(),
         }),
     ));
-    start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket())
+    start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket(), &background)
         .await
         .expect("the run starts");
     let flow = read_until(&pool, |f| {
@@ -1459,7 +1461,7 @@ async fn a_refusal_behind_the_answer_stops_the_flow_where_it_happened() {
     let ticket = start_work::ready_retry(&pool, fake.as_ref(), id)
         .await
         .expect("a retry");
-    start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket)
+    start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket, &background)
         .await
         .expect("the retry runs");
     read_until(&pool, |f| {
@@ -1476,6 +1478,7 @@ async fn a_refusal_behind_the_answer_stops_the_flow_where_it_happened() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_second_run_while_one_is_behind_starts_no_second_loop() {
     let pool = corpus("start_work_behind_once").await;
+    let background = knobas_sync::background::Background::new();
     let flow = planned(&pool).await;
     let branch = proposed_branch(&flow);
     let look = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
@@ -1485,7 +1488,7 @@ async fn a_second_run_while_one_is_behind_starts_no_second_loop() {
             .looking_through(&look),
     );
 
-    start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket())
+    start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket(), &background)
         .await
         .expect("the run starts");
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -1507,7 +1510,7 @@ async fn a_second_run_while_one_is_behind_starts_no_second_loop() {
 
     tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket()),
+        start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket(), &background),
     )
     .await
     .expect("a second ask answers at once")
@@ -1535,6 +1538,7 @@ async fn a_second_run_while_one_is_behind_starts_no_second_loop() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_step_a_run_behind_may_be_taking_cannot_be_skipped_or_edited() {
     let pool = corpus("start_work_behind_guarded").await;
+    let background = knobas_sync::background::Background::new();
     let flow = planned(&pool).await;
     let branch = proposed_branch(&flow);
     let branch_step = step_of(&flow, Step::CreateBranch).clone();
@@ -1545,7 +1549,7 @@ async fn a_step_a_run_behind_may_be_taking_cannot_be_skipped_or_edited() {
             .looking_through(&look),
     );
 
-    start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket())
+    start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket(), &background)
         .await
         .expect("the run starts");
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);

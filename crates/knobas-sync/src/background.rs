@@ -61,6 +61,18 @@ impl Background {
         true
     }
 
+    /// Whether [`close`](Self::close) has begun: from then on nothing is
+    /// spawned. For a task in the set that does its work in steps -- a
+    /// start-work run (#1751) -- to stop before the next one rather than
+    /// start a send the quit would abort.
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        self.tasks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_none()
+    }
+
     /// Refuse every later spawn **now**, and answer the wait: until
     /// `deadline` for the tasks running, then abort what is left. The refusal
     /// is not deferred to the first poll, so a caller can close the set at
@@ -97,6 +109,7 @@ mod tests {
     #[tokio::test]
     async fn a_closed_set_spawns_nothing_and_close_waits_for_what_runs() {
         let background = Background::new();
+        assert!(!background.is_closed());
         let (tell, mut heard) = tokio::sync::mpsc::unbounded_channel();
         let early = tell.clone();
         assert!(background.spawn(async move {
@@ -109,6 +122,7 @@ mod tests {
             .await;
         assert_eq!(heard.try_recv(), Ok("ran to its end"), "close awaited it");
 
+        assert!(background.is_closed());
         assert!(!background.spawn(async move {
             let _ = tell.send("spawned after the close");
         }));
