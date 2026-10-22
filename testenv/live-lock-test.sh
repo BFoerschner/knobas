@@ -40,6 +40,13 @@ case "${1:-} ${2:-}" in
 esac
 STUB
 chmod +x "$scratch/bin/docker"
+# A curl that answers: `live_up gitea` probes http://127.0.0.1:3000 for health,
+# and without a stub the cases passed only on a machine with a real Gitea up
+# there (a bare Linux runner has none, #1713).
+printf '#!/bin/sh
+exit 0
+' >"$scratch/bin/curl"
+chmod +x "$scratch/bin/curl"
 
 export PATH="$scratch/bin:$PATH" STUB_LOG="$scratch/docker.log"
 export KNOBAS_LIVE_LOCK="$scratch/knobas-live-jvm.lock"
