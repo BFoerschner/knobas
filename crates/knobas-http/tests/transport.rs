@@ -489,6 +489,64 @@ async fn a_limiter_wait_never_outlasts_the_budget() {
     );
 }
 
+/// **A call the local quota stopped is marked beside its error** (#1729).
+///
+/// The error is a status-less `Protocol`, which is also what a refusal
+/// knobas raised itself looks like, so the write queue cannot tell the two
+/// apart from the error alone. [`knobas_http::watch_local_quota`] hands back
+/// the quota a call inside it stopped on. One a second with a burst of one:
+/// the first send goes, the second cannot pass the limiter within its
+/// budget and is marked. A call that went is not marked, and a fresh watch
+/// does not see the last one's mark.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_watched_call_the_quota_stopped_is_marked() {
+    let server = CountingServer::always(200, "");
+    let client = paced_client(&server, 1).with_send_budget(std::time::Duration::from_millis(300));
+
+    let (went, quota) =
+        knobas_http::watch_local_quota(client.send(client.request(Method::GET, "/x"))).await;
+    assert!(went.is_ok(), "the burst lets the first through: {went:?}");
+    assert_eq!(quota, None, "a call that went is not marked");
+
+    let (stopped, quota) =
+        knobas_http::watch_local_quota(client.send(client.request(Method::GET, "/x"))).await;
+    assert!(
+        matches!(stopped, Err(SourceError::Protocol { status: None, .. })),
+        "{stopped:?}"
+    );
+    let quota = quota.expect("the quota that stopped the call is handed back");
+    assert!(quota.to_string().contains("1 request a second"), "{quota}");
+    assert_eq!(server.hits(), 1, "the stopped call never reached the server");
+
+    let ((), quota) = knobas_http::watch_local_quota(async {}).await;
+    assert_eq!(quota, None, "each watch starts unmarked");
+}
+
+/// **A retry the quota stopped is not marked** (#1729): the call ends with
+/// what the source said on the attempt before, a `503` here, and that answer
+/// is what the write queue reads. Only a call that never reached the source
+/// carries the mark.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_retry_the_quota_stopped_is_not_marked() {
+    let busy = CountingServer::always(503, "");
+    let client = paced_client(&busy, 1).with_send_budget(std::time::Duration::from_millis(800));
+
+    let (answered, quota) =
+        knobas_http::watch_local_quota(client.send(client.request(Method::GET, "/x"))).await;
+
+    assert!(
+        matches!(
+            answered,
+            Err(SourceError::Protocol {
+                status: Some(503),
+                ..
+            })
+        ),
+        "{answered:?}"
+    );
+    assert_eq!(quota, None, "the source was asked, so this is its answer");
+}
+
 /// What reaches `server` within the first 900 ms of `per_client` sends started
 /// at once on each of `clients` -- under the second at which a one-a-second
 /// quota adds a token, so the burst is all that can pass. The sends still
