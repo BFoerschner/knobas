@@ -11894,3 +11894,12 @@ set.
   process. Since #1611, nothing but the scheduler holds a pass. *Reversing:* low.
 - **`replace` drops a recorded update check.** *Ruling:* acceptable. `sources::start` re-runs the
   check in the background on every bring-up, a retry included. *Reversing:* n/a.
+- **Merge-manager: the declarations come from bring-up's registry, not the `Lifecycle`'s.**
+  *Fork:* the two could differ, and Settings reads the `Lifecycle`'s. *Ruling:* accepted. Both
+  production callers of `spawn_bring_up` (`setup` and `retry_database`) pass
+  `Registry::for_process()`, and `setup` manages `Lifecycle::new()`, which is the same list;
+  `bring_up` with any other registry exists only behind `test-util`. *Reversing:* low.
+- **Merge-manager: the `include_str!` criterion's intent is met.** *Ruling:* both byte-offset
+  tests are gone and their claims run in `tests/it/bring_up.rs`; the eight scans left in
+  `wiring.rs` pin plugin registration, the handler list and version pins, and order nothing. The
+  tick with a note stands; #1738 (backlog) rewords the criterion. *Reversing:* n/a.
