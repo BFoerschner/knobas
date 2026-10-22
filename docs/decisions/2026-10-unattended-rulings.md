@@ -12030,5 +12030,14 @@ The write side's rung is `attempts`, 1 after the first failure. That is the sync
 - **Scope.** *Fork:* reset all 33 module-level stores or the six the ticket names. *Ruling:* the
   six; the rest sit in `NOT_YET_RESET`, which the completeness test accepts and #1743 empties.
   *Reversing:* low.
-- **Unwitnessed resets.** `health.reset`'s `phase` and `kindRegistry.reset`'s `loaded` have no
-  mutant-killing test: dirtying them needs a reseed or load against a mocked port. Left as is.
+- **Unwitnessed resets (merge-manager).** The implementer left `health.reset`'s `phase` and
+  `kindRegistry.reset`'s `loaded` unwitnessed. *Ruling:* a test each is owed, since both are
+  one-liners on a store factory; added to `test-resets.test.ts`, both mutants now die. *Reversing:* low.
+- **Scope against the ticket (merge-manager).** *Fork:* does six resets plus a 19-entry
+  `NOT_YET_RESET` meet "a new store without a reset is red"? *Ruling:* yes. The ticket names
+  six stores and all six reset; the list is a known-gaps list, and a store in neither list is red
+  (test 1), a list entry that is gone or reset is red (test 2, which also fails if the scan finds
+  no files). #1743 empties it. *Reversing:* low.
+- **Skipped stores (merge-manager).** `resetStores` swallows only `[vitest] No "x" export`; a
+  store a file's partial mock stops from loading is not in that file's graph, so it holds no state
+  there, and a file that does load it resets it. *Reversing:* low.

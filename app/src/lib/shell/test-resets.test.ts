@@ -54,8 +54,8 @@ test("the scan sees what it is meant to", () => {
 // The resets do what the list says.
 // ---------------------------------------------------------------------------
 
-import { health } from "./health.svelte";
-import { kindRegistry } from "./kind-registry.svelte";
+import { createHealth, health } from "./health.svelte";
+import { createKindRegistry, kindRegistry } from "./kind-registry.svelte";
 import { lifecycle } from "./lifecycle.svelte";
 import { resetStores } from "./test-resets";
 import { push, toasts } from "./toasts.svelte";
@@ -80,4 +80,25 @@ test("resetStores puts every listed store back to a fresh window", async () => {
   expect(lifecycle.status).toBeNull();
   expect(lifecycle.db.state).toBe("starting");
   expect(lifecycle.ready).toBe(false);
+});
+
+test("health.reset drops a seeded store back to loading", async () => {
+  const h = createHealth({ credentialHealth: async () => [], listen: async () => () => {} });
+  const stop = h.start();
+  await h.reseed();
+  expect(h.phase).toBe("ready");
+  h.reset();
+  expect(h.phase).toBe("loading");
+  stop();
+});
+
+test("kindRegistry.reset makes the next load ask again", async () => {
+  const listAdapters = vi.fn(async () => []);
+  const registry = createKindRegistry({ listAdapters });
+  await registry.load();
+  await registry.load();
+  expect(listAdapters).toHaveBeenCalledTimes(1);
+  registry.reset();
+  await registry.load();
+  expect(listAdapters).toHaveBeenCalledTimes(2);
 });
