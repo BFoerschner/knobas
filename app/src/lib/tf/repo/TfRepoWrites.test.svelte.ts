@@ -8,7 +8,7 @@
  * `submit_write` was handed, which is the whole of what the shell decides.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import type { EntityDetail, EntityRow, SourceView, ViewAction, ViewBlock, ViewRow } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
@@ -16,6 +16,7 @@ import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import { forgetQueued } from "./queued.svelte";
+import { sourceName } from "./repo";
 import TfRepo, { forgetBranches, type RepoPorts } from "./TfRepo.svelte";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
@@ -737,4 +738,63 @@ test("a commit the source declares taken opens on Commit to <branch>, enabled (#
   flushSync();
   const [same] = [...dialog()!.querySelectorAll<HTMLInputElement>("input[type=radio]")];
   expect([same!.disabled, same!.checked, same!.hasAttribute("aria-describedby")]).toEqual([false, true, false]);
+});
+
+// The repository page's sentences name the source that fills the code-host role (ADR-0029), never Gitea.
+describe("a repository whose source is not Gitea", () => {
+  const forgejo = (): RepoPorts => {
+    const base = ports();
+    return {
+      ...base,
+      getEntity: async (id) => {
+        const detail = await base.getEntity(id);
+        return id === REPO ? ({ ...detail, source: { id: "forgejo", display_name: "Forgejo" } } as EntityDetail) : detail;
+      },
+    };
+  };
+  const seen = () => text(target);
+
+  test("Branches' delete dialog names it", async () => {
+    await draw([REPO, "branches"], null, forgejo());
+    button("Delete…", rowOf("feature/"))!.click();
+    flushSync();
+    const body = text(dialog()!);
+    expect(body).toContain("Forgejo closes it when the branch goes.");
+    expect(body).toContain("This deletes the branch on Forgejo.");
+    expect(body).not.toContain("Gitea");
+  });
+
+  test("Compare's reviewers line and its not-yet-synced line name it", async () => {
+    await draw(COMPARE("spike/sepa-instant"), "PAY-231", forgejo());
+    expect(seen()).toContain("Reviewers are asked on Forgejo after it opens.");
+    expect(seen()).not.toContain("Gitea");
+    unmount(view!);
+    view = null;
+    await draw(COMPARE("fix/PAY-231-README"), "PAY-231", forgejo());
+    expect(text(target.querySelector(".tf-compare .tf-empty"))).toBe(
+      "This branch is not on Forgejo yet, or knobas has not synced it. What it changes shows here once it has.",
+    );
+  });
+
+  test("Files' edit banner and queued-commit line name it", async () => {
+    await draw([REPO, "edit", "README.md"], "PAY-231", forgejo());
+    expect(text(target.querySelector(".tf-fileview .tf-banner.tf-info"))).toBe(
+      "The edit is committed to main on Forgejo. Your local checkout is never written to.",
+    );
+    type(editor(), "# payout\nnew line\n");
+    button("Commit change…", target)!.click();
+    flushSync();
+    button("Commit change", dialog()!)!.click();
+    await settle();
+    unmount(view!);
+    view = null;
+    await draw([REPO, "files", "README.md"], null, forgejo());
+    expect(text(target.querySelector(".tf-fileview .tf-banner.tf-warn"))).toBe(
+      "A commit of this file is queued: “PAY-231: update README.md”. It shows here once Forgejo has it.",
+    );
+  });
+
+  test("a source that is not yet known reads as the code host", () => {
+    expect([sourceName(null), sourceName({ id: "forgejo", display_name: "" })]).toEqual(["the code host", "forgejo"]);
+  });
 });

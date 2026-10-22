@@ -469,3 +469,8 @@ export function commitRefusal(section: ViewSection | undefined): string | null {
   }
   return null;
 }
+
+/** What the repository page calls its source in a sentence: the display name, else the id, else a role word. */
+export function sourceName(source: { id: string; display_name: string } | null | undefined): string {
+  return source?.display_name || source?.id || "the code host";
+}
