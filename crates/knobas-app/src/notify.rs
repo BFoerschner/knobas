@@ -343,9 +343,13 @@ mod tests {
         /// The addresses whose wait actually started, in order.
         started: Mutex<Vec<String>>,
         shown: Mutex<Vec<String>>,
-        /// One gate per *show*, oldest first: a duplicate send shows too,
-        /// and its (never-run) wait must not steal the running one's gate.
-        gates: Mutex<HashMap<String, Vec<Sender<String>>>>,
+        /// The gate of each wait that is *running*, by address. A gate is
+        /// filed when its wait starts, not when its banner is shown: a
+        /// duplicate or over-cap send shows too, drops its wait on its own
+        /// thread, and a gate filed at show time could be picked by `release`
+        /// before that thread had dropped it -- the release would reach no
+        /// one and the real wait would run on (#1762).
+        gates: Mutex<HashMap<String, Sender<String>>>,
         refuse: Mutex<bool>,
     }
 
@@ -356,15 +360,10 @@ mod tests {
             }
             self.shown.lock().unwrap().push(draft.address.clone());
             let (release, released) = mpsc::channel::<String>();
-            self.gates
-                .lock()
-                .unwrap()
-                .entry(draft.address.clone())
-                .or_default()
-                .push(release);
             let me = Arc::clone(self);
             let address = draft.address.clone();
             Ok(Box::new(move || {
+                me.gates.lock().unwrap().insert(address.clone(), release);
                 me.started.lock().unwrap().push(address);
                 released.recv().unwrap_or_else(|_| CLOSED.to_owned())
             }))
@@ -417,20 +416,20 @@ mod tests {
                 .expect("the fake backend shows")
         }
 
-        /// End the wait on `address` with `action`.
+        /// End the wait on `address` with `action`, once that wait is running
+        /// (its thread files the gate when it starts, a moment after the send
+        /// returned).
         fn release(&self, address: &str, action: &str) {
-            // A gate whose wait was never run (a duplicate or over-cap send
-            // dropped it) has no receiver; skip to the one that is waiting.
-            let mut gates = self.backend.gates.lock().unwrap();
-            let queue = gates
-                .get_mut(address)
-                .expect("a desktop notification was shown for this address");
-            while !queue.is_empty() {
-                if queue.remove(0).send(action.to_owned()).is_ok() {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(gate) = self.backend.gates.lock().unwrap().remove(address) {
+                    gate.send(action.to_owned())
+                        .expect("the running wait holds its receiver");
                     return;
                 }
+                assert!(Instant::now() < deadline, "no wait started for {address}");
+                std::thread::sleep(Duration::from_millis(1));
             }
-            panic!("no wait is running for {address}");
         }
 
         /// Block until no wait is running -- every emit has happened by then.
@@ -472,7 +471,7 @@ mod tests {
     /// event carrying the address -- while a clear leaves as nothing.
     ///
     /// The silence is asserted against the click in the same test, the rule
-    /// `notify.test.svelte.ts` follows: "nothing was emitted" alone cannot
+    /// `notify.test.ts` follows: "nothing was emitted" alone cannot
     /// tell a working `__closed` branch from a bench whose events port was
     /// never wired.
     #[test]

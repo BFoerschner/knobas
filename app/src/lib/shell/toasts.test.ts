@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { dismiss, push, toasts } from "./toasts.svelte";
+import { dismiss, push, reset, toasts } from "./toasts.svelte";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -13,7 +13,9 @@ afterEach(() => {
 
 test("a pushed toast is on the stack and leaves on its own", () => {
   const id = push({ text: "Synced 21 items from mock" });
-  expect(toasts.items.map((t) => t.text)).toEqual(["Synced 21 items from mock"]);
+  expect(toasts.items.map((t) => t.text)).toEqual([
+    "Synced 21 items from mock",
+  ]);
   expect(toasts.items[0]?.id).toBe(id);
 
   vi.advanceTimersByTime(6499);
@@ -51,4 +53,29 @@ test("dismiss is idempotent and removes only its own", () => {
 test("ids are not reused across pushes", () => {
   const ids = [push({ text: "a" }), push({ text: "b" }), push({ text: "c" })];
   expect(new Set(ids).size).toBe(3);
+});
+
+/**
+ * #1762: `reset()` runs after every test and leaves the timers of the toasts it
+ * dropped armed. A restarted counter handed the next test's first toast the
+ * same id, so a timer from a test seconds earlier removed it -- under load,
+ * between the toast being raised and the assertion on it.
+ */
+test("a reset does not let a dropped toast's timer take a later one", () => {
+  push({ text: "from an earlier test" });
+  vi.advanceTimersByTime(3000);
+  reset();
+
+  push({ text: "from this test" });
+  vi.advanceTimersByTime(3500);
+
+  expect(toasts.items.map((t) => t.text)).toEqual(["from this test"]);
+});
+
+test("a reset leaves no dismiss timer armed", () => {
+  push({ text: "a" });
+  push({ text: "b" });
+  expect(vi.getTimerCount()).toBe(2);
+  reset();
+  expect(vi.getTimerCount()).toBe(0);
 });

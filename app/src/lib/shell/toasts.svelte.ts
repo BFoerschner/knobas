@@ -39,6 +39,9 @@ const DEFAULT_MS = 6500;
 
 let nextId = 0;
 
+/** The armed auto-dismiss timer of each live toast, by id. */
+const timers = new Map<number, ReturnType<typeof setTimeout>>();
+
 /**
  * The live stack, oldest first.
  *
@@ -53,14 +56,22 @@ export function push(spec: ToastSpec): number {
   const id = ++nextId;
   toasts.items.push({ ...spec, id });
   const ms = spec.ms ?? DEFAULT_MS;
-  setTimeout(() => dismiss(id), ms);
+  timers.set(
+    id,
+    setTimeout(() => dismiss(id), ms),
+  );
   return id;
 }
 
-/** Drop the stack and restart the ids: a test starts on an empty screen. */
+/**
+ * Drop the stack: a test starts on an empty screen. The dropped toasts'
+ * dismiss timers are cleared, and the ids keep counting so a timer that
+ * somehow survives could never remove a later toast (#1762).
+ */
 export function reset(): void {
+  for (const timer of timers.values()) clearTimeout(timer);
+  timers.clear();
   toasts.items = [];
-  nextId = 0;
 }
 
 /**
@@ -68,5 +79,7 @@ export function reset(): void {
  * for a toast the reader has already closed by hand.
  */
 export function dismiss(id: number): void {
+  clearTimeout(timers.get(id));
+  timers.delete(id);
   toasts.items = toasts.items.filter((toast) => toast.id !== id);
 }
