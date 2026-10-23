@@ -14662,3 +14662,42 @@ Ruled 2026-10-23 by the merge-manager (Opus).
 - **Blocking calls the ticket did not name.** `spawn_into`'s `Command::spawn`, `git_on_path`'s
   `is_file` probes and `stop`'s `path.exists()` stay on the runtime. They are outside #1658's
   grep and wording, and are filed as #1856 (backlog).
+
+## #1657: the uncalled `log_all` command retires (Opus implementer, 2026-10-23)
+
+- **Diagnosis, re-checked.** *Ruling:* holds on `6cdaf42e`. `TfLogAll.svelte` imports
+  `logAllPreview`, `worklogDraft` and `logWork` and never `logAll`; outside the barrel the only
+  callers were the dev fake, its test, and `TfTime.svelte`'s local `$state` of that name. No
+  sibling change overtook it. *Reversing:* n/a.
+- **How far the retirement reaches.** *Ruling:* the command and the bulk path behind it:
+  `time::week::log_all`, `log_all_in_background`, `log_all_with` and `worklog::log_within`. The
+  ticket's defect is two paths that log a week with different failure rules; dropping only the
+  command would leave the second path in the crate with tests as its only callers, where the
+  next change to a failing day could still land in it and not in `log_work`. `log_within` had
+  no caller but `log_all_with`. `plan`, `vet` and the `pub(super)` helpers it reads
+  (`unlogged`, `concatenate`, `takes_a_worklog_for`) stay. *Reversing:* medium, revert the PR
+  and re-add the command under a new §10.8 entry.
+- **`week_ipc.rs`' three *Log all* tests.** *Ruling:* kept, sent through the dialog's path: a
+  `log_the_plan` helper asks for the plan and calls `time::worklog::log` once per row, with the
+  plan's start and seconds and offset 0 (the fixture week is UTC). The waiting `log`, not the
+  command's `log_in_background`, so the fake source has every worklog when the assertions run;
+  the two share `log_with` and `commit`. The tests now witness the path a person reaches, and
+  their names and assertions are unchanged. *Reversing:* low.
+- **`fake-features.test.ts`' week test.** *Ruling:* drops its `log_all` call and its "logging
+  empties the plan" half, and its title says so. The next test, *Log all's dialog path*, empties
+  the plan through `log_work`, so a second copy would add nothing. *Reversing:* low.
+- **`TfLogAll.svelte`'s header comment.** *Ruling:* left as it is, because the ticket requires
+  the file unchanged. Its lines "`log_all` is not called" and "`log_all`'s rule" now name a
+  retired command; filed as a backlog follow-up. *Reversing:* n/a.
+- **`mockups/shared/capabilities.md`.** *Ruling:* its *Log all* row names `log_work` in place of
+  `log_all`, in this PR, because the row lists the commands the feature runs on. *Reversing:*
+  trivial.
+
+### Reserved for Björn, ruled by implementer on Opus
+
+- **Retiring a command from the frozen IPC schema, and sign-off on its §10.8 entry**
+  (`docs/contract/10.8/1657-retire-log-all.md`), under Björn's 2026-10-22 waiver. *Ruling:*
+  retired and signed off, on #1578's and #1611's grounds and ruling D2. The entry only takes away
+  from the frozen surface. The command had no caller outside the barrel, the fake and tests. The
+  generated mirror changes in one doc comment only (`PlannedWorklog`'s), and the parts of #283,
+  #775 and #896 it supersedes are named and left unedited. *Reversing:* medium, revert the PR.
