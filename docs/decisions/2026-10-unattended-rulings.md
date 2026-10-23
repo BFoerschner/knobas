@@ -14866,3 +14866,9 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1859.
   *Reasoning:* promoting it dispatches a symptom fix, the cost #1865 names; skipping it starves
   the seat that "never leave a seat empty" protects. *Reversing:* low, one sentence.
 - **`tdd` not invoked, no mutants.** *Ruling:* docs-only, no code. *Reversing:* n/a.
+## #1661: a relative clones root refused at the setter (merge-manager, Sonnet, 2026-10-23)
+
+- **The fake IPC handler.** *Fork:* leave `set_clones_root` in `fake/checkouts.ts` accepting a
+  relative path, or mirror the refusal. *Ruling:* mirrored, three lines throwing the same `invalid`.
+  *Reasoning:* a QA pass on `?fake-ipc` would otherwise store `Code` and show a screen the real app
+  cannot reach. *Reversing:* trivial.

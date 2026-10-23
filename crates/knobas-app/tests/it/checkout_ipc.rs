@@ -1266,3 +1266,31 @@ async fn a_clones_root_typed_with_a_tilde_is_stored_under_home() {
         Some(format!("{}/code", home.trim_end_matches('/')))
     );
 }
+
+/// A root that is not absolute once `~` is home is refused where it is typed
+/// (#1661): Clone refuses it on every click and the scan would read it against
+/// the process's working directory. The stored root stays what it was.
+#[tokio::test]
+async fn a_relative_clones_root_is_refused_and_leaves_the_stored_one() {
+    let pool = pool().await;
+    let root = tempfile::tempdir().unwrap();
+    let spelled = root.path().to_string_lossy().into_owned();
+    set_clones_root(&pool, Some(&spelled)).await.unwrap();
+
+    for typed in ["Code", "./src", "  ../up  ", "~user/code"] {
+        let refused = set_clones_root(&pool, Some(typed)).await.unwrap_err();
+        assert_eq!(refused.code, IpcErrorCode::Invalid, "{typed:?}");
+        assert!(refused.message.contains("absolute"), "{}", refused.message);
+    }
+    assert_eq!(
+        clones_root(&pool).await.unwrap().as_deref(),
+        Some(spelled.as_str())
+    );
+
+    // An absolute path is still taken.
+    set_clones_root(&pool, Some("/srv/clones")).await.unwrap();
+    assert_eq!(
+        clones_root(&pool).await.unwrap().as_deref(),
+        Some("/srv/clones")
+    );
+}

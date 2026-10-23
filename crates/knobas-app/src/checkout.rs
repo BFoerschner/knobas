@@ -154,10 +154,21 @@ pub async fn clones_root(pool: &PgPool) -> Result<Option<String>, IpcError> {
 ///
 /// # Errors
 ///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if the path is not absolute once
+/// `~` is home (#1661): Clone refuses such a root on every click and the scan
+/// would read it against the process's working directory, so the one place it
+/// is typed refuses it;
 /// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
 pub async fn set_clones_root(pool: &PgPool, path: Option<&str>) -> Result<(), IpcError> {
     let home = std::env::var("HOME").ok();
     let path = settable(path).map(|path| expand_home(path, home.as_deref()));
+    if let Some(path) = &path
+        && !std::path::Path::new(path).is_absolute()
+    {
+        return Err(IpcError::invalid(format!(
+            "the clones root must be an absolute path (or start with ~/), not {path:?}"
+        )));
+    }
     write_setting(pool, CLONES_ROOT_KEY, path.as_deref()).await
 }
 
