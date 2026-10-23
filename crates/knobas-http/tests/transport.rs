@@ -101,6 +101,12 @@ fn a_secret_never_reaches_a_debug_rendering() {
             })
             .expect("client")
         ),
+        // A password in the base URL itself (#1640): refused by `new`, and
+        // still never printed by the config that carries it.
+        format!(
+            "{:?}",
+            config(format!("https://someone:{SECRET}@example.test"))
+        ),
     ];
 
     for rendering in renderings {
@@ -1900,7 +1906,11 @@ mod bounds {
             .await
             .expect_err("over the cap");
         assert!(names_the_cap(&error), "{error:?}");
-        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     /// What reqwest inflates counts, not what arrived: a gzip body far under
@@ -1928,7 +1938,9 @@ mod bounds {
         assert!(names_the_cap(&error), "{error:?}");
         // And the server did gzip it: reqwest asked for it.
         assert!(
-            server.heads()[0].to_ascii_lowercase().contains("accept-encoding: gzip"),
+            server.heads()[0]
+                .to_ascii_lowercase()
+                .contains("accept-encoding: gzip"),
             "{:?}",
             server.heads()
         );
@@ -1938,7 +1950,11 @@ mod bounds {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_body_at_or_under_the_cap_is_read() {
         fn at_the_cap(head: &str) -> Answer {
-            let len = if head.starts_with("GET /at ") { CAP } else { CAP / 2 };
+            let len = if head.starts_with("GET /at ") {
+                CAP
+            } else {
+                CAP / 2
+            };
             Answer::sent(response(200, "", &json_of_length(len as usize)))
         }
         let server = ScriptedServer::new(at_the_cap);
@@ -1963,7 +1979,26 @@ mod bounds {
             .await
             .expect("the status is a success");
         let read = answer.bytes().await;
-        assert!(read.is_err(), "read {} bytes", read.map(|b| b.len()).unwrap_or(0));
+        assert!(
+            read.is_err(),
+            "read {} bytes",
+            read.map(|b| b.len()).unwrap_or(0)
+        );
+    }
+
+    /// A reader that stops at a cap of its own reads the start of a body
+    /// declared over this one: only a read of the whole body is refused on
+    /// the declared length (Gitea's `raw_capped`, #711).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_body_declared_over_the_cap_still_yields_its_start() {
+        let server = ScriptedServer::new(twice_the_cap);
+        let client = capped_client(server.url());
+        let mut answer = client
+            .send(client.request(Method::GET, "/raw/big.txt"))
+            .await
+            .expect("the status is a success");
+        let first = answer.chunk().await.expect("the start").expect("a chunk");
+        assert!(!first.is_empty());
     }
 
     /// A download is not capped: `send_streaming` is for the bodies that are
@@ -2045,7 +2080,10 @@ mod bounds {
         }
         let lines = server.request_lines();
         assert_eq!(lines.len(), 10, "{lines:?}");
-        assert!(lines.iter().all(|line| line.starts_with("POST ")), "{lines:?}");
+        assert!(
+            lines.iter().all(|line| line.starts_with("POST ")),
+            "{lines:?}"
+        );
     }
 
     /// A read still follows a redirect.
@@ -2062,7 +2100,10 @@ mod bounds {
         let client = capped_client(server.url());
         let read: serde_json::Value = client.get_json("/old", &[]).await.expect("followed");
         assert_eq!(read["moved"], true);
-        assert_eq!(server.request_lines(), ["GET /old HTTP/1.1", "GET /new HTTP/1.1"]);
+        assert_eq!(
+            server.request_lines(),
+            ["GET /old HTTP/1.1", "GET /new HTTP/1.1"]
+        );
     }
 
     const PASSWORD: &str = "pw-from-a-browser-form";
@@ -2124,7 +2165,10 @@ mod bounds {
                 }
             );
             assert!(!printed.contains(PASSWORD), "{printed}");
-            assert!(printed.contains("jira"), "the host stays readable: {printed}");
+            assert!(
+                printed.contains("jira"),
+                "the host stays readable: {printed}"
+            );
         }
     }
 }

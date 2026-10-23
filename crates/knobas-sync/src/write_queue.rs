@@ -1347,6 +1347,16 @@ mod tests {
                 },
                 None,
             ),
+            // A write a proxy redirected, which `knobas_http` refuses rather
+            // than follow (#1640): an address the reader has to fix.
+            (
+                SourceError::Protocol {
+                    status: Some(301),
+                    message: "HTTP 301 Moved Permanently: the write was redirected to /x/"
+                        .to_owned(),
+                },
+                None,
+            ),
             (
                 SourceError::protocol("this adapter does not accept comment"),
                 None,

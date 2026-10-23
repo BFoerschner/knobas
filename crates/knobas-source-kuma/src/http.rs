@@ -90,6 +90,7 @@ impl KumaHttp {
                 // a body this adapter cannot parse.
                 body_message: None,
                 forbidden: None,
+                max_body: knobas_http::MAX_BODY,
             })?,
         })
     }

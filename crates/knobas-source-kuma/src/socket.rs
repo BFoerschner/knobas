@@ -334,6 +334,7 @@ impl KumaSocket {
                 // to lift, and the bounded excerpt is the honest reading.
                 body_message: None,
                 forbidden: None,
+                max_body: knobas_http::MAX_BODY,
             })?,
             account,
             cfg: cfg.clone(),

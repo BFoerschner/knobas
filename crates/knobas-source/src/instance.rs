@@ -301,7 +301,10 @@ mod tests {
                 }
             );
             assert!(!printed.contains("hunter2"), "{printed}");
-            assert!(printed.contains("@jira"), "the host stays readable: {printed}");
+            assert!(
+                printed.contains("@jira"),
+                "the host stays readable: {printed}"
+            );
         }
     }
 

@@ -346,23 +346,25 @@ impl HttpClient {
 
         let build = |redirect: reqwest::redirect::Policy| {
             reqwest::Client::builder()
-            // Explicit, and it must stay explicit. reqwest picks its backend
-            // from the *union* of the features every crate in the workspace
-            // asks for, and `TlsBackend::default()` prefers native-tls the
-            // moment anything turns it on -- `postgresql_embedded` does, via
-            // `postgresql_archive/tls-native-tls`. Left implicit, this client
-            // would quietly validate against OpenSSL's root store instead of
-            // the platform verifier, and the corporate-CA guarantee (roadmap
-            // §4) would hold on nobody's machine.
-            .use_rustls_tls()
-            .connect_timeout(config.connect_timeout)
-            // No client-wide `.timeout`: a request's timeout is set per
-            // attempt in `send_with`, and a client-wide one would cut every
-            // streamed body off at the request timeout, which is #1012's bug.
-            .default_headers(headers.clone())
-            .redirect(redirect)
-            .build()
-            .map_err(|error| SourceError::protocol(format!("building the http client: {error}")))
+                // Explicit, and it must stay explicit. reqwest picks its backend
+                // from the *union* of the features every crate in the workspace
+                // asks for, and `TlsBackend::default()` prefers native-tls the
+                // moment anything turns it on -- `postgresql_embedded` does, via
+                // `postgresql_archive/tls-native-tls`. Left implicit, this client
+                // would quietly validate against OpenSSL's root store instead of
+                // the platform verifier, and the corporate-CA guarantee (roadmap
+                // §4) would hold on nobody's machine.
+                .use_rustls_tls()
+                .connect_timeout(config.connect_timeout)
+                // No client-wide `.timeout`: a request's timeout is set per
+                // attempt in `send_with`, and a client-wide one would cut every
+                // streamed body off at the request timeout, which is #1012's bug.
+                .default_headers(headers.clone())
+                .redirect(redirect)
+                .build()
+                .map_err(|error| {
+                    SourceError::protocol(format!("building the http client: {error}"))
+                })
         };
         let client = build(reqwest::redirect::Policy::default())?;
         let writes = build(reqwest::redirect::Policy::none())?;
@@ -593,8 +595,8 @@ impl HttpClient {
                     // must not hold the call open.
                     let body =
                         tokio::time::timeout(attempt_timeout, body_of(response, self.max_body))
-                        .await
-                        .unwrap_or_default();
+                            .await
+                            .unwrap_or_default();
                     let error =
                         classify::response_error(status, &body, self.body_message, self.forbidden);
                     if !retry {
@@ -671,6 +673,9 @@ impl HttpClient {
         let response = self
             .send(self.request(Method::GET, path).query(query))
             .await?;
+        if let Some(over) = cap::declared_over(&response, self.max_body) {
+            return Err(SourceError::protocol(format!("{path}: {over}")));
+        }
         response
             .json::<T>()
             .await
@@ -708,6 +713,9 @@ impl HttpClient {
         let response = self
             .send(self.request(Method::GET, path).query(query))
             .await?;
+        if let Some(over) = cap::declared_over(&response, self.max_body) {
+            return Err(SourceError::protocol(format!("{path}: {over}")));
+        }
         let Some(BodyExcerpt { contract }) = excerpt else {
             return response.json::<T>().await.map_err(|error| {
                 read_error(path, &error, |error| format!("decoding {path}: {error}"))
@@ -997,12 +1005,23 @@ impl Request {
 /// `401` still asks for the credential -- and the message says why it
 /// carries no excerpt.
 async fn body_of(response: reqwest::Response, max_body: u64) -> String {
+    if let Some(over) = cap::declared_over(&response, max_body) {
+        return over.to_string();
+    }
     match cap::capped(response, max_body).text().await {
         Ok(body) => body,
         Err(error) => cap::over_cap(&error)
             .map(|over| over.to_string())
             .unwrap_or_default(),
     }
+}
+
+/// Whether a failed read of a body [`HttpClient::send`] handed back failed on
+/// the cap ([`HttpConfig::max_body`], #1640): for a caller that reads the body
+/// itself and says so in its own words.
+#[must_use]
+pub fn over_the_cap(error: &reqwest::Error) -> bool {
+    cap::over_cap(error).is_some()
 }
 
 /// A failed read of `path`'s answer: the cap's sentence when the cap is why,

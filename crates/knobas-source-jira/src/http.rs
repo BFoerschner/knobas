@@ -90,6 +90,7 @@ pub(crate) fn client(
         request_timeout: std::time::Duration::from_secs(cfg.request_timeout_secs),
         body_message: Some(error_envelope),
         forbidden: None,
+        max_body: knobas_http::MAX_BODY,
     })
 }
 

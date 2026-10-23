@@ -436,6 +436,61 @@ async fn an_invalid_id_or_interval_is_refused_with_a_reason() {
     ));
 }
 
+/// SPI-10 (#1640): a base URL carrying a username or a password is refused
+/// at the save with `invalid` and a reason the Add-source dialog shows, before
+/// the keychain or the table is touched, and the reason does not repeat the
+/// password. An edit to one is refused the same way and leaves the stored
+/// address alone.
+#[tokio::test]
+async fn a_base_url_with_a_password_in_it_is_refused_at_the_save() {
+    const PASSWORD: &str = "pw-from-a-browser-form";
+    let f = fixture().await;
+    let with_password = format!("https://me:{PASSWORD}@jira.example.invalid");
+
+    let mut input = a_new_source(&f.id);
+    input.base_url = with_password.clone();
+    let err = sources::crud::add(&f.pool, &f.secrets, &f.registry, input)
+        .await
+        .unwrap_err();
+    let ipc = sources::to_ipc(&err, Some(&f.id));
+    assert_eq!(ipc.code, knobas_app::IpcErrorCode::Invalid, "{err:?}");
+    assert!(
+        ipc.message.contains("username or password"),
+        "{}",
+        ipc.message
+    );
+    assert!(!ipc.message.contains(PASSWORD), "{}", ipc.message);
+    assert!(f.secrets.get(&account(&f.id)).unwrap().is_none());
+    assert!(
+        knobas_sync::config::get(&f.pool, &f.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    sources::crud::add(&f.pool, &f.secrets, &f.registry, a_new_source(&f.id))
+        .await
+        .unwrap();
+    for refused in [with_password, "https://me@jira.example.invalid".to_owned()] {
+        let err = sources::crud::update(
+            &f.pool,
+            &f.registry,
+            &f.id,
+            SourcePatch {
+                base_url: Some(refused.clone()),
+                ..SourcePatch::default()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err, sources::SourcesError::Invalid(_)),
+            "{refused}: {err:?}"
+        );
+    }
+    assert_eq!(stored(&f).await.base_url, "https://jira.example.invalid");
+}
+
 /// interfaces §3, Re-enter: `put` (overwrite) → `test_connection` → write
 /// `auth_state` + `auth_checked_at` → clear `backoff_until`.
 #[tokio::test]

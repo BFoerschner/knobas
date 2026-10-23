@@ -32,6 +32,22 @@ fn check_id(id: &str) -> Result<(), SourcesError> {
         .map_err(|error| SourcesError::Invalid(error.to_string()))
 }
 
+/// Refuse a base URL carrying a username or password *before* anything is
+/// written (#1640, SPI-10).
+///
+/// `knobas_http::refuse_userinfo` and nothing local, for [`check_id`]'s
+/// reason: it is the check every client built for the source makes, so a URL
+/// the form accepts is one every sync can use. Its message does not repeat the
+/// URL, so the password goes no further than the form.
+fn check_base_url(base_url: &str) -> Result<(), SourcesError> {
+    knobas_http::refuse_userinfo(base_url).map_err(|error| {
+        SourcesError::Invalid(match error {
+            knobas_source::SourceError::Protocol { message, .. } => message,
+            other => other.to_string(),
+        })
+    })
+}
+
 /// The descriptor template for one adapter kind.
 ///
 /// Read off [`AdapterRegistry::descriptors`] rather than off the concrete
@@ -199,8 +215,9 @@ pub async fn instance_write_ops(
 /// screen to say why.
 ///
 /// # Errors
-/// [`SourcesError::Invalid`] for a bad id or interval;
-/// [`SourcesError::UnknownAdapter`]; [`SourcesError::Conflict`] for a duplicate
+/// [`SourcesError::Invalid`] for a bad id or interval, or a base URL with a
+/// username or password in it; [`SourcesError::UnknownAdapter`];
+/// [`SourcesError::Conflict`] for a duplicate
 /// id; [`SourcesError::Secret`] / [`SourcesError::Db`] for a failing store.
 pub async fn add(
     pool: &PgPool,
@@ -209,6 +226,7 @@ pub async fn add(
     input: NewSource,
 ) -> Result<SourceSummary, SourcesError> {
     check_id(&input.id)?;
+    check_base_url(&input.base_url)?;
     let template = template_for(registry, &input.adapter_kind)?;
     let interval =
         config::check_interval(input.sync_interval_secs, template.min_sync_interval_secs)
@@ -379,14 +397,18 @@ async fn item_counts(pool: &PgPool) -> Result<std::collections::HashMap<String, 
 /// Apply an edit. `None` fields are left as they are.
 ///
 /// # Errors
-/// [`SourcesError::Invalid`] for an interval below the floor,
-/// [`SourcesError::NotFound`] if there is no such source.
+/// [`SourcesError::Invalid`] for an interval below the floor or a base URL
+/// with a username or password in it, [`SourcesError::NotFound`] if there is
+/// no such source.
 pub async fn update(
     pool: &PgPool,
     registry: &dyn AdapterRegistry,
     id: &str,
     patch: SourcePatch,
 ) -> Result<SourceSummary, SourcesError> {
+    if let Some(base_url) = &patch.base_url {
+        check_base_url(base_url)?;
+    }
     if let Some(secs) = patch.sync_interval_secs {
         // The floor is the stored source's adapter's, so the row is read
         // first. Its kind never changes (P10), so the read cannot go stale
