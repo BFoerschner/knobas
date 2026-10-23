@@ -19,8 +19,13 @@
 # went red with `shmget: No space left on device`. So a recipe takes one of
 # `KNOBAS_GATE_SLOTS` (default 2) slots before it does anything else, and with
 # none free prints one line naming the holders' pids and polls, up to
-# `KNOBAS_GATE_SLOT_WAIT` seconds (default 900), then exits 1 naming the same
-# holders. The slot is held from the recipe's start to after its server has
+# `KNOBAS_GATE_SLOT_WAIT` seconds (default 240), then exits 75 naming the same
+# holders. 240 is the Bash tool's 600 s foreground ceiling less the gate's own
+# run: a wait that outlasts the tool's timeout is killed there, mid-queue or
+# mid-run, and read as a red gate (D4, #1690). 75 (EX_TEMPFAIL) is this exit's
+# own code, so a wait that expired is told from a gate that failed (1 and up
+# from the recipe's own steps) by the code alone; the line says "not a red
+# gate" too. The slot is held from the recipe's start to after its server has
 # stopped, and released by the same EXIT, INT and TERM traps that clean up the
 # rest. For a bare `just test` on a cold tree that start is before the build,
 # so a waiting gate's compile does not share the cores the two running gates
@@ -74,7 +79,7 @@ slot_root=${TMPDIR:-/tmp}/knobas-gate-slots
 slot='' held='' reclaim_lock=''
 # Set by `hold_gate_slot` from the environment before `take_slot` reads them;
 # declared here so a `set -u` shell cannot meet them unset.
-slots=2 slot_wait=900
+slots=2 slot_wait=240
 
 # One pass over the slots: takes a free one (or one whose holder is dead) and
 # returns 0 with `slot` set; else returns 1 with `held` naming the pids that
@@ -123,8 +128,8 @@ release_slot() {
     slot=
 }
 
-# Block until this shell holds a slot, or exit 1 having waited the full
-# `KNOBAS_GATE_SLOT_WAIT`. `$1` is the recipe's name, which is what the
+# Block until this shell holds a slot, or exit 75 having waited the full
+# `KNOBAS_GATE_SLOT_WAIT` (default 240 s). `$1` is the recipe's name, which is what the
 # waiting and giving-up lines are prefixed with -- a reader of a stalled
 # terminal has to be able to tell which recipe is queued. Call it with
 # `release_slot` already armed in the EXIT, INT and TERM traps.
@@ -139,7 +144,7 @@ hold_gate_slot() {
         echo "error: KNOBAS_GATE_SLOTS must be at least 1 (0 would let no gate ever start)" >&2; exit 1
     fi
     # Seconds; 0 is one try and no wait.
-    slot_wait=${KNOBAS_GATE_SLOT_WAIT:-900}
+    slot_wait=${KNOBAS_GATE_SLOT_WAIT:-240}
     case $slot_wait in
         ''|*[!0-9]*) echo "error: KNOBAS_GATE_SLOT_WAIT must be a whole number of seconds, not '$slot_wait'" >&2; exit 1 ;;
     esac
@@ -152,8 +157,8 @@ hold_gate_slot() {
             echo "$name: all $slots gate slots are held (pids $held); waiting up to $slot_wait s for one to free"
         fi
         if [ "$waited" -ge "$slot_wait" ]; then
-            echo "error: all $slots gate slots are held (pids $held); waited $waited s for one to free, giving up" >&2
-            exit 1
+            echo "error: all $slots gate slots are held (pids $held); waited $waited s for one to free, giving up (exit 75: the queue, not a red gate; run it again)" >&2
+            exit 75
         fi
         sleep 1
     done

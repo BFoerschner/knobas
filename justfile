@@ -156,6 +156,13 @@ check:
 
     if [ "$front_status" -ne 0 ] || [ "$scripts_status" -ne 0 ] || [ "$cargo_status" -ne 0 ]; then
         echo "check: FAILED (front exit $front_status, scripts exit $scripts_status, cargo exit $cargo_status)" >&2
+        # 75 is `hold_gate_slot`'s queue timeout (#1690), not a red step: it
+        # passes through only when it is the sole failure, so the caller can
+        # tell "the slots were held, run it again" from a red gate by `$?`.
+        if [ "$cargo_status" -eq 75 ] && [ "$front_status" -eq 0 ] && [ "$scripts_status" -eq 0 ]; then
+            echo "check: the gate slot wait expired (exit 75): the queue, not a red gate; run it again" >&2
+            exit 75
+        fi
         exit 1
     fi
     echo "check: ok in ${SECONDS} s"
@@ -554,6 +561,7 @@ witness-unit:
     scripts/test-prefix-guard.sh
     scripts/merge-tail-lock-test.sh
     scripts/gate-scope-test.sh
+    scripts/gate-slot-test.sh
     scripts/docs-check-test.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh
