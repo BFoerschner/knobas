@@ -15132,3 +15132,33 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1879.
   doc comment named `entity_id_bytes_idx` as an index that exists; `0050` dropped it (ADR-0027).
   *Ruling:* corrected in all three before merge; the migration is unmerged, so editing its comment
   touches no applied checksum. *Reversing:* trivial.
+
+## #1860: synchronous file and process calls off the tokio workers (merge-manager, Opus, 2026-10-23)
+
+- **The widened scope.** *Fork:* the PR wraps bring-up helpers, `status` and `tool_command` that
+  the issue's list does not name. *Ruling:* in scope. *Reasoning:* the issue is the class and its
+  search section says a synchronous helper called from an async fn needs its callers read; each
+  addition is such a helper. *Reversing:* one wrapper each.
+- **A cancelled bring-up.** *Fork:* a step now under `spawn_blocking` (`claim_ownership`,
+  `recover_or_mark`, `keep_to_owner`) runs on after its caller is dropped, while the bring-up and
+  ownership locks drop with the caller, so a second bring-up could overlap the orphaned step.
+  *Ruling:* no change. *Reasoning:* nothing cancels a bring-up: the app runs it on a spawned task
+  that only process exit ends, `Lifecycle::begin_retry` admits one at a time, and no test wraps
+  a bring-up in a timeout or a `select!`. Without cancellation every step is awaited in the old
+  order with both locks held, and two bring-ups still serialise on the bring-up lock.
+  *Reversing:* move an `Arc` of the held locks into each closure.
+- **`backup::run`'s pipes.** *Ruling:* equivalent to `output()`. *Reasoning:* `output()`
+  defaults to stdin null and stdout and stderr piped, which `run` now sets, and `wait_with_output`
+  drains both pipes concurrently with the wait, so a full pipe cannot deadlock. *Reversing:* n/a.
+- **The FIFO test under load.** *Fork:* a 2 s watchdog and a 1 s bound left 0.8 s of margin
+  for a 200 ms tick on a loaded gate. *Ruling:* widened. The watchdog now fires at 10 s, the bound
+  is 5 s, and the test opens the FIFO itself once the tick is in, so the test passes in about
+  0.2 s and the inline-creation mutant still fails, at 10 s, without hanging. *Reversing:* trivial.
+- **The two surviving mutants.** *Ruling:* both folded in as tests in `knobas-db/tests/backup.rs`:
+  `a_dump_into_a_directory_never_used_creates_it` (kills `dump_with` without `create_dir_all`)
+  and `a_tool_that_refuses_reports_its_stderr` (kills `run` with stderr to null). *Reversing:* n/a.
+- **The grep, rerun.** *Ruling:* two more instances, both `test-util` only, fixed here:
+  `serve_until_closed`'s `remove_root` (forks `rm`) and `discard`'s `installation_dir` on its
+  error path (`fresh_settings` removes directories). Every other hit is an HTTP status, a name
+  collision, or a call already under `spawn_blocking` or `tokio::fs`. *Reversing:* one wrapper
+  each.

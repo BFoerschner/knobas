@@ -275,3 +275,40 @@ async fn a_failed_restore_of_a_partial_archive_leaves_the_bookkeeping_rows_in_pl
         an_archive_from_a_newer_build("newer-share", Some(&["entity", "dep_layer"])).await;
     a_failed_restore_of(&archive, "failed-partial-restore").await;
 }
+
+/// A dump into a backup directory that has never been used creates it: the
+/// promise `backup::dump` makes, and what a first nightly export relies on.
+#[tokio::test]
+async fn a_dump_into_a_directory_never_used_creates_it() {
+    let pool = test_pool().await;
+    knobas_db::migrate::run(&pool).await.expect("migrate");
+    let connector = test_connector().await;
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let archive = dir.path().join("never").join("used").join("first.knobas");
+
+    let bytes = backup::dump_tables(&connector, &archive, &["setting"])
+        .await
+        .expect("a dump into a missing directory");
+
+    assert!(archive.is_file(), "no archive at {}", archive.display());
+    assert!(bytes > 0, "the dump reported an empty archive");
+}
+
+/// A tool that refuses says why: its stderr is in the error, the one clue a
+/// failed backup or restore gives the user.
+#[tokio::test]
+async fn a_tool_that_refuses_reports_its_stderr() {
+    // The shared server is what installs the bundled `pg_restore`.
+    let _ = test_connector().await;
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let archive = dir.path().join("not-an-archive.knobas");
+    std::fs::write(&archive, "this is not a pg_dump archive").expect("write the file");
+
+    match backup::archive_contents(&archive).await {
+        Err(backup::BackupError::Tool { stderr, .. }) => assert!(
+            !stderr.is_empty(),
+            "pg_restore refused the file and the error carries none of its stderr"
+        ),
+        other => panic!("pg_restore should refuse a file that is no archive: {other:?}"),
+    }
+}

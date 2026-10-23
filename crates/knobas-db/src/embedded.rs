@@ -762,15 +762,21 @@ impl EmbeddedDb {
         // The lookup stats the installation and the stop forks: both under
         // `spawn_blocking`, which a dropped caller does not cut off.
         let stop_dir = data_dir.clone();
-        let Some(output) = off_runtime(&data_dir, move || {
-            pg_ctl_stop_immediate(&stop_dir).map(|mut pg_ctl| pg_ctl.output())
+        let output = match off_runtime(&data_dir, move || {
+            pg_ctl_stop_immediate(&stop_dir)
+                .map(|mut pg_ctl| pg_ctl.output())
+                // Resolving the installation touches the disk too.
+                .ok_or_else(installation_dir)
         })
         .await?
-        else {
-            return Err(DbError::io(
-                installation_dir(),
-                io::Error::new(io::ErrorKind::NotFound, format!("no {PG_CTL} under it")),
-            ));
+        {
+            Ok(output) => output,
+            Err(installation) => {
+                return Err(DbError::io(
+                    installation,
+                    io::Error::new(io::ErrorKind::NotFound, format!("no {PG_CTL} under it")),
+                ));
+            }
         };
         let output = output.map_err(|source| DbError::io(&data_dir, source))?;
         if !output.status.success() {
@@ -2726,12 +2732,13 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        // A watchdog frees the creation after two seconds whatever happens, so
+        // A watchdog frees the creation after ten seconds whatever happens, so
         // a creation that does hold the worker ends the test as a failure
-        // rather than a hang.
+        // rather than a hang. It is far past the bound below, so a loaded
+        // machine cannot free a held worker in time to pass.
         let watchdog = fifo.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(2));
+            std::thread::sleep(Duration::from_secs(10));
             let _ = File::open(&watchdog);
         });
         runtime.block_on(async {
@@ -2743,9 +2750,13 @@ mod tests {
                 .await
                 .unwrap();
             assert!(
-                started.elapsed() < Duration::from_secs(1),
+                started.elapsed() < Duration::from_secs(5),
                 "the worker was held while the lock file was being created"
             );
+            // Free the creation now rather than at the watchdog. This thread
+            // is not a worker, and the open returns once the creation's own
+            // open meets it.
+            drop(File::open(&fifo).unwrap());
             // The lock itself is refused on a FIFO on some systems, so only
             // that it settles is asserted.
             let _ = lock.await.unwrap();

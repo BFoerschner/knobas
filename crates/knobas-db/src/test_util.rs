@@ -461,7 +461,7 @@ pub async fn serve_until_closed(
         // Nobody is listening, so nobody will close the pipe: stop now
         // rather than serve for ever.
         db.discard().await?;
-        remove_root(&root_dir, lock);
+        remove_root_off_runtime(root_dir, lock).await;
         return Err(crate::DbError::Io {
             path: PathBuf::from("<stdout>"),
             source,
@@ -480,8 +480,16 @@ pub async fn serve_until_closed(
     }
 
     db.discard().await?;
-    remove_root(&root_dir, lock);
+    remove_root_off_runtime(root_dir, lock).await;
     Ok(())
+}
+
+/// [`remove_root`] under `spawn_blocking`: it forks `rm`, or removes the tree
+/// in place.
+async fn remove_root_off_runtime(root: PathBuf, lock: &'static File) {
+    tokio::task::spawn_blocking(move || remove_root(&root, lock))
+        .await
+        .expect("remove the scratch root");
 }
 
 /// Remove a scratch root and the lock beside it -- in the background, where
