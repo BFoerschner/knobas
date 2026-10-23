@@ -5,7 +5,7 @@
  * backend derives is `knobas-core`'s `inbox` tests; here the calls are counted.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { createInbox, type Inbox } from "../../inbox/inbox.svelte";
 import type { ContextRow, EntityDetail, InboxEntry, InboxItem, Reached } from "../../ipc/entity";
@@ -109,7 +109,9 @@ function context(anchor: string): ContextRow {
   return { id: `ctx:${anchor}`, kind: "ticket", title: anchor, anchor_id: anchor, created_at: at(9, 0), archived_at: null };
 }
 
-async function open(over: { job?: string | null; contexts?: ContextRow[]; extra?: InboxEntry[] } = {}) {
+async function open(
+  over: { job?: string | null; contexts?: ContextRow[]; extra?: InboxEntry[]; clock?: boolean } = {},
+) {
   const ports = {
     listContexts: async () => over.contexts ?? [],
     listSources: async () => [{ id: "jira" }, { id: "gitea" }, { id: "tc", display_name: "TeamCity" }],
@@ -124,7 +126,7 @@ async function open(over: { job?: string | null; contexts?: ContextRow[]; extra?
       return { id: 7 } as unknown as QueuedWrite;
     },
   };
-  view = mount(TfInbox, { target, props: { ready: true, job: over.job ?? null, inbox: store(over.extra), ports, now: NOW } });
+  view = mount(TfInbox, { target, props: { ready: true, job: over.job ?? null, inbox: store(over.extra), ports, ...(over.clock ? {} : { now: NOW }) } });
   await settle();
 }
 
@@ -377,4 +379,27 @@ test("a row about a ticket links the job by its entity id, so a key two sources 
     ],
   });
   expect(rowOf("Same key").querySelector(".tf-ctx a")?.getAttribute("href")).toBe("#/job/gitea%3APAY-231");
+});
+
+test("an inbox left open across midnight ticks its clock: a row reads yesterday and Tomorrow moves a day on (#1681)", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+  try {
+    vi.setSystemTime(new Date(2026, 7, 22, 23, 50));
+    await open({ clock: true });
+    expect(text(rowOf("Idempotent").querySelector("time"))).toBe("13:50");
+
+    vi.setSystemTime(new Date(2026, 7, 23, 0, 10));
+    vi.advanceTimersByTime(30_000);
+    flushSync();
+    expect(text(rowOf("Idempotent").querySelector("time"))).toBe("yesterday 13:50");
+
+    const row = rowOf("Idempotent");
+    button(row, "Snooze").click();
+    flushSync();
+    button(row, "Tomorrow").click();
+    await settle();
+    expect(snoozeCalls()).toEqual([`snooze review_request:gitea:payouts#142 ${new Date(2026, 7, 24, 9, 0).toISOString()}`]);
+  } finally {
+    vi.useRealTimers();
+  }
 });

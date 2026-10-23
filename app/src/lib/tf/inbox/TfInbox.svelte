@@ -13,7 +13,7 @@
 -->
 <script lang="ts">
   import { clockLabel } from "../../time/format";
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import {
@@ -74,7 +74,15 @@
     now?: Date;
   } = $props();
 
-  const now = $derived(fixedNow ?? new Date());
+  /** Moved every thirty seconds, as the Day and Week tabs do, so a row says *yesterday* and *Tomorrow* means tomorrow once midnight passes. */
+  // svelte-ignore state_referenced_locally
+  let clock = $state(new Date());
+  onMount(() => {
+    if (fixedNow) return;
+    const tick = setInterval(() => (clock = new Date()), 30_000);
+    return () => clearInterval(tick);
+  });
+  const now = $derived(fixedNow ?? clock);
 
   const filter = sessionFilter("inbox");
   // Prototype-6 opens the Inbox on *All*.
