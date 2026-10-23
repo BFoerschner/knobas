@@ -517,8 +517,8 @@ async fn spawn_into(
     protocols: &[&str],
     shown: &str,
 ) -> Result<Result<tokio::process::Child, CloneAnswer>, IpcError> {
-    if std::fs::symlink_metadata(target).is_ok() {
-        return adopt_or_refuse(target, url, shown).map(Err);
+    if tokio::fs::symlink_metadata(target).await.is_ok() {
+        return adopt_blocking(target, url, shown).await.map(Err);
     }
 
     let git = working_tree::git_on_path()
@@ -530,15 +530,15 @@ async fn spawn_into(
             _ => IpcError::invalid("git is not installed, so knobas cannot clone"),
         })?;
 
-    std::fs::create_dir_all(root).map_err(|error| {
+    tokio::fs::create_dir_all(root).await.map_err(|error| {
         IpcError::internal(format!(
             "could not make the clones root {}: {error}",
             root.display()
         ))
     })?;
-    if let Err(error) = std::fs::create_dir(target) {
+    if let Err(error) = tokio::fs::create_dir(target).await {
         if error.kind() == std::io::ErrorKind::AlreadyExists {
-            return adopt_or_refuse(target, url, shown).map(Err);
+            return adopt_blocking(target, url, shown).await.map(Err);
         }
         return Err(IpcError::internal(format!(
             "could not make {shown}: {error}"
@@ -569,10 +569,18 @@ async fn spawn_into(
     match command.spawn() {
         Ok(child) => Ok(Ok(child)),
         Err(error) => {
-            let _ = std::fs::remove_dir_all(target);
+            let _ = tokio::fs::remove_dir_all(target).await;
             Err(IpcError::invalid(format!("git could not be run: {error}")))
         }
     }
+}
+
+/// [`adopt_or_refuse`] on a blocking thread: it reads the folder's git config.
+async fn adopt_blocking(target: &Path, url: &str, shown: &str) -> Result<CloneAnswer, IpcError> {
+    let (target, url, shown) = (target.to_path_buf(), url.to_owned(), shown.to_owned());
+    tokio::task::spawn_blocking(move || adopt_or_refuse(&target, &url, &shown))
+        .await
+        .map_err(IpcError::internal)?
 }
 
 /// A folder is already at the target: adopted if it is a clone of the

@@ -282,7 +282,11 @@ pub async fn open(
         },
     )
     .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))?;
-    spawn(&argv)
+    let to_run = argv.clone();
+    tokio::task::spawn_blocking(move || spawn(&to_run))
+        .await
+        .map_err(std::io::Error::other)
+        .and_then(|started| started)
         .map_err(|error| IpcError::invalid(format!("'{template}' could not be run: {error}")))?;
     Ok(argv)
 }
