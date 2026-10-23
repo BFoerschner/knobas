@@ -59,11 +59,11 @@
 //!
 //! One **title**, on one seeded page, changed to make it the *renamed* page of
 //! the incremental test and changed back when the test ends -- passing or
-//! panicking alike, from [`Renamed`]'s `Drop`, on a thread with a runtime of
-//! its own, and checked afterwards rather than assumed. A title is the
-//! smallest edit that moves `version.when` while touching no field the
-//! fixture's *content* describes, and it is the one edit that makes the
-//! id-not-title criterion visible.
+//! panicking alike, from [`Renamed`]'s `Drop`, through
+//! `knobas_live_cleanup::Cleanup`, and checked afterwards rather than
+//! assumed. A title is the smallest edit that moves `version.when` while
+//! touching no field the fixture's *content* describes, and it is the one
+//! edit that makes the id-not-title criterion visible.
 //!
 //! What a *killed* run left behind is put back by the next one:
 //! [`Seeded::clear_leftovers`] restores every seeded page's title from
@@ -112,6 +112,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use knobas_core::payload::resolve_string;
+use knobas_live_cleanup::Cleanup;
 use knobas_source::contract::{Fault, VecSink, Walking, battery};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceError, SyncItem};
@@ -642,40 +643,17 @@ impl Drop for Renamed {
             return;
         };
         let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
-        let (edited, title) = (id.clone(), original.clone());
-        // `Drop` cannot await and runs on a tokio worker thread, so the
-        // cleanup gets a thread with a runtime of its own -- and a client
-        // built inside it, because a `reqwest::Client` driven from a second
-        // runtime hangs rather than failing (the Gitea suite measured that).
-        let report = std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the cleanup")
-                .block_on(async move {
-                    restore_title(&client(), &url, &user, &password, &edited, &title).await
-                })
-        })
-        .join();
-        let failure = match report {
-            Ok(Ok(())) => return,
-            Ok(Err(e)) => e,
-            Err(_) => format!(
-                "the cleanup thread panicked (its own message is on stderr), so page {id} may \
-                 still be renamed; the next run's leftover clearing puts it back"
-            ),
-        };
-        let report = format!(
+        let edited = id.clone();
+        Cleanup::new(
             "the live suite did not undo the rename it made, so the server is no longer in the \
-             plain-seed state: {failure}"
-        );
-        // Panicking while already unwinding aborts the process; the test is
-        // already red in that case and this only has to be visible.
-        if std::thread::panicking() {
-            eprintln!("live suite cleanup: {report}");
-        } else {
-            panic!("{report}");
-        }
+             plain-seed state",
+            format!(
+                "page {id} may still be renamed; the next run's leftover clearing puts it back"
+            ),
+        )
+        .run(move || async move {
+            restore_title(&client(), &url, &user, &password, &edited, &original).await
+        });
     }
 }
 

@@ -26,3 +26,6 @@ serde_json.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+# The cleanup runner `tests/live_confluence_seeded.rs`'s `Drop` guard calls
+# (#1913): a thread and runtime of its own, a bound, a report.
+knobas-live-cleanup = { path = "../knobas-live-cleanup" }
