@@ -247,6 +247,9 @@ test("the applications are macOS's four, a saved list replaces them, and opening
 
   const argv = h["open_checkout"]!({ entityId: "mock:tidewater/payout-service", application: null, file: "src/lib.rs", line: 3 });
   expect(argv).toEqual(["open", "-a", "Visual Studio Code", "/Users/mara/src/payout-service/src/lib.rs"]);
+  // A command the webview names is not run: the program is a saved one (#1643, ADR-0016).
+  const named = h["open_checkout"]!({ entityId: "mock:tidewater/payout-service", application: "terminal", command: "/bin/sh {path}" });
+  expect(named).toEqual(["open", "-a", "Terminal", "/Users/mara/src/payout-service"]);
 
   expect(() =>
     h["set_checkout_applications"]!({ applications: [{ id: null, name: "X", command: "x {branch}", file_command: null }], defaultApplication: null }),
