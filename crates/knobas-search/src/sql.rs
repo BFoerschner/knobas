@@ -713,8 +713,9 @@ fn bind_lowered(builder: &mut Builder, values: &[String]) -> String {
 /// `materialized` so the planner cannot inline it back into each branch.
 ///
 /// **Both halves are spelled as migration `0058` indexes them** (#1850):
-/// `entity_ticket_id_lower_idx` and `entity_ticket_key_lower_idx`, partial on
-/// `kind = 'ticket'`, which the planner answers with a `BitmapOr` of the two.
+/// `entity_id_lower_idx` and `entity_key_lower_idx`, which the planner
+/// answers with a `BitmapOr` of the two, `kind = 'ticket'` a filter on the
+/// rows they found.
 /// Spelled any other way, the start set is a scan of every entity again
 /// (`reach.rs`' `the_start_set_is_found_through_an_index`).
 ///

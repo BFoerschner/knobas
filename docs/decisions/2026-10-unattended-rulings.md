@@ -15085,13 +15085,23 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1876.
 Reviewed 2026-10-23 by the merge-manager (Opus), PR #1879.
 
 - **Reserved for Björn, ruled by merge-manager on Opus: migration `0058` and its §10.8 entry.**
-  *Fork:* confirm the implementer's ruling or rule again. *Ruling:* confirmed. *Reasoning:* the
-  primary-key probe #1845's merge-manager offered serves only an id typed whole in its stored case;
-  `reach:pay-231` needs the key half. Each index is the expression `reaches` spells, character for
-  character, and the reader's `e.kind = 'ticket'` implies the partial predicate. `lower`, `substr`
-  and `strpos` are immutable, and the id is `collate "C"` on both sides (ADR-0027), so index and
-  reader lowercase alike. Additive: nothing dropped, no earlier migration edited. *Reversing:* one
-  migration dropping both.
+  *Fork:* confirm the implementer's ruling or rule again. *Ruling:* ruled again in part. The two
+  expression indexes stay; the partial `where kind = 'ticket'` goes, and they are renamed
+  `entity_id_lower_idx` and `entity_key_lower_idx`. *Reasoning:* the pre-gate went red in
+  `knobas-core`'s `suggest_plans::every_pass_statement_plans_by_index_on_tables_never_analyzed`:
+  on tables never analyzed, all four exact-key rules (`ticket_keyed!`'s lateral, `t.id = any(...)
+  and t.kind = 'ticket'`) walked `entity_ticket_key_lower_idx` with no condition per key found, the
+  partial index serving as the list of every ticket. That is #770's quadratic shape on a fresh
+  install, the case where the pass once proposed nothing. Any read that says `kind = 'ticket'` could
+  take the same plan, so the class is the partial predicate, not the four rules. An index over every
+  entity is probed only through its expression, which only `reaches` spells, and its expression gets
+  statistics. The rest of the implementer's ruling holds: the primary-key probe serves only an id
+  typed whole in its stored case, each index is the expression `reaches` spells, `lower`, `substr`
+  and `strpos` are immutable, and the id is `collate "C"` on both sides (ADR-0027). The pin now
+  refuses `Rows Removed by Filter` in place of any `Filter:`, since `kind = 'ticket'` is a filter
+  on what the probes found; `0058` without the key index still fails it (a `Seq Scan`, 3,998 rows
+  removed). *Cost:* two btree inserts per entity of any kind, not per ticket. *Reversing:* one
+  migration.
 - **The rail's `try_join!`.** *Fork:* the two halves now hold two of the app pool's five
   connections at once. *Ruling:* kept. *Reasoning:* each half acquires per statement and holds
   nothing while it waits for another connection, so a busy pool queues a half (under the 30 s

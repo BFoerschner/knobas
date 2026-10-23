@@ -287,12 +287,12 @@ async fn the_start_set_is_found_through_an_index() {
             .collect();
         assert!(!start.is_empty(), "no start set in the plan:\n{plan}");
         let start = start.join("\n");
-        // Probed, not walked: a partial index can also stand in for a scan
-        // of every ticket, read whole and filtered, which is no `Seq Scan`
-        // and no better. So no filter either, and a probe of each half.
+        // Probed, not walked: no scan, no row read only to be dropped, and a
+        // probe of each half. `kind = 'ticket'` filters what the probes
+        // found, and both rows found are tickets.
         assert!(
             !start.contains("Seq Scan")
-                && !start.contains("Filter:")
+                && !start.contains("Rows Removed by Filter")
                 && start.contains("Index Cond: (lower(id) = ")
                 && start.contains("Index Cond: (lower(substr(id, "),
             "analyzed: {analyzed}; the start set does not probe both ticket indexes:\n{start}"
