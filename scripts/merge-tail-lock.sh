@@ -6,7 +6,7 @@
 # Usage: scripts/merge-tail-lock.sh ready <PR> <head SHA> [<main SHA>]   (review done, and with a main: gated green on that head over that main; may be batched)
 #        scripts/merge-tail-lock.sh take <PR>      (exit 0 = held; 3 = merged in a batch; 4 = still queued, call again)
 #        scripts/merge-tail-lock.sh gated <PR>     (the holder asks, in its worktree: exit 0 = merge without gating again; 1 = gate under the lock)
-#        scripts/merge-tail-lock.sh hold <PR> <command...>   (the holder runs a long command; its claim stays fresh meanwhile)
+#        scripts/merge-tail-lock.sh hold <PR> <command...>   (the holder runs a long command; its claim stays fresh meanwhile, and a gate in it goes first on the gate slots)
 #        scripts/merge-tail-lock.sh partner <PR> [1|2]   (the holder asks: the oldest other ready, waiting PRs, one per line, at most 1 or 2; default 1)
 #        scripts/merge-tail-lock.sh merged <PR> <merge SHA>   (the holder merged it in a batch)
 #        scripts/merge-tail-lock.sh release <PR>
@@ -42,6 +42,11 @@
 # counted, so a holder that died with its PR open held the lock until a human
 # noticed (2026-10-23, 20 min). A lock taken by that older script has no
 # `alive` file: its claim is as old as its `holder` file.
+#
+# The holder's gate first (#1866): `hold` runs its command with
+# KNOBAS_MERGE_TAIL_HOLDER=<PR>, and `scripts/gate-slot.sh` gives a gate that
+# carries it the next free gate slot ahead of every pre-gate, since the whole
+# queue in `take` waits on the holder's re-gate.
 set -u
 POLL="${KNOBAS_MERGE_TAIL_POLL:-30}"     # seconds between polls, and between `hold`'s refreshes
 LEASE="${KNOBAS_MERGE_TAIL_LEASE:-600}"  # seconds a holder may go without refreshing its claim
@@ -183,7 +188,7 @@ hold)
   fi
   ( while [ "$(holder)" = "$pr" ]; do touch "$LOCK/alive"; sleep "$POLL"; done ) &
   keeper=$!
-  "$@"; status=$?
+  KNOBAS_MERGE_TAIL_HOLDER=$pr "$@"; status=$?
   kill "$keeper" 2>/dev/null; wait "$keeper" 2>/dev/null
   exit "$status"
   ;;
