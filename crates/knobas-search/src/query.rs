@@ -680,7 +680,7 @@ pub fn needles(text: &str) -> Vec<String> {
 /// One alternative of the Tickets view's word filter (#1889): a row it
 /// admits holds every word of `holds` and none of `lacks`. Each is a needle
 /// as [`needles`] spells it, lowercased, once each.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct WordAlternative {
     pub holds: Vec<String>,
     pub lacks: Vec<String>,
@@ -1748,7 +1748,7 @@ mod tests {
     /// The view's word filter (#1889): `or` splits the alternatives, and a
     /// `-word` or `-"phrase"` is left out of the one it stands in.
     #[test]
-    fn word_alternatives_split_on_or_and_keep_what_is_left_out() {
+    fn word_alternatives_split_on_or_and_record_what_is_left_out() {
         let alt = |holds: &[&str], lacks: &[&str]| WordAlternative {
             holds: holds.iter().map(|w| (*w).to_owned()).collect(),
             lacks: lacks.iter().map(|w| (*w).to_owned()).collect(),

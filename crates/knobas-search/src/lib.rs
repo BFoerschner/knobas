@@ -416,9 +416,9 @@ impl Searcher {
     /// with no chips, matched by the predicates [`sql::search_sql`] uses. The
     /// words are the view's: each must appear in the row's key, title,
     /// assignee or epic, a `-word` or `-"phrase"` must not, and `or`
-    /// separates alternatives ([`query::word_alternatives`], [`sql::ids_sql`],
-    /// #1889). Over the live mirror. A prefix
-    /// (`#`, `>`) and `list:` mean nothing here and are not acted on.
+    /// separates alternatives ([`query::word_alternatives`],
+    /// [`sql::ids_sql`], #1889). Over the live mirror. A prefix (`#`, `>`)
+    /// and `list:` mean nothing here and are not acted on.
     ///
     /// # Errors
     ///

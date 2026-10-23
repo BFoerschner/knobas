@@ -2037,7 +2037,7 @@ knobas-search	lib/knobas_search	query::tests::type_falls_back_to_kind_while_the_
 knobas-search	lib/knobas_search	query::tests::under_is_a_typed_filter_that_ignores_case
 knobas-search	lib/knobas_search	query::tests::unknown_tokens_are_capped_so_a_paste_cannot_grow_the_response
 knobas-search	lib/knobas_search	query::tests::websearch_operators_and_phrases_survive_into_the_text
-knobas-search	lib/knobas_search	query::tests::word_alternatives_split_on_or_and_keep_what_is_left_out
+knobas-search	lib/knobas_search	query::tests::word_alternatives_split_on_or_and_record_what_is_left_out
 knobas-search	lib/knobas_search	saved::tests::a_slug_is_addressable_whatever_the_label_was
 knobas-search	lib/knobas_search	saved::tests::every_refusal_names_its_own_rule_under_one_heading
 knobas-search	lib/knobas_search	saved::tests::saving_names_the_rule_and_only_the_rail_offers_to_delete
