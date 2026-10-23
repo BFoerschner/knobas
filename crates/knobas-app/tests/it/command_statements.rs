@@ -28,6 +28,12 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Count {
     }
 }
 
+/// One counted section at a time in this file: two threads installing and
+/// dropping thread-local subscribers at once raced tracing's callsite interest
+/// cache and counted nothing on some runs. (`ipc.rs` installs the binary's one
+/// global subscriber, so this cannot be one.)
+static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 async fn pool() -> PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
@@ -49,13 +55,26 @@ where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
+    let _only = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     work().await;
-    let seen = Arc::new(AtomicUsize::new(0));
-    let subscriber = tracing_subscriber::registry().with(Count(seen.clone()));
-    let guard = tracing::subscriber::set_default(subscriber);
-    work().await;
-    drop(guard);
-    seen.load(Ordering::SeqCst)
+    // Every command here issues a statement, so a count of nothing is the
+    // subscriber missing a callsite that tracing had cached as uninteresting
+    // (it still happens when another binary test drops a dispatcher): look
+    // again rather than report it.
+    for _ in 0..5 {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let guard = tracing::subscriber::set_default(
+            tracing_subscriber::registry().with(Count(seen.clone())),
+        );
+        work().await;
+        drop(guard);
+        let counted = seen.load(Ordering::SeqCst);
+        if counted > 0 {
+            return counted;
+        }
+        tracing::callsite::rebuild_interest_cache();
+    }
+    0
 }
 
 #[tokio::test]

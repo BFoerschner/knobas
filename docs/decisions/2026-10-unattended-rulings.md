@@ -14951,3 +14951,25 @@ Reviewed 2026-10-23 by the merge-manager (Opus).
 - **#1858's `common_word` ruling stays reversed.** *Ruling:* confirmed. *Reasoning:* the flag kept
   the mirror away from the list it flipped on; with the list capped, the plan test holds on the
   mirror the probe seeds. *Reversing:* low.
+## #1659 and #1660: derive once per command; read a queued create through WriteOp (Sonnet implementer, 2026-10-23)
+
+- **Which "laned ticket-board read".** *Fork:* `mini_board_laned` or `saved_view_board_laned`.
+  *Ruling:* the count test measures `mini_board_laned` with a search (the path with all three
+  derivations); both boards share the new `tickets_matching` helper, so the saved view gets the same
+  saving. *Reversing:* trivial, add a saved-view fixture to the test.
+- **Where "moved below the shim" stops.** *Fork:* move the five statement-holding reads into
+  `knobas-core` or name them as exceptions (the ticket allows either, with one `backlog` follow-up
+  per file not moved). *Ruling:* named in `commands/mod.rs`'s doc; #1870 to #1874 (`backlog`), one per
+  file. *Reasoning:* a Sonnet-sized measured refactor; moving five policies is five tickets of its
+  own. *Reversing:* n/a.
+- **`searcher()` split.** *Fork:* commands that discard the searcher still paid its notes-visibility
+  read. *Ruling:* `search::declare` stores the declarations and builds nothing; every discarding call
+  site (docs, projects, link sets) uses it. `Searcher::vocabulary` is public and `matching_ids_in`
+  takes a loaded vocabulary, so a searched board loads the vocabulary once. *Reversing:* trivial.
+- **`docs_tree` keeps one repeated source listing.** *Fork:* `declared_paths` and `fillers` each
+  list the sources. *Ruling:* left; `role_scope` lists the sources and reads the role check itself,
+  and sharing the list means a new `role_scope_in` in `sources::crud`. `docs_tree` still drops from 10
+  to 9. *Reversing:* small.
+- **#1660: the write queue is untouched.** The payload is still the serialised `WriteOp`;
+  `action_item_payload` now builds it with `serde_json::to_value(WriteOp::CreateTicket {..})`, whose
+  output is the same externally tagged shape. Nothing stored or replayed changes.
