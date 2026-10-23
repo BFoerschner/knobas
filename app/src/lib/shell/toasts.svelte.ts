@@ -57,10 +57,13 @@ export function push(spec: ToastSpec): number {
   return id;
 }
 
-/** Drop the stack and restart the ids: a test starts on an empty screen. */
+/**
+ * Drop the stack: a test starts on an empty screen. The ids keep counting.
+ * The dropped toasts' dismiss timers are still armed, and an id handed out
+ * again would let one of them remove the next test's toast (#1762).
+ */
 export function reset(): void {
   toasts.items = [];
-  nextId = 0;
 }
 
 /**
