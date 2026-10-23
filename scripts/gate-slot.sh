@@ -135,7 +135,7 @@ slots=1 slot_wait=150
 # slot taken afresh -- see above.
 take_slot() {
     local i name holder lock=$slot_root/reclaim
-    held= ahead=
+    held='' ahead=''
     mkdir -p "$slot_root"
     if [ -n "$holder_pr" ]; then
         # Every pass, so a mark removed by hand with the directory comes back.

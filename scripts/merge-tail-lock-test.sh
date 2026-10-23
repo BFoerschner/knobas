@@ -308,6 +308,7 @@ lock release 1310 > /dev/null
 # --- 6. The holder's gate goes first on the gate slots (#1866) ---
 fresh
 lock take 1320 > /dev/null
+# shellcheck disable=SC2016 # the command's own shell expands it
 lock hold 1320 bash -c 'echo "holder=${KNOBAS_MERGE_TAIL_HOLDER:-none}"' > "$scratch/s1.out" 2>&1
 check "hold: its command is told it runs for the holder" has "$scratch/s1.out" "holder=1320"
 
@@ -326,11 +327,11 @@ sleep 0.5
 lock hold 1320 bash "$scratch/gate.sh" > "$scratch/s2.holder" 2>&1 & holder_gate=$!
 sleep 1.5
 gate_pid=$(pgrep -f "^bash $scratch/gate.sh" | grep -vx "$pre")
-kill -STOP $gate_pid
+kill -STOP "$gate_pid"
 kill "$busy"; wait "$busy" 2>/dev/null
 sleep 2.5
 check "slots: the pre-gate leaves the freed slot to the holder's gate" lacks "$scratch/s2.pre" "gate slot free after"
-kill -CONT $gate_pid
+kill -CONT "$gate_pid"
 sleep 1.5
 check "slots: the holder's gate under hold takes the freed slot" has "$scratch/s2.holder" "gate slot free after"
 check "slots: the pre-gate that waited longer is still waiting" lacks "$scratch/s2.pre" "gate slot free after"
