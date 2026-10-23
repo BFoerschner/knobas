@@ -1649,6 +1649,7 @@ knobas-db	lib/knobas_db	embedded::tests::inspect_lock_removes_a_pid_file_with_no
 knobas-db	lib/knobas_db	embedded::tests::inspect_lock_reports_nothing_to_do_without_a_pid_file
 knobas-db	lib/knobas_db	embedded::tests::only_sub_protocol_failures_count_as_a_stranger_on_the_port
 knobas-db	lib/knobas_db	embedded::tests::process_liveness_tells_a_running_process_from_a_reaped_one
+knobas-db	lib/knobas_db	embedded::tests::the_bring_up_lock_is_created_off_the_runtime_worker
 knobas-db	lib/knobas_db	embedded::tests::the_bring_up_lock_is_exclusive_and_released_with_its_guard
 knobas-db	lib/knobas_db	embedded::tests::the_recorded_password_is_adopted_under_the_lock_not_before_it
 knobas-db	lib/knobas_db	test_util::tests::a_child_spawned_holding_a_lock_keeps_it_until_it_exits

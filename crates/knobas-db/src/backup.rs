@@ -271,10 +271,12 @@ async fn dump_with(
     scope: &[String],
 ) -> Result<u64, BackupError> {
     if let Some(parent) = archive.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|source| BackupError::Io {
-            path: parent.to_path_buf(),
-            source,
-        })?;
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|source| BackupError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
     }
 
     let mut args: Vec<&OsStr> = vec![
