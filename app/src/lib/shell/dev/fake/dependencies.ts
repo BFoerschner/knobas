@@ -247,7 +247,7 @@ export function handlers(): Handlers {
       return answer();
     },
     order_dep_layers: (args) => {
-      const ids = (args["layerIds"] as string[]) ?? [];
+      const ids = args["layerIds"] as string[];
       if (ids.length !== layers.length || !layers.every((layer) => ids.includes(layer.id)))
         throw refuse("invalid", "The order must name every layer exactly once.");
       layers = ids.map((id) => layerAt(id));

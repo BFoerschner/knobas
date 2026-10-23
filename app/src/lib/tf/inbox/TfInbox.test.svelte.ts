@@ -15,6 +15,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import { writeQueuePanel } from "../../shell/write-queue.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TfInbox from "./TfInbox.svelte";
+import { sourceFacts } from "../job/source-facts.fixture";
 
 const NOW = new Date(2026, 7, 22, 15, 0);
 const at = (h: number, m: number, d = 22) => new Date(2026, 7, d, h, m).toISOString();
@@ -114,7 +115,7 @@ async function open(
 ) {
   const ports = {
     listContexts: async () => over.contexts ?? [],
-    listSources: async () => [{ id: "jira" }, { id: "gitea" }, { id: "tc", display_name: "TeamCity" }],
+    listSources: async () => [sourceFacts("jira"), sourceFacts("gitea"), sourceFacts("tc", { display_name: "TeamCity" })],
     getEntity: async (id: string) => {
       if (id !== "jira:PAY-231") throw { code: "not_found", message: "no", source_id: null };
       return { row: { entity_id: id, kind: "ticket" } } as unknown as EntityDetail;

@@ -20,6 +20,7 @@ import { pageFor } from "../pages";
 import { parseTfHash } from "../route";
 import type { JobPorts } from "./ports";
 import TfJob from "./TfJob.svelte";
+import { sourceFacts } from "./source-facts.fixture";
 
 const ID = "jira:PAY-231";
 const VISIT = "2026-10-15T07:00:00Z";
@@ -154,7 +155,7 @@ const ELSEWHERE: SuggestionEntry = {
 function ports(over: Partial<JobPorts> = {}): JobPorts {
   let links = [PR, PAGE];
   return {
-    listSources: () => Promise.resolve([{ id: "jira" }]),
+    listSources: () => Promise.resolve([sourceFacts("jira")]),
     getEntity: (id) => {
       calls.reads += 1;
       return id === ID ? Promise.resolve(ticket(links)) : Promise.reject({ code: "not_found", message: "", source_id: null });

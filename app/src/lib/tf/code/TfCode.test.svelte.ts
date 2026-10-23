@@ -12,6 +12,7 @@ import type { CheckoutView, CodeFacts, EntityFilter, EntityPage, EntityRow, Grou
 import { forgetFilters } from "../filter/filter-state.svelte";
 import type { CodePorts } from "./TfCode.svelte";
 import TfCode from "./TfCode.svelte";
+import { sourceFacts } from "../job/source-facts.fixture";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
 
@@ -122,7 +123,7 @@ function ports(over: Partial<CodePorts> = {}): CodePorts {
     },
     entityCheckout: async (id) => checkout(id.endsWith("payout-service") ? "/Users/mara/src/payout-service" : null),
     codeFacts: async (ids) => FACTS.filter((facts) => ids.includes(facts.entity_id)),
-    listSources: async () => [{ id: "gitea", base_url: "https://git.example.com" }, { id: "jira" }],
+    listSources: async () => [{ ...sourceFacts("gitea"), base_url: "https://git.example.com" }, { ...sourceFacts("jira"), base_url: "" }],
     listContexts: async () => [],
     getEntity: async (id) => {
       if (id !== "jira:PAY-231") throw { code: "not_found" };

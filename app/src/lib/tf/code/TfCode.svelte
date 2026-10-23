@@ -25,6 +25,8 @@
 <script lang="ts" module>
   import type { CheckoutView, CodeFacts, EntityFilter, EntityPage } from "../../ipc/entity";
   import { readAllRows } from "../repo/repo";
+  import type { SourceSummary } from "../../ipc/sources";
+  import type { SourceFacts } from "../job/job";
   import type { OpenJobPorts } from "../job/open-jobs";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
@@ -33,7 +35,7 @@
     entityCheckout: (entityId: string) => Promise<CheckoutView>;
     codeFacts: (entityIds: string[]) => Promise<CodeFacts[]>;
     /** The sources, for the host the header names. */
-    listSources: () => Promise<{ id: string; base_url?: string | null }[]>;
+    listSources: () => Promise<(SourceFacts & Pick<SourceSummary, "base_url">)[]>;
   }
 </script>
 
@@ -142,7 +144,7 @@
   let attention = $state<EntityPage | null>(null);
   let everyPr = $state<EntityPage | null>(null);
   let branches = $state<EntityRow[]>([]);
-  let sources = $state<{ id: string; base_url?: string | null }[]>([]);
+  let sources = $state<Pick<SourceSummary, "id" | "base_url">[]>([]);
   let failed = $state<string | null>(null);
   let checkouts = $state<Record<string, CheckoutView>>({});
   let jobs = $state<OpenJob[]>([]);

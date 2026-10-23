@@ -19,6 +19,7 @@ import { sourceRoles } from "./roles.svelte";
 import { jobHash, NAV, SECTION_NAME } from "./route";
 import TfShell, { type TfShellPorts } from "./TfShell.svelte";
 import { createTheme, type Theme } from "./theme.svelte";
+import { sourceFacts } from "./job/source-facts.fixture";
 
 /** Every block the Day tab's *Add to* wrote, as its target (#1525). */
 const created = vi.hoisted(() => [] as unknown[]);
@@ -122,7 +123,7 @@ function health(id: string, state: CredentialHealth["state"]): CredentialHealth 
 
 /** The job page's reads: `PAY-231` under Jira, holding nothing yet. */
 const JOB_PORTS: JobPorts = {
-  listSources: () => Promise.resolve([{ id: "jira" }]),
+  listSources: () => Promise.resolve([sourceFacts("jira")]),
   getEntity: (id) =>
     id === "jira:PAY-231"
       ? Promise.resolve({
@@ -796,7 +797,7 @@ test("a job opened by its id names its key on the Job tab", async () => {
  */
 const TWO_SOURCE_PORTS: JobPorts = {
   ...JOB_PORTS,
-  listSources: () => Promise.resolve([{ id: "jira" }, { id: "tide" }]),
+  listSources: () => Promise.resolve([sourceFacts("jira"), sourceFacts("tide")]),
   getEntity: (id) =>
     id === "tide:PAY-231"
       ? JOB_PORTS.getEntity("jira:PAY-231").then((detail) => ({

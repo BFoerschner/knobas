@@ -227,7 +227,7 @@ export function fakeUnmonitored() {
     ];
   }).sort(
     (left, right) =>
-      (left.path ?? "").localeCompare(right.path ?? "") || left.name.localeCompare(right.name),
+      left.path.localeCompare(right.path) || left.name.localeCompare(right.name),
   );
   return [...assets, ...routes];
 }

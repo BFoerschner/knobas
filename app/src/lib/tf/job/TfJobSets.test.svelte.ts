@@ -11,6 +11,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import type { JobPorts, JobSetPorts } from "./ports";
 import TfJob from "./TfJob.svelte";
+import { sourceFacts } from "./source-facts.fixture";
 
 const ID = "jira:PAY-231";
 let target: HTMLElement;
@@ -114,7 +115,7 @@ const answer = (draft: LinkSetDraft): LinkSetDetail => ({
 function ports(applying: JobLinkSets["sets"] = []): JobPorts {
   const reject = () => Promise.reject(new Error("not in this test"));
   return {
-    listSources: () => Promise.resolve([{ id: "jira" }]),
+    listSources: () => Promise.resolve([sourceFacts("jira")]),
     getEntity: (id) =>
       id === ID
         ? Promise.resolve(detail(ID, "Retry failed SEPA payouts", "PAY-200", [...LINKS, ...extraLinks]))

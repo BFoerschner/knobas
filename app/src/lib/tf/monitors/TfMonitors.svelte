@@ -163,7 +163,7 @@
     }, fail);
     ports.listSources().then(
       (rows) => {
-        if (live) sourceNames = Object.fromEntries(rows.map((row) => [row.id, row.display_name ?? row.id]));
+        if (live) sourceNames = Object.fromEntries(rows.map((row) => [row.id, row.display_name]));
       },
       () => {},
     );

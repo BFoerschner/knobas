@@ -46,6 +46,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import type { CaptureShortcut, EntityDetail, EntityPage, EntityRow } from "../ipc/entity";
 import type { QueuedWrite } from "../ipc/sources";
+import { sourceFacts } from "../tf/job/source-facts.fixture";
 
 // ---------------------------------------------------------------------------
 // Answers the test hands over on command, never on a timer.
@@ -1278,7 +1279,7 @@ const CASES: Case[] = [
           }),
           ports: {
             listContexts: () => deferred([]),
-            listSources: () => deferred([{ id: "jira" }]),
+            listSources: () => deferred([sourceFacts("jira")]),
             getEntity: () => deferred({ row: { entity_id: "jira:PAY-231", kind: "ticket" } } as never),
             jobReach: () => deferred([]),
             submitWrite: () => deferred({ id: 1 } as never),
@@ -1323,7 +1324,7 @@ const CASES: Case[] = [
               }),
             entityCheckout: () => deferred({ path: null } as never),
             codeFacts: () => deferred([]),
-            listSources: () => deferred([{ id: "jira" }]),
+            listSources: () => deferred([{ ...sourceFacts("jira"), base_url: "" }]),
             listContexts: () => deferred([]),
             getEntity: () => deferred({ row: { entity_id: "jira:PAY-231", kind: "ticket" } } as never),
             jobReach: () => deferred([]),
@@ -1585,7 +1586,7 @@ const CASES: Case[] = [
             editAsset: () => deferred({} as never),
             getRoute: () => deferred({} as never),
             editRoute: () => deferred({} as never),
-            listSources: () => deferred([{ id: "jira" }]),
+            listSources: () => deferred([sourceFacts("jira")]),
             listContexts: () => deferred([]),
             getEntity: () => deferred({ row: { entity_id: "jira:PAY-231", kind: "ticket" } } as never),
             jobReach: () => deferred([]),

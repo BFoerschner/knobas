@@ -8,6 +8,7 @@
  * path, its author and a repository's team and language `code_facts` (#966).
  */
 import type { AttentionGroup, CheckoutView, CodeFacts, EntityPage, EntityRow, WorkingTreeState } from "../../ipc/entity";
+import type { SourceSummary } from "../../ipc/sources";
 import { matchesAll } from "../filter/filter";
 
 /** `code_facts`' answer by entity id. */
@@ -278,7 +279,7 @@ export function compareHash(branches: readonly EntityRow[], repos: readonly Enti
 export function headerLine(
   total: number,
   repos: readonly EntityRow[],
-  sources: readonly { id: string; base_url?: string | null }[],
+  sources: readonly Pick<SourceSummary, "id" | "base_url">[],
 ): string {
   const noun = total === 1 ? "repository" : "repositories";
   const ids = [...new Set(repos.map((row) => row.source_id))];
