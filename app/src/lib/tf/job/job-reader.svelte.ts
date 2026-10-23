@@ -13,7 +13,7 @@
  * read.
  *
  * `TfJob.svelte` binds to it and keeps the writes and the drawing. The reader
- * touches no DOM, so its race is tested on fake ports (`job-reader.test.svelte.ts`).
+ * touches no DOM, so its race is tested on fake ports (`job-reader.test.ts`).
  */
 import type {
   CheckoutView,

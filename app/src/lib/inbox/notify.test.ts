@@ -655,7 +655,7 @@ test("an entity key with a hash and a slash in it survives the address", () => {
  * the **monitor** is the subject half of the key, the **asset** it watches is
  * the entity, and the reason names the asset's whole path.
  *
- * The same values `inbox.test.svelte.ts`' own `alertEntry` carries, written
+ * The same values `inbox.test.ts`' own `alertEntry` carries, written
  * out again rather than shared: that file mocks `../ipc/entity` with a
  * factory and this one does not, so a module either could import would have
  * to live outside both. The values are repeated on purpose all the same —

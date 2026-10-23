@@ -510,7 +510,7 @@ function callArguments(code: string, method: string): string[] {
  * #1256, #1278) edited a dozen sites where a page read rows for every source
  * and then dropped the ones whose source did not fill its role; a page that
  * forgot one drew a source for a role it does not fill. The role module lost
- * the means (`draws`, `keep`, `scope`; `roles.test.svelte.ts` pins what it
+ * the means (`draws`, `keep`, `scope`; `roles.test.ts` pins what it
  * still offers), and this rule keeps a page from growing its own.
  *
  * The scan reads every production file under `lib/tf/` and lists each
