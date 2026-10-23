@@ -14872,3 +14872,46 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1859.
   relative path, or mirror the refusal. *Ruling:* mirrored, three lines throwing the same `invalid`.
   *Reasoning:* a QA pass on `?fake-ipc` would otherwise store `Code` and show a screen the real app
   cannot reach. *Reversing:* trivial.
+
+## #1864: the mention plans flip on a pending list, not on the word (Opus implementer, 2026-10-23)
+
+- **The cause.** Not a predicate and not a column statistic. `item_body_trgm_idx` (`0049`) took
+  the default `gin_pending_list_limit` (4 MB). `read_plans.rs`' load with `common` in three bodies
+  of four ended with 411 pending pages (828 rows); without the word, 20. `gincostestimate`
+  charges every pending page as a random read, so the index read cost about 1,716 to 1,777
+  against 128, above a scan of every prose body (967 never analyzed, 1,389 analyzed). A manual
+  `analyze` merges nothing, so both states carry the list. `gin_clean_pending_list` on the same
+  mirror brought the plan back (cost 43). The word's share only moved where the last 4 MB merge
+  fell: red at 1/2, 2/3, 3/4 and 7/8, green at 1/4, as #1858's merge-manager found.
+- **Hold the index; the scan is not right at that share.** *Fork:* #1864 offers holding the plan
+  or ruling the scan right. *Ruling:* hold it. *Reasoning:* the scan was 4.8 ms and 1,132 to 1,354
+  buffers, the index 0.06 to 0.11 ms and 10 to 14 buffers, and the charge that chose the scan is
+  for a list a merge would remove. *Reversing:* drop `0057`'s limit and let `read_plans` keep the
+  word out again.
+- **256 kB, not `fastupdate = off`, a 1 MB cap or a merge after each sync.** *Ruling:*
+  `gin_pending_list_limit = 256` on the index. *Reasoning:* measured inserting the 5,000 bodies
+  row by row: 4 MB 0.26 to 0.39 s, 1 MB 0.29 to 0.51 s, 256 kB 0.50 to 0.74 s, 64 kB 0.98 to
+  1.7 s, `fastupdate = off` 3.5 to 10.8 s (`0033`'s choice, for an index its own batch probes). At
+  256 kB the list holds about 33 pages, a charge of about 130; at 1 MB about 129 pages, about 520,
+  which a mirror of a few thousand items' scan undercuts. A merge called after each sync would
+  need code in the sink and still leave a long list during a first sync. *Reversing:* one
+  migration resetting the limit.
+- **Reserved for Björn, ruled by implementer on Opus: migration `0057`** (Björn's 2026-10-22
+  waiver, as dispatched). *Fork:* §10.8 freezes `crates/knobas-db/migrations/**`; #1864 names a
+  statistics target or the predicate as the fixes it expected. *Ruling:* add `0057`, the storage
+  parameter and a merge of what is pending, with its entry
+  `1864-migration-0057-body-trigram-pending-list.md`. *Reasoning:* the rulings above; no
+  predicate or statistics target changes the pending-page charge. *Reversing:* as above.
+- **The migration merges the list already pending.** *Ruling:* `gin_clean_pending_list` after
+  the `alter`. *Reasoning:* the new limit merges only on the next insert past it, and an upgraded
+  mirror that writes nothing until its next sync would plan the rule on the old list until then.
+  Pinned by `zero_fifty_seven_caps_the_body_trigram_pending_list`, which reruns the migration over
+  a list the default limit left. *Reversing:* drop the statement.
+- **`read_plans` carries the common word; `Synthetic` loses `common_word`.** *Ruling:* reverses
+  #1858's ruling above. *Reasoning:* with the cause fixed, every caller would set the flag, and
+  the mirror that once flipped is the one the plan test should hold on. *Reversing:* low, the
+  flag back and three literals.
+- **The full-text index has the same default.** *Ruling:* out of scope, filed as #1869
+  (`backlog`). *Reasoning:* `item_fts_idx` is a different read and a different index, and
+  `knobas-search`'s notes record its pending list inflating benchmark reads 24x to 182x; it needs
+  its own reading on an unvacuumed mirror before a migration. *Reversing:* n/a.

@@ -26,7 +26,7 @@
 --
 -- At 256 kB the list holds at most about 33 pages, a charge of about 130,
 -- under a scan of all but a tiny mirror. Inserting those 5,000 bodies one by
--- one took 0.5 to 0.7 s, against 0.3 to 0.4 s at 4 MB and 3.5 to 13 s with
+-- one took 0.5 to 0.7 s, against 0.3 to 0.4 s at 4 MB and 3.5 to 10.8 s with
 -- no pending list (`0033`'s choice for an index a batch probes itself): a
 -- first sync pays for the merges, a few tenths of a second per 5,000 bodies.
 --
