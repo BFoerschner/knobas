@@ -48,6 +48,15 @@ pub(crate) const PG_CTL: &str = if cfg!(windows) {
     "pg_ctl"
 };
 
+/// The settings the app's server writes durably under, passed as `-c` every
+/// time it starts (#1896): see [`build_settings`]. The gate's test server
+/// overrides `fsync` (see `start_with_max_connections`).
+const DURABLE_SETTINGS: [(&str, &str); 3] = [
+    ("fsync", "on"),
+    ("synchronous_commit", "on"),
+    ("full_page_writes", "on"),
+];
+
 /// Pool size. The desktop app is a single user with a handful of concurrent
 /// queries; a larger pool only buys idle backends.
 const MAX_CONNECTIONS: u32 = 5;
@@ -423,8 +432,10 @@ impl EmbeddedDb {
     /// For a managed server this installs PostgreSQL into the shared,
     /// version-keyed `~/.theseus/postgresql/<version>` (a no-op once present,
     /// and shared with every other `root_dir` on the machine), runs `initdb` into `root_dir/data` the
-    /// first time, starts the server on an ephemeral loopback port and creates
-    /// the `knobas` database if it does not exist yet.
+    /// first time, starts the server on an ephemeral loopback port with
+    /// `fsync` on (#1896) and creates the `knobas` database if it does not
+    /// exist yet. An adopted orphan an older build left running with `fsync`
+    /// off is stopped and started again with it on (#1896).
     ///
     /// A server that is already up and serving this very data directory, one
     /// a signal-killed run left behind, is *adopted* rather than fought over:
@@ -470,13 +481,14 @@ impl EmbeddedDb {
     }
 
     /// [`start`](Self::start) for a managed server with a larger connection
-    /// limit than the desktop app's server has.
+    /// limit than the desktop app's server has, and with `fsync` off.
     ///
     /// For the test server `just test` runs: every test binary of a gate opens
     /// its pools on that one server, so PostgreSQL's default ceiling of 100 is
     /// what a parallel run would hit first. The knob is exposed here rather
     /// than through [`DbConfig`] because no shipped path wants it -- hence
-    /// `test-util` only.
+    /// `test-util` only. `fsync` is off because the run deletes the data
+    /// directory at its end; the app's server runs it on (#1896).
     ///
     /// # Errors
     ///
@@ -491,6 +503,13 @@ impl EmbeddedDb {
         settings
             .configuration
             .insert("max_connections".to_owned(), max_connections.to_string());
+        // Over the `fsync=on` `build_settings` passes (#1896): this server's
+        // data directory is deleted when the run ends, so a crash costs it
+        // nothing a sync to disk would have saved, and every test's `create
+        // database` and `drop database` skip the flush.
+        settings
+            .configuration
+            .insert("fsync".to_owned(), "off".to_owned());
         launch(&root_dir, settings).await
     }
 
@@ -1143,6 +1162,10 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
 /// was free, `owner_lock` is it, and the clean quit of this process stops the
 /// server.
 ///
+/// An orphan running with `fsync` off, which every build before #1896
+/// started, is stopped and started again on `settings` ([`restart_durable`]),
+/// so the app never goes on writing to it without syncing.
+///
 /// # A stranger on the port
 ///
 /// An answer on the recorded port that is not a server of ours -- not
@@ -1324,7 +1347,23 @@ async fn adopt(
             tracing::info!("the {DATABASE_NAME} database appeared before this adoption created it");
         }
     }
+    let fsync: (String,) = sqlx::query_as("select current_setting('fsync')")
+        .fetch_one(&mut admin)
+        .await
+        .map_err(|source| unreachable(format!("cannot query it: {source}")))?;
     let _ = admin.close().await;
+
+    // An orphan a build before #1896 started runs with `fsync` off: that
+    // build passed `-F` alone. A command-line setting outranks a reload, so
+    // only a start of our own gives it the `fsync=on` this build passes.
+    // Stopping it is safe for the reason `stop` stopping an adopted server
+    // is: `owner_lock` is held, so no knobas has this profile open.
+    let postgresql = if fsync.0 == "on" {
+        None
+    } else {
+        restart_durable(&settings).await?
+    };
+    let stop_settings = postgresql.is_none().then_some(settings);
 
     let connector = Connector::parse(&url)?;
     let pool = connector.app_pool().await.map_err(|source| {
@@ -1340,13 +1379,46 @@ async fn adopt(
     Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
         connector,
-        postgresql: None,
+        postgresql,
         // `settings.port` was set to the recorded port above, and
         // `adopt_recorded_password` gave it the password `initdb` burned in,
         // so this is a handle over the server we are actually connected to.
-        stop_settings: Some(settings),
+        stop_settings,
         owner_lock: Some(owner_lock),
     })))
+}
+
+/// Stop the orphan [`adopt`] found running with `fsync` off and start it
+/// again on `settings`, which pass `fsync=on` (#1896), on the port it had.
+///
+/// `Some` handle when the server runs durably now, which then stops it as a
+/// server started here does. `None` when the stop failed: the orphan is
+/// adopted as it is, with `fsync` off until the next quit, since a launch
+/// refused over a setting the previous build chose would cost the user more
+/// than the setting does. A failed start after a clean stop is an error, as
+/// any failed start is.
+async fn restart_durable(settings: &Settings) -> Result<Option<PostgreSQL>, DbError> {
+    tracing::warn!(
+        port = settings.port,
+        "the orphaned postgres runs with fsync off: starting it again with fsync on"
+    );
+    let orphan = PostgreSQL::new(settings.clone());
+    if let Err(error) = orphan.stop().await {
+        tracing::warn!(%error, "could not stop it: adopting it with fsync off");
+        // Its `Drop` would run `pg_ctl stop` again, under a server the
+        // caller goes on to connect to.
+        std::mem::forget(orphan);
+        return Ok(None);
+    }
+    drop(orphan);
+    let mut postgresql = PostgreSQL::new(settings.clone());
+    if let Err(error) = postgresql.start().await {
+        // As in `start_managed`: a handle whose start failed is never
+        // dropped, since its `Drop` stops whatever `postmaster.pid` names.
+        std::mem::forget(postgresql);
+        return Err(error.into());
+    }
+    Ok(Some(postgresql))
 }
 
 /// Whether two paths are **provably different** directories.
@@ -1470,6 +1542,18 @@ fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
     settings
         .configuration
         .insert("listen_addresses".to_owned(), HOST.to_owned());
+    // Durable writes (#1896). `postgresql_embedded` 0.21 starts every server
+    // as `pg_ctl start -o "-F -p <port> -c <key>=<value>..."`, and `-F` is
+    // `fsync=off`: a crash or a power loss on such a server can leave the
+    // data directory corrupt. The postmaster reads its arguments in order and
+    // the last setting of a name wins, so the `-c fsync=on` this puts after
+    // `-F` is the one the server runs with. The other two are PostgreSQL's
+    // defaults, set here so no `postgresql.conf` can lower them.
+    for (name, value) in DURABLE_SETTINGS {
+        settings
+            .configuration
+            .insert(name.to_owned(), value.to_owned());
+    }
     settings.timeout = Some(COMMAND_TIMEOUT);
 
     // The password `Settings::new()` invented is left in place here. Reading
