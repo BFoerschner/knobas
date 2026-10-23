@@ -793,3 +793,74 @@ async fn a_monitor_row_draws_its_type_and_dot_and_a_repository_its_team_or_owner
         ]
     );
 }
+
+/// #1843: a pattern's `project:` and `under:` hold a value the server and
+/// Rust's `to_lowercase` fold differently (`İ`). The pattern is stored as
+/// typed and the read folds both sides with `lower()`, so the page and the
+/// pipeline are found, and `lower()` leaves a value Rust folded already as it is.
+#[tokio::test]
+async fn a_pattern_with_a_dotted_capital_i_matches_under_the_servers_fold() {
+    let pool = pool().await;
+    let t = tag();
+    let space = format!("OPS{t}");
+    let parent = format!("İstanbul Rollout {t}");
+    let child = page(
+        &pool,
+        &space,
+        &format!("{space}1"),
+        "Plan",
+        &[parent.as_str()],
+    )
+    .await;
+    let project = format!("İstanbul{t}");
+    // Its id is not its name and its path does not hold the project, so the
+    // read's name branch is the one that has to fold.
+    let build = mirrored(
+        &pool,
+        "tc",
+        "build_config",
+        &format!("{t}_Build"),
+        &format!("{project} / {t}_Build"),
+        serde_json::json!({
+            "id": format!("{t}_Build"), "name": "Build", "projectId": format!("Ist{t}"),
+            "projectName": project, "projectPath": [{ "name": "Root" }],
+        }),
+    )
+    .await;
+    // And one found by its project's key alone.
+    let keyed_project = format!("İkey{t}");
+    let keyed = mirrored(
+        &pool,
+        "tc",
+        "build_config",
+        &format!("{t}_Keyed"),
+        &format!("Plain / {t}_Keyed"),
+        serde_json::json!({
+            "id": format!("{t}_Keyed"), "name": "Keyed", "projectId": keyed_project,
+            "projectName": format!("Plain{t}"), "projectPath": [{ "name": "Root" }],
+        }),
+    )
+    .await;
+    let job = ticket(&pool).await;
+
+    let saved = link_sets::save(
+        &pool,
+        &Registry::for_process(),
+        draft(
+            "Istanbul",
+            vec![],
+            vec![
+                pattern("page", &format!(r#"project:{space} under:"{parent}""#)),
+                pattern("pipeline", &format!(r#"project:"{project}""#)),
+                pattern("pipeline", &format!("project:{keyed_project}")),
+            ],
+            &job,
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(from_sets(&pool, &job).await, ids(&[&child, &build, &keyed]));
+    assert_eq!(saved.set.patterns[0].count, 1);
+    assert_eq!(saved.set.patterns[1].count, 1);
+    assert_eq!(saved.set.patterns[2].count, 1);
+}

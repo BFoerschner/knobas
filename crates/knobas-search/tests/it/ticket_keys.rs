@@ -841,3 +841,39 @@ async fn words_alone_match_the_key_the_title_and_the_declared_assignee() {
         );
     }
 }
+
+/// A value the server and Rust lower-case differently (#1843): `İ` is `i̇`
+/// (two code points) to Rust's `to_lowercase` and `i` to the server's
+/// `lower()`. The typed value must meet the stored one under the server's
+/// fold, for each key that compares a name.
+#[tokio::test]
+async fn a_value_with_a_dotted_capital_i_matches_under_the_servers_fold() {
+    let pool = pool().await;
+    let p = project();
+    let a = store(
+        &pool,
+        &p,
+        1,
+        Ticket {
+            status: "İn Review",
+            issuetype: "İssue",
+            priority: Some("İmportant"),
+            assignee: Some("İlker"),
+            labels: &["İstanbul"],
+            ..BASE
+        },
+    )
+    .await;
+    let other = store(&pool, &p, 2, BASE).await;
+    for (raw, expected) in [
+        (r#"status:"İn Review""#, vec![&a]),
+        (r#"-status:"İn Review""#, vec![&other]),
+        ("issuetype:İssue", vec![&a]),
+        ("priority:İmportant", vec![&a]),
+        ("assignee:İlker", vec![&a]),
+        ("label:İstanbul", vec![&a]),
+    ] {
+        let expected = sorted(expected.into_iter().cloned().collect());
+        assert_eq!(answer(&pool, &p, raw).await, expected, "{raw}");
+    }
+}

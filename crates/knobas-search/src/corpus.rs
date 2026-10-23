@@ -205,7 +205,7 @@ pub struct Corpus {
     pub(crate) under: Option<&'static str>,
     /// What each ticket key matches (#811), as a predicate over a row, the
     /// statement's [`FIELD_PATHS`] CTEs (`fp`, `lp`) and a relation `fd`
-    /// carrying the lowercased values (`fd.v`) and `assigned:`'s window in
+    /// carrying the values (`fd.v`, folded by the server, #1843) and `assigned:`'s window in
     /// days (`fd.n`). A key with no entry here is a field this corpus's rows
     /// do not have: the condition fails on every row, and its negation holds
     /// on every row.
@@ -334,8 +334,8 @@ pub(crate) use list_of;
 /// (`sync.item_project.path`, #1019), with `under:`'s adapter check: a parent
 /// project takes in its subprojects, as a link-set pattern's does.
 ///
-/// Every comparison is on `lower(...)` against values the grammar
-/// lowercased: Jira's status, type, priority and project names are
+/// Every comparison is on `lower(...)` against values the statement
+/// folds with the same `lower()` (#1843): Jira's status, type, priority and project names are
 /// case-insensitive in JQL, and so are its usernames.
 pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
     use crate::query::FieldKey;

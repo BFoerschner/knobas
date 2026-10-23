@@ -14782,3 +14782,20 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1859.
   a test with an unreadable clones root, if the race ever gets a seam.
 - **The readers' other blocking calls** (`is_dir`, `output()`, `run_capped`'s spawn, the Command
   Line Tools probe). *Ruling:* out of #1856's scope, filed as #1860 (`backlog`). *Reversing:* n/a.
+## #1843: ticket-key values and link-set patterns folded by the server (Sonnet implementer, 2026-10-23)
+
+- **Which keys bind as typed.** *Fork:* `has:`, `sprint:` and `assigned:` read their value in the
+  parse. *Ruling:* only the six name keys (`project:`, `status:`, `issuetype:`, `priority:`,
+  `assignee:`, `label:`) keep the typed spelling and bind through `sql::bind_lowered`; the other
+  three keep a value `apply_field` folds, since it is an ASCII spelling from a closed set.
+  *Reversing:* trivial.
+- **Dedupe of repeated values.** *Fork:* `push_unique` is exact. *Ruling:* a value typed twice in
+  two cases (`status:Done status:done`) is one, as it was before (`same_value`).
+- **The stored pattern.** *Fork:* the pattern is a stored contract. *Ruling:* `pattern_of` stores
+  `project:`, `under:` and `name:` as typed; `link_set_pattern_hits!` wraps the stored side of
+  `projects` and `under` in `lower()` (`names` already went through the glob's `lower()`). Patterns
+  saved before, folded by Rust, stay valid: `lower()` of a lower-cased value is itself, except that
+  an old pattern holding `i̇` (what Rust makes of `İ`) still does not match, as before. This
+  changes the macro's behaviour for any caller of `knobas-core`: a pattern stored with capitals now
+  matches, where it matched nothing. *Reversing:* moderate; no migration, so no stored row needs
+  rewriting either way.

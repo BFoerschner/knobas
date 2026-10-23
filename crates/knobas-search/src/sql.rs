@@ -487,7 +487,21 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
     for filter in &filters.fields {
         // `has:`'s kinds before its user: its fragment reads them first,
         // to pick the links it walks (#939).
-        let values = builder.param(Bind::Texts(filter.values.clone()));
+        // The six name keys bind as typed and are folded by the server
+        // (#1843); `has:`, `sprint:` and `assigned:` read a spelling the
+        // parse already folded.
+        use crate::query::FieldKey;
+        let values = match filter.key {
+            FieldKey::Project
+            | FieldKey::Status
+            | FieldKey::IssueType
+            | FieldKey::Priority
+            | FieldKey::Assignee
+            | FieldKey::Label => bind_lowered(builder, &filter.values),
+            FieldKey::Sprint | FieldKey::Assigned | FieldKey::Has => {
+                builder.param(Bind::Texts(filter.values.clone()))
+            }
+        };
         let me = if filter.key == crate::query::FieldKey::Has {
             builder.param(Bind::Texts(filter.me.clone()))
         } else {

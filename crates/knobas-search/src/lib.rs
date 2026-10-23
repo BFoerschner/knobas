@@ -514,7 +514,7 @@ impl Searcher {
             filters.fields.push(query::FieldFilter {
                 key: query::FieldKey::Project,
                 negated: false,
-                values: vec![key.to_lowercase()],
+                values: vec![key.to_owned()],
                 within_days: None,
                 me: Vec::new(),
             });

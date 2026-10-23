@@ -427,7 +427,8 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
             Vec::new()
         },
         // Typed only, like `under:`. `@me` becomes whoever the identity
-        // names, lowercased as every value here is; with no identity it
+        // names, as typed like every name value here (the statement folds
+        // them, #1843); with no identity it
         // becomes nobody, which matches nothing -- not "no filter".
         fields: parsed
             .fields
@@ -444,10 +445,10 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
                 for value in typed {
                     if value == ME {
                         for name in &parsed.identity {
-                            push_unique(&mut values, &name.to_lowercase());
+                            push_unique_value(&mut values, name);
                         }
                     } else {
-                        push_unique(&mut values, value);
+                        push_unique_value(&mut values, value);
                     }
                 }
                 FieldFilter {
@@ -511,7 +512,7 @@ impl Parsed {
         };
         let filter = &mut self.fields[index];
         if let Some(value) = value {
-            push_unique(&mut filter.values, &value);
+            push_unique_value(&mut filter.values, &value);
         }
         if let Some(days) = days {
             filter.within_days = Some(filter.within_days.map_or(days, |d| d.max(days)));
@@ -819,23 +820,27 @@ fn apply_key_value(
 /// `sprint:` reads `current` and nothing else, and `assigned:` a window as
 /// `updated:` reads one; any other value of theirs is reported.
 fn apply_field(key: FieldKey, negated: bool, value: &str, token: &str, parsed: &mut Parsed) {
-    let value = unquote(value.trim()).trim().to_lowercase();
-    if value.is_empty() {
+    let typed = unquote(value.trim()).trim().to_owned();
+    if typed.is_empty() {
         return;
     }
+    // The parse reads `sprint:`, `has:`, `assigned:` and `@me` folded; the
+    // value a name key matches with travels as typed (#1843).
+    let folded = typed.to_lowercase();
     match key {
-        FieldKey::Sprint if value != "current" => parsed.unknown(token),
-        FieldKey::Has if knobas_core::signals::SignalKind::from_spelling(&value).is_none() => {
+        FieldKey::Sprint if folded != "current" => parsed.unknown(token),
+        FieldKey::Has if knobas_core::signals::SignalKind::from_spelling(&folded).is_none() => {
             parsed.unknown(token);
         }
-        FieldKey::Assigned => match duration_days(&value) {
+        FieldKey::Sprint | FieldKey::Has => parsed.field(key, negated, Some(folded), None),
+        FieldKey::Assigned => match duration_days(&folded) {
             Some(days) => parsed.field(key, negated, None, Some(days)),
             None => parsed.unknown(token),
         },
-        FieldKey::Assignee if value == "me" || value == ME => {
+        FieldKey::Assignee if folded == "me" || folded == ME => {
             parsed.field(key, negated, Some(ME.to_owned()), None);
         }
-        _ => parsed.field(key, negated, Some(value), None),
+        _ => parsed.field(key, negated, Some(typed), None),
     }
 }
 
@@ -909,6 +914,14 @@ fn duration_days(value: &str) -> Option<u32> {
     None
 }
 
+/// [`push_unique`] for a typed name value: the same value in another case is
+/// the same value, and the statement folds it (#1843).
+fn push_unique_value(into: &mut Vec<String>, value: &str) {
+    if !into.iter().any(|existing| same_value(existing, value)) {
+        into.push(value.to_owned());
+    }
+}
+
 /// Append unless already present, preserving first-seen order.
 ///
 /// Order matters beyond tidiness: it is the order the generated SQL binds its
@@ -922,8 +935,8 @@ fn push_unique(into: &mut Vec<String>, value: &str) {
 
 /// What a link-set pattern matches (#868, R-7.2): a stored query read down
 /// to the four keys a pattern may use. Each list ORs its values and the lists
-/// AND; an empty list does not narrow. Every value is lowercased, as the
-/// grammar reads it. Serialized as the `pattern` column of
+/// AND; an empty list does not narrow. Every value is stored as typed; the
+/// matcher folds it with `lower()` (#1843). Serialized as the `pattern` column of
 /// `knobas.link_set_member` (migration `0040`), which
 /// `knobas_core::link_set_pattern_hits!` matches.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -991,15 +1004,11 @@ pub fn pattern_of(parsed: &Parsed) -> Result<Pattern, String> {
         under: parsed
             .under
             .iter()
-            .map(|(_, value)| value.to_lowercase())
+            .map(|(_, value)| value.clone())
             .collect(),
-        // A pattern is stored lowercased: `knobas_core`'s matcher compares
-        // its stored values as they are.
-        names: parsed
-            .names
-            .iter()
-            .map(|name| name.to_lowercase())
-            .collect(),
+        // A pattern is stored as typed: `knobas_core`'s matcher folds the
+        // stored side with the server's `lower()` (#1843).
+        names: parsed.names.to_vec(),
     };
     if pattern == Pattern::default() {
         return Err("a pattern needs a project, a parent or a name to match".to_owned());
@@ -1594,21 +1603,21 @@ mod tests {
             read(r#"project:"Payouts" name:Payout_* name:PspClient_*"#),
             Ok(Pattern {
                 sources: vec![],
-                projects: vec!["payouts".to_owned()],
+                projects: vec!["Payouts".to_owned()],
                 under: vec![],
-                names: vec!["payout_*".to_owned(), "pspclient_*".to_owned()],
+                names: vec!["Payout_*".to_owned(), "PspClient_*".to_owned()],
             })
         );
         assert_eq!(
             read(r#"project:OPS under:"Runbooks""#).map(|p| (p.projects, p.under)),
-            Ok((vec!["ops".to_owned()], vec!["runbooks".to_owned()]))
+            Ok((vec!["OPS".to_owned()], vec!["Runbooks".to_owned()]))
         );
         // `source:` and `/alias` claim the source prefix; they are still a
         // pattern's key.
         for raw in ["source:teamcity name:Payout_*", "/teamcity name:Payout_*"] {
             assert_eq!(
                 read(raw).map(|p| (p.sources, p.names)),
-                Ok((vec!["teamcity".to_owned()], vec!["payout_*".to_owned()])),
+                Ok((vec!["teamcity".to_owned()], vec!["Payout_*".to_owned()])),
                 "{raw:?}"
             );
         }
@@ -1638,17 +1647,17 @@ mod tests {
     }
 
     /// Each of the eight new keys (#811) is a filter on its own field: its
-    /// value lowercased (the match ignores case), a quoted value read inside
+    /// value as typed (the statement ignores case), a quoted value read inside
     /// its quotes, never a search word and never a kind.
     #[test]
     fn each_ticket_key_is_a_filter_on_its_own_field() {
         let v = fixture();
         for (raw, key, value) in [
-            ("project:PAY", FieldKey::Project, "pay"),
-            ("status:Done", FieldKey::Status, "done"),
-            (r#"status:"In Review""#, FieldKey::Status, "in review"),
-            ("issuetype:Bug", FieldKey::IssueType, "bug"),
-            ("priority:High", FieldKey::Priority, "high"),
+            ("project:PAY", FieldKey::Project, "PAY"),
+            ("status:Done", FieldKey::Status, "Done"),
+            (r#"status:"In Review""#, FieldKey::Status, "In Review"),
+            ("issuetype:Bug", FieldKey::IssueType, "Bug"),
+            ("priority:High", FieldKey::Priority, "High"),
             ("assignee:jonas.becker", FieldKey::Assignee, "jonas.becker"),
             ("label:sepa", FieldKey::Label, "sepa"),
             ("sprint:current", FieldKey::Sprint, "current"),
@@ -1676,7 +1685,7 @@ mod tests {
         );
         assert_eq!(
             parse("-space:\"Ops Team\"", &v).fields,
-            [field(FieldKey::Project, true, &["ops team"])]
+            [field(FieldKey::Project, true, &["Ops Team"])]
         );
         assert!(parse("space:ENG retry", &v).query.unknown_tokens.is_empty());
         assert_eq!(parse("space:ENG retry", &v).query.text, "retry");
@@ -1752,8 +1761,8 @@ mod tests {
         assert_eq!(
             p.fields,
             [
-                field(FieldKey::Status, false, &["done", "in review"]),
-                field(FieldKey::Status, true, &["blocked", "on hold"]),
+                field(FieldKey::Status, false, &["Done", "In Review"]),
+                field(FieldKey::Status, true, &["Blocked", "On Hold"]),
             ]
         );
         assert_eq!(p.query.text, "sepa");
@@ -1780,7 +1789,7 @@ mod tests {
         let p = parse("assignee:@me assignee:me assignee:Jonas", &v);
         assert_eq!(
             p.fields,
-            [field(FieldKey::Assignee, false, &["@me", "jonas"])]
+            [field(FieldKey::Assignee, false, &["@me", "Jonas"])]
         );
         let eff = merge(&p, &SearchFilters::default());
         assert_eq!(
@@ -1788,7 +1797,7 @@ mod tests {
             [field(
                 FieldKey::Assignee,
                 false,
-                &["mara.lindqvist", "jonas"]
+                &["mara.lindqvist", "Jonas"]
             )]
         );
         // Not `mine`: the author filter stays off.
@@ -1834,10 +1843,10 @@ mod tests {
     fn every_ticket_key_negates() {
         let v = fixture();
         for (raw, key, value) in [
-            ("project:PAY", FieldKey::Project, Some("pay")),
-            ("status:Done", FieldKey::Status, Some("done")),
-            ("issuetype:Bug", FieldKey::IssueType, Some("bug")),
-            ("priority:High", FieldKey::Priority, Some("high")),
+            ("project:PAY", FieldKey::Project, Some("PAY")),
+            ("status:Done", FieldKey::Status, Some("Done")),
+            ("issuetype:Bug", FieldKey::IssueType, Some("Bug")),
+            ("priority:High", FieldKey::Priority, Some("High")),
             ("assignee:jonas", FieldKey::Assignee, Some("jonas")),
             ("label:sepa", FieldKey::Label, Some("sepa")),
             ("sprint:current", FieldKey::Sprint, Some("current")),
