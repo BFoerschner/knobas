@@ -533,6 +533,18 @@ impl Harness {
         *self.interrupt.lock().unwrap() = Some(interrupt);
     }
 
+    /// Wait for the first paced write to go on the wire, and answer its
+    /// target and when it started (see [`Paced`]).
+    async fn first_paced(&self) -> (String, std::time::Instant) {
+        for _ in 0..1000 {
+            if let Some(first) = self.paced.lock().unwrap().started.first().cloned() {
+                return first;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!("no paced write went on the wire");
+    }
+
     /// Queue a ticket under a project container -- the op ADR-0012 singles out
     /// as not naturally idempotent, and whose adapter names nothing back.
     async fn create_ticket(&self, project: &EntityRef, title: &str) -> store::QueuedWrite {
@@ -1673,15 +1685,7 @@ async fn beside_the_flush_task(mine: Mine) {
     }
 
     let send = async {
-        let mut on_the_wire = None;
-        for _ in 0..1000 {
-            on_the_wire = h.paced.lock().unwrap().started.first().map(|(_, at)| *at);
-            if on_the_wire.is_some() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        let on_the_wire = on_the_wire.expect("the flush task's first write went on the wire");
+        let (_, on_the_wire) = h.first_paced().await;
         match mine {
             Mine::Submitted => {
                 h.comment(&pull, "mine").await;
@@ -1724,6 +1728,166 @@ async fn beside_the_flush_task(mine: Mine) {
         ],
         "every write is delivered once"
     );
+}
+
+/// #1807: a submit on an entity whose earlier write the flush task is
+/// sending tries its own write once that one lands, and does not wait for
+/// the slow write the task owes on another entity after it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_submit_behind_a_head_the_flush_task_is_sending_tries_its_own_write() {
+    behind_a_head_on_the_wire(Fate::Lands).await;
+}
+
+/// #1807: as above, with the head withdrawn while it is on the wire, which
+/// closes it as surely as its landing does: the entity's next write is the
+/// head now.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_submit_behind_a_head_withdrawn_on_the_wire_tries_its_own_write() {
+    behind_a_head_on_the_wire(Fate::Withdrawn).await;
+}
+
+/// What becomes of the head in [`behind_a_head_on_the_wire`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Fate {
+    /// The flush task's send settles it.
+    Lands,
+    /// The reader withdraws it at the end of its send, once the submit is
+    /// waiting for the source.
+    Withdrawn,
+}
+
+/// The flush task's pass sends a head write on one entity and then a slow
+/// write on another, each taking `DWELL`; a submit on the first entity starts
+/// while the head is on the wire. Asserts that, the moment the submit
+/// returns, its own write was sent and the other entity's was not yet.
+///
+/// Arranged rather than timed: the verdict reads rows, not a clock. The one
+/// bound is the other entity's `DWELL`, which the submit has, once it lets go
+/// of the source, to re-read its entity's heads and the two rows.
+async fn behind_a_head_on_the_wire(fate: Fate) {
+    const DWELL: std::time::Duration = std::time::Duration::from_secs(1);
+    let h = harness().await;
+    let mine = h.mirror("PAY-1807-A", "a payout fails").await;
+    let other = h.mirror("PAY-1807-B", "a refund fails").await;
+    let comment = |entity: &EntityRef, body: &str| WriteOp::Comment {
+        entity: entity.to_string(),
+        body: body.to_owned(),
+    };
+
+    // Queued in this order, so the task's pass sends the head on `mine`
+    // first and then the write on `other`.
+    let head = flusher::queue(&h.deps, &h.source, comment(&mine, "the head"))
+        .await
+        .unwrap();
+    let slow = flusher::queue(&h.deps, &h.source, comment(&other, "the slow one"))
+        .await
+        .unwrap();
+    for entity in [&mine, &other] {
+        h.paced
+            .lock()
+            .unwrap()
+            .dwell
+            .insert(entity.to_string(), DWELL);
+    }
+    if fate == Fate::Withdrawn {
+        h.interrupt(Interrupt::Withdraw(head.id));
+    }
+
+    let submit = async {
+        let (target, _) = h.first_paced().await;
+        assert_eq!(target, mine.to_string(), "the head on `mine` goes first");
+        // The head has read its dwell; the submitted write takes none.
+        h.paced.lock().unwrap().dwell.remove(&mine.to_string());
+        let submitted = h.comment(&mine, "mine").await;
+        (
+            h.reload(submitted.id).await.state,
+            h.reload(slow.id).await.state,
+        )
+    };
+    let (task, (submitted, slow_then)) =
+        tokio::join!(flusher::flush_source(&h.deps, &h.source), submit);
+    task.unwrap();
+
+    assert_eq!(
+        submitted,
+        WriteState::Sent,
+        "the submit returned without trying its own write"
+    );
+    assert_eq!(
+        slow_then,
+        WriteState::Pending,
+        "the submit waited for the other entity's write"
+    );
+    let settled = match fate {
+        Fate::Lands => WriteState::Sent,
+        Fate::Withdrawn => WriteState::Discarded,
+    };
+    assert_eq!(h.reload(head.id).await.state, settled);
+    assert_eq!(h.reload(slow.id).await.state, WriteState::Sent);
+    let delivered = h.delivered();
+    assert_eq!(
+        delivered.iter().filter(|body| *body == "mine").count(),
+        1,
+        "every write is delivered once: {delivered:?}"
+    );
+    let at = |body: &str| delivered.iter().position(|b| b == body);
+    assert!(
+        at("the head") < at("mine"),
+        "the entity's writes go in queue order: {delivered:?}"
+    );
+    assert_eq!(delivered.len(), 3, "{delivered:?}");
+}
+
+/// #1807 beside #1628: a head that closed while the flush task waited hands
+/// its turn on only to a successor the tick owes. One waiting out a rung of
+/// the ladder is not sent early because the write ahead of it went.
+///
+/// Arranged: the task's pass reads the head on `mine`, then sends a slow
+/// write on `other`; while that one is on the wire the reader withdraws the
+/// head, and the write after it, now the entity's head, is recorded as
+/// waiting `unreachable` on its first rung.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_head_withdrawn_while_the_task_waited_hands_on_only_to_an_owed_write() {
+    let h = harness().await;
+    let mine = h.mirror("PAY-1812-A", "a payout fails").await;
+    let other = h.mirror("PAY-1812-B", "a refund fails").await;
+    let comment = |entity: &EntityRef, body: &str| WriteOp::Comment {
+        entity: entity.to_string(),
+        body: body.to_owned(),
+    };
+
+    let slow = flusher::queue(&h.deps, &h.source, comment(&other, "the slow one"))
+        .await
+        .unwrap();
+    let head = flusher::queue(&h.deps, &h.source, comment(&mine, "the head"))
+        .await
+        .unwrap();
+    let next = flusher::queue(&h.deps, &h.source, comment(&mine, "on a rung"))
+        .await
+        .unwrap();
+    h.paced
+        .lock()
+        .unwrap()
+        .dwell
+        .insert(other.to_string(), std::time::Duration::from_millis(500));
+
+    let meanwhile = async {
+        let (target, _) = h.first_paced().await;
+        assert_eq!(target, other.to_string(), "the slow write goes first");
+        flusher::discard(&h.deps, head.id).await.unwrap().unwrap();
+        store::wait(&h.deps.pool, next.id, WaitReason::Unreachable, None)
+            .await
+            .unwrap()
+            .unwrap();
+    };
+    let (task, ()) = tokio::join!(flusher::flush_source(&h.deps, &h.source), meanwhile);
+    task.unwrap();
+
+    assert_eq!(h.reload(slow.id).await.state, WriteState::Sent);
+    let row = h.reload(next.id).await;
+    assert_eq!(row.state, WriteState::Pending, "sent before its rung");
+    assert_eq!(row.attempts, 1);
+    assert_eq!(h.delivered(), vec!["the slow one".to_owned()]);
 }
 
 /// Issue #336: a create that landed after the user withdrew it is recorded,

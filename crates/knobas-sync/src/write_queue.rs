@@ -467,7 +467,10 @@ struct CredentialSeen<'a> {
 /// second pass is what lets an entity's *next* write follow the one that just
 /// landed. It stops the moment a pass delivers nothing, which is what keeps a
 /// stuck queue from spinning; and a write that failed in one pass is not owed
-/// in the next, because its wait was just recorded.
+/// in the next, because its wait was just recorded. A head another flusher
+/// landed, or the reader withdrew, while this one waited for the lock gives
+/// its turn to the entity's next write ([`turn`]), so that write is this
+/// flusher's to send.
 ///
 /// # Errors
 ///
@@ -574,12 +577,15 @@ async fn flush(
 
 /// What a flusher finds when its turn at one write comes ([`turn`]).
 enum Turn<'g> {
-    /// The write is as this flusher read it, and still owed: send it,
-    /// holding the source's lock until it has settled.
+    /// The row to send, as it stands now: the write this flusher read, still
+    /// untouched and owed, or, if that one closed, its entity's next head.
+    /// Send it, holding the source's lock until it has settled.
     /// Boxed: a queue row is far larger than the other two arms.
     Go(tokio::sync::MutexGuard<'g, ()>, Box<QueuedWrite>),
-    /// Another flusher attempted it, or it settled or was withdrawn, since
-    /// it was read.
+    /// Nothing to send this turn: the write is held or refused, another
+    /// flusher attempted it since it was read, or it is waiting something out
+    /// ([`owed`]); or it settled or was withdrawn and its entity has no
+    /// pending head after it that this pass sends.
     Gone,
     /// The quit came first: start nothing more.
     Stopped,
@@ -590,9 +596,17 @@ enum Turn<'g> {
 ///
 /// The row as it stands now is what is sent, not the copy the pass read: an
 /// amend that landed in between is the version the reader means. It is
-/// [`Turn::Gone`] if it is no longer pending, if its `attempted_at` or
+/// [`Turn::Gone`] if it is held or refused, if its `attempted_at` or
 /// `attempts` moved (every attempt bumps both, under this lock), or, on a
 /// pass of the tick's kind, if it is no longer [`owed`].
+///
+/// A write another flusher landed, or the reader withdrew, while this one
+/// waited hands its turn to its entity's next write, re-read as `heads`
+/// reads it (#1807). Without that, a submit whose entity's earlier write the
+/// flush task was sending would make no progress and return untried, and its
+/// own write would wait for the rest of the task's pass on the source. A
+/// write another flusher attempted and failed is still no progress: it is
+/// still the entity's head, and the attempt this flusher meant was just made.
 async fn turn<'g>(
     deps: &SchedulerDeps,
     gate: &'g Gate,
@@ -608,6 +622,17 @@ async fn turn<'g>(
     let Some(now) = store::get(&deps.pool, read.id).await? else {
         return Ok(Turn::Gone);
     };
+    if !now.state.is_open() {
+        // Another flusher landed it, or the reader withdrew it, while this
+        // one waited: the entity's next write is its head now, and this turn
+        // is that write's (#1807). Read under the lock, so as it stands; one
+        // entity's, so never another's; the head, so in queue order.
+        let next = heads(deps, &read.source_id, pass, Reach::Entity(&read.entity_id)).await?;
+        return Ok(match next.into_iter().next() {
+            Some(next) => Turn::Go(sending, Box::new(next)),
+            None => Turn::Gone,
+        });
+    }
     let untouched = now.state == WriteState::Pending
         && now.attempted_at == read.attempted_at
         && now.attempts == read.attempts;
