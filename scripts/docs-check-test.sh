@@ -49,7 +49,7 @@ expect green "the tree after both are removed"
 # #1697: an entry file must start with a bullet naming an issue. The index is
 # regenerated around the stray file, so only the entry-file check can refuse it.
 idx() { python3 -I "$scratch/scripts/contract-index.py" >/dev/null; }
-check_err() { python3 -I "$scratch/scripts/contract-index.py" --check 2>&1 >/dev/null || true; }
+check_err() { python3 -I "$scratch/scripts/contract-index.py" --check 2>&1 | cat; }
 printf '# Notes\n\nNot an entry, though it names issue #12.\n' > "$scratch/docs/contract/10.8/README.md"
 idx
 expect red "a README.md in section 10.8 with the index regenerated"
