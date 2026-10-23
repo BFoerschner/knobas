@@ -13242,3 +13242,13 @@ The measurement came after it.
 - **#1797 states the conflict right.** `submit` runs `flush_source`, `store::due` orders heads by
   id, and the tokio mutex is FIFO, so a submit still waits through the flush task's sends on its
   source. Not widened here. *Reversing:* n/a.
+## #1762, load flakes on the ubuntu runner
+
+- **Launcher-chain split off, #1762 closes for the two fixed causes.** *Fork:* keep #1762 open for
+  an unreproduced third flake, or file it separately. *Ruling:* file a `backlog` follow-up with the
+  implementer's measurements, close #1762. *Reasoning:* the ticket says fix the cause, not the
+  timeout, and no cause was measured for `launcher-chain.test.svelte.ts`; a speculative wait change
+  would be the timeout fix the ticket forbids. *Reversing:* reopen the follow-up as a ticket.
+- **`toasts.reset()` clears the armed dismiss timers as well as keeping ids unique.** *Ruling:* done
+  in the PR (`timers` map, cleared in `reset` and `dismiss`). *Reasoning:* a timer firing into a
+  later test is leaked state even when the id match is harmless. *Reversing:* low.
