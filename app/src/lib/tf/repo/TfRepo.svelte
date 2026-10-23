@@ -88,6 +88,7 @@
     checkoutSentence,
     headLine,
     litTab,
+    readAllRows,
     readRepoRoute,
     repoHash,
     repoPrs,
@@ -192,9 +193,9 @@
           include_deleted: false,
           reach: null,
         };
-        ports.listEntities(filter, LIMIT, 0).then(
-          (page) => {
-            if (live) prs = repoPrs(page.rows, detail.row);
+        readAllRows((offset) => ports.listEntities(filter, LIMIT, offset)).then(
+          (rows) => {
+            if (live) prs = repoPrs(rows, detail.row);
           },
           () => {
             if (live) prs = [];

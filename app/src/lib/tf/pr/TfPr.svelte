@@ -81,7 +81,7 @@
   import { actionName } from "../../detail/view/actions";
   import { prNumber } from "../code/code";
   import { isMine, itemHash, keyOf, username } from "../job/job";
-  import { commitHash, repoHash } from "../repo/repo";
+  import { commitHash, readAllRows, repoHash, repoOfRow } from "../repo/repo";
   import { jobHash } from "../route";
   import { initials } from "../tickets/tickets";
   import {
@@ -137,8 +137,10 @@
     follower?: WriteFollower;
   } = $props();
 
-  /** How many repositories and proposals one read asks for. */
+  /** How many repositories one read asks for: a source with more is read on with `offset` (#1825). */
   const LIMIT = 1000;
+  /** The proposals one read answers: `room_suggestions` takes no offset and answers at most 500 (`ROW_CEILING`, #1643), as many as Review reads. */
+  const PROPOSALS = 500;
 
   const route = $derived(readPrRoute(rest));
   const prId = $derived(route.prId);
@@ -212,7 +214,7 @@
         viewFailed = ipcErrorMessage(error);
       },
     );
-    ports.roomSuggestions([], null, LIMIT).then(
+    ports.roomSuggestions([], null, PROPOSALS).then(
       (page) => {
         if (!live) return;
         const found: Record<string, string> = {};
@@ -241,10 +243,15 @@
       include_deleted: false,
       reach: null,
     };
-    ports.listEntities(filter, LIMIT, 0).then(
-      (page) => {
+    // The source's repositories are read on past one read's rows until the
+    // pull request's own turns up (#1825): its repository may sit anywhere.
+    readAllRows(
+      (offset) => ports.listEntities(filter, LIMIT, offset),
+      (rows) => repoOfRow(row, rows) !== null,
+    ).then(
+      (rows) => {
         if (!live()) return;
-        repo = page.rows.find((candidate) => candidate.title === row.path) ?? null;
+        repo = repoOfRow(row, rows);
         if (repo === null) return;
         ports.entityCheckout(repo.entity_id).then(
           (answer) => {

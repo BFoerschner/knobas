@@ -846,3 +846,21 @@ test("a close the queue refuses drops its chip and its holds, and says why", asy
   expect(holdOf("Merge…")).toEqual([null, ""]);
   expect(toasts.items.at(-1)!.text).toBe("Close was refused: 403 Forbidden");
 });
+
+test("the repository is found in a source of more than 1000 repositories (#1825)", async () => {
+  const many = Array.from({ length: 1200 }, (_, n) => row(`gitea:tidewater/r${n}`, "repo", `tidewater/r${n}`));
+  many[1100] = row(REPO, "repo", "tidewater/payout-service");
+  const offsets: number[] = [];
+  await draw(
+    [PR],
+    ports({
+      listEntities: async (_filter, limit, offset) => {
+        offsets.push(offset);
+        return { rows: many.slice(offset, offset + limit), total: many.length } as never;
+      },
+    }),
+  );
+  expect(target.querySelector(".tf-crumbs a[href='#/repo/" + encodeURIComponent(REPO) + "']")?.textContent).toBe("tidewater/payout-service");
+  expect(offsets).toEqual([0, 1000]);
+  expect(text(".tf-prlocal")).toContain("/Users/mara/code/payout-service");
+});

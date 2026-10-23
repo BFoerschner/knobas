@@ -9,6 +9,7 @@ import type { DiffFile, DiffRead, EntityRow, SourceView, ViewAction, ViewSection
 import {
   ancestors,
   branchOptions,
+  readAllRows,
   branchStanding,
   type BranchRow,
   commitPrefill,
@@ -417,4 +418,33 @@ test("a commit onto the branch is refused where the file's section declares comm
   expect(commitRefusal(fileSection([action("delete_branch", "Protected branch")]))).toBeNull();
   expect(commitRefusal(fileSection(null))).toBeNull();
   expect(commitRefusal(undefined)).toBeNull();
+});
+
+// ---- readAllRows (#1825) ----
+
+const filler = (from: number, count: number): EntityRow[] =>
+  Array.from({ length: count }, (_, n) => ({ entity_id: `gitea:o/r${from + n}`, kind: "repo", source_id: "gitea", title: `o/r${from + n}` }) as EntityRow);
+
+test("readAllRows reads on with offset until total, so rows past one read are kept (#1825)", async () => {
+  const all = filler(0, 2300);
+  const offsets: number[] = [];
+  const rows = await readAllRows(async (offset) => {
+    offsets.push(offset);
+    return { rows: all.slice(offset, offset + 1000), total: all.length, tally: null, groups: null };
+  });
+  expect(rows.length).toBe(2300);
+  expect(offsets).toEqual([0, 1000, 2000]);
+});
+
+test("readAllRows stops as soon as done is satisfied, and on an empty page", async () => {
+  const all = filler(0, 2300);
+  const offsets: number[] = [];
+  const read = async (offset: number) => {
+    offsets.push(offset);
+    return { rows: all.slice(offset, offset + 1000), total: all.length, tally: null, groups: null };
+  };
+  await readAllRows(read, (rows) => rows.some((row) => row.title === "o/r1500"));
+  expect(offsets).toEqual([0, 1000]);
+  const shrunk = await readAllRows(async () => ({ rows: [], total: 5, tally: null, groups: null }));
+  expect(shrunk).toEqual([]);
 });

@@ -36,7 +36,7 @@
 
 <script lang="ts">
   import { ipcErrorMessage, isIpcError } from "../../ipc";
-  import { repoOfRow, underRepoHash, type UnderRepoKind } from "../repo/repo";
+  import { readAllRows, repoOfRow, underRepoHash, type UnderRepoKind } from "../repo/repo";
 
   let {
     head,
@@ -66,22 +66,24 @@
         const repos =
           row.path === null
             ? []
-            : (
-                await ports.listEntities(
-                  {
-                    sources: [row.source_id],
-                    kinds: ["repo"],
-                    updated_within_days: null,
-                    order: "updated_desc",
-                    context: null,
-                    project: null,
-                    include_deleted: false,
-                    reach: null,
-                  },
-                  LIMIT,
-                  0,
-                )
-              ).rows;
+            : await readAllRows(
+                (offset) =>
+                  ports.listEntities(
+                    {
+                      sources: [row.source_id],
+                      kinds: ["repo"],
+                      updated_within_days: null,
+                      order: "updated_desc",
+                      context: null,
+                      project: null,
+                      include_deleted: false,
+                      reach: null,
+                    },
+                    LIMIT,
+                    offset,
+                  ),
+                (rows) => repoOfRow(row, rows) !== null,
+              );
         if (!live) return;
         const repo = repoOfRow(row, repos);
         if (repo === null) read = { unplaced: row.title };
