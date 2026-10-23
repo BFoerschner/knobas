@@ -120,11 +120,12 @@
 # Where the slots live, and this shell's state in the protocol. `slot` is the
 # link this shell holds (empty when it holds none), `held` the pids the last
 # failed pass found, `reclaim_lock` a lock this shell is inside right now.
-# `holder_pr` is the merge-tail holder's PR when this gate runs under `hold`,
-# `holder_mark` this shell's "a holder is waiting" link while it waits, and
-# `ahead` the waiting holders' pids the last pass yielded to.
+# `tail_pr` is the merge-tail lock holder's PR when this gate runs under
+# `hold` (not to be confused with a slot's holder, the pid in its link),
+# `tail_mark` this shell's `holder-waiting-<pid>` link while it waits, and
+# `tail_waiting` the pids of such waiting gates the last pass yielded to.
 slot_root=${TMPDIR:-/tmp}/knobas-gate-slots
-slot='' held='' reclaim_lock='' holder_pr='' holder_mark='' ahead=''
+slot='' held='' reclaim_lock='' tail_pr='' tail_mark='' tail_waiting=''
 # Set by `hold_gate_slot` from the environment before `take_slot` reads them;
 # declared here so a `set -u` shell cannot meet them unset.
 slots=1 slot_wait=150
@@ -135,17 +136,17 @@ slots=1 slot_wait=150
 # slot taken afresh -- see above.
 take_slot() {
     local i name holder lock=$slot_root/reclaim
-    held='' ahead=''
+    held='' tail_waiting=''
     mkdir -p "$slot_root"
-    if [ -n "$holder_pr" ]; then
+    if [ -n "$tail_pr" ]; then
         # Every pass, so a mark removed by hand with the directory comes back.
-        [ -L "$holder_mark" ] || ln -s "$$" "$holder_mark" 2>/dev/null || true
+        [ -L "$tail_mark" ] || ln -s "$$" "$tail_mark" 2>/dev/null || true
     else
-        waiting_holders
-        if [ -n "$ahead" ]; then
+        tail_waiters
+        if [ -n "$tail_waiting" ]; then
             for ((i = 1; i <= slots; i++)); do
                 holder=$(readlink "$slot_root/slot-$i" 2>/dev/null || true)
-                [ -z "$holder" ] || held="$held $holder"
+                if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then held="$held $holder"; fi
             done
             held=${held# }
             return 1
@@ -177,18 +178,18 @@ take_slot() {
     return 1
 }
 
-# Sets `ahead` to the pids of the merge-tail holders' gates waiting for a
-# slot right now. A mark whose pid is dead is a holder SIGKILLed mid-wait
+# Sets `tail_waiting` to the pids of merge-tail holders' gates waiting for a
+# slot right now (one, unless a holder that lost the lock still waits). A mark whose pid is dead is a holder SIGKILLed mid-wait
 # (its traps did not run) and is removed: only that pid ever makes that name.
-waiting_holders() {
+tail_waiters() {
     local m p
-    ahead=
+    tail_waiting=
     for m in "$slot_root"/holder-waiting-*; do
         [ -L "$m" ] || continue
         p=${m##*-}
-        if kill -0 "$p" 2>/dev/null; then ahead="$ahead $p"; else rm -f "$m"; fi
+        if kill -0 "$p" 2>/dev/null; then tail_waiting="$tail_waiting $p"; else rm -f "$m"; fi
     done
-    ahead=${ahead# }
+    tail_waiting=${tail_waiting# }
 }
 
 release_slot() {
@@ -198,8 +199,8 @@ release_slot() {
     [ -z "$reclaim_lock" ] || rmdir "$reclaim_lock" 2>/dev/null || true
     reclaim_lock=
     # A holder interrupted while it waits takes its mark with it.
-    [ -z "$holder_mark" ] || rm -f "$holder_mark"
-    holder_mark=
+    [ -z "$tail_mark" ] || rm -f "$tail_mark"
+    tail_mark=
     [ -n "$slot" ] || return 0
     # Only a link that still names this shell: a reclaimer removes a
     # slot only when its holder is dead, so this is belt and braces.
@@ -213,7 +214,7 @@ release_slot() {
 # terminal has to be able to tell which recipe is queued. Call it with
 # `release_slot` already armed in the EXIT, INT and TERM traps.
 hold_gate_slot() {
-    local name=$1 wait_from waited reason why said=
+    local name=$1 wait_from waited cause message told=
     slots=${KNOBAS_GATE_SLOTS:-1}
     case $slots in
         ''|*[!0-9]*) echo "error: KNOBAS_GATE_SLOTS must be a whole number of at least 1, not '$slots'" >&2; exit 1 ;;
@@ -230,34 +231,34 @@ hold_gate_slot() {
     slot_wait=$((10#$slot_wait))
     # Set by `merge-tail-lock.sh hold` for the command it runs: this gate is
     # the merge-tail holder's, and the queue in `take` waits on it.
-    holder_pr=${KNOBAS_MERGE_TAIL_HOLDER:-}
-    [ -z "$holder_pr" ] || holder_mark=$slot_root/holder-waiting-$$
+    tail_pr=${KNOBAS_MERGE_TAIL_HOLDER:-}
+    [ -z "$tail_pr" ] || tail_mark=$slot_root/holder-waiting-$$
     wait_from=$SECONDS
     until take_slot; do
         waited=$((SECONDS - wait_from))
-        if [ -n "$ahead" ]; then
-            reason=yield why="the merge-tail holder's gate (pid $ahead) is waiting for a gate slot and goes first (slots held by pids ${held:-none})"
+        if [ -n "$tail_waiting" ]; then
+            cause=yield message="the merge-tail holder's gate (pid $tail_waiting) is waiting for a gate slot and goes first (slots held by pids ${held:-none})"
         else
-            reason=held why="all $slots gate slots are held (pids $held)"
+            cause=held message="all $slots gate slots are held (pids $held)"
         fi
-        # Said again when the reason changes: a pre-gate waiting on a run
+        # Said again when the cause changes: a pre-gate waiting on a run
         # that a holder then queues behind is told the holder goes first.
-        if [ "$said" != "$reason" ]; then
-            said=$reason
-            if [ -n "$holder_pr" ]; then
-                echo "$name: $why; waiting up to $slot_wait s for one to free, ahead of any pre-gate (merge-tail holder #$holder_pr)"
+        if [ "$told" != "$cause" ]; then
+            told=$cause
+            if [ -n "$tail_pr" ]; then
+                echo "$name: $message; waiting up to $slot_wait s for one to free, ahead of any pre-gate (merge-tail holder #$tail_pr)"
             else
-                echo "$name: $why; waiting up to $slot_wait s for one to free"
+                echo "$name: $message; waiting up to $slot_wait s for one to free"
             fi
         fi
         if [ "$waited" -ge "$slot_wait" ]; then
-            echo "error: $why; waited $waited s for one to free, giving up (exit 75: the queue, not a red gate; run it again)" >&2
+            echo "error: $message; waited $waited s for one to free, giving up (exit 75: the queue, not a red gate; run it again)" >&2
             exit 75
         fi
         sleep 1
     done
-    [ -z "$holder_mark" ] || rm -f "$holder_mark"
-    holder_mark=
+    [ -z "$tail_mark" ] || rm -f "$tail_mark"
+    tail_mark=
     waited=$((SECONDS - wait_from))
     [ "$waited" -eq 0 ] || echo "$name: gate slot free after $waited s"
 }

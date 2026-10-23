@@ -107,8 +107,16 @@ check "race: the others expire with 75" "$lost" 4
 # the pre-gate starts waiting first, the holder's gate second. The slot frees
 # while the holder's gate is stopped (SIGSTOP: alive, but it cannot poll), so
 # on first come, first served the pre-gate's next poll would take it. Every
-# taker gives up after 20 s and holds what it took for 3 s.
+# taker gives up after 20 s and holds what it took for 3 s. Each step waits
+# for what it needs to see (`await`), not for a fixed time, so a loaded
+# machine (`witness-unit` runs inside a gate) slows it down without breaking it.
 slots_dir=$TMPDIR/knobas-gate-slots
+await() { # await <seconds> <command...>: polls every 0.1 s until it succeeds
+    local n=$(($1 * 10)); shift
+    until "$@"; do n=$((n - 1)); [ "$n" -gt 0 ] || return 1; sleep 0.1; done
+}
+says() { grep -q -- "$2" "$1" 2>/dev/null; } # says <file> <text>
+slot_names() { [ "$(readlink "$slots_dir/slot-1" 2>/dev/null)" = "$1" ]; }
 start_taker() { # start_taker <out file> <hold seconds> [VAR=value...]: sets `started` to its pid
     local out=$1 hold=$2; shift 2
     env KNOBAS_GATE_SLOTS=1 KNOBAS_GATE_SLOT_WAIT=20 "$@" \
@@ -119,18 +127,20 @@ rm -rf "$slots_dir"; mkdir -p "$slots_dir"
 sleep 60 & a=$!; holders=$a
 ln -s "$a" "$slots_dir/slot-1"
 start_taker "$scratch/pre.out" 3; pre=$started
-sleep 0.5
+await 10 says "$scratch/pre.out" "waiting up to"
 start_taker "$scratch/holder.out" 3 KNOBAS_MERGE_TAIL_HOLDER=1900; hold=$started
 holders="$a $pre $hold"
-sleep 1.5
+await 10 says "$scratch/holder.out" "waiting up to"
 kill -STOP "$hold"
 kill "$a"; wait "$a" 2>/dev/null
+# Long enough for the pre-gate's once-a-second poll to come round twice;
+# the scripts before #1866 take the slot in it.
 sleep 2.5
 # The freed link still names the dead pid: a taker that yields reclaims nothing.
 check "a pre-gate leaves the freed slot to a waiting holder's gate" "$(readlink "$slots_dir/slot-1")" "$a"
 contains "the pre-gate says a merge-tail holder's gate goes first" "$(cat "$scratch/pre.out")" "merge-tail holder"
 kill -CONT "$hold"
-sleep 1.5
+await 10 slot_names "$hold"
 check "the merge-tail holder's gate takes the freed slot ahead of a pre-gate that waited longer" \
     "$(readlink "$slots_dir/slot-1")" "$hold"
 wait "$hold"; code=$?

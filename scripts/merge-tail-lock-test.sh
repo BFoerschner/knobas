@@ -315,7 +315,12 @@ check "hold: its command is told it runs for the holder" has "$scratch/s1.out" "
 # One gate slot, held by a live pid; the pre-gate starts waiting first. The
 # slot frees while the holder's gate is stopped (alive, but it cannot poll),
 # so on first come, first served the pre-gate's next poll would take it.
+# Each step waits for what it needs to see, not for a fixed time.
 slots_dir=$TMPDIR/knobas-gate-slots
+await() { # await <seconds> <command...>: polls every 0.1 s until it succeeds
+    local n=$(($1 * 10)); shift
+    until "$@"; do n=$((n - 1)); [ "$n" -gt 0 ] || return 1; sleep 0.1; done
+}
 mkdir -p "$slots_dir"
 sleep 60 & busy=$!
 ln -s "$busy" "$slots_dir/slot-1"
@@ -323,16 +328,16 @@ printf '#!/usr/bin/env bash\n. "%s"; trap release_slot EXIT; hold_gate_slot test
     "${GATE_SLOT:-$here/gate-slot.sh}" > "$scratch/gate.sh"
 export KNOBAS_GATE_SLOTS=1 KNOBAS_GATE_SLOT_WAIT=20
 bash "$scratch/gate.sh" > "$scratch/s2.pre" 2>&1 & pre=$!
-sleep 0.5
+await 10 has "$scratch/s2.pre" "waiting up to"
 lock hold 1320 bash "$scratch/gate.sh" > "$scratch/s2.holder" 2>&1 & holder_gate=$!
-sleep 1.5
+await 10 has "$scratch/s2.holder" "waiting up to"
 gate_pid=$(pgrep -f "^bash $scratch/gate.sh" | grep -vx "$pre")
 kill -STOP "$gate_pid"
 kill "$busy"; wait "$busy" 2>/dev/null
-sleep 2.5
+sleep 2.5 # the pre-gate's once-a-second poll comes round twice
 check "slots: the pre-gate leaves the freed slot to the holder's gate" lacks "$scratch/s2.pre" "gate slot free after"
 kill -CONT "$gate_pid"
-sleep 1.5
+await 10 has "$scratch/s2.holder" "gate slot free after"
 check "slots: the holder's gate under hold takes the freed slot" has "$scratch/s2.holder" "gate slot free after"
 check "slots: the pre-gate that waited longer is still waiting" lacks "$scratch/s2.pre" "gate slot free after"
 wait "$holder_gate" "$pre"
