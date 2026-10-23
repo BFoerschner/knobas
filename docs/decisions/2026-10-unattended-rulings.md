@@ -15437,3 +15437,25 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1883.
   the grep, which finds nothing. The ticket's mutant line is met by that grep, and the PR says the
   routing half is a review matter. *Reversing:* add an allowlist test over `sources::state(` call
   sites.
+## #1698 and #1700 — the Jira board 400 and the bounded board re-walk
+
+- **A 400 anywhere in `one()` leaves the board out, not only the one from `keys()`.** *Fork:* the
+  ticket names `keys()`; the arm in `boards()` sees the whole of `one()`. *Ruling:* one arm,
+  `not_readable || 400`, the favourite arm's own condition. *Reasoning:* the ticket asks for one
+  arm matching the favourite path; a 400 from the filter read is the same stale-saved-query class.
+  *Reversing:* one line.
+- **The read stamp carries the *Boards and filters* setting it was read under.** *Fork:* ruling D6
+  says "an hour since the last board read"; a setting changed within the hour would then take up to
+  an hour to show (two existing tests turn the setting off and expect the views gone at the next
+  sync). *Ruling:* the one optional cursor field `board_read` is `{at, scope}`, and a changed scope
+  reads at once. *Reasoning:* keeps the "one field" and the "setting is read at the next sync"
+  behaviour of #878. *Reversing:* drop `scope` and `scope()`; the two setting tests then need an
+  aged clock.
+- **The clock is Jira's `serverTime`, and a source with no views keeps no stamp.** *Fork:* wall
+  clock or server time. *Ruling:* server time, already read each run, so tests drive it and clock
+  skew between the app and Jira does not matter; a source reading no views asks Jira nothing and
+  stores nothing, so its cursor bytes stay as they were. *Reversing:* swap `server_now` for
+  `Utc::now()`.
+- **The live views test ages the cursor instead of waiting an hour.** *Fork:* the seeded test
+  creates and deletes a board and syncs at once. *Ruling:* `an_hour_on()` sets the stamp to the
+  year 2000 before those two syncs. *Reversing:* n/a.
