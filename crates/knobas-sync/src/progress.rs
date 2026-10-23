@@ -314,8 +314,7 @@ pub struct Observed<'a> {
     inner: &'a dyn Source,
     /// The id every message names. The caller's, not read off `inner`: the
     /// engine reads the descriptor once per run (#1701), through
-    /// [`Source::descriptor`] below, and for an external adapter a second
-    /// read is a second call into its sandbox.
+    /// [`Source::descriptor`] below.
     source_id: String,
     run_id: i64,
     started: std::time::Instant,

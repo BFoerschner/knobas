@@ -52,8 +52,7 @@ struct MockRegistry {
     /// refusal is one (#1477).
     protocol: Mutex<bool>,
     /// How many times an adapter this registry built was asked for its
-    /// descriptor. For an external adapter each ask is a call into its
-    /// sandbox (ADR-0028), so a run asks once (#1701).
+    /// descriptor. A run asks once (#1701).
     descriptor_calls: Arc<std::sync::atomic::AtomicUsize>,
 }
 
@@ -909,10 +908,9 @@ async fn a_run_with_no_channel_reports_nothing() {
     );
 }
 
-/// A run reads its adapter's descriptor once, watched or not (#1701). For an
-/// external adapter every read is a call into its sandbox, and a value taken
-/// from one read and another from a second can disagree if the adapter's
-/// `descriptor()` is not pure.
+/// A run reads its adapter's descriptor once, watched or not (#1701), so
+/// every value it takes from the descriptor comes from the same answer, also
+/// from an adapter whose `descriptor()` is not pure.
 #[tokio::test]
 async fn a_run_reads_the_descriptor_once_watched_or_not() {
     #[derive(Default)]

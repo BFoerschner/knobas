@@ -447,9 +447,10 @@ async fn run_inner(
     source: &dyn Source,
     from: CursorSource,
 ) -> Result<SyncReport, SyncError> {
-    // The run's only read of the descriptor (#1701). For an external adapter
-    // each read is a call into its sandbox (ADR-0028), and two reads of an
-    // adapter whose `descriptor()` is not pure could disagree within one run.
+    // The run's only read of the descriptor (#1701): two reads of an adapter
+    // whose `descriptor()` is not pure could disagree within one run. A
+    // built-in adapter builds its descriptor afresh on every call; an
+    // external one answers a copy of what its build read (ADR-0028).
     let descriptor = source.descriptor();
     check_source_id(&descriptor.id)?;
     let (source_id, declared) = Declared::of(descriptor);
