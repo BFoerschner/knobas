@@ -393,7 +393,8 @@ fn password_of(url: &str) -> Option<String> {
     )
 }
 
-/// Take one connection out of `pool`, under [`FIRST_CONNECT_TIMEOUT`].
+/// Take one connection out of `pool`, under [`FIRST_CONNECT_TIMEOUT`]: for
+/// `KNOBAS_DB_URL`'s first contact alone (#1815).
 ///
 /// `PgPoolOptions::connect` does this itself and bounds it by the pool's
 /// acquire timeout, which is 30 s and has to stay that way for a *busy*
@@ -599,7 +600,11 @@ impl EmbeddedDb {
                 }
             }
         }
-        probe(&self.pool).await?;
+        // Under the pool's acquire timeout, not [`FIRST_CONNECT_TIMEOUT`]:
+        // this handle's server has answered it before, and a start above ran
+        // `pg_ctl start --wait`, which returns once it accepts connections
+        // (#1815).
+        drop(self.pool.acquire().await?);
         Ok(())
     }
 

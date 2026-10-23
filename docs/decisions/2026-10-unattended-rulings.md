@@ -14356,3 +14356,9 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   39893420478 failed `a_lock_naming_a_live_unrelated_process_and_a_silent_port_is_cleared` at line
   141, the first `EmbeddedDb::start`, with the five-second timeout. #1808's failure is line 159's
   port guard and #1802's is `AlreadyRunning`. Fixed here by the first ruling. *Reversing:* n/a.
+- **`restart`'s probe** (merge-manager, Opus). *Fork:* leave `EmbeddedDb::restart`'s closing
+  check under the five-second bound, or wait under the pool's acquire timeout. *Ruling:* the
+  acquire timeout. *Reasoning:* the branch's own first ruling and `FIRST_CONNECT_TIMEOUT`'s doc say
+  the bound is for a first contact alone; `restart` is only reached for a server this handle owns
+  and has answered on, after `pg_ctl start --wait`, and `tests/embedded.rs`'s restart test is in
+  the gate on the same loaded runner. *Reversing:* one line.
