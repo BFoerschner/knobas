@@ -171,11 +171,14 @@ struct Fixture {
 }
 
 async fn fixture(name: &str) -> Fixture {
-    fixture_on(knobas_db::test_util::scratch_database(name).await).await
+    fixture_on(knobas_db::test_util::scratch_database(name).await, HELD_OFF).await
 }
 
-/// [`fixture`] on `connector`'s database.
-async fn fixture_on(connector: knobas_db::embedded::Connector) -> Fixture {
+/// [`fixture`] on `connector`'s database, its scheduler on `timing`.
+async fn fixture_on(
+    connector: knobas_db::embedded::Connector,
+    timing: knobas_sync::scheduler::SchedulerTiming,
+) -> Fixture {
     let pool = connector.pool(4).await.expect("a pool");
 
     let secrets = Arc::new(MemoryStore::new());
@@ -217,7 +220,7 @@ async fn fixture_on(connector: knobas_db::embedded::Connector) -> Fixture {
         // The tick held off for the whole test: it flushes the queue too, and
         // a send the tick made would pass these tests with no background send
         // at all. So whatever delivers below is `submit_in_background`'s.
-        timing: HELD_OFF,
+        timing,
     })
     .await
     .expect("a scheduler");
@@ -238,7 +241,19 @@ async fn fixture_on(connector: knobas_db::embedded::Connector) -> Fixture {
 const HELD_OFF: knobas_sync::scheduler::SchedulerTiming = knobas_sync::scheduler::SchedulerTiming {
     startup_delay: Duration::from_secs(3600),
     tick: Duration::from_secs(3600),
+    shutdown_grace: knobas_sync::scheduler::SHUTDOWN_GRACE,
 };
+
+/// [`HELD_OFF`], with a quit's grace far past [`PATIENCE`] (#1920): a run the
+/// quit waited out to the grace's end holds the quit for an hour, so a quit
+/// that finishes inside the patience waited for nothing but what it had to.
+/// A clock reading against the 3 s grace said the same thing only while the
+/// machine was quick.
+const HELD_OFF_PATIENT_QUIT: knobas_sync::scheduler::SchedulerTiming =
+    knobas_sync::scheduler::SchedulerTiming {
+        shutdown_grace: Duration::from_secs(3600),
+        ..HELD_OFF
+    };
 
 fn comment(body: &str) -> serde_json::Value {
     json!({ "Comment": { "entity": PR, "body": body } })
@@ -446,9 +461,15 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
     use tauri::Manager as _;
 
     let connector = knobas_db::test_util::scratch_database("background_write_quit").await;
+    // On the default grace, not `HELD_OFF_PATIENT_QUIT`, and on purpose: this
+    // pins today's behaviour, which is wrong (#1924). The background send's
+    // entity flush has no stop, so once the first comment lands it sends the
+    // one submitted after the quit began. The look below comes before that,
+    // and the 3 s grace then aborts it at the gate. With an hour's grace the
+    // quit never ends. #1924 moves this test to the long grace with its fix.
     let Fixture {
         state, wrote, gate, ..
-    } = fixture_on(connector.clone()).await;
+    } = fixture_on(connector.clone(), HELD_OFF).await;
     let app = tauri::test::mock_builder()
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("a mock app");
@@ -483,7 +504,9 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
     )
     .await
     .expect("a submit during the quit is still queued");
-    // Give a send that was spawned for it the time to reach the source.
+    // Give a send that was spawned for it the time to reach the source. A
+    // negative window (#1927): the send #1924 names arrives after this look,
+    // once the gate lets the first comment land.
     tokio::time::sleep(Duration::from_millis(200)).await;
     let entered_during_quit = *wrote.entered.lock().unwrap();
     gate.add_permits(1);
@@ -529,6 +552,7 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
         timing: knobas_sync::scheduler::SchedulerTiming {
             startup_delay: Duration::from_millis(10),
             tick: Duration::from_millis(50),
+            ..Default::default()
         },
     })
     .await
@@ -585,7 +609,7 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
         knobas_db::test_util::scratch_database("background_write_quit_start_work").await;
     let Fixture {
         state, wrote, gate, ..
-    } = fixture_on(connector.clone()).await;
+    } = fixture_on(connector.clone(), HELD_OFF_PATIENT_QUIT).await;
     for (id, kind, title, payload) in [
         (BEFORE, "ticket", "payout latency", json!({})),
         (AFTER, "ticket", "refund latency", json!({})),
@@ -638,9 +662,13 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
     .await
     .expect("the first flow's branch reaches the source");
 
+    let (over, quit_over) = std::sync::mpsc::channel();
     let quitting = std::thread::spawn({
         let handle = app.handle().clone();
-        move || knobas_app::shutdown(&handle)
+        move || {
+            knobas_app::shutdown(&handle);
+            let _ = over.send(());
+        }
     });
     tokio::time::timeout(PATIENCE, async {
         while !state.scheduler.is_shutting_down() {
@@ -649,15 +677,19 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
     })
     .await
     .expect("the quit begins");
-    let began = std::time::Instant::now();
     knobas_app::commands::entity::start_work_run(app.handle().clone(), AFTER.to_owned())
         .await
         .expect("a run asked for during the quit still answers the flow");
     // Give a run that was spawned for it the time to queue its branch.
     tokio::time::sleep(Duration::from_millis(200)).await;
     gate.add_permits(1);
+    // A run still in the set at the grace's end is aborted, and the grace is
+    // an hour: a quit over inside the patience is one whose run ended once
+    // its send landed, rather than looping in the set until the abort.
+    quit_over
+        .recv_timeout(PATIENCE)
+        .expect("the quit waited out its grace: the run did not end after its step");
     quitting.join().expect("the quit finishes");
-    let quit_took = began.elapsed();
 
     let reader = connector.pool(1).await.unwrap();
     let flow_of = async |id: &str| {
@@ -716,12 +748,5 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
             .expect("the start-up pass runs"),
         0,
         "the quit left a step running"
-    );
-    // A run still in the set at the grace's end is aborted. This one ends
-    // once its send lands, ~200 ms in, so a quit that waited out the grace
-    // had a run looping in the set.
-    assert!(
-        quit_took < knobas_sync::scheduler::SHUTDOWN_GRACE - Duration::from_millis(500),
-        "the quit waited out its grace ({quit_took:?}): the run did not end after its step"
     );
 }

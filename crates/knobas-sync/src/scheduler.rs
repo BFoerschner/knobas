@@ -171,18 +171,24 @@ pub struct SchedulerDeps {
 }
 
 /// The ticker's clock: how long it waits before its first look for due
-/// sources, and how long between looks after that.
+/// sources, how long between looks after that, and how long a quit waits for
+/// what is still running.
 ///
-/// A value on [`SchedulerDeps`] rather than two constants read directly, so a
-/// test can drive the loop at millisecond ticks. The defaults are the
-/// production numbers ([`STARTUP_DELAY`], [`TICK`]) and nothing in the shipped
-/// binary constructs anything else.
+/// A value on [`SchedulerDeps`] rather than constants read directly, so a
+/// test can drive the loop at millisecond ticks, and can give a quit a grace
+/// longer than its own patience (#1920): a quit that then returns at all has
+/// waited for nothing, which no clock reading can say. The defaults are the
+/// production numbers ([`STARTUP_DELAY`], [`TICK`], [`SHUTDOWN_GRACE`]) and
+/// nothing in the shipped binary constructs anything else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SchedulerTiming {
     /// Before the first look. See [`STARTUP_DELAY`] for the two jobs it does.
     pub startup_delay: Duration,
     /// Between looks. See [`TICK`] for why it is fixed rather than computed.
     pub tick: Duration,
+    /// From the quit's cancel to the abort of what is still running. See
+    /// [`SHUTDOWN_GRACE`].
+    pub shutdown_grace: Duration,
 }
 
 impl Default for SchedulerTiming {
@@ -190,6 +196,7 @@ impl Default for SchedulerTiming {
         SchedulerTiming {
             startup_delay: STARTUP_DELAY,
             tick: TICK,
+            shutdown_grace: SHUTDOWN_GRACE,
         }
     }
 }
@@ -1269,7 +1276,9 @@ const STARTUP_DELAY: Duration = Duration::from_secs(2);
 /// run only has to unwind to its next await point; a send at the source is
 /// let finish so its `sent` mark lands before the pool closes.
 ///
-/// Public so a test can bound a quit against it rather than restate it.
+/// The default for [`SchedulerTiming::shutdown_grace`], which is what
+/// [`Scheduler::shutdown`] reads. Public so a test can size a wait past it
+/// rather than restate it.
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
 /// Upper bound on closing the scheduler's pool. Belt and braces: the runs are
@@ -1928,14 +1937,15 @@ impl Scheduler {
     /// [`background`](Self::background) set takes no task after it. Then
     /// every trigger that began before it is let reach its spawn (the door),
     /// so its run is in `tasks` or its row ended. Then the runs and the set
-    /// are awaited together. One [`SHUTDOWN_GRACE`] from the cancel covers
+    /// are awaited together. One grace ([`SchedulerTiming::shutdown_grace`],
+    /// [`SHUTDOWN_GRACE`] outside tests) from the cancel covers
     /// the door and both waits, and what is left at its end is aborted. Only
     /// then the pool.
     ///
     /// Idempotent: `RunEvent::ExitRequested` can fire more than once.
     pub async fn shutdown(&self) {
         self.inner.cancel.cancel();
-        let deadline = tokio::time::Instant::now() + SHUTDOWN_GRACE;
+        let deadline = tokio::time::Instant::now() + self.inner.deps.timing.shutdown_grace;
         let background = self.inner.background.close(deadline);
         if tokio::time::timeout_at(deadline, self.inner.door.write())
             .await
@@ -2376,6 +2386,7 @@ async fn tick_loop(inner: Arc<Inner>) {
     let SchedulerTiming {
         startup_delay,
         tick,
+        ..
     } = inner.deps.timing;
     tokio::select! {
         () = inner.cancel.cancelled() => return,
@@ -2619,7 +2630,8 @@ mod tests {
 
     /// The timing a production [`SchedulerDeps`] gets when nobody chooses one
     /// is the timing the app shipped with before it became a choice: a two
-    /// second startup delay and a five second tick (#412). The literals here
+    /// second startup delay, a five second tick (#412) and a three second
+    /// grace at quit (#1633). The literals here
     /// are the spec's numbers, not the constants -- a test that compared the
     /// default to `TICK` would pass through any edit to `TICK`.
     #[test]
@@ -2629,6 +2641,7 @@ mod tests {
             SchedulerTiming {
                 startup_delay: Duration::from_secs(2),
                 tick: Duration::from_secs(5),
+                shutdown_grace: Duration::from_secs(3),
             }
         );
     }

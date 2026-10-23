@@ -256,6 +256,7 @@ async fn fixture(name: &str) -> Fixture {
         timing: knobas_sync::scheduler::SchedulerTiming {
             startup_delay: Duration::from_secs(3600),
             tick: Duration::from_secs(3600),
+            ..Default::default()
         },
     })
     .await

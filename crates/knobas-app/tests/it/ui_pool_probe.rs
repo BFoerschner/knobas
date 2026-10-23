@@ -418,6 +418,7 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
         timing: SchedulerTiming {
             startup_delay: Duration::from_millis(500),
             tick: Duration::from_secs(1),
+            ..Default::default()
         },
     })
     .await

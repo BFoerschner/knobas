@@ -460,19 +460,29 @@ async fn a_limiter_wait_that_outlasts_the_budget_is_the_local_quota() {
 /// `a_retry_after_longer_than_the_budget_ends_the_call`'s half for the waits
 /// between attempts.
 ///
-/// Unbounded, the five queued sends above end at t=0, 1, 2, 3 and 4 s; bounded,
-/// none ends later than the 1.5 s budget, plus the scheduling slack of a
-/// loaded test machine. The retry half: a `503` at t=0 asks for a second
-/// attempt, which cannot pass the limiter before the budget runs out, so the
-/// call ends at the budget with the `503` it had -- what the source said --
-/// and not with the quota, which only kept it from asking again.
+/// Twelve sends queued at once behind one a second. Unbounded, they end at
+/// t=0, 1, 2, ... 11 s; bounded, none ends later than the 1.5 s budget. The
+/// subject is a duration, so the witness is the clock, and the bound is sized
+/// so that load cannot reach it (#1920): five seconds of slack on top of the
+/// budget, where the old five sends and 400 ms of slack left a loaded gate
+/// room to overrun a correct limiter. An unbounded wait still overruns it by
+/// up to five seconds.
+///
+/// The retry half: a `503` at t=0 asks for a second attempt, which cannot
+/// pass the limiter before the budget runs out, so the call ends with the
+/// `503` it had -- what the source said -- and not with the quota, which only
+/// kept it from asking again. It is not timed: an unbounded wait there ends
+/// at t=1 s, 200 ms past its 800 ms budget, which no slack a loaded machine
+/// needs can tell from a bounded one. The bound on that wait is the first
+/// half's, since every attempt waits through the same call with what is left
+/// of its budget.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_limiter_wait_never_outlasts_the_budget() {
-    let slack = std::time::Duration::from_millis(400);
+    let slack = std::time::Duration::from_secs(5);
 
     let server = CountingServer::always(200, "");
     let client = Arc::new(paced_client(&server, 1).with_send_budget(SHORT_BUDGET));
-    for (outcome, took) in queued_sends(&client, 5).await {
+    for (outcome, took) in queued_sends(&client, 12).await {
         assert!(
             took <= SHORT_BUDGET + slack,
             "a send ended {took:?} in, past the {SHORT_BUDGET:?} budget: {outcome:?}"
@@ -481,12 +491,10 @@ async fn a_limiter_wait_never_outlasts_the_budget() {
 
     let busy = CountingServer::always(503, "");
     let client = paced_client(&busy, 1).with_send_budget(std::time::Duration::from_millis(800));
-    let started = std::time::Instant::now();
     let error = client
         .send(client.request(Method::GET, "/x"))
         .await
         .expect_err("503, then no room for a second attempt");
-    let took = started.elapsed();
     assert!(
         matches!(
             error,
@@ -501,10 +509,6 @@ async fn a_limiter_wait_never_outlasts_the_budget() {
         busy.hits(),
         1,
         "the second attempt never passed the limiter"
-    );
-    assert!(
-        took <= std::time::Duration::from_millis(800) + slack,
-        "{took:?}"
     );
 }
 
@@ -1736,7 +1740,7 @@ mod walk {
 mod bounds {
     use std::io::Write as _;
     use std::sync::{Arc, Mutex};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     use knobas_http::{Auth, BodyExcerpt, HttpClient, HttpConfig, InstanceLimiter, Method};
     use knobas_source::SourceError;
@@ -1894,6 +1898,11 @@ mod bounds {
     /// The declared length is read before the body is: a server that
     /// declares twice the cap and then sends almost nothing is refused at
     /// once, not after the request timeout spent waiting for the rest.
+    ///
+    /// The refusal naming the cap is the witness, not a clock (#1920). The
+    /// server sends five bytes of the declared 128 KiB and then holds the
+    /// connection for 30 s, so a read that waited for the body could never
+    /// reach the cap: it would end at the 5 s request timeout, as a timeout.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_declared_length_over_the_cap_is_refused_before_the_read() {
         fn declares_twice(_: &str) -> Answer {
@@ -1911,17 +1920,11 @@ mod bounds {
         let server = ScriptedServer::new(declares_twice);
         let client = capped_client(server.url());
 
-        let started = Instant::now();
         let error = client
             .get_json::<serde_json::Value>("/listing", &[])
             .await
             .expect_err("over the cap");
         assert!(names_the_cap(&error), "{error:?}");
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "{:?}",
-            started.elapsed()
-        );
     }
 
     /// What reqwest inflates counts, not what arrived: a gzip body far under

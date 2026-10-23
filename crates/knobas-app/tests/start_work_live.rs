@@ -1615,6 +1615,7 @@ fn tick_held_off() -> knobas_sync::scheduler::SchedulerTiming {
     knobas_sync::scheduler::SchedulerTiming {
         startup_delay: std::time::Duration::from_secs(3600),
         tick: std::time::Duration::from_secs(3600),
+        ..Default::default()
     }
 }
 
