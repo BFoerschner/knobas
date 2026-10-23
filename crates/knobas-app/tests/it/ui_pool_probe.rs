@@ -420,6 +420,7 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
             tick: Duration::from_secs(1),
             ..Default::default()
         },
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();

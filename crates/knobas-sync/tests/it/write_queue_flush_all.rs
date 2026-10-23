@@ -325,6 +325,7 @@ async fn sources(ids: &[String]) -> Vec<Harness> {
         secrets: Arc::new(secrets),
         events: Arc::new(Silent) as Arc<dyn SyncEvents>,
         timing: knobas_sync::scheduler::SchedulerTiming::default(),
+        quit: knobas_sync::scheduler::Quit::default(),
     });
     ids.iter()
         .map(|id| Harness {
@@ -362,6 +363,7 @@ async fn the_scheduler_drains_the_queue_on_its_own() {
         secrets: Arc::clone(&h.deps.secrets),
         events: Arc::clone(&h.deps.events),
         timing: knobas_sync::scheduler::SchedulerTiming::default(),
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();

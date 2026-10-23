@@ -268,6 +268,7 @@ async fn harness(stored: serde_json::Value, discovery: Discovery) -> Harness {
             }),
             events: Arc::new(Quiet),
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
+            quit: knobas_sync::scheduler::Quit::default(),
         },
         built,
         handed,

@@ -517,6 +517,7 @@ async fn shutdown_stops_the_scheduler_before_the_database_and_a_second_does_noth
             tick: Duration::from_secs(3600),
             ..Default::default()
         },
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .expect("a scheduler");
@@ -1029,6 +1030,7 @@ async fn a_trigger_that_reaches_the_spawn_after_the_quit_ends_its_row() {
             tick: Duration::from_secs(3600),
             ..Default::default()
         },
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .expect("a scheduler");

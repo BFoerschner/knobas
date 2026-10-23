@@ -1382,6 +1382,7 @@ async fn writes(
                 tick: std::time::Duration::from_secs(3600),
                 ..Default::default()
             },
+            quit: knobas_sync::scheduler::Quit::default(),
         })
         .await
         .unwrap();

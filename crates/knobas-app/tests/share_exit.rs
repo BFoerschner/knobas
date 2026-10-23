@@ -588,6 +588,7 @@ async fn engine(
             secrets: Arc::clone(&secrets),
             events: Arc::new(live_digest::Quiet),
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
+            quit: knobas_sync::scheduler::Quit::default(),
         })
         .await
         .expect("a scheduler over the profile");

@@ -462,6 +462,7 @@ async fn slow_deps(
             secrets: Arc::new(MemoryStore::new()),
             events: Arc::new(Silent),
             timing: FAST,
+            quit: knobas_sync::scheduler::Quit::default(),
         },
         peak,
         inside,
@@ -1012,6 +1013,7 @@ async fn a_trigger_says_running_before_it_returns() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::clone(&events) as Arc<dyn SyncEvents>,
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -1069,6 +1071,7 @@ async fn a_running_state_names_its_own_run_not_another_open_one() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::clone(&events) as Arc<dyn SyncEvents>,
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -1222,6 +1225,7 @@ async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<Stri
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -1686,6 +1690,7 @@ async fn a_failure_reads_the_same_live_or_joined_and_retry_still_runs() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -1801,6 +1806,7 @@ async fn the_wizards_retry_after_watching_its_own_run_fail_starts_a_run() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -1864,6 +1870,7 @@ async fn a_wizard_that_joined_the_wakes_run_still_gets_a_run_when_it_retries() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -2065,6 +2072,7 @@ async fn a_run_whose_task_panics_still_gives_its_watchers_an_ending() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -2131,6 +2139,7 @@ async fn a_run_whose_adapter_panics_is_recorded_and_stops_running() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::clone(&events) as Arc<dyn SyncEvents>,
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();
@@ -3080,6 +3089,7 @@ async fn writer_deps(
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: FAST,
+        quit: knobas_sync::scheduler::Quit::default(),
     };
     (deps, started, finished)
 }

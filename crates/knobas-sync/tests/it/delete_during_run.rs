@@ -505,6 +505,7 @@ async fn the_rows_a_purge_skipped_are_purged_once_the_run_settles() {
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::new(Silent),
         timing: SchedulerTiming::default(),
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .unwrap();

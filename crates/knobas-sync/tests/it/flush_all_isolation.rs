@@ -3,7 +3,7 @@
 //!
 //! `flush_all` reaches *every* configured source in a module's database, and
 //! so does the real scheduler's flush task, which every tick wakes
-//! (`crate::write_queue::flush_all_until`, from `scheduler.rs`). Each test harness's secret store holds only its own
+//! (`crate::write_queue::flush_all`, from `scheduler.rs`). Each test harness's secret store holds only its own
 //! source's credential, so a flush started by one test fails to build the
 //! other tests' sources and re-reasons their due writes `unauthorized`. A
 //! test in the same module that asserts `Unreachable` then reads back

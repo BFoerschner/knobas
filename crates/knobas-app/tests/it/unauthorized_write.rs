@@ -258,6 +258,7 @@ async fn fixture(name: &str) -> Fixture {
             tick: Duration::from_secs(3600),
             ..Default::default()
         },
+        quit: knobas_sync::scheduler::Quit::default(),
     })
     .await
     .expect("a scheduler");
