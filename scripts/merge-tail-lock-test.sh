@@ -24,15 +24,23 @@
 #    only while origin's main is the main `ready` recorded, the worktree's head
 #    is the head it recorded, and that head sits on that main. Anything else
 #    (a commit since, main moved, no record, origin unreadable) is stale.
+# 6. `hold` tells its command it runs for the holder (#1866):
+#    KNOBAS_MERGE_TAIL_HOLDER=<PR>, which `scripts/gate-slot.sh` reads. End to
+#    end with that script, the holder's gate under `hold` takes the freed gate
+#    slot ahead of a pre-gate that has waited longer.
 #
 # Everything runs under a private TMPDIR, so the real lock under the machine's
 # $TMPDIR is never touched. The lock no longer asks GitHub anything: a `gh` on
 # PATH that records being called proves it.
 #
 # MERGE_TAIL_LOCK=<path> runs it against another copy of the script, such as
-# the one on `main` before #1836, to watch the dead-holder cases fail.
+# the one on `main` before #1836, to watch the dead-holder cases fail;
+# GATE_SLOT=<path> does the same for `scripts/gate-slot.sh` in case 6.
 set -uo pipefail # no -e: a failed check is counted, and the run goes on
 here=$(cd "$(dirname "$0")" && pwd)
+# Under a holder's re-gate (`hold <PR> just gate` runs `witness-unit`) the
+# environment already carries the mark case 6 looks for.
+unset KNOBAS_MERGE_TAIL_HOLDER
 
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/knobas-merge-tail-check.XXXXXX")
 # A private copy, so the cleanup and the watchdog can kill exactly this test's
@@ -296,6 +304,46 @@ lock take 1310 > /dev/null
 status=$(gated_status 1310 "$scratch/g9.out")
 check "gated: release drops the record (status $status)" [ "$status" = 1 ]
 lock release 1310 > /dev/null
+
+# --- 6. The holder's gate goes first on the gate slots (#1866) ---
+fresh
+lock take 1320 > /dev/null
+# shellcheck disable=SC2016 # the command's own shell expands it
+lock hold 1320 bash -c 'echo "holder=${KNOBAS_MERGE_TAIL_HOLDER:-none}"' > "$scratch/s1.out" 2>&1
+check "hold: its command is told it runs for the holder" has "$scratch/s1.out" "holder=1320"
+
+# One gate slot, held by a live pid; the pre-gate starts waiting first. The
+# slot frees while the holder's gate is stopped (alive, but it cannot poll),
+# so on first come, first served the pre-gate's next poll would take it.
+# Each step waits for what it needs to see, not for a fixed time.
+slots_dir=$TMPDIR/knobas-gate-slots
+await() { # await <seconds> <command...>: polls every 0.1 s until it succeeds
+    local n=$(($1 * 10)); shift
+    until "$@"; do n=$((n - 1)); [ "$n" -gt 0 ] || return 1; sleep 0.1; done
+}
+mkdir -p "$slots_dir"
+sleep 60 & busy=$!
+ln -s "$busy" "$slots_dir/slot-1"
+printf '#!/usr/bin/env bash\n. "%s"; trap release_slot EXIT; hold_gate_slot test && sleep 3\n' \
+    "${GATE_SLOT:-$here/gate-slot.sh}" > "$scratch/gate.sh"
+export KNOBAS_GATE_SLOTS=1 KNOBAS_GATE_SLOT_WAIT=20
+bash "$scratch/gate.sh" > "$scratch/s2.pre" 2>&1 & pre=$!
+await 10 has "$scratch/s2.pre" "waiting up to"
+lock hold 1320 bash "$scratch/gate.sh" > "$scratch/s2.holder" 2>&1 & holder_gate=$!
+await 10 has "$scratch/s2.holder" "waiting up to"
+gate_pid=$(pgrep -f "^bash $scratch/gate.sh" | grep -vx "$pre")
+kill -STOP "$gate_pid"
+kill "$busy"; wait "$busy" 2>/dev/null
+sleep 2.5 # the pre-gate's once-a-second poll comes round twice
+check "slots: the pre-gate leaves the freed slot to the holder's gate" lacks "$scratch/s2.pre" "gate slot free after"
+kill -CONT "$gate_pid"
+await 10 has "$scratch/s2.holder" "gate slot free after"
+check "slots: the holder's gate under hold takes the freed slot" has "$scratch/s2.holder" "gate slot free after"
+check "slots: the pre-gate that waited longer is still waiting" lacks "$scratch/s2.pre" "gate slot free after"
+wait "$holder_gate" "$pre"
+check "slots: the pre-gate takes the slot after the holder's run" has "$scratch/s2.pre" "gate slot free after"
+unset KNOBAS_GATE_SLOTS KNOBAS_GATE_SLOT_WAIT
+lock release 1320 > /dev/null
 
 check "the lock never asks GitHub" [ ! -e "$scratch/gh-called" ]
 

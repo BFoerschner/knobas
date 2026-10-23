@@ -137,9 +137,10 @@ check:
                              if ($(i+1) == "ignored;") g += $i } }
                            END { printf "  %d test binaries and doc-test crates: %d passed, %d failed, %d ignored\n", n, p, f, g }' "$log"
                        # Where the half's time went (#920): each recipe's
-                       # wall time, `test`'s build and run, its slowest binaries.
+                       # wall time, `test`'s wait for a gate slot (and on
+                       # whom, #1866), its build and run, its slowest binaries.
                        awk '/^step: / { printf "  step %-13s %4d s\n", $2, $3 }' "$log"
-                       { grep -E '^test: (build|run) |^test: slowest|^  +[0-9.]+ s ' "$log" || true; } | sed 's/^/  /' ;;
+                       { grep -E '^test: (build|run|gate slot free after) |^test: .*; waiting up to |^test: slowest|^  +[0-9.]+ s ' "$log" || true; } | sed 's/^/  /' ;;
             esac
         else
             echo "check: $name FAILED; its full output follows" >&2
