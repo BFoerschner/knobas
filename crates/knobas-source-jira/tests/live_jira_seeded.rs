@@ -3249,14 +3249,31 @@ impl RefusedProbe {
                 })
                 .collect()
         };
-        let (_, boards) = seeded
-            .get(&format!(
-                "rest/agile/1.0/board?name={}",
-                url_encode(REFUSED_PROBE)
-            ))
-            .await;
-        let (_, favourites) = seeded.get("rest/api/2/filter/favourite").await;
-        let (_, versions) = seeded.get("rest/api/2/project/PAY/versions").await;
+        // A listing that failed would read as "nothing left behind".
+        let listed = |(status, rows): (u16, serde_json::Value), what: &str| {
+            assert_eq!(
+                status, 200,
+                "listing {what} for a killed run's probe: {rows}"
+            );
+            rows
+        };
+        let boards = listed(
+            seeded
+                .get(&format!(
+                    "rest/agile/1.0/board?name={}",
+                    url_encode(REFUSED_PROBE)
+                ))
+                .await,
+            "the boards",
+        );
+        let favourites = listed(
+            seeded.get("rest/api/2/filter/favourite").await,
+            "the favourite filters",
+        );
+        let versions = listed(
+            seeded.get("rest/api/2/project/PAY/versions").await,
+            "PAY's versions",
+        );
         let number = |id: String| id.parse::<u64>().expect("a numeric id");
         let stale: Vec<Probed> = mine(boards["values"].clone())
             .into_iter()
@@ -3479,6 +3496,17 @@ async fn a_board_and_a_favourite_filter_whose_version_was_deleted_are_left_out_a
         saved["jql"].as_str(),
         Some(jql.as_str()),
         "Jira rewrote the filter when its version went"
+    );
+    let (status, favourites) = seeded.get("rest/api/2/filter/favourite").await;
+    assert_eq!(status, 200, "{favourites}");
+    assert!(
+        favourites
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|f| f["id"].as_str() == Some(filter_id.to_string().as_str())),
+        "the filter left the favourites with its version, so the run never reaches its \
+         query: {favourites}"
     );
     let (status, listed) = seeded
         .get(&format!("rest/agile/1.0/board?name={}", url_encode(&name)))
