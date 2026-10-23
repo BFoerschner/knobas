@@ -35,8 +35,10 @@
 #   1 slot, 2 threads: median 16.1, max 36.7; runs 157-178 s, the waiter's
 #     check 340 s
 # So one slot, four threads. The load stays above the twelve cores with two
-# gates beside each other even so; what is left is the databases themselves
-# (#1897). `KNOBAS_GATE_SLOTS=2` brings the old ceiling back.
+# gates beside each other even so. #1897 then cut a gate's databases from
+# ~930 to ~180 (the `justfile`'s `test` has the numbers); the same three
+# side by side, with other agents' gates overlapping, still read a median of
+# 16-23 either way. `KNOBAS_GATE_SLOTS=2` brings the old ceiling back.
 #
 # THE MERGE-TAIL HOLDER GOES FIRST (#1866). Since #1862 pre-gates run beside
 # the merge-tail lock holder's re-gate, and every merge-manager queued in

@@ -1986,7 +1986,8 @@ async fn the_app_pool_carries_a_statement_timeout_that_a_migration_leaves_in_pla
 /// migration -- about 0.15 s, most of it waiting on the disk -- and hundreds of
 /// tests in `knobas-app`'s binary did. Now the migrations run once, into this
 /// process's template, and each scratch database is `create database ...
-/// template` of it.
+/// template` of it -- or, since #1897, one a finished test held, reset to the
+/// template's state (`test_util`'s `recycle`).
 ///
 /// Two scratch databases each hold every migration, a row written to one is
 /// not in the other, and the template they were copied from is on the server

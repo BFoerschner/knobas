@@ -14,7 +14,7 @@
 //! scans the whole mirror for a matching `fields.parent` or `epic` -- both are passes
 //! over shared state, so test A's context would appear in test B's switcher
 //! and every list assertion would be decided by scheduling. `scratch_database`
-//! costs one `create database` per test and buys fixtures that read as
+//! costs one database per test and buys fixtures that read as
 //! `PAY-231` rather than as a uuid -- the trade `suggestions.rs` records.
 
 use knobas_core::context::{self, ContextKind};

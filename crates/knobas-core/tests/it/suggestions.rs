@@ -16,9 +16,10 @@
 //! already there and *correctly* writes nothing. Every negative assertion in
 //! this file would be decided by scheduling.
 //!
-//! `scratch_database` costs one `create database` per test on the same
-//! postmaster -- no second server -- and buys assertions that mean what they
-//! say. It is also what lets the fixtures read as `PAY-231` rather than as a
+//! `scratch_database` costs one database per test on the same postmaster --
+//! no second server, and most often not even a `create database`, but one a
+//! finished test held, reset (#1897) -- and buys assertions that mean what
+//! they say. It is also what lets the fixtures read as `PAY-231` rather than as a
 //! uuid.
 
 use knobas_core::entity::EntityRef;

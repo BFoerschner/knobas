@@ -1659,6 +1659,14 @@ knobas-db	lib/knobas_db	embedded::tests::process_liveness_tells_a_running_proces
 knobas-db	lib/knobas_db	embedded::tests::the_bring_up_lock_is_created_off_the_runtime_worker
 knobas-db	lib/knobas_db	embedded::tests::the_bring_up_lock_is_exclusive_and_released_with_its_guard
 knobas-db	lib/knobas_db	embedded::tests::the_recorded_password_is_adopted_under_the_lock_not_before_it
+knobas-db	lib/knobas_db	test_util::recycle::tests::a_database_whose_schema_changed_is_not_recycled
+knobas-db	lib/knobas_db	test_util::recycle::tests::a_database_with_settings_of_its_own_is_not_recycled
+knobas-db	lib/knobas_db	test_util::recycle::tests::a_dropped_database_is_not_recycled
+knobas-db	lib/knobas_db	test_util::recycle::tests::a_kept_connector_keeps_its_database_off_the_shelf
+knobas-db	lib/knobas_db	test_util::recycle::tests::a_lease_ends_with_the_thread_that_took_it
+knobas-db	lib/knobas_db	test_util::recycle::tests::a_recycled_database_cannot_be_reached_by_its_old_name
+knobas-db	lib/knobas_db	test_util::recycle::tests::a_recycled_database_reads_as_a_fresh_copy_does
+knobas-db	lib/knobas_db	test_util::recycle::tests::a_scratch_database_a_finished_test_held_is_handed_on_empty
 knobas-db	lib/knobas_db	test_util::tests::a_child_spawned_holding_a_lock_keeps_it_until_it_exits
 knobas-db	lib/knobas_db	test_util::tests::a_claim_discards_what_a_recycled_pid_left_behind
 knobas-db	lib/knobas_db	test_util::tests::a_claim_leaves_this_runs_own_directory_alone

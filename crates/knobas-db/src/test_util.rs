@@ -84,6 +84,8 @@ use sqlx::{Connection, PgPool};
 
 use crate::{DbConfig, EmbeddedDb};
 
+mod recycle;
+
 /// Prefix for this crate's scratch directories under the system temp dir.
 const DIR_PREFIX: &str = "knobas-test-";
 
@@ -213,7 +215,7 @@ async fn shared_server() -> &'static Server {
 /// The server this binary's databases live on.
 struct Server {
     /// Reaches the server; which database it names does not matter, since
-    /// every use goes through [`create_migrated_database`], which moves it.
+    /// every use moves it with `with_database` first.
     connector: crate::embedded::Connector,
     /// The server this binary started, kept here so its `Drop` -- which would
     /// stop the server -- never runs; statics are never dropped. `None` when
@@ -272,34 +274,68 @@ impl Server {
     }
 }
 
-/// A database of its own on this binary's shared server, migrated and empty.
+/// A database of its own on this binary's shared server, migrated and in the
+/// state a fresh copy of the template is in.
 ///
 /// The file's shared database cannot be used by a test that *replaces* its
-/// contents: every other test in the file is in it, and nothing here
-/// truncates. A restore is exactly such a test -- so it gets its own database
-/// instead, which costs one `create database` rather than a second postmaster.
+/// contents: every other test in the file is in it, and nothing truncates
+/// it. A restore is exactly such a test -- so it gets its own database
+/// instead.
 ///
-/// The name carries `label` plus a per-call nonce, so two calls (and two runs
-/// against a server that outlived one) never collide. Nothing drops it: the
-/// whole scratch directory goes when the run's lock is released, and a
+/// It is the caller's for as long as the thread that asked runs and any clone
+/// of the returned connector lives. Then the next caller takes it, renames it
+/// and puts it back into the template's state ([`recycle`]) instead of
+/// creating one: a gate used to create about 930, and their files were most
+/// of its test run's load (#1897). A database DDL ran in is not handed on.
+/// Two shapes lose the database while they still use it, and loudly, since
+/// its name no longer exists: asking from a thread that ends before the test
+/// is done with it, and keeping a pool or the URL past the test's thread
+/// without a clone of the connector (a `static` keeps the connector, as
+/// `tests/it/estate_exit.rs` does).
+///
+/// The name carries `label`, the pid and a per-call counter, so two calls (and
+/// two runs against a server that outlived one) never collide. Nothing drops
+/// it: the whole scratch directory goes when the run's lock is released, and a
 /// `drop database` in a test that failed would run only when it did not need
 /// to.
 ///
 /// # Panics
 ///
-/// Panics if the database cannot be created, connected to, or migrated --
-/// there is no useful way for a test to continue without one.
+/// Panics if the database cannot be created, connected to, or migrated, or the
+/// template's state cannot be read -- there is no useful way for a test to
+/// continue without one. A database that cannot be reused is not a panic:
+/// the reason is printed and the next one, or a new one, is taken.
 pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    static SHELF: recycle::Shelf = recycle::Shelf::new();
 
-    let name = format!(
-        "knobas_scratch_{}_{}_{}",
-        identifier_slug(label),
-        std::process::id(),
-        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    );
+    let next_name = || {
+        format!(
+            "knobas_scratch_{}_{}_{}",
+            identifier_slug(label),
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        )
+    };
+    let server = &shared_server().await.connector;
+    let template = template(server).await;
 
-    create_migrated_database(&shared_server().await.connector, &name).await
+    while let Some(returned) = SHELF.take() {
+        let name = next_name();
+        match recycle::recycle(server, &returned, &name, template).await {
+            Ok(Some(snapshot)) => {
+                return recycle::lease(&SHELF, server, name, snapshot);
+            }
+            Ok(None) => {}
+            Err(error) => eprintln!(
+                "test_util: {} could not be reused ({error}); trying the next one",
+                returned.name
+            ),
+        }
+    }
+    let name = next_name();
+    create_database(server, &name, Some(&template.name)).await;
+    recycle::lease(&SHELF, server, name, template.snapshot.clone())
 }
 
 /// `text` reduced to what may sit inside a database name without quoting:
@@ -318,7 +354,7 @@ fn identifier_slug(text: &str) -> String {
 /// database` takes no parameter.
 ///
 /// The database is a copy of this process's migrated template (#925): the
-/// migrations run once per process, into [`template_name`], and every database
+/// migrations run once per process, into [`template`], and every database
 /// after that is `create database ... template` of it, instead of a fresh
 /// `create database` plus every migration for each one.
 ///
@@ -329,7 +365,7 @@ async fn create_migrated_database(
     server: &crate::embedded::Connector,
     name: &str,
 ) -> crate::embedded::Connector {
-    let template = template_name(server).await;
+    let template = &template(server).await.name;
     create_database(server, name, Some(template)).await;
     server.with_database(name)
 }
@@ -342,8 +378,12 @@ async fn create_migrated_database(
 /// gate's server, and a template they all copied would need them to agree on
 /// who migrates it. One migration per binary instead of one per scratch
 /// database is the saving that matters.
-async fn template_name(server: &crate::embedded::Connector) -> &'static str {
-    static TEMPLATE: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+///
+/// What a fresh copy of it looks like is read here too, while it is still
+/// open, for [`scratch_database`] to put a database a test is done with back
+/// into that state ([`recycle`]).
+async fn template(server: &crate::embedded::Connector) -> &'static recycle::Template {
+    static TEMPLATE: tokio::sync::OnceCell<recycle::Template> = tokio::sync::OnceCell::const_new();
     TEMPLATE
         .get_or_init(|| async {
             let name = format!("knobas_template_{}", identifier_slug(run_nonce()));
@@ -356,8 +396,13 @@ async fn template_name(server: &crate::embedded::Connector) -> &'static str {
             crate::migrate::run(&pool)
                 .await
                 .expect("migrate the template database");
+            let mut conn = pool.acquire().await.expect("a session on the template");
+            let template = recycle::capture(&mut conn, name)
+                .await
+                .expect("read the template's state");
+            drop(conn);
             pool.close().await;
-            name
+            template
         })
         .await
 }
