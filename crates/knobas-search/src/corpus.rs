@@ -120,7 +120,7 @@ pub struct Corpus {
     ///
     /// The mirror stores them (migration `0056`, #1650): it is the corpus a
     /// common word matches most of, and lexing every matching title per
-    /// keystroke was a fifth to a third of the statement there. The stored
+    /// keystroke was a fifth of the statement there. The stored
     /// comparison must be true exactly where `NAMED` over the same title is,
     /// which the migration's columns are written to be and
     /// `knobas-db`'s `zero_fifty_six_stores_what_the_launcher_lexed_per_match`

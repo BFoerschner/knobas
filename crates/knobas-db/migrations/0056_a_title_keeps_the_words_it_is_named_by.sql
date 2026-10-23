@@ -12,15 +12,16 @@
 -- ## Why
 --
 -- The launcher orders equal ranks by whether a row is *named* what was typed
--- (story 25, `knobas_search::sql::NAMED` and `KEY_NAMED`): its title, its
--- title's last `/` segment, or a ticket's key, lexed as the index lexes it,
--- is the typed words and nothing else. Lexing is parsing and stemming, and
--- the statement lexed every one of those per match, per keystroke. On a word
--- in most of the mirror that was a fifth to a third of the statement: 22,000
--- matches with six-word titles took 86 to 107 ms with it and 65 to 67 ms
--- with the comparison taken out (#1650). Only the typed words change between
--- keystrokes; a title's lexemes change when the title does. So they are kept
--- with the row, and a match compares two short arrays.
+-- (story 25, `knobas_search::sql::NAMED`, and `KEY_NAMED` until this
+-- migration): its title, its title's last `/` segment, or a ticket's key,
+-- lexed as the index lexes it, is the typed words and nothing else. Lexing is
+-- parsing and stemming, and the statement lexed every one of those per match,
+-- per keystroke. On a word in every row of the mirror that was a fifth of the
+-- statement: 22,000 matches with six-word titles took 81 to 83 ms lexing them
+-- and 65 to 67 ms reading these columns (#1650, warm, interleaved runs). Only
+-- the typed words change between keystrokes; a title's lexemes change when
+-- the title does. So they are kept with the row, and a match compares short
+-- arrays.
 --
 -- ## The columns
 --

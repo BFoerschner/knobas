@@ -962,7 +962,7 @@ async fn named_statements(conn: &mut sqlx::PgConnection) -> i64 {
 
 /// The mirror's `named` (#1650) compares the lexemes `0056` stores and lexes
 /// nothing per match: on a word in most of the mirror, lexing every matching
-/// title and key was a fifth to a third of the statement. The corpora that
+/// title and key was a fifth of the statement. The corpora that
 /// store none still lex their title, and the match set is still scanned once.
 #[test]
 fn the_mirror_is_named_from_stored_lexemes_and_lexes_no_title_per_match() {
