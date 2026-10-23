@@ -14411,3 +14411,23 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   site that holds its listener (mock servers, `SilentPort`-style guards, `knobas-db`'s
   `embedded.rs` test, whose dropped listener is only a held pid-file port and already names port 1
   for the dead case).
+
+## #1645: a hostile quoted path in a diff (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus: changing `crates/knobas-source/src/**`.**
+  *Ruling:* change it. *Reasoning:* the change is one private function in `diff.rs` and a new
+  private helper. No public item, SPI method or type changes, and every escape git itself writes
+  reads as before. The §10.8 entry (`1645-knobas-source-a-hostile-quoted-path-in-a-diff-cannot-panic.md`)
+  records it as behaviour only. *Reversing:* trivial.
+- **A malformed escape: a miss or the characters.** *Fork:* the ticket allows "a miss or the
+  decoded path". Git's own `unquote_c_style` refuses a short escape, so a miss would follow git.
+  *Ruling:* the characters (`"\1aé.txt"` → `1aé.txt`). *Reasoning:* `take_quoted` already reads
+  every other unknown escape that way (`\q` → `q`) and reads invalid UTF-8 lossily, so it never
+  fails. A miss would make it fallible and push an `Option` into `header_paths` and the `---`/`+++`
+  reader on a frozen surface, and one odd byte could then drop a whole file from a view. Either
+  answer meets ADR-0020: the view no longer panics, so the detail no longer fails. *Reversing:*
+  low (`octal` stays, `take_quoted` would answer `Option`).
+- **The all-digits check is witnessed, beyond the ticket's tests.** *Fork:* the check looks
+  redundant next to `from_utf8` and `from_str_radix`, but `from_str_radix` takes a leading `+`.
+  *Ruling:* keep the check and pin it (`"\+12"` → `+12`), so dropping it fails a test.
+  *Reasoning:* without it, `\+12` would decode to a newline in a path. *Reversing:* trivial.
