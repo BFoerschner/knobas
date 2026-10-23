@@ -1065,38 +1065,7 @@ mod tests {
     /// and nothing else in the tree noticing.
     #[test]
     fn the_mirror_invokes_the_commands_by_their_registered_names() {
-        for command in [
-            "asset_tree",
-            "get_asset",
-            "create_asset",
-            "edit_asset",
-            "move_asset",
-            "delete_asset",
-            "asset_types",
-            "get_route",
-            "create_route",
-            "edit_route",
-            "delete_route",
-            "preview_estate_import",
-            "apply_estate_import",
-            "produce_estate_file",
-            "monitoring_settings",
-            "set_monitoring_settings",
-            "monitor_roster",
-            "open_alerts",
-            "ack_alert",
-            "unmonitored_assets",
-        ] {
-            assert!(
-                MIRROR.contains(&format!("\"{command}\"")),
-                "{command} is not invoked from app/src/lib/ipc/assets.ts"
-            );
-            let registry = include_str!("../lib.rs");
-            assert!(
-                registry.contains(&format!("commands::assets::{command}")),
-                "{command} is not in the generate_handler! list"
-            );
-        }
+        crate::commands::mirror::assert_mirrors("assets", MIRROR, "app/src/lib/ipc/assets.ts", 20);
     }
 
     /// **Every producer the chooser can send is one this build declares.**

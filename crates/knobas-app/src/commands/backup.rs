@@ -123,29 +123,13 @@ pub async fn restore_backup<R: tauri::Runtime>(
 mod tests {
     const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/backup.ts");
 
-    /// The five commands, named in the mirror's `invoke` calls.
+    /// Every backup command in the handler list is invoked from the mirror.
     ///
     /// `tests/it/ipc.rs` proves they are registered and dispatch; this proves the
     /// frontend calls them by the names they are registered under. A typo on
     /// either side is a call that fails only at run time.
     #[test]
     fn the_mirror_invokes_the_commands_by_their_registered_names() {
-        for command in [
-            "backup_status",
-            "backup_now",
-            "share_export",
-            "set_backup_schedule",
-            "restore_backup",
-        ] {
-            assert!(
-                MIRROR.contains(&format!("\"{command}\"")),
-                "{command} is not invoked from app/src/lib/ipc/backup.ts"
-            );
-            let registry = include_str!("../lib.rs");
-            assert!(
-                registry.contains(&format!("commands::backup::{command}")),
-                "{command} is not in the generate_handler! list"
-            );
-        }
+        crate::commands::mirror::assert_mirrors("backup", MIRROR, "app/src/lib/ipc/backup.ts", 5);
     }
 }

@@ -43,6 +43,71 @@ pub mod time;
 /// `list_entities` read under it.
 pub const ROW_CEILING: u32 = 500;
 
+/// What the mirror tests of this directory read off `lib.rs` and the barrels.
+#[cfg(test)]
+pub(crate) mod mirror {
+    /// Every `commands::<module>::<name>` line of `lib.rs`'s handler list, so a
+    /// command added there is checked without a second list to keep.
+    pub(crate) fn registered(module: &str) -> Vec<&'static str> {
+        let prefix = format!("commands::{module}::");
+        include_str!("../lib.rs")
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix(prefix.as_str()))
+            .map(|rest| rest.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_'))
+            .filter(|name| {
+                !name.is_empty() && !name.contains(|c: char| !c.is_alphanumeric() && c != '_')
+            })
+            .collect()
+    }
+
+    /// The command names a barrel calls as `invoke<...>("name"`, comment lines
+    /// skipped so a doc comment cannot stand in for a call.
+    pub(crate) fn invoked(mirror: &'static str) -> Vec<&'static str> {
+        let mut names = Vec::new();
+        for (at, _) in mirror.match_indices("invoke<") {
+            let line_start = mirror[..at].rfind('\n').map_or(0, |i| i + 1);
+            let lead = mirror[line_start..at].trim_start();
+            if lead.starts_with("//") || lead.starts_with('*') || lead.starts_with("/*") {
+                continue;
+            }
+            let rest = &mirror[at..];
+            let Some((_, after)) = rest.split_once('(') else {
+                continue;
+            };
+            if let Some(quoted) = after.trim_start().strip_prefix('"')
+                && let Some((name, _)) = quoted.split_once('"')
+            {
+                names.push(name);
+            }
+        }
+        names
+    }
+
+    /// Both directions: every registered command is invoked, every invoked
+    /// command is registered.
+    pub(crate) fn assert_mirrors(module: &str, mirror: &'static str, barrel: &str, min: usize) {
+        let registered = registered(module);
+        assert!(
+            registered.len() >= min,
+            "only {} {module} commands found in the handler list -- the parse is wrong, not the list",
+            registered.len()
+        );
+        let invoked = invoked(mirror);
+        for command in &registered {
+            assert!(
+                invoked.contains(command),
+                "{command} is in the handler list but {barrel} has no invoke<..>(\"{command}\" call"
+            );
+        }
+        for name in &invoked {
+            assert!(
+                registered.contains(name),
+                "{barrel} invokes {name}, which is not in the handler list under commands::{module}"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// No command anywhere in this directory takes `State<'_, AppState>`.

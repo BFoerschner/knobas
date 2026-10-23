@@ -89,35 +89,7 @@ mod tests {
     /// so a command registered and never mirrored fails this too.
     #[test]
     fn the_mirror_invokes_the_commands_by_their_registered_names() {
-        let barrel = include_str!("../../lib.rs");
-        let registered: Vec<&str> = barrel
-            .lines()
-            .filter_map(|line| line.trim().strip_prefix("commands::entity::"))
-            .map(|line| line.trim_end_matches(','))
-            .collect();
-        assert!(
-            registered.len() >= 9,
-            "only {} entity commands found in the handler barrel -- the parse \
-             is wrong, not the barrel",
-            registered.len()
-        );
-        for command in &registered {
-            assert!(
-                MIRROR.contains(&format!("\"{command}\"")),
-                "{command} is registered but never invoked from entity.ts"
-            );
-        }
-        for invoked in MIRROR.split("invoke<").skip(1) {
-            let name = invoked
-                .split_once('"')
-                .and_then(|(_, rest)| rest.split_once('"'))
-                .map(|(name, _)| name)
-                .expect("every invoke names a command");
-            assert!(
-                registered.contains(&name),
-                "entity.ts invokes {name}, which is not in the handler barrel"
-            );
-        }
+        crate::commands::mirror::assert_mirrors("entity", MIRROR, "entity.ts", 9);
     }
 
     /// `entity.ts` reads `list_entities` in reads of the ceiling the backend

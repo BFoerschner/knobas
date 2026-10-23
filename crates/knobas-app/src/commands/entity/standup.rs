@@ -39,23 +39,16 @@ use super::*;
 /// # Errors
 ///
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
-/// database or the sync engine is still coming up,
+/// database is still coming up,
 /// [`Internal`](crate::IpcErrorCode::Internal) for a read failure.
 #[tauri::command]
-pub async fn standup_digest<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
+pub async fn standup_digest(
+    lifecycle: State<'_, Lifecycle>,
     today: crate::time::week::DayWindow,
     earlier: Vec<crate::time::week::DayWindow>,
 ) -> Result<crate::standup::StandupDigest, IpcError> {
-    let state = crate::sources::state(&app)?;
-    standup_digest_inner(
-        &state.pool,
-        state.registry.as_ref(),
-        Utc::now(),
-        today,
-        &earlier,
-    )
-    .await
+    let pool = lifecycle.pool()?;
+    standup_digest_inner(&pool, lifecycle.registry(), Utc::now(), today, &earlier).await
 }
 
 /// [`standup_digest`] with the pool, the registry and the clock handed in, so
