@@ -136,12 +136,20 @@ async fn ten_views_are_counted_in_one_statement() {
         store(&pool, &p, n, if n % 2 == 0 { "Bug" } else { "Story" }).await;
     }
     let acquired = Arc::new(AtomicUsize::new(0));
-    let counter = Arc::clone(&acquired);
+    // An acquire is either a reuse of an idle connection (`before_acquire`) or
+    // a fresh connection (`after_connect`); counting only the first made the
+    // total depend on whether the pool had an idle connection ready (#1846).
+    let reused = Arc::clone(&acquired);
+    let opened = Arc::clone(&acquired);
     let counted = sqlx::postgres::PgPoolOptions::new()
         .max_connections(4)
         .before_acquire(move |_, _| {
-            counter.fetch_add(1, Ordering::SeqCst);
+            reused.fetch_add(1, Ordering::SeqCst);
             Box::pin(async { Ok(true) })
+        })
+        .after_connect(move |_, _| {
+            opened.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Ok(()) })
         })
         .connect_with((*pool.connect_options()).clone())
         .await
