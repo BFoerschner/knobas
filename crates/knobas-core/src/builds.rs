@@ -1,13 +1,15 @@
 //! The Builds frame's mirror reads (ADR-0022, #848; moved here by #1318,
 //! spec #1303): the pipelines, the runs of a pipeline, the commits a run
 //! names, the frame-kinds CTE and the run columns, beside the entity list
-//! read ([`crate::entity_list`]).
+//! read ([`crate::entity_list`]). Since #1870 also the pins' write, *This
+//! job*'s pipelines and the rule that links a run to its commit
+//! ([`link_commits`]).
 //!
 //! What needs an adapter stays in the app crate: a run's log, tests,
 //! artifacts and chain, a pipeline's settings and older runs, and the live
-//! read that tells two mirrored commits of one sha apart (#1144). So do the
-//! declarations and the configured identity, which every read here takes as
-//! a parameter.
+//! read that tells two mirrored commits of one sha apart (#1144), whose
+//! answer [`link_commits`] takes. So do the declarations and the configured
+//! identity, which every read here takes as a parameter.
 
 use std::collections::HashMap;
 
@@ -132,8 +134,8 @@ const PIPELINE_RUNS: i64 = 100;
 /// statement, so the live corpus is joined on its `(source_id, kind)` rather
 /// than every row's declaration being looked up.
 ///
-/// Exported for the app's *This job* read (`job_pipelines`), which joins the
-/// frame's kinds too and stays beside the job's other reads.
+/// Exported for the payload macros' callers; [`JOB_PIPELINES`] joins the
+/// frame's kinds too.
 #[macro_export]
 macro_rules! frame_kinds_cte {
     () => {
@@ -532,6 +534,279 @@ pub async fn is_pipeline(
         .await?)
 }
 
+/// The shas of `runs` that two or more mirrored commits hold (`held`, from
+/// [`commits_of`]), grouped by the pipeline whose run names them, each once
+/// (#1144). Only these need the pipeline's settings to be told apart: a sha
+/// one commit holds links that commit, and one the mirror lacks links
+/// nothing.
+#[must_use]
+pub fn shared_shas<'a>(
+    runs: &[(&'a str, &mut RunRow)],
+    held: &HashMap<String, Vec<String>>,
+) -> std::collections::BTreeMap<&'a str, Vec<String>> {
+    let mut shared: std::collections::BTreeMap<&'a str, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for (pipeline, run) in runs {
+        if let Some(sha) = run.revision.as_ref()
+            && held.get(sha).is_some_and(|commits| commits.len() > 1)
+        {
+            let wanted = shared.entry(*pipeline).or_default();
+            if !wanted.contains(sha) {
+                wanted.push(sha.clone());
+            }
+        }
+    }
+    shared
+}
+
+/// Fills each run's [`RunRow::commit_id`] from its `revision` (#1004): the
+/// one commit `held` names for that sha, or, for a sha two hold (#1144), the
+/// one `resolved` names for the run's pipeline -- what its settings say it
+/// builds -- and only if `held` names that one too. Anything else links
+/// nothing: a commit in another repository is never offered as the one the
+/// run built. A run that names no revision is left as it is.
+pub fn link_commits(
+    runs: &mut [(&str, &mut RunRow)],
+    held: &HashMap<String, Vec<String>>,
+    resolved: &HashMap<&str, HashMap<String, String>>,
+) {
+    for (pipeline, run) in runs {
+        let Some(sha) = run.revision.as_ref() else {
+            continue;
+        };
+        run.commit_id = match held.get(sha).map(Vec::as_slice) {
+            Some([only]) => Some(only.clone()),
+            Some(commits) => resolved
+                .get(*pipeline)
+                .and_then(|found| found.get(sha))
+                .filter(|commit| commits.contains(commit))
+                .cloned(),
+            None => None,
+        };
+    }
+}
+
+/// Pin or unpin `pipeline` (#849, R-9.3) in [`PINS_SETTING`], and answer
+/// whether it is pinned now.
+///
+/// The pins are a set: pinning twice keeps one, unpinning what is not pinned
+/// changes nothing. They are kept by entity id and never checked against the
+/// mirror, so a pin outlives a sync that withdrew its pipeline and is drawn
+/// again when it comes back. A stored value that is not an array (an older or
+/// a broken knobas) reads as no pins and is replaced by the first write.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the write fails.
+pub async fn set_pinned(
+    pool: &PgPool,
+    pipeline: &EntityRef,
+    pinned: bool,
+) -> Result<bool, CoreError> {
+    let id = pipeline.to_string();
+    let stored: serde_json::Value = sqlx::query_scalar(SET_PINNED)
+        .bind(PINS_SETTING)
+        .bind(&id)
+        .bind(pinned)
+        .fetch_one(pool)
+        .await?;
+    Ok(stored
+        .as_array()
+        .is_some_and(|ids| ids.iter().any(|v| v.as_str() == Some(id.as_str()))))
+}
+
+/// [`set_pinned`]'s upsert: `$1` the key, `$2` the pipeline, `$3` whether it
+/// is pinned.
+const SET_PINNED: &str = "insert into knobas.setting as s (key, value)
+         values ($1, case when $3 then jsonb_build_array($2::text) else '[]'::jsonb end)
+         on conflict (key) do update set
+           value = (select coalesce(jsonb_agg(distinct x order by x), '[]'::jsonb)
+                      from (select jsonb_array_elements_text(
+                                     case when jsonb_typeof(s.value) = 'array'
+                                          then s.value else '[]'::jsonb end) as x
+                            union select $2::text where $3) kept
+                     where $3 or x <> $2),
+           updated_at = now()
+         returning value";
+
+/// Why a pipeline is on a job (#850, R-9.1, R-9.2). Tagged on `kind`, so a
+/// link set (#866) joins as one more arm without changing these.
+///
+/// - `branch`: One of its runs built a branch the job reaches: a reached
+///   branch, by its title, or the branch a reached pull request is opened from
+///   (its declared `head`). *your branch*.
+/// - `pr_check`: One of its runs checked a pull request the job reaches: it ran
+///   on the pull request's declared `commit` (its head), or the job reaches the
+///   run through the pull request. *PR check*.
+/// - `linked`: The job reaches the pipeline, or one of its runs, some other
+///   way: a direct link, the parent's links (R-7.3), or a link set (#866).
+///   `step` and `origin` are the reach's own ([`knobas_core::reach::Reached`]).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
+pub enum PipelineReason {
+    Branch {
+        branch: String,
+    },
+    PrCheck {
+        pr: String,
+    },
+    Linked {
+        step: String,
+        origin: crate::reach::Origin,
+    },
+}
+
+/// One pipeline on a job, with every reason it is there (#850): branches
+/// first, then pull requests, then links, as prototype-6 lists them.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct JobPipeline {
+    pub pipeline_id: String,
+    pub reasons: Vec<PipelineReason>,
+}
+
+/// The pipelines a job's reach puts on it, with their reasons (#850).
+///
+/// `$1` is the declarations; `$2`, `$3` and `$4` are the reach's rows as
+/// three arrays: what is reached, the first step of its path, and its
+/// origin. Every field is a declared one (ADR-0007): a run's `branch` and
+/// `pipeline`, a pull request's `head` and `commit`, a run's revisions as
+/// `sync.item_revision` keeps them (#732). A branch's name is its title,
+/// which is what Gitea titles a branch with and what a pull request's `head`
+/// names (#712). A run built on `refs/heads/<name>` counts as `<name>`.
+const JOB_PIPELINES: &str = concat!(
+    "with ",
+    crate::frame_kinds_cte!(),
+    ",
+reached as (
+  select * from unnest($2::text[], $3::text[], $4::text[]) as r(id, step, origin)
+),
+names as (
+  select i.title as name
+    from reached r join sync.live_item i on i.entity_id = r.id
+   where i.kind = 'branch'
+  union
+  select ",
+    crate::declared_string!("$1", "head"),
+    "
+    from reached r join sync.live_item i on i.entity_id = r.id
+),
+heads as (
+  select r.id as pr, ",
+    crate::declared_string!("$1", "commit"),
+    " as sha
+    from reached r join sync.live_item i on i.entity_id = r.id
+   where i.kind = 'pr'
+),
+p as (
+  select i.entity_id, i.source_id, ",
+    crate::declared_string!("$1", "pipeline"),
+    " as pkey
+    from frames f
+    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+   where f.frame = 'pipeline'
+),
+x as (
+  select i.entity_id, i.source_id, ",
+    crate::declared_string!("$1", "pipeline"),
+    " as pkey, ",
+    crate::declared_string!("$1", "branch"),
+    " as branch
+    from frames f
+    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+   where f.frame = 'run'
+),
+reasons as (
+  select p.entity_id as pipeline, 1 as ord, 'branch' as kind, n.name as value, null::text as origin
+    from x
+    join p on p.source_id = x.source_id and p.pkey = x.pkey
+    join names n on n.name is not null
+                and (x.branch = n.name or x.branch = 'refs/heads/' || n.name)
+  union
+  select p.entity_id, 2, 'pr_check', h.pr, null
+    from heads h
+    join sync.item_revision rv on rv.revision = h.sha
+    join x on x.entity_id = rv.entity_id
+    join knobas.source_config s on s.id = x.source_id and s.kind = rv.adapter_kind
+    join p on p.source_id = x.source_id and p.pkey = x.pkey
+  union
+  select p.entity_id,
+         case when se.kind = 'pr' and r.origin = 'own' then 2 else 3 end,
+         case when se.kind = 'pr' and r.origin = 'own' then 'pr_check' else 'linked' end,
+         r.step,
+         case when se.kind = 'pr' and r.origin = 'own' then null else r.origin end
+    from reached r
+    left join x on x.entity_id = r.id
+    join p on p.entity_id = r.id or (p.source_id = x.source_id and p.pkey = x.pkey)
+    left join knobas.entity se on se.id = r.step
+)
+select pipeline, kind, value, origin from reasons order by pipeline, ord, value
+"
+);
+
+/// The pipelines on the job whose reach is `reached` ([`crate::reach::reach`],
+/// #850), each once with its reasons, by entity id. A job that reaches
+/// nothing has none.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn job_pipelines(
+    pool: &PgPool,
+    declarations: &crate::payload::Declarations,
+    reached: &[crate::reach::Reached],
+) -> Result<Vec<JobPipeline>, CoreError> {
+    use crate::reach::Origin;
+    let ids: Vec<&str> = reached.iter().map(|r| r.entity_id.as_str()).collect();
+    let steps: Vec<&str> = reached.iter().map(|r| r.step.as_str()).collect();
+    let origins: Vec<&str> = reached
+        .iter()
+        .map(|r| match r.origin {
+            Origin::Own => "own",
+            Origin::Parent { .. } => "parent",
+            Origin::LinkSet { .. } => "link_set",
+        })
+        .collect();
+    let rows: Vec<(String, String, String, Option<String>)> = sqlx::query_as(JOB_PIPELINES)
+        .bind(declarations.as_param())
+        .bind(&ids)
+        .bind(&steps)
+        .bind(&origins)
+        .fetch_all(pool)
+        .await?;
+    let mut out: Vec<JobPipeline> = Vec::new();
+    for (pipeline, kind, value, origin) in rows {
+        let reason = match kind.as_str() {
+            "branch" => PipelineReason::Branch { branch: value },
+            "pr_check" => PipelineReason::PrCheck { pr: value },
+            _ => PipelineReason::Linked {
+                origin: match origin.as_deref() {
+                    Some("parent") => Origin::Parent {
+                        ticket: value.clone(),
+                    },
+                    // A set's member is its own first step (#866), so the
+                    // reach row it came from names the set.
+                    Some("link_set") => reached
+                        .iter()
+                        .find(|r| r.step == value && matches!(r.origin, Origin::LinkSet { .. }))
+                        .map_or(Origin::Own, |r| r.origin.clone()),
+                    _ => Origin::Own,
+                },
+                step: value,
+            },
+        };
+        match out.last_mut() {
+            Some(last) if last.pipeline_id == pipeline => last.reasons.push(reason),
+            _ => out.push(JobPipeline {
+                pipeline_id: pipeline,
+                reasons: vec![reason],
+            }),
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,5 +816,84 @@ mod tests {
     #[test]
     fn the_pins_are_read_by_their_constant() {
         assert!(PIPELINES.contains(&format!("key = '{PINS_SETTING}'")));
+    }
+
+    fn run(revision: Option<&str>) -> RunRow {
+        RunRow::read(
+            RawRun {
+                entity_id: "tc:run".to_owned(),
+                number: None,
+                state: None,
+                branch: None,
+                started: None,
+                finished: None,
+                updated_at: None,
+                web_url: None,
+                trigger: None,
+                started_by: None,
+                agent: None,
+                current_step: None,
+                tests_failed: None,
+                tests_passed: None,
+                tests_ignored: None,
+                revision: revision.map(str::to_owned),
+            },
+            &[],
+        )
+    }
+
+    fn held() -> HashMap<String, Vec<String>> {
+        HashMap::from([
+            ("aaa".to_owned(), vec!["gitea:one@aaa".to_owned()]),
+            (
+                "bbb".to_owned(),
+                vec!["gitea:one@bbb".to_owned(), "gitea:two@bbb".to_owned()],
+            ),
+        ])
+    }
+
+    /// Only a sha two mirrored commits hold needs the pipeline's settings,
+    /// asked once per pipeline however many of its runs name it (#1144).
+    #[test]
+    fn only_a_shared_sha_is_asked_of_its_pipeline() {
+        let (mut a, mut b, mut c, mut d) =
+            (run(Some("aaa")), run(Some("bbb")), run(Some("bbb")), run(None));
+        let runs = vec![("p1", &mut a), ("p1", &mut b), ("p1", &mut c), ("p2", &mut d)];
+        let shared = shared_shas(&runs, &held());
+        assert_eq!(
+            shared,
+            std::collections::BTreeMap::from([("p1", vec!["bbb".to_owned()])])
+        );
+    }
+
+    /// One holder links it; two link the one the pipeline's repository names,
+    /// and only when the mirror holds that one too; none links nothing.
+    #[test]
+    fn a_shared_sha_links_only_the_commit_its_pipeline_builds() {
+        let (mut only, mut told, mut stranger, mut untold, mut missing) = (
+            run(Some("aaa")),
+            run(Some("bbb")),
+            run(Some("bbb")),
+            run(Some("bbb")),
+            run(Some("ccc")),
+        );
+        let mut runs = vec![
+            ("p1", &mut only),
+            ("p1", &mut told),
+            ("p2", &mut stranger),
+            ("p3", &mut untold),
+            ("p1", &mut missing),
+        ];
+        let resolved = HashMap::from([
+            ("p1", HashMap::from([("bbb".to_owned(), "gitea:two@bbb".to_owned())])),
+            // A commit the mirror does not hold for that sha is never offered.
+            ("p2", HashMap::from([("bbb".to_owned(), "gitea:three@bbb".to_owned())])),
+        ]);
+        link_commits(&mut runs, &held(), &resolved);
+        assert_eq!(only.commit_id.as_deref(), Some("gitea:one@aaa"));
+        assert_eq!(told.commit_id.as_deref(), Some("gitea:two@bbb"));
+        assert_eq!(stranger.commit_id, None);
+        assert_eq!(untold.commit_id, None);
+        assert_eq!(missing.commit_id, None);
     }
 }

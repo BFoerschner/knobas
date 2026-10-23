@@ -993,6 +993,44 @@ pub async fn pipeline_commits(
     Ok(found)
 }
 
+/// How long [`shared_commits`] waits for all its pipelines' settings together
+/// (#1144). The live read only sharpens a link, and the run page's runs wait
+/// on it, so a slow or unreachable source costs at most this before those
+/// runs answer without the link. One HTTP call alone may take 45 s
+/// (`knobas_http::SEND_BUDGET`), and a settings read makes several.
+const COMMIT_READ_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// [`pipeline_commits`] for each pipeline of `shared` (its shas two mirrored
+/// commits hold, `knobas_core::builds::shared_shas`), one live read per
+/// pipeline, all of them within [`COMMIT_READ_BUDGET`]. A pipeline whose
+/// settings cannot be read, or not in time, answers nothing and is logged:
+/// its runs then link no commit, which is never a failure of the read that
+/// asked.
+pub async fn shared_commits<'a>(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    shared: std::collections::BTreeMap<&'a str, Vec<String>>,
+) -> std::collections::HashMap<&'a str, std::collections::HashMap<String, String>> {
+    let mut resolved = std::collections::HashMap::new();
+    let deadline = tokio::time::Instant::now() + COMMIT_READ_BUDGET;
+    for (pipeline, wanted) in shared {
+        let read = pipeline_commits(pool, secrets, registry, pipeline, &wanted);
+        match tokio::time::timeout_at(deadline, read).await {
+            Err(_) => {
+                tracing::warn!(pipeline, "a run's repository took too long to read");
+            }
+            Ok(Ok(found)) => {
+                resolved.insert(pipeline, found);
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(pipeline, %error, "a run's repository could not be read");
+            }
+        }
+    }
+    resolved
+}
+
 /// The runs of pipeline `entity_id` older than run `before`, asked of its own
 /// source (ADR-0022, #851), routed like [`view`]. The items are the source's
 /// answer as it is: nothing is stored, and the caller reads them through the

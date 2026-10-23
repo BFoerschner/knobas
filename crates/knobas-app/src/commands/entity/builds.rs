@@ -5,7 +5,7 @@ use super::*;
 // -- the Builds frame (ADR-0022, #848) -------------------------------------
 
 use knobas_core::builds::RawRun;
-pub(super) use knobas_core::builds::{PINS_SETTING, PipelineRow, RunRow};
+pub(super) use knobas_core::builds::{PipelineRow, RunRow};
 
 /// Every pipeline the sources filling the CI role declare, for the Builds
 /// list. The read is CI's by definition, so it narrows itself to the role's
@@ -103,13 +103,6 @@ async fn runs_of_pipeline(
     Ok(runs)
 }
 
-/// How long [`with_commits`] waits for all its pipelines' settings together
-/// (#1144). The live read only sharpens a link, and the run page's runs wait
-/// on it, so a slow or unreachable source costs at most this before those
-/// runs answer without the link. One HTTP call alone may take 45 s
-/// (`knobas_http::SEND_BUDGET`), and a settings read makes several.
-const COMMIT_READ_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
-
 /// The live reads a run's commit may need (#1144): the secrets and adapters
 /// to read its pipeline's settings with.
 type LiveReads<'a> = (
@@ -121,84 +114,34 @@ type LiveReads<'a> = (
 /// one read for all of them, and none when no run names a revision. Each run
 /// comes with the id of its pipeline.
 ///
-/// A commit is found by kind and declared `commit`, not by the view's
-/// repository-and-sha hint: a branch and a pull request declare a `commit`
-/// too, and only a commit's own item is what a commit link opens.
-///
-/// **A sha one mirrored commit holds** links that commit. **A sha two hold**
-/// (#1144) links the one in the repository the run's pipeline builds, found
-/// by [`crate::sources::crud::pipeline_commits`] from its settings, one live
-/// read per pipeline and only for such a sha, all of them within
-/// [`COMMIT_READ_BUDGET`]. Without `live`, or where the settings cannot be
-/// read in time or name none of them, it links nothing: a commit
-/// in another repository is never offered as the one the run built.
+/// The rule is [`knobas_core::builds::link_commits`]'s: a sha one mirrored
+/// commit holds links it; a sha two hold links the one in the repository the
+/// run's pipeline builds, read from its settings live
+/// ([`crate::sources::crud::shared_commits`], within its budget) and only
+/// with `live`. Without it, or where the settings cannot be read in time,
+/// that run links nothing.
 async fn with_commits<'a>(
     pool: &PgPool,
     declarations: &knobas_core::payload::Declarations,
     live: Option<LiveReads<'_>>,
-    runs: Vec<(&'a str, &'a mut RunRow)>,
+    mut runs: Vec<(&'a str, &'a mut RunRow)>,
 ) -> Result<(), IpcError> {
-    let mut runs: Vec<(&str, &mut RunRow)> = runs
-        .into_iter()
-        .filter(|(_, r)| r.revision.is_some())
-        .collect();
-    if runs.is_empty() {
-        return Ok(());
-    }
     let shas: Vec<&str> = runs
         .iter()
         .filter_map(|(_, r)| r.revision.as_deref())
         .collect();
+    if shas.is_empty() {
+        return Ok(());
+    }
     let held = knobas_core::builds::commits_of(pool, declarations, &shas).await?;
-    let mut shared: std::collections::BTreeMap<&str, Vec<String>> =
-        std::collections::BTreeMap::new();
-    for (pipeline, run) in &runs {
-        if let Some(sha) = run.revision.as_ref()
-            && held.get(sha).is_some_and(|commits| commits.len() > 1)
-        {
-            let wanted = shared.entry(pipeline).or_default();
-            if !wanted.contains(sha) {
-                wanted.push(sha.clone());
-            }
+    let shared = knobas_core::builds::shared_shas(&runs, &held);
+    let resolved = match live {
+        Some((secrets, registry)) => {
+            crate::sources::crud::shared_commits(pool, secrets, registry, shared).await
         }
-    }
-    let mut resolved: std::collections::HashMap<(&str, String), String> =
-        std::collections::HashMap::new();
-    if let Some((secrets, registry)) = live {
-        let deadline = tokio::time::Instant::now() + COMMIT_READ_BUDGET;
-        for (pipeline, wanted) in shared {
-            let read =
-                crate::sources::crud::pipeline_commits(pool, secrets, registry, pipeline, &wanted);
-            match tokio::time::timeout_at(deadline, read).await {
-                Err(_) => {
-                    tracing::warn!(pipeline, "a run's repository took too long to read");
-                }
-                Ok(Ok(found)) => {
-                    for (sha, commit) in found {
-                        if held
-                            .get(&sha)
-                            .is_some_and(|commits| commits.contains(&commit))
-                        {
-                            resolved.insert((pipeline, sha), commit);
-                        }
-                    }
-                }
-                Ok(Err(error)) => {
-                    tracing::warn!(pipeline, %error, "a run's repository could not be read");
-                }
-            }
-        }
-    }
-    for (pipeline, run) in &mut runs {
-        run.commit_id =
-            run.revision
-                .as_ref()
-                .and_then(|sha| match held.get(sha).map(Vec::as_slice) {
-                    Some([only]) => Some(only.clone()),
-                    Some(_) => resolved.get(&(*pipeline, sha.clone())).cloned(),
-                    None => None,
-                });
-    }
+        None => std::collections::HashMap::new(),
+    };
+    knobas_core::builds::link_commits(&mut runs, &held, &resolved);
     Ok(())
 }
 
@@ -837,13 +780,8 @@ pub async fn pipeline_runs<R: tauri::Runtime>(
 
 // -- pins and *This job* (#849, #850) ---------------------------------------
 
-/// Pin or unpin one pipeline (#849, R-9.3), and answer what is now stored.
-///
-/// The pins are a set: pinning twice keeps one, unpinning what is not pinned
-/// changes nothing. They are kept by entity id and never checked against the
-/// mirror, so a pin outlives a sync that withdrew its pipeline and is drawn
-/// again when it comes back. A stored value that is not an array (an older or
-/// a broken knobas) reads as no pins and is replaced by the first write.
+/// Pin or unpin one pipeline (#849, R-9.3), and answer what is now stored:
+/// [`knobas_core::builds::set_pinned`].
 ///
 /// # Errors
 ///
@@ -855,28 +793,7 @@ pub async fn set_pipeline_pinned_inner(
     pinned: bool,
 ) -> Result<bool, IpcError> {
     let entity = EntityRef::parse(pipeline_id).map_err(IpcError::invalid)?;
-    let stored: serde_json::Value = sqlx::query_scalar(
-        "insert into knobas.setting as s (key, value)
-         values ($1, case when $3 then jsonb_build_array($2::text) else '[]'::jsonb end)
-         on conflict (key) do update set
-           value = (select coalesce(jsonb_agg(distinct x order by x), '[]'::jsonb)
-                      from (select jsonb_array_elements_text(
-                                     case when jsonb_typeof(s.value) = 'array'
-                                          then s.value else '[]'::jsonb end) as x
-                            union select $2::text where $3) kept
-                     where $3 or x <> $2),
-           updated_at = now()
-         returning value",
-    )
-    .bind(PINS_SETTING)
-    .bind(entity.to_string())
-    .bind(pinned)
-    .fetch_one(pool)
-    .await?;
-    let id = entity.to_string();
-    Ok(stored
-        .as_array()
-        .is_some_and(|ids| ids.iter().any(|v| v.as_str() == Some(id.as_str()))))
+    Ok(knobas_core::builds::set_pinned(pool, &entity, pinned).await?)
 }
 
 /// Pin or unpin a pipeline (#849).
@@ -980,124 +897,11 @@ pub async fn delete_run_preset(
     delete_run_preset_inner(&pool, &pipeline_id, &name).await
 }
 
-/// Why a pipeline is on a job (#850, R-9.1, R-9.2). Tagged on `kind`, so a
-/// link set (#866) joins as one more arm without changing these.
-///
-/// - `branch`: One of its runs built a branch the job reaches: a reached
-///   branch, by its title, or the branch a reached pull request is opened from
-///   (its declared `head`). *your branch*.
-/// - `pr_check`: One of its runs checked a pull request the job reaches: it ran
-///   on the pull request's declared `commit` (its head), or the job reaches the
-///   run through the pull request. *PR check*.
-/// - `linked`: The job reaches the pipeline, or one of its runs, some other
-///   way: a direct link, the parent's links (R-7.3), or a link set (#866).
-///   `step` and `origin` are the reach's own ([`knobas_core::reach::Reached`]).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-#[ts(export_to = "entity.ts")]
-pub enum PipelineReason {
-    Branch {
-        branch: String,
-    },
-    PrCheck {
-        pr: String,
-    },
-    Linked {
-        step: String,
-        origin: knobas_core::reach::Origin,
-    },
-}
-
-/// One pipeline on a job, with every reason it is there (#850): branches
-/// first, then pull requests, then links, as prototype-6 lists them.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
-#[ts(export_to = "entity.ts")]
-pub struct JobPipeline {
-    pub pipeline_id: String,
-    pub reasons: Vec<PipelineReason>,
-}
-
-/// The pipelines a job's reach puts on it, with their reasons (#850).
-///
-/// `$1` is the declarations; `$2`, `$3` and `$4` are the reach's rows as
-/// three arrays: what is reached, the first step of its path, and its
-/// origin. Every field is a declared one (ADR-0007): a run's `branch` and
-/// `pipeline`, a pull request's `head` and `commit`, a run's revisions as
-/// `sync.item_revision` keeps them (#732). A branch's name is its title,
-/// which is what Gitea titles a branch with and what a pull request's `head`
-/// names (#712). A run built on `refs/heads/<name>` counts as `<name>`.
-const JOB_PIPELINES: &str = concat!(
-    "with ",
-    knobas_core::frame_kinds_cte!(),
-    ",
-reached as (
-  select * from unnest($2::text[], $3::text[], $4::text[]) as r(id, step, origin)
-),
-names as (
-  select i.title as name
-    from reached r join sync.live_item i on i.entity_id = r.id
-   where i.kind = 'branch'
-  union
-  select ",
-    knobas_core::declared_string!("$1", "head"),
-    "
-    from reached r join sync.live_item i on i.entity_id = r.id
-),
-heads as (
-  select r.id as pr, ",
-    knobas_core::declared_string!("$1", "commit"),
-    " as sha
-    from reached r join sync.live_item i on i.entity_id = r.id
-   where i.kind = 'pr'
-),
-p as (
-  select i.entity_id, i.source_id, ",
-    knobas_core::declared_string!("$1", "pipeline"),
-    " as pkey
-    from frames f
-    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
-   where f.frame = 'pipeline'
-),
-x as (
-  select i.entity_id, i.source_id, ",
-    knobas_core::declared_string!("$1", "pipeline"),
-    " as pkey, ",
-    knobas_core::declared_string!("$1", "branch"),
-    " as branch
-    from frames f
-    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
-   where f.frame = 'run'
-),
-reasons as (
-  select p.entity_id as pipeline, 1 as ord, 'branch' as kind, n.name as value, null::text as origin
-    from x
-    join p on p.source_id = x.source_id and p.pkey = x.pkey
-    join names n on n.name is not null
-                and (x.branch = n.name or x.branch = 'refs/heads/' || n.name)
-  union
-  select p.entity_id, 2, 'pr_check', h.pr, null
-    from heads h
-    join sync.item_revision rv on rv.revision = h.sha
-    join x on x.entity_id = rv.entity_id
-    join knobas.source_config s on s.id = x.source_id and s.kind = rv.adapter_kind
-    join p on p.source_id = x.source_id and p.pkey = x.pkey
-  union
-  select p.entity_id,
-         case when se.kind = 'pr' and r.origin = 'own' then 2 else 3 end,
-         case when se.kind = 'pr' and r.origin = 'own' then 'pr_check' else 'linked' end,
-         r.step,
-         case when se.kind = 'pr' and r.origin = 'own' then null else r.origin end
-    from reached r
-    left join x on x.entity_id = r.id
-    join p on p.entity_id = r.id or (p.source_id = x.source_id and p.pkey = x.pkey)
-    left join knobas.entity se on se.id = r.step
-)
-select pipeline, kind, value, origin from reasons order by pipeline, ord, value
-"
-);
+pub use knobas_core::builds::{JobPipeline, PipelineReason};
 
 /// The pipelines on the job of `ticket_id` (#850), each once with its
-/// reasons, by entity id. A ticket that reaches nothing has none.
+/// reasons, by entity id: [`knobas_core::builds::job_pipelines`] over the
+/// ticket's reach. A ticket that reaches nothing has none.
 ///
 /// # Errors
 ///
@@ -1108,57 +912,8 @@ pub async fn job_pipelines_inner(
     ticket_id: &str,
 ) -> Result<Vec<JobPipeline>, IpcError> {
     let reached = knobas_core::reach::reach(pool, ticket_id).await?;
-    let ids: Vec<&str> = reached.iter().map(|r| r.entity_id.as_str()).collect();
-    let steps: Vec<&str> = reached.iter().map(|r| r.step.as_str()).collect();
-    let origins: Vec<&str> = reached
-        .iter()
-        .map(|r| match r.origin {
-            knobas_core::reach::Origin::Own => "own",
-            knobas_core::reach::Origin::Parent { .. } => "parent",
-            knobas_core::reach::Origin::LinkSet { .. } => "link_set",
-        })
-        .collect();
     let declarations = declared_paths(pool, registry).await?;
-    let rows: Vec<(String, String, String, Option<String>)> = sqlx::query_as(JOB_PIPELINES)
-        .bind(declarations.as_param())
-        .bind(&ids)
-        .bind(&steps)
-        .bind(&origins)
-        .fetch_all(pool)
-        .await?;
-    let mut out: Vec<JobPipeline> = Vec::new();
-    for (pipeline, kind, value, origin) in rows {
-        let reason = match kind.as_str() {
-            "branch" => PipelineReason::Branch { branch: value },
-            "pr_check" => PipelineReason::PrCheck { pr: value },
-            _ => PipelineReason::Linked {
-                origin: match origin.as_deref() {
-                    Some("parent") => knobas_core::reach::Origin::Parent {
-                        ticket: value.clone(),
-                    },
-                    // A set's member is its own first step (#866), so the
-                    // reach row it came from names the set.
-                    Some("link_set") => reached
-                        .iter()
-                        .find(|r| {
-                            r.step == value
-                                && matches!(r.origin, knobas_core::reach::Origin::LinkSet { .. })
-                        })
-                        .map_or(knobas_core::reach::Origin::Own, |r| r.origin.clone()),
-                    _ => knobas_core::reach::Origin::Own,
-                },
-                step: value,
-            },
-        };
-        match out.last_mut() {
-            Some(last) if last.pipeline_id == pipeline => last.reasons.push(reason),
-            _ => out.push(JobPipeline {
-                pipeline_id: pipeline,
-                reasons: vec![reason],
-            }),
-        }
-    }
-    Ok(out)
+    Ok(knobas_core::builds::job_pipelines(pool, &declarations, &reached).await?)
 }
 
 /// The pipelines on a job, with their reasons (#850).
