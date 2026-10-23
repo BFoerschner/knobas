@@ -80,48 +80,6 @@ crate::closed_vocabulary! {
     }
 }
 
-impl std::fmt::Display for RuleClass {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// A `rule_class` column value that is not one of the known classes.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("unknown suggestion rule class {0:?}")]
-pub struct UnknownRuleClass(pub String);
-
-impl std::str::FromStr for RuleClass {
-    type Err = UnknownRuleClass;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        RuleClass::ALL
-            .iter()
-            .copied()
-            .find(|class| class.as_str() == s)
-            .ok_or_else(|| UnknownRuleClass(s.to_owned()))
-    }
-}
-
-// Plain `text`, like `Origin`: the codec borrows `str`'s rather than declaring
-// a PostgreSQL enum type that does not exist.
-impl sqlx::Type<sqlx::Postgres> for RuleClass {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <str as sqlx::Type<sqlx::Postgres>>::type_info()
-    }
-
-    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
-        <&str as sqlx::Type<sqlx::Postgres>>::compatible(ty)
-    }
-}
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for RuleClass {
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
-        let text = <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        Ok(text.parse()?)
-    }
-}
-
 /// Who a proposal belongs to, in `created_by`.
 ///
 /// Not `"user"` -- the user did not draw it -- and not `"sync:<source_id>"`,

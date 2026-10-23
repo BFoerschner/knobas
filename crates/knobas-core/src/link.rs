@@ -116,50 +116,6 @@ crate::closed_vocabulary! {
     }
 }
 
-impl std::fmt::Display for Origin {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// An `origin` column value that is not one of the five known origins.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("unknown link origin {0:?}")]
-pub struct UnknownOrigin(pub String);
-
-impl std::str::FromStr for Origin {
-    type Err = UnknownOrigin;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Read off `ALL` rather than a second hand-written match: the point of
-        // declaring the enum as a closed vocabulary is that there is one list.
-        Origin::ALL
-            .iter()
-            .copied()
-            .find(|origin| origin.as_str() == s)
-            .ok_or_else(|| UnknownOrigin(s.to_owned()))
-    }
-}
-
-// The column is plain `text`, so the codec borrows `str`'s rather than
-// declaring a PostgreSQL enum type that does not exist.
-impl sqlx::Type<sqlx::Postgres> for Origin {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <str as sqlx::Type<sqlx::Postgres>>::type_info()
-    }
-
-    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
-        <&str as sqlx::Type<sqlx::Postgres>>::compatible(ty)
-    }
-}
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Origin {
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
-        let text = <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        Ok(text.parse()?)
-    }
-}
-
 /// Every column of `knobas.link` that leaves this module, in one place.
 ///
 /// [`LinkRow`] is a `FromRow`, so a column this list forgets is not a compile

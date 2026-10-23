@@ -124,61 +124,6 @@ crate::closed_vocabulary! {
     }
 }
 
-/// Decode a `text` column into a closed vocabulary, the way `link::Origin`
-/// does: the column is plain `text`, so the codec borrows `str`'s rather than
-/// declaring a PostgreSQL enum type that does not exist.
-macro_rules! text_codec {
-    ($name:ident) => {
-        impl std::fmt::Display for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(self.as_str())
-            }
-        }
-
-        impl std::str::FromStr for $name {
-            type Err = UnknownValue;
-
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                // Read off `ALL` rather than a second hand-written match: the
-                // point of declaring the enum as a closed vocabulary is that
-                // there is one list.
-                $name::ALL
-                    .iter()
-                    .copied()
-                    .find(|value| value.as_str() == s)
-                    .ok_or_else(|| UnknownValue(s.to_owned()))
-            }
-        }
-
-        impl sqlx::Type<sqlx::Postgres> for $name {
-            fn type_info() -> sqlx::postgres::PgTypeInfo {
-                <str as sqlx::Type<sqlx::Postgres>>::type_info()
-            }
-
-            fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
-                <&str as sqlx::Type<sqlx::Postgres>>::compatible(ty)
-            }
-        }
-
-        impl<'r> sqlx::Decode<'r, sqlx::Postgres> for $name {
-            fn decode(
-                value: sqlx::postgres::PgValueRef<'r>,
-            ) -> Result<Self, sqlx::error::BoxDynError> {
-                let text = <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-                Ok(text.parse()?)
-            }
-        }
-    };
-}
-
-/// A column value that is not one of a closed vocabulary's spellings.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("unknown write-queue value {0:?}")]
-pub struct UnknownValue(pub String);
-
-text_codec!(WriteState);
-text_codec!(WaitReason);
-
 /// Every column of `knobas.write_queue` that leaves this module, in one place
 /// -- plus the one *derived* column, `source_enabled`, which is not a column
 /// of the table at all.
