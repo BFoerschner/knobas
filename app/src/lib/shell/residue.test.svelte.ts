@@ -576,6 +576,8 @@ function sourcePageProps() {
       item_count: 0,
       auth_kind: "UserPassword" as const,
       kinds: [],
+      roles: [],
+      role_misses: [],
     },
     adapter: null,
     health: null,

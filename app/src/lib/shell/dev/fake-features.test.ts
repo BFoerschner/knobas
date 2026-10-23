@@ -323,13 +323,13 @@ test("list_entities asked for a role reads its fillers' rows of its kinds, and a
   expect(read("nobody:fills-this")).toEqual([]);
 
   // A recorded miss of the role takes the source off that surface alone.
-  const mock = FIXTURE_SOURCES.find((source) => source.id === "mock") as { role_misses?: { role: string }[] };
+  const mock = FIXTURE_SOURCES.find((source) => source.id === "mock") as { role_misses: { role: string }[] };
   mock.role_misses = [{ role: "code-host" }];
   try {
     expect(read("code-host")).toEqual([]);
     expect(read("ticket-system")).toContain("mock/ticket");
   } finally {
-    delete mock.role_misses;
+    mock.role_misses = [];
   }
 });
 
@@ -369,12 +369,12 @@ test("builds: 59 pipelines by name, each with at most twelve runs, and pipeline_
 
 /** Runs `read` with `role` recorded as missed on fixture source `id`, then takes the miss back. */
 function withMiss<T>(id: string, role: string, read: () => T): T {
-  const source = FIXTURE_SOURCES.find((entry) => entry.id === id) as { role_misses?: { role: string }[] };
+  const source = FIXTURE_SOURCES.find((entry) => entry.id === id) as { role_misses: { role: string }[] };
   source.role_misses = [{ role }];
   try {
     return read();
   } finally {
-    delete source.role_misses;
+    source.role_misses = [];
   }
 }
 
@@ -416,12 +416,12 @@ test("builds: pipelines reads CI's fillers alone, so a recorded CI miss takes th
   const h = demoHandlers() as Calls;
   const sources = () => [...new Set((h["pipelines"]!({}) as { source_id: string }[]).map((p) => p.source_id))];
   expect(sources()).toEqual(["teamcity"]);
-  const teamcity = FIXTURE_SOURCES.find((source) => source.id === "teamcity") as { role_misses?: { role: string }[] };
+  const teamcity = FIXTURE_SOURCES.find((source) => source.id === "teamcity") as { role_misses: { role: string }[] };
   teamcity.role_misses = [{ role: "ci" }];
   try {
     expect(h["pipelines"]!({})).toEqual([]);
   } finally {
-    delete teamcity.role_misses;
+    teamcity.role_misses = [];
   }
   expect(h["pipelines"]!({})).toHaveLength(59);
 });

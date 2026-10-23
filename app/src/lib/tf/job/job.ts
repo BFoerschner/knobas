@@ -474,8 +474,10 @@ export function staleBuilds(
   rows: readonly EntityRow[],
   now: Date,
 ): Staleness[] {
+  // A source whose claims the job was not handed claims nothing.
   const holders = sources.filter(
-    (source) => claims(source, CI) || rows.some((row) => row.source_id === source.id),
+    (source) =>
+      (source.roles !== undefined && claims({ roles: source.roles }, CI)) || rows.some((row) => row.source_id === source.id),
   );
   const out: Staleness[] = [];
   for (const source of holders) {

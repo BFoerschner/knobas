@@ -771,7 +771,7 @@ export function fakeTicketKeys(): string[] {
 export interface FakeClaimer {
   id: string;
   roles: { role: string }[];
-  role_misses?: { role: string }[];
+  role_misses: { role: string }[];
   kinds: { id: string }[];
   payload_paths: { kind: string; frame?: string | null }[];
 }
@@ -814,7 +814,7 @@ function minimumKinds(minimum: { ids: string[]; frames: string[] }, source: Fake
 export function fakeRoleScope(role: string): { sources: string[]; kinds: string[] } {
   const fillers = ROLE_CLAIMERS.flatMap((claimers) => claimers()).filter(
     (source) =>
-      source.roles.some((claim) => claim.role === role) && !(source.role_misses ?? []).some((miss) => miss.role === role),
+      source.roles.some((claim) => claim.role === role) && !source.role_misses.some((miss) => miss.role === role),
   );
   const kinds = fillers.flatMap((source) => {
     const minimum = ROLE_MINIMUMS[role];

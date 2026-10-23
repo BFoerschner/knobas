@@ -130,7 +130,7 @@ export function sourceState(
     const text = `Failed ${ago(finished, now)}`;
     return { tone: "warn", text: limit ? `${text}, stopped at ${limit}` : text, failed: false };
   }
-  const misses = source.role_misses ?? [];
+  const misses = source.role_misses;
   if (misses.length > 0) {
     const [first] = misses;
     const more = misses.length > 1 ? ` and ${misses.length - 1} more` : "";
@@ -164,7 +164,7 @@ export function roleWord(role: string): string {
  * fields.priority.name. Its tickets stay searchable and linkable.*
  */
 export function roleMissLines(source: Pick<SourceSummary, "kinds" | "role_misses">): string[] {
-  return (source.role_misses ?? []).map((miss) => {
+  return source.role_misses.map((miss) => {
     const kind = source.kinds.find((info) => info.id === miss.kind);
     const one = (kind?.label ?? miss.kind).toLowerCase();
     const many = (kind?.plural ?? miss.kind).toLowerCase();

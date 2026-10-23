@@ -1261,7 +1261,7 @@ function jiraHarness(over: Partial<NonNullable<TicketViewRow["saved_view_source"
     }),
   ]);
   // The Jira source claims `translate_query`, and answers as the adapter does (#1208).
-  sourceRoles.take([{ id: "jira", roles: [{ role: "ticket-system", reads: ["reachable_transitions", "translate_query"] }] }]);
+  sourceRoles.take([{ id: "jira", roles: [{ role: "ticket-system", reads: ["reachable_transitions", "translate_query"] }], role_misses: [] }]);
   h.ports.translateView = (id) => {
     h.translated.push(id);
     return Promise.resolve(FLOW_COPY);
@@ -1349,8 +1349,8 @@ test("on a Jira view the preview and the list read the ticket's status, the colu
 test("two sources holding PAY-1: each card and row names its source and opens by it; a unique key names none (#1476)", async () => {
   const twin = { status: "To Do", card: card("PAY-1", "Retry failed SEPA payouts", { entity_id: "gitea:PAY-1", source_id: "gitea" }) };
   sourceRoles.take([
-    { id: "jira", display_name: "Tidewater Jira" },
-    { id: "gitea", display_name: "Tidewater Gitea" },
+    { id: "jira", display_name: "Tidewater Jira", roles: [], role_misses: [] },
+    { id: "gitea", display_name: "Tidewater Gitea", roles: [], role_misses: [] },
   ]);
   try {
     // Counted over the cards read: the twin is among the first eight.
@@ -1442,7 +1442,7 @@ test("View settings on a Jira view says how much a copy keeps and offers Make an
 
 test("a saved view from a source without translate_query offers no editable copy, and its view still shows (#1208)", async () => {
   const { h } = jiraHarness();
-  sourceRoles.take([{ id: "jira", roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }] }]);
+  sourceRoles.take([{ id: "jira", roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }], role_misses: [] }]);
   await open(h, null, "jira-board-21");
   expect(columns().map((column) => column.head)).toEqual(["Ready 12", "In flight 1 of 6", "Shipped 5"]);
 
@@ -1757,8 +1757,8 @@ test("every board read asks for the ticket system, and the shell's source list a
   // The shell's list of claims is no scope of the board's any more.
   const asked = roles.length;
   sourceRoles.take([
-    { id: "tracker", roles: [{ role: "ticket-system", reads: [] }] },
-    { id: "notes", roles: [{ role: "ticket-system", reads: [] }] },
+    { id: "tracker", roles: [{ role: "ticket-system", reads: [] }], role_misses: [] },
+    { id: "notes", roles: [{ role: "ticket-system", reads: [] }], role_misses: [] },
   ]);
   await settle();
   expect(roles).toHaveLength(asked);

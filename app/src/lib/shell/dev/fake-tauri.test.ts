@@ -1151,7 +1151,7 @@ test("the fixture's mini_board reads a role's fillers: the demo board whole, a m
   // Jira holds three of the mock's keys too (#1476).
   expect(drawnBy(board("ticket-system"))).toEqual(["gitea", "jira", "mock"]);
 
-  const gitea = FIXTURE_SOURCES.find((source) => source.id === "gitea") as { role_misses?: { role: string }[] };
+  const gitea = FIXTURE_SOURCES.find((source) => source.id === "gitea") as { role_misses: { role: string }[] };
   gitea.role_misses = [{ role: "ticket-system" }];
   try {
     const narrowed = board("ticket-system");
@@ -1159,7 +1159,7 @@ test("the fixture's mini_board reads a role's fillers: the demo board whole, a m
     const counted = narrowed.columns.reduce((all, column) => all + column.total, 0);
     expect(counted).toBe(narrowed.columns.flatMap((column) => column.cards).length);
   } finally {
-    delete gitea.role_misses;
+    gitea.role_misses = [];
   }
   expect(board("role_nobody:fills-this")).toEqual({ columns: [], sources: [], lanes: [], more_lanes: 0 });
 });
