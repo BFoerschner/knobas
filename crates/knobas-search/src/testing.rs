@@ -37,6 +37,10 @@
 //! has to recall is a benchmark that will one day be run without it, and the
 //! result will look plausible.
 //!
+//! The table above was read at the default 4 MB limit. Since `0059` (#1869)
+//! `item_fts_idx` merges at 256 kB, so a sync leaves at most 33 pages pending;
+//! the vacuum stays, because 33 pages are still a list and not the index.
+//!
 //! # What task 10 added to that record: the penalty is paid **per index scan**
 //!
 //! The inherited record says the artifact's severity is governed by the
@@ -407,8 +411,8 @@ pub async fn match_count(pool: &PgPool, text: &str) -> Result<i64, SearchError> 
 
 /// How much of `item_fts_idx` is sitting unmerged in the pending list.
 ///
-/// **The mechanism itself, not a proxy for it.** `fastupdate` (on by default --
-/// `item_fts_idx` declares no `reloptions`, so it takes the default) parks
+/// **The mechanism itself, not a proxy for it.** `fastupdate` (on by default,
+/// and `item_fts_idx` keeps it, with a 256 kB limit since `0059`) parks
 /// freshly inserted entries in an unsorted pending list that every index scan
 /// reads linearly until a `VACUUM` merges it, and `ANALYZE` does not flush it.
 ///
@@ -443,11 +447,11 @@ pub async fn pending_list(pool: &PgPool) -> Result<(i32, i64), SearchError> {
 ///
 /// The state [`prepare`] exists to clear, created on purpose so a test can show
 /// that clearing it does something -- *when you build a detector, mutate the
-/// detector*. The increment is deliberately modest: crossing
-/// `gin_pending_list_limit` (4 MB) makes PostgreSQL merge most of the list
-/// unasked, so a large dirtying step can leave the index **cleaner** than a
-/// small one. That is the same mechanism that makes the artifact's severity
-/// depend on where a load stopped rather than on corpus size.
+/// detector*. Crossing `gin_pending_list_limit` (256 kB on this index since
+/// `0059`, 4 MB before) makes PostgreSQL merge the list unasked, so a larger
+/// dirtying step does not leave a longer list, and can leave a shorter one.
+/// That is the same mechanism that makes the artifact's severity depend on
+/// where a load stopped rather than on corpus size.
 ///
 /// # Errors
 ///

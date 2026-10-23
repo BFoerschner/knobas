@@ -15284,3 +15284,109 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1885.
   `app/src` whose left side cannot be nullish adds no non-test, non-fake instance beyond the two
   it lists; it is posted on #1884 with the fake-IPC hits, and no second issue is opened.
   *Reversing:* n/a.
+## #1869: which GIN indexes keep the default pending list (Opus implementer, 2026-10-23)
+
+- **Where the readings came from.** *Fork:* #1879's comment found 0 pending pages on all four
+  indexes on `perf.rs`' mirror, which `seed_corpus` vacuums. *Ruling:* read `item_fts_idx` on
+  clones of the responsiveness probe's snapshots (23,500 items through the real sync, autovacuum
+  off), and the three `knobas` indexes on a clone loaded by SQL with no vacuum. *Reasoning:* the
+  probe's snapshot is the mirror a sync leaves: 367 pages pending on `item_fts_idx`. Its estate and
+  notes are empty, so those were loaded at `knobas_search::testing`'s upper-bound shapes (3,303
+  assets, 1,500 routes, 10,000 notes) in one load each. Searches through `Searcher::search`,
+  median of 7 warm runs, each state read twice, alternating. *Reversing:* n/a, a method.
+- **`item_fts_idx`: cap at 256 kB.** *Ruling:* migration `0059`. *Reasoning:* never analyzed,
+  with 367 pages pending, `payment retry`, `payment re`, `JIRA0-42` and `kind:build fail` walked
+  every entity and probed its item instead of reading the index: 24 to 36 ms, against 2.0 to
+  3.0 ms with the list merged. Grown 100 rows at a time, the plan held to 213 pages (2.4 to
+  3.1 ms, the list read linearly) and flipped at 225. Analyzed, the plan held at 367 pages and the
+  list cost 0.5 to 1.5 ms a search. Single words (`pay`, `payment`, `common`) read the same in
+  both states. *Reversing:* one migration resetting the limit.
+- **256 kB, not 1 MB or `fastupdate = off`.** *Ruling:* 256 kB, `0057`'s limit. *Reasoning:*
+  writing the 23,500 items' `fts` into a table with this index alone, in batches of 500 in one
+  transaction, three rounds: no index 0.2 to 0.3 s, 4 MB 0.6 to 1.0 s, 1 MB 0.9 to 1.3 s,
+  256 kB 1.6 to 2.7 s, 64 kB 2.8 to 5.7 s, `fastupdate = off` 3.6 to 9.8 s. 256 kB costs a first
+  sync some 40 to 75 µs an item, in the background; 0.2 to 0.4 s per 5,000, the order #1864's
+  merge-manager accepted. 1 MB (129 pages) holds on this mirror, but the walk the planner prices
+  against the charge is estimated from the mirror's size, so a smaller mirror flips on a shorter
+  list; at 33 pages the charge is a planner cost of about 130. *Reversing:* one migration.
+- **Reserved for Björn, ruled by implementer on Opus: migration `0059`** (Björn's 2026-10-22
+  waiver, as dispatched). *Fork:* §10.8 freezes `crates/knobas-db/migrations/**`. *Ruling:* add
+  `0059`, the storage parameter and a merge of what is pending, with its entry
+  `1869-migration-0059-mirror-search-pending-list.md`. *Reasoning:* the rulings above; `0058` is
+  on `main`, so `0059` is the next number. *Reversing:* as above.
+- **The migration merges the list already pending.** *Ruling:* `gin_clean_pending_list` after the
+  `alter`, as `0057`. *Reasoning:* the new limit merges only on the next insert past it. 83 ms
+  for the probe mirror's 367 pages. *Reversing:* drop the statement.
+- **`note_fts_idx`, `asset_fts_idx`, `route_fts_idx`: left on the default.** *Ruling:* no
+  migration. *Reasoning:* at the upper-bound shapes, loaded with no vacuum, the default left 75
+  pages on notes (one 4 MB merge, 1,261 rows after it), 108 on assets (the whole estate) and 20 on
+  routes (all 1,500, under 256 kB either way); at 256 kB, 12, 12 and 20. At the default the estate
+  branch of `asset: w101` read `knobas.asset` by a scan (0.4 to 1.1 ms) where the capped index
+  took 0.07 ms, and the notes' index read took 0.4 ms against 0.1 ms. Whole searches differed by
+  0.1 to 0.4 ms (`asset: w101` 2.8 against 2.5 ms, `kind:note w7 w108` 4.4 against 4.3 ms). A
+  scan of these tables is bounded by an estate or a notebook, never by a mirror, and they are
+  written by hand or by an import in the thousands. *Reversing:* one migration per index.
+- **The re-index button keeps the limit.** *Ruling:* no code. *Reasoning:* `reindex index
+  concurrently sync.item_fts_idx` on the probe clone left `reloptions` at
+  `{gin_pending_list_limit=256}`. *Reversing:* n/a.
+- **`perf.rs`' `the_artifact_this_harness_is_built_to_avoid` keeps its shape.** *Fork:* it asserts
+  `dirty_the_pending_list(20_000)` leaves pages pending; at 256 kB the list now holds 1 to 33.
+  *Ruling:* unchanged; `testing.rs`' docs name the new limit. *Reasoning:* a list ends empty only
+  when the last row's insert merges it, and the update is deterministic. `just search-perf` reads
+  it. *Reversing:* n/a.
+
+Reviewed 2026-10-23 by the merge-manager (Opus), PR #1883.
+
+- **Reserved for Björn, ruled by merge-manager on Opus: migration `0059` and its §10.8 entry.**
+  *Fork:* confirm the implementer's ruling or rule again. *Ruling:* confirmed, on the
+  merge-manager's own authority: #1869 was filed on 2026-10-23, after the planning pass the
+  2026-10-22 waiver names, so the waiver's wording does not reach it. *Reasoning:* one storage
+  parameter and a merge, as `0057`: no rewrite, rebuild, new object or data change, a two-way door
+  a later migration resets. The §10.8 entry matches the diff, and the next free number on `main`
+  is `0059`. *Reversing:* one migration resetting the limit.
+- **The write cost is accepted.** *Fork:* a first sync pays some 40 to 75 µs more per item
+  (1.0 to 1.7 s for 23,500). *Ruling:* accept. *Reasoning:* the cost falls on the sync's
+  background writes, against a first sync's network time. The probe's two-word and key searches
+  go from 42 to 58 ms to 5 to 6 ms on every keystroke while the mirror is unanalyzed. Once
+  analyzed, the 4 MB default would still let incremental syncs grow the list toward 512 pages,
+  past the 367 the implementer read. An incremental sync writes tens of items, so its share of
+  the cost is negligible. *Reversing:* as above.
+- **`note_fts_idx`, `asset_fts_idx`, `route_fts_idx` stay on the default.** *Fork:* cap them
+  too. *Ruling:* confirmed, leave them. *Reasoning:* the readings are at the documented upper
+  bounds (`testing.rs`: 3,303 assets, 1,500 routes; 10,000 notes). The routes' whole index fits
+  in 256 kB, so a cap changes nothing. On assets the default moves the estate branch to a scan of
+  at most 3,303 rows: 0.4 to 1.1 ms against 0.07 ms. On notes the index read goes from 0.1 to
+  0.4 ms. Whole searches differ by 0.1 to 0.4 ms, which no one sees. None of these tables grows
+  with the mirror. *Reversing:* one migration per index.
+- **The schema test is deterministic under gate load.** *Fork:* #1878's `0057` test needed
+  autovacuum off on `sync.item`. *Ruling:* no change. *Reasoning:* the new test switches it off
+  the same way, before the first load. With it off, the only merges are the inserts' own, on one
+  connection. The bodies are `md5` of the row number, so each load is the same. The default-limit
+  load reaches 334 pages: under the 512-page 4 MB merge, and over the 132 the control needs.
+  *Reversing:* n/a.
+- **The `mine` p90 reading is load.** *Fork:* `mine` at 100k read p90 93 ms on the branch
+  against 50 ms on main in one `just search-perf` pair. *Ruling:* load, not the cap. *Reasoning:*
+  `mine` is `@me settlement`, read after `seed_corpus` vacuums, so the pending list is 0 on both
+  binaries. In the alternated reruns, the pair at lower load read 44 ms against 44 ms. The 168 ms
+  run came at load 25.5. *Reversing:* n/a.
+- **Single-word searches on a never-analyzed mirror are expected, no follow-up.** *Fork:*
+  `payment` reads about 28 to 33 ms never analyzed against about 5 ms analyzed, whatever the
+  pending list does; file the class "plans on a never-analyzed mirror". *Ruling:* expected, not
+  filed. *Reasoning:* that class is #778 (closed). After every run that commits, the scheduler
+  asks for an analyze pass (`scheduler.rs` `end_run`, `analyze.rs`), and a run is one
+  transaction, so the unanalyzed state lasts from the first commit to that pass's end. The probe
+  holds it open on purpose (`responsiveness_probe.rs`, autovacuum off) as the worst case.
+  28 to 33 ms is under the spec's 100 ms for local search (design spec, Performance). A plan that misses that target with no
+  statistics is #778's class and would be folded there. Searches: `gh issue list --state all
+  --search` 'never analyzed', 'never-analyzed', 'no statistics', 'ANALYZE first sync', 'planner
+  statistics'; `grep -rn analyze crates/knobas-sync/src`. *Reversing:* file one issue against
+  #778's pass.
+- **The write cost was read in the sync's batches, not #1864's row at a time.** *Fork:* #1869
+  asks for the write cost "as #1864 did". *Ruling:* accept the batched reading. *Reasoning:* the
+  issue asks for the cost a sync pays, and batches of 500 in one transaction are how a sync
+  writes. Every setting was read the same way, so the comparison holds. *Reversing:* n/a.
+- **No plan test pins `0059`.** *Fork:* add a plan test of the flip, as #1864 had for the mention
+  rule. *Ruling:* none. *Reasoning:* the flip needs a never-analyzed mirror of about 23,500 synced
+  items, which the gate does not build. The issue's cause is the list's length, and the schema
+  test pins that, with mutants killed at 512 kB, 1 MB, no merge and the wrong index. The probe
+  shows the plan in the PR. *Reversing:* add one to `read_plans.rs`.
