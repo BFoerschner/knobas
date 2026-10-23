@@ -20,6 +20,11 @@ test-util = []
 # reqwest (issue #1012).
 bytes = "1"
 governor.workspace = true
+# The body cap (#1640): a response's body is re-wrapped through `http`'s
+# `Response` and read through an `http_body::Body` that counts it. Both are
+# the copies reqwest already resolves.
+http = "1"
+http-body = "1"
 knobas-source = { path = "../knobas-source" }
 reqwest.workspace = true
 serde.workspace = true
@@ -30,6 +35,10 @@ tracing = "0.1"
 url = "2"
 
 [dev-dependencies]
+# Gzips a body that inflates past the cap, so the cap is shown to count what
+# the read decodes, not what arrived (#1640). The version the Gitea adapter
+# already resolves.
+flate2 = "1.1.9"
 # Self-dev-dependency so this crate's own integration tests see
 # `Request::build` (the convention `knobas-db` and `knobas-app` use).
 knobas-http = { path = ".", features = ["test-util"] }

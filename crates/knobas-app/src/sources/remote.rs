@@ -348,10 +348,15 @@ async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
     if let Some(query) = parsed.query() {
         path = format!("{path}?{query}");
     }
+    let max_body = u64::try_from(cap).unwrap_or(u64::MAX);
     let client = HttpClient::new(HttpConfig {
         base_url: origin,
         adapter_kind: "adapter-install".to_owned(),
         adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
+        // This read's own cap, which for a component is over the client's
+        // default (#1640): the client counts the body against it as it
+        // arrives, and a body that runs past it is `TooLarge` below.
+        max_body,
         ..HttpConfig::default()
     })
     .map_err(unreachable)?;
@@ -363,16 +368,16 @@ async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
         url: url.to_owned(),
         cap,
     };
-    if response.content_length().is_some_and(|n| n > cap as u64) {
+    if response.content_length().is_some_and(|n| n > max_body) {
         return Err(too_large());
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| unreachable(SourceError::Unreachable(format!("reading the body: {e}"))))?;
-    if bytes.len() > cap {
-        return Err(too_large());
-    }
+    let bytes = response.bytes().await.map_err(|e| {
+        if knobas_http::over_the_cap(&e) {
+            too_large()
+        } else {
+            unreachable(SourceError::Unreachable(format!("reading the body: {e}")))
+        }
+    })?;
     Ok(bytes.to_vec())
 }
 
@@ -465,6 +470,45 @@ mod tests {
             release("http://127.0.0.1:3000/harbour/surveys/releases/download/v1/m.json")
                 .map(|r| r.0),
             Some("http://127.0.0.1:3000/api/v1/repos/harbour/surveys/releases".to_owned())
+        );
+    }
+
+    /// One answer of `len` bytes from a thread, with no `content-length`, so
+    /// only counting the body can find its size.
+    fn undeclared_body(len: usize) -> String {
+        use std::io::{Read as _, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept");
+            let _ = socket.read(&mut [0u8; 4096]);
+            let _ = socket.write_all(b"HTTP/1.1 200 OK\r\nconnection: close\r\n\r\n");
+            let _ = socket.write_all(&vec![b'x'; len]);
+        });
+        format!("http://127.0.0.1:{port}/knobas-adapter.wasm")
+    }
+
+    /// A component may be larger than the client's default body cap, up to
+    /// this read's own (#1640): the client is built with this read's cap.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_component_over_the_default_body_cap_is_fetched_whole() {
+        let len = usize::try_from(knobas_http::MAX_BODY).unwrap() + 1024 * 1024;
+        assert!(len < ARTIFACT_CAP);
+        let bytes = get(&undeclared_body(len), ARTIFACT_CAP)
+            .await
+            .expect("fetched");
+        assert_eq!(bytes.len(), len);
+    }
+
+    /// A body that runs past this read's cap is `TooLarge`, declared or not.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_body_over_the_reads_cap_is_too_large() {
+        let error = get(&undeclared_body(MANIFEST_CAP + 1), MANIFEST_CAP)
+            .await
+            .expect_err("over the cap");
+        assert!(
+            matches!(error, FetchError::TooLarge { cap, .. } if cap == MANIFEST_CAP),
+            "{error:?}"
         );
     }
 

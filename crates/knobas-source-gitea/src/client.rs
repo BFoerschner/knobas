@@ -225,6 +225,7 @@ impl GiteaClient {
             request_timeout: REQUEST_TIMEOUT,
             body_message: Some(error_message),
             forbidden: Some(forbidden_refusal),
+            max_body: knobas_http::MAX_BODY,
         })?;
         Ok(Self { http })
     }

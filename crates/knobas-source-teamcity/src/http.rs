@@ -93,6 +93,7 @@ pub(crate) fn client(
         request_timeout: REQUEST_TIMEOUT,
         body_message: Some(error_message),
         forbidden: None,
+        max_body: knobas_http::MAX_BODY,
     })
 }
 
