@@ -775,9 +775,6 @@ async fn matching_ids_are_every_ticket_the_query_admits() {
     );
 }
 
-/// The Tickets view's words with no key beside them (#897), which is what a
-/// keystroke on *All tickets* sends: the key, the title and the declared
-/// assignee are each a word of the row, and every word is still required.
 /// The Tickets view reads its words as the launcher grammar does (#1651):
 /// a quoted phrase is one needle, a `-word` is no needle at all, and the
 /// rail's `readings` agree with `matching_ids` on the same text.
@@ -824,6 +821,9 @@ async fn quoted_and_negated_words_read_through_the_needles() {
     assert_eq!(counts[2], sorted(vec![phrase, scattered]), "`sepa` alone");
 }
 
+/// The Tickets view's words with no key beside them (#897), which is what a
+/// keystroke on *All tickets* sends: the key, the title and the declared
+/// assignee are each a word of the row, and every word is still required.
 #[tokio::test]
 async fn words_alone_match_the_key_the_title_and_the_declared_assignee() {
     let pool = pool().await;
