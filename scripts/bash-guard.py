@@ -47,8 +47,8 @@ WRAPPERS = {"sudo": {"-u", "-g"}, "command": set(), "exec": set(), "time": set()
             "nice": {"-n"}, "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s"}, "builtin": set()}
 # Reserved words lead into the command they hold: `if cd x`, `do cd x`, `{ cd x`.
 RESERVED = {"{", "}", "!", "if", "then", "else", "elif", "fi", "do", "done", "while", "until"}
-# Words after which a `((` is arithmetic, as at a command's start: `if ((x))`, `for ((i=0; ...))`.
-ARITHMETIC_LEADS = RESERVED | {"for", "time"}
+# Words after which a `((` is arithmetic, as at a command's start: `if ((x))`, `for ((i=0; ...))`, `time -p ((x))`.
+ARITHMETIC_LEADS = RESERVED | {"for", "time", "-p", "coproc"}
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 MAX_DEPTH = 8  # eval and `sh -c` nested deeper than this are not read
 SHELL_CONFIG = (".bashrc", ".bash_profile", ".profile", ".zshrc", ".zprofile", ".zshenv", ".zlogin")
@@ -58,6 +58,15 @@ def find_or_end(s, ch, i):
     """The index of `ch` in `s` from `i`, or the end of `s`."""
     j = s.find(ch, i)
     return len(s) if j < 0 else j
+
+
+class Heredoc(NamedTuple):
+    """A heredoc opened on the current line, whose body starts at the next unquoted newline."""
+
+    delimiter: str
+    strip_tabs: bool  # `<<-`
+    quoted: bool  # a quote or backslash in the delimiter makes the body data
+    command: list  # the words of the command it belongs to
 
 
 class Word:
@@ -83,7 +92,7 @@ class Parser:
 
     def __init__(self, text):
         self.s = text
-        self.pending = []  # heredocs opened on the current line: (delimiter, strip tabs, quoted, its command)
+        self.pending = []  # the Heredocs opened on the current line
 
     def parse(self, i, stop=None):
         """The commands from `i` up to `stop` (`)` or a backquote; None runs to the end), and the index past it."""
@@ -141,10 +150,10 @@ class Parser:
                 new_command()  # a body's substitutions may have filled a command of only `<<EOF`
                 continue
             if s.startswith("((", i) and word is None and all(w.text in ARITHMETIC_LEADS for w in commands[-1]):
-                arithmetic = Word()
-                j = self.arithmetic(i, arithmetic)
+                expression = Word()
+                j = self.arithmetic(i, expression)
                 if j is not None:
-                    commands[-1].append(arithmetic)
+                    commands[-1].append(expression)
                     i = j
                     continue
             if c in ";|&()":
@@ -293,7 +302,7 @@ class Parser:
             delimiter += s[i]
             i += 1
         if delimiter:
-            self.pending.append((delimiter, strip_tabs, quoted, command))
+            self.pending.append(Heredoc(delimiter, strip_tabs, quoted, command))
         return i
 
     def heredoc_bodies(self, i):
@@ -304,18 +313,18 @@ class Parser:
         """
         s = self.s
         pending, self.pending = self.pending, []
-        for delimiter, strip_tabs, quoted, command in pending:
+        for heredoc in pending:
             body = Word()
             while i < len(s):
                 j = find_or_end(s, "\n", i)
                 line = s[i:j]
-                if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                if (line.lstrip("\t") if heredoc.strip_tabs else line) == heredoc.delimiter:
                     i = j + 1
                     break
-                i = j + 1 if quoted else self.body_line(i, body)
+                i = j + 1 if heredoc.quoted else self.body_line(i, body)
             if body.subs:
-                body.text = "<<" + delimiter  # the substitutions' text is no path to write to
-                command.append(body)
+                body.text = "<<" + heredoc.delimiter  # the substitutions' text is no path to write to
+                heredoc.command.append(body)
         return min(i, len(s))
 
     def body_line(self, i, word):

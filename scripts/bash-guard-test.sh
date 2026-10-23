@@ -119,6 +119,8 @@ check refuse $'(( n = 1 << 3 ))\ncd x && ls'
 check refuse $'((x<<2))\necho x > .git/info/exclude'
 check refuse $'if ((x<<2)); then ls; fi\ncd x && ls'
 check refuse $'for ((i=0; i<<1; i++)); do ls; done\ncd x && ls'
+check refuse $'time -p ((x<<2))\ncd x && ls'
+check refuse $'coproc ((x<<2))\ncd x && ls'
 check pass '((x<<2))'
 check pass 'for ((i=0; i<3; i++)); do echo $i; done'
 # ...but a `((` whose inner group is not closed by `))` is two subshells, as the shell reads it
