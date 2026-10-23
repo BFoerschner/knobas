@@ -32,7 +32,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Count {
 /// dropping thread-local subscribers at once raced tracing's callsite interest
 /// cache and counted nothing on some runs. (`ipc.rs` installs the binary's one
 /// global subscriber, so this cannot be one.)
-static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn pool() -> PgPool {
     let pool = knobas_db::test_util::test_pool().await;
@@ -55,7 +55,7 @@ where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    let _only = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let _only = ONE_AT_A_TIME.lock().await;
     work().await;
     // Every command here issues a statement, so a count of nothing is the
     // subscriber missing a callsite that tracing had cached as uninteresting
