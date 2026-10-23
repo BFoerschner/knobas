@@ -699,11 +699,13 @@ mod tests {
         assert_eq!(unquote("\"\\1aé.txt\""), "1aé.txt");
     }
 
-    /// An octal escape is three digits: two are the digits themselves.
+    /// An octal escape is three digits: two digits, or a sign before them,
+    /// are the characters themselves.
     #[test]
-    fn a_two_digit_escape_is_its_digits() {
+    fn an_escape_short_of_three_digits_is_its_characters() {
         assert_eq!(unquote("\"a\\12x.txt\""), "a12x.txt");
         assert_eq!(unquote("\"a\\12\""), "a12");
+        assert_eq!(unquote("\"a\\+12.txt\""), "a+12.txt");
     }
 
     #[test]
