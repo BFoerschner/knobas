@@ -1726,6 +1726,89 @@ async fn beside_the_flush_task(mine: Mine) {
     );
 }
 
+/// #1807: a submit on an entity whose earlier write the flush task is
+/// sending tries its own write once that one lands, and does not wait for
+/// the slow write the task owes on another entity after it.
+///
+/// Arranged rather than timed: the submit starts while the task's first
+/// write is on the wire, and the assertions read the rows the moment the
+/// submit returns, so no bound on the clock decides the verdict.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_submit_behind_a_head_the_flush_task_is_sending_tries_its_own_write() {
+    const DWELL: std::time::Duration = std::time::Duration::from_secs(1);
+    let h = harness().await;
+    let mine = h.mirror("PAY-1807-A", "a payout fails").await;
+    let other = h.mirror("PAY-1807-B", "a refund fails").await;
+    let comment = |entity: &EntityRef, body: &str| WriteOp::Comment {
+        entity: entity.to_string(),
+        body: body.to_owned(),
+    };
+
+    // Queued in this order, so the task's pass sends the head on `mine`
+    // first and then the write on `other`.
+    let head = flusher::queue(&h.deps, &h.source, comment(&mine, "the head"))
+        .await
+        .unwrap();
+    let slow = flusher::queue(&h.deps, &h.source, comment(&other, "the slow one"))
+        .await
+        .unwrap();
+    for entity in [&mine, &other] {
+        h.paced
+            .lock()
+            .unwrap()
+            .dwell
+            .insert(entity.to_string(), DWELL);
+    }
+
+    let submit = async {
+        let mut on_the_wire = None;
+        for _ in 0..1000 {
+            on_the_wire = h.paced.lock().unwrap().started.first().cloned();
+            if on_the_wire.is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let (target, _) = on_the_wire.expect("the flush task's first write went on the wire");
+        assert_eq!(target, mine.to_string(), "the head on `mine` goes first");
+        // The head has read its dwell; the submitted write takes none.
+        h.paced.lock().unwrap().dwell.remove(&mine.to_string());
+        let submitted = h.comment(&mine, "mine").await;
+        (
+            h.reload(submitted.id).await.state,
+            h.reload(slow.id).await.state,
+        )
+    };
+    let (task, (submitted, slow_then)) =
+        tokio::join!(flusher::flush_source(&h.deps, &h.source), submit);
+    task.unwrap();
+
+    assert_eq!(
+        submitted,
+        WriteState::Sent,
+        "the submit returned without trying its own write"
+    );
+    assert_eq!(
+        slow_then,
+        WriteState::Pending,
+        "the submit waited for the other entity's write"
+    );
+    assert_eq!(h.reload(head.id).await.state, WriteState::Sent);
+    assert_eq!(h.reload(slow.id).await.state, WriteState::Sent);
+    let delivered = h.delivered();
+    assert_eq!(
+        delivered.iter().filter(|body| *body == "mine").count(),
+        1,
+        "every write is delivered once: {delivered:?}"
+    );
+    let at = |body: &str| delivered.iter().position(|b| b == body);
+    assert!(
+        at("the head") < at("mine"),
+        "the entity's writes go in queue order: {delivered:?}"
+    );
+    assert_eq!(delivered.len(), 3, "{delivered:?}");
+}
+
 /// Issue #336: a create that landed after the user withdrew it is recorded,
 /// and the record carries what the source called what it made.
 ///
