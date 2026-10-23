@@ -43,6 +43,82 @@ pub mod time;
 /// `list_entities` read under it.
 pub const ROW_CEILING: u32 = 500;
 
+/// What the mirror tests of this directory read off `lib.rs` and the barrels.
+#[cfg(test)]
+pub(crate) mod mirror {
+    /// Every `commands::<module>::<name>` line of `lib.rs`'s handler list, so a
+    /// command added there is checked without a second list to keep.
+    pub(crate) fn registered(module: &str) -> Vec<&'static str> {
+        let prefix = format!("commands::{module}::");
+        include_str!("../lib.rs")
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix(prefix.as_str()))
+            .map(|rest| {
+                let end = rest
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(rest.len());
+                &rest[..end]
+            })
+            .filter(|name| !name.is_empty())
+            .collect()
+    }
+
+    /// The command names a barrel calls as `invoke<...>("name"`, comment lines
+    /// skipped so a doc comment cannot stand in for a call.
+    pub(crate) fn invoked(mirror: &'static str) -> Vec<&'static str> {
+        let mut names = Vec::new();
+        for (at, _) in mirror.match_indices("invoke<") {
+            let line_start = mirror[..at].rfind('\n').map_or(0, |i| i + 1);
+            let lead = mirror[line_start..at].trim_start();
+            if lead.starts_with("//") || lead.starts_with('*') || lead.starts_with("/*") {
+                continue;
+            }
+            // The name follows the `>(` that closes the type argument. A site
+            // this cannot read is a panic, never a skipped line: a skipped
+            // `invoke` would let a ghost command through the reverse check.
+            let rest = &mirror[at..];
+            let name = rest
+                .split_once(">(")
+                .and_then(|(_, after)| after.trim_start().strip_prefix('"'))
+                .and_then(|quoted| quoted.split_once('"'))
+                .map(|(name, _)| name);
+            let Some(name) = name else {
+                panic!(
+                    "an `invoke<` call site whose command name is not a double-quoted \
+                     literal right after `>(`: {}",
+                    rest.lines().next().unwrap_or_default()
+                );
+            };
+            names.push(name);
+        }
+        names
+    }
+
+    /// Both directions: every registered command is invoked, every invoked
+    /// command is registered.
+    pub(crate) fn assert_mirrors(module: &str, mirror: &'static str, barrel: &str, min: usize) {
+        let registered = registered(module);
+        assert!(
+            registered.len() >= min,
+            "only {} {module} commands found in the handler list -- the parse is wrong, not the list",
+            registered.len()
+        );
+        let invoked = invoked(mirror);
+        for command in &registered {
+            assert!(
+                invoked.contains(command),
+                "{command} is in the handler list but {barrel} has no invoke<..>(\"{command}\" call"
+            );
+        }
+        for name in &invoked {
+            assert!(
+                registered.contains(name),
+                "{barrel} invokes {name}, which is not in the handler list under commands::{module}"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// No command anywhere in this directory takes `State<'_, AppState>`.

@@ -753,29 +753,25 @@ pub async fn pipelines(lifecycle: State<'_, Lifecycle>) -> Result<Vec<PipelineRo
 /// # Errors
 ///
 /// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
-/// up, and whatever [`pipeline_runs_inner`] refuses with. Before the sync
-/// engine is up it answers the mirror alone ([`pipeline_runs_inner`]).
+/// up, and whatever [`pipeline_runs_live_inner`] refuses with. The sources
+/// state is managed before `Ready` is announced, so there is no moment the
+/// database answers and the live read cannot: no mirror-only fallback here.
+/// [`pipeline_runs_inner`] stays as the mirror read the tests drive.
 #[tauri::command]
 pub async fn pipeline_runs<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    lifecycle: State<'_, Lifecycle>,
     pipeline_id: String,
     limit: Option<u32>,
 ) -> Result<Vec<RunRow>, IpcError> {
-    let pool = lifecycle.pool()?;
-    match crate::sources::state(&app) {
-        Ok(state) => {
-            pipeline_runs_live_inner(
-                &pool,
-                &state.secrets,
-                state.registry.as_ref(),
-                &pipeline_id,
-                limit,
-            )
-            .await
-        }
-        Err(_) => pipeline_runs_inner(&pool, lifecycle.registry(), &pipeline_id, limit).await,
-    }
+    let state = crate::sources::state(&app)?;
+    pipeline_runs_live_inner(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &pipeline_id,
+        limit,
+    )
+    .await
 }
 
 // -- pins and *This job* (#849, #850) ---------------------------------------

@@ -15422,3 +15422,18 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1883.
   `suggest.ts` fails it. *Reasoning:* it is the #1885 scan, already proven; a new `?? []` on a
   present IPC field now fails `check-front`. `.svelte` files stay uncovered (the checker does not
   read them); that gap is filed as one `backlog` issue. *Reversing:* delete the file.
+## PR #1886 (closes #1662 and #1663), merge-manager
+
+- **The mirror parser panics on an `invoke<` site it cannot read.** *Fork:* `commands::mirror::invoked`
+  skipped a site whose name was not a double-quoted literal after the first `(`, which let a ghost
+  command through the reverse check. *Ruling:* read the name after `>(` and panic on any site that
+  does not yield one. *Reasoning:* every site in `app/src/lib/ipc/*.ts` is the plain shape today, so
+  the panic costs nothing and a changed spelling fails the test instead of narrowing it.
+  *Reversing:* one commit.
+- **The sources-state scan is not tightened for #1663.** *Fork:* extend the scan to catch a read
+  routed back through `sources::state(&app)`. *Ruling:* accept. *Reasoning:* many commands use
+  `sources::state` for secrets or the write queue, so a text scan cannot tell a registry-only read
+  from a legitimate one without an allowlist that rots; the stale-comment half of the criterion is
+  the grep, which finds nothing. The ticket's mutant line is met by that grep, and the PR says the
+  routing half is a review matter. *Reversing:* add an allowlist test over `sources::state(` call
+  sites.

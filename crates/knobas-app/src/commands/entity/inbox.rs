@@ -59,12 +59,12 @@ pub async fn inbox_items_inner(
 /// database or the sync engine is still coming up, `internal` for a read
 /// failure.
 #[tauri::command]
-pub async fn inbox_items<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
+pub async fn inbox_items(
+    lifecycle: State<'_, Lifecycle>,
     shelf: knobas_core::inbox::Shelf,
 ) -> Result<Vec<crate::inbox::InboxEntry>, IpcError> {
-    let state = crate::sources::state(&app)?;
-    inbox_items_inner(&state.pool, state.registry.as_ref(), Utc::now(), shelf).await
+    let pool = lifecycle.pool()?;
+    inbox_items_inner(&pool, lifecycle.registry(), Utc::now(), shelf).await
 }
 
 /// How many items need you now -- the number the top strip shows.

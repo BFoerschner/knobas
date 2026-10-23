@@ -245,12 +245,9 @@ pub async fn dismiss_block(lifecycle: State<'_, Lifecycle>, id: i64) -> Result<(
 /// offset from UTC, because their machine is the only thing that knows which
 /// day they mean.
 ///
-/// **Takes no `Lifecycle`**, and that is not an oversight: the draft asks the
-/// *adapter* whether a worklog can go there, so it needs the sources state --
-/// which carries the pool as well, and is managed later than the pool is. Two
-/// routes to one pool in one shim would be a second thing that can be
-/// `not_ready` for a different reason. The shape `commands::entity`'s
-/// `submit_write` uses, for the same reason.
+/// Reads the pool and the registry from the [`Lifecycle`] (#1321): the draft
+/// only needs the adapters' declarations, which the registry answers, so it
+/// has one route to both and one reason to be `not_ready`.
 ///
 /// # Errors
 ///
@@ -258,21 +255,14 @@ pub async fn dismiss_block(lifecycle: State<'_, Lifecycle>, id: i64) -> Result<(
 /// [`Invalid`](crate::IpcErrorCode::Invalid) for a target that is not an
 /// entity id or an offset that is not an offset.
 #[tauri::command]
-pub async fn worklog_draft<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
+pub async fn worklog_draft(
+    lifecycle: State<'_, Lifecycle>,
     entity_id: String,
     day: chrono::NaiveDate,
     offset_minutes: i32,
 ) -> Result<Option<time::worklog::Draft>, IpcError> {
-    let sources = crate::sources::state(&app)?;
-    time::worklog::draft(
-        &sources.pool,
-        sources.registry.as_ref(),
-        &entity_id,
-        day,
-        offset_minutes,
-    )
-    .await
+    let pool = lifecycle.pool()?;
+    time::worklog::draft(&pool, lifecycle.registry(), &entity_id, day, offset_minutes).await
 }
 
 /// Log a day's work on a ticket: queue the write, keep the copy, and make the
@@ -401,9 +391,8 @@ pub async fn set_passive_attribution(
 /// thing that knows which day they mean. It is the day the **block** started
 /// on, not the day the dialog opened on.
 ///
-/// **Takes no `Lifecycle`**, the shape [`worklog_draft`] uses and for the same
-/// reason: the rules ask the *adapter* which sources take a worklog, so this
-/// needs the sources state, which carries the pool as well.
+/// Reads the pool and the registry from the [`Lifecycle`], as [`worklog_draft`]
+/// does.
 ///
 /// # Errors
 ///
@@ -412,21 +401,14 @@ pub async fn set_passive_attribution(
 /// [`Invalid`](crate::IpcErrorCode::Invalid) for an offset that is not an
 /// offset.
 #[tauri::command]
-pub async fn ad_hoc_block<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
+pub async fn ad_hoc_block(
+    lifecycle: State<'_, Lifecycle>,
     block_id: i64,
     day: chrono::NaiveDate,
     offset_minutes: i32,
 ) -> Result<Option<time::suggest::AdHocBlock>, IpcError> {
-    let sources = crate::sources::state(&app)?;
-    time::suggest::offer(
-        &sources.pool,
-        sources.registry.as_ref(),
-        block_id,
-        day,
-        offset_minutes,
-    )
-    .await
+    let pool = lifecycle.pool()?;
+    time::suggest::offer(&pool, lifecycle.registry(), block_id, day, offset_minutes).await
 }
 
 /// The week timesheet: a row per target and a cell per day (issue #283).
@@ -463,9 +445,8 @@ pub async fn week_timesheet(
 /// system other people read. The dialog sends each row it ticks through
 /// [`log_work`], which re-derives the blocks rather than being handed them.
 ///
-/// **Takes no `Lifecycle`** and reaches the pool through the sources state, the
-/// shape [`worklog_draft`] records: the plan asks each target's *adapter*
-/// whether a worklog can go there.
+/// Reads the pool and the registry from the [`Lifecycle`], as [`worklog_draft`]
+/// does.
 ///
 /// # Errors
 ///
@@ -473,12 +454,12 @@ pub async fn week_timesheet(
 /// [`Invalid`](crate::IpcErrorCode::Invalid) for a day list the timesheet
 /// would refuse.
 #[tauri::command]
-pub async fn log_all_preview<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
+pub async fn log_all_preview(
+    lifecycle: State<'_, Lifecycle>,
     days: Vec<time::week::DayWindow>,
 ) -> Result<Vec<time::week::PlannedWorklog>, IpcError> {
-    let sources = crate::sources::state(&app)?;
-    time::week::plan(&sources.pool, sources.registry.as_ref(), &days).await
+    let pool = lifecycle.pool()?;
+    time::week::plan(&pool, lifecycle.registry(), &days).await
 }
 
 #[cfg(test)]
@@ -514,41 +495,14 @@ mod tests {
         );
     }
 
-    /// The four commands, named in the mirror's `invoke` calls.
+    /// Every time command in the handler list is invoked from the mirror, and the reverse.
     ///
     /// `tests/it/wiring.rs` proves every declared command is registered; this
     /// proves the frontend calls them by the names they are registered under.
     /// A typo on either side is a call that fails only at run time.
     #[test]
     fn the_mirror_invokes_the_commands_by_their_registered_names() {
-        for command in [
-            "current_timer",
-            "start_timer",
-            "stop_timer",
-            "timer_heartbeat",
-            "day_blocks",
-            "update_block",
-            "delete_block",
-            "dismiss_block",
-            "create_block",
-            "passive_attribution",
-            "set_passive_attribution",
-            "worklog_draft",
-            "log_work",
-            "ad_hoc_block",
-            "week_timesheet",
-            "log_all_preview",
-        ] {
-            assert!(
-                MIRROR.contains(&format!("\"{command}\"")),
-                "{command} is not invoked from app/src/lib/ipc/time.ts"
-            );
-            let registry = include_str!("../lib.rs");
-            assert!(
-                registry.contains(&format!("commands::time::{command}")),
-                "{command} is not in the generate_handler! list"
-            );
-        }
+        crate::commands::mirror::assert_mirrors("time", MIRROR, "app/src/lib/ipc/time.ts", 16);
     }
 
     /// Tauri renames a command's *arguments* to camelCase and leaves struct
