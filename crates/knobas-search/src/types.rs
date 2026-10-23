@@ -148,9 +148,9 @@ pub struct FilterCoverage {
     /// nothing is **not** here, and that is not an omission: it contributed no
     /// corpus, so this dimension is not why it is absent from the results.
     /// Neither is a **disabled** source — the report's scope is the
-    /// vocabulary's, which reads enabled sources only. Its still-mirrored rows
-    /// can match a plain search, but the grammar cannot name a source the user
-    /// turned off, and this report does not verdict it either.
+    /// vocabulary's, which reads enabled sources only. Since migration
+    /// `0012`, `sync.live_item` reads enabled sources only too, so a disabled
+    /// source's rows match nothing, and this report does not verdict it.
     pub sources: Vec<SourceAnswer>,
 }
 

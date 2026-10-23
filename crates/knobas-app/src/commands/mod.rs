@@ -2,7 +2,8 @@
 //!
 //! One module per owning stream (interfaces §2), which is what keeps seven
 //! branches off each other's toes: `app` and `entity` are stream D's, `sources`
-//! is stream F's, `search` is stream E's. This file and the
+//! is stream F's, `search` is stream E's; `assets`, `backup` and `time` are
+//! the modules added since. This file and the
 //! `generate_handler!` list in `crate::run` are the only shared surfaces, both
 //! append-only and orchestrator-owned.
 //!
