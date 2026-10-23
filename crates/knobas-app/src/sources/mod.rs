@@ -739,8 +739,9 @@ mod tests {
 
     /// The generated `SourceSummary` types `roles` and `role_misses` as
     /// required arrays (#1664), so the shell reads them with no fallback. That
-    /// is only true while serde sends them when they are empty, which is the
-    /// case a mock source and every filled role answer.
+    /// is only true while serde sends them when they are empty, as they are
+    /// for the mock, which claims no role, and for a source whose claimed
+    /// roles are all filled.
     #[test]
     fn a_summary_that_claims_and_misses_nothing_still_sends_both_arrays() {
         let summary = serde_json::to_value(super::SourceSummary {
