@@ -15437,3 +15437,68 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1883.
   the grep, which finds nothing. The ticket's mutant line is met by that grep, and the PR says the
   routing half is a review matter. *Reversing:* add an allowlist test over `sources::state(` call
   sites.
+## #1698 and #1700 — the Jira board 400 and the bounded board re-walk
+
+- **A 400 anywhere in `one()` leaves the board out, not only the one from `keys()`.** *Fork:* the
+  ticket names `keys()`; the arm in `boards()` sees the whole of `one()`. *Ruling:* one arm,
+  `not_readable || 400`, the favourite arm's own condition. *Reasoning:* the ticket asks for one
+  arm matching the favourite path; a 400 from the filter read is the same stale-saved-query class.
+  *Reversing:* one line.
+- **The read stamp carries the *Boards and filters* setting it was read under.** *Fork:* ruling D6
+  says "an hour since the last board read"; a setting changed within the hour would then take up to
+  an hour to show (two existing tests turn the setting off and expect the views gone at the next
+  sync). *Ruling:* the one optional cursor field `board_read` is `{at, scope}`, and a changed scope
+  reads at once. *Reasoning:* keeps the "one field" and the "setting is read at the next sync"
+  behaviour of #878. *Reversing:* drop `scope` and `scope()`; the two setting tests then need an
+  aged clock.
+- **The clock is Jira's `serverTime`, and a source with no views keeps no stamp.** *Fork:* wall
+  clock or server time. *Ruling:* server time, already read each run, so tests drive it and clock
+  skew between the app and Jira does not matter; a source reading no views asks Jira nothing and
+  stores nothing, so its cursor bytes stay as they were. *Reversing:* swap `server_now` for
+  `Utc::now()`.
+- **The live views test ages the cursor instead of waiting an hour.** *Fork:* the seeded test
+  creates and deletes a board and syncs at once. *Ruling:* `an_hour_on()` sets the stamp to the
+  year 2000 before those two syncs. *Reversing:* n/a.
+
+Reviewed 2026-10-23 by the merge-manager (Opus), PR #1891.
+
+- **The stamp carries the setting it was read under: upheld.** *Fork:* D6 says only "an hour since
+  the last board read". *Ruling:* keep `scope`. *Reasoning:* it narrows nothing D6 asks for. An
+  idle run within the hour still reads no board. A changed *Boards and filters* setting is read at
+  the next sync, as #878 promised and its setting tests check. `scope()` covers every field
+  `views::read` reads (`boards`, `favourite_filters`, `projects`). *Reversing:* the implementer's
+  line above.
+- **The hourly read moves the cursor on an idle run, and the contract says so.** *Fork:* §4.2's
+  clause 2 says a run that emitted nothing returns its cursor byte-identical. A board read an
+  hour on that finds nothing new returns a moved `board_read`. *Ruling:* keep the code. Amend the
+  clause 2 line and the Jira cursor row to name this as the one exception. *Reasoning:* the
+  ticket puts the stamp in the cursor. Then the only way an idle source reads at most hourly is
+  for the stamp to move on that read. Not moving it would bring back a board read on every run
+  after the first idle hour. The cost is one `synced` activity line an hour for each idle Jira
+  source with views, where there were none (`knobas-sync` `run_once`, `changed_nothing`).
+  Clause 2's watermark rule is untouched, since `board_read` is not a position. The battery and
+  the live idle-poll test run inside the hour and stay green. *Reversing:* a per-process memo of
+  the last read, with the cursor stamp written only when the cursor moves anyway. That is one
+  field plus a memo, and a live run.
+- **No §10.8 entry.** *Fork:* the cursor is stored state. *Ruling:* the row amendment is enough.
+  *Reasoning:* §10.8 does not freeze `crates/knobas-source-jira/**`, and the PR adds no
+  migration and no IPC. The field is optional with a default and `CURSOR_VERSION` stays 4.
+  `a_v4_envelope_without_the_board_read_stamp_decodes` checks that an old envelope re-encodes
+  byte-identical. #1624 amended Gitea's cursor the same way, with no entry. *Reversing:* add a
+  file under `docs/contract/10.8/`.
+- **`scope()` stays a `Debug` string.** *Fork:* `Debug` is no persistence format; use the serde
+  spelling. *Ruling:* keep it. *Reasoning:* the string is only ever compared with what the same
+  function wrote. If it drifts (a variant renamed, the projects reordered), the result is one
+  extra board read, which is the safe direction. Changing it now would cost a `jira-live` re-run
+  for no behaviour change. *Reversing:* `serde_json::to_string(&cfg.boards)` in `scope()`, then
+  one extra read for each source after the upgrade.
+- **The 400 arm is witnessed by the fake only. Handed on as #1893.** *Fork:* build a refused
+  board in the live suite now, or hand it on. *Ruling:* hand on, as the class: the board and
+  favourite leave-out arms both lack a live witness. *Reasoning:* the fixture can build one (a
+  probe version, a filter on it and a board, then delete the version). Doing it here costs a
+  `jira-live` run of about 45 minutes, and no criterion asks for it. The unwitnessed direction is
+  whether Data Center really answers 400 there. *Reversing:* n/a.
+- **The board arm leaves the board out without a warning.** *Fork:* #1698's text says "left out
+  with a warning", but the favourite arm it points to warns of nothing. *Ruling:* match the
+  favourite arm, as the fix direction says. No criterion asks for a warning. *Reversing:* one
+  `tracing::warn!` in each arm.

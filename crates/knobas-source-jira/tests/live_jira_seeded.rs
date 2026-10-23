@@ -2795,6 +2795,17 @@ async fn an_untouched_source_is_still_quiet_after_many_polls() {
     println!("SEEDED {IDLE_POLLS} idle polls, all quiet, cursor unchanged: {cursor}");
 }
 
+/// The cursor as it reads an hour on (#1700): an idle run reads the boards at
+/// most hourly, so a test that changes a board in Jira and syncs at once ages
+/// the cursor's board-read stamp instead of waiting an hour.
+fn an_hour_on(cursor: &str) -> String {
+    let mut envelope: serde_json::Value = serde_json::from_str(cursor).expect("a JSON cursor");
+    if let Some(read) = envelope.get_mut("board_read") {
+        read["at"] = serde_json::json!("2000-01-01T00:00:00Z");
+    }
+    envelope.to_string()
+}
+
 /// **The Jira views (#877) against the seeded boards**, from a source that
 /// syncs PAY alone. The Scrum board holds what its active sprint holds; the
 /// Kanban board over PAY and OPS carries Jira's sub-filter, the limit the seed
@@ -2916,7 +2927,7 @@ async fn the_seeded_boards_arrive_as_jira_views_and_a_board_deleted_in_jira_is_g
         .await;
     assert!(status == 200 || status == 201, "{status} {board}");
     let probe = format!("board-{}", board["id"]);
-    let (made, after_made) = sync_from(&*source, Some(cursor)).await;
+    let (made, after_made) = sync_from(&*source, Some(an_hour_on(&cursor))).await;
     assert!(
         made.iter().any(|i| i.entity.key == probe && !i.deleted),
         "{:?}",
@@ -2937,7 +2948,7 @@ async fn the_seeded_boards_arrive_as_jira_views_and_a_board_deleted_in_jira_is_g
             None,
         )
         .await;
-    let (gone, _) = sync_from(&*source, Some(after_made)).await;
+    let (gone, _) = sync_from(&*source, Some(an_hour_on(&after_made))).await;
     let gone: Vec<&SyncItem> = gone.iter().filter(|i| i.kind == "jira_view").collect();
     assert_eq!(gone.len(), 1, "{gone:?}");
     assert_eq!(gone[0].entity.key, probe);

@@ -176,6 +176,9 @@ pub(crate) struct JiraView {
 const MAX_PAGES: u32 = 1_000;
 /// Boards per listing page; Jira's own default.
 const BOARD_PAGE: u32 = 50;
+/// The keys-only page: Jira Data Center's search maximum (#1700), the keys
+/// being all a view's page carries.
+const KEYS_PAGE: u32 = 1_000;
 
 /// The query a view's keys come from (R-3.21): the board's filter, plus the
 /// Kanban sub-filter, plus `sprint in openSprints()` on a Scrum board, keeping
@@ -228,6 +231,45 @@ fn split_order(jql: &str) -> (&str, Option<&str>) {
     }
 }
 
+/// How long an idle run leaves the boards unread (#1700, ruling D6): a
+/// board's filter can change its membership with no issue changing, so the
+/// floor is an hour rather than never.
+const REREAD_AFTER: chrono::Duration = chrono::Duration::hours(1);
+
+/// Whether this run reads the boards though the issue walk emitted nothing:
+/// never read, an hour gone since, a clock that cannot say, or a setting
+/// changed since.
+pub(crate) fn due(
+    last: Option<&crate::cursor::BoardRead>,
+    now: Option<chrono::DateTime<chrono::Utc>>,
+    cfg: &crate::JiraConfig,
+) -> bool {
+    match (last, now) {
+        (Some(last), Some(now)) => {
+            last.scope != scope(cfg)
+                || !(chrono::Duration::zero()..REREAD_AFTER).contains(&(now - last.at))
+        }
+        _ => true,
+    }
+}
+
+/// Whether the setting brings any view in. One that does not asks Jira
+/// nothing, so it keeps no read stamp and its cursor bytes stay put.
+pub(crate) fn reads_any(cfg: &crate::JiraConfig) -> bool {
+    cfg.boards != BoardScope::None || cfg.favourite_filters
+}
+
+/// What the *Boards and filters* setting reads, to tell a changed setting from
+/// an idle hour.
+pub(crate) fn scope(cfg: &crate::JiraConfig) -> String {
+    format!(
+        "{:?}|{}|{}",
+        cfg.boards,
+        cfg.favourite_filters,
+        cfg.projects.join(",")
+    )
+}
+
 /// Whether a failure is "this account may not read it", which leaves the
 /// thing out rather than failing the run.
 fn not_readable(error: &SourceError) -> bool {
@@ -259,7 +301,7 @@ pub(crate) async fn read(
         filters.sort_by_key(|filter| (filter.id().parse::<u64>().ok(), filter.id()));
         filters.dedup_by_key(|filter| filter.id());
         for filter in &filters {
-            match filter_view(api, cfg, base_url, filter).await {
+            match filter_view(api, base_url, filter).await {
                 Ok(view) => views.push(view),
                 // A filter Jira can no longer run (400: a field or a project
                 // gone since it was saved) or this account may not read is
@@ -306,10 +348,11 @@ async fn boards(
         .collect();
     let mut views = Vec::new();
     for board in boards {
-        match one(api, cfg, base_url, &board, &names, only.as_ref()).await {
+        match one(api, base_url, &board, &names, only.as_ref()).await {
             Ok(Some(view)) => views.push(view),
             Ok(None) => {}
-            Err(error) if not_readable(&error) => {}
+            // A board's filter Jira can no longer run (400), like a favourite's.
+            Err(error) if not_readable(&error) || error.status() == Some(400) => {}
             Err(error) => return Err(error),
         }
     }
@@ -354,12 +397,11 @@ async fn listing(
 /// it is, keys in Jira's order. No columns: Jira gives a filter none.
 async fn filter_view(
     api: &(dyn JiraApi + '_),
-    cfg: &crate::JiraConfig,
     base_url: &str,
     filter: &FavouriteFilter,
 ) -> Result<JiraView, SourceError> {
     let id = filter.id();
-    let keys = keys(api, cfg, &filter.jql).await?;
+    let keys = keys(api, &filter.jql).await?;
     Ok(JiraView {
         key: format!("filter-{id}"),
         name: filter.name.clone(),
@@ -388,7 +430,6 @@ async fn filter_view(
 /// among them.
 async fn one(
     api: &(dyn JiraApi + '_),
-    cfg: &crate::JiraConfig,
     base_url: &str,
     board: &Board,
     names: &std::collections::HashMap<String, String>,
@@ -442,7 +483,7 @@ async fn one(
         })
         .collect();
     let query = view_jql(&filter_jql, sub_query.as_deref(), scrum);
-    let keys = keys(api, cfg, &query).await?;
+    let keys = keys(api, &query).await?;
     Ok(Some(JiraView {
         key: format!("board-{}", board.id),
         name: board.name.clone(),
@@ -469,15 +510,11 @@ async fn one(
 
 /// The keys a view's query answers, in Jira's order: `fields=key`, paged like
 /// the issue walk.
-async fn keys(
-    api: &(dyn JiraApi + '_),
-    cfg: &crate::JiraConfig,
-    jql: &str,
-) -> Result<Vec<String>, SourceError> {
+async fn keys(api: &(dyn JiraApi + '_), jql: &str) -> Result<Vec<String>, SourceError> {
     let mut keys: Vec<String> = Vec::new();
     let mut start_at = 0;
     for _ in 0..MAX_PAGES {
-        let page = api.search_keys(jql, start_at, cfg.page_size).await?;
+        let page = api.search_keys(jql, start_at, KEYS_PAGE).await?;
         let returned = u32::try_from(page.issues.len()).unwrap_or(u32::MAX);
         keys.extend(page.issues.into_iter().map(|issue| issue.key));
         start_at += returned;
@@ -554,7 +591,11 @@ mod tests {
         favourites: Vec<(u64, &'static str, &'static str, Vec<&'static str>)>,
         /// A query Jira refuses with a 400 (a field gone since it was saved).
         refused: Option<&'static str>,
+        /// Minutes the server clock stands past 10:00 UTC.
+        clock_minutes: i64,
         queries: Mutex<Vec<String>>,
+        /// The page size each keys-only search asked for.
+        key_pages: Mutex<Vec<u32>>,
     }
 
     impl Agile {
@@ -576,10 +617,12 @@ mod tests {
     #[async_trait::async_trait]
     impl JiraApi for Agile {
         async fn server_info(&self) -> Result<ServerInfo, SourceError> {
-            Ok(
-                serde_json::from_value(json!({ "serverTime": "2026-10-17T10:00:00.000+0000" }))
-                    .unwrap(),
-            )
+            let time = format!(
+                "2026-10-17T{:02}:{:02}:00.000+0000",
+                10 + self.clock_minutes / 60,
+                self.clock_minutes % 60
+            );
+            Ok(serde_json::from_value(json!({ "serverTime": time })).unwrap())
         }
         async fn myself(&self) -> Result<Myself, SourceError> {
             unreachable!("a sync run does not ask")
@@ -598,6 +641,7 @@ mod tests {
                 return Ok(serde_json::from_value(json!({ "total": 0, "issues": [] })).unwrap());
             }
             self.queries.lock().unwrap().push(jql.to_owned());
+            self.key_pages.lock().unwrap().push(max);
             if self.refused == Some(jql) {
                 return Err(SourceError::Protocol {
                     status: Some(400),
@@ -881,6 +925,7 @@ mod tests {
         let mut api = seeded();
         let (_, first) = sync(&api, None).await;
         api.boards[1].6 = vec!["PAY-231", "PAY-240"];
+        api.clock_minutes = 120; // an hour on: the boards are read again
         let (items, second) = sync(&api, Some(first.clone())).await;
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].payload["keys"], json!(["PAY-231", "PAY-240"]));
@@ -892,6 +937,7 @@ mod tests {
         let mut api = seeded();
         let (_, first) = sync(&api, None).await;
         api.boards.remove(0);
+        api.clock_minutes = 120; // an hour on: the boards are read again
         let (items, second) = sync(&api, Some(first)).await;
         assert_eq!(items.len(), 1, "{items:?}");
         assert_eq!(items[0].entity.key, "board-21");
@@ -937,6 +983,7 @@ mod tests {
         let (_, old) = sync(&api, None).await;
         assert!(!old.contains("views"), "{old}");
         api.no_software = false;
+        api.clock_minutes = 120; // an hour on: the boards are read again
         let (items, next) = sync(&api, Some(old)).await;
         let keys: Vec<(&str, bool)> = items
             .iter()
@@ -1084,5 +1131,29 @@ mod tests {
         let (items, _) = sync(&api, None).await;
         let keys: Vec<&str> = items.iter().map(|i| i.entity.key.as_str()).collect();
         assert_eq!(keys, ["board-21", "board-22", "filter-122"]);
+    }
+
+    /// A board whose saved filter Jira can no longer run (a field deleted
+    /// since it was saved) is left out, rather than failing every sync.
+    #[tokio::test]
+    async fn a_board_jira_refuses_to_run_is_left_out() {
+        let api = Agile {
+            refused: Some("(project in (PAY, WEB)) AND (fixVersion is EMPTY) ORDER BY Rank ASC"),
+            ..with_favourites()
+        };
+        let (items, _) = sync(&api, None).await;
+        let keys: Vec<&str> = items.iter().map(|i| i.entity.key.as_str()).collect();
+        assert_eq!(keys, ["board-21", "filter-122", "filter-10300"]);
+    }
+
+    /// Jira Data Center's search maximum (#1700): the keys are all a view's
+    /// page carries, so a board is walked in few requests.
+    #[tokio::test]
+    async fn the_keys_are_asked_for_at_jiras_page_maximum() {
+        let api = with_favourites();
+        sync(&api, None).await;
+        let pages = api.key_pages.lock().unwrap();
+        assert!(!pages.is_empty());
+        assert!(pages.iter().all(|&max| max == 1000), "{pages:?}");
     }
 }
