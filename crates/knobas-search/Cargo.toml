@@ -30,6 +30,8 @@ sqlx.workspace = true
 # #1325): `Segment` rides inline in the entity barrel's `DocSnippet` (#1326).
 ts-rs.workspace = true
 thiserror.workspace = true
+# `try_join!` only: the rail's two halves are read at once (#1855).
+tokio.workspace = true
 
 [dev-dependencies]
 # The exit criterion's measurement (interfaces §6.3: "a bench, not a claim").

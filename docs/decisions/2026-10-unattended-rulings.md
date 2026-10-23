@@ -15018,3 +15018,117 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1876.
   start (empty foreground) landed first. *Ruling:* read the record before pressing `⌘T`, which is what the
   test asserts about (the foreground the start leaves). *Reasoning:* the old order passed by tick count.
   *Reversing:* trivial.
+## #1850, #1851 and #1855: three launcher statements over 100k (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus: migration `0058` and its §10.8 entry.**
+  *Fork:* §10.8 freezes `crates/knobas-db/migrations/**`; #1850 offers a partial expression
+  index, or carrying the typed case through `query::parse` for an exact first try, and #1845's
+  merge-manager noted that a primary-key probe on the value as typed needs no migration.
+  *Ruling:* the index, two of them (`entity_ticket_id_lower_idx`, `entity_ticket_key_lower_idx`,
+  each `where kind = 'ticket'`), entry `1850-migration-0058-tickets-by-lowercased-key.md`.
+  *Reasoning:* a primary-key probe finds only an id typed whole and in the stored case, and a
+  key typed without its namespace (`reach:pay-231`, the common form) would still scan every
+  entity. Two indexes, one per half of the start set's `or`, are what the planner can join with
+  a `BitmapOr`. On the probe's 23,500 entities the start set went from 5.7 ms to 0.04 ms. *Reversing:* one migration
+  dropping both indexes.
+- **Partial indexes, and the estimate they leave.** *Fork:* partial on tickets, or over every
+  entity. *Ruling:* partial. *Reasoning:* the start set reads only tickets, so other kinds would
+  pay a btree insert for nothing. The cost: PostgreSQL does not use a partial index's expression
+  statistics for estimates, so the start set is still estimated at 150 rows for 1 on the probe (198 at
+  100k), the same as before the index. Nothing downstream changed plan on that estimate in the
+  reads taken here. *Reversing:* drop the `where` from both.
+- **#1851: the serial plan stays.** *Fork:*
+  #1851 asks for either a change that brings `payout` at 100k back to the pre-#1650 wall-clock
+  without per-match lexing, or a ruling that the serial plan stays. *Ruling:* the serial plan
+  stays, with no change. *Reasoning:* the planner's choice rests on one constant. The serial
+  mirror branch is estimated at 10,126.83. The parallel one is 9,398.89 for the `Parallel
+  Append`, plus `parallel_setup_cost` (1,000) and 2,580 rows at `parallel_tuple_cost` (0.1):
+  10,656.89. Serial wins by 5%. Parallelism saves so little on paper because the branch's cost is
+  mostly the bitmap heap scan's page charges, which the planner does not divide among workers,
+  although every page is a buffer hit. Before `0056`, three `to_tsvector` calls per match
+  (procost 100) put about 3,800 units of CPU in the projection, and dividing those by 2.4 is
+  what bought the `Gather`. `ts_rank_cd` (procost 1) runs about 70 times its estimate (0.47 µs
+  a call against 2.6 µs a cost unit), but over 5,053 rows that is about 900 units, of which a
+  parallel plan would save about 530: correcting it would only tie the two plans. Forcing the
+  parallel plan (`parallel_setup_cost = 100`, warm, alternated, load 9.5 to 10.4) moves `payout`
+  from 38.5 to 21 ms p50 but `tombstone` from 2.3 to 5.6 ms, and leaves `backoff` (23 ms) and
+  `ledger` (368 to 380 ms) where they were. So the knob trades the rare word for the common one
+  and costs about three processes' CPU per keystroke. The constant is server-wide; set per
+  statement, it puts a transaction round the launcher's hot path; and the 5% margin would flip on
+  any change to the fixture, so no test could pin it. `payout` reads 38 to 40 ms p90, 40% of the
+  budget. *Reversing:* `set local parallel_setup_cost` in a transaction round the search, or a
+  server setting in `knobas_db::embedded`'s configuration.
+- **#1855: run the rail's two halves at once, not a new `saved_summary_sql`.** *Fork:* the
+  ticket names the saved lists' statement. *Ruling:* `Searcher::smart_lists_of` reads
+  `lists::summaries` and `saved::summaries` with `tokio::try_join!`, and neither statement
+  changes. *Reasoning:* measured at 100k with 8 lists, the rail was two statements in turn: the
+  built-ins' (about 65 ms; its scan of `sync.live_item` is already a `Gather`, and the estate's
+  aggregate runs after it) and the saved lists' (42 to 48 ms, already a `Parallel Append` over
+  the eight branches, with `/tc`'s browse count of 33,333 rows through `sync.live_item` the
+  longest at about 38 ms). Neither reads what the other answers. At once the rail costs the
+  longer one: 114 to 116 ms p50 became 64 to 66 (three alternated rounds against `main`'s
+  binary, load 10.8 to 11.6). *Reversing:* one line.
+- **#1855: `0056`'s width.** *Ruling:* not the cause; recorded. *Reasoning:* the three stored
+  columns are 55 of 585 bytes a row (9.4%) at 100k, so about 720 of `sync.item`'s 7,681 pages,
+  and they show up only in the branches that read the heap whole (`/tc` and the built-ins' scan).
+  `fts` is 294 of the 585. *Reversing:* n/a.
+- **#1855: the board's newest-items read left in turn.** *Fork:* `launcher_board` could join
+  `home::recent` with the rail too. *Ruling:* left serial. *Reasoning:* it reads about 1 ms, and
+  every table it reads the rail reads too, so no lock can show whether it runs at once; a change
+  no test can witness is not worth that 1 ms. *Reversing:* one `try_join!`.
+- **#1869 not folded.** *Fork:* the orchestrator asked whether the four default-limit GIN
+  pending lists (#1869) are the shared root. *Ruling:* no. *Reasoning:* `pgstatginindex` read 0
+  pending pages on all four (`item_fts_idx`, `note_fts_idx`, `asset_fts_idx`, `route_fts_idx`)
+  on the 100k mirror the rail was measured on (`seed_corpus` vacuums), and the rail still read
+  114 ms there. *Reversing:* n/a.
+
+Reviewed 2026-10-23 by the merge-manager (Opus), PR #1879.
+
+- **Reserved for Björn, ruled by merge-manager on Opus: migration `0058` and its §10.8 entry.**
+  *Fork:* confirm the implementer's ruling or rule again. *Ruling:* ruled again in part. The two
+  expression indexes stay; the partial `where kind = 'ticket'` goes, and they are renamed
+  `entity_id_lower_idx` and `entity_key_lower_idx`. *Reasoning:* the pre-gate went red in
+  `knobas-core`'s `suggest_plans::every_pass_statement_plans_by_index_on_tables_never_analyzed`:
+  on tables never analyzed, all four exact-key rules (`ticket_keyed!`'s lateral, `t.id = any(...)
+  and t.kind = 'ticket'`) walked `entity_ticket_key_lower_idx` with no condition per key found, the
+  partial index serving as the list of every ticket. That is #770's quadratic shape on a fresh
+  install, the case where the pass once proposed nothing. Any read that says `kind = 'ticket'` could
+  take the same plan, so the class is the partial predicate, not the four rules. An index over every
+  entity is probed only through its expression, which only `reaches` spells, and its expression gets
+  statistics. The rest of the implementer's ruling holds: the primary-key probe serves only an id
+  typed whole in its stored case, each index is the expression `reaches` spells, `lower`, `substr`
+  and `strpos` are immutable, and the id is `collate "C"` on both sides (ADR-0027). The pin now
+  refuses `Rows Removed by Filter` in place of any `Filter:`, since `kind = 'ticket'` is a filter
+  on what the probes found; `0058` without the key index still fails it (a `Seq Scan`, 3,998 rows
+  removed). *Cost:* two btree inserts per entity of any kind, not per ticket. *Reversing:* one
+  migration.
+- **The rail's `try_join!`.** *Fork:* the two halves now hold two of the app pool's five
+  connections at once. *Ruling:* kept. *Reasoning:* each half acquires per statement and holds
+  nothing while it waits for another connection, so a busy pool queues a half (under the 30 s
+  acquire timeout, as before) and cannot deadlock. The rail's peak goes from one connection to two
+  for tens of milliseconds, beside the launcher's serial reads. When one half fails, `try_join!`
+  drops the other: sqlx returns or closes that connection, the statement it left is a read, and
+  `statement_timeout` bounds it on the server. `just ui-pool-probe` was not re-run. *Reversing:*
+  one line.
+- **`lists::the_rails_two_halves_run_at_once` under gate load.** *Fork:* deterministic, or another
+  #1846. *Ruling:* deterministic, no change. *Reasoning:* the order comes from the two table locks,
+  and once a half waits it stays waiting until the watch rolls back, so the count can only climb to
+  2. The 10 s deadline ends the failing path only. Load can delay a half's arrival but cannot lower
+  the count, unlike #1846's acquire count, which background work inflated. Five connections at
+  most against a pool of six, on a database of its own, and the `regclass` casts take no lock.
+  *Reversing:* n/a.
+- **#1851's serial plan.** *Ruling:* confirmed; the ticket offers the ruling as an outcome.
+  *Reasoning:* a 5% cost margin decides it, the knob is server-wide or a transaction round the hot
+  path, and forcing parallel trades `tombstone` (2.3 to 5.6 ms) for `payout` (38.5 to 21 ms) while
+  `payout` sits at 40% of its budget. *Reversing:* `set local parallel_setup_cost` round the search.
+- **#1855's five-run criterion handed to the milestone review.** *Ruling:* confirmed. *Reasoning:*
+  #533's condition (a) needs nothing else on the machine for the whole run, which the loop's
+  parallel agents rule out, and the criterion reads `main`, which this head is not yet. One run
+  read 45 ms p90 at the cap against 100. *Reversing:* n/a.
+- **#1869 not folded.** *Ruling:* confirmed. *Reasoning:* `seed_corpus` vacuums, so the rail was
+  slow with 0 pending pages on all four indexes; its cost does not come from the lists. Whether the
+  lists show on an unvacuumed mirror is #1869's own question and stays there. *Reversing:* n/a.
+- **`0047`'s index in the prose.** *Fork:* the migration header, the §10.8 entry and the pin's
+  doc comment named `entity_id_bytes_idx` as an index that exists; `0050` dropped it (ADR-0027).
+  *Ruling:* corrected in all three before merge; the migration is unmerged, so editing its comment
+  touches no applied checksum. *Reversing:* trivial.
