@@ -79,6 +79,51 @@ root=$(new_root)
 echo "knobas-b/gone  this file was deleted" >>"$root/test-layout-exceptions.txt"
 check "a stale list entry goes red" fail "$script" -C "$root" guard
 
+# A second binary by the two routes other than tests/*.rs (issue #1692).
+root=$(new_root)
+mkdir -p "$root/crates/knobas-a/tests/perf2"
+: >"$root/crates/knobas-a/tests/perf2/main.rs"
+check "a tests/<dir>/main.rs other than it goes red" fail "$script" -C "$root" guard
+
+root=$(new_root)
+mkdir -p "$root/crates/knobas-a/tests/perf2"
+: >"$root/crates/knobas-a/tests/perf2/main.rs"
+echo "knobas-a/perf2  listed on purpose" >>"$root/test-layout-exceptions.txt"
+check "a tests/<dir>/main.rs cannot be put on the list" fail "$script" -C "$root" guard
+
+root=$(new_root)
+check "a tests/<dir>/mod.rs helper stays green" pass "$script" -C "$root" guard
+
+root=$(new_root)
+cat >"$root/crates/knobas-a/Cargo.toml" <<'EOF'
+[package]
+name = "knobas-a"
+
+[[test]]
+name = "extra"
+path = "tests/extra_main.rs"
+EOF
+check "a [[test]] with a path goes red" fail "$script" -C "$root" guard
+
+root=$(new_root)
+cat >"$root/crates/knobas-a/Cargo.toml" <<'EOF'
+[package]
+name = "knobas-a"
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
+
+[[test]]
+name = "other"
+harness = false
+
+[[bin]]
+name = "tool"
+path = "src/bin/tool.rs"
+EOF
+check "[[test]] on tests/it/main.rs, one without a path, and a [[bin]] path stay green" pass "$script" -C "$root" guard
+
 root=$(new_root)
 echo "knobas-b/live_b" >"$root/test-layout-exceptions.txt"
 check "an entry without a reason goes red" fail "$script" -C "$root" guard

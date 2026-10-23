@@ -7,7 +7,11 @@
 #
 #     Fails when a crate has a top-level `tests/*.rs` that the exception list
 #     does not name, and when the list names a file that does not exist, so the
-#     list cannot rot. `just check` runs this. Files are found on disk, not via
+#     list cannot rot. It also fails on the two other routes to a second
+#     integration binary, which the list cannot excuse: a `tests/<dir>/main.rs`
+#     other than `tests/it/main.rs` (cargo auto-discovers it), and a `[[test]]`
+#     table with a `path` other than `tests/it/main.rs` in a crate's
+#     Cargo.toml. `just check` runs this. Files are found on disk, not via
 #     `git ls-files`: cargo compiles an untracked `tests/stray.rs` all the same.
 #
 #   test-layout.sh [-C ROOT] rename OLD NEW CRATE...
@@ -85,7 +89,7 @@ nonblank() { printf '%s\n' "$1" | sed '/^$/d'; }
 
 guard() {
     [ $# -eq 0 ] || usage
-    local listed found='' crate f n=0
+    local listed found='' crate f n=0 extra='' d
     listed=$(exceptions)
 
     for crate in "$root"/crates/*/; do
@@ -96,6 +100,24 @@ guard() {
             found="$found$(basename "$crate")/$(basename "$f" .rs)
 "
         done
+        for f in "$crate"tests/*/main.rs; do
+            [ -f "$f" ] || continue
+            d=$(basename "$(dirname "$f")")
+            [ "$d" = it ] || extra="$extra  crates/$(basename "$crate")/tests/$d/main.rs (auto-discovered binary)
+"
+        done
+        if [ -f "$crate"Cargo.toml ]; then
+            # `[[test]]` tables with a `path`: any but tests/it/main.rs is a
+            # second binary. A table without a path only configures a
+            # discovered target.
+            extra="$extra$(awk -v c="$(basename "$crate")" '
+                function flush() { if (intest && path != "" && path != "tests/it/main.rs") printf "  crates/%s/Cargo.toml: [[test]] path = \"%s\"\n", c, path; path = "" }
+                /^[[:space:]]*\[/ { flush(); intest = ($0 ~ /^[[:space:]]*\[\[test\]\][[:space:]]*(#.*)?$/); next }
+                intest && /^[[:space:]]*path[[:space:]]*=/ { v = $0; sub(/^[^=]*=[[:space:]]*/, "", v); gsub(/["\047]/, "", v); sub(/[[:space:]]*(#.*)?$/, "", v); path = v }
+                END { flush() }
+            ' "$crate"Cargo.toml)
+"
+        fi
     done
     found=$(printf '%s' "$found" | LC_ALL=C sort)
     # A root with no crates is a guard pointed at the wrong place, not a tree
@@ -116,6 +138,13 @@ guard() {
         echo "$prog: test-layout-exceptions.txt names files that do not exist:" >&2
         printf '%s\n' "$stale" | sed 's/^/  /' >&2
         echo "  Delete those lines; an exception for nothing is a list going stale." >&2
+        status=1
+    fi
+    extra=$(nonblank "$extra")
+    if [ -n "$extra" ]; then
+        echo "$prog: second integration binaries (a crate has one, tests/it/main.rs, ADR-0017):" >&2
+        printf '%s\n' "$extra" >&2
+        echo "  Make it a module of tests/it/. These cannot go on test-layout-exceptions.txt." >&2
         status=1
     fi
     [ "$status" -eq 0 ] || exit 1

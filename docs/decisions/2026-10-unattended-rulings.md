@@ -13252,3 +13252,11 @@ The measurement came after it.
 - **`toasts.reset()` clears the armed dismiss timers as well as keeping ids unique.** *Ruling:* done
   in the PR (`timers` map, cleared in `reset` and `dismiss`). *Reasoning:* a timer firing into a
   later test is leaked state even when the id match is harmless. *Reversing:* low.
+
+## #1692, layout guard: second integration binaries
+
+- **A `tests/<dir>/main.rs` or a `[[test]]` path cannot go on the exception list.** *Fork:* let
+  the list excuse them like top-level files, or always red. *Ruling:* always red, except
+  `tests/it/main.rs`. *Reasoning:* the list is for top-level `tests/*.rs` that a recipe runs with
+  `--test`; the ticket's aim is one binary per crate. *Reversing:* low, add the directory names to
+  the guard's `found` set.
