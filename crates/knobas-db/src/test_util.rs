@@ -215,7 +215,7 @@ async fn shared_server() -> &'static Server {
 /// The server this binary's databases live on.
 struct Server {
     /// Reaches the server; which database it names does not matter, since
-    /// every use goes through [`create_migrated_database`], which moves it.
+    /// every use moves it with `with_database` first.
     connector: crate::embedded::Connector,
     /// The server this binary started, kept here so its `Drop` -- which would
     /// stop the server -- never runs; statics are never dropped. `None` when
@@ -278,8 +278,8 @@ impl Server {
 /// state a fresh copy of the template is in.
 ///
 /// The file's shared database cannot be used by a test that *replaces* its
-/// contents: every other test in the file is in it, and nothing here
-/// truncates. A restore is exactly such a test -- so it gets its own database
+/// contents: every other test in the file is in it, and nothing truncates
+/// it. A restore is exactly such a test -- so it gets its own database
 /// instead.
 ///
 /// It is the caller's for as long as the thread that asked runs and any clone
@@ -301,8 +301,10 @@ impl Server {
 ///
 /// # Panics
 ///
-/// Panics if the database cannot be created, connected to, or migrated --
-/// there is no useful way for a test to continue without one.
+/// Panics if the database cannot be created, connected to, or migrated, or the
+/// template's state cannot be read -- there is no useful way for a test to
+/// continue without one. A database that cannot be reused is not a panic:
+/// the reason is printed and the next one, or a new one, is taken.
 pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     static SHELF: recycle::Shelf = recycle::Shelf::new();
@@ -322,7 +324,7 @@ pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
         let name = next_name();
         match recycle::recycle(server, &returned, &name, template).await {
             Ok(Some(snapshot)) => {
-                return recycle::lease(&SHELF, server.with_database(&name), name, snapshot);
+                return recycle::lease(&SHELF, server, name, snapshot);
             }
             Ok(None) => {}
             Err(error) => eprintln!(
@@ -333,12 +335,7 @@ pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
     }
     let name = next_name();
     create_database(server, &name, Some(&template.name)).await;
-    recycle::lease(
-        &SHELF,
-        server.with_database(&name),
-        name,
-        template.snapshot.clone(),
-    )
+    recycle::lease(&SHELF, server, name, template.snapshot.clone())
 }
 
 /// `text` reduced to what may sit inside a database name without quoting:

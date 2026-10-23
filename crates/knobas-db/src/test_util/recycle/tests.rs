@@ -175,7 +175,7 @@ async fn a_dropped_database_is_not_recycled() {
 }
 
 /// Whether `shelf` has a database on it, put back if so.
-fn on(shelf: &'static Shelf) -> bool {
+fn on_the_shelf(shelf: &'static Shelf) -> bool {
     shelf.take().map(|returned| shelf.put(returned)).is_some()
 }
 
@@ -189,15 +189,15 @@ async fn a_lease_ends_with_the_thread_that_took_it() {
 
     let thread = std::thread::spawn(move || {
         // A pool's worth of use: the connector itself is gone at once.
-        drop(lease(shelf, server.clone(), "x".to_owned(), snapshot));
+        drop(lease(shelf, server, "x".to_owned(), snapshot));
         taken.send(()).expect("report");
         finished.recv().expect("wait to finish");
     });
     take.recv().expect("taken");
-    assert!(!on(shelf), "held while the thread runs");
+    assert!(!on_the_shelf(shelf), "held while the thread runs");
     finish.send(()).expect("finish");
     thread.join().expect("the thread");
-    assert!(on(shelf), "returned once it ended");
+    assert!(on_the_shelf(shelf), "returned once it ended");
 }
 
 #[tokio::test]
@@ -206,12 +206,12 @@ async fn a_kept_connector_keeps_its_database_off_the_shelf() {
     let server = &shared_server().await.connector;
     let snapshot = template(server).await.snapshot.clone();
 
-    let kept = std::thread::spawn(move || lease(shelf, server.clone(), "x".to_owned(), snapshot))
+    let kept = std::thread::spawn(move || lease(shelf, server, "x".to_owned(), snapshot))
         .join()
         .expect("the thread");
-    assert!(!on(shelf), "a `static` holding the connector still uses it");
+    assert!(!on_the_shelf(shelf), "a `static` holding the connector still uses it");
     drop(kept);
-    assert!(on(shelf), "returned with the last clone");
+    assert!(on_the_shelf(shelf), "returned with the last clone");
 }
 
 /// The whole path, through `scratch_database`: nothing else in this binary

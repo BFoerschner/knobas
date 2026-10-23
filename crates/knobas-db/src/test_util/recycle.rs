@@ -23,7 +23,7 @@
 //! # Why nobody from before can reach it
 //!
 //! The taker terminates every session still on the database and renames it
-//! to a name of its own ([`take_over`]) before it looks inside. A connector, a
+//! to a name of its own ([`rename_once_free`]) before it looks inside. A connector, a
 //! pool or a child process left over from the test before names a database
 //! that no longer exists, so it fails rather than writing into the next
 //! test's rows.
@@ -39,20 +39,27 @@
 //! `vacuum` update `pg_class` in place, so they do not count as DDL; the
 //! statistics they leave are cleared instead, because the plan tests
 //! (`knobas_db::plan_shape`) assert on a mirror never analyzed. Every table
-//! whose part differs is truncated, the template's rows go back into the ones
-//! that had some, the sequences are set back, and the cumulative statistics
-//! are reset.
+//! whose part differs is truncated (a materialized view cannot be, and one
+//! that differs declines the database), the template's rows go back into the
+//! ones that had some, the sequences are set back, and the cumulative
+//! statistics are reset.
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use sqlx::{AssertSqlSafe, Connection, PgConnection, Row};
+use sqlx::{AssertSqlSafe, Connection, PgConnection};
 
 use crate::embedded::{Connector, MAINTENANCE_DATABASE};
 
 /// How often a taker terminates the sessions on a returned database and tries
 /// the rename again, when a session got back in between.
 const TAKE_OVER_ATTEMPTS: usize = 5;
+
+/// SQLSTATE `object_in_use`: `alter database` with a session on it.
+const OBJECT_IN_USE: &str = "55006";
+
+/// SQLSTATE `invalid_catalog_name`: no database of that name.
+const INVALID_CATALOG_NAME: &str = "3D000";
 
 /// What a database is compared by; see the module docs.
 #[derive(Clone, Debug, PartialEq)]
@@ -68,7 +75,7 @@ pub(super) struct Snapshot {
 }
 
 /// One user table's physical and statistical state.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, sqlx::FromRow)]
 struct Table {
     oid: i64,
     /// Schema-qualified and quoted, ready for a statement.
@@ -89,9 +96,9 @@ struct Table {
     content: Option<String>,
 }
 
-/// One relation's planner numbers in `pg_class`. `truncate` sets an index's
-/// to what a table's start as, not to what `create index` left.
-#[derive(Clone, Debug, PartialEq)]
+/// One relation's planner numbers in `pg_class`. `truncate` gives an index
+/// the numbers a new table starts with, not the ones `create index` left.
+#[derive(Clone, Debug, PartialEq, sqlx::FromRow)]
 struct Stats {
     oid: i64,
     schema: String,
@@ -103,7 +110,7 @@ struct Stats {
 }
 
 /// One sequence's position.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, sqlx::FromRow)]
 struct Sequence {
     oid: i64,
     start: i64,
@@ -231,7 +238,7 @@ async fn snapshot(
     let catalog: String = sqlx::query_scalar(AssertSqlSafe(catalog_query))
         .fetch_one(&mut *conn)
         .await?;
-    let tables = sqlx::query(
+    let tables: Vec<Table> = sqlx::query_as(
         r"select c.oid::int8 as oid, format('%I.%I', n.nspname, c.relname) as name,
                  c.relkind::text as kind, pg_relation_size(c.oid) as main,
                  pg_table_size(c.oid) as size, pg_indexes_size(c.oid) as indexes,
@@ -253,40 +260,14 @@ async fn snapshot(
     )
     .bind(seeded)
     .fetch_all(&mut *conn)
-    .await?
-    .iter()
-    .map(|row| {
-        Ok(Table {
-            oid: row.try_get("oid")?,
-            name: row.try_get("name")?,
-            kind: row.try_get("kind")?,
-            main: row.try_get("main")?,
-            size: row.try_get("size")?,
-            indexes: row.try_get("indexes")?,
-            pages: row.try_get("pages")?,
-            tuples: row.try_get("tuples")?,
-            visible: row.try_get("visible")?,
-            analyzed: row.try_get("analyzed")?,
-            content: row.try_get("content")?,
-        })
-    })
-    .collect::<Result<Vec<_>, sqlx::Error>>()?;
-    let sequences = sqlx::query(
+    .await?;
+    let sequences: Vec<Sequence> = sqlx::query_as(
         "select seqrelid::int8 as oid, seqstart as start,
                 pg_sequence_last_value(seqrelid) as last
            from pg_sequence order by seqrelid",
     )
     .fetch_all(&mut *conn)
-    .await?
-    .iter()
-    .map(|row| {
-        Ok(Sequence {
-            oid: row.try_get("oid")?,
-            start: row.try_get("start")?,
-            last: row.try_get("last")?,
-        })
-    })
-    .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    .await?;
     Ok(Snapshot {
         catalog,
         tables,
@@ -298,7 +279,7 @@ async fn snapshot(
 /// The planner's numbers for every user table and index. TOAST tables are
 /// left out: `pg_restore_relation_stats` refuses them, and no plan reads them.
 async fn stats(conn: &mut PgConnection) -> Result<Vec<Stats>, sqlx::Error> {
-    sqlx::query(
+    sqlx::query_as(
         "select c.oid::int8 as oid, n.nspname::text as schema, c.relname::text as relation,
                 c.relpages as pages, c.reltuples as tuples, c.relallvisible as visible,
                 c.relallfrozen as frozen
@@ -308,20 +289,7 @@ async fn stats(conn: &mut PgConnection) -> Result<Vec<Stats>, sqlx::Error> {
           order by c.oid",
     )
     .fetch_all(&mut *conn)
-    .await?
-    .iter()
-    .map(|row| {
-        Ok(Stats {
-            oid: row.try_get("oid")?,
-            schema: row.try_get("schema")?,
-            relation: row.try_get("relation")?,
-            pages: row.try_get("pages")?,
-            tuples: row.try_get("tuples")?,
-            visible: row.try_get("visible")?,
-            frozen: row.try_get("frozen")?,
-        })
-    })
-    .collect()
+    .await
 }
 
 /// A database a test is done with: its name and what it looked like when
@@ -371,14 +339,16 @@ thread_local! {
     static HELD: RefCell<Vec<Arc<Lease>>> = const { RefCell::new(Vec::new()) };
 }
 
-/// `connector`, onto database `name` as `snapshot` describes it, leased to the
-/// calling thread and to the connector's clones; see the module docs.
+/// A connector onto database `name` on `server`, as `snapshot` describes it,
+/// leased to the calling thread and to the connector's clones; see the module
+/// docs.
 pub(super) fn lease(
     shelf: &'static Shelf,
-    connector: Connector,
+    server: &Connector,
     name: String,
     snapshot: Snapshot,
 ) -> Connector {
+    let connector = server.with_database(&name);
     let lease = Arc::new(Lease {
         shelf,
         returned: Some(Returned { name, snapshot }),
@@ -390,9 +360,11 @@ pub(super) fn lease(
 }
 
 /// `returned`, under the name `name` and as a fresh copy of `template`
-/// looks; `None` when it cannot be put back -- DDL ran in it, or a test
-/// dropped it. A database declined is left where it is, for the scratch
-/// root's removal like any other.
+/// looks; `None` when it cannot be put back: a test dropped it, sessions kept
+/// coming back onto it, its catalogs changed (DDL, a setting of its own, a
+/// temporary table), or a materialized view's contents did. A database
+/// declined is left where it is, for the scratch root's removal like any
+/// other.
 ///
 /// # Errors
 ///
@@ -404,7 +376,7 @@ pub(super) async fn recycle(
     name: &str,
     template: &Template,
 ) -> Result<Option<Snapshot>, sqlx::Error> {
-    if !take_over(server, &returned.name, name).await? {
+    if !rename_once_free(server, &returned.name, name).await? {
         return Ok(None);
     }
     let mut conn = server.with_database(name).connect().await?;
@@ -415,7 +387,7 @@ pub(super) async fn recycle(
 
 /// Database `from` renamed to `to`, once no session is left on it; false when
 /// it no longer exists or sessions kept coming back.
-async fn take_over(server: &Connector, from: &str, to: &str) -> Result<bool, sqlx::Error> {
+async fn rename_once_free(server: &Connector, from: &str, to: &str) -> Result<bool, sqlx::Error> {
     let mut admin = server.with_database(MAINTENANCE_DATABASE).connect().await?;
     let mut outcome = Ok(false);
     for _ in 0..TAKE_OVER_ATTEMPTS {
@@ -441,10 +413,12 @@ async fn take_over(server: &Connector, from: &str, to: &str) -> Result<bool, sql
                 outcome = Ok(true);
                 break;
             }
-            // `object_in_use`: a session got in between the two statements.
-            Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("55006") => {}
-            // `invalid_catalog_name`: the test dropped it.
-            Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("3D000") => {
+            // A session got in between the two statements.
+            Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some(OBJECT_IN_USE) => {}
+            // The test dropped it.
+            Err(sqlx::Error::Database(error))
+                if error.code().as_deref() == Some(INVALID_CATALOG_NAME) =>
+            {
                 break;
             }
             Err(error) => {
@@ -457,6 +431,11 @@ async fn take_over(server: &Connector, from: &str, to: &str) -> Result<bool, sql
     outcome
 }
 
+/// Whether `now` and `before` list the same relations, in the same order.
+fn same_oids<T>(now: &[T], before: &[T], oid: impl Fn(&T) -> i64) -> bool {
+    now.len() == before.len() && now.iter().zip(before).all(|(n, b)| oid(n) == oid(b))
+}
+
 /// The database `conn` is on, last seen as `before`, put back into
 /// `template`'s state; its snapshot afterwards, or `None` if its catalogs
 /// changed.
@@ -467,24 +446,9 @@ async fn reset(
 ) -> Result<Option<Snapshot>, sqlx::Error> {
     let seeded: Vec<i64> = template.seeds.iter().map(|seed| seed.oid).collect();
     let now = snapshot(conn, &template.catalog_query, &seeded).await?;
-    let same_relations = now.tables.len() == before.tables.len()
-        && now
-            .tables
-            .iter()
-            .zip(&before.tables)
-            .all(|(n, b)| n.oid == b.oid)
-        && now.sequences.len() == before.sequences.len()
-        && now
-            .sequences
-            .iter()
-            .zip(&before.sequences)
-            .all(|(n, b)| n.oid == b.oid)
-        && now.stats.len() == before.stats.len()
-        && now
-            .stats
-            .iter()
-            .zip(&before.stats)
-            .all(|(n, b)| n.oid == b.oid);
+    let same_relations = same_oids(&now.tables, &before.tables, |t| t.oid)
+        && same_oids(&now.sequences, &before.sequences, |s| s.oid)
+        && same_oids(&now.stats, &before.stats, |s| s.oid);
     if now.catalog != before.catalog || !same_relations {
         return Ok(None);
     }
