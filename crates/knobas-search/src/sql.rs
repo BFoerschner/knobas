@@ -77,7 +77,7 @@ use sqlx::query::QueryAs;
 use sqlx::{FromRow, Postgres};
 
 use crate::corpus::Corpus;
-use crate::query::EffectiveFilters;
+use crate::query::{EffectiveFilters, WordAlternative};
 
 /// One value bound into a generated statement.
 ///
@@ -333,9 +333,11 @@ pub fn search_sql(
 /// `jira` is not a word of every Jira ticket), title, declared assignee or the names
 /// of its declared parents (a Jira ticket's epic) -- R-2.3's rule and
 /// prototype-6's *Filter by key, summary, epic or person*, which the view
-/// marks. `words` are lowercased by the caller; none is no word filter.
+/// marks. `words` are [`query::word_alternatives`](crate::query::word_alternatives),
+/// lowercased by the caller: a row is kept when it holds every word of one
+/// alternative and none it leaves out (#1889); none is no word filter.
 #[must_use]
-pub fn ids_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql {
+pub fn ids_sql(words: &[WordAlternative], filters: &EffectiveFilters) -> SearchSql {
     let mut builder = Builder::default();
     let sql = ids_body(&mut builder, words, filters);
     SearchSql {
@@ -346,17 +348,16 @@ pub fn ids_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql {
 
 /// [`ids_sql`]'s statement, its placeholders allocated on `builder`, so that
 /// several can share one statement ([`ids_counts_sql`]).
-fn ids_body(builder: &mut Builder, words: &[String], filters: &EffectiveFilters) -> String {
+fn ids_body(
+    builder: &mut Builder,
+    words: &[WordAlternative],
+    filters: &EffectiveFilters,
+) -> String {
     let corpus = &crate::corpus::LIVE_ITEM;
     let bound = bind_filters(builder, filters);
-    let typed = (!words.is_empty()).then(|| {
-        (
-            builder.param(Bind::Texts(words.to_vec())),
-            match &bound.declarations {
-                Some(declarations) => declarations.clone(),
-                None => builder.param(Bind::Json(filters.declarations.as_param())),
-            },
-        )
+    let typed = (!words.is_empty()).then(|| match &bound.declarations {
+        Some(declarations) => declarations.clone(),
+        None => builder.param(Bind::Json(filters.declarations.as_param())),
     });
 
     let mut sql = String::from("with\n");
@@ -378,21 +379,9 @@ fn ids_body(builder: &mut Builder, words: &[String], filters: &EffectiveFilters)
     );
     let mut predicates = vec![knobas_core::live_by_exclusion!("i").to_owned()];
     predicates.extend(corpus_predicates(corpus, None, &bound));
-    if let Some((words, declarations)) = &typed {
+    if let Some(declarations) = &typed {
         let _ = write!(sql, " cross join (select {declarations}::jsonb as d) pd");
-        // The key and the title first, each on its own, so a word either
-        // holds reads no payload (#897); the declared assignee only for a
-        // word they both miss. No word holds a space, so this matches what
-        // the three joined by spaces matched.
-        predicates.push(format!(
-            "not exists (select 1 from unnest({words}::text[]) w(word) where \
-             case when strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), w.word) > 0 then false \
-                  when strpos(lower(i.title), w.word) > 0 then false \
-                  when strpos(lower(coalesce({}, '')), w.word) > 0 then false \
-                  else not exists (select 1 from sync.item_parent ip \
-                                   where ip.entity_id = i.entity_id and strpos(lower(ip.name), w.word) > 0) end)",
-            knobas_core::declared_string!("pd.d", "assignee")
-        ));
+        predicates.push(words_predicate(builder, words));
     }
     sql.push('\n');
     if !predicates.is_empty() {
@@ -401,10 +390,52 @@ fn ids_body(builder: &mut Builder, words: &[String], filters: &EffectiveFilters)
     sql
 }
 
+/// [`ids_sql`]'s word filter: the row meets one of `words`' alternatives,
+/// each holding every word it asks for and none it leaves out (#1889).
+/// An alternative's words bind as one array, those it leaves out as another.
+fn words_predicate(builder: &mut Builder, words: &[WordAlternative]) -> String {
+    // Whether the row holds `w.word`. The key and the title first, each on
+    // its own, so a word either holds reads no payload (#897); the declared
+    // assignee, then the declared parents, only for a word they both miss.
+    // No word holds a space, so this matches what the three joined by
+    // spaces matched.
+    let holds = format!(
+        "case when strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), w.word) > 0 then true \
+              when strpos(lower(i.title), w.word) > 0 then true \
+              when strpos(lower(coalesce({}, '')), w.word) > 0 then true \
+              else exists (select 1 from sync.item_parent ip \
+                           where ip.entity_id = i.entity_id and strpos(lower(ip.name), w.word) > 0) end",
+        knobas_core::declared_string!("pd.d", "assignee")
+    );
+    let alternatives: Vec<String> = words
+        .iter()
+        .map(|alternative| {
+            let mut parts = Vec::new();
+            if !alternative.holds.is_empty() {
+                let holds_all = builder.param(Bind::Texts(alternative.holds.clone()));
+                parts.push(format!(
+                    "not exists (select 1 from unnest({holds_all}::text[]) w(word) where not ({holds}))"
+                ));
+            }
+            if !alternative.lacks.is_empty() {
+                let lacks_all = builder.param(Bind::Texts(alternative.lacks.clone()));
+                parts.push(format!(
+                    "not exists (select 1 from unnest({lacks_all}::text[]) w(word) where {holds})"
+                ));
+            }
+            parts.join(" and ")
+        })
+        .collect();
+    match alternatives.as_slice() {
+        [one] => one.clone(),
+        many => format!("(({}))", many.join(")\n    or (")),
+    }
+}
+
 /// How many rows [`ids_sql`] would answer with, as one `bigint` (#812): a
 /// ticket view's count in the views pane, the same rows its board draws.
 #[must_use]
-pub fn ids_count_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql {
+pub fn ids_count_sql(words: &[WordAlternative], filters: &EffectiveFilters) -> SearchSql {
     let ids = ids_sql(words, filters);
     SearchSql {
         sql: format!("select count(*)::bigint from (\n{}\n) matched", ids.sql),
@@ -417,7 +448,7 @@ pub fn ids_count_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql 
 /// `None` for none. One round trip however many ticket views are saved, as
 /// [`saved_summary_sql`] does for the rail.
 #[must_use]
-pub fn ids_counts_sql(queries: &[(&[String], &EffectiveFilters)]) -> Option<SearchSql> {
+pub fn ids_counts_sql(queries: &[(&[WordAlternative], &EffectiveFilters)]) -> Option<SearchSql> {
     if queries.is_empty() {
         return None;
     }
