@@ -54,11 +54,15 @@ pub fn note_markdown(note: &NoteRow) -> String {
 /// cannot be written.
 pub async fn export(pool: &PgPool, folder: &Path) -> Result<NotesExport, IpcError> {
     let notes = knobas_core::note::all(pool).await?;
-    std::fs::create_dir_all(folder).map_err(IpcError::internal)?;
+    tokio::fs::create_dir_all(folder)
+        .await
+        .map_err(IpcError::internal)?;
     let mut taken = HashSet::new();
     for note in &notes {
         let name = unique_name(&page_file_name(&note.title), &mut taken);
-        std::fs::write(folder.join(name), note_markdown(note)).map_err(IpcError::internal)?;
+        tokio::fs::write(folder.join(name), note_markdown(note))
+            .await
+            .map_err(IpcError::internal)?;
     }
     Ok(NotesExport {
         count: notes.len() as u64,
