@@ -211,9 +211,9 @@ impl RunConnections for TestConnections {
 /// ticker waits tens of milliseconds rather than the 2 s startup delay and 5 s
 /// tick a user gets. Real time, not tokio's paused clock: with every task
 /// blocked on database I/O tokio auto-advances a paused clock, which fires
-/// pool-acquire timeouts these tests are not about. The startup delay plus two
-/// ticks of this is the window [`the_ticker_runs_a_due_source_by_itself`]
-/// holds open (150 ms), and its adapter dwell is chosen to outlast it.
+/// pool-acquire timeouts these tests are not about. Two ticks of this are the
+/// window [`the_ticker_runs_a_due_source_by_itself`] holds its run open for
+/// (100 ms), at a door rather than for a dwell (#1920).
 ///
 /// Tests that still seed *on* the schedule live with the ticker joining their
 /// runs 50 ms in: each of them asserts something a join does not change (a
@@ -225,6 +225,15 @@ const FAST: SchedulerTiming = SchedulerTiming {
     tick: Duration::from_millis(50),
     shutdown_grace: knobas_sync::scheduler::SHUTDOWN_GRACE,
 };
+
+/// A quit's grace far past [`HANG_GUARD`]: a run or a write the quit waited
+/// out to the grace's end holds it for an hour, so a quit that returns inside
+/// the guard waited out nothing (#1920).
+const PATIENT_GRACE: Duration = Duration::from_secs(3600);
+
+/// How long a test waits for something that, on a correct scheduler, happens
+/// in milliseconds: a deadline against a hang, not a measurement.
+const HANG_GUARD: Duration = Duration::from_secs(30);
 
 /// Serialises the tests in this binary.
 ///
@@ -421,6 +430,10 @@ struct Held {
 
 /// Deps whose every run parks at a shut door inside the adapter: the run is
 /// demonstrably still going for as long as the test needs it to be (#1920).
+///
+/// The purge tests below hold their run there until the delete, the forget
+/// and any re-add are done. A 400 ms dwell used to hold that window, and on a
+/// loaded gate the run committed before the delete did.
 async fn held_deps(pool: PgPool) -> (SchedulerDeps, Held) {
     let door = Door::shut();
     let (deps, peak, inside) = slow_deps(pool, Duration::ZERO, Some(Arc::clone(&door))).await;
@@ -526,8 +539,8 @@ async fn six_blocked_runs_five_go_and_the_sixth_waits() {
     let (pool, sched_pool) = pools().await;
     let ids = seed(&pool, 6).await;
     let bookkeeping = sched_pool.clone();
-    let (deps, adapter) = held_deps(sched_pool).await;
-    let inside = &adapter.inside;
+    let (deps, parked) = held_deps(sched_pool).await;
+    let inside = &parked.inside;
     assert_eq!(SYNC_CONCURRENCY, 5);
 
     let scheduler = Scheduler::start(deps).await.unwrap();
@@ -559,7 +572,7 @@ async fn six_blocked_runs_five_go_and_the_sixth_waits() {
         );
     }
     drop(held);
-    adapter.door.open();
+    parked.door.open();
 
     for id in &ids {
         await_source_idle(&pool, id).await;
@@ -695,7 +708,7 @@ async fn shutdown_during_a_long_run_returns_promptly_and_leaves_no_open_run() {
     // that returns at all is one whose run **noticed** the cancellation at
     // its next await point. The old witness was a 2 s bound against the 3 s
     // grace, which a loaded gate overran on correct code.
-    deps.timing.shutdown_grace = Duration::from_secs(3600);
+    deps.timing.shutdown_grace = PATIENT_GRACE;
     // A stored `unreachable` the run will not get to re-witness, and the rung
     // the ladder stands on before it: neither is the cancelled run's to move
     // (#1629, spec #1618 ruling A8).
@@ -719,9 +732,9 @@ async fn shutdown_during_a_long_run_returns_promptly_and_leaves_no_open_run() {
     // about -- a condition rather than a 200 ms guess (#307).
     await_inside(&held.inside).await;
 
-    // Thirty seconds is a hang guard, not a measurement: the grace above is an
-    // hour, so a run that is waited out rather than stopped fails here.
-    tokio::time::timeout(Duration::from_secs(30), scheduler.shutdown())
+    // The grace above is an hour, so a run that is waited out rather than
+    // stopped fails here.
+    tokio::time::timeout(HANG_GUARD, scheduler.shutdown())
         .await
         .expect(
             "the quit waited out its grace: a cancelled run stops at its next \
@@ -1459,8 +1472,12 @@ async fn a_sync_after_a_write_waits_for_a_run_that_began_after_it_asked() {
         .trigger(&id, SyncTrigger::Manual, None)
         .await
         .unwrap();
-    // Well inside the adapter's dwell, so this genuinely joins a live run
-    // rather than racing its ending.
+    // Well inside the adapter's dwell, so this joins a live run rather than
+    // racing its ending. A margin, not a door (#1920): nothing outside the
+    // scheduler shows that `sync_after_write` has enrolled, so a door could
+    // not be opened at the right moment. A load that sees the dwell out first
+    // leaves `sync_after_write` starting the one run itself, which still
+    // passes every assertion below and only weakens the test (#1927).
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let waited_on = scheduler.sync_after_write(&id).await.unwrap();
@@ -2464,9 +2481,6 @@ async fn a_purge_survives_the_run_that_was_in_flight_when_the_source_was_deleted
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    // Each run waits at the door until the test has done what it does mid-run
-    // (#1920). A 400 ms dwell used to hold the window, and on a loaded gate
-    // the run committed before the delete did.
     let (deps, held) = held_deps(sched_pool).await;
     let inside = &held.inside;
     let scheduler = Scheduler::start(deps).await.unwrap();
@@ -2557,9 +2571,6 @@ async fn adding_a_source_back_under_the_id_voids_the_purge_armed_for_the_old_one
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    // Each run waits at the door until the test has done what it does mid-run
-    // (#1920). A 400 ms dwell used to hold the window, and on a loaded gate
-    // the run committed before the delete did.
     let (deps, held) = held_deps(sched_pool).await;
     let inside = &held.inside;
     let scheduler = Scheduler::start(deps).await.unwrap();
@@ -2654,9 +2665,6 @@ async fn a_source_added_inside_the_delete_does_not_have_the_forgets_purge_armed_
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    // Each run waits at the door until the test has done what it does mid-run
-    // (#1920). A 400 ms dwell used to hold the window, and on a loaded gate
-    // the run committed before the delete did.
     let (deps, held) = held_deps(sched_pool).await;
     let inside = &held.inside;
     let scheduler = Scheduler::start(deps).await.unwrap();
@@ -2873,9 +2881,6 @@ async fn deleting_a_source_mid_run_without_purging_keeps_its_items() {
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    // Each run waits at the door until the test has done what it does mid-run
-    // (#1920). A 400 ms dwell used to hold the window, and on a loaded gate
-    // the run committed before the delete did.
     let (deps, held) = held_deps(sched_pool).await;
     let inside = &held.inside;
     let scheduler = Scheduler::start(deps).await.unwrap();
@@ -3175,9 +3180,8 @@ async fn a_slow_write_does_not_hold_off_a_source_that_falls_due() {
     owe_a_comment(scheduler.deps(), &writing[0], "W-1").await;
     await_count(&started, 1).await;
 
-    // The write stays on the wire until the run has started. Thirty seconds
-    // is a hang guard, thirty times `DUE_IN`, not a measurement.
-    let run = tokio::time::timeout(Duration::from_secs(30), async {
+    // The write stays on the wire until the run has started.
+    let run = tokio::time::timeout(HANG_GUARD, async {
         loop {
             if let Some(run) = run_log::list(&pool, Some(&due_soon[0]), 1)
                 .await
@@ -3230,7 +3234,7 @@ async fn a_quit_during_a_flush_stops_it_between_writes() {
     // A grace far past the wait on the quit below: the write on the wire is
     // let finish whenever this test opens its door, and an abort would hold
     // the quit for an hour rather than land early.
-    deps.timing.shutdown_grace = Duration::from_secs(3600);
+    deps.timing.shutdown_grace = PATIENT_GRACE;
 
     let scheduler = Scheduler::start(deps).await.unwrap();
     let mut owed = Vec::new();
@@ -3243,7 +3247,7 @@ async fn a_quit_during_a_flush_stops_it_between_writes() {
         let scheduler = scheduler.clone();
         async move { scheduler.shutdown().await }
     });
-    tokio::time::timeout(Duration::from_secs(30), async {
+    tokio::time::timeout(HANG_GUARD, async {
         while !scheduler.is_shutting_down() {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
@@ -3253,7 +3257,7 @@ async fn a_quit_during_a_flush_stops_it_between_writes() {
     // The quit has begun with the first write on the wire. Let it, and
     // anything after it, through.
     door.open();
-    tokio::time::timeout(Duration::from_secs(30), quitting)
+    tokio::time::timeout(HANG_GUARD, quitting)
         .await
         .expect("the quit waited for something other than the write on the wire")
         .unwrap();

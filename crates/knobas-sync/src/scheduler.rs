@@ -1277,7 +1277,7 @@ const STARTUP_DELAY: Duration = Duration::from_secs(2);
 /// let finish so its `sent` mark lands before the pool closes.
 ///
 /// The default for [`SchedulerTiming::shutdown_grace`], which is what
-/// [`Scheduler::shutdown`] reads. Public so a test can size a write against it
+/// [`Scheduler::shutdown`] reads. Public so a test can size a wait past it
 /// rather than restate it.
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 

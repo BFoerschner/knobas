@@ -678,9 +678,9 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
     // A run still in the set at the grace's end is aborted, and the grace is
     // an hour: a quit over inside the patience is one whose run ended once
     // its send landed, rather than looping in the set until the abort.
-    quit_over.recv_timeout(PATIENCE).expect(
-        "the quit waited out its grace: the run did not end after its step",
-    );
+    quit_over
+        .recv_timeout(PATIENCE)
+        .expect("the quit waited out its grace: the run did not end after its step");
     quitting.join().expect("the quit finishes");
 
     let reader = connector.pool(1).await.unwrap();
