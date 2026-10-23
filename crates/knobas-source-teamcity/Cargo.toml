@@ -20,6 +20,9 @@ serde_json.workspace = true
 # The HTTP-level mock the exit criteria are certified against (interfaces §5).
 # A dev-dependency only: nothing in the shipped adapter knows mockd exists.
 knobas-mockd = { path = "../knobas-mockd" }
+# The cleanup runner `tests/live_teamcity_seeded.rs`'s `Drop` guards share
+# (#1913): a thread and runtime of their own, a bound, a report.
+knobas-live-cleanup = { path = "../knobas-live-cleanup" }
 # The Tidewater dataset both mock layers share -- every expectation in
 # `tests/it/mockd.rs` is computed from it rather than hard-coded (spec §14a).
 knobas-source-mock = { path = "../knobas-source-mock" }

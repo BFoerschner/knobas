@@ -102,6 +102,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use knobas_live_cleanup::Cleanup;
 use knobas_source::contract::{Fault, VecSink, Walking, battery};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceError, SyncItem};
@@ -117,8 +118,10 @@ const REQUEST_BUDGET: Duration = Duration::from_secs(10);
 /// and a fresh agent that still has to clone the repository within a minute.
 const BUILD_BUDGET: Duration = Duration::from_secs(180);
 
-/// How long [`Queued`]'s `Drop` waits for its cleanup before reporting that it
-/// did not finish rather than stalling the run.
+/// How long each guard's `Drop` waits for its cleanup before reporting that it
+/// did not finish rather than stalling the run: what this suite hands
+/// `knobas_live_cleanup::Cleanup::within`, below the runner's own default
+/// because no cleanup here waits on an index.
 const CLEANUP_BUDGET: Duration = Duration::from_secs(90);
 
 /// The configurations the seed always leaves with a **finished** build: the
@@ -859,48 +862,22 @@ impl Drop for Queued {
             return;
         };
         let (url, token) = (self.url.clone(), self.token.clone());
-        // `Drop` cannot await and runs on a tokio worker thread, so the
-        // cleanup gets a thread with a runtime of its own -- and a client
-        // built inside it, because a `reqwest::Client` driven from a second
-        // runtime hangs rather than failing (the Gitea suite measured that).
-        // The wait is bounded so a server that stops answering ends the run
-        // with a sentence rather than a stall.
-        let (done, waiting) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let failures = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the cleanup")
-                .block_on(async move { remove(&client(), &url, &token, &[id]).await });
-            let _ = done.send(failures);
-        });
-        let failures = match waiting.recv_timeout(CLEANUP_BUDGET) {
-            Ok(failures) => failures,
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => vec![format!(
-                "the cleanup thread panicked (its own message is on stderr), so build {id} may \
-                 still be standing; the next run's leftover clearing removes it"
-            )],
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => vec![format!(
-                "the cleanup did not finish within {CLEANUP_BUDGET:?} and was abandoned, so \
-                 build {id} may still be standing; check the container is healthy, then re-run \
-                 -- the next run's leftover clearing removes it"
-            )],
-        };
-        if failures.is_empty() {
-            return;
-        }
-        let report = format!(
+        Cleanup::new(
             "the live suite did not remove the build it queued, so the server is no longer in \
-             the plain-seed state: {}",
-            failures.join("; ")
-        );
-        // Panicking while already unwinding aborts the process; the test is
-        // already red in that case and this only has to be visible.
-        if std::thread::panicking() {
-            eprintln!("live suite cleanup: {report}");
-        } else {
-            panic!("{report}");
-        }
+             the plain-seed state",
+            format!("build {id} may still be standing; the next run's leftover clearing removes it"),
+        )
+        .within(CLEANUP_BUDGET)
+        .run(move || async move { joined(remove(&client(), &url, &token, &[id]).await) });
+    }
+}
+
+/// One cleanup's failures as the runner takes them: none is `Ok`.
+fn joined(failures: Vec<String>) -> Result<(), String> {
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
     }
 }
 
@@ -2664,51 +2641,34 @@ impl Drop for ParameterRestore {
     fn drop(&mut self) {
         let requests = self.put();
         let token = self.token.clone();
-        let (done, waiting) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let failures = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the restore")
-                .block_on(async move {
-                    let http = client();
-                    let mut failures = Vec::new();
-                    for (verb, url, body) in requests {
-                        let mut request = http
-                            .request(verb.clone(), &url)
-                            .bearer_auth(&token)
-                            .header("Accept", "text/plain");
-                        if let Some(body) = body {
-                            request = request.header("Content-Type", "text/plain").body(body);
-                        }
-                        match request.send().await {
-                            Ok(r) if r.status().is_success() => {}
-                            Ok(r) => failures.push(format!("{verb} {url} -> {}", r.status())),
-                            Err(e) => failures.push(format!("{verb} {url}: {e}")),
-                        }
-                    }
-                    failures
-                });
-            let _ = done.send(failures);
+        Cleanup::new(
+            format!(
+                "the live suite did not restore the seeded parameters of {}, so the server is no \
+                 longer in the plain-seed state (re-run `./seed --teamcity` to put them back)",
+                self.config
+            ),
+            "they may still hold the values the test wrote",
+        )
+        .within(CLEANUP_BUDGET)
+        .run(move || async move {
+            let http = client();
+            let mut failures = Vec::new();
+            for (verb, url, body) in requests {
+                let mut request = http
+                    .request(verb.clone(), &url)
+                    .bearer_auth(&token)
+                    .header("Accept", "text/plain");
+                if let Some(body) = body {
+                    request = request.header("Content-Type", "text/plain").body(body);
+                }
+                match request.send().await {
+                    Ok(r) if r.status().is_success() => {}
+                    Ok(r) => failures.push(format!("{verb} {url} -> {}", r.status())),
+                    Err(e) => failures.push(format!("{verb} {url}: {e}")),
+                }
+            }
+            joined(failures)
         });
-        let failures = match waiting.recv_timeout(CLEANUP_BUDGET) {
-            Ok(failures) => failures,
-            Err(e) => vec![format!("the restore did not finish: {e}")],
-        };
-        if failures.is_empty() {
-            return;
-        }
-        let report = format!(
-            "the live suite did not restore the seeded parameters of {}, so the server is no \
-             longer in the plain-seed state (re-run `./seed --teamcity` to put them back): {}",
-            self.config,
-            failures.join("; ")
-        );
-        if std::thread::panicking() {
-            eprintln!("live suite restore: {report}");
-        } else {
-            panic!("{report}");
-        }
     }
 }
 
@@ -3153,52 +3113,33 @@ impl Drop for AgentsParked {
             return;
         }
         let (url, token, ids) = (self.url.clone(), self.token.clone(), self.disabled.clone());
-        let (done, waiting) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let failures = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the restore")
-                .block_on(async move {
-                    let http = client();
-                    let mut failures = Vec::new();
-                    for id in ids {
-                        let at = format!("{url}/app/rest/agents/id:{id}/enabled");
-                        match http
-                            .put(&at)
-                            .header("Content-Type", "text/plain")
-                            .header("Accept", "text/plain")
-                            .bearer_auth(&token)
-                            .body("true")
-                            .send()
-                            .await
-                        {
-                            Ok(r) if r.status().is_success() => {}
-                            Ok(r) => failures.push(format!("PUT {at} -> {}", r.status())),
-                            Err(e) => failures.push(format!("PUT {at}: {e}")),
-                        }
-                    }
-                    failures
-                });
-            let _ = done.send(failures);
-        });
-        let failures = match waiting.recv_timeout(CLEANUP_BUDGET) {
-            Ok(failures) => failures,
-            Err(e) => vec![format!("the re-enabling did not finish: {e}")],
-        };
-        if failures.is_empty() {
-            return;
-        }
-        let report = format!(
+        Cleanup::new(
             "the live suite did not re-enable the agents it disabled, so no later build will \
-             run (enable them under Agents in TeamCity, or re-seed): {}",
-            failures.join("; ")
-        );
-        if std::thread::panicking() {
-            eprintln!("live suite restore: {report}");
-        } else {
-            panic!("{report}");
-        }
+             run (enable them under Agents in TeamCity, or re-seed)",
+            format!("agents {ids:?} may still be disabled"),
+        )
+        .within(CLEANUP_BUDGET)
+        .run(move || async move {
+            let http = client();
+            let mut failures = Vec::new();
+            for id in ids {
+                let at = format!("{url}/app/rest/agents/id:{id}/enabled");
+                match http
+                    .put(&at)
+                    .header("Content-Type", "text/plain")
+                    .header("Accept", "text/plain")
+                    .bearer_auth(&token)
+                    .body("true")
+                    .send()
+                    .await
+                {
+                    Ok(r) if r.status().is_success() => {}
+                    Ok(r) => failures.push(format!("PUT {at} -> {}", r.status())),
+                    Err(e) => failures.push(format!("PUT {at}: {e}")),
+                }
+            }
+            joined(failures)
+        });
     }
 }
 
@@ -3453,22 +3394,12 @@ impl NestedProject {
 impl Drop for NestedProject {
     fn drop(&mut self) {
         let (url, token) = (self.url.clone(), self.token.clone());
-        let outcome = std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the cleanup")
-                .block_on(async move { NestedProject::delete(&client(), &url, &token).await })
-        })
-        .join()
-        .expect("the cleanup thread");
-        if let Err(e) = outcome {
-            if std::thread::panicking() {
-                eprintln!("live suite cleanup: {e}");
-            } else {
-                panic!("live suite cleanup: {e}");
-            }
-        }
+        Cleanup::new(
+            "the live suite did not delete the nested project it made",
+            format!("{NESTED} may still be standing; the next run's leftover clearing deletes it"),
+        )
+        .within(CLEANUP_BUDGET)
+        .run(move || async move { NestedProject::delete(&client(), &url, &token).await });
     }
 }
 
@@ -3836,22 +3767,12 @@ impl ChainProject {
 impl Drop for ChainProject {
     fn drop(&mut self) {
         let (url, token) = (self.url.clone(), self.token.clone());
-        let outcome = std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the cleanup")
-                .block_on(async move { ChainProject::delete(&client(), &url, &token).await })
-        })
-        .join()
-        .expect("the cleanup thread");
-        if let Err(e) = outcome {
-            if std::thread::panicking() {
-                eprintln!("live suite cleanup: {e}");
-            } else {
-                panic!("live suite cleanup: {e}");
-            }
-        }
+        Cleanup::new(
+            "the live suite did not delete the chain project it made",
+            format!("{CHAIN} may still be standing; the next run's leftover clearing deletes it"),
+        )
+        .within(CLEANUP_BUDGET)
+        .run(move || async move { ChainProject::delete(&client(), &url, &token).await });
     }
 }
 

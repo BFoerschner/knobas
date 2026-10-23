@@ -3369,6 +3369,7 @@ dependencies = [
  "chrono",
  "knobas-core",
  "knobas-http",
+ "knobas-live-cleanup",
  "knobas-mockd",
  "knobas-source",
  "knobas-source-mock",
