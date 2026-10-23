@@ -605,11 +605,10 @@ impl EmbeddedDb {
     /// The two halves are deliberately different. The lock is **dropped**,
     /// because the kernel is what releases an OS lock when a process dies and
     /// an orphan with a live lock holder would be indistinguishable from a
-    /// live sibling's server. Dropping it unlocks it ([`OwnerLock`]), which a
-    /// dead process cannot do; its lock goes with the last copy of the
-    /// descriptor instead, a child's exec at the latest, and the launch that
-    /// finds the orphan comes after that. Unlocked here, the next launch finds
-    /// it free at once, as that one does. The pool and the `PostgreSQL` handle are
+    /// live sibling's server. Dropping an [`OwnerLock`] unlocks it at once. A
+    /// dead process cannot unlock: its lock goes when the last copy of the
+    /// descriptor closes, a child's exec at the latest, and a later launch
+    /// finds it free either way. The pool and the `PostgreSQL` handle are
     /// **forgotten**, because dropping either one is what would stop the
     /// server (`PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever
     /// `postmaster.pid` exists). Leaking them costs a handful of sockets for

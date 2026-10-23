@@ -13566,15 +13566,16 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   a 40-line program (296 of 2,000 reclaims refused beside four spawning threads, 0 without them, 0
   with an explicit unlock) and in the new unit test (106 of 300). `OwnerLock` unlocks on drop.
   *Reversing:* low, the newtype is the only change.
-- **No §10.8 entry.** *Ruling:* none owed. *Reasoning:* no IPC, migration or module-layout change;
+- **No §10.8 entry.** *Fork:* book the unlock as an observable change, or not. *Ruling:* none owed. *Reasoning:* no IPC, migration or module-layout change;
   a shipped process releases the lock only as it quits, and `restart` keeps it. *Reversing:* n/a.
-- **Cross-run collision ruled out.** *Fork:* a shared port, data directory or temp path between
+- **Cross-run collision ruled out for the adoption test.** *Fork:* a shared port, data directory or temp path between
   test binaries or worktrees, or a cause inside one binary. *Ruling:* inside one binary.
   *Reasoning:* every embedded test takes its own
   `tempfile::tempdir()` (data directory, both lock files), and a fresh start asks for port 0. A
   shared port fails a start with a bind error, never with *has this profile open*.
   *Reversing:* n/a.
-- **The bring-up lock keeps closing without an unlock.** *Ruling:* unchanged. *Reasoning:* a
+- **The bring-up lock keeps closing without an unlock.** *Fork:* give it the same unlock-on-drop, or
+  leave it. *Ruling:* unchanged. *Reasoning:* a
   bring-up waits for its lock (50 ms polls), so a child's copy delays it by one exec and refuses
   nothing. *Reversing:* low.
 - **The two sibling limiter tests with a literal refill bound get the measured one too.** *Fork:*

@@ -1614,7 +1614,8 @@ async fn stop_the_server_a_child_left(pid: u32) {
     let root = std::env::temp_dir().join(format!("knobas-test-{pid}"));
     let lock_path = root.with_file_name(format!("knobas-test-{pid}.lock"));
     let lock = std::fs::File::create(&lock_path).expect("the child's scratch lock");
-    lock.lock().expect("wait out any reaper of the child's root");
+    lock.lock()
+        .expect("wait out any reaper of the child's root");
     if root.join("data").join("postmaster.pid").exists() {
         let adopted = EmbeddedDb::start(DbConfig {
             root_dir: root.clone(),
