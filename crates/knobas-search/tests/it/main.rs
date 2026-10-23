@@ -21,6 +21,7 @@ mod name_glob;
 mod parent_key_pin;
 mod path_line;
 mod ranking;
+mod readings;
 mod reach;
 mod search;
 mod sql_containment;

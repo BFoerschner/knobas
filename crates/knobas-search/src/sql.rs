@@ -337,9 +337,19 @@ pub fn search_sql(
 /// marks. `words` are lowercased by the caller; none is no word filter.
 #[must_use]
 pub fn ids_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql {
-    let corpus = &crate::corpus::LIVE_ITEM;
     let mut builder = Builder::default();
-    let bound = bind_filters(&mut builder, filters);
+    let sql = ids_body(&mut builder, words, filters);
+    SearchSql {
+        sql,
+        binds: builder.binds,
+    }
+}
+
+/// [`ids_sql`]'s statement, its placeholders allocated on `builder`, so that
+/// several can share one statement ([`ids_counts_sql`]).
+fn ids_body(builder: &mut Builder, words: &[String], filters: &EffectiveFilters) -> String {
+    let corpus = &crate::corpus::LIVE_ITEM;
+    let bound = bind_filters(builder, filters);
     let typed = (!words.is_empty()).then(|| {
         (
             builder.param(Bind::Texts(words.to_vec())),
@@ -388,10 +398,7 @@ pub fn ids_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql {
     if !predicates.is_empty() {
         let _ = write!(sql, " where {}", predicates.join("\n   and "));
     }
-    SearchSql {
-        sql,
-        binds: builder.binds,
-    }
+    sql
 }
 
 /// How many rows [`ids_sql`] would answer with, as one `bigint` (#812): a
@@ -403,6 +410,34 @@ pub fn ids_count_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql 
         sql: format!("select count(*)::bigint from (\n{}\n) matched", ids.sql),
         binds: ids.binds,
     }
+}
+
+/// [`ids_count_sql`] for several queries in one statement (#1654): one row
+/// per query, `(position, count)`, `position` being its index in `queries`.
+/// `None` for none. One round trip however many ticket views are saved, as
+/// [`saved_summary_sql`] does for the rail.
+#[must_use]
+pub fn ids_counts_sql(queries: &[(&[String], &EffectiveFilters)]) -> Option<SearchSql> {
+    if queries.is_empty() {
+        return None;
+    }
+    let mut builder = Builder::default();
+    let mut sql = String::new();
+    for (position, (words, filters)) in queries.iter().enumerate() {
+        if position > 0 {
+            sql.push_str("union all\n");
+        }
+        let body = ids_body(&mut builder, words, filters);
+        let position = builder.param(Bind::I64(i64::try_from(position).unwrap_or(i64::MAX)));
+        let _ = writeln!(
+            sql,
+            "select {position}::bigint as position, count(*)::bigint as total from (\n{body}\n) matched"
+        );
+    }
+    Some(SearchSql {
+        sql,
+        binds: builder.binds,
+    })
 }
 
 /// The filter placeholders one statement has allocated, ready to splice.
