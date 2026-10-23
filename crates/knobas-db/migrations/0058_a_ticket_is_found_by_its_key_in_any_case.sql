@@ -15,9 +15,9 @@
 -- `reach:jira:PAY-231` both name `jira:PAY-231`. Nothing indexed either
 -- expression, so the start set was a scan of every entity, once per
 -- statement since #1653 and once per saved list holding `reach:` on the
--- rail. No existing index can stand in: the primary key and `0047`'s
--- `entity_id_bytes_idx` compare the id as stored, and the values arrive
--- lowercased.
+-- rail. No existing index can stand in: the primary key compares the id as
+-- stored (bytewise since `0050`, which dropped `0047`'s
+-- `entity_id_bytes_idx`), and the values arrive lowercased.
 --
 -- On the search crate's 100,000-item corpus (114,803 entities) the start set
 -- read 10.6 ms of a 16.5 ms statement, and 0.04 ms through these (#1850).

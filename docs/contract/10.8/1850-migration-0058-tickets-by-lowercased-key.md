@@ -14,8 +14,8 @@
 
   **Why.** `knobas_search::sql::reaches` starts the walk from every ticket whose id or key (the
   id past its namespace) is one of the typed values, both compared lowercased, since the values
-  arrive lowercased by the server (#1652). Neither the primary key nor `0047`'s
-  `entity_id_bytes_idx` compares lowercased, so the start set was a scan of every entity: once
+  arrive lowercased by the server (#1652). The primary key (bytewise since `0050`, which dropped
+  `0047`'s `entity_id_bytes_idx`) does not compare lowercased, so the start set was a scan of every entity: once
   per statement since #1653, and once per saved list holding `reach:` on the rail. On the
   responsiveness probe's 23,500 entities the scan read 5.7 ms of a 21.5 ms statement and the
   `BitmapOr` of these two reads 0.04 ms (14.4 ms in all). On the search crate's 114,803 it was

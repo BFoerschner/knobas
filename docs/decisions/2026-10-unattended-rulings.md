@@ -15081,3 +15081,44 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1876.
   pending pages on all four (`item_fts_idx`, `note_fts_idx`, `asset_fts_idx`, `route_fts_idx`)
   on the 100k mirror the rail was measured on (`seed_corpus` vacuums), and the rail still read
   114 ms there. *Reversing:* n/a.
+
+Reviewed 2026-10-23 by the merge-manager (Opus), PR #1879.
+
+- **Reserved for Björn, ruled by merge-manager on Opus: migration `0058` and its §10.8 entry.**
+  *Fork:* confirm the implementer's ruling or rule again. *Ruling:* confirmed. *Reasoning:* the
+  primary-key probe #1845's merge-manager offered serves only an id typed whole in its stored case;
+  `reach:pay-231` needs the key half. Each index is the expression `reaches` spells, character for
+  character, and the reader's `e.kind = 'ticket'` implies the partial predicate. `lower`, `substr`
+  and `strpos` are immutable, and the id is `collate "C"` on both sides (ADR-0027), so index and
+  reader lowercase alike. Additive: nothing dropped, no earlier migration edited. *Reversing:* one
+  migration dropping both.
+- **The rail's `try_join!`.** *Fork:* the two halves now hold two of the app pool's five
+  connections at once. *Ruling:* kept. *Reasoning:* each half acquires per statement and holds
+  nothing while it waits for another connection, so a busy pool queues a half (under the 30 s
+  acquire timeout, as before) and cannot deadlock. The rail's peak goes from one connection to two
+  for tens of milliseconds, beside the launcher's serial reads. When one half fails, `try_join!`
+  drops the other: sqlx returns or closes that connection, the statement it left is a read, and
+  `statement_timeout` bounds it on the server. `just ui-pool-probe` was not re-run. *Reversing:*
+  one line.
+- **`lists::the_rails_two_halves_run_at_once` under gate load.** *Fork:* deterministic, or another
+  #1846. *Ruling:* deterministic, no change. *Reasoning:* the order comes from the two table locks,
+  and once a half waits it stays waiting until the watch rolls back, so the count can only climb to
+  2. The 10 s deadline ends the failing path only. Load can delay a half's arrival but cannot lower
+  the count, unlike #1846's acquire count, which background work inflated. Five connections at
+  most against a pool of six, on a database of its own, and the `regclass` casts take no lock.
+  *Reversing:* n/a.
+- **#1851's serial plan.** *Ruling:* confirmed; the ticket offers the ruling as an outcome.
+  *Reasoning:* a 5% cost margin decides it, the knob is server-wide or a transaction round the hot
+  path, and forcing parallel trades `tombstone` (2.3 to 5.6 ms) for `payout` (38.5 to 21 ms) while
+  `payout` sits at 40% of its budget. *Reversing:* `set local parallel_setup_cost` round the search.
+- **#1855's five-run criterion handed to the milestone review.** *Ruling:* confirmed. *Reasoning:*
+  #533's condition (a) needs nothing else on the machine for the whole run, which the loop's
+  parallel agents rule out, and the criterion reads `main`, which this head is not yet. One run
+  read 45 ms p90 at the cap against 100. *Reversing:* n/a.
+- **#1869 not folded.** *Ruling:* confirmed. *Reasoning:* `seed_corpus` vacuums, so the rail was
+  slow with 0 pending pages on all four indexes; its cost does not come from the lists. Whether the
+  lists show on an unvacuumed mirror is #1869's own question and stays there. *Reversing:* n/a.
+- **`0047`'s index in the prose.** *Fork:* the migration header, the §10.8 entry and the pin's
+  doc comment named `entity_id_bytes_idx` as an index that exists; `0050` dropped it (ADR-0027).
+  *Ruling:* corrected in all three before merge; the migration is unmerged, so editing its comment
+  touches no applied checksum. *Reversing:* trivial.

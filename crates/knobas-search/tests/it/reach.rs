@@ -257,8 +257,8 @@ async fn many_entities(analyzed: bool) -> sqlx::PgPool {
 
 /// `reach:`'s start set is found through an index on the lowercased id and
 /// key (#1850), not a scan of every entity, with and without statistics:
-/// the values arrive lowercased, so neither the primary key nor the key's
-/// bytewise index can answer `pay-15` for `jira:PAY-15`. Planned over a
+/// the values arrive lowercased, so the primary key, which compares the id
+/// as stored, cannot answer `pay-15` for `jira:PAY-15`. Planned over a
 /// typed id and a bare key, the two halves the start set compares.
 #[tokio::test]
 async fn the_start_set_is_found_through_an_index() {
