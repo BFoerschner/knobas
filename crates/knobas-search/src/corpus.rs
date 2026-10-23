@@ -205,7 +205,7 @@ pub struct Corpus {
     pub(crate) under: Option<&'static str>,
     /// What each ticket key matches (#811), as a predicate over a row, the
     /// statement's [`FIELD_PATHS`] CTEs (`fp`, `lp`) and a relation `fd`
-    /// carrying the values, folded by the server (#1843) (`fd.v`) and `assigned:`'s window in
+    /// carrying the values (`fd.v`, folded by the server, #1843) and `assigned:`'s window in
     /// days (`fd.n`). A key with no entry here is a field this corpus's rows
     /// do not have: the condition fails on every row, and its negation holds
     /// on every row.

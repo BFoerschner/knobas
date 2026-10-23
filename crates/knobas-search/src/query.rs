@@ -511,10 +511,8 @@ impl Parsed {
             }
         };
         let filter = &mut self.fields[index];
-        if let Some(value) = value
-            && !filter.values.iter().any(|seen| same_value(seen, &value))
-        {
-            filter.values.push(value);
+        if let Some(value) = value {
+            push_unique_value(&mut filter.values, &value);
         }
         if let Some(days) = days {
             filter.within_days = Some(filter.within_days.map_or(days, |d| d.max(days)));
@@ -1010,7 +1008,7 @@ pub fn pattern_of(parsed: &Parsed) -> Result<Pattern, String> {
             .collect(),
         // A pattern is stored as typed: `knobas_core`'s matcher folds the
         // stored side with the server's `lower()` (#1843).
-        names: parsed.names.iter().cloned().collect(),
+        names: parsed.names.to_vec(),
     };
     if pattern == Pattern::default() {
         return Err("a pattern needs a project, a parent or a name to match".to_owned());
