@@ -164,52 +164,27 @@ impl TimerTarget {
     }
 }
 
-/// How a block came to exist. Mirrors `block_kind_chk` in migration `0013`.
-///
-/// - `manual`: the timer made it -- `CONTEXT.md`'s wording, and deliberately
-///   not "a person started and stopped it": [`close_stranded`] writes a
-///   `manual` block that nobody stopped. [`Block::ended_by_relaunch`] is what
-///   tells those two apart; the kind says only where the block came from.
-/// - `passive`: passive attribution recorded what was open (#282) -- knobas'
-///   own guess, and never logged anywhere on its own. Written only by
-///   [`passive::materialize`], and turned into `manual` the moment a person
-///   assigns it (`update_block`) -- nothing else in the crate writes this
-///   word, and nothing at all writes it back.
-///
-/// The kinds are documented here and not on each variant because the
-/// generated TypeScript (`app/src/lib/ipc/generated/time.ts`) carries a
-/// type's and a field's doc but not a variant's (#1325).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export_to = "time.ts")]
-pub enum BlockKind {
-    Manual,
-    Passive,
-}
-
-impl BlockKind {
-    /// The spelling the schema stores and `block_kind_chk` enumerates.
+knobas_core::closed_vocabulary! {
+    /// How a block came to exist. Mirrors `block_kind_chk` in migration `0013`.
     ///
-    /// Public because the day review and the timesheet (#279) narrow by it,
-    /// and because a caller writing the word out again is how the fourth copy
-    /// of this vocabulary would start.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Manual => "manual",
-            Self::Passive => "passive",
-        }
-    }
-
-    fn parse(word: &str) -> Result<Self, IpcError> {
-        match word {
-            "manual" => Ok(Self::Manual),
-            "passive" => Ok(Self::Passive),
-            other => Err(IpcError::internal(format!(
-                "knobas.block holds the kind {other:?}, which `block_kind_chk` \
-                 should have refused"
-            ))),
-        }
+    /// - `manual`: the timer made it -- `CONTEXT.md`'s wording, and deliberately
+    ///   not "a person started and stopped it": [`close_stranded`] writes a
+    ///   `manual` block that nobody stopped. [`Block::ended_by_relaunch`] is what
+    ///   tells those two apart; the kind says only where the block came from.
+    /// - `passive`: passive attribution recorded what was open (#282) -- knobas'
+    ///   own guess, and never logged anywhere on its own. Written only by
+    ///   [`passive::materialize`], and turned into `manual` the moment a person
+    ///   assigns it (`update_block`) -- nothing else in the crate writes this
+    ///   word, and nothing at all writes it back.
+    ///
+    /// The kinds are documented here and not on each variant because the
+    /// generated TypeScript (`app/src/lib/ipc/generated/time.ts`) carries a
+    /// type's and a field's doc but not a variant's (#1325).
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "time.ts")]
+    pub enum BlockKind {
+        Manual => "manual",
+        Passive => "passive",
     }
 }
 
@@ -441,7 +416,7 @@ fn block_of(row: &sqlx::postgres::PgRow) -> Result<Block, IpcError> {
         started_at: row.try_get("started_at")?,
         ended_at: row.try_get("ended_at")?,
         target: target_of(row.try_get("entity_id")?, row.try_get("label")?)?,
-        kind: BlockKind::parse(row.try_get::<String, _>("kind")?.as_str())?,
+        kind: row.try_get("kind")?,
         ended_by_relaunch: row.try_get("ended_by_relaunch")?,
         worklog_id: row.try_get("worklog_id")?,
     })

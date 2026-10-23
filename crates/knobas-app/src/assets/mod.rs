@@ -314,58 +314,31 @@ const MONITOR_KIND: &str = "monitor";
 // The wire vocabularies
 // ---------------------------------------------------------------------------
 
-/// An asset's **own** status -- what a person recorded about it.
-///
-/// Not its health: story 37's health is the worst of this and its monitors'
-/// states, and its *effective* health also takes the worst descendant. Both
-/// are computed at read time, by [`ROLLUP`] over this column and over the
-/// newest sample of every attached monitor (#444). This is the stored fact
-/// those reads are built on, and [`AssetRow`] carries all three.
-///
-/// `none` is the default and means *nobody has said*, which is a different
-/// thing from `up`. The four spellings are `0017`'s `asset_status_chk`, and
-/// [`tests::every_status_is_one_the_schema_accepts`] reads the migration to
-/// keep the two lists in step.
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
-)]
-#[serde(rename_all = "snake_case")]
-#[ts(export_to = "assets.ts")]
-pub enum AssetStatus {
-    Up,
-    Warn,
-    Down,
-    #[default]
-    None,
+knobas_core::closed_vocabulary! {
+    /// An asset's **own** status -- what a person recorded about it.
+    ///
+    /// Not its health: story 37's health is the worst of this and its monitors'
+    /// states, and its *effective* health also takes the worst descendant. Both
+    /// are computed at read time, by [`ROLLUP`] over this column and over the
+    /// newest sample of every attached monitor (#444). This is the stored fact
+    /// those reads are built on, and [`AssetRow`] carries all three.
+    ///
+    /// `none` is the default and means *nobody has said*, which is a different
+    /// thing from `up`. The four spellings are `0017`'s `asset_status_chk`, and
+    /// [`tests::every_status_is_one_the_schema_accepts`] reads the migration to
+    /// keep the two lists in step.
+    #[derive(Default, ts_rs::TS)]
+    #[ts(export_to = "assets.ts")]
+    pub enum AssetStatus {
+        Up => "up",
+        Warn => "warn",
+        Down => "down",
+        #[default]
+        None => "none",
+    }
 }
 
 impl AssetStatus {
-    /// Every status, for a walk that must not miss one.
-    pub const ALL: [AssetStatus; 4] = [
-        AssetStatus::Up,
-        AssetStatus::Warn,
-        AssetStatus::Down,
-        AssetStatus::None,
-    ];
-
-    /// The stored spelling, which is also the wire value.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AssetStatus::Up => "up",
-            AssetStatus::Warn => "warn",
-            AssetStatus::Down => "down",
-            AssetStatus::None => "none",
-        }
-    }
-
-    fn parse(value: &str) -> Result<Self, IpcError> {
-        Self::ALL
-            .into_iter()
-            .find(|status| status.as_str() == value)
-            .ok_or_else(|| IpcError::internal(format!("unknown asset status {value:?}")))
-    }
-
     /// Where this status sits in story 37's order -- **down over warn over up
     /// over none** -- as a number whose *smaller* value is the worse one.
     ///
@@ -397,106 +370,58 @@ impl AssetStatus {
     #[must_use]
     fn of_severity(rank: i32) -> Self {
         AssetStatus::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .find(|status| status.severity() == rank)
             .unwrap_or(AssetStatus::None)
     }
 }
 
-/// Which environment an asset belongs to.
-///
-/// Stored on the asset, and story 8 inherits it from the nearest ancestor that
-/// sets it -- that walk is #431's. The four spellings are `0017`'s
-/// `asset_environment_chk`, kept in step with this list by
-/// [`tests::every_environment_is_one_the_schema_accepts`].
-///
-/// `null` where an asset's own field carries one means *not set here*: what is
-/// in force is [`AssetDetail::effective_environment`], the nearest asset at or
-/// above that sets one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export_to = "assets.ts")]
-pub enum Environment {
-    Dev,
-    Stage,
-    Prod,
-    Shared,
-}
-
-impl Environment {
-    /// Every environment, for a walk that must not miss one.
-    pub const ALL: [Environment; 4] = [
-        Environment::Dev,
-        Environment::Stage,
-        Environment::Prod,
-        Environment::Shared,
-    ];
-
-    /// The stored spelling, which is also the wire value.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Environment::Dev => "dev",
-            Environment::Stage => "stage",
-            Environment::Prod => "prod",
-            Environment::Shared => "shared",
-        }
-    }
-
-    fn parse(value: &str) -> Result<Self, IpcError> {
-        Self::ALL
-            .into_iter()
-            .find(|environment| environment.as_str() == value)
-            .ok_or_else(|| IpcError::internal(format!("unknown environment {value:?}")))
+knobas_core::closed_vocabulary! {
+    /// Which environment an asset belongs to.
+    ///
+    /// Stored on the asset, and story 8 inherits it from the nearest ancestor that
+    /// sets it -- that walk is #431's. The four spellings are `0017`'s
+    /// `asset_environment_chk`, kept in step with this list by
+    /// [`tests::every_environment_is_one_the_schema_accepts`].
+    ///
+    /// `null` where an asset's own field carries one means *not set here*: what is
+    /// in force is [`AssetDetail::effective_environment`], the nearest asset at or
+    /// above that sets one.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "assets.ts")]
+    pub enum Environment {
+        Dev => "dev",
+        Stage => "stage",
+        Prod => "prod",
+        Shared => "shared",
     }
 }
 
-/// Who can reach a route.
-///
-/// Two values, because the question a reader asks of a URL is *can somebody
-/// outside open this* -- and every finer shade (which VPN, which network,
-/// which allow-list) is a fact with a name of its own and belongs in a
-/// property. `internal` is the default: it is the safe reading of a route
-/// nobody has classified, and `0018`'s `route_visibility_chk` is the same two
-/// spellings, kept in step by
-/// [`tests::every_visibility_is_one_the_schema_accepts`].
-///
-/// - `internal`: reachable from inside the estate. What an unclassified route
-///   reads as.
-/// - `public`: reachable from outside it.
-///
-/// The values are documented here and not on each variant because the
-/// generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
-/// type's and a field's doc but not a variant's (#1325).
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
-)]
-#[serde(rename_all = "snake_case")]
-#[ts(export_to = "assets.ts")]
-pub enum Visibility {
-    #[default]
-    Internal,
-    Public,
-}
-
-impl Visibility {
-    /// Every visibility, for a walk that must not miss one.
-    pub const ALL: [Visibility; 2] = [Visibility::Internal, Visibility::Public];
-
-    /// The stored spelling, which is also the wire value.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Visibility::Internal => "internal",
-            Visibility::Public => "public",
-        }
-    }
-
-    fn parse(value: &str) -> Result<Self, IpcError> {
-        Self::ALL
-            .into_iter()
-            .find(|visibility| visibility.as_str() == value)
-            .ok_or_else(|| IpcError::internal(format!("unknown route visibility {value:?}")))
+knobas_core::closed_vocabulary! {
+    /// Who can reach a route.
+    ///
+    /// Two values, because the question a reader asks of a URL is *can somebody
+    /// outside open this* -- and every finer shade (which VPN, which network,
+    /// which allow-list) is a fact with a name of its own and belongs in a
+    /// property. `internal` is the default: it is the safe reading of a route
+    /// nobody has classified, and `0018`'s `route_visibility_chk` is the same two
+    /// spellings, kept in step by
+    /// [`tests::every_visibility_is_one_the_schema_accepts`].
+    ///
+    /// - `internal`: reachable from inside the estate. What an unclassified route
+    ///   reads as.
+    /// - `public`: reachable from outside it.
+    ///
+    /// The values are documented here and not on each variant because the
+    /// generated TypeScript (`app/src/lib/ipc/generated/assets.ts`) carries a
+    /// type's and a field's doc but not a variant's (#1325).
+    #[derive(Default, ts_rs::TS)]
+    #[ts(export_to = "assets.ts")]
+    pub enum Visibility {
+        #[default]
+        Internal => "internal",
+        Public => "public",
     }
 }
 
@@ -1082,24 +1007,6 @@ knobas_core::closed_vocabulary! {
     pub enum AlertState {
         Down => "down",
         Warn => "warn",
-    }
-}
-
-impl AlertState {
-    /// The state a stored spelling belongs to.
-    ///
-    /// [`AssetStatus::parse`]'s shape, and its neighbours' -- one rule per
-    /// vocabulary in this file rather than a fourth copy of it inlined at a
-    /// call site. Unreachable from `monitor_alert_state_chk`, and an error
-    /// rather than a default all the same: a row carrying a word this build
-    /// has no meaning for is a database this build should not be drawing, not
-    /// one to guess about.
-    fn parse(value: &str) -> Result<Self, IpcError> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|state| state.as_str() == value)
-            .ok_or_else(|| IpcError::internal(format!("unknown alert state {value:?}")))
     }
 }
 
@@ -1821,8 +1728,7 @@ fn row_of(
     let id: String = row.try_get("id")?;
     let type_id: String = row.try_get("type_id")?;
     let declared = asset::find(&type_id);
-    let status = AssetStatus::parse(&row.try_get::<String, _>("status")?)?;
-    let environment: Option<String> = row.try_get("environment")?;
+    let status: AssetStatus = row.try_get("status")?;
     let rolled = rollups.get(&id).copied();
     // Read here rather than in the field below: `id` is moved into the row.
     let work = linked.get(&id).copied().unwrap_or(0);
@@ -1838,7 +1744,7 @@ fn row_of(
         type_id,
         name: row.try_get("name")?,
         status,
-        environment: environment.as_deref().map(Environment::parse).transpose()?,
+        environment: row.try_get("environment")?,
         owner: row.try_get("owner")?,
         has_children: row.try_get("has_children")?,
         health: rolled.map_or(status, |r| r.health),
@@ -2709,7 +2615,7 @@ fn route_row_of(row: &sqlx::postgres::PgRow) -> Result<RouteRow, IpcError> {
         target_name: row.try_get("target_name")?,
         name: row.try_get("name")?,
         url: row.try_get("url")?,
-        visibility: Visibility::parse(&row.try_get::<String, _>("visibility")?)?,
+        visibility: row.try_get("visibility")?,
         properties: custom_properties(&stored),
     })
 }
@@ -3029,7 +2935,7 @@ pub async fn ack_alert(
         )));
     };
     let id: i64 = row.try_get("id")?;
-    let state = AlertState::parse(&row.try_get::<String, _>("state")?)?;
+    let state: AlertState = row.try_get("state")?;
     let monitor_name: String = row.try_get("monitor_name")?;
     let opened_at: chrono::DateTime<chrono::Utc> = row.try_get("opened_at")?;
     let already: Option<chrono::DateTime<chrono::Utc>> = row.try_get("acked_at")?;
@@ -3184,11 +3090,10 @@ pub async fn open_alerts(pool: &PgPool) -> Result<Vec<OpenAlert>, IpcError> {
     rows.iter()
         .map(|row| {
             let monitor_id: String = row.try_get("entity_id")?;
-            let state: String = row.try_get("state")?;
             Ok(OpenAlert {
                 id: row.try_get("id")?,
                 monitor_name: row.try_get("monitor_name")?,
-                state: AlertState::parse(&state)?,
+                state: row.try_get("state")?,
                 opened_at: row.try_get("opened_at")?,
                 acked_at: row.try_get("acked_at")?,
                 assets: watching.remove(&monitor_id).unwrap_or_default(),
@@ -5985,15 +5890,15 @@ fn duplicate_file_id(id: &str) -> IpcError {
 
 /// The file's environment, refused by name rather than by `0017`'s constraint.
 fn vet_environment(value: &str, id: &str) -> Result<Environment, IpcError> {
-    Environment::ALL
-        .into_iter()
-        .find(|environment| environment.as_str() == value)
-        .ok_or_else(|| {
-            IpcError::invalid(format!(
-                "`{id}` is in the environment {value:?}, which is not one of {:?}",
-                Environment::ALL.map(Environment::as_str)
-            ))
-        })
+    value.parse().map_err(|_| {
+        IpcError::invalid(format!(
+            "`{id}` is in the environment {value:?}, which is not one of {:?}",
+            Environment::ALL
+                .iter()
+                .map(|environment| environment.as_str())
+                .collect::<Vec<_>>()
+        ))
+    })
 }
 
 /// The monitor names one asset lists, trimmed, deduplicated and refused when
@@ -6173,15 +6078,13 @@ async fn locked(tx: &mut Transaction<'_, Postgres>, id: &str) -> Result<Stored, 
     .await?
     .ok_or_else(|| no_such_asset(id))?;
 
-    let status: String = row.try_get("status")?;
-    let environment: Option<String> = row.try_get("environment")?;
     let properties: serde_json::Value = row.try_get("properties")?;
     Ok(Stored {
         parent_id: row.try_get("parent_id")?,
         type_id: row.try_get("type_id")?,
         name: row.try_get("name")?,
-        status: AssetStatus::parse(&status)?,
-        environment: environment.as_deref().map(Environment::parse).transpose()?,
+        status: row.try_get("status")?,
+        environment: row.try_get("environment")?,
         owner: row.try_get("owner")?,
         properties: match properties {
             serde_json::Value::Object(map) => map,
@@ -6374,7 +6277,7 @@ async fn locked_route(
         target_id: row.try_get("target_id")?,
         name: row.try_get("name")?,
         url: row.try_get("url")?,
-        visibility: Visibility::parse(&row.try_get::<String, _>("visibility")?)?,
+        visibility: row.try_get("visibility")?,
         properties: match properties {
             serde_json::Value::Object(map) => map,
             _ => serde_json::Map::new(),
@@ -7420,7 +7323,7 @@ mod tests {
                     .split_once(" end")
                     .unwrap_or_else(|| panic!("a `{needle}` in ROLLUP never ends"))
                     .0;
-                for status in AssetStatus::ALL {
+                for &status in AssetStatus::ALL {
                     if status == AssetStatus::None {
                         // `none` is the `else` arm; there is no `when` for it.
                         continue;
@@ -7448,7 +7351,7 @@ mod tests {
         );
         // And the trip back, which is what turns the statement's answer into a
         // status again.
-        for status in AssetStatus::ALL {
+        for &status in AssetStatus::ALL {
             assert_eq!(AssetStatus::of_severity(status.severity()), status);
         }
         // Worse is smaller, which is what makes `min` the worst-of.
