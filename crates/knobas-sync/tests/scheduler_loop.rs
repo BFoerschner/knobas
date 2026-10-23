@@ -2729,3 +2729,301 @@ async fn forgetting_a_source_mid_run_still_gives_that_runs_watchers_their_ending
     scheduler.shutdown().await;
     retire(&pool, &ids).await;
 }
+
+// ---------------------------------------------------------------------------
+// The write queue's flush beside the ticker (#1629, spec #1618 ruling A7).
+// ---------------------------------------------------------------------------
+
+/// A [`Slow`] whose writes land, each after `dwell`: a source that takes its
+/// time over a write, as an unreachable one spends the send budget on each.
+///
+/// `started` counts the calls to `write`, `finished` the ones that returned,
+/// of the one source a test counts; a write in flight is the difference.
+/// Only that one: the flush reaches every source in this binary's database,
+/// and a source an earlier test left owing would otherwise count here.
+struct Writer {
+    slow: Slow,
+    dwell: Duration,
+    counted: bool,
+    started: Arc<AtomicUsize>,
+    finished: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl Source for Writer {
+    async fn view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        self.slow.view(entity, section).await
+    }
+    fn descriptor(&self) -> SourceDescriptor {
+        self.slow.descriptor()
+    }
+    async fn test_connection(&self) -> Result<knobas_source::ConnectionInfo, SourceError> {
+        self.slow.test_connection().await
+    }
+    async fn sync(
+        &self,
+        cursor: Option<Cursor>,
+        sink: &mut (dyn Sink + Send),
+    ) -> Result<Cursor, SourceError> {
+        self.slow.sync(cursor, sink).await
+    }
+    async fn write(
+        &self,
+        _op: knobas_source::WriteOp,
+    ) -> Result<knobas_source::WriteReceipt, SourceError> {
+        if self.counted {
+            self.started.fetch_add(1, Ordering::SeqCst);
+        }
+        tokio::time::sleep(self.dwell).await;
+        if self.counted {
+            self.finished.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(knobas_source::WriteReceipt::none())
+    }
+    async fn reachable_transitions(&self, entity: &str) -> Result<Vec<String>, SourceError> {
+        self.slow.reachable_transitions(entity).await
+    }
+}
+
+struct WriterRegistry {
+    dwell: Duration,
+    counted: String,
+    started: Arc<AtomicUsize>,
+    finished: Arc<AtomicUsize>,
+}
+
+impl AdapterRegistry for WriterRegistry {
+    fn descriptors(&self) -> Vec<SourceDescriptor> {
+        Vec::new()
+    }
+    fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
+        Ok(Box::new(Writer {
+            counted: instance.id == self.counted,
+            slow: Slow {
+                id: instance.id,
+                inside: Arc::new(AtomicUsize::new(0)),
+                peak: Arc::new(AtomicUsize::new(0)),
+                dwell: Duration::ZERO,
+                fault: None,
+            },
+            dwell: self.dwell,
+            started: Arc::clone(&self.started),
+            finished: Arc::clone(&self.finished),
+        }))
+    }
+}
+
+/// Deps whose every source syncs at once and writes after `dwell`, and the
+/// two write counters of `counted`.
+async fn writer_deps(
+    pool: PgPool,
+    dwell: Duration,
+    counted: &str,
+) -> (SchedulerDeps, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+    let connector = knobas_db::test_util::test_connector().await;
+    let started = Arc::new(AtomicUsize::new(0));
+    let finished = Arc::new(AtomicUsize::new(0));
+    let deps = SchedulerDeps {
+        pool,
+        connections: Arc::new(TestConnections(connector)),
+        registry: Arc::new(WriterRegistry {
+            dwell,
+            counted: counted.to_owned(),
+            started: Arc::clone(&started),
+            finished: Arc::clone(&finished),
+        }),
+        secrets: Arc::new(MemoryStore::new()),
+        events: Arc::new(Silent),
+        timing: FAST,
+    };
+    (deps, started, finished)
+}
+
+/// Queue a comment on a mirrored entity of `source_id`, without the attempt
+/// `submit` makes: the flush the ticker wakes is the only thing sending it.
+async fn owe_a_comment(
+    deps: &SchedulerDeps,
+    source_id: &str,
+    key: &str,
+) -> knobas_core::write_queue::QueuedWrite {
+    let entity = knobas_core::entity::EntityRef::new(source_id, key);
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title) values ($1,'ticket','a ticket')
+         on conflict (id) do nothing",
+    )
+    .bind(entity.to_string())
+    .execute(&deps.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1,$2,'ticket','a ticket','','{}'::jsonb)
+         on conflict (entity_id) do nothing",
+    )
+    .bind(entity.to_string())
+    .bind(source_id)
+    .execute(&deps.pool)
+    .await
+    .unwrap();
+    knobas_sync::write_queue::queue(
+        deps,
+        source_id,
+        knobas_source::WriteOp::Comment {
+            entity: entity.to_string(),
+            body: format!("on {key}"),
+        },
+    )
+    .await
+    .unwrap()
+}
+
+/// Drop what `ids` still owe, so the next test's flush does not send it: the
+/// write queue's half of [`retire`].
+async fn forgive(pool: &PgPool, ids: &[String]) {
+    sqlx::query("delete from knobas.write_queue where source_id = any($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// Wait for `counter` to reach `n`, against the same five-second deadline
+/// [`await_inside`] allows.
+async fn await_count(counter: &Arc<AtomicUsize>, n: usize) {
+    for _ in 0..500 {
+        if counter.load(Ordering::SeqCst) >= n {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the source was asked for {n} writes in five seconds, not {counter:?}");
+}
+
+/// SYNC-2 (#1629): a write that takes ten seconds does not hold off a
+/// source that falls due one second in. The flush runs on its own task, so
+/// the ticker goes on looking while a write is on the wire.
+///
+/// Red with the flush inline in the tick: the ticker sits in the write until
+/// it returns, and the due source's run starts after it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_slow_write_does_not_hold_off_a_source_that_falls_due() {
+    /// The ticket's: a write that dwells ten seconds, beside a source due in
+    /// one.
+    const WRITE_DWELL: Duration = Duration::from_secs(10);
+    const DUE_IN: Duration = Duration::from_secs(1);
+
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    // Off the sync schedule: only its write is owed, and the flush does not
+    // read the backoff.
+    let writing = seed_quiet(&pool, 1).await;
+    let due_soon = seed(&pool, 1).await;
+    let (due_at,): (chrono::DateTime<chrono::Utc>,) = sqlx::query_as(
+        "update knobas.source_config set backoff_until = now() + make_interval(secs => $2)
+          where id = $1 returning backoff_until",
+    )
+    .bind(&due_soon[0])
+    .bind(DUE_IN.as_secs_f64())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (deps, started, finished) = writer_deps(sched_pool, WRITE_DWELL, &writing[0]).await;
+
+    let scheduler = Scheduler::start(deps).await.unwrap();
+    owe_a_comment(scheduler.deps(), &writing[0], "W-1").await;
+    await_count(&started, 1).await;
+
+    // Until the write returns: the run has to start while it is on the wire.
+    let run = loop {
+        if let Some(run) = run_log::list(&pool, Some(&due_soon[0]), 1)
+            .await
+            .unwrap()
+            .pop()
+        {
+            break run;
+        }
+        assert_eq!(
+            finished.load(Ordering::SeqCst),
+            0,
+            "the due source's run did not start until the write returned"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    // Within a tick of falling due. `DUE_IN` again on top, for the queries a
+    // loaded machine runs slowly: still a tenth of the dwell it is told from.
+    let late = (run.started_at - due_at).to_std().unwrap_or_default();
+    assert!(
+        late < FAST.tick + DUE_IN,
+        "the due source started {late:?} after it fell due"
+    );
+
+    scheduler.shutdown().await;
+    forgive(&pool, &writing).await;
+    retire(&pool, &[writing, due_soon].concat()).await;
+}
+
+/// SYNC-2 (#1629): a quit during a flush stops it between writes. The write
+/// on the wire is let finish inside the grace, so its `sent` lands; the two
+/// behind it are not started, and stay owed for the next launch.
+///
+/// Red with the flush inline in the tick: nothing looks at the cancel inside
+/// it, and the next two writes go out before the grace runs out and the
+/// abort lands.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_quit_during_a_flush_stops_it_between_writes() {
+    use knobas_core::write_queue::{self as store, WriteState};
+    use knobas_sync::scheduler::SHUTDOWN_GRACE;
+
+    // Short enough that, unchecked, all three start inside the grace; long
+    // enough that the first is still on the wire when the quit comes.
+    let dwell = SHUTDOWN_GRACE / 4;
+
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let writing = seed_quiet(&pool, 1).await;
+    let (deps, started, _finished) = writer_deps(sched_pool, dwell, &writing[0]).await;
+
+    let scheduler = Scheduler::start(deps).await.unwrap();
+    let mut owed = Vec::new();
+    for key in ["Q-1", "Q-2", "Q-3"] {
+        owed.push(owe_a_comment(scheduler.deps(), &writing[0], key).await);
+    }
+    await_count(&started, 1).await;
+
+    let before = started.load(Ordering::SeqCst);
+    let quitting = std::time::Instant::now();
+    scheduler.shutdown().await;
+    let took = quitting.elapsed();
+    let after = started.load(Ordering::SeqCst);
+
+    // At most one: a write that began between the read above and the cancel
+    // inside `shutdown` is not one the quit could have stopped.
+    assert!(
+        after - before <= 1,
+        "{} writes were started after the quit",
+        after - before
+    );
+    assert!(
+        took < SHUTDOWN_GRACE,
+        "the write on the wire was aborted rather than let finish: {took:?}"
+    );
+    let mut states = Vec::new();
+    for write in &owed {
+        states.push(store::get(&pool, write.id).await.unwrap().unwrap().state);
+    }
+    assert_eq!(
+        states.iter().filter(|s| **s == WriteState::Sent).count(),
+        after,
+        "each write the source took is marked sent, and no other: {states:?}"
+    );
+    assert!(
+        states.iter().filter(|s| **s == WriteState::Pending).count() >= 1,
+        "the writes behind the quit stay owed: {states:?}"
+    );
+    forgive(&pool, &writing).await;
+    retire(&pool, &writing).await;
+}

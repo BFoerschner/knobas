@@ -1295,6 +1295,12 @@ struct Inner {
     /// run, a new source, a re-entered credential), so the UI does not wait out
     /// a tick.
     wake: Notify,
+    /// Poked by the ticker on every tick: the write queue's flush runs on a
+    /// task of its own ([`flush_loop`], #1629), so a write that spends its
+    /// send budget holds no source's schedule. A poke while a flush is under
+    /// way leaves one permit, so the flush runs once more after it, not once
+    /// per tick it missed.
+    flush_due: Notify,
     cancel: CancellationToken,
     /// Handles to join (or abort) at shutdown.
     ///
@@ -1360,6 +1366,7 @@ impl Scheduler {
                 pending_purges: HashSet::new(),
             }),
             wake: Notify::new(),
+            flush_due: Notify::new(),
             cancel: CancellationToken::new(),
             tasks: Mutex::new(Vec::new()),
             background,
@@ -1367,7 +1374,11 @@ impl Scheduler {
         });
 
         let ticker = tokio::spawn(tick_loop(Arc::clone(&inner)));
-        inner.tasks.lock().await.push(ticker);
+        // Beside the runs in `tasks`, so `shutdown` joins it within the same
+        // grace and aborts it at its end. Not through the door: it opens no
+        // run row, so there is nothing a quit could leave half-started.
+        let flusher = tokio::spawn(flush_loop(Arc::clone(&inner)));
+        inner.tasks.lock().await.extend([ticker, flusher]);
         Ok(Scheduler { inner })
     }
 
@@ -2182,13 +2193,11 @@ async fn tick_loop(inner: Arc<Inner>) {
         // while nothing is due would otherwise leave the queue sitting until
         // the next scheduled run.
         //
-        // Nearly free when nothing is owed: `flush_source` returns before
-        // building an adapter or touching the keychain if nothing in the
-        // source's queue is owed (a write waiting on a refused credential
-        // never is, #1628). Cancellation is not checked between the two -- a flush
-        // that has started is one write against one source, and `shutdown`'s
-        // grace window covers it.
-        crate::write_queue::flush_all(&inner.deps).await;
+        // Woken, not run: the flush is on its own task (`flush_loop`, #1629,
+        // spec #1618 ruling A7). A pass can be every due write of every
+        // source, each of which may spend the 45 s send budget, and inline
+        // here it held every source's schedule for as long.
+        inner.flush_due.notify_one();
 
         tokio::select! {
             biased;
@@ -2196,6 +2205,26 @@ async fn tick_loop(inner: Arc<Inner>) {
             () = inner.wake.notified() => {}
             () = tokio::time::sleep(tick) => {}
         }
+    }
+}
+
+/// The write queue's flush, woken by every tick ([`Inner::flush_due`]).
+///
+/// What a started flush is: every head write each source owes, source after
+/// source, each send bounded only by the adapter's budget (45 s). What a quit
+/// does to it: the cancel is selected against between writes, so no write is
+/// started after it; the one on the wire is let finish inside
+/// [`SHUTDOWN_GRACE`], so its `sent` lands, and is aborted at the grace's end,
+/// which leaves that one request at risk of a re-send on the next start
+/// (ADR-0012's window).
+async fn flush_loop(inner: Arc<Inner>) {
+    loop {
+        tokio::select! {
+            biased;
+            () = inner.cancel.cancelled() => return,
+            () = inner.flush_due.notified() => {}
+        }
+        crate::write_queue::flush_all_until(&inner.deps, &inner.cancel).await;
     }
 }
 

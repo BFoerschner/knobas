@@ -45,6 +45,7 @@ use knobas_core::payload::StatePath;
 use knobas_core::write_queue::{self as store, QueuedWrite, WaitReason, WriteState};
 use knobas_http::LocalQuota;
 use knobas_source::{Source, SourceError, WriteOp, WriteReceipt};
+use tokio_util::sync::CancellationToken;
 
 use crate::config;
 use crate::scheduler::{RunFailure, SchedulerDeps};
@@ -217,8 +218,9 @@ pub async fn queue(
 /// One source's failure never stops another's: each is flushed on its own and
 /// its errors are logged rather than raised, which is what story 21 asks for
 /// -- one broken credential must not stop everything. Sequential rather than
-/// concurrent, deliberately: the queue is small, and each source's flush takes
-/// its own lock anyway (see [`gate`]).
+/// concurrent, deliberately: the queue is small, and each source's writes take
+/// its own lock anyway (see [`gate`]). The scheduler runs it on a task of its
+/// own ([`flush_all_until`]), so however long it takes, nobody's sync waits.
 ///
 /// A source whose health needs a human -- the credential was refused, or
 /// there is none -- is skipped whole, the test `Scheduler::trigger_all` makes
@@ -227,7 +229,18 @@ pub async fn queue(
 /// credential), so what keeps a refused write from going again is
 /// [`owed`], read per row.
 pub async fn flush_all(deps: &SchedulerDeps) {
-    flush_every(deps, Pass::Owed).await;
+    flush_all_until(deps, &CancellationToken::new()).await;
+}
+
+/// [`flush_all`], stopping between writes once `stop` is cancelled: the
+/// scheduler's flush task, which a quit cancels (#1629, spec #1618 ruling A7).
+///
+/// Between writes and not inside one. A write already on the wire is let
+/// finish, so its `sent` lands; `Scheduler::shutdown`'s grace is what bounds
+/// it, and its abort is what leaves that one request at risk, the window
+/// ADR-0012 discloses. No later write is started.
+pub(crate) async fn flush_all_until(deps: &SchedulerDeps, stop: &CancellationToken) {
+    flush_every(deps, Pass::Owed, stop).await;
 }
 
 /// *Flush now* from the queue panel (#1628): one source, or every source when
@@ -246,9 +259,9 @@ pub async fn flush_all(deps: &SchedulerDeps) {
 /// [`flush_all`]'s are.
 pub async fn flush_now(deps: &SchedulerDeps, source_id: Option<&str>) -> Result<(), FlushError> {
     match source_id {
-        Some(id) => flush(deps, id, Pass::Now).await,
+        Some(id) => flush(deps, id, Pass::Now, &CancellationToken::new()).await,
         None => {
-            flush_every(deps, Pass::Now).await;
+            flush_every(deps, Pass::Now, &CancellationToken::new()).await;
             Ok(())
         }
     }
@@ -263,7 +276,7 @@ enum Pass {
     Now,
 }
 
-async fn flush_every(deps: &SchedulerDeps, pass: Pass) {
+async fn flush_every(deps: &SchedulerDeps, pass: Pass, stop: &CancellationToken) {
     let sources = match config::list(&deps.pool).await {
         Ok(sources) => sources,
         Err(error) => {
@@ -272,10 +285,13 @@ async fn flush_every(deps: &SchedulerDeps, pass: Pass) {
         }
     };
     for source in sources {
+        if stop.is_cancelled() {
+            return;
+        }
         if pass == Pass::Owed && source.health.state.needs_human() {
             continue;
         }
-        if let Err(error) = flush(deps, &source.id, pass).await {
+        if let Err(error) = flush(deps, &source.id, pass, stop).await {
             tracing::warn!(source = %source.id, %error, "write queue flush failed");
         }
     }
@@ -345,7 +361,7 @@ pub async fn release_unauthorized(
     Ok(store::release_unauthorized(pool, source_id).await?)
 }
 
-/// One flush of a source at a time, process-wide.
+/// One write of a source at a time, process-wide.
 ///
 /// Two flushers that both read [`due`](store::due) see the *same* head write
 /// and both call `Source::write`. The `where state = 'pending'` guard on
@@ -353,7 +369,13 @@ pub async fn release_unauthorized(
 /// stop the second from posting the comment. A queue whose job is not to lose
 /// an edit must not post it twice either, and the two flushers that actually
 /// overlap are ordinary: [`submit`] flushes immediately, and the scheduler's
-/// tick flushes every five seconds.
+/// flush task runs on every tick.
+///
+/// **Held per write, not per pass** (#1629): a submit waits for the write on
+/// the wire, not for every write the tick's pass still owes, which on an
+/// unreachable source is one send budget each. So whoever takes the lock
+/// re-reads the row first ([`turn`]): a write another flusher attempted, or
+/// that settled, since this one read it is not sent again.
 ///
 /// In-process rather than a database lock, deliberately. `pg_advisory_xact_lock`
 /// would mean holding a transaction open across the adapter's HTTP call, which
@@ -390,7 +412,7 @@ fn gate(source_id: &str) -> Arc<Gate> {
 /// One source's share of the flush loop's process-wide state; see [`gate`].
 #[derive(Default)]
 struct Gate {
-    /// Held for a whole flush of the source.
+    /// Held across one write's attempt: the re-read, the send, the settle.
     flush: tokio::sync::Mutex<()>,
     /// How many times [`release_unauthorized`] has run for the source in this
     /// process.
@@ -419,12 +441,16 @@ struct CredentialSeen<'a> {
 /// credential -- is **not** an error: its writes wait, with the reason
 /// recorded, which is the whole point of the queue.
 pub async fn flush_source(deps: &SchedulerDeps, source_id: &str) -> Result<(), FlushError> {
-    flush(deps, source_id, Pass::Owed).await
+    flush(deps, source_id, Pass::Owed, &CancellationToken::new()).await
 }
 
-async fn flush(deps: &SchedulerDeps, source_id: &str, pass: Pass) -> Result<(), FlushError> {
+async fn flush(
+    deps: &SchedulerDeps,
+    source_id: &str,
+    pass: Pass,
+    stop: &CancellationToken,
+) -> Result<(), FlushError> {
     let gate = gate(source_id);
-    let _flushing = gate.flush.lock().await;
 
     let mut due = heads(deps, source_id, pass).await?;
     if due.is_empty() {
@@ -446,7 +472,13 @@ async fn flush(deps: &SchedulerDeps, source_id: &str, pass: Pass) -> Result<(), 
             // owes waits for the same reason, rather than one of them failing
             // and the rest silently not being tried.
             for write in due {
-                waited(deps, &seen, &write, reason.0, &reason.1).await?;
+                match turn(deps, &gate, &write, pass, stop).await? {
+                    Turn::Go(_sending, write) => {
+                        waited(deps, &seen, &write, reason.0, &reason.1).await?;
+                    }
+                    Turn::Gone => {}
+                    Turn::Stopped => return Ok(()),
+                }
             }
             return Ok(());
         }
@@ -455,8 +487,14 @@ async fn flush(deps: &SchedulerDeps, source_id: &str, pass: Pass) -> Result<(), 
     loop {
         let mut progressed = false;
         for write in due {
-            if attempt(deps, &seen, source.as_ref(), &write).await? {
-                progressed = true;
+            match turn(deps, &gate, &write, pass, stop).await? {
+                Turn::Go(_sending, write) => {
+                    if attempt(deps, &seen, source.as_ref(), &write).await? {
+                        progressed = true;
+                    }
+                }
+                Turn::Gone => {}
+                Turn::Stopped => return Ok(()),
             }
         }
         if !progressed {
@@ -470,6 +508,50 @@ async fn flush(deps: &SchedulerDeps, source_id: &str, pass: Pass) -> Result<(), 
             return Ok(());
         }
     }
+}
+
+/// What a flusher finds when its turn at one write comes ([`turn`]).
+enum Turn<'g> {
+    /// The write is as this flusher read it, and still owed: send it,
+    /// holding the source's lock until it has settled.
+    Go(tokio::sync::MutexGuard<'g, ()>, QueuedWrite),
+    /// Another flusher attempted it, or it settled or was withdrawn, since
+    /// it was read.
+    Gone,
+    /// The quit came first: start nothing more.
+    Stopped,
+}
+
+/// Take the source's lock for one write -- or the quit, whichever comes
+/// first -- and re-read the write under it (#1629).
+///
+/// The row as it stands now is what is sent, not the copy the pass read: an
+/// amend that landed in between is the version the reader means. It is
+/// [`Turn::Gone`] if it is no longer pending, if its `attempted_at` moved
+/// (every attempt stamps it, under this lock), or, on a pass of the tick's
+/// kind, if it is no longer [`owed`].
+async fn turn<'g>(
+    deps: &SchedulerDeps,
+    gate: &'g Gate,
+    read: &QueuedWrite,
+    pass: Pass,
+    stop: &CancellationToken,
+) -> Result<Turn<'g>, FlushError> {
+    let sending = tokio::select! {
+        biased;
+        () = stop.cancelled() => return Ok(Turn::Stopped),
+        sending = gate.flush.lock() => sending,
+    };
+    let Some(now) = store::get(&deps.pool, read.id).await? else {
+        return Ok(Turn::Gone);
+    };
+    let untouched = now.state == WriteState::Pending
+        && now.attempted_at == read.attempted_at
+        && now.attempts == read.attempts;
+    if !untouched || (pass == Pass::Owed && !owed(&now, chrono::Utc::now())) {
+        return Ok(Turn::Gone);
+    }
+    Ok(Turn::Go(sending, now))
 }
 
 /// *I know, and I still mean it* (story 13): release a held write and try it.
