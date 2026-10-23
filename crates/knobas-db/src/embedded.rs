@@ -594,19 +594,22 @@ impl EmbeddedDb {
     }
 
     /// Drop this handle the way a signal does: no `pg_ctl stop`, no pool
-    /// close, the ownership lock released by closing its file. The server
-    /// keeps running, owned by nobody -- which is exactly the state a
-    /// `kill -9` leaves behind.
+    /// close, the ownership lock released. The server keeps running, owned
+    /// by nobody -- which is exactly the state a `kill -9` leaves behind.
     ///
     /// Test-only, and the only way to reach the orphan case in-process: a
     /// `kill -9` is not something a `#[tokio::test]` can do to itself, and the
     /// property under test -- that the *next* launch adopts an orphan **and
     /// takes responsibility for it** -- is the one M0 could not deliver.
     ///
-    /// The two halves are deliberately different. The lock file is **dropped**,
+    /// The two halves are deliberately different. The lock is **dropped**,
     /// because the kernel is what releases an OS lock when a process dies and
     /// an orphan with a live lock holder would be indistinguishable from a
-    /// live sibling's server. The pool and the `PostgreSQL` handle are
+    /// live sibling's server. Dropping it unlocks it ([`OwnerLock`]), which a
+    /// dead process cannot do; its lock goes with the last copy of the
+    /// descriptor instead, a child's exec at the latest, and the launch that
+    /// finds the orphan comes after that. Unlocked here, the next launch finds
+    /// it free at once, as that one does. The pool and the `PostgreSQL` handle are
     /// **forgotten**, because dropping either one is what would stop the
     /// server (`PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever
     /// `postmaster.pid` exists). Leaking them costs a handful of sockets for
@@ -962,7 +965,7 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
     let _guard = bring_up_lock(root_dir).await?;
     let data_dir = settings.data_dir.clone();
     let owner_lock = match claim_ownership(root_dir)? {
-        Ownership::Ours(file) => file,
+        Ownership::Ours(lock) => lock,
         Ownership::Held { by } => {
             let holder = by.map_or_else(
                 || "another knobas process".to_owned(),
@@ -2152,7 +2155,7 @@ mod tests {
     /// An ownership lock of this test's own, for `adopt` to take over.
     fn owner_lock(dir: &Path) -> OwnerLock {
         match claim_ownership(dir).unwrap() {
-            Ownership::Ours(file) => file,
+            Ownership::Ours(lock) => lock,
             Ownership::Held { by } => panic!("a fresh directory's lock is held by {by:?}"),
         }
     }
@@ -2256,8 +2259,8 @@ mod tests {
     /// lock on a file lasts until the last copy closes: a release that only
     /// closed the descriptor left the lock held for as long as that child
     /// took to exec, and a relaunch in that instant was refused naming this
-    /// very process. The spawns are what every test beside an embedded one
-    /// does, `pg_ctl` and `initdb`; any program stands in for them.
+    /// very process. The embedded tests on other threads spawn `pg_ctl` and
+    /// `initdb`; any program stands in for them.
     #[test]
     fn a_released_ownership_lock_is_free_while_children_are_spawned() {
         use std::sync::Arc;

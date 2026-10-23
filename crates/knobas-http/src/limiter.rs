@@ -482,15 +482,16 @@ mod tests {
 
     use super::{InstanceLimiter, Paced, PoisonError, Rate};
 
-    /// The most a limiter refilling `per_second` can hand out for a quiet
-    /// that began at `since`, read once its requests are counted: what that
-    /// rate refilled in the time gone since, and one more for a refill the
+    /// The most a limiter at `rate` can hand out for a quiet that began at
+    /// `since`, read once its requests are counted: what `rate` refilled in
+    /// the time gone since, and one more for a refill the
     /// two clocks round differently (#1802). An upper bound read from the
     /// clock, not a literal: a test the machine stalls is held to what the
     /// stall refilled, and an unstalled one to the single request it always
     /// was. Counted here rather than by [`Rate::refilled_in`], which the
     /// tests are checking.
-    fn refilled_since(per_second: u128, since: Instant) -> u32 {
+    fn refilled_since(rate: Rate, since: Instant) -> u32 {
+        let per_second = u128::from(rate.per_second.get());
         let refilled = since.elapsed().as_nanos() * per_second / 1_000_000_000;
         u32::try_from(refilled + 1).unwrap_or(u32::MAX)
     }
@@ -644,7 +645,7 @@ mod tests {
         let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
 
         let left = strict.slot.current().take_left();
-        let bound = refilled_since(10, asked);
+        let bound = refilled_since(Rate::new(10, 4), asked);
         assert!(left <= bound, "{left} left, at most {bound} refilled");
     }
 
@@ -711,7 +712,7 @@ mod tests {
 
         assert_eq!(loose.slot.current().rate, Rate::new(100, 20), "it loosened");
         let left = loose.slot.current().take_left();
-        let bound = refilled_since(100, loose.slot.born);
+        let bound = refilled_since(Rate::new(100, 20), loose.slot.born);
         assert!(
             left <= bound,
             "{left} of twenty left, at most {bound} refilled"
@@ -737,7 +738,7 @@ mod tests {
 
         assert_eq!(loose.slot.current().rate, Rate::new(20, 8), "it loosened");
         let left = loose.slot.current().take_left();
-        let bound = refilled_since(20, asked);
+        let bound = refilled_since(Rate::new(20, 8), asked);
         assert!(
             left <= bound,
             "{left} of eight left, at most {bound} refilled"
