@@ -18,6 +18,12 @@
 #    stays. `take` is re-entrant for the holder; `assert` exits 0 for the
 #    holder and 1 for anyone else; `hold` runs nothing for a non-holder and
 #    passes its command's exit status through.
+# 4. `partner <PR> 2` names up to two ready, live waiters, oldest first
+#    (#1862); without a count it names one, as the brief before #1862 reads it.
+# 5. `gated` (#1862) says "merge without gating again" only to the holder,
+#    only while origin's main is the main `ready` recorded, the worktree's head
+#    is the head it recorded, and that head sits on that main. Anything else
+#    (a commit since, main moved, no record, origin unreadable) is stale.
 #
 # Everything runs under a private TMPDIR, so the real lock under the machine's
 # $TMPDIR is never touched. The lock no longer asks GitHub anything: a `gh` on
@@ -191,6 +197,102 @@ lock hold 1280 bash -c 'exit 7' > /dev/null 2>&1; hold_status=$?
 check "hold: the holder's command exit status passes through (status $hold_status)" [ "$hold_status" = 7 ]
 check "hold: the holder still holds afterwards" [ "$(assert_status 1280)" = 0 ]
 lock release 1280 > /dev/null
+
+# --- 4. partner: up to two ready, live waiters, oldest first ---
+# 1302 is ready before 1301, so the order is by number, not by arrival. 1299
+# is merged in a batch, 1298's queue entry is dead, 1297 is queued but not
+# ready, 1300 is the holder asking.
+fresh
+lock take 1300 > /dev/null
+mkdir -p "$QUEUE"
+for n in 1302 1301 1303 1299 1298; do lock ready "$n" "sha$n" > /dev/null; done
+lock merged 1299 merge1299 > /dev/null
+touch "$QUEUE/1302" "$QUEUE/1301" "$QUEUE/1303" "$QUEUE/1298" "$QUEUE/1297"
+age 200 "$QUEUE/1298"
+lock partner 1300 2 > "$scratch/p1.out"
+check "partner 2: the two oldest ready, live waiters, oldest first" \
+    diff <(printf '1301 sha1301\n1302 sha1302\n') "$scratch/p1.out"
+lock partner 1300 > "$scratch/p2.out"
+# A holder on the brief before #1862 stacks one partner and reads one line.
+check "partner without a count: one partner, the oldest" diff <(printf '1301 sha1301\n') "$scratch/p2.out"
+rm "$QUEUE/1301" "$QUEUE/1302"
+lock partner 1300 2 > "$scratch/p3.out"
+check "partner 2 with one candidate left: one line" diff <(printf '1303 sha1303\n') "$scratch/p3.out"
+lock partner 1300 3 > "$scratch/p4.out" 2>&1; p4_status=$?
+check "partner 3: refused, a batch is at most three (status $p4_status)" [ "$p4_status" = 2 ]
+lock release 1300 > /dev/null
+
+# --- 5. The pre-gate record: merge without gating again only when nothing moved ---
+# A real origin and two clones: `wt` is the merge-manager's worktree, `other`
+# moves main the way another merge does.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+g() { git -c user.name=test -c user.email=test@example.invalid -c commit.gpgsign=false "$@"; }
+wt=$scratch/wt
+git init -q --bare "$scratch/origin.git"
+git init -q -b main "$wt"
+g -C "$wt" commit -q --allow-empty -m base
+git -C "$wt" remote add origin "$scratch/origin.git"
+git -C "$wt" push -q origin HEAD:refs/heads/main
+git -C "$wt" switch -q -c feature
+g -C "$wt" commit -q --allow-empty -m feature
+main0=$(git -C "$wt" rev-parse HEAD^); head0=$(git -C "$wt" rev-parse HEAD)
+git clone -q "$scratch/origin.git" "$scratch/other" 2> /dev/null
+# gated_status <PR> <out file>: `gated`'s exit status, run in the worktree as the brief runs it.
+gated_status() { (cd "$wt" && lock gated "$1") > "$2" 2>&1; echo $?; }
+
+fresh
+lock take 1310 > /dev/null
+lock ready 1310 "$head0" "$main0" > /dev/null
+status=$(gated_status 1310 "$scratch/g1.out")
+check "gated: same head, main unchanged: merge without gating again (status $status)" [ "$status" = 0 ]
+check "gated: it says so" has "$scratch/g1.out" "without gating again"
+status=$(gated_status 1311 "$scratch/g2.out")
+check "gated: a PR that does not hold the lock, exit 1 (status $status)" [ "$status" = 1 ]
+
+g -C "$wt" commit -q --allow-empty -m "fix after the pre-gate"
+status=$(gated_status 1310 "$scratch/g3.out")
+check "gated: a commit after the pre-gate is stale (status $status)" [ "$status" = 1 ]
+check "gated: it names the head" has "$scratch/g3.out" "head"
+git -C "$wt" reset -q --hard "$head0"
+
+g -C "$scratch/other" commit -q --allow-empty -m "another merge"
+git -C "$scratch/other" push -q origin HEAD:refs/heads/main
+main1=$(git -C "$scratch/other" rev-parse HEAD)
+# The worktree has not fetched: its own origin/main still reads main0, and
+# `gated` must not trust it.
+status=$(gated_status 1310 "$scratch/g4.out")
+check "gated: main moved since the pre-gate, unfetched: stale (status $status)" [ "$status" = 1 ]
+check "gated: it says main moved, from and to" has "$scratch/g4.out" "main moved.*$main0.*$main1"
+
+# A record that claims the new main for a head that does not sit on it.
+lock ready 1310 "$head0" "$main1" > /dev/null
+git -C "$wt" fetch -q origin
+status=$(gated_status 1310 "$scratch/g5.out")
+check "gated: the head is not on the recorded main: stale (status $status)" [ "$status" = 1 ]
+
+git -C "$wt" rebase -q origin/main
+head1=$(git -C "$wt" rev-parse HEAD)
+lock ready 1310 "$head1" "$main1" > /dev/null
+status=$(gated_status 1310 "$scratch/g6.out")
+check "gated: rebased, gated again, recorded: merge without gating again (status $status)" [ "$status" = 0 ]
+
+# `ready` with no main is a merge-manager on the brief before #1862: no pre-gate.
+lock ready 1310 "$head1" > /dev/null
+status=$(gated_status 1310 "$scratch/g7.out")
+check "gated: ready without a main records no pre-gate (status $status)" [ "$status" = 1 ]
+check "gated: it says there is no pre-gate" has "$scratch/g7.out" "no pre-gate"
+
+lock ready 1310 "$head1" "$main1" > /dev/null
+git -C "$wt" remote set-url origin "$scratch/nowhere.git"
+status=$(gated_status 1310 "$scratch/g8.out")
+check "gated: origin unreadable: stale, never fresh (status $status)" [ "$status" = 1 ]
+git -C "$wt" remote set-url origin "$scratch/origin.git"
+
+lock release 1310 > /dev/null
+lock take 1310 > /dev/null
+status=$(gated_status 1310 "$scratch/g9.out")
+check "gated: release drops the record (status $status)" [ "$status" = 1 ]
+lock release 1310 > /dev/null
 
 check "the lock never asks GitHub" [ ! -e "$scratch/gh-called" ]
 
