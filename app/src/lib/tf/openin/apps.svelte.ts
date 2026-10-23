@@ -37,7 +37,7 @@ export interface Apps {
   reload(): Promise<void>;
   /** Save the list and the default; rejects with the backend's refusal. */
   save(applications: readonly CheckoutApplication[], defaultApplication: string | null): Promise<void>;
-  /** Run an application (or a command, for *Try it*) and say so in a toast. */
+  /** Run a saved application and say so in a toast. */
   run(entityId: string, name: string, at: OpenAt): Promise<void>;
   /** Tests only: forget the settings read (#1743). */
   reset(): void;

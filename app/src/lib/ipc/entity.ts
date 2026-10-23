@@ -1117,17 +1117,17 @@ export interface OpenAt {
   file?: string | null;
   /** Fills `{line}`. */
   line?: number | null;
-  /** A command not saved yet, run instead of an application (*Try it*). */
-  command?: string | null;
 }
 
 /**
  * Run an application at this entity's checkout — `open_checkout` (#501,
  * #844). Answers the argument vector it started.
  *
- * The one call that starts a program a person chose. Every value filled into
- * it is from this disk: the checkout path and a file inside it, never a field
- * of the mirrored repo (ADR-0016). Resolves once the program has started.
+ * The one call that starts a program a person chose, and the program is
+ * always a saved application: *Try it* saves the draft first and opens it by
+ * id (#1643). Every value filled into it is from this disk: the checkout path
+ * and a file inside it, never a field of the mirrored repo (ADR-0016).
+ * Resolves once the program has started.
  */
 export function openCheckout(entityId: string, at: OpenAt = {}): Promise<string[]> {
   return invoke<string[]>("open_checkout", {
@@ -1135,7 +1135,6 @@ export function openCheckout(entityId: string, at: OpenAt = {}): Promise<string[
     application: at.application ?? null,
     file: at.file ?? null,
     line: at.line ?? null,
-    command: at.command ?? null,
   });
 }
 

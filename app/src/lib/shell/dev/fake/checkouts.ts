@@ -270,18 +270,13 @@ function fakeOpen(args: Record<string, unknown>) {
   }
   const file = typeof args["file"] === "string" && args["file"] !== "" ? `${checkout.path}/${args["file"]}` : null;
   const line = typeof args["line"] === "number" ? args["line"] : 1;
-  let template: string;
-  if (typeof args["command"] === "string") {
-    template = args["command"];
-  } else {
-    const id = typeof args["application"] === "string" ? args["application"] : fakeSettings().default_application;
-    const app = fakeApps.find((one) => one.id === id);
-    if (!app) throw { code: "invalid", message: `'${id}' is not one of your applications: see Settings › Checkouts`, source_id: null };
-    if (app.id === fakeOpenFails) {
-      throw { code: "invalid", message: `'${app.command}' could not be run: No such file or directory (os error 2)`, source_id: null };
-    }
-    template = file !== null && app.file_command ? app.file_command : app.command;
+  const id = typeof args["application"] === "string" ? args["application"] : fakeSettings().default_application;
+  const app = fakeApps.find((one) => one.id === id);
+  if (!app) throw { code: "invalid", message: `'${id}' is not one of your applications: see Settings › Checkouts`, source_id: null };
+  if (app.id === fakeOpenFails) {
+    throw { code: "invalid", message: `'${app.command}' could not be run: No such file or directory (os error 2)`, source_id: null };
   }
+  const template = file !== null && app.file_command ? app.file_command : app.command;
   refuse(template, `'${template}'`);
   const name = checkout.path.split("/").pop() ?? "";
   return words(template).map((word) =>

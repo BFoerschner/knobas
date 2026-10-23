@@ -5,8 +5,10 @@
   this disk; the warnings; *Try it on <repo>*; and, editing, *Remove*.
 
   Saving writes the whole list (`set_checkout_applications`), so every menu
-  redraws from the answer. *Try it* runs the command as typed and saves
-  nothing (`open_checkout` with `command`).
+  redraws from the answer. *Try it* saves the draft too and opens it by the id
+  the save gave it (`open_checkout` with `application`): the program is always
+  a saved template (#1643, ADR-0016). From then on the dialog edits that entry,
+  and closing it unsaved puts the list back as it was before the first try.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -40,6 +42,10 @@
   let fileCommand = $state(editing?.file_command ?? "");
   let error = $state<string | null>(null);
   let busy = $state(false);
+  /** The entry's place in the saved list: `index`, or where a *Try it* saved a new one. */
+  let at = $state<number | null>((() => index)());
+  /** The list and its default before the first *Try it*, put back if the dialog closes unsaved. */
+  let before: { list: CheckoutApplication[]; default: string | null } | null = null;
 
   let commandField = $state<HTMLInputElement | null>(null);
   let fileField = $state<HTMLInputElement | null>(null);
@@ -71,12 +77,18 @@
     });
   }
 
+  /** Save `list`, keeping the default where it still names an entry; rejects with the refusal. */
+  async function store(list: CheckoutApplication[]) {
+    const current = apps.settings?.default_application ?? null;
+    await apps.save(list, list.some((app) => app.id === current) ? current : null);
+  }
+
   async function write(list: CheckoutApplication[], said: string) {
     busy = true;
     error = null;
     try {
-      const current = apps.settings?.default_application ?? null;
-      await apps.save(list, list.some((app) => app.id === current) ? current : null);
+      await store(list);
+      before = null;
       push({ text: said });
       onclose();
     } catch (cause) {
@@ -85,18 +97,23 @@
     }
   }
 
-  function save() {
-    if (!ready) return;
+  /** The saved list with the dialog's entry in its place, or at the end for a new one. */
+  function withEntry(): CheckoutApplication[] {
     const list = [...(apps.settings?.applications ?? [])];
     const entry: CheckoutApplication = {
-      id: editing?.id ?? "",
+      id: at !== null ? (list[at]?.id ?? "") : "",
       name: name.trim(),
       command: command.trim(),
       file_command: fileCommand.trim() || null,
     };
-    if (index !== null && editing !== null) list[index] = entry;
+    if (at !== null && at < list.length) list[at] = entry;
     else list.push(entry);
-    void write(list, `${editing ? "Saved" : "Added"} ${entry.name}. It is in every Open in… menu.`);
+    return list;
+  }
+
+  function save() {
+    if (!ready) return;
+    void write(withEntry(), `${editing ? "Saved" : "Added"} ${name.trim()}. It is in every Open in… menu.`);
   }
 
   function remove() {
@@ -105,13 +122,40 @@
     void write(list, "Removed the application");
   }
 
-  function tryIt() {
-    if (sample === null || command.trim() === "") return;
-    void apps.run(sample.entityId, name.trim() || "the application", { command: command.trim() });
+  async function tryIt() {
+    if (sample === null || !ready) return;
+    const was = { list: [...(apps.settings?.applications ?? [])], default: apps.settings?.default_application ?? null };
+    const list = withEntry();
+    busy = true;
+    error = null;
+    try {
+      await store(list);
+    } catch (cause) {
+      error = ipcErrorMessage(cause);
+      return;
+    } finally {
+      busy = false;
+    }
+    before ??= was;
+    at ??= list.length - 1;
+    const id = apps.settings?.applications[at]?.id;
+    if (id !== undefined) await apps.run(sample.entityId, name.trim(), { application: id });
+  }
+
+  /** Close unsaved: a list a *Try it* changed goes back to what it was. */
+  function dismiss() {
+    const restore = before;
+    before = null;
+    if (restore !== null) {
+      apps.save(restore.list, restore.default).catch((cause: unknown) => {
+        push({ text: `Could not take back the try of ${name.trim()}: ${ipcErrorMessage(cause)}`, tone: "err" });
+      });
+    }
+    onclose();
   }
 </script>
 
-<TfDialog title={editing ? "Edit an application" : "Add an application"} {onclose} {layers} className="tf-app-dialog">
+<TfDialog title={editing ? "Edit an application" : "Add an application"} onclose={dismiss} {layers} className="tf-app-dialog">
   {#snippet body()}
     <form
       class="tf-formgrid"
@@ -175,9 +219,9 @@
       <button type="button" class="tf-btn tf-ghost tf-remove" disabled={busy} onclick={remove}>Remove</button>
     {/if}
     {#if sample !== null}
-      <button type="button" class="tf-btn" disabled={command.trim() === ""} onclick={tryIt}>Try it on {sample.name}</button>
+      <button type="button" class="tf-btn" disabled={!ready} onclick={() => void tryIt()}>Try it on {sample.name}</button>
     {/if}
-    <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button type="button" class="tf-btn tf-ghost" onclick={dismiss}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-app-form" disabled={!ready}>{editing ? "Save" : "Add application"}</button>
   {/snippet}
 </TfDialog>
