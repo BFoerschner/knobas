@@ -1713,3 +1713,418 @@ mod walk {
         assert_eq!(drain(walk).await, (vec![], "protocol: down".to_owned()));
     }
 }
+
+// ---- Bounds: the body cap, a redirected write, a URL with userinfo (#1640) --
+
+mod bounds {
+    use std::io::Write as _;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    use knobas_http::{Auth, BodyExcerpt, HttpClient, HttpConfig, InstanceLimiter, Method};
+    use knobas_source::SourceError;
+
+    /// What [`ScriptedServer`] sends for one request.
+    struct Answer {
+        bytes: Vec<u8>,
+        /// Keep the connection open after `bytes`, sending nothing more: a
+        /// body shorter than its declared length.
+        then_hold: bool,
+    }
+
+    impl Answer {
+        fn sent(bytes: Vec<u8>) -> Self {
+            Self {
+                bytes,
+                then_hold: false,
+            }
+        }
+    }
+
+    /// `status` with `headers` and `body`, `content-length` set from the body.
+    fn response(status: u16, headers: &str, body: &[u8]) -> Vec<u8> {
+        let mut bytes = format!(
+            "HTTP/1.1 {status} X\r\n{headers}content-length: {}\r\nconnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        bytes.extend_from_slice(body);
+        bytes
+    }
+
+    /// A server that answers each request with what `answer` makes of its
+    /// head, and keeps every head it was sent, in order.
+    struct ScriptedServer {
+        port: u16,
+        heads: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl ScriptedServer {
+        fn new(answer: fn(&str) -> Answer) -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("addr").port();
+            // Held for the process, as `CountingServer`'s is: the limiter is
+            // keyed by origin, and a reused port would inherit its quota.
+            std::mem::forget(listener.try_clone().expect("hold the port"));
+            listener.set_nonblocking(true).expect("nonblocking");
+            let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+            let heads = Arc::new(Mutex::new(Vec::new()));
+            let kept = Arc::clone(&heads);
+            tokio::spawn(async move {
+                while let Ok((mut socket, _)) = listener.accept().await {
+                    let kept = Arc::clone(&kept);
+                    tokio::spawn(async move {
+                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                        let mut read = Vec::new();
+                        let mut buffer = [0u8; 4096];
+                        while !read.windows(4).any(|w| w == b"\r\n\r\n") {
+                            match socket.read(&mut buffer).await {
+                                Ok(0) | Err(_) => return,
+                                Ok(n) => read.extend_from_slice(&buffer[..n]),
+                            }
+                        }
+                        let head = String::from_utf8_lossy(&read).into_owned();
+                        let answer = answer(&head);
+                        kept.lock().expect("heads").push(head);
+                        let _ = socket.write_all(&answer.bytes).await;
+                        if answer.then_hold {
+                            tokio::time::sleep(Duration::from_secs(30)).await;
+                        }
+                        let _ = socket.shutdown().await;
+                    });
+                }
+            });
+            Self { port, heads }
+        }
+
+        fn url(&self) -> String {
+            format!("http://127.0.0.1:{}", self.port)
+        }
+
+        /// Each request's line, e.g. `"POST /a HTTP/1.1"`.
+        fn request_lines(&self) -> Vec<String> {
+            self.heads
+                .lock()
+                .expect("heads")
+                .iter()
+                .map(|head| head.lines().next().unwrap_or_default().to_owned())
+                .collect()
+        }
+
+        fn heads(&self) -> Vec<String> {
+            self.heads.lock().expect("heads").clone()
+        }
+    }
+
+    /// The cap the body tests run at: small enough that twice it is cheap.
+    const CAP: u64 = 64 * 1024;
+
+    fn capped_client(url: String) -> HttpClient {
+        HttpClient::new(HttpConfig {
+            base_url: url,
+            adapter_kind: "test".to_owned(),
+            adapter_version: "0.1.0".to_owned(),
+            auth: Auth::None,
+            max_body: CAP,
+            request_timeout: Duration::from_secs(5),
+            ..HttpConfig::default()
+        })
+        .expect("client")
+    }
+
+    /// A JSON string `len` bytes long, quotes included.
+    fn json_of_length(len: usize) -> Vec<u8> {
+        let mut body = vec![b'a'; len];
+        body[0] = b'"';
+        body[len - 1] = b'"';
+        body
+    }
+
+    fn twice_the_cap(_: &str) -> Answer {
+        Answer::sent(response(200, "", &json_of_length(2 * CAP as usize)))
+    }
+
+    fn names_the_cap(error: &SourceError) -> bool {
+        matches!(error, SourceError::Protocol { status: None, message } if message.contains("64 KiB"))
+    }
+
+    /// SPI-4: a body twice the cap is refused, naming the cap, through both
+    /// reads this crate does for an adapter.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_body_over_the_cap_is_refused_naming_the_cap() {
+        let server = ScriptedServer::new(twice_the_cap);
+        let client = capped_client(server.url());
+
+        let plain = client
+            .get_json::<serde_json::Value>("/listing", &[])
+            .await
+            .expect_err("over the cap");
+        assert!(names_the_cap(&plain), "{plain:?}");
+
+        let excerpted = client
+            .get_json_with::<serde_json::Value, [(&str, &str)]>(
+                "/listing",
+                &[],
+                Some(BodyExcerpt {
+                    contract: "the test contract",
+                }),
+            )
+            .await
+            .expect_err("over the cap");
+        assert!(names_the_cap(&excerpted), "{excerpted:?}");
+    }
+
+    /// The declared length is read before the body is: a server that
+    /// declares twice the cap and then sends almost nothing is refused at
+    /// once, not after the request timeout spent waiting for the rest.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_declared_length_over_the_cap_is_refused_before_the_read() {
+        fn declares_twice(_: &str) -> Answer {
+            let mut bytes = format!(
+                "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                2 * CAP
+            )
+            .into_bytes();
+            bytes.extend_from_slice(b"\"aaaa");
+            Answer {
+                bytes,
+                then_hold: true,
+            }
+        }
+        let server = ScriptedServer::new(declares_twice);
+        let client = capped_client(server.url());
+
+        let started = Instant::now();
+        let error = client
+            .get_json::<serde_json::Value>("/listing", &[])
+            .await
+            .expect_err("over the cap");
+        assert!(names_the_cap(&error), "{error:?}");
+        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+    }
+
+    /// What reqwest inflates counts, not what arrived: a gzip body far under
+    /// the cap that inflates to twice it is refused.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_gzip_body_that_inflates_past_the_cap_is_refused() {
+        fn gzipped(_: &str) -> Answer {
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+            encoder
+                .write_all(&json_of_length(2 * CAP as usize))
+                .expect("gzip");
+            let compressed = encoder.finish().expect("gzip");
+            // The fixture's premise: it arrives small.
+            assert!((compressed.len() as u64) < CAP / 16, "{}", compressed.len());
+            Answer::sent(response(200, "content-encoding: gzip\r\n", &compressed))
+        }
+        let server = ScriptedServer::new(gzipped);
+        let client = capped_client(server.url());
+
+        let error = client
+            .get_json::<serde_json::Value>("/listing", &[])
+            .await
+            .expect_err("inflates over the cap");
+        assert!(names_the_cap(&error), "{error:?}");
+        // And the server did gzip it: reqwest asked for it.
+        assert!(
+            server.heads()[0].to_ascii_lowercase().contains("accept-encoding: gzip"),
+            "{:?}",
+            server.heads()
+        );
+    }
+
+    /// A body at the cap is read whole, and so is one under it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_body_at_or_under_the_cap_is_read() {
+        fn at_the_cap(head: &str) -> Answer {
+            let len = if head.starts_with("GET /at ") { CAP } else { CAP / 2 };
+            Answer::sent(response(200, "", &json_of_length(len as usize)))
+        }
+        let server = ScriptedServer::new(at_the_cap);
+        let client = capped_client(server.url());
+        for path in ["/at", "/under"] {
+            let read = client
+                .get_json::<serde_json::Value>(path, &[])
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error:?}"));
+            assert!(read.is_string(), "{path}");
+        }
+    }
+
+    /// An adapter that reads the answer itself is bounded too: the cap is on
+    /// the body `send` hands back, not only on this crate's own reads.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_adapters_own_read_of_a_sent_answer_is_bounded() {
+        let server = ScriptedServer::new(twice_the_cap);
+        let client = capped_client(server.url());
+        let answer = client
+            .send(client.request(Method::GET, "/listing"))
+            .await
+            .expect("the status is a success");
+        let read = answer.bytes().await;
+        assert!(read.is_err(), "read {} bytes", read.map(|b| b.len()).unwrap_or(0));
+    }
+
+    /// A download is not capped: `send_streaming` is for the bodies that are
+    /// large on purpose (#1012).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_streamed_body_over_the_cap_arrives_whole() {
+        let server = ScriptedServer::new(twice_the_cap);
+        let client = capped_client(server.url());
+        let mut body = client
+            .send_streaming(
+                client.request(Method::GET, "/big.zip"),
+                Duration::from_secs(5),
+            )
+            .await
+            .expect("headers");
+        let mut total = 0;
+        while let Some(chunk) = body.chunk().await.expect("whole") {
+            total += chunk.len();
+        }
+        assert_eq!(total as u64, 2 * CAP);
+    }
+
+    /// A failing status keeps its class with a body over the cap, and its
+    /// message names the cap where the body's excerpt would be.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_error_body_over_the_cap_keeps_its_status_and_names_the_cap() {
+        fn refused(_: &str) -> Answer {
+            Answer::sent(response(400, "", &json_of_length(2 * CAP as usize)))
+        }
+        let server = ScriptedServer::new(refused);
+        let client = capped_client(server.url());
+        let error = client
+            .get_json::<serde_json::Value>("/listing", &[])
+            .await
+            .expect_err("400");
+        assert!(
+            matches!(&error, SourceError::Protocol { status: Some(400), message } if message.contains("64 KiB")),
+            "{error:?}"
+        );
+    }
+
+    /// SPI-7: a write answered with a redirect is refused, naming where it
+    /// was sent, and the GET the redirect asks for is never made -- for every
+    /// redirect status, retried write or once-sent.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_redirected_write_is_refused_naming_the_location() {
+        fn moves(head: &str) -> Answer {
+            if head.starts_with("GET ") {
+                return Answer::sent(response(200, "", b"[]"));
+            }
+            let status = head
+                .split_whitespace()
+                .nth(1)
+                .and_then(|path| path.rsplit('/').next())
+                .and_then(|last| last.parse().ok())
+                .unwrap_or(301);
+            Answer::sent(response(
+                status,
+                "location: /rest/api/2/issue/PAY-1/transitions/\r\n",
+                b"",
+            ))
+        }
+        let server = ScriptedServer::new(moves);
+        let client = capped_client(server.url());
+
+        for status in [301, 302, 303, 307, 308] {
+            for once in [false, true] {
+                let request = client
+                    .request(Method::POST, &format!("/rest/api/2/issue/PAY-1/{status}"))
+                    .json(&serde_json::json!({ "transition": { "id": "31" } }));
+                let request = if once { request.no_retry() } else { request };
+                let error = client.send(request).await.expect_err("redirected");
+                assert!(
+                    matches!(&error, SourceError::Protocol { status: Some(s), message }
+                        if *s == status && message.contains("/rest/api/2/issue/PAY-1/transitions/")),
+                    "{status} once={once}: {error:?}"
+                );
+            }
+        }
+        let lines = server.request_lines();
+        assert_eq!(lines.len(), 10, "{lines:?}");
+        assert!(lines.iter().all(|line| line.starts_with("POST ")), "{lines:?}");
+    }
+
+    /// A read still follows a redirect.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_redirected_read_is_followed() {
+        fn moves(head: &str) -> Answer {
+            if head.starts_with("GET /old ") {
+                Answer::sent(response(301, "location: /new\r\n", b""))
+            } else {
+                Answer::sent(response(200, "", br#"{"moved":true}"#))
+            }
+        }
+        let server = ScriptedServer::new(moves);
+        let client = capped_client(server.url());
+        let read: serde_json::Value = client.get_json("/old", &[]).await.expect("followed");
+        assert_eq!(read["moved"], true);
+        assert_eq!(server.request_lines(), ["GET /old HTTP/1.1", "GET /new HTTP/1.1"]);
+    }
+
+    const PASSWORD: &str = "pw-from-a-browser-form";
+
+    /// SPI-10: a base URL carrying a username or a password is refused when
+    /// the client is built, and the refusal does not repeat the password.
+    #[test]
+    fn a_base_url_with_userinfo_is_refused_without_naming_it() {
+        for url in [
+            format!("https://me:{PASSWORD}@jira.example"),
+            format!("https://:{PASSWORD}@jira.example"),
+            "https://me@jira.example".to_owned(),
+            format!("https:me:{PASSWORD}@jira.example"),
+        ] {
+            let error = HttpClient::new(HttpConfig {
+                base_url: url.clone(),
+                ..HttpConfig::default()
+            })
+            .expect_err(&url);
+            assert!(
+                matches!(&error, SourceError::Protocol { status: None, message }
+                    if message.contains("username or password") && !message.contains(PASSWORD)),
+                "{url}: {error:?}"
+            );
+            let limiter = InstanceLimiter::for_url(&url, 5, 10).expect_err(&url);
+            assert!(!limiter.to_string().contains(PASSWORD), "{limiter}");
+        }
+    }
+
+    /// No refusal of a base URL repeats a password in it, malformed or not.
+    #[test]
+    fn a_refused_base_url_never_repeats_its_password() {
+        for url in [
+            format!("ftp://me:{PASSWORD}@jira.example"),
+            format!("https://me:{PASSWORD}@jira example"),
+        ] {
+            let error = HttpClient::new(HttpConfig {
+                base_url: url.clone(),
+                ..HttpConfig::default()
+            })
+            .expect_err(&url);
+            assert!(!error.to_string().contains(PASSWORD), "{url}: {error}");
+        }
+    }
+
+    /// `HttpConfig`'s `Debug` prints the base URL without its password.
+    #[test]
+    fn a_configs_debug_never_prints_a_password_in_its_url() {
+        for url in [
+            format!("https://me:{PASSWORD}@jira.example/prefix"),
+            format!("https:me:{PASSWORD}@jira.example"),
+            format!("https://me:{PASSWORD}@jira example"),
+        ] {
+            let printed = format!(
+                "{:?}",
+                HttpConfig {
+                    base_url: url,
+                    ..HttpConfig::default()
+                }
+            );
+            assert!(!printed.contains(PASSWORD), "{printed}");
+            assert!(printed.contains("jira"), "the host stays readable: {printed}");
+        }
+    }
+}

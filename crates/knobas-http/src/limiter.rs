@@ -459,15 +459,35 @@ impl Paced {
 
 /// `url` parsed, if it is an http(s) URL: what [`InstanceLimiter::for_url`]
 /// and [`HttpClient::new`](crate::HttpClient::new) both accept.
+///
+/// No message repeats a username or password the URL carries (#1640): one
+/// that carries any is refused before the scheme is looked at, and one that
+/// does not parse is named with its userinfo masked.
 pub(crate) fn http_url(url: &str) -> Result<url::Url, SourceError> {
-    let parsed = url::Url::parse(url)
-        .map_err(|error| SourceError::protocol(format!("base url {url:?}: {error}")))?;
+    let parsed = url::Url::parse(url).map_err(|error| {
+        SourceError::protocol(format!(
+            "base url {:?}: {error}",
+            knobas_source::instance::redact_userinfo(url)
+        ))
+    })?;
+    refuse_userinfo(&parsed)?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(SourceError::protocol(format!(
             "base url {url:?} is not http(s)"
         )));
     }
     Ok(parsed)
+}
+
+/// [`crate::refuse_userinfo`] on a URL already parsed.
+pub(crate) fn refuse_userinfo(url: &url::Url) -> Result<(), SourceError> {
+    if url.username().is_empty() && url.password().is_none() {
+        return Ok(());
+    }
+    Err(SourceError::protocol(
+        "the base url carries a username or password; knobas sends the credential the source is \
+         configured with, so the address must not carry one",
+    ))
 }
 
 /// Quotas cannot be zero; a misconfigured `0/s` means "one", not "never".

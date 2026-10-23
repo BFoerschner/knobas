@@ -3188,7 +3188,10 @@ name = "knobas-http"
 version = "2.0.0"
 dependencies = [
  "bytes",
+ "flate2",
  "governor",
+ "http",
+ "http-body",
  "knobas-http",
  "knobas-source",
  "reqwest",

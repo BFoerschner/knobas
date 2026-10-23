@@ -54,7 +54,22 @@
 //!   offset and next link (issue #1315).
 //! * **`User-Agent: knobas/<version> (<adapter_kind>/<adapter_version>)`** --
 //!   an admin reading their access log can tell what is calling them.
+//! * **A cap on what one answer's body may hold** ([`HttpConfig::max_body`],
+//!   [`MAX_BODY`] by default): checked against the declared length before the
+//!   read, and counted as the body is decoded, so a gzip bomb is refused
+//!   too. Every body [`HttpClient::send`] hands back is read through it, an
+//!   adapter's own `response.json()` included; a streamed download is not
+//!   (#1640).
+//! * **A redirect is followed for a read only.** A `GET` or `HEAD` follows
+//!   one as reqwest does; any other method answered with a redirect fails
+//!   with `Protocol` naming the `Location`, rather than reqwest re-sending a
+//!   write as a `GET` whose `200` would read as the write's success
+//!   (ADR-0012, #1640).
+//! * **No credential in a base URL.** [`HttpClient::new`] refuses one that
+//!   carries a username or a password ([`refuse_userinfo`]), and no message
+//!   or `Debug` of this crate repeats one (#1640).
 
+mod cap;
 pub mod classify;
 mod credential;
 mod limiter;
@@ -128,6 +143,16 @@ pub const SEND_BUDGET: Duration = Duration::from_secs(45);
 /// anyone still there?" -- about one read instead of about the whole body.
 pub const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The most bytes of one answer's body a client reads by default
+/// ([`HttpConfig::max_body`], #1640).
+///
+/// Tens of MiB on purpose: far over the largest page any adapter asks for (a
+/// hundred Jira issues with their fields run to a few MiB), and far under
+/// what the desktop app can hold beside its embedded Postgres. A download that
+/// is large on purpose goes through [`HttpClient::send_streaming`], which is
+/// not capped.
+pub const MAX_BODY: u64 = 32 * 1024 * 1024;
+
 /// How an adapter authenticates. The secret lives in the OS keychain and
 /// arrives here per instance; it is never logged and never stored.
 ///
@@ -162,9 +187,9 @@ impl std::fmt::Debug for Auth {
 
 /// What one adapter instance's client is configured with.
 ///
-/// `Debug`-able because [`Auth`]'s own `Debug` redacts; a config that could
-/// not be logged at all would be logged by hand, field by field, three times.
-#[derive(Debug)]
+/// `Debug`-able because [`Auth`]'s own `Debug` redacts and the base URL is
+/// printed without a username or password in it; a config that could not be
+/// logged at all would be logged by hand, field by field, three times.
 pub struct HttpConfig {
     /// The instance's base URL, path prefix included.
     pub base_url: String,
@@ -202,6 +227,35 @@ pub struct HttpConfig {
     /// refuses the credential, or `None` to read every 403 as the credential's
     /// ([`classify::ForbiddenReading`], issue #722). Gitea's only.
     pub forbidden: Option<classify::ForbiddenReading>,
+    /// The most bytes of one answer's body this client reads, as decoded
+    /// ([`MAX_BODY`] by default, #1640). Over it, the read fails with
+    /// [`SourceError::Protocol`] naming the cap; a failing status keeps its
+    /// class and names the cap where its body would be. Not applied to a
+    /// [`HttpClient::send_streaming`] body.
+    pub max_body: u64,
+}
+
+impl std::fmt::Debug for HttpConfig {
+    /// Every field, the base URL without its userinfo (#1640).
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HttpConfig")
+            .field(
+                "base_url",
+                &knobas_source::instance::redact_userinfo(&self.base_url),
+            )
+            .field("adapter_kind", &self.adapter_kind)
+            .field("adapter_version", &self.adapter_version)
+            .field("auth", &self.auth)
+            .field("requests_per_second", &self.requests_per_second)
+            .field("burst", &self.burst)
+            .field("connect_timeout", &self.connect_timeout)
+            .field("request_timeout", &self.request_timeout)
+            .field("body_message", &self.body_message)
+            .field("forbidden", &self.forbidden)
+            .field("max_body", &self.max_body)
+            .finish()
+    }
 }
 
 impl Default for HttpConfig {
@@ -217,13 +271,21 @@ impl Default for HttpConfig {
             request_timeout: Duration::from_secs(30),
             body_message: None,
             forbidden: None,
+            max_body: MAX_BODY,
         }
     }
 }
 
 /// One adapter instance's HTTP client.
 pub struct HttpClient {
+    /// For `GET` and `HEAD`: follows a redirect as reqwest does.
     inner: reqwest::Client,
+    /// For every other method: follows none, so [`HttpClient::send`] sees the
+    /// redirect and refuses it (#1640). reqwest's redirect policy cannot see
+    /// the method, so the choice is made by picking the client.
+    writes: reqwest::Client,
+    /// [`HttpConfig::max_body`].
+    max_body: u64,
     /// The per-request timeout, kept so [`HttpClient::send`] can shorten it to
     /// whatever is left of [`SEND_BUDGET`].
     request_timeout: Duration,
@@ -259,9 +321,10 @@ impl HttpClient {
     ///
     /// # Errors
     ///
-    /// [`SourceError::Protocol`] if the base URL is not a URL or the TLS
-    /// backend cannot be built -- both are configuration failures, and both
-    /// must surface when the source is saved rather than mid-sync.
+    /// [`SourceError::Protocol`] if the base URL is not an http(s) URL,
+    /// carries a username or a password ([`refuse_userinfo`]), or the TLS
+    /// backend cannot be built -- all configuration failures, and all must
+    /// surface when the source is saved rather than mid-sync.
     pub fn new(config: HttpConfig) -> Result<Self, SourceError> {
         let parsed = limiter::http_url(&config.base_url)?;
 
@@ -281,7 +344,8 @@ impl HttpClient {
                 .map_err(|error| SourceError::protocol(format!("user agent: {error}")))?,
         );
 
-        let client = reqwest::Client::builder()
+        let build = |redirect: reqwest::redirect::Policy| {
+            reqwest::Client::builder()
             // Explicit, and it must stay explicit. reqwest picks its backend
             // from the *union* of the features every crate in the workspace
             // asks for, and `TlsBackend::default()` prefers native-tls the
@@ -295,9 +359,13 @@ impl HttpClient {
             // No client-wide `.timeout`: a request's timeout is set per
             // attempt in `send_with`, and a client-wide one would cut every
             // streamed body off at the request timeout, which is #1012's bug.
-            .default_headers(headers)
+            .default_headers(headers.clone())
+            .redirect(redirect)
             .build()
-            .map_err(|error| SourceError::protocol(format!("building the http client: {error}")))?;
+            .map_err(|error| SourceError::protocol(format!("building the http client: {error}")))
+        };
+        let client = build(reqwest::redirect::Policy::default())?;
+        let writes = build(reqwest::redirect::Policy::none())?;
 
         let limiter = InstanceLimiter::for_origin(
             &parsed,
@@ -306,6 +374,8 @@ impl HttpClient {
 
         Ok(Self {
             inner: client,
+            writes,
+            max_body: config.max_body,
             request_timeout: config.request_timeout,
             send_budget: SEND_BUDGET,
             base_url: config.base_url.trim_end_matches('/').to_owned(),
@@ -334,7 +404,11 @@ impl HttpClient {
     /// that puts it on the wire. That is the point -- see [`Request`].
     #[must_use]
     pub fn request(&self, method: Method, path: &str) -> Request {
-        let request = self.inner.request(method, self.url_for(path));
+        // A read follows a redirect; anything else is sent on the client
+        // that follows none (#1640).
+        let follows = method == Method::GET || method == Method::HEAD;
+        let client = if follows { &self.inner } else { &self.writes };
+        let request = client.request(method, self.url_for(path));
         let request = match &self.auth {
             Auth::None => request,
             Auth::Bearer(token) => request.bearer_auth(token),
@@ -344,6 +418,7 @@ impl HttpClient {
         Request {
             inner: request,
             retry: true,
+            follows,
         }
     }
 
@@ -412,6 +487,7 @@ impl HttpClient {
         // retried only after a connect error: the connection never opened, so
         // no byte of it reached the source.
         let retry = request.retry;
+        let follows = request.follows;
         let mut request = request.inner;
         // What the attempt before this one ended in, once there was one: what
         // the call reports if the budget runs out before the next goes.
@@ -492,7 +568,21 @@ impl HttpClient {
             // is what to report if there is not going to be one. Carrying both
             // is what keeps a 503-that-cannot-be-retried a 503.
             let (delay, give_up) = match answered {
-                Ok(response) if response.status().is_success() => return Ok(response),
+                Ok(response) if response.status().is_success() => {
+                    // A download is large on purpose and is bounded by its
+                    // stall timeout instead (#1012); every other body is
+                    // read through the cap (#1640).
+                    return Ok(match deadline {
+                        Deadline::Whole => cap::capped(response, self.max_body),
+                        Deadline::Headers => response,
+                    });
+                }
+                // A write that met a redirect: refused, never re-sent. The
+                // client it went out on follows none, so this is the answer
+                // to the write itself, and nothing has been sent since.
+                Ok(response) if !follows && response.status().is_redirection() => {
+                    return Err(redirected(&response));
+                }
                 Ok(response) => {
                     let status = response.status();
                     let transient = retry && retry::status_is_transient(status.as_u16());
@@ -501,7 +591,8 @@ impl HttpClient {
                     // Bounded here too: a streamed send's response carries no
                     // deadline of its own, and an error body that dribbles
                     // must not hold the call open.
-                    let body = tokio::time::timeout(attempt_timeout, body_of(response))
+                    let body =
+                        tokio::time::timeout(attempt_timeout, body_of(response, self.max_body))
                         .await
                         .unwrap_or_default();
                     let error =
@@ -583,7 +674,7 @@ impl HttpClient {
         response
             .json::<T>()
             .await
-            .map_err(|error| SourceError::protocol(format!("decoding {path}: {error}")))
+            .map_err(|error| read_error(path, &error, |error| format!("decoding {path}: {error}")))
     }
 
     /// GET a JSON document, with the body's start in the message when it is
@@ -618,13 +709,14 @@ impl HttpClient {
             .send(self.request(Method::GET, path).query(query))
             .await?;
         let Some(BodyExcerpt { contract }) = excerpt else {
-            return response
-                .json::<T>()
-                .await
-                .map_err(|error| SourceError::protocol(format!("decoding {path}: {error}")));
+            return response.json::<T>().await.map_err(|error| {
+                read_error(path, &error, |error| format!("decoding {path}: {error}"))
+            });
         };
         let body = response.text().await.map_err(|error| {
-            SourceError::protocol(format!("{path}: the answer's body broke off: {error}"))
+            read_error(path, &error, |error| {
+                format!("{path}: the answer's body broke off: {error}")
+            })
         })?;
         serde_json::from_str::<T>(&body).map_err(|error| {
             let start: String = body.chars().take(BODY_EXCERPT_CHARS).collect();
@@ -728,6 +820,9 @@ pub struct Request {
     inner: reqwest::RequestBuilder,
     /// `false` once [`Request::no_retry`] said so.
     retry: bool,
+    /// A `GET` or `HEAD`, built on the client that follows a redirect
+    /// (#1640).
+    follows: bool,
 }
 
 impl std::fmt::Debug for Request {
@@ -896,6 +991,72 @@ impl Request {
 
 /// A response body, or an empty string if it cannot be read -- this is only
 /// ever used to build an error message.
-async fn body_of(response: reqwest::Response) -> String {
-    response.text().await.unwrap_or_default()
+///
+/// Read through the cap (#1640). Over it, the "body" is the sentence naming
+/// the cap, so the status keeps its class -- a `503` is still retried, a
+/// `401` still asks for the credential -- and the message says why it
+/// carries no excerpt.
+async fn body_of(response: reqwest::Response, max_body: u64) -> String {
+    match cap::capped(response, max_body).text().await {
+        Ok(body) => body,
+        Err(error) => cap::over_cap(&error)
+            .map(|over| over.to_string())
+            .unwrap_or_default(),
+    }
+}
+
+/// A failed read of `path`'s answer: the cap's sentence when the cap is why,
+/// `otherwise`'s reading of the error when it is not.
+fn read_error(
+    path: &str,
+    error: &reqwest::Error,
+    otherwise: impl FnOnce(&reqwest::Error) -> String,
+) -> SourceError {
+    match cap::over_cap(error) {
+        Some(over) => SourceError::protocol(format!("{path}: {over}")),
+        None => SourceError::protocol(otherwise(error)),
+    }
+}
+
+/// A write answered with a redirect (#1640, SPI-7).
+///
+/// `Protocol` with the redirect's status, which the write queue records as a
+/// refusal: a proxy that moves a write is a base URL the reader has to fix,
+/// and guessing whether to re-send the write elsewhere, or as which method,
+/// is not this crate's to do. Under ADR-0012 a write that reads as success
+/// must have happened, and following the redirect as reqwest does turns a
+/// `POST` into a `GET` whose `200` reads as exactly that.
+fn redirected(response: &reqwest::Response) -> SourceError {
+    let status = response.status();
+    let location = response
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|location| location.to_str().ok())
+        .unwrap_or("nowhere it named");
+    SourceError::Protocol {
+        status: Some(status.as_u16()),
+        message: format!(
+            "HTTP {status}: the write was redirected to {location}, and knobas does not follow a \
+             redirect on a write; the source's address may need to be the one it redirects to"
+        ),
+    }
+}
+
+/// Refuse a base URL that carries a username or a password (#1640, SPI-10).
+///
+/// reqwest would send one as HTTP Basic beside the credential the source is
+/// configured with, and the URL is stored in `knobas.source_config` and
+/// printed wherever it is. [`HttpClient::new`] calls this, and so does the
+/// source save, so the Add-source dialog refuses what every sync would. A
+/// string that is not a URL passes: [`HttpClient::new`] refuses it on its own
+/// grounds.
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`], whose message does not repeat the URL.
+pub fn refuse_userinfo(base_url: &str) -> Result<(), SourceError> {
+    match url::Url::parse(base_url) {
+        Ok(parsed) => limiter::refuse_userinfo(&parsed),
+        Err(_) => Ok(()),
+    }
 }

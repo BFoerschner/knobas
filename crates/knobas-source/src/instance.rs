@@ -118,12 +118,41 @@ impl fmt::Debug for SourceInstance {
             .field("id", &self.id)
             .field("kind", &self.kind)
             .field("display_name", &self.display_name)
-            .field("base_url", &self.base_url)
+            .field("base_url", &redact_userinfo(&self.base_url))
             .field("auth", &self.auth)
             .field("secret", &self.secret.as_ref().map(|_| "<redacted>"))
             .field("account", &self.account)
             .field("config", &self.config)
             .finish()
+    }
+}
+
+/// `url` with whatever could be a username or password in it masked, for a
+/// `Debug` or a message (#1640).
+///
+/// Blunt on purpose, and by string rather than by parsing: it has to mask a
+/// URL that does not parse too, since that is the one a refusal names. The
+/// authority starts after `://` (or after the scheme's `:` where there are no
+/// slashes, which a WHATWG parser accepts for `https:`), runs to the first `?`
+/// or `#`, and everything in it before its last `@` is masked. A `/` does not
+/// end it, so a password with a slash in it is masked whole; the price is that
+/// a path with an `@` in it masks the host before it, in a log line.
+///
+/// A source's base URL may not carry userinfo at all (`knobas_http`'s
+/// `refuse_userinfo`, at the source save and when a client is built). This is
+/// for one stored before that was refused.
+#[must_use]
+pub fn redact_userinfo(url: &str) -> std::borrow::Cow<'_, str> {
+    let start = match url.find("://") {
+        Some(at) => at + 3,
+        None => url.find(':').map_or(0, |at| at + 1),
+    };
+    let end = url[start..]
+        .find(['?', '#'])
+        .map_or(url.len(), |at| start + at);
+    match url[start..end].rfind('@') {
+        Some(at) => format!("{}…{}", &url[..start], &url[start + at..]).into(),
+        None => url.into(),
     }
 }
 
@@ -256,6 +285,44 @@ mod tests {
             "Debug leaked the account password: {printed}"
         );
         assert!(printed.contains("knobas"), "{printed}");
+
+        // A base URL stored with a password in it, from before the source
+        // save refused one (#1640): printed without it.
+        for base_url in [
+            "https://me:hunter2-in-the-url@jira.example/prefix",
+            "https:me:hunter2-in-the-url@jira.example",
+            "https://me:hunter2/in-the-url@jira example?x=1",
+        ] {
+            let printed = format!(
+                "{:?}",
+                SourceInstance {
+                    base_url: base_url.to_owned(),
+                    ..instance.clone()
+                }
+            );
+            assert!(!printed.contains("hunter2"), "{printed}");
+            assert!(printed.contains("@jira"), "the host stays readable: {printed}");
+        }
+    }
+
+    /// The mask covers every byte before the authority's last `@`, and
+    /// leaves a URL without one as it is.
+    #[test]
+    fn userinfo_is_masked_and_nothing_else() {
+        assert_eq!(
+            redact_userinfo("https://me:pw@jira.example/a@b?q=c@d"),
+            "https://…@b?q=c@d"
+        );
+        assert_eq!(
+            redact_userinfo("https://me:pw@jira.example/x"),
+            "https://…@jira.example/x"
+        );
+        assert_eq!(redact_userinfo("me:pw@jira.example"), "me:…@jira.example");
+        assert_eq!(
+            redact_userinfo("https://jira.example/x?user=a@b"),
+            "https://jira.example/x?user=a@b"
+        );
+        assert_eq!(redact_userinfo("not a url"), "not a url");
     }
 
     /// P6 keeps this plain serde data, which is what preserves the SPI's
