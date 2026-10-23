@@ -13490,3 +13490,60 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   and records `unreachable`. The mutant that reads the hand-on with `Pass::Now` survived every
   existing test and sent that write before its rung; the new test kills it. *Reversing:* delete
   the test.
+
+## #1638: a panicked run is recorded by the closing guard (Opus implementer, 2026-10-23)
+
+- **How the guard records from a `Drop`.** *Fork:* `catch_unwind` around the run, a STATUS
+  bound on old open rows (the ticket's second fix direction), or the guard spawning the run's
+  tail. *Ruling:* the guard hands `Inner::end_run` (the tail of `run_task`, factored out) to the
+  scheduler's `Background` set with an `error` verdict. *Reasoning:* spec #1619 says the closing
+  guard records the ending, and the guard is what also sees a task dropped without a panic.
+  `Background::spawn` is synchronous and refuses once the quit has begun, so the quit's abort
+  keeps today's behaviour (watchers closed at once, the row left to `reconcile_abandoned`) and
+  `shutdown` awaits a spawned tail under the grace. A STATUS bound would leave the row open and
+  no ending emitted, which spec #1619 says must exist. *Reversing:* low.
+- **Once, not twice.** *Fork:* disarm the guard's recording before `run_task`'s own `end_run`,
+  or after it. *Ruling:* before: `run_task` clears the guard's `recorder` the moment it has a
+  verdict. *Reasoning:* disarmed after, a task aborted or panicking inside `end_run` would have
+  its row written and its `sync:state` ending sent a second time. Disarmed before, it gets only
+  the watchers' ending, as it did before #1638. The spawned tail carries a guard with `recorder`
+  unset, so an aborted tail still closes the watchers. *Reversing:* n/a.
+- **Row before ending.** *Fork:* close the watchers in the drop at once and record afterwards, or
+  close them only once the row is written. *Ruling:* the latter: when the guard spawns the tail,
+  `end_run` closes the watchers after `settle`, as on the ordinary path. *Reasoning:* closed
+  first, a caller that reads `status_for` the moment it hears the ending can still read the run
+  as open, and a trigger in that window starts a second run beside an open row. Closed after, a
+  trigger in the window joins the dying run and is told its ending. The cost is that the ending
+  now waits for `settle`'s statements, bounded by the pool's own timeouts. *Reversing:* low.
+- **The backoff.** *Fork:* treat the panic as the cancelled run is treated (no verdict, no
+  backoff), or as an `error`. *Ruling:* an `error`: one rung up the ladder, no credential verdict,
+  a stored `unreachable` cleared, as for a protocol bug. *Reasoning:* a panic is the adapter's
+  fault, not the reader's, and an adapter that panics every run should back off like one that
+  errors every run. `reconcile_abandoned` writes `error` too, so the ladder already counted these
+  rows after a restart. *Reversing:* one constructor.
+- **The message.** *Fork:* keep `RUN_STOPPED_MESSAGE`'s text or change it. *Ruling:* it now reads
+  "the run stopped before it could finish". *Reasoning:* the old "without recording an outcome"
+  became false once the guard records one, and the row now stores the text. Nothing outside
+  `scheduler.rs` matched the old text. *Reversing:* one string.
+- **A §10.8 entry.** *Ruling:* booked (`1638-a-panicked-run-is-recorded.md`). `knobas-sync` is not
+  frozen, but `sync:state`, `sync_status` and `list_sources` observably change for a panicked run,
+  as they did for #1629's cancelled run. *Reversing:* n/a.
+
+### #1638: merge-manager review (Opus, 2026-10-23)
+
+- **A drop on a runtime that is shutting down.** *Fork:* guard the spawn further, or rely on
+  `Handle::try_current` plus tokio's handling of a spawn onto a closed runtime. *Ruling:* as
+  written. *Reasoning:* off a runtime the guard falls through to closing the watchers; on one that
+  is shutting down, tokio 1.53 shuts the new task down at bind instead of panicking, and dropping
+  its future runs the inner guard (`recorder` unset), which closes the watchers. Neither path can
+  panic during the unwind or re-enter `Background`'s lock. *Reversing:* n/a.
+- **The quit racing the spawn.** *Ruling:* no gap. `Background::spawn` checks the closed state and
+  spawns under one lock, and `close` takes the set under the same lock, so a tail either lands in
+  the set the quit awaits or is refused. *Reversing:* n/a.
+- **Panic versus cancel for the ladder.** *Ruling:* the distinction is drawn by the right signal.
+  `was_cancelled` and `failures_since_last_ok` key on `CANCELLED_MESSAGE`, which only
+  `RunResult::cancelled` writes; the guard writes `RUN_STOPPED_MESSAGE`, so #1629's cancelled run
+  still does not back off and a panic does. *Reversing:* one constructor.
+- **§10.8 wording.** *Ruling:* the entry now also says a panic after the quit has begun keeps the
+  old treatment (watchers closed, row left to `reconcile_abandoned`), since that is observable and
+  the entry named only the abort. *Reversing:* one sentence.

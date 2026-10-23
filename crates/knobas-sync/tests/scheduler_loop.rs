@@ -192,6 +192,19 @@ async fn serially() -> tokio::sync::MutexGuard<'static, ()> {
     SERIAL.lock().await
 }
 
+/// Every `sync:state` a scheduler emitted, in order; the other events are
+/// dropped.
+#[derive(Default)]
+struct Recorder(std::sync::Mutex<Vec<SourceSyncStatus>>);
+
+impl SyncEvents for Recorder {
+    fn sync_state(&self, s: SourceSyncStatus) {
+        self.0.lock().unwrap().push(s);
+    }
+    fn source_health(&self, _h: knobas_sync::config::CredentialHealth) {}
+    fn activity_new(&self, _r: knobas_core::activity::ActivityRow) {}
+}
+
 /// One caller's channel: everything it was told about a run, in order.
 ///
 /// A test's stand-in for `knobas-app`'s `ChannelSink`, and the only way to say
@@ -319,8 +332,9 @@ async fn seed_quiet(pool: &PgPool, n: usize) -> Vec<String> {
 /// `config::due` clamps the schedule up by `backoff_until`, and
 /// `Scheduler::trigger` consults neither it nor `enabled`, so this keeps
 /// exactly the asymmetry these tests need while leaving the source *normal*:
-/// enabled, mirrored, searchable. Nothing in this file asserts on
-/// `backoff_until`, which is what makes it free to borrow.
+/// enabled, mirrored, searchable. The two tests that assert on `backoff_until`
+/// read it before they retire their source or after their own run has set it,
+/// which is what keeps it free to borrow.
 async fn retire(pool: &PgPool, ids: &[String]) {
     for id in ids {
         sqlx::query(
@@ -900,16 +914,6 @@ async fn a_trigger_says_running_before_it_returns() {
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
 
-    #[derive(Default)]
-    struct Recorder(std::sync::Mutex<Vec<SourceSyncStatus>>);
-    impl SyncEvents for Recorder {
-        fn sync_state(&self, s: SourceSyncStatus) {
-            self.0.lock().unwrap().push(s);
-        }
-        fn source_health(&self, _h: knobas_sync::config::CredentialHealth) {}
-        fn activity_new(&self, _r: knobas_core::activity::ActivityRow) {}
-    }
-
     let events = Arc::new(Recorder::default());
     let connector = knobas_db::test_util::test_connector().await;
     let scheduler = Scheduler::start(SchedulerDeps {
@@ -965,16 +969,6 @@ async fn a_running_state_names_its_own_run_not_another_open_one() {
     // starting a run of its own would put a third id in play.
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-
-    #[derive(Default)]
-    struct Recorder(std::sync::Mutex<Vec<SourceSyncStatus>>);
-    impl SyncEvents for Recorder {
-        fn sync_state(&self, s: SourceSyncStatus) {
-            self.0.lock().unwrap().push(s);
-        }
-        fn source_health(&self, _h: knobas_sync::config::CredentialHealth) {}
-        fn activity_new(&self, _r: knobas_core::activity::ActivityRow) {}
-    }
 
     let events = Arc::new(Recorder::default());
     let connector = knobas_db::test_util::test_connector().await;
@@ -1988,18 +1982,119 @@ async fn a_run_whose_task_panics_still_gives_its_watchers_an_ending() {
     await_ending(&again).await;
     scheduler.shutdown().await;
 
-    // Neither task reached `settle`, so both rows are still open --
-    // `reconcile_abandoned` is what closes rows like these at the next start.
-    // Closed here so the tests that assert the reconciler has nothing to do are
-    // not reading this one's residue.
-    sqlx::query(
-        "update knobas.sync_run set finished_at = now(), outcome = 'error'
-          where source_id = $1 and finished_at is null",
-    )
-    .bind(&id)
-    .execute(&pool)
+    // Neither task reached its own `settle`; the guard recorded both rows
+    // (#1638), so this test leaves no residue for the ones that assert the
+    // reconciler has nothing to do. The test below pins the record itself.
+    retire(&pool, &ids).await;
+}
+
+/// **A run whose adapter panics is recorded, and its source stops running**
+/// (#1638, SYNC-4).
+///
+/// The guard above closes the watchers, which keeps ADR-0005 for the caller.
+/// Before #1638 it did only that: the run's row stayed open and no `sync:state`
+/// ending went out, so `status_for` -- which takes the open run per source --
+/// said `running: true` with no next time for the rest of the session, however
+/// many later runs finished. The guard now records the ending too: the row is
+/// finished, one ending is emitted, and the start after this one finds nothing
+/// of this run's to reconcile.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_run_whose_adapter_panics_is_recorded_and_stops_running() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+
+    let events = Arc::new(Recorder::default());
+    let connector = knobas_db::test_util::test_connector().await;
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: sched_pool,
+        connections: Arc::new(TestConnections(connector)),
+        registry: Arc::new(SlowRegistry {
+            inside: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+            dwell: Duration::from_millis(10),
+            fault: Some(|| panic!("the adapter blew up")),
+        }),
+        secrets: Arc::new(MemoryStore::new()),
+        events: Arc::clone(&events) as Arc<dyn SyncEvents>,
+        timing: FAST,
+    })
     .await
     .unwrap();
+
+    let watcher = Heard::new();
+    let run = scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(watcher.sink()))
+        .await
+        .unwrap();
+    let ending = await_ending(&watcher).await;
+    assert_eq!(ending.phase, SyncPhase::Failed);
+    assert_eq!(ending.run_id, run);
+
+    // Read the moment the caller hears the ending, with no wait in between:
+    // the row is written before the watchers are told, as on the ordinary
+    // path, so a caller that reacts to the ending reads a finished run.
+    let status = knobas_sync::scheduler::status_for(&pool, &id)
+        .await
+        .unwrap()
+        .expect("the source exists");
+    assert!(
+        !status.running,
+        "the panicked run still reads as running: {status:?}"
+    );
+    assert_eq!(status.run_id, Some(run), "{status:?}");
+    assert!(
+        status.next_run_at.is_some(),
+        "a source whose run ended has a next time: {status:?}"
+    );
+    // An error on the ladder like any other: the first rung, in place of the
+    // hour `seed_quiet` parked the source behind. Not the cancelled run's
+    // untouched backoff -- a panic is the adapter's fault, not the reader's.
+    let until = status.backoff_until.expect("a failed run backs off");
+    let rung = chrono::Duration::from_std(config::backoff_after(1)).unwrap();
+    let now = chrono::Utc::now();
+    assert!(
+        until > now && until <= now + rung,
+        "the panicked run backs off one rung: {status:?}"
+    );
+    let row = run_log::list(&pool, Some(&id), 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.id == run)
+        .expect("the run's row");
+    assert!(row.finished_at.is_some(), "the row is still open: {row:?}");
+    assert_eq!(row.outcome, Some(run_log::SyncOutcome::Error));
+    assert_eq!(
+        row.error.as_deref(),
+        ending.message.as_deref(),
+        "the row and the ending say the same thing"
+    );
+
+    scheduler.shutdown().await;
+
+    // One ending, not one from the guard and another from somewhere else.
+    let endings = events
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|s| s.run_id == Some(run) && !s.running)
+        .count();
+    assert_eq!(endings, 1, "the panicked run's sync:state endings");
+    // What `reconcile_abandoned` would close at the next start: nothing of
+    // this source's. Asked of the source rather than by running the
+    // reconciler, which is whole-database and would close other binaries'
+    // live runs.
+    let open: i64 = sqlx::query_scalar(
+        "select count(*) from knobas.sync_run where source_id = $1 and finished_at is null",
+    )
+    .bind(&id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(open, 0, "a run of this source is left for the next start");
     retire(&pool, &ids).await;
 }
 
