@@ -151,21 +151,43 @@ mod tests {
     /// this crate, with its own tests, where a change to it is found by the
     /// module that owns the behaviour rather than in a command body. #1659
     /// named the exceptions and #1870 moved them; this keeps the next one
-    /// from arriving unnoticed. The two spellings are the ones the issue's
-    /// search used: `sqlx::query*` for a statement, `.begin()` for a
-    /// transaction.
+    /// from arriving unnoticed.
+    ///
+    /// The issue's search spelled a statement `sqlx::query*` and a
+    /// transaction `.begin()`. A statement has more spellings than the first
+    /// (`sqlx::raw_sql`, `sqlx::QueryBuilder`, `use sqlx::{query_as, ..}`),
+    /// so every `sqlx::` path must name one of the two items a shim has a
+    /// use for -- the pool it is handed and the error it maps -- and a
+    /// connection is neither begun nor acquired.
     #[test]
     fn no_command_issues_its_own_statement() {
+        const SHIM_ITEMS: [&str; 2] = ["PgPool", "Error"];
         let mut checked = 0_usize;
         for path in command_modules() {
             let source = std::fs::read_to_string(&path).expect("a command module");
             let code = strip_comments(&source);
-            for spelling in [concat!("sqlx::", "query"), concat!(".begin", "()")] {
+            let mut rest = code.as_str();
+            while let Some(at) = rest.find(concat!("sqlx", "::")) {
+                rest = &rest[at + "sqlx::".len()..];
+                let item: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                assert!(
+                    SHIM_ITEMS.contains(&item.as_str()),
+                    "{} spells `sqlx::{item}`: a command issues no statement of its \
+                     own, and a shim names no sqlx item but {SHIM_ITEMS:?}. Move the \
+                     read or write into `knobas-core` or the behaviour module that \
+                     owns it, and call that (#1870).",
+                    path.display()
+                );
+            }
+            for spelling in [concat!(".begin", "()"), concat!(".acquire", "()")] {
                 assert!(
                     !code.contains(spelling),
-                    "{} spells `{spelling}`: a command issues no statement of its own. \
-                     Move the read or write into `knobas-core` or the behaviour module \
-                     that owns it, and call that (#1870).",
+                    "{} spells `{spelling}`: a command opens no connection or \
+                     transaction of its own. Move it into `knobas-core` or the \
+                     behaviour module that owns it, and call that (#1870).",
                     path.display()
                 );
             }

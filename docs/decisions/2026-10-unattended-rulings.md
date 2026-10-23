@@ -15217,3 +15217,19 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1879.
 - **`knobas-sync` is touched by one doc path.** `write_queue.rs` names
   `knobas_app::protocol::ticket_titled` where it named the command module. No live suite exercises
   a comment. *Reversing:* n/a.
+
+Reviewed 2026-10-23 by the merge-manager (Opus), PR #1882.
+
+- **The scan names what a shim may take from sqlx, not two spellings it may not.** *Fork:* keep
+  the issue's two spellings (`sqlx::query*`, `.begin()`). *Ruling:* those let a statement in
+  through `sqlx::raw_sql`, `sqlx::QueryBuilder`, `use sqlx::{query_as, ..}` or `.acquire()`; a
+  shim with `sqlx::raw_sql("select 1")` passed the scan as written. Every `sqlx::` path in a
+  command module must now name `PgPool` or `Error`, the two the modules spell today, and
+  `.begin()` and `.acquire()` are both refused. The `raw_sql` mutant fails it. *Reversing:*
+  trivial; a shim that needs a third sqlx item adds it to `SHIM_ITEMS` with a reason.
+- **The implementer's eleven rulings stand.** The link transaction, the activity lines, the
+  self-link message and code, the 5 s shared deadline with its two warnings, and the detail
+  status rule are unchanged; the regenerated IPC mirror is byte-identical, so no §10.8 entry is
+  due. The verbatim wire-type docs leave intra-doc links in core that name app items
+  (`EntityDetail`) or the crate by name; rustdoc is not gated, and byte-identical TypeScript is
+  the better trade. *Reversing:* n/a.
