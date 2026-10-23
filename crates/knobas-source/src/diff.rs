@@ -478,16 +478,12 @@ fn take_quoted(value: &str) -> (String, &str) {
         match bytes[i] {
             b'"' => return (String::from_utf8_lossy(&out).into_owned(), &value[i + 1..]),
             b'\\' if i + 1 < bytes.len() => {
-                let next = bytes[i + 1];
-                if next.is_ascii_digit() && i + 3 < bytes.len() {
-                    let octal = &value[i + 1..i + 4];
-                    if let Ok(byte) = u8::from_str_radix(octal, 8) {
-                        out.push(byte);
-                        i += 4;
-                        continue;
-                    }
+                if let Some(byte) = bytes.get(i + 1..i + 4).and_then(octal) {
+                    out.push(byte);
+                    i += 4;
+                    continue;
                 }
-                out.push(match next {
+                out.push(match bytes[i + 1] {
                     b'n' => b'\n',
                     b't' => b'\t',
                     b'r' => b'\r',
@@ -502,6 +498,17 @@ fn take_quoted(value: &str) -> (String, &str) {
         }
     }
     (String::from_utf8_lossy(&out).into_owned(), "")
+}
+
+/// The byte a three-digit octal escape names (`303` → `0xC3`), or `None`
+/// unless the bytes are all octal digits and name one byte. Read
+/// as bytes: the text is whatever the instance answered, and a slice of the
+/// `&str` could end inside a character (#1645).
+fn octal(digits: &[u8]) -> Option<u8> {
+    if !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    u8::from_str_radix(std::str::from_utf8(digits).ok()?, 8).ok()
 }
 
 #[cfg(test)]
@@ -671,6 +678,32 @@ mod tests {
                 line(Add, None, Some(1), "bonsoir")
             ]
         );
+    }
+
+    /// The diff is whatever the instance answered, so a path git would never
+    /// write -- a backslash, one digit, then a character of more than one
+    /// byte -- reads as the escaped character, not as a panic (#1645).
+    #[test]
+    fn a_short_escape_before_a_multibyte_character_is_the_character() {
+        let file = one(concat!(
+            "diff --git \"a/\\1aé.txt\" \"b/\\1aé.txt\"\n",
+            "--- \"a/\\1aé.txt\"\n",
+            "+++ \"b/\\1aé.txt\"\n",
+            "@@ -1 +1 @@\n",
+            "-bonjour\n",
+            "+bonsoir\n",
+        ));
+        assert_eq!(file.path, "1aé.txt");
+        assert_eq!(unquote("\"\\1aé.txt\""), "1aé.txt");
+    }
+
+    /// An octal escape is three digits: two digits, or a sign before them,
+    /// are the characters themselves.
+    #[test]
+    fn an_escape_short_of_three_digits_is_its_characters() {
+        assert_eq!(unquote("\"a\\12x.txt\""), "a12x.txt");
+        assert_eq!(unquote("\"a\\12\""), "a12");
+        assert_eq!(unquote("\"a\\+12.txt\""), "a+12.txt");
     }
 
     #[test]

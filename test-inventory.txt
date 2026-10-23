@@ -2318,8 +2318,10 @@ knobas-source	lib/knobas_source	diff::tests::a_modified_file_numbers_its_lines_f
 knobas-source	lib/knobas_source	diff::tests::a_pure_rename_has_no_hunks
 knobas-source	lib/knobas_source	diff::tests::a_quoted_path_is_unquoted
 knobas-source	lib/knobas_source	diff::tests::a_rename_with_edits_names_both_paths_and_carries_its_hunk
+knobas-source	lib/knobas_source	diff::tests::a_short_escape_before_a_multibyte_character_is_the_character
 knobas-source	lib/knobas_source	diff::tests::a_whole_commit_is_every_file_in_order
 knobas-source	lib/knobas_source	diff::tests::an_added_file_has_only_new_line_numbers
+knobas-source	lib/knobas_source	diff::tests::an_escape_short_of_three_digits_is_its_characters
 knobas-source	lib/knobas_source	diff::tests::no_newline_at_end_of_file_is_not_a_line
 knobas-source	lib/knobas_source	diff::tests::text_before_the_first_file_and_an_empty_diff_are_nothing
 knobas-source	lib/knobas_source	diff::tests::the_per_file_cap_cuts_one_line_over_and_not_at
