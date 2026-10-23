@@ -182,8 +182,8 @@ macro_rules! name_glob_matches {
 /// `$pat` is a relation with the columns of `knobas.link_set_member` it
 /// reads: `set_id`, `position`, `kind` and `pattern`, the stored reading of
 /// the member's query (`knobas_search::Pattern`: `sources`, `projects`,
-/// `under`, `names`, each lowercased). Each list ORs its values and the lists
-/// AND, over facts the database keeps: the item's source, its declared
+/// `under`, `names`, each as typed: the read folds them with `lower()`,
+/// #1843). Each list ORs its values and the lists AND, over facts the database keeps: the item's source, its declared
 /// project in `sync.item_project` by key or name (ADR-0010), or any project
 /// of the chain stored beside it (`path`, #1019: a parent project takes in its
 /// subprojects), a declared parent
@@ -212,12 +212,12 @@ macro_rules! link_set_pattern_hits {
                              join knobas.source_config sc
                                on sc.id = ip.source_id and sc.kind = ip.adapter_kind
                             where ip.entity_id = i.entity_id
-                              and (lower(ip.key) in (select jsonb_array_elements_text(p.pattern->'projects'))
-                                   or lower(ip.name) in (select jsonb_array_elements_text(p.pattern->'projects'))
+                              and (lower(ip.key) in (select lower(pv) from jsonb_array_elements_text(p.pattern->'projects') pv)
+                                   or lower(ip.name) in (select lower(pv) from jsonb_array_elements_text(p.pattern->'projects') pv)
                                    or ",
             $crate::project_chain_has!(
                 "ip.path",
-                "array(select jsonb_array_elements_text(p.pattern->'projects'))"
+                "array(select lower(pv) from jsonb_array_elements_text(p.pattern->'projects') pv)"
             ),
             ")))
            and (jsonb_array_length(coalesce(p.pattern->'under', '[]')) = 0
@@ -225,7 +225,7 @@ macro_rules! link_set_pattern_hits {
                              join knobas.source_config sc
                                on sc.id = i.source_id and sc.kind = ip.adapter_kind
                             where ip.entity_id = i.entity_id
-                              and lower(ip.name) in (select jsonb_array_elements_text(p.pattern->'under'))))
+                              and lower(ip.name) in (select lower(uv) from jsonb_array_elements_text(p.pattern->'under') uv)))
            and (jsonb_array_length(coalesce(p.pattern->'names', '[]')) = 0
                 or exists (select 1 from jsonb_array_elements_text(p.pattern->'names') ng(g)
                             where ",

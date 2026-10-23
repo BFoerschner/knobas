@@ -793,3 +793,45 @@ async fn a_monitor_row_draws_its_type_and_dot_and_a_repository_its_team_or_owner
         ]
     );
 }
+
+/// #1843: a pattern's `project:` and `under:` hold a value the server and
+/// Rust's `to_lowercase` fold differently (`İ`). The pattern is stored as
+/// typed and the read folds both sides with `lower()`, so the page and the
+/// pipeline are found, and `lower()` leaves a value Rust folded already as it is.
+#[tokio::test]
+async fn a_pattern_with_a_dotted_capital_i_matches_under_the_servers_fold() {
+    let pool = pool().await;
+    let t = tag();
+    let space = format!("OPS{t}");
+    let parent = format!("İstanbul Rollout {t}");
+    let child = page(
+        &pool,
+        &space,
+        &format!("{space}1"),
+        "Plan",
+        &[parent.as_str()],
+    )
+    .await;
+    let project = format!("İstanbul{t}");
+    let build = pipeline(&pool, &project, &format!("{t}_Build")).await;
+    let job = ticket(&pool).await;
+
+    let saved = link_sets::save(
+        &pool,
+        &Registry::for_process(),
+        draft(
+            "Istanbul",
+            vec![],
+            vec![
+                pattern("page", &format!(r#"project:{space} under:"{parent}""#)),
+                pattern("pipeline", &format!(r#"project:"{project}""#)),
+            ],
+            &job,
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(from_sets(&pool, &job).await, ids(&[&child, &build]));
+    assert_eq!(saved.set.patterns[0].count, 1);
+    assert_eq!(saved.set.patterns[1].count, 1);
+}
