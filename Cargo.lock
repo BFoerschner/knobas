@@ -3109,6 +3109,7 @@ dependencies = [
  "knobas-core",
  "knobas-db",
  "knobas-http",
+ "knobas-live-cleanup",
  "knobas-mockd",
  "knobas-search",
  "knobas-secrets",

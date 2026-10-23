@@ -96,6 +96,7 @@ use knobas_app::sources::{Registry, SourcesState};
 use knobas_app::start_work;
 use knobas_core::entity::EntityRef;
 use knobas_core::start_work::{Step, StepOutcome};
+use knobas_live_cleanup::Cleanup;
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
 use knobas_sync::scheduler::{Scheduler, SchedulerDeps};
@@ -473,123 +474,96 @@ impl Drop for Litter {
             .opened
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        // A blocking client in its own thread: `Drop` cannot be async, and the
-        // test's runtime may already be winding down.
-        let cleanup = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the cleanup");
-            rt.block_on(async move {
-                // By number from here on, never by head ref: **Gitea rewrites
-                // a pull request's `head.ref` to `refs/pull/{number}/head` once
-                // the branch it pointed at is deleted**, so a check that
-                // re-read the listing looking for `branch` would find nothing
-                // whether the delete worked or not. Measured: with the delete
-                // replaced by the old `PATCH state=closed`, which Gitea refuses
-                // on a merged pull request, the by-head check passed over a
-                // pull request that was still there.
-                let [branch, _] = &names;
-                let repo = env.full_name();
-                // The number the test recorded, plus anything the listing still
-                // shows on this branch -- the second for a run that panicked
-                // before it could record one. See `Litter::opened` for why the
-                // listing alone will not do.
-                let mut opened: Vec<u64> = told.into_iter().collect();
-                opened.extend(
-                    env.pulls()
-                        .await
-                        .into_iter()
-                        .filter(|(_, head, _)| head == branch)
-                        .map(|(number, _, _)| number)
-                        .filter(|number| Some(*number) != told),
-                );
-                for number in &opened {
-                    env.api(
-                        reqwest::Method::DELETE,
-                        &format!("/repos/{repo}/issues/{number}"),
-                        None,
-                    )
-                    .await;
-                }
-                for name in &names {
-                    env.api(
-                        reqwest::Method::DELETE,
-                        &format!("/repos/{repo}/branches/{name}"),
-                        None,
-                    )
-                    .await;
-                }
-
-                let mut failures = Vec::new();
-                let still_listed: Vec<u64> = env
-                    .pulls()
+        Cleanup::new(
+            format!(
+                "the start-work round trip did not leave {repo} as it found it, so the next run \
+                 inherits it and live_gitea_capped.rs's HEADROOM budget shrinks (issue #373)"
+            ),
+            format!("{branch:?}, {base:?} and any pull request between them may still be standing"),
+        )
+        .run(move || async move {
+            // By number from here on, never by head ref: **Gitea rewrites
+            // a pull request's `head.ref` to `refs/pull/{number}/head` once
+            // the branch it pointed at is deleted**, so a check that
+            // re-read the listing looking for `branch` would find nothing
+            // whether the delete worked or not. Measured: with the delete
+            // replaced by the old `PATCH state=closed`, which Gitea refuses
+            // on a merged pull request, the by-head check passed over a
+            // pull request that was still there.
+            let [branch, _] = &names;
+            let repo = env.full_name();
+            // The number the test recorded, plus anything the listing still
+            // shows on this branch -- the second for a run that panicked
+            // before it could record one. See `Litter::opened` for why the
+            // listing alone will not do.
+            let mut opened: Vec<u64> = told.into_iter().collect();
+            opened.extend(
+                env.pulls()
                     .await
                     .into_iter()
+                    .filter(|(_, head, _)| head == branch)
                     .map(|(number, _, _)| number)
-                    .filter(|number| opened.contains(number))
-                    .collect();
-                if !still_listed.is_empty() {
-                    failures.push(format!(
-                        "pull request(s) {still_listed:?}, opened from {branch}, are still in the \
-                         state=all listing that live_gitea_capped.rs counts"
-                    ));
-                }
-                let listed = env.branches().await;
-                let standing: Vec<&String> =
-                    names.iter().filter(|name| listed.contains(name)).collect();
-                if !standing.is_empty() {
-                    failures.push(format!("branch(es) {standing:?} are still there"));
-                }
-                match env.head_of(&default_branch).await {
-                    Ok(now) if now.as_deref() == Some(default_head.as_str()) => {}
-                    Ok(now) => failures.push(format!(
-                        "{default_branch} is at {now:?} and was at {default_head} when this run \
-                         started, so something this run did was merged into the default branch -- \
-                         which is residue no DELETE takes back, only a force-push or \
-                         testenv/reset"
-                    )),
-                    // Not the accusation above: this says nothing about whether
-                    // the default branch moved, and saying it did would send
-                    // somebody force-pushing a repository nobody touched.
-                    Err(error) => failures.push(format!(
-                        "could not read where {default_branch} stands ({error}), so whether this \
-                         run reached the default branch is unknown"
-                    )),
-                }
-                failures
-            })
-        });
-        // Never `expect` here. A panic inside the thread -- a request that
-        // could not even be sent, say -- would panic this `Drop` too, and a
-        // panic while already unwinding aborts the process, replacing a legible
-        // test failure with a crash. The thread names its own cause on stderr;
-        // this side only has to say what may still be standing.
-        let failures = match cleanup.join() {
-            Ok(failures) => failures,
-            Err(_) => vec![format!(
-                "the cleanup thread panicked (its own message is on stderr), so {branch:?}, \
-                 {base:?} and any pull request between them may still be standing"
-            )],
-        };
+                    .filter(|number| Some(*number) != told),
+            );
+            for number in &opened {
+                env.api(
+                    reqwest::Method::DELETE,
+                    &format!("/repos/{repo}/issues/{number}"),
+                    None,
+                )
+                .await;
+            }
+            for name in &names {
+                env.api(
+                    reqwest::Method::DELETE,
+                    &format!("/repos/{repo}/branches/{name}"),
+                    None,
+                )
+                .await;
+            }
 
-        if failures.is_empty() {
-            return;
-        }
-        let report = format!(
-            "the start-work round trip did not leave {} as it found it, so the next run inherits \
-             it and live_gitea_capped.rs's HEADROOM budget shrinks (issue #373): {}",
-            repo,
-            failures.join("; ")
-        );
-        // Panicking while already unwinding aborts the process, which would
-        // replace a legible test failure with a crash. The test is already red
-        // in that case; this only has to be visible.
-        if std::thread::panicking() {
-            eprintln!("start_work_live cleanup: {report}");
-        } else {
-            panic!("{report}");
-        }
+            let mut failures = Vec::new();
+            let still_listed: Vec<u64> = env
+                .pulls()
+                .await
+                .into_iter()
+                .map(|(number, _, _)| number)
+                .filter(|number| opened.contains(number))
+                .collect();
+            if !still_listed.is_empty() {
+                failures.push(format!(
+                    "pull request(s) {still_listed:?}, opened from {branch}, are still in the \
+                     state=all listing that live_gitea_capped.rs counts"
+                ));
+            }
+            let listed = env.branches().await;
+            let standing: Vec<&String> =
+                names.iter().filter(|name| listed.contains(name)).collect();
+            if !standing.is_empty() {
+                failures.push(format!("branch(es) {standing:?} are still there"));
+            }
+            match env.head_of(&default_branch).await {
+                Ok(now) if now.as_deref() == Some(default_head.as_str()) => {}
+                Ok(now) => failures.push(format!(
+                    "{default_branch} is at {now:?} and was at {default_head} when this run \
+                     started, so something this run did was merged into the default branch -- \
+                     which is residue no DELETE takes back, only a force-push or \
+                     testenv/reset"
+                )),
+                // Not the accusation above: this says nothing about whether
+                // the default branch moved, and saying it did would send
+                // somebody force-pushing a repository nobody touched.
+                Err(error) => failures.push(format!(
+                    "could not read where {default_branch} stands ({error}), so whether this \
+                     run reached the default branch is unknown"
+                )),
+            }
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(failures.join("; "))
+            }
+        });
     }
 }
 

@@ -110,6 +110,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use knobas_app::sources::{Registry, SourcesState};
+use knobas_live_cleanup::Cleanup;
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
 use knobas_sync::SyncTrigger;
@@ -915,40 +916,22 @@ impl Drop for Litter {
     }
 }
 
-/// Run one cleanup on a thread with a runtime of its own -- `Drop` cannot
-/// await, and a `reqwest::Client` driven from a second runtime hangs rather
-/// than failing (the Gitea suite measured that) -- and report what it could
-/// not undo.
-///
-/// Panicking while already unwinding aborts the process; the test is already
-/// red in that case and the report only has to be visible.
+/// Run one cleanup through the shared runner, `knobas_live_cleanup::Cleanup`,
+/// and report what it could not undo in this suite's words.
 fn undo<F, Fut>(what: &str, cleanup: F)
 where
     F: FnOnce() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
-    let joined = std::thread::spawn(move || {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("a runtime for the cleanup")
-            .block_on(cleanup())
-    })
-    .join();
-    let failure = match joined {
-        Ok(Ok(())) => return,
-        Ok(Err(e)) => e,
-        Err(_) => "the cleanup thread panicked (its own message is on stderr)".to_owned(),
-    };
-    let report = format!(
-        "the live suite did not take back {what}, so the server is no longer in the plain-seed \
-         state -- the next run's leftover clearing removes what carries {LITTER_LABEL:?}: {failure}"
-    );
-    if std::thread::panicking() {
-        eprintln!("live suite cleanup: {report}");
-    } else {
-        panic!("{report}");
-    }
+    Cleanup::new(
+        format!(
+            "the live suite did not take back {what}, so the server is no longer in the \
+             plain-seed state -- the next run's leftover clearing removes what carries \
+             {LITTER_LABEL:?}"
+        ),
+        format!("{what} may still be standing"),
+    )
+    .run(cleanup);
 }
 
 // -- the app, wired the way the app wires it --------------------------------
