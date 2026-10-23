@@ -19,6 +19,9 @@ serde_json.workspace = true
 # The HTTP-level mock the exit criteria are certified against (interfaces §5).
 # A dev-dependency only: nothing in the shipped adapter knows mockd exists.
 knobas-mockd = { path = "../knobas-mockd" }
+# The cleanup runner `tests/live_jira_seeded.rs`'s `Drop` guards share
+# (#1913): a thread and runtime of their own, a bound, a report.
+knobas-live-cleanup = { path = "../knobas-live-cleanup" }
 # Test-only, and only in `tests/live_jira_seeded.rs`: the raw requests that
 # certify what mapping cannot carry -- the status and headers of a real 401,
 # and the edit that suite makes through Jira's own REST API. The adapter
