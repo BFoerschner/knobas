@@ -14578,8 +14578,8 @@ Ruled 2026-10-23 by the implementer (Sonnet) while building the bundle.
   set. *Ruling:* one materialized CTE `reaches(id)` holding the walk's result. *Reasoning:* the
   walk reads nothing but the start set and the links, so every branch walked to the same ids; one
   walk is the start set once plus the links once. *Reversing:* trivial.
-- **"Resolving the typed key by exact match first".** *Fork:* the values reach the builder
-  lowercased, and nothing on `knobas.entity` indexes `lower(id)` or the key past the namespace, so
+- **"Resolving the typed key by exact match first".** *Fork:* the values reach the start set
+  lowered (by the server since #1844's `bind_lowered`), and nothing on `knobas.entity` indexes `lower(id)` or the key past the namespace, so
   an exact lookup by primary key never finds a Jira ticket. *Ruling:* the start set resolves by
   equality on the lowercased id and key, once a statement, a scan of `knobas.entity` (about 2 ms
   at 22,000 entities); an index-served lookup is a follow-up (`backlog`). *Reasoning:* the
@@ -14595,3 +14595,50 @@ Ruled 2026-10-23 by the implementer (Sonnet) while building the bundle.
   not depend on, and moving the summary's text bind after its filters would change every saved
   list's bind list for it.
   *Reversing:* trivial.
+
+### #1650 and #1653: review of the implementer's rulings (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by merge-manager on Opus: migration `0056` and its §10.8 entry.**
+  *Ruling:* confirmed, on the head rebased onto `163bd976`. *Reasoning:* the ticket names the
+  generated column as its second fix direction. Each of the three columns is the per-match
+  expression it replaces, over the same columns: `NAMED`'s two halves and `KEY_NAMED`. The old
+  guards (`strpos(...) > 0 and`, `key is not null and`) become the null branches, and
+  `coalesce(..., false)` keeps a null from sorting first under `named desc`. `sync.live_item` is
+  `0050`'s definition plus the three columns. No migration from `0051` to `0055` touches it, and
+  no open PR holds a `0056`. Every write to `sync.item` names its columns, so a generated column
+  breaks none. The view's other readers name their columns too. The entry matches the diff. One
+  edit: the entry named only the implementer's ratification and a heading that doesn't exist
+  (`## #1650`). It now names this ruling and `## #1650 and #1653`. *Reversing:* as the
+  implementer's ruling says.
+- **Stored lexemes, not naming after the cap.** *Ruling:* confirmed, and it is no departure. The
+  ticket's *What to build* offers both directions ("or the title lexeme array becomes a generated
+  column"), and every criterion is met on this route: one materialized match scan (asserted), the
+  ordering tests, the transcript and the mutants. M1 stands in for the ticket's mutant, which has
+  no position left to move. *Reversing:* as above.
+- **The 100k regression (`payout`, 5,000 matches, 24 to 38 ms).** *Ruling:* the trade holds.
+  *Reasoning:* reproduced in an alternating A/B of the `perf` binaries from `main` and this head,
+  three rounds each: common word at 100k, 23 to 25 ms p90 on `main` and 37 to 43 on the branch.
+  It is real, not load. It is still at 40% of the budget. It comes from a planner choice (the
+  mirror branch loses its `Gather`), not from added work. Searches up to 22k, the size an install
+  has, get faster, and so do the widest matches with longer titles. #1851 tracks it as `backlog`:
+  Björn would not notice 14 ms in the app. *Reversing:* #1851.
+- **Hand-on: the 22k probe has no `payout` (#1849).** *Ruling:* accepted. *Reasoning:* checked.
+  `crates/knobas-app/tests/it/responsiveness_probe.rs` draws its text from `WORDS` (no `payout`)
+  and `w<n>` synthetic words. `payout` appears only in pull request ids, which no `fts` indexes.
+  A probe word with no matches measures nothing, so the criterion is ticked with that note. The
+  bend is in the probe, not in the code.
+- **Hand-on: exact-match-first is not index-served (#1850).** *Ruling:* accepted. *Reasoning:*
+  "exact match first" is in #1653's *What to build*, not its criteria. Every criterion is met:
+  one start-set predicate over `corpus::ALL`, and one `knobas.entity` scan in the plan. The start
+  set already resolves by equality, never by a pattern. No primary-key lookup finds
+  `jira:PAY-231` from a typed `pay-231`. Since #1844 the as-typed value is a bind of its own, so
+  #1850 can add `e.id = any(<as typed>)` cheaply for a fully typed id. That is noted on #1850.
+- **The `just search-perf` red is load, not the diff.** *Ruling:* not a blocker. *Reasoning:*
+  three runs on this branch went red on three different assertions: the rail at 103, `under:` at
+  100, and, on the rebased head, the rail at 102 while the same run's curve read 97. In my A/B,
+  `under:` read 62 to 83 ms p90 on both binaries, and `main` went red on the rail at 108 in round
+  3. This diff changes no `under:` or rail statement: the fixture has no `reach:`, and a browse
+  has no `named`. The one thing that could reach them is the wider `sync.item` row, and this
+  sample can't separate it from load (round 2, at the lowest load, reads the same on both). The
+  rail sitting at its budget on `main` is #1855 (`backlog`), which asks for that plan.
+  *Reversing:* none. #1855 decides the budget.
