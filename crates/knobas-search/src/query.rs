@@ -370,10 +370,16 @@ pub fn parse(raw: &str, vocab: &Vocabulary) -> Parsed {
     // "Still being typed" means: the user has not pressed space, there is a
     // word to extend, and that word is not a closed phrase (`"sepa retry"` is
     // finished by its closing quote, and `'sepa' <-> 'retri':*` would be a
-    // prefix match on a word the user already ended).
+    // prefix match on a word the user already ended). A negated phrase
+    // (`-"retry batch"`) is just as closed: its tsquery text is
+    // `!( 'retri' <-> 'batch' )`, and `:*` after the parenthesis is a syntax
+    // error (#1648). A bare `-word` is not closed: its text ends in a quoted
+    // lexeme, so it stays a prefix.
     parsed.prefix_last_term = !raw.ends_with(char::is_whitespace)
         && !parsed.query.text.is_empty()
-        && terms.last().is_some_and(|term| !term.starts_with('"'));
+        && terms
+            .last()
+            .is_some_and(|term| !term.starts_with('"') && !term.starts_with("-\""));
 
     parsed
 }
@@ -1223,6 +1229,25 @@ mod tests {
         assert!(!parse("/ji", &v).prefix_last_term); // no search word at all
         assert!(!parse("", &v).prefix_last_term);
         assert!(parse("/ji sep", &v).prefix_last_term);
+    }
+
+    /// #1648: a negated phrase typed last is closed (its tsquery text ends in
+    /// `)`, which `:*` cannot follow); a bare negated word is not.
+    #[test]
+    fn a_negated_phrase_typed_last_is_not_a_prefix_but_a_negated_word_is() {
+        let v = fixture();
+        for raw in [
+            r#"-"a b""#,
+            r#"a -"b c""#,
+            r#"sepa -"retry batch""#,
+            r#""a b"c"#,
+        ] {
+            assert!(!parse(raw, &v).prefix_last_term, "{raw}");
+        }
+        for raw in ["-word", "sepa -word", "a or", "\u{fc}berweisung"] {
+            let p = parse(raw, &v);
+            assert!(p.prefix_last_term, "{raw}: {p:?}");
+        }
     }
 
     #[test]

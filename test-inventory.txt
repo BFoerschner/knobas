@@ -1983,6 +1983,7 @@ knobas-search	lib/knobas_search	lists::tests::the_roster_rule_is_spelled_the_way
 knobas-search	lib/knobas_search	lists::tests::the_summary_projects_every_lists_three_columns
 knobas-search	lib/knobas_search	lists::tests::the_two_statements_agree_on_the_seen_key
 knobas-search	lib/knobas_search	query::tests::a_named_person_is_an_author_filter_in_every_spelling
+knobas-search	lib/knobas_search	query::tests::a_negated_phrase_typed_last_is_not_a_prefix_but_a_negated_word_is
 knobas-search	lib/knobas_search	query::tests::a_pattern_reads_four_keys_and_refuses_the_rest
 knobas-search	lib/knobas_search	query::tests::an_unreadable_ticket_value_is_reported_and_a_bare_key_is_typing
 knobas-search	lib/knobas_search	query::tests::assignee_me_is_the_identity_and_assigned_is_mine_within_a_window
@@ -2119,6 +2120,7 @@ knobas-search	test/it	search::a_filter_with_no_text_browses_rather_than_answerin
 knobas-search	test/it	search::a_kind_no_one_declared_is_still_grouped_and_labelled
 knobas-search	test/it	search::a_kind_the_limit_cut_still_reports_its_count
 knobas-search	test/it	search::a_named_person_filters_with_or_without_search_text
+knobas-search	test/it	search::a_negated_phrase_typed_last_answers_while_typing
 knobas-search	test/it	search::a_note_is_found_by_the_same_search_that_finds_a_ticket
 knobas-search	test/it	search::a_notes_snippet_is_segments_of_the_markdown_the_user_typed
 knobas-search	test/it	search::a_pages_docs_marks_never_reach_the_launcher_excerpt
@@ -2129,6 +2131,7 @@ knobas-search	test/it	search::every_row_carries_its_provenance
 knobas-search	test/it	search::filters_narrow_and_are_echoed_back_as_the_launcher_will_chip_them
 knobas-search	test/it	search::finds_by_full_text_and_groups_by_kind_in_a_fixed_order
 knobas-search	test/it	search::hostile_input_is_answered_not_executed
+knobas-search	test/it	search::page_search_answers_pages_only_and_survives_a_negated_phrase
 knobas-search	test/it	search::the_note_prefix_returns_notes_and_only_notes
 knobas-search	test/it	search::the_shown_body_text_macro_names_the_three_marks
 knobas-search	test/it	search::the_snippet_is_segments_of_raw_text_with_the_match_flagged
