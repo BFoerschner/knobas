@@ -332,6 +332,16 @@ pub(crate) async fn build_source(
     deps: &SchedulerDeps,
     cfg: &config::SourceConfigRow,
 ) -> Result<Box<dyn Source>, RunFailure> {
+    let instance = instance_for(deps, cfg).await?;
+    deps.registry.build(instance).map_err(RunFailure::Source)
+}
+
+/// What [`build_source`] builds from: the stored configuration and its secret.
+/// The keychain read is here, so a run that builds twice reads it once.
+async fn instance_for(
+    deps: &SchedulerDeps,
+    cfg: &config::SourceConfigRow,
+) -> Result<SourceInstance, RunFailure> {
     // One keychain read, both halves. The account is the optional second
     // credential of envelope version 2 (issue #452) and rides in the same
     // item, so asking for it is not a second trip to a store that may be
@@ -352,7 +362,7 @@ pub(crate) async fn build_source(
             (Some(stored.value), stored.account)
         }
     };
-    let instance = SourceInstance {
+    Ok(SourceInstance {
         id: cfg.id.clone(),
         kind: cfg.adapter_kind.clone(),
         display_name: cfg.display_name.clone(),
@@ -361,8 +371,7 @@ pub(crate) async fn build_source(
         secret,
         account,
         config: cfg.config.clone(),
-    };
-    deps.registry.build(instance).map_err(RunFailure::Source)
+    })
 }
 
 /// What a run does with the position the source has stored.
@@ -583,13 +592,69 @@ const DISCOVERABLE: [&str; 2] = ["epic_link_field", "sprint_field"];
 /// as long. Past this the run syncs as it would have, and asks again next time.
 const DISCOVERY_BUDGET: Duration = Duration::from_secs(10);
 
+/// The discoverable keys a far end answered and had nothing for, in this
+/// process (#1702, ruling D7).
+///
+/// A Jira without Jira Software has no Epic Link or Sprint field, and without
+/// this every scheduled run asked it again: a *Test connection* (three reads,
+/// up to [`DISCOVERY_BUDGET`]) each time. Kept in memory, not stored: a
+/// restart asks once more, which is the price of needing no migration (D7).
+/// Only an answer is remembered. A refusal or a timeout is asked again next
+/// run, since the far end may let that run in.
+///
+/// Keyed by [`FarEnd`], so a source pointed somewhere else is asked again. A
+/// credential changed in the keychain is not part of the key, so a source
+/// whose new credential could see the field learns it at the next restart, or
+/// from the reader typing it in. A handful of entries per source at most, so
+/// nothing is evicted.
+static ANSWERED_NOTHING: std::sync::LazyLock<std::sync::Mutex<HashSet<(FarEnd, &'static str)>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// What decides a discovery's answer: the source, its adapter, its address
+/// and its config **without** the discoverable keys, so recording one key does
+/// not make the other look like a new question.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct FarEnd {
+    source_id: String,
+    adapter_kind: String,
+    base_url: String,
+    config: String,
+}
+
+impl FarEnd {
+    fn of(cfg: &config::SourceConfigRow) -> FarEnd {
+        let mut config = cfg.config.clone();
+        if let Some(map) = config.as_object_mut() {
+            for key in DISCOVERABLE {
+                map.remove(key);
+            }
+        }
+        FarEnd {
+            source_id: cfg.id.clone(),
+            adapter_kind: cfg.adapter_kind.clone(),
+            base_url: cfg.base_url.clone(),
+            config: config.to_string(),
+        }
+    }
+}
+
+/// [`ANSWERED_NOTHING`], read or written. A poisoned lock is still a set of
+/// keys: the worst a half-finished insert leaves is one more question.
+fn answered_nothing() -> std::sync::MutexGuard<'static, HashSet<(FarEnd, &'static str)>> {
+    ANSWERED_NOTHING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// A source saved before its adapter could discover a field id gets that id
 /// once, at its next sync (#889).
 ///
-/// Only for keys the adapter's own `config_schema` declares **and** the stored
-/// config leaves empty, so a source with nothing to find costs nothing, and an
-/// id the reader typed is never asked about, let alone replaced
-/// ([`config::fill_missing`] repeats that rule inside the one statement). The
+/// Only for keys the adapter's own `config_schema` declares, the stored config
+/// leaves empty, and the far end has not already answered nothing for
+/// ([`ANSWERED_NOTHING`]). So a source with nothing to find is asked once per
+/// process, and an id the reader typed is never asked about, let alone
+/// replaced ([`config::fill_missing`] repeats that rule inside the one
+/// statement). The
 /// discovery is best-effort: a source that fails or times out here
 /// ([`DISCOVERY_BUDGET`]) syncs as it did before, and the run reports the real
 /// failure itself.
@@ -608,25 +673,37 @@ async fn discover(
         .into_iter()
         .find(|d| d.id == cfg.adapter_kind)
         .map(|d| d.config_schema);
-    let wanted: Vec<&str> = DISCOVERABLE
-        .into_iter()
-        .filter(|key| {
-            declared
-                .as_ref()
-                .is_some_and(|schema| schema["properties"].get(*key).is_some())
-                && !config::config_names(&cfg.config, key)
-        })
-        .collect();
+    let far_end = FarEnd::of(cfg);
+    let wanted: Vec<&'static str> = {
+        let answered = answered_nothing();
+        DISCOVERABLE
+            .into_iter()
+            .filter(|key| {
+                declared
+                    .as_ref()
+                    .is_some_and(|schema| schema["properties"].get(*key).is_some())
+                    && !config::config_names(&cfg.config, key)
+                    && !answered.contains(&(far_end.clone(), *key))
+            })
+            .collect()
+    };
     if wanted.is_empty() {
         return None;
     }
     let found: std::collections::BTreeMap<String, String> =
         match tokio::time::timeout(DISCOVERY_BUDGET, source.test_connection()).await {
-            Ok(Ok(info)) => info
-                .discovered
-                .into_iter()
-                .filter(|(key, _)| wanted.contains(&key.as_str()))
-                .collect(),
+            Ok(Ok(info)) => {
+                let found: std::collections::BTreeMap<String, String> = info
+                    .discovered
+                    .into_iter()
+                    .filter(|(key, _)| wanted.contains(&key.as_str()))
+                    .collect();
+                let mut answered = answered_nothing();
+                for key in wanted.iter().filter(|key| !found.contains_key(**key)) {
+                    answered.insert((far_end.clone(), *key));
+                }
+                found
+            }
             Ok(Err(error)) => {
                 tracing::debug!(source_id = %cfg.id, %error, "field discovery skipped");
                 return None;
@@ -639,17 +716,17 @@ async fn discover(
     (!found.is_empty()).then_some(found)
 }
 
-/// `cfg` as the run that records `found` builds its adapter: the stored config
-/// with each found id under its (empty) key.
+/// The config the run that records `found` builds its adapter from: the stored
+/// one with each found id under its (empty) key.
 fn with_discovered(
-    cfg: &config::SourceConfigRow,
+    config: &serde_json::Value,
     found: &std::collections::BTreeMap<String, String>,
-) -> config::SourceConfigRow {
-    let mut widened = cfg.clone();
-    if !widened.config.is_object() {
-        widened.config = serde_json::json!({});
+) -> serde_json::Value {
+    let mut widened = config.clone();
+    if !widened.is_object() {
+        widened = serde_json::json!({});
     }
-    if let Some(map) = widened.config.as_object_mut() {
+    if let Some(map) = widened.as_object_mut() {
         for (key, id) in found {
             map.insert(key.clone(), serde_json::Value::String(id.clone()));
         }
@@ -688,10 +765,19 @@ async fn attempt(
         .map_err(RunFailure::Db)?
         .ok_or(RunFailure::NotConfigured)?;
     let mut mode = mode;
-    let mut source = build_source(deps, &cfg).await?;
+    // One keychain read for the run, also when the adapter is built twice.
+    let instance = instance_for(deps, &cfg).await?;
+    let mut source = deps
+        .registry
+        .build(instance.clone())
+        .map_err(RunFailure::Source)?;
     let discovered = discover(deps, &cfg, source.as_ref()).await;
     if let Some(found) = &discovered {
-        source = build_source(deps, &with_discovered(&cfg, found)).await?;
+        let widened = SourceInstance {
+            config: with_discovered(&instance.config, found),
+            ..instance
+        };
+        source = deps.registry.build(widened).map_err(RunFailure::Source)?;
         // A new field id widens what the adapter keeps of every ticket, and an
         // incremental run re-fetches only what changed upstream, so a ticket
         // nobody touched would keep `sprints: []` for ever. The run that
