@@ -14701,3 +14701,37 @@ Ruled 2026-10-23 by the merge-manager (Opus).
   from the frozen surface. The command had no caller outside the barrel, the fake and tests. The
   generated mirror changes in one doc comment only (`PlannedWorklog`'s), and the parts of #283,
   #775 and #896 it supersedes are named and left unedited. *Reversing:* medium, revert the PR.
+
+## #1657 / PR #1854: review of the implementer's rulings (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by merge-manager on Opus: retiring `log_all` from the frozen IPC
+  schema, and sign-off on `docs/contract/10.8/1657-retire-log-all.md`.** *Ruling:* the
+  implementer's ruling is confirmed: retired and signed off. *Reasoning:* outside the barrel,
+  `log_all` / `logAll` only appears now in `TfTime.svelte`'s local `$state` and in
+  `TfLogAll.svelte`'s header comment (#1853). The entry only removes from the frozen surface, as
+  #1578's and #1611's did. Every surface it names changed in the diff, and every surface the diff
+  changes is named in it. The parts of #283, #775 and #896 it supersedes are the only entry files
+  that name `log_all`, and they are left unedited. *Reversing:* medium. Revert the PR, and the
+  command returns under a new §10.8 entry.
+- **The bulk path went with the command.** *Ruling:* confirmed in scope. *Reasoning:* the
+  ticket's defect is "two code paths log a week with different failure semantics". Leaving
+  `week::log_all` and `log_all_with` with tests as their only callers would keep the second path.
+  `worklog::log_within` had no caller but `log_all_with`. No file outside `docs/` names any of the
+  four now. *Reversing:* medium, as above.
+- **`log_the_plan` in `week_ipc.rs`.** *Ruling:* confirmed. *Reasoning:* it calls
+  `time::worklog::log` with the arguments `TfLogAll` gives `log_work`: the plan row's day, start
+  and seconds, an empty comment, and offset 0, since the fixture week's windows are UTC
+  midnights. The waiting `log` stands in for the command's `log_in_background`. The two share
+  `log_with` and `commit`, and `worklog_ipc` pins the background half. *Reversing:* low.
+- **M5 survives `week_ipc` and dies in `worklog_ipc`.** *Ruling:* accepted, no new mutant.
+  *Reasoning:* the clause `worklog_id is null` is witnessed in the same `it` binary that the gate
+  runs. `week_ipc` cannot kill M5 because `plan`'s `LOGGABLE` carries the same clause, and that
+  is a property of the code, not a hole in the tests. *Reversing:* n/a.
+- **The first acceptance grep, ticked with a note.** *Ruling:* confirmed. *Reasoning:* checked on
+  `e0d1ecf9`. `grep -n 'commands::time::log_all'` prints only the `log_all_preview` line, and
+  `grep -nw` prints nothing. `docs/agents/issue-tracker.md`'s *Acceptance greps* already asks for
+  the call-site spelling with its trailing comma, so the ticket's wording was the fault, not the
+  rule. No follow-up. *Reversing:* n/a.
+- **#1853 for `TfLogAll.svelte`'s comment.** *Ruling:* confirmed as filed, `backlog` being the
+  right label because nobody sees a comment in the app. It is already in progress in its own
+  worktree. *Reversing:* n/a.
