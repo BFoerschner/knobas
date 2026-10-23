@@ -15,7 +15,8 @@
 //! It never guesses. A `/alias` that resolves to nothing, an `updated:` it
 //! cannot read, an `env:` or `health:` no ticket has given a home yet -- each
 //! is reported, not honoured, in [`ParsedQuery::unknown_tokens`] so the
-//! launcher can grey it out with a reason. The alternative, demoting an unrecognised filter to a search word,
+//! launcher can grey it out with a reason. So is a `-` on a key or marker with
+//! no negation (`-kind:pr`, `-@jonas`): only the ticket keys negate. The alternative, demoting an unrecognised filter to a search word,
 //! quietly changes the result set in a way nobody on screen can see.
 
 use knobas_core::payload::Declarations;
@@ -164,7 +165,7 @@ pub struct Parsed {
     /// and the text never mentioned it.
     pub identity: Vec<String>,
     /// The `under:` values, each with the token it was typed as, in the order
-    /// typed and lowercased -- `under:` matches ignoring case (ADR-0018).
+    /// typed -- `under:` matches ignoring case (ADR-0018).
     ///
     /// Here and not on [`ParsedQuery`]'s filters: `SearchFilters` is the
     /// frozen wire shape the chips travel in, and `under:` has no chip -- it
@@ -173,11 +174,11 @@ pub struct Parsed {
     /// mirror, asked after the parse, and the answer is reported in the
     /// spelling the reader typed.
     pub under: Vec<(String, String)>,
-    /// The `reach:` values (#817), lowercased, in the order typed: each a
+    /// The `reach:` values (#817), as typed, in the order typed: each a
     /// ticket key or id whose job-reach read the row must be in. Typed only,
     /// for `under:`'s reason.
     pub reach: Vec<String>,
-    /// The `name:` globs (#868), lowercased, in the order typed. Typed only,
+    /// The `name:` globs (#868), as typed, in the order typed. Typed only,
     /// for `under:`'s reason.
     pub names: Vec<String>,
     /// What every source declares, carried over from the vocabulary for the
@@ -209,14 +210,14 @@ pub struct EffectiveFilters {
     /// A filter in its own right, which is why [`Self::is_empty`] consults it:
     /// `@jonas` with no text is a query somebody asked, not a browse.
     pub named_authors: Vec<String>,
-    /// The `under:` values, lowercased, OR-ed: the item sits beneath a parent
+    /// The `under:` values, as typed (the statement lower-cases them, #1652), OR-ed: the item sits beneath a parent
     /// answering to one of them, or is that parent (ADR-0018).
     pub under: Vec<String>,
-    /// The `reach:` values (#817), lowercased, OR-ed: the row is something
+    /// The `reach:` values (#817), as typed, OR-ed: the row is something
     /// one of these tickets reaches, by `knobas_core::reach_walk!` -- the
     /// same walk the job-reach read makes.
     pub reach: Vec<String>,
-    /// The `name:` globs (#868), lowercased, OR-ed: the row's key or title
+    /// The `name:` globs (#868), as typed, OR-ed: the row's key or title
     /// matches one of them whole, `*` any run of characters and `?` one
     /// (`knobas_core::name_glob_matches!`).
     pub names: Vec<String>,
@@ -625,7 +626,35 @@ fn apply_token(token: &str, vocab: &Vocabulary, parsed: &mut Parsed, terms: &mut
     {
         return;
     }
+    if negates_what_cannot_be_negated(token) {
+        parsed.unknown(token);
+        return;
+    }
     terms.push(token.to_owned());
+}
+
+/// The keys [`apply_key_value`] reads, which have no negation (#1649). Kept
+/// beside it and pinned to it by
+/// `the_refused_keys_are_the_keys_apply_key_value_reads`.
+const NEGATION_UNSUPPORTED_KEYS: [&str; 15] = [
+    "source", "src", "in", "kind", "type", "updated", "is", "author", "owner", "by", "under",
+    "reach", "name", "env", "health",
+];
+
+/// Whether a `-` token is the negation of something the grammar reads and has
+/// no negation for: a marker (`-@x`, `-/x`, `-#x`) or a `key:value` whose key
+/// [`apply_key_value`] knows. Websearch would take it for a search word and
+/// negate the English word (`-kind:pr` is `!kind & pr`), which is the
+/// demotion the module's rule rules out. `-word` and `-unknownkey:v` stay
+/// websearch's own.
+fn negates_what_cannot_be_negated(token: &str) -> bool {
+    let Some(rest) = token.strip_prefix('-') else {
+        return false;
+    };
+    if rest.starts_with(['@', '/', '#']) {
+        return rest.len() > 1;
+    }
+    split_key_value(rest).is_some_and(|(key, _)| NEGATION_UNSUPPORTED_KEYS.contains(&key.as_str()))
 }
 
 /// The words and phrases a query's text asks for, as a reader marks them
@@ -664,6 +693,12 @@ fn split_key_value(token: &str) -> Option<(String, &str)> {
         return None;
     }
     Some((key.to_lowercase(), value))
+}
+
+/// Whether two typed `under:`, `reach:` or `name:` values are one value,
+/// for the once-each rule only: the match itself is the statement's `lower()`.
+fn same_value(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
 }
 
 /// Apply one `key:value` token; `false` means "not a filter, treat it as text".
@@ -723,8 +758,11 @@ fn apply_key_value(
             parsed.claim_prefix(Prefix::Person);
             apply_person(parsed, value);
         }
-        // A parent (ADR-0018). Lowercased, because it matches ignoring case;
-        // repeated values OR. Whether a value names any parent at all is not
+        // A parent (ADR-0018). Kept as typed: it matches ignoring case, and
+        // the statement lower-cases both sides (#1652), because Rust's
+        // `to_lowercase` and the server's `lower()` disagree on a few code
+        // points (`İ`, a final sigma). Repeated values OR. Whether a value
+        // names any parent at all is not
         // the grammar's to know -- the parent lives in the children's records
         // -- so that is judged after the parse (`crate::under`). A bare
         // `under:` is somebody mid-typing, as a bare `author:` is.
@@ -735,8 +773,13 @@ fn apply_key_value(
         // that way). Unlike the search text, no phrase is lost: a parent's
         // name is matched whole, never as words.
         "under" => {
-            let value = unquote(value.trim()).trim().to_lowercase();
-            if !value.is_empty() && !parsed.under.iter().any(|(_, seen)| *seen == value) {
+            let value = unquote(value.trim()).trim().to_owned();
+            if !value.is_empty()
+                && !parsed
+                    .under
+                    .iter()
+                    .any(|(_, seen)| same_value(seen, &value))
+            {
                 parsed.under.push((token.to_owned(), value));
             }
         }
@@ -746,8 +789,8 @@ fn apply_key_value(
         // nothing answers to reaches nothing, which is a true empty result.
         // A bare `reach:` is somebody mid-typing.
         "reach" => {
-            let value = unquote(value.trim()).trim().to_lowercase();
-            if !value.is_empty() && !parsed.reach.contains(&value) {
+            let value = unquote(value.trim()).trim().to_owned();
+            if !value.is_empty() && !parsed.reach.iter().any(|seen| same_value(seen, &value)) {
                 parsed.reach.push(value);
             }
         }
@@ -756,8 +799,8 @@ fn apply_key_value(
         // one character, ignoring case; repeated globs OR. Quoted when it
         // holds a space. A bare `name:` is somebody mid-typing.
         "name" => {
-            let value = unquote(value.trim()).trim().to_lowercase();
-            if !value.is_empty() && !parsed.names.contains(&value) {
+            let value = unquote(value.trim()).trim().to_owned();
+            if !value.is_empty() && !parsed.names.iter().any(|seen| same_value(seen, &value)) {
                 parsed.names.push(value);
             }
         }
@@ -948,9 +991,15 @@ pub fn pattern_of(parsed: &Parsed) -> Result<Pattern, String> {
         under: parsed
             .under
             .iter()
-            .map(|(_, value)| value.clone())
+            .map(|(_, value)| value.to_lowercase())
             .collect(),
-        names: parsed.names.clone(),
+        // A pattern is stored lowercased: `knobas_core`'s matcher compares
+        // its stored values as they are.
+        names: parsed
+            .names
+            .iter()
+            .map(|name| name.to_lowercase())
+            .collect(),
     };
     if pattern == Pattern::default() {
         return Err("a pattern needs a project, a parent or a name to match".to_owned());
@@ -1452,7 +1501,7 @@ mod tests {
         }
     }
 
-    /// `under:` is a filter, not a search word: lowercased, repeated values
+    /// `under:` is a filter, not a search word: kept as typed (the statement folds case), repeated values
     /// collected once each in the order typed, the token kept for the report,
     /// and a bare `under:` -- somebody mid-typing -- neither a filter nor an
     /// unknown token. No chip carries it, so the echo does not either.
@@ -1469,16 +1518,23 @@ mod tests {
             [
                 (
                     "under:Tidewater/Payout-Service".to_owned(),
-                    "tidewater/payout-service".to_owned()
+                    "Tidewater/Payout-Service".to_owned()
                 ),
                 ("UNDER:ledger".to_owned(), "ledger".to_owned()),
             ]
         );
         assert!(p.query.unknown_tokens.is_empty());
         let merged = merge(&p, &SearchFilters::default());
-        assert_eq!(merged.under, ["tidewater/payout-service", "ledger"]);
+        assert_eq!(merged.under, ["Tidewater/Payout-Service", "ledger"]);
         assert!(merged.filters_by_under());
         assert_eq!(merged.echo(), SearchFilters::default());
+
+        // Not folded here: Rust's lower-casing of `İ` is not the server's, so
+        // the typed spelling reaches the statement (#1652).
+        let p = parse(r#"under:"İstanbul Rollout" reach:İ-1 name:ΌΔΟΣ*"#, &v);
+        assert_eq!(p.under[0].1, "İstanbul Rollout");
+        assert_eq!(p.reach, ["İ-1"]);
+        assert_eq!(p.names, ["ΌΔΟΣ*"]);
 
         let typing = parse("under:", &v);
         assert!(typing.under.is_empty());
@@ -1494,10 +1550,10 @@ mod tests {
         let v = fixture();
         let p = parse("reach:PAY-231 retry REACH:jira:OPS-77 reach:pay-231", &v);
         assert_eq!(p.query.text, "retry");
-        assert_eq!(p.reach, ["pay-231", "jira:ops-77"]);
+        assert_eq!(p.reach, ["PAY-231", "jira:OPS-77"]);
         assert!(p.query.unknown_tokens.is_empty());
         let merged = merge(&p, &SearchFilters::default());
-        assert_eq!(merged.reach, ["pay-231", "jira:ops-77"]);
+        assert_eq!(merged.reach, ["PAY-231", "jira:OPS-77"]);
         assert!(merged.filters_by_reach());
         assert_eq!(merged.echo(), SearchFilters::default());
 
@@ -1516,10 +1572,10 @@ mod tests {
             &v,
         );
         assert_eq!(p.query.text, "retry");
-        assert_eq!(p.names, ["payout_*", "dash board?"]);
+        assert_eq!(p.names, ["Payout_*", "Dash board?"]);
         assert!(p.query.unknown_tokens.is_empty());
         let merged = merge(&p, &SearchFilters::default());
-        assert_eq!(merged.names, ["payout_*", "dash board?"]);
+        assert_eq!(merged.names, ["Payout_*", "Dash board?"]);
         assert!(!merged.is_empty());
         assert_eq!(merged.echo(), SearchFilters::default());
 
@@ -1638,6 +1694,52 @@ mod tests {
         assert!(needles("-only").is_empty());
     }
 
+    /// A minus on a key or marker the grammar knows and cannot negate is
+    /// reported, never demoted to a search word: `-kind:pr sepa` as text is
+    /// `!kind & pr & sepa`, a result set narrowed on English words nobody can
+    /// see (the module's "never demotes" rule; #1649).
+    #[test]
+    fn a_minus_on_a_key_that_cannot_be_negated_is_an_unknown_token() {
+        let v = fixture();
+        let p = parse("-kind:pr sepa", &v).query;
+        assert_eq!(p.text, "sepa");
+        assert_eq!(p.unknown_tokens, ["-kind:pr"]);
+        assert!(p.filters.kinds.is_empty());
+
+        // Every key `apply_key_value` reads, not only the one named.
+        for key in NEGATION_UNSUPPORTED_KEYS {
+            let token = format!("-{key}:x");
+            let p = parse(&format!("{token} sepa"), &v).query;
+            assert_eq!(p.text, "sepa", "{token}");
+            assert_eq!(p.unknown_tokens, [token.as_str()], "{token}");
+        }
+        for token in ["-@jonas", "-/gitea", "-#PAY-231"] {
+            let p = parse(&format!("{token} sepa"), &v).query;
+            assert_eq!(p.text, "sepa", "{token}");
+            assert_eq!(p.unknown_tokens, [token], "{token}");
+            assert_eq!(p.prefix, None, "{token}");
+        }
+        // The un-negated spelling is still read.
+        assert_eq!(parse("kind:pr", &v).query.filters.kinds, ["pr"]);
+    }
+
+    /// The list of keys the minus is refused on is every key
+    /// `apply_key_value` reads: a key added there and not here would be
+    /// demoted again.
+    #[test]
+    fn the_refused_keys_are_the_keys_apply_key_value_reads() {
+        let v = fixture();
+        for key in NEGATION_UNSUPPORTED_KEYS {
+            let mut parsed = Parsed::empty(&v);
+            assert!(
+                apply_key_value(key, "x", &format!("{key}:x"), &v, &mut parsed),
+                "{key}"
+            );
+        }
+        let mut parsed = Parsed::empty(&v);
+        assert!(!apply_key_value("jira", "x", "jira:x", &v, &mut parsed));
+    }
+
     /// Repeated values of one key mean any of them; the same value twice is
     /// one; a negated key is a filter of its own, and so is its repetition.
     #[test]
@@ -1656,9 +1758,9 @@ mod tests {
         );
         assert_eq!(p.query.text, "sepa");
         // A minus on a word is still websearch's own negation, and a minus on
-        // a key that is not one of these stays what it was.
+        // a key the grammar does not know stays a word too.
         assert_eq!(parse("-timeout", &v).query.text, "-timeout");
-        assert_eq!(parse("-kind:pr", &v).query.text, "-kind:pr");
+        assert_eq!(parse("-jira:PAY-231", &v).query.text, "-jira:PAY-231");
         assert_eq!(
             parse("-label:tech-debt -assignee:@me", &v).fields,
             [

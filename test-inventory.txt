@@ -1982,6 +1982,7 @@ knobas-search	lib/knobas_search	lists::tests::the_missing_identity_advice_names_
 knobas-search	lib/knobas_search	lists::tests::the_roster_rule_is_spelled_the_way_the_link_table_spells_it
 knobas-search	lib/knobas_search	lists::tests::the_summary_projects_every_lists_three_columns
 knobas-search	lib/knobas_search	lists::tests::the_two_statements_agree_on_the_seen_key
+knobas-search	lib/knobas_search	query::tests::a_minus_on_a_key_that_cannot_be_negated_is_an_unknown_token
 knobas-search	lib/knobas_search	query::tests::a_named_person_is_an_author_filter_in_every_spelling
 knobas-search	lib/knobas_search	query::tests::a_negated_phrase_typed_last_is_not_a_prefix_but_a_negated_word_is
 knobas-search	lib/knobas_search	query::tests::a_pattern_reads_four_keys_and_refuses_the_rest
@@ -2003,6 +2004,7 @@ knobas-search	lib/knobas_search	query::tests::space_is_an_alias_of_project
 knobas-search	lib/knobas_search	query::tests::text_filters_win_over_chips_dimension_by_dimension
 knobas-search	lib/knobas_search	query::tests::the_echo_carries_every_dimension_the_query_ran_with
 knobas-search	lib/knobas_search	query::tests::the_leading_table_is_ordered_longest_first
+knobas-search	lib/knobas_search	query::tests::the_refused_keys_are_the_keys_apply_key_value_reads
 knobas-search	lib/knobas_search	query::tests::the_trailing_word_is_a_prefix_match_only_while_it_is_being_typed
 knobas-search	lib/knobas_search	query::tests::ticket_keys_are_typed_filters_the_echo_does_not_carry
 knobas-search	lib/knobas_search	query::tests::tokenizing_keeps_a_phrase_whole_and_its_quotes_on
@@ -2164,6 +2166,7 @@ knobas-search	test/it	suggest::the_parents_statement_is_never_a_named_prepared_s
 knobas-search	test/it	suggest::the_read_offers_the_kinds_the_sources_and_the_parents_that_exist
 knobas-search	test/it	suggest::the_rewritten_reads_return_what_the_live_item_view_returned
 knobas-search	test/it	suggest::under_knows_exactly_the_names_the_box_offers
+knobas-search	test/it	suggest::under_scopes_to_a_parent_whose_name_lowercases_differently_in_rust
 knobas-search	test/it	ticket_by_key::a_jira_ticket_is_found_by_its_key_and_comes_first
 knobas-search	test/it	ticket_keys::a_mirror_row_whose_kind_declares_no_path_fails_the_key_and_passes_its_negation
 knobas-search	test/it	ticket_keys::a_saved_list_of_ticket_keys_counts_what_it_lists

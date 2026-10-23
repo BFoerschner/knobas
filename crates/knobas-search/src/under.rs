@@ -27,7 +27,7 @@ use crate::SearchError;
 use crate::query::Parsed;
 
 /// Every `(name, kind)` a parent answers to, as a table expression -- the one
-/// place the parent arms are put together, read by [`KNOWN_SQL`] here and by
+/// place the parent arms are put together, read by [`crate::sql::known_parent_positions`] and by
 /// `crate::suggest`'s `PARENTS_SQL`, so what `under:` knows and what the box
 /// offers for it cannot drift apart (#615).
 ///
@@ -64,15 +64,6 @@ macro_rules! parent_names {
 }
 pub(crate) use parent_names;
 
-/// The distinct lowercased names among `$1` that a parent answers to:
-/// [`parent_names!`] without the kind. `lower(ip.name)` is
-/// `item_parent_name_idx`'s expression, so the mirror's arm is an index read.
-const KNOWN_SQL: &str = concat!(
-    "select distinct lower(p.name) from ",
-    parent_names!(),
-    " p where lower(p.name) = any($1)"
-);
-
 /// Report every `under:` value no parent answers to as an unknown token, in
 /// the spelling the reader typed it.
 ///
@@ -92,15 +83,13 @@ pub(crate) async fn report_unknown(pool: &PgPool, parsed: &mut Parsed) -> Result
         .iter()
         .map(|(_, value)| value.clone())
         .collect();
-    let known: Vec<String> = sqlx::query_scalar(KNOWN_SQL)
-        .bind(&values)
-        .fetch_all(pool)
-        .await?;
+    let known = crate::sql::known_parent_positions(pool, &values).await?;
     let unknown: Vec<String> = parsed
         .under
         .iter()
-        .filter(|(_, value)| !known.contains(value))
-        .map(|(token, _)| token.clone())
+        .zip(1_i64..)
+        .filter(|(_, position)| !known.contains(position))
+        .map(|((token, _), _)| token.clone())
         .collect();
     for token in unknown {
         parsed.unknown(&token);

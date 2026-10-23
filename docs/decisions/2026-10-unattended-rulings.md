@@ -14490,3 +14490,36 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   replaced first), among them both of today's dead merge-managers, whose Monitors demonstrably
   fired (their task files hold the event and `[exited with code 0]`). The resume is the harness's,
   not the repo's; the foreground wait does not depend on it. *Reversing:* the #1829 wording.
+
+---
+
+## #1649 and #1652 — a refused minus, and where `under:`, `reach:` and `name:` are lower-cased
+
+Ruled 2026-10-23 by the implementer (Sonnet) while building the bundle.
+
+- **Which tokens a `-` is refused on (#1649).** *Fork:* the ticket names `-kind:`, `-source:`,
+  `-under:` and `-@x`. *Ruling:* every key `apply_key_value` reads (`source`, `src`, `in`, `kind`,
+  `type`, `updated`, `is`, `author`, `owner`, `by`, `under`, `reach`, `name`, `env`, `health`) and
+  the three markers `-@x`, `-/x`, `-#x`; a key the grammar does not know (`-jira:PAY-231`) and a
+  bare `-word` stay websearch's. *Reasoning:* `-/x` and `-#x` demote the same way as `-@x`, and the
+  module rule is that the grammar never demotes a filter. A test pins the list to
+  `apply_key_value`, so a key added there and not here fails. *Reversing:* delete the marker line
+  in `negates_what_cannot_be_negated`.
+- **Where the lower-casing moved (#1652).** *Fork:* `under:`, `reach:` and `name:` values are bound
+  as typed; the statement and `report_unknown` lower-case them. *Ruling:* `sql.rs` binds each
+  value as its own text and splices `array[lower($n::text), ...]`; `known_parent_positions`
+  (there, because `AssertSqlSafe` is confined to `sql.rs`) asks the server which typed values a
+  parent answers to. *Reasoning:* `lower(<array bind>::text)`, an `unnest` and a join on
+  `lower(v.t)` all cost the `under:` probe 64 ms to about 100 ms at p90 over 100,000 items, since
+  the planner cannot fold them; `lower` of a bound text folds to a constant and the probe stays at
+  64 ms. *Reversing:* moderate; the typed value reaches `Parsed`, so Rust's fold is a one-line
+  change back, at the price of the `İ` bug.
+- **The link-set pattern stays lower-cased in Rust.** *Fork:* `pattern_of` stores `under` and
+  `names`, which `knobas_core::link_set_pattern_hits!` compares as stored. *Ruling:* `pattern_of`
+  lower-cases them itself, so the stored shape is what it was. *Reasoning:* the matcher is in
+  `knobas-core`, outside this ticket, and a stored pattern is a contract. The `İ` mismatch
+  therefore remains for link-set patterns; a follow-up covers it. *Reversing:* n/a.
+- **Ticket-key values.** *Fork:* the finding lists "ticket-key values" with the others; the ticket's
+  title and acceptance criteria name `under:`, `reach:` and `name:`. *Ruling:* ticket-key values
+  (`status:`, `project:` ...) stay lower-cased in Rust, because the parse also reads them
+  (`has:`, `sprint:`, `assigned:`) and `fd.v` is spliced in many fragments. A follow-up covers it.
