@@ -608,6 +608,7 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
         (&pr, "pr", "Backoff"),
         (&asset, "asset", "db-01"),
         (&route, "route", "postgres"),
+        (&context, "ctx", "Payouts"),
         (&note, "note", "Runbook"),
     ] {
         sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $3)")
@@ -976,7 +977,13 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
         .fetch_all(there)
         .await
         .expect("the entity rows");
-    for id in [&estate.ticket, &estate.pr, &estate.asset, &estate.route] {
+    for id in [
+        &estate.ticket,
+        &estate.pr,
+        &estate.asset,
+        &estate.route,
+        &estate.context,
+    ] {
         assert!(
             addressed.contains(id),
             "{id} has no entity row after the restore"

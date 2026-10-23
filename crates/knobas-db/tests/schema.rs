@@ -1318,6 +1318,22 @@ async fn the_context_kind_vocabulary_is_closed() {
     migrate::run(pool).await.unwrap();
 
     let run = uuid::Uuid::new_v4().simple().to_string();
+    // A context's id is its entity's (`0060`), so each gets its entity row.
+    sqlx::query(
+        "insert into knobas.entity (id, kind)
+         select 'ctx:kind-' || $1 || '-' || k, 'ctx' from unnest($2::text[]) as k",
+    )
+    .bind(&run)
+    .bind(
+        CONTEXT_KINDS
+            .iter()
+            .copied()
+            .chain(["bad"])
+            .collect::<Vec<_>>(),
+    )
+    .execute(pool)
+    .await
+    .unwrap();
     for kind in CONTEXT_KINDS {
         sqlx::query("insert into knobas.context (id, kind, title) values ($1, $2, $2)")
             .bind(format!("ctx:kind-{run}-{kind}"))
@@ -1386,6 +1402,15 @@ async fn one_unarchived_context_per_anchor() {
         .execute(pool)
         .await
         .unwrap();
+    // A context's id is its entity's (`0060`).
+    sqlx::query(
+        "insert into knobas.entity (id, kind)
+         select 'ctx:anchor-' || $1 || '-' || n, 'ctx' from generate_series(1, 5) as n",
+    )
+    .bind(&run)
+    .execute(pool)
+    .await
+    .unwrap();
 
     sqlx::query(
         "insert into knobas.context (id, kind, title, anchor_id) values ($1,'ticket','a',$2)",
@@ -2049,17 +2074,22 @@ async fn scratch_databases_are_migrated_copies_of_one_template_and_stay_apart() 
 
 /// The columns that hold an entity id and reach `knobas.entity` by no foreign
 /// key, spelled out: the catalog cannot tell an id from any other text.
-const UNKEYED_ENTITY_IDS: [&str; 13] = [
+const UNKEYED_ENTITY_IDS: [&str; 18] = [
     "knobas.activity.entity_id",
+    "knobas.block.context_id",
     "knobas.block.entity_id",
     "knobas.heartbeat.entity_id",
     "knobas.link_set_hidden.member_id",
     "knobas.link_set_hidden.ticket_id",
     "knobas.link_set_member.entity_id",
+    "knobas.run_preset.pipeline_id",
     "knobas.start_work_step.ticket_id",
+    "knobas.ticket_view.saved_view",
+    "knobas.timer.context_id",
     "knobas.timer.entity_id",
     "knobas.worklog.entity_id",
     "knobas.write_queue.entity_id",
+    "knobas.write_queue.link_to",
     "sync.saved_view_member.entity_id",
     "sync.similar_text_counted.entity_id",
     "sync.similar_text_top.other_id",
@@ -2071,7 +2101,8 @@ const UNKEYED_ENTITY_IDS: [&str; 13] = [
 /// the responsiveness probe's mirror. "Every" is `knobas.entity.id`, each
 /// column a chain of single-column foreign keys leads from to it, and
 /// [`UNKEYED_ENTITY_IDS`]. A text column a user reads sorted, a title, keeps
-/// the database's collation.
+/// the database's collation. `0060` (#1708) collated the six `0050` missed
+/// and keyed `knobas.context.id` to its entity, so the chain reaches it.
 #[tokio::test]
 async fn every_entity_id_compares_bytewise_and_a_title_by_the_database() {
     let pool = &knobas_db::test_util::test_pool().await;
@@ -2100,7 +2131,11 @@ async fn every_entity_id_compares_bytewise_and_a_title_by_the_database() {
     .await
     .unwrap();
     // The chain reaches past `entity`: `sync.item`, and the tables keyed by it.
-    for reached in ["knobas.link.to_id", "sync.item_parent.entity_id"] {
+    for reached in [
+        "knobas.context.id",
+        "knobas.link.to_id",
+        "sync.item_parent.entity_id",
+    ] {
         assert!(
             keyed.iter().any(|(column, _)| column == reached),
             "the foreign keys reach {reached}: {keyed:?}"
@@ -2149,6 +2184,105 @@ async fn every_entity_id_compares_bytewise_and_a_title_by_the_database() {
         titles,
         ["default", "default"],
         "a title sorts as the user reads"
+    );
+}
+
+/// `0060` (#1708): a context is an entity, and the database says so. A
+/// context row with no entity row is refused, so nothing can make one the
+/// switcher lists and *Add to context* cannot link to; the entity row going
+/// takes its context with it, as a note's does (`0006`).
+#[tokio::test]
+async fn zero_sixty_refuses_a_context_without_its_entity() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let run = uuid::Uuid::new_v4().simple().to_string();
+    let refused =
+        sqlx::query("insert into knobas.context (id, kind, title) values ($1,'adhoc','x')")
+            .bind(format!("ctx:no-entity-{run}"))
+            .execute(pool)
+            .await
+            .unwrap_err();
+    assert_eq!(
+        refused
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
+        Some("23503"),
+        "a context without its entity row must be refused: {refused}"
+    );
+
+    let whole = format!("ctx:whole-{run}");
+    for statement in [
+        "insert into knobas.entity (id, kind, title) values ($1, 'ctx', 'x')",
+        "insert into knobas.context (id, kind, title) values ($1, 'adhoc', 'x')",
+        "delete from knobas.entity where id = $1",
+    ] {
+        sqlx::query(statement)
+            .bind(&whole)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| panic!("{statement}: {error}"));
+    }
+    let left: i64 = sqlx::query_scalar("select count(*) from knobas.context where id = $1")
+        .bind(&whole)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "the entity row going takes its context");
+}
+
+/// `0060` on an install that predates it: a context row with no entity row
+/// (none of knobas' writers ever made one; a hand edit or a partial restore
+/// could) is removed, a whole context stays, and a block that ran in the
+/// removed room keeps the id it recorded (`0016`: a dangling `ctx:` id reads
+/// correctly). Wound back to the schema `0059` left.
+#[tokio::test]
+async fn zero_sixty_removes_a_context_without_its_entity_and_keeps_the_rest() {
+    let pool = knobas_db::test_util::scratch_database("context-orphans-60")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+
+    sqlx::raw_sql(
+        "alter table knobas.context drop constraint context_entity_fk;
+         alter table knobas.context alter column id type text collate \"default\";
+         alter table knobas.timer alter column context_id type text collate \"default\";
+         alter table knobas.block alter column context_id type text collate \"default\";
+         alter table knobas.write_queue alter column link_to type text collate \"default\";
+         alter table knobas.run_preset alter column pipeline_id type text collate \"default\";
+         alter table knobas.ticket_view alter column saved_view type text collate \"default\";
+         delete from public._sqlx_migrations where version = 60;
+         insert into knobas.entity (id, kind, title) values ('ctx:whole', 'ctx', 'whole');
+         insert into knobas.context (id, kind, title) values ('ctx:whole', 'adhoc', 'whole'),
+                                                             ('ctx:orphan', 'adhoc', 'orphan');
+         insert into knobas.block (started_at, ended_at, kind, label, context_id)
+         values ('2026-10-01T08:00:00Z', '2026-10-01T09:00:00Z', 'manual', 'standup', 'ctx:orphan');",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    migrate::run(&pool).await.unwrap();
+
+    let contexts: Vec<String> = sqlx::query_scalar("select id from knobas.context order by id")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        contexts,
+        ["ctx:whole"],
+        "the orphan goes, the whole one stays"
+    );
+    let rooms: Vec<Option<String>> = sqlx::query_scalar("select context_id from knobas.block")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        rooms,
+        [Some("ctx:orphan".to_owned())],
+        "the afternoon keeps its room"
     );
 }
 

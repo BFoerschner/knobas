@@ -115,6 +115,13 @@ async fn seed(pool: &PgPool, tag: &str) -> Seeded {
     .await
     .unwrap();
 
+    // A context's id is its entity's (`0060`).
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ctx', $2)")
+        .bind(&context)
+        .bind(format!("Context {t}"))
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query(
         "insert into knobas.context (id, kind, title, anchor_id) values ($1,'ticket',$2,$3)",
     )

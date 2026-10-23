@@ -670,9 +670,11 @@ async fn a_hand_written_ctx_anchor_never_roots_the_walk() {
     let bs_own = entity_only(&pool, SOURCE, "ticket", "PAY-1").await;
     draw(&pool, &b.id, &bs_own).await;
 
-    // The row promote refuses to write, written anyway.
+    // The row promote refuses to write, written anyway, with the entity row
+    // a context's id needs (`0060`).
     sqlx::query(
-        "insert into knobas.context (id, kind, title, anchor_id)
+        "with e as (insert into knobas.entity (id, kind) values ('ctx:handmade', 'ctx'))
+         insert into knobas.context (id, kind, title, anchor_id)
          values ('ctx:handmade', 'ticket', 'about B', $1)",
     )
     .bind(&b.id)
