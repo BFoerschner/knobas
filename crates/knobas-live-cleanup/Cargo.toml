@@ -1,0 +1,20 @@
+[package]
+name = "knobas-live-cleanup"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+# The one cleanup runner every live suite's `Drop` guard calls (#1913): the
+# async cleanup on a thread and a runtime of its own, a bound on the whole
+# sequence, and a report that cannot abort a test that is already unwinding.
+# A dev-dependency of the adapter crates and of `knobas-app`, and nothing
+# else: no shipped crate depends on it. Its own unit tests are the witness the
+# live suites cannot be, since they run only against the real products.
+[dependencies]
+# `rt` for the cleanup's own current-thread runtime. The workspace entry
+# brings `time`, which `enable_all` turns on for a cleanup that waits.
+tokio = { workspace = true, features = ["rt"] }
+
+[dev-dependencies]
+tokio.workspace = true
