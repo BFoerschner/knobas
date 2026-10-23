@@ -1594,7 +1594,7 @@ async fn a_submit_does_not_wait_for_the_flush_tasks_other_writes() {
 }
 
 /// #1797: as a submit, a write queued and then sent on its own, which is
-/// what `submit_write` and a worklog do (`flush_write`).
+/// what `submit_write` and a worklog do (`flush_entity_of`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_queued_write_sent_on_its_own_does_not_wait_for_the_flush_tasks_other_writes() {
     beside_the_flush_task(Mine::Queued).await;
@@ -1617,7 +1617,7 @@ async fn an_amend_does_not_wait_for_the_flush_tasks_other_writes() {
 enum Mine {
     /// `submit`.
     Submitted,
-    /// `queue`, then `flush_write`.
+    /// `queue`, then `flush_entity_of`.
     Queued,
     /// `apply_anyway` on a write held before the task's pass.
     Released,
@@ -1645,18 +1645,20 @@ async fn beside_the_flush_task(mine: Mine) {
         entity: entity.to_string(),
         body: body.to_owned(),
     };
-    // A write the user is shown as held, for the two that release one: its
-    // pull request was closed between the queue and the send.
-    let held = if matches!(mine, Mine::Released | Mine::Amended) {
+    // The write the user is shown as held, which the two that release one
+    // start from: its pull request was closed between the queue and the send.
+    let held = async {
         let write = flusher::queue(&h.deps, &h.source, comment(&pull, "mine"))
             .await
             .unwrap();
         mirror_pull(&h, "o/r#1797", "Bound the retry jitter", "closed").await;
         flusher::flush_source(&h.deps, &h.source).await.unwrap();
         assert_eq!(h.reload(write.id).await.state, WriteState::Held);
-        Some(write.id)
-    } else {
-        None
+        write.id
+    };
+    let held = match mine {
+        Mine::Released | Mine::Amended => Some(held.await),
+        Mine::Submitted | Mine::Queued => None,
     };
     for entity in [&first, &second] {
         let owed = format!("owed on {}", entity.key);
@@ -1671,32 +1673,36 @@ async fn beside_the_flush_task(mine: Mine) {
     }
 
     let send = async {
-        let on_the_wire = loop {
-            if let Some((_, at)) = h.paced.lock().unwrap().started.first() {
-                break *at;
+        let mut on_the_wire = None;
+        for _ in 0..1000 {
+            on_the_wire = h.paced.lock().unwrap().started.first().map(|(_, at)| *at);
+            if on_the_wire.is_some() {
+                break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        };
-        match (mine, held) {
-            (Mine::Submitted, _) => {
+        }
+        let on_the_wire = on_the_wire.expect("the flush task's first write went on the wire");
+        match mine {
+            Mine::Submitted => {
                 h.comment(&pull, "mine").await;
             }
-            (Mine::Queued, _) => {
+            Mine::Queued => {
                 let write = flusher::queue(&h.deps, &h.source, comment(&pull, "mine"))
                     .await
                     .unwrap();
-                flusher::flush_write(&h.deps, write.id).await.unwrap();
+                flusher::flush_entity_of(&h.deps, write.id).await.unwrap();
             }
-            (Mine::Released, Some(id)) => {
+            Mine::Released => {
+                let id = held.expect("held above");
                 flusher::apply_anyway(&h.deps, id).await.unwrap().unwrap();
             }
-            (Mine::Amended, Some(id)) => {
+            Mine::Amended => {
+                let id = held.expect("held above");
                 flusher::amend(&h.deps, id, comment(&pull, "mine"))
                     .await
                     .unwrap()
                     .unwrap();
             }
-            (_, None) => unreachable!("a release needs a held write"),
         }
         on_the_wire.elapsed()
     };

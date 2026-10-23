@@ -2,7 +2,7 @@
   the whole source.** Spec #1618, under Björn's 2026-10-22 waiver for this spec's frozen-surface
   steps. No signature change, no new variant, no migration, no event, no new module in
   `commands/` or `ipc/`. The generated mirror does not change. `knobas_sync::write_queue` gains
-  `flush_write(deps, id)`, a crate function, not a command.
+  `flush_entity_of(deps, id)`, a crate function, not a command.
 
   `submit_write`'s background send, *Send mine anyway* (`apply_held_write`), *Edit and send*
   (`amend_write`), `log_work`'s send and every other send the app makes for a write it just

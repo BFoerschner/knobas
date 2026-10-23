@@ -132,6 +132,9 @@ fn retryable(error: &SourceError, held_on: Option<&LocalQuota>) -> Option<WaitRe
 /// settles milliseconds later. A "send it directly if the source is up" fast
 /// path would be a second write path, which ADR-0006 is explicit there is not.
 ///
+/// The try reaches this write's entity, in queue order, and nothing else the
+/// source owes ([`flush_entity_of`], #1797).
+///
 /// The returned row is the write **as queued**, before the attempt -- read it
 /// back with `knobas_core::write_queue::get` for the outcome. That is the
 /// honest shape: the caller asked to queue a write and that is what happened,
@@ -143,9 +146,6 @@ fn retryable(error: &SourceError, held_on: Option<&LocalQuota>) -> Option<WaitRe
 /// [`FlushError::Store`] or [`FlushError::Db`] if the queue's own writes fail.
 /// A source that cannot take the write is **not** an error here -- that is the
 /// entire point.
-///
-/// The try is [`flush_write`]'s: this write's entity, in queue order, and
-/// nothing else the source owes (#1797).
 pub async fn submit(
     deps: &SchedulerDeps,
     source_id: &str,
@@ -153,7 +153,7 @@ pub async fn submit(
 ) -> Result<QueuedWrite, FlushError> {
     let queued = queue(deps, source_id, op).await?;
     // Try it now. A failure here is the queue working, not the call failing.
-    flush(deps, source_id, Pass::Owed, Reach::Entity(&queued.entity_id), &never()).await?;
+    flush_entity(deps, &queued).await?;
     Ok(queued)
 }
 
@@ -169,10 +169,10 @@ pub async fn submit(
 /// crash in the gap between the send and the copy would leave a worklog on the
 /// ticket with no trace of it here and the same afternoon offered for logging
 /// again. `submit` has that gap by construction; this half plus
-/// [`flush_write`] does not.
+/// [`flush_entity_of`] does not.
 ///
 /// The pair is therefore: `queue`, write the local record against this row's
-/// id, then [`flush_write`]. A crash between them leaves a pending write and
+/// id, then [`flush_entity_of`]. A crash between them leaves a pending write and
 /// a copy that says so -- which is the ordinary state of every worklog logged
 /// while Jira is down, and the next flush finishes it.
 ///
@@ -291,7 +291,7 @@ enum Reach<'w> {
     /// Every entity's: the flush task, *Flush now*, [`flush_source`].
     Source,
     /// One entity's, the entity of the write a submit, an amend or *Send
-    /// mine anyway* is for ([`flush_write`], #1797).
+    /// mine anyway* is for ([`flush_entity_of`], #1797).
     ///
     /// The source takes one write at a time, and the flush task holds it for
     /// one write, not a pass (#1629). A flush that reached the whole source
@@ -461,7 +461,7 @@ struct CredentialSeen<'a> {
 }
 
 /// Flush what one source is owed: every head write [`owed`] says is due.
-/// The flush task's reach; a submit's is [`flush_write`]'s, one entity.
+/// The flush task's reach; a submit's is [`flush_entity_of`]'s, one entity.
 ///
 /// Loops while it makes progress: `due` hands out one write per entity, so a
 /// second pass is what lets an entity's *next* write follow the one that just
@@ -479,8 +479,9 @@ pub async fn flush_source(deps: &SchedulerDeps, source_id: &str) -> Result<(), F
     flush(deps, source_id, Pass::Owed, Reach::Source, &never()).await
 }
 
-/// Flush write `id`: its entity's head writes, as [`flush_source`]
-/// would, and nothing else its source owes (#1797).
+/// Flush the entity write `id` is for: its head writes, as [`flush_source`]
+/// would, in queue order and as far as they go, and nothing else its source
+/// owes (#1797).
 ///
 /// What a submit, an amend and *Send mine anyway* run, and what a caller
 /// that [`queue`]d a write sends it with. It waits for the source's write
@@ -491,18 +492,17 @@ pub async fn flush_source(deps: &SchedulerDeps, source_id: &str) -> Result<(), F
 /// # Errors
 ///
 /// As [`flush_source`].
-pub async fn flush_write(deps: &SchedulerDeps, id: i64) -> Result<(), FlushError> {
-    let Some(write) = store::get(&deps.pool, id).await? else {
-        return Ok(());
-    };
-    flush(
-        deps,
-        &write.source_id,
-        Pass::Owed,
-        Reach::Entity(&write.entity_id),
-        &never(),
-    )
-    .await
+pub async fn flush_entity_of(deps: &SchedulerDeps, id: i64) -> Result<(), FlushError> {
+    match store::get(&deps.pool, id).await? {
+        Some(write) => flush_entity(deps, &write).await,
+        None => Ok(()),
+    }
+}
+
+/// [`flush_entity_of`] with the row in hand.
+async fn flush_entity(deps: &SchedulerDeps, write: &QueuedWrite) -> Result<(), FlushError> {
+    let reach = Reach::Entity(&write.entity_id);
+    flush(deps, &write.source_id, Pass::Owed, reach, &never()).await
 }
 
 async fn flush(
@@ -637,8 +637,7 @@ pub async fn apply_anyway(
         return Ok(None);
     };
     announce(deps, "released", &released).await;
-    let reach = Reach::Entity(&released.entity_id);
-    flush(deps, &released.source_id, Pass::Owed, reach, &never()).await?;
+    flush_entity(deps, &released).await?;
     Ok(Some(released))
 }
 
@@ -669,8 +668,7 @@ pub async fn amend(
         return Ok(None);
     };
     announce(deps, "amended", &amended).await;
-    let reach = Reach::Entity(&amended.entity_id);
-    flush(deps, &amended.source_id, Pass::Owed, reach, &never()).await?;
+    flush_entity(deps, &amended).await?;
     Ok(Some(amended))
 }
 

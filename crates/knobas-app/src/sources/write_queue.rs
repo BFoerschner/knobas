@@ -73,9 +73,8 @@ pub async fn submit(
 /// call, a merge's bounded retry (#721), the re-read of the mirror when it
 /// lands -- is [`flush`], spawned onto the runtime with a copy of the state.
 ///
-/// **Nothing about the queue changes.** The spawned flush is
-/// `flush_write`, the scheduler's flush narrowed to this write's entity
-/// (#1797): one write of a source at a time (its per-source lock, re-read
+/// **The queue's rules hold.** The spawned flush is `flush_entity_of`, the
+/// scheduler's flush narrowed to this write's entity (#1797): one write of a source at a time (its per-source lock, re-read
 /// under it, #1629), each entity's writes in the order they were queued, a
 /// moved target held, a refusal recorded. Two writes queued back to back
 /// spawn two flushes; they take turns at the lock, and neither sends a write
@@ -556,9 +555,9 @@ pub async fn flush_now(
         })
 }
 
-/// [`submit`]'s second half: send the write, after any its entity queued
-/// before it (`knobas_sync::write_queue::flush_write`, #1797), and re-read the
-/// mirror if it landed.
+/// [`submit`]'s second half: send the write's entity in queue order
+/// (`knobas_sync::write_queue::flush_entity_of`, #1797), and re-read the mirror
+/// if the write landed.
 ///
 /// # Errors
 ///
@@ -570,7 +569,7 @@ pub(crate) async fn flush(
     write_id: i64,
 ) -> Result<(), IpcError> {
     let scheduler = &state.scheduler;
-    knobas_sync::write_queue::flush_write(scheduler.deps(), write_id)
+    knobas_sync::write_queue::flush_entity_of(scheduler.deps(), write_id)
         .await
         .map_err(IpcError::internal)?;
 

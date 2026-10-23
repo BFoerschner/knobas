@@ -13414,7 +13414,7 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   `one_entitys_writes_keep_their_order_without_blocking_another` asks for exactly that). The cost
   is one entity's later writes, not the source's. *Reversing:* an `id <=` bound in the filter.
 - **Which callers narrow.** *Ruling:* `submit`, `apply_anyway`, `amend` and a new
-  `flush_write(deps, id)`, which the app's `flush` (every `submit_write`, `log_work` and
+  `flush_entity_of(deps, id)`, which the app's `flush` (every `submit_write`, `log_work` and
   background send) now calls in place of `flush_source`. `flush_source`, the flush task and
   *Flush now* still reach the whole source. *Reasoning:* the ticket names the submit, *Send mine
   anyway* and an amend; the app's send is the same submit by another door. A press of *Flush now*
