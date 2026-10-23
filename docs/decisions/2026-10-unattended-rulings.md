@@ -12965,3 +12965,11 @@ The measurement came after it.
   *Reversing:* one `git mv` per file.
 - **`shell/timer.test.svelte.ts` collides with `timer.test.ts`.** *Ruling:* it becomes
   `timer-store.test.ts` (the store; the other file holds the pure rules). *Reversing:* one rename.
+
+## #1786, start-work `fieldsOf` has no reader
+
+- **Render TfStartWork from `fieldsOf`, or delete it.** *Ruling:* delete `fieldsOf`, `Field` and
+  `opBody`; keep `edited`, which `pick()` and `edited()` in TfStartWork call. *Reasoning:* nothing
+  in the app read the list; TfStartWork names its fields itself, so rendering from it would be a
+  rewrite for no visible change. The entity test now pins `edited` directly. *Reversing:* low, the
+  code is in git history.
