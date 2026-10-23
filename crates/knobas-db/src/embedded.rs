@@ -2953,6 +2953,26 @@ mod tests {
         }
     }
 
+    /// #1819: a `base/` that cannot be listed counts as holding a database,
+    /// so the directory is kept.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_whose_databases_cannot_be_listed_is_kept() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        std::fs::create_dir_all(data.join("base/1")).unwrap();
+        write(&data, "PG_VERSION", "18\n");
+        write(&data, "postgresql.conf", "");
+        let base = data.join("base");
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let found = shape(&data);
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert_eq!(found, Shape::Finished);
+    }
+
     /// #1819: a marked directory is never removed, whatever it lacks later.
     #[test]
     fn a_marked_directory_is_never_removed() {
