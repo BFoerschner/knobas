@@ -396,25 +396,18 @@ impl SyncRunRow {
 /// Parse a stored `trigger`.
 ///
 /// Anything unrecognised reads as [`SyncTrigger::Schedule`]: a row written by
-/// a newer knobas must not break the diagnostics list. Driven by `ALL`, so a
-/// variant is readable the moment it is writable.
+/// a newer knobas must not break the diagnostics list. Read through the codec
+/// `closed_vocabulary!` generates off `ALL`, so a variant is readable the
+/// moment it is writable.
 fn trigger_from_db(raw: &str) -> SyncTrigger {
-    SyncTrigger::ALL
-        .iter()
-        .copied()
-        .find(|t| t.as_str() == raw)
-        .unwrap_or(SyncTrigger::Schedule)
+    raw.parse().unwrap_or(SyncTrigger::Schedule)
 }
 
 /// Parse a stored `outcome`. As [`trigger_from_db`], defaulting to
 /// [`SyncOutcome::Error`] -- an outcome this version cannot name is not a
 /// success, and must not clear a backoff ladder.
 pub(crate) fn outcome_from_db(raw: &str) -> SyncOutcome {
-    SyncOutcome::ALL
-        .iter()
-        .copied()
-        .find(|o| o.as_str() == raw)
-        .unwrap_or(SyncOutcome::Error)
+    raw.parse().unwrap_or(SyncOutcome::Error)
 }
 
 #[derive(sqlx::FromRow)]
