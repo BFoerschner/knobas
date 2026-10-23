@@ -13555,3 +13555,66 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   reach (bring_up, external_adapter_install, similar_text_incremental, knobas-db embedded, gitea
   client); that red is main's, filed as #1815 (bring_up also #1809). The front half of both runs
   was green. *Reversing:* none, the diff is one test file.
+
+## #1802: two load flakes, a limiter bound and an ownership lock (Opus implementer, 2026-10-23)
+
+- **The adoption failure is not a race in `start_managed`'s claim.** *Fork:* fix the claim, or
+  fix how the lock is released. *Ruling:* the release. *Reasoning:* the refusal named the test
+  binary's own pid, which only this test's processes could have written into its tempdir's
+  `.owner.lock`. A child another test thread was spawning held a copy of the dropped descriptor
+  between its fork and its exec, and an flock lasts until the last copy closes. Reproduced alone in
+  a 40-line program (296 of 2,000 reclaims refused beside four spawning threads, 0 without them, 0
+  with an explicit unlock) and in the new unit test (106 of 300). `OwnerLock` unlocks on drop.
+  *Reversing:* low, the newtype is the only change.
+- **No §10.8 entry.** *Fork:* book the unlock as an observable change, or not. *Ruling:* none owed. *Reasoning:* no IPC, migration or module-layout change;
+  a shipped process releases the lock only as it quits, and `restart` keeps it. *Reversing:* n/a.
+- **Cross-run collision ruled out for the adoption test.** *Fork:* a shared port, data directory or temp path between
+  test binaries or worktrees, or a cause inside one binary. *Ruling:* inside one binary.
+  *Reasoning:* every embedded test takes its own
+  `tempfile::tempdir()` (data directory, both lock files), and a fresh start asks for port 0. A
+  shared port fails a start with a bind error, never with *has this profile open*.
+  *Reversing:* n/a.
+- **The bring-up lock keeps closing without an unlock.** *Fork:* give it the same unlock-on-drop, or
+  leave it. *Ruling:* unchanged. *Reasoning:* a
+  bring-up waits for its lock (50 ms polls), so a child's copy delays it by one exec and refuses
+  nothing. *Reversing:* low.
+- **The two sibling limiter tests with a literal refill bound get the measured one too.** *Fork:*
+  the named test only, or every test bounded by "what refills while the test runs". *Ruling:* all
+  three (`a_loosening_right_away_takes_nothing_from_a_full_limiter`, `a_request_ends_the_quiet`,
+  `a_request_ends_the_quiet_before_a_loosening`). *Reasoning:* same assertion shape, same cause;
+  the others' literals had 100 to 300 ms of margin where the named one had 10. The tests asserting a
+  floor or a whole burst are left alone: a stall only adds refill up to the burst.
+  *Reversing:* low.
+- **The bound adds one request to what the elapsed time refilled.** *Fork:* the bare elapsed
+  refill, or one more. *Ruling:* one more. *Reasoning:* governor reads
+  `quanta`'s clock and the test reads `Instant`, and the two can round a refill differently; the
+  one is the original test's own allowance at a zero-length window, not a wider tolerance.
+  *Reversing:* low.
+- **#1808 (a silent port another bind can take) is fixed here; #1809 is left.** *Fork:* the
+  orchestrator asked for both if they share a cause. *Ruling:* #1808 shares the class (how the
+  embedded tests pick ports) and failed once in this ticket's own 22 runs, so `SilentPort` holds a
+  bound, never-listened socket for each of the three tests that dropped one. #1809 is a scheduler
+  gap bound in `knobas-app`'s bring-up test; its fix needs a marker inside the migration step,
+  which is neither of the causes here. *Reversing:* low.
+- **A cross-binary collision does exist, in one test, and the test takes the reaper's lock.**
+  *Fork:* leave `on_a_server_of_its_own_each_source_file_gets_a_database_of_its_own` to the
+  reaper's rules, or hold the child's scratch lock while adopting its orphan. *Ruling:* hold it.
+  *Reasoning:* two `embedded` binaries side by side went red 2 times in 9 with *pg_ctl: directory
+  ... is not a database cluster directory*: the child's `$TMPDIR/knobas-test-<pid>` is abandoned
+  by design once it exits, so the other binary's reaper (and any gate's `knobas-test-server`)
+  stopped and deleted it between this test's adoption and its stop. Locking the sibling
+  `knobas-test-<pid>.lock` first, blocking, is what a reaper itself does, so every reaper passes the
+  root by; a reaper that got there first leaves no `postmaster.pid` and the adoption is skipped.
+  Test-only; the reaper and the product are unchanged. *Reversing:* low.
+- **Merge-manager deep pass: unlock-on-drop is the fix, not close-on-exec (Opus merge-manager,
+  2026-10-23).** *Fork:* open `.owner.lock` close-on-exec as the root fix, or keep the unlock.
+  *Ruling:* keep the unlock; nothing to add. *Reasoning:* the descriptor is already close-on-exec:
+  `std::fs::OpenOptions` opens every file with `O_CLOEXEC`, so no exec'd child (the postmaster
+  included, which `pg_ctl` execs) keeps a copy past its exec. The window is fork to exec, which
+  close-on-exec cannot close and an unlock does. `File::try_lock`/`unlock` are `flock(2)` on Unix,
+  so the lock belongs to the open file description: `LOCK_UN` releases it for every copy of that
+  descriptor, and for no other. `claim_ownership` opens a new description on each call and the
+  file is never `try_clone`d, so a second claim in the same process is refused rather than
+  sharing the lock, and dropping one `OwnerLock` cannot release a lock another handle still
+  needs. `EmbeddedDb` declares `owner_lock` last, so the unlock still follows the server's stop.
+  *Reversing:* low.

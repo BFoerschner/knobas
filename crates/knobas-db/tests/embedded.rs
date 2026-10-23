@@ -144,10 +144,8 @@ async fn a_lock_naming_a_live_unrelated_process_and_a_silent_port_is_cleared() {
         .unwrap();
 
     let mut sleeper = Sleeper::spawn();
-    let silent_port = {
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        listener.local_addr().unwrap().port()
-    };
+    let silent = SilentPort::bind();
+    let silent_port = silent.port();
     let data_dir = dir.path().join("data");
     let pid_file = data_dir.join("postmaster.pid");
     let lock = format!(
@@ -298,10 +296,8 @@ async fn a_failed_retry_never_stops_the_server_that_appeared_in_the_window() {
     let mut reaped = std::process::Command::new("true").spawn().unwrap();
     let dead_pid = reaped.id();
     reaped.wait().unwrap();
-    let silent_port = {
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        listener.local_addr().unwrap().port()
-    };
+    let silent = SilentPort::bind();
+    let silent_port = silent.port();
     std::fs::write(
         data_dir.join("postmaster.pid"),
         format!(
@@ -885,6 +881,52 @@ fn port_of(root_dir: &std::path::Path) -> u16 {
     running_port(root_dir)
 }
 
+/// A port on `127.0.0.1` that nothing answers on for as long as this lives
+/// (#1808): bound, and never listened on, so a connect to it is refused and
+/// no other bind on the machine can be handed it. A port picked by binding a
+/// listener and dropping it was free again at once, and the next bind to
+/// port 0 -- a postmaster of another test or another gate -- could take it
+/// before the test was done with it.
+struct SilentPort {
+    port: u16,
+    _held: tokio::net::TcpSocket,
+}
+
+impl SilentPort {
+    fn bind() -> SilentPort {
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket
+            .bind(std::net::SocketAddr::from(([127, 0, 0, 1], 0)))
+            .unwrap();
+        SilentPort {
+            port: socket.local_addr().unwrap().port(),
+            _held: socket,
+        }
+    }
+
+    fn port(&self) -> u16 {
+        self.port
+    }
+}
+
+/// What the silent-port tests rest on (#1808): a held [`SilentPort`] answers
+/// nothing, and nobody else can bind it, not even with `SO_REUSEADDR`, which
+/// PostgreSQL sets on its own listeners.
+#[test]
+fn a_silent_port_answers_nothing_and_cannot_be_taken_while_held() {
+    let silent = SilentPort::bind();
+    assert!(!port_answers(silent.port()), "a connect is refused");
+
+    let squatter = tokio::net::TcpSocket::new_v4().unwrap();
+    squatter.set_reuseaddr(true).unwrap();
+    assert!(
+        squatter
+            .bind(std::net::SocketAddr::from(([127, 0, 0, 1], silent.port())))
+            .is_err(),
+        "a second bind to the held port is refused"
+    );
+}
+
 fn port_answers(port: u16) -> bool {
     std::net::TcpStream::connect_timeout(
         &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
@@ -1149,11 +1191,9 @@ async fn a_connector_does_not_print_its_password() {
 /// retrying a refused handshake until the pool's acquire timeout expired.
 #[tokio::test]
 async fn an_existing_url_that_answers_nothing_fails_fast_rather_than_after_thirty_seconds() {
-    // A port nothing listens on: bind it, read it back, drop the listener.
-    let port = {
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        listener.local_addr().unwrap().port()
-    };
+    // A port nothing answers on, held until the test ends.
+    let silent = SilentPort::bind();
+    let port = silent.port();
     let dir = tempfile::tempdir().unwrap();
 
     let started = std::time::Instant::now();
@@ -1562,8 +1602,20 @@ async fn on_a_server_of_its_own_each_source_file_gets_a_database_of_its_own() {
 /// (`test_util`'s `$TMPDIR/knobas-test-<pid>`), and remove the root and the
 /// lock beside it. The child is gone, so its lock is free and the server is
 /// an orphan, which a start on the same root adopts and owns.
+///
+/// Under that lock, taken first and held to the end, as a reaper takes it
+/// (#1802): with the child gone, the first test binary of any run to sweep
+/// `$TMPDIR` finds the root abandoned, and a sweep that ran between this
+/// adoption and its stop deleted the data directory under it -- `pg_ctl:
+/// directory ... is not a database cluster directory`. Held here, the lock
+/// makes every reaper pass the root by; taken after a reaper's, it finds
+/// nothing left to stop.
 async fn stop_the_server_a_child_left(pid: u32) {
     let root = std::env::temp_dir().join(format!("knobas-test-{pid}"));
+    let lock_path = root.with_file_name(format!("knobas-test-{pid}.lock"));
+    let lock = std::fs::File::create(&lock_path).expect("the child's scratch lock");
+    lock.lock()
+        .expect("wait out any reaper of the child's root");
     if root.join("data").join("postmaster.pid").exists() {
         let adopted = EmbeddedDb::start(DbConfig {
             root_dir: root.clone(),
@@ -1581,5 +1633,6 @@ async fn stop_the_server_a_child_left(pid: u32) {
             .expect("stop the server the child left");
     }
     let _ = std::fs::remove_dir_all(&root);
-    let _ = std::fs::remove_file(root.with_file_name(format!("knobas-test-{pid}.lock")));
+    let _ = std::fs::remove_file(&lock_path);
+    drop(lock);
 }
