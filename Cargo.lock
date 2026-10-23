@@ -3307,6 +3307,7 @@ dependencies = [
  "flate2",
  "knobas-core",
  "knobas-http",
+ "knobas-live-cleanup",
  "knobas-source",
  "reqwest",
  "serde",
