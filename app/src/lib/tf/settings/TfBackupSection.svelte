@@ -16,8 +16,8 @@
   back into focus (#1470): the list is the only way in (#831), and the dialog
   asks the reader to put a file there. Until the dialog's own read lands it
   lists nothing rather than the folder as it was. *Open the backup folder*
-  (#1471) opens that folder through the opener, as *Open the log folder* does,
-  since it sits under the hidden `~/Library`.
+  (#1471) opens that folder, since it sits under the hidden `~/Library`; the
+  `open_backup_folder` command picks the running profile's (#1704).
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -99,9 +99,9 @@
     return () => window.removeEventListener("focus", again);
   });
 
-  async function openFolder(directory: string) {
+  async function openFolder() {
     try {
-      await ports.openBackupFolder(directory);
+      await ports.openBackupFolder();
     } catch (cause) {
       push({ text: `Could not open the backup folder: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -254,7 +254,7 @@
     <div class="tf-stg-acts">
       <button class="tf-btn tf-primary" disabled={busy || nothingTicked} onclick={() => void exportShare()}>Export…</button>
       <button class="tf-btn tf-ghost" onclick={() => choose("share")}>Import…</button>
-      <button class="tf-btn tf-ghost" onclick={() => void openFolder(current.directory)}>Open the backup folder</button>
+      <button class="tf-btn tf-ghost" onclick={() => void openFolder()}>Open the backup folder</button>
     </div>
   </div>
 
@@ -270,7 +270,7 @@
           file there to see it here.
         </p>
         <div class="tf-stg-acts">
-          <button class="tf-btn tf-sm" onclick={() => void openFolder(current.directory)}>Open the backup folder</button>
+          <button class="tf-btn tf-sm" onclick={() => void openFolder()}>Open the backup folder</button>
         </div>
         <p class="tf-dsub">
           This works only into a knobas that holds no data yet; one that has data refuses it. Passwords are not in the

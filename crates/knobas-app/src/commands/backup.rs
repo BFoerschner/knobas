@@ -119,6 +119,25 @@ pub async fn restore_backup<R: tauri::Runtime>(
     Ok(backup::restore(&service, &file).await?)
 }
 
+/// *Open the backup folder* (#1704): the running profile's `backups` folder
+/// in the file manager, created first if no export has made it yet.
+///
+/// No argument: the folder is the [`Profile`](crate::Profile)'s, so a demo
+/// window cannot name the real profile's archives (P13). Needs no database.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before `setup` has managed the
+/// profile and the opener,
+/// [`Internal`](crate::IpcErrorCode::Internal) naming the folder when it
+/// cannot be created or the file manager refuses it.
+#[tauri::command]
+pub async fn open_backup_folder<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<(), IpcError> {
+    backup::folder::open_managed(&app)
+}
+
 #[cfg(test)]
 mod tests {
     const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/backup.ts");
@@ -130,6 +149,6 @@ mod tests {
     /// either side is a call that fails only at run time.
     #[test]
     fn the_mirror_invokes_the_commands_by_their_registered_names() {
-        crate::commands::mirror::assert_mirrors("backup", MIRROR, "app/src/lib/ipc/backup.ts", 5);
+        crate::commands::mirror::assert_mirrors("backup", MIRROR, "app/src/lib/ipc/backup.ts", 6);
     }
 }

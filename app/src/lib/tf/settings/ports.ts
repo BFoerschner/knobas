@@ -13,6 +13,7 @@ import { monitoringSettings, setMonitoringSettings, type MonitoringSettings } fr
 import {
   backupNow,
   backupStatus,
+  openBackupFolder,
   restoreBackup,
   setBackupSchedule,
   shareExport,
@@ -192,11 +193,11 @@ export interface SectionPorts {
   reindexFts: () => Promise<void>;
   openLogs: () => Promise<void>;
   /**
-   * Open the profile's backup folder (#1471), the `directory` `backup_status`
-   * reported: the share exports and backups the Restore and Import dialogs
-   * list live there, under the hidden `~/Library`.
+   * Open the profile's backup folder (#1471): the share exports and backups
+   * the Restore and Import dialogs list live there, under the hidden
+   * `~/Library`. No path: the command opens the running profile's (#1704).
    */
-  openBackupFolder: (directory: string) => Promise<void>;
+  openBackupFolder: () => Promise<void>;
 }
 
 /** The real commands, each looked up when it is called (see above). */
@@ -230,10 +231,6 @@ export const realSectionPorts: SectionPorts = {
     const { openPath } = await import("@tauri-apps/plugin-opener");
     await openPath(await appLogDir());
   },
-  // The same opener, its `open-path` scope widened to the profile's
-  // `backups` folder under `$APPDATA` (#1471), so no command was added.
-  openBackupFolder: async (directory) => {
-    const { openPath } = await import("@tauri-apps/plugin-opener");
-    await openPath(directory);
-  },
+  // The running profile's folder, chosen in Rust (#1704).
+  openBackupFolder: () => openBackupFolder(),
 };

@@ -461,6 +461,7 @@ knobas-app	test/it	backup_ipc::a_database_with_no_stored_schedule_is_nightly_by_
 knobas-app	test/it	backup_ipc::a_directory_named_like_an_archive_is_neither_listed_nor_pruned
 knobas-app	test/it	backup_ipc::a_disabled_schedule_exports_nothing
 knobas-app	test/it	backup_ipc::a_dismissed_offer_crosses_the_time_part_still_dismissed
+knobas-app	test/it	backup_ipc::a_folder_the_opener_refuses_is_an_error_that_names_it
 knobas-app	test/it	backup_ipc::a_fresh_machine_restores_after_taking_its_own_first_backup
 knobas-app	test/it	backup_ipc::a_keychain_that_refuses_one_source_still_settles_the_others
 knobas-app	test/it	backup_ipc::a_misspelled_argument_is_refused_before_the_body_runs
@@ -482,6 +483,7 @@ knobas-app	test/it	backup_ipc::an_empty_saved_list_table_is_still_in_the_archive
 knobas-app	test/it	backup_ipc::each_part_alone_brings_exactly_its_own_tables
 knobas-app	test/it	backup_ipc::every_backup_command_is_registered_and_its_arguments_decode
 knobas-app	test/it	backup_ipc::export_now_writes_an_archive_and_records_it
+knobas-app	test/it	backup_ipc::open_backup_folder_opens_the_running_profiles_folder_and_no_other
 knobas-app	test/it	backup_ipc::restoring_a_partial_archive_leaves_the_targets_own_settings_alone
 knobas-app	test/it	backup_ipc::retention_deletes_the_oldest_and_spares_what_is_not_an_archive
 knobas-app	test/it	backup_ipc::switching_notes_and_time_on_brings_the_notes_and_the_hours
@@ -1205,6 +1207,7 @@ knobas-app	test/it	week_ipc::the_no_target_row_tells_app_open_from_app_closed_an
 knobas-app	test/it	wiring::each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge
 knobas-app	test/it	wiring::every_command_is_in_the_handler_list
 knobas-app	test/it	wiring::no_grant_reaches_further_than_the_app_does
+knobas-app	test/it	wiring::setup_manages_the_platform_folder_opener
 knobas-app	test/it	wiring::the_capture_window_may_close_itself_and_nothing_more
 knobas-app	test/it	wiring::the_global_shortcut_plugin_is_pinned_and_has_no_javascript_half
 knobas-app	test/it	wiring::the_global_shortcut_plugin_is_registered_with_a_handler
@@ -1212,7 +1215,7 @@ knobas-app	test/it	wiring::the_notification_plugin_is_registered
 knobas-app	test/it	wiring::the_opener_plugin_is_registered
 knobas-app	test/it	wiring::the_window_may_ask_about_permission_and_nothing_else_about_notifications
 knobas-app	test/it	wiring::the_window_may_open_http_urls_and_only_http_urls
-knobas-app	test/it	wiring::the_window_may_open_the_log_and_backup_folders_and_no_other_path
+knobas-app	test/it	wiring::the_window_may_open_the_log_folder_and_no_other_path
 knobas-app	test/it	working_tree::a_clean_tree_names_its_branch_and_head_and_nothing_to_do
 knobas-app	test/it	working_tree::a_detached_head_has_no_branch_and_keeps_its_commit
 knobas-app	test/it	working_tree::a_directory_that_is_not_a_repository_says_so
