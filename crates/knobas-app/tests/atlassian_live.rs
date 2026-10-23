@@ -2016,14 +2016,9 @@ async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workfl
     let read = |entity: String| {
         let state = &state;
         async move {
-            crud::reachable_transitions(
-                &state.pool,
-                &state.secrets,
-                &state.registry,
-                &entity,
-            )
-            .await
-            .unwrap_or_else(|error| panic!("the read must answer for {entity}: {error}"))
+            crud::reachable_transitions(&state.pool, &state.secrets, &state.registry, &entity)
+                .await
+                .unwrap_or_else(|error| panic!("the read must answer for {entity}: {error}"))
         }
     };
     let reachable = read(entity.clone()).await;

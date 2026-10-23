@@ -347,15 +347,9 @@ pub async fn set_source_secret<R: tauri::Runtime>(
     secret: SecretInput,
 ) -> Result<knobas_sync::config::CredentialHealth, IpcError> {
     let state = crate::sources::state(&app)?;
-    let health = crud::set_secret(
-        &state.pool,
-        &state.secrets,
-        &state.registry,
-        &id,
-        secret,
-    )
-    .await
-    .map_err(|error| to_ipc(&error, Some(&id)))?;
+    let health = crud::set_secret(&state.pool, &state.secrets, &state.registry, &id, secret)
+        .await
+        .map_err(|error| to_ipc(&error, Some(&id)))?;
     emit(&app, crate::events::SOURCE_HEALTH, &health);
     // A credential that now works releases the backoff, so the source may be
     // due this instant rather than at the next tick.

@@ -193,15 +193,18 @@ pub async fn instance_write_ops(
             Ok(None) | Err(_) => return Vec::new(),
         },
     };
-    let built = knobas_sync::scheduler::build_off_runtime(registry, instance_from(
-        &cfg.id,
-        &cfg.adapter_kind,
-        &cfg.display_name,
-        &cfg.base_url,
-        cfg.auth_kind.method(),
-        credential,
-        cfg.config.clone(),
-    ))
+    let built = knobas_sync::scheduler::build_off_runtime(
+        registry,
+        instance_from(
+            &cfg.id,
+            &cfg.adapter_kind,
+            &cfg.display_name,
+            &cfg.base_url,
+            cfg.auth_kind.method(),
+            credential,
+            cfg.config.clone(),
+        ),
+    )
     .await;
     built
         .map(|source| source.descriptor().write_ops)
@@ -527,15 +530,18 @@ pub async fn set_secret(
     .await?;
     release_unauthorized_writes(pool, id).await;
 
-    let source = knobas_sync::scheduler::build_off_runtime(registry, instance_from(
-        id,
-        &cfg.adapter_kind,
-        &cfg.display_name,
-        &cfg.base_url,
-        Some(method),
-        credential,
-        cfg.config.clone(),
-    ))
+    let source = knobas_sync::scheduler::build_off_runtime(
+        registry,
+        instance_from(
+            id,
+            &cfg.adapter_kind,
+            &cfg.display_name,
+            &cfg.base_url,
+            Some(method),
+            credential,
+            cfg.config.clone(),
+        ),
+    )
     .await?;
     let outcome = source.test_connection().await;
 
@@ -701,15 +707,10 @@ pub async fn test(
     let display_name = saved
         .as_ref()
         .map_or(kind.as_str(), |row| &row.display_name);
-    let source = knobas_sync::scheduler::build_off_runtime(registry, instance_from(
-        id,
-        &kind,
-        display_name,
-        &base_url,
-        auth,
-        credential,
-        config,
-    ))
+    let source = knobas_sync::scheduler::build_off_runtime(
+        registry,
+        instance_from(id, &kind, display_name, &base_url, auth, credential, config),
+    )
     .await?;
 
     let started = std::time::Instant::now();
@@ -1225,15 +1226,18 @@ async fn adapter_for(
             .await?
         }
     };
-    let source = knobas_sync::scheduler::build_off_runtime(registry, instance_from(
-        &parsed.namespace,
-        &cfg.adapter_kind,
-        &cfg.display_name,
-        &cfg.base_url,
-        method,
-        Credential::keeping(&SecretInput::default(), stored),
-        cfg.config.clone(),
-    ))
+    let source = knobas_sync::scheduler::build_off_runtime(
+        registry,
+        instance_from(
+            &parsed.namespace,
+            &cfg.adapter_kind,
+            &cfg.display_name,
+            &cfg.base_url,
+            method,
+            Credential::keeping(&SecretInput::default(), stored),
+            cfg.config.clone(),
+        ),
+    )
     .await?;
     Ok(source)
 }

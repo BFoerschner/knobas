@@ -852,10 +852,15 @@ async fn attempt(
     // one `match` gave four arms, two of which built the same decorator, and
     // made `(Some(sink), Backfill)` look like a case somebody had to reach for
     // it to be live code.
-    let observed =
-        progress.map(|sink| {
-            Observed::new(source.as_ref(), source_id, run_id, started, Arc::clone(sink))
-        });
+    let observed = progress.map(|sink| {
+        Observed::new(
+            source.as_ref(),
+            source_id,
+            run_id,
+            started,
+            Arc::clone(sink),
+        )
+    });
     let watched: &dyn Source = match &observed {
         Some(o) => o,
         None => source.as_ref(),

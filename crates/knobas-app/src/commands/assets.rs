@@ -149,8 +149,7 @@ async fn monitor_targets<R: tauri::Runtime>(
             continue;
         }
         let ops =
-            crate::sources::crud::instance_write_ops(&state.secrets, &state.registry, &cfg)
-                .await;
+            crate::sources::crud::instance_write_ops(&state.secrets, &state.registry, &cfg).await;
         if let Some(target) = target_of(&cfg, &ops) {
             targets.push(target);
         }
@@ -935,8 +934,7 @@ async fn monitor_write_ops<R: tauri::Runtime>(
             continue;
         };
         let ops =
-            crate::sources::crud::instance_write_ops(&state.secrets, &state.registry, &cfg)
-                .await;
+            crate::sources::crud::instance_write_ops(&state.secrets, &state.registry, &cfg).await;
         offered.insert(source_id.to_owned(), ops);
     }
     Ok(offered)

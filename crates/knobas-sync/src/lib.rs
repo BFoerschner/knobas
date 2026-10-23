@@ -815,8 +815,7 @@ async fn run_locked(
     knobas_core::context::follow_status(
         &mut **tx,
         source_id,
-        &knobas_core::payload::Declarations::empty()
-            .with(source_id, payload_paths),
+        &knobas_core::payload::Declarations::empty().with(source_id, payload_paths),
     )
     .await?;
 

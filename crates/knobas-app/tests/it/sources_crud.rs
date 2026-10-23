@@ -1133,7 +1133,12 @@ async fn only_a_source_with_an_account_offers_write_ops() {
         .await
         .unwrap();
     assert_eq!(
-        sources::crud::instance_write_ops(&f.secrets, &crate::support::shared(f.registry.clone()), &stored(&f).await).await,
+        sources::crud::instance_write_ops(
+            &f.secrets,
+            &crate::support::shared(f.registry.clone()),
+            &stored(&f).await
+        )
+        .await,
         Vec::<String>::new()
     );
 
@@ -1147,7 +1152,12 @@ async fn only_a_source_with_an_account_offers_write_ops() {
     .await
     .unwrap();
     assert_eq!(
-        sources::crud::instance_write_ops(&g.secrets, &crate::support::shared(g.registry.clone()), &stored(&g).await).await,
+        sources::crud::instance_write_ops(
+            &g.secrets,
+            &crate::support::shared(g.registry.clone()),
+            &stored(&g).await
+        )
+        .await,
         ["pause_monitor", "resume_monitor", "create_monitor"]
     );
 }
@@ -1168,9 +1178,13 @@ async fn adding_an_account_keeps_the_stored_key_and_turns_the_write_ops_on() {
         .await
         .unwrap();
     assert!(
-        sources::crud::instance_write_ops(&f.secrets, &crate::support::shared(f.registry.clone()), &stored(&f).await)
-            .await
-            .is_empty()
+        sources::crud::instance_write_ops(
+            &f.secrets,
+            &crate::support::shared(f.registry.clone()),
+            &stored(&f).await
+        )
+        .await
+        .is_empty()
     );
 
     sources::crud::set_secret(
@@ -1201,7 +1215,12 @@ async fn adding_an_account_keeps_the_stored_key_and_turns_the_write_ops_on() {
     assert_eq!(account.password, "knobas-dev");
 
     assert_eq!(
-        sources::crud::instance_write_ops(&f.secrets, &crate::support::shared(f.registry.clone()), &stored(&f).await).await,
+        sources::crud::instance_write_ops(
+            &f.secrets,
+            &crate::support::shared(f.registry.clone()),
+            &stored(&f).await
+        )
+        .await,
         ["pause_monitor", "resume_monitor", "create_monitor"],
         "the write ops flipped on with no other change"
     );
@@ -1305,13 +1324,23 @@ async fn a_keychain_that_refuses_to_answer_offers_nothing_rather_than_failing() 
     // The account really is stored, so the empty answer below is the refusal
     // and not a source that never had one.
     assert_eq!(
-        sources::crud::instance_write_ops(&f.secrets, &crate::support::shared(f.registry.clone()), &stored(&f).await).await,
+        sources::crud::instance_write_ops(
+            &f.secrets,
+            &crate::support::shared(f.registry.clone()),
+            &stored(&f).await
+        )
+        .await,
         ["pause_monitor", "resume_monitor", "create_monitor"]
     );
 
     let locked: Arc<dyn SecretStore> = Arc::new(Refuses);
     assert_eq!(
-        sources::crud::instance_write_ops(&locked, &crate::support::shared(f.registry.clone()), &stored(&f).await).await,
+        sources::crud::instance_write_ops(
+            &locked,
+            &crate::support::shared(f.registry.clone()),
+            &stored(&f).await
+        )
+        .await,
         Vec::<String>::new(),
         "a refused keychain offers nothing; it does not take the surface down with it"
     );

@@ -726,10 +726,16 @@ async fn older_runs_are_the_sources_answer_read_through_the_run_declarations() {
     )
     .await;
 
-    let older =
-        older_pipeline_runs_inner(&pool, &no_secrets(), &answering(), &tests, &oldest, Some(10))
-            .await
-            .unwrap();
+    let older = older_pipeline_runs_inner(
+        &pool,
+        &no_secrets(),
+        &answering(),
+        &tests,
+        &oldest,
+        Some(10),
+    )
+    .await
+    .unwrap();
     let ids: Vec<&str> = older.iter().map(|r| r.entity_id.as_str()).collect();
     assert_eq!(
         ids,
@@ -814,7 +820,8 @@ async fn older_runs_of_no_pipeline_or_a_foreign_run_are_refused() {
     );
     assert_eq!(
         code(
-            older_pipeline_runs_inner(&pool, &no_secrets(), &answering(), "no id", &run, None).await
+            older_pipeline_runs_inner(&pool, &no_secrets(), &answering(), "no id", &run, None)
+                .await
         ),
         knobas_app::IpcErrorCode::Invalid
     );
@@ -927,9 +934,14 @@ async fn a_runs_chain_is_the_sources_answer_read_through_the_run_declarations() 
         .unwrap();
     assert!(none.is_empty());
 
-    let failed = run_chain_inner(&pool, &no_secrets(), &answering(), &format!("{tc}:build:404"))
-        .await
-        .unwrap_err();
+    let failed = run_chain_inner(
+        &pool,
+        &no_secrets(),
+        &answering(),
+        &format!("{tc}:build:404"),
+    )
+    .await
+    .unwrap_err();
     assert_eq!(failed.code, knobas_app::IpcErrorCode::Unreachable);
     let bad = run_chain_inner(&pool, &no_secrets(), &answering(), "not an id")
         .await

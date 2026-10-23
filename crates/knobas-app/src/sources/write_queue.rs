@@ -518,13 +518,8 @@ pub(crate) async fn queue(
     state: &crate::sources::SourcesState,
     payload: serde_json::Value,
 ) -> Result<(QueuedWrite, String), IpcError> {
-    let (op, source_id) = submittable(
-        &state.pool,
-        &state.secrets,
-        &state.registry,
-        payload,
-    )
-    .await?;
+    let (op, source_id) =
+        submittable(&state.pool, &state.secrets, &state.registry, payload).await?;
     let queued = knobas_sync::write_queue::queue(state.scheduler.deps(), &source_id, op)
         .await
         .map_err(IpcError::internal)?;

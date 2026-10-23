@@ -511,11 +511,13 @@ async fn a_refused_discovery_is_asked_again_next_run() {
 async fn a_source_moved_to_another_address_is_asked_again() {
     let h = harness(serde_json::json!({}), Discovery::Fields(Vec::new())).await;
     assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
-    sqlx::query("update knobas.source_config set base_url = 'https://elsewhere.example' where id = $1")
-        .bind(&h.id)
-        .execute(&h.deps.pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "update knobas.source_config set base_url = 'https://elsewhere.example' where id = $1",
+    )
+    .bind(&h.id)
+    .execute(&h.deps.pool)
+    .await
+    .unwrap();
     assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
     assert_eq!(count(&h.asked), 2);
 }
