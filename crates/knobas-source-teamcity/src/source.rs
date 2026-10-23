@@ -606,11 +606,8 @@ mod tests {
     /// on -- the mockd suite covers the 401 half against a live server.
     #[tokio::test]
     async fn an_unreachable_instance_is_unreachable_from_both_entry_points() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().expect("addr").port();
-        drop(listener);
         let mut i = instance(json!({}));
-        i.base_url = format!("http://127.0.0.1:{port}");
+        i.base_url = knobas_mockd::refused_url();
         let source = built(i);
 
         let connect = source.test_connection().await;

@@ -482,13 +482,24 @@ impl Drop for MockServer {
 /// A URL on a port nothing is listening on — the deterministic way to make an
 /// adapter classify `SourceError::Unreachable` without waiting out a timeout.
 ///
-/// Binds an ephemeral port, reads its number and closes it again. The OS may
-/// hand that port to something else before the caller connects; the window is
-/// microseconds, and no test in this workspace binds ephemeral ports
-/// concurrently with an assertion on this URL.
+/// Port 1 on the loopback (#1831), refused at once. A port bound to `0` and
+/// dropped is free again immediately, and a mock server another test starts can
+/// be handed it and answer where the test expected nothing (#1815). Port 1 is
+/// below every ephemeral range a bind to `0` draws from, and privileged on
+/// Linux. A port held bound but never listened on is refused on Linux and
+/// silently dropped on macOS, where every connect then waits out its timeout.
+///
+/// Checked once per process, so a machine where something does answer there
+/// fails here, naming the port, rather than in whichever test asked.
 pub fn refused_url() -> String {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
-    let addr = l.local_addr().expect("a bound listener has an address");
-    drop(l);
-    format!("http://{addr}")
+    static REFUSED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    REFUSED.get_or_init(|| {
+        let refused = std::net::TcpStream::connect(("127.0.0.1", 1))
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionRefused);
+        assert!(
+            refused,
+            "something answers on 127.0.0.1:1, the port refused_url names"
+        );
+    });
+    "http://127.0.0.1:1".to_owned()
 }

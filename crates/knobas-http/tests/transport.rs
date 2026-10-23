@@ -19,16 +19,29 @@ fn config(base_url: String) -> HttpConfig {
     }
 }
 
+/// A URL nothing answers on (#1815, #1831): port 1 on the loopback, refused at
+/// once. A port bound to `0` and dropped is free again at once, and another
+/// test's server can be handed it. Port 1 is below every ephemeral range and
+/// privileged on Linux; a bound, unlistened port instead makes macOS connects
+/// wait out their timeout. Checked refused once per process.
+fn dead_url() -> String {
+    static REFUSED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    REFUSED.get_or_init(|| {
+        let refused = std::net::TcpStream::connect(("127.0.0.1", 1))
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionRefused);
+        assert!(
+            refused,
+            "something answers on 127.0.0.1:1, the port dead_url names"
+        );
+    });
+    "http://127.0.0.1:1".to_owned()
+}
+
 /// §4.1: connect/DNS/TLS/timeout are `Unreachable` -- the class the scheduler
 /// backs off on, as opposed to the one that needs a human.
 #[tokio::test]
 async fn a_refused_connection_is_unreachable() {
-    // Bind and drop: the port is real, closed, and nobody else's.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().expect("addr").port();
-    drop(listener);
-
-    let client = HttpClient::new(config(format!("http://127.0.0.1:{port}"))).expect("client");
+    let client = HttpClient::new(config(dead_url())).expect("client");
     let error = client
         .get_json::<serde_json::Value>("/rest/api/2/myself", &[])
         .await
@@ -873,10 +886,7 @@ async fn a_once_sent_write_turned_away_as_busy_is_not_unconfirmed() {
 /// send it again on a later tick.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_once_sent_write_that_never_connected_is_unreachable() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().expect("addr").port();
-    drop(listener);
-    let client = HttpClient::new(config(format!("http://127.0.0.1:{port}"))).expect("client");
+    let client = HttpClient::new(config(dead_url())).expect("client");
 
     let error = client
         .send(
@@ -900,6 +910,7 @@ async fn a_write_that_opted_out_of_retries_is_retried_after_a_refused_connection
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     // Bind and drop: the port is real and closed until the server takes it.
+    // The one dead URL that must be rebound, so it cannot be port 1.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     drop(listener);
