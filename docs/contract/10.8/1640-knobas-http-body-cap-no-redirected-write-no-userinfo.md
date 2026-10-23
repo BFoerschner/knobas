@@ -15,7 +15,8 @@
     each gain `max_body: knobas_http::MAX_BODY`.
   - New private module `src/cap.rs`. Every body `HttpClient::send` hands back for a success is
     read through a body that counts what is decoded and fails past `max_body` (so a gzip body is
-    counted inflated); a `send_streaming` body is not. `get_json`, `get_json_with` and the
+    counted inflated); a `send_streaming` body is not. The re-wrapped response keeps its URL
+    (`Response::url()` is still where the answer came from). `get_json`, `get_json_with` and the
     failing-status body read refuse a declared `content-length` over the cap before reading. Over
     the cap, `get_json` and `get_json_with` fail with `SourceError::Protocol { status: None }`
     reading `<path>: the answer is larger than <cap>, the most knobas reads of one answer`; a

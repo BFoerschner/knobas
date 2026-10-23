@@ -2084,6 +2084,15 @@ mod bounds {
             lines.iter().all(|line| line.starts_with("POST ")),
             "{lines:?}"
         );
+        // The client a write goes out on is configured as the read's is.
+        assert!(
+            server
+                .heads()
+                .iter()
+                .all(|head| head.contains("user-agent: knobas/")),
+            "{:?}",
+            server.heads()
+        );
     }
 
     /// A read still follows a redirect.
@@ -2104,6 +2113,12 @@ mod bounds {
             server.request_lines(),
             ["GET /old HTTP/1.1", "GET /new HTTP/1.1"]
         );
+        // The answer, read through the cap, still says where it came from.
+        let response = client
+            .send(client.request(Method::GET, "/old"))
+            .await
+            .expect("followed");
+        assert_eq!(response.url().path(), "/new");
     }
 
     const PASSWORD: &str = "pw-from-a-browser-form";

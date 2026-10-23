@@ -13634,8 +13634,8 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   `send_streaming` body is exempt. *Reasoning:* Confluence's listings, Gitea's JSON reads and the
   Jira writes call `response.json()` themselves, and a cap that skipped them would leave the
   review's scenario open. A download is large on purpose and has its stall bound (#1012).
-  *Cost:* `Response::url()` reads `http://no.url.provided.local` after the re-wrap. Nothing in
-  the tree calls it. *Reversing:* low.
+  *Cost:* none left: the re-wrap keeps the response's URL (merge-manager's fix, below).
+  *Reversing:* low.
 - **Where the declared length is checked.** *Fork:* in the counting body (every reader), or in
   the reads that take the body whole. *Ruling:* in the whole-body reads (`cap::declared_over`).
   *Reasoning:* Gitea's `raw_capped` (#711) reads the first megabyte of a file of any size and
@@ -13699,3 +13699,24 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   tests send JSON and text bodies through it. The cap is far over any seeded page, a TeamCity
   log goes through `send_streaming`, and Gitea's file read stops at its own cap (tested
   locally). *Reversing:* n/a.
+
+### #1640, merge-manager review (Opus, 2026-10-23)
+
+- **Reserved for Björn, ruled by merge-manager on Opus: the implementer's frozen-surface ruling.**
+  *Fork:* accept it, or hold #1640 for Björn. *Ruling:* accept it. The §10.8 entry matches the
+  diff, the limiter and #1729's quota mark sit in `send_with` above the choice of client, so a
+  write on the second client is paced and marked as a read is, and the second client is built by
+  the same closure (rustls, connect timeout, default headers with the user agent, system proxy).
+  *Reasoning:* the waiver covers C2's frozen steps, and nothing in the diff goes past C2.
+  *Reversing:* medium, as the implementer said.
+- **`Response::url()` after the re-wrap.** *Fork:* leave the placeholder (nothing calls it today),
+  or keep the URL. *Ruling:* keep it: `cap::capped` copies the URL into the `http::Response`'s
+  extensions through `reqwest::ResponseBuilderExt::url`, which is what reqwest reads back.
+  *Reasoning:* a placeholder is a silent wrong answer for the first caller that asks where a
+  followed `GET` ended, and the response's own `Debug` prints it. `a_redirected_read_is_followed`
+  now checks the URL is the redirect's target; it fails without the copy. *Reversing:* low.
+- **A live run.** *Fork:* none (the implementer's ruling), or the cheap suites. *Ruling:*
+  `just gitea-live` and `just kuma-live` on the merge head. *Reasoning:* the cap and the second
+  client sit under every adapter's reads and writes, and Kuma's socket.io polling sends its reads
+  as `POST`s, so they now go out on the second client. The JVM suites add nothing the two do not
+  cover for a change below the adapters. *Reversing:* n/a.

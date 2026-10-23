@@ -61,9 +61,20 @@ impl std::fmt::Display for Size {
 ///
 /// Lazy: nothing is read here, so a write whose answer is over the cap has
 /// still been sent and answered, and only the read of that answer fails.
+///
+/// The answer keeps the URL it came from, the redirect's target after a
+/// followed `GET`: reqwest's conversion to `http::Response` drops it, and
+/// the conversion back would put a placeholder in its place.
 pub(crate) fn capped(response: reqwest::Response, cap: u64) -> reqwest::Response {
+    use reqwest::ResponseBuilderExt as _;
+    let url = response.url().clone();
     let response: http::Response<reqwest::Body> = response.into();
-    let (parts, body) = response.into_parts();
+    let (mut parts, body) = response.into_parts();
+    // `ResponseBuilderExt::url` is the only public way to set the extension
+    // reqwest reads the URL back from.
+    if let Ok(carrier) = http::Response::builder().url(url).body(()) {
+        parts.extensions.extend(carrier.into_parts().0.extensions);
+    }
     let body = reqwest::Body::wrap(Capped {
         inner: body,
         left: cap,
