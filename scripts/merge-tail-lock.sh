@@ -1,19 +1,31 @@
 #!/usr/bin/env bash
-# Machine-wide merge-tail lock: reviews run in parallel, only rebase + gate +
-# merge + cleanup run one at a time, oldest PR first.
+# Machine-wide merge-tail lock: reviews and pre-gates run in parallel; only the
+# freshness check, a re-gate when main moved, and the merges run one at a
+# time, oldest PR first.
 #
-# Usage: scripts/merge-tail-lock.sh ready <PR> <head SHA>   (review done; may be batched)
+# Usage: scripts/merge-tail-lock.sh ready <PR> <head SHA> [<main SHA>]   (review done, and with a main: gated green on that head over that main; may be batched)
 #        scripts/merge-tail-lock.sh take <PR>      (exit 0 = held; 3 = merged in a batch; 4 = still queued, call again)
+#        scripts/merge-tail-lock.sh gated <PR>     (the holder asks, in its worktree: exit 0 = merge without gating again; 1 = gate under the lock)
 #        scripts/merge-tail-lock.sh hold <PR> <command...>   (the holder runs a long command; its claim stays fresh meanwhile)
-#        scripts/merge-tail-lock.sh partner <PR>   (the holder asks: oldest other ready, waiting PR)
+#        scripts/merge-tail-lock.sh partner <PR> [1|2]   (the holder asks: the oldest other ready, waiting PRs, one per line, at most 1 or 2; default 1)
 #        scripts/merge-tail-lock.sh merged <PR> <merge SHA>   (the holder merged it in a batch)
 #        scripts/merge-tail-lock.sh release <PR>
 #        scripts/merge-tail-lock.sh assert <PR>    (exit 1 unless <PR> holds the lock; run right before gh pr merge)
 #
-# Batching (Björn, 2026-10-15): the holder may stack one ready waiter on its own
-# head, gate the pair once and merge both. `ready` records the head SHA a
-# waiter's review settled on; `merged` tells that waiter its PR is in, and its
-# `take` then exits 3 with the merge SHA instead of taking the lock.
+# Batching (Björn, 2026-10-15; three since #1862): the holder may stack up to
+# two ready waiters on its own head, gate the batch once and merge them in
+# order. `ready` records the head SHA a waiter's review settled on; `merged`
+# tells that waiter its PR is in, and its `take` then exits 3 with the merge
+# SHA instead of taking the lock. `partner` without a count names one, which
+# is what a holder on the brief before #1862 reads.
+#
+# Pre-gate (#1862): a merge-manager gates its rebased head before `take` and
+# records it with `ready <PR> <head> <main>`, in `$READY/<PR>.main`. Under the
+# lock, `gated` exits 0 only when origin's main (read with `git ls-remote`,
+# never the worktree's own possibly unfetched `origin/main`) is still that
+# main, the worktree's HEAD is that head, and the head sits on that main: then
+# the squash merge produces exactly the tree the pre-gate saw. Anything else,
+# including no record and an unreadable origin, exits 1: gate under the lock.
 #
 # A waiter registers in the queue dir and touches its entry every poll. The lock
 # goes to the lowest-numbered live waiter, since every merge makes the others
@@ -38,7 +50,7 @@ LOCK="${TMPDIR:-/tmp}/knobas-merge-tail.lock"
 QUEUE="${TMPDIR:-/tmp}/knobas-merge-tail.queue"
 READY="${TMPDIR:-/tmp}/knobas-merge-tail.ready"
 cmd="${1:-}"; pr="${2:-}"; arg="${3:-}"
-usage() { echo "usage: $0 ready|take|hold|partner|merged|assert|release <PR> [SHA | command...]"; exit 2; }
+usage() { echo "usage: $0 ready|take|gated|hold|partner|merged|assert|release <PR> [SHA [SHA] | count | command...]"; exit 2; }
 if [ -z "$cmd" ] || [ -z "$pr" ]; then usage; fi
 oldest_live_waiter() {
   local f n best='' now; now=$(date +%s)
@@ -60,24 +72,57 @@ claim_age() { local f="$LOCK/alive"; [ -e "$f" ] || f="$LOCK/holder"; echo $(( $
 refresh() { [ "$(holder)" = "$pr" ] && touch "$LOCK/alive"; }
 case "$cmd" in
 ready)
-  [ -n "$arg" ] || { echo "usage: $0 ready <PR> <head SHA>"; exit 2; }
+  [ -n "$arg" ] || { echo "usage: $0 ready <PR> <head SHA> [<main SHA the gate ran over>]"; exit 2; }
   mkdir -p "$READY"; echo "$arg" > "$READY/$pr"
-  echo "merge-tail: PR #$pr ready at $arg"
+  # A `ready` without a main (the brief before #1862, or a head nobody
+  # pre-gated) drops any older record: what it says is no longer true.
+  if [ -n "${4:-}" ]; then
+    echo "$4" > "$READY/$pr.main"
+    echo "merge-tail: PR #$pr ready at $arg, gated over main $4"
+  else
+    rm -f "$READY/$pr.main"
+    echo "merge-tail: PR #$pr ready at $arg"
+  fi
+  ;;
+gated)
+  if ! refresh; then
+    echo "merge-tail: PR #$pr does NOT hold the lock (holder: $(holder)); gate under the lock once you hold it"; exit 1
+  fi
+  gated_head=$(cat "$READY/$pr" 2>/dev/null); gated_main=$(cat "$READY/$pr.main" 2>/dev/null)
+  if [ -z "$gated_head" ] || [ -z "$gated_main" ]; then
+    echo "merge-tail: PR #$pr has no pre-gate recorded (\`ready <PR> <head> <main>\`); gate under the lock"; exit 1
+  fi
+  now_head=$(git rev-parse HEAD 2>/dev/null)
+  if [ "$now_head" != "$gated_head" ]; then
+    echo "merge-tail: PR #$pr's head is ${now_head:-unreadable}, the pre-gate ran on $gated_head; gate under the lock"; exit 1
+  fi
+  now_main=$(GIT_TERMINAL_PROMPT=0 git ls-remote origin refs/heads/main 2>/dev/null | cut -f1)
+  if [ -z "$now_main" ]; then
+    echo "merge-tail: cannot read origin's main; gate under the lock"; exit 1
+  fi
+  if [ "$now_main" != "$gated_main" ]; then
+    echo "merge-tail: main moved from $gated_main (the pre-gate's) to $now_main; rebase and gate under the lock"; exit 1
+  fi
+  if ! git merge-base --is-ancestor "$gated_main" "$gated_head" 2>/dev/null; then
+    echo "merge-tail: PR #$pr's head $gated_head does not sit on main $gated_main; rebase and gate under the lock"; exit 1
+  fi
+  echo "merge-tail: PR #$pr was gated at $gated_head over main $gated_main, and main has not moved: merge without gating again"
   ;;
 partner)
+  max=${arg:-1}
+  case $max in 1|2) ;; *) echo "usage: $0 partner <PR> [1|2] (a batch is at most three)"; exit 2 ;; esac
   refresh
-  now=$(date +%s); best=''
+  now=$(date +%s)
   for f in "$READY"/*; do
     [ -e "$f" ] || continue
     n=${f##*/}
-    case $n in *.merged) continue ;; esac
+    case $n in *.*) continue ;; esac # `.merged`, `.main`
     [ "$n" != "$pr" ] || continue
     [ ! -e "$READY/$n.merged" ] || continue
     [ -e "$QUEUE/$n" ] || continue
     [ $((now - $(mtime "$QUEUE/$n"))) -le 120 ] || continue
-    if [ -z "$best" ] || [ "$n" -lt "$best" ]; then best=$n; fi
-  done
-  [ -n "$best" ] && echo "$best $(cat "$READY/$best")"
+    echo "$n"
+  done | sort -n | head -n "$max" | while read -r n; do echo "$n $(cat "$READY/$n")"; done
   ;;
 merged)
   [ -n "$arg" ] || { echo "usage: $0 merged <PR> <merge SHA>"; exit 2; }
@@ -89,7 +134,7 @@ take)
   mkdir -p "$QUEUE"; said=""; started=$SECONDS
   while :; do
     if [ -e "$READY/$pr.merged" ]; then
-      rm -f "$QUEUE/$pr" "$READY/$pr"
+      rm -f "$QUEUE/$pr" "$READY/$pr" "$READY/$pr.main"
       echo "merge-tail: PR #$pr was merged in a batch as $(cat "$READY/$pr.merged"); do the cleanup only"
       exit 3
     fi
@@ -147,7 +192,7 @@ assert)
   else echo "merge-tail: PR #$pr does NOT hold the lock (holder: $(holder)); not merging"; exit 1; fi
   ;;
 release)
-  rm -f "$QUEUE/$pr" "$READY/$pr" "$READY/$pr.merged"
+  rm -f "$QUEUE/$pr" "$READY/$pr" "$READY/$pr.merged" "$READY/$pr.main"
   holder=$(holder)
   if [ "$holder" = "$pr" ]; then rm -rf "$LOCK"; echo "merge-tail: released by PR #$pr"
   else echo "merge-tail: PR #$pr does not hold the lock (holder: ${holder:-none})"; fi

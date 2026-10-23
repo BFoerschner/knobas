@@ -14799,3 +14799,49 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1859.
   changes the macro's behaviour for any caller of `knobas-core`: a pattern stored with capitals now
   matches, where it matched nothing. *Reversing:* moderate; no migration, so no stored row needs
   rewriting either way.
+## #1862: gate before the merge-tail lock, re-gate only when main moved, batch up to three (Opus implementer, 2026-10-23)
+
+- **Where the "main unchanged, no re-gate" decision lives.** *Ruling:* in the script, as
+  `gated <PR>`, run in the worktree. It exits 0 only for the holder, only when origin's `main`
+  read with `git ls-remote` is the main `ready` recorded, the worktree's `HEAD` is the head it
+  recorded, and that head sits on that main (`git merge-base --is-ancestor`). Everything else
+  exits 1: no record, head changed, main moved, origin unreadable. *Reasoning:* the one way a
+  pre-gate could be trusted wrongly is a holder comparing against its own unfetched
+  `origin/main`. Reading the remote closes that, and the ancestry check means the record need
+  not be taken on trust. In the script, the test can witness it. *Reversing:* low; the brief
+  would compare the SHAs by hand.
+- **The pre-gate record.** *Ruling:* `ready <PR> <head> <main>` writes the main to
+  `$READY/<PR>.main`, beside the head file `ready` already wrote. A `ready` without a main drops
+  the record, and `release` and a batched `take` remove it. *Reasoning:* the script before
+  #1862 reads `$READY/<PR>` as the head SHA and skips names it has no queue entry for, so a
+  separate file is invisible to it during the switch. *Reversing:* low.
+- **`partner`'s count.** *Ruling:* `partner <PR> 2` names up to two waiters; without a count it
+  names one; three or more is refused (exit 2). *Reasoning:* a holder still working from a brief
+  copied before #1862 stacks one partner and pushes its whole rebased batch head to that
+  partner's branch. With two lines, it could merge the second partner's commits under the first
+  partner's PR. With the default at one, that holder sees exactly what it saw before.
+  *Reversing:* one line, once no pre-#1862 brief copy is in use.
+- **Partners gated on the same main first?** *Ruling:* no; oldest first, as the issue requires.
+  *Reasoning:* the batch tree is gated under the lock whatever its members' pre-gates said, so a
+  partner's pre-gate on the current main only makes a green batch somewhat likelier. In steady
+  state every waiter's pre-gate is older than the last merge, so the preference would almost
+  never apply, and when it did it would put a younger PR ahead of an older one, which has more to
+  rebase. *Reversing:* low; sort the candidates on whether their `.main` matches.
+- **A fresh holder merges alone.** *Ruling:* when `gated` exits 0 the holder merges without
+  `partner`. *Reasoning:* that merge costs no gate. Stacking partners on it would buy a gate now
+  to save the next holder's, and that holder re-gates anyway because this merge moved main.
+  *Reversing:* trivial.
+- **What a batch member's merge is checked against.** *Ruling:* each partner, rebased onto the
+  new `main` from its tip in the batch, must have the tree of that tip in the gated batch. The
+  last member's tip is the gated batch tree. An earlier member leaves `main` for seconds on a
+  prefix of the gated tree, which no gate saw by itself. Pair batches have done the same since
+  2026-10-15. *Reasoning:* gating each prefix would cost a gate per member and undo the batch. A
+  merge sequence that stops early is caught by the next holder's `gated`, because main moved.
+  *Reversing:* medium; gate each prefix.
+- **The holder's re-gate and the gate slots.** *Ruling:* unchanged. Pre-gates and the holder's
+  re-gate share the two slots (`scripts/gate-slot.sh`), as the issue says. *Reasoning:* giving
+  the holder priority changes the slot protocol, which this ticket leaves alone. Filed as a
+  backlog follow-up. *Reversing:* n/a.
+- **Docs-only self-merges.** *Ruling:* the same order, with `just docs-check` as the pre-gate
+  and the re-gate. *Reasoning:* one order for every reader of the brief; the check takes
+  seconds either way. *Reversing:* trivial.
