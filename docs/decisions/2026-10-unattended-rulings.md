@@ -13076,3 +13076,76 @@ The measurement came after it.
   the gate cannot know in advance. Briefs say: rerun in the background with Monitor and
   `KNOBAS_GATE_SLOT_WAIT=900` (no 600 s ceiling there), never in a foreground call. Exit 75
   semantics from #1690 are untouched. *Reversing:* one clause in each brief.
+
+### #1775 and #1779: a stranger's answer beside a live pid, and a window whose postmaster died (Opus implementer, 2026-10-23)
+
+- **#1775: does a free owner lock plus an answer that is not ours clear the lock with a live
+  recorded pid?** Reserved for Björn, ruled by implementer on Opus, under Björn's 2026-10-22 waiver
+  for spec #1619's reserved steps. It reverses part of ruling B5. *Ruling:* yes, together with
+  pinning the server's `listen_addresses` to `127.0.0.1`. *Reasoning:* the ticket's counter-case
+  is a live postmaster of ours, unreachable on loopback, with a stranger on its recorded port. It
+  existed before this PR and is gone after it. Evidence, from PostgreSQL 18.6 on this Mac
+  (`postgres -D <scratch> -p <port>`, a Python listener as the stranger):
+  1. Default `listen_addresses` (`localhost`, which is `::1` and `127.0.0.1`), stranger on
+     `127.0.0.1:P`: the postmaster logs `could not bind IPv4 address "127.0.0.1": Address already
+     in use`, listens on `::1` alone, and reaches `ready`. Ours was alive, and our clients, which
+     dial `127.0.0.1`, reached the stranger. postgresql_embedded never sets `listen_addresses`, so
+     every knobas server ran like this.
+  2. `listen_addresses=127.0.0.1`, same stranger: `FATAL: could not create any TCP/IP sockets`.
+     The postmaster exits and removes `postmaster.pid`.
+  3. `listen_addresses=127.0.0.1`, stranger on `0.0.0.0:P`: the postmaster binds, and `psql -h
+     127.0.0.1 -p P` reaches it (`show data_directory` is ours). The specific bind wins.
+  4. Postmaster bound first: a stranger's bind of `127.0.0.1:P` fails with `EADDRINUSE` (with
+     `SO_REUSEADDR` and `SO_REUSEPORT`). `0.0.0.0:P` binds, and loopback still reaches ours.
+  5. `postmaster.pid` removed under a live postmaster, a second one started on another port:
+     `FATAL: pre-existing shared memory block (key …) is still in use`. PostgreSQL's SysV interlock
+     refuses the second server.
+  6. The first notices within a minute: `performing immediate shutdown because data directory
+     lock file is invalid` (57 s here).
+  So with one listen address, "a stranger answers on our recorded port" means no postmaster of
+  ours is bound there. A postmaster of ours not bound there is one in the instant between writing
+  `postmaster.pid` and binding (it then exits, as in 2), or an orphan an older build started on
+  `localhost` (as in 1). Clearing the lock under either still puts no second server on the files
+  (5), and the orphan stops itself (6), so the launch after that one starts clean. Deleting
+  `postmaster.pid` by hand, which the old refusal advised, did exactly this. Ownership comes first
+  (#1636), so no live knobas window is ever behind such a lock. The pid check was the only thing
+  between a recycled pid after a reboot and a permanent refusal. *Reversing:* one arm in `adopt`
+  and one setting in `build_settings`.
+- **#1775: the silent-port arm.** *Fork:* also clear `Lock::LiveProcess` (live pid, nothing
+  answering) under a free owner lock. *Ruling:* out of scope, filed as #1789 (backlog).
+  *Reasoning:* the ticket asks about an answer that is provably not ours. A silent port is no
+  answer, and its counter-case (a postmaster of ours in crash recovery whose knobas died) needs a
+  ruling of its own. *Reversing:* n/a.
+- **#1775: `Lock::Live`'s pid.** *Ruling:* removed, with `recorded_pid_alive`. `adopt` no longer
+  reads it. *Reversing:* low.
+- **#1779: detect a dead postmaster, and how.** *Ruling:* yes, with a watch: every five seconds a
+  `ready` window reads `postmaster.pid` and runs one `ps -p` on a blocking thread. Gone means the
+  file is missing, names another pid, or names a dead process. *Reasoning:* a pool-error trigger
+  would need a hook in every command's error path and fires only when the reader does something,
+  while the boot screen needs `failed` either way. The watch is off every command's path, and its
+  cost (a 9 ms `ps`) is negligible at five seconds. A server knobas does not manage
+  (`KNOBAS_DB_URL`) is not watched. *Reversing:* low, one task.
+- **#1779: what *Retry* does after a death.** *Fork:* run bring-up again, or restart the server in
+  place. *Ruling:* in place: `EmbeddedDb::restart` starts the server on its port, under the
+  bring-up lock, and the lifecycle puts back the shared state it set aside. *Reasoning:* a second
+  bring-up would run `sources::start` and `backup::start` again, and Tauri's `manage` keeps the
+  first value, so the second scheduler would be orphaned (`sources::start`'s own note). Nothing
+  but the server stopped: the pools, the sync engine and the backup task reach a server on the same
+  port again as they are. The window holds the `EmbeddedDb`, and with it `.owner.lock`, from the
+  death to the restart, so a second launch is refused throughout, which the ticket asks for.
+  *Reversing:* medium.
+- **#1779: commands while the server is down.** *Ruling:* the shared state is set aside, so a
+  command taking the lifecycle's pool answers `not_ready` and `app_status` counts nothing.
+  *Reasoning:* a pool against a dead port retries until its 30 s acquire timeout, and `app_status`
+  is what the boot screen polls after *Retry*. *Reversing:* low.
+- **#1779: a quit during a restart.** *Ruling:* the restart holds a gate from first to last, and
+  the exit handler takes it before taking the server. *Reasoning:* without it a quit during the
+  restart found no server to stop, and the postmaster the restart started outlived the window,
+  the defect #1634 fixed for bring-up. *Reversing:* low.
+- **#1779: `stop` on a server that already died.** *Ruling:* `Ok`, without `pg_ctl`.
+  *Reasoning:* the quit of a window whose server died has nothing to stop, and `pg_ctl stop`
+  reported that as an error in the log. *Reversing:* low.
+- **#1779: §10.8.** *Ruling:* booked
+  (`docs/contract/10.8/1775-1779-a-strangers-port-clears-a-live-pids-lock-and-a-dead-server-fails-the-window.md`):
+  `db:state` can go `ready` to `failed`, and `retry_database` from that state restarts instead of
+  bringing up. No type changes. *Reversing:* n/a.
