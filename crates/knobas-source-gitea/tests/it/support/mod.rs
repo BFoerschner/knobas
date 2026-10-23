@@ -1133,7 +1133,10 @@ pub fn dead_url() -> String {
     REFUSED.get_or_init(|| {
         let refused = std::net::TcpStream::connect(("127.0.0.1", 1))
             .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionRefused);
-        assert!(refused, "something answers on 127.0.0.1:1, the port dead_url names");
+        assert!(
+            refused,
+            "something answers on 127.0.0.1:1, the port dead_url names"
+        );
     });
     "http://127.0.0.1:1".to_owned()
 }
