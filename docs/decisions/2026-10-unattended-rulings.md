@@ -13719,4 +13719,10 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   `just gitea-live` and `just kuma-live` on the merge head. *Reasoning:* the cap and the second
   client sit under every adapter's reads and writes, and Kuma's socket.io polling sends its reads
   as `POST`s, so they now go out on the second client. The JVM suites add nothing the two do not
-  cover for a change below the adapters. *Reversing:* n/a.
+  cover for a change below the adapters. *Result:* `gitea-live` green. Every `kuma-live` suite
+  but one green, `kuma_write_live` and `alert_chain_live` included. The exception is
+  `a_monitor_deleted_through_the_seeds_helper_is_swept`, which is red on and off with
+  `hyper::Error(IncompleteMessage)` on `GET /metrics`. The seed's delete takes 5.04 s against
+  Node's 5 s keep-alive, so the next sync reuses a connection Kuma is closing. It also fails with
+  every request on the one client, as on main (1 of 3), so it predates this PR and does not block
+  the merge: #1818. *Reversing:* n/a.
