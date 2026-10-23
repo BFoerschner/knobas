@@ -532,7 +532,8 @@ impl Searcher {
     /// [`matching_ids`](Self::matching_ids) would admit, or the part the
     /// grammar could not read. A ticket view's count in the views pane.
     ///
-    /// One vocabulary for all of them, then one count per readable text. A
+    /// One vocabulary for all of them, then one statement counting every
+    /// readable text ([`sql::ids_counts_sql`], #1654). A
     /// text with neither words nor a filter counts every live row of `kind`,
     /// which is what its board draws. Nothing is rewritten: the text is read,
     /// never stored back.
@@ -543,27 +544,31 @@ impl Searcher {
     /// a [`Reading::Unreadable`], never an error.
     pub async fn readings(&self, raws: &[&str], kind: &str) -> Result<Vec<Reading>, SearchError> {
         let vocab = self.vocabulary().await?;
-        let mut out = Vec::with_capacity(raws.len());
+        let mut out: Vec<Option<Reading>> = Vec::with_capacity(raws.len());
+        // The readable texts that still need a count: (slot in `out`, words, filters).
+        let mut pending: Vec<(usize, Vec<String>, query::EffectiveFilters)> = Vec::new();
         for raw in raws {
             if let Err(error) = validate(SearchQuery {
                 raw: (*raw).to_owned(),
                 limit: 1,
                 filters: SearchFilters::default(),
             }) {
-                out.push(Reading::Unreadable(match error {
+                out.push(Some(Reading::Unreadable(match error {
                     SearchError::Invalid(message) => message,
                     other => other.to_string(),
-                }));
+                })));
                 continue;
             }
             let parsed = query::parse(raw, &vocab);
             if !parsed.query.unknown_tokens.is_empty() {
-                out.push(Reading::Unreadable(parsed.query.unknown_tokens.join(" ")));
+                out.push(Some(Reading::Unreadable(
+                    parsed.query.unknown_tokens.join(" "),
+                )));
                 continue;
             }
             let mut filters = query::merge(&parsed, &SearchFilters::default());
             if !filters.kinds.is_empty() && !filters.kinds.iter().any(|k| k == kind) {
-                out.push(Reading::Count(0));
+                out.push(Some(Reading::Count(0)));
                 continue;
             }
             filters.kinds = vec![kind.to_owned()];
@@ -574,12 +579,29 @@ impl Searcher {
                 .split_whitespace()
                 .map(str::to_owned)
                 .collect::<Vec<_>>();
-            let (count,): (i64,) = sql::query_as_with(sql::ids_count_sql(&words, &filters))
-                .fetch_one(&self.pool)
-                .await?;
-            out.push(Reading::Count(u64::try_from(count).unwrap_or(0)));
+            pending.push((out.len(), words, filters));
+            out.push(None);
         }
-        Ok(out)
+        // One statement for every readable text, not a scan awaited per view.
+        let queries: Vec<(&[String], &query::EffectiveFilters)> = pending
+            .iter()
+            .map(|(_, words, filters)| (words.as_slice(), filters))
+            .collect();
+        if let Some(built) = sql::ids_counts_sql(&queries) {
+            let rows: Vec<(i64, i64)> = sql::query_as_with(built).fetch_all(&self.pool).await?;
+            for (position, count) in rows {
+                if let Some((slot, ..)) = usize::try_from(position)
+                    .ok()
+                    .and_then(|position| pending.get(position))
+                {
+                    out[*slot] = Some(Reading::Count(u64::try_from(count).unwrap_or(0)));
+                }
+            }
+        }
+        Ok(out
+            .into_iter()
+            .map(|reading| reading.unwrap_or(Reading::Count(0)))
+            .collect())
     }
 
     /// What an empty box answers with: the smart lists and the newest items.

@@ -22,6 +22,7 @@ mod parent_key_pin;
 mod path_line;
 mod ranking;
 mod reach;
+mod readings;
 mod search;
 mod sql_containment;
 mod sql_shape;

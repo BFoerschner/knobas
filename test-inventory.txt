@@ -2114,6 +2114,8 @@ knobas-search	test/it	ranking::the_cap_and_the_limit_keep_the_title_match_and_th
 knobas-search	test/it	ranking::the_item_named_exactly_the_word_ranks_above_its_hyphenated_siblings
 knobas-search	test/it	reach::reach_of_an_unknown_key_is_empty
 knobas-search	test/it	reach::reach_returns_the_same_ids_as_the_read
+knobas-search	test/it	readings::readings_count_unreadable_and_empty_texts_each_in_its_own_slot
+knobas-search	test/it	readings::ten_views_are_counted_in_one_statement
 knobas-search	test/it	search::a_clicked_chip_is_applied_and_echoed_like_a_typed_one
 knobas-search	test/it	search::a_deleted_item_disappears_from_the_index
 knobas-search	test/it	search::a_filter_with_no_text_browses_rather_than_answering_nothing
