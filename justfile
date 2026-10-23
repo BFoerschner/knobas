@@ -3,7 +3,7 @@
 # override the pin and let the gate pass on an unpinned compiler.
 
 # Four rustc jobs per cargo unless the caller says otherwise (#1892). Cargo's
-# own default is one per core, twelve here, and up to two gates and three
+# own default is one per core, twelve here, and the gates and up to three
 # agents' builds share those cores; the briefs export 4 for every agent call,
 # and this is the same figure for a call that forgot. `CARGO_BUILD_JOBS=12
 # just check` still asks for twelve.
@@ -799,17 +799,18 @@ clippy-libs *PKGS:
 # descendants explicitly with `TERM` (deepest first, so xargs cannot start
 # the next binary after its current one dies) before closing the pipe.
 #
-# GATE SLOTS. At most two gate-sized recipes run on one machine at a time. The
+# GATE SLOTS. At most one gate-sized recipe runs on one machine at a time by
+# default (two before #1892; `KNOBAS_GATE_SLOTS=2` asks for two). The
 # protocol that enforces it lives in `scripts/gate-slot.sh`, sourced below,
 # with the measurement, the whole reasoning, and the list of what sources it in
-# its header -- one place, so a third gate is one edit. In short: one of `KNOBAS_GATE_SLOTS` (default 2)
-# symlinks under `$TMPDIR/knobas-gate-slots` is taken before this recipe does
-# anything else, a third gate prints one line naming the holders and polls up
-# to `KNOBAS_GATE_SLOT_WAIT` seconds, and the slot is released by the same
-# EXIT, INT and TERM traps that close the pipe. The ceiling is SysV shared
-# memory, not CPU: one gate peaks at 13 of macOS's 32 segments. What a gate
-# costs in CPU is bounded inside it instead, by the test threads per binary
-# below (#1892).
+# its header -- one place, so a change of ceiling is one edit. In short: one
+# of `KNOBAS_GATE_SLOTS` (default 1) symlinks under `$TMPDIR/knobas-gate-slots`
+# is taken before this recipe does anything else, a gate that finds them all
+# held prints one line naming the holders and polls up to
+# `KNOBAS_GATE_SLOT_WAIT` seconds, and the slot is released by the same EXIT,
+# INT and TERM traps that close the pipe. SysV shared memory would allow two
+# (one gate peaks at 13 of macOS's 32 segments); the cores allow one, and the
+# test threads per binary below bound what that one costs (#1892).
 #
 # Portability: plain bash 3.2, jq, xargs with `-P`/`-I` (both BSD and GNU),
 # pgrep, getconf, `ln -s`, `readlink` and `find -mmin`. `check.yml` on
@@ -945,7 +946,7 @@ test:
     fi
     [ "$jobs" -le "$cores" ] || jobs=$cores
 
-    # TEST THREADS PER BINARY, T = 2 (#1892): libtest's own default is one
+    # TEST THREADS PER BINARY, T = 4 (#1892): libtest's own default is one
     # test thread per core, so six binaries at once could run 72 tests, and
     # nearly every one of them starts with a `create database` on the gate's
     # server. That is where a gate's load came from: on 2026-10-23, sampling
@@ -956,12 +957,14 @@ test:
     #   T=4:            run 138 s, mean 8.4 (p90 16), Postgres 5.2
     #   T=2:            run 158 s, mean 4.5 (p90 12), Postgres 2.8
     # The run is bound by the server and the file system (a scratch
-    # database's files are created, then unlinked with the root), not by test
-    # threads, so a quarter of the load costs a sixth more time. Two gates'
-    # test runs at T=2 fit the twelve cores; at the default, one did not.
-    # `KNOBAS_TEST_THREADS` overrides it; it reaches every binary and the
-    # doc-test run as `RUST_TEST_THREADS`.
-    threads=${KNOBAS_TEST_THREADS:-2}
+    # database's files are created, then unlinked with the root; #1897), not
+    # by test threads, so four threads cost it nothing measurable. Paired
+    # with one gate slot (`scripts/gate-slot.sh` has that measurement: two
+    # gates and a pre-gate side by side, load1 median 43.5 before, 18.5
+    # after), not two: two slots at T=2 still timed a vitest test out beside
+    # them. `KNOBAS_TEST_THREADS` overrides it; it reaches every binary and
+    # the doc-test run as `RUST_TEST_THREADS`.
+    threads=${KNOBAS_TEST_THREADS:-4}
     case $threads in
         ''|*[!0-9]*) echo "error: KNOBAS_TEST_THREADS must be a whole number of at least 1, not '$threads'" >&2; exit 1 ;;
     esac
@@ -1121,8 +1124,8 @@ test:
 #
 # IT TAKES A GATE SLOT, through `scripts/gate-slot.sh`, the same protocol and
 # the same directory `test` uses: it seeds 100 k rows several times over and
-# starts a postmaster per test binary, so it counts against the two-gate
-# ceiling and a third gate waits on it.
+# starts a postmaster per test binary, so it counts against the gate
+# ceiling and a gate waits on it.
 search-perf:
     #!/usr/bin/env bash
     set -euo pipefail
