@@ -9,13 +9,16 @@ here=$(dirname "$0")
 guard=$here/bash-guard.py
 
 failures=0
+fail() { echo "FAIL: $1" >&2; failures=$((failures + 1)); }
+call() { # call <command>: the Bash tool call a hook reads on stdin
+    python3 -I -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))' "$1"
+}
 check() { # check <pass|refuse> <command>
     local want=$1 command=$2 got=pass status=0
-    python3 -I -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))' "$command" |
-        python3 -I "$guard" >/dev/null 2>&1 || status=$?
+    call "$command" | python3 -I "$guard" >/dev/null 2>&1 || status=$?
     [ "$status" -eq 0 ] || got=refuse
     [ "$status" -eq 0 ] || [ "$status" -eq 2 ] || got="exit $status"
-    if [ "$got" != "$want" ]; then echo "FAIL: wanted $want, got $got: $command" >&2; failures=$((failures + 1)); fi
+    [ "$got" = "$want" ] || fail "wanted $want, got $got: $command"
 }
 
 # cd
@@ -30,6 +33,50 @@ check pass 'env -C /Users/dev/Projects/knobas just check'
 check pass 'git commit -m "cd into the app && run the tests"'
 check pass $'python3 -I - <<\'EOF\'\nimport os\nos.system("cd /tmp && ls")\nEOF'
 check pass $'cat > /tmp/x.sh <<EOF\ncd "$(dirname "$0")" && pwd\nEOF'
+# compound shapes: keywords, braces and `builtin` are not the command's name
+check refuse '{ cd /tmp && ls; }'
+check refuse 'if cd /tmp; then ls; fi'
+check refuse 'for d in a b; do cd $d && ls; done'
+check refuse $'for d in a b\ndo\n  cd $d\ndone'
+check refuse 'while true; do cd x; done'
+check refuse '! cd x || ls'
+check refuse 'builtin cd /tmp && ls'
+check pass '{ ls; }'
+check pass 'if test -d x; then ls; fi'
+check pass 'for d in a b; do echo $d; done'
+check pass 'echo builtin'
+check pass 'builtin echo hi && ls'
+check pass 'command -v cd >/dev/null && echo yes'
+check refuse 'command cd /tmp && ls'
+check pass 'git commit -m "{ cd x && y; }"'
+# eval and shell strings are parsed as the commands they run
+check refuse 'eval "cd x && y"'
+check refuse 'bash -c "cd x && y"'
+check refuse "sh -c 'cd x; y'"
+check refuse 'bash -ec "cd x && y"'
+check refuse 'xargs -I{} sh -c "cd {} && ls"'
+check refuse 'bash -c "echo x > .git/info/exclude"'
+check pass 'bash -c "ls && pwd"'
+check pass 'eval "ls; pwd"'
+check pass 'bash -c "cd /tmp"'
+check pass 'bash scripts/bash-guard-test.sh'
+check pass 'echo "bash -c cd x && y"'
+# a substitution is a second command, except in cd's own argument
+check pass 'cd "$(git rev-parse --show-toplevel)"'
+check pass 'cd $(git rev-parse --show-toplevel)'
+check pass 'cd `pwd`'
+check refuse 'cd $(pwd) && ls'
+check refuse 'cd "$(cd x && pwd)"'
+check refuse 'echo "$(cd /tmp && pwd)"'
+check refuse 'echo "`cd /tmp && pwd`"'
+# testenv/README.md names the passing form of the refused one
+check refuse 'eval "$(cd testenv && ./seed --env)"'
+check pass 'eval "$(env -C testenv ./seed --env)"'
+check pass 'ls "$(git rev-parse --show-toplevel)"'
+check pass $'git commit -m "$(cat <<\'EOF\'\nParse heredocs; cd x && y is data\nEOF\n)"'
+# a comment is not a command
+check pass 'ls # then cd x && y'
+check pass 'echo a#b'
 
 # rm
 check refuse 'rm -f $T/*.png'
@@ -55,14 +102,51 @@ check pass 'ls -la .git'
 check pass 'just check > /Users/dev/.claude/jobs/90bee8a9/tmp/gate.log 2>&1'
 check refuse 'echo x > /Users/dev/.claude/jobs/90bee8a9/settings.json'
 
+# heredocs: only an unquoted `<<` that is not `<<<` opens one, so a phantom never hides a later line
+check refuse $'echo "<<EOF"\necho x > .git/info/exclude'
+check refuse $'cat <<<EOF\necho x > .git/info/exclude'
+check refuse $'grep -rn \'<<EOF\' scripts\necho x > .git/info/exclude'
+check refuse $'echo $((1<<2))\necho x > .git/info/exclude'
+check refuse $'cat > /tmp/x <<EOF\nbody\nEOF\necho x > .git/info/exclude'
+check refuse $'cat > /tmp/x <<"EOF"\nbody\nEOF\necho x > .git/info/exclude'
+check pass $'echo "<<EOF"; echo "it\'s\nfine"\nEOF\necho "> .git/x"'
+check pass $'cat > /tmp/x <<EOF\necho x > .git/info/exclude\nEOF'
+check pass $'cat <<-EOF\n\tcd x && y\n\tEOF\nls'
+check pass $'cat <<A <<B\ncd x && y\nA\ncd x && y\nB'
+check pass 'cat <<<"$x" > /tmp/y'
+
 # shell configuration
 check refuse 'echo export X=1 >> ~/.bashrc'
 check refuse 'cp /tmp/zshrc ~/.zshrc'
 check pass 'grep PATH ~/.bashrc'
+check refuse 'perl -pi -e s/a/b/ ~/.zshrc'
+check refuse 'perl -i -pe s/a/b/ ~/.zshrc'
+check refuse 'perl -pi.bak -e s/a/b/ ~/.zshrc'
+check refuse 'sed -Ei s/a/b/ ~/.bashrc'
+check refuse 'sed --in-place=.bak s/a/b/ ~/.bashrc'
+check pass 'perl -pe s/a/b/ ~/.zshrc'
+check pass 'sed -n /PATH/p ~/.bashrc'
 
 # not a Bash call, or no command: let through
-printf '%s' '{"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}}' | python3 -I "$guard" || { echo "FAIL: a Read call was refused" >&2; failures=$((failures + 1)); }
-printf '%s' 'not json' | python3 -I "$guard" || { echo "FAIL: unreadable input was refused" >&2; failures=$((failures + 1)); }
+printf '%s' '{"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}}' | python3 -I "$guard" || fail "a Read call was refused"
+printf '%s' 'not json' | python3 -I "$guard" || fail "unreadable input was refused"
+
+# the wiring in .claude/settings.json: a refusal comes through as exit 2, and a
+# missing script lets the call through (any status but 2) and says why on stderr
+hook=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["hooks"]["PreToolUse"][0]["hooks"][0]["command"])' "$here/../.claude/settings.json")
+wired() { # wired <project dir> <command>: the hook's exit status, a space, its stderr
+    local status=0 err
+    err=$(call "$2" | CLAUDE_PROJECT_DIR=$1 sh -c "$hook" 2>&1 >/dev/null) || status=$?
+    echo "$status $err"
+}
+case $(wired "$here/.." 'cd /tmp && ls') in "2 bash-guard: \`cd\` chained"*) ;; *) fail "the wired hook did not refuse a chained cd" ;; esac
+case $(wired "$here/.." 'ls') in "0 ") ;; *) fail "the wired hook refused ls" ;; esac
+missing=$(wired /nonexistent/bash-guard-test 'cd /tmp && ls')
+case $missing in
+    "2 "*) fail "a missing script blocked the call: $missing" ;;
+    *" bash-guard: /nonexistent/bash-guard-test/scripts/bash-guard.py is missing"*) ;;
+    *) fail "a missing script did not say why: $missing" ;;
+esac
 
 if [ "$failures" -gt 0 ]; then echo "bash-guard-test: $failures failure(s)" >&2; exit 1; fi
 echo "bash-guard-test: ok"

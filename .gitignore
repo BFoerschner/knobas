@@ -16,3 +16,6 @@ crates/knobas-app/gen/
 .env
 .env.*
 !.env.example
+
+# Python bytecode, written when a script under scripts/ is imported.
+__pycache__/

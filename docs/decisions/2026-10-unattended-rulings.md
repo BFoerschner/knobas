@@ -12998,3 +12998,64 @@ The measurement came after it.
   gives; the line also says "not a red gate". *Reversing:* one number and the test's assertion.
 - **The 45 min JVM lock keeps its wait.** *Ruling:* the briefs send queued live recipes to the
   background with Monitor instead of capping that wait. *Reversing:* two sentences.
+## #1689, bash-guard: compound shapes, heredocs, fail-open wiring
+## #1689: bash-guard, compound shapes, heredocs, fail-open wiring (Opus implementer, 2026-10-23)
+
+- **`eval` and `sh -c` are not commands of their own.** *Fork:* count the wrapper beside the
+  commands of its string, or let the string's commands stand in for it. *Ruling:* the string's
+  commands stand in for it. The wrapper is still read for its redirections. *Reasoning:* `bash -c
+  "cd /tmp"` holds one command, the same as `cd /tmp`, which passes. If the wrapper counted, every
+  `sh -c` holding a lone `cd` would be refused as chained. *Reversing:* one flag in
+  `simple_commands`.
+- **Reserved words count as commands.** *Fork:* drop a command made only of `}`, `fi` or `done`
+  from the count, or keep it. *Ruling:* keep it, so `{ cd /tmp; }` alone is refused. *Reasoning:*
+  every case the ticket names has a real second command, and a brace group around a lone `cd` does
+  nothing that `cd` alone doesn't. Counting them keeps the rule "more than one command" without
+  special cases. *Reversing:* low.
+- **Quoted substitutions are parsed.** *Fork:* keep `"$(...)"` as data, as the old tokenizer did,
+  or parse it. *Ruling:* parse it, quoted or not. *Reasoning:* the shell runs it. As data, `echo
+  "$(cd /tmp && pwd)"` passed while the unquoted form was refused. Over the 60,793 Bash commands in
+  this project's transcripts, the new guard refuses 20 that the old one passed. All 20 contain
+  `eval "$(cd testenv && ./seed --env)"` or a `( cd /tmp && … )` inside `bash -c`, which is the
+  `$(cd x && pwd)` shape the guard already lists as refused. The allowed form is `eval "$(env -C
+  testenv ./seed --env)"`. *Reversing:* low.
+- **A missing script exits 1, not 0.** *Fork:* exit 0 (silent) or another non-blocking status.
+  *Ruling:* `exit 1` after draining stdin. *Reasoning:* Claude Code never shows the stderr of a
+  hook that exits 0. A non-blocking non-zero status lets the call through and shows the user the
+  first line of stderr as a hook error, which the ticket requires ("the hook prints why"). Only 2
+  blocks. *Reversing:* one word in `.claude/settings.json`.
+- **The tracked `scripts/__pycache__/*.pyc` goes.** *Fork:* leave the bytecode #1486 committed,
+  or untrack it and ignore `__pycache__/`. *Ruling:* untrack and ignore. *Reasoning:* every change
+  to the script makes it stale, and importing the script (as a test harness does) rewrites it.
+  That dirties the checkout, and a dirty root checkout makes `gh pr merge` exit 1. *Reversing:*
+  none needed.
+- **The in-place match is the ticket's `-[a-zA-Z]*i`.** *Fork:* the ticket's pattern, or one
+  narrowed to flags that take no argument. *Ruling:* the ticket's pattern, with #1790 filed for
+  the narrowing. *Reasoning:* a ruling may not contradict the ticket. The cost is a rare false
+  refusal: `perl -Mstrict … ~/.bashrc`. *Reversing:* #1790.
+
+### #1689: merge review of PR #1791 (Opus merge-manager, 2026-10-23)
+
+- **`bash -c "cd /tmp"` alone passes.** *Fork:* refuse every `cd` inside a shell string, or only
+  a chained one. *Ruling:* only a chained one, as the implementer had it. *Reasoning:* a lone `cd`
+  in a child shell is one command, the same as a lone `cd`, and changes nothing after it.
+  *Reversing:* one flag in `simple_commands`.
+- **A bare `((x<<2))` opening a phantom heredoc is not owed in this PR.** *Fork:* read `((` at a
+  command's start as arithmetic now, or file it. *Ruling:* filed as #1795 (backlog) with the
+  two other misses the review found (`function f { cd x; ls; }`, and a `$(cd x && y)` in the body
+  of a heredoc with an unquoted delimiter, which the shell runs). *Reasoning:* all three fail open
+  only: they hide a command, they never refuse one. 2 of 60,793 transcript commands hit the first,
+  and the ticket names none of them. *Reversing:* #1795.
+- **`eval "$(cd testenv && ./seed --env)"` stays refused, and the docs name the passing form.**
+  *Fork:* exempt it, or refuse it and say what to type. *Ruling:* refuse it. *Reasoning:* no
+  doc, brief or recipe tells an agent to type it; agents built it from `testenv/README.md`, which
+  runs every command from `testenv/`. The README now says that an agent prefixes each one with
+  `env -C testenv`, and the test pins both forms. *Reversing:* low.
+- **`command -v cd` is a lookup, not a `cd`.** *Fork:* keep `command` a plain wrapper, or stop at
+  `-v`/`-V`. *Ruling:* stop there. *Reasoning:* the wrapper's option skipping is new in this PR,
+  and it made `command -v cd >/dev/null && echo yes`, which passed on `main`, a refusal.
+  `command cd /tmp && ls` is still refused. *Reversing:* one line.
+- **A missing script's `exit 1` lets the call through.** Checked against Claude Code's hook docs:
+  exit 2 blocks a `PreToolUse` call, and any other status is a non-blocking error unless the hook
+  sets `onFailure: "block"`, which this wiring does not. The wiring line runs the same under `sh -c`
+  and `zsh -c`, with a project dir that contains spaces and one that is missing.

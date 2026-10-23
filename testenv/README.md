@@ -13,6 +13,11 @@ docker compose --env-file images.env up -d --build   # gitea, uptime-kuma, mockd
 ./seed                         # the Tidewater content, idempotent
 ```
 
+Every command in this file runs in `testenv/`. An agent's Bash call starts at
+the repository root, and the bash-guard refuses `cd testenv && …`, inside
+`$(…)` too, so an agent prefixes each one with `env -C testenv`: `env -C
+testenv ./seed`, `eval "$(env -C testenv ./seed --env)"`.
+
 Uptime Kuma's monitor list is the real estate (see "Monitors" below), and
 since #634 every value in it is literal: `./seed` needs nothing beyond this
 directory. (From 2026-09-06 it needed a gitignored `hetzner/hosts.env` for
