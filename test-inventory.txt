@@ -1618,7 +1618,7 @@ knobas-db	lib/knobas_db	embedded::tests::a_watch_sees_a_killed_postmaster_whose_
 knobas-db	lib/knobas_db	embedded::tests::adopt_treats_a_stranger_on_the_recorded_port_as_a_stale_lock
 knobas-db	lib/knobas_db	embedded::tests::an_absent_password_file_leaves_the_invented_password_alone
 knobas-db	lib/knobas_db	embedded::tests::an_empty_password_file_leaves_the_invented_password_alone
-knobas-db	lib/knobas_db	embedded::tests::an_unfinished_directory_a_server_answers_for_is_kept
+knobas-db	lib/knobas_db	embedded::tests::an_unfinished_directory_is_kept_only_while_a_postmaster_answers_for_it
 knobas-db	lib/knobas_db	embedded::tests::build_settings_does_not_create_the_installation_dir
 knobas-db	lib/knobas_db	embedded::tests::build_settings_keeps_the_binaries_out_of_the_root_dir
 knobas-db	lib/knobas_db	embedded::tests::build_settings_pins_version_and_uses_loopback_tcp

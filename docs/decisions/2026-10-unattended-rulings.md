@@ -14037,7 +14037,7 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   keeps it. *Reversing:* n/a.
 - **Test seams.** *Fork:* confirm the seams with Björn first, as the TDD skill asks, or pick them.
   *Ruling:* picked, since the loop runs unattended. `EmbeddedDb::start` for what a launch does,
-  and `recover_unfinished` and `shape` in the crate for the doubt paths no launch can set up.
+  and `recover_or_mark` and `shape` in the crate for the doubt paths no launch can set up.
   *Reversing:* n/a.
 - **§10.8.** *Fork:* book the recovery as a boot-screen change, or not. *Ruling:* none owed.
   *Reasoning:* no IPC type, migration, module layout, boot-screen state or message changes. A
