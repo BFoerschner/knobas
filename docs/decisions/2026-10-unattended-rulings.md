@@ -13369,3 +13369,30 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   process from a cargo test needs a crashed cluster and `SIGSTOP` on a child the test did not
   spawn. The arm it reaches, `Lock::Live` into `adopt`, is unchanged here and keeps its tests.
   *Reversing:* n/a.
+
+### #1789: merge-manager review (Opus merge-manager, 2026-10-23)
+
+- **The implementer's ruling (a silent port clears the lock whatever the pid does).** Reserved for
+  Björn, ruled by merge-manager on Opus as well: confirmed. *Reasoning:* the logs bear out each
+  step. In the recovery run the postmaster logged `listening on IPv4 address "127.0.0.1"` before
+  `database system was interrupted`, and `psql` got 57P03 during redo. A 57P03 is a
+  `sqlx::Error::Database` whose code does not start with `28`, so `adopt` refuses it and does not
+  read it as a stranger. With the lock cleared under it, the second postmaster got `pre-existing
+  shared memory block ... is still in use`. In the ordering where the frozen postmaster had not yet
+  created shared memory, the interlock fired the other way round: the new server removed the
+  crashed run's unattached segment and created its own, and the frozen one, once resumed, got the
+  same FATAL on the new server's segment and never reached redo. Only one startup process wrote,
+  and the rows, marker and `pg_amcheck` were clean. The *2 ms* window is measured
+  (`issue-1789-e3-window.py`), but on an idle machine. Re-run by the merge-manager during a cargo
+  build, twice 20 starts: min 1.67 and 2.34, median 2.72 and 3.97, max 34.57 and 33.99 ms. So the
+  `inspect_lock` docs say "a few milliseconds". The argument never depended on the width, because
+  the interlock is the guard. The §10.8 entry now also covers the pre-shared-memory ordering, where
+  the launch reaches `ready` and #1779's watch then fails it. *Reversing:* as the implementer's.
+- **Mutant M4 (a silent port read as answering) survives the integration test.** *Ruling:* no
+  integration case owed. At `EmbeddedDb::start` the mutant is equivalent: `adopt` takes the refused
+  connect as a stranger, `launch` clears the lock and calls `start_managed` again, and that start
+  succeeds without reaching `inspect_lock`. Nothing at that seam can tell the two paths apart. The
+  unit test pins which path is taken. *Reversing:* low.
+- **No test pins a recovering postmaster's refusal.** *Ruling:* not owed by this PR. That arm
+  (`Lock::Live` into `adopt`, 57P03 into `AlreadyRunning`) is unchanged here, and constructing a
+  `PgDatabaseError` with a chosen code needs a live server in that state. *Reversing:* low.

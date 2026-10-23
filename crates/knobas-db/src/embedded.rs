@@ -1447,12 +1447,15 @@ enum Lock {
 /// postmaster of ours answers on `127.0.0.1` from the moment it binds until
 /// it exits, through crash recovery and shutdown alike ([`build_settings`]
 /// pins that address), so a silent port with a live postmaster of ours behind
-/// it is one in the 2 ms between writing `postmaster.pid` and binding, which
-/// no relaunch reaches unless the process is frozen there, or an orphan an
-/// older build started on `localhost`. Clearing under either is safe for the
-/// reasons [`adopt`] gives under *A stranger on the port*; the next start
-/// replays the WAL. The evidence is recorded in
-/// `docs/decisions/2026-10-unattended-rulings.md` under #1789.
+/// it is one in the few milliseconds between writing `postmaster.pid` and
+/// binding, which no relaunch reaches unless the process is frozen there, or
+/// an orphan an older build started on `localhost`. Clearing under either
+/// puts no second server on the files: PostgreSQL's shared-memory interlock
+/// lets only one of the two postmasters past it (see [`adopt`], *A stranger
+/// on the port*), the other exits, and the survivor, whose lock file is then
+/// gone, shuts itself down within a minute; the next start replays the WAL.
+/// The evidence is recorded in `docs/decisions/2026-10-unattended-rulings.md`
+/// under #1789.
 fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
     let pid_file = data_dir.join("postmaster.pid");
 
