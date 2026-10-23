@@ -37,8 +37,9 @@ set -uo pipefail
 if [ -n "${KNOBAS_MACHINE_SAMPLE:-}" ]; then
     read -r load1 load5 mask ncpu power pct <<<"$KNOBAS_MACHINE_SAMPLE"
 else
-    read -r load1 load5 _ <<<"$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}')"
-    ncpu=$(sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN)
+    read -r load1 load5 _ <<<"$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' || cat /proc/loadavg 2>/dev/null)"
+    ncpu=$(sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || true)
+    [[ ${ncpu:-} =~ ^[0-9]+$ ]] || { echo "machine-load: cannot read the core count (got '${ncpu:-}')" >&2; exit 2; }
     mask=$(sysctl -n kern.sched_recommended_cores 2>/dev/null || echo $(( (1 << ncpu) - 1 )))
     batt=$(pmset -g batt 2>/dev/null || true)
     case $batt in *"Battery Power"*) power=battery ;; *) power=AC ;; esac

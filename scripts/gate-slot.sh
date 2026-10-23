@@ -10,9 +10,9 @@
 # directory is how a mutual exclusion stops being one.
 #
 # At most two gate-sized recipes run on one machine at a time (Björn,
-# 2026-09-06, #425; the measurement is #422's), and one by default (below). The ceiling is SysV shared
-# memory, not CPU: macOS allows 32 segments machine-wide (`kern.sysv.shmmni`),
-# every postmaster holds one, and one `just test` peaks at 13 -- the gate
+# 2026-09-06, #425; the measurement is #422's), and one by default (below).
+# The ceiling on two is SysV shared memory, not CPU: macOS allows 32
+# segments machine-wide (`kern.sysv.shmmni`), every postmaster holds one, and one `just test` peaks at 13 -- the gate
 # server plus up to 12 transient servers the `knobas-db` lifecycle suite
 # starts. Two gates fit; three fit only when their peaks miss each other, and
 # cost 2.4x the single wall each; five ran the kernel out and every worktree
@@ -39,8 +39,7 @@
 # (#1897). `KNOBAS_GATE_SLOTS=2` brings the old ceiling back.
 #
 # So a recipe takes one of `KNOBAS_GATE_SLOTS` (default 1) slots before it
-# does anything else, and with
-# none free prints one line naming the holders' pids and polls, up to
+# does anything else, and with none free prints one line naming the holders' pids and polls, up to
 # `KNOBAS_GATE_SLOT_WAIT` seconds (default 150), then exits 75 naming the same
 # holders. 150 is what a full gate leaves under the Bash tool's 600 s foreground
 # ceiling (383 s median, 504 s p90 over Oct 20-23, #1793): a wait that outlasts

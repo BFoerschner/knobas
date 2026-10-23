@@ -1096,7 +1096,7 @@ test:
 # `--ignored`.
 #
 # WHY NOT IN `check`. Every assertion in `perf.rs` is wall-clock against a
-# fixed budget, `just check` runs two at a time beside other agents' builds,
+# fixed budget, `just check` runs beside other gates and agents' builds,
 # and `browse, no text` was measured at 27 ms and at 429 ms on the same tree
 # within an hour on 2026-09-08. In the gate it would be a check that measures
 # the machine instead of the thing.
