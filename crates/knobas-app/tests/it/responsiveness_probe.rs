@@ -117,7 +117,7 @@ const COMMON_WORD: &str = "common";
 /// Whether item `i` carries [`COMMON_WORD`]: three in four, a share no
 /// fixture size changes and `RP_ITEMS` scaling keeps above half.
 fn carries_common_word(i: u64) -> bool {
-    i % 4 != 0
+    !i.is_multiple_of(4)
 }
 
 const STATUSES: &[&str] = &["Open", "In Progress", "In Review", "Blocked", "Done"];
