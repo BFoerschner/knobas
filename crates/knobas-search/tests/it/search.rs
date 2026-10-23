@@ -787,6 +787,15 @@ async fn hostile_input_is_answered_not_executed() {
         "  ",
         "!!!",
         "sepa'::text||(select 1)",
+        // The last token is a negated phrase, an `or`, a phrase with text
+        // glued to its closing quote, or non-ASCII (#1648).
+        "-\"a b\"",
+        "a -\"b c\"",
+        "sepa -\"retry batch\"",
+        "a or",
+        "\"a b\"c",
+        "überweisung",
+        "größe -\"zürich büro\"",
     ] {
         s.search(q(raw)).await.expect(raw); // no error, no damage
     }
@@ -1029,4 +1038,67 @@ async fn a_notes_snippet_is_segments_of_the_markdown_the_user_typed() {
         joined.contains("[[jira:PAY-231]]"),
         "the excerpt quotes what the user typed: {joined:?}"
     );
+}
+
+/// #1648: the half-typed word is what the launcher sends on every keystroke,
+/// so a negated phrase typed last must answer, not fail.
+#[tokio::test]
+async fn a_negated_phrase_typed_last_answers_while_typing() {
+    let pool = pool().await;
+    seed_sources(&pool).await;
+    seeded_corpus(&pool, "negphrase").await;
+    let s = searcher(&pool);
+    for raw in ["sepa -\"retry batch\"", "-\"retry batch\"", "sepa -\"retry"] {
+        s.search(q(raw)).await.expect(raw);
+    }
+}
+
+/// #1648: `page_search` is reached only through knobas-app elsewhere. It
+/// answers pages only, keeps its needles, and survives a negated phrase typed
+/// last.
+#[tokio::test]
+async fn page_search_answers_pages_only_and_survives_a_negated_phrase() {
+    let pool = pool().await;
+    seed_sources(&pool).await;
+    let t = token("pagesearch");
+    seed(
+        &pool,
+        &format!("acme:{t}-page"),
+        "page",
+        "confluence",
+        &format!("{t} runbook"),
+        "how to retry batch jobs",
+        None,
+        Utc::now() - Duration::days(1),
+    )
+    .await;
+    seed(
+        &pool,
+        &format!("acme:{t}-ticket"),
+        "ticket",
+        "jira",
+        &format!("{t} ticket"),
+        "body",
+        None,
+        Utc::now() - Duration::days(1),
+    )
+    .await;
+    let s = searcher(&pool);
+
+    let found = s.page_search(&t, None, 10).await.unwrap().expect("words");
+    assert_eq!(found.total, 1, "{found:?}");
+    assert_eq!(found.hits.len(), 1);
+    assert_eq!(found.hits[0].row.entity_id, format!("acme:{t}-page"));
+    assert!(found.needles.iter().any(|n| n == &t), "{:?}", found.needles);
+
+    // Half-typed, and with a negated phrase typed last: both answer.
+    let half = &t[..t.len() - 1];
+    let typing = s.page_search(half, None, 10).await.unwrap().expect("words");
+    assert_eq!(typing.hits.len(), 1, "{typing:?}");
+    let negated = format!("{t} -\"retry batch\"");
+    let excluded = s.page_search(&negated, None, 10).await.unwrap().expect("words");
+    assert!(excluded.hits.is_empty(), "{excluded:?}");
+
+    // Nothing to search for is `None`, not an error.
+    assert!(s.page_search("  ", None, 10).await.unwrap().is_none());
 }
