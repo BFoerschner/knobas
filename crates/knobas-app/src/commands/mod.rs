@@ -53,10 +53,13 @@ pub(crate) mod mirror {
         include_str!("../lib.rs")
             .lines()
             .filter_map(|line| line.trim().strip_prefix(prefix.as_str()))
-            .map(|rest| rest.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_'))
-            .filter(|name| {
-                !name.is_empty() && !name.contains(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|rest| {
+                let end = rest
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(rest.len());
+                &rest[..end]
             })
+            .filter(|name| !name.is_empty())
             .collect()
     }
 
