@@ -15706,7 +15706,7 @@ Measured on the seeded Jira Data Center 10.3 (`just jira-live`'s container): wit
 ## #1708: the six entity-id columns `0050` missed, and the context's foreign key (implementer, Opus, 2026-10-24)
 
 - **Reserved for Björn, ruled by implementer on Opus: migration `0060`** (Björn's 2026-10-22
-  waiver, review handoff). *Ruling:* `0060_the_ids_0050_missed_compare_bytewise_and_a_context_is_an_entity.sql`,
+  waiver, review handoff). *Fork:* the number, and whether it runs in a transaction. *Ruling:* `0060_the_ids_0050_missed_compare_bytewise_and_a_context_is_an_entity.sql`,
   next after `0059` on `origin/main` at `9deb973b`, transactional (no `-- no-transaction`), with
   its §10.8 entry `docs/contract/10.8/1708-migration-0060-context-entity-key.md`. *Reasoning:* the
   ticket's "next after `0055`" predates `0056` to `0059`. *Reversing:* a later migration.
@@ -15728,13 +15728,13 @@ Measured on the seeded Jira Data Center 10.3 (`just jira-live`'s container): wit
   a title nobody chose for an entity. A timer or block that ran in a deleted context keeps its
   `ctx:` id, which `0016` reads correctly. *Reversing:* the rows are gone, and had no members; a
   pre-`0060` backup holds them.
-- **Reserved for Björn, ruled by implementer on Opus: the index choice.** *Ruling:* no index
-  added. *Reasoning:* the key's referencing side is `context_pkey`. The collation change rebuilds
+- **Reserved for Björn, ruled by implementer on Opus: the index choice.** *Fork:* an index for the key or for any of
+  the six columns. *Ruling:* no index added. *Reasoning:* the key's referencing side is `context_pkey`. The collation change rebuilds
   `context_pkey`, `write_queue_link_owed` and `run_preset_name_idx` (`pipeline_id` first) in `C`.
   `timer` holds one row, a block's room is read by the block's id, and `saved_view` is read by a
   sync's prefix match, which no btree serves. *Reversing:* one migration.
-- **The key's delete action.** *Ruling:* `on delete cascade`, named `context_entity_fk`.
-  *Reasoning:* the shape `0006` gave `note_entity_fk` and `0017` the asset and route keys: the
+- **The key's delete action.** *Fork:* `restrict` or `cascade`. *Ruling:* `on delete cascade`, named `context_entity_fk`.
+  *Reasoning:* the shape `0006` gave `note_entity_fk`, `0017` `asset_entity_fk` and `0018` `route_entity_fk`: the
   entity row is the identity. No knobas path deletes an entity row; archiving sets `archived_at`.
   A linked context's entity cannot be deleted anyway, since `knobas.link`'s keys restrict it.
   *Reversing:* drop and re-add the constraint.
@@ -15748,6 +15748,6 @@ Measured on the seeded Jira Data Center 10.3 (`just jira-live`'s container): wit
   `tests/it/backup.rs` and `backup_ipc.rs`). *Ruling:* each seed writes the entity row first; none
   asserted on the context's lack of one. *Reasoning:* that is the shape the key exists to refuse,
   and `knobas_core::context::insert` writes both. *Reversing:* n/a.
-- **ADR-0027.** *Ruling:* one line under *Consequences* naming `0060`. *Reasoning:* the ADR's
+- **ADR-0027.** *Fork:* leave the ADR as `0050` left it, or name `0060`. *Ruling:* one line under *Consequences* naming `0060`. *Reasoning:* the ADR's
   decision is unchanged; its count of `0050`'s columns is history, and a reader of "every column"
   should find where the last six went. *Reversing:* delete the line.

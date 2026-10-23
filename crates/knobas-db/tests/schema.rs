@@ -1324,7 +1324,13 @@ async fn the_context_kind_vocabulary_is_closed() {
          select 'ctx:kind-' || $1 || '-' || k, 'ctx' from unnest($2::text[]) as k",
     )
     .bind(&run)
-    .bind(CONTEXT_KINDS.iter().copied().chain(["bad"]).collect::<Vec<_>>())
+    .bind(
+        CONTEXT_KINDS
+            .iter()
+            .copied()
+            .chain(["bad"])
+            .collect::<Vec<_>>(),
+    )
     .execute(pool)
     .await
     .unwrap();
@@ -2191,11 +2197,12 @@ async fn zero_sixty_refuses_a_context_without_its_entity() {
     migrate::run(pool).await.unwrap();
 
     let run = uuid::Uuid::new_v4().simple().to_string();
-    let refused = sqlx::query("insert into knobas.context (id, kind, title) values ($1,'adhoc','x')")
-        .bind(format!("ctx:no-entity-{run}"))
-        .execute(pool)
-        .await
-        .unwrap_err();
+    let refused =
+        sqlx::query("insert into knobas.context (id, kind, title) values ($1,'adhoc','x')")
+            .bind(format!("ctx:no-entity-{run}"))
+            .execute(pool)
+            .await
+            .unwrap_err();
     assert_eq!(
         refused
             .as_database_error()
@@ -2206,14 +2213,17 @@ async fn zero_sixty_refuses_a_context_without_its_entity() {
     );
 
     let whole = format!("ctx:whole-{run}");
-    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-        "insert into knobas.entity (id, kind, title) values ('{whole}', 'ctx', 'x');
-         insert into knobas.context (id, kind, title) values ('{whole}', 'adhoc', 'x');
-         delete from knobas.entity where id = '{whole}';"
-    )))
-    .execute(pool)
-    .await
-    .expect("a context with its entity row is written, and goes with it");
+    for statement in [
+        "insert into knobas.entity (id, kind, title) values ($1, 'ctx', 'x')",
+        "insert into knobas.context (id, kind, title) values ($1, 'adhoc', 'x')",
+        "delete from knobas.entity where id = $1",
+    ] {
+        sqlx::query(statement)
+            .bind(&whole)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| panic!("{statement}: {error}"));
+    }
     let left: i64 = sqlx::query_scalar("select count(*) from knobas.context where id = $1")
         .bind(&whole)
         .fetch_one(pool)
@@ -2260,12 +2270,20 @@ async fn zero_sixty_removes_a_context_without_its_entity_and_keeps_the_rest() {
         .fetch_all(&pool)
         .await
         .unwrap();
-    assert_eq!(contexts, ["ctx:whole"], "the orphan goes, the whole one stays");
+    assert_eq!(
+        contexts,
+        ["ctx:whole"],
+        "the orphan goes, the whole one stays"
+    );
     let rooms: Vec<Option<String>> = sqlx::query_scalar("select context_id from knobas.block")
         .fetch_all(&pool)
         .await
         .unwrap();
-    assert_eq!(rooms, [Some("ctx:orphan".to_owned())], "the afternoon keeps its room");
+    assert_eq!(
+        rooms,
+        [Some("ctx:orphan".to_owned())],
+        "the afternoon keeps its room"
+    );
 }
 
 /// Migration `0053` (#1245): a ticket system's saved views keep no Jira name.

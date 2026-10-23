@@ -37,7 +37,8 @@
 -- `knobas.context.id` is reached by the foreign key below. No other text
 -- column in `knobas` or `sync` holds an entity id: `inbox_state.item_key` is
 -- `'<category>:<subject>'` (`0009`), `saved_view.ref_id` is the source's own
--- board or filter id, the `remote_id`s are the source's, the `monitors`
+-- board or filter id, the `remote_id`s are the source's, a `source_id`
+-- names a source and `asset.type_id` an estate type, the `monitors`
 -- arrays hold monitor names, and `link_set`, `smart_list`, `ticket_view`,
 -- `dep_view` and `dep_layer` ids are knobas' own rows, not entities. The three
 -- views (`0050`) read none of these tables, and none of them has a generated
@@ -57,8 +58,8 @@
 --
 -- ## The foreign key
 --
--- `context_entity_fk`, `on delete cascade`, the shape `0006` gave a note and
--- `0017` an asset and a route: the entity row is the context's identity, and
+-- `context_entity_fk`, `on delete cascade`, the shape `0006` gave a note,
+-- `0017` an asset and `0018` a route: the entity row is the context's identity, and
 -- an identity that is gone cannot leave a context behind. No knobas path
 -- deletes an entity row; an archive is `archived_at`.
 --

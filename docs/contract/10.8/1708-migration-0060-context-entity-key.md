@@ -14,7 +14,8 @@
     `knobas.block.context_id`, `knobas.write_queue.link_to`, `knobas.run_preset.pipeline_id` and
     `knobas.ticket_view.saved_view`.
   - Adds `context_entity_fk`: `foreign key (id) references knobas.entity (id) on delete cascade`,
-    the shape of `note_entity_fk` (`0006`) and `asset_entity_fk` / `route_entity_fk` (`0017`).
+    the shape of `note_entity_fk` (`0006`), `asset_entity_fk` (`0017`) and `route_entity_fk`
+    (`0018`).
   - No index added, none dropped; `context_pkey`, `write_queue_link_owed` and
     `run_preset_name_idx` are rebuilt by the collation change. No view or generated column reads
     a changed column.
