@@ -13296,7 +13296,16 @@ The measurement came after it.
   `cd <<EOF` keeps its own-argument exemption the way `cd "$(...)"` does, and a `$(cat
   ./.git/HEAD)` in the body of `tee /tmp/x <<EOF` is not read as a write target. A delimiter
   holding any quote or backslash makes the body data, as in the shell. *Reversing:* low.
+- **A `((` that is no arithmetic leaves no heredoc pending (Opus merge-manager, review finding).**
+  *Fork:* fix in this PR, or file a follow-up. *Ruling:* fix here: `arithmetic` restores
+  `self.pending` when it returns None. *Reasoning:* the caller reads the same text again as a
+  substitution or subshell, so a `<<EOF` inside it was registered twice and the second "body"
+  swallowed the lines after the real one: `echo $(( $(cat <<EOF) ); ls)`, `body`, `EOF`,
+  `cd x && y` passed, where `main` refused it and bash runs `cd x && y`. The PR introduced the
+  second reading, so it closes it; two tests pin it. *Reversing:* three lines.
+
 Transcript replay, a measurement rather than a ruling: all Bash commands in this project's
 transcripts and their subagent transcripts, 61,185 unique (66,603 calls), old guard (61a7dd73)
 against new: 0 verdicts differ, 0 exceptions; both refuse 23,427. So no doc tells an agent to type
-a newly refused command, and no doc changes.
+a newly refused command, and no doc changes. The merge-manager's re-run on the fixed head, against
+`main`'s guard: 61,334 unique, 0 verdicts differ, 0 exceptions, none slower than 50 ms.

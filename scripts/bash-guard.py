@@ -241,8 +241,11 @@ class Parser:
         its second `(` opens is closed by `))`: `((cd x); ls)` is two subshells.
         """
         s = self.s
+        # When this is no arithmetic the caller reads the text again, so a heredoc
+        # opened in it must not stay pending twice: `$(( $(cat <<EOF) ); ls)`.
+        pending = list(self.pending)
         inner = Word()  # the substitutions inside, whose text is already in s[i:j]
-        j, parens = i + (s[i] == "$"), 0
+        j, parens, closed = i + (s[i] == "$"), 0, False
         while j < len(s):
             if s[j] == "`" or (s.startswith("$(", j) and not s.startswith("$((", j)):
                 j = self.substitution(j, inner)
@@ -256,11 +259,11 @@ class Parser:
             parens += {"(": 1, ")": -1}.get(s[j], 0)
             j += 1
             if parens == 1 and s[j - 1] == ")":  # the second `(` is closed
-                if not s.startswith(")", j):
-                    return None
+                closed = s.startswith(")", j)
                 j += 1
                 break
-        else:
+        if not closed:
+            self.pending = pending
             return None
         word.text += s[i:j]
         word.expands = True

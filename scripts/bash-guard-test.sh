@@ -126,6 +126,9 @@ check pass 'for ((i=0; i<3; i++)); do echo $i; done'
 # ...but a `((` whose inner group is not closed by `))` is two subshells, as the shell reads it
 check refuse '((cd x); ls)'
 check refuse 'echo $((cd x); ls)'
+# ...and a heredoc opened in it is read once, not again for each reading
+check refuse $'echo $(( $(cat <<EOF) ); ls)\nbody\nEOF\ncd x && y'
+check refuse $'(( $(cat <<EOF) ); ls)\nbody\nEOF\ncd x && y'
 # a substitution inside arithmetic runs
 check refuse 'echo $(( $(cd x && pwd) + 1 ))'
 check refuse '(( $(cd x && echo 1) ))'
