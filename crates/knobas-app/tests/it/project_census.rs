@@ -11,7 +11,7 @@
 //!
 //! `sync.parent_declaration` is one row per adapter kind, and every test's
 //! [`pool`] writes it back, so the test that rewrites it takes a database of
-//! its own ([`own_pool`], #1907).
+//! its own ([`scratch`], #1907).
 
 use knobas_app::commands::entity::list_projects_inner;
 use knobas_app::sources::Registry;
@@ -23,10 +23,10 @@ async fn pool() -> PgPool {
     declared(pool).await
 }
 
-async fn own_pool(label: &str) -> PgPool {
+async fn scratch(label: &str) -> PgPool {
     let pool = knobas_db::test_util::scratch_database(label)
         .await
-        .pool(4)
+        .pool(2)
         .await
         .expect("a pool on the scratch database");
     declared(pool).await
@@ -154,7 +154,7 @@ fn row(source: &str, key: &str, name: Option<&str>) -> Row {
 /// walk and with what it should say. One test: the steps build on each other.
 #[tokio::test]
 async fn the_census_is_the_walk_after_every_change() {
-    let pool = own_pool("project_census_walk").await;
+    let pool = scratch("project_census_walk").await;
     let a = configured(&pool, "jira").await;
     let b = configured(&pool, "jira").await;
     let both = [a.as_str(), b.as_str()];
