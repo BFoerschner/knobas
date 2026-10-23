@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # `scripts/gate-slot.sh`'s own test (#1690), run by `just witness-unit`.
 #
-# 1. The default wait is 240 s: a taker finding every slot held announces
-#    "waiting up to 240 s". (900 s outlasts the Bash tool's 600 s foreground
+# 1. The default wait is 150 s: a taker finding every slot held announces
+#    "waiting up to 150 s". (900 s outlasts the Bash tool's 600 s foreground
 #    ceiling, so a third gate was killed by the tool and read as a red gate.)
 # 2. The wait expiring exits 75, not 1, naming every holder's pid, so a
 #    timeout is told from a red gate; a short KNOBAS_GATE_SLOT_WAIT is honoured.
@@ -28,7 +28,18 @@ contains() { # contains <name> <haystack> <needle>
     case $2 in *"$3"*) echo "ok: $1" ;; *) echo "FAIL: $1: '$3' not in '$2'" >&2; fails=$((fails + 1)) ;; esac
 }
 # A taker: sources the real script, takes a slot, holds it for $1 seconds.
-taker() { bash -c ". '$here/gate-slot.sh'; trap release_slot EXIT; hold_gate_slot t && sleep $1" 2>&1; }
+# A taker that never gives up (a wait that ignores its deadline) is killed after
+# 30 s and exits 143, so that fails a check instead of hanging the run (macOS
+# has no `timeout`).
+taker() {
+    bash -c ". '$here/gate-slot.sh'; trap release_slot EXIT; hold_gate_slot t && sleep $1" 2>&1 &
+    local t=$! k
+    ( sleep 30; kill "$t" 2>/dev/null ) >/dev/null 2>&1 &
+    k=$!
+    wait "$t"; local code=$?
+    kill "$k" 2>/dev/null; wait "$k" 2>/dev/null
+    return "$code"
+}
 
 # 1 + 2. Two live holders; a third taker.
 sleep 60 & a=$!
@@ -45,10 +56,11 @@ sleep 2
 kill "$p" 2>/dev/null
 wait "$p" 2>/dev/null
 out=$(cat "$scratch/default.out")
-contains "default wait is 240 s" "$out" "waiting up to 240 s"
+contains "default wait is 150 s" "$out" "waiting up to 150 s"
 
 out=$(KNOBAS_GATE_SLOT_WAIT=2 taker 0); code=$?
 check "expired wait exits 75" "$code" 75
+contains "an override replaces the default" "$out" "waiting up to 2 s"
 giveup=$(printf '%s\n' "$out" | grep 'giving up')
 contains "expiry line names holder 1" "$giveup" "$a"
 contains "expiry line names holder 2" "$giveup" "$b"
