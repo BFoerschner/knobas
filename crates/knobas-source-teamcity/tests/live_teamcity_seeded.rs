@@ -54,7 +54,7 @@
 //! API, and one through the adapter's `run_build`, and each waits for the one
 //! agent to run it; each build is **deleted again**
 //! when the test ends, passing or panicking alike -- [`Queued`] does it from
-//! `Drop`, on a thread with a runtime of its own, and checks afterwards that
+//! `Drop`, through `knobas_live_cleanup::Cleanup`, and checks afterwards that
 //! the build is really gone rather than assuming so. What a *killed* run left
 //! behind is cleared by the next run: [`Seeded::clear_leftovers`] removes
 //! every build whose id is not in `seed-state.json`, canceling it first if it

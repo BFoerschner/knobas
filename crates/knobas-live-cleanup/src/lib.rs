@@ -11,7 +11,7 @@
 //!    so a `reqwest::Client` it builds is registered with that runtime's
 //!    reactor: a client built on the test's runtime and driven from this one
 //!    hangs rather than failing (measured in the Gitea suite, #143).
-//! 2. **A bound on the whole sequence**, [`CLEANUP_BUDGET`] unless the guard
+//! 2. **A bound on the whole sequence**, [`DEFAULT_BUDGET`] unless the guard
 //!    names its own. Each request is bounded by its client's timeout, but a
 //!    walk of slow-but-answering requests is not, and only this bound can say
 //!    what was abandoned (#162). The wait is a channel rather than a `join`
@@ -41,7 +41,7 @@ use std::time::Duration;
 /// report a healthy run as a failed one. A guard whose sequence is known to be
 /// short names a tighter bound with [`Cleanup::within`], as Gitea's `Litter`
 /// does.
-pub const CLEANUP_BUDGET: Duration = Duration::from_secs(300);
+pub const DEFAULT_BUDGET: Duration = Duration::from_secs(300);
 
 /// One guard's cleanup, as its `Drop` hands it over: what failing would mean,
 /// what may be left standing, and how long to wait.
@@ -74,11 +74,11 @@ impl Cleanup {
         Cleanup {
             undone: undone.into(),
             left: left.into(),
-            budget: CLEANUP_BUDGET,
+            budget: DEFAULT_BUDGET,
         }
     }
 
-    /// Wait at most `budget` instead of [`CLEANUP_BUDGET`].
+    /// Wait at most `budget` instead of [`DEFAULT_BUDGET`].
     pub fn within(mut self, budget: Duration) -> Cleanup {
         self.budget = budget;
         self

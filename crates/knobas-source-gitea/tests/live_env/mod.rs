@@ -214,11 +214,12 @@ pub const LITTER: &str = "knobas-";
 ///    A panicking test unwinds through here exactly as a passing one returns
 ///    through it. What it cannot survive is a process that never unwinds --
 ///    a `SIGKILL`, or a Ctrl-C at the wrong moment -- which is what 3 is for.
-///    [`Drop`] does its work on a thread of its own and **waits at most
-///    [`CLEANUP_BUDGET`]** for it, so a server that stops answering ends the
-///    run with a sentence rather than a stall (issue #162). Every request also
-///    carries [`REQUEST_BUDGET`] (issue #170); see `CLEANUP_BUDGET` for why
-///    the sequence keeps a bound of its own on top of its parts'.
+///    [`Drop`] hands its work to `knobas_live_cleanup::Cleanup`, which runs
+///    it on a thread of its own and **waits at most [`CLEANUP_BUDGET`]** for
+///    it, so a server that stops answering ends the run with a sentence
+///    rather than a stall (issue #162). Every request also carries
+///    [`REQUEST_BUDGET`] (issue #170); see `CLEANUP_BUDGET` for why the
+///    sequence keeps a bound of its own on top of its parts'.
 /// 3. **Every guard clears an earlier run's leftovers before it builds**
 ///    ([`Litter::clear_leftovers`]). Whatever a killed run left behind is
 ///    removed by the next run's first mutating test, so recovery is "run the

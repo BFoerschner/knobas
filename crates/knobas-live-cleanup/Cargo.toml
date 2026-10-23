@@ -12,9 +12,7 @@ publish = false
 # else: no shipped crate depends on it. Its own unit tests are the witness the
 # live suites cannot be, since they run only against the real products.
 [dependencies]
-# `rt` for the cleanup's own current-thread runtime. The workspace entry
-# brings `time`, which `enable_all` turns on for a cleanup that waits.
-tokio = { workspace = true, features = ["rt"] }
-
-[dev-dependencies]
+# The cleanup's own current-thread runtime, with the timer a cleanup that
+# waits needs (`time`, in the workspace entry). `macros` is there too, for the
+# unit tests' `#[tokio::test]`.
 tokio.workspace = true

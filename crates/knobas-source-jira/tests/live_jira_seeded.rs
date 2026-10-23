@@ -126,7 +126,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use knobas_live_cleanup::{CLEANUP_BUDGET, Cleanup};
+use knobas_live_cleanup::{Cleanup, DEFAULT_BUDGET};
 use knobas_source::contract::{Fault, VecSink, Walking, battery};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceError, SyncItem};
@@ -3805,7 +3805,7 @@ impl Drop for Tied {
         let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
         // Each delete may wait out INDEX_BUDGET for the index, one after
         // another, so the default bound alone could abandon a healthy run.
-        let budget = CLEANUP_BUDGET.max(INDEX_BUDGET * 2 * filed.len() as u32);
+        let budget = DEFAULT_BUDGET.max(INDEX_BUDGET * 2 * filed.len() as u32);
         Cleanup::new(
             "the live suite did not delete the tied issues it filed",
             "some may still exist; the next run's leftover clearing deletes what is left",
