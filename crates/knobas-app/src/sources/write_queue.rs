@@ -74,11 +74,11 @@ pub async fn submit(
 /// lands -- is [`flush`], spawned onto the runtime with a copy of the state.
 ///
 /// **Nothing about the queue changes.** The spawned flush is the same
-/// `flush_source` the scheduler's tick runs: one flush of a source at a time
-/// (its per-source lock), each entity's writes in the order they were queued,
-/// a moved target held, a refusal recorded. Two writes queued back to back
-/// spawn two flushes; the first sends both in order and the second finds
-/// nothing owed. A flush that fails here is logged, and the tick tries again
+/// `flush_source` the scheduler's flush task runs: one write of a source at a
+/// time (its per-source lock, re-read under it, #1629), each entity's writes
+/// in the order they were queued, a moved target held, a refusal recorded.
+/// Two writes queued back to back spawn two flushes; they take turns at the
+/// lock, and neither sends a write the other has already tried. A flush that fails here is logged, and the tick tries again
 /// within seconds -- the row is the record, not this task.
 ///
 /// The settle is announced as every queue transition is, on `activity:new`,

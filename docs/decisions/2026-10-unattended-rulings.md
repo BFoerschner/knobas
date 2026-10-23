@@ -13221,3 +13221,24 @@ The measurement came after it.
   before it. The 10 s dwell and 1 s due time are the ticket's; the lateness bound is one tick plus
   that 1 s for a loaded machine, a tenth of the dwell. The quit test's dwell is
   `SHUTDOWN_GRACE / 4`. *Reversing:* n/a.
+
+## #1629: merge-manager review (Opus merge-manager, 2026-10-23)
+
+- **`turn`'s re-read cannot skip a due write for good.** *Fork:* tighten the re-read or leave it.
+  *Ruling:* leave it. A `Gone` skips one turn only; every pass reads `store::due` afresh, and every
+  attempt path (`sent`, `hold`, `refused`, `store::wait`) moves `state` or bumps both
+  `attempted_at` and `attempts` under the lock, so a second flusher cannot pass the re-read of a
+  write the first just tried. The two paths that leave the row untouched are a stale 401 after a
+  release (meant to be sent again, #1628) and a failed settle statement (ADR-0012's re-send).
+  *Reversing:* n/a.
+- **A *Flush now*'s later passes call `turn` with `Pass::Now`, so they skip the `owed` re-check.**
+  *Ruling:* left as is. Those heads were read through `Pass::Owed`, and a row the re-read finds
+  untouched cannot stop being owed, since `owed` only grows truer with time. *Reversing:* one
+  argument.
+- **Two doc comments outside the diff still described the old flush.** `knobas-app`'s
+  `submit_write` doc ("one flush of a source at a time") and Kuma's `CALL_BUDGET` doc ("`flush_all`
+  is awaited inline in the tick"). *Ruling:* corrected on the branch, comment-only.
+  *Reversing:* n/a.
+- **#1797 states the conflict right.** `submit` runs `flush_source`, `store::due` orders heads by
+  id, and the tokio mutex is FIFO, so a submit still waits through the flush task's sends on its
+  source. Not widened here. *Reversing:* n/a.
