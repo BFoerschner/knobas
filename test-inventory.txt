@@ -104,6 +104,7 @@ knobas-app	lib/knobas_app	commands::entity::detail::tests::two_adapters_declarin
 knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_role_the_mirror_sends
 knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_saved_view_the_mirror_sends
 knobas-app	lib/knobas_app	commands::entity::tests::the_mirror_invokes_the_commands_by_their_registered_names
+knobas-app	lib/knobas_app	commands::entity::tests::the_mirror_pages_by_the_backends_row_ceiling
 knobas-app	lib/knobas_app	commands::search::tests::search_failures_keep_their_kind
 knobas-app	lib/knobas_app	commands::search::tests::the_two_entity_rows_are_one_wire_shape
 knobas-app	lib/knobas_app	commands::sources::tests::adding_a_source_voids_a_purge_the_scheduler_still_owes_that_id
