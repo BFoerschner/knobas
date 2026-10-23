@@ -478,8 +478,22 @@ fn nonzero(value: u32) -> NonZeroU32 {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Instant;
 
     use super::{InstanceLimiter, Paced, PoisonError, Rate};
+
+    /// The most a limiter refilling `per_second` can hand out for a quiet
+    /// that began at `since`, read once its requests are counted: what that
+    /// rate refilled in the time gone since, and one more for a refill the
+    /// two clocks round differently (#1802). An upper bound read from the
+    /// clock, not a literal: a test the machine stalls is held to what the
+    /// stall refilled, and an unstalled one to the single request it always
+    /// was. Counted here rather than by [`Rate::refilled_in`], which the
+    /// tests are checking.
+    fn refilled_since(per_second: u128, since: Instant) -> u32 {
+        let refilled = since.elapsed().as_nanos() * per_second / 1_000_000_000;
+        u32::try_from(refilled + 1).unwrap_or(u32::MAX)
+    }
 
     /// One entry per origin, however its quota moves, and a dropped holder
     /// does not stay on the books: building a limiter prunes the dead.
@@ -615,20 +629,23 @@ mod tests {
     /// The quiet is counted from the last request let through, not from when
     /// the limiter was built (#1764): the same half second as above, ended by
     /// a request, leaves the stricter quota what the loose one had left in
-    /// seconds -- none -- and what ten a second refills while the test runs,
-    /// at most two in 300 ms. Counted from the build it would have all four.
+    /// seconds -- none -- and what ten a second refills from that request to
+    /// the count. Counted from the build it would have all four.
     #[tokio::test]
     async fn a_request_ends_the_quiet() {
         let url = url::Url::parse("http://ended.invalid:1764").expect("url");
         let loose = InstanceLimiter::for_origin(&url, Rate::new(100, 4));
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let asked = Instant::now();
         loose
             .until_ready_within(std::time::Duration::from_secs(1))
             .await
             .expect("a full limiter lets one through");
         let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
 
-        assert!(strict.slot.current().take_left() <= 2);
+        let left = strict.slot.current().take_left();
+        let bound = refilled_since(10, asked);
+        assert!(left <= bound, "{left} left, at most {bound} refilled");
     }
 
     /// A loosening does not end the quiet (#1764): a new limiter was built,
@@ -684,7 +701,8 @@ mod tests {
     /// nothing, though that limiter was full (#1728): its ten requests are
     /// ten seconds at one a second, a thousand at a hundred a second, and
     /// crediting them would be the fresh burst on every alternation. What a
-    /// hundred a second refills while the test runs is at most one.
+    /// hundred a second refills from the slot's build to the count is all it
+    /// may have: one request when nothing stalls the test.
     #[test]
     fn a_loosening_right_away_takes_nothing_from_a_full_limiter() {
         let url = url::Url::parse("http://full.invalid:1771").expect("url");
@@ -692,18 +710,21 @@ mod tests {
         let loose = InstanceLimiter::for_origin(&url, Rate::new(100, 20));
 
         assert_eq!(loose.slot.current().rate, Rate::new(100, 20), "it loosened");
-        assert!(loose.slot.current().take_left() <= 1);
+        let left = loose.slot.current().take_left();
+        let bound = refilled_since(100, loose.slot.born);
+        assert!(left <= bound, "{left} of twenty left, at most {bound} refilled");
     }
 
     /// The quiet a loosening is credited with ends at the last request let
     /// through (#1771): half a second, then a request, then the loosening,
-    /// leaves what twenty a second refills while the test runs, at most two
-    /// in 100 ms. Counted from the slot's build it would have all eight.
+    /// leaves what twenty a second refills from that request to the count.
+    /// Counted from the slot's build it would have all eight.
     #[tokio::test]
     async fn a_request_ends_the_quiet_before_a_loosening() {
         let url = url::Url::parse("http://ended.invalid:1771").expect("url");
         let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let asked = Instant::now();
         strict
             .until_ready_within(std::time::Duration::from_secs(1))
             .await
@@ -712,7 +733,9 @@ mod tests {
         let loose = InstanceLimiter::for_origin(&url, Rate::new(20, 8));
 
         assert_eq!(loose.slot.current().rate, Rate::new(20, 8), "it loosened");
-        assert!(loose.slot.current().take_left() <= 2);
+        let left = loose.slot.current().take_left();
+        let bound = refilled_since(20, asked);
+        assert!(left <= bound, "{left} of eight left, at most {bound} refilled");
     }
 
     /// A zero reads as one, as it always has: `0/s` means "one", not "never".
