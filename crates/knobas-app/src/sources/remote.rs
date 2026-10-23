@@ -110,17 +110,21 @@ enum Start {
 
 impl Start {
     fn of(url: &url::Url) -> Self {
-        let here = match url.host() {
-            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-            Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
-            None => false,
-        };
-        if here {
+        if on_this_machine(url) {
             Self::ThisMachine
         } else {
             Self::Elsewhere
         }
+    }
+}
+
+/// Whether `url`'s host is a loopback address or `localhost` (#1641).
+fn on_this_machine(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        None => false,
     }
 }
 
@@ -387,7 +391,7 @@ fn text(bytes: &[u8], url: &str) -> Result<String, FetchError> {
 fn require_https(url: &url::Url, start: Start) -> Result<(), FetchError> {
     let ok = match url.scheme() {
         "https" => true,
-        "http" => start == Start::ThisMachine && Start::of(url) == Start::ThisMachine,
+        "http" => start == Start::ThisMachine && on_this_machine(url),
         _ => false,
     };
     if ok {
@@ -471,6 +475,8 @@ async fn get(url: &str, cap: usize, start: Start) -> Result<Vec<u8>, FetchError>
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
 
     fn parse(input: &str) -> Origin {
@@ -665,34 +671,11 @@ mod tests {
     /// than `localhost`, and resolves to the redirect's own server.)
     #[tokio::test(flavor = "multi_thread")]
     async fn a_redirect_to_plain_http_off_this_machine_is_refused() {
-        use std::io::{Read as _, Write as _};
-        let target = undeclared_body(16);
-        let port = target
-            .rsplit(':')
-            .next()
-            .unwrap()
-            .split('/')
-            .next()
-            .unwrap()
-            .to_owned();
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let from = listener.local_addr().expect("addr").port();
-        std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().expect("accept");
-            let _ = socket.read(&mut [0u8; 4096]);
-            let answer = format!(
-                "HTTP/1.1 302 Found\r\nlocation: http://localhost.:{port}/knobas-adapter.wasm\r\n\
-                 content-length: 0\r\nconnection: close\r\n\r\n"
-            );
-            let _ = socket.write_all(answer.as_bytes());
-        });
-        let error = get(
-            &format!("http://127.0.0.1:{from}/m.wasm"),
-            ARTIFACT_CAP,
-            Start::ThisMachine,
-        )
-        .await
-        .expect_err("redirected to plain http");
+        let target = undeclared_body(16).replace("127.0.0.1", "localhost.");
+        let (from, _) = answer_once(redirect(&target));
+        let error = get(&format!("{from}/m.wasm"), ARTIFACT_CAP, Start::ThisMachine)
+            .await
+            .expect_err("redirected to plain http");
         assert!(matches!(error, FetchError::NotHttps(_)), "{error:?}");
     }
 
@@ -711,15 +694,15 @@ mod tests {
 
     /// One answer, `answer`, from a thread on a listener of its own: its
     /// `http://` base, and whether anything asked it.
-    fn answer_once(answer: String) -> (String, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    fn answer_once(answer: String) -> (String, Arc<AtomicBool>) {
         use std::io::{Read as _, Write as _};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("addr").port();
-        let asked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let flag = std::sync::Arc::clone(&asked);
+        let asked = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&asked);
         std::thread::spawn(move || {
             let (mut socket, _) = listener.accept().expect("accept");
-            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            flag.store(true, Ordering::SeqCst);
             let _ = socket.read(&mut [0u8; 4096]);
             let _ = socket.write_all(answer.as_bytes());
         });
@@ -815,10 +798,14 @@ mod tests {
             matches!(&error, FetchError::NotHttps(url) if url.contains("localhost.")),
             "{error:?}"
         );
-        let asked =
-            |flag: &std::sync::atomic::AtomicBool| flag.load(std::sync::atomic::Ordering::SeqCst);
-        assert!(!asked(&hop_asked), "the plain-http hop was asked");
-        assert!(!asked(&end_asked), "the server after the hop was asked");
+        assert!(
+            !hop_asked.load(Ordering::SeqCst),
+            "the plain-http hop was asked"
+        );
+        assert!(
+            !end_asked.load(Ordering::SeqCst),
+            "the server after the hop was asked"
+        );
     }
 
     #[test]

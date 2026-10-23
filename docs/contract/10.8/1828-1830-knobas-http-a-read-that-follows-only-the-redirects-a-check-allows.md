@@ -29,9 +29,11 @@
 
   **IPC command semantics (`install_adapter`, `check_adapter_updates`, `update_adapter`, a
   backup restore that fetches an adapter again):** every read of a release goes out on a client
-  built with `with_redirect_check`, whose check is `remote::require_https`, so a redirect hop
-  over plain http off this machine is refused before it is requested, wherever it falls in the
-  chain (#1830). Plain http to this machine (a loopback address or `localhost`) is allowed only
+  built with `with_redirect_check`, whose check runs `remote::require_https` on the hop and
+  keeps the `FetchError` it refused with for `remote::get` to return. A redirect hop over plain
+  http off this machine is refused before it is requested, wherever it falls in the chain
+  (#1830), and the separate check on the answer's final URL is gone: the last hop is checked
+  before it is requested. Plain http to this machine (a loopback address or `localhost`) is allowed only
   when the release's reads started on this machine: the pasted manifest URL, or the release API
   knobas asks (`Endpoints::github_api` for a GitHub repository or a github.com download, the
   forge's own API otherwise) (#1828). A release found elsewhere that names an asset at, or

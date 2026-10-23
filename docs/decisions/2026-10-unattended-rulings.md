@@ -14293,8 +14293,10 @@ Ruled 2026-10-23 by the implementer (Sonnet).
 - **The `NotHttps` message.** *Ruling:* it ends "…when the release is on this machine too", so
   a refused `http://127.0.0.1` asset does not read as allowed by the message that refuses it.
   *Reversing:* trivial.
-- **The start an https origin gives is witnessed below `locate`.** The gate has no TLS server,
-  so a release found on a remote https origin is the `Located` such an origin yields, handed to
-  `artifact` (`a_remote_release_naming_an_asset_on_this_machine_is_refused`), and `Start::of`
-  and `require_https` are tested on their own. `locate` setting `Start::ThisMachine` for a
-  remote origin would pass every test. *Reversing:* n/a.
+- **How the https origin of #1828's first criterion is witnessed.** *Fork:* add a TLS test
+  server (a root knobas-http would have to trust in tests) or witness below `locate`.
+  *Ruling:* below `locate`: the `Located` a remote https origin yields, handed to `artifact`
+  (`a_remote_release_naming_an_asset_on_this_machine_is_refused`), with `Start::of` and
+  `require_https` tested on their own. *Reasoning:* a test-only trust root is a second way past
+  the platform verifier in the frozen crate. The cost: `locate` giving a remote origin
+  `Start::ThisMachine` would pass every test. *Reversing:* low.

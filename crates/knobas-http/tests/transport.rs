@@ -2191,7 +2191,11 @@ mod bounds {
         assert_eq!(*asked.lock().unwrap(), ["/mid", "/end"]);
         assert_eq!(
             server.request_lines(),
-            ["GET /start HTTP/1.1", "GET /mid HTTP/1.1", "GET /end HTTP/1.1"]
+            [
+                "GET /start HTTP/1.1",
+                "GET /mid HTTP/1.1",
+                "GET /end HTTP/1.1"
+            ]
         );
     }
 
