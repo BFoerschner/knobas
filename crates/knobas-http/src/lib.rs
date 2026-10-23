@@ -140,6 +140,18 @@ pub const MAX_ATTEMPTS: u32 = 3;
 /// that is stream F's (interfaces §10.6).
 pub const SEND_BUDGET: Duration = Duration::from_secs(45);
 
+/// How long a connection the write client pooled may sit idle before it is
+/// closed rather than reused (#1821).
+///
+/// Below the 5 s keep-alive timeout of Node (so Uptime Kuma, whose socket.io
+/// packets go out on that client) and of Apache. A server closes an idle
+/// connection when its timeout fires, and a write sent on it at that moment
+/// is read and never answered: `Unconfirmed`, held for the reader when a
+/// second arrival would duplicate it. A write after a pause opens a fresh
+/// connection instead. Reads keep reqwest's pool: one the server hung up on
+/// is sent again (#1818).
+pub const WRITE_POOL_IDLE: Duration = Duration::from_secs(4);
+
 /// How long a streamed body may go without a byte before it is given up on
 /// ([`HttpClient::send_streaming`], issue #1012).
 ///
@@ -363,8 +375,14 @@ impl HttpClient {
                 .map_err(|error| SourceError::protocol(format!("user agent: {error}")))?,
         );
 
-        let build = |redirect: reqwest::redirect::Policy| {
-            reqwest::Client::builder()
+        let build = |redirect: reqwest::redirect::Policy, idle: Option<Duration>| {
+            let builder = reqwest::Client::builder();
+            // reqwest's own idle timeout unless one is given.
+            let builder = match idle {
+                Some(idle) => builder.pool_idle_timeout(idle),
+                None => builder,
+            };
+            builder
                 // Explicit, and it must stay explicit. reqwest picks its backend
                 // from the *union* of the features every crate in the workspace
                 // asks for, and `TlsBackend::default()` prefers native-tls the
@@ -385,8 +403,10 @@ impl HttpClient {
                     SourceError::protocol(format!("building the http client: {error}"))
                 })
         };
-        let client = build(reqwest::redirect::Policy::default())?;
-        let writes = build(reqwest::redirect::Policy::none())?;
+        // A write's connection is let go before the commonest keep-alive
+        // timeout closes it under the write ([`WRITE_POOL_IDLE`], #1821).
+        let client = build(reqwest::redirect::Policy::default(), None)?;
+        let writes = build(reqwest::redirect::Policy::none(), Some(WRITE_POOL_IDLE))?;
 
         let limiter = InstanceLimiter::for_origin(
             &parsed,
@@ -567,18 +587,29 @@ impl HttpClient {
             // another attempt.
             let classify_transport = |error: reqwest::Error| {
                 let mapped = classify::reqwest_error(&error);
-                if retry {
+                let hung_up = retry::closed_before_answering(&error);
+                if retry && follows {
                     // A pooled keep-alive connection the server timed out as
                     // the request went out on it (#1818). Safe to repeat for a
                     // read (`follows` is a `GET` or `HEAD`), and once is what
                     // that race needs: the pool has dropped the closed
                     // connection, so the next attempt goes out on another
                     // one; a server that hangs up on that too is not racing.
-                    // A write may have been read, so it is never sent again
-                    // on this.
-                    closed = follows && retry::closed_before_answering(&error);
+                    closed = hung_up;
                     let again = closed && !resent_after_close;
                     (mapped, again || retry::error_is_transient(&error))
+                } else if hung_up {
+                    // A write, or a request sent once, the server read whole
+                    // and closed on without answering. It may have been acted
+                    // on, so it is never sent again on this (#1818). It
+                    // reached the source and got no answer, which is what
+                    // `once_sent` reads as `Unconfirmed` (#1821): the write
+                    // queue holds a write a second arrival would duplicate
+                    // rather than refuse it.
+                    let unanswered = SourceError::Unreachable(error.to_string());
+                    (classify::once_sent(unanswered, true), false)
+                } else if retry {
+                    (mapped, retry::error_is_transient(&error))
                 } else {
                     // Sent once: past a connect error, it may have landed.
                     let connected = !error.is_connect();
