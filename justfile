@@ -554,6 +554,7 @@ witness-unit:
     scripts/test-prefix-guard.sh
     scripts/merge-tail-lock-test.sh
     scripts/gate-scope-test.sh
+    scripts/gate-slot-test.sh
     scripts/docs-check-test.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh

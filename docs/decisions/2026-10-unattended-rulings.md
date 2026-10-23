@@ -12973,3 +12973,16 @@ The measurement came after it.
   in the app read the list; TfStartWork names its fields itself, so rendering from it would be a
   rewrite for no visible change. The entity test now pins `edited` directly. *Reversing:* low, the
   code is in git history.
+## #1690, the gate's slot wait against the Bash ceiling
+
+- **The arithmetic holds, and is tighter than D4 assumed.** The old 900 s wait plus any gate
+  exceeds 600 s, as the ticket says. D4's 240 s was sized to the 290 s p90; this session's gates
+  ran 272-610 s (median ~400 s) with two gates and three Rust builds beside them, so 240 s plus a
+  median full gate is 640 s. *Ruling:* ship the ticket's 240 s as ruled; the exit-75 line makes a
+  tool timeout recognisable, and a front-only gate (23-58 s) fits with room. *Reversing:* one
+  number (`KNOBAS_GATE_SLOT_WAIT`, default in `scripts/gate-slot.sh`); a lower cap (about 150 s)
+  would be needed for a full gate to always fit under load.
+- **Exit code 75, not another number.** *Ruling:* `EX_TEMPFAIL`, distinct from the 1 a failed step
+  gives; the line also says "not a red gate". *Reversing:* one number and the test's assertion.
+- **The 45 min JVM lock keeps its wait.** *Ruling:* the briefs send queued live recipes to the
+  background with Monitor instead of capping that wait. *Reversing:* two sentences.
