@@ -61,7 +61,7 @@ pub mod day;
 ///
 /// A fourth file for the reason there is a third: [`day`] is one day's blocks
 /// and their edits, and this is the same time added up across seven of them,
-/// plus the one bulk write in the module. It reads [`worklog`]'s rules rather
+/// plus the plan *Log all* sends from. It reads [`worklog`]'s rules rather
 /// than restating them, which is what keeps *Log all* and the draft from
 /// disagreeing about what is loggable.
 pub mod week;

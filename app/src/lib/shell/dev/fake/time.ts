@@ -396,26 +396,6 @@ function fakeTime(params: URLSearchParams): Handlers {
     // also lists yesterday's PAY-231 (1h 30m), which no block here backs, so
     // it is a fixed row for the window whose day is yesterday.
     log_all_preview: (args) => planLogAll(args),
-    log_all: (args) => {
-      const plan = planLogAll(args);
-      if (plan.some((row) => row.blocks === 0)) loggedYesterday = true;
-      return plan.map((row) => {
-        const spans = row.blocks > 0 ? unloggedOn(row) : [];
-        const id = nextWorklog++;
-        for (const block of spans) block.worklog_id = id;
-        return {
-          id,
-          entity_id: row.entity_id,
-          started_at: row.started_at,
-          seconds: row.seconds,
-          comment: "",
-          block_ids: spans.map((block) => block.id),
-          write_queue_id: null,
-          remote_id: null,
-          created_at: new Date().toISOString(),
-        };
-      });
-    },
   };
 
   /** The unlogged manual ticket blocks that start inside one planned day. */

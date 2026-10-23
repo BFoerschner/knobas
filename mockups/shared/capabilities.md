@@ -157,7 +157,7 @@ Generic for every kind. A source may add its own **source view** (tabs of blocks
 | On stop on a non-ticket target: *Log an ad-hoc block* with a suggested ticket and the reason for it | BUILT | `ad_hoc_block` |
 | **Day review** (`#/time/<date>`): manual vs passive blocks, gaps → *Assign…*, edit/delete/create blocks | BUILT | `day_blocks`, `update/delete/create_block` |
 | **Week timesheet**: per target and day, tracked / offered / logged / unlogged / held; no rounding | BUILT | `week_timesheet` |
-| *Log all* with preview: one worklog per day and ticket from unlogged manual blocks | BUILT | `log_all_preview`, `log_all` |
+| *Log all* with preview: one worklog per day and ticket from unlogged manual blocks | BUILT | `log_all_preview`, `log_work` |
 | Passive attribution (opt-in): records what was in front while focused; days older than the observation horizon read "no record" | BUILT | `passive_attribution` |
 | Drag/merge blocks in the day strip | LOW | `update_block` / `delete_block` already cover it; the work is the interaction. |
 

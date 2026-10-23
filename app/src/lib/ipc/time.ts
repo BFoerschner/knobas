@@ -345,29 +345,12 @@ export function weekTimesheet(days: DayWindow[]): Promise<Week> {
 }
 
 /**
- * What {@link logAll} would send, before it sends any of it.
+ * What *Log all* would send, before it sends any of it.
  *
- * The confirmation's list. Ask for it, show it, and call {@link logAll} only
- * if the reader says yes — a bulk write into a ticketing system other people
- * read is not something to discover afterwards.
+ * The confirmation's list. Ask for it, show it, and send each row the reader
+ * ticks with {@link logWork} — a bulk write into a ticketing system other
+ * people read is not something to discover afterwards.
  */
 export function logAllPreview(days: DayWindow[]): Promise<PlannedWorklog[]> {
   return invoke<PlannedWorklog[]>("log_all_preview", { days });
-}
-
-/**
- * Log the week: one worklog per day and ticket from that day's unlogged
- * **manual** blocks.
- *
- * Passive blocks and ad-hoc label blocks are never touched — a passive block
- * is knobas' own guess, and a label is not somewhere a worklog can go. The
- * work is re-derived rather than taken from the plan, so a timer that stopped
- * while the confirmation was on screen is logged too.
- *
- * Rejects with whatever the queue said, **after** the rest of the week has
- * been logged: each worklog is its own write and one that failed does not undo
- * the copies of the ones that did not.
- */
-export function logAll(days: DayWindow[]): Promise<Worklog[]> {
-  return invoke<Worklog[]>("log_all", { days });
 }

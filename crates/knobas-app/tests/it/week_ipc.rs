@@ -2,8 +2,8 @@
 //!
 //! `tests/it/time_ipc.rs` has the timer and the day's blocks; `tests/it/worklog_ipc.rs`
 //! has one day becoming one worklog. This is the week: the four numbers a cell
-//! carries, and the bulk write that turns a week's unlogged blocks into one
-//! worklog per day and ticket.
+//! carries, and the plan that turns a week's unlogged blocks into one worklog
+//! per day and ticket, sent the way the *Log all* dialog sends it.
 //!
 //! The source on the other end is the same **trait-level fake** the worklog
 //! tests use, and for the reason recorded there: ADR-0013 says the real
@@ -66,6 +66,34 @@ fn week() -> Vec<DayWindow> {
             }
         })
         .collect()
+}
+
+/// Send the week the way the *Log all* dialog does (`TfLogAll.svelte`): ask
+/// for the plan, then one `log_work` per row with the plan's start and seconds
+/// and an empty comment. UTC days, so the offset is zero. The waiting
+/// [`time::worklog::log`] rather than the command's queue-and-answer one, so
+/// the source has been handed every worklog by the time this returns.
+async fn log_the_plan(state: &SourcesState, days: &[DayWindow]) -> Vec<time::worklog::Worklog> {
+    let planned = time::week::plan(&state.pool, state.registry.as_ref(), days)
+        .await
+        .expect("the plan reads");
+    let mut made = Vec::new();
+    for entry in planned {
+        made.push(
+            time::worklog::log(
+                state,
+                &entry.entity_id,
+                entry.day,
+                0,
+                entry.started_at,
+                entry.seconds,
+                "",
+            )
+            .await
+            .expect("each planned row logs"),
+        );
+    }
+    made
 }
 
 /// The column a date sits in, so an assertion names a weekday rather than an
@@ -612,9 +640,7 @@ async fn log_all_makes_one_worklog_per_day_and_ticket() {
          on PAY-231 are one of them"
     );
 
-    let made = time::week::log_all(&state, &week())
-        .await
-        .expect("the week logs");
+    let made = log_the_plan(&state, &week()).await;
     assert_eq!(made.len(), 4, "four worklogs, not one lump: {made:?}");
 
     let sent: Vec<(String, DateTime<Utc>, i64)> = wrote
@@ -681,7 +707,7 @@ async fn log_all_touches_neither_a_passive_block_nor_a_label_one() {
         "the guess and the label are not in the hours either"
     );
 
-    time::week::log_all(&state, &week()).await.expect("it logs");
+    log_the_plan(&state, &week()).await;
 
     assert_eq!(
         wrote.ops.lock().unwrap().len(),
@@ -792,7 +818,7 @@ async fn a_block_through_midnight_is_booked_on_monday_and_covers_tuesdays_small_
         "Monday's column is what Monday sends: {planned:?}"
     );
 
-    time::week::log_all(&state, &days).await.expect("it logs");
+    log_the_plan(&state, &days).await;
     let sent: Vec<(DateTime<Utc>, i64)> = wrote
         .ops
         .lock()

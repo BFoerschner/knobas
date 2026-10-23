@@ -6,7 +6,8 @@
 //! reached a ticket and what has not shown side by side. It is a fourth file
 //! in the module pair for the reason [`super::day`] is a second and
 //! [`super::passive`] a third -- the timer is a state machine, the day review
-//! is a read and three writes, this is an aggregate and one bulk write.
+//! is a read and three writes, this is an aggregate and the plan *Log all*
+//! sends from.
 //!
 //! # The four numbers, and where each comes from
 //!
@@ -240,8 +241,9 @@ pub struct Week {
 ///
 /// The confirmation's line, and the acceptance criterion is that it exists
 /// *before* anything is sent: a bulk write to a ticketing system is not
-/// something to discover afterwards. [`log_all`] re-derives its own work
-/// rather than taking this back, for the reason
+/// something to discover afterwards. The dialog sends each ticked line
+/// through the `log_work` command, which re-derives the blocks rather than
+/// taking them from this line, for the reason
 /// [`worklog::log`](super::worklog::log) does not take block ids -- a caller
 /// that could name the blocks could name another ticket's.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
@@ -679,87 +681,6 @@ async fn loggable(
         out.push((entity_id, title.filter(|title| !title.trim().is_empty())));
     }
     Ok(out)
-}
-
-/// Log every planned worklog, one per (day, ticket).
-///
-/// The worklogs it made, in the order it made them. **The work is re-derived**
-/// rather than taken from a plan the caller hands back: a plan is what the
-/// confirmation was drawn from, and between drawing it and confirming it a
-/// timer may have stopped or another window may have logged the same
-/// afternoon. [`worklog`]'s own read is asked again, per day and per ticket,
-/// which is also what makes the comment and the interval the same ones a
-/// single *Log* would have produced.
-///
-/// **The comment is empty**, and that is a decision rather than an omission.
-/// A worklog with no words is a worklog (story 33), and the alternative --
-/// generating the draft's candidate bullets for every ticket of a week without
-/// anybody reading one of them -- would send text nobody ticked to a system
-/// other people read. A reader who wants the bullets logs that day from the
-/// draft, where the boxes are.
-///
-/// A day and ticket that fails is **not** rolled back and does not stop the
-/// rest: each worklog is its own write through the queue, the copy exists
-/// before anything is sent, and a failure that undid the copies would be the
-/// one thing ADR-0012 forbids -- losing knobas' record of a write that may
-/// already have landed. The failure is returned once every other day has been
-/// logged.
-///
-/// # Errors
-/// [`Invalid`](crate::IpcErrorCode::Invalid) for a day list [`vet`] refuses;
-/// otherwise whatever the queue or the database said, after the rest of the
-/// week has been logged.
-pub async fn log_all(
-    state: &crate::sources::SourcesState,
-    days: &[DayWindow],
-) -> Result<Vec<worklog::Worklog>, IpcError> {
-    log_all_with(state, days, worklog::Delivery::Awaited).await
-}
-
-/// [`log_all`], each worklog answered once it is queued and its copy kept,
-/// and sent behind the answer (#775): what the `log_all` command does, so
-/// *Log all* closes on the queue's answers rather than on a week of sends.
-///
-/// # Errors
-/// As [`log_all`].
-pub async fn log_all_in_background(
-    state: &crate::sources::SourcesState,
-    days: &[DayWindow],
-) -> Result<Vec<worklog::Worklog>, IpcError> {
-    log_all_with(state, days, worklog::Delivery::Background).await
-}
-
-async fn log_all_with(
-    state: &crate::sources::SourcesState,
-    days: &[DayWindow],
-    delivery: worklog::Delivery,
-) -> Result<Vec<worklog::Worklog>, IpcError> {
-    vet(days)?;
-    let planned = plan(&state.pool, state.registry.as_ref(), days).await?;
-    let mut made = Vec::new();
-    let mut failure: Option<IpcError> = None;
-    for entry in &planned {
-        let Some(window) = days.iter().find(|window| window.day == entry.day) else {
-            continue;
-        };
-        match worklog::log_within(
-            state,
-            &entry.entity_id,
-            window.from,
-            window.to,
-            "",
-            delivery,
-        )
-        .await
-        {
-            Ok(worklog) => made.push(worklog),
-            Err(error) => failure = failure.or(Some(error)),
-        }
-    }
-    match failure {
-        Some(error) => Err(error),
-        None => Ok(made),
-    }
 }
 
 #[cfg(test)]
