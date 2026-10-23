@@ -89,6 +89,7 @@ async fn observed_sync(
     let reported = Arc::new(Reported::default());
     let observed = Observed::new(
         source,
+        "surveys",
         7,
         std::time::Instant::now(),
         Arc::clone(&reported) as Arc<dyn ProgressSink>,

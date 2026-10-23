@@ -481,17 +481,21 @@ fn report(
     started: std::time::Instant,
     message: Option<String>,
 ) {
-    sink.report(SyncProgress {
+    crate::progress::deliver(
         run_id,
-        source_id: source_id.to_owned(),
-        phase,
-        items,
-        elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-        message,
-        walked: None,
-        of: None,
-        unit: None,
-    });
+        sink.as_ref(),
+        SyncProgress {
+            run_id,
+            source_id: source_id.to_owned(),
+            phase,
+            items,
+            elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            message,
+            walked: None,
+            of: None,
+            unit: None,
+        },
+    );
 }
 
 /// Milliseconds since a run started, saturating.
@@ -729,7 +733,9 @@ async fn attempt(
     // made `(Some(sink), Backfill)` look like a case somebody had to reach for
     // it to be live code.
     let observed =
-        progress.map(|sink| Observed::new(source.as_ref(), run_id, started, Arc::clone(sink)));
+        progress.map(|sink| {
+            Observed::new(source.as_ref(), source_id, run_id, started, Arc::clone(sink))
+        });
     let watched: &dyn Source = match &observed {
         Some(o) => o,
         None => source.as_ref(),
@@ -1112,8 +1118,16 @@ pub const SYNC_CONCURRENCY: usize = 5;
 
 /// How often the ticker looks for due sources, unless [`SchedulerTiming`]
 /// says otherwise. One indexed query; a fixed interval is cheaper to reason
-/// about than a computed sleep, and five seconds is well inside the smallest
-/// interval a user can configure (60 s).
+/// about than a computed sleep.
+///
+/// A source runs up to one tick after it falls due, so the tick must stay
+/// well under the smallest interval a user can configure. That floor is each
+/// adapter's own `min_sync_interval_secs` (#1187): TeamCity declares 20 s,
+/// Uptime Kuma 45 s, every other adapter
+/// [`knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS`] (60 s), and an external
+/// adapter whatever its descriptor says. Five seconds is a quarter of the
+/// lowest of them today. Against a floor near five seconds, a run up to one
+/// tick late nearly doubles the interval.
 const TICK: Duration = Duration::from_secs(5);
 
 /// How long the ticker waits before its first look, unless

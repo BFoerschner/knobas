@@ -51,6 +51,10 @@ struct MockRegistry {
     /// mock's [`Fault`] has no member for. TeamCity's deleted-watermark
     /// refusal is one (#1477).
     protocol: Mutex<bool>,
+    /// How many times an adapter this registry built was asked for its
+    /// descriptor. For an external adapter each ask is a call into its
+    /// sandbox (ADR-0028), so a run asks once (#1701).
+    descriptor_calls: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl AdapterRegistry for MockRegistry {
@@ -69,6 +73,7 @@ impl AdapterRegistry for MockRegistry {
             inner,
             cursors: Arc::clone(&self.cursors),
             protocol: *self.protocol.lock().unwrap(),
+            descriptor_calls: Arc::clone(&self.descriptor_calls),
         }))
     }
 }
@@ -80,6 +85,7 @@ struct Renamed {
     inner: MockSource,
     cursors: Arc<Mutex<Vec<Option<knobas_source::Cursor>>>>,
     protocol: bool,
+    descriptor_calls: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 #[async_trait::async_trait]
@@ -94,6 +100,8 @@ impl Source for Renamed {
     }
 
     fn descriptor(&self) -> SourceDescriptor {
+        self.descriptor_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         SourceDescriptor {
             id: self.id.clone(),
             ..self.inner.descriptor()
@@ -227,6 +235,7 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
         tombstone: Mutex::new(false),
         cursors: Arc::new(Mutex::new(Vec::new())),
         protocol: Mutex::new(false),
+        descriptor_calls: Arc::default(),
     });
 
     Harness {
@@ -898,6 +907,78 @@ async fn a_run_with_no_channel_reports_nothing() {
         0,
         "a sink nobody attached must never be reported to"
     );
+}
+
+/// A run reads its adapter's descriptor once, watched or not (#1701). For an
+/// external adapter every read is a call into its sandbox, and a value taken
+/// from one read and another from a second can disagree if the adapter's
+/// `descriptor()` is not pure.
+#[tokio::test]
+async fn a_run_reads_the_descriptor_once_watched_or_not() {
+    #[derive(Default)]
+    struct Recorder(Mutex<usize>);
+    impl knobas_sync::progress::ProgressSink for Recorder {
+        fn report(&self, _progress: knobas_sync::progress::SyncProgress) {
+            *self.0.lock().unwrap() += 1;
+        }
+    }
+    let calls = |h: &Harness| {
+        h.registry
+            .descriptor_calls
+            .swap(0, std::sync::atomic::Ordering::SeqCst)
+    };
+
+    let h = harness(AuthKind::None, false).await;
+    let (_, unwatched) = one_run(&h, SyncTrigger::Manual).await;
+    assert_eq!(unwatched.outcome, SyncOutcome::Ok);
+    assert_eq!(calls(&h), 1, "an unwatched run");
+
+    let sink = Arc::new(Recorder::default());
+    let run_id = run_log::start(&h.deps.pool, &h.id, SyncTrigger::Manual)
+        .await
+        .unwrap();
+    let watched = knobas_sync::scheduler::execute_run(
+        &h.deps,
+        &h.id,
+        run_id,
+        RunMode::Incremental,
+        Some(sink.clone()),
+        std::time::Instant::now(),
+    )
+    .await;
+    assert_eq!(watched.outcome, SyncOutcome::Ok);
+    assert!(*sink.0.lock().unwrap() > 0, "the run was watched");
+    assert_eq!(calls(&h), 1, "a watched run");
+}
+
+/// `execute_run` is public and takes any sink, not only the scheduler's
+/// fan-out. A sink that panics loses its messages and the run still finishes:
+/// the scheduler's own `Started` and the decorator's `Fetching` and `Writing`
+/// go through `deliver` as the fan-outs do (#1701).
+#[tokio::test]
+async fn a_sink_that_panics_does_not_unwind_the_run() {
+    struct Panicking;
+    impl knobas_sync::progress::ProgressSink for Panicking {
+        fn report(&self, progress: knobas_sync::progress::SyncProgress) {
+            panic!("a broken sink, handed {:?}", progress.phase);
+        }
+    }
+
+    let h = harness(AuthKind::None, false).await;
+    let run_id = run_log::start(&h.deps.pool, &h.id, SyncTrigger::Manual)
+        .await
+        .unwrap();
+    let result = knobas_sync::scheduler::execute_run(
+        &h.deps,
+        &h.id,
+        run_id,
+        RunMode::Incremental,
+        Some(Arc::new(Panicking)),
+        std::time::Instant::now(),
+    )
+    .await;
+    assert_eq!(result.outcome, SyncOutcome::Ok, "{:?}", result.error);
+    assert!(result.counts.upserted > 0, "the adapter's items landed");
 }
 
 /// `RunMode::Backfill` is what the scheduler does with #32's third part, and

@@ -140,7 +140,7 @@ impl Source for Flood {
 async fn the_decorator_forwards_every_item_untouched_and_returns_the_adapters_cursor() {
     let inner = MockSource::new();
     let recorder: Arc<dyn ProgressSink> = Arc::new(Recorder::default());
-    let observed = Observed::new(&inner, 7, Instant::now(), Arc::clone(&recorder));
+    let observed = Observed::new(&inner, "mock", 7, Instant::now(), Arc::clone(&recorder));
 
     let mut direct = Counting::default();
     let direct_cursor: Cursor = inner.sync(None, &mut direct).await.unwrap();
@@ -175,7 +175,7 @@ async fn progress_is_throttled_rather_than_one_message_per_item() {
     let recorder = Arc::new(Recorder::default());
     let sink: Arc<dyn ProgressSink> = recorder.clone();
     let inner = Flood(5_000);
-    let observed = Observed::new(&inner, 9, Instant::now(), sink);
+    let observed = Observed::new(&inner, "flood", 9, Instant::now(), sink);
 
     let mut counting = Counting::default();
     observed.sync(None, &mut counting).await.unwrap();
@@ -224,7 +224,7 @@ async fn a_run_that_pushed_nothing_still_reports_once() {
     let recorder = Arc::new(Recorder::default());
     let sink: Arc<dyn ProgressSink> = recorder.clone();
     let inner = Flood(0);
-    let observed = Observed::new(&inner, 3, Instant::now(), sink);
+    let observed = Observed::new(&inner, "flood", 3, Instant::now(), sink);
 
     let mut counting = Counting::default();
     observed.sync(None, &mut counting).await.unwrap();
@@ -245,7 +245,7 @@ async fn a_refused_item_does_not_count_as_progress() {
     let recorder = Arc::new(Recorder::default());
     let sink: Arc<dyn ProgressSink> = recorder.clone();
     let inner = Flood(10);
-    let observed = Observed::new(&inner, 4, Instant::now(), sink);
+    let observed = Observed::new(&inner, "flood", 4, Instant::now(), sink);
 
     let mut refusing = Refusing::default();
     let error = observed
@@ -316,7 +316,7 @@ async fn an_adapter_that_never_reports_its_walk_sends_no_reading() {
     let recorder = Arc::new(Recorder::default());
     let sink: Arc<dyn ProgressSink> = recorder.clone();
     let inner = Flood(3);
-    let observed = Observed::new(&inner, 5, Instant::now(), sink);
+    let observed = Observed::new(&inner, "flood", 5, Instant::now(), sink);
     observed.sync(None, &mut Counting::default()).await.unwrap();
 
     let reports = recorder.seen();
@@ -336,7 +336,7 @@ async fn a_walk_reading_reaches_the_progress_sink_on_the_item_throttle() {
     let recorder = Arc::new(Recorder::default());
     let sink: Arc<dyn ProgressSink> = recorder.clone();
     let inner = Walker(5_000);
-    let observed = Observed::new(&inner, 6, Instant::now(), sink);
+    let observed = Observed::new(&inner, "flood", 6, Instant::now(), sink);
     observed.sync(None, &mut Counting::default()).await.unwrap();
 
     let reports = recorder.seen();
@@ -367,7 +367,7 @@ async fn the_mocks_walk_reaches_the_progress_sink_and_the_wrapped_sink() {
     let recorder = Arc::new(Recorder::default());
     let sink: Arc<dyn ProgressSink> = recorder.clone();
     let inner = MockSource::new();
-    let observed = Observed::new(&inner, 8, Instant::now(), sink);
+    let observed = Observed::new(&inner, "mock", 8, Instant::now(), sink);
     let mut wrapped = Walking::default();
     observed.sync(None, &mut wrapped).await.unwrap();
 
