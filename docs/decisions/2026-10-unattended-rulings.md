@@ -14256,3 +14256,73 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   a note where `rows.length < total`.
 - **TfPr's 1000-proposal read.** *Ruling:* ask for 500, the most `room_suggestions` answers
   (it takes no offset), as many as Review reads. *Reversing:* none needed; the backend clamps.
+## #1828, #1830: a release fetch's start and every redirect hop (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus: changing `crates/knobas-http/**`.**
+  *Ruling:* changed under Björn's 2026-10-22 waiver, booked in
+  `docs/contract/10.8/1828-1830-knobas-http-a-read-that-follows-only-the-redirects-a-check-allows.md`.
+  *Reasoning:* reqwest decides each hop inside the client; no caller of `send` sees a hop but the
+  last, so checking every hop cannot be done outside the crate. *Reversing:* low.
+- **Per-request option or a client of its own.** *Fork:* a `Request` option, an `HttpConfig`
+  field, or a second constructor. *Ruling:* a second constructor,
+  `HttpClient::with_redirect_check(config, check)`. *Reasoning:* reqwest's redirect policy is set
+  on the `reqwest::Client`, and its `Attempt` cannot see the request, so a per-request option
+  would need a third reqwest client inside every `HttpClient`, adapters' included. An
+  `HttpConfig` field would have to be added to the six adapter constructors that name every
+  field, each one a chance to get it wrong. A constructor of its own leaves `HttpClient::new`
+  and every adapter's client exactly as they were; `remote::get` builds one client per read
+  anyway. *Reversing:* low.
+- **What the check is.** *Fork:* a fixed rule in knobas-http ("no https → http downgrade off
+  loopback", as the ticket sketches) or the caller's predicate. *Ruling:* the caller's
+  predicate, `Fn(&Url) -> bool`. *Reasoning:* a downgrade-only rule misses a chain that starts
+  on `http://127.0.0.1` and hops through `http://cdn.example`, and the rule a release needs
+  (#1828's start) is knobas-app's, not the shared stack's. *Reversing:* low.
+- **How the refused hop reaches `NotHttps`.** *Ruling:* the check records the `FetchError` it
+  refused with in a cell `remote::get` owns, and a failed send reads it back. knobas-http's own
+  error for the hop is `Protocol` with the redirect's status, naming the hop. *Reasoning:*
+  `SourceError` has no variant for it, and adding one changes the SPI. *Reversing:* trivial.
+- **The check on the answer's final URL.** *Ruling:* removed: the check sees the last hop
+  before it is requested, so the final URL has already passed. *Reversing:* trivial.
+- **Where a release's reads start.** *Ruling:* at the first URL knobas fetches for the
+  release: the release API for a repository or a release download it reads through the API
+  (`Endpoints::github_api` for GitHub, the forge's own API otherwise), and the manifest URL when
+  it is fetched as it is. A manifest's artifact beside it starts at the manifest URL.
+  "On this machine" is #1641's loopback-or-`localhost` reading, over http or https.
+  *Reasoning:* the ticket names the pasted origin or `github_api`; both are what the reader
+  pasted or knobas' own configuration, never something a server answered. *Reversing:* low.
+- **The `NotHttps` message.** *Ruling:* it ends "…when the release is on this machine too", so
+  a refused `http://127.0.0.1` asset does not read as allowed by the message that refuses it.
+  *Reversing:* trivial.
+- **How the https origin of #1828's first criterion is witnessed.** *Fork:* add a TLS test
+  server (a root knobas-http would have to trust in tests) or witness below `locate`.
+  *Ruling:* below `locate`: the `Located` a remote https origin yields, handed to `artifact`
+  (`a_remote_release_naming_an_asset_on_this_machine_is_refused`), with `Start::of` and
+  `require_https` tested on their own. *Reasoning:* a test-only trust root is a second way past
+  the platform verifier in the frozen crate. The cost: `locate` giving a remote origin
+  `Start::ThisMachine` would pass every test. *Reversing:* low.
+
+## #1828, #1830: merge-manager review of PR #1832 (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by merge-manager on Opus: changing `crates/knobas-http/**`.**
+  *Ruling:* the implementer's ruling is confirmed. *Reasoning:* the change is additive.
+  `HttpClient::new` builds the client it built before (`Policy::default()` for reads, none for
+  writes), every adapter keeps `new`, and the write client never asks the check. The one shared
+  path the change touches is `send_with`'s `classify_transport`. There, a refused hop returns
+  first and is not transient, so #1818's resend and #1821's `Unconfirmed` never see it. The
+  §10.8 entry adds only `A` rows and matches the diff. *Reversing:* low (one constructor, one
+  private module, one re-export).
+- **The cell in `remote::get` that hands the refused hop back as `NotHttps`.** *Ruling:*
+  confirmed. *Reasoning:* each `get` builds its own client, so the cell belongs to one read. The
+  check runs only on redirect hops, after `get` has checked the first URL itself. A refused hop
+  ends the send without a resend, so the cell is written at most once and read only on the
+  failed send. A failed send with an empty cell maps to `Unreachable`, as before. The other way,
+  matching on `Protocol`'s message, would read a refusal out of prose. A `SourceError` variant
+  would change the SPI for one caller. *Reversing:* trivial.
+- **The https origin of #1828's first criterion, witnessed only through `Located`.** *Fork:*
+  close it with a test or hand it on. *Ruling:* hand-on accepted. No gate test can close it.
+  Every path from a remote origin to a `Located` fetches over TLS first (the release API, or the
+  manifest URL), and knobas-http trusts only the platform's roots. `Start::of` is tested on
+  `https://api.github.com/x`, and `artifact` is tested on the `Located` such an origin yields.
+  What stays unwitnessed is the line in `from_release_api` that takes the start from the API URL,
+  and review confirms it. A test-only trust root in the frozen crate would cost more than the gap
+  does. *Reversing:* low (a TLS fixture can add the witness later without touching this code).

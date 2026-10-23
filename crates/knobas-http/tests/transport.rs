@@ -2121,6 +2121,97 @@ mod bounds {
         assert_eq!(response.url().path(), "/new");
     }
 
+    /// `/start` to `/mid` to `/end`, each a redirect but the last; `/loop`
+    /// redirects to itself.
+    fn hops(head: &str) -> Answer {
+        let next = |to: &str| Answer::sent(response(302, &format!("location: {to}\r\n"), b""));
+        if head.starts_with("GET /start ") {
+            next("/mid")
+        } else if head.starts_with("GET /mid ") {
+            next("/end")
+        } else if head.starts_with("GET /loop ") {
+            next("/loop")
+        } else {
+            Answer::sent(response(200, "", br#"{"end":true}"#))
+        }
+    }
+
+    /// A client built with a redirect check, recording each hop it is asked
+    /// about, and refusing the ones whose path is `refused`.
+    fn checked_client(url: String, refused: &'static str) -> (HttpClient, Arc<Mutex<Vec<String>>>) {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&asked);
+        let client = HttpClient::with_redirect_check(
+            HttpConfig {
+                base_url: url,
+                request_timeout: Duration::from_secs(5),
+                ..HttpConfig::default()
+            },
+            move |hop: &knobas_http::Url| {
+                seen.lock().expect("hops").push(hop.path().to_owned());
+                hop.path() != refused
+            },
+        )
+        .expect("client");
+        (client, asked)
+    }
+
+    /// #1830: a read on a client built with a redirect check asks it about
+    /// every hop, not only the last. A hop it refuses is never requested:
+    /// the read fails with `Protocol`, the redirect's status, naming the hop,
+    /// and is not sent again.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_checked_read_is_refused_at_the_first_hop_its_check_refuses() {
+        let server = ScriptedServer::new(hops);
+        let (client, asked) = checked_client(server.url(), "/mid");
+        let error = client
+            .send(client.request(Method::GET, "/start"))
+            .await
+            .expect_err("a refused hop");
+        assert!(
+            matches!(&error, SourceError::Protocol { status: Some(302), message }
+                if message.contains(&format!("{}/mid", server.url()))),
+            "{error:?}"
+        );
+        assert_eq!(server.request_lines(), ["GET /start HTTP/1.1"]);
+        assert_eq!(*asked.lock().unwrap(), ["/mid"]);
+    }
+
+    /// A hop the check allows is followed, and so is the next: the check
+    /// sees each one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_checked_read_follows_every_hop_its_check_allows() {
+        let server = ScriptedServer::new(hops);
+        let (client, asked) = checked_client(server.url(), "/elsewhere");
+        let response = client
+            .send(client.request(Method::GET, "/start"))
+            .await
+            .expect("followed");
+        assert_eq!(response.url().path(), "/end");
+        assert_eq!(*asked.lock().unwrap(), ["/mid", "/end"]);
+        assert_eq!(
+            server.request_lines(),
+            [
+                "GET /start HTTP/1.1",
+                "GET /mid HTTP/1.1",
+                "GET /end HTTP/1.1"
+            ]
+        );
+    }
+
+    /// A checked read stops where reqwest's own policy does: after 10 hops.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_checked_read_follows_at_most_ten_hops() {
+        let server = ScriptedServer::new(hops);
+        let (client, _) = checked_client(server.url(), "/elsewhere");
+        let error = client
+            .send(client.request(Method::GET, "/loop"))
+            .await
+            .expect_err("too many redirects");
+        assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
+        assert_eq!(server.request_lines().len(), 11);
+    }
+
     const PASSWORD: &str = "pw-from-a-browser-form";
 
     /// SPI-10: a base URL carrying a username or a password is refused when

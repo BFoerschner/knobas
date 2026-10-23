@@ -21,6 +21,7 @@
 //! credential: a release is public, and a private one is out of scope.
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use knobas_http::{HttpClient, HttpConfig, Method};
 use knobas_source::SourceError;
@@ -87,10 +88,44 @@ pub struct Located {
 enum Assets {
     /// Beside a local manifest.
     Directory(PathBuf),
-    /// Relative to the manifest's URL.
+    /// Relative to the manifest's URL, which was the first fetched.
     Beside(url::Url),
-    /// A release's asset list, by name.
-    Listed(Vec<Asset>),
+    /// A release's asset list, by name, and where the reads that found it
+    /// started.
+    Listed { assets: Vec<Asset>, start: Start },
+}
+
+/// Where a release's reads started: the first URL knobas fetched for it,
+/// which it built from what the reader pasted or from [`Endpoints`]. Plain
+/// http to this machine is allowed in the reads only when they started on
+/// this machine (#1828): a release on a remote origin may not send knobas to
+/// a port on the reader's own machine, by an asset's URL or a redirect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Start {
+    /// On a loopback address or `localhost`, over http or https.
+    ThisMachine,
+    /// Anywhere else.
+    Elsewhere,
+}
+
+impl Start {
+    fn of(url: &url::Url) -> Self {
+        if on_this_machine(url) {
+            Self::ThisMachine
+        } else {
+            Self::Elsewhere
+        }
+    }
+}
+
+/// Whether `url`'s host is a loopback address or `localhost` (#1641).
+fn on_this_machine(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        None => false,
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -113,7 +148,7 @@ pub enum FetchError {
     NotAnOrigin(String),
     #[error(
         "{0} is plain http: a release is fetched over https, or over http only from this \
-         machine (127.0.0.1, ::1, localhost)"
+         machine (127.0.0.1, ::1, localhost) when the release is on this machine too"
     )]
     NotHttps(String),
     #[error("cannot read the manifest {path}: {error}")]
@@ -161,7 +196,7 @@ impl Origin {
                 });
             }
         }
-        require_https(&url)?;
+        require_https(&url, Start::of(&url))?;
         Ok(Origin::Manifest(url))
     }
 
@@ -245,7 +280,8 @@ pub async fn locate(
                 from_release_api(&api, pin, &file).await
             }
             (release, _) => {
-                let manifest = text(&get(url.as_str(), MANIFEST_CAP).await?, url.as_str())?;
+                let start = Start::of(url);
+                let manifest = text(&get(url.as_str(), MANIFEST_CAP, start).await?, url.as_str())?;
                 Ok(Located {
                     tag: release.map(|(_, tag, _)| tag),
                     manifest,
@@ -263,18 +299,23 @@ async fn from_release_api(api: &str, pin: Pin<'_>, file: &str) -> Result<Located
         Pin::Latest | Pin::Recorded(None) => format!("{api}/latest"),
         Pin::Recorded(Some(tag)) => format!("{api}/tags/{}", encode_segment(tag)),
     };
-    let body = get(&url, MANIFEST_CAP).await?;
+    // The release API is the first URL fetched: the reads start there.
+    let start = url::Url::parse(&url).map_or(Start::Elsewhere, |url| Start::of(&url));
+    let body = get(&url, MANIFEST_CAP, start).await?;
     let release: Release =
         serde_json::from_slice(&body).map_err(|error| FetchError::NotARelease {
             url: url.clone(),
             error: error.to_string(),
         })?;
     let asset = find(&release.assets, &release.tag_name, file)?;
-    let manifest = text(&get(&asset, MANIFEST_CAP).await?, &asset)?;
+    let manifest = text(&get(&asset, MANIFEST_CAP, start).await?, &asset)?;
     Ok(Located {
         tag: Some(release.tag_name),
         manifest,
-        assets: Assets::Listed(release.assets),
+        assets: Assets::Listed {
+            assets: release.assets,
+            start,
+        },
     })
 }
 
@@ -315,11 +356,11 @@ pub async fn artifact(located: &Located, file: &str) -> Result<Vec<u8>, FetchErr
                         url: format!("{manifest} beside {file}"),
                         error: SourceError::protocol(e.to_string()),
                     })?;
-            get(url.as_str(), ARTIFACT_CAP).await
+            get(url.as_str(), ARTIFACT_CAP, Start::of(manifest)).await
         }
-        Assets::Listed(assets) => {
+        Assets::Listed { assets, start } => {
             let tag = located.tag.as_deref().unwrap_or_default();
-            get(&find(assets, tag, file)?, ARTIFACT_CAP).await
+            get(&find(assets, tag, file)?, ARTIFACT_CAP, *start).await
         }
     }
 }
@@ -342,19 +383,15 @@ fn text(bytes: &[u8], url: &str) -> Result<String, FetchError> {
     })
 }
 
-/// [`FetchError::NotHttps`] unless `url` may carry a release: https, or
-/// plain http to this machine (a loopback address, or `localhost`), where
-/// nothing on the path can swap the manifest and the artifact it pins
-/// together (#1641). The test forge is `http://127.0.0.1`.
-fn require_https(url: &url::Url) -> Result<(), FetchError> {
+/// [`FetchError::NotHttps`] unless `url` may carry a release in reads that
+/// started at `start`: https, or plain http to this machine (a loopback
+/// address, or `localhost`), where nothing on the path can swap the manifest
+/// and the artifact it pins together (#1641), when the reads started on this
+/// machine too (#1828). The test forge is `http://127.0.0.1`.
+fn require_https(url: &url::Url, start: Start) -> Result<(), FetchError> {
     let ok = match url.scheme() {
         "https" => true,
-        "http" => match url.host() {
-            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-            Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
-            None => false,
-        },
+        "http" => start == Start::ThisMachine && on_this_machine(url),
         _ => false,
     };
     if ok {
@@ -364,41 +401,61 @@ fn require_https(url: &url::Url) -> Result<(), FetchError> {
     }
 }
 
-/// GET `url` through the one HTTP stack, with no credential, refusing a
-/// body over `cap` bytes, and a URL [`require_https`] refuses: `url`
-/// itself, and the URL the answer came from after any redirects (a
-/// release's API names the assets' URLs, and a download redirects). A
-/// plain-http hop between the two is not seen (#1830).
-async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
+/// GET `url`, one of the reads that started at `start`, through the one
+/// HTTP stack, with no credential, refusing a body over `cap` bytes, and a
+/// URL [`require_https`] refuses: `url` itself, and every hop of a redirect
+/// before it is requested, the last one included (#1830; a release's API
+/// names the assets' URLs, and a download redirects).
+async fn get(url: &str, cap: usize, start: Start) -> Result<Vec<u8>, FetchError> {
     let unreachable = |error| FetchError::Unreachable {
         url: url.to_owned(),
         error,
     };
     let parsed = url::Url::parse(url)
         .map_err(|e| unreachable(SourceError::protocol(format!("not a URL: {e}"))))?;
-    require_https(&parsed)?;
+    require_https(&parsed, start)?;
     let origin = parsed.origin().ascii_serialization();
     let mut path = parsed.path().to_owned();
     if let Some(query) = parsed.query() {
         path = format!("{path}?{query}");
     }
     let max_body = u64::try_from(cap).unwrap_or(u64::MAX);
-    let client = HttpClient::new(HttpConfig {
-        base_url: origin,
-        adapter_kind: "adapter-install".to_owned(),
-        adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
-        // This read's own cap, which for a component is over the client's
-        // default (#1640): the client counts the body against it as it
-        // arrives, and a body that runs past it is `TooLarge` below.
-        max_body,
-        ..HttpConfig::default()
-    })
+    // The hop the check refused, which the failed send cannot carry.
+    let refused = Arc::new(Mutex::new(None));
+    let check = {
+        let refused = Arc::clone(&refused);
+        move |hop: &knobas_http::Url| match require_https(hop, start) {
+            Ok(()) => true,
+            Err(error) => {
+                *refused.lock().unwrap_or_else(PoisonError::into_inner) = Some(error);
+                false
+            }
+        }
+    };
+    let client = HttpClient::with_redirect_check(
+        HttpConfig {
+            base_url: origin,
+            adapter_kind: "adapter-install".to_owned(),
+            adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
+            // This read's own cap, which for a component is over the client's
+            // default (#1640): the client counts the body against it as it
+            // arrives, and a body that runs past it is `TooLarge` below.
+            max_body,
+            ..HttpConfig::default()
+        },
+        check,
+    )
     .map_err(unreachable)?;
     let response = client
         .send(client.request(Method::GET, &path))
         .await
-        .map_err(unreachable)?;
-    require_https(response.url())?;
+        .map_err(|error| {
+            let hop = refused
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            hop.unwrap_or_else(|| unreachable(error))
+        })?;
     let too_large = || FetchError::TooLarge {
         url: url.to_owned(),
         cap,
@@ -418,6 +475,8 @@ async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
 
     fn parse(input: &str) -> Origin {
@@ -529,7 +588,7 @@ mod tests {
     async fn a_component_over_the_default_body_cap_is_fetched_whole() {
         let len = usize::try_from(knobas_http::MAX_BODY).unwrap() + 1024 * 1024;
         assert!(len < ARTIFACT_CAP);
-        let bytes = get(&undeclared_body(len), ARTIFACT_CAP)
+        let bytes = get(&undeclared_body(len), ARTIFACT_CAP, Start::ThisMachine)
             .await
             .expect("fetched");
         assert_eq!(bytes.len(), len);
@@ -538,9 +597,13 @@ mod tests {
     /// A body that runs past this read's cap is `TooLarge`, declared or not.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_body_over_the_reads_cap_is_too_large() {
-        let error = get(&undeclared_body(MANIFEST_CAP + 1), MANIFEST_CAP)
-            .await
-            .expect_err("over the cap");
+        let error = get(
+            &undeclared_body(MANIFEST_CAP + 1),
+            MANIFEST_CAP,
+            Start::ThisMachine,
+        )
+        .await
+        .expect_err("over the cap");
         assert!(
             matches!(error, FetchError::TooLarge { cap, .. } if cap == MANIFEST_CAP),
             "{error:?}"
@@ -593,9 +656,13 @@ mod tests {
     /// `get` refuses plain http off this machine before it connects.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_fetch_over_plain_http_off_this_machine_is_refused() {
-        let error = get("http://example.test/knobas-adapter.wasm", ARTIFACT_CAP)
-            .await
-            .expect_err("plain http");
+        let error = get(
+            "http://example.test/knobas-adapter.wasm",
+            ARTIFACT_CAP,
+            Start::ThisMachine,
+        )
+        .await
+        .expect_err("plain http");
         assert!(matches!(error, FetchError::NotHttps(_)), "{error:?}");
     }
 
@@ -604,31 +671,141 @@ mod tests {
     /// than `localhost`, and resolves to the redirect's own server.)
     #[tokio::test(flavor = "multi_thread")]
     async fn a_redirect_to_plain_http_off_this_machine_is_refused() {
-        use std::io::{Read as _, Write as _};
-        let target = undeclared_body(16);
-        let port = target
-            .rsplit(':')
-            .next()
-            .unwrap()
-            .split('/')
-            .next()
-            .unwrap()
-            .to_owned();
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let from = listener.local_addr().expect("addr").port();
-        std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().expect("accept");
-            let _ = socket.read(&mut [0u8; 4096]);
-            let answer = format!(
-                "HTTP/1.1 302 Found\r\nlocation: http://localhost.:{port}/knobas-adapter.wasm\r\n\
-                 content-length: 0\r\nconnection: close\r\n\r\n"
-            );
-            let _ = socket.write_all(answer.as_bytes());
-        });
-        let error = get(&format!("http://127.0.0.1:{from}/m.wasm"), ARTIFACT_CAP)
+        let target = undeclared_body(16).replace("127.0.0.1", "localhost.");
+        let (from, _) = answer_once(redirect(&target));
+        let error = get(&format!("{from}/m.wasm"), ARTIFACT_CAP, Start::ThisMachine)
             .await
             .expect_err("redirected to plain http");
         assert!(matches!(error, FetchError::NotHttps(_)), "{error:?}");
+    }
+
+    /// A listener nothing is expected to reach, and its `http://` base.
+    fn silent_listener() -> (std::net::TcpListener, String) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let port = listener.local_addr().expect("addr").port();
+        (listener, format!("http://127.0.0.1:{port}"))
+    }
+
+    /// Whether anything connected to `listener`.
+    fn reached(listener: &std::net::TcpListener) -> bool {
+        listener.accept().is_ok()
+    }
+
+    /// One answer, `answer`, from a thread on a listener of its own: its
+    /// `http://` base, and whether anything asked it.
+    fn answer_once(answer: String) -> (String, Arc<AtomicBool>) {
+        use std::io::{Read as _, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let asked = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&asked);
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept");
+            flag.store(true, Ordering::SeqCst);
+            let _ = socket.read(&mut [0u8; 4096]);
+            let _ = socket.write_all(answer.as_bytes());
+        });
+        (format!("http://127.0.0.1:{port}"), asked)
+    }
+
+    fn redirect(location: &str) -> String {
+        format!(
+            "HTTP/1.1 302 Found\r\nlocation: {location}\r\ncontent-length: 0\r\n\
+             connection: close\r\n\r\n"
+        )
+    }
+
+    /// Plain http to this machine is allowed only in reads that started on
+    /// this machine (#1828); https is allowed in any.
+    #[test]
+    fn plain_http_to_this_machine_is_allowed_only_when_the_reads_started_there() {
+        let url = |s: &str| url::Url::parse(s).unwrap();
+        for here in [
+            "http://127.0.0.1:3000/a",
+            "http://[::1]/a",
+            "http://localhost/a",
+        ] {
+            assert!(
+                require_https(&url(here), Start::ThisMachine).is_ok(),
+                "{here}"
+            );
+            assert!(
+                matches!(
+                    require_https(&url(here), Start::Elsewhere),
+                    Err(FetchError::NotHttps(_))
+                ),
+                "{here}"
+            );
+        }
+        for start in [Start::ThisMachine, Start::Elsewhere] {
+            assert!(require_https(&url("https://cdn.example/a"), start).is_ok());
+            assert!(require_https(&url("https://127.0.0.1/a"), start).is_ok());
+            assert!(require_https(&url("http://cdn.example/a"), start).is_err());
+            assert!(require_https(&url("ftp://127.0.0.1/a"), start).is_err());
+        }
+        assert_eq!(
+            Start::of(&url("http://127.0.0.1:3000/x")),
+            Start::ThisMachine
+        );
+        assert_eq!(Start::of(&url("https://localhost/x")), Start::ThisMachine);
+        assert_eq!(
+            Start::of(&url("https://api.github.com/x")),
+            Start::Elsewhere
+        );
+        assert_eq!(Start::of(&url("http://localhost./x")), Start::Elsewhere);
+    }
+
+    /// #1828: a release found on a remote https origin whose asset is at
+    /// `http://127.0.0.1:…` is refused, and nothing reaches the reader's own
+    /// machine.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_remote_release_naming_an_asset_on_this_machine_is_refused() {
+        let (listener, base) = silent_listener();
+        let located = Located {
+            tag: Some("v1".to_owned()),
+            manifest: String::new(),
+            assets: Assets::Listed {
+                assets: vec![Asset {
+                    name: "fixture.wasm".to_owned(),
+                    browser_download_url: format!("{base}/fixture.wasm"),
+                }],
+                start: Start::Elsewhere,
+            },
+        };
+        let error = artifact(&located, "fixture.wasm")
+            .await
+            .expect_err("plain http to this machine");
+        assert!(matches!(error, FetchError::NotHttps(_)), "{error:?}");
+        assert!(!reached(&listener), "the local listener was asked");
+    }
+
+    /// #1830: a hop over plain http off this machine inside a redirect chain
+    /// is refused, though the chain starts and ends on URLs that pass, and
+    /// neither the hop nor the server after it is asked. (`localhost.` is a
+    /// name other than `localhost`, and resolves to this machine.)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_plain_http_hop_inside_a_redirect_chain_is_refused() {
+        let ok = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok";
+        let (end, end_asked) = answer_once(ok.to_owned());
+        let (hop, hop_asked) = answer_once(redirect(&format!("{end}/knobas-adapter.wasm")));
+        let hop = hop.replace("127.0.0.1", "localhost.");
+        let (start, _) = answer_once(redirect(&format!("{hop}/next")));
+        let error = get(&format!("{start}/m.wasm"), ARTIFACT_CAP, Start::ThisMachine)
+            .await
+            .expect_err("a plain-http hop");
+        assert!(
+            matches!(&error, FetchError::NotHttps(url) if url.contains("localhost.")),
+            "{error:?}"
+        );
+        assert!(
+            !hop_asked.load(Ordering::SeqCst),
+            "the plain-http hop was asked"
+        );
+        assert!(
+            !end_asked.load(Ordering::SeqCst),
+            "the server after the hop was asked"
+        );
     }
 
     #[test]
