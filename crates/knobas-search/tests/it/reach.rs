@@ -208,3 +208,90 @@ async fn reach_of_an_unknown_key_is_empty() {
             .is_empty()
     );
 }
+
+/// What [`the_start_set_is_found_through_an_index`] plans over: its own
+/// database, `analyzed` or never, holding 4,000 entities of which 800 are
+/// Jira tickets (`jira:PAY-<n>`), so a scan of `knobas.entity` is a real
+/// cost and not one page the planner may as well read, and three of them
+/// mirrored.
+async fn many_entities(analyzed: bool) -> sqlx::PgPool {
+    let pool = knobas_db::test_util::scratch_database(if analyzed {
+        "reach_start_analyzed"
+    } else {
+        "reach_start_never"
+    })
+    .await
+    .pool(2)
+    .await
+    .expect("a pool on the scratch database");
+    if !analyzed {
+        knobas_db::plan_shape::never_analyzed(&pool).await;
+    }
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title)
+         select case when g % 5 = 0 then 'jira:PAY-' || g else 'gitea:o/r#' || g end,
+                case when g % 5 = 0 then 'ticket' else 'pr' end,
+                'entity ' || g
+           from generate_series(1, 4000) g",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // A mirror row for a few of them, so the branches read the start set.
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         select id, split_part(id, ':', 1), kind, title, title, '{}'::jsonb
+           from knobas.entity where title in ('entity 15', 'entity 20', 'entity 21')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    if analyzed {
+        sqlx::query("analyze knobas.entity")
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    pool
+}
+
+/// `reach:`'s start set is found through an index on the lowercased id and
+/// key (#1850), not a scan of every entity, with and without statistics:
+/// the values arrive lowercased, so neither the primary key nor the key's
+/// bytewise index can answer `pay-15` for `jira:PAY-15`. Planned over a
+/// typed id and a bare key, the two halves the start set compares.
+#[tokio::test]
+async fn the_start_set_is_found_through_an_index() {
+    use knobas_search::query::EffectiveFilters;
+    use knobas_search::{corpus, sql};
+
+    for analyzed in [false, true] {
+        let pool = many_entities(analyzed).await;
+        let built = sql::search_sql(
+            corpus::ALL,
+            None,
+            false,
+            &EffectiveFilters {
+                reach: vec!["jira:PAY-15".to_owned(), "PAY-20".to_owned()],
+                ..EffectiveFilters::default()
+            },
+            10,
+            40,
+        );
+        let plan = sql::explain(&pool, built).await.unwrap();
+        let start: Vec<&str> = plan
+            .lines()
+            .skip_while(|line| line.trim() != "CTE start")
+            .skip(1)
+            .take_while(|line| !line.trim_start().starts_with("CTE "))
+            .collect();
+        assert!(!start.is_empty(), "no start set in the plan:\n{plan}");
+        let start = start.join("\n");
+        assert!(
+            !start.contains("Seq Scan") && start.contains("Index Scan on entity_ticket_"),
+            "analyzed: {analyzed}; the start set is not read through the ticket indexes:\n{start}"
+        );
+        // The rows it found are the two the values name, case aside.
+        assert!(start.contains("rows=2"), "analyzed: {analyzed}:\n{start}");
+    }
+}

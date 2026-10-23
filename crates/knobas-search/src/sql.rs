@@ -707,11 +707,16 @@ fn bind_lowered(builder: &mut Builder, values: &[String]) -> String {
 /// would list it.
 ///
 /// **One CTE, materialized, that every corpus branch reads** (#1653). The
-/// start set compares `lower(e.id)` and the key past its namespace, which no
-/// index on `knobas.entity` serves, so it is a scan of every entity; spliced
-/// into each branch, as it was, that was four scans and four walks a search
+/// start set compares `lower(e.id)` and the key past its namespace; spliced
+/// into each branch, as it was, that was four starts and four walks a search
 /// over [`crate::corpus::ALL`], and four more per saved list on the rail.
 /// `materialized` so the planner cannot inline it back into each branch.
+///
+/// **Both halves are spelled as migration `0058` indexes them** (#1850):
+/// `entity_ticket_id_lower_idx` and `entity_ticket_key_lower_idx`, partial on
+/// `kind = 'ticket'`, which the planner answers with a `BitmapOr` of the two.
+/// Spelled any other way, the start set is a scan of every entity again
+/// (`reach.rs`' `the_start_set_is_found_through_an_index`).
 ///
 /// Resolved by equality, value by value: the id as typed or the key, both
 /// lowercased, and never a pattern.
