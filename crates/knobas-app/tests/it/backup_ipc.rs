@@ -2232,6 +2232,15 @@ async fn seed_entity(pool: &sqlx::PgPool, tag: &str) -> String {
 /// command" -- and it is only reachable because none of them declares the
 /// state as an argument (carry-over §10.6(a)).
 fn invoke(cmd: &str, body: serde_json::Value) -> Result<String, String> {
+    invoke_managing(cmd, body, |_| {})
+}
+
+/// [`invoke`], with `manage` given the app first.
+fn invoke_managing(
+    cmd: &str,
+    body: serde_json::Value,
+    manage: impl FnOnce(&tauri::App<MockRuntime>),
+) -> Result<String, String> {
     let app = tauri::test::mock_builder()
         .invoke_handler(tauri::generate_handler![
             knobas_app::commands::backup::backup_status,
@@ -2239,9 +2248,11 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<String, String> {
             knobas_app::commands::backup::set_backup_schedule,
             knobas_app::commands::backup::restore_backup,
             knobas_app::commands::backup::share_export,
+            knobas_app::commands::backup::open_backup_folder,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
+    manage(&app);
     let webview: tauri::WebviewWindow<MockRuntime> =
         tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
             .build()
@@ -2300,6 +2311,7 @@ fn every_backup_command_is_registered_and_its_arguments_decode() {
                 "notes": false, "time": false, "sources": true
             } }),
         ),
+        ("open_backup_folder", serde_json::json!({})),
     ] {
         let rejection = invoke(cmd, args).expect_err("nothing is managed, so nothing is ready");
         assert!(
@@ -2332,4 +2344,77 @@ fn a_misspelled_argument_is_refused_before_the_body_runs() {
         !wrong.contains("not_ready"),
         "an argument that did not decode must not look like a command that ran: {wrong}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// *Open the backup folder* (#1704): the running profile's, and no other.
+// ---------------------------------------------------------------------------
+
+/// Invoke `open_backup_folder` as `profile`, over an opener that records what
+/// it was asked to open instead of starting the file manager. Returns the
+/// outcome and every folder the opener saw.
+fn open_backup_folder_as(
+    profile: knobas_app::Profile,
+    answer: Result<(), String>,
+) -> (Result<String, String>, Vec<std::path::PathBuf>) {
+    use tauri::Manager as _;
+
+    let opened = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let record = Arc::clone(&opened);
+    let outcome = invoke_managing("open_backup_folder", serde_json::json!({}), move |app| {
+        app.manage(profile);
+        app.manage(backup::FolderOpener::new(Arc::new(
+            move |folder: &std::path::Path| {
+                record.lock().expect("opened").push(folder.to_path_buf());
+                answer.clone()
+            },
+        )));
+    });
+    let opened = opened.lock().expect("opened").clone();
+    (outcome, opened)
+}
+
+/// Each profile opens its own `backups` folder, and the other profile's never
+/// (P13, LIFE-10). The window's path grant named both folders for whichever
+/// profile ran it; the command answers from the `Profile` the process runs as.
+///
+/// The expected folders are written out from the layout `Profile` documents
+/// (the real profile at the root of the app data directory, the demo one under
+/// `demo/`), not asked of `backup_dir()`, so a command that opened the
+/// profile's root or the other profile's folder fails here.
+#[test]
+fn open_backup_folder_opens_the_running_profiles_folder_and_no_other() {
+    let data = tempfile::tempdir().expect("a scratch app data directory");
+    let real_backups = data.path().join("backups");
+    let demo_backups = data.path().join("demo").join("backups");
+
+    for (demo, own, other) in [
+        (false, &real_backups, &demo_backups),
+        (true, &demo_backups, &real_backups),
+    ] {
+        let profile = knobas_app::Profile::new(demo, data.path());
+        let (outcome, opened) = open_backup_folder_as(profile, Ok(()));
+        outcome.unwrap_or_else(|rejection| panic!("demo={demo}: refused: {rejection}"));
+        assert_eq!(&opened, &[own.clone()], "demo={demo}: the running profile's backups folder, once");
+        assert!(!opened.contains(other), "demo={demo}: the other profile's folder was opened");
+        assert!(
+            own.is_dir(),
+            "demo={demo}: a profile that has not exported yet still gets a folder to open"
+        );
+    }
+}
+
+/// The file manager's refusal reaches the window, naming the folder: the
+/// section shows it in a toast, and a bare "internal" would say nothing.
+#[test]
+fn a_folder_the_opener_refuses_is_an_error_that_names_it() {
+    let data = tempfile::tempdir().expect("a scratch app data directory");
+    let profile = knobas_app::Profile::new(false, data.path());
+    let (outcome, opened) =
+        open_backup_folder_as(profile, Err("no application knows this folder".to_owned()));
+    let rejection = outcome.expect_err("the opener refused");
+    assert_eq!(opened.len(), 1, "the opener was asked once");
+    assert!(rejection.contains("internal"), "{rejection}");
+    assert!(rejection.contains("no application knows this folder"), "{rejection}");
+    assert!(rejection.contains("backups"), "the error names the folder: {rejection}");
 }

@@ -64,10 +64,14 @@ fn the_window_may_open_http_urls_and_only_http_urls() {
     );
 }
 
-/// *Show logs* (#747) may open the log folder, and *Open the backup folder*
-/// (#1471) each profile's backups folder (P13), and nothing else on disk.
+/// *Show logs* (#747) may open the log folder, and nothing else on disk.
+///
+/// The log folder is one for both profiles (`app_log_dir`). *Open the backup
+/// folder* held a grant here for each profile's `backups` folder (#1471) until
+/// #1704 made it a command: the one main window got both whichever profile
+/// ran it, so a demo window could open the real profile's archives (P13).
 #[test]
-fn the_window_may_open_the_log_and_backup_folders_and_no_other_path() {
+fn the_window_may_open_the_log_folder_and_no_other_path() {
     let capability = capability();
     let opener = capability["permissions"]
         .as_array()
@@ -83,7 +87,8 @@ fn the_window_may_open_the_log_and_backup_folders_and_no_other_path() {
         .collect();
     assert_eq!(
         allowed,
-        vec!["$APPLOG", "$APPDATA/backups", "$APPDATA/demo/backups"]
+        vec!["$APPLOG"],
+        "a backup folder is opened by `open_backup_folder`, for the running profile only"
     );
 }
 

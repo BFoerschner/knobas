@@ -69,3 +69,13 @@ export function setBackupSchedule(schedule: BackupSchedule): Promise<BackupStatu
 export function restoreBackup(file: string): Promise<void> {
   return invoke<void>("restore_backup", { file });
 }
+
+/**
+ * *Open the backup folder* (#1704): this profile's backup folder in the file
+ * manager, created first if no export has made it yet. It takes no path: the
+ * folder is the running profile's, so a demo window cannot open the real
+ * profile's archives.
+ */
+export function openBackupFolder(): Promise<void> {
+  return invoke<void>("open_backup_folder");
+}

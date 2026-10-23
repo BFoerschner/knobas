@@ -279,6 +279,9 @@ pub fn run() {
             let profile = Profile::new(demo, &handle.path().app_data_dir()?);
             tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
             handle.manage(profile);
+            // The file manager behind *Open the backup folder* (#1704), next
+            // to the profile whose folder it opens.
+            handle.manage(backup::FolderOpener::platform());
             handle.manage(sources::SecretStoreKind::from_env());
             handle.manage(Lifecycle::new());
             // The desktop notification sender and its waiter registry (#339),
@@ -326,6 +329,7 @@ pub fn run() {
             commands::backup::share_export,
             commands::backup::set_backup_schedule,
             commands::backup::restore_backup,
+            commands::backup::open_backup_folder,
             commands::entity::list_contexts,
             commands::entity::promote_context,
             commands::entity::mini_board,

@@ -49,6 +49,7 @@
 //! (#69 landed in PR #102, and M4.2 (#454) added [`share_export`] to the same
 //! surface -- the section's *Share…* dialog.)
 
+pub mod folder;
 pub mod policy;
 pub mod share;
 
@@ -64,6 +65,7 @@ use sqlx::PgPool;
 use tauri::Manager;
 use tokio_util::sync::CancellationToken;
 
+pub use folder::FolderOpener;
 pub use policy::BackupSchedule;
 pub use share::ShareParts;
 

@@ -116,7 +116,7 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
     ),
     reindexFts: vi.fn(() => Promise.resolve()),
     openLogs: vi.fn(() => Promise.resolve()),
-    openBackupFolder: vi.fn((_directory: string) => Promise.resolve()),
+    openBackupFolder: vi.fn(() => Promise.resolve()),
     ...over,
   } satisfies SectionPorts;
 }
@@ -472,7 +472,7 @@ test("Open the backup folder: beside Export… and Import…, and in both dialog
   opens()[0]!.click();
   await settle();
   expect(p.openBackupFolder).toHaveBeenCalledOnce();
-  expect(p.openBackupFolder).toHaveBeenLastCalledWith(DIR);
+  expect(p.openBackupFolder, "no path: the command opens the running profile's folder (#1704)").toHaveBeenLastCalledWith();
 
   for (const [press, calls] of [["Restore from a file…", 2], ["Import…", 3]] as const) {
     button(press).click();
