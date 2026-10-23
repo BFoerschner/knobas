@@ -16,7 +16,7 @@ Read `docs/agents/working-model.md`, `CLAUDE.md`, `docs/agents/issue-tracker.md`
 
 **You rule your review findings**; nobody waits for another agent or for Björn. Record each ruling in the PR under **Rulings** (fork / ruling / reasoning / cost of reversing) and in `docs/decisions/<yyyy-mm>-unattended-rulings.md` in the same PR. A ruling may not contradict a ticket, spec, ADR or the glossary; where one is wrong, follow it, file a `ready-for-agent` follow-up, and say so.
 
-A step **reserved for Björn** that the implementer left open: on Opus, rule it ("Reserved for Björn, ruled by merge-manager on Opus"), tick the criterion, name the ruling beside it. On Sonnet, finish the review but **stop before taking the lock** and report the step; the orchestrator sends an Opus merge-manager.
+A step **reserved for Björn** that the implementer left open: you run on Opus, so rule it ("Reserved for Björn, ruled by merge-manager on Opus"), tick the criterion, name the ruling beside it.
 
 A PR line "Not witnessable by an agent, handed to the milestone review" is not a blocker: merge on the rest and list it under *Milestone review* in your report. A criterion the implementer marked as unsatisfiable on correct code: check the claim; if right, it is ticked with that note, never satisfied by bending the code.
 
