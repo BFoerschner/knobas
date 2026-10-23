@@ -13606,3 +13606,15 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   `knobas-test-<pid>.lock` first, blocking, is what a reaper itself does, so every reaper passes the
   root by; a reaper that got there first leaves no `postmaster.pid` and the adoption is skipped.
   Test-only; the reaper and the product are unchanged. *Reversing:* low.
+- **Merge-manager deep pass: unlock-on-drop is the fix, not close-on-exec (Opus merge-manager,
+  2026-10-23).** *Fork:* open `.owner.lock` close-on-exec as the root fix, or keep the unlock.
+  *Ruling:* keep the unlock; nothing to add. *Reasoning:* the descriptor is already close-on-exec:
+  `std::fs::OpenOptions` opens every file with `O_CLOEXEC`, so no exec'd child (the postmaster
+  included, which `pg_ctl` execs) keeps a copy past its exec. The window is fork to exec, which
+  close-on-exec cannot close and an unlock does. `File::try_lock`/`unlock` are `flock(2)` on Unix,
+  so the lock belongs to the open file description: `LOCK_UN` releases it for every copy of that
+  descriptor, and for no other. `claim_ownership` opens a new description on each call and the
+  file is never `try_clone`d, so a second claim in the same process is refused rather than
+  sharing the lock, and dropping one `OwnerLock` cannot release a lock another handle still
+  needs. `EmbeddedDb` declares `owner_lock` last, so the unlock still follows the server's stop.
+  *Reversing:* low.
