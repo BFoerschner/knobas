@@ -88,6 +88,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use knobas_app::sources::{Registry, SourcesState};
+use knobas_live_cleanup::Cleanup;
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
 use knobas_sync::scheduler::{Scheduler, SchedulerDeps};
@@ -530,44 +531,33 @@ impl Drop for ParameterBack {
             self.url, self.config, self.name
         );
         let (token, value) = (self.token.clone(), self.value.clone());
-        // `Drop` cannot await; a thread with a runtime and a client of its
-        // own, as `live_teamcity_seeded.rs`'s guards do.
-        let restored = std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
+        Cleanup::new(
+            format!(
+                "{} of {} was not put back to {:?}; re-run `./seed --teamcity`",
+                self.name, self.config, self.value
+            ),
+            "it may still hold the value the test wrote",
+        )
+        .run(move || async move {
+            let status = reqwest::Client::builder()
+                .timeout(REQUEST_BUDGET)
                 .build()
-                .expect("a runtime for the restore")
-                .block_on(async move {
-                    reqwest::Client::builder()
-                        .timeout(REQUEST_BUDGET)
-                        .build()
-                        .expect("a bounded client")
-                        .put(&url)
-                        .bearer_auth(&token)
-                        .header("Accept", "text/plain")
-                        .header("Content-Type", "text/plain")
-                        .body(value)
-                        .send()
-                        .await
-                        .map(|r| r.status())
-                })
-        })
-        .join();
-        let report = match restored {
-            Ok(Ok(status)) if status.is_success() => return,
-            Ok(Ok(status)) => format!("PUT answered {status}"),
-            Ok(Err(e)) => e.to_string(),
-            Err(_) => "the restore thread panicked".to_owned(),
-        };
-        let report = format!(
-            "{} of {} was not put back to {:?} ({report}); re-run `./seed --teamcity`",
-            self.name, self.config, self.value
-        );
-        if std::thread::panicking() {
-            eprintln!("live suite restore: {report}");
-        } else {
-            panic!("{report}");
-        }
+                .expect("a bounded client")
+                .put(&url)
+                .bearer_auth(&token)
+                .header("Accept", "text/plain")
+                .header("Content-Type", "text/plain")
+                .body(value)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?
+                .status();
+            if status.is_success() {
+                Ok(())
+            } else {
+                Err(format!("PUT answered {status}"))
+            }
+        });
     }
 }
 

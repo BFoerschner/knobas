@@ -196,6 +196,7 @@ under `docs/contract/10.8/`. `docs/contract.md` is the record.
 | `knobas-source-kuma` | Uptime Kuma adapter: monitors from `/metrics`; pause, resume and create over socket.io with an account. |
 | `knobas-source-mock` | The reference adapter. It serves the Tidewater fixture and talks to nothing. UI and engine tests use it. |
 | `knobas-mockd` | Deprecated and frozen (ADR-0013). An HTTP mock of Jira and TeamCity, kept as a dev-dependency for older tests until the live suites cover them. |
+| `knobas-live-cleanup` | Dev-dependency only. The one runner every live suite's `Drop` guard hands its cleanup to: a thread and runtime of its own, a bound on the whole sequence, and a report that cannot abort a test that is already unwinding (#1913). |
 | `knobas-secrets` | The OS-keychain credential store behind a trait, with an in-memory store for tests. No secret reaches Postgres or crosses the bridge. |
 | `knobas-search` | The launcher's read side: full-text search over the mirror in the `SearchQuery` to `SearchResponse` shape. |
 | `knobas-sync` | The sync engine and scheduler: one run per transaction, cursors, backoff, credential health, the run log, and the write queue. |

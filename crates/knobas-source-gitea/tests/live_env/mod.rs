@@ -43,6 +43,7 @@
 
 use std::time::Duration;
 
+use knobas_live_cleanup::Cleanup;
 use knobas_source::contract::VecSink;
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SyncItem};
@@ -213,11 +214,12 @@ pub const LITTER: &str = "knobas-";
 ///    A panicking test unwinds through here exactly as a passing one returns
 ///    through it. What it cannot survive is a process that never unwinds --
 ///    a `SIGKILL`, or a Ctrl-C at the wrong moment -- which is what 3 is for.
-///    [`Drop`] does its work on a thread of its own and **waits at most
-///    [`CLEANUP_BUDGET`]** for it, so a server that stops answering ends the
-///    run with a sentence rather than a stall (issue #162). Every request also
-///    carries [`REQUEST_BUDGET`] (issue #170); see `CLEANUP_BUDGET` for why
-///    the sequence keeps a bound of its own on top of its parts'.
+///    [`Drop`] hands its work to `knobas_live_cleanup::Cleanup`, which runs
+///    it on a thread of its own and **waits at most [`CLEANUP_BUDGET`]** for
+///    it, so a server that stops answering ends the run with a sentence
+///    rather than a stall (issue #162). Every request also carries
+///    [`REQUEST_BUDGET`] (issue #170); see `CLEANUP_BUDGET` for why the
+///    sequence keeps a bound of its own on top of its parts'.
 /// 3. **Every guard clears an earlier run's leftovers before it builds**
 ///    ([`Litter::clear_leftovers`]). Whatever a killed run left behind is
 ///    removed by the next run's first mutating test, so recovery is "run the
@@ -289,7 +291,8 @@ pub const REQUEST_BUDGET: Duration = Duration::from_secs(10);
 ///
 /// Everything here goes through a client from this function -- [`Litter::new`]
 /// via [`Litter::with_request_budget`], and [`Drop`]'s cleanup thread, which
-/// must build its own (see the comment there for why it cannot clone one).
+/// must build its own inside the runtime it runs on (`knobas_live_cleanup`
+/// says why a client cannot cross runtimes).
 /// `tests/litter_guard.rs` is what notices if the `.timeout(..)` disappears.
 fn client(request_budget: Duration) -> reqwest::Client {
     reqwest::Client::builder()
@@ -562,84 +565,32 @@ impl Drop for Litter {
         if branches.is_empty() && pulls.is_empty() {
             return;
         }
-        let (auth, api, budget) = (self.auth.clone(), self.api.clone(), self.budget);
+        let (auth, api) = (self.auth.clone(), self.api.clone());
         let request_budget = self.request_budget;
-        // Kept back for the timeout's message: `branches` itself is moved into
-        // the thread, and a report that could not name what it abandoned would
-        // leave the reader with nothing to look for.
-        let abandoned = (branches.clone(), pulls.clone());
-        // `Drop` cannot await, and this one runs on a tokio worker thread, so
-        // it cannot block on the current runtime either. A thread with a
-        // runtime of its own can do both; waiting for it keeps the cleanup
-        // ordered before the next test starts, which is what the next guard's
-        // `clear_leftovers` counts on.
-        //
-        // The client is **built inside that runtime** rather than cloned from
-        // `self`: a `reqwest::Client`'s connections are registered with the
-        // reactor of whichever runtime created them, and driving one from a
-        // second runtime hangs rather than failing (measured: the first test
-        // never returned).
-        //
-        // **The wait is bounded** (issue #162) even though every request the
-        // thread sends now is too (issue #170) -- one bounds a request, this
-        // bounds the sequence; see CLEANUP_BUDGET. It is a channel rather than
-        // a `join` because `JoinHandle` has no timed wait. The received value
-        // is sent after `remove` has returned, so the ordering above survives;
-        // what does not survive a timeout is the thread, which is left running
-        // rather than killed -- there is no way to cancel a blocked socket read
-        // from outside, and a leaked thread in a test process that is already
-        // failing costs nothing. See `CLEANUP_BUDGET` for why it is bounded at
-        // all.
-        let (done, waiting) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let failures = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the cleanup")
-                .block_on(async move {
-                    remove(&client(request_budget), &auth, &api, &branches, &pulls).await
-                });
-            // The receiver is gone only if the waiter already gave up.
-            let _ = done.send(failures);
-        });
-        let failures = match waiting.recv_timeout(budget) {
-            Ok(failures) => failures,
-            // The sender is dropped without sending only by an unwind -- since
-            // issue #170 the usual one: a request that outlived REQUEST_BUDGET
-            // panics in the thread, naming its URL on stderr. Named here too,
-            // because only this side knows what is now left standing.
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => vec![format!(
-                "the cleanup thread panicked (its own message is on stderr, naming the request), \
-                 so {abandoned:?} (branches, pull requests) may still be standing; the next guard's leftover sweep removes \
-                 whatever is left"
-            )],
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => vec![format!(
-                "the cleanup did not finish within {budget:?} and was abandoned, so {:?} may \
-                 still be standing. Every request is individually bounded by \
-                 live_env::REQUEST_BUDGET (issue #170), so a whole cleanup reaching this number \
-                 means a long walk of slow-but-answering requests rather than one wedged one. \
-                 Check the container is healthy, then re-run -- the next guard's leftover sweep \
-                 removes whatever is left. If a healthy container really needs longer, raise \
-                 live_env::CLEANUP_BUDGET.",
-                abandoned
-            )],
-        };
-        if failures.is_empty() {
-            return;
-        }
-        let report = format!(
+        // The thread, the runtime the client is built in, the wait bounded by
+        // `budget` and the report that cannot abort an unwinding test are
+        // `knobas_live_cleanup::Cleanup`'s, shared with every other live suite
+        // (#1913). What is this guard's own: what to remove, and what to name
+        // as abandoned when the removal could not say so itself -- kept back
+        // here because `branches` moves into the cleanup.
+        Cleanup::new(
             "the live suite did not remove everything it created, so the next run inherits it \
-             and the corpus ratchets (issue #143): {}",
-            failures.join("; ")
-        );
-        // Panicking while already unwinding aborts the process, which would
-        // replace a legible test failure with a crash. The test is already red
-        // in that case; this only has to be visible.
-        if std::thread::panicking() {
-            eprintln!("live suite cleanup: {report}");
-        } else {
-            panic!("{report}");
-        }
+             and the corpus ratchets (issue #143)",
+            format!(
+                "{:?} (branches, pull requests) may still be standing; the next guard's leftover \
+                 sweep removes whatever is left",
+                (&branches, &pulls)
+            ),
+        )
+        .within(self.budget)
+        .run(move || async move {
+            let failures = remove(&client(request_budget), &auth, &api, &branches, &pulls).await;
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(failures.join("; "))
+            }
+        });
     }
 }
 

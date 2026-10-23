@@ -74,8 +74,8 @@
 //!
 //! One label, [`LITTER_LABEL`], added to one seeded issue to make it the
 //! *edited* issue of the incremental test, and removed again when the test
-//! ends -- passing or panicking alike, from [`Labeled`]'s `Drop`, on a thread
-//! with a runtime of its own, and checked afterwards rather than assumed. A
+//! ends -- passing or panicking alike, from [`Labeled`]'s `Drop`, through
+//! `knobas_live_cleanup::Cleanup`, and checked afterwards rather than assumed. A
 //! label is the smallest reversible edit Jira has: it moves `updated`, which is
 //! the whole point, and it changes no field the fixture describes.
 //!
@@ -126,6 +126,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use knobas_live_cleanup::{Cleanup, DEFAULT_BUDGET};
 use knobas_source::contract::{Fault, VecSink, Walking, battery};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceError, SyncItem};
@@ -695,38 +696,14 @@ impl Drop for Labeled {
             return;
         };
         let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
-        let edited = key.clone();
-        // `Drop` cannot await and runs on a tokio worker thread, so the cleanup
-        // gets a thread with a runtime of its own -- and a client built inside
-        // it, because a `reqwest::Client` driven from a second runtime hangs
-        // rather than failing (the Gitea suite measured that).
-        let report = std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the cleanup")
-                .block_on(async move { unlabel(&client(), &url, &user, &password, &edited).await })
-        })
-        .join();
-        let failure = match report {
-            Ok(Ok(())) => return,
-            Ok(Err(e)) => e,
-            Err(_) => format!(
-                "the cleanup thread panicked (its own message is on stderr), so {key} may still \
-                 carry {LITTER_LABEL}; the next run's leftover clearing removes it"
-            ),
-        };
-        let report = format!(
+        Cleanup::new(
             "the live suite did not undo the edit it made, so the server is no longer in the \
-             plain-seed state: {failure}"
-        );
-        // Panicking while already unwinding aborts the process; the test is
-        // already red in that case and this only has to be visible.
-        if std::thread::panicking() {
-            eprintln!("live suite cleanup: {report}");
-        } else {
-            panic!("{report}");
-        }
+             plain-seed state",
+            format!(
+                "{key} may still carry {LITTER_LABEL}; the next run's leftover clearing removes it"
+            ),
+        )
+        .run(move || async move { unlabel(&client(), &url, &user, &password, &key).await });
     }
 }
 
@@ -1931,36 +1908,15 @@ impl Drop for SubTask {
         };
         let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
         let (filed, parent) = (key.clone(), self.parent.clone());
-        // A thread with a runtime of its own and a client built inside it, for
-        // the reasons `Labeled`'s `Drop` gives.
-        let report = std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the cleanup")
-                .block_on(async move {
-                    let named_by = format!("parent = {parent}");
-                    delete_issue(&client(), &url, &user, &password, &filed, &named_by).await
-                })
-        })
-        .join();
-        let failure = match report {
-            Ok(Ok(())) => return,
-            Ok(Err(e)) => e,
-            Err(_) => format!(
-                "the cleanup thread panicked (its own message is on stderr), so {key} may still \
-                 exist; the next run's leftover clearing deletes it"
-            ),
-        };
-        let report = format!(
+        Cleanup::new(
             "the live suite did not delete the sub-task it filed, so the server is no longer in \
-             the plain-seed state: {failure}"
-        );
-        if std::thread::panicking() {
-            eprintln!("live suite cleanup: {report}");
-        } else {
-            panic!("{report}");
-        }
+             the plain-seed state",
+            format!("{key} may still exist; the next run's leftover clearing deletes it"),
+        )
+        .run(move || async move {
+            let named_by = format!("parent = {parent}");
+            delete_issue(&client(), &url, &user, &password, &filed, &named_by).await
+        });
     }
 }
 
@@ -2410,36 +2366,16 @@ impl Drop for Reassigned {
         };
         let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
         let restore = key.clone();
-        // The same shape as `Labeled`'s, and for the same measured reason: a
-        // `reqwest::Client` driven from a second runtime hangs rather than
-        // failing, so the cleanup gets its own thread and its own runtime.
-        let report = std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the cleanup")
-                .block_on(async move {
-                    reassign(&client(), &url, &user, &password, &restore, was.as_deref()).await
-                })
-        })
-        .join();
-        let failure = match report {
-            Ok(Ok(())) => return,
-            Ok(Err(e)) => e,
-            Err(_) => format!(
-                "the cleanup thread panicked (its own message is on stderr), so {key} may still \
-                 be assigned to the suite"
+        Cleanup::new(
+            format!(
+                "the live suite did not give {key}'s assignee back, so the server is no longer in \
+                 the plain-seed state"
             ),
-        };
-        let report = format!(
-            "the live suite did not give {key}'s assignee back, so the server is no longer in \
-             the plain-seed state: {failure}"
-        );
-        if std::thread::panicking() {
-            eprintln!("live suite cleanup: {report}");
-        } else {
-            panic!("{report}");
-        }
+            format!("{key} may still be assigned to the suite"),
+        )
+        .run(move || async move {
+            reassign(&client(), &url, &user, &password, &restore, was.as_deref()).await
+        });
     }
 }
 
@@ -3220,8 +3156,8 @@ impl Probed {
 /// What the refused-query probe made on the seeded Jira (#1893): a version
 /// on PAY, a favourite filter naming it, and a Kanban board on that filter.
 /// [`Drop`] takes back whatever of it is still there, passing or panicking
-/// alike, on a thread with a runtime of its own (the reasons `Labeled`'s
-/// `Drop` gives), and checks each one is gone afterwards.
+/// alike, through `knobas_live_cleanup::Cleanup`, and checks each one is
+/// gone afterwards.
 struct RefusedProbe {
     url: String,
     user: String,
@@ -3334,30 +3270,12 @@ impl Drop for RefusedProbe {
         }
         left.reverse();
         let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
-        let report = std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the cleanup")
-                .block_on(async move { take_back(&client(), &url, &user, &password, &left).await })
-        })
-        .join();
-        let failure = match report {
-            Ok(Ok(())) => return,
-            Ok(Err(e)) => e,
-            Err(_) => "the cleanup thread panicked (its own message is on stderr); the next \
-                       run's sweep takes the probe back"
-                .to_owned(),
-        };
-        let report = format!(
+        Cleanup::new(
             "the live suite did not take back its refused-query probe, so the server is no \
-             longer in the plain-seed state: {failure}"
-        );
-        if std::thread::panicking() {
-            eprintln!("live suite cleanup: {report}");
-        } else {
-            panic!("{report}");
-        }
+             longer in the plain-seed state",
+            "the probe may still be standing; the next run's sweep takes it back",
+        )
+        .run(move || async move { take_back(&client(), &url, &user, &password, &left).await });
     }
 }
 
@@ -3881,41 +3799,32 @@ impl Tied {
 impl Drop for Tied {
     fn drop(&mut self) {
         let filed = std::mem::take(&mut self.filed);
-        let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
-        // A thread with a runtime of its own, for the reasons `Labeled`'s
-        // `Drop` gives.
-        let report = std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime for the cleanup")
-                .block_on(async move {
-                    let (http, named_by) = (client(), format!("labels = {LITTER_LABEL}"));
-                    let mut failures = Vec::new();
-                    for (_, key) in &filed {
-                        if let Err(e) =
-                            delete_issue(&http, &url, &user, &password, key, &named_by).await
-                        {
-                            failures.push(e);
-                        }
-                    }
-                    failures
-                })
-        })
-        .join();
-        let report = match report {
-            Ok(failures) if failures.is_empty() => return,
-            Ok(failures) => failures.join("; "),
-            Err(_) => "the cleanup thread panicked (its own message is on stderr); the next \
-                       run's leftover clearing deletes what is left"
-                .to_owned(),
-        };
-        let report = format!("the live suite did not delete the tied issues it filed: {report}");
-        if std::thread::panicking() {
-            eprintln!("live suite cleanup: {report}");
-        } else {
-            panic!("{report}");
+        if filed.is_empty() {
+            return;
         }
+        let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
+        // Each delete may wait out INDEX_BUDGET for the index, one after
+        // another, so the default bound alone could abandon a healthy run.
+        let budget = DEFAULT_BUDGET.max(INDEX_BUDGET * 2 * filed.len() as u32);
+        Cleanup::new(
+            "the live suite did not delete the tied issues it filed",
+            "some may still exist; the next run's leftover clearing deletes what is left",
+        )
+        .within(budget)
+        .run(move || async move {
+            let (http, named_by) = (client(), format!("labels = {LITTER_LABEL}"));
+            let mut failures = Vec::new();
+            for (_, key) in &filed {
+                if let Err(e) = delete_issue(&http, &url, &user, &password, key, &named_by).await {
+                    failures.push(e);
+                }
+            }
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(failures.join("; "))
+            }
+        });
     }
 }
 
