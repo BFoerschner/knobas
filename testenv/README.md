@@ -2042,7 +2042,7 @@ criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
   seam* paragraph names *"the capture links (stored room, derived room,
   foreground present and absent)"* at *"the app's commands over a scratch
   database"*. That witness is `crates/knobas-app/tests/it/capture_ipc.rs` and
-  `app/src/lib/capture/capture.test.svelte.ts`, and this driver asserting
+  `app/src/lib/capture/capture.test.ts`, and this driver asserting
   `CAPTURED FROM` is already one link more than that row asks of it. A driver
   step that makes a stored room is welcome later; it is owed to nothing (the
   deputy's ruling of 2026-09-08 on #503, part 5).

@@ -1,7 +1,7 @@
 /**
  * The capture window as a reader meets it (issue #503, criterion 2).
  *
- * What each exit *does* is `capture.test.svelte.ts`'s; what is asserted here is
+ * What each exit *does* is `capture.test.ts`'s; what is asserted here is
  * the half that only a rendered window has — that **Escape and ⌘Enter both
  * reach it**, that typing in the box is what creates the note, and that the
  * button is not offered before there is a note for it to open.

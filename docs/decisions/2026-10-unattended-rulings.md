@@ -12957,3 +12957,11 @@ The measurement came after it.
   limiter means it was drained, so the quiet credited is at most one of its emission intervals.
   Spending it would not help: those waiters are let through by its refill, not its burst.
   *Reversing:* low.
+
+## #1685, rune-free `.test.svelte.ts` renames
+
+- **Sixteen files, not thirteen.** *Ruling:* rename every `.test.svelte.ts` the scan finds without a
+  rune, `mount(` or `flushSync(`; the ticket's criterion is "no remaining rune-free file".
+  *Reversing:* one `git mv` per file.
+- **`shell/timer.test.svelte.ts` collides with `timer.test.ts`.** *Ruling:* it becomes
+  `timer-store.test.ts` (the store; the other file holds the pure rules). *Reversing:* one rename.
