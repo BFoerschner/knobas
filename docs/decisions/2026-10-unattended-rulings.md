@@ -14256,3 +14256,45 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   a note where `rows.length < total`.
 - **TfPr's 1000-proposal read.** *Ruling:* ask for 500, the most `room_suggestions` answers
   (it takes no offset), as many as Review reads. *Reversing:* none needed; the backend clamps.
+## #1828, #1830: a release fetch's start and every redirect hop (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus: changing `crates/knobas-http/**`.**
+  *Ruling:* changed under Björn's 2026-10-22 waiver, booked in
+  `docs/contract/10.8/1828-1830-knobas-http-a-read-that-follows-only-the-redirects-a-check-allows.md`.
+  *Reasoning:* reqwest decides each hop inside the client; no caller of `send` sees a hop but the
+  last, so checking every hop cannot be done outside the crate. *Reversing:* low.
+- **Per-request option or a client of its own.** *Fork:* a `Request` option, an `HttpConfig`
+  field, or a second constructor. *Ruling:* a second constructor,
+  `HttpClient::with_redirect_check(config, check)`. *Reasoning:* reqwest's redirect policy is set
+  on the `reqwest::Client`, and its `Attempt` cannot see the request, so a per-request option
+  would need a third reqwest client inside every `HttpClient`, adapters' included. An
+  `HttpConfig` field would have to be added to the seven adapter constructors that name every
+  field, each one a chance to get it wrong. A constructor of its own leaves `HttpClient::new`
+  and every adapter's client exactly as they were; `remote::get` builds one client per read
+  anyway. *Reversing:* low.
+- **What the check is.** *Fork:* a fixed rule in knobas-http ("no https → http downgrade off
+  loopback", as the ticket sketches) or the caller's predicate. *Ruling:* the caller's
+  predicate, `Fn(&Url) -> bool`. *Reasoning:* a downgrade-only rule misses a chain that starts
+  on `http://127.0.0.1` and hops through `http://cdn.example`, and the rule a release needs
+  (#1828's start) is knobas-app's, not the shared stack's. *Reversing:* low.
+- **How the refused hop reaches `NotHttps`.** *Ruling:* the check records the `FetchError` it
+  refused with in a cell `remote::get` owns, and a failed send reads it back. knobas-http's own
+  error for the hop is `Protocol` with the redirect's status, naming the hop. *Reasoning:*
+  `SourceError` has no variant for it, and adding one changes the SPI. *Reversing:* trivial.
+- **The check on the answer's final URL.** *Ruling:* removed: the check sees the last hop
+  before it is requested, so the final URL has already passed. *Reversing:* trivial.
+- **Where a release's reads start.** *Ruling:* at the first URL knobas fetches for the
+  release: the release API for a repository or a release download it reads through the API
+  (`Endpoints::github_api` for GitHub, the forge's own API otherwise), and the manifest URL when
+  it is fetched as it is. A manifest's artifact beside it starts at the manifest URL.
+  "On this machine" is #1641's loopback-or-`localhost` reading, over http or https.
+  *Reasoning:* the ticket names the pasted origin or `github_api`; both are what the reader
+  pasted or knobas' own configuration, never something a server answered. *Reversing:* low.
+- **The `NotHttps` message.** *Ruling:* it ends "…when the release is on this machine too", so
+  a refused `http://127.0.0.1` asset does not read as allowed by the message that refuses it.
+  *Reversing:* trivial.
+- **The start an https origin gives is witnessed below `locate`.** The gate has no TLS server,
+  so a release found on a remote https origin is the `Located` such an origin yields, handed to
+  `artifact` (`a_remote_release_naming_an_asset_on_this_machine_is_refused`), and `Start::of`
+  and `require_https` are tested on their own. `locate` setting `Start::ThisMachine` for a
+  remote origin would pass every test. *Reversing:* n/a.
