@@ -159,6 +159,7 @@ just live-status
 | Product | `live-up` starts | and seeds with | `live-down` |
 |---|---|---|---|
 | `gitea` | `knobas-gitea` | `seed-gitea.sh` | stops it |
+| `forgejo` | `knobas-forgejo` (`--profile forgejo`, #1195) | `seed-forgejo.sh` | stops it |
 | `teamcity` | Gitea (the VCS roots clone it), then `knobas-teamcity` and `knobas-teamcity-agent` | `seed-teamcity.sh` (wizard, token, agent, builds) | stops the server and agent; Gitea stays |
 | `jira` | `knobas-jira-db`, `knobas-jira` | timebomb key, `seed-atlassian.sh jira`, `seed-atlassian-content.sh jira` twice, `--verify` | removes both **and their volumes** |
 | `confluence` | `knobas-confluence-db`, `knobas-confluence` | the same, for `confluence` | removes both **and their volumes** |
