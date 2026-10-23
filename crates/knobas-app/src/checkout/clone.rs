@@ -286,7 +286,8 @@ pub async fn stop(
         Ok(Some(removed)) => removed,
         Ok(None) => return Ok(CloneAnswer::NotCloning),
         // The start gave up before its runner existed.
-        Err(_) => !path.exists(),
+        // `try_exists` off the runtime; an error reads as "gone", as `exists` did.
+        Err(_) => !tokio::fs::try_exists(&path).await.unwrap_or(false),
     };
     Ok(CloneAnswer::Stopped {
         path: path.to_string_lossy().into_owned(),
@@ -566,13 +567,26 @@ async fn spawn_into(
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    match command.spawn() {
+    match spawn_off_runtime(command).await? {
         Ok(child) => Ok(Ok(child)),
         Err(error) => {
             let _ = tokio::fs::remove_dir_all(target).await;
             Err(IpcError::invalid(format!("git could not be run: {error}")))
         }
     }
+}
+
+/// `command.spawn()` off the async runtime: the fork and exec are synchronous
+/// syscalls. The blocking thread still carries the runtime's context, which
+/// the child's pipes and its reaping need. The outer error is a task that
+/// panicked or was cancelled, [`Internal`](crate::IpcErrorCode::Internal); the
+/// inner one is the spawn's own.
+async fn spawn_off_runtime(
+    mut command: tokio::process::Command,
+) -> Result<std::io::Result<tokio::process::Child>, IpcError> {
+    tokio::task::spawn_blocking(move || command.spawn())
+        .await
+        .map_err(IpcError::internal)
 }
 
 /// [`adopt_or_refuse`] off the async runtime: it reads the folder's git

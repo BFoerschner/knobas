@@ -199,7 +199,7 @@ pub(super) async fn locate(
     probe: impl AsyncFnOnce() -> bool,
     timeout: Duration,
 ) -> Result<PathBuf, Unrunnable> {
-    let Some(git) = find_on(search, "git") else {
+    let Some(git) = find_off_runtime(search, "git").await? else {
         return Err(Unrunnable::NoGit);
     };
     if git == shim {
@@ -279,6 +279,18 @@ pub(super) fn refusal(stderr: &str) -> String {
         .unwrap_or("git refused without saying why")
         .trim()
         .to_owned()
+}
+
+/// [`find_on`] off the async runtime: it stats each `PATH` entry. A task that
+/// panicked or was cancelled is a failed lookup, `ProbeFailed`: the readers
+/// answer in [`TreeRead`], which has no internal error.
+async fn find_off_runtime(search: &OsStr, name: &str) -> Result<Option<PathBuf>, Unrunnable> {
+    let (search, name) = (search.to_owned(), name.to_owned());
+    tokio::task::spawn_blocking(move || find_on(&search, &name))
+        .await
+        .map_err(|error| {
+            Unrunnable::ProbeFailed(format!("the PATH lookup did not finish: {error}"))
+        })
 }
 
 /// The first executable called `name` in a `PATH`-style list.
