@@ -74,5 +74,6 @@ chrono.workspace = true
 knobas-db = { path = ".", features = ["test-util"] }
 serde_json.workspace = true
 tempfile = "3"
-tokio = { workspace = true }
+# `net` for the embedded tests' `SilentPort`, a socket bound and never listened on.
+tokio = { workspace = true, features = ["net"] }
 uuid.workspace = true
