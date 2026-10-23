@@ -71,7 +71,11 @@
 //!   one as reqwest does; any other method answered with a redirect fails
 //!   with `Protocol` naming the `Location`, rather than reqwest re-sending a
 //!   write as a `GET` whose `200` would read as the write's success
-//!   (ADR-0012, #1640).
+//!   (ADR-0012, #1640). A caller that must hold every hop of a read to a
+//!   rule of its own builds its client with
+//!   [`HttpClient::with_redirect_check`]: a hop the check refuses is never
+//!   requested (#1830). Every adapter's client is built with
+//!   [`HttpClient::new`] and follows as reqwest does.
 //! * **No credential in a base URL.** [`HttpClient::new`] refuses one that
 //!   carries a username or a password ([`refuse_userinfo`]), and no message
 //!   or `Debug` of this crate repeats one (#1640).
@@ -80,6 +84,7 @@ mod cap;
 pub mod classify;
 mod credential;
 mod limiter;
+mod redirect;
 pub mod retry;
 mod walk;
 
@@ -108,7 +113,7 @@ pub use walk::{NextLink, Offset, PageNumber, PageWalk, Paged, Protocol, Walked};
 // on the builder, left open one level up, so it is closed the same way: if a
 // type is not named here, it cannot be reached through this crate.
 // `RequestBuilder` and `Client` are both deliberately absent.
-pub use reqwest::{Method, Response, StatusCode, header};
+pub use reqwest::{Method, Response, StatusCode, Url, header};
 // What a [`StreamedBody`] chunk is; reqwest's own, so no copy per chunk.
 pub use bytes::Bytes;
 
@@ -312,7 +317,8 @@ impl Default for HttpConfig {
 
 /// One adapter instance's HTTP client.
 pub struct HttpClient {
-    /// For `GET` and `HEAD`: follows a redirect as reqwest does.
+    /// For `GET` and `HEAD`: follows a redirect as reqwest does, or as the
+    /// check of [`HttpClient::with_redirect_check`] allows.
     inner: reqwest::Client,
     /// For every other method: follows none, so [`HttpClient::send`] sees the
     /// redirect and refuses it (#1640). reqwest's redirect policy cannot see
@@ -360,6 +366,34 @@ impl HttpClient {
     /// backend cannot be built -- all configuration failures, and all must
     /// surface when the source is saved rather than mid-sync.
     pub fn new(config: HttpConfig) -> Result<Self, SourceError> {
+        Self::build(config, reqwest::redirect::Policy::default())
+    }
+
+    /// Build a client whose `GET` and `HEAD` follow a redirect only when
+    /// `check` allows its target (#1830). The check is asked about every hop
+    /// before it is requested, the last one included; reqwest's limit of 10
+    /// hops still holds. A client of its own, because reqwest's redirect
+    /// policy belongs to the client and not to a request: what
+    /// [`HttpClient::new`] builds is unchanged. Every other method follows no
+    /// redirect, as on any client.
+    ///
+    /// A read redirected to a hop `check` refuses fails with
+    /// [`SourceError::Protocol`] carrying the redirect's status and naming
+    /// the hop, and is not sent again.
+    ///
+    /// # Errors
+    ///
+    /// As [`HttpClient::new`].
+    pub fn with_redirect_check(
+        config: HttpConfig,
+        check: impl Fn(&Url) -> bool + Send + Sync + 'static,
+    ) -> Result<Self, SourceError> {
+        Self::build(config, redirect::policy(std::sync::Arc::new(check)))
+    }
+
+    /// [`HttpClient::new`], with `reads` as the policy a `GET` or `HEAD`
+    /// follows redirects by.
+    fn build(config: HttpConfig, reads: reqwest::redirect::Policy) -> Result<Self, SourceError> {
         let parsed = limiter::http_url(&config.base_url)?;
 
         let mut headers = HeaderMap::new();
@@ -408,7 +442,7 @@ impl HttpClient {
         };
         // A write's connection is let go before the commonest keep-alive
         // timeout closes it under the write ([`WRITE_POOL_IDLE`], #1821).
-        let client = build(reqwest::redirect::Policy::default(), None)?;
+        let client = build(reads, None)?;
         let writes = build(reqwest::redirect::Policy::none(), Some(WRITE_POOL_IDLE))?;
 
         let limiter = InstanceLimiter::for_origin(
@@ -593,6 +627,11 @@ impl HttpClient {
             // A transport failure, mapped, and whether it is transient: worth
             // another attempt.
             let classify_transport = |error: reqwest::Error| {
+                // A hop the client's redirect check refused (#1830): the
+                // check's answer, so another attempt would meet it again.
+                if let Some(refused) = redirect::refused(&error) {
+                    return (refused, false);
+                }
                 let hung_up = retry::closed_before_answering(&error);
                 if retry && follows {
                     // A pooled keep-alive connection the server timed out as
