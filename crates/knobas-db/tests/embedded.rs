@@ -34,8 +34,8 @@ async fn starts_answers_and_survives_restart() {
 /// half-written one, and the launch initialises it again instead of failing.
 ///
 /// `postgresql_embedded` reads `postgresql.conf` alone as "initialised", so it
-/// skipped `initdb` here and the start failed with *could not find the
-/// database system*, on this launch and every one after it. `initdb` writes
+/// skipped `initdb` here and `pg_ctl start` failed with *is not a database
+/// cluster directory*, on this launch and every one after it. `initdb` writes
 /// `PG_VERSION` before `postgresql.conf` and its own cleanup after a failure
 /// removes `PG_VERSION` first, so this shape is an `initdb` cleanup that was
 /// itself cut short (the evidence is under #1637 in
@@ -124,9 +124,8 @@ async fn a_data_directory_with_pg_version_is_never_removed() {
 #[tokio::test]
 async fn the_password_file_and_the_data_directory_are_the_owners_alone() {
     use std::os::unix::fs::PermissionsExt;
-    let mode = |path: &std::path::Path| {
-        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
-    };
+    let mode =
+        |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
     let dir = tempfile::tempdir().unwrap();
     let password_file = dir.path().join(".pgpass");
     let data = dir.path().join("data");
@@ -146,7 +145,11 @@ async fn the_password_file_and_the_data_directory_are_the_owners_alone() {
     std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o750)).unwrap();
     let db = EmbeddedDb::start(cfg).await.unwrap();
     db.stop().await.unwrap();
-    assert_eq!(mode(&password_file), 0o600, "an older build's password file");
+    assert_eq!(
+        mode(&password_file),
+        0o600,
+        "an older build's password file"
+    );
     assert_eq!(mode(&data), 0o700, "an older build's data directory");
 }
 

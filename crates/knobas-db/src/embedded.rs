@@ -1471,15 +1471,12 @@ fn read_password(password_file: &Path) -> Result<Option<String>, DbError> {
 /// An entry that cannot be examined counts as present, so a `PG_VERSION` this
 /// process cannot `stat` keeps the directory.
 fn remove_half_written(data_dir: &Path) -> Result<(), DbError> {
-    let present = |name: &str| match std::fs::symlink_metadata(data_dir.join(name)) {
-        Ok(_) => true,
-        Err(source) => source.kind() != io::ErrorKind::NotFound,
-    };
+    // Absent only when the file system says so: any other error is "present".
     let absent = |name: &str| {
         std::fs::symlink_metadata(data_dir.join(name))
             .is_err_and(|source| source.kind() == io::ErrorKind::NotFound)
     };
-    if !(present("postgresql.conf") && absent("PG_VERSION")) {
+    if absent("postgresql.conf") || !absent("PG_VERSION") {
         return Ok(());
     }
     tracing::warn!(
@@ -1507,7 +1504,12 @@ const INITDB_GRACE: Duration = Duration::from_secs(10);
 ///
 /// The password file is created here, as the crate would, but readable by
 /// its owner alone from the first byte (#1642).
+///
+/// Both checks use `Path::exists`, which reads an unreadable entry as absent,
+/// and both fail safe: `initdb` refuses a data directory that is not empty,
+/// and `create_new` refuses a password file that is there.
 async fn initialise(root_dir: &Path, settings: &Settings) -> Result<(), DbError> {
+    // The crate's own test (`is_initialized`), so `setup()` agrees with it.
     if settings.data_dir.join("postgresql.conf").exists() {
         return Ok(());
     }
@@ -1515,7 +1517,8 @@ async fn initialise(root_dir: &Path, settings: &Settings) -> Result<(), DbError>
     if !settings.password_file.exists() {
         write_password_file(&settings.password_file, &settings.password)?;
     }
-    run_initdb(&binaries.join("initdb"), settings, COMMAND_TIMEOUT).await
+    let initdb = binaries.join(format!("initdb{}", std::env::consts::EXE_SUFFIX));
+    run_initdb(&initdb, settings, COMMAND_TIMEOUT).await
 }
 
 /// Install the PostgreSQL binaries if they are not there yet, and return
@@ -1532,9 +1535,9 @@ async fn install(root_dir: &Path, settings: &Settings) -> Result<PathBuf, DbErro
     let conf = placeholder.join("postgresql.conf");
     std::fs::write(&conf, "").map_err(|source| DbError::io(&conf, source))?;
 
-    let mut only = settings.clone();
-    only.data_dir.clone_from(&placeholder);
-    let mut postgresql = PostgreSQL::new(only);
+    let mut install_settings = settings.clone();
+    install_settings.data_dir.clone_from(&placeholder);
+    let mut postgresql = PostgreSQL::new(install_settings);
     let installed = postgresql.setup().await;
     let binaries = postgresql.settings().binary_dir();
     // Nothing to stop: the placeholder has no `postmaster.pid`.
@@ -1546,6 +1549,8 @@ async fn install(root_dir: &Path, settings: &Settings) -> Result<PathBuf, DbErro
     Ok(binaries)
 }
 
+/// Write the superuser password `initdb --pwfile` reads, readable by its
+/// owner alone from creation on (#1642). Refuses a file that is already there.
 fn write_password_file(path: &Path, password: &str) -> Result<(), DbError> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -1601,12 +1606,11 @@ async fn run_initdb(initdb: &Path, settings: &Settings, limit: Duration) -> Resu
         Ok(output) => output.map_err(|source| DbError::io(initdb, source))?,
         Err(_) => {
             tracing::warn!(?pid, "initdb timed out: stopping it");
-            if let Some(pid) = pid {
-                terminate(pid);
-            }
             // Its own cleanup runs before it exits. A drop past the grace
             // kills it.
-            let _ = tokio::time::timeout(INITDB_GRACE, &mut output).await;
+            if pid.is_some_and(terminate) {
+                let _ = tokio::time::timeout(INITDB_GRACE, &mut output).await;
+            }
             return Err(failed("deadline has elapsed".to_owned()));
         }
     };
@@ -1621,20 +1625,24 @@ async fn run_initdb(initdb: &Path, settings: &Settings, limit: Duration) -> Resu
     }
 }
 
-/// Ask `pid` to terminate. Best-effort: the caller's drop kills it anyway.
+/// Ask `pid` to terminate, and say whether the signal went out. Best-effort:
+/// the caller's drop kills it anyway.
 #[cfg(unix)]
-fn terminate(pid: u32) {
-    let _ = std::process::Command::new("kill")
+fn terminate(pid: u32) -> bool {
+    std::process::Command::new("kill")
         .arg("-TERM")
         .arg(pid.to_string())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status();
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
-/// No signal but the kill a drop sends.
+/// No signal but the kill a drop sends, so there is nothing to wait for.
 #[cfg(not(unix))]
-fn terminate(_pid: u32) {}
+fn terminate(_pid: u32) -> bool {
+    false
+}
 
 /// Keep the password file and the data directory to their owner (#1642).
 ///
@@ -2550,7 +2558,10 @@ mod tests {
         let error = run_initdb(&initdb, &settings, Duration::from_millis(150))
             .await
             .expect_err("a full initdb takes longer than 150 ms");
-        assert!(error.to_string().contains("deadline has elapsed"), "{error}");
+        assert!(
+            error.to_string().contains("deadline has elapsed"),
+            "{error}"
+        );
         assert!(
             !settings.data_dir.exists(),
             "initdb removed the data directory it made"

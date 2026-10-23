@@ -13727,7 +13727,7 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   every request on the one client, as on main (1 of 3), so it predates this PR and does not block
   the merge: #1818. *Reversing:* n/a.
 
-### #1637 and #1642: a half-written data directory, `initdb`'s kill, and a private password file (Opus implementer, 2026-10-23)
+## #1637 and #1642: a half-written data directory, `initdb`'s kill, and a private password file (Opus implementer, 2026-10-23)
 
 - **Reproduce first (#1637).** *Fork:* reproduce "postgresql.conf without PG_VERSION fails every
   launch", or refute it. *Ruling:* reproduced, and that shape is rare. *Reasoning:* the launch on
@@ -13745,7 +13745,8 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
      that lacks the `postgres` database. Each fails every launch, as the ticket says, and is
      filed as #1819.
   *Reversing:* n/a.
-- **What may be removed.** *Ruling:* only `postgresql.conf` present and `PG_VERSION` absent, as
+- **What may be removed.** *Fork:* the shape the ticket names, or any directory that fails to
+  start. *Ruling:* only `postgresql.conf` present and `PG_VERSION` absent, as
   the dispatch requires, checked with `symlink_metadata`. An entry that cannot be examined counts
   as present, so a `PG_VERSION` that cannot be `stat`ed keeps the directory. It runs in
   `start_managed` after the ownership claim and the password read, under both locks, before
@@ -13753,7 +13754,8 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   not start on it, so no server is running there either. `Path::exists` reads a permission
   error as "absent" and would have deleted a real cluster over a bad mode. *Reversing:* one
   predicate.
-- **The PG_VERSION shapes are not recovered here.** *Ruling:* filed as #1819
+- **The PG_VERSION shapes are not recovered here.** *Fork:* widen the removal to them here, or
+  file them. *Ruling:* filed as #1819
   (`ready-for-agent`, Opus). It asks for a ruling on a marker that tells a finished `initdb`
   from a killed one. *Reasoning:* the dispatch forbids removing a directory with `PG_VERSION`.
   Without a marker, no on-disk test separates a killed `initdb` from a reader's database with a
@@ -13778,7 +13780,8 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   the kill, the old crate path let `initdb` run on. A drop, which cannot wait, still kills. Both
   are tested: `a_timed_out_initdb_is_stopped_and_removes_what_it_made` and
   `a_dropped_initdb_is_killed_with_its_future`. *Reversing:* low.
-- **The password file's mode (#1642).** *Ruling:* created 0600 (`OpenOptionsExt::mode`) when
+- **The password file's mode (#1642).** *Fork:* chmod after setup only, or also create the file
+  0600. *Ruling:* created 0600 (`OpenOptionsExt::mode`) when
   knobas writes it, and set to 0600 after every `setup()`, so a 0644 file an older build left is
   tightened too. The data directory is set to 0700 when it is wider (PostgreSQL also accepts
   0750). Both only on `cfg(unix)`. *Reasoning:* the ticket asks for 0600 after setup. Writing it
@@ -13787,14 +13790,16 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   *Reasoning:* knobas owns the file, so a chmod can fail only on a volume that does not keep
   Unix modes. Failing there would fail every launch over a mode the volume cannot hold.
   *Reversing:* one match arm.
-- **§10.8.** *Ruling:* none owed. *Reasoning:* no IPC type, migration or module-layout change.
+- **§10.8.** *Fork:* book the recovery as a boot-screen change, or not. *Ruling:* none owed. *Reasoning:* no IPC type, migration or module-layout change.
   No boot-screen state or message changes. A directory that used to fail now starts, and an
   `initdb` failure reads as before (`DatabaseInitializationError` with the command's output, or
   *deadline has elapsed*). *Reversing:* n/a.
-- **SysV segments (incident).** Killing `initdb`'s whole process group with `SIGKILL` during the
-  first experiment left 31 SysV segments from its bootstrap backends. With `kern.sysv.shmmni`
-  at 32, every new PostgreSQL on the machine failed with *could not create shared memory
-  segment* from about 07:08 to 07:13. I removed the 31 by their creator pids (the experiment's
-  dead `postgres` children, `NATTCH` 0). Later experiments removed the segments their own
-  processes created. A run that kills only `initdb`, as `kill_on_drop` does, leaves none: the
+- **SysV segments left by the experiments.** *Fork:* leave the segments for the reaper, or
+  remove them by hand. *Ruling:* removed by hand. *Reasoning:* killing `initdb`'s whole process
+  group with `SIGKILL` during the first experiment left 31 SysV segments from its bootstrap
+  backends. With `kern.sysv.shmmni` at 32, every new PostgreSQL on the machine failed with *could
+  not create shared memory segment* from about 07:08 to 07:13. PostgreSQL reclaims a stale
+  segment only when the same data directory starts again, and those directories were gone. The
+  31 were removed by their creator pids (the experiment's dead `postgres` children, `NATTCH` 0).
+  Later experiments removed the segments their own processes created. A run that kills only `initdb`, as `kill_on_drop` does, leaves none: the
   backend reads EOF and exits. *Reversing:* n/a.
