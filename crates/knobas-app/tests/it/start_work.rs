@@ -848,9 +848,7 @@ async fn the_repository_of_a_branch_and_a_pull_request_step_can_be_amended() {
         let step = step_of(&flow, kind);
         let mut edited = step.payload.clone();
         edited[tag]["entity"] = serde_json::json!(other);
-        let after = start_work::repropose(&pool, step.id, edited)
-            .await
-            .unwrap();
+        let after = start_work::repropose(&pool, step.id, edited).await.unwrap();
         assert_eq!(step_of(&after, kind).payload[tag]["entity"], other);
     }
 }

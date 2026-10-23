@@ -1025,6 +1025,7 @@ knobas-app	test/it	start_work::run_answers_before_the_first_send_and_the_steps_l
 knobas-app	test/it	start_work::skipping_a_step_that_already_happened_is_refused
 knobas-app	test/it	start_work::skipping_the_branch_still_lets_the_ticket_move
 knobas-app	test/it	start_work::skipping_the_pull_request_leaves_the_link_step_with_nothing_to_do
+knobas-app	test/it	start_work::the_repository_of_a_branch_and_a_pull_request_step_can_be_amended
 knobas-app	test/it	start_work::the_reverse_direction_names_its_pull_request_in_the_activity_stream
 knobas-app	test/it	start_work::the_start_up_pass_leaves_settled_steps_alone
 knobas-app	test/it	status_move::a_legal_move_lands_and_an_illegal_one_is_refused_by_name
