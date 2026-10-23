@@ -259,6 +259,8 @@ hold_gate_slot() {
     done
     [ -z "$tail_mark" ] || rm -f "$tail_mark"
     tail_mark=
+    # Only after a pass that failed: `SECONDS` can tick over inside a first
+    # pass that took the slot, and `check`'s summary prints this line.
     waited=$((SECONDS - wait_from))
-    [ "$waited" -eq 0 ] || echo "$name: gate slot free after $waited s"
+    [ -z "$told" ] || echo "$name: gate slot free after $waited s"
 }
