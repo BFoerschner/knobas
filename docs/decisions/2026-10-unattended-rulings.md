@@ -14523,3 +14523,13 @@ Ruled 2026-10-23 by the implementer (Sonnet) while building the bundle.
   title and acceptance criteria name `under:`, `reach:` and `name:`. *Ruling:* ticket-key values
   (`status:`, `project:` ...) stay lower-cased in Rust, because the parse also reads them
   (`has:`, `sprint:`, `assigned:`) and `fd.v` is spliced in many fragments. A follow-up covers it.
+
+## #1655 (PR #1848): a half-typed `list:` id
+
+- **No `Launcher.test` case for "no error line while typing `list:m`".** *Fork:* the ticket's first
+  criterion names a `Launcher.test` witness; the implementer argued the engine-level test is enough.
+  *Ruling:* accepted. *Reasoning:* the launcher shows its error line only on an IPC error, and
+  `Launcher.test.svelte.ts` already pins that an empty response with unknown tokens renders chips and
+  no error; a new case would mock the port's answer and test nothing the engine does not. The
+  engine test asserts the empty response, total 0 and the `list:nope` token. *Reversing:* trivial,
+  one test.

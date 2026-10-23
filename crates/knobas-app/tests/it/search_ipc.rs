@@ -197,14 +197,24 @@ async fn no_markup_reaches_the_wire_in_a_snippet() {
 
 /// Errors carry a code the frontend can branch on (ruling P1).
 ///
-/// `not_found` is what makes a stale `list:` in the box say *no such list*
-/// instead of *something went wrong*; the message is for humans and nobody
-/// parses it.
+/// `not_found` is what makes a command naming a missing list say *no such
+/// list* instead of *something went wrong* (a `list:` typed into the box is
+/// not such a command, #1655); the message is for humans and nobody parses
+/// it.
 #[tokio::test]
 async fn errors_carry_a_code_the_frontend_can_branch_on() {
     let pool = pool().await;
 
-    let unknown = open_list(&pool, "nope", 10).await.unwrap_err();
+    // Typed into the box, a list nobody ships is a half-typed state (#1655):
+    // an empty answer and the id as an unknown token, never an error.
+    let typed = open_list(&pool, "nope", 10).await.unwrap();
+    assert!(typed.groups.is_empty(), "{typed:?}");
+    assert_eq!(typed.interpreted.unknown_tokens, ["list:nope"]);
+
+    // The commands that name a list still say `not_found`.
+    let unknown = delete_smart_list_inner(&pool, &Registry::for_process(), "nope")
+        .await
+        .unwrap_err();
     assert_eq!(unknown.code, IpcErrorCode::NotFound, "{unknown:?}");
     assert!(unknown.message.contains("nope"), "{unknown:?}");
 
@@ -1868,12 +1878,12 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
         !rail(&pool).await.iter().any(|list| list.saved),
         "nothing saved is left"
     );
+    // Typed into the box it is now an unknown token, not an error (#1655).
+    let gone = open_list(&pool, &made.id, 20).await.expect("it is gone");
+    assert!(gone.groups.is_empty(), "{gone:?}");
     assert_eq!(
-        open_list(&pool, &made.id, 20)
-            .await
-            .expect_err("it is gone")
-            .code,
-        IpcErrorCode::NotFound
+        gone.interpreted.unknown_tokens,
+        [format!("list:{}", made.id)]
     );
     assert_eq!(
         delete_smart_list_inner(&pool, &Registry::for_process(), &made.id)
