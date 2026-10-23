@@ -15414,3 +15414,11 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1883.
   is `#[serde(default)]` in Rust, so the real command takes a draft without it and the fake
   matches; the generated type calling it required is the same request-side-default case the
   #1884 body excludes. Removing the fallback fails `fake-features.test.ts`.
+- **Guard added by the merge-manager (Sonnet): `shell/nullish-fallback.test.ts`.** *Fork:* the
+  ticket's "Fix direction" is a type-aware lint or a house-rules check; the implementer left both.
+  *Ruling:* add the check as a vitest file that walks every non-test `.ts` `a ?? b` with the
+  TypeScript checker (about 15 s in the suite) and fails on a left side that cannot be nullish, with
+  a `KEPT` map for the four hits that are right at runtime. Mutant: `lists.fields ?? []` back in
+  `suggest.ts` fails it. *Reasoning:* it is the #1885 scan, already proven; a new `?? []` on a
+  present IPC field now fails `check-front`. `.svelte` files stay uncovered (the checker does not
+  read them); that gap is filed as one `backlog` issue. *Reversing:* delete the file.
