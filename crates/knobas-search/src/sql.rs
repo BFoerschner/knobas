@@ -219,14 +219,11 @@ pub fn search_sql(
             (true, false) => format!("ts_rank_cd({}, q.tsq)", corpus.fts),
             (false, _) => "0::real".to_owned(),
         };
-        let named = if text.is_some() {
-            let by_title = NAMED.replace("{title}", corpus.title);
-            match corpus.key {
-                Some(key) => format!("({by_title} or {})", KEY_NAMED.replace("{key}", key)),
-                None => by_title,
-            }
-        } else {
-            "false".to_owned()
+        // What a corpus stores (#1650) it is not lexed for, per match.
+        let named = match (text, corpus.named) {
+            (None, _) => "false".to_owned(),
+            (Some(_), Some(stored)) => stored.to_owned(),
+            (Some(_), None) => NAMED.replace("{title}", corpus.title),
         };
         let _ = writeln!(
             sql,
@@ -1011,15 +1008,14 @@ const RANK_WHOLE: &str = "case when {fts} @@ q.whole then ts_rank_cd({fts}, q.wh
 /// `payout` by the same rule. The guard is for cost, not meaning: with no `/`,
 /// `split_part` returns the whole title and the second half can only repeat
 /// the first, so a planner that skips the guard changes no answer.
+///
+/// **Lexed per match**, and so only for a corpus that stores no lexemes of
+/// its own (`Corpus::named`, #1650): the notes, the assets and the routes. The
+/// mirror stores this expression's two halves, and a ticket's key lexed the
+/// same way, as columns (migration `0056`), and compares those, because a
+/// word in most of the mirror made this the larger part of the statement.
 const NAMED: &str = "(tsvector_to_array(to_tsvector('english', {title})) = q.words\n              or (strpos({title}, '/') > 0\n                  and tsvector_to_array(to_tsvector('english', split_part({title}, '/', -1))) = q.words))";
 
-/// Whether a match is named what was typed by its key `{key}` (#1174), lexed
-/// as [`NAMED`] lexes a title. The parser reads `PAY-231` as `pay` and the
-/// signed number `-231`, so while the last word is a prefix `PAY-231` also
-/// matches PAY-2310 at the same rank, and recency would put the newer one
-/// first. A row with no key names nothing by it.
-const KEY_NAMED: &str =
-    "({key} is not null and tsvector_to_array(to_tsvector('english', {key})) = q.words)";
 
 /// The result ordering, qualified with `prefix` (`""`, `"m."` or `"d."`).
 ///
@@ -1472,12 +1468,11 @@ mod tests {
         assert!(!done.sql.contains("':*'"), "{}", done.sql);
         assert!(!done.sql.contains("q.whole"), "{}", done.sql);
         // Either way, a row named exactly what was typed comes first among
-        // equal ranks (`NAMED`), and only among them.
+        // equal ranks, and only among them: for the mirror, by the lexemes it
+        // stores (`Corpus::named`, #1650) rather than by `NAMED` per match.
         for built in [&typing, &done] {
             assert!(
-                built
-                    .sql
-                    .contains("tsvector_to_array(to_tsvector('english', i.title)) = q.words"),
+                built.sql.contains("i.title_words = q.words"),
                 "{}",
                 built.sql
             );
@@ -1745,7 +1740,7 @@ mod tests {
             kind: "o.kind",
             source_id: "o.source_id",
             title: "o.title",
-            key: None,
+            named: None,
             fts: "o.fts",
             headline_text: "o.title",
             // No author column: an author filter must exclude this corpus

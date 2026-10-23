@@ -959,3 +959,42 @@ async fn named_statements(conn: &mut sqlx::PgConnection) -> i64 {
         .await
         .unwrap()
 }
+
+/// The mirror's `named` (#1650) compares the lexemes `0056` stores and lexes
+/// nothing per match: on a word in most of the mirror, lexing every matching
+/// title and key was a fifth to a third of the statement. The corpora that
+/// store none still lex their title, and the match set is still scanned once.
+#[test]
+fn the_mirror_is_named_from_stored_lexemes_and_lexes_no_title_per_match() {
+    for prefix_last in [false, true] {
+        let built = search_sql(
+            corpus::ALL,
+            Some("payout"),
+            prefix_last,
+            &EffectiveFilters::default(),
+            10,
+            40,
+        );
+        let sql = built.sql();
+        assert!(sql.contains("i.title_words = q.words"), "{sql}");
+        assert!(sql.contains("i.key_words = q.words"), "{sql}");
+        for lexed in [
+            "to_tsvector('english', i.title)",
+            "to_tsvector('english', split_part(i.title",
+            "to_tsvector('english', case when i.kind",
+            "to_tsvector('english', substr(i.entity_id",
+        ] {
+            assert!(!sql.contains(lexed), "{lexed} per match:\n{sql}");
+        }
+        // A note, an asset and a route store nothing, and are lexed as before.
+        for title in ["n.title", "a.name", "r.name"] {
+            assert!(
+                sql.contains(&format!(
+                    "tsvector_to_array(to_tsvector('english', {title})) = q.words"
+                )),
+                "{title}:\n{sql}"
+            );
+        }
+        assert_eq!(sql.matches("m as materialized (").count(), 1, "{sql}");
+    }
+}

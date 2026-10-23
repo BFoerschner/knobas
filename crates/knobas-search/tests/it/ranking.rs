@@ -455,6 +455,60 @@ async fn the_item_named_exactly_the_word_ranks_above_its_hyphenated_siblings() {
     assert_eq!(group(&r, "page").total, 3, "{r:?}");
 }
 
+/// Story 25 past the per-kind cap (#1650): the item named exactly the word is
+/// kept when more than a kind's cap of newer rows tie with it on rank.
+///
+/// The thirteen siblings each hold the word once in the title, as the plain
+/// name does, so all fourteen rank alike and only `named` tells them apart.
+/// The plain name is the oldest, so a cap that cut by rank and recency before
+/// asking which row is named would cut it, and the tiebreak would then reorder
+/// ten rows that do not include it.
+#[tokio::test]
+async fn the_item_named_exactly_the_word_survives_a_cap_of_equally_ranked_siblings() {
+    let pool = pool().await;
+    let t = token("tie");
+
+    seed(
+        &pool,
+        &format!("jira:{t}-plain"),
+        "ticket",
+        &t,
+        "Attendees, action items, nothing else.",
+        days_ago(30),
+    )
+    .await;
+    for n in 0..13 {
+        seed(
+            &pool,
+            &format!("jira:{t}-sibling-{n:02}"),
+            "ticket",
+            &format!("{t} rollout {n}"),
+            "Attendees, action items, nothing else.",
+            Utc::now() - Duration::minutes(n),
+        )
+        .await;
+    }
+
+    for raw in [t.clone(), format!("{t} ")] {
+        let r = searcher(&pool).search(q(&raw)).await.unwrap();
+        let ticket = group(&r, "ticket");
+        // Ten is the crate's per-kind cap (`PER_GROUP` in `src/lib.rs`).
+        assert_eq!(ticket.hits.len(), 10, "{raw:?}: {r:?}");
+        assert_eq!(
+            ticket.hits[0].row.entity_id,
+            format!("jira:{t}-plain"),
+            "{raw:?}: {r:?}"
+        );
+        assert_eq!(ticket.total, 14, "{raw:?}: {r:?}");
+        // The ranks really are tied, or this pins nothing about the cap.
+        let first = ticket.hits[0].rank;
+        assert!(
+            ticket.hits.iter().all(|h| h.rank == first),
+            "{raw:?}: {r:?}"
+        );
+    }
+}
+
 /// A hyphenated name stays findable by its full spelling and by each part
 /// (#611): the fix changes how a match ranks, never whether it matches.
 ///
