@@ -19,3 +19,10 @@ crates/knobas-app/gen/
 
 # Python bytecode, written when a script under scripts/ is imported.
 __pycache__/
+
+# The ticket loop's local state: the in-flight ledger (`.claude/loop/`; the
+# tracked stages.sh stays tracked), the per-machine permission overrides and
+# the scheduler's lock. A clone on another machine has none of them tracked.
+.claude/loop/
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
