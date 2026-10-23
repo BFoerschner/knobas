@@ -72,7 +72,7 @@ claim_age() { local f="$LOCK/alive"; [ -e "$f" ] || f="$LOCK/holder"; echo $(( $
 refresh() { [ "$(holder)" = "$pr" ] && touch "$LOCK/alive"; }
 case "$cmd" in
 ready)
-  [ -n "$arg" ] || { echo "usage: $0 ready <PR> <head SHA>"; exit 2; }
+  [ -n "$arg" ] || { echo "usage: $0 ready <PR> <head SHA> [<main SHA the gate ran over>]"; exit 2; }
   mkdir -p "$READY"; echo "$arg" > "$READY/$pr"
   # A `ready` without a main (the brief before #1862, or a head nobody
   # pre-gated) drops any older record: what it says is no longer true.
@@ -88,25 +88,25 @@ gated)
   if ! refresh; then
     echo "merge-tail: PR #$pr does NOT hold the lock (holder: $(holder)); gate under the lock once you hold it"; exit 1
   fi
-  head=$(cat "$READY/$pr" 2>/dev/null); base=$(cat "$READY/$pr.main" 2>/dev/null)
-  if [ -z "$head" ] || [ -z "$base" ]; then
+  gated_head=$(cat "$READY/$pr" 2>/dev/null); gated_main=$(cat "$READY/$pr.main" 2>/dev/null)
+  if [ -z "$gated_head" ] || [ -z "$gated_main" ]; then
     echo "merge-tail: PR #$pr has no pre-gate recorded (\`ready <PR> <head> <main>\`); gate under the lock"; exit 1
   fi
   now_head=$(git rev-parse HEAD 2>/dev/null)
-  if [ "$now_head" != "$head" ]; then
-    echo "merge-tail: PR #$pr's head is ${now_head:-unreadable}, the pre-gate ran on $head; gate under the lock"; exit 1
+  if [ "$now_head" != "$gated_head" ]; then
+    echo "merge-tail: PR #$pr's head is ${now_head:-unreadable}, the pre-gate ran on $gated_head; gate under the lock"; exit 1
   fi
-  now_main=$(git ls-remote origin refs/heads/main 2>/dev/null | cut -f1)
+  now_main=$(GIT_TERMINAL_PROMPT=0 git ls-remote origin refs/heads/main 2>/dev/null | cut -f1)
   if [ -z "$now_main" ]; then
     echo "merge-tail: cannot read origin's main; gate under the lock"; exit 1
   fi
-  if [ "$now_main" != "$base" ]; then
-    echo "merge-tail: main moved from $base (the pre-gate's) to $now_main; rebase and gate under the lock"; exit 1
+  if [ "$now_main" != "$gated_main" ]; then
+    echo "merge-tail: main moved from $gated_main (the pre-gate's) to $now_main; rebase and gate under the lock"; exit 1
   fi
-  if ! git merge-base --is-ancestor "$base" "$head" 2>/dev/null; then
-    echo "merge-tail: PR #$pr's head $head does not sit on main $base; rebase and gate under the lock"; exit 1
+  if ! git merge-base --is-ancestor "$gated_main" "$gated_head" 2>/dev/null; then
+    echo "merge-tail: PR #$pr's head $gated_head does not sit on main $gated_main; rebase and gate under the lock"; exit 1
   fi
-  echo "merge-tail: PR #$pr was gated at $head over main $base, and main has not moved: merge without gating again"
+  echo "merge-tail: PR #$pr was gated at $gated_head over main $gated_main, and main has not moved: merge without gating again"
   ;;
 partner)
   max=${arg:-1}
