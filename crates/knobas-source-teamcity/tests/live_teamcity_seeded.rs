@@ -784,7 +784,7 @@ async fn remove(http: &reqwest::Client, url: &str, token: &str, ids: &[i64]) -> 
     failures
 }
 
-/// The one build the mutating test queues, deleted again when the guard
+/// One build a mutating test queues, deleted again when the guard
 /// drops -- passing or panicking alike -- and the deletion checked.
 ///
 /// Built before the test's baseline sync, because clearing an earlier run's
@@ -838,7 +838,8 @@ impl Queued {
     }
 
     /// Own the removal of a build something else queued -- the adapter's
-    /// `run_build`, whose receipt names it (#669) -- from this line onwards.
+    /// `run_build`, whose receipt names it (#669), or a trigger or re-run,
+    /// found on the queue by [`adopt_first`] -- from this line onwards.
     fn adopt(&mut self, id: i64) {
         assert!(self.id.is_none(), "this guard owns exactly one build");
         self.id = Some(id);
@@ -3280,7 +3281,7 @@ async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_
 /// locator, so a build put on the queue for **any** configuration is on the
 /// page: a write aimed at the wrong configuration must show up here to be
 /// caught.
-async fn queue(seeded: &Seeded) -> Vec<serde_json::Value> {
+async fn queued_builds(seeded: &Seeded) -> Vec<serde_json::Value> {
     let (status, body) = seeded
         .get("app/rest/buildQueue?fields=build(id,state,buildType(id),branchName,defaultBranch)")
         .await;
@@ -3291,10 +3292,37 @@ async fn queue(seeded: &Seeded) -> Vec<serde_json::Value> {
 /// Hand the guard the first build on the queue, if there is one, before
 /// anything is asserted about it: a write that queued something it should not
 /// have is still cleaned up when the assertion after this fails.
-fn adopt_first(guard: &mut Queued, queue: &[serde_json::Value]) {
-    if let Some(row) = queue.first() {
+fn adopt_first(guard: &mut Queued, queued: &[serde_json::Value]) {
+    if let Some(row) = queued.first() {
         guard.adopt(id_of(row));
     }
+}
+
+/// `op` is refused on TeamCity's own 404 and puts nothing on the queue
+/// (#1699): a target the server does not have is a refusal the write queue
+/// does not retry. Whatever the write did queue goes to `guard` first.
+async fn refused_and_nothing_queued(
+    seeded: &Seeded,
+    source: &dyn Source,
+    op: knobas_source::WriteOp,
+    guard: &mut Queued,
+    what: &str,
+) {
+    let refused = source.write(op).await;
+    let queued = queued_builds(seeded).await;
+    adopt_first(guard, &queued);
+    println!("SEEDED {what}: {refused:?}");
+    assert!(
+        matches!(
+            refused,
+            Err(SourceError::Protocol {
+                status: Some(404),
+                ..
+            })
+        ),
+        "{what} is a refusal, not a retry: {refused:?}"
+    );
+    assert!(queued.is_empty(), "{what} queues nothing: {queued:?}");
 }
 
 /// The restore point a write test records before it writes (#1699): every
@@ -3342,33 +3370,21 @@ async fn a_trigger_through_the_adapter_queues_one_build_of_the_configuration_it_
     let before = restore_point(&seeded, "before the trigger").await;
     parked.park(&seeded).await;
     assert_eq!(
-        queue(&seeded).await,
+        queued_builds(&seeded).await,
         Vec::<serde_json::Value>::new(),
         "the queue starts empty"
     );
 
-    let refused = source
-        .write(WriteOp::TriggerBuild {
+    refused_and_nothing_queued(
+        &seeded,
+        &*source,
+        WriteOp::TriggerBuild {
             entity: "teamcity:buildType:Knobas_NoSuchConfiguration1699".to_owned(),
-        })
-        .await;
-    let after_refusal = queue(&seeded).await;
-    adopt_first(&mut refused_guard, &after_refusal);
-    println!("SEEDED trigger of a configuration the server does not have: {refused:?}");
-    assert!(
-        matches!(
-            refused,
-            Err(SourceError::Protocol {
-                status: Some(404),
-                ..
-            })
-        ),
-        "a configuration that is gone is a refusal, not a retry: {refused:?}"
-    );
-    assert!(
-        after_refusal.is_empty(),
-        "a refused trigger queues nothing: {after_refusal:?}"
-    );
+        },
+        &mut refused_guard,
+        "a trigger of a configuration the server does not have",
+    )
+    .await;
 
     let receipt = source
         .write(WriteOp::TriggerBuild {
@@ -3376,7 +3392,7 @@ async fn a_trigger_through_the_adapter_queues_one_build_of_the_configuration_it_
         })
         .await
         .unwrap_or_else(|e| panic!("the trigger is queued: {e:?}"));
-    let queued = queue(&seeded).await;
+    let queued = queued_builds(&seeded).await;
     adopt_first(&mut guard, &queued);
     println!("SEEDED queue after the trigger: {queued:?} (receipt {receipt:?})");
     assert_eq!(queued.len(), 1, "exactly one build was queued: {queued:?}");
@@ -3425,7 +3441,7 @@ async fn a_rerun_through_the_adapter_queues_the_builds_own_configuration_and_a_g
     let before = restore_point(&seeded, "before the re-run").await;
     parked.park(&seeded).await;
     assert_eq!(
-        queue(&seeded).await,
+        queued_builds(&seeded).await,
         Vec::<serde_json::Value>::new(),
         "the queue starts empty"
     );
@@ -3436,7 +3452,7 @@ async fn a_rerun_through_the_adapter_queues_the_builds_own_configuration_and_a_g
         })
         .await
         .unwrap_or_else(|e| panic!("the re-run is queued: {e:?}"));
-    let queued = queue(&seeded).await;
+    let queued = queued_builds(&seeded).await;
     adopt_first(&mut guard, &queued);
     println!(
         "SEEDED queue after re-running build {} (1187): {queued:?} (receipt {receipt:?})",
@@ -3462,28 +3478,16 @@ async fn a_rerun_through_the_adapter_queues_the_builds_own_configuration_and_a_g
     // The re-run's build deleted (and checked gone by the guard): re-running
     // it now is re-running a build the server does not have.
     drop(guard);
-    let refused = source
-        .write(WriteOp::RerunBuild {
+    refused_and_nothing_queued(
+        &seeded,
+        &*source,
+        WriteOp::RerunBuild {
             entity: format!("teamcity:build:{rerun}"),
-        })
-        .await;
-    let after_refusal = queue(&seeded).await;
-    adopt_first(&mut refused_guard, &after_refusal);
-    println!("SEEDED re-run of deleted build {rerun}: {refused:?}");
-    assert!(
-        matches!(
-            refused,
-            Err(SourceError::Protocol {
-                status: Some(404),
-                ..
-            })
-        ),
-        "a build that is gone is a refusal, not a retry: {refused:?}"
-    );
-    assert!(
-        after_refusal.is_empty(),
-        "a refused re-run queues nothing: {after_refusal:?}"
-    );
+        },
+        &mut refused_guard,
+        &format!("a re-run of deleted build {rerun}"),
+    )
+    .await;
 
     drop((refused_guard, parked));
     let after = restore_point(&seeded, "after the re-run").await;
