@@ -73,44 +73,6 @@ export function labelOf(step: StartWorkStepKind): string {
   }
 }
 
-/** One editable line of a step's proposal. */
-export interface Field {
-  /** The key inside the op's object — `name`, `title`, `body`, `from_ref`. */
-  key: string;
-  label: string;
-  value: string;
-  /** Whether it wants a `textarea` rather than an `input`. */
-  long: boolean;
-}
-
-/**
- * The parts of a step's proposal the reader may change before it runs.
- *
- * Read out of the stored payload rather than from a table of what each op has,
- * so a proposal carrying a field this list does not name is still shown. That
- * includes `entity`: the repository dropdown repoints the branch and pull
- * request steps, and `start_work_amend` takes the amendment.
- */
-export function fieldsOf(step: StartWorkStep): Field[] {
-  const op = opBody(step);
-  if (!op) return [];
-  const named: Record<string, [string, boolean]> = {
-    name: ["Branch name", false],
-    from_ref: ["Starting from", false],
-    title: ["Pull request title", false],
-    body: ["Pull request body", true],
-    head: ["From branch", false],
-    base: ["Into branch", false],
-    status: ["Status", false],
-  };
-  return Object.entries(op)
-    .filter(([, value]) => typeof value === "string")
-    .map(([key, value]) => {
-      const [label, long] = named[key] ?? [key, false];
-      return { key, label, value: value as string, long };
-    });
-}
-
 /** A step's payload with `key` replaced — the value `startWorkAmend` takes. */
 export function edited(
   step: StartWorkStep,
@@ -122,20 +84,6 @@ export function edited(
   if (tag === undefined) return payload;
   const body = { ...(payload[tag] as Record<string, unknown>), [key]: value };
   return { [tag]: body };
-}
-
-/**
- * The op's fields, or `null` for a step whose payload is not an op — the link
- * step, whose payload is a relation and whose proposal is not editable.
- */
-function opBody(step: StartWorkStep): Record<string, unknown> | null {
-  const payload = step.payload;
-  if (typeof payload !== "object" || payload === null) return null;
-  const entries = Object.entries(payload as Record<string, unknown>);
-  if (entries.length !== 1) return null;
-  const [, body] = entries[0]!;
-  if (typeof body !== "object" || body === null) return null;
-  return body as Record<string, unknown>;
 }
 
 export interface StartWork {

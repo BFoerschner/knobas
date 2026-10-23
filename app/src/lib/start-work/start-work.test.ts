@@ -31,7 +31,7 @@ vi.mock("../ipc/entity", () => ({
   startWorkAmend: () => Promise.resolve([]),
 }));
 
-const { createStartWork, edited, fieldsOf } = await import("./start-work.svelte");
+const { createStartWork, edited } = await import("./start-work.svelte");
 
 function one(id: number, outcome: StartWorkStep["outcome"]): StartWorkStep {
   return {
@@ -114,11 +114,10 @@ test("stop ends the following, for a stepper that goes away while the flow moves
   expect(peeks).toBe(before);
 });
 
-test("fieldsOf offers the entity the repository picker amends, and an amendment of it reads back", () => {
+test("edited replaces one key of the op, so the repository picker's amendment carries the entity", () => {
   const step = one(1, "pending");
-  expect(fieldsOf(step).map((field) => field.key)).toContain("entity");
-
-  const moved = { ...step, payload: edited(step, "entity", "gitea:other") } as StartWorkStep;
-  const entity = fieldsOf(moved).find((field) => field.key === "entity");
-  expect(entity?.value).toBe("gitea:other");
+  const amended = edited(step, "entity", "gitea:other") as Record<string, Record<string, unknown>>;
+  const [tag] = Object.keys(amended);
+  expect(amended[tag!]!.entity).toBe("gitea:other");
+  expect(Object.keys(amended)).toHaveLength(1);
 });
