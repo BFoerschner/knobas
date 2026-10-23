@@ -1735,7 +1735,8 @@ async fn a_submit_behind_a_head_the_flush_task_is_sending_tries_its_own_write() 
 }
 
 /// #1807: as above, with the head withdrawn while it is on the wire, which
-/// closes it as surely as its landing does.
+/// closes it as surely as its landing does: the entity's next write is the
+/// head now.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_submit_behind_a_head_withdrawn_on_the_wire_tries_its_own_write() {
     behind_a_head_on_the_wire(Head::Withdrawn).await;
@@ -1746,7 +1747,8 @@ async fn a_submit_behind_a_head_withdrawn_on_the_wire_tries_its_own_write() {
 enum Head {
     /// The flush task's send settles it.
     Lands,
-    /// The reader withdraws it before the submit.
+    /// The reader withdraws it at the end of its send, once the submit is
+    /// waiting for the source.
     Withdrawn,
 }
 
@@ -1781,6 +1783,9 @@ async fn behind_a_head_on_the_wire(fate: Head) {
             .dwell
             .insert(entity.to_string(), DWELL);
     }
+    if fate == Head::Withdrawn {
+        *h.interrupt.lock().unwrap() = Some(Interrupt::Withdraw(head.id));
+    }
 
     let submit = async {
         let mut on_the_wire = None;
@@ -1795,9 +1800,6 @@ async fn behind_a_head_on_the_wire(fate: Head) {
         assert_eq!(target, mine.to_string(), "the head on `mine` goes first");
         // The head has read its dwell; the submitted write takes none.
         h.paced.lock().unwrap().dwell.remove(&mine.to_string());
-        if fate == Head::Withdrawn {
-            flusher::discard(&h.deps, head.id).await.unwrap().unwrap();
-        }
         let submitted = h.comment(&mine, "mine").await;
         (
             h.reload(submitted.id).await.state,
