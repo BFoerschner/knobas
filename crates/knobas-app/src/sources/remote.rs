@@ -161,9 +161,7 @@ impl Origin {
                 });
             }
         }
-        if !secure(&url) {
-            return Err(FetchError::NotHttps(url.to_string()));
-        }
+        require_https(&url)?;
         Ok(Origin::Manifest(url))
     }
 
@@ -344,12 +342,12 @@ fn text(bytes: &[u8], url: &str) -> Result<String, FetchError> {
     })
 }
 
-/// Whether `url` may carry a release: https, or plain http to this
-/// machine (a loopback address, or `localhost`), where nothing on the path
-/// can swap the manifest and the artifact it pins together (#1641). The
-/// test forge is `http://127.0.0.1`.
-fn secure(url: &url::Url) -> bool {
-    match url.scheme() {
+/// [`FetchError::NotHttps`] unless `url` may carry a release: https, or
+/// plain http to this machine (a loopback address, or `localhost`), where
+/// nothing on the path can swap the manifest and the artifact it pins
+/// together (#1641). The test forge is `http://127.0.0.1`.
+fn require_https(url: &url::Url) -> Result<(), FetchError> {
+    let ok = match url.scheme() {
         "https" => true,
         "http" => match url.host() {
             Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
@@ -358,11 +356,16 @@ fn secure(url: &url::Url) -> bool {
             None => false,
         },
         _ => false,
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(FetchError::NotHttps(url.to_string()))
     }
 }
 
 /// GET `url` through the one HTTP stack, with no credential, refusing a
-/// body over `cap` bytes, and a URL or a redirect that is not [`secure`]:
+/// body over `cap` bytes, and a URL or a redirect [`require_https`] refuses:
 /// a release's API names the assets' URLs, and a download redirects.
 async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
     let unreachable = |error| FetchError::Unreachable {
@@ -371,9 +374,7 @@ async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
     };
     let parsed = url::Url::parse(url)
         .map_err(|e| unreachable(SourceError::protocol(format!("not a URL: {e}"))))?;
-    if !secure(&parsed) {
-        return Err(FetchError::NotHttps(parsed.to_string()));
-    }
+    require_https(&parsed)?;
     let origin = parsed.origin().ascii_serialization();
     let mut path = parsed.path().to_owned();
     if let Some(query) = parsed.query() {
@@ -395,9 +396,7 @@ async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
         .send(client.request(Method::GET, &path))
         .await
         .map_err(unreachable)?;
-    if !secure(response.url()) {
-        return Err(FetchError::NotHttps(response.url().to_string()));
-    }
+    require_https(response.url())?;
     let too_large = || FetchError::TooLarge {
         url: url.to_owned(),
         cap,

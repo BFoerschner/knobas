@@ -511,7 +511,9 @@ impl HostState {
             tracing::warn!(
                 source = self.source_id.as_str(),
                 "the external adapter wrote {dropped} more log lines than the host writes \
-                 (100 a call, then one a second); they were dropped"
+                 ({} a call, then one each {:?}); they were dropped",
+                limits::LOG_BURST,
+                limits::LOG_REFILL,
             );
         }
     }

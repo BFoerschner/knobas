@@ -313,7 +313,7 @@ async fn a_component_that_floods_its_log_is_held_to_a_few_short_lines() {
         .collect();
     let (flood, notes): (Vec<&Line>, Vec<&Line>) = ours
         .iter()
-        .partition(|(_, message)| message.starts_with("flood "));
+        .partition(|(_, message)| message.starts_with("flood: "));
     let bytes: usize = flood.iter().map(|(_, message)| message.len()).sum();
     let allowed = 100 + usize::try_from(took.as_secs()).unwrap() + 1;
     assert!(

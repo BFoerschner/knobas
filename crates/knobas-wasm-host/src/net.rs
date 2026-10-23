@@ -564,13 +564,13 @@ impl reqwest::dns::Resolve for Resolver {
 /// Whether a guarded `name` is refused for resolving to `addrs`: any of
 /// them not [public](is_public). A refusal is logged with the address.
 fn refuse_unless_public(name: &str, addrs: &[SocketAddr]) -> bool {
-    let Some(local) = addrs.iter().find(|addr| !is_public(addr.ip())) else {
+    let Some(refused) = addrs.iter().find(|addr| !is_public(addr.ip())) else {
         return false;
     };
     tracing::warn!(
         "an external adapter's request is refused: {name}, a host its manifest fixes, \
          resolves to {}, which is not a public address",
-        local.ip()
+        refused.ip()
     );
     true
 }

@@ -170,18 +170,18 @@ pub struct Adapter {
     /// The MiB a download of every artifact streams.
     #[cfg_attr(feature = "v1_0", allow(dead_code))]
     download_mib: u64,
-    /// How many times `test_connection` logs [`FLOOD`] bytes.
+    /// How many times `test_connection` logs [`FLOOD_BYTES`] bytes.
     log_flood: u64,
 }
 
 /// The size of one message of a log flood.
-const FLOOD: usize = 256 << 10;
+const FLOOD_BYTES: usize = 256 << 10;
 
 /// Log a 256 KiB message `times` times. Two-byte characters after a
-/// six-byte head, so a cut at a round size falls inside a character.
+/// seven-byte head, so a cut at an even size falls inside a character.
 fn flood(times: u64) {
-    let mut message = String::from("flood ");
-    while message.len() + 'ä'.len_utf8() <= FLOOD {
+    let mut message = String::from("flood: ");
+    while message.len() + 'ä'.len_utf8() <= FLOOD_BYTES {
         message.push('ä');
     }
     for _ in 0..times {
