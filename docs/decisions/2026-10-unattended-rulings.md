@@ -13618,3 +13618,84 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   sharing the lock, and dropping one `OwnerLock` cannot release a lock another handle still
   needs. `EmbeddedDb` declares `owner_lock` last, so the unlock still follows the server's stop.
   *Reversing:* low.
+## #1640: a body cap, no redirected write, no userinfo in a base URL (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): the frozen-surface
+  change to `crates/knobas-http/**` and `crates/knobas-source/src/**`.** *Fork:* change both, or
+  leave #1640 open until Björn signs it off. *Ruling:* change them, booked in
+  `docs/contract/10.8/1640-knobas-http-body-cap-no-redirected-write-no-userinfo.md`. The limiter
+  and #1729's `watch_local_quota` mark are untouched. *Reasoning:* spec #1620 ruling C2 names
+  these changes and the waiver covers its frozen-surface steps. `HttpConfig::max_body` is a new
+  public field, so the six adapter struct literals that name every field gain one line.
+  *Reversing:* medium: the field, the module, the second client.
+- **Which reads the cap covers.** *Fork:* this crate's own reads (`get_json`, `get_json_with`,
+  the error body), or every body `send` hands back. *Ruling:* every body `send` hands back for a
+  success, re-wrapped through `http::Response` and read through a counting `http_body::Body`. A
+  `send_streaming` body is exempt. *Reasoning:* Confluence's listings, Gitea's JSON reads and the
+  Jira writes call `response.json()` themselves, and a cap that skipped them would leave the
+  review's scenario open. A download is large on purpose and has its stall bound (#1012).
+  *Cost:* `Response::url()` reads `http://no.url.provided.local` after the re-wrap. Nothing in
+  the tree calls it. *Reversing:* low.
+- **Where the declared length is checked.** *Fork:* in the counting body (every reader), or in
+  the reads that take the body whole. *Ruling:* in the whole-body reads (`cap::declared_over`).
+  *Reasoning:* Gitea's `raw_capped` (#711) reads the first megabyte of a file of any size and
+  stops. A body that refused a long declared length up front would turn its cut view of a 40 MiB
+  file into an error. *Reversing:* low.
+- **An error body over the cap.** *Fork:* fail it as `Protocol { status: None }` naming the cap,
+  or keep the status's class and put the cap's sentence where the excerpt goes. *Ruling:* keep
+  the class. *Reasoning:* a 503 with a huge body must still be retried and a 401 must still ask
+  for the credential. A 4xx is still `Protocol` naming the cap, which is the ticket's wording.
+  *Reversing:* low.
+- **A write whose success answer is over the cap.** *Ruling:* the wrap is lazy, so the write is
+  sent and answered, and only the adapter's read of the answer fails, the same as an undecodable
+  answer today. *Reasoning:* failing inside `send` would record as refused a write that happened.
+  *Reversing:* n/a.
+- **How a write is kept off redirects.** *Fork:* a custom redirect policy, or a second client.
+  *Ruling:* a second reqwest client with `Policy::none()` for every method but `GET`/`HEAD`.
+  *Reasoning:* reqwest 0.13's `redirect::Attempt` carries the status and URLs but not the method,
+  so no policy can tell a POST from a GET. *Cost:* a second connection pool and TLS config per
+  `HttpClient`. *Reversing:* low.
+- **Which redirects a write refuses.** *Ruling:* every 3xx, 307 and 308 included, and 303 too.
+  *Reasoning:* the ticket says never follow one. A 307 re-send to an address knobas was not
+  configured with is still a guess about the proxy (C2). A 303 after a POST (post/redirect/get)
+  can mean the write happened, but no write endpoint knobas uses answers that way, and the
+  refusal names the target either way. *Reversing:* one match arm.
+- **The redirected write's status.** *Fork:* `Protocol { status: None }` as the dispatch
+  expected, or the 3xx. *Ruling:* `Some(<3xx>)`. *Reasoning:* `SourceError::Protocol`'s doc says
+  `status` is set when the failure came from a response. The write queue's `retryable` reads any
+  status under 500 other than 408 and 429 as a refusal, so the write is recorded refused with the
+  `Location` in its reason either way (a row in its table test says so). The quota mark (#1729)
+  never applies, since the source answered. *Reversing:* one field.
+- **The `Location` as given.** *Ruling:* printed raw, not resolved against the request URL.
+  *Reasoning:* it is what the proxy said, and a test can match it exactly. *Reversing:* low.
+- **What counts as userinfo, and where it is refused.** *Ruling:* a username alone too
+  (`username()` non-empty or `password()` set, as the wasm guard reads it), refused in `http_url`
+  so `InstanceLimiter::for_url` refuses it too, and at `crud::add` and `crud::update` through
+  `knobas_http::refuse_userinfo`, before the keychain is written. The draft *Test* path gets no
+  check of its own: every adapter that reaches the network builds an `HttpClient`, which refuses.
+  *Reasoning:* `check_id`'s rule: the form uses the client's function, not a copy. *Reversing:*
+  low.
+- **The redaction helper.** *Fork:* a private mask in each crate, or one public function.
+  *Ruling:* `knobas_source::instance::redact_userinfo`, by string, used by `SourceInstance`'s and
+  `HttpConfig`'s `Debug` and by `http_url`'s parse-failure message. *Reasoning:* it has to mask a
+  URL that does not parse, so `url` cannot do it. `knobas-http` already depends on
+  `knobas-source`, so one function serves both. It is blunt (everything before the authority's
+  last `@`, a `/` included) because a false positive costs a masked host in a log line.
+  *Reversing:* low.
+- **`remote.rs`'s cap.** *Ruling:* folded in, as spec #1620 allowed: the adapter fetch builds its
+  client with its own cap as `max_body`, and maps `over_the_cap` to `TooLarge`. Its
+  read-then-measure check is removed. *Reasoning:* a component may be up to 64 MiB, over the
+  default, so the default would have broken an install between 32 and 64 MiB. *Reversing:* low.
+- **The cap's value.** *Ruling:* 32 MiB. *Reasoning:* "tens of MiB": far over a hundred-issue
+  Jira page, far under what the app can hold beside Postgres. *Reversing:* one constant.
+- **The dialog showing the reason.** *Ruling:* witnessed by the crud test's IPC mapping (`to_ipc`
+  gives `invalid` and the message) plus the existing #1506 vitest, which shows a rejected save's
+  `ipcErrorMessage` in the dialog's alert. No new vitest. *Reasoning:* the dialog does not branch
+  on this reason, so a test with this message would repeat #1506's. *Reversing:* n/a.
+- **A live run.** *Ruling:* none owed. *Reasoning:* the redirect change acts only when a source
+  answers a write with a 3xx. A live write suite that passes today checks that its write landed,
+  which a write turned into a GET would not, so none passes through a redirect now. The
+  second client differs from the first only in its redirect policy, and the local transport
+  tests send JSON and text bodies through it. The cap is far over any seeded page, a TeamCity
+  log goes through `send_streaming`, and Gitea's file read stops at its own cap (tested
+  locally). *Reversing:* n/a.

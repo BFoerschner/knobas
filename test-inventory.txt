@@ -190,6 +190,8 @@ knobas-app	lib/knobas_app	sources::registry::tests::a_source_of_an_adapter_refus
 knobas-app	lib/knobas_app	sources::registry::tests::an_external_adapter_joins_the_templates_once
 knobas-app	lib/knobas_app	sources::registry::tests::only_bring_up_and_the_lifecycles_default_call_for_process
 knobas-app	lib/knobas_app	sources::registry::tests::the_trait_object_answers_the_docs_projection_and_writes
+knobas-app	lib/knobas_app	sources::remote::tests::a_body_over_the_reads_cap_is_too_large
+knobas-app	lib/knobas_app	sources::remote::tests::a_component_over_the_default_body_cap_is_fetched_whole
 knobas-app	lib/knobas_app	sources::remote::tests::a_forge_release_download_asks_its_own_api_under_its_path_prefix
 knobas-app	lib/knobas_app	sources::remote::tests::a_github_release_download_asks_github_s_api
 knobas-app	lib/knobas_app	sources::remote::tests::a_github_repository_url_is_a_repository_with_or_without_its_git_suffix
@@ -935,6 +937,7 @@ knobas-app	test/it	signals_ipc::an_unknown_has_value_is_reported
 knobas-app	test/it	signals_ipc::each_signal_is_drawn_on_its_card_and_has_admits_exactly_those_tickets
 knobas-app	test/it	signals_ipc::has_failing_build_finds_a_red_build_one_and_two_hops_back
 knobas-app	test/it	signals_ipc::the_filter_suggestions_offer_the_four_signals
+knobas-app	test/it	sources_crud::a_base_url_with_a_password_in_it_is_refused_at_the_save
 knobas-app	test/it	sources_crud::a_credential_that_is_still_wrong_does_not_release_the_backoff
 knobas-app	test/it	sources_crud::a_discovered_config_value_reaches_the_report
 knobas-app	test/it	sources_crud::a_draft_for_a_saved_source_re_tests_the_stored_secret
@@ -1699,6 +1702,7 @@ knobas-db	test/schema	zero_three_applies_through_the_runner_to_a_database_that_p
 knobas-db	test/schema	zero_twenty_seven_changes_only_a_title_that_holds_a_slash
 knobas-db	test/schema	zero_twenty_seven_reaches_a_row_mirrored_before_it
 knobas-db	test/schema	zero_two_adds_the_listing_indexes_and_drops_the_one_it_supersedes
+knobas-http	lib/knobas_http	cap::tests::a_size_is_said_in_the_largest_whole_unit
 knobas-http	lib/knobas_http	classify::tests::a_403_the_caller_reads_as_a_refusal_is_a_protocol_fault
 knobas-http	lib/knobas_http	classify::tests::a_body_excerpt_is_bounded
 knobas-http	lib/knobas_http	classify::tests::a_body_excerpt_survives_multibyte_text
@@ -1753,6 +1757,19 @@ knobas-http	test/transport	a_write_that_opted_out_of_retries_is_not_retried_on_a
 knobas-http	test/transport	a_write_that_opted_out_of_retries_is_retried_after_a_refused_connection
 knobas-http	test/transport	a_write_that_opted_out_of_retries_is_sent_once_when_it_times_out
 knobas-http	test/transport	an_unauthorized_answer_is_not_retried_and_keeps_its_class
+knobas-http	test/transport	bounds::a_base_url_with_userinfo_is_refused_without_naming_it
+knobas-http	test/transport	bounds::a_body_at_or_under_the_cap_is_read
+knobas-http	test/transport	bounds::a_body_declared_over_the_cap_still_yields_its_start
+knobas-http	test/transport	bounds::a_body_over_the_cap_is_refused_naming_the_cap
+knobas-http	test/transport	bounds::a_configs_debug_never_prints_a_password_in_its_url
+knobas-http	test/transport	bounds::a_declared_length_over_the_cap_is_refused_before_the_read
+knobas-http	test/transport	bounds::a_gzip_body_that_inflates_past_the_cap_is_refused
+knobas-http	test/transport	bounds::a_redirected_read_is_followed
+knobas-http	test/transport	bounds::a_redirected_write_is_refused_naming_the_location
+knobas-http	test/transport	bounds::a_refused_base_url_never_repeats_its_password
+knobas-http	test/transport	bounds::a_streamed_body_over_the_cap_arrives_whole
+knobas-http	test/transport	bounds::an_adapters_own_read_of_a_sent_answer_is_bounded
+knobas-http	test/transport	bounds::an_error_body_over_the_cap_keeps_its_status_and_names_the_cap
 knobas-http	test/transport	each_auth_variant_has_its_own_wire_spelling
 knobas-http	test/transport	every_attempt_waits_for_the_rate_limiter
 knobas-http	test/transport	retry_after_is_waited_out_before_the_retry
@@ -2302,6 +2319,7 @@ knobas-source	lib/knobas_source	instance::tests::accepts_the_ids_the_contract_na
 knobas-source	lib/knobas_source	instance::tests::debug_redacts_the_secret
 knobas-source	lib/knobas_source	instance::tests::rejects_everything_else
 knobas-source	lib/knobas_source	instance::tests::round_trips_as_plain_json
+knobas-source	lib/knobas_source	instance::tests::userinfo_is_masked_and_nothing_else
 knobas-source	lib/knobas_source	pipeline::tests::settings_without_the_later_fields_read_as_empty
 knobas-source	lib/knobas_source	query::tests::a_translation_crosses_as_plain_json_with_the_grammar_s_keys
 knobas-source	lib/knobas_source	role::data::tests::a_custom_role_and_no_claim_check_nothing
