@@ -13803,3 +13803,31 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   31 were removed by their creator pids (the experiment's dead `postgres` children, `NATTCH` 0).
   Later experiments removed the segments their own processes created. A run that kills only `initdb`, as `kill_on_drop` does, leaves none: the
   backend reads EOF and exits. *Reversing:* n/a.
+
+### #1637 and #1642: merge-manager review (Opus, 2026-10-23)
+
+- **A symlinked data directory.** *Fork:* resolve the link and remove what it points at, or
+  remove the link alone. *Ruling:* the link alone, which `std::fs::remove_dir_all` already does:
+  it follows no symlink, so the target keeps every file and `initdb` makes a real `data/` in the
+  link's place. *Reasoning:* a wrong removal loses a database; a removed link loses nothing.
+  Witnessed by `a_half_written_symlinked_data_directory_loses_the_link_alone` (a mutant that
+  removes the canonical path dies). *Reversing:* low.
+- **"Under both locks" holds on every path.** *Fork:* guard `remove_half_written` itself, or rely
+  on its one caller. *Ruling:* rely on it. *Reasoning:* `start_managed` is its only caller, and
+  every bring-up reaches it through `launch`: the first launch, the stale-lock retry, and #1779's
+  restart after *Failed* (`EmbeddedDb::start` again). A restore is a logical `pg_restore` over
+  the connector and never touches `data/`. *Reversing:* n/a.
+- **The install placeholder leaves nothing behind.** *Fork:* accept the placeholder, or install
+  through `postgresql_archive`. *Ruling:* accept it. *Reasoning:* in `postgresql_embedded` 0.21
+  `setup()` writes the password file only inside `initialize()`, which the placeholder's empty
+  `postgresql.conf` skips. The handle's drop stops nothing (no `postmaster.pid`) and deletes
+  nothing (`temporary` is false). A placeholder a kill left is rewritten and removed by the next
+  launch. *Reversing:* n/a.
+- **`initdb` matches the crate's.** *Fork:* accept the copy as is, or align it. *Ruling:* aligned
+  on the one difference. The arguments are the crate's, in its order (`--auth password --pgdata
+  --encoding UTF8 --pwfile --username postgres`), with no environment and stdin closed, as
+  `output()` leaves it, under the same 60 s limit. The crate also sets `CREATE_NO_WINDOW` on
+  Windows. knobas now sets it too, under `cfg(windows)`, which this Mac does not compile.
+  *Reasoning:* a data directory either `initdb` made is the same. A profile that is already
+  initialised skips `initialise` before the install, so it starts as before; only the two modes
+  change. *Reversing:* one line.

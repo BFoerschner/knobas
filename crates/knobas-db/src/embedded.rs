@@ -1469,7 +1469,9 @@ fn read_password(password_file: &Path) -> Result<Option<String>, DbError> {
 /// database. Evidence: `docs/decisions/2026-10-unattended-rulings.md`, #1637.
 ///
 /// An entry that cannot be examined counts as present, so a `PG_VERSION` this
-/// process cannot `stat` keeps the directory.
+/// process cannot `stat` keeps the directory. A data directory that is a
+/// symlink loses the link alone (`remove_dir_all` follows no symlink): what
+/// it points at is left as it was, and `initdb` makes a directory in its place.
 fn remove_half_written(data_dir: &Path) -> Result<(), DbError> {
     // Absent only when the file system says so: any other error is "present".
     let absent = |name: &str| {
@@ -1583,7 +1585,11 @@ async fn run_initdb(initdb: &Path, settings: &Settings, limit: Duration) -> Resu
             message,
         ))
     };
-    let child = tokio::process::Command::new(initdb)
+    let mut command = tokio::process::Command::new(initdb);
+    // The crate's `CREATE_NO_WINDOW`: no console flashes up over the app.
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
+    let child = command
         .arg("--auth")
         .arg("password")
         .arg("--pgdata")
@@ -2568,6 +2574,30 @@ mod tests {
         );
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert!(!settings.data_dir.exists(), "and nothing wrote it again");
+    }
+
+    /// #1637: a half-written data directory that is a symlink loses the link,
+    /// never what it points at, and one with `PG_VERSION` keeps everything.
+    #[cfg(unix)]
+    #[test]
+    fn a_half_written_symlinked_data_directory_loses_the_link_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("elsewhere");
+        std::fs::create_dir_all(target.join("base")).unwrap();
+        std::fs::write(target.join("postgresql.conf"), "").unwrap();
+        let data = dir.path().join("data");
+        std::os::unix::fs::symlink(&target, &data).unwrap();
+
+        remove_half_written(&data).unwrap();
+
+        assert!(std::fs::symlink_metadata(&data).is_err(), "the link is gone");
+        assert!(target.join("postgresql.conf").is_file(), "its target is kept");
+        assert!(target.join("base").is_dir(), "its target is kept");
+
+        std::os::unix::fs::symlink(&target, &data).unwrap();
+        std::fs::write(target.join("PG_VERSION"), "18\n").unwrap();
+        remove_half_written(&data).unwrap();
+        assert!(data.join("postgresql.conf").is_file(), "with PG_VERSION, kept");
     }
 
     /// #1637: dropping the future that runs `initdb` kills it, rather than
