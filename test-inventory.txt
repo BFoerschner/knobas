@@ -538,6 +538,7 @@ knobas-app	test/it	checkout_ipc::a_command_that_cannot_be_run_is_refused_where_i
 knobas-app	test/it	checkout_ipc::a_file_opens_with_the_file_command_and_its_line
 knobas-app	test/it	checkout_ipc::a_file_outside_the_checkout_is_refused_and_nothing_runs
 knobas-app	test/it	checkout_ipc::a_program_that_will_not_start_names_the_command
+knobas-app	test/it	checkout_ipc::a_relative_clones_root_is_refused_and_leaves_the_stored_one
 knobas-app	test/it	checkout_ipc::a_repo_reads_the_clone_the_scan_found
 knobas-app	test/it	checkout_ipc::a_repo_with_no_checkout_refuses_and_names_it
 knobas-app	test/it	checkout_ipc::a_repo_with_no_clone_reads_no_checkout_and_a_clone_command

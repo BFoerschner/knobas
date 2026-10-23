@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { CheckoutApplicationDraft, CheckoutSettings } from "../../ipc/entity";
+import { reset, toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import { createApps } from "../openin/apps.svelte";
 import TfCheckoutsSection from "./TfCheckoutsSection.svelte";
@@ -44,7 +45,7 @@ async function settle() {
 
 const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 
-async function draw() {
+async function draw(refuse?: (path: string | null) => Promise<void>) {
   const apps = createApps({
     checkoutSettings: () => Promise.resolve(stored),
     setCheckoutApplications: (drafts, defaultApplication) => {
@@ -60,6 +61,7 @@ async function draw() {
       apps,
       layers: createLayers(),
       saveRoot: (path) => {
+        if (refuse) return refuse(path);
         roots.push(path);
         stored = { ...stored, clones_root: path };
         return Promise.resolve();
@@ -129,4 +131,22 @@ test("with no clones root, Not set is not in the mono face (#1444)", async () =>
   const notSet = mark(target, "Not set");
   expect(notSet).not.toBeNull();
   expect(inMono(notSet)).toBe(false);
+});
+
+test("a clones root the setter refuses is said on the page, and the field stays open with what was typed (#1661)", async () => {
+  reset();
+  await draw(() =>
+    Promise.reject({ code: "invalid", message: 'the clones root must be an absolute path (or start with ~/), not "Code"', source_id: null }),
+  );
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Change…")!.click();
+  flushSync();
+  const field = target.querySelector<HTMLInputElement>("input[aria-label='Clones root']")!;
+  field.value = "Code";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Save")!.click();
+  await settle();
+  expect(toasts.items.map((t) => t.text)).toEqual([expect.stringContaining("must be an absolute path")]);
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Clones root']")?.value).toBe("Code");
+  expect(roots).toEqual([]);
 });
