@@ -90,6 +90,13 @@ const HANDS_TO_THE_QUEUE: &[&str] = &[
     // above gives: the SPI's serde shape in a string literal is a renamed
     // field discovered at run time. Nothing here dispatches.
     "knobas-app/src/time/worklog.rs",
+    // Issue #1660's action-item ticket. It builds the `create_ticket` op an
+    // action item files and hands its payload to `sources::write_queue::queue`
+    // or `submit`, and reads a queued row's payload back as a `WriteOp` to
+    // learn the title it filed (ADR-0007), so a renamed field is a compile
+    // error rather than a `json!` literal that silently stops matching.
+    // Nothing here dispatches.
+    "knobas-app/src/commands/entity/standup.rs",
 ];
 
 /// Files that name the write op only to generate its TypeScript.

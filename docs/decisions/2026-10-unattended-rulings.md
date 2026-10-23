@@ -15000,3 +15000,9 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1876.
   (`WriteOp::identifier`), and the variant match is the check ADR-0007 asks for. The stored payload
   is the same JSON value (`jsonb`, externally tagged, the same four fields), so the queue's storage
   and replay are unchanged and no §10.8 entry is due. *Reversing:* trivial.
+- **`standup.rs` joins the write choke point's `HANDS_TO_THE_QUEUE`.** *Fork:* the gate's
+  `write_choke_point` test refused `standup.rs` for naming `WriteOp`; list it, or move the build and
+  the read-back into `sources/write_queue.rs`, which is listed already. *Ruling:* list it, beside
+  `start_work/plan.rs` and `time/worklog.rs`, which build ops for the queue the same way; it
+  contains no `.write(` call, which the list still forbids. *Reversing:* small, two helpers in
+  `sources/write_queue.rs` and the entry removed.
