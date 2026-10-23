@@ -2,6 +2,7 @@ pub mod activity;
 pub mod asset;
 pub mod builds;
 pub mod checkout;
+pub mod code_facts;
 pub mod context;
 pub mod detail;
 pub mod entity_list;

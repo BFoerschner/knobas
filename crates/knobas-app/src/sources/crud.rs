@@ -13,8 +13,6 @@ use knobas_sync::config::{self, AuthKind, CredentialHealth, InsertConfig, PatchC
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
 
-use crate::commands::entity::{RESOLVE_URL, no_form_readings};
-
 use super::{
     ConnectionReport, NewSource, SecretInput, SourceDraft, SourcePatch, SourceSummary, SourcesError,
 };
@@ -808,8 +806,9 @@ pub async fn reachable_transitions(
 /// its repository's URL and sha, because the adapter that drew it -- TeamCity,
 /// listing a build's changes -- cannot see another source's mirror. The app
 /// can: [`commit_page`] composes the commit's page from the two, and the
-/// paste resolver's own statement ([`RESOLVE_URL`]) finds the entity whose
-/// page it is. Found, the row gets that entity's id; not found, it stays
+/// paste resolver's own statement
+/// ([`knobas_core::web_url::resolve_stored`]) finds the entity whose page it
+/// is. Found, the row gets that entity's id; not found, it stays
 /// plain text. Either way the hint is cleared, so it never reaches the shell.
 ///
 /// # Errors
@@ -898,14 +897,10 @@ pub async fn pipeline_settings(
             )) else {
                 continue;
             };
-            let found: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
-                .bind(&page)
-                .bind(no_form_readings())
-                .fetch_optional(pool)
-                .await?;
+            let found = knobas_core::web_url::resolve_stored(pool, &page).await?;
             repository.entity_id = found
-                .filter(|(_, kind)| kind == "repo")
-                .map(|(entity_id, _)| entity_id);
+                .filter(|found| found.kind == "repo")
+                .map(|found| found.entity_id);
         }
     }
     Ok(Some(settings))
@@ -975,15 +970,10 @@ pub async fn pipeline_commits(
             let Some(page) = commit_page(repository, sha) else {
                 continue;
             };
-            let hit: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
-                .bind(&page)
-                .bind(no_form_readings())
-                .fetch_optional(pool)
-                .await?;
-            if let Some((commit, kind)) = hit
-                && kind == "commit"
+            if let Some(hit) = knobas_core::web_url::resolve_stored(pool, &page).await?
+                && hit.kind == "commit"
             {
-                hits.insert(commit);
+                hits.insert(hit.entity_id);
             }
         }
         if hits.len() == 1 {
@@ -1135,12 +1125,8 @@ async fn resolve_commit_hints(
             let Some(page) = commit_page(&repo_url, &hint.sha) else {
                 continue;
             };
-            let found: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
-                .bind(&page)
-                .bind(no_form_readings())
-                .fetch_optional(pool)
-                .await?;
-            row.entity_id = found.map(|(entity_id, _kind)| entity_id);
+            let found = knobas_core::web_url::resolve_stored(pool, &page).await?;
+            row.entity_id = found.map(|found| found.entity_id);
         }
     }
     Ok(())
