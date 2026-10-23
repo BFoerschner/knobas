@@ -142,11 +142,7 @@ class Parser:
                 end_word()
                 i += 1
                 continue
-            if s.startswith("<<<", i):  # a here-string: the next word is plain data
-                end_word()
-                i += 3
-                continue
-            if s.startswith("<<", i):
+            if s.startswith("<<", i):  # `<<<`, a here-string, reads an empty delimiter: no heredoc
                 end_word()
                 i = self.heredoc(i + 2)
                 continue
@@ -231,7 +227,10 @@ class Parser:
         return j
 
     def heredoc(self, i):
-        """Read the delimiter of a heredoc whose `<<` ends before `i`; its body starts at the next unquoted newline."""
+        """Read the delimiter of a heredoc whose `<<` ends before `i`; its body starts at the next unquoted newline.
+
+        The third `<` of a here-string ends the delimiter at once, so `<<<` opens nothing.
+        """
         s = self.s
         strip_tabs = s.startswith("-", i)
         i += strip_tabs
