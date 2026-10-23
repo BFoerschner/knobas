@@ -18,7 +18,12 @@ g add -A
 g commit -q -m base
 
 # The stub generator writes what the Rust types "now produce": a.ts = current.
-printf '#!/usr/bin/env bash\necho current > gen/a.ts\n[ -z "${EXTRA:-}" ] || echo x > "gen/$EXTRA"\n[ -z "${BOOM:-}" ] || exit 3\n' > "$scratch/generate"
+cat > "$scratch/generate" <<'GEN'
+#!/usr/bin/env bash
+echo current > gen/a.ts
+[ -z "${EXTRA:-}" ] || echo x > "gen/$EXTRA"
+[ -z "${BOOM:-}" ] || exit 3
+GEN
 chmod +x "$scratch/generate"
 
 run() { env -C "$scratch" "$check" gen ./generate >/dev/null 2>&1; }
