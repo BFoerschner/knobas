@@ -14079,3 +14079,51 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   `base/1` but not the rest, or not. *Ruling:* not. *Reasoning:* a copy or a move across volumes
   keeps its source until it finishes, and a move within one is a rename, so nothing the reader
   has is lost. *Reversing:* n/a.
+## #1641: the rebinding guard, an adapter's log, https for a release (Opus implementer, 2026-10-23)
+
+- **Where the guard's ranges come from.** *Fork:* std's `is_global` list, or the registries.
+  *Ruling:* the IANA IPv4 and IPv6 special-purpose registries as published on 2025-10-09, read
+  by their "Globally Reachable" column, with multicast (`224/4`, `ff00::/8`) added and IPv6
+  outside `2000::/3` refused. *Reasoning:* `is_global` is still unstable; the registries are
+  what it is written from, and an allow rule for IPv6 (only global unicast is public) cannot miss
+  a block IANA adds outside it. *Reversing:* low, two tables in `allow.rs`.
+- **Documentation addresses (`192.0.2/24`, `198.51.100/24`, `203.0.113/24`, `2001:db8::/32`,
+  `3fff::/20`).** *Fork:* public or not. *Ruling:* not public, as the registry says. Nothing
+  public answers there, so a fixed name that resolves to one is no host the adapter needs. The
+  network tests' stand-in public address moves from `203.0.113.7` to `1.1.1.1`; no test connects
+  to it. *Reversing:* trivial.
+- **Entries the registry leaves without a value.** TEREDO (`2001::/32`, "N/A") is refused: it is
+  inside `2001::/23`, which is not reachable "unless allowed by a more specific allocation", and
+  TEREDO is not so allowed. The terminated 6to4 relay block (`192.88.99.0/24`) stays public but
+  for `192.88.99.2/32`, which the registry marks not reachable. 6to4 (`2002::/16`, "N/A") is
+  read as the IPv4 address in its bits 16 to 47, as the ticket says. *Reversing:* low.
+- **NAT64.** `64:ff9b::/96` is the IPv4 address in its low 32 bits. The local-use
+  `64:ff9b:1::/48` is refused whole (the registry marks it not reachable). A network's own NAT64
+  prefix (RFC 6052 §2.2) cannot be told from the address and counts as what it is: a gap no
+  address check closes, named in `is_public`'s doc. *Reversing:* n/a.
+- **IPv4-compatible `::a.b.c.d`.** *Fork:* read it as the IPv4 address (as before) or refuse it.
+  *Ruling:* refuse: it is outside `2000::/3`, deprecated since RFC 4291, and no host answers it.
+  IPv4-mapped `::ffff:a.b.c.d` is still the IPv4 address. *Reversing:* trivial.
+- **The log's bound.** *Fork:* the numbers. *Ruling:* 4 KiB a line, 100 lines a call, then one a
+  second, counted and reported as one warn line when the component writes again or the store is
+  dropped. *Reasoning:* a call may run up to `MAX_DEADLINE` (an hour), which keeps the worst call
+  under 15 MiB of log; a well-behaved adapter writes a handful of lines a call. *Reversing:*
+  trivial, three constants in `limits.rs`.
+- **The refill is witnessed by a unit test, not the flood.** The fixture's 1,000-line flood ends
+  in about 0.2 s, inside the burst, so the end-to-end test bounds the burst and the cut; the
+  one-a-second refill is held by `limits::tests::a_call_logs_its_burst_then_one_line_a_second`
+  over explicit instants. *Reversing:* n/a.
+- **What counts as "this machine" for plain http.** *Ruling:* a loopback address
+  (`127.0.0.0/8`, `::1`) or the name `localhost`, which resolvers keep on loopback (RFC 6761).
+  `localhost.` and `*.localhost` are not. *Reversing:* trivial.
+- **Beyond `Origin::parse`.** *Fork:* the pasted URL only, as the ticket names, or every fetch.
+  *Ruling:* every fetch of a release refuses a non-https URL off this machine, and so does a
+  redirect's target. *Reasoning:* a release API's answer names the asset URLs and a download
+  redirects; checking only what was pasted leaves both on whatever scheme the server answers.
+  *Reversing:* low, two checks in `remote::get`.
+- **A GitHub repository URL over http.** *Ruling:* accepted: nothing is fetched from it, and its
+  release is read through `Endpoints::github_api` (https). *Reversing:* trivial.
+- **An adapter installed earlier from a plain-http URL.** Its update check and update now fail
+  with the https message, and so does a restore that has to fetch it again. *Ruling:* intended;
+  the reader re-installs it from an https URL. Booked in
+  `docs/contract/10.8/1641-a-release-is-fetched-over-https.md`. *Reversing:* low.
