@@ -396,7 +396,10 @@ macro_rules! review_request {
 /// are spelled by `mention_of!`. `cardinality`
 /// keeps an empty `$1` empty: the alternation of no names matches any `@`.
 /// Pinned by `a_name_with_pattern_characters_is_matched_literally` and, for
-/// the index in both statistics states, `knobas-app`'s `read_plans.rs`.
+/// the index in both statistics states, `knobas-app`'s `read_plans.rs`. The
+/// index keeps a short pending list (`0057`, #1864): at the default 4 MB a
+/// load could leave enough of it unmerged that the planner, charging a
+/// random read per pending page, priced the index above a scan of every body.
 macro_rules! mention {
     () => {
         concat!(

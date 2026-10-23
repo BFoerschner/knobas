@@ -68,7 +68,10 @@ const RESHAPED_RULES: &[knobas_core::inbox::Category] = &[
 /// A probe-shaped mirror, a third of its size: three Jira-shaped sources of
 /// 1,500 tickets, a TeamCity-shaped one of 1,500 builds, a Confluence-shaped
 /// one of 500 pages, synced through the real sink so the stored parents and
-/// projects are what a sync leaves.
+/// projects are what a sync leaves. Three bodies in four carry the probe's
+/// common word (#1849), as the probe's do: a heavier load of trigrams, which
+/// left `item_body_trgm_idx` 411 pages of pending list that the planner
+/// charged a random read each until `0057` capped the list (#1864).
 async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) {
     let connector = knobas_db::test_util::scratch_database("read_plans").await;
     let pool = connector.app_pool().await.unwrap();
@@ -85,7 +88,6 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
             },
             kind: "ticket",
             count: 1_500,
-            common_word: false,
         });
     }
     sources.push(Synthetic {
@@ -95,7 +97,6 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
         },
         kind: "build",
         count: 1_500,
-        common_word: false,
     });
     sources.push(Synthetic {
         descriptor: SourceDescriptor {
@@ -104,7 +105,6 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
         },
         kind: "page",
         count: 500,
-        common_word: false,
     });
     for source in &sources {
         knobas_app::sources::demo::load_mirror_of(&pool, source)

@@ -2587,3 +2587,103 @@ async fn zero_fifty_six_stores_what_the_launcher_lexed_per_match() {
         )
     );
 }
+
+/// `0057` (#1864): the mention rule's trigram index keeps a pending list of
+/// at most 256 kB, so a load leaves the planner a few pages to charge for it
+/// and not up to 4 MB. With the default limit, 600 bodies of twenty random
+/// words reach some 480 unmerged pages before the 4 MB merge, each costed as
+/// a random read, and the inbox's mention rule read every body instead of the
+/// index once that cost passed a scan of the mirror's prose. Read after every
+/// 20 rows, so a list that grew past the cap and was merged before the load
+/// ended still counts. Rerun over a list left under the old limit, the
+/// migration also merges it, so an upgraded mirror does not wait for its next
+/// write.
+#[tokio::test]
+async fn zero_fifty_seven_caps_the_body_trigram_pending_list() {
+    /// The pages 256 kB of pending list fill, and the one a merge starts on.
+    const CAP: i32 = 256 / 8 + 1;
+    let pool = knobas_db::test_util::scratch_database("body-trigram-pending")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    sqlx::query("create extension if not exists pgstattuple")
+        .execute(&pool)
+        .await
+        .unwrap();
+    // An autovacuum worker's analyze merges the list too, and holds the merge
+    // lock while it does, so an insert past the cap meanwhile skips its own
+    // merge: off, so the only merges are the inserts' and the migration's.
+    sqlx::query("alter table sync.item set (autovacuum_enabled = false)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let pending = |pool: sqlx::PgPool| async move {
+        sqlx::query_scalar::<_, i32>(
+            "select pending_pages from pgstatginindex('sync.item_body_trgm_idx')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    // 600 tickets from `from` on, 20 a statement; the most pages pending
+    // after any of them.
+    let load = |from: i32| {
+        let pool = pool.clone();
+        async move {
+            let mut most = 0;
+            for batch in (from..from + 600).step_by(20) {
+                sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+                    "insert into knobas.entity (id, kind, title)
+                     select 'jira:T-' || g, 'ticket', 't'
+                       from generate_series({batch}, {batch} + 19) g;
+                     insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+                     select 'jira:T-' || g, 'jira', 'ticket', 't',
+                            (select string_agg(md5((g * 100 + w)::text), ' ')
+                               from generate_series(1, 20) w),
+                            '{{}}'::jsonb
+                       from generate_series({batch}, {batch} + 19) g"
+                )))
+                .execute(&pool)
+                .await
+                .unwrap();
+                most = most.max(pending(pool.clone()).await);
+            }
+            most
+        }
+    };
+
+    let capped = load(1).await;
+    assert!(
+        capped <= CAP,
+        "{capped} pages pending, over the 256 kB limit"
+    );
+
+    // The list an index under the default limit is left with, merged by the
+    // migration rerun.
+    sqlx::query("alter index sync.item_body_trgm_idx reset (gin_pending_list_limit)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let at_default = load(1_001).await;
+    assert!(
+        at_default > 4 * CAP,
+        "the default limit left {at_default} pages pending, too few to tell the cap from it"
+    );
+    sqlx::raw_sql(include_str!(
+        "../migrations/0057_a_mention_index_keeps_a_short_pending_list.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        pending(pool.clone()).await,
+        0,
+        "the migration merges what was pending"
+    );
+    let again = load(2_001).await;
+    assert!(
+        again <= CAP,
+        "{again} pages pending after the migration, over the 256 kB limit"
+    );
+}
