@@ -5,8 +5,8 @@
   Over existing commands only: `log_all_preview` lists the rows,
   `worklog_draft` gives each row the comment the draft would (the same
   bullets, from what knobas saw that day), and **`log_work` sends each ticked
-  row** with its comment. `log_all` is not called: it takes no ticks and sends
-  every worklog with no comment, and the spec's dialog has both.
+  row** with its comment: one `log_work` per ticked row, so the dialog can
+  honour both the ticks and the edited comments.
 
   **The week is asked again at send time.** `log_work` covers every unlogged
   block of the day on the ticket and logs the seconds it is given, so a timer
@@ -17,8 +17,8 @@
   The comment is a two-line text area, not the prototype's one-line input: a
   draft's comment is one bullet per line, and an input drops the line breaks.
 
-  A refused worklog does not stop the rest, `log_all`'s rule: each worklog is
-  its own write, and the copies of the ones that went stay (ADR-0012).
+  A refused worklog does not stop the rest: each worklog is its own write,
+  and the copies of the ones that went stay (ADR-0012).
 -->
 <script lang="ts">
   import { minutesLabel } from "../../time/format";
