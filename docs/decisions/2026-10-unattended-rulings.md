@@ -13547,3 +13547,11 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
 - **§10.8 wording.** *Ruling:* the entry now also says a panic after the quit has begun keeps the
   old treatment (watchers closed, row left to `reconcile_abandoned`), since that is observable and
   the entry named only the abort. *Reversing:* one sentence.
+
+## #1799: launcher-chain wait timeline (merge-manager, Sonnet, 2026-10-23)
+
+- **Red CI on b7e53ad8 (runs 39893420478, 39895253427).** *Ruling (orchestrator):* merge on the
+  local gate. Both runs failed only in the cargo half, on Rust tests a frontend test file cannot
+  reach (bring_up, external_adapter_install, similar_text_incremental, knobas-db embedded, gitea
+  client); that red is main's, filed as #1815 (bring_up also #1809). The front half of both runs
+  was green. *Reversing:* none, the diff is one test file.
