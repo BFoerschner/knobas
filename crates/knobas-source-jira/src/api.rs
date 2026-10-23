@@ -181,10 +181,10 @@ fn search_query(
 /// violation, which is what turns "the adapter invented an endpoint" into a red
 /// test in this crate's own suite rather than a surprise against a real Jira.
 ///
-/// The issue key is interpolated into the path. Keys come from Jira's own
-/// responses (`PAY-231`) and are `[A-Z0-9_]+-\d+`, so no escaping is required;
-/// a key that is not one would 404 and be reported as
-/// [`SourceError::Protocol`].
+/// The issue key is interpolated into the path, unescaped. A read's key comes
+/// from Jira's own responses (`PAY-231`, `[A-Z][A-Z0-9_]*-\d+`); a write's
+/// comes from a queue row, and `JiraSource::issue_key` refuses one outside
+/// that grammar before it reaches here (#1644).
 #[async_trait::async_trait]
 impl JiraApi for crate::http::HttpClient {
     async fn server_info(&self) -> Result<ServerInfo, SourceError> {

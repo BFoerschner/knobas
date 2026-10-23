@@ -3094,9 +3094,11 @@ knobas-source-jira	lib/knobas_source_jira	source::tests::a_trailing_slash_on_the
 knobas-source-jira	lib/knobas_source_jira	source::tests::a_workflow_read_for_another_source_is_refused_rather_than_asked_here
 knobas-source-jira	lib/knobas_source_jira	source::tests::a_write_for_another_source_is_refused_rather_than_posted_here
 knobas-source-jira	lib/knobas_source_jira	source::tests::an_entity_id_that_is_not_one_is_refused
+knobas-source-jira	lib/knobas_source_jira	source::tests::an_entity_that_is_not_an_issue_key_never_reaches_the_server
 knobas-source-jira	lib/knobas_source_jira	source::tests::an_op_this_adapter_does_not_declare_is_refused_by_name
 knobas-source-jira	lib/knobas_source_jira	source::tests::an_unreachable_instance_is_unreachable_from_both_entry_points
 knobas-source-jira	lib/knobas_source_jira	source::tests::basic_auth_needs_the_username_from_the_config
+knobas-source-jira	lib/knobas_source_jira	source::tests::keys_jira_issues_are_issue_keys
 knobas-source-jira	lib/knobas_source_jira	source::tests::the_cloud_flavor_is_refused_at_build_time
 knobas-source-jira	lib/knobas_source_jira	source::tests::the_connection_note_is_the_epic_link_clause_in_three_arms
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_ceiling_below_the_previous_watermark_does_not_move_it_back

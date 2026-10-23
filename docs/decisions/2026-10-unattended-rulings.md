@@ -14377,3 +14377,19 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   a loaded machine merges anything; it is #1815's family, a test reading the machine's speed. The
   assertion now sums the notes' counts and still fails on an unreported or miscounted drop.
   *Reversing:* the test only.
+## #1644 / PR #1835: merge-manager rulings (Opus merge-manager, 2026-10-23)
+
+- **Where the refusal test lives.** *Fork:* keep `an_entity_that_is_not_an_issue_key_never_reaches_the_server`
+  in `tests/it/mockd.rs`, where the implementer put it, or move it. *Ruling:* move it into
+  `source.rs`'s unit tests beside `a_write_for_another_source_is_refused_rather_than_posted_here`,
+  and drive log work and `reachable_transitions` there too. *Reasoning:* ADR-0013 freezes mockd
+  ("nothing new") and its test module goes when mockd does, which would take this witness with it;
+  the test needs no mock, only a bare listener. Log work and the workflow read call the same
+  `issue_key`, but no test drove them, so a mutant that switched either to `owned_key` would have
+  lived. *Reversing:* move the test back; nothing else depends on where it lives.
+- **The project-key grammar is written twice in `source.rs` (and once more in `config.rs`).**
+  *Fork:* share one helper now, or leave it. *Ruling:* leave it. *Reasoning:* `config::is_project_key`
+  also caps the length at 32, so sharing it would add a refusal to writes on real tickets,
+  and a local helper would be an adapter code change made after the live run, which the working model's
+  live-run rule would then require again for a refactor that changes no behaviour. The three
+  checks agree today. *Reversing:* extract one `fn` and use it in all three places.

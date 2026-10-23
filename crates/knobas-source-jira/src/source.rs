@@ -26,19 +26,42 @@ pub struct JiraSource {
 impl JiraSource {
     /// The issue key inside an entity id this source owns.
     ///
-    /// Two refusals, and both are about a write going somewhere it was not
+    /// Three refusals, and all are about a write going somewhere it was not
     /// meant to. An id that does not parse cannot name anything; an id in
     /// **another source's namespace** would otherwise have its key half posted
     /// to *this* Jira, which is how a `jira-eu:PAY-231` reaches the wrong
     /// instance and moves the wrong ticket. The queue routes by namespace
     /// already, so reaching here with a foreign one is knobas' own bug -- and
-    /// the adapter refuses it rather than trusting the routing.
+    /// the adapter refuses it rather than trusting the routing. And a key that
+    /// is not in Jira's issue-key grammar is refused because the key goes into
+    /// the request path: a queue row's entity is whatever string the shell
+    /// held, and `jira:PAY-1/transitions?x=` would otherwise post to a
+    /// different resource of the same server (#1644).
     ///
     /// # Errors
     ///
     /// [`SourceError::Protocol`], which the queue reads as a refusal rather
     /// than something to retry: nothing about waiting makes a wrong id right.
     fn issue_key(&self, entity: &str) -> Result<String, SourceError> {
+        let key = self.owned_key(entity)?;
+        if !is_issue_key(&key) {
+            return Err(SourceError::protocol(format!(
+                "{entity:?} does not carry a Jira issue key (like \"PAY-231\"); the key goes \
+                 into the request path, so a key of any other shape is refused"
+            )));
+        }
+        Ok(key)
+    }
+
+    /// The key half of an entity id in this source's namespace, its shape
+    /// unvetted: [`Self::issue_key`] and [`Self::project_key`] each check the
+    /// grammar of what they put into a request.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Protocol`] for an id that does not parse or that belongs
+    /// to another source's namespace.
+    fn owned_key(&self, entity: &str) -> Result<String, SourceError> {
         let parsed = knobas_core::entity::EntityRef::parse(entity)
             .map_err(|error| SourceError::protocol(error.to_string()))?;
         if parsed.namespace != self.id {
@@ -61,12 +84,12 @@ impl JiraSource {
     ///
     /// # Errors
     ///
-    /// As [`Self::issue_key`], plus a key that is not a project key -- Jira
+    /// As [`Self::owned_key`], plus a key that is not a project key -- Jira
     /// project keys are `[A-Z][A-Z0-9_]*`, and `jira:PAY-231` reaching here
     /// means a create was aimed at a *ticket*, which would otherwise be sent as
     /// a project that does not exist.
     fn project_key(&self, entity: &str) -> Result<String, SourceError> {
-        let key = self.issue_key(entity)?;
+        let key = self.owned_key(entity)?;
         let looks_like_a_project = !key.is_empty()
             && key.starts_with(|c: char| c.is_ascii_uppercase())
             && key
@@ -402,6 +425,19 @@ impl Source for JiraSource {
     }
 }
 
+/// Jira's key grammar: a project key (`[A-Z][A-Z0-9_]*`), a hyphen, then
+/// digits. Nothing in it can leave a URL path segment.
+fn is_issue_key(key: &str) -> bool {
+    let Some((project, number)) = key.rsplit_once('-') else {
+        return false;
+    };
+    let mut chars = project.chars();
+    chars.next().is_some_and(|c| c.is_ascii_uppercase())
+        && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        && !number.is_empty()
+        && number.chars().all(|c| c.is_ascii_digit())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,6 +464,28 @@ mod tests {
         match build(i) {
             Ok(source) => source,
             Err(e) => panic!("the adapter must build from this instance: {e:?}"),
+        }
+    }
+
+    /// Keys Jira itself issues must keep passing. That a refused key never
+    /// leaves the adapter is `an_entity_that_is_not_an_issue_key_never_reaches_the_server`.
+    #[test]
+    fn keys_jira_issues_are_issue_keys() {
+        for key in [
+            "PAY-1",
+            "PAY-231",
+            "A-1",
+            "AB2-10",
+            "MY_PROJ-7",
+            "A_1-99999",
+            "P9-0",
+        ] {
+            assert!(is_issue_key(key), "{key}");
+        }
+        for key in [
+            "PAY", "pay-1", "PAY-", "-1", "1A-1", "_A-1", "PAY-1x", "PAY--1", "P-Y-1",
+        ] {
+            assert!(!is_issue_key(key), "{key}");
         }
     }
 
@@ -640,6 +698,72 @@ mod tests {
         };
         assert!(message.contains("jira-eu"), "{message}");
         assert!(message.contains("jira"), "{message}");
+    }
+
+    /// ADPT-10 (#1644): a queue row's entity id is whatever string the shell
+    /// held. A key that is not an issue key must be refused by name before any
+    /// request leaves -- otherwise `jira:PAY-1/transitions?x=` would place a
+    /// comment on a different resource of the same server. Every path that
+    /// puts an issue key into a URL is driven: comment, transition, log work
+    /// and the workflow read.
+    ///
+    /// The server here is a bare listener: a request that leaves shows up as
+    /// an accepted connection, and the count must stay zero.
+    #[tokio::test]
+    async fn an_entity_that_is_not_an_issue_key_never_reaches_the_server() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut i = instance(json!({}));
+        i.base_url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let source = built(i);
+        let started = chrono::DateTime::from_timestamp(1_788_000_000, 0).expect("a fixed instant");
+
+        for entity in [
+            "jira:PAY-1/transitions?x=",
+            "jira:PAY-1/../../field",
+            "jira:PAY-1?expand=x",
+            "jira:PAY-1#frag",
+            "jira:PAY-1%2Fcomment",
+            "jira:pay-1",
+            "jira:PAY-",
+            "jira:PAY",
+            "jira:-1",
+            "jira:1A-1",
+            "jira:_A-1",
+            "jira:PAY-1 ",
+        ] {
+            for op in [
+                WriteOp::Comment {
+                    entity: entity.to_owned(),
+                    body: "x".to_owned(),
+                },
+                WriteOp::Transition {
+                    entity: entity.to_owned(),
+                    status: "Done".to_owned(),
+                },
+                WriteOp::LogWork {
+                    entity: entity.to_owned(),
+                    started,
+                    seconds: 60,
+                    comment: "x".to_owned(),
+                },
+            ] {
+                let refused = source.write(op).await;
+                assert!(
+                    matches!(&refused, Err(SourceError::Protocol { message, .. }) if message.contains("issue key")),
+                    "{entity:?}: {refused:?}"
+                );
+            }
+            let refused = source.reachable_transitions(entity).await;
+            assert!(
+                matches!(&refused, Err(SourceError::Protocol { message, .. }) if message.contains("issue key")),
+                "{entity:?}: {refused:?}"
+            );
+        }
+        assert!(
+            matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "a refused key must not open a connection"
+        );
     }
 
     /// A create is aimed at a **project**, so an id naming a ticket is a
