@@ -570,9 +570,12 @@ impl HttpClient {
                 if retry {
                     // A pooled keep-alive connection the server timed out as
                     // the request went out on it (#1818). Safe to repeat for a
-                    // read, and once is what that race needs: the next
-                    // attempt goes out on another connection. A write may
-                    // have been read, so it is never sent again on this.
+                    // read (`follows` is a `GET` or `HEAD`), and once is what
+                    // that race needs: the pool has dropped the closed
+                    // connection, so the next attempt goes out on another
+                    // one; a server that hangs up on that too is not racing.
+                    // A write may have been read, so it is never sent again
+                    // on this.
                     closed = follows && retry::closed_before_answering(&error);
                     let again = closed && !resent_after_close;
                     (mapped, again || retry::error_is_transient(&error))
@@ -865,7 +868,8 @@ pub struct Request {
     /// `false` once [`Request::no_retry`] said so.
     retry: bool,
     /// A `GET` or `HEAD`, built on the client that follows a redirect
-    /// (#1640).
+    /// (#1640). Also what makes a request safe to send again after the
+    /// server hung up on it (#1818).
     follows: bool,
 }
 

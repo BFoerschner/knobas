@@ -13834,7 +13834,8 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
 ## #1818: a read the server hung up on is sent again (Opus implementer, 2026-10-23)
 
 - **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): the frozen-surface
-  change** to `crates/knobas-http/**`. *Ruling:* make it, booked in
+  change** to `crates/knobas-http/**`. *Fork:* change the frozen crate, or leave #1818 open for
+  Björn. *Ruling:* make it, booked in
   `docs/contract/10.8/1818-knobas-http-a-read-the-server-hung-up-on-is-sent-again.md`: one new
   public predicate, `retry::closed_before_answering`, one dependency (`hyper`, already in the
   tree through reqwest), and one more transient case in `send_with`. *Reasoning:* the ticket

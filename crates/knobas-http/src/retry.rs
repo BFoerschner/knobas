@@ -5,8 +5,9 @@
 //! times is three times the load and the same answer), and not 4xx (the
 //! request is wrong). One more, for reads only: a `GET` or `HEAD` the server
 //! closed its connection on before answering is sent once more
-//! ([`closed_before_answering`], #1818). Writes retry too, since M2's write-backs (issue #43):
-//! [`Request::json`](crate::Request::json) buffers its body, so a retry
+//! ([`closed_before_answering`], #1818). Writes retry too, since M2's
+//! write-backs (issue #43): [`Request::json`](crate::Request::json) buffers
+//! its body, so a retry
 //! re-sends the same bytes. A write that must not arrive twice opts out with
 //! [`Request::no_retry`](crate::Request::no_retry) (issue #1122).
 //!
@@ -43,9 +44,9 @@ pub fn error_is_transient(error: &reqwest::Error) -> bool {
     error.is_timeout() || error.is_connect()
 }
 
-/// A request whose connection the server closed before a byte of answer
-/// arrived: hyper's `IncompleteMessage`, at the bottom of reqwest's error
-/// chain.
+/// A request whose connection the server closed before the answer's status
+/// line and headers were complete: hyper's `IncompleteMessage`, at the bottom
+/// of reqwest's error chain.
 ///
 /// This is what a pooled keep-alive connection looks like when the server's
 /// idle timeout closes it just as the next request goes out on it -- Node's

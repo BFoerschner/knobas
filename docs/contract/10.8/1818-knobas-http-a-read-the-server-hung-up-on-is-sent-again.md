@@ -5,7 +5,8 @@
   read at once as `SourceError::Protocol { status: None }`, since `retry::error_is_transient`
   takes timeouts and connect errors only. No change to the SPI, the commands, `HttpConfig`, any
   adapter, the limiter, #1729's `watch_local_quota` mark, #1640's body cap or second client, or
-  the error a failing send returns.
+  how any failure maps to a `SourceError` (a read sent again reports what its second attempt
+  met, as every retry reports its last).
 
   **`crates/knobas-http/**`:**
   - `Cargo.toml`: dependency `hyper = "1"` (the copy reqwest already resolves).
@@ -18,8 +19,8 @@
     after it. The retry is the loop's own: it waits `retry::backoff`, passes the limiter, and is
     not made when the delay does not fit what is left of `SEND_BUDGET`. Any other method, and a
     request sent with `no_retry`, is never sent again on it and keeps its classification
-    (`Protocol { status: None }`). The crate doc's Retries bullet, the `retry` module doc and
-    `send`'s doc say so.
+    (`Protocol { status: None }`). The crate doc's Retries bullet, the `retry` module doc,
+    `send`'s doc and the private `Request::follows` field's doc say so.
   - `tests/transport.rs` gains the `hung_up` module: a server that reads each request whole and
     closes the connection unanswered, and five tests (a read sent again and answered, for `GET`
     and `HEAD`; a `POST` not sent again, with and without `no_retry`; a read sent twice only; the

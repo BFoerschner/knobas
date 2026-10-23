@@ -2188,9 +2188,7 @@ mod bounds {
     }
 }
 
-// ---------------------------------------------------------------------------
-// A keep-alive connection the server closed as it was reused (#1818).
-// ---------------------------------------------------------------------------
+// ---- A keep-alive connection the server closed as it was reused (#1818) ---
 
 mod hung_up {
     use std::sync::{Arc, Mutex};
@@ -2211,13 +2209,21 @@ mod hung_up {
         Always,
     }
 
+    /// What [`HangUpServer`] was sent, in arrival order.
+    #[derive(Default)]
+    struct Log {
+        /// Each request's line, e.g. `"GET /a HTTP/1.1"`.
+        lines: Vec<String>,
+        /// The lines of the requests it hung up on.
+        hung_up: Vec<String>,
+    }
+
     /// A server that reads each request whole and either answers it `200 {}`
     /// with the connection kept alive, or closes the connection without a
     /// byte of answer. It keeps every request line and every hang-up.
     struct HangUpServer {
         port: u16,
-        lines: Arc<Mutex<Vec<String>>>,
-        hung_up: Arc<Mutex<Vec<String>>>,
+        log: Arc<Mutex<Log>>,
     }
 
     impl HangUpServer {
@@ -2229,34 +2235,26 @@ mod hung_up {
             std::mem::forget(listener.try_clone().expect("hold the port"));
             listener.set_nonblocking(true).expect("nonblocking");
             let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
-            let lines = Arc::new(Mutex::new(Vec::new()));
-            let hung_up = Arc::new(Mutex::new(Vec::new()));
-            let (kept, closed) = (Arc::clone(&lines), Arc::clone(&hung_up));
+            let log = Arc::new(Mutex::new(Log::default()));
+            let kept = Arc::clone(&log);
             tokio::spawn(async move {
                 while let Ok((socket, _)) = listener.accept().await {
-                    let (kept, closed) = (Arc::clone(&kept), Arc::clone(&closed));
-                    tokio::spawn(serve(socket, when, kept, closed));
+                    tokio::spawn(serve(socket, when, Arc::clone(&kept)));
                 }
             });
-            Self {
-                port,
-                lines,
-                hung_up,
-            }
+            Self { port, log }
         }
 
         fn url(&self) -> String {
             format!("http://127.0.0.1:{}", self.port)
         }
 
-        /// Each request's line, e.g. `"GET /a HTTP/1.1"`, in arrival order.
         fn lines(&self) -> Vec<String> {
-            self.lines.lock().expect("lines").clone()
+            self.log.lock().expect("log").lines.clone()
         }
 
-        /// The lines of the requests it hung up on.
         fn hung_up(&self) -> Vec<String> {
-            self.hung_up.lock().expect("hung up").clone()
+            self.log.lock().expect("log").hung_up.clone()
         }
 
         /// How many requests arrived with `line`.
@@ -2267,23 +2265,16 @@ mod hung_up {
 
     /// One connection: each request read whole (head and `content-length`
     /// body), then answered or hung up on.
-    async fn serve(
-        mut socket: tokio::net::TcpStream,
-        when: HangUp,
-        lines: Arc<Mutex<Vec<String>>>,
-        hung_up: Arc<Mutex<Vec<String>>>,
-    ) {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    async fn serve(mut socket: tokio::net::TcpStream, when: HangUp, log: Arc<Mutex<Log>>) {
+        use tokio::io::AsyncWriteExt;
         let mut read = Vec::new();
-        let mut buffer = [0u8; 4096];
         for nth in 0usize.. {
             let end = loop {
                 if let Some(at) = read.windows(4).position(|w| w == b"\r\n\r\n") {
                     break at + 4;
                 }
-                match socket.read(&mut buffer).await {
-                    Ok(0) | Err(_) => return,
-                    Ok(n) => read.extend_from_slice(&buffer[..n]),
+                if !read_more(&mut socket, &mut read).await {
+                    return;
                 }
             };
             let head = String::from_utf8_lossy(&read[..end]).into_owned();
@@ -2297,16 +2288,21 @@ mod hung_up {
                 })
                 .unwrap_or(0);
             while read.len() < end + length {
-                match socket.read(&mut buffer).await {
-                    Ok(0) | Err(_) => return,
-                    Ok(n) => read.extend_from_slice(&buffer[..n]),
+                if !read_more(&mut socket, &mut read).await {
+                    return;
                 }
             }
             read.drain(..end + length);
             let line = head.lines().next().unwrap_or_default().to_owned();
-            lines.lock().expect("lines").push(line.clone());
-            if matches!(when, HangUp::Always) || nth > 0 {
-                hung_up.lock().expect("hung up").push(line);
+            let hang_up = matches!(when, HangUp::Always) || nth > 0;
+            {
+                let mut log = log.lock().expect("log");
+                log.lines.push(line.clone());
+                if hang_up {
+                    log.hung_up.push(line);
+                }
+            }
+            if hang_up {
                 // Everything sent has been read, so this is a FIN and not a
                 // reset: the client reads the end of the stream where it
                 // waited for a status line.
@@ -2317,6 +2313,19 @@ mod hung_up {
                           content-length: 2\r\nconnection: keep-alive\r\n\r\n{}";
             if socket.write_all(answer.as_bytes()).await.is_err() {
                 return;
+            }
+        }
+    }
+
+    /// Append what the socket has next to `read`; `false` once it has ended.
+    async fn read_more(socket: &mut tokio::net::TcpStream, read: &mut Vec<u8>) -> bool {
+        use tokio::io::AsyncReadExt;
+        let mut buffer = [0u8; 4096];
+        match socket.read(&mut buffer).await {
+            Ok(0) | Err(_) => false,
+            Ok(n) => {
+                read.extend_from_slice(&buffer[..n]);
+                true
             }
         }
     }
@@ -2354,7 +2363,10 @@ mod hung_up {
             .send(client.request(Method::POST, "/first").no_retry())
             .await
             .expect("the first request on a connection is answered");
-        response.bytes().await.expect("read whole, so the connection is pooled");
+        response
+            .bytes()
+            .await
+            .expect("read whole, so the connection is pooled");
     }
 
     /// **A read the server hung up on as it reused a pooled connection is
@@ -2432,7 +2444,12 @@ mod hung_up {
             matches!(error, SourceError::Protocol { status: None, .. }),
             "{error:?}"
         );
-        assert_eq!(server.count("GET /thing HTTP/1.1"), 2, "{:?}", server.lines());
+        assert_eq!(
+            server.count("GET /thing HTTP/1.1"),
+            2,
+            "{:?}",
+            server.lines()
+        );
     }
 
     /// The second sending is a request against the instance's quota, so it
