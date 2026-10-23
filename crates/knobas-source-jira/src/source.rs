@@ -39,6 +39,18 @@ impl JiraSource {
     /// [`SourceError::Protocol`], which the queue reads as a refusal rather
     /// than something to retry: nothing about waiting makes a wrong id right.
     fn issue_key(&self, entity: &str) -> Result<String, SourceError> {
+        let key = self.owned_key(entity)?;
+        if !is_issue_key(&key) {
+            return Err(SourceError::protocol(format!(
+                "{entity:?} does not carry a Jira issue key (like \"PAY-231\"); the key goes \
+                 into the request path, so a key of any other shape is refused"
+            )));
+        }
+        Ok(key)
+    }
+
+    /// The key half of an entity id in this source's namespace, unvetted.
+    fn owned_key(&self, entity: &str) -> Result<String, SourceError> {
         let parsed = knobas_core::entity::EntityRef::parse(entity)
             .map_err(|error| SourceError::protocol(error.to_string()))?;
         if parsed.namespace != self.id {
@@ -66,7 +78,7 @@ impl JiraSource {
     /// means a create was aimed at a *ticket*, which would otherwise be sent as
     /// a project that does not exist.
     fn project_key(&self, entity: &str) -> Result<String, SourceError> {
-        let key = self.issue_key(entity)?;
+        let key = self.owned_key(entity)?;
         let looks_like_a_project = !key.is_empty()
             && key.starts_with(|c: char| c.is_ascii_uppercase())
             && key
@@ -402,6 +414,19 @@ impl Source for JiraSource {
     }
 }
 
+/// Jira's key grammar: a project key (`[A-Z][A-Z0-9_]*`), a hyphen, then
+/// digits. Nothing in it can leave a URL path segment.
+fn is_issue_key(key: &str) -> bool {
+    let Some((project, number)) = key.rsplit_once('-') else {
+        return false;
+    };
+    let mut chars = project.chars();
+    chars.next().is_some_and(|c| c.is_ascii_uppercase())
+        && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        && !number.is_empty()
+        && number.chars().all(|c| c.is_ascii_digit())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,6 +453,28 @@ mod tests {
         match build(i) {
             Ok(source) => source,
             Err(e) => panic!("the adapter must build from this instance: {e:?}"),
+        }
+    }
+
+    /// Keys Jira itself issues must keep passing; the refusals are in
+    /// `tests/it/mockd.rs`.
+    #[test]
+    fn keys_jira_issues_are_issue_keys() {
+        for key in [
+            "PAY-1",
+            "PAY-231",
+            "A-1",
+            "AB2-10",
+            "MY_PROJ-7",
+            "A_1-99999",
+            "P9-0",
+        ] {
+            assert!(is_issue_key(key), "{key}");
+        }
+        for key in [
+            "PAY", "pay-1", "PAY-", "-1", "1A-1", "_A-1", "PAY-1x", "PAY--1", "P-Y-1",
+        ] {
+            assert!(!is_issue_key(key), "{key}");
         }
     }
 

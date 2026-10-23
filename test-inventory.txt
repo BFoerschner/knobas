@@ -3097,6 +3097,7 @@ knobas-source-jira	lib/knobas_source_jira	source::tests::an_entity_id_that_is_no
 knobas-source-jira	lib/knobas_source_jira	source::tests::an_op_this_adapter_does_not_declare_is_refused_by_name
 knobas-source-jira	lib/knobas_source_jira	source::tests::an_unreachable_instance_is_unreachable_from_both_entry_points
 knobas-source-jira	lib/knobas_source_jira	source::tests::basic_auth_needs_the_username_from_the_config
+knobas-source-jira	lib/knobas_source_jira	source::tests::keys_jira_issues_are_issue_keys
 knobas-source-jira	lib/knobas_source_jira	source::tests::the_cloud_flavor_is_refused_at_build_time
 knobas-source-jira	lib/knobas_source_jira	source::tests::the_connection_note_is_the_epic_link_clause_in_three_arms
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_ceiling_below_the_previous_watermark_does_not_move_it_back
@@ -3188,6 +3189,7 @@ knobas-source-jira	test/it	mockd::a_timeout_is_unreachable
 knobas-source-jira	test/it	mockd::a_transition_moves_the_ticket
 knobas-source-jira	test/it	mockd::a_write_to_a_jira_that_hangs_is_unconfirmed_rather_than_refused
 knobas-source-jira	test/it	mockd::a_write_with_a_rejected_credential_waits_for_a_human
+knobas-source-jira	test/it	mockd::an_entity_that_is_not_an_issue_key_never_reaches_the_server
 knobas-source-jira	test/it	mockd::an_idle_incremental_returns_nothing_and_the_same_cursor
 knobas-source-jira	test/it	mockd::an_incremental_run_delivers_the_widened_payload_for_what_it_returns
 knobas-source-jira	test/it	mockd::an_incremental_run_returns_exactly_what_changed
