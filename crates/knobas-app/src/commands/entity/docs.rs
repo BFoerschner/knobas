@@ -36,12 +36,9 @@ pub async fn docs_tree_inner(
 ) -> Result<crate::docs::DocsTree, IpcError> {
     // The census table the spaces come from is resolved from the stored
     // declarations, which every search command writes first (#759).
-    crate::commands::search::searcher(pool, registry).await?;
+    crate::commands::search::declare(pool, registry).await?;
     let declarations = declared_paths(pool, registry).await?;
-    let me = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
-        .await
-        .map_err(IpcError::internal)?
-        .identity;
+    let me = identity_of(pool).await?;
     let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::WIKI).await?;
     crate::docs::tree(
         pool,
@@ -80,12 +77,9 @@ pub async fn docs_page_inner(
     registry: &dyn AdapterRegistry,
     entity_id: &str,
 ) -> Result<crate::docs::DocPage, IpcError> {
-    crate::commands::search::searcher(pool, registry).await?;
+    crate::commands::search::declare(pool, registry).await?;
     let declarations = declared_paths(pool, registry).await?;
-    let me = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
-        .await
-        .map_err(IpcError::internal)?
-        .identity;
+    let me = identity_of(pool).await?;
     let templates = registry.descriptors();
     crate::docs::page(
         pool,
@@ -172,7 +166,7 @@ pub async fn docs_export_markdown_inner(
     entity_id: &str,
     folder: &std::path::Path,
 ) -> Result<crate::docs::DocExport, IpcError> {
-    crate::commands::search::searcher(pool, registry).await?;
+    crate::commands::search::declare(pool, registry).await?;
     let declarations = declared_paths(pool, registry).await?;
     crate::docs::export(
         pool,
@@ -304,7 +298,7 @@ pub async fn docs_create_page_payload(
 ) -> Result<(serde_json::Value, String), IpcError> {
     // The space comes from the census table, kept from the stored
     // declarations every search command writes first (#759).
-    crate::commands::search::searcher(pool, registry).await?;
+    crate::commands::search::declare(pool, registry).await?;
     crate::docs::create_page(pool, |kind| registry.doc_writes(kind), page).await
 }
 
@@ -353,7 +347,7 @@ pub async fn move_notes_payloads(
     if notes.is_empty() {
         return Err(IpcError::invalid("There are no notes to move."));
     }
-    crate::commands::search::searcher(pool, registry).await?;
+    crate::commands::search::declare(pool, registry).await?;
     let mut payloads = Vec::with_capacity(notes.len());
     for page in crate::notes_export::note_pages(&notes, parent) {
         payloads

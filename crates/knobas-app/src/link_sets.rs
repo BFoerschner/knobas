@@ -636,7 +636,7 @@ async fn read(
 ) -> Result<Vec<(LinkSetRow, Vec<RuleTicket>)>, IpcError> {
     // Make sure the stored parent resolutions are the registry's (#627), as
     // every search does before it reads them.
-    crate::commands::search::searcher(pool, registry).await?;
+    crate::commands::search::declare(pool, registry).await?;
     let sets = sqlx::query(
         "select id, name, description from knobas.link_set
           where $1::text[] is null or id = any($1)
@@ -820,7 +820,7 @@ pub async fn preview(
     if let Some(why) = rule_refusal(rule) {
         return Err(IpcError::invalid(why));
     }
-    crate::commands::search::searcher(pool, registry).await?;
+    crate::commands::search::declare(pool, registry).await?;
     Ok(tickets_of(pool, registry, &[(0, rule)])
         .await?
         .into_iter()
@@ -1222,7 +1222,7 @@ pub async fn on_job(
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     ticket_id: &str,
 ) -> Result<JobLinkSets, IpcError> {
-    crate::commands::search::searcher(pool, registry).await?;
+    crate::commands::search::declare(pool, registry).await?;
     let sets = sqlx::query(JOB_SETS)
         .bind(ticket_id)
         .fetch_all(pool)
@@ -1368,7 +1368,7 @@ pub async fn hints(
     pool: &PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
 ) -> Result<Vec<LinkSetHint>, IpcError> {
-    crate::commands::search::searcher(pool, registry).await?;
+    crate::commands::search::declare(pool, registry).await?;
     let rows = sqlx::query(HINTS)
         .bind(HINT_TICKETS)
         .fetch_all(pool)

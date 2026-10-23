@@ -46,15 +46,26 @@ pub async fn declared_paths(
     pool: &PgPool,
     registry: &dyn AdapterRegistry,
 ) -> Result<Declarations, IpcError> {
+    let sources = knobas_sync::config::list(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    Ok(declared_paths_of(sources, registry))
+}
+
+/// [`declared_paths`] over a source list the caller already read, for a
+/// command that needs the list for something else too and so lists it once
+/// (#1659).
+#[must_use]
+pub fn declared_paths_of(
+    sources: Vec<knobas_sync::config::SourceConfigRow>,
+    registry: &dyn AdapterRegistry,
+) -> Declarations {
     let by_kind: std::collections::HashMap<String, Vec<knobas_source::KindPaths>> = registry
         .descriptors()
         .into_iter()
         .map(|d| (d.adapter_kind, d.payload_paths))
         .collect();
-    let sources = knobas_sync::config::list(pool)
-        .await
-        .map_err(IpcError::internal)?;
-    Ok(sources
+    sources
         .into_iter()
         .fold(
             Declarations::empty(),
@@ -62,7 +73,7 @@ pub async fn declared_paths(
                 Some(paths) => declarations.with(source.id, paths.clone()),
                 None => declarations,
             },
-        ))
+        )
 }
 
 #[cfg(test)]
