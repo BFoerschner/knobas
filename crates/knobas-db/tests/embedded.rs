@@ -59,6 +59,62 @@ async fn a_started_server_listens_on_the_ipv4_loopback_alone() {
     assert!(!on_v6, "the server must not listen on ::1 as well");
 }
 
+/// #1779: a postmaster that dies under its handle is seen gone by the
+/// handle's watch, and the handle starts it again on the port its pools and
+/// connector dial, while it goes on holding the profile: a second launch in
+/// between is refused, as it is beside any live owner (ruling B2).
+#[tokio::test]
+async fn a_server_that_dies_under_its_handle_is_seen_gone_and_restarts_on_its_port() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    };
+    let mut db = EmbeddedDb::start(cfg.clone()).await.unwrap();
+    let port = running_port(dir.path());
+    let watch = db.watch().expect("a server this process owns is watched");
+    assert!(!watch.is_gone(), "a running server is not gone");
+
+    knobas_db::test_util::kill_server(dir.path());
+    assert!(watch.is_gone(), "a killed server is gone");
+    match EmbeddedDb::start(cfg).await {
+        Err(knobas_db::DbError::AlreadyRunning { .. }) => {}
+        Err(other) => panic!("a second launch beside the owner is refused, not {other}"),
+        Ok(_) => panic!("a second launch was let in while the owner's server was down"),
+    }
+
+    db.restart().await.expect("the dead server starts again");
+    assert_eq!(running_port(dir.path()), port, "on the port it had");
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(db.pool())
+        .await
+        .expect("the handle's pool reaches the restarted server");
+    assert_eq!(one.0, 1);
+    assert!(
+        !db.watch().expect("still owned").is_gone(),
+        "the restarted server is watched as running"
+    );
+    db.stop().await.unwrap();
+}
+
+/// #1779: stopping a handle whose server already died is not a failure.
+/// The quit of a window whose postmaster died has nothing left to stop, and
+/// used to log `pg_ctl`'s complaint as an error.
+#[tokio::test]
+async fn stopping_a_server_that_already_died_succeeds() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+    knobas_db::test_util::kill_server(dir.path());
+    db.stop()
+        .await
+        .expect("a server that is already gone stops cleanly");
+}
+
 /// A `postmaster.pid` naming a **live** process whose port is silent is
 /// reported, not cleared -- and the same directory starts normally once that
 /// process is gone.

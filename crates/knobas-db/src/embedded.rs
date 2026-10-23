@@ -509,6 +509,79 @@ impl EmbeddedDb {
         self.owner_lock.is_some()
     }
 
+    /// A watch on this handle's server, for noticing that it died (#1779).
+    ///
+    /// `None` for a server this process does not own (`existing_url`), whose
+    /// life is not knobas's to follow, and when `postmaster.pid` names no
+    /// running postmaster to watch.
+    #[must_use]
+    pub fn watch(&self) -> Option<ServerWatch> {
+        self.owner_lock.as_ref()?;
+        let data_dir = self.server_settings()?.data_dir.clone();
+        let pid = recorded_pid(&data_dir)?;
+        Some(ServerWatch { data_dir, pid })
+    }
+
+    /// Start this handle's server again after it died under the handle
+    /// (#1779), on the port it had, so the pool, every pool
+    /// [`pool_for`](Self::pool_for) opened and the
+    /// [`connector`](Self::connector) reach it again without being rebuilt.
+    ///
+    /// The handle holds the ownership lock throughout, so the profile is
+    /// never free for a second launch while its owner is down. The start runs
+    /// under the bring-up lock, as every start does. A server that is still
+    /// running is left alone, and one this process does not own is never
+    /// started: for both, this only checks that the pool answers.
+    ///
+    /// # Errors
+    ///
+    /// [`DbError::Embedded`] if the start fails. A port something else took
+    /// in the meantime is one cause: the server listens on `127.0.0.1` alone,
+    /// and a stranger there ends its start. [`DbError::Sqlx`] if the server
+    /// does not answer the pool afterwards.
+    pub async fn restart(&mut self) -> Result<(), DbError> {
+        if self.owner_lock.is_some()
+            && let Some(settings) = self.server_settings().cloned()
+        {
+            let root_dir = settings
+                .data_dir
+                .parent()
+                .map_or_else(|| settings.data_dir.clone(), Path::to_path_buf);
+            let _guard = bring_up_lock(&root_dir).await?;
+            if self.watch().is_none_or(|watch| watch.is_gone()) {
+                tracing::warn!(port = settings.port, "restarting the embedded postgres");
+                match self.postgresql.as_mut() {
+                    Some(postgresql) => postgresql.start().await?,
+                    // Adopted: a handle of our own over the settings `stop`
+                    // would have used, which from now on is how it stops.
+                    None => {
+                        let mut postgresql = PostgreSQL::new(settings);
+                        if let Err(error) = postgresql.start().await {
+                            // As in `start_managed`: a handle whose start
+                            // failed is never dropped, since its `Drop`
+                            // stops whatever `postmaster.pid` names.
+                            std::mem::forget(postgresql);
+                            return Err(error.into());
+                        }
+                        self.postgresql = Some(postgresql);
+                        self.stop_settings = None;
+                    }
+                }
+            }
+        }
+        probe(&self.pool).await?;
+        Ok(())
+    }
+
+    /// The settings this handle's server runs on: the started handle's, or
+    /// the adopted server's. `None` for `existing_url`.
+    fn server_settings(&self) -> Option<&Settings> {
+        self.postgresql
+            .as_ref()
+            .map(PostgreSQL::settings)
+            .or(self.stop_settings.as_ref())
+    }
+
     /// Drop this handle the way a signal does: no `pg_ctl stop`, no pool
     /// close, the ownership lock released by closing its file. The server
     /// keeps running, owned by nobody -- which is exactly the state a
@@ -567,6 +640,12 @@ impl EmbeddedDb {
         close_pool_bounded(&self.pool).await;
         if self.owner_lock.is_none() {
             tracing::info!("not this process's server to stop");
+            return Ok(());
+        }
+        // A server that died under the handle (#1779) has nothing to stop,
+        // and `pg_ctl stop` would only report that it is not running.
+        if self.watch().is_none_or(|watch| watch.is_gone()) {
+            tracing::info!("the embedded postgres is not running: nothing to stop");
             return Ok(());
         }
         match &self.postgresql {
@@ -629,15 +708,10 @@ impl EmbeddedDb {
         }
         // An owned server was either started here or adopted, so one of the
         // two holds its settings; the `else` is for the type, not for a case.
-        let data_dir = self
-            .postgresql
-            .as_ref()
-            .map(|postgresql| &postgresql.settings().data_dir)
-            .or(self
-                .stop_settings
-                .as_ref()
-                .map(|settings| &settings.data_dir));
-        let Some(data_dir) = data_dir.cloned() else {
+        let Some(data_dir) = self
+            .server_settings()
+            .map(|settings| settings.data_dir.clone())
+        else {
             return Ok(());
         };
         let Some(pg_ctl) = pg_ctl_stop_immediate(&data_dir) else {
@@ -1419,6 +1493,42 @@ fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
     tracing::warn!(pid_file = %pid_file.display(), "removing stale postmaster.pid");
     clear_lock(data_dir)?;
     Ok(Lock::Cleared)
+}
+
+/// Whether the server a handle owns is still running (#1779).
+///
+/// Cheap and synchronous: one read of `postmaster.pid` and, while it still
+/// names the postmaster this watch was made for, one `ps -p`. A postmaster
+/// that exits removes the file, a killed one leaves it naming a dead
+/// process, and a restarted one names another pid; each of the three is
+/// gone. A caller on an async runtime runs it on a blocking thread.
+#[derive(Clone, Debug)]
+pub struct ServerWatch {
+    data_dir: PathBuf,
+    pid: u32,
+}
+
+impl ServerWatch {
+    /// Whether the postmaster this watch was made for has stopped.
+    #[must_use]
+    pub fn is_gone(&self) -> bool {
+        // Without `ps` there is no telling a killed postmaster from a live
+        // one, and a watch that guessed would fail every window it watched.
+        recorded_pid(&self.data_dir) != Some(self.pid) || (cfg!(unix) && !process_alive(self.pid))
+    }
+}
+
+/// The postmaster's pid, line 1 of `data_dir`'s `postmaster.pid`, if the
+/// file is there and names one.
+fn recorded_pid(data_dir: &Path) -> Option<u32> {
+    std::fs::read_to_string(data_dir.join("postmaster.pid"))
+        .ok()?
+        .lines()
+        .next()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|pid| *pid != 0)
 }
 
 /// Whether a process with `pid` exists right now.
