@@ -13930,3 +13930,28 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   ack (#1627); one on a login packet is `Unconfirmed` turned `Unreachable` by `not_yet_emitted`,
   so the write waits on the ladder where it was refused before. `just kuma-live` ran once to
   witness the write client's change. *Reversing:* low.
+
+### #1821 merge review (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus: the frozen-surface change.** *Fork:* uphold
+  the implementer's ruling or send it back. *Ruling:* upheld. *Reasoning:* the §10.8 entry
+  matches the diff (one classifier branch, one constant, docs, tests); the merge review added the
+  doc-only line on `SourceError::Unconfirmed` and booked it in the entry. *Reversing:* low.
+- **A `no_retry` `GET` the server hung up on reads `Unconfirmed`.** *Fork:* keep `Protocol` for
+  reads, or accept `Unconfirmed`. *Ruling:* accept. *Reasoning:* no production caller sends a
+  `GET` with `no_retry` (all seven call sites, in Jira, Gitea, Confluence, TeamCity and Kuma, are
+  `POST`s). Outside the write queue every consumer reads `Unconfirmed` as `Unreachable`
+  (`scheduler`'s and `run_log`'s `SyncOutcome`, `IpcError::from_source_error`, the sources
+  view's codes and `auth_state_of`), and no adapter matches a status-less `Protocol` from a send.
+  So a `POST`-shaped read hung up on now logs `unreachable` where it logged `error`: both back
+  off, and "the source did not answer" is the true sentence. *Reversing:* trivial.
+- **Mutant "hang-up made transient" survives the sync tests.** *Fork:* add a resend count to the
+  sync fixture, or not. *Ruling:* not owed. *Reasoning:* whether the transport sends again is
+  the transport's property, pinned by `hung_up::a_write_the_server_hung_up_on_is_not_sent_again`
+  (`count == 1`); the queue sees only the error, which the sync tests pin. *Reversing:* trivial.
+- **The idle-timeout test sleeps a real 4.5 s.** *Fork:* accept, or make `WRITE_POOL_IDLE`
+  injectable. *Ruling:* accept. *Reasoning:* one test, run in parallel by nextest; a knob would
+  grow the frozen `HttpConfig` for a test. *Reversing:* trivial.
+- **`just kuma-live` on `3b739a9b`, not the head.** *Fork:* re-run on the head or accept.
+  *Ruling:* accept. *Reasoning:* the `src/` diff from `3b739a9b` to `262b44e1` moves `mapped`
+  into the branches that use it and edits docs; behaviour is the same. *Reversing:* trivial.

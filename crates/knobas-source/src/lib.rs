@@ -438,12 +438,14 @@ pub enum SourceError {
     Unreachable(String),
     /// A write that may be applied only once reached the source, and no answer
     /// it can read says whether the source acted (issue #1125): it timed out
-    /// after the request went out, a gateway answered `502`/`504` for it, or
+    /// after the request went out, a gateway answered `502`/`504` for it, the
+    /// server read it and closed the connection without answering (#1821), or
     /// (Kuma) an acknowledgement arrived in a shape knobas cannot read.
     ///
     /// Raised by `knobas_http` for a request sent with
     /// `Request::no_retry`, which is how an adapter says a write must not
-    /// arrive twice. Everywhere but the write queue it reads as
+    /// arrive twice, and for any request but a `GET` or `HEAD` the server
+    /// hung up on that way, since it is never sent again (#1821). Everywhere but the write queue it reads as
     /// [`Unreachable`](Self::Unreachable). An adapter whose write takes more
     /// than one request turns it back into `Unreachable` when the request
     /// that failed came before the write's own (Kuma's login,

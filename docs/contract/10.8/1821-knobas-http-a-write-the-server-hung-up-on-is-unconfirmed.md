@@ -22,6 +22,10 @@
     Kuma's socket.io packets also go). The read client keeps reqwest's default.
   - Docs: the crate doc's Retries bullet, `send`'s Errors, `classify::once_sent` and
     `retry::closed_before_answering` say so. `once_sent`'s signature is unchanged.
+
+  **`crates/knobas-source/**` (doc only):** `SourceError::Unconfirmed`'s doc names the hang-up
+  among its causes and `knobas_http`'s raising of it for any request but a `GET` or `HEAD`. No
+  change to the SPI.
   - `tests/transport.rs`, `hung_up` module: `a_write_the_server_hung_up_on_is_not_sent_again`
     (`POST` with and without `no_retry`) and `a_read_sent_with_no_retry_is_not_sent_again` now
     expect `Unconfirmed { status: None }`; new
