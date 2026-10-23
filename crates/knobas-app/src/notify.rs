@@ -471,7 +471,7 @@ mod tests {
     /// event carrying the address -- while a clear leaves as nothing.
     ///
     /// The silence is asserted against the click in the same test, the rule
-    /// `notify.test.svelte.ts` follows: "nothing was emitted" alone cannot
+    /// `notify.test.ts` follows: "nothing was emitted" alone cannot
     /// tell a working `__closed` branch from a bench whose events port was
     /// never wired.
     #[test]
