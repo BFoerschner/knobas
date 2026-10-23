@@ -208,6 +208,21 @@ fn the_opener_plugin_is_registered() {
     );
 }
 
+/// `setup` manages the file manager `open_backup_folder` opens with (#1704).
+///
+/// The command's tests manage a recording opener of their own, so without this
+/// line `setup` could drop the real one and every test would still pass while
+/// the button answered `not_ready`.
+#[test]
+fn setup_manages_the_platform_folder_opener() {
+    let code = strip_comments(include_str!("../../src/lib.rs"));
+    assert!(
+        code.contains("handle.manage(backup::FolderOpener::platform());"),
+        "`setup` does not manage `FolderOpener::platform()`, so *Open the backup folder* \
+         answers not_ready in the app"
+    );
+}
+
 /// Each Tauri plugin's two halves are pinned to **one** version.
 ///
 /// A plugin is a Rust crate and an npm package speaking one protocol over

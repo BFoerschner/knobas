@@ -135,12 +135,7 @@ pub async fn restore_backup<R: tauri::Runtime>(
 pub async fn open_backup_folder<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<(), IpcError> {
-    use tauri::Manager as _;
-
-    let starting = || IpcError::not_ready("knobas is still starting".to_owned());
-    let profile = app.try_state::<crate::Profile>().ok_or_else(starting)?;
-    let opener = app.try_state::<backup::FolderOpener>().ok_or_else(starting)?;
-    backup::folder::open(&profile, &opener)
+    backup::folder::open_managed(&app)
 }
 
 #[cfg(test)]

@@ -1207,6 +1207,7 @@ knobas-app	test/it	week_ipc::the_no_target_row_tells_app_open_from_app_closed_an
 knobas-app	test/it	wiring::each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge
 knobas-app	test/it	wiring::every_command_is_in_the_handler_list
 knobas-app	test/it	wiring::no_grant_reaches_further_than_the_app_does
+knobas-app	test/it	wiring::setup_manages_the_platform_folder_opener
 knobas-app	test/it	wiring::the_capture_window_may_close_itself_and_nothing_more
 knobas-app	test/it	wiring::the_global_shortcut_plugin_is_pinned_and_has_no_javascript_half
 knobas-app	test/it	wiring::the_global_shortcut_plugin_is_registered_with_a_handler

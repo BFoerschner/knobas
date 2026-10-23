@@ -2395,8 +2395,15 @@ fn open_backup_folder_opens_the_running_profiles_folder_and_no_other() {
         let profile = knobas_app::Profile::new(demo, data.path());
         let (outcome, opened) = open_backup_folder_as(profile, Ok(()));
         outcome.unwrap_or_else(|rejection| panic!("demo={demo}: refused: {rejection}"));
-        assert_eq!(&opened, &[own.clone()], "demo={demo}: the running profile's backups folder, once");
-        assert!(!opened.contains(other), "demo={demo}: the other profile's folder was opened");
+        assert_eq!(
+            &opened,
+            std::slice::from_ref(own),
+            "demo={demo}: the running profile's backups folder, once"
+        );
+        assert!(
+            !opened.contains(other),
+            "demo={demo}: the other profile's folder was opened"
+        );
         assert!(
             own.is_dir(),
             "demo={demo}: a profile that has not exported yet still gets a folder to open"
@@ -2415,6 +2422,12 @@ fn a_folder_the_opener_refuses_is_an_error_that_names_it() {
     let rejection = outcome.expect_err("the opener refused");
     assert_eq!(opened.len(), 1, "the opener was asked once");
     assert!(rejection.contains("internal"), "{rejection}");
-    assert!(rejection.contains("no application knows this folder"), "{rejection}");
-    assert!(rejection.contains("backups"), "the error names the folder: {rejection}");
+    assert!(
+        rejection.contains("no application knows this folder"),
+        "{rejection}"
+    );
+    assert!(
+        rejection.contains("backups"),
+        "the error names the folder: {rejection}"
+    );
 }

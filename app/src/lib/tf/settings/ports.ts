@@ -231,7 +231,6 @@ export const realSectionPorts: SectionPorts = {
     const { openPath } = await import("@tauri-apps/plugin-opener");
     await openPath(await appLogDir());
   },
-  // A command, not the opener's `open-path` (#1704): one window grant could
-  // not tell the demo profile's folder from the real one's.
+  // The running profile's folder, chosen in Rust (#1704).
   openBackupFolder: () => openBackupFolder(),
 };

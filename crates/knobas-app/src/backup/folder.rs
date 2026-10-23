@@ -56,6 +56,30 @@ impl FolderOpener {
             tauri_plugin_opener::open_path(folder, None::<&str>).map_err(|error| error.to_string())
         }))
     }
+
+    /// Open `folder` with this opener.
+    ///
+    /// # Errors
+    /// The opener's refusal, as text.
+    pub fn open(&self, folder: &Path) -> Result<(), String> {
+        self.0.open(folder)
+    }
+}
+
+/// [`open`] for the profile and opener `setup` managed, or the one honest
+/// refusal for a call that beat `setup` (as [`super::state`] answers for the
+/// database).
+///
+/// # Errors
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before `setup` has managed the
+/// profile and the opener, and whatever [`open`] refuses with.
+pub fn open_managed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), IpcError> {
+    use tauri::Manager as _;
+
+    let starting = || IpcError::not_ready("knobas is still starting".to_owned());
+    let profile = app.try_state::<Profile>().ok_or_else(starting)?;
+    let opener = app.try_state::<FolderOpener>().ok_or_else(starting)?;
+    open(&profile, &opener)
 }
 
 /// Open `profile`'s backup folder, creating it first.
@@ -73,8 +97,7 @@ pub fn open(profile: &Profile, opener: &FolderOpener) -> Result<(), IpcError> {
     std::fs::create_dir_all(&folder).map_err(|error| {
         IpcError::internal(format!("could not create {}: {error}", folder.display()))
     })?;
-    opener
-        .0
-        .open(&folder)
-        .map_err(|error| IpcError::internal(format!("could not open {}: {error}", folder.display())))
+    opener.open(&folder).map_err(|error| {
+        IpcError::internal(format!("could not open {}: {error}", folder.display()))
+    })
 }

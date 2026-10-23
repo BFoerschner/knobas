@@ -1,9 +1,11 @@
 - **The IPC command schema and the Rust handler barrel — issue #1704 (2026-10-23): one command,
   `open_backup_folder`, which opens the running profile's backup folder in the file manager.**
-  Review finding LIFE-10. No migration, no event, no new type, no new module in `commands/` or
+  Review finding LIFE-10. No migration, no event, no new IPC type, no new module in `commands/` or
   `ipc/`; the command sits in the existing `commands/backup.rs` and is appended to the backup group
-  of the handler list, after `restore_backup`. The logic is the new `knobas_app::backup::folder`
-  (`crates/knobas-app/src/backup/folder.rs`), with its managed opener `backup::FolderOpener`, which
+  of the handler list, after `restore_backup`. The logic is the new Rust module
+  `knobas_app::backup::folder` (`crates/knobas-app/src/backup/folder.rs`): `open` and
+  `open_managed`, the `Opener` trait (closures implement it, as `notify::Backend`), and the managed
+  opener `FolderOpener` (re-exported as `backup::FolderOpener`), whose `FolderOpener::platform()`
   `setup` manages beside the `Profile`.
 
   ```rust
@@ -22,7 +24,11 @@
   `app/src/lib/ipc/backup.ts` (`openBackupFolder`), held by `commands/backup.rs`'s
   `the_mirror_invokes_the_commands_by_their_registered_names` (now six commands), answered by the
   fake IPC (`fake/settings.ts`, opening nothing), called by `SectionPorts.openBackupFolder` in
-  `app/src/lib/tf/settings/ports.ts`, which loses its `directory` argument. Witnessed by
+  `app/src/lib/tf/settings/ports.ts`, which loses its `directory` argument (the section's
+  `TfSettingsSections.test.svelte.ts` expects the call with none). Witnessed by
   `tests/it/backup_ipc.rs`'s `open_backup_folder_opens_the_running_profiles_folder_and_no_other`
-  and `a_folder_the_opener_refuses_is_an_error_that_names_it`, and by `tests/it/wiring.rs`'s
-  `the_window_may_open_the_log_folder_and_no_other_path`.
+  and `a_folder_the_opener_refuses_is_an_error_that_names_it`, with `open_backup_folder` added to
+  `every_backup_command_is_registered_and_its_arguments_decode`; and by `tests/it/wiring.rs`'s
+  `setup_manages_the_platform_folder_opener` (new) and
+  `the_window_may_open_the_log_folder_and_no_other_path` (renamed from
+  `the_window_may_open_the_log_and_backup_folders_and_no_other_path`).

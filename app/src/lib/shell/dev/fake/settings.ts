@@ -5,8 +5,9 @@
  * Answers `passive_attribution`, `set_passive_attribution`,
  * `monitoring_settings`, `set_monitoring_settings`, `backup_status`,
  * `backup_now`, `set_backup_schedule` and `open_backup_folder` (which opens
- * nothing: a browser has no file manager to show the folder in). Notifications are `inbox.ts`'s and
- * Standup's publish target is `standup.ts`'s, each beside the data it names.
+ * nothing: a browser has no file manager to show the folder in).
+ * Notifications are `inbox.ts`'s and Standup's publish target is
+ * `standup.ts`'s, each beside the data it names.
  *
  * **Values are prototype-6's `STGV` pages**: passive blocks on; slow above
  * 2000 ms and samples kept 30 days; the last backup "today 02:00, 48 MB",
