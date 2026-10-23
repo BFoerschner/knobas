@@ -64,13 +64,16 @@ macro_rules! parent_names {
 }
 pub(crate) use parent_names;
 
-/// The distinct lowercased names among `$1` that a parent answers to:
-/// [`parent_names!`] without the kind. `lower(ip.name)` is
-/// `item_parent_name_idx`'s expression, so the mirror's arm is an index read.
+/// The distinct typed values among `$1` that a parent answers to:
+/// [`parent_names!`] without the kind, compared as `lower(p.name) =
+/// lower(v.t)` -- **in SQL on both sides** (#1652), as `PARENTS_SQL` is, so a
+/// value Rust and the server lower-case differently (`İ`) is still known.
+/// `lower(ip.name)` is `item_parent_name_idx`'s expression, so the mirror's
+/// arm is an index read.
 const KNOWN_SQL: &str = concat!(
-    "select distinct lower(p.name) from ",
+    "select distinct v.t from unnest($1::text[]) v(t) join ",
     parent_names!(),
-    " p where lower(p.name) = any($1)"
+    " p on lower(p.name) = lower(v.t)"
 );
 
 /// Report every `under:` value no parent answers to as an unknown token, in

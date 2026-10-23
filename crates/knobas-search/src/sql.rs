@@ -606,7 +606,8 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
             // again needs no change here.
             Some(under) => format!(
                 "exists (select 1 from (select {declarations}::jsonb as d, \
-                 {values}::text[] as v) ud where {under})"
+                 {} as v) ud where {under})",
+                lowered(values)
             ),
             // A corpus whose rows declare no parent sits beneath nothing.
             None => "false".to_owned(),
@@ -659,18 +660,28 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
     predicates
 }
 
+/// A text-array placeholder with every value lower-cased **by the server**
+/// (#1652): the typed value is bound as typed, so it is folded by the same
+/// `lower()` as the stored side it is compared to, not by Rust's
+/// `to_lowercase`, which differs from libc on `İ` and a final sigma. An
+/// uncorrelated `array(...)`, so it is one init plan per statement.
+fn lowered(placeholder: &str) -> String {
+    format!("array(select lower(lv.x) from unnest({placeholder}::text[]) lv(x))")
+}
+
 /// What the tickets a `reach:` names reach (#817), as one subquery over the
 /// values' placeholder: `knobas_core::reach_walk!`, the walk the job-reach
 /// read makes, started from every ticket whose id or key is one of the
 /// values. Every corpus reads the same ids, so an asset, a note or a route is
 /// kept exactly when the read would list it.
 fn reach_ids(values: &str) -> String {
+    let values = lowered(values);
     format!(
         "with recursive start(t) as (
         select e.id from knobas.entity e
          where e.kind = 'ticket'
-           and (lower(e.id) = any({values}::text[])
-                or lower(substr(e.id, strpos(e.id, ':') + 1)) = any({values}::text[]))
+           and (lower(e.id) = any({values})
+                or lower(substr(e.id, strpos(e.id, ':') + 1)) = any({values}))
     ),
     {}
     select r.id from reached r",

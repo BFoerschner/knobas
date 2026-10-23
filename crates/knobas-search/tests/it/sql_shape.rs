@@ -835,7 +835,16 @@ async fn hostile_text_is_a_search_term_and_nothing_else() {
                 named_authors: vec![evil.to_owned()],
                 // A parent value travels as a bind like every other, and so
                 // does the declaration it is read through.
-                under: vec![evil.to_owned()],
+                //
+                // And so do values the server and Rust lower-case
+                // differently (#1652): a dotted capital I and a final sigma.
+                under: vec![
+                    evil.to_owned(),
+                    "İstanbul Rollout".to_owned(),
+                    "ΌΔΟΣ".to_owned(),
+                ],
+                reach: vec!["İSTANBUL-1".to_owned(), "ΌΔΟΣ-1".to_owned()],
+                names: vec!["İstanbul*".to_owned(), "ΌΔΟΣ?".to_owned()],
                 ..EffectiveFilters::default()
             },
             10,

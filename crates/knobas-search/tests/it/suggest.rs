@@ -855,3 +855,50 @@ async fn the_parents_statement_is_never_a_named_prepared_statement() {
          planned generically from its sixth execution"
     );
 }
+
+/// A parent whose name Rust and the server lower-case differently (#1652):
+/// `İ` is `i̇` (two code points) to Rust and `i` to the server's `lower()`.
+/// The box offers the page, because the statement lowers both sides, so
+/// `under:` has to as well: it knows the name and scopes to the children.
+#[tokio::test]
+async fn under_scopes_to_a_parent_whose_name_lowercases_differently_in_rust() {
+    let pool = pool().await;
+    let t = token();
+    let name = format!("İstanbul Rollout {t}");
+    asset(&pool, &format!("asset:ist-{t}"), None, &name).await;
+    asset(
+        &pool,
+        &format!("asset:ist-child-{t}"),
+        Some(&format!("asset:ist-{t}")),
+        &format!("Child {t}"),
+    )
+    .await;
+    let searcher = searcher(&pool).await;
+
+    let offered = parents_of(&searcher, &[String::new(), "İstanbul".to_owned()], &t).await;
+    assert!(offered.contains(&parent(&name, "asset")), "{offered:?}");
+
+    let response = searcher
+        .search(SearchQuery {
+            raw: typed_under(&name),
+            limit: 30,
+            filters: SearchFilters::default(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        response.interpreted.unknown_tokens.is_empty(),
+        "{name} is offered and greyed out: {:?}",
+        response.interpreted.unknown_tokens
+    );
+    let mut found: Vec<String> = response
+        .groups
+        .iter()
+        .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        [format!("asset:ist-child-{t}"), format!("asset:ist-{t}")]
+    );
+}
