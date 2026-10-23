@@ -188,7 +188,7 @@ pub struct EmbeddedDb {
     /// stopping the server. `None` only when `existing_url` points at a
     /// server knobas does not manage at all: a managed start either takes
     /// the lock or is refused.
-    owner_lock: Option<File>,
+    owner_lock: Option<OwnerLock>,
 }
 
 /// How to open a connection to a knobas database.
@@ -840,10 +840,31 @@ async fn launch(root_dir: &Path, settings: Settings) -> Result<EmbeddedDb, DbErr
 /// *and take responsibility for it*.
 const OWNER_LOCK: &str = ".owner.lock";
 
+/// The ownership lock, held by this process until this is dropped.
+///
+/// Dropping it **unlocks** the file before closing it (#1802). Closing alone
+/// does not release an OS lock while another copy of the descriptor is
+/// open, and every process spawned holds such a copy from its fork to its
+/// exec: a release that closed the file while another thread was spawning
+/// -- `pg_ctl`, `git`, anything -- left the lock held for that long, and a
+/// launch in that instant was refused naming this process. The unlock
+/// releases the lock itself, whoever still holds a copy of the descriptor.
+/// A process that dies cannot unlock, and its lock goes with the last copy,
+/// a child's exec at the latest.
+struct OwnerLock(File);
+
+impl Drop for OwnerLock {
+    fn drop(&mut self) {
+        // Nothing to report to: the close that follows releases it anyway,
+        // as it did before #1802, only later.
+        let _ = self.0.unlock();
+    }
+}
+
 /// Who is responsible for stopping the server serving a `root_dir`.
 enum Ownership {
-    /// This process: the lock is held for as long as the file is.
-    Ours(File),
+    /// This process: the lock is held for as long as the [`OwnerLock`] is.
+    Ours(OwnerLock),
     /// A live process holds the lock. `by` is the pid it wrote into the
     /// file, `None` when it has not written one yet or it cannot be read.
     Held { by: Option<u32> },
@@ -883,7 +904,7 @@ fn claim_ownership(root_dir: &Path) -> Result<Ownership, DbError> {
                     "could not write our pid into the ownership lock"
                 );
             }
-            Ok(Ownership::Ours(file))
+            Ok(Ownership::Ours(OwnerLock(file)))
         }
         Err(TryLockError::WouldBlock) => {
             let mut contents = String::new();
@@ -1108,7 +1129,11 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
 /// so a dead pid gets here only when the start failed for another reason. The
 /// recovery then hands that reason back instead of a conflict that does not
 /// exist.
-async fn adopt(mut settings: Settings, port: u16, owner_lock: File) -> Result<Started, DbError> {
+async fn adopt(
+    mut settings: Settings,
+    port: u16,
+    owner_lock: OwnerLock,
+) -> Result<Started, DbError> {
     let data_dir = settings.data_dir.clone();
     // The recorded port, not the 0 that `build_settings` asks a fresh start to
     // pick: this server chose its port long ago.
@@ -2125,7 +2150,7 @@ mod tests {
     }
 
     /// An ownership lock of this test's own, for `adopt` to take over.
-    fn owner_lock(dir: &Path) -> File {
+    fn owner_lock(dir: &Path) -> OwnerLock {
         match claim_ownership(dir).unwrap() {
             Ownership::Ours(file) => file,
             Ownership::Held { by } => panic!("a fresh directory's lock is held by {by:?}"),
@@ -2223,5 +2248,50 @@ mod tests {
             bring_up_lock(dir.path()).await.is_ok(),
             "dropping the guard must release the lock"
         );
+    }
+
+    /// A dropped ownership lock is free at once, even while another thread
+    /// is spawning a process (#1802). A child between its fork and its exec
+    /// holds a copy of every descriptor, the lock's among them, and an OS
+    /// lock on a file lasts until the last copy closes: a release that only
+    /// closed the descriptor left the lock held for as long as that child
+    /// took to exec, and a relaunch in that instant was refused naming this
+    /// very process. The spawns are what every test beside an embedded one
+    /// does, `pg_ctl` and `initdb`; any program stands in for them.
+    #[test]
+    fn a_released_ownership_lock_is_free_while_children_are_spawned() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let dir = tempfile::tempdir().unwrap();
+        let done = Arc::new(AtomicBool::new(false));
+        let spawners: Vec<_> = (0..2)
+            .map(|_| {
+                let done = Arc::clone(&done);
+                std::thread::spawn(move || {
+                    while !done.load(Ordering::Relaxed) {
+                        let _ = std::process::Command::new("true").status();
+                    }
+                })
+            })
+            .collect();
+
+        let mut refused = 0;
+        for _ in 0..300 {
+            match claim_ownership(dir.path()).unwrap() {
+                // Held across a moment of spawning, then released.
+                Ownership::Ours(lock) => {
+                    std::thread::sleep(Duration::from_micros(200));
+                    drop(lock);
+                }
+                Ownership::Held { .. } => refused += 1,
+            }
+        }
+        done.store(true, Ordering::Relaxed);
+        for spawner in spawners {
+            spawner.join().unwrap();
+        }
+
+        assert_eq!(refused, 0, "claims refused after their lock was dropped");
     }
 }
