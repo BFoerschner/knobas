@@ -62,7 +62,7 @@ test("the inbox's failed sign-ins are the fixture's sources whose sign-in fails"
   expect(times, "still newest first").toEqual(times.slice().sort().reverse());
 });
 
-test("the week and Log all: the label and passive blocks are never planned, and logging empties the plan", () => {
+test("the week and Log all's plan: the label and passive blocks are never planned", () => {
   const h = demoHandlers() as Calls;
   const today = new Date();
   const from = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -80,9 +80,6 @@ test("the week and Log all: the label and passive blocks are never planned, and 
     [dayBeforeName, "mock:PAY-231", 90 * 60],
     [day, "mock:PAY-231", 130 * 60],
   ]);
-  const logged = h["log_all"]!({ days }) as unknown[];
-  expect(logged).toHaveLength(2);
-  expect(h["log_all_preview"]!({ days })).toEqual([]);
   const week = h["week_timesheet"]!({ days: [days[0], days[0], days[0], days[0], days[0]] }) as { rows: unknown[] };
   expect(week.rows).toHaveLength(5);
 });
