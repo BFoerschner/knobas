@@ -13,6 +13,7 @@ use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{self, Read, Seek, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use postgresql_embedded::{PostgreSQL, Settings, VersionReq};
@@ -225,6 +226,11 @@ pub struct Connector {
     /// world-readable in `ps` and the environment of another user's process is
     /// not.
     password: Option<String>,
+    /// Whatever must stay alive for as long as any clone of this connector
+    /// does: a test database's lease (`test_util`), which hands the database
+    /// on to another test only once nothing can reach it under this name.
+    /// `None` for every connector the application makes.
+    keep: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 impl std::fmt::Debug for Connector {
@@ -245,6 +251,7 @@ impl Connector {
         Ok(Connector {
             options: url.parse()?,
             password: password_of(url),
+            keep: None,
         })
     }
 
@@ -258,7 +265,16 @@ impl Connector {
         Connector {
             options: self.options.clone().database(database),
             password: self.password.clone(),
+            keep: self.keep.clone(),
         }
+    }
+
+    /// This connector, keeping `keep` alive until its last clone is gone.
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub(crate) fn keeping(mut self, keep: Arc<dyn std::any::Any + Send + Sync>) -> Connector {
+        self.keep = Some(keep);
+        self
     }
 
     /// The database this connector opens, when the URL named one.

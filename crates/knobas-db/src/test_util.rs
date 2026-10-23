@@ -84,6 +84,8 @@ use sqlx::{Connection, PgPool};
 
 use crate::{DbConfig, EmbeddedDb};
 
+mod recycle;
+
 /// Prefix for this crate's scratch directories under the system temp dir.
 const DIR_PREFIX: &str = "knobas-test-";
 
@@ -291,15 +293,40 @@ impl Server {
 /// there is no useful way for a test to continue without one.
 pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    static SHELF: recycle::Shelf = recycle::Shelf::new();
 
-    let name = format!(
-        "knobas_scratch_{}_{}_{}",
-        identifier_slug(label),
-        std::process::id(),
-        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    );
+    let next_name = || {
+        format!(
+            "knobas_scratch_{}_{}_{}",
+            identifier_slug(label),
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        )
+    };
+    let server = &shared_server().await.connector;
+    let template = template(server).await;
 
-    create_migrated_database(&shared_server().await.connector, &name).await
+    while let Some(returned) = SHELF.take() {
+        let name = next_name();
+        match recycle::recycle(server, &returned, &name, template).await {
+            Ok(Some(snapshot)) => {
+                return recycle::lease(&SHELF, server.with_database(&name), name, snapshot);
+            }
+            Ok(None) => {}
+            Err(error) => eprintln!(
+                "test_util: {} could not be reused ({error}); trying the next one",
+                returned.name
+            ),
+        }
+    }
+    let name = next_name();
+    create_database(server, &name, Some(&template.name)).await;
+    recycle::lease(
+        &SHELF,
+        server.with_database(&name),
+        name,
+        template.snapshot.clone(),
+    )
 }
 
 /// `text` reduced to what may sit inside a database name without quoting:
@@ -318,7 +345,7 @@ fn identifier_slug(text: &str) -> String {
 /// database` takes no parameter.
 ///
 /// The database is a copy of this process's migrated template (#925): the
-/// migrations run once per process, into [`template_name`], and every database
+/// migrations run once per process, into [`template`], and every database
 /// after that is `create database ... template` of it, instead of a fresh
 /// `create database` plus every migration for each one.
 ///
@@ -329,7 +356,7 @@ async fn create_migrated_database(
     server: &crate::embedded::Connector,
     name: &str,
 ) -> crate::embedded::Connector {
-    let template = template_name(server).await;
+    let template = &template(server).await.name;
     create_database(server, name, Some(template)).await;
     server.with_database(name)
 }
@@ -342,8 +369,12 @@ async fn create_migrated_database(
 /// gate's server, and a template they all copied would need them to agree on
 /// who migrates it. One migration per binary instead of one per scratch
 /// database is the saving that matters.
-async fn template_name(server: &crate::embedded::Connector) -> &'static str {
-    static TEMPLATE: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+///
+/// What a fresh copy of it looks like is read here too, while it is still
+/// open, for [`scratch_database`] to put a database a test is done with back
+/// into that state ([`recycle`]).
+async fn template(server: &crate::embedded::Connector) -> &'static recycle::Template {
+    static TEMPLATE: tokio::sync::OnceCell<recycle::Template> = tokio::sync::OnceCell::const_new();
     TEMPLATE
         .get_or_init(|| async {
             let name = format!("knobas_template_{}", identifier_slug(run_nonce()));
@@ -356,8 +387,13 @@ async fn template_name(server: &crate::embedded::Connector) -> &'static str {
             crate::migrate::run(&pool)
                 .await
                 .expect("migrate the template database");
+            let mut conn = pool.acquire().await.expect("a session on the template");
+            let template = recycle::capture(&mut *conn, name)
+                .await
+                .expect("read the template's state");
+            drop(conn);
             pool.close().await;
-            name
+            template
         })
         .await
 }
