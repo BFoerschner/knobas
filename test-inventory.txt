@@ -1601,6 +1601,7 @@ knobas-db	lib/knobas_db	backup::tests::an_object_with_no_schema_reads_a_dash
 knobas-db	lib/knobas_db	backup::tests::the_header_and_the_comments_are_not_entries
 knobas-db	lib/knobas_db	embedded::tests::a_launch_that_started_cold_authenticates_with_the_recorded_password
 knobas-db	lib/knobas_db	embedded::tests::a_path_that_cannot_be_resolved_is_never_proof_of_a_mismatch
+knobas-db	lib/knobas_db	embedded::tests::a_released_ownership_lock_is_free_while_children_are_spawned
 knobas-db	lib/knobas_db	embedded::tests::a_stranger_on_the_recorded_port_clears_the_lock_whatever_the_pid_is_doing
 knobas-db	lib/knobas_db	embedded::tests::a_tool_comes_from_the_pinned_version_when_several_are_installed
 knobas-db	lib/knobas_db	embedded::tests::a_tool_is_still_found_without_a_version_directory
