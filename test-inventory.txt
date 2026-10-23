@@ -1400,6 +1400,9 @@ knobas-core	test/it	contexts::reviving_leaves_an_older_archived_context_behind_a
 knobas-core	test/it	contexts::the_anchor_index_refuses_a_second_context_as_a_duplicate
 knobas-core	test/it	contexts::the_merged_walk_is_the_union_of_every_contexts_members
 knobas-core	test/it	contexts::the_one_time_pass_archives_done_jobs_and_is_a_no_op_the_second_time
+knobas-core	test/it	detail::a_turned_off_sources_ticket_opens_and_says_no_status
+knobas-core	test/it	detail::an_unconfigured_source_falls_back_to_its_id_and_names_no_adapter
+knobas-core	test/it	detail::nothing_in_the_mirror_is_none
 knobas-core	test/it	estate_file::a_monitor_is_named_by_a_name
 knobas-core	test/it	estate_file::every_compose_service_runs_on_the_notebooks_engine
 knobas-core	test/it	estate_file::every_compose_service_the_notebook_runs_is_recorded
