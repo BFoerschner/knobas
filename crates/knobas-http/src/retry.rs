@@ -53,10 +53,12 @@ pub fn error_is_transient(error: &reqwest::Error) -> bool {
 /// default is 5 s, and Kuma's `live_kuma` suite met it between two syncs. The
 /// request was written, so it may have been read: only a method that is safe
 /// to repeat may be sent again on it, and [`HttpClient::send`] does that once,
-/// for a `GET` or `HEAD` that did not opt out ([`Request::no_retry`]). A body
+/// for a `GET` or `HEAD` that did not opt out ([`Request::no_retry`]). Any
+/// other request it matches is [`SourceError::Unconfirmed`] (#1821). A body
 /// that breaks off after its headers fails the body's read, never `send`, so
 /// it is not this.
 ///
+/// [`SourceError::Unconfirmed`]: knobas_source::SourceError::Unconfirmed
 /// [`HttpClient::send`]: crate::HttpClient::send
 /// [`Request::no_retry`]: crate::Request::no_retry
 #[must_use]

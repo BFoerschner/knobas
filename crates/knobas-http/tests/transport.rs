@@ -2396,10 +2396,13 @@ mod hung_up {
     }
 
     /// **A write the server hung up on is never sent again**, whether or not
-    /// it opted out of retries (ADR-0012).
+    /// it opted out of retries (ADR-0012), **and is `Unconfirmed`** (#1821).
     ///
     /// The server read it whole; whether it acted on it before closing is
-    /// what the client cannot know, so the write keeps its once-sent reading.
+    /// what the client cannot know. That is `classify::once_sent`'s reading
+    /// of a request that reached the source and got no answer, so the write
+    /// queue holds a write a second arrival would duplicate rather than
+    /// refuse it.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_write_the_server_hung_up_on_is_not_sent_again() {
         for no_retry in [true, false] {
@@ -2421,14 +2424,41 @@ mod hung_up {
             assert_eq!(server.hung_up(), [line], "no_retry {no_retry}");
             assert_eq!(server.count(line), 1, "no_retry {no_retry}: sent again");
             assert!(
-                matches!(error, SourceError::Protocol { status: None, .. }),
+                matches!(error, SourceError::Unconfirmed { status: None, .. }),
                 "no_retry {no_retry}: {error:?}"
             );
         }
     }
 
+    /// **A write does not go out on a connection idle for
+    /// [`knobas_http::WRITE_POOL_IDLE`]** (#1821): the write client lets it
+    /// go before a server's 5 s keep-alive timeout (Node's, so Kuma's) can
+    /// close it as the write goes out, and opens a fresh one.
+    ///
+    /// The server hangs up on any request after a connection's first, so a
+    /// write sent on the pooled connection would be hung up on, as
+    /// `a_write_the_server_hung_up_on_is_not_sent_again` shows for one sent
+    /// at once. This one is answered.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_write_after_the_pool_idle_timeout_goes_out_on_a_fresh_connection() {
+        let server = HangUpServer::new(HangUp::OnReuse);
+        let client = client(&server);
+        pool_a_write_connection(&client).await;
+
+        tokio::time::sleep(knobas_http::WRITE_POOL_IDLE + Duration::from_millis(500)).await;
+        let answered = client
+            .send(client.request(Method::POST, "/second").no_retry())
+            .await;
+
+        assert!(answered.is_ok(), "{answered:?}");
+        assert!(server.hung_up().is_empty(), "{:?}", server.hung_up());
+        assert_eq!(server.count("POST /second HTTP/1.1"), 1);
+    }
+
     /// **A read sent with `no_retry` is not sent again either**: the
     /// caller asked for one sending, and a `GET` is no exception to that.
+    /// Sent once, it reads as every once-sent request the server hung up on
+    /// does: `Unconfirmed` (#1821).
     #[tokio::test(flavor = "multi_thread")]
     async fn a_read_sent_with_no_retry_is_not_sent_again() {
         let server = HangUpServer::new(HangUp::OnReuse);
@@ -2444,7 +2474,7 @@ mod hung_up {
         assert_eq!(server.hung_up(), [line]);
         assert_eq!(server.count(line), 1, "sent again: {:?}", server.lines());
         assert!(
-            matches!(error, SourceError::Protocol { status: None, .. }),
+            matches!(error, SourceError::Unconfirmed { status: None, .. }),
             "{error:?}"
         );
     }

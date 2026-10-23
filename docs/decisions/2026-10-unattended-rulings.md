@@ -13882,3 +13882,76 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   for it is rare (no adapter does) but gets what it asked for. Pinned by the new
   `hung_up::a_read_sent_with_no_retry_is_not_sent_again`, which fails if the once-sent branch
   also resends a read. *Reversing:* low.
+
+## #1821: a write the server hung up on before answering (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): the frozen-surface
+  change** to `crates/knobas-http/**`. *Fork:* change the frozen crate, or leave the reading as
+  it is. *Ruling:* change it, booked in
+  `docs/contract/10.8/1821-knobas-http-a-write-the-server-hung-up-on-is-unconfirmed.md`: one
+  new branch in `send_with`'s transport classifier and one new public constant. *Reasoning:* the
+  ticket names the change and the waiver lets an Opus implementer rule it; the limiter, the quota
+  mark, #1640's changes and #1818's resend of a read are untouched. *Reversing:* low.
+- **The reading (fork a).** *Fork:* keep `Protocol { status: None }` (refused by the queue), or
+  read the hang-up as `Unconfirmed { status: None }` through `classify::once_sent`. *Ruling:*
+  `Unconfirmed`. *Reasoning:* the server read the request whole and gave no answer, which is
+  ADR-0012's (#1125's) case of a request that reached the source and got none, the same as a
+  timeout or a `502`/`504`. Refused was the one wrong reading: a ticket that may stand at the
+  source showed as one that never would. The queue now holds a write a second arrival would
+  duplicate and ladders one whose resend is harmless, as #1627 does for Kuma. *Reversing:* low.
+- **Which requests read so.** *Fork:* `no_retry` writes only, every write, or every request not
+  sent again for the hang-up. *Ruling:* every request not sent again for it: any method but `GET`
+  and `HEAD`, retries or not, and any request sent with `no_retry`, a `GET` included. A `GET` or
+  `HEAD` with retries is sent once more (#1818), and its second hang-up stays `Protocol`.
+  *Reasoning:* a write that kept retries was still sent once on this failure (#1818 never resends
+  one), so it is in the same doubt; the #1122 audit gave retries to writes whose resend is
+  harmless, so the queue ladders them. A `no_retry` read is `once_sent`'s domain like any
+  once-sent request, and `Unconfirmed` reads as `Unreachable` everywhere outside the write queue.
+  This supersedes #1818's "Writes" ruling, which left this to #1821. *Reversing:* low.
+- **How it goes through `once_sent`.** *Fork:* a new public classifier, a new parameter on
+  `once_sent`, or hand the hang-up in as what it is to `once_sent`. *Ruling:* the last:
+  `once_sent(Unreachable(<message>), connected = true)`. *Reasoning:* the server did not answer,
+  which is `Unreachable`'s meaning, and the connection had opened; `once_sent` already maps that
+  to `Unconfirmed`, so the frozen signature stays and no second rule exists. *Reversing:* trivial.
+- **A `pool_idle_timeout` on the write client (fork b).** *Fork:* none, one on both clients, one
+  on the write client, or no pooling for writes at all. *Ruling:* 4 s on the write client only
+  (`WRITE_POOL_IDLE`). *Reasoning:* reads are covered by #1818's resend, so #1818's ruling
+  against a timeout stands for them. A write has no resend, and under fork a the race now costs
+  the reader a held create to check. Kuma's socket.io packets go on the write client and Node's
+  keep-alive is 5 s (Apache's too) against Kuma's 15 s `IDLE_REUSE`, so a held session's emit
+  could meet the close; 4 s lets the connection go first, and the cost is one fresh connection
+  for a write after a pause. No pooling at all would cost a handshake per packet of every Kuma
+  exchange. A server with a shorter keep-alive (gunicorn's 2 s) can still race, and fork a reads
+  that honestly. *Reversing:* trivial (one builder call).
+- **Kuma's poll path.** *Fork:* change the Kuma adapter too, or not. *Ruling:* no adapter change.
+  *Reasoning:* the GET polls stay on the read client, and engine.io's polling session is named
+  by its `sid`, not bound to a connection, so a packet on a fresh connection is the same packet.
+  A hang-up on the write's emit is now `Unconfirmed`, which `call_with` returns as it does a lost
+  ack (#1627); one on a login packet is `Unconfirmed` turned `Unreachable` by `not_yet_emitted`,
+  so the write waits on the ladder where it was refused before. `just kuma-live` ran once to
+  witness the write client's change. *Reversing:* low.
+
+### #1821 merge review (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus: the frozen-surface change.** *Fork:* uphold
+  the implementer's ruling or send it back. *Ruling:* upheld. *Reasoning:* the §10.8 entry
+  matches the diff (one classifier branch, one constant, docs, tests); the merge review added the
+  doc-only line on `SourceError::Unconfirmed` and booked it in the entry. *Reversing:* low.
+- **A `no_retry` `GET` the server hung up on reads `Unconfirmed`.** *Fork:* keep `Protocol` for
+  reads, or accept `Unconfirmed`. *Ruling:* accept. *Reasoning:* no production caller sends a
+  `GET` with `no_retry` (all seven call sites, in Jira, Gitea, Confluence, TeamCity and Kuma, are
+  `POST`s). Outside the write queue every consumer reads `Unconfirmed` as `Unreachable`
+  (`scheduler`'s and `run_log`'s `SyncOutcome`, `IpcError::from_source_error`, the sources
+  view's codes and `auth_state_of`), and no adapter matches a status-less `Protocol` from a send.
+  So a `POST`-shaped read hung up on now logs `unreachable` where it logged `error`: both back
+  off, and "the source did not answer" is the true sentence. *Reversing:* trivial.
+- **Mutant "hang-up made transient" survives the sync tests.** *Fork:* add a resend count to the
+  sync fixture, or not. *Ruling:* not owed. *Reasoning:* whether the transport sends again is
+  the transport's property, pinned by `hung_up::a_write_the_server_hung_up_on_is_not_sent_again`
+  (`count == 1`); the queue sees only the error, which the sync tests pin. *Reversing:* trivial.
+- **The idle-timeout test sleeps a real 4.5 s.** *Fork:* accept, or make `WRITE_POOL_IDLE`
+  injectable. *Ruling:* accept. *Reasoning:* one test, run in parallel by nextest; a knob would
+  grow the frozen `HttpConfig` for a test. *Reversing:* trivial.
+- **`just kuma-live` on `3b739a9b`, not the head.** *Fork:* re-run on the head or accept.
+  *Ruling:* accept. *Reasoning:* the `src/` diff from `3b739a9b` to `262b44e1` moves `mapped`
+  into the branches that use it and edits docs; behaviour is the same. *Reversing:* trivial.

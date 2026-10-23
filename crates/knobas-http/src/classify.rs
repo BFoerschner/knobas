@@ -134,13 +134,17 @@ fn message_of(body: &str, body_message: Option<BodyMessage>) -> String {
 /// A timeout after the connection opened, and a gateway's `502`/`504`, say
 /// nothing about whether the source acted, so they become
 /// [`SourceError::Unconfirmed`]: the write queue holds such a write rather
-/// than sending it again. Every other failure keeps its class. A connect error
+/// than sending it again. So does a request the server read and closed its
+/// connection on without answering (#1821): [`HttpClient::send`] hands that
+/// one in as `Unreachable`, since the server did not answer, and it is never
+/// sent again. Every other failure keeps its class. A connect error
 /// stays [`SourceError::Unreachable`] (nothing left this machine), and a
 /// `503`/`429` stays [`SourceError::Protocol`] (the source turned it away).
 ///
 /// `connected` is `false` when the failure was a connect error.
 ///
 /// [`Request::no_retry`]: crate::Request::no_retry
+/// [`HttpClient::send`]: crate::HttpClient::send
 #[must_use]
 pub fn once_sent(error: SourceError, connected: bool) -> SourceError {
     match error {
