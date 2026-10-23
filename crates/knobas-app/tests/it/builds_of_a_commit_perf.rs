@@ -22,7 +22,7 @@
 //! The gate's test seeds this file's database (#572); the reading seeds a
 //! scratch database of its own, so neither size is the other's fixture.
 
-use knobas_app::commands::entity::DETAIL_BUILDS_AT;
+use knobas_core::detail::DETAIL_BUILDS_AT;
 use knobas_app::sources::Registry;
 use sqlx::PgPool;
 

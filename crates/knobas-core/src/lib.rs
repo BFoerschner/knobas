@@ -3,6 +3,7 @@ pub mod asset;
 pub mod builds;
 pub mod checkout;
 pub mod context;
+pub mod detail;
 pub mod entity_list;
 mod error;
 pub mod evidence;

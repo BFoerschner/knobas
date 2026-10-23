@@ -2,7 +2,7 @@
 //! holds the read, its types and the six statements (#1317).
 
 use knobas_core::entity_list::{self, EntityFilter, EntityPage};
-pub(super) use knobas_core::entity_list::{EntityRow, entity_row, state_of};
+pub(super) use knobas_core::entity_list::EntityRow;
 
 use super::*;
 
