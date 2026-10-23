@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { markNeedles } from "../filter/filter";
-import { needles } from "./needles";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { needles, wordAlternatives, type WordAlternative } from "./needles";
 
 describe("needles", () => {
   it("keeps a quoted phrase whole", () => {
@@ -32,4 +34,21 @@ describe("markNeedles", () => {
       { text: " now", hit: false },
     ]);
   });
+});
+
+// `crates/knobas-search/tests/fixtures/needle-parity.json` is read by the Rust
+// test `needles_and_alternatives_match_the_shared_parity_fixture` too: a grammar
+// change on either side fails the other until the fixture and both copies agree.
+describe("parity with knobas_search::query", () => {
+  const rows: { typed: string; needles: string[]; alternatives: WordAlternative[] }[] = JSON.parse(
+    readFileSync(resolve(process.cwd(), "../crates/knobas-search/tests/fixtures/needle-parity.json"), "utf8",
+    ),
+  );
+  it("has rows", () => expect(rows.length).toBeGreaterThan(10));
+  for (const row of rows) {
+    it(`reads ${JSON.stringify(row.typed)} as the server does`, () => {
+      expect(needles(row.typed)).toEqual(row.needles);
+      expect(wordAlternatives(row.typed)).toEqual(row.alternatives);
+    });
+  }
 });

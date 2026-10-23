@@ -1,0 +1,17 @@
+[
+  { "typed": "", "needles": [], "alternatives": [] },
+  { "typed": "Sepa, sepa (SEPA)", "needles": ["sepa"], "alternatives": [{ "holds": ["sepa"], "lacks": [] }] },
+  { "typed": "\"sepa retry\" batch", "needles": ["sepa retry", "batch"], "alternatives": [{ "holds": ["sepa retry", "batch"], "lacks": [] }] },
+  { "typed": "sepa -blocked -\"retry batch\"", "needles": ["sepa"], "alternatives": [{ "holds": ["sepa"], "lacks": ["blocked", "retry batch"] }] },
+  { "typed": "-only", "needles": [], "alternatives": [{ "holds": [], "lacks": ["only"] }] },
+  { "typed": "Retry \"backoff policy\" -cron -\"dead letter\" OR sepa, retry", "needles": ["retry", "backoff policy", "sepa"], "alternatives": [{ "holds": ["retry", "backoff policy"], "lacks": ["cron", "dead letter"] }, { "holds": ["sepa", "retry"], "lacks": [] }] },
+  { "typed": "or a or or -b or", "needles": ["a"], "alternatives": [{ "holds": ["a"], "lacks": [] }, { "holds": [], "lacks": ["b"] }] },
+  { "typed": "error for the ledger or", "needles": ["error", "for", "the", "ledger"], "alternatives": [{ "holds": ["error", "for", "the", "ledger"], "lacks": [] }] },
+  { "typed": "or - \"\"", "needles": [], "alternatives": [] },
+  { "typed": "project:PAY -status:Done @mara /jira kind:pr sepa", "needles": ["sepa"], "alternatives": [{ "holds": ["sepa"], "lacks": [] }] },
+  { "typed": "-@x -/x -#x -kind:pr -updated:7d sepa", "needles": ["sepa"], "alternatives": [{ "holds": ["sepa"], "lacks": [] }] },
+  { "typed": "jira:PAY-231 #PAY-7 #", "needles": ["jira:pay-231", "pay-7"], "alternatives": [{ "holds": ["jira:pay-231", "pay-7"], "lacks": [] }] },
+  { "typed": "-nokey:v payout", "needles": ["payout"], "alternatives": [{ "holds": ["payout"], "lacks": ["nokey:v"] }] },
+  { "typed": "\"note: the colon\" ledger", "needles": ["note: the colon", "ledger"], "alternatives": [{ "holds": ["note: the colon", "ledger"], "lacks": [] }] },
+  { "typed": "Ünïcode straße", "needles": ["ünïcode", "straße"], "alternatives": [{ "holds": ["ünïcode", "straße"], "lacks": [] }] }
+]
