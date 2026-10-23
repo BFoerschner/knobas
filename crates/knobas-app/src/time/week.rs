@@ -365,7 +365,7 @@ fn stretch_of(row: &sqlx::postgres::PgRow) -> Result<Stretch, IpcError> {
         started_at: row.try_get("started_at")?,
         ended_at: row.try_get("ended_at")?,
         target: super::target_of(entity_id, label)?,
-        kind: super::BlockKind::parse(row.try_get::<String, _>("kind")?.as_str())?,
+        kind: row.try_get("kind")?,
         title: title.filter(|title| !title.trim().is_empty()),
     })
 }

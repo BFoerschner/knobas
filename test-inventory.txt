@@ -1353,6 +1353,11 @@ knobas-core	lib/knobas_core	suggest::tests::the_relation_this_rule_proposes_is_t
 knobas-core	lib/knobas_core	suggest::tests::the_rule_classes_are_exactly_what_the_migration_allows
 knobas-core	lib/knobas_core	suggest::tests::the_similar_text_cap_in_the_statement_is_the_one_that_is_documented
 knobas-core	lib/knobas_core	suggest::tests::the_similarity_floor_in_the_statement_is_the_one_that_is_documented
+knobas-core	lib/knobas_core	suggest::tray::tests::the_count_asks_the_room_predicate_and_nothing_else
+knobas-core	lib/knobas_core	suggest::tray::tests::the_count_is_the_statement_the_plan_was_measured_on
+knobas-core	lib/knobas_core	tests::a_spelling_outside_the_vocabulary_is_refused_by_name
+knobas-core	lib/knobas_core	tests::a_variant_displays_as_its_stored_spelling
+knobas-core	lib/knobas_core	tests::every_spelling_parses_back_to_its_variant
 knobas-core	lib/knobas_core	write_queue::tests::a_close_over_a_state_the_declaration_misses_holds_on_the_whole_record
 knobas-core	lib/knobas_core	write_queue::tests::a_comment_over_a_state_the_declaration_misses_holds_on_the_whole_record
 knobas-core	lib/knobas_core	write_queue::tests::a_create_into_an_unmirrored_container_is_not_held

@@ -372,13 +372,14 @@ pub async fn proposal_overflow(
 /// Now an end is in the room by membership in the room's sources' items, a
 /// subquery inside an `or` that cannot be pulled up into a join and so runs
 /// hashed, once: 6 ms never analyzed, 9 ms analyzed, either plan.
-const PROPOSAL_COUNT: &str = "select count(*)
-   from knobas.proposed_link l
-  where ($1::text[] is null
-     or (l.from_id in (select i.entity_id from sync.item i where i.source_id = any($1))) is true
-     or (l.to_id in (select i.entity_id from sync.item i where i.source_id = any($1))) is true)
-    and ($2::text[] is null
-     or l.from_id = any($2) or l.to_id = any($2))";
+///
+/// Its predicate is [`in_room!`] itself, the room every tray statement asks.
+const PROPOSAL_COUNT: &str = concat!(
+    "select count(*)
+       from knobas.proposed_link l
+      where ",
+    in_room!()
+);
 
 /// [`PROPOSAL_COUNT`], for `knobas-app`'s plan test (`tests/it/read_plans.rs`,
 /// #778). It binds what [`proposal_count`] binds.
@@ -598,4 +599,40 @@ async fn settle(
         .fetch_optional(pool)
         .await?;
     existing.map(|_| None).ok_or(CoreError::LinkNotFound(id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Whitespace folded to single spaces: the statements are compared as SQL,
+    /// not as indentation.
+    fn folded(sql: &str) -> String {
+        sql.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// The count is the walk's room, so its predicate is `in_room!` itself and
+    /// not a second spelling of it that the next change to the room misses.
+    #[test]
+    fn the_count_asks_the_room_predicate_and_nothing_else() {
+        let (head, predicate) = PROPOSAL_COUNT
+            .split_once(" where ")
+            .expect("PROPOSAL_COUNT has a where clause");
+        assert_eq!(folded(head), "select count(*) from knobas.proposed_link l");
+        assert_eq!(predicate, in_room!());
+    }
+
+    /// The statement #778 measured, as it read before the predicate was shared:
+    /// sharing it changed no SQL.
+    #[test]
+    fn the_count_is_the_statement_the_plan_was_measured_on() {
+        assert_eq!(
+            folded(PROPOSAL_COUNT),
+            "select count(*) from knobas.proposed_link l \
+             where ($1::text[] is null \
+             or (l.from_id in (select i.entity_id from sync.item i where i.source_id = any($1))) is true \
+             or (l.to_id in (select i.entity_id from sync.item i where i.source_id = any($1))) is true) \
+             and ($2::text[] is null or l.from_id = any($2) or l.to_id = any($2))"
+        );
+    }
 }

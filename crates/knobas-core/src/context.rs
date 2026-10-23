@@ -53,50 +53,6 @@ crate::closed_vocabulary! {
     }
 }
 
-impl std::fmt::Display for ContextKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// A `kind` column value that is not one of the three known kinds.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("unknown context kind {0:?}")]
-pub struct UnknownContextKind(pub String);
-
-impl std::str::FromStr for ContextKind {
-    type Err = UnknownContextKind;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Read off `ALL` rather than a second hand-written match: the point of
-        // declaring the enum as a closed vocabulary is that there is one list.
-        ContextKind::ALL
-            .iter()
-            .copied()
-            .find(|kind| kind.as_str() == s)
-            .ok_or_else(|| UnknownContextKind(s.to_owned()))
-    }
-}
-
-// The column is plain `text`, so the codec borrows `str`'s rather than
-// declaring a PostgreSQL enum type that does not exist.
-impl sqlx::Type<sqlx::Postgres> for ContextKind {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <str as sqlx::Type<sqlx::Postgres>>::type_info()
-    }
-
-    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
-        <&str as sqlx::Type<sqlx::Postgres>>::compatible(ty)
-    }
-}
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ContextKind {
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
-        let text = <&str as sqlx::Decode<'r, sqlx::Postgres>>::decode(value)?;
-        Ok(text.parse()?)
-    }
-}
-
 /// One context, as `knobas.context` holds it.
 ///
 /// Issue #47.

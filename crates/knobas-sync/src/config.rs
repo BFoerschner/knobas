@@ -71,15 +71,12 @@ pub fn check_interval(secs: u32, floor: u32) -> Result<u32, String> {
 /// Parse a stored `auth_state`.
 ///
 /// Anything unrecognised reads as [`AuthState::Unknown`] -- a row written by a
-/// newer knobas must not stop this one from listing the source. Driven by
-/// `ALL`, so a new variant is readable the moment it is writable.
+/// newer knobas must not stop this one from listing the source. Read through
+/// the codec `closed_vocabulary!` generates off `ALL`, so a new variant is
+/// readable the moment it is writable.
 #[must_use]
 fn auth_state_from_db(raw: &str) -> AuthState {
-    AuthState::ALL
-        .iter()
-        .copied()
-        .find(|state| state.as_str() == raw)
-        .unwrap_or(AuthState::Unknown)
+    raw.parse().unwrap_or(AuthState::Unknown)
 }
 
 /// How a source authenticates, including "it does not".
