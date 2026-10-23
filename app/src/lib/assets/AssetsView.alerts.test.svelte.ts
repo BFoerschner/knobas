@@ -19,11 +19,12 @@
  * that the ack and the recovery read as sentences in the asset's history.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { AssetDetail, AssetRow, OpenAlert } from "../ipc/assets";
 import { createTestNav } from "./test-nav.svelte";
 import { createAlerts, type Alerts } from "./alerts.svelte";
+import { waitFor } from "../shell/test-wait";
 
 const { default: AssetsView } = await import("./AssetsView.svelte");
 
@@ -342,7 +343,7 @@ test("the ack and the recovery are sentences in the asset's history", async () =
     },
   });
   flushSync();
-  await vi.waitFor(() => {
+  await waitFor(() => {
     flushSync();
     expect(target.textContent ?? "").toContain("Alert closed");
   });

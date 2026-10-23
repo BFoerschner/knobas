@@ -36,6 +36,7 @@ import type {
   NotificationDraft,
 } from "./lib/ipc/entity";
 import type { CredentialHealth } from "./lib/ipc/sources";
+import { until } from "./lib/shell/test-wait";
 
 /** Readings `credential_health` hands back, and how many times it was asked. */
 let healthRows: CredentialHealth[] = [];
@@ -356,24 +357,6 @@ afterEach(() => {
   history.replaceState(null, "", location.pathname + location.search);
 });
 
-/**
- * Wait for the mount's awaits to reach a named point. A real `await import()`
- * sits in `onMount` (the dev fixture), and how long module resolution takes is
- * a property of the machine (#86), so this waits on the condition rather than
- * on a number of ticks. `flushSync` inside the poll lets an effect run between
- * attempts. The budget stays under vitest's 5 s, so a condition that never
- * comes true fails saying which one.
- */
-function until(condition: () => boolean, whatWasWaitedFor: string): Promise<void> {
-  return vi.waitFor(
-    () => {
-      flushSync();
-      if (!condition()) throw new Error(whatWasWaitedFor);
-    },
-    { timeout: 3_000, interval: 5 },
-  );
-}
-
 /** ⌘T, as the window receives it. */
 function pressTimerKey(): void {
   window.dispatchEvent(
@@ -684,9 +667,12 @@ test("what a capture would attach is the foreground and the context the timer re
     "the job on screen never reached the capture record",
   );
 
+  // Read before ⌘T: the start leaves the job, and the record that follows it is
+  // the empty foreground. Which of the two `.at(-1)` saw after the wait was a
+  // matter of how many microtasks the wait took.
+  const recorded = captureRecords.at(-1)!;
   pressTimerKey();
   await until(() => timerStarts.length > 0, "⌘T never reached the timer");
-  const recorded = captureRecords.at(-1)!;
   expect(recorded.foreground, "the capture and the timer disagree about the foreground").toBe(
     (timerStarts[0] as { entity_id: string }).entity_id,
   );

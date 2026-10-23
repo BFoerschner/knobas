@@ -30,6 +30,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { appStatus, frontendReady, retryDatabase, type AppStatus, type DbState } from "../ipc/app";
 import { createLifecycle } from "./lifecycle.svelte";
+import { waitFor } from "./test-wait";
 
 function status(db: DbState, extra: Partial<AppStatus> = {}): AppStatus {
   return {
@@ -65,7 +66,7 @@ test("registers its listener before arming the replay, then polls to ready", asy
     vi.mocked(frontendReady).mock.invocationCallOrder[0]!,
   );
 
-  await vi.waitFor(() => expect(life.ready).toBe(true));
+  await waitFor(() => expect(life.ready).toBe(true));
   expect(life.status?.source_count).toBe(1);
 
   // ...and it stops asking. A poll that keeps running once the answer is
@@ -83,7 +84,7 @@ test("a failed bring-up is surfaced, not swallowed, and stops the poll", async (
   const life = createLifecycle({ pollMs: 1 });
   await life.start();
 
-  await vi.waitFor(() => expect(life.error).toBe("port 5432 in use"));
+  await waitFor(() => expect(life.error).toBe("port 5432 in use"));
   expect(life.ready).toBe(false);
 
   const atFailure = vi.mocked(appStatus).mock.calls.length;
@@ -106,7 +107,7 @@ test("a rejected poll is retried rather than reported as a failed database", asy
   const life = createLifecycle({ pollMs: 1 });
   await life.start();
 
-  await vi.waitFor(() => expect(life.ready).toBe(true));
+  await waitFor(() => expect(life.ready).toBe(true));
   expect(life.error).toBeNull();
 
   life.stop();
@@ -162,13 +163,13 @@ test("retry asks the backend to start the database again", async () => {
 
   const life = createLifecycle({ pollMs: 1 });
   await life.start();
-  await vi.waitFor(() => expect(life.error).toBe("port in use"));
+  await waitFor(() => expect(life.error).toBe("port in use"));
 
   vi.mocked(appStatus).mockResolvedValue(status({ state: "ready" }));
   await life.retry();
 
   expect(retryDatabase).toHaveBeenCalledOnce();
-  await vi.waitFor(() => expect(life.ready).toBe(true));
+  await waitFor(() => expect(life.ready).toBe(true));
 
   life.stop();
 });
@@ -185,7 +186,7 @@ test("a listen that rejects degrades to polling rather than stalling", async () 
   const life = createLifecycle({ pollMs: 1 });
   await life.start();
 
-  await vi.waitFor(() => expect(life.ready).toBe(true));
+  await waitFor(() => expect(life.ready).toBe(true));
   // `frontendReady` is deliberately *not* asserted here: its only job is to
   // make the backend replay `db:state` to a listener, and there is no listener
   // to replay to. Whether it ran is not the behaviour that matters; that the
@@ -211,7 +212,7 @@ test("a frontendReady that rejects degrades to polling rather than stalling", as
   const life = createLifecycle({ pollMs: 1 });
   await life.start();
 
-  await vi.waitFor(() => expect(life.ready).toBe(true));
+  await waitFor(() => expect(life.ready).toBe(true));
   expect(life.error).toBeNull();
 
   // The listener was registered before the failure, so it is still torn down.
@@ -234,7 +235,7 @@ test("start() never rejects, whichever arming call fails", async () => {
     breakOne();
     const life = createLifecycle({ pollMs: 1 });
     await expect(life.start()).resolves.toBeUndefined();
-    await vi.waitFor(() => expect(life.ready).toBe(true));
+    await waitFor(() => expect(life.ready).toBe(true));
     life.stop();
   }
 });

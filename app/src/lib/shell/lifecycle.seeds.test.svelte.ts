@@ -23,6 +23,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { appStatus, frontendReady, retryDatabase, type AppStatus, type DbState } from "../ipc/app";
 import { createLifecycle } from "./lifecycle.svelte";
+import { waitFor } from "./test-wait";
 
 function status(db: DbState): AppStatus {
   return {
@@ -60,7 +61,7 @@ test("the three ready writes of a real boot seed once", async () => {
   flushSync();
 
   await life.start();
-  await vi.waitFor(() => expect(life.db).toEqual(ready));
+  await waitFor(() => expect(life.db).toEqual(ready));
   await new Promise((resolve) => setTimeout(resolve, 10));
   flushSync();
 

@@ -14,7 +14,7 @@
  * runs the same fixture twice, once with the gate closed and once with it
  * open, and the second half is what makes the first half mean something.
  */
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { InboxCategory, InboxEntry } from "../ipc/entity";
 import type { NotificationClicked, NotificationDraft as WireDraft } from "../ipc/entity";
@@ -27,6 +27,7 @@ import {
   type NotificationDraft,
   type NotifyPorts,
 } from "./notify.svelte";
+import { waitFor } from "../shell/test-wait";
 
 /** One line of the stream, of `category`, about `entityId`. */
 function entry(
@@ -428,7 +429,7 @@ test("a notification:clicked event navigates to the item it carries", async () =
   };
   const b = bench({ onAction: clickChannel(listen) });
   const stop = b.store.start();
-  await vi.waitFor(() => expect(deliver).not.toBeNull());
+  await waitFor(() => expect(deliver).not.toBeNull());
   expect(listened).toEqual(["notification:clicked"]);
 
   deliver!({ payload: { address: "#/pr/gitea%3Aacme%2Fpayouts%23144" } });
@@ -478,7 +479,7 @@ test("a notify command that rejects costs nothing", async () => {
   await b.primed(["mention"]);
   b.store.saw([entry("mention", "PAY-1")]);
   b.store.saw([entry("mention", "PAY-1"), entry("mention", "PAY-2")]);
-  await vi.waitFor(() => expect(calls).toBe(2));
+  await waitFor(() => expect(calls).toBe(2));
 });
 
 /**
@@ -497,7 +498,7 @@ test("a click channel that refuses to open costs nothing", async () => {
   cleanup = b.store.start();
   await b.primed(["mention"]);
   b.store.saw([entry("mention", "PAY-231")]);
-  await vi.waitFor(() => expect(b.calls.sent).toHaveLength(1));
+  await waitFor(() => expect(b.calls.sent).toHaveLength(1));
 });
 
 // -- the permission ---------------------------------------------------------

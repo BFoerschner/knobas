@@ -29,7 +29,7 @@
  * PostgreSQL, and it is deliberately not restated here.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type {
   AssetDetail,
@@ -46,6 +46,7 @@ import type { ActivityRow } from "../ipc/entity";
 import { createTestNav } from "./test-nav.svelte";
 import { layers } from "../tf/layers.svelte";
 import AssetsView from "./AssetsView.svelte";
+import { waitFor } from "../shell/test-wait";
 
 const NOW = new Date(2026, 8, 6, 12, 0, 0, 0);
 
@@ -641,7 +642,7 @@ function field(label: string): HTMLInputElement | HTMLSelectElement {
  * rather than holding a copy of it.
  */
 async function walkInto(name: string) {
-  await vi.waitFor(() => button(`Open ${name}`));
+  await waitFor(() => button(`Open ${name}`));
   click(`Open ${name}`);
 }
 
@@ -698,7 +699,7 @@ afterEach(() => {
 test("the first column's plus creates at the top of the estate", async () => {
   const store = estate(seed());
   const { nav } = render("#/assets/tree", store);
-  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
   click("New asset in Estate");
   expect(text()).toContain("At the top of the estate");
@@ -707,7 +708,7 @@ test("the first column's plus creates at the top of the estate", async () => {
   type("Name", "fsn1");
   click("Create");
 
-  await vi.waitFor(() => expect(columns()).toEqual([["fsn1", "hel1"]]));
+  await waitFor(() => expect(columns()).toEqual([["fsn1", "hel1"]]));
   expect(nav.route).toEqual({
     view: "assets",
     tab: "tree",
@@ -732,7 +733,7 @@ test("the first column's plus creates at the top of the estate", async () => {
 test("a deeper column's plus creates inside that column's asset, with its conventions", async () => {
   const store = estate(seed());
   render("#/asset/asset:vm-db-01", store);
-  await vi.waitFor(() => expect(columns()).toHaveLength(3));
+  await waitFor(() => expect(columns()).toHaveLength(3));
 
   click("New asset in vm-db-01");
   expect(text()).toContain("In vm-db-01");
@@ -746,7 +747,7 @@ test("a deeper column's plus creates inside that column's asset, with its conven
   choose("Type", "service");
   click("Create");
 
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres", "redis"]]),
   );
   expect(marked()).toEqual(["hel1", "vm-db-01", "redis"]);
@@ -774,14 +775,14 @@ test("a deeper column's plus creates inside that column's asset, with its conven
 test("a typed and a custom property are edited in the pane and the history says so", async () => {
   const store = estate(seed());
   render("#/asset/asset:postgres", store);
-  await vi.waitFor(() => expect(text()).toContain("Image postgres:18"));
+  await waitFor(() => expect(text()).toContain("Image postgres:18"));
   expect(text()).toContain("Ports —");
 
   // A declared key with nothing in it: the em dash is the button.
   click("Edit Ports");
   type("Ports", "5432");
   click("Save");
-  await vi.waitFor(() => expect(text()).toContain("Ports 5432"));
+  await waitFor(() => expect(text()).toContain("Ports 5432"));
   expect(text()).toContain("ports: nothing → 5432");
 
   // Now one of the reader's own, of a kind the type never declared.
@@ -789,7 +790,7 @@ test("a typed and a custom property are edited in the pane and the history says 
   type("New property key", "backup window");
   type("New property value", "02:00");
   click("Add");
-  await vi.waitFor(() => expect(text()).toContain("backup window 02:00"));
+  await waitFor(() => expect(text()).toContain("backup window 02:00"));
 
   // Changing it again is where old-and-new is actually witnessed: the first
   // write's "from" was empty, and an editor that sent the new value as both
@@ -797,7 +798,7 @@ test("a typed and a custom property are edited in the pane and the history says 
   click("Edit backup window");
   type("backup window", "03:30");
   click("Save");
-  await vi.waitFor(() => expect(text()).toContain("backup window: 02:00 → 03:30"));
+  await waitFor(() => expect(text()).toContain("backup window: 02:00 → 03:30"));
 
   expect(store.rows.find((row) => row.id === "asset:postgres")?.properties).toEqual({
     image: { kind: "text", value: "postgres:18" },
@@ -816,7 +817,7 @@ test("a typed and a custom property are edited in the pane and the history says 
 test("moving an asset redraws the columns at its new path", async () => {
   const store = estate(seed());
   render("#/asset/asset:postgres", store);
-  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
   click("Move…");
   // The picker opens where the asset already is, so its own path is the crumb.
@@ -828,7 +829,7 @@ test("moving an asset redraws the columns at its new path", async () => {
   await walkInto("vm-app-02");
   click("Move into vm-app-02");
 
-  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-app-02 / postgres"));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-app-02 / postgres"));
   // The line the move wrote, with the parent's **name**: the backend can only
   // write down an id, and the pane resolves it against the path it just read.
   expect(text()).toContain("Moved to vm-app-02");
@@ -854,7 +855,7 @@ test("moving an asset redraws the columns at its new path", async () => {
 test("a cycle is refused with the message the command gives, and nothing moves", async () => {
   const store = estate(seed());
   render("#/asset/asset:hel1", store);
-  await vi.waitFor(() => expect(text()).toContain("hel1"));
+  await waitFor(() => expect(text()).toContain("hel1"));
 
   click("Move…");
   await walkInto("hel1");
@@ -867,7 +868,7 @@ test("a cycle is refused with the message the command gives, and nothing moves",
   await walkInto("postgres");
   click("Move into postgres");
 
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(text()).toContain(
       'moving "hel1" under "postgres" would make a cycle: "vm-db-01" is already held by "hel1"',
     ),
@@ -887,7 +888,7 @@ test("a cycle is refused with the message the command gives, and nothing moves",
 test("deleting a leaf asks first, then lands on what held it", async () => {
   const store = estate(seed());
   const { nav } = render("#/asset/asset:postgres", store);
-  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
   click("Delete");
   expect(text()).toContain("Delete postgres?");
@@ -898,14 +899,14 @@ test("deleting a leaf asks first, then lands on what held it", async () => {
   click("Delete");
   click("Delete");
 
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(nav.route).toEqual({
       view: "assets",
       tab: "tree",
       assetId: "asset:vm-db-01",
     }),
   );
-  await vi.waitFor(() => expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"]]));
+  await waitFor(() => expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"]]));
   expect(store.rows.map((row) => row.id)).not.toContain("asset:postgres");
 });
 
@@ -927,7 +928,7 @@ test("the delete confirm counts the routes landing on the asset and says nothing
   });
   const store = estate(seed(), [lands("route:pg", "pg"), lands("route:pgadmin", "pgadmin")]);
   render("#/asset/asset:postgres", store);
-  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
   click("Delete");
   const ask = (reachable() as Element).querySelector(".ask")!.textContent!.replace(/\s+/g, " ").trim();
@@ -937,7 +938,7 @@ test("the delete confirm counts the routes landing on the asset and says nothing
 
 test("with no route landing on it, the delete confirm has no routes clause", async () => {
   render("#/asset/asset:postgres", estate(seed()));
-  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
   click("Delete");
   const ask = (reachable() as Element).querySelector(".ask")!.textContent!.replace(/\s+/g, " ").trim();
@@ -955,12 +956,12 @@ test("with no route landing on it, the delete confirm has no routes clause", asy
 test("deleting a branch is refused by name and nothing is removed", async () => {
   const store = estate(seed());
   render("#/asset/asset:vm-db-01", store);
-  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01"));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01"));
 
   click("Delete");
   click("Delete");
 
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(text()).toContain('"vm-db-01" still holds 1 asset(s) -- move or delete them first'),
   );
   expect(store.rows).toHaveLength(4);
@@ -985,7 +986,7 @@ test("a type table that will not load is said out loud, not left as a dead plus"
     assetTypes: () => Promise.reject({ code: "internal", message: "the bridge is down" }),
   });
 
-  await vi.waitFor(() => expect(text()).toContain("Creating is unavailable: the bridge is down"));
+  await waitFor(() => expect(text()).toContain("Creating is unavailable: the bridge is down"));
   const plus = button("New asset in Estate");
   expect(plus.disabled).toBe(true);
   expect(plus.getAttribute("title")).toBe("The type table could not be read: the bridge is down");
@@ -1007,7 +1008,7 @@ test.each([
 ])("%s opens a dialog on the layer stack, and its close shuts it (#1527)", async (opener, inside) => {
   const store = estate(seed());
   render("#/asset/asset:vm-db-01", store);
-  await vi.waitFor(() => expect(text()).toContain("Exposes No routes."));
+  await waitFor(() => expect(text()).toContain("Exposes No routes."));
 
   click(opener);
   expect(target.querySelector('[role="dialog"]')).not.toBeNull();
@@ -1033,7 +1034,7 @@ test.each([
 test("an open dialog closes when the address names another asset", async () => {
   const store = estate(seed());
   const { nav } = render("#/asset/asset:postgres", store);
-  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
   click("Move…");
   expect(text()).toContain("Move into vm-db-01");
@@ -1042,7 +1043,7 @@ test("an open dialog closes when the address names another asset", async () => {
   flushSync();
 
   expect(target.querySelector('[role="dialog"]')).toBeNull();
-  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-app-02"));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-app-02"));
   expect(store.rows.find((row) => row.id === "asset:postgres")?.parent_id).toBe("asset:vm-db-01");
 });
 
@@ -1057,13 +1058,13 @@ test("an open dialog closes when the address names another asset", async () => {
 test("renaming writes the old-to-new line and redraws the column", async () => {
   const store = estate(seed());
   render("#/asset/asset:postgres", store);
-  await vi.waitFor(() => expect(columns()).toHaveLength(3));
+  await waitFor(() => expect(columns()).toHaveLength(3));
 
   click("Rename");
   type("Name", "postgres-18");
   click("Save");
 
-  await vi.waitFor(() => expect(text()).toContain("name: postgres → postgres-18"));
+  await waitFor(() => expect(text()).toContain("name: postgres → postgres-18"));
   expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres-18"]]);
   expect(text()).toContain("hel1 / vm-db-01 / postgres-18");
 });
@@ -1083,7 +1084,7 @@ test("renaming writes the old-to-new line and redraws the column", async () => {
 test("Esc in a property editor cancels the edit and does not walk the selection", async () => {
   const store = estate(seed());
   render("#/asset/asset:postgres", store);
-  await vi.waitFor(() => expect(text()).toContain("Image postgres:18"));
+  await waitFor(() => expect(text()).toContain("Image postgres:18"));
 
   click("Edit Ports");
   type("Ports", "5432");
@@ -1126,7 +1127,7 @@ test("Esc in a property editor cancels the edit and does not walk the selection"
 test("a custom property is stored as the kind the picker was set to", async () => {
   const store = estate(seed());
   render("#/asset/asset:postgres", store);
-  await vi.waitFor(() => expect(text()).toContain("Image postgres:18"));
+  await waitFor(() => expect(text()).toContain("Image postgres:18"));
 
   click("Add a property");
   type("New property key", "metrics port");
@@ -1134,7 +1135,7 @@ test("a custom property is stored as the kind the picker was set to", async () =
   type("New property value", "9187");
   click("Add");
 
-  await vi.waitFor(() => expect(text()).toContain("metrics port 9187"));
+  await waitFor(() => expect(text()).toContain("metrics port 9187"));
   expect(store.rows.find((row) => row.id === "asset:postgres")?.properties).toEqual({
     image: { kind: "text", value: "postgres:18" },
     "metrics port": { kind: "number", value: 9187 },
@@ -1161,7 +1162,7 @@ test("a custom property is stored as the kind the picker was set to", async () =
 test("a route is exposed from the pane and lands where the picker was walked", async () => {
   const store = estate(seed());
   const { nav } = render("#/asset/asset:vm-db-01", store);
-  await vi.waitFor(() => expect(text()).toContain("Exposes No routes."));
+  await waitFor(() => expect(text()).toContain("Exposes No routes."));
 
   click("Add a route");
   expect(text()).toContain("On vm-db-01");
@@ -1172,11 +1173,11 @@ test("a route is exposed from the pane and lands where the picker was walked", a
   // click away — and clicking it is what makes it the target. `Land on …`
   // rather than `Open …`: in this picker choosing and walking are one click,
   // which is the difference from the move picker's rows.
-  await vi.waitFor(() => button("Land on postgres"));
+  await waitFor(() => button("Land on postgres"));
   click("Land on postgres");
   click("Expose");
 
-  await vi.waitFor(() => expect(text()).toContain("Postgres UI"));
+  await waitFor(() => expect(text()).toContain("Postgres UI"));
   const written = store.routes[0];
   expect(written).toMatchObject({
     asset_id: "asset:vm-db-01",
@@ -1213,14 +1214,14 @@ test("a route is exposed from the pane and lands where the picker was walked", a
 test("a route with no scheme is refused in place and nothing is written", async () => {
   const store = estate(seed());
   render("#/asset/asset:vm-db-01", store);
-  await vi.waitFor(() => expect(text()).toContain("Exposes No routes."));
+  await waitFor(() => expect(text()).toContain("Exposes No routes."));
 
   click("Add a route");
   type("Name", "Postgres UI");
   type("URL or endpoint", "pg.hel1.example");
   click("Expose");
 
-  await vi.waitFor(() => expect(text()).toContain("carries no scheme"));
+  await waitFor(() => expect(text()).toContain("carries no scheme"));
   expect(store.routes).toHaveLength(0);
   // The dialog is still open on what the reader typed, so the fix is one edit
   // rather than a re-entry.
@@ -1248,7 +1249,7 @@ test("a route is edited and then deleted from the pane", async () => {
     },
   ]);
   const { nav } = render("#/asset/asset:vm-db-01", store);
-  await vi.waitFor(() => expect(text()).toContain("Postgres UI"));
+  await waitFor(() => expect(text()).toContain("Postgres UI"));
 
   click("Edit…");
   expect((field("URL or endpoint") as HTMLInputElement).value).toBe("https://pg.hel1.example/");
@@ -1258,7 +1259,7 @@ test("a route is edited and then deleted from the pane", async () => {
   click("Clear");
   click("Save");
 
-  await vi.waitFor(() => expect(text()).toContain("Postgres console"));
+  await waitFor(() => expect(text()).toContain("Postgres console"));
   expect(store.routes[0]).toMatchObject({ name: "Postgres console", target_id: null });
   expect(text()).toContain("lands on nothing knobas knows");
   expect(nav.route).toEqual({
@@ -1270,7 +1271,7 @@ test("a route is edited and then deleted from the pane", async () => {
 
   click("Edit…");
   click("Delete");
-  await vi.waitFor(() => expect(text()).toContain("Exposes No routes."));
+  await waitFor(() => expect(text()).toContain("Exposes No routes."));
   expect(store.routes).toHaveLength(0);
   // Back at the asset that exposed it, not at an address that is now gone.
   expect(nav.route).toEqual({
@@ -1303,7 +1304,7 @@ test("a certificate expiry is written on a route as a property and cleared again
     },
   ]);
   render("#/asset/asset:vm-db-01", store);
-  await vi.waitFor(() => expect(text()).toContain("Postgres UI"));
+  await waitFor(() => expect(text()).toContain("Postgres UI"));
 
   click("Edit…");
   click("Add a property");
@@ -1312,7 +1313,7 @@ test("a certificate expiry is written on a route as a property and cleared again
   type("Property value", "2026-12-01");
   click("Save");
 
-  await vi.waitFor(() => expect(text()).toContain("cert_expires 2026-12-01"));
+  await waitFor(() => expect(text()).toContain("cert_expires 2026-12-01"));
   expect(store.routes[0]?.properties).toEqual({
     cert_expires: { kind: "date", value: "2026-12-01" },
   });
@@ -1326,7 +1327,7 @@ test("a certificate expiry is written on a route as a property and cleared again
   // The chip is gone from the route's row, and the route's history says where
   // it went — which is the difference between a cleared property and one that
   // was never there.
-  await vi.waitFor(() => expect(text()).not.toContain("cert_expires 2026-12-01"));
+  await waitFor(() => expect(text()).not.toContain("cert_expires 2026-12-01"));
   expect(text()).toContain("cert_expires: 2026-12-01 → nothing");
   expect(store.routes[0]?.properties).toEqual({});
 });
@@ -1364,10 +1365,10 @@ test("a route's URL opens in the browser, and a scheme no browser takes is said 
     },
   ]);
   render("#/asset/asset:vm-db-01", store);
-  await vi.waitFor(() => expect(text()).toContain("Postgres UI"));
+  await waitFor(() => expect(text()).toContain("Postgres UI"));
 
   click("Open https://pg.hel1.example/");
-  await vi.waitFor(() => expect(store.opened).toEqual(["https://pg.hel1.example/"]));
+  await waitFor(() => expect(store.opened).toEqual(["https://pg.hel1.example/"]));
   expect(text()).not.toContain("Could not open the link");
 
   // `shell/open-external`'s own sentence for a scheme it will not hand over.
@@ -1376,7 +1377,7 @@ test("a route's URL opens in the browser, and a scheme no browser takes is said 
     message: "refused to open postgres://pg.hel1.example:5432/ — only http and https",
   });
   click("Open postgres://pg.hel1.example:5432/");
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(text()).toContain("Could not open the link: refused to open"),
   );
   expect(store.opened).toHaveLength(2);
@@ -1407,14 +1408,14 @@ test("a route's own history is drawn when its address names it", async () => {
     },
   ]);
   render("#/route/route:pg", store);
-  await vi.waitFor(() => expect(text()).toContain("Postgres UI — history"));
+  await waitFor(() => expect(text()).toContain("Postgres UI — history"));
   expect(text()).toContain("Nothing recorded.");
 
   click("Edit…");
   type("Name", "Postgres console");
   click("Save");
 
-  await vi.waitFor(() => expect(text()).toContain("Postgres console — history"));
+  await waitFor(() => expect(text()).toContain("Postgres console — history"));
   // One line, with the old value and the new: the three fields the dialog also
   // sent changed nothing, and an edit that changes nothing writes no line.
   expect(text()).toContain("name: Postgres UI → Postgres console");
@@ -1430,6 +1431,6 @@ test("a route's own history is drawn when its address names it", async () => {
   click("Edit…");
   click("Clear");
   click("Save");
-  await vi.waitFor(() => expect(text()).toContain("target: postgres → nothing"));
+  await waitFor(() => expect(text()).toContain("target: postgres → nothing"));
   expect(text()).not.toContain("asset:postgres");
 });

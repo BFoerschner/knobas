@@ -10,6 +10,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { InboxEntry, InboxShelf } from "../ipc/entity";
+import { waitFor } from "../shell/test-wait";
 
 const calls: string[] = [];
 let stream: InboxEntry[] = [];
@@ -301,9 +302,9 @@ test("the inbox re-reads when a source's credential health moves", async () => {
     },
   });
   const stop = store.start();
-  await vi.waitFor(() => expect(handlers.has("source:health")).toBe(true));
+  await waitFor(() => expect(handlers.has("source:health")).toBe(true));
   handlers.get("source:health")!();
-  await vi.waitFor(() => expect(reads).toBe(1));
+  await waitFor(() => expect(reads).toBe(1));
   stop();
 });
 
@@ -332,12 +333,12 @@ test("a burst of events during a read makes one more read, not one per event", a
     },
   });
   const stop = store.start();
-  await vi.waitFor(() => expect(handlers).toHaveLength(3));
+  await waitFor(() => expect(handlers).toHaveLength(3));
 
   for (let n = 0; n < 6; n++) for (const handler of handlers) handler();
   expect(reads).toBe(1);
   land();
-  await vi.waitFor(() => expect(reads).toBe(2));
+  await waitFor(() => expect(reads).toBe(2));
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(reads).toBe(2);
   stop();

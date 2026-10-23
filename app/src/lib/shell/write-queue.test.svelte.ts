@@ -16,6 +16,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 import type { QueueCounts, QueuedWrite } from "../ipc/sources";
 import { onWithdrawn, type WordedRow } from "./write-queue.svelte";
+import { waitFor } from "./test-wait";
 
 const calls: { command: string; args: unknown }[] = [];
 let rows: QueuedWrite[] = [];
@@ -445,7 +446,7 @@ test("the panel is a ticket-first dialog: its title, its counts, no capitals, ev
   ];
   counts = { pending: 1, held: 1, refused: 1 };
   const screen = await render({ "kuma:8": "Payments API" });
-  await vi.waitFor(() => expect(screen.text()).toContain("Pause monitor Payments API"));
+  await waitFor(() => expect(screen.text()).toContain("Pause monitor Payments API"));
 
   const [dialog] = screen.dialogs();
   const title = document.getElementById(dialog!.getAttribute("aria-labelledby")!);
@@ -673,7 +674,7 @@ test("send mine anyway releases exactly that write", async () => {
   calls.length = 0;
 
   screen.button("Send mine anyway")!.click();
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(calls.some((c) => c.command === "apply_held_write")).toBe(true),
   );
   expect(calls.find((c) => c.command === "apply_held_write")!.args).toEqual({ id: 2 });
@@ -688,18 +689,18 @@ test("discard and cancel both withdraw the write", async () => {
   calls.length = 0;
 
   screen.button("Discard")!.click();
-  await vi.waitFor(() => expect(calls.some((c) => c.command === "discard_write")).toBe(true));
+  await waitFor(() => expect(calls.some((c) => c.command === "discard_write")).toBe(true));
   expect(calls.find((c) => c.command === "discard_write")!.args).toEqual({ id: 2 });
 
   // The panel refuses a second action while the first is in flight, so the
   // buttons are disabled until it settles. Waiting for that is not test
   // ceremony -- it *is* the guard against a double-fired discard.
-  await vi.waitFor(() => expect(screen.queue.busy).toBe(false));
+  await waitFor(() => expect(screen.queue.busy).toBe(false));
   flushSync();
 
   calls.length = 0;
   screen.button("Cancel")!.click();
-  await vi.waitFor(() => expect(calls.some((c) => c.command === "discard_write")).toBe(true));
+  await waitFor(() => expect(calls.some((c) => c.command === "discard_write")).toBe(true));
   expect(calls.find((c) => c.command === "discard_write")!.args).toEqual({ id: 1 });
   screen.done();
 });
@@ -713,7 +714,7 @@ test("a withdrawal from the panel is announced to whoever marked the write", asy
   const off = [onWithdrawn(2, () => heard.push("2")), onWithdrawn(1, () => heard.push("1"))];
 
   screen.button("Discard")!.click();
-  await vi.waitFor(() => expect(heard).toEqual(["2"]));
+  await waitFor(() => expect(heard).toEqual(["2"]));
   off.forEach((stop) => stop());
   screen.done();
 });
@@ -846,9 +847,9 @@ test("confirming the withdrawal discards the worklog", async () => {
   flushSync();
   screen.button("Discard the worklog")!.click();
 
-  await vi.waitFor(() => expect(calls.some((c) => c.command === "discard_write")).toBe(true));
+  await waitFor(() => expect(calls.some((c) => c.command === "discard_write")).toBe(true));
   expect(calls.find((c) => c.command === "discard_write")!.args).toEqual({ id: 4 });
-  await vi.waitFor(() => expect(screen.queue.busy).toBe(false));
+  await waitFor(() => expect(screen.queue.busy).toBe(false));
   flushSync();
 
   expect(screen.dialogs()).toHaveLength(1);
@@ -872,7 +873,7 @@ test("editing a held write sends the words the reader typed", async () => {
 
   calls.length = 0;
   screen.button("Send this instead")!.click();
-  await vi.waitFor(() => expect(calls.some((c) => c.command === "amend_write")).toBe(true));
+  await waitFor(() => expect(calls.some((c) => c.command === "amend_write")).toBe(true));
   expect(calls.find((c) => c.command === "amend_write")!.args).toEqual({
     id: 2,
     payload: { Comment: { entity: "jira:PAY-231", body: "thanks jonas — adding the trace" } },
@@ -926,7 +927,7 @@ test("a write the source never answered says to check the source, then send agai
 
   calls.length = 0;
   screen.button("Send again")!.click();
-  await vi.waitFor(() => expect(calls.some((c) => c.command === "apply_held_write")).toBe(true));
+  await waitFor(() => expect(calls.some((c) => c.command === "apply_held_write")).toBe(true));
   expect(calls.find((c) => c.command === "apply_held_write")!.args).toEqual({ id: 2 });
   screen.done();
 });
@@ -993,7 +994,7 @@ test("flush now retries the waiting writes and releases nothing", async () => {
   calls.length = 0;
 
   screen.button("Flush now")!.click();
-  await vi.waitFor(() => expect(calls.some((c) => c.command === "flush_writes")).toBe(true));
+  await waitFor(() => expect(calls.some((c) => c.command === "flush_writes")).toBe(true));
 
   expect(calls.filter((c) => c.command === "apply_held_write")).toEqual([]);
   expect(calls.find((c) => c.command === "flush_writes")!.args).toEqual({ sourceId: null });
@@ -1220,7 +1221,7 @@ test("a commit over a file that moved shows both versions of the file, and Edit 
   flushSync();
   calls.length = 0;
   screen.button("Send this instead")!.click();
-  await vi.waitFor(() => expect(calls.some((c) => c.command === "amend_write")).toBe(true));
+  await waitFor(() => expect(calls.some((c) => c.command === "amend_write")).toBe(true));
   expect(calls.find((c) => c.command === "amend_write")!.args).toEqual({
     id: 7,
     payload: { CommitFile: { ...COMMIT.CommitFile, content: "# payout\nmine and theirs\n", base_sha: "blob-2" } },

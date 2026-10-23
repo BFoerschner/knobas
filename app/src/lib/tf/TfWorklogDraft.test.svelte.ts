@@ -13,6 +13,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Candidate, DayRecord, Draft, LoggedWork, ReaderDay, Worklog } from "../ipc/time";
 import { createLayers, type Layers } from "./layers.svelte";
 import TfWorklogDraft from "./TfWorklogDraft.svelte";
+import { waitFor } from "../shell/test-wait";
 
 const TICKET = "jira:PAY-231";
 
@@ -137,7 +138,7 @@ afterEach(() => {
 
 test("it shows the key, the ticket, the duration and the intervals it came from", async () => {
   render();
-  await vi.waitFor(() => expect(target.textContent).toContain("09:40 to 11:50, and 13:58 to 14:32"));
+  await waitFor(() => expect(target.textContent).toContain("09:40 to 11:50, and 13:58 to 14:32"));
   expect(target.querySelector("h2")?.textContent).toBe("Log time to PAY-231");
   expect(target.textContent).toContain("Retry SEPA payouts");
   expect(target.querySelector(".tf-dur b")?.textContent).toBe("2h 44m");
@@ -146,7 +147,7 @@ test("it shows the key, the ticket, the duration and the intervals it came from"
 
 test("each candidate is a ticked box with its time and source", async () => {
   render();
-  await vi.waitFor(() => expect(target.textContent).toContain("10:02, Gitea"));
+  await waitFor(() => expect(target.textContent).toContain("10:02, Gitea"));
   expect(boxes().map((box) => box.checked)).toEqual([true, true]);
   expect(target.textContent).toContain("commit a41f2c PAY-231 backoff jitter");
   expect(target.textContent).toContain("10:20, you wrote");
@@ -167,7 +168,7 @@ test("the comment follows the boxes until it is edited", () => {
 
 test("it says where the worklog goes, and quotes ADR-0012", async () => {
   render();
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(text()).toContain(
       "Goes to Jira through the write queue. The comment follows the boxes you tick until you edit it.",
     ),
@@ -203,7 +204,7 @@ test("each button answers with its outcome", () => {
 test("Log sends the work for the reader's day and answers logged", async () => {
   const { sent, outcomes, onlogged } = render();
   button("Log 2h 44m to PAY-231")!.click();
-  await vi.waitFor(() => expect(outcomes).toEqual(["logged"]));
+  await waitFor(() => expect(outcomes).toEqual(["logged"]));
   expect(sent[0]).toMatchObject({ entityId: TICKET, day: "2026-09-03", startedAt: DRAFT.started_at, seconds: DRAFT.seconds });
   expect(onlogged).toHaveBeenCalledWith(WORKLOG);
 });
@@ -214,7 +215,7 @@ test("Log sends the offset at the draft day's midnight, not today's", async () =
     vi.setSystemTime(new Date(2026, 10, 5, 12));
     const { sent, outcomes } = render();
     button("Log 2h 44m to PAY-231")!.click();
-    await vi.waitFor(() => expect(outcomes).toEqual(["logged"]));
+    await waitFor(() => expect(outcomes).toEqual(["logged"]));
     expect(sent[0]!.offsetMinutes).toBe(120);
   } finally {
     vi.useRealTimers();
@@ -226,7 +227,7 @@ const ODD: Draft = { ...DRAFT, seconds: 163 };
 test("a 163 s draft reads Log 2m and sends 120 s, never the 163", async () => {
   const { sent, outcomes } = render({ draft: ODD });
   button("Log 2m to PAY-231")!.click();
-  await vi.waitFor(() => expect(outcomes).toEqual(["logged"]));
+  await waitFor(() => expect(outcomes).toEqual(["logged"]));
   expect(sent[0]!.seconds).toBe(120);
 });
 
@@ -237,7 +238,7 @@ test("a 163 s draft whose minutes are edited to 5 sends 300 s", async () => {
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
   button("Log 5m to PAY-231")!.click();
-  await vi.waitFor(() => expect(outcomes).toEqual(["logged"]));
+  await waitFor(() => expect(outcomes).toEqual(["logged"]));
   expect(sent[0]!.seconds).toBe(300);
 });
 
@@ -249,14 +250,14 @@ test("a draft under a minute floors to 0m and cannot be sent", () => {
 test("Log stops the clock before it sends, so the running stretch is a block log_work can find", async () => {
   const { order, outcomes } = render();
   button("Log 2h 44m to PAY-231")!.click();
-  await vi.waitFor(() => expect(outcomes).toEqual(["logged"]));
+  await waitFor(() => expect(outcomes).toEqual(["logged"]));
   expect(order).toEqual(["stop", "log"]);
 });
 
 test("a clock that will not stop is said, and nothing is sent", async () => {
   const { order, outcomes } = render({ onbeforelog: () => Promise.reject(new Error("no timer to stop")) });
   button("Log 2h 44m to PAY-231")!.click();
-  await vi.waitFor(() => expect(target.textContent).toContain("no timer to stop"));
+  await waitFor(() => expect(target.textContent).toContain("no timer to stop"));
   expect(order).toEqual(["stop"]);
   expect(outcomes).toEqual([]);
   expect(button("Keep running")?.disabled).toBe(false);
@@ -271,14 +272,14 @@ test("over a running clock the open stretch is one of the blocks, and it runs to
     running_since: "2026-09-03T11:58:00Z",
   };
   render({ draft });
-  await vi.waitFor(() => expect(target.textContent).toContain("from 2 blocks on"));
+  await waitFor(() => expect(target.textContent).toContain("from 2 blocks on"));
   expect(text()).toContain(": 09:40 to 11:50, and 13:58 to now");
 });
 
 test("a refused log is said, and the draft stays open", async () => {
   const { outcomes } = render({ logWork: () => Promise.reject(new Error("already logged")) });
   button("Log 2h 44m to PAY-231")!.click();
-  await vi.waitFor(() => expect(target.textContent).toContain("already logged"));
+  await waitFor(() => expect(target.textContent).toContain("already logged"));
   expect(outcomes).toEqual([]);
 });
 
@@ -303,10 +304,10 @@ test("leaving while the log is in flight does nothing: the log answers for itsel
   flushSync();
   layers.open[0]!.close();
   expect(outcomes, "Esc while the clock was stopping said the time was unlogged").toEqual([]);
-  await vi.waitFor(() => expect(order).toEqual(["stop", "log"]));
+  await waitFor(() => expect(order).toEqual(["stop", "log"]));
   layers.open[0]!.close();
   expect(outcomes, "Esc during a send said the time was unlogged").toEqual([]);
   expect(button("Stop, log later")?.disabled).toBe(true);
   resolve(WORKLOG);
-  await vi.waitFor(() => expect(outcomes).toEqual(["logged"]));
+  await waitFor(() => expect(outcomes).toEqual(["logged"]));
 });

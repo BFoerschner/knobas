@@ -4,7 +4,7 @@ test("Log to a ticket… asks for the draft with the offset at the block's day, 
     vi.setSystemTime(new Date(2026, 10, 5, 12));
     const { asked, onlog } = render();
     button("Log to").click();
-    await vi.waitFor(() => expect(onlog).toHaveBeenCalled());
+    await waitFor(() => expect(onlog).toHaveBeenCalled());
     expect(asked[0]?.when.offsetMinutes).toBe(120);
   } finally {
     vi.useRealTimers();
@@ -34,6 +34,7 @@ import type {
 } from "../ipc/time";
 import { createLayers, type Layers } from "../tf/layers.svelte";
 import AdHocBlock from "./AdHocBlock.svelte";
+import { waitFor } from "../shell/test-wait";
 
 const PAGE: TimerTarget = { kind: "entity", entity_id: "confluence:ENG:SEPA payout retry design" };
 const TICKET = "jira:PAY-231";
@@ -164,7 +165,7 @@ test("Log to a ticket… re-targets the block and then opens the draft", async (
   const { moved, asked, order, onclose, onlog } = render();
 
   button("Log to").click();
-  await vi.waitFor(() => expect(onlog).toHaveBeenCalled());
+  await waitFor(() => expect(onlog).toHaveBeenCalled());
   flushSync();
 
   expect(order).toEqual(["move", "draft"]);
@@ -230,7 +231,7 @@ test("a refused re-target keeps the dialog open and says why", async () => {
   );
 
   button("Log to").click();
-  await vi.waitFor(() => expect(target.textContent).toContain("read-only"));
+  await waitFor(() => expect(target.textContent).toContain("read-only"));
 
   expect(onclose).not.toHaveBeenCalled();
   expect(onlog).not.toHaveBeenCalled();
