@@ -13955,3 +13955,98 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
 - **`just kuma-live` on `3b739a9b`, not the head.** *Fork:* re-run on the head or accept.
   *Ruling:* accept. *Reasoning:* the `src/` diff from `3b739a9b` to `262b44e1` moves `mapped`
   into the branches that use it and edits docs; behaviour is the same. *Reversing:* trivial.
+
+## #1819: a data directory a killed `initdb` left with `PG_VERSION` in it (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): reversing #1637's
+  "never with `PG_VERSION`".** *Fork:* keep the rule, or reverse it for the shapes a killed
+  `initdb` leaves. *Ruling:* reversed for a data directory that has no knobas marker and holds no
+  database. Any other directory with `PG_VERSION` is still never removed. *Reasoning:* spec #1619
+  reserves this step, and the waiver lets an Opus agent rule it. A killed `initdb` fails every
+  launch until the reader deletes `data/` by hand, and the rule below never matches a directory
+  a finished `initdb` made. *Reversing:* one predicate (`shape`).
+- **What marks a directory deletable.** *Fork:* the ticket's marker with its example migration
+  rule (`PG_VERSION`, `global/pg_control` and `base/5` get the marker), an `initdb` into a temp
+  sibling renamed into place, or an on-disk test alone. *Ruling:* a marker
+  (`knobas-initdb-finished` in the data directory), written after knobas's `initdb` returns
+  success, plus a test for directories without one. A directory without the marker is removed
+  only when it **holds no database**: nothing under `base/` but the templates `1` and `4`, and
+  nothing under `pg_tblspc/`. Every other unmarked directory with `PG_VERSION` is marked the
+  first time a launch sees it, and is never removed after that. *Reasoning:* `initdb` makes
+  `base/5`, the `postgres` database, last. The reader's data lives in the `knobas` database,
+  which a launch creates after that. So a finished `initdb` from any build always leaves a
+  directory that is not `1` or `4`. Every build has run 18.6, and on PostgreSQL before 15, where
+  `postgres` and `template0` had no fixed OIDs, a finished cluster still has one. The ticket's
+  example reads in the other direction: a directory it would not mark (no `base/5`, but a
+  `knobas` database) would then be judged by its absence. Here the migration rule is the exact
+  complement of the removal test, so no directory falls between the two. Every doubt keeps the
+  directory: a marker or a `PG_VERSION` that cannot be `stat`ed counts as present, and a `base/`
+  that cannot be listed counts as holding a database. The marker matters after the first sight:
+  once a directory is marked, nothing it loses later (a dropped `postgres`, a damaged `base/`)
+  can make a launch remove it. *Reversing:* low. Without the marker, the test runs on every
+  launch.
+- **No temp sibling and rename.** *Fork:* `initdb` into `data.partial` and rename it to `data`
+  on success, so a half-made directory never has the final name, or the marker. *Ruling:* the
+  marker. *Reasoning:* the rename does not remove the test. Directories that older builds' killed
+  `initdb`s left are already named `data`, and the ticket asks for them back. Without a marker,
+  a renamed directory cannot be told from an older build's either, so the test would run on
+  every launch. The rename also replaces a symlinked `data/`, which #1637's review ruled
+  supported, and it fails across volumes when the link points at another volume. *Reversing:*
+  medium.
+- **An unfinished directory a server answers for is kept.** *Fork:* remove it under a running
+  postmaster, or keep it. *Ruling:* kept when `postmaster.pid` names a postmaster (a positive
+  pid) and something answers on its port, or when the file cannot be read. *Reasoning:* a server
+  on such a directory is one an older build started and lost, and its files are not deleted
+  under it. `initdb`'s own backends run standalone and write a lock that records their pid
+  negated and the default port 5432 (read during a real `initdb`). Without the sign check, a lock
+  a power loss left would keep the directory whenever any PostgreSQL answers on 5432.
+  *Reversing:* one function (`served`).
+- **No check for a concurrent `initdb`.** *Fork:* check for a live writer before removing, or
+  rely on the locks. *Ruling:* the locks. *Reasoning:* the removal runs under `bring_up_lock` and
+  the ownership lock, and every build since M0 (#12, 2026-08-24) has taken `bring_up_lock`
+  before `initdb`. *Reversing:* n/a.
+- **The three states, made by a real kill.** *Fork:* fixtures written by hand, a `SIGSTOP` copy
+  as #1637's evidence used, or the production kill. *Ruling:* the production kill:
+  `run_initdb`'s future is dropped (`kill_on_drop`, `SIGKILL` to `initdb` alone) at a point read
+  from the directory and the process tree, and the children then drain what `initdb` piped them
+  and exit. *Reasoning:* that is the directory a given-up bring-up leaves. Each state was named by
+  starting a server on what the kill left and logging in with our password (16 runs, scripts
+  `issue-1819-*.py` in that run's scratchpad, PostgreSQL 18.6 on this Mac):
+  1. Killed when `postgresql.conf` appears (the `--check` probes): *could not find the database
+     system*, 4 of 4.
+  2. Killed when `global/pg_control` is there and the `--boot` child runs: *password
+     authentication failed*, 4 of 4.
+  3. Killed when the `--single` child appears: *database "postgres" does not exist*, 8 of 8.
+     About 25 ms later `initdb` has piped every command, and a kill then leaves a finished
+     directory (base `1`, `4`, `5` at 30, 40, 40 and 100 ms).
+  In each, base holds `1` alone. `each_directory_a_killed_initdb_leaves_comes_back_from_a_launch`
+  makes the three states and launches on each. It failed on the pre-#1819 code (state 1:
+  *Connection reset by peer* after 60 s). No run of it, and no late kill with `initdb`'s pipes
+  closed, left a shared-memory segment. *Reversing:* n/a.
+- **An older build's directory, witnessed.** *Fork:* prove the migration in tests alone, or on a
+  directory main made. *Ruling:* both. *Reasoning:* main at 2c219532 (`EmbeddedDb::start`)
+  initialised a profile and wrote a row. Two launches of this build then read the row back, and
+  the first wrote the marker. In the tree,
+  `a_directory_a_finished_initdb_made_is_never_removed` runs #1637's `initdb` to the end with no
+  start, and the crate's own `setup()` with a `knobas` database and a row (every build before
+  #1637). Each is kept and marked. *Reversing:* n/a.
+- **#1637's never-removed test.** *Fork:* keep it, or replace it. *Ruling:* replaced by
+  `a_data_directory_that_holds_a_database_is_never_removed`. *Reasoning:* its fixtures (empty
+  `base/`, `PG_VERSION`) are what this ruling now removes. The new one gives each fixture a
+  database (`base/16384`, `base/5`, `pg_tblspc/16385`) and no `pg_control`, so only the database
+  keeps it. *Reversing:* n/a.
+- **Test seams.** *Fork:* confirm the seams with Björn first, as the TDD skill asks, or pick them.
+  *Ruling:* picked, since the loop runs unattended. `EmbeddedDb::start` for what a launch does,
+  and `recover_unfinished` and `shape` in the crate for the doubt paths no launch can set up.
+  *Reversing:* n/a.
+- **§10.8.** *Fork:* book the recovery as a boot-screen change, or not. *Ruling:* none owed.
+  *Reasoning:* no IPC type, migration, module layout, boot-screen state or message changes. A
+  directory that failed every launch now starts, and only the log line's text is new.
+  *Reversing:* n/a.
+- **SysV segments and a stray server.** *Fork:* free what appeared during the run, or only what
+  is provably ours. *Ruling:* only ours. *Reasoning:* the first red run left a server (pid 15283)
+  from a test that panicked while it held one. It exited on its own within a minute, once its
+  temp directory was gone, and the tests now stop their server before they assert. A segment
+  whose creator, pid 24266, was dead (`NATTCH` 0, 08:00:01) appeared during another run. No
+  rerun of mine reproduced it, and sibling runs were starting servers too, so it was left.
+  *Reversing:* n/a.

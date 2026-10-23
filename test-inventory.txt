@@ -1602,9 +1602,12 @@ knobas-db	lib/knobas_db	backup::tests::a_two_word_description_stays_in_the_kind
 knobas-db	lib/knobas_db	backup::tests::a_two_word_tag_does_not_shift_the_schema
 knobas-db	lib/knobas_db	backup::tests::an_object_with_no_schema_reads_a_dash
 knobas-db	lib/knobas_db	backup::tests::the_header_and_the_comments_are_not_entries
+knobas-db	lib/knobas_db	embedded::tests::a_directory_a_finished_initdb_made_is_never_removed
+knobas-db	lib/knobas_db	embedded::tests::a_directory_whose_databases_cannot_be_listed_is_kept
 knobas-db	lib/knobas_db	embedded::tests::a_dropped_initdb_is_killed_with_its_future
 knobas-db	lib/knobas_db	embedded::tests::a_half_written_symlinked_data_directory_loses_the_link_alone
 knobas-db	lib/knobas_db	embedded::tests::a_launch_that_started_cold_authenticates_with_the_recorded_password
+knobas-db	lib/knobas_db	embedded::tests::a_marked_directory_is_never_removed
 knobas-db	lib/knobas_db	embedded::tests::a_path_that_cannot_be_resolved_is_never_proof_of_a_mismatch
 knobas-db	lib/knobas_db	embedded::tests::a_released_ownership_lock_is_free_while_children_are_spawned
 knobas-db	lib/knobas_db	embedded::tests::a_stranger_on_the_recorded_port_clears_the_lock_whatever_the_pid_is_doing
@@ -1615,9 +1618,11 @@ knobas-db	lib/knobas_db	embedded::tests::a_watch_sees_a_killed_postmaster_whose_
 knobas-db	lib/knobas_db	embedded::tests::adopt_treats_a_stranger_on_the_recorded_port_as_a_stale_lock
 knobas-db	lib/knobas_db	embedded::tests::an_absent_password_file_leaves_the_invented_password_alone
 knobas-db	lib/knobas_db	embedded::tests::an_empty_password_file_leaves_the_invented_password_alone
+knobas-db	lib/knobas_db	embedded::tests::an_unfinished_directory_a_server_answers_for_is_kept
 knobas-db	lib/knobas_db	embedded::tests::build_settings_does_not_create_the_installation_dir
 knobas-db	lib/knobas_db	embedded::tests::build_settings_keeps_the_binaries_out_of_the_root_dir
 knobas-db	lib/knobas_db	embedded::tests::build_settings_pins_version_and_uses_loopback_tcp
+knobas-db	lib/knobas_db	embedded::tests::each_directory_a_killed_initdb_leaves_comes_back_from_a_launch
 knobas-db	lib/knobas_db	embedded::tests::inspect_lock_keeps_a_pid_file_a_live_listener_owns
 knobas-db	lib/knobas_db	embedded::tests::inspect_lock_removes_a_pid_file_whose_process_lives_but_whose_port_is_silent
 knobas-db	lib/knobas_db	embedded::tests::inspect_lock_removes_a_pid_file_with_no_process_and_no_listener
@@ -1642,7 +1647,7 @@ knobas-db	test/backup	the_archive_carries_the_owned_schema_and_leaves_the_mirror
 knobas-db	test/embedded	a_connector_does_not_print_its_password
 knobas-db	test/embedded	a_connector_hands_out_connections_outside_every_pool
 knobas-db	test/embedded	a_data_directory_an_interrupted_initdb_left_is_initialised_again
-knobas-db	test/embedded	a_data_directory_with_pg_version_is_never_removed
+knobas-db	test/embedded	a_data_directory_that_holds_a_database_is_never_removed
 knobas-db	test/embedded	a_failed_retry_never_stops_the_server_that_appeared_in_the_window
 knobas-db	test/embedded	a_launch_that_adopts_an_orphaned_server_takes_ownership_and_can_stop_it
 knobas-db	test/embedded	a_lock_naming_a_foreign_postgres_and_a_dead_process_is_cleared
