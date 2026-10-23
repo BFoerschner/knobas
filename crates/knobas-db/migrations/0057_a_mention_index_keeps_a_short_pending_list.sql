@@ -1,0 +1,40 @@
+-- 0057_a_mention_index_keeps_a_short_pending_list.sql -- `0049`'s trigram
+-- index over the prose bodies merges its pending list at 256 kB, not 4 MB, so
+-- the inbox's mention rule keeps reading it (#1864).
+--
+-- Single-writer, like every migration: a ticket that needs more schema takes
+-- the next number and never edits this file or its predecessors. Recorded in
+-- `docs/contract.md` section 10.8
+-- (`docs/contract/10.8/1864-migration-0057-body-trigram-pending-list.md`).
+--
+-- ## Why
+--
+-- With `fastupdate` on (the default), an insert into a GIN index lands in an
+-- unsorted pending list, merged once it passes `gin_pending_list_limit`
+-- (4 MB) or a vacuum reaches it. A manual `analyze` does not merge it, and
+-- autovacuum may not have reached a freshly synced mirror. The planner charges
+-- every pending page as a random read (`gincostestimate`) whatever the query
+-- asks. On `read_plans.rs`' mirror (5,000 prose bodies), a load that ended
+-- with 411 pages pending priced the mention rule's index read at about 1,700,
+-- above a scan of every body (967 never analyzed, 1,389 analyzed), and the
+-- rule read every body: 4.8 ms, against about 1 ms through the index.
+-- Whether a load ends with a long list depends on where the last 4 MB merge
+-- fell, which a word in most bodies moved (#1849): red with it in 1/2, 2/3,
+-- 3/4 or 7/8 of them, green at 1/4 and without it.
+--
+-- ## Why 256 kB, and not `fastupdate = off`
+--
+-- At 256 kB the list holds at most about 33 pages, a charge of about 130,
+-- under a scan of all but a tiny mirror. Inserting those 5,000 bodies one by
+-- one took 0.5 to 0.7 s, against 0.3 to 0.4 s at 4 MB and 3.5 to 13 s with
+-- no pending list (`0033`'s choice for an index a batch probes itself): a
+-- first sync pays for the merges, a few tenths of a second per 5,000 bodies.
+--
+-- ## The list already pending
+--
+-- Merged here, so an upgraded mirror plans the rule on the index before its
+-- next write.
+
+alter index sync.item_body_trgm_idx set (gin_pending_list_limit = 256);
+
+select gin_clean_pending_list('sync.item_body_trgm_idx'::regclass);

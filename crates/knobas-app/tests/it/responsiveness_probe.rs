@@ -152,11 +152,6 @@ pub(crate) struct Synthetic {
     pub(crate) descriptor: SourceDescriptor,
     pub(crate) kind: &'static str,
     pub(crate) count: u64,
-    /// Whether three bodies in four carry [`COMMON_WORD`] (#1849). The probe
-    /// seeds it; `read_plans.rs` does not, its plan shapes were fixed on a
-    /// mirror without a word in most bodies and the mention rule's index plan
-    /// flips to a scan of every body once one is there.
-    pub(crate) common_word: bool,
 }
 
 #[async_trait::async_trait]
@@ -269,7 +264,7 @@ impl Source for Synthetic {
                 rng.words(40)
             };
             // After every draw, so the rest of the text is the seed it was.
-            let body_text = if self.common_word && carries_common_word(i) {
+            let body_text = if carries_common_word(i) {
                 format!("{body_text} {COMMON_WORD}")
             } else {
                 body_text
@@ -479,7 +474,6 @@ async fn seed(
             },
             kind: "ticket",
             count: tickets,
-            common_word: true,
         });
     }
     synthetic.push(Synthetic {
@@ -489,7 +483,6 @@ async fn seed(
         },
         kind: "page",
         count: pages,
-        common_word: true,
     });
     synthetic.push(Synthetic {
         descriptor: SourceDescriptor {
@@ -498,7 +491,6 @@ async fn seed(
         },
         kind: "build",
         count: builds,
-        common_word: true,
     });
     synthetic.push(Synthetic {
         descriptor: SourceDescriptor {
@@ -507,7 +499,6 @@ async fn seed(
         },
         kind: "pr",
         count: prs,
-        common_word: true,
     });
     for source in &synthetic {
         knobas_app::sources::demo::load_mirror_of(pool, source)

@@ -2587,3 +2587,87 @@ async fn zero_fifty_six_stores_what_the_launcher_lexed_per_match() {
         )
     );
 }
+
+/// `0057` (#1864): the mention rule's trigram index keeps a pending list of
+/// at most 256 kB, so a load leaves the planner a few pages to charge for it
+/// and not up to 4 MB. With the default limit, 600 bodies of twenty random
+/// words sit unmerged in some 170 pages, each costed as a random read,
+/// and the inbox's mention rule read every body instead of the index once
+/// that cost passed a scan of the mirror's prose. Rerun over a list left
+/// under the old limit, the migration also merges it, so an upgraded mirror
+/// does not wait for its next write.
+#[tokio::test]
+async fn zero_fifty_seven_caps_the_body_trigram_pending_list() {
+    let pool = knobas_db::test_util::scratch_database("body-trigram-pending")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    sqlx::query("create extension if not exists pgstattuple")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let pending = || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i32>(
+                "select pending_pages from pgstatginindex('sync.item_body_trgm_idx')",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let load = |from: i32| {
+        let pool = pool.clone();
+        async move {
+            sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+                "insert into knobas.entity (id, kind, title)
+                 select 'jira:T-' || g, 'ticket', 't'
+                   from generate_series({from}, {from} + 599) g;
+                 insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+                 select 'jira:T-' || g, 'jira', 'ticket', 't',
+                        (select string_agg(md5((g * 100 + w)::text), ' ')
+                           from generate_series(1, 20) w),
+                        '{{}}'::jsonb
+                   from generate_series({from}, {from} + 599) g"
+            )))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
+
+    load(1).await;
+    let capped = pending().await;
+    assert!(
+        capped <= 256 / 8 + 1,
+        "{capped} pages pending, over the 256 kB limit"
+    );
+
+    // The list an index under the default limit is left with, merged by the
+    // migration rerun.
+    sqlx::query("alter index sync.item_body_trgm_idx reset (gin_pending_list_limit)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    load(1_001).await;
+    let unlimited = pending().await;
+    assert!(
+        unlimited > 4 * (256 / 8 + 1),
+        "the default limit left {unlimited} pages pending, too few to tell the cap from it"
+    );
+    sqlx::raw_sql(include_str!(
+        "../migrations/0057_a_mention_index_keeps_a_short_pending_list.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(pending().await, 0, "the migration merges what was pending");
+    load(2_001).await;
+    let again = pending().await;
+    assert!(
+        again <= 256 / 8 + 1,
+        "{again} pages pending after the migration, over the 256 kB limit"
+    );
+}
