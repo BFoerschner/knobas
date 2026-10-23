@@ -18,7 +18,7 @@ The loop runs unattended; one prompt stalls it until Björn is back. The Bash ho
 
 **You decide the forks that come up while implementing**; nobody waits for another agent or for Björn. Record each ruling in the PR under **Rulings** (fork / ruling / reasoning / cost of reversing) and append it to `docs/decisions/<yyyy-mm>-unattended-rulings.md` in the same PR (create it in the shape of `docs/decisions/2026-08-29-unattended-batch-rulings.md`). A ruling may not contradict a ticket, spec, ADR or the glossary: where the work shows one of them wrong, do what the document says, file a `ready-for-agent` follow-up naming the conflict, and say so in your report.
 
-A step the ticket **reserves for Björn** (sign-off, approval, a choice): on Opus, rule it, headed "Reserved for Björn, ruled by implementer on Opus", tick the criterion and name the ruling beside it. On Sonnet, do everything else and name the step in your report; never rule it.
+A step the ticket **reserves for Björn** (sign-off, approval, a choice): you run on Opus, so rule it, headed "Reserved for Björn, ruled by implementer on Opus", tick the criterion and name the ruling beside it.
 
 A criterion no agent can witness (by-eye judgement, a human-only step) is not a fork: do everything else and write in the PR *"Not witnessable by an agent, handed to the milestone review: <criterion>"*. A criterion that **cannot pass on a correct implementation** (a glob that misses the directory it asked for, a count no fixture reaches) is not a reason to bend the code: say so in the PR, tick it with that note, and file the wording fix as a follow-up.
 
