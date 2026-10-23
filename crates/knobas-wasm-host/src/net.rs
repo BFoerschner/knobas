@@ -11,8 +11,8 @@
 //!
 //! **A fixed name may not lead home** (#1244). A request the allowlist
 //! [guards](Allowlist::guards) leaves through a client of its own, whose
-//! resolver refuses the name when any address it resolves to [is
-//! local](crate::allow::is_local). The check is on the addresses the
+//! resolver refuses the name when any address it resolves to is not
+//! [public](crate::allow::is_public). The check is on the addresses the
 //! connection is then made to, so a name that answers public once and
 //! local the next time (DNS rebinding) cannot slip between a check and the
 //! connect. The refusal reaches the component as `connection-refused`.
@@ -85,7 +85,7 @@ use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, SourceError};
 use wasmtime_wasi_http::{Error as HttpError, RequestOptions, WasiBody, WasiHttpHooks};
 
-use crate::allow::{Allowlist, HostPattern, Target, declared_keys, is_local};
+use crate::allow::{Allowlist, HostPattern, Target, declared_keys, is_public};
 use crate::limits::Limits;
 use crate::redact::{self, Needles, RedactedBody};
 
@@ -346,7 +346,7 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
         // never sees it: judge it here first.
         // A lookup that never answers is a failed one: the request goes on to the proxy.
         if let Ok(Ok(addrs)) = tokio::time::timeout(LOOKUP_WAIT, lookup(name)).await
-            && refuse_if_local(name, &addrs)
+            && refuse_unless_public(name, &addrs)
         {
             return Err(HttpError::ConnectionRefused);
         }
@@ -541,7 +541,7 @@ fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// The clients' name lookup: the system's, and on the guarded client a
-/// refusal of a [guarded](register_guarded) name any of whose addresses is local. An
+/// refusal of a [guarded](register_guarded) name any of whose addresses is not public. An
 /// address in the URL never comes here; the connector reads it as it is.
 struct Resolver {
     guarded: bool,
@@ -553,8 +553,8 @@ impl reqwest::dns::Resolve for Resolver {
         let name = name.as_str().to_owned();
         Box::pin(async move {
             let addrs = lookup(&name).await?;
-            if guarded && is_guarded(&name) && refuse_if_local(&name, &addrs) {
-                return Err(format!("{name} resolves to a local address").into());
+            if guarded && is_guarded(&name) && refuse_unless_public(&name, &addrs) {
+                return Err(format!("{name} resolves to an address that is not public").into());
             }
             Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
         })
@@ -562,15 +562,15 @@ impl reqwest::dns::Resolve for Resolver {
 }
 
 /// Whether a guarded `name` is refused for resolving to `addrs`: any of
-/// them local. A refusal is logged with the address.
-fn refuse_if_local(name: &str, addrs: &[SocketAddr]) -> bool {
-    let Some(local) = addrs.iter().find(|addr| is_local(addr.ip())) else {
+/// them not [public](is_public). A refusal is logged with the address.
+fn refuse_unless_public(name: &str, addrs: &[SocketAddr]) -> bool {
+    let Some(refused) = addrs.iter().find(|addr| !is_public(addr.ip())) else {
         return false;
     };
     tracing::warn!(
         "an external adapter's request is refused: {name}, a host its manifest fixes, \
-         resolves to the local address {}",
-        local.ip()
+         resolves to {}, which is not a public address",
+        refused.ip()
     );
     true
 }

@@ -111,6 +111,11 @@ struct Release {
 pub enum FetchError {
     #[error("{0} is neither a manifest URL, a GitHub repository URL nor a local file")]
     NotAnOrigin(String),
+    #[error(
+        "{0} is plain http: a release is fetched over https, or over http only from this \
+         machine (127.0.0.1, ::1, localhost)"
+    )]
+    NotHttps(String),
     #[error("cannot read the manifest {path}: {error}")]
     Unreadable { path: String, error: std::io::Error },
     #[error("cannot fetch {url}: {error}")]
@@ -131,7 +136,9 @@ impl Origin {
     /// # Errors
     ///
     /// [`FetchError::NotAnOrigin`] for an empty input or a URL that does
-    /// not parse.
+    /// not parse; [`FetchError::NotHttps`] for a manifest URL over plain
+    /// http off this machine (#1641). A repository URL's scheme is not
+    /// checked: nothing is fetched from it.
     pub fn parse(input: &str, endpoints: &Endpoints) -> Result<Self, FetchError> {
         let input = input.trim();
         let not = || FetchError::NotAnOrigin(format!("{input:?}"));
@@ -154,6 +161,7 @@ impl Origin {
                 });
             }
         }
+        require_https(&url)?;
         Ok(Origin::Manifest(url))
     }
 
@@ -334,8 +342,33 @@ fn text(bytes: &[u8], url: &str) -> Result<String, FetchError> {
     })
 }
 
+/// [`FetchError::NotHttps`] unless `url` may carry a release: https, or
+/// plain http to this machine (a loopback address, or `localhost`), where
+/// nothing on the path can swap the manifest and the artifact it pins
+/// together (#1641). The test forge is `http://127.0.0.1`.
+fn require_https(url: &url::Url) -> Result<(), FetchError> {
+    let ok = match url.scheme() {
+        "https" => true,
+        "http" => match url.host() {
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+            None => false,
+        },
+        _ => false,
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(FetchError::NotHttps(url.to_string()))
+    }
+}
+
 /// GET `url` through the one HTTP stack, with no credential, refusing a
-/// body over `cap` bytes.
+/// body over `cap` bytes, and a URL [`require_https`] refuses: `url`
+/// itself, and the URL the answer came from after any redirects (a
+/// release's API names the assets' URLs, and a download redirects). A
+/// plain-http hop between the two is not seen (#1830).
 async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
     let unreachable = |error| FetchError::Unreachable {
         url: url.to_owned(),
@@ -343,6 +376,7 @@ async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
     };
     let parsed = url::Url::parse(url)
         .map_err(|e| unreachable(SourceError::protocol(format!("not a URL: {e}"))))?;
+    require_https(&parsed)?;
     let origin = parsed.origin().ascii_serialization();
     let mut path = parsed.path().to_owned();
     if let Some(query) = parsed.query() {
@@ -364,6 +398,7 @@ async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
         .send(client.request(Method::GET, &path))
         .await
         .map_err(unreachable)?;
+    require_https(response.url())?;
     let too_large = || FetchError::TooLarge {
         url: url.to_owned(),
         cap,
@@ -510,6 +545,90 @@ mod tests {
             matches!(error, FetchError::TooLarge { cap, .. } if cap == MANIFEST_CAP),
             "{error:?}"
         );
+    }
+
+    /// A manifest and the artifact it pins come over the same channel, so
+    /// over plain http an attacker on the path swaps both and the hash still
+    /// matches (#1641): a remote origin is https, or on this machine.
+    #[test]
+    fn a_plain_http_origin_off_this_machine_is_refused() {
+        for input in [
+            "http://example.test/manifest.json",
+            "HTTP://forge.example/harbour/surveys/releases/download/v1/m.json",
+            "http://10.0.0.1/m.json",
+            "http://localhost.example/m.json",
+            "http://127.0.0.1.example/m.json",
+        ] {
+            let error = Origin::parse(input, &Endpoints::default()).expect_err(input);
+            assert!(
+                matches!(error, FetchError::NotHttps(_)),
+                "{input}: {error:?}"
+            );
+            assert!(error.to_string().contains("https"), "{error}");
+        }
+    }
+
+    /// The test forge and a reader's own forge on this machine keep plain
+    /// http: nothing between knobas and the loopback can swap a byte.
+    #[test]
+    fn a_plain_http_origin_on_this_machine_still_parses() {
+        for input in [
+            "http://127.0.0.1:3000/m.json",
+            "http://127.0.0.9/harbour/surveys/releases/download/v1/m.json",
+            "http://[::1]:8080/m.json",
+            "http://localhost:3000/m.json",
+            "https://example.test/manifest.json",
+        ] {
+            assert!(matches!(parse(input), Origin::Manifest(_)), "{input}");
+        }
+        // Nothing is fetched from a repository URL: its release is read
+        // through `Endpoints::github_api`.
+        assert!(matches!(
+            parse("http://github.com/harbour/surveys"),
+            Origin::GitHubRepo { .. }
+        ));
+    }
+
+    /// A URL a release answers (an asset's download) is held to the same:
+    /// `get` refuses plain http off this machine before it connects.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_fetch_over_plain_http_off_this_machine_is_refused() {
+        let error = get("http://example.test/knobas-adapter.wasm", ARTIFACT_CAP)
+            .await
+            .expect_err("plain http");
+        assert!(matches!(error, FetchError::NotHttps(_)), "{error:?}");
+    }
+
+    /// A redirect to plain http off this machine is refused too: the body
+    /// that came from there is not handed on. (`localhost.` is a name other
+    /// than `localhost`, and resolves to the redirect's own server.)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_redirect_to_plain_http_off_this_machine_is_refused() {
+        use std::io::{Read as _, Write as _};
+        let target = undeclared_body(16);
+        let port = target
+            .rsplit(':')
+            .next()
+            .unwrap()
+            .split('/')
+            .next()
+            .unwrap()
+            .to_owned();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let from = listener.local_addr().expect("addr").port();
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept");
+            let _ = socket.read(&mut [0u8; 4096]);
+            let answer = format!(
+                "HTTP/1.1 302 Found\r\nlocation: http://localhost.:{port}/knobas-adapter.wasm\r\n\
+                 content-length: 0\r\nconnection: close\r\n\r\n"
+            );
+            let _ = socket.write_all(answer.as_bytes());
+        });
+        let error = get(&format!("http://127.0.0.1:{from}/m.wasm"), ARTIFACT_CAP)
+            .await
+            .expect_err("redirected to plain http");
+        assert!(matches!(error, FetchError::NotHttps(_)), "{error:?}");
     }
 
     #[test]

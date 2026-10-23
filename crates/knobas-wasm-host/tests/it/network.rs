@@ -342,9 +342,11 @@ fn fetching(entries: &[&str], fetch: &str, config: serde_json::Value) -> Box<dyn
 }
 
 const LOOPBACK: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
-/// TEST-NET-3 (RFC 5737): public as far as the guard can tell, and routed
-/// nowhere.
-const PUBLIC: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 7));
+/// A public address (Cloudflare's resolver). No test connects to it: a
+/// request to a name that answers it is carried by a test's proxy, or
+/// refused for a second answer. (A documentation address is not public to
+/// the guard, #1641.)
+const PUBLIC: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::new(1, 1, 1, 1));
 
 /// DNS rebinding (#1244): a name the manifest fixed, which its owner points
 /// at the reader's own machine, is refused before a socket opens.
@@ -534,6 +536,52 @@ async fn a_fixed_public_host_still_goes_through_the_proxy() {
     assert_eq!(
         proxy.carried(),
         ["GET http://public-1283.test/data HTTP/1.1"]
+    );
+}
+
+/// The NAT64 well-known prefix (`64:ff9b::/96`, RFC 6052) carries an IPv4
+/// address in its last 32 bits, and a dual-stack network's NAT64 gateway
+/// connects to that address: `64:ff9b::a00:1` is `10.0.0.1`. A fixed name
+/// whose owner answers it is refused like the private address itself
+/// (#1641). Through a proxy, so a request the guard let through is seen
+/// arriving.
+#[tokio::test]
+async fn a_fixed_host_that_resolves_to_the_nat64_form_of_a_private_address_is_refused() {
+    let local = Server::start(None).await;
+    let proxy = Proxy::start(&local).await;
+    let nat64: std::net::IpAddr = "64:ff9b::a00:1".parse().unwrap();
+    knobas_wasm_host::fake_dns("nat64-1641.test", &[nat64]);
+    knobas_wasm_host::fake_proxy("nat64-1641.test", &proxy.url);
+    let source = fetching(
+        &["nat64-1641.test"],
+        "http://nat64-1641.test/data",
+        serde_json::json!({}),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(!ok && text.contains("ConnectionRefused"), "{text}");
+    assert!(proxy.carried().is_empty(), "{:?}", proxy.carried());
+    assert!(local.seen().is_empty(), "{:?}", local.seen());
+}
+
+/// The control: the NAT64 form of a public address (`1.1.1.1`) is public,
+/// and goes through the proxy.
+#[tokio::test]
+async fn a_fixed_host_that_resolves_to_the_nat64_form_of_a_public_address_goes_through() {
+    let local = Server::start(None).await;
+    let proxy = Proxy::start(&local).await;
+    let nat64: std::net::IpAddr = "64:ff9b::101:101".parse().unwrap();
+    knobas_wasm_host::fake_dns("nat64-public-1641.test", &[nat64]);
+    knobas_wasm_host::fake_proxy("nat64-public-1641.test", &proxy.url);
+    let source = fetching(
+        &["nat64-public-1641.test"],
+        "http://nat64-public-1641.test/data",
+        serde_json::json!({}),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(ok, "{text}");
+    assert_eq!(
+        proxy.carried(),
+        ["GET http://nat64-public-1641.test/data HTTP/1.1"]
     );
 }
 

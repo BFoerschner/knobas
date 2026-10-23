@@ -232,3 +232,113 @@ async fn an_outgoing_body_past_the_memory_cap_is_refused() {
         "{answer:?}"
     );
 }
+
+/// A host log line: the source it names and its message.
+type Line = (String, String);
+
+/// Every log line the host wrote for a source in this binary, through a
+/// subscriber set once (a call may run on a thread of its own).
+fn logged() -> &'static std::sync::Mutex<Vec<Line>> {
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    struct Catch;
+    #[derive(Default)]
+    struct Fields {
+        source: Option<String>,
+        message: String,
+    }
+    impl tracing::field::Visit for Fields {
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            if field.name() == "source" {
+                self.source = Some(value.to_owned());
+            }
+        }
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            match field.name() {
+                "message" => self.message = format!("{value:?}"),
+                "source" => self.source = Some(format!("{value:?}")),
+                _ => {}
+            }
+        }
+    }
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Catch {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let mut fields = Fields::default();
+            event.record(&mut fields);
+            if let Some(source) = fields.source {
+                LINES.lock().unwrap().push((source, fields.message));
+            }
+        }
+    }
+    static LINES: std::sync::Mutex<Vec<Line>> = std::sync::Mutex::new(Vec::new());
+    static SET: std::sync::Once = std::sync::Once::new();
+    SET.call_once(|| {
+        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(Catch))
+            .expect("no other subscriber in this binary");
+    });
+    &LINES
+}
+
+/// A component that logs a 256 KiB message a thousand times (#1641): the
+/// host writes each line cut to 4 KiB, at most 100 of them and then one a
+/// second for the rest of the call, and says how many it dropped.
+#[tokio::test]
+async fn a_component_that_floods_its_log_is_held_to_a_few_short_lines() {
+    const ID: &str = "flood-1641";
+    let lines = logged();
+    let instance = SourceInstance {
+        id: ID.to_owned(),
+        kind: "wasm-fixture".to_owned(),
+        display_name: "Harbour surveys".to_owned(),
+        base_url: "https://surveys.example".to_owned(),
+        auth: None,
+        secret: None,
+        account: None,
+        config: serde_json::json!({ "log_flood": 1000 }),
+    };
+    let source = load_fixture().build(instance).expect("the fixture builds");
+    let started = Instant::now();
+    source.test_connection().await.expect("the flood answers");
+    let took = started.elapsed();
+    let ours: Vec<Line> = lines
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(source, _)| source == ID)
+        .cloned()
+        .collect();
+    let (flood, notes): (Vec<&Line>, Vec<&Line>) = ours
+        .iter()
+        .partition(|(_, message)| message.starts_with("flood: "));
+    let bytes: usize = flood.iter().map(|(_, message)| message.len()).sum();
+    let allowed = 100 + usize::try_from(took.as_secs()).unwrap() + 1;
+    assert!(
+        !flood.is_empty() && flood.len() <= allowed,
+        "{} lines in {took:?}, at most {allowed}",
+        flood.len()
+    );
+    for (_, message) in &flood {
+        assert!(
+            message.len() <= 4096 + 64,
+            "a line of {} bytes",
+            message.len()
+        );
+        assert!(
+            message.ends_with("bytes cut)"),
+            "{}",
+            &message[message.len() - 40..]
+        );
+    }
+    assert!(bytes <= flood.len() * (4096 + 64), "{bytes} bytes");
+    let dropped = 1000 - flood.len();
+    assert!(
+        notes
+            .iter()
+            .any(|(_, message)| message.contains(&format!("{dropped} more log lines"))),
+        "{notes:?}"
+    );
+}

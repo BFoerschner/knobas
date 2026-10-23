@@ -51,6 +51,9 @@
 //!   naive adapter, for the host's pacing (#1631). `mirror` and `username`
 //!   are config keys it declares and never reads, for a manifest's host
 //!   template and the host's basic auth.
+//! * **`"log_flood": <n>`** makes `test_connection` log one 256 KiB
+//!   message `n` times before it answers: an adapter that floods the
+//!   reader's log, for the host's bound on its lines (#1641).
 //! * **`"download_mib"`** is how many MiB a download of every artifact
 //!   streams (default 1).
 //! * **`translate-query`** (#1208) reads a payload's `"survey_query"`
@@ -167,6 +170,23 @@ pub struct Adapter {
     /// The MiB a download of every artifact streams.
     #[cfg_attr(feature = "v1_0", allow(dead_code))]
     download_mib: u64,
+    /// How many times `test_connection` logs [`FLOOD_BYTES`] bytes.
+    log_flood: u64,
+}
+
+/// The size of one message of a log flood.
+const FLOOD_BYTES: usize = 256 << 10;
+
+/// Log a 256 KiB message `times` times. Two-byte characters after a
+/// seven-byte head, so a cut at an even size falls inside a character.
+fn flood(times: u64) {
+    let mut message = String::from("flood: ");
+    while message.len() + 'ä'.len_utf8() <= FLOOD_BYTES {
+        message.push('ä');
+    }
+    for _ in 0..times {
+        knobas::adapter::log::log(knobas::adapter::log::Level::Info, &message);
+    }
 }
 
 fn protocol(message: String) -> SourceError {
@@ -190,6 +210,7 @@ fn read_fault(config: &str) -> Result<Fault, String> {
             "post_mib",
             "fetch_times",
             "download_mib",
+            "log_flood",
             "mirror",
             "username",
         ]
@@ -369,6 +390,7 @@ impl GuestAdapter for Adapter {
             fetch_options,
             fetch_times: read("fetch_times").unwrap_or(1).max(1),
             download_mib: read("download_mib").unwrap_or(1),
+            log_flood: read("log_flood").unwrap_or(0),
             received: serde_json::json!({
                 "id": instance.id,
                 "kind": instance.kind,
@@ -417,6 +439,7 @@ impl GuestAdapter for Adapter {
                     "post_mib": { "type": "integer" },
                     "fetch_times": { "type": "integer" },
                     "download_mib": { "type": "integer" },
+                    "log_flood": { "type": "integer" },
                     "mirror": { "type": "string" },
                     "username": { "type": "string" },
                 },
@@ -439,6 +462,7 @@ impl GuestAdapter for Adapter {
 
     fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
         self.healthy()?;
+        flood(self.log_flood);
         if let Some(url) = &self.fetch {
             let mut trace = fetch::get(url, self.fetch_options);
             for _ in 1..self.fetch_times {
