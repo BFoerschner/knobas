@@ -813,7 +813,10 @@ async fn a_pattern_with_a_dotted_capital_i_matches_under_the_servers_fold() {
     )
     .await;
     let project = format!("İstanbul{t}");
-    let build = pipeline(&pool, &project, &format!("{t}_Build")).await;
+    // Its id is not its name, so the name branch of the read is the one that
+    // has to fold.
+    let chain = [(format!("Ist{t}"), project.clone())];
+    let build = nested_pipeline(&pool, &chain, &format!("{t}_Build")).await;
     let job = ticket(&pool).await;
 
     let saved = link_sets::save(
