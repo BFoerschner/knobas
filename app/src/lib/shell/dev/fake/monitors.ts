@@ -201,7 +201,7 @@ export function fakeUnmonitored() {
     }))
     .sort(
       (left, right) =>
-        left.path.localeCompare(right.path) ||
+        (left.path ?? "").localeCompare(right.path ?? "") ||
         left.name.localeCompare(right.name),
     );
   // The routes follow the assets (#976). The estate file names no monitor for
