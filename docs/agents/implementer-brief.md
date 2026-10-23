@@ -67,7 +67,12 @@ The merge-manager runs the ticket's only full gate; you don't run `just gate` or
 
 **Self-merge** (dispatch says so): once ready, follow *Merge tail*, *Keeping the lock* and *Merge and cleanup* in the merge-manager brief named in your dispatch, with the lock named in yours. In short: gate before the lock (rebase onto `origin/main`, `MAIN=$(git rev-parse origin/main)`, `env -C <worktree> just gate` in the foreground, Bash timeout 600000, not under `hold`; docs-only runs `just docs-check` instead, the contract-index and conflict-marker checks), and only when it is green record it with `bash <lock> ready <PR> $(git rev-parse HEAD) $MAIN`; `bash <lock> take <PR>` in the foreground (exit 4 means still queued, so call it again); then `env -C <worktree> bash <lock> gated <PR>`: exit 0 merges without gating again, anything else rebases and gates once more under the lock as `env -C <worktree> bash <lock> hold <PR> just gate` (or `just docs-check`), batching per the brief. Report the merged commit.
 
-**Follow-ups:** `ready-for-agent` if Björn would notice it in the app, else `backlog`.
+**Filing a follow-up** (Björn, 2026-10-23): file the class, not the instance you met.
+
+- **Search first.** Grep the workspace for the pattern, read the sibling call sites, crates and suites, and run `gh issue list --state all --search '<cause>'` for an issue that already names the cause.
+- **Fold before you file.** An open issue that covers the cause gets your instance as a comment (`gh issue view` first); you open nothing.
+- **One issue per root cause.** The body names the cause, lists every instance found (`path:line`; one in flight carries its issue number) and quotes the search (grep and issue query) so it can be rerun. `ready-for-agent` if Björn would notice it in the app, else `backlog`.
+- **The test.** The next agent meeting another instance finds your issue by its cause and adds one line. A body naming only the place it surfaced fails it; so does a second issue for a cause already open.
 
 ## Attribution
 

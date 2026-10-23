@@ -31,7 +31,12 @@ Start as soon as the PR opens, even as a draft.
 5. Fix on the branch yourself (`git status --short`, named paths). Out-of-scope fixes: report with the finding quoted. Cap: 3 rounds, then stop and report.
 6. Re-run a live suite only if your fixes or the rebase touched what it exercises.
 
-**Follow-ups:** `ready-for-agent` if Björn would notice it in the app, else `backlog`.
+**Filing a follow-up** (Björn, 2026-10-23): file the class, not the instance you met.
+
+- **Search first.** Grep the workspace for the pattern, read the sibling call sites, crates and suites, and run `gh issue list --state all --search '<cause>'` for an issue that already names the cause.
+- **Fold before you file.** An open issue that covers the cause gets your instance as a comment (`gh issue view` first); you open nothing.
+- **One issue per root cause.** The body names the cause, lists every instance found (`path:line`; one in flight carries its issue number) and quotes the search (grep and issue query) so it can be rerun. `ready-for-agent` if Björn would notice it in the app, else `backlog`.
+- **The test.** The next agent meeting another instance finds your issue by its cause and adds one line. A body naming only the place it surfaced fails it; so does a second issue for a cause already open.
 
 ## The gate
 
