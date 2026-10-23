@@ -2064,6 +2064,16 @@ async fn a_run_whose_adapter_panics_is_recorded_and_stops_running() {
         status.next_run_at.is_some(),
         "a source whose run ended has a next time: {status:?}"
     );
+    // An error on the ladder like any other: the first rung, in place of the
+    // hour `seed_quiet` parked the source behind. Not the cancelled run's
+    // untouched backoff -- a panic is the adapter's fault, not the reader's.
+    let until = status.backoff_until.expect("a failed run backs off");
+    let rung = chrono::Duration::from_std(config::backoff_after(1)).unwrap();
+    let now = chrono::Utc::now();
+    assert!(
+        until > now && until <= now + rung,
+        "the panicked run backs off one rung: {status:?}"
+    );
     let row = run_log::list(&pool, Some(&id), 10)
         .await
         .unwrap()
