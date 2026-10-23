@@ -660,6 +660,26 @@ mod tests {
         assert_eq!(loose.slot.current().take_left(), 4);
     }
 
+    /// A loosening after a short quiet is credited in proportion to it, not
+    /// with its whole burst (#1771): 150 ms at ten a second is one request of
+    /// fifty, and the bound leaves the sleep almost a second to run long.
+    /// Counted in the wrong unit either way, the credit would be none or all
+    /// fifty.
+    #[test]
+    fn a_short_quiet_credits_a_loosening_in_proportion() {
+        let url = url::Url::parse("http://short.invalid:1771").expect("url");
+        drop(InstanceLimiter::for_origin(&url, Rate::new(1, 1)));
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let loose = InstanceLimiter::for_origin(&url, Rate::new(10, 50));
+
+        assert_eq!(loose.slot.current().rate, Rate::new(10, 50), "it loosened");
+        let left = loose.slot.current().take_left();
+        assert!(
+            (1..=10).contains(&left),
+            "{left} of fifty after 150 ms at ten a second"
+        );
+    }
+
     /// A loosening right after the stricter limiter was built hands out
     /// nothing, though that limiter was full (#1728): its ten requests are
     /// ten seconds at one a second, a thousand at a hundred a second, and

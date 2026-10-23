@@ -681,7 +681,7 @@ async fn a_quota_loosens_once_the_stricter_client_is_gone() {
 /// twenty. That the quota loosened at all is the test above's; this one is
 /// that the loosening sent no burst.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_loosened_quota_starts_drained() {
+async fn a_loosening_right_away_starts_drained() {
     let server = CountingServer::always(200, "");
     drop(client_at(&server, 1, 1));
     let loose = client_at(&server, 2, 20);

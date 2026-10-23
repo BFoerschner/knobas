@@ -12,9 +12,12 @@
   through (#1764's `Slot::last_grant`), at most its burst, and nothing of what the replaced
   limiter had left. The refill count both branches use moves into `Rate::refilled_in`, and
   `Paced::with_left` takes that `u128` and saturates it itself. The module doc, `Slot::register`'s
-  and `Paced::loosened`'s say so, and a comment in `crates/knobas-http/tests/transport.rs`
-  (`a_loosened_quota_starts_drained`) names the credit. Three module tests are new
+  and `Paced::loosened`'s say so. In `crates/knobas-http/tests/transport.rs`,
+  `a_loosened_quota_starts_drained` is renamed `a_loosening_right_away_starts_drained`, since a
+  loosening now starts drained only right after a request, and its comment names the credit; its
+  body is unchanged. Four module tests are new
   (`a_loosening_after_a_quiet_starts_with_what_the_quiet_refilled`,
+  `a_short_quiet_credits_a_loosening_in_proportion`,
   `a_loosening_right_away_takes_nothing_from_a_full_limiter`,
   `a_request_ends_the_quiet_before_a_loosening`), and `a_loosening_does_not_end_the_quiet`'s doc
   no longer says its loosening starts drained.

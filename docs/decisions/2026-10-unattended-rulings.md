@@ -12905,7 +12905,7 @@ The measurement came after it.
   fresh burst on every alternation. The quiet is safe: nothing was sent for that long, so the
   looser quota's bucket over the real requests would hold at least that much. A back-to-back
   alternation has a quiet of milliseconds and starts drained (the transport tests
-  `a_loosened_quota_starts_drained` and `a_tightening_after_a_loosening_starts_with_what_was_left`,
+  `a_loosening_right_away_starts_drained` and `a_tightening_after_a_loosening_starts_with_what_was_left`,
   and the module test `a_loosening_right_away_takes_nothing_from_a_full_limiter`). *Reversing:* low, one expression.
 - **A change looser in one field and stricter in the other.** *Ruling:* still a loosening (#1728),
   now credited with the quiet at its rate, capped at its burst. *Reasoning:* the cap is the
@@ -12920,6 +12920,6 @@ The measurement came after it.
   against eight counted from the build). *Reversing:* low.
 - **Live suite and transport test.** *Ruling:* none owed, as for #1740 and #1764. *Reasoning:* no
   live suite seeds two quotas on one server, and the module tests go through `for_origin`,
-  `Slot::register` and `Paced::loosened`, the path a client takes. `a_loosened_quota_starts_drained`
+  `Slot::register` and `Paced::loosened`, the path a client takes. `a_loosening_right_away_starts_drained`
   and `a_quota_loosens_once_the_stricter_client_is_gone` still pin the transport side.
   *Reversing:* n/a.
