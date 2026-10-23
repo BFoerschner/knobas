@@ -277,3 +277,21 @@ test("Code asks every read for the code host role with its own kinds, and draws 
   expect(target.querySelectorAll("tbody tr")).toHaveLength(REPOS.length + 1);
   expect([...target.querySelectorAll(".tf-tabs a")].map(text)[0]).toBe(`Repositories ${REPOS.length + 1}`);
 });
+
+test("a mirror of more than 1000 repositories is read on to its total, not cut at 1000 (#1825)", async () => {
+  const many = Array.from({ length: 1200 }, (_, n) => row(`gitea:o/r${n}`, "repo", `o/r${n}`));
+  const offsets: number[] = [];
+  await draw(
+    ["repos"],
+    "PAY-231",
+    ports({
+      listEntities: async (filter, limit, offset) => {
+        if (!filter.kinds.includes("repo")) return page([]);
+        offsets.push(offset);
+        return { rows: many.slice(offset, offset + limit), total: many.length, tally: null, groups: null };
+      },
+    }),
+  );
+  expect(offsets).toEqual([0, 1000]);
+  expect(target.querySelectorAll("tbody tr").length).toBeGreaterThan(1000);
+});

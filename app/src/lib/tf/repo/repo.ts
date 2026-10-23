@@ -14,6 +14,7 @@ import type {
   CodeFacts,
   DiffFile,
   DiffRead,
+  EntityPage,
   EntityRow,
   SourceView,
   TreeEntry,
@@ -128,6 +129,25 @@ export function commitHash(repoId: string, commitId: string): string {
 export function repoOfRow(row: Pick<EntityRow, "source_id" | "path">, repos: readonly EntityRow[]): EntityRow | null {
   if (row.path === null) return null;
   return repos.find((repo) => repo.kind === "repo" && repo.source_id === row.source_id && repo.title === row.path) ?? null;
+}
+
+/**
+ * Every row of a room, read a page at a time until `total` is reached, or
+ * until `done` says the rows so far hold what the caller wants (#1825). One
+ * read answers at most `LIST_MOST` rows, so a mirror of more rows than that
+ * is read on with `offset` instead of dropping its tail unsaid. An empty page
+ * ends the walk, so a room that shrank mid-read cannot loop it.
+ */
+export async function readAllRows(
+  read: (offset: number) => Promise<EntityPage>,
+  done: (rows: readonly EntityRow[]) => boolean = () => false,
+): Promise<EntityRow[]> {
+  const rows: EntityRow[] = [];
+  for (;;) {
+    const page = await read(rows.length);
+    rows.push(...page.rows);
+    if (page.rows.length === 0 || rows.length >= page.total || done(rows)) return rows;
+  }
 }
 
 /** The two kinds whose addresses send the reader to their repository page (#1440). */

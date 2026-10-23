@@ -24,6 +24,7 @@
 -->
 <script lang="ts" module>
   import type { CheckoutView, CodeFacts, EntityFilter, EntityPage } from "../../ipc/entity";
+  import { readAllRows } from "../repo/repo";
   import type { OpenJobPorts } from "../job/open-jobs";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
@@ -100,7 +101,7 @@
   const now = $derived(fixedNow ?? new Date());
   const tab = $derived<"repos" | "prs">(rest[0] === "prs" ? "prs" : "repos");
 
-  /** How many rows a read asks for: every repository and pull request the mirror holds. */
+  /** How many rows one read asks for; a room of more is read on with `offset`. */
   const LIMIT = 1000;
   /** How many `entity_checkout` reads run at once: each may run `git status`. */
   const CHECKOUT_LANES = 4;
@@ -122,6 +123,21 @@
     reach,
   });
 
+  /**
+   * Every row of a room, read on with `offset` past one read's `LIMIT` until
+   * `total` (#1825): the page's counts and its Open PRs column count what the
+   * mirror holds, so a tail dropped unsaid would miscount them.
+   */
+  async function whole(filter: EntityFilter): Promise<EntityPage> {
+    const first: { page?: EntityPage } = {};
+    const rows = await readAllRows(async (offset) => {
+      const page = await ports.listEntities(filter, LIMIT, offset);
+      first.page ??= page;
+      return page;
+    });
+    return { ...first.page!, rows };
+  }
+
   let repos = $state<EntityPage | null>(null);
   let attention = $state<EntityPage | null>(null);
   let everyPr = $state<EntityPage | null>(null);
@@ -140,15 +156,15 @@
     const fail = (error: unknown) => {
       if (live) failed = ipcErrorMessage(error);
     };
-    ports.listEntities(filterOf(["repo"], "updated_desc"), LIMIT, 0).then((page) => {
+    whole(filterOf(["repo"], "updated_desc")).then((page) => {
       if (!live) return;
       repos = page;
       void readCheckouts(page.rows.map((row) => row.entity_id), () => live);
     }, fail);
-    ports.listEntities(filterOf(["pr"], "attention"), LIMIT, 0).then((page) => {
+    whole(filterOf(["pr"], "attention")).then((page) => {
       if (live) attention = page;
     }, fail);
-    ports.listEntities(filterOf(["pr"], "updated_desc"), LIMIT, 0).then((page) => {
+    whole(filterOf(["pr"], "updated_desc")).then((page) => {
       if (live) everyPr = page;
     }, fail);
     ports.listSources().then(
