@@ -17,6 +17,7 @@ import { noFilters, type ResultGroup, type SearchHit, type SearchQuery, type Sea
 import type { TimerTarget } from "../ipc/time";
 import { createLayers, type Layers } from "../tf/layers.svelte";
 import TimerPicker from "./TimerPicker.svelte";
+import { waitFor } from "./test-wait";
 
 function row(entity_id: string, kind: string, title: string): EntityRow {
   return {
@@ -146,7 +147,7 @@ afterEach(() => {
 
 test("a free-text label is a legal target and is what the picker answers with", async () => {
   const { picked } = render();
-  await vi.waitFor(() => expect(offered()).toHaveLength(2));
+  await waitFor(() => expect(offered()).toHaveLength(2));
 
   type("  DB config for the migration  ");
   target.querySelector<HTMLButtonElement>("button[type=submit]")!.click();
@@ -175,7 +176,7 @@ test("a blank label cannot be started", () => {
  */
 test("a stored context in the recents is not offered as a target", async () => {
   render();
-  await vi.waitFor(() => expect(offered()).toHaveLength(2));
+  await waitFor(() => expect(offered()).toHaveLength(2));
 
   const rows = offered();
   expect(rows.some((text) => text.includes("Payments retry storm"))).toBe(true);
@@ -193,7 +194,7 @@ test("a stored context in the recents is not offered as a target", async () => {
  */
 test("a legal recent row is answered with as an entity target", async () => {
   const { picked } = render();
-  await vi.waitFor(() => expect(offered()).toHaveLength(2));
+  await waitFor(() => expect(offered()).toHaveLength(2));
 
   target.querySelectorAll<HTMLButtonElement>(".tf-tm-recents button")[0]!.click();
   flushSync();
@@ -219,7 +220,7 @@ test("recents that cannot be read still leave a working label field", async () =
     },
   });
   flushSync();
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(target.textContent).toContain("Recent items could not be read"),
   );
 
@@ -244,7 +245,7 @@ test("the estate's assets are offered beside the recents, by name and path", asy
     asset("asset:9f3c", "vm-db-01", "hel1"),
     asset("asset:1a2b", "postgres", "hel1 / vm-db-01"),
   ]));
-  await vi.waitFor(() => expect(estateOffered()).toHaveLength(2));
+  await waitFor(() => expect(estateOffered()).toHaveLength(2));
 
   // What was *asked for*, not only what was drawn: nothing typed and the one
   // dimension narrowed is what makes this the estate's browse rather than the
@@ -265,7 +266,7 @@ test("the estate's assets are offered beside the recents, by name and path", asy
 /** Choosing one starts the clock on that asset's entity id. */
 test("choosing an asset answers with it as an entity target", async () => {
   const { picked } = render(RECENT, estateOf([asset("asset:9f3c", "vm-db-01", "hel1")]));
-  await vi.waitFor(() => expect(estateOffered()).toHaveLength(1));
+  await waitFor(() => expect(estateOffered()).toHaveLength(1));
 
   target.querySelector<HTMLButtonElement>(".tf-tm-assets button")!.click();
   flushSync();
@@ -281,7 +282,7 @@ test("choosing an asset answers with it as an entity target", async () => {
  */
 test("an empty estate is no heading rather than an empty list", async () => {
   render();
-  await vi.waitFor(() => expect(offered()).toHaveLength(2));
+  await waitFor(() => expect(offered()).toHaveLength(2));
   expect(target.textContent).not.toContain("…or an asset");
 });
 
@@ -306,7 +307,7 @@ test("an estate that cannot be read leaves the recents alone and says nothing", 
     },
   });
   flushSync();
-  await vi.waitFor(() => expect(offered()).toHaveLength(2));
+  await waitFor(() => expect(offered()).toHaveLength(2));
 
   expect(estateOffered()).toEqual([]);
   expect(target.textContent).not.toContain("…or an asset");
@@ -358,7 +359,7 @@ test("it opens in the ticket-first dialog with the label field focused, and typi
  */
 test("a recent is drawn by its key, not its source-prefixed id", async () => {
   render([row("mock:PAY-231", "ticket", "Payments retry storm")]);
-  await vi.waitFor(() => expect(offered()).toHaveLength(1));
+  await waitFor(() => expect(offered()).toHaveLength(1));
 
   expect(offered()).toEqual(["Payments retry storm PAY-231"]);
   expect(target.textContent).not.toContain("mock:");

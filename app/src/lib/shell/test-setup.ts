@@ -56,7 +56,7 @@ if (zone !== PINNED_ZONE) {
  * agrees with itself for 22 hours a day and fails in the first hours after
  * midnight, which is when nobody runs it: #1031, #1150 and #1155 were one
  * bug filed three times. Only `Date` is faked, and it keeps advancing with
- * real time, so timers, `vi.waitFor` and the rejection guard below are
+ * real time, so timers, the wait helper and the rejection guard below are
  * untouched. A file that installs its own fake timers overrides this for the
  * tests that do, and gets it back from the next `beforeEach`.
  */

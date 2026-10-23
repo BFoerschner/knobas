@@ -18,11 +18,12 @@
  * never shows one asset's answer under another's heading.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { AssetDetail, AssetRow, DependsOnThis, RouteRow } from "../ipc/assets";
 import { createTestNav } from "./test-nav.svelte";
 import AssetsView from "./AssetsView.svelte";
+import { waitFor } from "../shell/test-wait";
 
 const NOW = new Date(2026, 8, 8, 12, 0, 0, 0);
 
@@ -217,7 +218,7 @@ test("the panel counts what breaks and says where each one sits and why", async 
     },
   });
 
-  await vi.waitFor(() => expect(text()).toContain("Depends on this"));
+  await waitFor(() => expect(text()).toContain("Depends on this"));
   expect(count()).toBe("3");
   expect(lines()).toEqual([
     "knobas-teamcity depends on knobas test estate / Hetzner Cloud nbg1",
@@ -241,7 +242,7 @@ test("the routes that would break are listed beneath and are not in the count", 
     },
   });
 
-  await vi.waitFor(() => expect(count()).toBe("1"));
+  await waitFor(() => expect(count()).toBe("1"));
   expect(text()).toContain("Reachable via routes that would break");
   expect(lines()).toEqual([
     "knobas-teamcity depends on",
@@ -260,7 +261,7 @@ test("the routes that would break are listed beneath and are not in the count", 
 test("an asset nothing depends on says so, with a count of zero", async () => {
   render("#/asset/asset:knobas-gitea", { [GITEA.id]: NOTHING });
 
-  await vi.waitFor(() => expect(count()).toBe("0"));
+  await waitFor(() => expect(count()).toBe("0"));
   expect(text()).toContain("Nothing depends on this.");
   expect(lines()).toEqual([]);
 });
@@ -284,20 +285,20 @@ test("selecting another asset asks again and never draws the last one's answer",
       routes: [TUNNEL],
     },
   });
-  await vi.waitFor(() => expect(count()).toBe("1"));
+  await waitFor(() => expect(count()).toBe("1"));
 
   // The second walk is held open, which is what makes the assertions below
   // about the gap between the two answers rather than about a race.
   const release = ports.holdNext();
   nav.go("#/asset/asset:hetzner-teamcity");
   flushSync();
-  await vi.waitFor(() => expect(ports.asked).toContain(TEAMCITY.id));
+  await waitFor(() => expect(ports.asked).toContain(TEAMCITY.id));
   expect(lines()).toEqual([]);
   expect(count()).toBeNull();
   expect(text()).not.toContain("knobas-teamcity depends on");
 
   release({ assets: [{ asset: AGENT, path: null, relation: "runs-on" }], routes: [] });
-  await vi.waitFor(() => expect(count()).toBe("1"));
+  await waitFor(() => expect(count()).toBe("1"));
   expect(lines()).toEqual(["knobas-teamcity-agent runs on"]);
 });
 
@@ -315,7 +316,7 @@ test("a refused walk draws its message and not the empty state", async () => {
     [GITEA.id]: { refusal: { code: "internal", message: "the estate could not be walked" } },
   });
 
-  await vi.waitFor(() => expect(text()).toContain("the estate could not be walked"));
+  await waitFor(() => expect(text()).toContain("the estate could not be walked"));
   expect(text()).not.toContain("Nothing depends on this.");
   expect(count()).toBeNull();
   // The pane itself is fine: this failure is the panel's alone.
@@ -330,7 +331,7 @@ test("a line on the panel opens the asset it names", async () => {
       routes: [],
     },
   });
-  await vi.waitFor(() => expect(count()).toBe("1"));
+  await waitFor(() => expect(count()).toBe("1"));
 
   const line = [...target.querySelectorAll<HTMLButtonElement>(".breaks li button")].find(
     (candidate) => (candidate.textContent ?? "").trim() === TEAMCITY.name,

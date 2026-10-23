@@ -12,6 +12,7 @@ import { expect, test, vi } from "vitest";
 
 import type { AuthState, CredentialHealth } from "../ipc/sources";
 import { createHealth, expiryNote, isActionable } from "./health.svelte";
+import { waitFor } from "./test-wait";
 
 function row(source_id: string, state: AuthState, extra: Partial<CredentialHealth> = {}): CredentialHealth {
   return {
@@ -67,7 +68,7 @@ test("a source:health event patches one source and leaves the others alone", asy
     listen: events.listen,
   });
   const stop = health.start();
-  await vi.waitFor(() => expect(events.handlers.length).toBe(1));
+  await waitFor(() => expect(events.handlers.length).toBe(1));
   await health.reseed();
   expect(health.all.length).toBe(2);
 
@@ -90,7 +91,7 @@ test("an event for a source the seed never mentioned adds it", async () => {
     listen: events.listen,
   });
   const stop = health.start();
-  await vi.waitFor(() => expect(events.handlers.length).toBe(1));
+  await waitFor(() => expect(events.handlers.length).toBe(1));
 
   // A source added in another window, or by the first-run wizard: the strip
   // must show it without waiting for a re-seed.
@@ -107,7 +108,7 @@ test("stopping unsubscribes, and a late listen resolution does not leak", async 
     listen: events.listen,
   });
   const stop = health.start();
-  await vi.waitFor(() => expect(events.handlers.length).toBe(1));
+  await waitFor(() => expect(events.handlers.length).toBe(1));
   stop();
   expect(events.unlistened).toBe(1);
 });
@@ -126,11 +127,11 @@ test("stopping before listen resolves still unsubscribes", async () => {
   stop();
   // `listen` is itself an `invoke`, so it resolves a tick or more after the
   // component that asked for it may already be gone.
-  await vi.waitFor(() => expect(resolveListen).not.toBeNull());
+  await waitFor(() => expect(resolveListen).not.toBeNull());
   resolveListen!(() => {
     unlistened += 1;
   });
-  await vi.waitFor(() => expect(unlistened).toBe(1));
+  await waitFor(() => expect(unlistened).toBe(1));
 });
 
 test("a seed that resolves after stop is discarded", async () => {
@@ -146,7 +147,7 @@ test("a seed that resolves after stop is discarded", async () => {
   const stop = health.start();
   const seeding = health.reseed();
   stop();
-  await vi.waitFor(() => expect(resolveSeed).not.toBeNull());
+  await waitFor(() => expect(resolveSeed).not.toBeNull());
   resolveSeed!([row("jira", "ok")]);
   await seeding;
   flushSync();
@@ -160,7 +161,7 @@ test("a failed seed leaves the store empty rather than throwing into the shell",
     listen: events.listen,
   });
   const stop = health.start();
-  await vi.waitFor(() => expect(events.handlers.length).toBe(1));
+  await waitFor(() => expect(events.handlers.length).toBe(1));
   await health.reseed();
   expect(health.all).toEqual([]);
   // ...and the subscription still works, so the store recovers the moment the
@@ -200,7 +201,7 @@ test("start subscribes but does not fetch — the seed is the shell's, gated on 
   });
 
   const stop = health.start();
-  await vi.waitFor(() => expect(events.handlers.length).toBe(1));
+  await waitFor(() => expect(events.handlers.length).toBe(1));
   expect(fetches, "start() must not call a command the database cannot answer yet").toBe(0);
   expect(health.all).toEqual([]);
 
@@ -278,10 +279,10 @@ test("a scheduler rejection landing mid-seed is not written back to ok by the se
     listen: events.listen,
   });
   const stop = health.start();
-  await vi.waitFor(() => expect(events.handlers.length).toBe(1));
+  await waitFor(() => expect(events.handlers.length).toBe(1));
 
   const seeding = health.reseed();
-  await vi.waitFor(() => expect(resolveSeed).not.toBeNull());
+  await waitFor(() => expect(resolveSeed).not.toBeNull());
 
   // …and with that read still open, the scheduler discovers the credential is
   // being refused. `checked_at` is five minutes past the snapshot below.
@@ -463,10 +464,10 @@ test("start is idempotent — a second call does not strand a listener", async (
   });
   const stop = health.start();
   const stopAgain = health.start();
-  await vi.waitFor(() => expect(events.handlers.length).toBe(1));
+  await waitFor(() => expect(events.handlers.length).toBe(1));
   stop();
   stopAgain();
-  await vi.waitFor(() => expect(events.unlistened).toBe(1));
+  await waitFor(() => expect(events.unlistened).toBe(1));
 });
 
 test("failing lists only the states a human can act on", async () => {

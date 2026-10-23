@@ -16,7 +16,7 @@
  * **before** it queues the write.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type {
   AssetDetail,
@@ -29,6 +29,7 @@ import type { WriteOpPayload } from "../ipc/sources";
 import { createTestNav } from "./test-nav.svelte";
 import { layers } from "../tf/layers.svelte";
 import AssetsView from "./AssetsView.svelte";
+import { waitFor } from "../shell/test-wait";
 
 const NOW = new Date(2026, 8, 7, 12, 0, 0, 0);
 
@@ -253,7 +254,7 @@ afterEach(() => {
 test("a pane with no monitor target draws no create", async () => {
   const store = estate([]);
   render(store);
-  await vi.waitFor(() => expect(text()).toContain("knobas-gitea"));
+  await waitFor(() => expect(text()).toContain("knobas-gitea"));
 
   expect(names()).not.toContain("Create monitor for this asset");
   expect(text()).not.toContain("Create monitor");
@@ -261,7 +262,7 @@ test("a pane with no monitor target draws no create", async () => {
 
 test("Create monitor opens a dialog on the layer stack, and its close shuts it (#1527)", async () => {
   render(estate([KUMA]));
-  await vi.waitFor(() => expect(names()).toContain("Create monitor for this asset"));
+  await waitFor(() => expect(names()).toContain("Create monitor for this asset"));
   click("Create monitor for this asset");
   expect(text()).toContain("In Uptime Kuma");
 
@@ -298,7 +299,7 @@ test("create records the name first and then queues the write", async () => {
   }) as typeof store.submitWrite;
 
   render(store);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(names()).toContain("Create monitor for this asset"),
   );
 
@@ -314,7 +315,7 @@ test("create records the name first and then queues the write", async () => {
   expect(text()).toContain("In Uptime Kuma");
 
   click("Create");
-  await vi.waitFor(() => expect(store.queued).toHaveLength(1));
+  await waitFor(() => expect(store.queued).toHaveLength(1));
 
   expect(order).toEqual(["record", "queue"]);
   expect(store.edits).toEqual([
@@ -346,7 +347,7 @@ test("create records the name first and then queues the write", async () => {
 test("a second source is picked, and its own entity is what the write targets", async () => {
   const store = estate([KUMA, KUMA_EU]);
   render(store);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(names()).toContain("Create monitor for this asset"),
   );
 
@@ -356,7 +357,7 @@ test("a second source is picked, and its own entity is what the write targets", 
   choose("Create it in", "kuma-eu");
   click("Create");
 
-  await vi.waitFor(() => expect(store.queued).toHaveLength(1));
+  await waitFor(() => expect(store.queued).toHaveLength(1));
   expect(store.queued[0]).toEqual({
     CreateMonitor: {
       entity: "kuma-eu:monitors",
@@ -379,7 +380,7 @@ test("a second source is picked, and its own entity is what the write targets", 
 test("the recorded name lands in the pane's waiting list", async () => {
   const store = estate([KUMA]);
   render(store);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(names()).toContain("Create monitor for this asset"),
   );
 
@@ -387,7 +388,7 @@ test("the recorded name lands in the pane's waiting list", async () => {
   type("Name", "gitea");
   click("Create");
 
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(text()).toContain("Named by the import, not in Kuma yet"),
   );
   expect(text()).toContain("gitea");
@@ -409,14 +410,14 @@ test("a refused write keeps the dialog open and says why", async () => {
     message: 'source "kuma" does not offer "create_monitor"',
   });
   render(store);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(names()).toContain("Create monitor for this asset"),
   );
 
   click("Create monitor for this asset");
   click("Create");
 
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(text()).toContain('does not offer "create_monitor"'),
   );
   expect(store.queued).toEqual([]);
@@ -436,14 +437,14 @@ test("a name that could not be recorded queues nothing", async () => {
   const store = estate([KUMA]);
   store.refuse("record", { code: "invalid", message: "an asset needs a name" });
   render(store);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(names()).toContain("Create monitor for this asset"),
   );
 
   click("Create monitor for this asset");
   click("Create");
 
-  await vi.waitFor(() => expect(text()).toContain("an asset needs a name"));
+  await waitFor(() => expect(text()).toContain("an asset needs a name"));
   expect(store.queued).toEqual([]);
 });
 
@@ -459,7 +460,7 @@ test("a name that could not be recorded queues nothing", async () => {
 test("a form with no URL cannot be submitted", async () => {
   const store = estate([KUMA], []);
   render(store);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(names()).toContain("Create monitor for this asset"),
   );
 

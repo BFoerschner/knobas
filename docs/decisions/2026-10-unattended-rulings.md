@@ -15006,3 +15006,15 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1876.
   `start_work/plan.rs` and `time/worklog.rs`, which build ops for the queue the same way; it
   contains no `.write(` call, which the list still forbids. *Reversing:* small, two helpers in
   `sources/write_queue.rs` and the entry removed.
+## #1799: one wait helper for the frontend tests (implementer, Sonnet, 2026-10-23)
+
+- **Where the helper lives.** *Fork:* a new `app/src/lib/shell/test-wait.ts`, or inside `test-setup.ts`.
+  *Ruling:* its own file beside `test-setup.ts`; a setup file is not importable by name. *Reversing:* trivial.
+- **`waitFor` signature.** *Fork:* a new shape, or `vi.waitFor`'s. *Ruling:* the same
+  (callback, `{timeout, interval}`, returns the value), so the 216 call sites change one identifier and
+  an import. *Reversing:* trivial.
+- **`App.test.svelte.ts` capture test reordered.** *Fork:* the test read `captureRecords.at(-1)` after
+  `⌘T`; the shared `until` takes a few more microtasks than the old copy, and the record that follows the
+  start (empty foreground) landed first. *Ruling:* read the record before pressing `⌘T`, which is what the
+  test asserts about (the foreground the start leaves). *Reasoning:* the old order passed by tick count.
+  *Reversing:* trivial.

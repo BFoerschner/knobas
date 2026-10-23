@@ -33,6 +33,7 @@ import type {
 import { DEBOUNCE_MS } from "../launcher";
 import { createTestNav } from "./test-nav.svelte";
 import AssetsView from "./AssetsView.svelte";
+import { waitFor } from "../shell/test-wait";
 
 /** The clock the history's *ago* readings are relative to. */
 const NOW = new Date(2026, 8, 6, 12, 0, 0, 0);
@@ -626,7 +627,7 @@ afterEach(() => {
 test("the bare address draws the roots and nothing is selected", async () => {
   const { asked } = render("#/assets/tree");
 
-  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
   expect(asked).toEqual([null]);
   expect(marked()).toEqual([null]);
   expect(text()).toContain("Select an asset to see what it holds.");
@@ -640,7 +641,7 @@ test("the bare address draws the roots and nothing is selected", async () => {
 test("the Tree draws no tab strip and no Monitors tab", async () => {
   render("#/assets");
 
-  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
   expect(target.querySelector("nav[aria-label='Assets views']")).toBeNull();
   const labels = [...target.querySelectorAll("button, a")].map((el) => el.textContent?.trim());
   expect(labels).not.toContain("Monitors");
@@ -662,7 +663,7 @@ test("the Tree draws no tab strip and no Monitors tab", async () => {
 test("an asset's address draws its whole path and its pane", async () => {
   const { asked } = render("#/asset/asset:postgres");
 
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]),
   );
   // Four reads, and the shape of the list is the point. The first `null` is
@@ -702,7 +703,7 @@ test("an asset's address draws its whole path and its pane", async () => {
  */
 test("selecting an asset that holds something opens the next column", async () => {
   const { nav } = render("#/asset/asset:postgres");
-  await vi.waitFor(() => expect(columns()).toHaveLength(3));
+  await waitFor(() => expect(columns()).toHaveLength(3));
 
   const vm = [...target.querySelectorAll<HTMLButtonElement>("button.row")].find(
     (button) => button.textContent?.includes("vm-db-01"),
@@ -711,7 +712,7 @@ test("selecting an asset that holds something opens the next column", async () =
   flushSync();
 
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: VM.id });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]),
   );
   expect(marked()).toEqual(["hel1", "vm-db-01", null]);
@@ -727,7 +728,7 @@ test("selecting an asset that holds something opens the next column", async () =
 test("an empty estate is told apart from a read that has not landed", async () => {
   render("#/assets/tree", []);
 
-  await vi.waitFor(() => expect(text()).toContain("Nothing in the estate yet."));
+  await waitFor(() => expect(text()).toContain("Nothing in the estate yet."));
   expect(columns()).toEqual([]);
 });
 
@@ -740,12 +741,12 @@ test("an empty estate is told apart from a read that has not landed", async () =
  */
 test("a deep link to an asset that is gone says so instead of showing the last one", async () => {
   const { nav } = render("#/asset/asset:postgres");
-  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
   nav.go("#/asset/asset:nobody");
   flushSync();
 
-  await vi.waitFor(() => expect(text()).toContain("no asset asset:nobody"));
+  await waitFor(() => expect(text()).toContain("no asset asset:nobody"));
   expect(text()).not.toContain("hel1 / vm-db-01 / postgres");
   expect(columns()).toEqual([]);
 });
@@ -762,7 +763,7 @@ test("a deep link to an asset that is gone says so instead of showing the last o
  */
 test("an inherited value names the ancestor it came from and links to it", async () => {
   const { nav } = render("#/asset/asset:postgres");
-  await vi.waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
   const pane = text();
   expect(pane).toContain("Environment prod inherited from hel1");
@@ -795,7 +796,7 @@ test("an inherited value names the ancestor it came from and links to it", async
  */
 test("a value set on the asset itself says so and offers no link", async () => {
   render("#/asset/asset:hel1");
-  await vi.waitFor(() => expect(text()).toContain("Environment prod set here"));
+  await waitFor(() => expect(text()).toContain("Environment prod set here"));
 
   expect(text()).toContain("Owner Björn set here");
   expect(text()).not.toContain("inherited from");
@@ -814,12 +815,12 @@ test("a value set on the asset itself says so and offers no link", async () => {
 test("an asset with no environment anywhere above it says nothing is set", async () => {
   const bare = row({ id: "asset:lonely", name: "lonely", has_children: false });
   render("#/assets/tree", [bare]);
-  await vi.waitFor(() => expect(columns()).toEqual([["lonely"]]));
+  await waitFor(() => expect(columns()).toEqual([["lonely"]]));
 
   const button = target.querySelector<HTMLButtonElement>("button.row");
   button?.click();
   flushSync();
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(text()).toContain("Environment Not set anywhere"),
   );
   expect(text()).toContain("Owner Not set anywhere");
@@ -876,7 +877,7 @@ test("a column row badges what is wrong inside it, in the worst tone inside", as
     }),
   ];
   render("#/assets/tree", estate);
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(columns()).toEqual([["amber", "clean", "red", "worse"]]),
   );
 
@@ -913,26 +914,26 @@ test("a column row badges what is wrong inside it, in the worst tone inside", as
  */
 test("the arrows and enter walk three levels, and the pane follows", async () => {
   const { nav } = render("#/assets/tree");
-  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
   press("ArrowDown");
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: SITE.id });
-  await vi.waitFor(() => expect(marked()).toEqual(["hel1", null]));
+  await waitFor(() => expect(marked()).toEqual(["hel1", null]));
 
   press("ArrowRight");
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: SIBLING.id });
-  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-app-02", null]));
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-app-02", null]));
 
   press("ArrowDown");
-  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", null]));
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", null]));
 
   press("Enter");
-  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
   expect(text()).toContain("hel1 / vm-db-01 / postgres");
   // The container holds nothing: `Enter` on it opens no column and moves
   // nothing, rather than selecting out of an empty one.
   press("Enter");
-  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
 });
 
 /**
@@ -943,14 +944,14 @@ test("the arrows and enter walk three levels, and the pane follows", async () =>
  */
 test("the walk carries focus to the row it selected", async () => {
   render("#/assets/tree");
-  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
   press("ArrowDown");
-  await vi.waitFor(() => expect(marked()).toEqual(["hel1", null]));
+  await waitFor(() => expect(marked()).toEqual(["hel1", null]));
 
   const on = target.querySelector('button.row[aria-current="true"]');
   expect(on?.textContent).toContain("hel1");
-  await vi.waitFor(() => expect(document.activeElement).toBe(on));
+  await waitFor(() => expect(document.activeElement).toBe(on));
 });
 
 /**
@@ -968,9 +969,9 @@ test("reduced motion is respected when the walk scrolls a row into view", async 
     );
 
   render("#/assets/tree");
-  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
   press("ArrowDown");
-  await vi.waitFor(() => expect(scrolled).not.toHaveLength(0));
+  await waitFor(() => expect(scrolled).not.toHaveLength(0));
   expect(scrolled.at(-1)?.behavior).toBe("auto");
 
   reduce.mockImplementation((query: string) => ({ matches: false, media: query }) as MediaQueryList);
@@ -978,7 +979,7 @@ test("reduced motion is respected when the walk scrolls a row into view", async 
   // press and not once at mount, which is what a reader who changes the
   // system setting while the app is open would expect.
   press("ArrowRight");
-  await vi.waitFor(() => expect(scrolled.at(-1)?.behavior).toBe("smooth"));
+  await waitFor(() => expect(scrolled.at(-1)?.behavior).toBe("smooth"));
 });
 
 /**
@@ -993,22 +994,22 @@ test("reduced motion is respected when the walk scrolls a row into view", async 
  */
 test("escape unwinds the path one level at a time and then falls through", async () => {
   const { nav } = render("#/asset/asset:postgres");
-  await vi.waitFor(() => expect(columns()).toHaveLength(3));
+  await waitFor(() => expect(columns()).toHaveLength(3));
 
   expect(press("Escape").defaultPrevented).toBe(true);
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: VM.id });
   // Waited out between presses, and that is a statement about the view rather
   // than about the test: the layout is derived from the pane's answer, so the
   // rung a press lands on is the one the *drawn* path offers.
-  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", null]));
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", null]));
 
   press("Escape");
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: SITE.id });
-  await vi.waitFor(() => expect(marked()).toEqual(["hel1", null]));
+  await waitFor(() => expect(marked()).toEqual(["hel1", null]));
 
   press("Escape");
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: null });
-  await vi.waitFor(() => expect(marked()).toEqual([null]));
+  await waitFor(() => expect(marked()).toEqual([null]));
 
   const last = press("Escape");
   expect(last.defaultPrevented).toBe(false);
@@ -1033,7 +1034,7 @@ test("a path too deep for the window collapses its oldest columns to spines", as
 
   // Four levels, three of them drawn: the site is a spine and the columns the
   // reader just walked into are the ones that keep their width.
-  await vi.waitFor(() => expect(spines()).toEqual(["hel1"]));
+  await waitFor(() => expect(spines()).toEqual(["hel1"]));
   expect(columns()).toEqual([["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]);
   expect(marked()).toEqual(["vm-app-02", "gitea", "gitea-db"]);
   expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
@@ -1044,7 +1045,7 @@ test("a path too deep for the window collapses its oldest columns to spines", as
   // Anchored at the site, the collapse moves to the other end: the deepest
   // column is the spine now, and it is labelled with the asset the reader has
   // selected in it.
-  await vi.waitFor(() => expect(spines()).toEqual(["gitea-db"]));
+  await waitFor(() => expect(spines()).toEqual(["gitea-db"]));
   expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"]]);
   expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
 });
@@ -1053,7 +1054,7 @@ test("a path too deep for the window collapses its oldest columns to spines", as
 test("a path the window holds collapses nothing", async () => {
   render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 1400 });
 
-  await vi.waitFor(() => expect(columns()).toHaveLength(4));
+  await waitFor(() => expect(columns()).toHaveLength(4));
   expect(spines()).toEqual([]);
 });
 
@@ -1069,7 +1070,7 @@ test("a path the window holds collapses nothing", async () => {
  */
 test("typing a name opens the path to the first match and selects it", async () => {
   const { nav, searched } = render("#/assets/tree");
-  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
   await type("gitea-db");
   // What the box asked for, which is the estate's corpus and nothing else.
@@ -1080,7 +1081,7 @@ test("typing a name opens the path to the first match and selects it", async () 
 
   press("Enter", box());
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: GITEA_DB.id });
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]),
   );
   expect(marked()).toEqual(["hel1", "vm-app-02", "gitea", "gitea-db"]);
@@ -1094,7 +1095,7 @@ test("typing a name opens the path to the first match and selects it", async () 
  */
 test("the box waits for the typing to stop, and an empty box asks nothing", async () => {
   const { searched } = render("#/assets/tree");
-  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
   const input = box();
   for (const text of ["g", "gi", "git"]) {
@@ -1117,7 +1118,7 @@ test("the box waits for the typing to stop, and an empty box asks nothing", asyn
  */
 test("a query nothing matches leaves the columns where they were", async () => {
   render("#/asset/asset:postgres");
-  await vi.waitFor(() => expect(columns()).toHaveLength(3));
+  await waitFor(() => expect(columns()).toHaveLength(3));
 
   await type("nothing-is-called-this");
 
@@ -1133,7 +1134,7 @@ test("a query nothing matches leaves the columns where they were", async () => {
  */
 test("escape in the search box clears the query before it unwinds anything", async () => {
   const { nav } = render("#/asset/asset:postgres");
-  await vi.waitFor(() => expect(columns()).toHaveLength(3));
+  await waitFor(() => expect(columns()).toHaveLength(3));
 
   await type("gitea");
   expect(text()).toContain("gitea-db");
@@ -1152,7 +1153,7 @@ test("escape in the search box clears the query before it unwinds anything", asy
  */
 test("the arrows move through the matches instead of the columns", async () => {
   const { nav } = render("#/assets/tree");
-  await vi.waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
   await type("vm-");
   press("ArrowDown", box());
@@ -1179,16 +1180,16 @@ test("the arrows move through the matches instead of the columns", async () => {
  */
 test("clicking a spine anchors this path and not the next one", async () => {
   const { nav } = render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 780 });
-  await vi.waitFor(() => expect(spines()).toEqual(["hel1"]));
+  await waitFor(() => expect(spines()).toEqual(["hel1"]));
 
   target.querySelector<HTMLButtonElement>("button.spine")?.click();
   flushSync();
-  await vi.waitFor(() => expect(spines()).toEqual(["gitea-db"]));
+  await waitFor(() => expect(spines()).toEqual(["gitea-db"]));
 
   nav.go(`#/asset/${GITEA.id}`);
   flushSync();
 
-  await vi.waitFor(() => expect(marked()).toEqual(["vm-app-02", "gitea", null]));
+  await waitFor(() => expect(marked()).toEqual(["vm-app-02", "gitea", null]));
   expect(spines()).toEqual(["hel1"]);
   expect(columns()).toEqual([["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]);
 });
@@ -1203,7 +1204,7 @@ test("clicking a spine anchors this path and not the next one", async () => {
  */
 test("the pane draws what an asset exposes and what reaches it", async () => {
   render("#/asset/asset:vm-app-02");
-  await vi.waitFor(() => expect(text()).toContain("Exposes"));
+  await waitFor(() => expect(text()).toContain("Exposes"));
 
   const exposing = text();
   expect(exposing).toContain("Gitea");
@@ -1228,7 +1229,7 @@ test("the pane draws what an asset exposes and what reaches it", async () => {
  */
 test("the pane of the asset a route lands on names the end it came from", async () => {
   render("#/asset/asset:gitea");
-  await vi.waitFor(() => expect(text()).toContain("Reachable via"));
+  await waitFor(() => expect(text()).toContain("Reachable via"));
 
   const landing = text();
   expect(landing).toContain("lands here");
@@ -1254,7 +1255,7 @@ test("a route's address opens the Tree at the asset that exposes it", async () =
   // Three columns: the estate, what the site holds, and what the *exposing*
   // asset holds — the layout `#/asset/asset:vm-app-02` draws, from an address
   // that named no asset at all.
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"]]),
   );
   expect(marked()).toEqual(["hel1", "vm-app-02", null]);
@@ -1284,7 +1285,7 @@ test("a route's address opens the Tree at the asset that exposes it", async () =
  */
 test("clicking a route reached from elsewhere opens the asset exposing it", async () => {
   const { nav } = render("#/asset/asset:gitea");
-  await vi.waitFor(() => expect(text()).toContain("Reachable via"));
+  await waitFor(() => expect(text()).toContain("Reachable via"));
 
   const route = [...target.querySelectorAll<HTMLButtonElement>("li button.link")].find(
     (button) => button.textContent?.trim() === "Gitea",
@@ -1298,7 +1299,7 @@ test("clicking a route reached from elsewhere opens the asset exposing it", asyn
     assetId: null,
     routeId: "route:gitea",
   });
-  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-app-02", null]));
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-app-02", null]));
 });
 
 // -- the wires (#433) --------------------------------------------------------
@@ -1335,7 +1336,7 @@ function wires(): string[] {
 test("a route to an asset in an open column draws a solid wire to its row", async () => {
   render("#/asset/asset:vm-app-02");
 
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(wires()).toEqual([
       // From *Exposes*: to the container the route lands on, one column right.
       "exposes:route:gitea → asset:gitea",
@@ -1361,7 +1362,7 @@ test("a route to an asset in an open column draws a solid wire to its row", asyn
 test("a route whose exposer is drawn takes its wire to that row", async () => {
   render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 780 });
 
-  await vi.waitFor(() => expect(wires()).toEqual(["via:route:gitea → asset:vm-app-02 dashed"]));
+  await waitFor(() => expect(wires()).toEqual(["via:route:gitea → asset:vm-app-02 dashed"]));
 });
 
 /**
@@ -1374,7 +1375,7 @@ test("a route whose exposer is drawn takes its wire to that row", async () => {
 test("a route whose exposer is behind a spine draws a dashed wire to the spine", async () => {
   render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 470 });
 
-  await vi.waitFor(() => expect(spines()).toEqual(["hel1", "vm-app-02", "gitea"]));
+  await waitFor(() => expect(spines()).toEqual(["hel1", "vm-app-02", "gitea"]));
   expect(wires()).toEqual(["via:route:gitea → spine:1 dashed"]);
 });
 
@@ -1388,12 +1389,12 @@ test("a route whose exposer is behind a spine draws a dashed wire to the spine",
  */
 test("moving to an asset no route reaches leaves no wire behind", async () => {
   const { nav } = render("#/asset/asset:vm-app-02");
-  await vi.waitFor(() => expect(wires()).toHaveLength(2));
+  await waitFor(() => expect(wires()).toHaveLength(2));
 
   nav.go("#/asset/asset:postgres");
   flushSync();
 
-  await vi.waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
   expect(wires()).toEqual([]);
 });
 
@@ -1433,7 +1434,7 @@ test("a route row below the window draws no wire, and one inside it does", async
   layOut({ "exposes:route:gitea": 100, "via:route:gitea": below }, window.innerHeight + 1500);
   render("#/asset/asset:vm-app-02");
 
-  await vi.waitFor(() => expect(wires()).toEqual(["exposes:route:gitea → asset:gitea"]));
+  await waitFor(() => expect(wires()).toEqual(["exposes:route:gitea → asset:gitea"]));
 });
 
 /**
@@ -1444,7 +1445,7 @@ test("a scroll on the pane brings a row scrolled into view its wire", async () =
   const rows = { "exposes:route:gitea": 100, "via:route:gitea": window.innerHeight + 400 };
   layOut(rows, window.innerHeight);
   render("#/asset/asset:vm-app-02");
-  await vi.waitFor(() => expect(wires()).toEqual(["exposes:route:gitea → asset:gitea"]));
+  await waitFor(() => expect(wires()).toEqual(["exposes:route:gitea → asset:gitea"]));
 
   rows["via:route:gitea"] = 300;
   expect(wires(), "nothing re-measures before the scroll").toHaveLength(1);
@@ -1496,7 +1497,7 @@ test("switches the wires' fade off under reduced motion rather than hiding them"
  */
 test("the pane lists the monitors watching the asset, with their state", async () => {
   render(`#/asset/${CONTAINER.id}`);
-  await vi.waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
+  await waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
 
   const section = target.querySelector(".watch");
   const rows = [...section!.querySelectorAll("li")].map((row) =>
@@ -1516,7 +1517,7 @@ test("the pane lists the monitors watching the asset, with their state", async (
  */
 test("a monitor's name goes to the Monitors page, not a rooms address", async () => {
   const { nav } = render(`#/asset/${CONTAINER.id}`);
-  await vi.waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
+  await waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
   const goes: string[] = [];
   const go = nav.go.bind(nav);
   nav.go = (hash: string) => {
@@ -1530,7 +1531,7 @@ test("a monitor's name goes to the Monitors page, not a rooms address", async ()
   expect(name).toBeDefined();
   name!.click();
 
-  await vi.waitFor(() => expect(goes).toEqual(["#/monitors"]));
+  await waitFor(() => expect(goes).toEqual(["#/monitors"]));
 });
 
 /**
@@ -1542,14 +1543,14 @@ test("a monitor's name goes to the Monitors page, not a rooms address", async ()
  */
 test("Open in Kuma hands the monitor's own URL to the browser", async () => {
   const { opened } = render(`#/asset/${CONTAINER.id}`);
-  await vi.waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
+  await waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
 
   const open = [...target.querySelectorAll<HTMLButtonElement>(".watch button")].find(
     (candidate) => candidate.textContent?.trim() === "Open in Kuma",
   );
   expect(open).toBeDefined();
   open!.click();
-  await vi.waitFor(() => expect(opened).toHaveLength(1));
+  await waitFor(() => expect(opened).toHaveLength(1));
 
   expect(opened).toEqual(["http://127.0.0.1:3001/dashboard/4"]);
 });
@@ -1561,7 +1562,7 @@ test("Open in Kuma hands the monitor's own URL to the browser", async () => {
  */
 test("only the names still waiting for a monitor are listed as named by the import", async () => {
   render(`#/asset/${CONTAINER.id}`);
-  await vi.waitFor(() => expect(target.querySelector(".named")).not.toBeNull());
+  await waitFor(() => expect(target.querySelector(".named")).not.toBeNull());
 
   const waiting = target.querySelector(".named");
   expect(
@@ -1576,7 +1577,7 @@ test("only the names still waiting for a monitor are listed as named by the impo
  */
 test("an asset with no monitors draws no monitoring section at all", async () => {
   render(`#/asset/${VM.id}`);
-  await vi.waitFor(() => expect(text()).toContain("vm-db-01"));
+  await waitFor(() => expect(text()).toContain("vm-db-01"));
 
   expect(target.querySelector(".watch")).toBeNull();
   expect(target.querySelector(".named")).toBeNull();

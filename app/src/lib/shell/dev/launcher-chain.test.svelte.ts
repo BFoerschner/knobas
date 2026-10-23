@@ -6,11 +6,12 @@
  * only the harness may import the harness (`house-rules.test.ts`).
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 
 import App from "../../../App.svelte";
 import { demoHandlers, installFakeTauri, type Handler } from "./fake-tauri";
 import { currentJob, linkRequest } from "../../tf/job/current.svelte";
+import { until } from "../test-wait";
 
 /**
  * The fixture's search answers the estate's lists alone (#430). `PAY-231` is
@@ -56,39 +57,6 @@ afterEach(() => {
   target.remove();
   history.replaceState(null, "", location.pathname + location.search);
 });
-
-/** Every wait of the running test, in order: label, how long it took, how many polls. */
-let waits: { label: string; ms: number; polls: number; timedOut: boolean }[] = [];
-let testStart = 0;
-
-beforeEach(() => {
-  waits = [];
-  testStart = performance.now();
-});
-
-function timeline(): string {
-  const rows = waits.map((w, i) => `  ${i + 1}. ${w.label}: ${Math.round(w.ms)} ms, ${w.polls} polls${w.timedOut ? " (TIMED OUT)" : ""}`);
-  return `waits so far (test started ${Math.round(performance.now() - testStart)} ms ago):\n${rows.join("\n")}`;
-}
-
-async function until(condition: () => boolean, whatWasWaitedFor: string): Promise<void> {
-  const start = performance.now();
-  let polls = 0;
-  try {
-    await vi.waitFor(
-      () => {
-        polls += 1;
-        flushSync();
-        if (!condition()) throw new Error(whatWasWaitedFor);
-      },
-      { timeout: 3_000, interval: 5 },
-    );
-    waits.push({ label: whatWasWaitedFor, ms: performance.now() - start, polls, timedOut: false });
-  } catch (cause) {
-    waits.push({ label: whatWasWaitedFor, ms: performance.now() - start, polls, timedOut: true });
-    throw new Error(`${whatWasWaitedFor}\n${timeline()}`, { cause });
-  }
-}
 
 /** The launcher's dialog, once it is up. */
 function launcher(): HTMLElement | null {

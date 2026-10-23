@@ -8,11 +8,12 @@
  * badge blinks to zero during a hiccup is an outage the reader stops looking
  * for.
  */
-import { expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 
 import { EVENTS } from "../ipc";
 import type { OpenAlert } from "../ipc/assets";
 import { createAlerts } from "./alerts.svelte";
+import { waitFor } from "../shell/test-wait";
 
 function alert(id: number, monitor: string, state: "down" | "warn" = "down"): OpenAlert {
   return {
@@ -91,7 +92,7 @@ test("it re-reads on a sync run and on an activity line, and stops when told", a
   });
 
   const stop = alerts.start();
-  await vi.waitFor(() => expect(events.handlers.length).toBe(2));
+  await waitFor(() => expect(events.handlers.length).toBe(2));
   // The two signals an alert moves on: a run reconciles them and an ack
   // writes a history line. There is deliberately no channel of the alert's
   // own — `alerts.svelte.ts` records the argument.
@@ -101,7 +102,7 @@ test("it re-reads on a sync run and on an activity line, and stops when told", a
   expect(reads).toBe(0);
 
   events.fire();
-  await vi.waitFor(() => expect(reads).toBe(2));
+  await waitFor(() => expect(reads).toBe(2));
 
   stop();
   expect(events.unlistened).toBe(2);
@@ -119,7 +120,7 @@ test("starting twice does not subscribe twice, and the second teardown is inert"
   });
 
   const stop = alerts.start();
-  await vi.waitFor(() => expect(events.handlers.length).toBe(2));
+  await waitFor(() => expect(events.handlers.length).toBe(2));
   const again = alerts.start();
   again();
   // The second teardown must not strand the first subscription.
@@ -202,12 +203,12 @@ test("a burst of events during a read makes one more read, not one per event", a
     listen: events.listen,
   });
   const stop = alerts.start();
-  await vi.waitFor(() => expect(events.handlers.length).toBe(2));
+  await waitFor(() => expect(events.handlers.length).toBe(2));
 
   for (let n = 0; n < 6; n++) events.fire();
   expect(reads).toBe(1);
   land();
-  await vi.waitFor(() => expect(reads).toBe(2));
+  await waitFor(() => expect(reads).toBe(2));
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(reads).toBe(2);
   stop();

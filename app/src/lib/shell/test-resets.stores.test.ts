@@ -32,6 +32,7 @@ import { createTheme } from "../tf/theme.svelte";
 import { createFollower, writeFollower } from "./follow-write";
 import { resetStores } from "./test-resets";
 import { createTimer } from "./timer.svelte";
+import { waitFor } from "./test-wait";
 
 afterEach(() => vi.useRealTimers());
 
@@ -277,7 +278,7 @@ test("clones.reset drops the marks and the finished count and unlistens", async 
   clones.reset();
   expect(clones.marks).toEqual({});
   expect(clones.finished).toBe(0);
-  await vi.waitFor(() => expect(off).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(off).toHaveBeenCalledTimes(1));
   await clones.start({ entityId: "e", name: "n", repoUrl: null, root: null });
   expect(listen, "the listener was not registered again").toHaveBeenCalledTimes(2);
 });

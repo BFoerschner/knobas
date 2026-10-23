@@ -11,6 +11,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { SearchQuery, SearchResponse } from "../ipc/search";
+import { waitFor } from "../shell/test-wait";
 
 /** Every query the picker asked, in order. */
 const queries: string[] = [];
@@ -163,7 +164,7 @@ test("the target picker searches what is typed", async () => {
   const screen = render();
 
   screen.type(screen.picker(), "payout");
-  await vi.waitFor(() => expect(screen.options()).toHaveLength(1));
+  await waitFor(() => expect(screen.options()).toHaveLength(1));
   flushSync();
 
   expect(queries).toEqual(["payout"]);
@@ -203,7 +204,7 @@ test("the whole flow is keyboard-only, and writes what was chosen", async () => 
   const screen = render();
 
   screen.type(screen.picker(), "payout");
-  await vi.waitFor(() => expect(screen.options()).toHaveLength(2));
+  await waitFor(() => expect(screen.options()).toHaveLength(2));
   flushSync();
 
   // Down to the second result, then Enter to take it.
@@ -216,7 +217,7 @@ test("the whole flow is keyboard-only, and writes what was chosen", async () => 
   // Enter in a field is the same as pressing Link.
   screen.press(screen.note(), "Enter");
 
-  await vi.waitFor(() => expect(writes).toHaveLength(1));
+  await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({
     fromId: "mock:PAY-231",
     toId: "mock:PAY-300",
@@ -234,13 +235,13 @@ test("a free-typed relation is sent as typed", async () => {
   const screen = render();
 
   screen.type(screen.picker(), "payout");
-  await vi.waitFor(() => expect(screen.options()).toHaveLength(1));
+  await waitFor(() => expect(screen.options()).toHaveLength(1));
   screen.press(screen.picker(), "Enter");
 
   screen.type(screen.relation(), "supersedes-eventually");
   screen.button("Link").click();
 
-  await vi.waitFor(() => expect(writes).toHaveLength(1));
+  await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]!.relation).toBe("supersedes-eventually");
 
   screen.done();
@@ -262,11 +263,11 @@ test("already linked is surfaced inline, and the dialog stays open", async () =>
   const screen = render();
 
   screen.type(screen.picker(), "payout");
-  await vi.waitFor(() => expect(screen.options()).toHaveLength(1));
+  await waitFor(() => expect(screen.options()).toHaveLength(1));
   screen.press(screen.picker(), "Enter");
   screen.button("Link").click();
 
-  await vi.waitFor(() => expect(screen.text()).toContain("Already linked"));
+  await waitFor(() => expect(screen.text()).toContain("Already linked"));
   flushSync();
 
   expect(screen.target.querySelector('[role="alert"]')?.textContent).toContain("Already linked");
@@ -290,11 +291,11 @@ test("a refusal that is not a conflict keeps the backend's sentence", async () =
   const screen = render();
 
   screen.type(screen.picker(), "payout");
-  await vi.waitFor(() => expect(screen.options()).toHaveLength(1));
+  await waitFor(() => expect(screen.options()).toHaveLength(1));
   screen.press(screen.picker(), "Enter");
   screen.button("Link").click();
 
-  await vi.waitFor(() => expect(screen.text()).toContain("is not in the mirror"));
+  await waitFor(() => expect(screen.text()).toContain("is not in the mirror"));
 
   screen.done();
 });
@@ -309,7 +310,7 @@ test("Esc clears the search first and only then closes the dialog", async () => 
   const screen = render();
 
   screen.type(screen.picker(), "payout");
-  await vi.waitFor(() => expect(screen.options()).toHaveLength(1));
+  await waitFor(() => expect(screen.options()).toHaveLength(1));
   flushSync();
 
   const first = screen.press(screen.picker(), "Escape");
@@ -331,7 +332,7 @@ test("Link is unavailable until a target is picked", async () => {
   expect(screen.button("Link").disabled).toBe(true);
 
   screen.type(screen.picker(), "payout");
-  await vi.waitFor(() => expect(screen.options()).toHaveLength(1));
+  await waitFor(() => expect(screen.options()).toHaveLength(1));
   screen.press(screen.picker(), "Enter");
 
   expect(screen.button("Link").disabled).toBe(false);
@@ -346,7 +347,7 @@ test("a result title is text, whatever a source put in it", async () => {
   const screen = render();
 
   screen.type(screen.picker(), "payout");
-  await vi.waitFor(() => expect(screen.options()).toHaveLength(1));
+  await waitFor(() => expect(screen.options()).toHaveLength(1));
   flushSync();
 
   expect(screen.text()).toContain("<em>Payout</em>");
@@ -371,13 +372,13 @@ test("picking monitors from a monitor writes monitored-by, drawn from the asset"
   const screen = render({ fromId: "kuma:7", fromTitle: "gitea" });
 
   screen.type(screen.picker(), "gitea");
-  await vi.waitFor(() => expect(screen.options()).toHaveLength(1));
+  await waitFor(() => expect(screen.options()).toHaveLength(1));
   screen.press(screen.picker(), "Enter");
 
   screen.button("monitors").click();
   screen.button("Link").click();
 
-  await vi.waitFor(() => expect(writes).toHaveLength(1));
+  await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({
     fromId: "asset:knobas-gitea",
     toId: "kuma:7",
@@ -394,13 +395,13 @@ test("picking monitored-by from an asset writes the same row", async () => {
   const screen = render({ fromId: "asset:knobas-gitea", fromTitle: "knobas-gitea" });
 
   screen.type(screen.picker(), "gitea");
-  await vi.waitFor(() => expect(screen.options()).toHaveLength(1));
+  await waitFor(() => expect(screen.options()).toHaveLength(1));
   screen.press(screen.picker(), "Enter");
 
   screen.button("monitored-by").click();
   screen.button("Link").click();
 
-  await vi.waitFor(() => expect(writes).toHaveLength(1));
+  await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({
     fromId: "asset:knobas-gitea",
     toId: "kuma:7",

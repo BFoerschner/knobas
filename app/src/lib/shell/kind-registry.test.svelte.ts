@@ -8,11 +8,12 @@
  * undeclared kind still renders, and that two adapters declaring one kind id
  * resolve the same way every time rather than by whichever answered first.
  */
-import { expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 
 import type { SourceDescriptor } from "../ipc/sources";
 import { createKindRegistry } from "./kind-registry.svelte";
 import { kindLabel, kindMonogram, kindSingular } from "./kinds";
+import { waitFor } from "./test-wait";
 
 function descriptor(adapterKind: string, kinds: SourceDescriptor["entity_kinds"]): SourceDescriptor {
   return {
@@ -154,7 +155,7 @@ test("the registry is reactive, so a tile drawn before it loaded redraws", async
     });
   });
   await kinds.load();
-  await vi.waitFor(() => expect(seen).toContain("Issue"));
+  await waitFor(() => expect(seen).toContain("Issue"));
   // Null first — the shell draws before `list_adapters` answers — then the
   // declaration. A non-reactive registry would leave the first reading on
   // screen for ever.
