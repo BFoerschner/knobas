@@ -14235,3 +14235,24 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   shares *Add application*'s `ready`, which the dialog already drew disabled for the same
   reason, and it was already disabled with no command before this PR. *Reversing:* enable it
   and show the save's refusal in the dialog.
+
+---
+
+## #1825 — page the views to their total, or look the repository up by key
+
+Ruled 2026-10-23 by the implementer (Sonnet).
+
+- **TfPr's repository: a lookup by key, or a walk through the source's repositories.**
+  *Ruling:* walk with `offset` until the pull request's repository turns up
+  (`readAllRows` in `tf/repo/repo.ts`). *Reasoning:* a lookup by key needs the repository's id,
+  and ADR-0020 forbids building it from the pull request's (the id is never taken apart);
+  `get_entity` takes an id, so it cannot find a repository by `owner/name`; a new IPC command
+  is a frozen-surface change. The walk stops at the match, so a source under 1000 repositories
+  reads once, as before. *Reversing:* swap the helper for a by-path read if one is ever booked.
+- **TfCode, TfRepo, TfCodeRow: "1000 of N", or page to `total`.** *Ruling:* page to `total`.
+  *Reasoning:* the Code page's counts, its Open PRs column and its checkouts count the rows it
+  holds, so a note beside a cut list would leave them wrong; the conventions carry no "n of N"
+  copy to follow; no visible change, so no screenshot. *Reversing:* cap `readAllRows` and draw
+  a note where `rows.length < total`.
+- **TfPr's 1000-proposal read.** *Ruling:* ask for 500, the most `room_suggestions` answers
+  (it takes no offset), as many as Review reads. *Reversing:* none needed; the backend clamps.
