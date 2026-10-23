@@ -125,7 +125,7 @@
   }
 
   function rename(event: FocusEvent, field: "name" | "description") {
-    const text = ((event.currentTarget as HTMLElement).textContent ?? "").trim();
+    const text = (event.currentTarget as HTMLElement).textContent.trim();
     if (!set || text === set[field]) return;
     if (field === "name" && text === "") {
       (event.currentTarget as HTMLElement).textContent = set.name;

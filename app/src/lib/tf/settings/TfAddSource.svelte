@@ -279,7 +279,7 @@
           {#each chosen.auth_methods as method (method)}
             <label>
               <input type="radio" name="tf-add-auth" value={method} bind:group={authKind} />
-              <span>{AUTH_LABEL[method] ?? method}</span>
+              <span>{AUTH_LABEL[method]}</span>
             </label>
           {/each}
         </div>

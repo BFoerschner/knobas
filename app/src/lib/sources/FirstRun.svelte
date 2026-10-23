@@ -563,7 +563,7 @@
                 <progress max={walkOf} value={walk?.walked}></progress>
               {/if}
               <p class="tf-fr-reading">
-                <b>{failed ? "failed" : (phase ?? "starting")}</b>
+                <b>{failed ? "failed" : phase}</b>
                 · {walkReading}{itemsReading} · {(elapsed / 1000).toFixed(1)} s
               </p>
             </div>
