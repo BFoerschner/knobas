@@ -3179,6 +3179,44 @@ async fn only_the_boards_built_on_my_favourite_filters_come_in_when_the_choice_i
 /// probe's name: the board listing's `name=` matches on a part of the name.
 const REFUSED_PROBE: &str = "knobas live refused-query probe";
 
+/// One thing the refused-query probe made on the seeded Jira, by its id.
+#[derive(Debug, Clone, PartialEq)]
+enum Probed {
+    Board(u64),
+    Filter(u64),
+    Version(String),
+}
+
+impl Probed {
+    fn path(&self) -> String {
+        match self {
+            Probed::Board(id) => format!("rest/agile/1.0/board/{id}"),
+            Probed::Filter(id) => format!("rest/api/2/filter/{id}"),
+            Probed::Version(id) => format!("rest/api/2/version/{id}"),
+        }
+    }
+
+    /// Whether Jira's answer about it says it is not there. Jira Data Center
+    /// 10 answers a filter that is not there 400 ("not available to you,
+    /// perhaps it has been deleted"), to a `GET` and a `DELETE` alike, where
+    /// a board or a version that is not there is a 404.
+    fn gone(&self, status: u16) -> bool {
+        status == 404 || (status == 400 && matches!(self, Probed::Filter(_)))
+    }
+
+    /// The request that removes it. Jira Data Center 10 answers `DELETE` on a
+    /// version 405, so a version goes through `removeAndSwap` (no issue holds
+    /// it).
+    fn removal(&self, http: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
+        match self {
+            Probed::Version(_) => http
+                .post(format!("{url}/{}/removeAndSwap", self.path()))
+                .json(&serde_json::json!({})),
+            Probed::Board(_) | Probed::Filter(_) => http.delete(format!("{url}/{}", self.path())),
+        }
+    }
+}
+
 /// What the refused-query probe made on the seeded Jira (#1893): a version
 /// on PAY, a favourite filter naming it, and a Kanban board on that filter.
 /// [`Drop`] takes back whatever of it is still there, passing or panicking
@@ -3188,16 +3226,30 @@ struct RefusedProbe {
     url: String,
     user: String,
     password: String,
-    board: Option<u64>,
-    filter: Option<u64>,
-    version: Option<String>,
+    /// In the order it was made.
+    made: Vec<Probed>,
 }
 
 impl RefusedProbe {
     /// Takes back what a killed run left first, so the views a test counts
     /// hold no stale probe.
     async fn new(seeded: &Seeded) -> RefusedProbe {
-        let (_, listed) = seeded
+        let mine = |rows: serde_json::Value| -> Vec<String> {
+            rows.as_array()
+                .into_iter()
+                .flatten()
+                .filter(|row| {
+                    row["name"]
+                        .as_str()
+                        .is_some_and(|name| name.starts_with(REFUSED_PROBE))
+                })
+                .map(|row| match &row["id"] {
+                    serde_json::Value::String(id) => id.clone(),
+                    other => other.to_string(),
+                })
+                .collect()
+        };
+        let (_, boards) = seeded
             .get(&format!(
                 "rest/agile/1.0/board?name={}",
                 url_encode(REFUSED_PROBE)
@@ -3205,40 +3257,17 @@ impl RefusedProbe {
             .await;
         let (_, favourites) = seeded.get("rest/api/2/filter/favourite").await;
         let (_, versions) = seeded.get("rest/api/2/project/PAY/versions").await;
-        let mine = |row: &serde_json::Value| {
-            row["name"]
-                .as_str()
-                .is_some_and(|name| name.starts_with(REFUSED_PROBE))
-        };
-        let id = |row: &serde_json::Value| match &row["id"] {
-            serde_json::Value::String(id) => id.clone(),
-            other => other.to_string(),
-        };
-        let mut stale = Vec::new();
-        for board in listed["values"]
-            .as_array()
+        let number = |id: String| id.parse::<u64>().expect("a numeric id");
+        let stale: Vec<Probed> = mine(boards["values"].clone())
             .into_iter()
-            .flatten()
-            .filter(|r| mine(r))
-        {
-            stale.push(format!("rest/agile/1.0/board/{}", id(board)));
-        }
-        for filter in favourites
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|r| mine(r))
-        {
-            stale.push(format!("rest/api/2/filter/{}", id(filter)));
-        }
-        for version in versions
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|r| mine(r))
-        {
-            stale.push(format!("rest/api/2/version/{}", id(version)));
-        }
+            .map(|id| Probed::Board(number(id)))
+            .chain(
+                mine(favourites)
+                    .into_iter()
+                    .map(|id| Probed::Filter(number(id))),
+            )
+            .chain(mine(versions).into_iter().map(Probed::Version))
+            .collect();
         if let Err(failure) = take_back(
             &seeded.http,
             &seeded.url,
@@ -3254,42 +3283,46 @@ impl RefusedProbe {
             url: seeded.url.clone(),
             user: seeded.user.clone(),
             password: seeded.password.clone(),
-            board: None,
-            filter: None,
-            version: None,
+            made: Vec::new(),
         }
     }
 
-    /// What is still there, board first: a board holds its filter, and the
-    /// filter names the version.
-    fn paths(&mut self) -> Vec<String> {
-        let mut paths = Vec::new();
-        if let Some(board) = self.board.take() {
-            paths.push(format!("rest/agile/1.0/board/{board}"));
-        }
-        if let Some(filter) = self.filter.take() {
-            paths.push(format!("rest/api/2/filter/{filter}"));
-        }
-        if let Some(version) = self.version.take() {
-            paths.push(format!("rest/api/2/version/{version}"));
-        }
-        paths
+    /// Own `thing`'s removal from this line on.
+    fn made(&mut self, thing: Probed) {
+        self.made.push(thing);
+    }
+
+    /// Take `thing` back now, and stop owning it once it is gone.
+    async fn take_back_now(&mut self, thing: &Probed) -> Result<(), String> {
+        take_back(
+            &client(),
+            &self.url,
+            &self.user,
+            &self.password,
+            std::slice::from_ref(thing),
+        )
+        .await?;
+        self.made.retain(|made| made != thing);
+        Ok(())
     }
 }
 
 impl Drop for RefusedProbe {
     fn drop(&mut self) {
-        let paths = self.paths();
-        if paths.is_empty() {
+        // The last made first: a board holds its filter, and the filter
+        // names the version.
+        let mut left: Vec<Probed> = std::mem::take(&mut self.made);
+        if left.is_empty() {
             return;
         }
+        left.reverse();
         let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
         let report = std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("a runtime for the cleanup")
-                .block_on(async move { take_back(&client(), &url, &user, &password, &paths).await })
+                .block_on(async move { take_back(&client(), &url, &user, &password, &left).await })
         })
         .join();
         let failure = match report {
@@ -3311,37 +3344,26 @@ impl Drop for RefusedProbe {
     }
 }
 
-/// Take back each path in order and **check** it is gone afterwards. A thing
-/// already gone is not a failure. Jira Data Center 10 answers `DELETE` on a
-/// version 405, so a version goes through `removeAndSwap` (no issue holds
-/// it); and it answers a filter that is not there 400 ("not available to
-/// you, perhaps it has been deleted"), to a `GET` and a `DELETE` alike,
-/// where a board or a version is a 404.
+/// Take back each thing in order and **check** it is gone afterwards. A thing
+/// already gone is not a failure.
 async fn take_back(
     http: &reqwest::Client,
     url: &str,
     user: &str,
     password: &str,
-    paths: &[String],
+    things: &[Probed],
 ) -> Result<(), String> {
-    for path in paths {
-        let gone = |status: u16| {
-            status == 404 || (status == 400 && path.starts_with("rest/api/2/filter/"))
-        };
-        let request = if path.starts_with("rest/api/2/version/") {
-            http.post(format!("{url}/{path}/removeAndSwap"))
-                .json(&serde_json::json!({}))
-        } else {
-            http.delete(format!("{url}/{path}"))
-        };
-        let response = request
+    for thing in things {
+        let path = thing.path();
+        let response = thing
+            .removal(http, url)
             .header("Accept", "application/json")
             .basic_auth(user, Some(password))
             .send()
             .await
             .map_err(|e| format!("taking back {path}: {e}"))?;
         let status = response.status().as_u16();
-        if !(200..300).contains(&status) && !gone(status) {
+        if !(200..300).contains(&status) && !thing.gone(status) {
             return Err(format!(
                 "taking back {path} -> {status}: {}",
                 response.text().await.unwrap_or_default()
@@ -3356,7 +3378,7 @@ async fn take_back(
             .map_err(|e| format!("GET {path}: {e}"))?
             .status()
             .as_u16();
-        if !gone(status) {
+        if !thing.gone(status) {
             return Err(format!("{path} answers {status} after it was taken back"));
         }
     }
@@ -3399,7 +3421,7 @@ async fn a_board_and_a_favourite_filter_whose_version_was_deleted_are_left_out_a
         .await;
     assert_eq!(status, 201, "{version}");
     let version_id = version["id"].as_str().expect("a version id").to_owned();
-    probe.version = Some(version_id.clone());
+    probe.made(Probed::Version(version_id.clone()));
     let jql = format!("project = PAY AND fixVersion = \"{name}\" ORDER BY Rank ASC");
     let (status, filter) = seeded
         .request(
@@ -3409,8 +3431,11 @@ async fn a_board_and_a_favourite_filter_whose_version_was_deleted_are_left_out_a
         )
         .await;
     assert_eq!(status, 200, "{filter}");
-    let filter_id: u64 = filter["id"].as_str().unwrap().parse().unwrap();
-    probe.filter = Some(filter_id);
+    let filter_id: u64 = filter["id"]
+        .as_str()
+        .and_then(|id| id.parse().ok())
+        .expect("a filter id");
+    probe.made(Probed::Filter(filter_id));
     let (status, board) = seeded
         .request(
             reqwest::Method::POST,
@@ -3420,12 +3445,12 @@ async fn a_board_and_a_favourite_filter_whose_version_was_deleted_are_left_out_a
         .await;
     assert!(status == 200 || status == 201, "{status} {board}");
     let board_id = board["id"].as_u64().expect("a board id");
-    probe.board = Some(board_id);
+    probe.made(Probed::Board(board_id));
     let (board_view, filter_view) = (format!("board-{board_id}"), format!("filter-{filter_id}"));
     let source = seeded.source(serde_json::json!({
         "projects": ["PAY"], "boards": "all", "favourite_filters": true,
     }));
-    let in_run = |items: &[SyncItem]| -> Vec<String> {
+    let view_keys = |items: &[SyncItem]| -> Vec<String> {
         let mut views: Vec<String> = items
             .iter()
             .filter(|i| i.kind == "jira_view")
@@ -3436,7 +3461,7 @@ async fn a_board_and_a_favourite_filter_whose_version_was_deleted_are_left_out_a
     };
 
     let (before, _) = full(&*source).await;
-    let before = in_run(&before);
+    let before = view_keys(&before);
     for key in [&board_view, &filter_view] {
         assert!(
             before.contains(key),
@@ -3444,16 +3469,10 @@ async fn a_board_and_a_favourite_filter_whose_version_was_deleted_are_left_out_a
         );
     }
 
-    let deleted = take_back(
-        &seeded.http,
-        &seeded.url,
-        &seeded.user,
-        &seeded.password,
-        &[format!("rest/api/2/version/{version_id}")],
-    )
-    .await;
+    let deleted = probe
+        .take_back_now(&Probed::Version(version_id.clone()))
+        .await;
     assert_eq!(deleted, Ok(()), "deleting the version");
-    probe.version = None;
     let (status, saved) = seeded.get(&format!("rest/api/2/filter/{filter_id}")).await;
     assert_eq!(status, 200, "{saved}");
     assert_eq!(
@@ -3489,7 +3508,7 @@ async fn a_board_and_a_favourite_filter_whose_version_was_deleted_are_left_out_a
     );
 
     let (after, _) = full(&*source).await;
-    let after = in_run(&after);
+    let after = view_keys(&after);
     for key in [&board_view, &filter_view] {
         assert!(
             !after.contains(key),
