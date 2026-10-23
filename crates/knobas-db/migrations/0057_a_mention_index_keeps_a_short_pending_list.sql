@@ -17,7 +17,8 @@
 -- asks. On `read_plans.rs`' mirror (5,000 prose bodies), a load that ended
 -- with 411 pages pending priced the mention rule's index read at about 1,700,
 -- above a scan of every body (967 never analyzed, 1,389 analyzed), and the
--- rule read every body: 4.8 ms, against about 1 ms through the index.
+-- rule read every body: 4.8 ms, against about 1 ms through the index with
+-- that list and 0.1 ms once it was merged.
 -- Whether a load ends with a long list depends on where the last 4 MB merge
 -- fell, which a word in most bodies moved (#1849): red with it in 1/2, 2/3,
 -- 3/4 or 7/8 of them, green at 1/4 and without it.

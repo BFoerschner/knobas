@@ -13,8 +13,8 @@
   random read, a manual `analyze` merges nothing, and autovacuum may not have reached a freshly
   synced mirror. On `read_plans.rs`' mirror a load that ended with 411 pages pending priced the
   mention rule's index read at about 1,700, above a scan of every prose body, and the rule read
-  every body (4.8 ms, about 1,100 to 1,350 buffers) where the index answers in 0.1 ms. At 256 kB
-  the list holds about 33 pages at most. Indexing 5,000 bodies row by row costs 0.5 to 0.7 s
+  every body (4.8 ms, about 1,100 to 1,350 buffers) where the merged index answers in 0.1 ms.
+  At 256 kB the list holds at most 33 pages. Indexing 5,000 bodies row by row costs 0.5 to 0.7 s
   against 0.3 to 0.4 s at 4 MB; `fastupdate = off` cost 3.5 to 10.8 s.
 
   **Backups.** A backup dumps the `knobas` schema only (`knobas_db::backup::OWNED_SCHEMA`); the
@@ -22,7 +22,8 @@
   row.
 
   Pinned by `crates/knobas-db/tests/schema.rs`'
-  `zero_fifty_seven_caps_the_body_trigram_pending_list` (read after every 20 rows, the list stays
-  under 33 pages through a load the default limit lets reach about 480, and the migration rerun
-  over such a list merges it), and by `crates/knobas-app/tests/it/read_plans.rs`, whose mirror now carries the probe's
-  common word and whose mention rule must read `item_body_trgm_idx` in both statistics states.
+  `zero_fifty_seven_caps_the_body_trigram_pending_list` (read after every 20 rows, the list holds at
+  most 33 pages through a load the default limit lets reach about 480, and the migration rerun over
+  such a list merges it), and by `crates/knobas-app/tests/it/read_plans.rs`, whose mirror now
+  carries the probe's common word and whose mention rule must read `item_body_trgm_idx` in both
+  statistics states.

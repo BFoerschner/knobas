@@ -2647,7 +2647,10 @@ async fn zero_fifty_seven_caps_the_body_trigram_pending_list() {
     };
 
     let capped = load(1).await;
-    assert!(capped <= CAP, "{capped} pages pending, over the 256 kB limit");
+    assert!(
+        capped <= CAP,
+        "{capped} pages pending, over the 256 kB limit"
+    );
 
     // The list an index under the default limit is left with, merged by the
     // migration rerun.
@@ -2655,10 +2658,10 @@ async fn zero_fifty_seven_caps_the_body_trigram_pending_list() {
         .execute(&pool)
         .await
         .unwrap();
-    let unlimited = load(1_001).await;
+    let at_default = load(1_001).await;
     assert!(
-        unlimited > 4 * CAP,
-        "the default limit left {unlimited} pages pending, too few to tell the cap from it"
+        at_default > 4 * CAP,
+        "the default limit left {at_default} pages pending, too few to tell the cap from it"
     );
     sqlx::raw_sql(include_str!(
         "../migrations/0057_a_mention_index_keeps_a_short_pending_list.sql"
