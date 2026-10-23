@@ -661,18 +661,29 @@ async fn a_quit_while_migrating_stops_the_server() {
 /// LIFE-6 (spec #1619): a bring-up whose migration fails stops the server
 /// with the asynchronous stop, not by dropping it. Dropping a server this
 /// process started runs `pg_ctl stop` synchronously in `PostgreSQL`'s `Drop`,
-/// on the runtime's thread, for the shutdown checkpoint: `pg_ctl` polls every
-/// tenth of a second, so the thread is held for at least that.
+/// on the runtime's thread, until the postmaster has exited.
 ///
-/// A runtime of one thread, and a task on it that ticks every five
-/// milliseconds: while bring-up says *migrating* the tick never stops for
-/// long. The migration fails because an applied migration's checksum no
-/// longer matches its file.
+/// The stop is held open until the runtime's one thread does something
+/// (#1809), so the witness is a fact about the thread, not a bound on a
+/// scheduler gap that a loaded machine stretches. The server archives WAL
+/// through a command of the test's, and a shutdown hands the archiver the
+/// segment it closes and waits for it: the command marks itself waiting and
+/// returns only once `go` exists. Only a task on the runtime creates `go`,
+/// while bring-up still says *migrating*. Awaited, the stop leaves the thread
+/// free and the task releases it at once, however slow the machine. Dropped,
+/// the stop holds the thread until the command gives up on its own
+/// ([`ARCHIVE_GIVES_UP`]); bring-up then says *failed* and the task never
+/// released anything.
+///
+/// The migration fails because an applied migration's checksum no longer
+/// matches its file.
 #[tokio::test]
 async fn a_failed_migration_stops_the_server_without_holding_the_runtime() {
     let data = tempfile::tempdir().unwrap();
     let profile = Profile::new(false, data.path());
     let root = profile.db_config(None).root_dir;
+    let gate = tempfile::tempdir().unwrap();
+    let archive_command = archive_gate(gate.path());
     let stopped = provisioned(&profile, async |db| {
         sqlx::query(
             "update _sqlx_migrations set checksum = '\\x00'::bytea
@@ -681,31 +692,41 @@ async fn a_failed_migration_stops_the_server_without_holding_the_runtime() {
         .execute(db.pool())
         .await
         .expect("an applied migration no longer matches its file");
+        // Read at the next start: bring-up's.
+        for statement in [
+            "alter system set archive_mode = on".to_owned(),
+            format!("alter system set archive_command = '{archive_command}'"),
+        ] {
+            sqlx::raw_sql(sqlx::AssertSqlSafe(statement))
+                .execute(db.pool())
+                .await
+                .expect("the archiver is configured for the next start");
+        }
     })
     .await;
     stopped.stop().await.expect("the provisioning server stops");
 
     let registry = Registry::default();
     let app = mock_app(&profile, &registry);
-    let ticks: Arc<Mutex<Vec<(std::time::Instant, DbState)>>> = Arc::default();
+    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let ticker = tokio::spawn({
-        let ticks = Arc::clone(&ticks);
+        let released = Arc::clone(&released);
         let handle = app.handle().clone();
+        let gate = gate.path().to_path_buf();
         async move {
             loop {
-                let state = handle.state::<Lifecycle>().get();
-                ticks
-                    .lock()
-                    .unwrap()
-                    .push((std::time::Instant::now(), state));
+                if handle.state::<Lifecycle>().get() == DbState::Migrating
+                    && gate.join("waiting").exists()
+                    && !released.swap(true, std::sync::atomic::Ordering::SeqCst)
+                {
+                    std::fs::write(gate.join("go"), b"").expect("the stop is released");
+                }
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         }
     });
 
     knobas_app::bring_up(app.handle(), &profile, None, registry).await;
-    // A few more ticks, so the one after a held thread is recorded.
-    tokio::time::sleep(Duration::from_millis(50)).await;
     ticker.abort();
 
     assert!(
@@ -716,17 +737,41 @@ async fn a_failed_migration_stops_the_server_without_holding_the_runtime() {
         !root.join("data").join("postmaster.pid").exists(),
         "the failed bring-up stopped its server"
     );
-    let ticks = ticks.lock().unwrap();
-    let held = ticks
-        .windows(2)
-        .filter(|pair| pair[0].1 == DbState::Migrating)
-        .map(|pair| pair[1].0 - pair[0].0)
-        .max()
-        .expect("the ticker ran while bring-up was migrating");
     assert!(
-        held < Duration::from_millis(80),
-        "the runtime's one thread was held for {held:?} while bring-up said migrating"
+        gate.path().join("waiting").exists(),
+        "the stop never waited on the archive command, so nothing here was witnessed"
     );
+    assert!(
+        released.load(std::sync::atomic::Ordering::SeqCst),
+        "the runtime's one thread did not run while the server's stop waited on it"
+    );
+}
+
+/// How long the archive command waits for `go` before it returns anyway, so
+/// a stop that holds the runtime's thread ends and the test can say so. Far
+/// past anything an awaited stop needs: there the release comes as soon as
+/// the thread runs once.
+const ARCHIVE_GIVES_UP: Duration = Duration::from_secs(10);
+
+/// An `archive_command` that marks `gate/waiting`, then returns once
+/// `gate/go` exists, or after [`ARCHIVE_GIVES_UP`]. The archiver runs it
+/// through `/bin/sh`.
+fn archive_gate(gate: &std::path::Path) -> String {
+    let script = gate.join("archive.sh");
+    let polls = ARCHIVE_GIVES_UP.as_millis() / 10;
+    std::fs::write(
+        &script,
+        format!(
+            "gate=\"{gate}\"\n\
+             : > \"$gate/waiting\"\n\
+             i=0\n\
+             while [ ! -e \"$gate/go\" ] && [ \"$i\" -lt {polls} ]; do sleep 0.01; i=$((i + 1)); done\n\
+             exit 0\n",
+            gate = gate.display()
+        ),
+    )
+    .unwrap();
+    format!("/bin/sh {} %p", script.display())
 }
 
 // -- a server that dies after ready (#1779) ---------------------------------
