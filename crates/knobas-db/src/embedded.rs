@@ -90,6 +90,12 @@ const LIVENESS_TIMEOUT: Duration = Duration::from_millis(500);
 /// live server answers in milliseconds, so five seconds is generous for the
 /// question actually being asked -- and it bounds only the probe, not the
 /// pool's own acquire timeout, which still has to cover a busy database.
+///
+/// **Only for a first contact** (#1815): a pool on a server that has already
+/// answered -- one this process started, adopted, or reached before -- waits
+/// for its first connection under the pool's acquire timeout instead. On a
+/// loaded machine a live local server took longer than five seconds to
+/// answer, moments after it had answered, and this bound called it dead.
 const FIRST_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How long [`EmbeddedDb::stop`] waits for in-flight queries before stopping
@@ -312,36 +318,52 @@ impl Connector {
         PgConnection::connect_with(&self.options).await
     }
 
-    /// A pool of `max_connections` on the same server.
+    /// A pool of `max_connections` on the same server, its first connection
+    /// waited for under the pool's acquire timeout: this server has answered
+    /// already, so [`FIRST_CONNECT_TIMEOUT`] is not the question (#1815).
     ///
     /// # Errors
     /// [`sqlx::Error`] if the first connection fails.
     pub async fn pool(&self, max_connections: u32) -> Result<PgPool, sqlx::Error> {
-        let pool = PgPoolOptions::new()
+        PgPoolOptions::new()
             .max_connections(max_connections)
-            .connect_lazy_with(self.options.clone());
-        probe(&pool).await?;
-        Ok(pool)
+            .connect_with(self.options.clone())
+            .await
     }
 
     /// The app's own pool: five connections, each carrying
-    /// [`UI_STATEMENT_TIMEOUT`] from its first packet.
+    /// [`UI_STATEMENT_TIMEOUT`] from its first packet. Its first connection
+    /// is waited for under the pool's acquire timeout, as [`pool`](Self::pool)'s
+    /// is: the callers reach a server that has just answered them.
     ///
     /// # Errors
     /// [`sqlx::Error`] if the first connection fails.
     pub async fn app_pool(&self) -> Result<PgPool, sqlx::Error> {
+        let pool = self.app_pool_unconnected();
+        drop(pool.acquire().await?);
+        Ok(pool)
+    }
+
+    /// [`app_pool`](Self::app_pool) for `KNOBAS_DB_URL`'s first contact,
+    /// where nothing has answered yet: the first connection is bounded by
+    /// [`FIRST_CONNECT_TIMEOUT`], so a dead URL fails the boot screen fast.
+    async fn app_pool_on_first_contact(&self) -> Result<PgPool, sqlx::Error> {
+        let pool = self.app_pool_unconnected();
+        probe(&pool).await?;
+        Ok(pool)
+    }
+
+    fn app_pool_unconnected(&self) -> PgPool {
         let options = self.options.clone().options([(
             "statement_timeout",
             format!("{}ms", UI_STATEMENT_TIMEOUT.as_millis()),
         )]);
-        let pool = PgPoolOptions::new()
+        PgPoolOptions::new()
             .max_connections(MAX_CONNECTIONS)
             // sqlx's default, spelled out: the statement limit above is
             // argued from it.
             .acquire_timeout(Duration::from_secs(30))
-            .connect_lazy_with(options);
-        probe(&pool).await?;
-        Ok(pool)
+            .connect_lazy_with(options)
     }
 }
 
@@ -429,7 +451,7 @@ impl EmbeddedDb {
             tracing::info!("connecting to externally managed postgres");
             let connector = Connector::parse(url)?;
             return Ok(EmbeddedDb {
-                pool: connector.app_pool().await?,
+                pool: connector.app_pool_on_first_contact().await?,
                 connector,
                 postgresql: None,
                 stop_settings: None,
