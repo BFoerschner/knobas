@@ -13831,3 +13831,35 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   *Reasoning:* a data directory either `initdb` made is the same. A profile that is already
   initialised skips `initialise` before the install, so it starts as before; only the two modes
   change. *Reversing:* one line.
+## #1818: a read the server hung up on is sent again (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): the frozen-surface
+  change** to `crates/knobas-http/**`. *Ruling:* make it, booked in
+  `docs/contract/10.8/1818-knobas-http-a-read-the-server-hung-up-on-is-sent-again.md`: one new
+  public predicate, `retry::closed_before_answering`, one dependency (`hyper`, already in the
+  tree through reqwest), and one more transient case in `send_with`. *Reasoning:* the ticket
+  names the change and the model; the limiter (#1630, #1728, #1740, #1764, #1771), the quota mark
+  (#1729) and #1640's cap and second client are untouched. *Reversing:* low, one branch.
+- **Retry the read, or shorten the pool's idle timeout.** *Fork:* the ticket's two options.
+  *Ruling:* send a `GET` or `HEAD` once more when hyper reports `IncompleteMessage` from `send`.
+  *Reasoning:* the race is between the client's reuse and *any* server's idle timeout, and a
+  `pool_idle_timeout` only wins it against servers whose timeout is above the number picked:
+  Node's 5 s, Apache's 5 s and gunicorn's 2 s sit at or below anything that still pools usefully,
+  so the number would be a guess about every source a person might add. A retry covers every
+  server, costs nothing until the race happens, and goes through the attempt loop, so it passes
+  the limiter and fits the send budget as every retry does. *Reversing:* low.
+- **"On a reused connection".** *Fork:* resend only when the connection was a pooled one, or on
+  any `IncompleteMessage`. *Ruling:* any, once per call. *Reasoning:* hyper-util knows whether a
+  connection was reused but reqwest's error does not say; for a safe method the distinction does
+  not change what a resend can do, and "once" is the bound that keeps a server that hangs up on
+  every request from costing `MAX_ATTEMPTS`. *Reversing:* low.
+- **Writes.** *Fork:* let a write that did not opt out retry too. *Ruling:* no; any method other
+  than `GET` or `HEAD`, and any request with `no_retry`, is not sent again and keeps its
+  `Protocol { status: None }` reading. *Reasoning:* the server read the request whole before it
+  closed; whether it acted is unknown, and ADR-0012's once-sent reading is the ticket's
+  constraint. Whether that reading should be `Unconfirmed` rather than `Protocol` is outside the
+  ticket and filed as a follow-up. *Reversing:* low.
+- **A reset rather than a close.** *Fork:* also resend a read whose connection was reset
+  (`ECONNRESET`) before answering. *Ruling:* no, `IncompleteMessage` only, as the ticket names.
+  *Reasoning:* the seen failure is the clean close; the reset shape has not been seen here and
+  would widen the retry past the diagnosis. *Reversing:* low.

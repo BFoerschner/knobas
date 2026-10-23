@@ -25,6 +25,10 @@ governor.workspace = true
 # the copies reqwest already resolves.
 http = "1"
 http-body = "1"
+# A read the server hung up on before answering is told by the
+# `hyper::Error` at the bottom of reqwest's error chain (#1818). The copy
+# reqwest already resolves.
+hyper = "1"
 knobas-source = { path = "../knobas-source" }
 reqwest.workspace = true
 serde.workspace = true

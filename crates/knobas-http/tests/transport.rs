@@ -2187,3 +2187,298 @@ mod bounds {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// A keep-alive connection the server closed as it was reused (#1818).
+// ---------------------------------------------------------------------------
+
+mod hung_up {
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    use knobas_http::{Auth, HttpClient, HttpConfig, Method};
+    use knobas_source::SourceError;
+
+    /// When [`HangUpServer`] closes a connection on a request it has read.
+    #[derive(Clone, Copy)]
+    enum HangUp {
+        /// On any request after a connection's first. The first is answered
+        /// and the connection kept alive, so the client pools it; the next
+        /// request on it meets what a server's keep-alive timeout firing as
+        /// the request went out looks like: read whole, and never answered.
+        OnReuse,
+        /// On every request, fresh connection or not.
+        Always,
+    }
+
+    /// A server that reads each request whole and either answers it `200 {}`
+    /// with the connection kept alive, or closes the connection without a
+    /// byte of answer. It keeps every request line and every hang-up.
+    struct HangUpServer {
+        port: u16,
+        lines: Arc<Mutex<Vec<String>>>,
+        hung_up: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl HangUpServer {
+        fn new(when: HangUp) -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("addr").port();
+            // Held for the process, as `CountingServer`'s is: the limiter is
+            // keyed by origin, and a reused port would inherit its quota.
+            std::mem::forget(listener.try_clone().expect("hold the port"));
+            listener.set_nonblocking(true).expect("nonblocking");
+            let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+            let lines = Arc::new(Mutex::new(Vec::new()));
+            let hung_up = Arc::new(Mutex::new(Vec::new()));
+            let (kept, closed) = (Arc::clone(&lines), Arc::clone(&hung_up));
+            tokio::spawn(async move {
+                while let Ok((socket, _)) = listener.accept().await {
+                    let (kept, closed) = (Arc::clone(&kept), Arc::clone(&closed));
+                    tokio::spawn(serve(socket, when, kept, closed));
+                }
+            });
+            Self {
+                port,
+                lines,
+                hung_up,
+            }
+        }
+
+        fn url(&self) -> String {
+            format!("http://127.0.0.1:{}", self.port)
+        }
+
+        /// Each request's line, e.g. `"GET /a HTTP/1.1"`, in arrival order.
+        fn lines(&self) -> Vec<String> {
+            self.lines.lock().expect("lines").clone()
+        }
+
+        /// The lines of the requests it hung up on.
+        fn hung_up(&self) -> Vec<String> {
+            self.hung_up.lock().expect("hung up").clone()
+        }
+
+        /// How many requests arrived with `line`.
+        fn count(&self, line: &str) -> usize {
+            self.lines().iter().filter(|seen| *seen == line).count()
+        }
+    }
+
+    /// One connection: each request read whole (head and `content-length`
+    /// body), then answered or hung up on.
+    async fn serve(
+        mut socket: tokio::net::TcpStream,
+        when: HangUp,
+        lines: Arc<Mutex<Vec<String>>>,
+        hung_up: Arc<Mutex<Vec<String>>>,
+    ) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut read = Vec::new();
+        let mut buffer = [0u8; 4096];
+        for nth in 0usize.. {
+            let end = loop {
+                if let Some(at) = read.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break at + 4;
+                }
+                match socket.read(&mut buffer).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => read.extend_from_slice(&buffer[..n]),
+                }
+            };
+            let head = String::from_utf8_lossy(&read[..end]).into_owned();
+            let length = head
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+                .unwrap_or(0);
+            while read.len() < end + length {
+                match socket.read(&mut buffer).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => read.extend_from_slice(&buffer[..n]),
+                }
+            }
+            read.drain(..end + length);
+            let line = head.lines().next().unwrap_or_default().to_owned();
+            lines.lock().expect("lines").push(line.clone());
+            if matches!(when, HangUp::Always) || nth > 0 {
+                hung_up.lock().expect("hung up").push(line);
+                // Everything sent has been read, so this is a FIN and not a
+                // reset: the client reads the end of the stream where it
+                // waited for a status line.
+                let _ = socket.shutdown().await;
+                return;
+            }
+            let answer = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                          content-length: 2\r\nconnection: keep-alive\r\n\r\n{}";
+            if socket.write_all(answer.as_bytes()).await.is_err() {
+                return;
+            }
+        }
+    }
+
+    fn client(server: &HangUpServer) -> HttpClient {
+        client_at(server, 5, 10)
+    }
+
+    fn client_at(server: &HangUpServer, per_second: u32, burst: u32) -> HttpClient {
+        HttpClient::new(HttpConfig {
+            base_url: server.url(),
+            adapter_kind: "test".to_owned(),
+            adapter_version: "0.1.0".to_owned(),
+            auth: Auth::None,
+            requests_per_second: per_second,
+            burst,
+            request_timeout: Duration::from_secs(5),
+            ..HttpConfig::default()
+        })
+        .expect("client")
+    }
+
+    /// The read that leaves a kept-alive connection in the client's pool.
+    async fn pool_a_connection(client: &HttpClient) {
+        client
+            .get_json::<serde_json::Value>("/first", &[])
+            .await
+            .expect("the first request on a connection is answered");
+    }
+
+    /// The same for a write, which goes out on a client of its own (#1640)
+    /// and so on a pool of its own.
+    async fn pool_a_write_connection(client: &HttpClient) {
+        let response = client
+            .send(client.request(Method::POST, "/first").no_retry())
+            .await
+            .expect("the first request on a connection is answered");
+        response.bytes().await.expect("read whole, so the connection is pooled");
+    }
+
+    /// **A read the server hung up on as it reused a pooled connection is
+    /// sent again, and answered** (#1818).
+    ///
+    /// The `live_kuma` flake: Kuma's (Node's) 5 s keep-alive timeout closed
+    /// the connection the incremental sync's `GET /metrics` went out on, and
+    /// the sync failed `Protocol` on a read that was always safe to repeat.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_read_the_server_hung_up_on_is_sent_again() {
+        for method in [Method::GET, Method::HEAD] {
+            let server = HangUpServer::new(HangUp::OnReuse);
+            let client = client(&server);
+            pool_a_connection(&client).await;
+
+            let answered = client.send(client.request(method.clone(), "/second")).await;
+
+            let line = format!("{method} /second HTTP/1.1");
+            assert!(answered.is_ok(), "{method}: {answered:?}");
+            assert_eq!(
+                server.hung_up(),
+                [line.as_str()],
+                "{method}: the request went out on the pooled connection and was hung up on"
+            );
+            assert_eq!(server.count(&line), 2, "{method}: {:?}", server.lines());
+        }
+    }
+
+    /// **A write the server hung up on is never sent again**, whether or not
+    /// it opted out of retries (ADR-0012).
+    ///
+    /// The server read it whole; whether it acted on it before closing is
+    /// what the client cannot know, so the write keeps its once-sent reading.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_write_the_server_hung_up_on_is_not_sent_again() {
+        for no_retry in [true, false] {
+            let server = HangUpServer::new(HangUp::OnReuse);
+            let client = client(&server);
+            pool_a_write_connection(&client).await;
+
+            let request = client
+                .request(Method::POST, "/rest/api/2/issue")
+                .json(&serde_json::json!({ "fields": { "summary": "once" } }));
+            let request = if no_retry {
+                request.no_retry()
+            } else {
+                request
+            };
+            let error = client.send(request).await.expect_err("never answered");
+
+            let line = "POST /rest/api/2/issue HTTP/1.1";
+            assert_eq!(server.hung_up(), [line], "no_retry {no_retry}");
+            assert_eq!(server.count(line), 1, "no_retry {no_retry}: sent again");
+            assert!(
+                matches!(error, SourceError::Protocol { status: None, .. }),
+                "no_retry {no_retry}: {error:?}"
+            );
+        }
+    }
+
+    /// A read is sent again **once**: a server that hangs up on every
+    /// request is broken, not racing its keep-alive timeout, and is told so
+    /// after two requests rather than [`knobas_http::MAX_ATTEMPTS`].
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_read_the_server_keeps_hanging_up_on_is_sent_twice_only() {
+        let server = HangUpServer::new(HangUp::Always);
+        let client = client(&server);
+
+        let error = client
+            .get_json::<serde_json::Value>("/thing", &[])
+            .await
+            .expect_err("never answered");
+
+        assert!(
+            matches!(error, SourceError::Protocol { status: None, .. }),
+            "{error:?}"
+        );
+        assert_eq!(server.count("GET /thing HTTP/1.1"), 2, "{:?}", server.lines());
+    }
+
+    /// The second sending is a request against the instance's quota, so it
+    /// waits for the rate limiter as every attempt does (#1630).
+    ///
+    /// One a second with a burst of two: `/first` and `/second` take the
+    /// burst, and `/second` sent again waits for the next token, about a
+    /// second -- not just the 250 ms backoff.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_read_sent_again_waits_for_the_rate_limiter() {
+        let server = HangUpServer::new(HangUp::OnReuse);
+        let client = client_at(&server, 1, 2);
+        pool_a_connection(&client).await;
+
+        let started = Instant::now();
+        client
+            .get_json::<serde_json::Value>("/second", &[])
+            .await
+            .expect("answered the second time");
+        let took = started.elapsed();
+
+        assert_eq!(server.count("GET /second HTTP/1.1"), 2);
+        assert!(
+            took >= Duration::from_millis(700),
+            "sent again after {took:?}: the retry skipped the limiter"
+        );
+    }
+
+    /// The second sending fits in [`knobas_http::SEND_BUDGET`] or is not
+    /// made: a call whose budget is shorter than the backoff ends with the
+    /// hang-up rather than outliving the caller's patience.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_read_sent_again_stays_inside_the_send_budget() {
+        let server = HangUpServer::new(HangUp::OnReuse);
+        let client = client(&server).with_send_budget(Duration::from_millis(200));
+        pool_a_connection(&client).await;
+
+        let error = client
+            .get_json::<serde_json::Value>("/second", &[])
+            .await
+            .expect_err("no room to send it again");
+
+        assert!(
+            matches!(error, SourceError::Protocol { status: None, .. }),
+            "{error:?}"
+        );
+        assert_eq!(server.count("GET /second HTTP/1.1"), 1);
+    }
+}

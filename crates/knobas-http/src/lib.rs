@@ -15,6 +15,10 @@
 //!   -- exponential, transient statuses only, and `Retry-After` obeyed
 //!   *before* the retry it applies to, up to [`classify::RETRY_AFTER_CAP`].
 //!   A write that must not arrive twice opts out with [`Request::no_retry`].
+//!   A `GET` or `HEAD` the server closed its connection on before answering
+//!   -- a pooled keep-alive connection its idle timeout closed as the request
+//!   went out -- is sent once more; a write never is
+//!   ([`retry::closed_before_answering`], #1818).
 //! * **Rate limiting**: per instance, so two Jiras do not share a budget, and
 //!   **every attempt passes it**, retries included. The limiter lives in a
 //!   process-wide map keyed by the base URL's origin (scheme, host, port), not
@@ -447,7 +451,10 @@ impl HttpClient {
     /// followed by the delay the server asked for (`Retry-After`, capped at
     /// [`classify::RETRY_AFTER_CAP`]) if it asked for one, and by the
     /// exponential [`retry::backoff`] if it did not. The whole call, waits
-    /// included, is bounded by [`SEND_BUDGET`].
+    /// included, is bounded by [`SEND_BUDGET`]. A `GET` or `HEAD` the server
+    /// closed its connection on before answering is sent once more, through
+    /// the limiter and inside the budget like any retry
+    /// ([`retry::closed_before_answering`], #1818).
     ///
     /// A request that cannot be cloned is never retried -- a retry has to
     /// re-send the same bytes, and guessing is worse than one attempt -- but
@@ -515,6 +522,9 @@ impl HttpClient {
         // What the attempt before this one ended in, once there was one: what
         // the call reports if the budget runs out before the next goes.
         let mut previous: Option<SourceError> = None;
+        // Whether a read has been sent again after the server closed its
+        // connection before answering: that happens once per call (#1818).
+        let mut resent_after_close = false;
 
         for attempt in 1..=MAX_ATTEMPTS {
             // Cloned before sending, because sending consumes it. `None` for a
@@ -550,12 +560,22 @@ impl HttpClient {
                 }
             };
 
+            // Set when this attempt is a read the server closed its
+            // connection on before answering.
+            let mut closed = false;
             // A transport failure, mapped, and whether it is transient: worth
             // another attempt.
             let classify_transport = |error: reqwest::Error| {
                 let mapped = classify::reqwest_error(&error);
                 if retry {
-                    (mapped, retry::error_is_transient(&error))
+                    // A pooled keep-alive connection the server timed out as
+                    // the request went out on it (#1818). Safe to repeat for a
+                    // read, and once is what that race needs: the next
+                    // attempt goes out on another connection. A write may
+                    // have been read, so it is never sent again on this.
+                    closed = follows && retry::closed_before_answering(&error);
+                    let again = closed && !resent_after_close;
+                    (mapped, again || retry::error_is_transient(&error))
                 } else {
                     // Sent once: past a connect error, it may have landed.
                     let connected = !error.is_connect();
@@ -655,6 +675,7 @@ impl HttpClient {
             tokio::time::sleep(delay).await;
             request = next;
             previous = Some(give_up);
+            resent_after_close |= closed;
         }
 
         // `MAX_ATTEMPTS` is a non-zero constant, so the loop always returns.
