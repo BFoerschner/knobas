@@ -14162,3 +14162,37 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   checking each hop means changing `crates/knobas-http/**`, which is another frozen surface and
   outside this ticket. The gap needs the release's own https server to redirect to plain http.
   *Reversing:* n/a.
+
+## #1643: implementer rulings (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus: `open_checkout`'s IPC arguments.** *Fork:*
+  drop `command` outright, or keep it and validate the program against the saved list. *Ruling:*
+  drop it, with no replacement argument; `application`, `file` and `line` stay as they were, and
+  the §10.8 entry is `docs/contract/10.8/1643-open-checkout-takes-no-command-and-two-reads-clamp.md`.
+  *Reasoning:* spec #1620 ruling C4 and ADR-0016: a program from a setting is only true when
+  the command takes no program. A check against the list would be a second copy of the list's
+  rules at the shim. *Reversing:* the argument, the `Run` enum and the entry come back.
+- **What *Try it* does to the dialog.** *Fork:* after a try saves the draft, close the dialog, or
+  keep it open; and on Cancel, keep the saved try or put the list back. *Ruling:* the dialog
+  stays open and edits the entry the try saved (*Add application* then writes over it, not a
+  second one); closing it unsaved saves the list and default back as they were before the first
+  try. *Try it* needs a name now, as the save refuses one without. *Reasoning:* C4 calls the
+  save "one extra write the reader does not see"; an application that stays in every menu after
+  Cancel is one the reader sees. *Reversing:* `dismiss` in `TfAppDialog.svelte` calls `onclose`
+  alone.
+- **How the environment is scrubbed.** *Fork:* `env_remove` a fixed list of the variables knobas
+  reads, or drop every `KNOBAS_*` name. *Ruling:* `env_clear` and pass the parent's environment
+  back less every name starting `KNOBAS_`. The builder takes the parent environment as an
+  argument, so the test hands it a `KNOBAS_DB_URL` without setting one in the test process.
+  *Reasoning:* a fixed list misses the next variable somebody adds; `std::env::set_var` in a
+  threaded test binary is unsound. *Reversing:* one filter.
+- **Where the clamp sits.** *Fork:* in the `#[tauri::command]` itself, or in its `_inner` body.
+  *Ruling:* in `room_suggestions_inner` and `list_entities_inner`, which are the shims' bodies,
+  under a named `commands::ROW_CEILING` that `list_sync_runs` now reads too. *Reasoning:* a
+  `#[tauri::command]` cannot be called from a test, and the criterion asks for a tested clamp.
+  Every caller of the `_inner`s is a command or a test. *Reversing:* move two lines.
+- **500 against the views that ask for 1000.** *Fork:* clamp `list_entities` at 500 as the ticket
+  says, or at the 1000 that `TfCode`, `TfRepo`, `TfPr` and `TfCodeRow` ask for. *Ruling:* 500,
+  per the criterion; filed #1825 (`ready-for-agent`) for the four views, which now draw at most
+  500 rows of a larger mirror. *Reasoning:* a ruling may not contradict the ticket.
+  *Reversing:* one constant, or paging in the four views (#1825).
