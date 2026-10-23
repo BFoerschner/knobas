@@ -15390,3 +15390,7 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1883.
   items, which the gate does not build. The issue's cause is the list's length, and the schema
   test pins that, with mutants killed at 512 kB, 1 MB, no merge and the wrong index. The probe
   shows the plan in the PR. *Reversing:* add one to `read_plans.rs`.
+
+## #1651 — the Tickets view's word filter
+
+- **A `-word` is dropped, not excluded.** *Fork:* the ticket's first criterion says `project:PAY -blocked` "excludes `blocked`", but its title and fix direction say to read the words through `query::needles`, which drops `-word`; `ids_sql` has only a "every word appears" predicate and no exclusion. *Ruling:* follow the fix direction: the negated word is no needle, so it neither has to appear nor is it required absent. *Reasoning:* real exclusion is a new SQL predicate in `ids_sql` and `ids_counts_sql`, a hot path the ticket does not ask to change. The tested contract is that the literal `-word` is no longer matched. *Reversing:* add a `not strpos` predicate over the grammar's excluded words in both statements.
