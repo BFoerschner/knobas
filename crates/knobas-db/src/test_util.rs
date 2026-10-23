@@ -274,16 +274,28 @@ impl Server {
     }
 }
 
-/// A database of its own on this binary's shared server, migrated and empty.
+/// A database of its own on this binary's shared server, migrated and in the
+/// state a fresh copy of the template is in.
 ///
 /// The file's shared database cannot be used by a test that *replaces* its
 /// contents: every other test in the file is in it, and nothing here
 /// truncates. A restore is exactly such a test -- so it gets its own database
-/// instead, which costs one `create database` rather than a second postmaster.
+/// instead.
 ///
-/// The name carries `label` plus a per-call nonce, so two calls (and two runs
-/// against a server that outlived one) never collide. Nothing drops it: the
-/// whole scratch directory goes when the run's lock is released, and a
+/// It is the caller's for as long as the thread that asked runs and any clone
+/// of the returned connector lives. Then the next caller takes it, renames it
+/// and puts it back into the template's state ([`recycle`]) instead of
+/// creating one: a gate used to create about 930, and their files were most
+/// of its test run's load (#1897). A database DDL ran in is not handed on.
+/// Two shapes lose the database while they still use it, and loudly, since
+/// its name no longer exists: asking from a thread that ends before the test
+/// is done with it, and keeping a pool or the URL past the test's thread
+/// without a clone of the connector (a `static` keeps the connector, as
+/// `tests/it/estate_exit.rs` does).
+///
+/// The name carries `label`, the pid and a per-call counter, so two calls (and
+/// two runs against a server that outlived one) never collide. Nothing drops
+/// it: the whole scratch directory goes when the run's lock is released, and a
 /// `drop database` in a test that failed would run only when it did not need
 /// to.
 ///

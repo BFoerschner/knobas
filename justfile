@@ -958,8 +958,13 @@ test:
     #   T=4:            run 138 s, mean 8.4 (p90 16), Postgres 5.2
     #   T=2:            run 158 s, mean 4.5 (p90 12), Postgres 2.8
     # The run is bound by the server and the file system (a scratch
-    # database's files are created, then unlinked with the root; #1897), not
-    # by test threads, so four threads cost it nothing measurable. Paired
+    # database's files are created, then unlinked with the root), not by
+    # test threads, so four threads cost it nothing measurable. Since #1897 a
+    # scratch database a finished test held is reset and handed on instead
+    # (`test_util`'s `recycle`): about 180 databases a gate rather than 930,
+    # and every gate binary against a private server, before and after, two
+    # rounds: run 176 and 137 s -> 101 and 95 s, the server's CPU 343 and
+    # 300 s -> 231 and 228 s (system time halved), 10.8 GB of data -> 3.2. Paired
     # with one gate slot (`scripts/gate-slot.sh` has that measurement: two
     # gates and a pre-gate side by side, load1 median 43.5 before, 18.5
     # after), not two: two slots at T=2 still timed a vitest test out beside

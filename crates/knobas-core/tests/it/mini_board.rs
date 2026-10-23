@@ -8,7 +8,7 @@
 //! Every test gets a database of its own, the trade `contexts.rs` records: the
 //! board's second half is a pass over each source's whole ticket corpus, so a
 //! shared database would let one test's fixture decide another's answer, and
-//! fixtures that read as `PAY-231` are worth one `create database` each.
+//! fixtures that read as `PAY-231` are worth one database each.
 
 use std::collections::BTreeMap;
 

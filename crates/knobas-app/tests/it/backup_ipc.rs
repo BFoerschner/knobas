@@ -13,7 +13,8 @@
 //! (`knobas_db::test_util::scratch_database`) on the binary's shared server,
 //! because the settings this feature reads and writes are one row per key: two
 //! tests sharing `backup.schedule` would be each other's fixture. The server
-//! is still shared, so this costs a `create database` and not a postmaster.
+//! is still shared, so this costs a database (most often one a finished test
+//! held, reset; `test_util::scratch_database`) and not a postmaster.
 
 use knobas_app::sources::Registry;
 use std::sync::Arc;
