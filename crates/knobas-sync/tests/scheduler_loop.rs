@@ -608,6 +608,19 @@ async fn shutdown_during_a_long_run_returns_promptly_and_leaves_no_open_run() {
     // Far longer than the shutdown grace period. Never waited out: the
     // assertion below is that shutdown does not wait for it.
     let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_secs(30)).await;
+    // A stored `unreachable` the run will not get to re-witness, and the rung
+    // the ladder stands on before it: neither is the cancelled run's to move
+    // (#1629, spec #1618 ruling A8).
+    config::set_health(
+        &pool,
+        &id,
+        config::AuthState::Unreachable,
+        Some("connection refused"),
+        None,
+    )
+    .await
+    .unwrap();
+    let rung_before = run_log::failures_since_last_ok(&pool, &id).await.unwrap();
 
     let scheduler = Scheduler::start(deps).await.unwrap();
     scheduler
@@ -658,6 +671,26 @@ async fn shutdown_during_a_long_run_returns_promptly_and_leaves_no_open_run() {
         run_log::reconcile_abandoned(&pool).await.unwrap(),
         0,
         "nothing was left for the reconciler to close"
+    );
+
+    // The quit was the reader's act, not the source's fault (#1629, spec
+    // #1618 ruling A8): the source is not backed off for it, the ladder's rung
+    // does not move, and the health the run never re-witnessed stays. A large
+    // first sync quit twice would otherwise be held off 1 and then 2 minutes.
+    let source = config::get(&pool, &id).await.unwrap().unwrap();
+    assert_eq!(
+        source.backoff_until, None,
+        "a cancelled run backed the source off"
+    );
+    assert_eq!(
+        run_log::failures_since_last_ok(&pool, &id).await.unwrap(),
+        rung_before,
+        "a cancelled run counted as a failure"
+    );
+    assert_eq!(
+        source.health.state,
+        config::AuthState::Unreachable,
+        "a cancelled run says nothing about the far end"
     );
 
     // The write itself never landed: the run was cancelled inside its

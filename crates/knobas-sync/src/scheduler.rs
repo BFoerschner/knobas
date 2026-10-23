@@ -752,6 +752,8 @@ async fn attempt(
 }
 
 /// Close the run: log it, judge the credential, set or clear the backoff, emit.
+/// A run the quit cancelled is logged and emitted, and judged on nothing
+/// (#1629).
 ///
 /// Every step is best-effort *after* the sync itself committed. The data is
 /// already durable at this point, so a failed bookkeeping statement is warned
@@ -860,6 +862,14 @@ async fn purge_again(deps: &SchedulerDeps, source_id: &str) {
 }
 
 async fn apply_health_and_backoff(deps: &SchedulerDeps, source_id: &str, result: &RunResult) {
+    // A run the quit cancelled (#1629, spec #1618 ruling A8) is the reader's
+    // act, not the source's fault: no verdict on the credential, no clearing
+    // of a stored `unreachable` it did not re-witness, and the backoff left
+    // as it was. Its row still ends, above, and its ending is still sent
+    // (ADR-0005); `failures_since_last_ok` does not count it either.
+    if result.was_cancelled() {
+        return;
+    }
     let (state, detail) = match result.outcome {
         SyncOutcome::Ok => (Some(AuthState::Ok), None),
         SyncOutcome::Unauthorized if result.error.as_deref() == Some(MISSING_SECRET_MESSAGE) => {
@@ -2024,11 +2034,11 @@ impl Inner {
         };
 
         let result = match permit {
-            None => cancelled_result(),
+            None => RunResult::cancelled(),
             Some(_permit) => {
                 tokio::select! {
                     biased;
-                    () = self.cancel.cancelled() => cancelled_result(),
+                    () = self.cancel.cancelled() => RunResult::cancelled(),
                     result = execute_run(
                         &self.deps,
                         &source_id,
@@ -2126,18 +2136,6 @@ impl Drop for Closing {
             0,
             elapsed_ms(self.started),
         ));
-    }
-}
-
-/// The verdict for a run the user's quit interrupted.
-///
-/// Logged as an error rather than silently dropped: the diagnostics view is
-/// where "why is there a gap in my sync history" gets answered.
-fn cancelled_result() -> RunResult {
-    RunResult {
-        outcome: SyncOutcome::Error,
-        counts: run_log::RunCounts::default(),
-        error: Some("cancelled: knobas is shutting down".to_owned()),
     }
 }
 
