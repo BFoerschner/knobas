@@ -512,8 +512,9 @@ impl EmbeddedDb {
     /// A watch on this handle's server, for noticing that it died (#1779).
     ///
     /// `None` for a server this process does not own (`existing_url`), whose
-    /// life is not knobas's to follow, and when `postmaster.pid` names no
-    /// running postmaster to watch.
+    /// life is not knobas's to follow, and when there is no `postmaster.pid`
+    /// naming a pid. A file left naming a dead postmaster is watched, and
+    /// reads as gone at once.
     #[must_use]
     pub fn watch(&self) -> Option<ServerWatch> {
         self.owner_lock.as_ref()?;
@@ -543,12 +544,15 @@ impl EmbeddedDb {
         if self.owner_lock.is_some()
             && let Some(settings) = self.server_settings().cloned()
         {
-            let root_dir = settings
-                .data_dir
-                .parent()
-                .map_or_else(|| settings.data_dir.clone(), Path::to_path_buf);
-            let _guard = bring_up_lock(&root_dir).await?;
-            if self.watch().is_none_or(|watch| watch.is_gone()) {
+            // `build_settings` puts the data directory at `<root_dir>/data`.
+            let Some(root_dir) = settings.data_dir.parent() else {
+                return Err(DbError::io(
+                    &settings.data_dir,
+                    io::Error::other("a data directory with no root above it"),
+                ));
+            };
+            let _guard = bring_up_lock(root_dir).await?;
+            if !self.server_is_running() {
                 tracing::warn!(port = settings.port, "restarting the embedded postgres");
                 match self.postgresql.as_mut() {
                     Some(postgresql) => postgresql.start().await?,
@@ -571,6 +575,12 @@ impl EmbeddedDb {
         }
         probe(&self.pool).await?;
         Ok(())
+    }
+
+    /// Whether `postmaster.pid` names a live postmaster for this handle's
+    /// data directory, read afresh. False for `existing_url`.
+    fn server_is_running(&self) -> bool {
+        self.watch().is_some_and(|watch| !watch.is_gone())
     }
 
     /// The settings this handle's server runs on: the started handle's, or
@@ -644,7 +654,7 @@ impl EmbeddedDb {
         }
         // A server that died under the handle (#1779) has nothing to stop,
         // and `pg_ctl stop` would only report that it is not running.
-        if self.watch().is_none_or(|watch| watch.is_gone()) {
+        if !self.server_is_running() {
             tracing::info!("the embedded postgres is not running: nothing to stop");
             return Ok(());
         }
@@ -1107,11 +1117,7 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
 /// so a dead pid gets here only when the start failed for another reason. The
 /// recovery then hands that reason back instead of a conflict that does not
 /// exist.
-async fn adopt(
-    mut settings: Settings,
-    port: u16,
-    owner_lock: File,
-) -> Result<Started, DbError> {
+async fn adopt(mut settings: Settings, port: u16, owner_lock: File) -> Result<Started, DbError> {
     let data_dir = settings.data_dir.clone();
     // The recorded port, not the 0 that `build_settings` asks a fresh start to
     // pick: this server chose its port long ago.
@@ -1364,7 +1370,8 @@ fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
     settings.temporary = false;
     // Explicit: `None` keeps `Settings::url` on the TCP form.
     settings.socket_dir = None;
-    // `127.0.0.1` alone, the one address every client here dials (#1775).
+    // `127.0.0.1` alone, the one address every client here dials (#1775, and
+    // ADR-0001's "TCP on 127.0.0.1 only").
     // PostgreSQL's default is `localhost`, which is `::1` and `127.0.0.1`,
     // and a bind failure on one of two addresses is only a warning: with a
     // stranger on `127.0.0.1:<port>` the postmaster came up on `::1` and our

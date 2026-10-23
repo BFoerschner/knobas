@@ -826,8 +826,10 @@ fn stop_server(root: &Path) {
     }
 }
 
-/// Kill the server serving `root_dir` the way a crash does, under whatever
-/// handle holds it: `pg_ctl stop -m immediate -w` (#1779). The handle is
+/// Stop the server serving `root_dir` with `pg_ctl stop -m immediate -w`,
+/// under whatever handle holds it (#1779): the backends are killed and the
+/// postmaster exits at once, removing `postmaster.pid` (a `kill -9` would
+/// leave it, which `ServerWatch`'s unit test covers). The handle is
 /// left as it was, still holding the ownership lock, which is the state a
 /// window whose postmaster died is in.
 ///

@@ -103,7 +103,7 @@ pub struct Lifecycle {
     /// Held by a restart from first to last (#1779), and taken by the exit
     /// handler before it takes the server, so a quit during a restart waits
     /// for it and then stops what it started.
-    restarting: tokio::sync::Mutex<()>,
+    restart_gate: tokio::sync::Mutex<()>,
     /// The adapter registry every read takes, as the trait object (#1321).
     /// Here rather than on `AppState`, because the reads that answer before
     /// the database is up (the Add-source form's adapter list) need it too.
@@ -136,7 +136,7 @@ impl Lifecycle {
             server: Mutex::new(None),
             generation: AtomicU64::new(0),
             suspended: Mutex::new(None),
-            restarting: tokio::sync::Mutex::new(()),
+            restart_gate: tokio::sync::Mutex::new(()),
             registry,
         }
     }
@@ -221,8 +221,15 @@ impl Lifecycle {
         if server.is_none() || self.generation() != generation || *db != DbState::Ready {
             return false;
         }
-        let state = self.app.lock().unwrap_or_else(PoisonError::into_inner).take();
-        *self.suspended.lock().unwrap_or_else(PoisonError::into_inner) = state;
+        let state = self
+            .app
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        *self
+            .suspended
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = state;
         *db = DbState::Failed { message };
         true
     }
@@ -251,8 +258,8 @@ impl Lifecycle {
     }
 
     /// The gate a restart holds from first to last; see the field.
-    pub(crate) fn restarting(&self) -> &tokio::sync::Mutex<()> {
-        &self.restarting
+    pub(crate) fn restart_gate(&self) -> &tokio::sync::Mutex<()> {
+        &self.restart_gate
     }
 
     /// The server [`hold_server`](Self::hold_server) was given, once: for the
@@ -294,6 +301,8 @@ impl Lifecycle {
     /// The refusal for a call that beat bring-up, or followed a failed one.
     fn not_ready(&self) -> IpcError {
         IpcError::not_ready(match self.get() {
+            // It did start, and then stopped (#1779): the message says so.
+            DbState::Failed { message } if self.server_is_down() => message,
             DbState::Failed { message } => format!("the database did not start: {message}"),
             _ => "the database is still starting".to_owned(),
         })

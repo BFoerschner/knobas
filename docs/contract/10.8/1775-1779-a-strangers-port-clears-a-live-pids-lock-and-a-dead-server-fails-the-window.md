@@ -18,8 +18,8 @@
   **#1779, what changes on the wire.** `db:state` can now go from `ready` to `failed` without a
   restart of the app, when the window's own postmaster dies (checked every five seconds). The
   `message` is `the database server stopped while knobas was running; Retry starts it again`. While
-  `failed`, a command that takes the pool from the lifecycle answers `not_ready` (`the database did
-  not start: <message>`), and `app_status` counts no sources, as before `ready`. The sync engine's
+  `failed`, a command that takes the pool from the lifecycle answers `not_ready` with `message`
+  itself, without the `the database did not start: ` other failures carry, and `app_status` counts no sources, as before `ready`. The sync engine's
   and the backup's commands, which hold pools of their own, fail against the stopped server as they
   did before. `retry_database` from that
   state no longer runs bring-up again: it emits `starting` with `detail` `restarting the database

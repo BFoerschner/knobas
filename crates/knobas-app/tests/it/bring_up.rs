@@ -803,10 +803,9 @@ async fn a_server_that_dies_after_ready_fails_the_window_and_retry_restarts_it()
         .state::<Lifecycle>()
         .pool()
         .expect_err("no pool while the server is down");
-    assert!(
-        refused.message.contains("Retry"),
-        "a command is told why: {}",
-        refused.message
+    assert_eq!(
+        refused.message, message,
+        "a command is told the server stopped, not that it never started"
     );
 
     match knobas_db::EmbeddedDb::start(profile.db_config(None)).await {

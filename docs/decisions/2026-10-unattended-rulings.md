@@ -12855,7 +12855,8 @@ The measurement came after it.
 - **The live-pid corner keeps its refusal (B5), with a hint.** *Ruling:* a live recorded pid
   beside an answer that is not ours stays `AlreadyRunning`, and the reason says to delete
   `postmaster.pid` if no knobas has the profile open. A follow-up asks whether ownership-first
-  makes the pid check redundant there. *Reversing:* a string.
+  makes the pid check redundant there. *Reversing:* a string. *Reversed by #1775 (2026-10-23),
+  below.*
 - **Tests that pinned the borrower.** *Ruling:* the race, adoption-creates-the-database and
   cold-password tests now run against an orphan or assert the refusal, and the adopter test
   became `a_second_launch_on_a_live_owner_is_refused_naming_the_owner`. *Reversing:* n/a.

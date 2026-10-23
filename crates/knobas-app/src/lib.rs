@@ -935,7 +935,7 @@ async fn restart_server<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
     let lifecycle = handle.state::<Lifecycle>();
     // Held to the end, so a quit meanwhile waits and then stops what this
     // started; see `shutdown_database`.
-    let _gate = lifecycle.restarting().lock().await;
+    let _gate = lifecycle.restart_gate().lock().await;
     let Some(mut db) = lifecycle.take_server() else {
         // A quit took it first.
         return;
@@ -1040,7 +1040,7 @@ fn shutdown_database<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     // which stopped its own.
     // After a restart in flight (#1779), which holds this gate to its end.
     let server = tauri::async_runtime::block_on(async {
-        let _gate = lifecycle.restarting().lock().await;
+        let _gate = lifecycle.restart_gate().lock().await;
         lifecycle.take_server()
     });
     if let Some(db) = server {
