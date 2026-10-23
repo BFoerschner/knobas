@@ -532,7 +532,8 @@ impl Searcher {
     /// [`matching_ids`](Self::matching_ids) would admit, or the part the
     /// grammar could not read. A ticket view's count in the views pane.
     ///
-    /// One vocabulary for all of them, then one count per readable text. A
+    /// One vocabulary for all of them, then one statement counting every
+    /// readable text ([`sql::ids_counts_sql`], #1654). A
     /// text with neither words nor a filter counts every live row of `kind`,
     /// which is what its board draws. Nothing is rewritten: the text is read,
     /// never stored back.
