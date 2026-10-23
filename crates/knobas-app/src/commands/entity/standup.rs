@@ -527,7 +527,7 @@ pub async fn action_item_ticket_inner(
     let mut ticket_entity_id = None;
     let mut linked = false;
     if write.state == knobas_core::write_queue::WriteState::Sent {
-        ticket_entity_id = ticket_titled(pool, &write.source_id, title).await?;
+        ticket_entity_id = crate::protocol::ticket_titled(pool, &write.source_id, title).await?;
         if let Some(ticket) = ticket_entity_id.as_deref() {
             crate::protocol::draw_link(
                 pool,
@@ -546,52 +546,6 @@ pub async fn action_item_ticket_inner(
         ticket_entity_id,
         linked,
     })
-}
-
-/// The newest ticket in a source's corpus with exactly this title.
-///
-/// The look-back-after-write `start_work::queue`'s `PULL_REQUEST_BY_HEAD` is,
-/// and it carries the same warning: it is a source-shaped read outside an
-/// adapter and it exists because `Source::write` answers nothing for a create.
-/// §4.1 guarantees `title`, which is the only field a freshly created ticket
-/// can be recognised by from outside.
-///
-/// Newest first, so a project that has had this exact summary before answers
-/// with the one just made. A title nothing matches is `None`, never a guess.
-///
-/// **What this cannot do, stated rather than left to be met.** Two action items
-/// worded identically, or a project that already holds a ticket with this exact
-/// summary, link the protocol to the wrong ticket -- `start_work`'s precedent
-/// matched a head branch, and this matches free prose. The fix is not a better
-/// statement: it is the key Jira *did* answer with, which
-/// `knobas-source-jira`'s create deliberately drops on `WriteReceipt`'s own
-/// reasoning ("a created ticket is a mirrored entity"). Undoing that decision
-/// is the adapter's to make and the orchestrator's to ratify; until then this
-/// is the only answer there is, and the failure direction is a link to a
-/// *sibling* ticket rather than to nothing.
-///
-/// The namespace is matched as a **literal prefix** through
-/// `start_work::queue::escape_like`, the one escaping in this crate: `_`
-/// matches any character in a `like` pattern and source ids carry them, so an
-/// unescaped prefix could find another source's ticket.
-async fn ticket_titled(
-    pool: &PgPool,
-    source_id: &str,
-    title: &str,
-) -> Result<Option<String>, IpcError> {
-    let prefix = format!("{}:%", crate::start_work::queue::escape_like(source_id));
-    let found: Option<String> = sqlx::query_scalar(
-        "select entity_id from sync.live_item
-          where entity_id like $1 and kind = 'ticket' and title = $2
-          order by item_updated_at desc nulls last, entity_id
-          limit 1",
-    )
-    .bind(&prefix)
-    .bind(title)
-    .fetch_optional(pool)
-    .await
-    .map_err(IpcError::internal)?;
-    Ok(found)
 }
 
 /// [`create_action_item_ticket_in_background`] behind the app handle:

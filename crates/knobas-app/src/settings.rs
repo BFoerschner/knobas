@@ -120,3 +120,81 @@ pub async fn write_value(
 pub fn settable(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
+
+// -- the first run (§14a) ---------------------------------------------------
+
+/// How many sources are configured, and whether this is still a first run:
+/// what `app_status` reports (moved here from `commands::app` by #1870).
+///
+/// `app_status` does not propagate a failure: it is what the boot screen
+/// polls, and a window that cannot say "the database is up" because a `count`
+/// failed is worse than one reporting zero sources.
+///
+/// # Errors
+///
+/// The statement's.
+pub async fn first_run(pool: &PgPool) -> Result<(u32, bool), sqlx::Error> {
+    let sources: i64 = sqlx::query_scalar("select count(*) from knobas.source_config")
+        .fetch_one(pool)
+        .await?;
+    let completed: bool = sqlx::query_scalar(
+        "select exists(select 1 from knobas.setting where key = 'first_run.completed')",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    let source_count = u32::try_from(sources).unwrap_or(u32::MAX);
+    // Both halves, because they are different facts: a user who finished the
+    // wizard and then deleted their only source is not on a first run.
+    Ok((source_count, source_count == 0 && !completed))
+}
+
+/// The SQL [`complete_first_run`] runs. Named so the test can assert on the
+/// shape rather than on a copy of it.
+const COMPLETE_FIRST_RUN_SQL: &str = "insert into knobas.setting (key, value) \
+     values ('first_run.completed', 'true'::jsonb) \
+     on conflict (key) do update set value = excluded.value, updated_at = now()";
+
+/// Record that the §14a wizard finished: the row [`first_run`] reads.
+/// Idempotent by `on conflict`: finishing the wizard twice -- a double click,
+/// a second window -- is the same as finishing it once.
+///
+/// # Errors
+///
+/// The statement's.
+pub async fn complete_first_run(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(COMPLETE_FIRST_RUN_SQL).execute(pool).await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The write has to be an upsert, and it has to touch exactly the key
+    /// [`first_run`] reads.
+    ///
+    /// Both halves are load-bearing and neither is visible from the type: a
+    /// plain `insert` makes finishing the wizard twice a primary-key violation
+    /// (a double click is enough), and a key that does not match the one
+    /// `app_status` looks for leaves the wizard reappearing for ever with the
+    /// row sitting in the table.
+    #[test]
+    fn completing_the_first_run_upserts_the_key_app_status_reads() {
+        assert!(
+            COMPLETE_FIRST_RUN_SQL.contains("on conflict (key) do update"),
+            "a plain insert makes a second Finish a primary-key violation: {COMPLETE_FIRST_RUN_SQL}"
+        );
+        // `first_run`'s literal query, quoted from the same file, so a
+        // rename on one side fails here rather than at run time.
+        assert!(
+            COMPLETE_FIRST_RUN_SQL.contains("'first_run.completed'"),
+            "the wizard would write a key nothing reads: {COMPLETE_FIRST_RUN_SQL}"
+        );
+        let reader = include_str!("settings.rs");
+        assert!(
+            reader.contains("where key = 'first_run.completed'"),
+            "app_status no longer reads the key this command writes"
+        );
+    }
+}

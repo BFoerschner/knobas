@@ -782,6 +782,125 @@ pub async fn delete(pool: &PgPool, id: &str) -> Result<(), IpcError> {
     Ok(())
 }
 
+/// A saved view as its board draws it (#877, #1245, R-3.21, R-3.24): the
+/// view's own columns and the tickets the source put on it
+/// (`sync.saved_view_member`), in the source's order.
+#[derive(Debug, Clone)]
+pub struct SavedViewLayout {
+    pub columns: Vec<ViewColumn>,
+    /// Entity ids, the source's order. Keys the source returned that knobas
+    /// does not mirror stay here and are never drawn.
+    pub members: Vec<String>,
+}
+
+/// The layout of saved view `view`, or `None` for one the mirror does not
+/// hold.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) for a read failure, or
+/// stored columns that are not a column list.
+pub async fn saved_view_layout(
+    pool: &PgPool,
+    view: &str,
+) -> Result<Option<SavedViewLayout>, IpcError> {
+    let columns: Option<serde_json::Value> =
+        sqlx::query_scalar("select columns from sync.saved_view where entity_id = $1")
+            .bind(view)
+            .fetch_optional(pool)
+            .await?;
+    let Some(columns) = columns else {
+        return Ok(None);
+    };
+    let columns: Vec<ViewColumn> = serde_json::from_value(columns).map_err(IpcError::internal)?;
+    let members: Vec<String> = sqlx::query_scalar(
+        "select entity_id from sync.saved_view_member where view_id = $1 order by rank",
+    )
+    .bind(view)
+    .fetch_all(pool)
+    .await?;
+    Ok(Some(SavedViewLayout { columns, members }))
+}
+
+impl SavedViewLayout {
+    /// `whole` -- the view's tickets as the mini board read them, one column
+    /// per status -- under this view's columns, **in the source's order**:
+    /// each column holds the cards whose status is one of its statuses, empty
+    /// ones included, as on the source's board. A status on no column does
+    /// not show. A view with no columns keeps one column per status. A
+    /// column's `status` is the view column's name; each card carries its own
+    /// status (#1423). `per_column` cuts each column after its first cards in
+    /// that order; `total` counts them all. No lanes: the caller puts the
+    /// board in lanes after.
+    #[must_use]
+    pub fn board(
+        &self,
+        whole: knobas_core::mini_board::MiniBoard,
+        per_column: Option<u32>,
+    ) -> knobas_core::mini_board::MiniBoard {
+        use knobas_core::mini_board::{MiniBoard, MiniBoardCard, MiniBoardColumn};
+        let rank: std::collections::HashMap<&str, usize> = self
+            .members
+            .iter()
+            .enumerate()
+            .map(|(at, id)| (id.as_str(), at))
+            .collect();
+        let in_order = |mut cards: Vec<MiniBoardCard>| -> MiniBoardColumn {
+            cards.sort_by_key(|card| {
+                rank.get(card.entity_id.as_str())
+                    .copied()
+                    .unwrap_or(usize::MAX)
+            });
+            let total = u32::try_from(cards.len()).unwrap_or(u32::MAX);
+            if let Some(cap) = per_column {
+                cards.truncate(cap as usize);
+            }
+            MiniBoardColumn {
+                status: None,
+                cards,
+                total,
+            }
+        };
+        let drawn: Vec<MiniBoardColumn> = if self.columns.is_empty() {
+            whole
+                .columns
+                .into_iter()
+                .map(|column| MiniBoardColumn {
+                    status: column.status,
+                    ..in_order(column.cards)
+                })
+                .collect()
+        } else {
+            let mut by_status: std::collections::HashMap<Option<String>, Vec<MiniBoardCard>> = whole
+                .columns
+                .into_iter()
+                .map(|column| (column.status, column.cards))
+                .collect();
+            self.columns
+                .iter()
+                .map(|column| MiniBoardColumn {
+                    status: Some(column.name.clone()),
+                    ..in_order(
+                        column
+                            .statuses
+                            .iter()
+                            .flat_map(|status| {
+                                by_status.remove(&Some(status.clone())).unwrap_or_default()
+                            })
+                            .collect(),
+                    )
+                })
+                .collect()
+        };
+        MiniBoard {
+            columns: drawn,
+            sources: whole.sources,
+            lanes: Vec::new(),
+            more_lanes: 0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

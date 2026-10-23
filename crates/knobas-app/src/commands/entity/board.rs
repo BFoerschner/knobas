@@ -249,35 +249,16 @@ pub async fn saved_view_board_laned(
     query: Option<&str>,
     lanes: Option<knobas_core::mini_board::Lanes>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
-    use knobas_core::mini_board::{MiniBoard, MiniBoardCard, MiniBoardColumn};
     let (per_column, lanes_cap) = match lanes {
         Some(_) => (None, per_column),
         None => (per_column, None),
     };
-    let columns: Option<serde_json::Value> =
-        sqlx::query_scalar("select columns from sync.saved_view where entity_id = $1")
-            .bind(view)
-            .fetch_optional(pool)
-            .await?;
-    let Some(columns) = columns else {
+    let Some(layout) = crate::ticket_views::saved_view_layout(pool, view).await? else {
         return Err(IpcError::not_found(format!(
             "no Jira view is called {view}"
         )));
     };
-    let columns: Vec<crate::ticket_views::ViewColumn> =
-        serde_json::from_value(columns).map_err(IpcError::internal)?;
-    let members: Vec<String> = sqlx::query_scalar(
-        "select entity_id from sync.saved_view_member where view_id = $1 order by rank",
-    )
-    .bind(view)
-    .fetch_all(pool)
-    .await?;
-    let rank: std::collections::HashMap<&str, usize> = members
-        .iter()
-        .enumerate()
-        .map(|(at, id)| (id.as_str(), at))
-        .collect();
-    let mut only = members.clone();
+    let mut only = layout.members.clone();
     let (matched, identity) = tickets_matching(pool, registry, query).await?;
     if let Some(matched) = matched {
         let matched: std::collections::HashSet<String> = matched.into_iter().collect();
@@ -295,59 +276,7 @@ pub async fn saved_view_board_laned(
         None,
     )
     .await?;
-    let in_order = |mut cards: Vec<MiniBoardCard>| -> MiniBoardColumn {
-        cards.sort_by_key(|card| {
-            rank.get(card.entity_id.as_str())
-                .copied()
-                .unwrap_or(usize::MAX)
-        });
-        let total = u32::try_from(cards.len()).unwrap_or(u32::MAX);
-        if let Some(cap) = per_column {
-            cards.truncate(cap as usize);
-        }
-        MiniBoardColumn {
-            status: None,
-            cards,
-            total,
-        }
-    };
-    let drawn: Vec<MiniBoardColumn> = if columns.is_empty() {
-        whole
-            .columns
-            .into_iter()
-            .map(|column| MiniBoardColumn {
-                status: column.status,
-                ..in_order(column.cards)
-            })
-            .collect()
-    } else {
-        let mut by_status: std::collections::HashMap<Option<String>, Vec<MiniBoardCard>> = whole
-            .columns
-            .into_iter()
-            .map(|column| (column.status, column.cards))
-            .collect();
-        columns
-            .iter()
-            .map(|column| MiniBoardColumn {
-                status: Some(column.name.clone()),
-                ..in_order(
-                    column
-                        .statuses
-                        .iter()
-                        .flat_map(|status| {
-                            by_status.remove(&Some(status.clone())).unwrap_or_default()
-                        })
-                        .collect(),
-                )
-            })
-            .collect()
-    };
-    let board = MiniBoard {
-        columns: drawn,
-        sources: whole.sources,
-        lanes: Vec::new(),
-        more_lanes: 0,
-    };
+    let board = layout.board(whole, per_column);
     Ok(match lanes {
         Some(lanes) => knobas_core::mini_board::in_lanes(board, lanes, lanes_cap),
         None => board,

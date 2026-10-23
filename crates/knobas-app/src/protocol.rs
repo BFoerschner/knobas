@@ -808,6 +808,54 @@ pub fn create_page_payload(
     })
 }
 
+/// The newest ticket in a source's corpus with exactly this title: what an
+/// action item's ticket (`commands::entity::action_item_ticket_inner`) is
+/// found by once its create was sent (#779; moved here by #1870).
+///
+/// The look-back-after-write `start_work::queue`'s `PULL_REQUEST_BY_HEAD` is,
+/// and it carries the same warning: it is a source-shaped read outside an
+/// adapter and it exists because `Source::write` answers nothing for a create.
+/// §4.1 guarantees `title`, which is the only field a freshly created ticket
+/// can be recognised by from outside.
+///
+/// Newest first, so a project that has had this exact summary before answers
+/// with the one just made. A title nothing matches is `None`, never a guess.
+///
+/// **What this cannot do, stated rather than left to be met.** Two action items
+/// worded identically, or a project that already holds a ticket with this exact
+/// summary, link the protocol to the wrong ticket -- `start_work`'s precedent
+/// matched a head branch, and this matches free prose. The fix is not a better
+/// statement: it is the key Jira *did* answer with, which
+/// `knobas-source-jira`'s create deliberately drops on `WriteReceipt`'s own
+/// reasoning ("a created ticket is a mirrored entity"). Undoing that decision
+/// is the adapter's to make and the orchestrator's to ratify; until then this
+/// is the only answer there is, and the failure direction is a link to a
+/// *sibling* ticket rather than to nothing.
+///
+/// The namespace is matched as a **literal prefix** through
+/// `start_work::queue::escape_like`, the one escaping in this crate: `_`
+/// matches any character in a `like` pattern and source ids carry them, so an
+/// unescaped prefix could find another source's ticket.
+pub(crate) async fn ticket_titled(
+    pool: &PgPool,
+    source_id: &str,
+    title: &str,
+) -> Result<Option<String>, IpcError> {
+    let prefix = format!("{}:%", crate::start_work::queue::escape_like(source_id));
+    let found: Option<String> = sqlx::query_scalar(
+        "select entity_id from sync.live_item
+          where entity_id like $1 and kind = 'ticket' and title = $2
+          order by item_updated_at desc nulls last, entity_id
+          limit 1",
+    )
+    .bind(&prefix)
+    .bind(title)
+    .fetch_optional(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

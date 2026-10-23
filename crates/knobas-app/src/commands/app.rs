@@ -339,7 +339,9 @@ pub async fn app_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppStatu
     // run", so both stay false-y until the database can answer.
     let pool = app.state::<Lifecycle>().app_state();
     let (source_count, first_run) = match pool {
-        Some(state) => counts(&state.pool).await.unwrap_or((0, false)),
+        Some(state) => crate::settings::first_run(&state.pool)
+            .await
+            .unwrap_or((0, false)),
         None => (0, false),
     };
 
@@ -351,27 +353,6 @@ pub async fn app_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppStatu
         app_version,
         secrets_in_memory,
     }
-}
-
-/// How many sources are configured, and whether this is still a first run.
-///
-/// A query failure is not propagated: `app_status` is what the boot screen
-/// polls, and a window that cannot say "the database is up" because a `count`
-/// failed is worse than one reporting zero sources.
-async fn counts(pool: &sqlx::PgPool) -> Result<(u32, bool), sqlx::Error> {
-    let sources: i64 = sqlx::query_scalar("select count(*) from knobas.source_config")
-        .fetch_one(pool)
-        .await?;
-    let completed: bool = sqlx::query_scalar(
-        "select exists(select 1 from knobas.setting where key = 'first_run.completed')",
-    )
-    .fetch_one(pool)
-    .await?;
-
-    let source_count = u32::try_from(sources).unwrap_or(u32::MAX);
-    // Both halves, because they are different facts: a user who finished the
-    // wizard and then deleted their only source is not on a first run.
-    Ok((source_count, source_count == 0 && !completed))
 }
 
 /// Arm event emission: the frontend has its listeners up.
@@ -423,12 +404,6 @@ pub fn retry_database<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(),
     Ok(())
 }
 
-/// The SQL `complete_first_run` runs. Named so the test can assert on the
-/// shape rather than on a copy of it.
-const COMPLETE_FIRST_RUN_SQL: &str = "insert into knobas.setting (key, value) \
-     values ('first_run.completed', 'true'::jsonb) \
-     on conflict (key) do update set value = excluded.value, updated_at = now()";
-
 /// Record that the §14a wizard finished.
 ///
 /// `app_status.first_run` is `source_count == 0 && !completed` -- two facts,
@@ -458,43 +433,14 @@ pub async fn complete_first_run<R: tauri::Runtime>(
     // latter is rejected by Tauri itself during bring-up with a bare "state
     // not managed" that the frontend cannot branch on. See [`Lifecycle`].
     let pool = app.state::<Lifecycle>().pool()?;
-    sqlx::query(COMPLETE_FIRST_RUN_SQL)
-        .execute(&pool)
+    crate::settings::complete_first_run(&pool)
         .await
-        .map_err(IpcError::internal)?;
-    Ok(())
+        .map_err(IpcError::internal)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The write has to be an upsert, and it has to touch exactly the key
-    /// `counts()` reads.
-    ///
-    /// Both halves are load-bearing and neither is visible from the type: a
-    /// plain `insert` makes finishing the wizard twice a primary-key violation
-    /// (a double click is enough), and a key that does not match the one
-    /// `app_status` looks for leaves the wizard reappearing for ever with the
-    /// row sitting in the table.
-    #[test]
-    fn completing_the_first_run_upserts_the_key_app_status_reads() {
-        assert!(
-            COMPLETE_FIRST_RUN_SQL.contains("on conflict (key) do update"),
-            "a plain insert makes a second Finish a primary-key violation: {COMPLETE_FIRST_RUN_SQL}"
-        );
-        // The literal `counts()` queries, quoted from the same file, so a
-        // rename on one side fails here rather than at run time.
-        assert!(
-            COMPLETE_FIRST_RUN_SQL.contains("'first_run.completed'"),
-            "the wizard would write a key nothing reads: {COMPLETE_FIRST_RUN_SQL}"
-        );
-        let reader = include_str!("app.rs");
-        assert!(
-            reader.contains("where key = 'first_run.completed'"),
-            "app_status no longer reads the key this command writes"
-        );
-    }
 
     /// The frontend narrows on `state` and reads `message` only inside the
     /// `failed` arm. A different tag, or a payload that moved, is a union that

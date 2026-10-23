@@ -1151,7 +1151,7 @@ async fn waited(
 /// all, since any number of them can carry the same one -- which is exactly
 /// why `create_ticket`, whose row carries a title and no address, needs the
 /// line. The tree already draws that same line, in the read direction:
-/// `knobas_app::commands::entity::ticket_titled` is the read-back for a
+/// `knobas_app::protocol::ticket_titled` is the read-back for a
 /// created ticket, and its own doc says why it is the weaker one --
 /// "`start_work`'s precedent matched a head branch, and this matches free
 /// prose".
