@@ -149,10 +149,10 @@ pub const SEND_BUDGET: Duration = Duration::from_secs(45);
 /// Below the 5 s keep-alive timeout of Node (so Uptime Kuma, whose socket.io
 /// packets go out on that client) and of Apache. A server closes an idle
 /// connection when its timeout fires, and a write sent on it at that moment
-/// is read and never answered: `Unconfirmed`, held for the reader when a
-/// second arrival would duplicate it. A write after a pause opens a fresh
-/// connection instead. Reads keep reqwest's pool: one the server hung up on
-/// is sent again (#1818).
+/// is read and never answered: `Unconfirmed`, held until the user acts when
+/// a second arrival would duplicate it. A write after a pause opens a fresh
+/// connection instead. Reads keep reqwest's default idle timeout: one the
+/// server hung up on is sent again (#1818).
 pub const WRITE_POOL_IDLE: Duration = Duration::from_secs(4);
 
 /// How long a streamed body may go without a byte before it is given up on
@@ -593,7 +593,6 @@ impl HttpClient {
             // A transport failure, mapped, and whether it is transient: worth
             // another attempt.
             let classify_transport = |error: reqwest::Error| {
-                let mapped = classify::reqwest_error(&error);
                 let hung_up = retry::closed_before_answering(&error);
                 if retry && follows {
                     // A pooled keep-alive connection the server timed out as
@@ -604,7 +603,8 @@ impl HttpClient {
                     // one; a server that hangs up on that too is not racing.
                     closed = hung_up;
                     let again = closed && !resent_after_close;
-                    (mapped, again || retry::error_is_transient(&error))
+                    let transient = again || retry::error_is_transient(&error);
+                    (classify::reqwest_error(&error), transient)
                 } else if hung_up {
                     // A write, or a request sent once, the server read whole
                     // and closed on without answering. It may have been acted
@@ -616,9 +616,11 @@ impl HttpClient {
                     let unanswered = SourceError::Unreachable(error.to_string());
                     (classify::once_sent(unanswered, true), false)
                 } else if retry {
-                    (mapped, retry::error_is_transient(&error))
+                    let transient = retry::error_is_transient(&error);
+                    (classify::reqwest_error(&error), transient)
                 } else {
                     // Sent once: past a connect error, it may have landed.
+                    let mapped = classify::reqwest_error(&error);
                     let connected = !error.is_connect();
                     (classify::once_sent(mapped, connected), !connected)
                 }

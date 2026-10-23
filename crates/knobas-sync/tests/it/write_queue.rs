@@ -299,9 +299,10 @@ async fn held_by_the_local_quota() -> SourceError {
 /// The server hangs up on every request, on a thread of its own with
 /// blocking sockets: the request is read to the end of its body first, so
 /// the close is a clean end of stream where the client waits for a status
-/// line, which hyper reports as an incomplete message.
+/// line, which hyper reports as an incomplete message. `knobas-http`'s own
+/// `hung_up` tests have the pooled-connection version of this server.
 async fn hung_up_on() -> SourceError {
-    use std::io::{Read, Write};
+    use std::io::Read;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     std::thread::spawn(move || {
@@ -325,7 +326,6 @@ async fn hung_up_on() -> SourceError {
                     Ok(n) => read.extend_from_slice(&buffer[..n]),
                 }
             }
-            let _ = socket.flush();
             let _ = socket.shutdown(std::net::Shutdown::Both);
         }
     });
@@ -334,7 +334,7 @@ async fn hung_up_on() -> SourceError {
         ..knobas_http::HttpConfig::default()
     })
     .unwrap();
-    client
+    let error = client
         .send(
             client
                 .request(knobas_http::Method::POST, "/rest/api/2/issue")
@@ -342,7 +342,11 @@ async fn hung_up_on() -> SourceError {
                 .no_retry(),
         )
         .await
-        .expect_err("the server hangs up on every request")
+        .expect_err("the server hangs up on every request");
+    match error {
+        error @ SourceError::Unconfirmed { status: None, .. } => error,
+        other => panic!("a once-sent write the server hung up on is Unconfirmed: {other:?}"),
+    }
 }
 
 struct FakeRegistry {

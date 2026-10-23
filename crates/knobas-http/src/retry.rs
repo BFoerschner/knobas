@@ -59,7 +59,6 @@ pub fn error_is_transient(error: &reqwest::Error) -> bool {
 /// it is not this.
 ///
 /// [`SourceError::Unconfirmed`]: knobas_source::SourceError::Unconfirmed
-///
 /// [`HttpClient::send`]: crate::HttpClient::send
 /// [`Request::no_retry`]: crate::Request::no_retry
 #[must_use]

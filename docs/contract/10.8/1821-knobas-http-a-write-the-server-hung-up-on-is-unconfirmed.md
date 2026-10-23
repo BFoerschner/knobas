@@ -1,6 +1,7 @@
 - **`crates/knobas-http/**` — issue #1821 (2026-10-23): a write the server hung up on before
   answering is `Unconfirmed`, and the write client lets an idle connection go after 4 s.**
-  Parent spec #1618; follows #1818. A request other than a `GET` or `HEAD`, or one sent with
+  Parent spec #1618. **Amends #1818's entry**, under which such a request kept
+  `Protocol { status: None }`. A request other than a `GET` or `HEAD`, or one sent with
   `no_retry`, that the server read whole and closed its connection on without answering (hyper's
   `IncompleteMessage`, `retry::closed_before_answering`) failed as `SourceError::Protocol
   { status: None }`, which `knobas_sync::write_queue` reads as a refusal of the write although it
