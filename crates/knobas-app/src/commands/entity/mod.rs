@@ -30,7 +30,7 @@
 use chrono::{DateTime, Utc};
 use knobas_core::activity::ActivityRow;
 use knobas_core::entity::EntityRef;
-use knobas_core::link::{LinkEntry, LinkRow, Origin};
+use knobas_core::link::{LinkEntry, LinkRow};
 use knobas_core::suggest::{self, SuggestionEntry};
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::{PgPool, Row};

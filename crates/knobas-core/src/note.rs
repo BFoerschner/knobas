@@ -218,7 +218,7 @@ pub struct BornLink {
 /// One link a note really **was** born with, in the three words the activity
 /// log uses for a link.
 ///
-/// The same three keys `commands::entity`'s `link_detail` writes on a `linked`
+/// The same three keys [`crate::link`]'s `activity_detail` writes on a `linked`
 /// or an `unlinked` line, and deliberately so: they are what lets a reader of
 /// the note's history pair the birth with a later withdrawal. A born link is
 /// [`Origin::Manual`], so the links panel does let a reader withdraw one, and
@@ -293,7 +293,7 @@ struct DrawnLink {
 /// links were worth a line while the note's own birth stayed silent.
 ///
 /// `born` carries [`DrawnLink`]s, which is what makes the line the partner a
-/// withdrawal needs: the same three keys `link_detail` writes, so an
+/// withdrawal needs: the same three keys `activity_detail` writes, so an
 /// `unlinked` line's `link_id` is one of these. It is **`[]` and never
 /// absent** when nothing was drawn -- a key that is missing reads as a line
 /// written before this existed, and a reader of the log can act on the

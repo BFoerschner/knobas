@@ -17,6 +17,7 @@ pub mod reach;
 pub mod signals;
 pub mod start_work;
 pub mod suggest;
+pub mod viewed;
 pub mod web_url;
 pub mod write_queue;
 
