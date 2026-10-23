@@ -533,6 +533,18 @@ impl Harness {
         *self.interrupt.lock().unwrap() = Some(interrupt);
     }
 
+    /// Wait for the first paced write to go on the wire, and answer its
+    /// target and when it started (see [`Paced`]).
+    async fn first_paced(&self) -> (String, std::time::Instant) {
+        for _ in 0..1000 {
+            if let Some(first) = self.paced.lock().unwrap().started.first().cloned() {
+                return first;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!("no paced write went on the wire");
+    }
+
     /// Queue a ticket under a project container -- the op ADR-0012 singles out
     /// as not naturally idempotent, and whose adapter names nothing back.
     async fn create_ticket(&self, project: &EntityRef, title: &str) -> store::QueuedWrite {
@@ -1673,15 +1685,7 @@ async fn beside_the_flush_task(mine: Mine) {
     }
 
     let send = async {
-        let mut on_the_wire = None;
-        for _ in 0..1000 {
-            on_the_wire = h.paced.lock().unwrap().started.first().map(|(_, at)| *at);
-            if on_the_wire.is_some() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        let on_the_wire = on_the_wire.expect("the flush task's first write went on the wire");
+        let (_, on_the_wire) = h.first_paced().await;
         match mine {
             Mine::Submitted => {
                 h.comment(&pull, "mine").await;
@@ -1731,7 +1735,7 @@ async fn beside_the_flush_task(mine: Mine) {
 /// the slow write the task owes on another entity after it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_submit_behind_a_head_the_flush_task_is_sending_tries_its_own_write() {
-    behind_a_head_on_the_wire(Head::Lands).await;
+    behind_a_head_on_the_wire(Fate::Lands).await;
 }
 
 /// #1807: as above, with the head withdrawn while it is on the wire, which
@@ -1739,12 +1743,12 @@ async fn a_submit_behind_a_head_the_flush_task_is_sending_tries_its_own_write() 
 /// head now.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_submit_behind_a_head_withdrawn_on_the_wire_tries_its_own_write() {
-    behind_a_head_on_the_wire(Head::Withdrawn).await;
+    behind_a_head_on_the_wire(Fate::Withdrawn).await;
 }
 
 /// What becomes of the head in [`behind_a_head_on_the_wire`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Head {
+enum Fate {
     /// The flush task's send settles it.
     Lands,
     /// The reader withdraws it at the end of its send, once the submit is
@@ -1757,8 +1761,10 @@ enum Head {
 /// while the head is on the wire. Asserts that, the moment the submit
 /// returns, its own write was sent and the other entity's was not yet.
 ///
-/// Arranged rather than timed: no bound on the clock decides the verdict.
-async fn behind_a_head_on_the_wire(fate: Head) {
+/// Arranged rather than timed: the verdict reads rows, not a clock. The one
+/// bound is the other entity's `DWELL`, which the submit has, once it lets go
+/// of the source, to re-read its entity's heads and the two rows.
+async fn behind_a_head_on_the_wire(fate: Fate) {
     const DWELL: std::time::Duration = std::time::Duration::from_secs(1);
     let h = harness().await;
     let mine = h.mirror("PAY-1807-A", "a payout fails").await;
@@ -1783,20 +1789,12 @@ async fn behind_a_head_on_the_wire(fate: Head) {
             .dwell
             .insert(entity.to_string(), DWELL);
     }
-    if fate == Head::Withdrawn {
-        *h.interrupt.lock().unwrap() = Some(Interrupt::Withdraw(head.id));
+    if fate == Fate::Withdrawn {
+        h.interrupt(Interrupt::Withdraw(head.id));
     }
 
     let submit = async {
-        let mut on_the_wire = None;
-        for _ in 0..1000 {
-            on_the_wire = h.paced.lock().unwrap().started.first().cloned();
-            if on_the_wire.is_some() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        let (target, _) = on_the_wire.expect("the flush task's first write went on the wire");
+        let (target, _) = h.first_paced().await;
         assert_eq!(target, mine.to_string(), "the head on `mine` goes first");
         // The head has read its dwell; the submitted write takes none.
         h.paced.lock().unwrap().dwell.remove(&mine.to_string());
@@ -1821,8 +1819,8 @@ async fn behind_a_head_on_the_wire(fate: Head) {
         "the submit waited for the other entity's write"
     );
     let settled = match fate {
-        Head::Lands => WriteState::Sent,
-        Head::Withdrawn => WriteState::Discarded,
+        Fate::Lands => WriteState::Sent,
+        Fate::Withdrawn => WriteState::Discarded,
     };
     assert_eq!(h.reload(head.id).await.state, settled);
     assert_eq!(h.reload(slow.id).await.state, WriteState::Sent);

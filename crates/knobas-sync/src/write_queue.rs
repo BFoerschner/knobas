@@ -468,8 +468,9 @@ struct CredentialSeen<'a> {
 /// landed. It stops the moment a pass delivers nothing, which is what keeps a
 /// stuck queue from spinning; and a write that failed in one pass is not owed
 /// in the next, because its wait was just recorded. A head another flusher
-/// landed while this one waited for the lock gives its turn to the entity's
-/// next write ([`turn`]), so that write is this flusher's to send.
+/// landed, or the reader withdrew, while this one waited for the lock gives
+/// its turn to the entity's next write ([`turn`]), so that write is this
+/// flusher's to send.
 ///
 /// # Errors
 ///
@@ -576,13 +577,15 @@ async fn flush(
 
 /// What a flusher finds when its turn at one write comes ([`turn`]).
 enum Turn<'g> {
-    /// The write is as this flusher read it, and still owed, or it closed
-    /// and this is the entity's next write: send it, holding the source's
-    /// lock until it has settled.
+    /// The row to send, as it stands now: the write this flusher read, still
+    /// untouched and owed, or, if that one closed, its entity's next head.
+    /// Send it, holding the source's lock until it has settled.
     /// Boxed: a queue row is far larger than the other two arms.
     Go(tokio::sync::MutexGuard<'g, ()>, Box<QueuedWrite>),
-    /// Another flusher attempted it since it was read, or it is no longer
-    /// owed; or it closed and its entity has no write owed after it.
+    /// Nothing to send this turn: the write is held or refused, another
+    /// flusher attempted it since it was read, or it is waiting something out
+    /// ([`owed`]); or it settled or was withdrawn and its entity has no
+    /// pending head after it that this pass sends.
     Gone,
     /// The quit came first: start nothing more.
     Stopped,
