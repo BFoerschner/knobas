@@ -799,7 +799,7 @@ async fn quoted_and_negated_words_read_through_the_needles() {
         .unwrap();
     let searcher = searcher(&pool).await;
     let quoted = format!("project:{p} \"sepa retry\"");
-    let negated = format!("project:{p} -retry");
+    let negated = format!("project:{p} -zeppelin");
     let literal = format!("project:{p} sepa -retry");
     let texts = [quoted.as_str(), negated.as_str(), literal.as_str()];
     let readings = searcher.readings(&texts, "ticket").await.unwrap();
@@ -818,8 +818,8 @@ async fn quoted_and_negated_words_read_through_the_needles() {
         counts.push(sorted(ids));
     }
     assert_eq!(counts[0], vec![phrase.clone()], "the phrase, not its words");
-    // `-retry` is no needle: it is not a literal substring to find, and the
-    // words that remain (none) narrow nothing.
+    // `-zeppelin` is no needle: neither a literal substring to find nor the
+    // word `zeppelin` required, and the words that remain (none) narrow nothing.
     assert_eq!(counts[1], sorted(vec![phrase.clone(), scattered.clone()]));
     assert_eq!(counts[2], sorted(vec![phrase, scattered]), "`sepa` alone");
 }

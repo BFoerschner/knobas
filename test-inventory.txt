@@ -2206,6 +2206,7 @@ knobas-search	test/it	ticket_keys::label_matches_any_of_an_items_labels
 knobas-search	test/it	ticket_keys::matching_ids_are_every_ticket_the_query_admits
 knobas-search	test/it	ticket_keys::no_active_sprint_offers_no_current
 knobas-search	test/it	ticket_keys::project_matches_the_key_or_the_name
+knobas-search	test/it	ticket_keys::quoted_and_negated_words_read_through_the_needles
 knobas-search	test/it	ticket_keys::sprint_current_is_a_ticket_in_an_active_sprint
 knobas-search	test/it	ticket_keys::words_alone_match_the_key_the_title_and_the_declared_assignee
 knobas-search	test/it	under::a_bare_name_two_owners_share_scopes_to_both
