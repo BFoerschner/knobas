@@ -425,7 +425,7 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
 ///
 /// What an asset answers to is spelled twice, here and in
 /// the asset arm of `crate::under`'s `parent_names!`, through which
-/// `KNOWN_SQL` reports a value no asset is called as an unknown token. Change
+/// `sql::known_parent_positions` reports a value no asset is called as an unknown token. Change
 /// one and the other must follow.
 macro_rules! estate_subtree {
     () => {

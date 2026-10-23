@@ -175,7 +175,7 @@ pub const PARENT_SUGGESTIONS: i64 = 20;
 /// point, so a name that continues the prefix with U+10FFFF itself falls
 /// outside it; that is a private-use character no source spells a parent
 /// with. `starts_with` is the exact test. `lower` on both sides, in SQL: the
-/// lowering `under::KNOWN_SQL` compares with. A name the trim leaves empty, or
+/// lowering `sql::known_parent_positions` compares with. A name the trim leaves empty, or
 /// a row without a kind, is not offered.
 const PARENTS_SQL: &str = concat!(
     "select g.name, g.kind from ( \

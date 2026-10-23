@@ -27,7 +27,7 @@ use crate::SearchError;
 use crate::query::Parsed;
 
 /// Every `(name, kind)` a parent answers to, as a table expression -- the one
-/// place the parent arms are put together, read by [`KNOWN_SQL`] here and by
+/// place the parent arms are put together, read by [`crate::sql::known_parent_positions`] and by
 /// `crate::suggest`'s `PARENTS_SQL`, so what `under:` knows and what the box
 /// offers for it cannot drift apart (#615).
 ///
