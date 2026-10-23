@@ -13309,3 +13309,63 @@ transcripts and their subagent transcripts, 61,185 unique (66,603 calls), old gu
 against new: 0 verdicts differ, 0 exceptions; both refuse 23,427. So no doc tells an agent to type
 a newly refused command, and no doc changes. The merge-manager's re-run on the fixed head, against
 `main`'s guard: 61,334 unique, 0 verdicts differ, 0 exceptions, none slower than 50 ms.
+### #1789: a silent port beside a live pid (Opus implementer, 2026-10-23)
+
+- **Does a free owner lock plus a silent port clear the lock with a live recorded pid?** Reserved
+  for Björn, ruled by implementer on Opus, under Björn's 2026-10-22 waiver for spec #1619's
+  reserved steps. It reverses the rest of ruling B5. *Ruling:* yes. `inspect_lock` reads the port
+  alone, and `Lock::LiveProcess` and its `AlreadyRunning` are gone. *Reasoning:* the ticket's case
+  against, a postmaster of ours starting or in crash recovery whose knobas died, never reaches this
+  arm, because such a postmaster answers on its port. Where one could reach it, clearing costs one
+  failed start and no data. Evidence, from PostgreSQL 18.6 on this Mac (`postgres -D <scratch> -p
+  <port> -c listen_addresses=127.0.0.1`, a cluster of 3 to 6 million committed rows crashed with
+  `kill -9`; the scripts are `issue-1789-e*.py` in that run's scratchpad):
+  1. **Crash recovery answers.** The postmaster logs `listening on IPv4 address "127.0.0.1"` before
+     its startup process logs `database system was interrupted`. With the startup process frozen
+     (`SIGSTOP`) mid-redo, a TCP handshake on the recorded port succeeds and `psql` gets `FATAL:
+     the database system is not yet accepting connections` (57P03). That is `Lock::Live`, and
+     `adopt` refuses it as `cannot connect on port <n>`, as before this PR.
+  2. **Shutdown answers.** With the checkpointer frozen in a fast shutdown, `postmaster.pid` reads
+     `stopping`, and the port still answers (`the database system is shutting down`) until exit.
+  3. **The silent window is 2 ms.** Over 20 starts, from `postmaster.pid` naming a pid and port to
+     the port answering: min 2.08, median 2.22, max 2.46 ms. In PostgreSQL 18 the order is lock
+     file, shared memory, bind. A relaunch, which first runs `setup()` and `pg_ctl start`, cannot
+     land in it unless the postmaster is frozen there. The other way a postmaster of ours is
+     silent on `127.0.0.1` is an orphan an older build started on `localhost` that kept only
+     `::1` (#1775, evidence 1). Today that one is a lockout until it is killed by hand.
+  4. **Clearing under recovery.** `postmaster.pid` removed under the recovering postmaster of (1):
+     a second postmaster is refused with `pre-existing shared memory block (key …) is still in
+     use`. 65 s later the first logs `performing immediate shutdown because data directory lock
+     file is invalid`, then `issuing SIGKILL to recalcitrant children` and `database system is
+     shut down`, leaving no process and no SysV segment. The next start logs `database system was
+     interrupted while in recovery`, replays from the same redo point, and is ready in 1.4 s.
+     PostgreSQL adds its generic hint `This probably means that some data is corrupted`, but all
+     6,000,000 rows and the marker row are there, and `pg_amcheck --heapallindexed` exits 0.
+     Redo is idempotent, so an interrupted crash recovery just runs again.
+  5. **Clearing a postmaster frozen after shared memory, before bind** (pid and port written,
+     port silent): the second postmaster is refused by the interlock as in (4). The first, once
+     resumed, binds, recovers and serves without a lock file (it logs `could not open file
+     "postmaster.pid"`), until the minute check of (4) stops it; this run killed it first.
+  6. **Clearing a postmaster frozen before shared memory** (pid and port written, port silent,
+     no segment, so exactly the old `Lock::LiveProcess`): the second postmaster wins the
+     interlock, replays and reaches `ready`. The first, resumed, exits on the interlock, and its
+     exit unlinks `postmaster.pid`, which is now the second's (PostgreSQL removes its lock-file
+     path unconditionally on exit). The second keeps serving and shuts itself down 56 to 60 s later
+     (`lock file is invalid`). In a knobas window, #1779's watch sees the missing file within 5 s
+     and the window goes `failed`. *Retry* is refused by the interlock until that shutdown, then
+     starts. Only one startup process ever ran: rows, marker and `pg_amcheck` all clean on the
+     final start, in all three runs.
+  So clearing never puts two servers on the files, and its worst case (6, which needs a frozen
+  postmaster) is a window that fails once and recovers on *Retry*. Keeping the lock costs a
+  lockout on every launch until the reader deletes `postmaster.pid`: the recycled pid after a
+  reboot, and the `::1` orphan, which only clearing gets rid of. A ps-name check (clear only when
+  the live pid is not a `postgres`) was considered and rejected: a recycled pid can land on a
+  second profile's or Homebrew's postgres, and that lockout would stay. *Reversing:* one `if` in
+  `inspect_lock` and the variant.
+- **§10.8.** *Ruling:* booked (`docs/contract/10.8/1789-a-silent-port-clears-a-live-pids-lock.md`):
+  the boot screen's `postmaster.pid records process <pid>, which is still running, but nothing
+  answers…` refusal is gone. No type changes. *Reversing:* n/a.
+- **No test pins the recovering postmaster's refusal.** *Ruling:* not added. Freezing a startup
+  process from a cargo test needs a crashed cluster and `SIGSTOP` on a child the test did not
+  spawn. The arm it reaches, `Lock::Live` into `adopt`, is unchanged here and keeps its tests.
+  *Reversing:* n/a.
