@@ -1725,7 +1725,7 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
         let reachable = crud::reachable_transitions(
             &state.pool,
             &state.secrets,
-            state.registry.as_ref(),
+            &state.registry,
             &format!("{JIRA}:{key}"),
         )
         .await
@@ -1763,7 +1763,7 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
     let error = crud::reachable_transitions(
         &refused_state.pool,
         &refused_state.secrets,
-        refused_state.registry.as_ref(),
+        &refused_state.registry,
         &format!("{JIRA}:{COMMENTED}"),
     )
     .await
@@ -2019,7 +2019,7 @@ async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workfl
             crud::reachable_transitions(
                 &state.pool,
                 &state.secrets,
-                state.registry.as_ref(),
+                &state.registry,
                 &entity,
             )
             .await
@@ -2887,7 +2887,7 @@ async fn test_source_carries_the_epic_link_note_for_a_draft_and_for_a_saved_sour
     let draft = crud::test(
         &state.pool,
         &state.secrets,
-        state.registry.as_ref(),
+        &state.registry,
         SourceDraft {
             source_id: None,
             adapter_kind: "jira".to_owned(),
@@ -2931,7 +2931,7 @@ async fn test_source_carries_the_epic_link_note_for_a_draft_and_for_a_saved_sour
     let saved = crud::test(
         &state.pool,
         &state.secrets,
-        state.registry.as_ref(),
+        &state.registry,
         SourceDraft {
             source_id: Some(JIRA.to_owned()),
             adapter_kind: "jira".to_owned(),
@@ -3001,7 +3001,7 @@ async fn test_source_answers_the_configured_arm_once_the_saved_source_names_the_
     let draft = crud::test(
         &state.pool,
         &state.secrets,
-        state.registry.as_ref(),
+        &state.registry,
         SourceDraft {
             source_id: None,
             adapter_kind: "jira".to_owned(),
@@ -3042,7 +3042,7 @@ async fn test_source_answers_the_configured_arm_once_the_saved_source_names_the_
     let saved = crud::test(
         &state.pool,
         &state.secrets,
-        state.registry.as_ref(),
+        &state.registry,
         SourceDraft {
             source_id: Some(JIRA.to_owned()),
             adapter_kind: "jira".to_owned(),

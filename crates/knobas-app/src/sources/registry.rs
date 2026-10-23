@@ -422,9 +422,9 @@ mod tests {
     #[test]
     fn a_source_of_an_adapter_refused_at_load_fails_with_the_reason() {
         use knobas_sync::scheduler::AdapterRegistry as _;
-        let registry = Registry::default();
-        registry.refuse("wasm-fixture", "its hash changed".to_owned());
-        let Err(error) = registry.build(fixture_instance()) else {
+        let refusing = Registry::default();
+        refusing.refuse("wasm-fixture", "its hash changed".to_owned());
+        let Err(error) = refusing.build(fixture_instance()) else {
             panic!("a refused adapter must not build");
         };
         assert!(error.to_string().contains("its hash changed"), "{error}");

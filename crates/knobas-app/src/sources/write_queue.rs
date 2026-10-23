@@ -521,7 +521,7 @@ pub(crate) async fn queue(
     let (op, source_id) = submittable(
         &state.pool,
         &state.secrets,
-        state.registry.as_ref(),
+        &state.registry,
         payload,
     )
     .await?;
@@ -605,7 +605,7 @@ pub(crate) async fn flush(
 pub(crate) async fn submittable(
     pool: &sqlx::PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
-    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
     payload: serde_json::Value,
 ) -> Result<(WriteOp, String), IpcError> {
     let op: WriteOp = serde_json::from_value(payload)
@@ -902,8 +902,8 @@ mod tests {
         .expect("the source row is written");
     }
 
-    fn registry() -> crate::sources::Registry {
-        crate::sources::Registry::for_process()
+    fn registry() -> std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry> {
+        std::sync::Arc::new(crate::sources::Registry::for_process())
     }
 
     /// The store `submittable` reads an instance's own write ops through

@@ -146,7 +146,7 @@ async fn an_unconfigured_source_cannot_be_reached() {
     let error = knobas_app::sources::crud::set_secret(
         &pool,
         &secrets,
-        &registry,
+        &crate::support::shared(registry.clone()),
         &missing,
         knobas_app::sources::SecretInput::of("pat"),
     )

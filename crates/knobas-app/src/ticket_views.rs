@@ -488,7 +488,7 @@ async fn saved_view_sources(
 pub async fn translate(
     pool: &PgPool,
     secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
-    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
     id: &str,
 ) -> Result<Option<knobas_source::query::Translation>, IpcError> {
     let row: Option<(Option<String>, Option<serde_json::Value>)> = sqlx::query_as(

@@ -178,7 +178,7 @@ fn instance_from(
 /// comes to propagate one.
 pub async fn instance_write_ops(
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     cfg: &knobas_sync::config::SourceConfigRow,
 ) -> Vec<String> {
     let credential = match cfg.auth_kind.method() {
@@ -193,7 +193,7 @@ pub async fn instance_write_ops(
             Ok(None) | Err(_) => return Vec::new(),
         },
     };
-    let built = registry.build(instance_from(
+    let built = knobas_sync::scheduler::build_off_runtime(registry, instance_from(
         &cfg.id,
         &cfg.adapter_kind,
         &cfg.display_name,
@@ -201,7 +201,8 @@ pub async fn instance_write_ops(
         cfg.auth_kind.method(),
         credential,
         cfg.config.clone(),
-    ));
+    ))
+    .await;
     built
         .map(|source| source.descriptor().write_ops)
         .unwrap_or_default()
@@ -482,7 +483,7 @@ pub async fn delete(
 pub async fn set_secret(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     id: &str,
     secret: SecretInput,
 ) -> Result<CredentialHealth, SourcesError> {
@@ -526,7 +527,7 @@ pub async fn set_secret(
     .await?;
     release_unauthorized_writes(pool, id).await;
 
-    let source = registry.build(instance_from(
+    let source = knobas_sync::scheduler::build_off_runtime(registry, instance_from(
         id,
         &cfg.adapter_kind,
         &cfg.display_name,
@@ -534,7 +535,8 @@ pub async fn set_secret(
         Some(method),
         credential,
         cfg.config.clone(),
-    ))?;
+    ))
+    .await?;
     let outcome = source.test_connection().await;
 
     // A good check records **no** detail. What the adapter had to say about
@@ -637,7 +639,7 @@ fn auth_state_of(error: &knobas_source::SourceError) -> knobas_sync::config::Aut
 pub async fn test(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     draft: SourceDraft,
 ) -> Result<ConnectionReport, SourcesError> {
     // **A saved source is tested against what it is saved as.** The draft's
@@ -668,7 +670,7 @@ pub async fn test(
             draft.config.clone(),
         ),
     };
-    let template = template_for(registry, &kind)?;
+    let template = template_for(registry.as_ref(), &kind)?;
 
     // **The same rule `set_secret` applies**, through the same function: a
     // typed half wins and an absent one keeps what is stored (issue #452). A
@@ -699,7 +701,7 @@ pub async fn test(
     let display_name = saved
         .as_ref()
         .map_or(kind.as_str(), |row| &row.display_name);
-    let source = registry.build(instance_from(
+    let source = knobas_sync::scheduler::build_off_runtime(registry, instance_from(
         id,
         &kind,
         display_name,
@@ -707,7 +709,8 @@ pub async fn test(
         auth,
         credential,
         config,
-    ))?;
+    ))
+    .await?;
 
     let started = std::time::Instant::now();
     let outcome = source.test_connection().await;
@@ -784,7 +787,7 @@ pub async fn test(
 pub async fn reachable_transitions(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     entity_id: &str,
 ) -> Result<Vec<String>, SourcesError> {
     let source = adapter_for(pool, secrets, registry, entity_id).await?;
@@ -820,7 +823,7 @@ pub async fn reachable_transitions(
 pub async fn view(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     entity_id: &str,
     section: Option<&str>,
 ) -> Result<Option<knobas_source::view::SourceView>, SourcesError> {
@@ -828,7 +831,7 @@ pub async fn view(
     let Some(mut view) = source.view(entity_id, section).await? else {
         return Ok(None);
     };
-    resolve_commit_hints(pool, registry, &mut view).await?;
+    resolve_commit_hints(pool, registry.as_ref(), &mut view).await?;
     let named: Vec<String> = view
         .sections
         .iter()
@@ -879,7 +882,7 @@ pub async fn view(
 pub async fn pipeline_settings(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     entity_id: &str,
 ) -> Result<Option<knobas_source::pipeline::PipelineSettings>, SourcesError> {
     let source = adapter_for(pool, secrets, registry, entity_id).await?;
@@ -887,7 +890,7 @@ pub async fn pipeline_settings(
         return Ok(None);
     };
     if settings.repositories.iter().any(|r| r.url.is_some()) {
-        let addresses = clone_addresses(pool, registry).await?;
+        let addresses = clone_addresses(pool, registry.as_ref()).await?;
         for repository in &mut settings.repositories {
             let Some(url) = repository.url.as_deref() else {
                 continue;
@@ -917,7 +920,7 @@ pub async fn pipeline_settings(
 pub async fn translate_query(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     entity_id: &str,
     payload: &serde_json::Value,
 ) -> Result<Option<knobas_source::query::Translation>, SourcesError> {
@@ -942,7 +945,7 @@ pub async fn translate_query(
 pub async fn pipeline_commits(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     entity_id: &str,
     shas: &[String],
 ) -> Result<std::collections::HashMap<String, String>, SourcesError> {
@@ -959,7 +962,7 @@ pub async fn pipeline_commits(
     if urls.is_empty() {
         return Ok(found);
     }
-    let addresses = clone_addresses(pool, registry).await?;
+    let addresses = clone_addresses(pool, registry.as_ref()).await?;
     let repositories: Vec<String> = urls
         .iter()
         .map(|url| knobas_source::clone_urls::canonical_repo_url(url, &addresses))
@@ -999,7 +1002,7 @@ const COMMIT_READ_BUDGET: std::time::Duration = std::time::Duration::from_secs(5
 pub async fn shared_commits<'a>(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     shared: std::collections::BTreeMap<&'a str, Vec<String>>,
 ) -> knobas_core::builds::ResolvedCommits<'a> {
     let mut resolved = knobas_core::builds::ResolvedCommits::new();
@@ -1032,7 +1035,7 @@ pub async fn shared_commits<'a>(
 pub async fn older_runs(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     entity_id: &str,
     before: &str,
     count: u32,
@@ -1053,7 +1056,7 @@ pub async fn older_runs(
 pub async fn run_chain(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     entity_id: &str,
 ) -> Result<Vec<knobas_source::pipeline::RunChainStep>, SourcesError> {
     let source = adapter_for(pool, secrets, registry, entity_id).await?;
@@ -1072,7 +1075,7 @@ pub async fn run_chain(
 pub async fn run_source(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     entity_id: &str,
 ) -> Result<Box<dyn knobas_source::Source>, SourcesError> {
     adapter_for(pool, secrets, registry, entity_id).await
@@ -1199,7 +1202,7 @@ fn commit_page(repo_url: &str, sha: &str) -> Option<String> {
 async fn adapter_for(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &dyn AdapterRegistry,
+    registry: &Arc<dyn AdapterRegistry>,
     entity_id: &str,
 ) -> Result<Box<dyn knobas_source::Source>, SourcesError> {
     let parsed = knobas_core::entity::EntityRef::parse(entity_id)
@@ -1222,7 +1225,7 @@ async fn adapter_for(
             .await?
         }
     };
-    let source = registry.build(instance_from(
+    let source = knobas_sync::scheduler::build_off_runtime(registry, instance_from(
         &parsed.namespace,
         &cfg.adapter_kind,
         &cfg.display_name,
@@ -1230,7 +1233,8 @@ async fn adapter_for(
         method,
         Credential::keeping(&SecretInput::default(), stored),
         cfg.config.clone(),
-    ))?;
+    ))
+    .await?;
     Ok(source)
 }
 

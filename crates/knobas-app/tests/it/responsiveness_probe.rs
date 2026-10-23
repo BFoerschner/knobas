@@ -1179,6 +1179,8 @@ async fn what_the_reader_waits_on() {
             .await
             .unwrap()
         };
+        // The views build an adapter, so they take the registry shared (#1705).
+        let shared = crate::support::shared(registry.clone());
         for kind in ["repo", "pr", "branch", "commit"] {
             let Some(id) = pick(kind).await else {
                 println!("RP-NOTE no gitea {kind} mirrored");
@@ -1190,11 +1192,11 @@ async fn what_the_reader_waits_on() {
             })
             .await;
             let view = time(&what, "entity_view (whole)", runs, || {
-                knobas_app::sources::crud::view(pool, &secrets, &registry, &id, None)
+                knobas_app::sources::crud::view(pool, &secrets, &shared, &id, None)
             })
             .await;
             let _ = view;
-            let whole = knobas_app::sources::crud::view(pool, &secrets, &registry, &id, None)
+            let whole = knobas_app::sources::crud::view(pool, &secrets, &shared, &id, None)
                 .await
                 .unwrap()
                 .unwrap();
@@ -1207,7 +1209,7 @@ async fn what_the_reader_waits_on() {
                         knobas_app::sources::crud::view(
                             pool,
                             &secrets,
-                            &registry,
+                            &shared,
                             &id,
                             Some(&section.id),
                         )
@@ -1222,7 +1224,7 @@ async fn what_the_reader_waits_on() {
                         knobas_app::sources::crud::view(
                             pool,
                             &secrets,
-                            &registry,
+                            &shared,
                             &id,
                             Some("files:docs"),
                         )
@@ -1397,7 +1399,7 @@ async fn writes(
         get_entity_inner(pool, &Registry::for_process(), TICKET)
             .await
             .map_err(said)?;
-        knobas_app::sources::crud::view(pool, &secrets, registry.as_ref(), TICKET, None)
+        knobas_app::sources::crud::view(pool, &secrets, &registry, TICKET, None)
             .await
             .map_err(said)
             .map(|_| ())
@@ -1433,7 +1435,7 @@ async fn writes(
             get_entity_inner(pool, &Registry::for_process(), "ci:build:42")
                 .await
                 .map_err(said)?;
-            knobas_app::sources::crud::view(pool, &secrets, registry.as_ref(), "ci:build:42", None)
+            knobas_app::sources::crud::view(pool, &secrets, &registry, "ci:build:42", None)
                 .await
                 .map_err(said)
                 .map(|_| ())

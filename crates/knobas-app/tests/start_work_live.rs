@@ -1399,7 +1399,7 @@ async fn view_text(state: &SourcesState, entity: &str) -> String {
     let view = knobas_app::sources::crud::view(
         &state.pool,
         &state.secrets,
-        state.registry.as_ref(),
+        &state.registry,
         entity,
         None,
     )

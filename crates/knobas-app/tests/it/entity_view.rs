@@ -256,7 +256,7 @@ async fn view(f: &Fixture, key: &str, section: Option<&str>) -> Result<Option<So
     sources::crud::view(
         &f.pool,
         &f.secrets,
-        &f.registry,
+        &crate::support::shared(DrawingRegistry(f.asked.clone())),
         &format!("{}:{key}", f.id),
         section,
     )
@@ -316,7 +316,7 @@ async fn the_read_routes_to_the_entitys_source_and_keeps_none_and_failure_apart(
     let unknown = sources::crud::view(
         &f.pool,
         &f.secrets,
-        &f.registry,
+        &crate::support::shared(DrawingRegistry(f.asked.clone())),
         "nowhere-configured:x",
         None,
     )

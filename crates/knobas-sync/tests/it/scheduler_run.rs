@@ -951,6 +951,81 @@ async fn a_run_reads_the_descriptor_once_watched_or_not() {
     assert_eq!(calls(&h), 1, "a watched run");
 }
 
+/// A registry whose builds take two seconds, the way an external adapter's
+/// does while its component's `descriptor()` dwells, and that says when one
+/// has started.
+struct Dwelling {
+    inner: Arc<MockRegistry>,
+    entered: std::sync::mpsc::Sender<()>,
+}
+
+impl AdapterRegistry for Dwelling {
+    fn descriptors(&self) -> Vec<SourceDescriptor> {
+        self.inner.descriptors()
+    }
+    fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
+        let _ = self.entered.send(());
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        self.inner.build(instance)
+    }
+}
+
+/// A run builds its adapter off the runtime (#1705): on one worker, a build
+/// held there would hold every other command until it finished. The second
+/// command here is sent once the build has started, and answers while it is
+/// still going.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn a_run_whose_adapter_is_slow_to_build_holds_no_worker() {
+    let h = harness(AuthKind::None, false).await;
+    let (entered, built) = std::sync::mpsc::channel();
+    let deps = Arc::new(SchedulerDeps {
+        pool: h.deps.pool.clone(),
+        connections: Arc::clone(&h.deps.connections),
+        registry: Arc::new(Dwelling {
+            inner: Arc::clone(&h.registry),
+            entered,
+        }),
+        secrets: Arc::clone(&h.deps.secrets),
+        events: Arc::clone(&h.deps.events),
+        timing: h.deps.timing,
+    });
+    let run_id = run_log::start(&deps.pool, &h.id, SyncTrigger::Manual)
+        .await
+        .unwrap();
+    let running = tokio::spawn({
+        let (deps, id) = (Arc::clone(&deps), h.id.clone());
+        async move {
+            knobas_sync::scheduler::execute_run(
+                &deps,
+                &id,
+                run_id,
+                RunMode::Incremental,
+                None,
+                std::time::Instant::now(),
+            )
+            .await
+        }
+    });
+    // The test's own thread, not the worker, waits here.
+    built
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("the run builds its adapter");
+
+    let asked = std::time::Instant::now();
+    let (pool, id) = (deps.pool.clone(), h.id.clone());
+    let listed = tokio::spawn(async move { run_log::list(&pool, Some(&id), 1).await })
+        .await
+        .unwrap();
+    let answered_in = asked.elapsed();
+    assert!(listed.is_ok(), "{:?}", listed.err());
+    assert!(!running.is_finished(), "the build was still going");
+    assert!(
+        answered_in < std::time::Duration::from_millis(1_000),
+        "a command answered in {answered_in:?} while a build was in flight"
+    );
+    assert_eq!(running.await.unwrap().outcome, SyncOutcome::Ok);
+}
+
 /// `execute_run` is public and takes any sink, not only the scheduler's
 /// fan-out. A sink that panics loses its messages and the run still finishes:
 /// the scheduler's own `Started` and the decorator's `Fetching` and `Writing`

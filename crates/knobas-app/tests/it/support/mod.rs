@@ -7,6 +7,14 @@
 use serde_json::Value;
 use sqlx::PgPool;
 
+/// `registry` the way a read that builds an adapter takes it: shared, so the
+/// build can run on the blocking pool (#1705).
+pub fn shared(
+    registry: impl knobas_sync::scheduler::AdapterRegistry,
+) -> std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry> {
+    std::sync::Arc::new(registry)
+}
+
 /// One `knobas.source_config` row: `id` configured as adapter `kind`, shown as
 /// `display_name`, at `http://x` with a `Pat`, holding `config`.
 pub async fn source_config(

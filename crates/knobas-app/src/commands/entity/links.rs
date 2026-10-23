@@ -249,7 +249,7 @@ pub async fn reachable_transitions<R: tauri::Runtime>(
     crate::sources::crud::reachable_transitions(
         &state.pool,
         &state.secrets,
-        state.registry.as_ref(),
+        &state.registry,
         &entity_id,
     )
     .await
@@ -287,7 +287,7 @@ pub async fn entity_view<R: tauri::Runtime>(
     crate::sources::crud::view(
         &state.pool,
         &state.secrets,
-        state.registry.as_ref(),
+        &state.registry,
         &entity_id,
         section.as_deref(),
     )

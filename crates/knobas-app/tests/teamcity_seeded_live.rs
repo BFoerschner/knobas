@@ -616,7 +616,7 @@ async fn a_seeded_parameter_changed_through_the_write_queue_reads_back_in_the_ne
         let view = crud::view(
             &state.pool,
             &state.secrets,
-            state.registry.as_ref(),
+            &state.registry,
             &entity,
             None,
         )
@@ -749,7 +749,7 @@ async fn a_builds_change_and_its_revision_open_the_mirrored_gitea_commit() {
         crud::view(
             &state.pool,
             &state.secrets,
-            state.registry.as_ref(),
+            &state.registry,
             &entity,
             None,
         )

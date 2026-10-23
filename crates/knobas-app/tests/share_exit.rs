@@ -669,7 +669,7 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
     knobas_app::sources::crud::set_secret(
         &sharer.pool,
         &sharer_keys,
-        sharer_engine.registry.as_ref(),
+        &sharer_engine.registry,
         JIRA,
         knobas_app::sources::SecretInput::of(env.password.clone()),
     )
@@ -750,7 +750,7 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
     let health = knobas_app::sources::crud::set_secret(
         &colleague.pool,
         &colleague_keys,
-        colleague_engine.registry.as_ref(),
+        &colleague_engine.registry,
         JIRA,
         knobas_app::sources::SecretInput::of(env.password.clone()),
     )

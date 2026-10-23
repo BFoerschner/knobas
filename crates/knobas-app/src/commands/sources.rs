@@ -350,7 +350,7 @@ pub async fn set_source_secret<R: tauri::Runtime>(
     let health = crud::set_secret(
         &state.pool,
         &state.secrets,
-        state.registry.as_ref(),
+        &state.registry,
         &id,
         secret,
     )
@@ -371,7 +371,7 @@ pub async fn test_source<R: tauri::Runtime>(
 ) -> Result<ConnectionReport, IpcError> {
     let state = crate::sources::state(&app)?;
     let id = draft.source_id.clone();
-    crud::test(&state.pool, &state.secrets, state.registry.as_ref(), draft)
+    crud::test(&state.pool, &state.secrets, &state.registry, draft)
         .await
         .map_err(|error| to_ipc(&error, id.as_deref()))
 }

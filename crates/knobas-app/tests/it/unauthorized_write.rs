@@ -202,7 +202,7 @@ impl Fixture {
         knobas_app::sources::crud::set_secret(
             &self.state.pool,
             &self.state.secrets,
-            self.state.registry.as_ref(),
+            &self.state.registry,
             source,
             secret,
         )

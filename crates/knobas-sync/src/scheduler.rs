@@ -87,6 +87,36 @@ pub trait AdapterRegistry: Send + Sync + 'static {
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError>;
 }
 
+/// [`AdapterRegistry::build`] on the blocking pool. Every caller on the
+/// runtime builds an adapter through here (#1705, ruling D9).
+///
+/// `build` is synchronous, and the `Source` SPI keeps it so. For an external
+/// adapter it instantiates the component and runs its `descriptor()` on a
+/// thread of its own, then joins that thread (ADR-0028). A caller on a
+/// runtime worker would hold the worker for as long as the component takes,
+/// which only the adapter's deadline bounds (600 s by default). A compiled-in
+/// adapter's build is a constructor, so the hop is its only cost.
+///
+/// A build that panicked, or that the runtime's shutdown cancelled before it
+/// started, is a [`SourceError::Protocol`] with no status: the adapter's own
+/// fault, which IPC answers as `internal` and a run logs as `error`. A caller
+/// dropped while the build runs does not cut it off. The build finishes on its
+/// blocking thread and the adapter it made is dropped there.
+///
+/// # Errors
+/// What [`AdapterRegistry::build`] answers, or the protocol error above.
+pub async fn build_off_runtime(
+    registry: &Arc<dyn AdapterRegistry>,
+    instance: SourceInstance,
+) -> Result<Box<dyn Source>, SourceError> {
+    let registry = Arc::clone(registry);
+    tokio::task::spawn_blocking(move || registry.build(instance))
+        .await
+        .map_err(|error| {
+            SourceError::protocol(format!("building the adapter did not finish: {error}"))
+        })?
+}
+
 /// Where a run gets the connection it holds for its whole duration.
 ///
 /// **Not a `PgPool`, and that is interfaces §10.6(c).** A run keeps its
@@ -333,7 +363,9 @@ pub(crate) async fn build_source(
     cfg: &config::SourceConfigRow,
 ) -> Result<Box<dyn Source>, RunFailure> {
     let instance = instance_for(deps, cfg).await?;
-    deps.registry.build(instance).map_err(RunFailure::Source)
+    build_off_runtime(&deps.registry, instance)
+        .await
+        .map_err(RunFailure::Source)
 }
 
 /// What [`build_source`] builds from: the stored configuration and its secret.
@@ -767,9 +799,8 @@ async fn attempt(
     let mut mode = mode;
     // One keychain read for the run, also when the adapter is built twice.
     let instance = instance_for(deps, &cfg).await?;
-    let mut source = deps
-        .registry
-        .build(instance.clone())
+    let mut source = build_off_runtime(&deps.registry, instance.clone())
+        .await
         .map_err(RunFailure::Source)?;
     let discovered = discover(deps, &cfg, source.as_ref()).await;
     if let Some(found) = &discovered {
@@ -777,7 +808,9 @@ async fn attempt(
             config: with_discovered(&instance.config, found),
             ..instance
         };
-        source = deps.registry.build(widened).map_err(RunFailure::Source)?;
+        source = build_off_runtime(&deps.registry, widened)
+            .await
+            .map_err(RunFailure::Source)?;
         // A new field id widens what the adapter keeps of every ticket, and an
         // incremental run re-fetches only what changed upstream, so a ticket
         // nobody touched would keep `sprints: []` for ever. The run that
