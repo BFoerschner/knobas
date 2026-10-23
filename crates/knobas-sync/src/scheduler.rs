@@ -52,7 +52,8 @@ pub use crate::run_log::SourceSyncStatus;
 /// installed external adapters (P6: every adapter crate exposes
 /// `descriptor_template()` and `build(SourceInstance)`). Everything a read
 /// takes from the registry is here, so a read can take `&dyn AdapterRegistry`
-/// and a test can hand it a registry of its own (#1321).
+/// and a test can hand it a registry of its own (#1321). A read that builds an
+/// adapter takes `&Arc<dyn AdapterRegistry>`, for [`build_off_runtime`].
 pub trait AdapterRegistry: Send + Sync + 'static {
     /// One descriptor **template** per adapter kind the registry holds, with
     /// `id == adapter_kind`: the kinds, declared paths, roles and write ops
@@ -85,6 +86,36 @@ pub trait AdapterRegistry: Send + Sync + 'static {
     /// [`SourceError::Protocol`] if no adapter answers to the instance's
     /// `kind`, or if the adapter rejected the configuration.
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError>;
+}
+
+/// [`AdapterRegistry::build`] on the blocking pool. Every caller on the
+/// runtime builds an adapter through here (#1705, ruling D9).
+///
+/// `build` is synchronous, and the `Source` SPI keeps it so. For an external
+/// adapter it instantiates the component and runs its `descriptor()` on a
+/// thread of its own, then joins that thread (ADR-0028). A caller on a
+/// runtime worker would hold the worker for as long as the component takes,
+/// which only the adapter's deadline bounds (600 s by default). A compiled-in
+/// adapter's build is a constructor, so the hop is its only cost.
+///
+/// A build that panicked, or that the runtime's shutdown cancelled before it
+/// started, is a [`SourceError::Protocol`] with no status: the adapter's own
+/// fault, which IPC answers as `internal` and a run logs as `error`. A caller
+/// dropped while the build runs does not cut it off. The build finishes on its
+/// blocking thread and the adapter it made is dropped there.
+///
+/// # Errors
+/// What [`AdapterRegistry::build`] answers, or the protocol error above.
+pub async fn build_off_runtime(
+    registry: &Arc<dyn AdapterRegistry>,
+    instance: SourceInstance,
+) -> Result<Box<dyn Source>, SourceError> {
+    let registry = Arc::clone(registry);
+    tokio::task::spawn_blocking(move || registry.build(instance))
+        .await
+        .map_err(|error| {
+            SourceError::protocol(format!("building the adapter did not finish: {error}"))
+        })?
 }
 
 /// Where a run gets the connection it holds for its whole duration.
@@ -332,6 +363,18 @@ pub(crate) async fn build_source(
     deps: &SchedulerDeps,
     cfg: &config::SourceConfigRow,
 ) -> Result<Box<dyn Source>, RunFailure> {
+    let instance = instance_for(deps, cfg).await?;
+    build_off_runtime(&deps.registry, instance)
+        .await
+        .map_err(RunFailure::Source)
+}
+
+/// What [`build_source`] builds from: the stored configuration and its secret.
+/// The keychain read is here, so a run that builds twice reads it once.
+async fn instance_for(
+    deps: &SchedulerDeps,
+    cfg: &config::SourceConfigRow,
+) -> Result<SourceInstance, RunFailure> {
     // One keychain read, both halves. The account is the optional second
     // credential of envelope version 2 (issue #452) and rides in the same
     // item, so asking for it is not a second trip to a store that may be
@@ -352,7 +395,7 @@ pub(crate) async fn build_source(
             (Some(stored.value), stored.account)
         }
     };
-    let instance = SourceInstance {
+    Ok(SourceInstance {
         id: cfg.id.clone(),
         kind: cfg.adapter_kind.clone(),
         display_name: cfg.display_name.clone(),
@@ -361,8 +404,7 @@ pub(crate) async fn build_source(
         secret,
         account,
         config: cfg.config.clone(),
-    };
-    deps.registry.build(instance).map_err(RunFailure::Source)
+    })
 }
 
 /// What a run does with the position the source has stored.
@@ -481,17 +523,21 @@ fn report(
     started: std::time::Instant,
     message: Option<String>,
 ) {
-    sink.report(SyncProgress {
+    crate::progress::deliver(
         run_id,
-        source_id: source_id.to_owned(),
-        phase,
-        items,
-        elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-        message,
-        walked: None,
-        of: None,
-        unit: None,
-    });
+        sink.as_ref(),
+        SyncProgress {
+            run_id,
+            source_id: source_id.to_owned(),
+            phase,
+            items,
+            elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            message,
+            walked: None,
+            of: None,
+            unit: None,
+        },
+    );
 }
 
 /// Milliseconds since a run started, saturating.
@@ -579,16 +625,71 @@ const DISCOVERABLE: [&str; 2] = ["epic_link_field", "sprint_field"];
 /// as long. Past this the run syncs as it would have, and asks again next time.
 const DISCOVERY_BUDGET: Duration = Duration::from_secs(10);
 
+/// The discoverable keys a far end answered and had nothing for, in this
+/// process (#1702, ruling D7).
+///
+/// A Jira without Jira Software has no Epic Link or Sprint field, and without
+/// this every scheduled run asked it again: a *Test connection* (three reads,
+/// up to [`DISCOVERY_BUDGET`]) each time. Kept in memory, not stored: a
+/// restart asks once more, which is the price of needing no migration (D7).
+/// Only an answer is remembered. A refusal or a timeout is asked again next
+/// run, since the far end may let that run in.
+///
+/// Keyed by [`FarEnd`], so a source pointed somewhere else is asked again. A
+/// credential changed in the keychain is not part of the key, so a source
+/// whose new credential could see the field learns it at the next restart, or
+/// from the reader typing it in. A handful of entries per source at most, so
+/// nothing is evicted.
+static ANSWERED_NOTHING: std::sync::LazyLock<std::sync::Mutex<HashSet<(FarEnd, &'static str)>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// What decides a discovery's answer: the source, its adapter, its address
+/// and its config **without** the discoverable keys, so recording one key does
+/// not make the other look like a new question.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct FarEnd {
+    source_id: String,
+    adapter_kind: String,
+    base_url: String,
+    config: String,
+}
+
+impl FarEnd {
+    fn of(cfg: &config::SourceConfigRow) -> FarEnd {
+        let mut config = cfg.config.clone();
+        if let Some(map) = config.as_object_mut() {
+            for key in DISCOVERABLE {
+                map.remove(key);
+            }
+        }
+        FarEnd {
+            source_id: cfg.id.clone(),
+            adapter_kind: cfg.adapter_kind.clone(),
+            base_url: cfg.base_url.clone(),
+            config: config.to_string(),
+        }
+    }
+}
+
+/// [`ANSWERED_NOTHING`], read or written. A poisoned lock is still a set of
+/// keys: the worst a half-finished insert leaves is one more question.
+fn answered_nothing() -> std::sync::MutexGuard<'static, HashSet<(FarEnd, &'static str)>> {
+    ANSWERED_NOTHING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// A source saved before its adapter could discover a field id gets that id
 /// once, at its next sync (#889).
 ///
-/// Only for keys the adapter's own `config_schema` declares **and** the stored
-/// config leaves empty, so a source with nothing to find costs nothing, and an
-/// id the reader typed is never asked about, let alone replaced
-/// ([`config::fill_missing`] repeats that rule inside the one statement). The
-/// discovery is best-effort: a source that fails or times out here
-/// ([`DISCOVERY_BUDGET`]) syncs as it did before, and the run reports the real
-/// failure itself.
+/// Only for keys the adapter's own `config_schema` declares, the stored config
+/// leaves empty, and the far end has not already answered nothing for
+/// ([`ANSWERED_NOTHING`]). So a source with nothing to find is asked once per
+/// process, and an id the reader typed is never asked about, let alone
+/// replaced ([`config::fill_missing`] repeats that rule inside the one
+/// statement). The discovery is best-effort: a source that fails or times out
+/// here ([`DISCOVERY_BUDGET`]) syncs as it did before, and the run reports the
+/// real failure itself.
 ///
 /// Returns the ids found for empty keys, or `None` when there is nothing to
 /// record, so the caller builds the adapter again only then. Nothing is
@@ -604,25 +705,37 @@ async fn discover(
         .into_iter()
         .find(|d| d.id == cfg.adapter_kind)
         .map(|d| d.config_schema);
-    let wanted: Vec<&str> = DISCOVERABLE
-        .into_iter()
-        .filter(|key| {
-            declared
-                .as_ref()
-                .is_some_and(|schema| schema["properties"].get(*key).is_some())
-                && !config::config_names(&cfg.config, key)
-        })
-        .collect();
+    let far_end = FarEnd::of(cfg);
+    let wanted: Vec<&'static str> = {
+        let answered = answered_nothing();
+        DISCOVERABLE
+            .into_iter()
+            .filter(|key| {
+                declared
+                    .as_ref()
+                    .is_some_and(|schema| schema["properties"].get(*key).is_some())
+                    && !config::config_names(&cfg.config, key)
+                    && !answered.contains(&(far_end.clone(), *key))
+            })
+            .collect()
+    };
     if wanted.is_empty() {
         return None;
     }
     let found: std::collections::BTreeMap<String, String> =
         match tokio::time::timeout(DISCOVERY_BUDGET, source.test_connection()).await {
-            Ok(Ok(info)) => info
-                .discovered
-                .into_iter()
-                .filter(|(key, _)| wanted.contains(&key.as_str()))
-                .collect(),
+            Ok(Ok(info)) => {
+                let found: std::collections::BTreeMap<String, String> = info
+                    .discovered
+                    .into_iter()
+                    .filter(|(key, _)| wanted.contains(&key.as_str()))
+                    .collect();
+                let mut answered = answered_nothing();
+                for key in wanted.iter().filter(|key| !found.contains_key(**key)) {
+                    answered.insert((far_end.clone(), *key));
+                }
+                found
+            }
             Ok(Err(error)) => {
                 tracing::debug!(source_id = %cfg.id, %error, "field discovery skipped");
                 return None;
@@ -635,17 +748,17 @@ async fn discover(
     (!found.is_empty()).then_some(found)
 }
 
-/// `cfg` as the run that records `found` builds its adapter: the stored config
-/// with each found id under its (empty) key.
+/// The config the run that records `found` builds its adapter from: the stored
+/// one with each found id under its (empty) key.
 fn with_discovered(
-    cfg: &config::SourceConfigRow,
+    config: &serde_json::Value,
     found: &std::collections::BTreeMap<String, String>,
-) -> config::SourceConfigRow {
-    let mut widened = cfg.clone();
-    if !widened.config.is_object() {
-        widened.config = serde_json::json!({});
+) -> serde_json::Value {
+    let mut widened = config.clone();
+    if !widened.is_object() {
+        widened = serde_json::json!({});
     }
-    if let Some(map) = widened.config.as_object_mut() {
+    if let Some(map) = widened.as_object_mut() {
         for (key, id) in found {
             map.insert(key.clone(), serde_json::Value::String(id.clone()));
         }
@@ -684,10 +797,20 @@ async fn attempt(
         .map_err(RunFailure::Db)?
         .ok_or(RunFailure::NotConfigured)?;
     let mut mode = mode;
-    let mut source = build_source(deps, &cfg).await?;
+    // One keychain read for the run, also when the adapter is built twice.
+    let instance = instance_for(deps, &cfg).await?;
+    let mut source = build_off_runtime(&deps.registry, instance.clone())
+        .await
+        .map_err(RunFailure::Source)?;
     let discovered = discover(deps, &cfg, source.as_ref()).await;
     if let Some(found) = &discovered {
-        source = build_source(deps, &with_discovered(&cfg, found)).await?;
+        let widened = SourceInstance {
+            config: with_discovered(&instance.config, found),
+            ..instance
+        };
+        source = build_off_runtime(&deps.registry, widened)
+            .await
+            .map_err(RunFailure::Source)?;
         // A new field id widens what the adapter keeps of every ticket, and an
         // incremental run re-fetches only what changed upstream, so a ticket
         // nobody touched would keep `sprints: []` for ever. The run that
@@ -728,8 +851,15 @@ async fn attempt(
     // one `match` gave four arms, two of which built the same decorator, and
     // made `(Some(sink), Backfill)` look like a case somebody had to reach for
     // it to be live code.
-    let observed =
-        progress.map(|sink| Observed::new(source.as_ref(), run_id, started, Arc::clone(sink)));
+    let observed = progress.map(|sink| {
+        Observed::new(
+            source.as_ref(),
+            source_id,
+            run_id,
+            started,
+            Arc::clone(sink),
+        )
+    });
     let watched: &dyn Source = match &observed {
         Some(o) => o,
         None => source.as_ref(),
@@ -1112,8 +1242,17 @@ pub const SYNC_CONCURRENCY: usize = 5;
 
 /// How often the ticker looks for due sources, unless [`SchedulerTiming`]
 /// says otherwise. One indexed query; a fixed interval is cheaper to reason
-/// about than a computed sleep, and five seconds is well inside the smallest
-/// interval a user can configure (60 s).
+/// about than a computed sleep.
+///
+/// A source runs up to one tick after it falls due, so the tick must stay
+/// well under the smallest interval a user can configure. That floor is each
+/// adapter's own `min_sync_interval_secs` (#1187): TeamCity declares 20 s,
+/// Uptime Kuma 45 s, every other adapter
+/// [`knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS`] (60 s). Five seconds is a
+/// quarter of the lowest compiled-in floor today. An external adapter's floor
+/// is whatever its descriptor says, and nothing here bounds it from below:
+/// against a floor near five seconds, a run up to one tick late nearly doubles
+/// the interval.
 const TICK: Duration = Duration::from_secs(5);
 
 /// How long the ticker waits before its first look, unless

@@ -169,7 +169,10 @@ pub enum Attach {
 ///
 /// **Every delivery this crate makes to a sink comes through here**, and that
 /// is the point of it being a free function rather than a method: the two
-/// [`Watchers`] fan-outs are not the only ones. `Scheduler`'s served-from-record
+/// [`Watchers`] fan-outs are not the only ones. The decorator's counting sink
+/// and the scheduler's `report` hand their messages to whatever sink
+/// `execute_run` was given, which is public and takes any sink, not only a
+/// [`Watchers`] (#1701). `Scheduler`'s served-from-record
 /// path hands a lone caller its synthesised ending directly, in the caller's own
 /// stack and under the scheduler's `runs` lock, so a panic there unwound out of
 /// `trigger` and into the command that called it. That is ADR-0005's own
@@ -309,6 +312,10 @@ const EVERY_N_ITEMS: u64 = 250;
 /// shape whether it wants progress or not.
 pub struct Observed<'a> {
     inner: &'a dyn Source,
+    /// The id every message names. The caller's, not read off `inner`: the
+    /// engine reads the descriptor once per run (#1701), through
+    /// [`Source::descriptor`] below.
+    source_id: String,
     run_id: i64,
     started: std::time::Instant,
     sink: std::sync::Arc<dyn ProgressSink>,
@@ -317,16 +324,19 @@ pub struct Observed<'a> {
 impl<'a> Observed<'a> {
     /// `started` is the *run's* start, not the decorator's, so `elapsed_ms`
     /// measures what the user has been waiting rather than when the wrapper
-    /// happened to be built.
+    /// happened to be built. `source_id` is the id the run is for, which the
+    /// scheduler's own messages name too.
     #[must_use]
     pub fn new(
         inner: &'a dyn Source,
+        source_id: &str,
         run_id: i64,
         started: std::time::Instant,
         sink: std::sync::Arc<dyn ProgressSink>,
     ) -> Observed<'a> {
         Observed {
             inner,
+            source_id: source_id.to_owned(),
             run_id,
             started,
             sink,
@@ -353,7 +363,6 @@ impl Source for Observed<'_> {
         cursor: Option<Cursor>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
-        let source_id = self.inner.descriptor().id;
         let mut counting = Counting {
             inner: sink,
             // So the first accepted item reports at once: a wizard that
@@ -363,7 +372,7 @@ impl Source for Observed<'_> {
             seen: 0,
             reading: None,
             run_id: self.run_id,
-            source_id,
+            source_id: self.source_id.clone(),
             started: self.started,
             sink: std::sync::Arc::clone(&self.sink),
         };
@@ -437,17 +446,21 @@ impl Counting<'_> {
             Some((done, of, unit)) => (Some(*done), *of, Some(unit.clone())),
             None => (None, None, None),
         };
-        self.sink.report(SyncProgress {
-            run_id: self.run_id,
-            source_id: self.source_id.clone(),
-            phase,
-            items: self.seen,
-            elapsed_ms: u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
-            message: None,
-            walked,
-            of,
-            unit,
-        });
+        deliver(
+            self.run_id,
+            self.sink.as_ref(),
+            SyncProgress {
+                run_id: self.run_id,
+                source_id: self.source_id.clone(),
+                phase,
+                items: self.seen,
+                elapsed_ms: u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                message: None,
+                walked,
+                of,
+                unit,
+            },
+        );
     }
 }
 

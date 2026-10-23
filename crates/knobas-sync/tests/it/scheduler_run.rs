@@ -51,6 +51,9 @@ struct MockRegistry {
     /// mock's [`Fault`] has no member for. TeamCity's deleted-watermark
     /// refusal is one (#1477).
     protocol: Mutex<bool>,
+    /// How many times an adapter this registry built was asked for its
+    /// descriptor. A run asks once (#1701).
+    descriptor_calls: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl AdapterRegistry for MockRegistry {
@@ -69,6 +72,7 @@ impl AdapterRegistry for MockRegistry {
             inner,
             cursors: Arc::clone(&self.cursors),
             protocol: *self.protocol.lock().unwrap(),
+            descriptor_calls: Arc::clone(&self.descriptor_calls),
         }))
     }
 }
@@ -80,6 +84,7 @@ struct Renamed {
     inner: MockSource,
     cursors: Arc<Mutex<Vec<Option<knobas_source::Cursor>>>>,
     protocol: bool,
+    descriptor_calls: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 #[async_trait::async_trait]
@@ -94,6 +99,8 @@ impl Source for Renamed {
     }
 
     fn descriptor(&self) -> SourceDescriptor {
+        self.descriptor_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         SourceDescriptor {
             id: self.id.clone(),
             ..self.inner.descriptor()
@@ -227,6 +234,7 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
         tombstone: Mutex::new(false),
         cursors: Arc::new(Mutex::new(Vec::new())),
         protocol: Mutex::new(false),
+        descriptor_calls: Arc::default(),
     });
 
     Harness {
@@ -898,6 +906,168 @@ async fn a_run_with_no_channel_reports_nothing() {
         0,
         "a sink nobody attached must never be reported to"
     );
+}
+
+/// A run reads its adapter's descriptor once, watched or not (#1701), so
+/// every value it takes from the descriptor comes from the same answer, also
+/// from an adapter whose `descriptor()` is not pure.
+#[tokio::test]
+async fn a_run_reads_the_descriptor_once_watched_or_not() {
+    #[derive(Default)]
+    struct Recorder(Mutex<usize>);
+    impl knobas_sync::progress::ProgressSink for Recorder {
+        fn report(&self, _progress: knobas_sync::progress::SyncProgress) {
+            *self.0.lock().unwrap() += 1;
+        }
+    }
+    let calls = |h: &Harness| {
+        h.registry
+            .descriptor_calls
+            .swap(0, std::sync::atomic::Ordering::SeqCst)
+    };
+
+    let h = harness(AuthKind::None, false).await;
+    let (_, unwatched) = one_run(&h, SyncTrigger::Manual).await;
+    assert_eq!(unwatched.outcome, SyncOutcome::Ok);
+    assert_eq!(calls(&h), 1, "an unwatched run");
+
+    let sink = Arc::new(Recorder::default());
+    let run_id = run_log::start(&h.deps.pool, &h.id, SyncTrigger::Manual)
+        .await
+        .unwrap();
+    let watched = knobas_sync::scheduler::execute_run(
+        &h.deps,
+        &h.id,
+        run_id,
+        RunMode::Incremental,
+        Some(sink.clone()),
+        std::time::Instant::now(),
+    )
+    .await;
+    assert_eq!(watched.outcome, SyncOutcome::Ok);
+    assert!(*sink.0.lock().unwrap() > 0, "the run was watched");
+    assert_eq!(calls(&h), 1, "a watched run");
+}
+
+/// How long a [`Dwelling`] build waits for the test to let it go before it
+/// finishes anyway: a build held on the only worker then ends the test
+/// instead of hanging it.
+const HOLD: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// A registry whose builds wait until the test lets them go, the way an
+/// external adapter's does while its component's `descriptor()` dwells, and
+/// that says when one has started and whether one has finished.
+struct Dwelling {
+    inner: Arc<MockRegistry>,
+    entered: std::sync::mpsc::Sender<()>,
+    /// Its sender dropped lets every build go.
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+    finished: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl AdapterRegistry for Dwelling {
+    fn descriptors(&self) -> Vec<SourceDescriptor> {
+        self.inner.descriptors()
+    }
+    fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
+        let _ = self.entered.send(());
+        let _ = self.release.lock().unwrap().recv_timeout(HOLD);
+        self.finished
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.inner.build(instance)
+    }
+}
+
+/// A run builds its adapter off the runtime (#1705): on one worker, a build
+/// held there would hold every other command until it finished. The second
+/// command here is sent once the build has started, and answers while it is
+/// still going.
+///
+/// No wall-clock bound: the build waits for the test, so a green command
+/// answers before it finishes however slow it is, and a build held on the
+/// worker has finished (after [`HOLD`]) before the command can start.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn a_run_whose_adapter_is_slow_to_build_holds_no_worker() {
+    let h = harness(AuthKind::None, false).await;
+    let (entered, built) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let deps = Arc::new(SchedulerDeps {
+        pool: h.deps.pool.clone(),
+        connections: Arc::clone(&h.deps.connections),
+        registry: Arc::new(Dwelling {
+            inner: Arc::clone(&h.registry),
+            entered,
+            release: Mutex::new(held),
+            finished: Arc::clone(&finished),
+        }),
+        secrets: Arc::clone(&h.deps.secrets),
+        events: Arc::clone(&h.deps.events),
+        timing: h.deps.timing,
+    });
+    let run_id = run_log::start(&deps.pool, &h.id, SyncTrigger::Manual)
+        .await
+        .unwrap();
+    let running = tokio::spawn({
+        let (deps, id) = (Arc::clone(&deps), h.id.clone());
+        async move {
+            knobas_sync::scheduler::execute_run(
+                &deps,
+                &id,
+                run_id,
+                RunMode::Incremental,
+                None,
+                std::time::Instant::now(),
+            )
+            .await
+        }
+    });
+    // The test's own thread, not the worker, waits here.
+    built
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("the run builds its adapter");
+
+    let (pool, id) = (deps.pool.clone(), h.id.clone());
+    let listed = tokio::spawn(async move { run_log::list(&pool, Some(&id), 1).await })
+        .await
+        .unwrap();
+    assert!(listed.is_ok(), "{:?}", listed.err());
+    assert!(
+        !finished.load(std::sync::atomic::Ordering::SeqCst),
+        "the command answered only once the build had finished"
+    );
+    drop(release);
+    assert_eq!(running.await.unwrap().outcome, SyncOutcome::Ok);
+}
+
+/// `execute_run` is public and takes any sink, not only the scheduler's
+/// fan-out. A sink that panics loses its messages and the run still finishes:
+/// the scheduler's own `Started` and the decorator's `Fetching` and `Writing`
+/// go through `deliver` as the fan-outs do (#1701).
+#[tokio::test]
+async fn a_sink_that_panics_does_not_unwind_the_run() {
+    struct Panicking;
+    impl knobas_sync::progress::ProgressSink for Panicking {
+        fn report(&self, progress: knobas_sync::progress::SyncProgress) {
+            panic!("a broken sink, handed {:?}", progress.phase);
+        }
+    }
+
+    let h = harness(AuthKind::None, false).await;
+    let run_id = run_log::start(&h.deps.pool, &h.id, SyncTrigger::Manual)
+        .await
+        .unwrap();
+    let result = knobas_sync::scheduler::execute_run(
+        &h.deps,
+        &h.id,
+        run_id,
+        RunMode::Incremental,
+        Some(Arc::new(Panicking)),
+        std::time::Instant::now(),
+    )
+    .await;
+    assert_eq!(result.outcome, SyncOutcome::Ok, "{:?}", result.error);
+    assert!(result.counts.upserted > 0, "the adapter's items landed");
 }
 
 /// `RunMode::Backfill` is what the scheduler does with #32's third part, and

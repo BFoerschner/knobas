@@ -56,6 +56,10 @@
 //!   reader's log, for the host's bound on its lines (#1641).
 //! * **`"download_mib"`** is how many MiB a download of every artifact
 //!   streams (default 1).
+//! * **`"descriptor_dwell_ms"`** makes `descriptor` wait that long on the
+//!   host's clock before it answers: a component slow to describe itself,
+//!   for the callers that build one off the runtime (#1705). The descriptor
+//!   read at load is of an empty config, so it never waits.
 //! * **`translate-query`** (#1208) reads a payload's `"survey_query"`
 //!   string as one `label` condition and leaves nothing out; a payload
 //!   without one it does not translate (`none`).
@@ -172,6 +176,8 @@ pub struct Adapter {
     download_mib: u64,
     /// How many times `test_connection` logs [`FLOOD_BYTES`] bytes.
     log_flood: u64,
+    /// How long `descriptor` waits before it answers, in milliseconds.
+    descriptor_dwell_ms: u64,
 }
 
 /// The size of one message of a log flood.
@@ -211,6 +217,7 @@ fn read_fault(config: &str) -> Result<Fault, String> {
             "fetch_times",
             "download_mib",
             "log_flood",
+            "descriptor_dwell_ms",
             "mirror",
             "username",
         ]
@@ -391,6 +398,7 @@ impl GuestAdapter for Adapter {
             fetch_times: read("fetch_times").unwrap_or(1).max(1),
             download_mib: read("download_mib").unwrap_or(1),
             log_flood: read("log_flood").unwrap_or(0),
+            descriptor_dwell_ms: read("descriptor_dwell_ms").unwrap_or(0),
             received: serde_json::json!({
                 "id": instance.id,
                 "kind": instance.kind,
@@ -404,6 +412,12 @@ impl GuestAdapter for Adapter {
     }
 
     fn descriptor(&self) -> String {
+        if self.descriptor_dwell_ms > 0 {
+            wasip2::clocks::monotonic_clock::subscribe_duration(
+                self.descriptor_dwell_ms.saturating_mul(1_000_000),
+            )
+            .block();
+        }
         let [pipeline, run] = builds::kinds();
         let descriptor = SourceDescriptor {
             id: self.id.clone(),
@@ -440,6 +454,7 @@ impl GuestAdapter for Adapter {
                     "fetch_times": { "type": "integer" },
                     "download_mib": { "type": "integer" },
                     "log_flood": { "type": "integer" },
+                    "descriptor_dwell_ms": { "type": "integer" },
                     "mirror": { "type": "string" },
                     "username": { "type": "string" },
                 },

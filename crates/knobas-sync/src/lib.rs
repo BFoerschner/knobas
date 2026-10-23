@@ -447,27 +447,14 @@ async fn run_inner(
     source: &dyn Source,
     from: CursorSource,
 ) -> Result<SyncReport, SyncError> {
+    // The run's only read of the descriptor (#1701): two reads of an adapter
+    // whose `descriptor()` is not pure could disagree within one run. A
+    // built-in adapter builds its descriptor afresh on every call; an
+    // external one answers a copy of what its build read
+    // (`knobas_wasm_host`'s `WasmSource::descriptor`).
     let descriptor = source.descriptor();
     check_source_id(&descriptor.id)?;
-    // Read before the descriptor is taken apart below. `None` is "this source
-    // emits no monitors"; `Some(paths)` carries the declaration a sample's
-    // state and reading are read through (#277, #1224, ADR-0007).
-    let monitor_paths = samples::monitor_paths(&descriptor);
-    let source_id = descriptor.id;
-    // Two sets out of one list: everything the sink will accept, and the
-    // subset the sweep may act on. Both are read here, before `entity_kinds`
-    // is consumed.
-    let exhaustive: HashSet<String> = descriptor
-        .entity_kinds
-        .iter()
-        .filter(|kind| kind.full_sync_exhaustive)
-        .map(|kind| kind.id.clone())
-        .collect();
-    let kinds: HashSet<String> = descriptor
-        .entity_kinds
-        .into_iter()
-        .map(|kind| kind.id)
-        .collect();
+    let (source_id, declared) = Declared::of(descriptor);
 
     let mut tx = match host {
         Host::Pool(pool) => pool.begin().await?,
@@ -485,16 +472,7 @@ async fn run_inner(
     // connection happened to be used again -- and the next run of the same
     // source would block on it for ever. Found by a test that failed one run
     // and then ran another on the same connection.
-    let locked = run_locked(
-        &mut tx,
-        source,
-        &source_id,
-        kinds,
-        exhaustive,
-        monitor_paths.as_ref(),
-        from,
-    )
-    .await;
+    let locked = run_locked(&mut tx, source, &source_id, declared, from).await;
     let locked = match locked {
         Ok(locked) => locked,
         Err(error) => {
@@ -563,6 +541,62 @@ async fn run_inner(
     Ok(report)
 }
 
+/// What a run takes from its adapter's descriptor, read once in [`run_inner`]
+/// and handed to [`run_locked`] (#1701).
+struct Declared {
+    /// Every kind the sink accepts.
+    kinds: HashSet<String>,
+    /// The subset of [`kinds`](Self::kinds) the sweep may act on.
+    exhaustive: HashSet<String>,
+    /// `None` is "this source emits no monitors"; `Some(paths)` carries the
+    /// declaration a sample's state and reading are read through (#277,
+    /// #1224, ADR-0007).
+    monitor_paths: Option<knobas_core::payload::KindPaths>,
+    /// Whether this source declares saved views (#1207), which gates their
+    /// projection: kinds declaring the saved-view frame the ticket-system
+    /// minimum names, never an adapter's kind id.
+    saved_views: Option<saved_views::SavedViewKinds>,
+    /// The roles the source claims, as the run judges them. Built from the
+    /// descriptor the run syncs under, so an external adapter's claims are
+    /// held as a built-in's are.
+    role_check: knobas_source::role::data::DataCheck,
+    /// What the job contexts' status is read through (#1501).
+    payload_paths: Vec<knobas_core::payload::KindPaths>,
+}
+
+impl Declared {
+    /// The source id, and everything else the run reads off `descriptor`.
+    fn of(descriptor: knobas_source::SourceDescriptor) -> (String, Declared) {
+        let monitor_paths = samples::monitor_paths(&descriptor);
+        let saved_views = saved_views::declared(&descriptor);
+        let role_check = knobas_source::role::data::DataCheck::new(&descriptor);
+        // Two sets out of one list: everything the sink will accept, and the
+        // subset the sweep may act on.
+        let exhaustive: HashSet<String> = descriptor
+            .entity_kinds
+            .iter()
+            .filter(|kind| kind.full_sync_exhaustive)
+            .map(|kind| kind.id.clone())
+            .collect();
+        let kinds: HashSet<String> = descriptor
+            .entity_kinds
+            .into_iter()
+            .map(|kind| kind.id)
+            .collect();
+        (
+            descriptor.id,
+            Declared {
+                kinds,
+                exhaustive,
+                monitor_paths,
+                saved_views,
+                role_check,
+                payload_paths: descriptor.payload_paths,
+            },
+        )
+    }
+}
+
 /// What the locked section produced, before the commit.
 struct Locked {
     cursor: Cursor,
@@ -583,11 +617,17 @@ async fn run_locked(
     tx: &mut Transaction<'_, Postgres>,
     source: &dyn Source,
     source_id: &str,
-    kinds: HashSet<String>,
-    exhaustive: HashSet<String>,
-    monitor_paths: Option<&knobas_core::payload::KindPaths>,
+    declared: Declared,
     from: CursorSource,
 ) -> Result<Locked, SyncError> {
+    let Declared {
+        kinds,
+        exhaustive,
+        monitor_paths,
+        saved_views,
+        role_check,
+        payload_paths,
+    } = declared;
     // Held until this transaction ends, however it ends. Two runs of one source
     // would otherwise take the same rows in whatever order their batches
     // happened to fall in, and a run holds its locks across every batch.
@@ -635,17 +675,10 @@ async fn run_locked(
         }
     };
     let full_sync = cursor.is_none();
-    // Whether this source declares saved views (#1207), which gates their
-    // projection below: kinds declaring the saved-view frame the
-    // ticket-system minimum names, never an adapter's kind id.
-    let saved_views = saved_views::declared(&source.descriptor());
 
     // What is kept of the source's roles, and whether this run judges them:
     // its first sync does, and a later one while a role is unjudged or missed
     // (`role_check`).
-    // Built from the descriptor the run syncs under, so an external adapter's
-    // claims are held as a built-in's are.
-    let role_check = knobas_source::role::data::DataCheck::new(&source.descriptor());
     let kept_roles = role_check::load(tx, source_id).await?;
     let role_check = (!role_check.is_empty() && role_check::wanted(&role_check, &kept_roles))
         .then_some(role_check);
@@ -730,7 +763,7 @@ async fn run_locked(
     //    whose cursor is a digest emits *nothing* on an unchanged source
     //    (contract §4.2 E) and the roster is still exactly as up as it was.
     //    `samples` records the argument in full.
-    if let Some(declared) = monitor_paths {
+    if let Some(declared) = &monitor_paths {
         samples::append(tx, source_id, declared).await?;
         // And the alerts, immediately after and in the same transaction
         // (spec #427, issue #444): the reconcile reads the newest sample of
@@ -783,8 +816,7 @@ async fn run_locked(
     knobas_core::context::follow_status(
         &mut **tx,
         source_id,
-        &knobas_core::payload::Declarations::empty()
-            .with(source_id, source.descriptor().payload_paths),
+        &knobas_core::payload::Declarations::empty().with(source_id, payload_paths),
     )
     .await?;
 

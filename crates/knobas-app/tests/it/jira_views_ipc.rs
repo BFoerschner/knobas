@@ -518,10 +518,15 @@ async fn make_an_editable_copy_asks_the_saved_views_source_to_translate_its_quer
         .unwrap();
     let registry = knobas_app::sources::Registry::for_process();
 
-    let copy = ticket_views::translate(&pool, &secrets, &registry, &id)
-        .await
-        .expect("the read answers")
-        .expect("Jira translates its views' JQL");
+    let copy = ticket_views::translate(
+        &pool,
+        &secrets,
+        &crate::support::shared(registry.clone()),
+        &id,
+    )
+    .await
+    .expect("the read answers")
+    .expect("Jira translates its views' JQL");
     assert_eq!(
         serde_json::to_value(copy).unwrap(),
         json!({
@@ -557,21 +562,36 @@ async fn make_an_editable_copy_asks_the_saved_views_source_to_translate_its_quer
     let mut draft = own_draft(format!("Mock {p}"));
     draft.saved_view = Some(mock_ref);
     let mock_view = ticket_views::save(&pool, draft).await.unwrap();
-    let none = ticket_views::translate(&pool, &secrets, &registry, &mock_view.id)
-        .await
-        .expect("the read answers");
+    let none = ticket_views::translate(
+        &pool,
+        &secrets,
+        &crate::support::shared(registry.clone()),
+        &mock_view.id,
+    )
+    .await
+    .expect("the read answers");
     assert_eq!(none, None);
 
     // A view of your own has no source query; no view is no view.
     let own = ticket_views::save(&pool, own_draft(format!("Own {p}")))
         .await
         .unwrap();
-    let refused = ticket_views::translate(&pool, &secrets, &registry, &own.id)
-        .await
-        .unwrap_err();
+    let refused = ticket_views::translate(
+        &pool,
+        &secrets,
+        &crate::support::shared(registry.clone()),
+        &own.id,
+    )
+    .await
+    .unwrap_err();
     assert_eq!(refused.code, IpcErrorCode::Invalid, "{refused:?}");
-    let missing = ticket_views::translate(&pool, &secrets, &registry, "no-such-view-1208")
-        .await
-        .unwrap_err();
+    let missing = ticket_views::translate(
+        &pool,
+        &secrets,
+        &crate::support::shared(registry.clone()),
+        "no-such-view-1208",
+    )
+    .await
+    .unwrap_err();
     assert_eq!(missing.code, IpcErrorCode::NotFound, "{missing:?}");
 }

@@ -465,6 +465,12 @@ async fn a_pin_is_kept_until_it_is_taken_back() {
 /// (`live_teamcity_seeded.rs`).
 struct Answering;
 
+/// [`Answering`] as the reads take a registry: shared, so a build can run on
+/// the blocking pool (#1705).
+fn answering() -> std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry> {
+    std::sync::Arc::new(Answering)
+}
+
 impl knobas_sync::scheduler::AdapterRegistry for Answering {
     fn descriptors(&self) -> Vec<knobas_source::SourceDescriptor> {
         knobas_app::sources::Registry::for_process().descriptors()
@@ -720,10 +726,16 @@ async fn older_runs_are_the_sources_answer_read_through_the_run_declarations() {
     )
     .await;
 
-    let older =
-        older_pipeline_runs_inner(&pool, &no_secrets(), &Answering, &tests, &oldest, Some(10))
-            .await
-            .unwrap();
+    let older = older_pipeline_runs_inner(
+        &pool,
+        &no_secrets(),
+        &answering(),
+        &tests,
+        &oldest,
+        Some(10),
+    )
+    .await
+    .unwrap();
     let ids: Vec<&str> = older.iter().map(|r| r.entity_id.as_str()).collect();
     assert_eq!(
         ids,
@@ -764,7 +776,7 @@ async fn older_runs_are_the_sources_answer_read_through_the_run_declarations() {
     assert_eq!(older[1].tests, None);
 
     let capped =
-        older_pipeline_runs_inner(&pool, &no_secrets(), &Answering, &tests, &oldest, Some(1))
+        older_pipeline_runs_inner(&pool, &no_secrets(), &answering(), &tests, &oldest, Some(1))
             .await
             .unwrap();
     assert_eq!(capped.len(), 1);
@@ -789,7 +801,7 @@ async fn older_runs_of_no_pipeline_or_a_foreign_run_are_refused() {
     .await;
     let code = |r: Result<Vec<_>, knobas_app::IpcError>| r.unwrap_err().code;
     assert_eq!(
-        code(older_pipeline_runs_inner(&pool, &no_secrets(), &Answering, &run, &run, None).await),
+        code(older_pipeline_runs_inner(&pool, &no_secrets(), &answering(), &run, &run, None).await),
         knobas_app::IpcErrorCode::NotFound
     );
     assert_eq!(
@@ -797,7 +809,7 @@ async fn older_runs_of_no_pipeline_or_a_foreign_run_are_refused() {
             older_pipeline_runs_inner(
                 &pool,
                 &no_secrets(),
-                &Answering,
+                &answering(),
                 &tests,
                 "other:build:1",
                 None
@@ -808,7 +820,8 @@ async fn older_runs_of_no_pipeline_or_a_foreign_run_are_refused() {
     );
     assert_eq!(
         code(
-            older_pipeline_runs_inner(&pool, &no_secrets(), &Answering, "no id", &run, None).await
+            older_pipeline_runs_inner(&pool, &no_secrets(), &answering(), "no id", &run, None)
+                .await
         ),
         knobas_app::IpcErrorCode::Invalid
     );
@@ -844,7 +857,7 @@ async fn settings_name_the_mirrored_repository_by_its_id() {
     .await
     .unwrap();
 
-    let settings = pipeline_settings_inner(&pool, &no_secrets(), &Answering, &tests)
+    let settings = pipeline_settings_inner(&pool, &no_secrets(), &answering(), &tests)
         .await
         .unwrap()
         .expect("a TeamCity pipeline has settings");
@@ -858,7 +871,7 @@ async fn settings_name_the_mirrored_repository_by_its_id() {
     // #1016: the steps a run takes cross as the source named them.
     assert_eq!(settings.steps, ["Checkout", "cargo test"]);
 
-    let failed = pipeline_settings_inner(&pool, &no_secrets(), &Answering, &down)
+    let failed = pipeline_settings_inner(&pool, &no_secrets(), &answering(), &down)
         .await
         .unwrap_err();
     assert_eq!(failed.code, knobas_app::IpcErrorCode::Unreachable);
@@ -877,7 +890,7 @@ async fn a_runs_chain_is_the_sources_answer_read_through_the_run_declarations() 
     let chain = run_chain_inner(
         &pool,
         &no_secrets(),
-        &Answering,
+        &answering(),
         &format!("{tc}:build:1200"),
     )
     .await
@@ -916,16 +929,21 @@ async fn a_runs_chain_is_the_sources_answer_read_through_the_run_declarations() 
         Some("SUCCESS")
     );
 
-    let none = run_chain_inner(&pool, &no_secrets(), &Answering, &format!("{tc}:build:7"))
+    let none = run_chain_inner(&pool, &no_secrets(), &answering(), &format!("{tc}:build:7"))
         .await
         .unwrap();
     assert!(none.is_empty());
 
-    let failed = run_chain_inner(&pool, &no_secrets(), &Answering, &format!("{tc}:build:404"))
-        .await
-        .unwrap_err();
+    let failed = run_chain_inner(
+        &pool,
+        &no_secrets(),
+        &answering(),
+        &format!("{tc}:build:404"),
+    )
+    .await
+    .unwrap_err();
     assert_eq!(failed.code, knobas_app::IpcErrorCode::Unreachable);
-    let bad = run_chain_inner(&pool, &no_secrets(), &Answering, "not an id")
+    let bad = run_chain_inner(&pool, &no_secrets(), &answering(), "not an id")
         .await
         .unwrap_err();
     assert_eq!(bad.code, knobas_app::IpcErrorCode::Invalid);
@@ -1224,7 +1242,7 @@ async fn a_shared_sha_links_the_commit_in_the_repository_the_pipeline_builds() {
 
     // The pipeline builds payout-service on gitea.example: the shared sha is
     // that repository's commit, not the fork's.
-    let live = pipeline_runs_live_inner(&pool, &no_secrets(), &Answering, &tests, None)
+    let live = pipeline_runs_live_inner(&pool, &no_secrets(), &answering(), &tests, None)
         .await
         .unwrap();
     assert_eq!(
@@ -1234,7 +1252,7 @@ async fn a_shared_sha_links_the_commit_in_the_repository_the_pipeline_builds() {
 
     // A pipeline whose settings cannot be read: the shared sha links nothing,
     // the sha one commit holds still links it.
-    let unread = pipeline_runs_live_inner(&pool, &no_secrets(), &Answering, &down, None)
+    let unread = pipeline_runs_live_inner(&pool, &no_secrets(), &answering(), &down, None)
         .await
         .unwrap();
     assert_eq!(commits(unread), [(b4, Some(alone.clone())), (b3, None)]);
@@ -1341,7 +1359,7 @@ async fn a_shared_sha_links_nothing_it_cannot_pin_and_never_waits_on_a_silent_so
             .collect::<Vec<_>>()
     };
 
-    let live = pipeline_runs_live_inner(&pool, &no_secrets(), &Answering, &tests, None)
+    let live = pipeline_runs_live_inner(&pool, &no_secrets(), &answering(), &tests, None)
         .await
         .unwrap();
     assert_eq!(
@@ -1353,7 +1371,7 @@ async fn a_shared_sha_links_nothing_it_cannot_pin_and_never_waits_on_a_silent_so
     );
 
     let started = std::time::Instant::now();
-    let silent = pipeline_runs_live_inner(&pool, &no_secrets(), &Answering, &slow, None)
+    let silent = pipeline_runs_live_inner(&pool, &no_secrets(), &answering(), &slow, None)
         .await
         .unwrap();
     assert!(

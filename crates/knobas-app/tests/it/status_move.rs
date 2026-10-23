@@ -380,7 +380,7 @@ async fn reachable(state: &SourcesState, entity: &str) -> Result<Vec<String>, St
     knobas_app::sources::crud::reachable_transitions(
         &state.pool,
         &state.secrets,
-        state.registry.as_ref(),
+        &state.registry,
         entity,
     )
     .await

@@ -874,6 +874,97 @@ async fn harness() -> Harness {
     }
 }
 
+/// How long a [`Dwelling`] build waits for the test to let it go before it
+/// finishes anyway: a build held on the only worker then ends the test
+/// instead of hanging it.
+const HOLD: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// A registry whose builds wait until the test lets them go, the way an
+/// external adapter's does while its component's `descriptor()` dwells, and
+/// that says when one has started and whether one has finished.
+struct Dwelling {
+    inner: Arc<dyn AdapterRegistry>,
+    entered: std::sync::mpsc::Sender<()>,
+    /// Its sender dropped lets every build go.
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+    finished: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl AdapterRegistry for Dwelling {
+    fn descriptors(&self) -> Vec<SourceDescriptor> {
+        self.inner.descriptors()
+    }
+
+    fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
+        let _ = self.entered.send(());
+        let _ = self.release.lock().unwrap().recv_timeout(HOLD);
+        self.finished
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.inner.build(instance)
+    }
+}
+
+/// A flush builds its adapter off the runtime (#1705): on one worker, a
+/// build held there would hold every other command until it finished. The
+/// second command here is sent once the build has started, and answers while
+/// it is still going.
+///
+/// No wall-clock bound: the build waits for the test, so a green command
+/// answers before it finishes however slow it is, and a build held on the
+/// worker has finished (after [`HOLD`]) before the command can start.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn a_flush_whose_adapter_is_slow_to_build_holds_no_worker() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-1", "a payout fails").await;
+    let (entered, built) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let deps = Arc::new(SchedulerDeps {
+        pool: h.deps.pool.clone(),
+        connections: Arc::clone(&h.deps.connections),
+        registry: Arc::new(Dwelling {
+            inner: Arc::clone(&h.deps.registry),
+            entered,
+            release: Mutex::new(held),
+            finished: Arc::clone(&finished),
+        }),
+        secrets: Arc::clone(&h.deps.secrets),
+        events: Arc::clone(&h.deps.events),
+        timing: h.deps.timing,
+    });
+    let write = flusher::queue(
+        &deps,
+        &h.source,
+        WriteOp::Comment {
+            entity: ticket.to_string(),
+            body: "on it".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    let flushing = tokio::spawn({
+        let deps = Arc::clone(&deps);
+        async move { flusher::flush_entity_of(&deps, write.id).await }
+    });
+    // The test's own thread, not the worker, waits here.
+    built
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("the flush builds its adapter");
+
+    let pool = deps.pool.clone();
+    let read = tokio::spawn(async move { store::get(&pool, write.id).await })
+        .await
+        .unwrap();
+    assert!(read.is_ok(), "{:?}", read.err());
+    assert!(
+        !finished.load(std::sync::atomic::Ordering::SeqCst),
+        "the command answered only once the build had finished"
+    );
+    drop(release);
+    flushing.await.unwrap().unwrap();
+    assert_eq!(h.delivered(), vec!["on it".to_owned()]);
+}
+
 /// The happy path, and story 20's first two lines: a write that can go, goes,
 /// and both the queueing and the delivery are in the activity stream.
 #[tokio::test]

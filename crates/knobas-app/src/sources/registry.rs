@@ -158,8 +158,9 @@ impl Registry {
     ///
     /// Bring-up and [`Lifecycle`](crate::Lifecycle)'s default are the only
     /// callers, and a scan test keeps it so (#1323). A read takes the lifecycle's
-    /// registry as `&dyn AdapterRegistry` instead, so a test can give it one
-    /// of its own.
+    /// registry as a trait object instead (`&dyn AdapterRegistry`, or
+    /// `&Arc<dyn AdapterRegistry>` where it builds an adapter, #1705), so a
+    /// test can give it one of its own.
     #[must_use]
     pub fn for_process() -> Registry {
         static PROCESS: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
@@ -422,9 +423,9 @@ mod tests {
     #[test]
     fn a_source_of_an_adapter_refused_at_load_fails_with_the_reason() {
         use knobas_sync::scheduler::AdapterRegistry as _;
-        let registry = Registry::default();
-        registry.refuse("wasm-fixture", "its hash changed".to_owned());
-        let Err(error) = registry.build(fixture_instance()) else {
+        let refusing = Registry::default();
+        refusing.refuse("wasm-fixture", "its hash changed".to_owned());
+        let Err(error) = refusing.build(fixture_instance()) else {
             panic!("a refused adapter must not build");
         };
         assert!(error.to_string().contains("its hash changed"), "{error}");
@@ -451,9 +452,9 @@ mod tests {
     }
 
     /// **Only bring-up and the lifecycle's default reach the process registry**
-    /// (#1305, #1323). Every other read takes the registry it is given as
-    /// `&dyn AdapterRegistry`, which is what lets a test hand it one of its
-    /// own; a third direct call is the second route growing back.
+    /// (#1305, #1323). Every other read takes the registry it is given as a
+    /// trait object, which is what lets a test hand it one of its own; a
+    /// third direct call is the second route growing back.
     ///
     /// Scans the non-test source of the app crate: every item gated by
     /// `#[cfg(test)]` is skipped (it ends at the first line at the attribute's
@@ -548,7 +549,7 @@ mod tests {
         assert_eq!(
             found, expected,
             "Registry::for_process() may be called from exactly two places: {sites}. \
-             Every other read takes the registry it is given (`&dyn AdapterRegistry`, from \
+             Every other read takes the registry it is given (a trait object, from \
              the lifecycle or the sources state). Found at: {at}"
         );
     }

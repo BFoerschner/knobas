@@ -35,6 +35,12 @@ fn no_secrets() -> std::sync::Arc<dyn knobas_secrets::SecretStore> {
 
 struct Answering;
 
+/// [`Answering`] as the reads take a registry: shared, so a build can run on
+/// the blocking pool (#1705).
+fn answering() -> std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry> {
+    std::sync::Arc::new(Answering)
+}
+
 impl knobas_sync::scheduler::AdapterRegistry for Answering {
     fn descriptors(&self) -> Vec<knobas_source::SourceDescriptor> {
         knobas_app::sources::Registry::for_process().descriptors()
@@ -198,7 +204,7 @@ async fn each_run_read_reaches_the_runs_own_source_with_the_cap_applied() {
     let run = format!("{tc}:build:7");
     let s = no_secrets();
 
-    let whole = run_log_inner(&pool, &s, &Answering, &run, None, None)
+    let whole = run_log_inner(&pool, &s, &answering(), &run, None, None)
         .await
         .unwrap()
         .unwrap();
@@ -206,7 +212,7 @@ async fn each_run_read_reaches_the_runs_own_source_with_the_cap_applied() {
     let over = run_log_inner(
         &pool,
         &s,
-        &Answering,
+        &answering(),
         &run,
         Some(3),
         Some(LOG_LINES_MAX * 5),
@@ -221,27 +227,27 @@ async fn each_run_read_reaches_the_runs_own_source_with_the_cap_applied() {
     );
 
     assert!(
-        run_tests_inner(&pool, &s, &Answering, &run)
+        run_tests_inner(&pool, &s, &answering(), &run)
             .await
             .unwrap()
             .is_some()
     );
-    let history = test_history_inner(&pool, &s, &Answering, &run, "-12")
+    let history = test_history_inner(&pool, &s, &answering(), &run, "-12")
         .await
         .unwrap()
         .unwrap();
     assert_eq!(history[0].number.as_deref(), Some("-12"));
-    let folder = run_artifacts_inner(&pool, &s, &Answering, &run, Some("logs"))
+    let folder = run_artifacts_inner(&pool, &s, &answering(), &run, Some("logs"))
         .await
         .unwrap()
         .unwrap();
     assert_eq!(folder[0].path, "logs/x");
-    let root = run_artifacts_inner(&pool, &s, &Answering, &run, None)
+    let root = run_artifacts_inner(&pool, &s, &answering(), &run, None)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(root[0].path, "/x", "no path is the root, \"\"");
-    let preview = artifact_preview_inner(&pool, &s, &Answering, &run, "logs/a.log")
+    let preview = artifact_preview_inner(&pool, &s, &answering(), &run, "logs/a.log")
         .await
         .unwrap()
         .unwrap();
@@ -258,7 +264,7 @@ async fn a_bad_address_or_path_is_refused_and_a_foreign_run_is_the_sources_refus
 
     assert_eq!(
         code(
-            run_log_inner(&pool, &s, &Answering, "no id", None, None)
+            run_log_inner(&pool, &s, &answering(), "no id", None, None)
                 .await
                 .unwrap_err()
         ),
@@ -266,7 +272,7 @@ async fn a_bad_address_or_path_is_refused_and_a_foreign_run_is_the_sources_refus
     );
     assert_eq!(
         code(
-            run_tests_inner(&pool, &s, &Answering, "nobody:build:7")
+            run_tests_inner(&pool, &s, &answering(), "nobody:build:7")
                 .await
                 .unwrap_err()
         ),
@@ -274,7 +280,7 @@ async fn a_bad_address_or_path_is_refused_and_a_foreign_run_is_the_sources_refus
     );
     assert_eq!(
         code(
-            run_artifacts_inner(&pool, &s, &Answering, &run, Some("../etc"))
+            run_artifacts_inner(&pool, &s, &answering(), &run, Some("../etc"))
                 .await
                 .unwrap_err()
         ),
@@ -282,7 +288,7 @@ async fn a_bad_address_or_path_is_refused_and_a_foreign_run_is_the_sources_refus
     );
     assert_eq!(
         code(
-            artifact_preview_inner(&pool, &s, &Answering, &run, "/etc/passwd")
+            artifact_preview_inner(&pool, &s, &answering(), &run, "/etc/passwd")
                 .await
                 .unwrap_err()
         ),
@@ -294,7 +300,7 @@ async fn a_bad_address_or_path_is_refused_and_a_foreign_run_is_the_sources_refus
     };
     assert_eq!(
         code(
-            download_run_file_inner(&pool, &s, &Answering, &run, &escape, dir.path())
+            download_run_file_inner(&pool, &s, &answering(), &run, &escape, dir.path())
                 .await
                 .unwrap_err()
         ),
@@ -304,7 +310,7 @@ async fn a_bad_address_or_path_is_refused_and_a_foreign_run_is_the_sources_refus
     let other = format!("{tc}:buildType:Payout_Build");
     assert_eq!(
         code(
-            run_tests_inner(&pool, &s, &Answering, &other)
+            run_tests_inner(&pool, &s, &answering(), &other)
                 .await
                 .unwrap_err()
         ),
@@ -320,7 +326,7 @@ async fn a_download_is_a_new_file_in_the_folder_named_by_its_last_segment() {
     let s = no_secrets();
     let dir = tempfile::tempdir().unwrap();
     let down = async |target: DownloadTarget| {
-        download_run_file_inner(&pool, &s, &Answering, &run, &target, dir.path()).await
+        download_run_file_inner(&pool, &s, &answering(), &run, &target, dir.path()).await
     };
 
     let log = down(DownloadTarget::Log).await.unwrap().unwrap();

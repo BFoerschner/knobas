@@ -30,11 +30,49 @@ type Handed = Arc<Mutex<Vec<Option<Cursor>>>>;
 /// Whether the far end fails the sync itself.
 type Fails = Arc<std::sync::atomic::AtomicBool>;
 
+/// How many times something was asked: the far end's *Test connection*, or
+/// the keychain.
+type Asked = Arc<std::sync::atomic::AtomicUsize>;
+
+fn count(asked: &Asked) -> usize {
+    asked.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// A keychain that counts its reads.
+struct CountingStore {
+    inner: MemoryStore,
+    gets: Asked,
+}
+
+impl SecretStore for CountingStore {
+    fn get(
+        &self,
+        account: &knobas_secrets::KeychainAccount,
+    ) -> Result<Option<Secret>, knobas_secrets::SecretError> {
+        self.gets.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.get(account)
+    }
+    fn put(
+        &self,
+        account: &knobas_secrets::KeychainAccount,
+        secret: &Secret,
+    ) -> Result<(), knobas_secrets::SecretError> {
+        self.inner.put(account, secret)
+    }
+    fn delete(
+        &self,
+        account: &knobas_secrets::KeychainAccount,
+    ) -> Result<(), knobas_secrets::SecretError> {
+        self.inner.delete(account)
+    }
+}
+
 struct Fake {
     id: String,
     discovery: Discovery,
     handed: Handed,
     fails: Fails,
+    asked: Asked,
 }
 
 #[async_trait::async_trait]
@@ -78,6 +116,7 @@ impl Source for Fake {
     }
 
     async fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
+        self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         match &self.discovery {
             Discovery::Refused => Err(SourceError::Unauthorized { status: Some(401) }),
             Discovery::Hangs => std::future::pending().await,
@@ -123,6 +162,7 @@ struct Registry {
     built: Built,
     handed: Handed,
     fails: Fails,
+    asked: Asked,
 }
 
 impl AdapterRegistry for Registry {
@@ -133,6 +173,7 @@ impl AdapterRegistry for Registry {
                 discovery: self.discovery.clone(),
                 handed: Arc::clone(&self.handed),
                 fails: Arc::clone(&self.fails),
+                asked: Arc::clone(&self.asked),
             }
             .descriptor(),
         ]
@@ -145,6 +186,7 @@ impl AdapterRegistry for Registry {
             discovery: self.discovery.clone(),
             handed: Arc::clone(&self.handed),
             fails: Arc::clone(&self.fails),
+            asked: Arc::clone(&self.asked),
         }))
     }
 }
@@ -170,6 +212,10 @@ struct Harness {
     built: Built,
     handed: Handed,
     fails: Fails,
+    /// *Test connection* calls, across every adapter the registry built.
+    asked: Asked,
+    /// Keychain reads.
+    gets: Asked,
     id: String,
 }
 
@@ -203,6 +249,8 @@ async fn harness(stored: serde_json::Value, discovery: Discovery) -> Harness {
     let built: Built = Arc::default();
     let handed: Handed = Arc::default();
     let fails: Fails = Arc::default();
+    let asked: Asked = Arc::default();
+    let gets: Asked = Arc::default();
     Harness {
         deps: SchedulerDeps {
             pool,
@@ -212,14 +260,20 @@ async fn harness(stored: serde_json::Value, discovery: Discovery) -> Harness {
                 built: Arc::clone(&built),
                 handed: Arc::clone(&handed),
                 fails: Arc::clone(&fails),
+                asked: Arc::clone(&asked),
             }),
-            secrets: Arc::new(store),
+            secrets: Arc::new(CountingStore {
+                inner: store,
+                gets: Arc::clone(&gets),
+            }),
             events: Arc::new(Quiet),
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
         },
         built,
         handed,
         fails,
+        asked,
+        gets,
         id,
     }
 }
@@ -412,4 +466,72 @@ async fn a_discovery_that_never_answers_does_not_hold_the_sync() {
     );
     assert_eq!(h.handed.lock().unwrap().len(), 1, "the sync ran");
     assert_eq!(stored(&h).await, serde_json::json!({}));
+}
+
+/// A far end that answers and has nothing to find (a Jira without Jira
+/// Software) is asked once per process, not on every run (#1702, ruling D7).
+#[tokio::test]
+async fn a_source_with_nothing_to_discover_is_asked_once() {
+    let h = harness(serde_json::json!({}), Discovery::Fields(Vec::new())).await;
+    assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
+    assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
+    assert_eq!(count(&h.asked), 1);
+    assert_eq!(stored(&h).await, serde_json::json!({}));
+}
+
+/// A run that finds one id of two records it, and the next run asks nothing:
+/// the key that answered nothing is remembered, and recording the other does
+/// not make it look like a new source.
+#[tokio::test]
+async fn the_key_that_answered_nothing_is_not_asked_again_after_the_other_is_recorded() {
+    let h = harness(
+        serde_json::json!({}),
+        Discovery::Fields(vec![("epic_link_field", "customfield_10101")]),
+    )
+    .await;
+    assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
+    assert_eq!(stored(&h).await["epic_link_field"], "customfield_10101");
+    assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
+    assert_eq!(count(&h.asked), 1);
+}
+
+/// A refusal is not an answer: the far end may let the next run in, so it is
+/// asked again.
+#[tokio::test]
+async fn a_refused_discovery_is_asked_again_next_run() {
+    let h = harness(serde_json::json!({}), Discovery::Refused).await;
+    let _ = sync_once(&h).await;
+    let _ = sync_once(&h).await;
+    assert_eq!(count(&h.asked), 2);
+}
+
+/// What is remembered is about one far end: a source pointed somewhere else
+/// is asked again.
+#[tokio::test]
+async fn a_source_moved_to_another_address_is_asked_again() {
+    let h = harness(serde_json::json!({}), Discovery::Fields(Vec::new())).await;
+    assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
+    sqlx::query(
+        "update knobas.source_config set base_url = 'https://elsewhere.example' where id = $1",
+    )
+    .bind(&h.id)
+    .execute(&h.deps.pool)
+    .await
+    .unwrap();
+    assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
+    assert_eq!(count(&h.asked), 2);
+}
+
+/// The run that records an id builds its adapter twice, with the id and
+/// without, and reads the keychain once for both (#1702).
+#[tokio::test]
+async fn a_run_that_finds_an_id_reads_the_keychain_once() {
+    let h = harness(
+        serde_json::json!({}),
+        Discovery::Fields(vec![("sprint_field", "customfield_10104")]),
+    )
+    .await;
+    assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
+    assert_eq!(count(&h.gets), 1);
+    assert_eq!(h.built.lock().unwrap().len(), 2);
 }

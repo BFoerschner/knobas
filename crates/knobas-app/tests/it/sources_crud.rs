@@ -18,7 +18,7 @@ use sqlx::PgPool;
 /// depend on another stream's timing. Without this the whole *failed*
 /// credential path in `set_secret` is unreachable — and a mutation that clears
 /// the backoff after a rejected password survived the entire suite because of
-/// it. `crud` takes `&dyn AdapterRegistry` so this can exist.
+/// it. `crud` takes the registry as a trait object so this can exist.
 /// A function rather than a value: `SourceError` is not `Clone` (frozen SPI),
 /// and each `build` needs its own.
 struct RefusingRegistry(fn() -> SourceError);
@@ -513,7 +513,7 @@ async fn re_entering_a_secret_overwrites_it_tests_it_and_releases_the_backoff() 
     let health = sources::crud::set_secret(
         &f.pool,
         &f.secrets,
-        &f.registry,
+        &crate::support::shared(f.registry.clone()),
         &f.id,
         SecretInput::of("pat-two"),
     )
@@ -570,7 +570,7 @@ async fn testing_a_draft_writes_nothing_at_all() {
     let report = sources::crud::test(
         &f.pool,
         &f.secrets,
-        &f.registry,
+        &crate::support::shared(f.registry.clone()),
         SourceDraft {
             source_id: None,
             adapter_kind: "mock".into(),
@@ -622,7 +622,7 @@ async fn a_draft_for_a_saved_source_re_tests_the_stored_secret() {
     let report = sources::crud::test(
         &f.pool,
         &f.secrets,
-        &f.registry,
+        &crate::support::shared(f.registry.clone()),
         SourceDraft {
             source_id: Some(f.id.clone()),
             adapter_kind: "mock".into(),
@@ -643,7 +643,7 @@ async fn a_draft_for_a_saved_source_re_tests_the_stored_secret() {
     let err = sources::crud::test(
         &f.pool,
         &f.secrets,
-        &f.registry,
+        &crate::support::shared(f.registry.clone()),
         SourceDraft {
             source_id: Some(f.id.clone()),
             adapter_kind: "mock".into(),
@@ -880,7 +880,7 @@ async fn a_credential_that_is_still_wrong_does_not_release_the_backoff() {
     let health = sources::crud::set_secret(
         &f.pool,
         &f.secrets,
-        &refusing,
+        &crate::support::shared(refusing),
         &f.id,
         SecretInput::of("still-wrong"),
     )
@@ -941,7 +941,7 @@ async fn an_unreachable_source_does_not_blame_the_credential_or_release_the_back
     let health = sources::crud::set_secret(
         &f.pool,
         &f.secrets,
-        &refusing,
+        &crate::support::shared(refusing),
         &f.id,
         SecretInput::of("probably-fine"),
     )
@@ -981,7 +981,7 @@ async fn testing_a_saved_source_uses_its_stored_configuration() {
     let report = sources::crud::test(
         &f.pool,
         &f.secrets,
-        &f.registry,
+        &crate::support::shared(f.registry.clone()),
         SourceDraft {
             source_id: Some(f.id.clone()),
             adapter_kind: "nosuch".into(),
@@ -1001,7 +1001,7 @@ async fn testing_a_saved_source_uses_its_stored_configuration() {
     let err = sources::crud::test(
         &f.pool,
         &f.secrets,
-        &f.registry,
+        &crate::support::shared(f.registry.clone()),
         SourceDraft {
             source_id: Some(gone.clone()),
             adapter_kind: "mock".into(),
@@ -1038,7 +1038,7 @@ async fn a_discovered_config_value_reaches_the_report() {
     let report = sources::crud::test(
         &f.pool,
         &f.secrets,
-        &DiscoveringRegistry,
+        &crate::support::shared(DiscoveringRegistry),
         SourceDraft {
             source_id: None,
             adapter_kind: "mock".into(),
@@ -1067,7 +1067,7 @@ async fn a_failed_test_discovers_nothing() {
     let report = sources::crud::test(
         &f.pool,
         &f.secrets,
-        &RefusingRegistry(SourceError::unauthorized),
+        &crate::support::shared(RefusingRegistry(SourceError::unauthorized)),
         SourceDraft {
             source_id: None,
             adapter_kind: "mock".into(),
@@ -1133,7 +1133,12 @@ async fn only_a_source_with_an_account_offers_write_ops() {
         .await
         .unwrap();
     assert_eq!(
-        sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await).await,
+        sources::crud::instance_write_ops(
+            &f.secrets,
+            &crate::support::shared(f.registry.clone()),
+            &stored(&f).await
+        )
+        .await,
         Vec::<String>::new()
     );
 
@@ -1147,7 +1152,12 @@ async fn only_a_source_with_an_account_offers_write_ops() {
     .await
     .unwrap();
     assert_eq!(
-        sources::crud::instance_write_ops(&g.secrets, &g.registry, &stored(&g).await).await,
+        sources::crud::instance_write_ops(
+            &g.secrets,
+            &crate::support::shared(g.registry.clone()),
+            &stored(&g).await
+        )
+        .await,
         ["pause_monitor", "resume_monitor", "create_monitor"]
     );
 }
@@ -1168,15 +1178,19 @@ async fn adding_an_account_keeps_the_stored_key_and_turns_the_write_ops_on() {
         .await
         .unwrap();
     assert!(
-        sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await)
-            .await
-            .is_empty()
+        sources::crud::instance_write_ops(
+            &f.secrets,
+            &crate::support::shared(f.registry.clone()),
+            &stored(&f).await
+        )
+        .await
+        .is_empty()
     );
 
     sources::crud::set_secret(
         &f.pool,
         &f.secrets,
-        &f.registry,
+        &crate::support::shared(f.registry.clone()),
         &f.id,
         SecretInput {
             value: None,
@@ -1201,7 +1215,12 @@ async fn adding_an_account_keeps_the_stored_key_and_turns_the_write_ops_on() {
     assert_eq!(account.password, "knobas-dev");
 
     assert_eq!(
-        sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await).await,
+        sources::crud::instance_write_ops(
+            &f.secrets,
+            &crate::support::shared(f.registry.clone()),
+            &stored(&f).await
+        )
+        .await,
         ["pause_monitor", "resume_monitor", "create_monitor"],
         "the write ops flipped on with no other change"
     );
@@ -1228,7 +1247,7 @@ async fn re_entering_the_key_keeps_the_stored_account() {
     sources::crud::set_secret(
         &f.pool,
         &f.secrets,
-        &f.registry,
+        &crate::support::shared(f.registry.clone()),
         &f.id,
         SecretInput::of("uk1_rotated"),
     )
@@ -1305,13 +1324,23 @@ async fn a_keychain_that_refuses_to_answer_offers_nothing_rather_than_failing() 
     // The account really is stored, so the empty answer below is the refusal
     // and not a source that never had one.
     assert_eq!(
-        sources::crud::instance_write_ops(&f.secrets, &f.registry, &stored(&f).await).await,
+        sources::crud::instance_write_ops(
+            &f.secrets,
+            &crate::support::shared(f.registry.clone()),
+            &stored(&f).await
+        )
+        .await,
         ["pause_monitor", "resume_monitor", "create_monitor"]
     );
 
     let locked: Arc<dyn SecretStore> = Arc::new(Refuses);
     assert_eq!(
-        sources::crud::instance_write_ops(&locked, &f.registry, &stored(&f).await).await,
+        sources::crud::instance_write_ops(
+            &locked,
+            &crate::support::shared(f.registry.clone()),
+            &stored(&f).await
+        )
+        .await,
         Vec::<String>::new(),
         "a refused keychain offers nothing; it does not take the surface down with it"
     );
@@ -1330,7 +1359,7 @@ async fn a_re_enter_with_nothing_typed_and_nothing_stored_is_refused() {
     let refused = sources::crud::set_secret(
         &f.pool,
         &f.secrets,
-        &f.registry,
+        &crate::support::shared(f.registry.clone()),
         &f.id,
         SecretInput::default(),
     )

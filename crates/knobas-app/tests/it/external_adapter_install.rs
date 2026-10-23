@@ -600,11 +600,16 @@ async fn the_fixture_s_custom_role_opens_its_block_view() {
     )
     .await
     .unwrap();
-    let view =
-        knobas_app::sources::crud::view(&pool, &secrets, &registry, "surveys:survey-2", None)
-            .await
-            .unwrap()
-            .expect("a survey has a view");
+    let view = knobas_app::sources::crud::view(
+        &pool,
+        &secrets,
+        &crate::support::shared(registry.clone()),
+        "surveys:survey-2",
+        None,
+    )
+    .await
+    .unwrap()
+    .expect("a survey has a view");
     let blocks = &view.sections[0].blocks;
     assert_eq!(view.sections[0].title, "Berth 7 fender survey");
     assert!(
