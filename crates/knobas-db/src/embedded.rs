@@ -48,6 +48,14 @@ pub(crate) const PG_CTL: &str = if cfg!(windows) {
     "pg_ctl"
 };
 
+/// The settings a managed server writes durably under, passed as `-c` at
+/// every start (#1896): see [`build_settings`].
+const DURABLE: [(&str, &str); 3] = [
+    ("fsync", "on"),
+    ("synchronous_commit", "on"),
+    ("full_page_writes", "on"),
+];
+
 /// Pool size. The desktop app is a single user with a handful of concurrent
 /// queries; a larger pool only buys idle backends.
 const MAX_CONNECTIONS: u32 = 5;
@@ -1470,6 +1478,18 @@ fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
     settings
         .configuration
         .insert("listen_addresses".to_owned(), HOST.to_owned());
+    // Durable writes (#1896). `postgresql_embedded` 0.21 starts every server
+    // as `pg_ctl start -o "-F -p <port> -c <key>=<value>..."`, and `-F` is
+    // `fsync=off`: a crash or a power loss on such a server can leave the
+    // data directory corrupt. The postmaster reads its arguments in order and
+    // the last setting of a name wins, so the `-c fsync=on` this puts after
+    // `-F` is the one the server runs with. The other two are PostgreSQL's
+    // defaults, set here so no `postgresql.conf` can lower them.
+    for (name, value) in DURABLE {
+        settings
+            .configuration
+            .insert(name.to_owned(), value.to_owned());
+    }
     settings.timeout = Some(COMMAND_TIMEOUT);
 
     // The password `Settings::new()` invented is left in place here. Reading

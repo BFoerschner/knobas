@@ -232,6 +232,76 @@ async fn a_server_that_dies_under_its_handle_is_seen_gone_and_restarts_on_its_po
     db.stop().await.unwrap();
 }
 
+/// #1896: the app's server writes durably, and goes on doing so after the
+/// handle starts it again.
+///
+/// `postgresql_embedded` passes `-F` (`fsync=off`) to every server it starts;
+/// a crash or a power loss on a server running that way can leave the data
+/// directory corrupt. `EmbeddedDb::start` is the desktop app's path.
+#[tokio::test]
+async fn the_apps_server_runs_with_fsync_on_after_a_restart_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+    let started = durability(db.pool()).await;
+
+    knobas_db::test_util::kill_server(dir.path());
+    db.restart().await.expect("the dead server starts again");
+    let restarted = durability(db.pool()).await;
+    db.stop().await.unwrap();
+
+    assert_eq!(started, DURABLE, "the started server");
+    assert_eq!(restarted, DURABLE, "the restarted server");
+}
+
+/// #1896: an orphan this build left is adopted, and the adopting handle's
+/// restart (a `PostgreSQL` of its own over the settings it adopted with)
+/// starts it durable as well.
+#[tokio::test]
+async fn an_adopted_server_restarts_with_fsync_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    };
+    EmbeddedDb::start(cfg.clone()).await.unwrap().abandon();
+    let mut adopted = EmbeddedDb::start(cfg).await.expect("the orphan is adopted");
+
+    knobas_db::test_util::kill_server(dir.path());
+    adopted
+        .restart()
+        .await
+        .expect("the adopted server starts again");
+    let restarted = durability(adopted.pool()).await;
+    adopted.stop().await.unwrap();
+
+    assert_eq!(restarted, DURABLE);
+}
+
+/// `fsync`, `synchronous_commit` and `full_page_writes` at PostgreSQL's
+/// defaults: the values a crash cannot corrupt a database under.
+const DURABLE: [&str; 3] = ["fsync=on", "synchronous_commit=on", "full_page_writes=on"];
+
+/// What the server behind `pool` runs [`DURABLE`]'s settings at, in its
+/// `name=value` form.
+async fn durability(pool: &sqlx::PgPool) -> [String; 3] {
+    let mut values = DURABLE.map(String::from);
+    for setting in &mut values {
+        let name = setting.split('=').next().unwrap().to_owned();
+        let value: String = sqlx::query_scalar("select current_setting($1)")
+            .bind(&name)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        *setting = format!("{name}={value}");
+    }
+    values
+}
+
 /// #1779: stopping a handle whose server already died is not a failure.
 /// The quit of a window whose postmaster died has nothing left to stop, and
 /// used to log `pg_ctl`'s complaint as an error.
