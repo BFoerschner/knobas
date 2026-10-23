@@ -18,7 +18,10 @@
 //!   A `GET` or `HEAD` the server closed its connection on before answering
 //!   -- a pooled keep-alive connection its idle timeout closed as the request
 //!   went out -- is sent once more; a write never is
-//!   ([`retry::closed_before_answering`], #1818).
+//!   ([`retry::closed_before_answering`], #1818). A write, or a request sent
+//!   with [`Request::no_retry`], that the server hung up on is
+//!   [`SourceError::Unconfirmed`] (#1821), and the write client lets an idle
+//!   connection go after [`WRITE_POOL_IDLE`] so the race is rarer for writes.
 //! * **Rate limiting**: per instance, so two Jiras do not share a budget, and
 //!   **every attempt passes it**, retries included. The limiter lives in a
 //!   process-wide map keyed by the base URL's origin (scheme, host, port), not
@@ -492,7 +495,11 @@ impl HttpClient {
     /// [`LocalQuota`]'s message: the source said nothing, and was not asked.
     /// A request other than a `GET` or `HEAD` answered with a redirect is
     /// [`SourceError::Protocol`] with the redirect's status, naming its
-    /// `Location`, and is not followed (#1640).
+    /// `Location`, and is not followed (#1640). A request the server closed
+    /// its connection on before answering, and that is not sent again for it
+    /// (a write, or one sent with [`Request::no_retry`]), is
+    /// [`SourceError::Unconfirmed`] with no status: it reached the source and
+    /// got no answer (#1821).
     ///
     /// The body of a success is read through [`HttpConfig::max_body`]: a read
     /// of it past the cap fails, which [`over_the_cap`] tells apart.
