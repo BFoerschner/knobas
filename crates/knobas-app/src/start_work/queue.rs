@@ -260,7 +260,7 @@ fn like_prefix(repo: &EntityRef) -> String {
 /// The escaping half of [`like_prefix`], without the trailing `%`.
 ///
 /// Split out for #289, which needs the same escaping for a **source id**:
-/// `commands::entity::ticket_titled` narrows a look-back-after-write to one
+/// `protocol::ticket_titled` narrows a look-back-after-write to one
 /// source's corpus with `<escaped source id>:%`, and source ids carry
 /// underscores just as repository names do. It wants the escaping and its own
 /// separator, not this function's bare `%` -- and trimming the `%` back off

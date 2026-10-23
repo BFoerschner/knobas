@@ -8,12 +8,7 @@ use super::*;
 // is undirected, so an entity's backlinks are the same query as its links and
 // need no endpoint of their own, and the target picker reuses `search`.
 
-/// The relation a link takes when the caller names none.
-///
-/// A quick link costs no extra decisions, which is only true if "no relation"
-/// is a relation rather than an empty string: the panel groups by this value
-/// and an empty group header is a row nobody can read.
-pub const DEFAULT_RELATION: &str = "related";
+pub use knobas_core::link::{DEFAULT_RELATION, LinkMutation};
 
 /// Who a link made through this surface belongs to, in `created_by` and in the
 /// activity line's `actor`.
@@ -23,106 +18,11 @@ pub const DEFAULT_RELATION: &str = "related";
 /// the two spellings from drifting.
 pub(super) const ACTOR: &str = "user";
 
-/// What a link mutation left behind: the row, and the activity line announcing
-/// it.
+/// Draw a link between two entities: [`knobas_core::link::draw`], as
+/// [`ACTOR`].
 ///
-/// Not a wire type -- the commands return the link and emit the line. It exists
-/// so the behaviour is reachable from a test without a Tauri app: the emit is
-/// the only part of these commands that a `#[tauri::command]` shell adds, and
-/// everything worth asserting is in here.
-#[derive(Debug)]
-pub struct LinkMutation {
-    pub link: LinkRow,
-    pub activity: ActivityRow,
-    /// The proposal this link displaced, when there was one (#70).
-    ///
-    /// Drawing the *reverse* of a live proposal withdraws it -- see
-    /// [`knobas_core::suggest::resolve_edge`] -- and a proposal leaving the tray
-    /// is a mutation, so it gets its own line rather than disappearing quietly.
-    /// `None` everywhere else, which is every other path in this module.
-    pub superseded: Option<ActivityRow>,
-}
-
-/// Text the user did not type is no text.
-///
-/// A dialog hands back `""` for a field left alone, and `Some("")` is not the
-/// same fact as `None` anywhere downstream: an empty relation is an unreadable
-/// group header, and an empty note is a line the panel would draw with nothing
-/// in it.
-fn present(value: Option<&str>) -> Option<&str> {
-    value.map(str::trim).filter(|text| !text.is_empty())
-}
-
-/// The relation a link will carry, folded to the one spelling that groups it.
-///
-/// A relation is a *key*, not prose: the panel groups rows by this value and
-/// the duplicate rule compares it verbatim, so `Blocks` and `blocks` would be
-/// two headers for one relationship and neither would see the other as a
-/// duplicate. Björn's ruling on the review of #52 (2026-08-28) is that they are
-/// one relation, and folding on write is what makes that true everywhere at
-/// once -- the stored value, the unique index, and every later reader.
-///
-/// Lowercase because the curated list, [`DEFAULT_RELATION`] and the design's
-/// own vocabulary (`blocks`, `implements`, `documents`, `depends-on`) are all
-/// written that way; a folded value is therefore already the spelling #53's
-/// inverse-label lookup will key on. Display capitalization is the panel's, and
-/// it has the whole string to do it from.
-///
-/// [`str::to_lowercase`] rather than the ASCII form: a user typing a relation
-/// in their own language should get the same folding an English one gets.
-///
-/// The **note** is deliberately not folded -- it is prose in the user's own
-/// words and nothing groups by it.
-fn relation_of(value: Option<&str>) -> String {
-    present(value).map_or_else(|| DEFAULT_RELATION.to_owned(), |named| named.to_lowercase())
-}
-
-/// What an activity line says about a link: the other end, the relation, and
-/// which link it was.
-///
-/// The line is named on the link's `from` end, so `to_id` is the end the reader
-/// does not already know. One helper, because `linked` and `unlinked` describe
-/// the same link and a reader of the log has to be able to pair them.
-///
-/// **These three keys are a shape a second writer depends on.**
-/// `knobas_core::note`'s `DrawnLink` spells them again for the `born[]` entries
-/// of a note's `created` line (#524), so that a born link withdrawn from the
-/// panel pairs with the birth that drew it. They are not one type: this one
-/// carries a fourth key for a proposal's `reason` and lives where `LinkRow`
-/// does, while `born[]` is composed from an insert's `returning` inside the
-/// store's own transaction, where no `LinkRow` exists. What holds them equal is
-/// `a_notes_birth_is_one_line_and_a_withdrawn_born_link_pairs_with_it`, which
-/// reads one against the other -- so a key **renamed** here fails that test.
-/// A key *added* here would not, and would not need to: `born[]` promising less
-/// than a line does is what it already promises.
-fn link_detail(link: &LinkRow) -> serde_json::Value {
-    let mut detail = serde_json::json!({
-        "link_id": link.id,
-        "to_id": link.to_id,
-        "relation": link.relation,
-    });
-    // Only when there is one, which is only ever for a link knobas proposed:
-    // "accepted" with no reason beside it is a line that says a decision was
-    // made and not what it was about. A key that is absent and a key that is
-    // `null` are different facts to a reader of the log, and the second is the
-    // one worth avoiding.
-    if let (Some(map), Some(reason)) = (detail.as_object_mut(), link.reason.as_deref()) {
-        map.insert("reason".to_owned(), serde_json::Value::from(reason));
-    }
-    detail
-}
-
-/// Draw a link between two entities.
-///
-/// `relation` defaults to [`DEFAULT_RELATION`] and is folded by
-/// [`relation_of`]; `note` is optional and is kept as typed; the origin is
-/// always [`Origin::Manual`] -- it is deliberately not client-suppliable in v1,
-/// because the other origins belong to the suggestion engine and to import.
-///
-/// An entity may not be linked to itself.
-///
-/// The behaviour lives here rather than in the command so it is reachable from
-/// a test: a `#[tauri::command]` cannot be called directly.
+/// The behaviour lives below rather than in the command so it is reachable
+/// from a test: a `#[tauri::command]` cannot be called directly.
 ///
 /// # Errors
 ///
@@ -144,79 +44,7 @@ pub async fn create_link_inner(
     // address, and the two want different words on screen.
     let from = EntityRef::parse(from_id).map_err(IpcError::invalid)?;
     let to = EntityRef::parse(to_id).map_err(IpcError::invalid)?;
-    // Also before any query: an entity linked to itself is a bad *request*, not
-    // a missing thing -- both ends resolve, they are simply the same one, and
-    // the row would draw as a panel entry pointing at the entity you are
-    // already looking at. Björn's ruling on the review of #52 (2026-08-28).
-    if from == to {
-        return Err(IpcError::invalid(format!(
-            "{from} cannot be linked to itself"
-        )));
-    }
-
-    let relation = relation_of(relation);
-
-    // The pair may already carry a *proposal*: `link_pair_active_idx` spans
-    // proposals and links alike (one active edge per pair per relation, whatever
-    // its state), so knobas suggesting this link is what would refuse it. The
-    // proposal is therefore answered *before* the insert rather than after it
-    // fails -- a unique violation aborts the transaction it happens in, and
-    // there would be nothing left to answer it with.
-    //
-    // One transaction, because `Superseded` is only half a mutation: the
-    // withdrawn proposal and the link that replaced it land together or not at
-    // all.
-    let mut tx = pool.begin().await.map_err(knobas_core::CoreError::from)?;
-    let answered = suggest::resolve_edge(&mut tx, &from, &to, &relation).await?;
-
-    let (link, superseded) = match answered {
-        // Drawing by hand the link knobas proposed is the same act as pressing
-        // *Accept*, and the alternative is telling the user "already linked"
-        // about a pair whose links panel is empty.
-        suggest::Edge::Promoted(link) => (link, None),
-        // The user drew the proposal's reverse, which contradicts its direction.
-        // The user wins: the proposal is withdrawn and the link they drew is
-        // written with the ends they gave it.
-        suggest::Edge::Superseded(proposal) => {
-            let line = record_link_activity_with(&mut tx, "dismissed", &proposal).await?;
-            let link = write_link(&mut tx, &from, &to, &relation, note).await?;
-            (link, Some(line))
-        }
-        // Nothing proposed for this pair. Whatever refuses the write now is a
-        // real link, which is what `conflict` has always meant here.
-        suggest::Edge::Open => (
-            write_link(&mut tx, &from, &to, &relation, note).await?,
-            None,
-        ),
-    };
-
-    let activity = record_link_activity_with(&mut tx, "linked", &link).await?;
-    tx.commit().await.map_err(knobas_core::CoreError::from)?;
-    Ok(LinkMutation {
-        link,
-        activity,
-        superseded,
-    })
-}
-
-/// The hand-drawn link itself, once the tray has been answered.
-async fn write_link(
-    conn: &mut sqlx::PgConnection,
-    from: &EntityRef,
-    to: &EntityRef,
-    relation: &str,
-    note: Option<&str>,
-) -> Result<LinkRow, IpcError> {
-    Ok(knobas_core::link::create_with(
-        conn,
-        from,
-        to,
-        relation,
-        Origin::Manual,
-        present(note),
-        ACTOR,
-    )
-    .await?)
+    Ok(knobas_core::link::draw(pool, &from, &to, relation, note, ACTOR).await?)
 }
 
 /// Withdraw a link.
@@ -246,33 +74,13 @@ pub async fn unlink_inner(pool: &PgPool, link_id: &str) -> Result<Option<LinkMut
     }))
 }
 
-/// One line, on the end the link was drawn from.
-///
-/// The to-end's own history panel therefore does not list it -- a known and
-/// accepted v1 limitation; that entity's links panel still shows the link. If
-/// the inbox (#45) ever needs the other side, the fix is a read-side change and
-/// not a second row.
+/// One line about `link`, as [`ACTOR`]: [`knobas_core::link::record_activity`].
 pub(super) async fn record_link_activity(
     pool: &PgPool,
     verb: &str,
     link: &LinkRow,
 ) -> Result<ActivityRow, IpcError> {
-    let from = EntityRef::parse(&link.from_id).map_err(IpcError::internal)?;
-    Ok(knobas_core::activity::record(pool, ACTOR, verb, Some(&from), link_detail(link)).await?)
-}
-
-/// [`record_link_activity`], against an executor the caller chooses, so a line
-/// can be written inside the transaction that made the mutation it describes.
-async fn record_link_activity_with(
-    conn: &mut sqlx::PgConnection,
-    verb: &str,
-    link: &LinkRow,
-) -> Result<ActivityRow, IpcError> {
-    let from = EntityRef::parse(&link.from_id).map_err(IpcError::internal)?;
-    Ok(
-        knobas_core::activity::record_with(conn, ACTOR, verb, Some(&from), link_detail(link))
-            .await?,
-    )
+    Ok(knobas_core::link::record_activity(pool, ACTOR, verb, link).await?)
 }
 
 /// Put an activity line on `activity:new`.
@@ -607,9 +415,9 @@ pub async fn create_note_inner(
         .map(|link| {
             Ok(knobas_core::note::BornLink {
                 target: EntityRef::parse(&link.target_id).map_err(IpcError::invalid)?,
-                relation: present(Some(&link.relation))
-                    .ok_or_else(|| IpcError::invalid("a link drawn with a note needs a relation"))?
-                    .to_lowercase(),
+                relation: knobas_core::link::relation_named(&link.relation).ok_or_else(|| {
+                    IpcError::invalid("a link drawn with a note needs a relation")
+                })?,
             })
         })
         .collect::<Result<Vec<_>, IpcError>>()?;

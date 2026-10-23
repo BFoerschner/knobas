@@ -8,6 +8,7 @@
 mod ancestor_path;
 mod checkout_scan;
 mod contexts;
+mod detail;
 mod estate_file;
 mod inbox;
 mod link_reads;

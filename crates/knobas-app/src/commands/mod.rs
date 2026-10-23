@@ -12,17 +12,19 @@
 //! [`IpcError`](crate::IpcError). When a command grows a policy, that policy
 //! belongs in a crate below it, with its own tests.
 //!
-//! **The exceptions, named rather than denied** (#1659): some `_inner`
-//! functions here still hold their own SQL or a resolution rule, and are not
-//! yet moved below. Among them `entity/builds.rs` (`with_commits`,
-//! `JOB_PIPELINES`), `entity/detail.rs` (`DETAIL`), `entity/lookups.rs`
-//! (`RESOLVE_URL`, `CODE_FACTS`), `entity/standup.rs` (`ticket_titled`),
-//! `entity/board.rs` (`saved_view_board_laned`), `entity/links.rs`
-//! (`create_link_inner`'s two-way transaction), `entity/viewed.rs` and
-//! `app.rs`. The full list, with lines and the grep that finds them, is the
-//! one `backlog` issue #1870. What is already settled: who am I
-//! (`identity_of`), the declared paths and the stored declarations are each
-//! derived once per command, through `identity_of`,
+//! **No command issues a statement of its own** (#1870). #1659 named the
+//! `_inner` functions that still held their SQL or a resolution rule, and
+//! #1870 moved each below: the Builds frame's pins, *This job* and the rule
+//! that links a run to its commit into `knobas_core::builds` (its budgeted
+//! live read into `sources::crud::shared_commits`), the detail view into
+//! `knobas_core::detail`, the paste resolver into `knobas_core::web_url`,
+//! Code's facts into `knobas_core::code_facts`, *Viewed* into
+//! `knobas_core::viewed`, drawing a link into `knobas_core::link`, an action
+//! item's ticket look-up into `crate::protocol`, a saved view's layout into
+//! `crate::ticket_views` and the first run into `crate::settings`.
+//! `no_command_issues_its_own_statement` keeps it so. What is also settled:
+//! who am I (`identity_of`), the declared paths and the stored declarations
+//! are each derived once per command, through `identity_of`,
 //! `sources::paths::declared_paths` and [`search::declare`] /
 //! [`search::searcher`], not re-read in a body. (`docs_tree` still lists the
 //! sources twice, once for the paths and once in `sources::crud::fillers`.)
@@ -69,35 +71,10 @@ mod tests {
     /// file.
     #[test]
     fn no_command_takes_the_app_state_directly() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
         let mut checked = 0_usize;
         let mut entity_files = 0_usize;
 
-        // One level down as well: a module that is a directory (`entity/`,
-        // #1316) keeps its commands in the files beside its `mod.rs`.
-        let mut paths = Vec::new();
-        for entry in std::fs::read_dir(&dir).expect("src/commands is readable") {
-            let path = entry.expect("a directory entry").path();
-            if path.is_dir() {
-                for inner in std::fs::read_dir(&path).expect("a command module directory") {
-                    paths.push(inner.expect("a directory entry").path());
-                }
-            } else {
-                paths.push(path);
-            }
-        }
-
-        for path in paths {
-            if path.extension().is_none_or(|extension| extension != "rs") {
-                continue;
-            }
-            // This file declares no commands -- it is re-exports and this
-            // test. It is skipped because the assertion below quotes the very
-            // signature it forbids, and a scan that matched its own error
-            // message could only be kept green by weakening the pattern.
-            if path == dir.join("mod.rs") {
-                continue;
-            }
+        for path in command_modules() {
             checked += 1;
             if path
                 .parent()
@@ -136,6 +113,92 @@ mod tests {
         assert!(
             entity_files > 1,
             "the walk did not reach `entity/`'s files, so its commands go unscanned"
+        );
+    }
+
+    /// Every command module's file: `src/commands/*.rs` and one level down,
+    /// since a module that is a directory (`entity/`, #1316) keeps its
+    /// commands in the files beside its `mod.rs`.
+    ///
+    /// This file is left out. It declares no commands -- it is re-exports and
+    /// these tests -- and the assertions here quote the very spellings they
+    /// forbid, so a scan that matched its own error messages could only be
+    /// kept green by weakening the pattern.
+    fn command_modules() -> Vec<std::path::PathBuf> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
+        let mut paths = Vec::new();
+        for entry in std::fs::read_dir(&dir).expect("src/commands is readable") {
+            let path = entry.expect("a directory entry").path();
+            if path.is_dir() {
+                for inner in std::fs::read_dir(&path).expect("a command module directory") {
+                    paths.push(inner.expect("a directory entry").path());
+                }
+            } else {
+                paths.push(path);
+            }
+        }
+        paths.retain(|path| {
+            path.extension().is_some_and(|extension| extension == "rs")
+                && *path != dir.join("mod.rs")
+        });
+        paths
+    }
+
+    /// No command module issues a statement of its own (#1870).
+    ///
+    /// A command is a shim (this module's doc): a statement, a transaction or
+    /// the rule they carry belongs in `knobas-core` or a behaviour module of
+    /// this crate, with its own tests, where a change to it is found by the
+    /// module that owns the behaviour rather than in a command body. #1659
+    /// named the exceptions and #1870 moved them; this keeps the next one
+    /// from arriving unnoticed.
+    ///
+    /// The issue's search spelled a statement `sqlx::query*` and a
+    /// transaction `.begin()`. A statement has more spellings than the first
+    /// (`sqlx::raw_sql`, `sqlx::QueryBuilder`, `use sqlx::{query_as, ..}`),
+    /// so every `sqlx::` path must name one of the two items a shim has a
+    /// use for -- the pool it is handed and the error it maps -- and a
+    /// connection is neither begun nor acquired.
+    #[test]
+    fn no_command_issues_its_own_statement() {
+        const SHIM_ITEMS: [&str; 2] = ["PgPool", "Error"];
+        let mut checked = 0_usize;
+        for path in command_modules() {
+            let source = std::fs::read_to_string(&path).expect("a command module");
+            let code = strip_comments(&source);
+            let mut rest = code.as_str();
+            while let Some(at) = rest.find(concat!("sqlx", "::")) {
+                rest = &rest[at + "sqlx::".len()..];
+                let item: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                assert!(
+                    SHIM_ITEMS.contains(&item.as_str()),
+                    "{} spells `sqlx::{item}`: a command issues no statement of its \
+                     own, and a shim names no sqlx item but {SHIM_ITEMS:?}. Move the \
+                     read or write into `knobas-core` or the behaviour module that \
+                     owns it, and call that (#1870).",
+                    path.display()
+                );
+            }
+            for spelling in [concat!(".begin", "()"), concat!(".acquire", "()")] {
+                assert!(
+                    !code.contains(spelling),
+                    "{} spells `{spelling}`: a command opens no connection or \
+                     transaction of its own. Move it into `knobas-core` or the \
+                     behaviour module that owns it, and call that (#1870).",
+                    path.display()
+                );
+            }
+            checked += 1;
+        }
+        // Twenty-four today (#1870); a floor well under that, so a walk that
+        // stopped descending into `entity/` fails here rather than passing.
+        assert!(
+            checked >= 20,
+            "only {checked} command modules were scanned -- the walk missed \
+             most of them, so this test proves little"
         );
     }
 

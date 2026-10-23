@@ -22,8 +22,9 @@
 //! the four sources' shapes, the miss, the tombstone, two instances of one
 //! adapter, and the two properties of the index the rule rests on.
 
-use knobas_app::commands::entity::{RESOLVE_URL, UrlMatch, resolve_url_inner};
+use knobas_app::commands::entity::{UrlMatch, resolve_url_inner};
 use knobas_app::{IpcError, IpcErrorCode};
+use knobas_core::web_url::RESOLVE_URL;
 use sqlx::PgPool;
 use tauri::ipc::CallbackFn;
 use tauri::test::MockRuntime;

@@ -2,7 +2,9 @@ pub mod activity;
 pub mod asset;
 pub mod builds;
 pub mod checkout;
+pub mod code_facts;
 pub mod context;
+pub mod detail;
 pub mod entity_list;
 mod error;
 pub mod evidence;
@@ -17,6 +19,7 @@ pub mod reach;
 pub mod signals;
 pub mod start_work;
 pub mod suggest;
+pub mod viewed;
 pub mod web_url;
 pub mod write_queue;
 

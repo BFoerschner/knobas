@@ -122,7 +122,7 @@ async fn record(
         "title": row.title,
     });
     // Absent rather than null for an ad-hoc context, the discipline
-    // `link_detail` records: a reader of the log should not meet a key that
+    // `knobas_core::link`'s `activity_detail` records: a reader of the log should not meet a key that
     // says "there is nothing here".
     if let (Some(map), Some(anchor)) = (detail.as_object_mut(), row.anchor_id.as_deref()) {
         map.insert("anchor_id".to_owned(), serde_json::Value::from(anchor));

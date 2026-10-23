@@ -507,6 +507,233 @@ pub async fn unlink(pool: &PgPool, id: Uuid) -> Result<Option<LinkRow>, CoreErro
     existing.map(|_| None).ok_or(CoreError::LinkNotFound(id))
 }
 
+// -- drawing a link by hand (moved from the app's link command, #1870) -------
+
+/// The relation a link takes when the caller names none.
+///
+/// A quick link costs no extra decisions, which is only true if "no relation"
+/// is a relation rather than an empty string: the panel groups by this value
+/// and an empty group header is a row nobody can read.
+pub const DEFAULT_RELATION: &str = "related";
+
+/// What a link mutation left behind: the row, and the activity line announcing
+/// it.
+///
+/// Not a wire type -- the commands return the link and emit the line. It exists
+/// so the behaviour is reachable from a test without a Tauri app: the emit is
+/// the only part of these commands that a `#[tauri::command]` shell adds, and
+/// everything worth asserting is in here.
+#[derive(Debug)]
+pub struct LinkMutation {
+    pub link: LinkRow,
+    pub activity: crate::activity::ActivityRow,
+    /// The proposal this link displaced, when there was one (#70).
+    ///
+    /// Drawing the *reverse* of a live proposal withdraws it -- see
+    /// [`crate::suggest::resolve_edge`] -- and a proposal leaving the tray
+    /// is a mutation, so it gets its own line rather than disappearing quietly.
+    /// `None` everywhere else, which is every other path that makes one.
+    pub superseded: Option<crate::activity::ActivityRow>,
+}
+
+/// Text the user did not type is no text.
+///
+/// A dialog hands back `""` for a field left alone, and `Some("")` is not the
+/// same fact as `None` anywhere downstream: an empty relation is an unreadable
+/// group header, and an empty note is a line the panel would draw with nothing
+/// in it.
+fn present(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|text| !text.is_empty())
+}
+
+/// The relation a link will carry, folded to the one spelling that groups it.
+///
+/// A relation is a *key*, not prose: the panel groups rows by this value and
+/// the duplicate rule compares it verbatim, so `Blocks` and `blocks` would be
+/// two headers for one relationship and neither would see the other as a
+/// duplicate. Björn's ruling on the review of #52 (2026-08-28) is that they are
+/// one relation, and folding on write is what makes that true everywhere at
+/// once -- the stored value, the unique index, and every later reader.
+///
+/// Lowercase because the curated list, [`DEFAULT_RELATION`] and the design's
+/// own vocabulary (`blocks`, `implements`, `documents`, `depends-on`) are all
+/// written that way; a folded value is therefore already the spelling #53's
+/// inverse-label lookup will key on. Display capitalization is the panel's, and
+/// it has the whole string to do it from.
+///
+/// [`str::to_lowercase`] rather than the ASCII form: a user typing a relation
+/// in their own language should get the same folding an English one gets.
+///
+/// The **note** is deliberately not folded -- it is prose in the user's own
+/// words and nothing groups by it.
+fn relation_of(value: Option<&str>) -> String {
+    value
+        .and_then(relation_named)
+        .unwrap_or_else(|| DEFAULT_RELATION.to_owned())
+}
+
+/// `value` folded as [`relation_of`] folds a relation, or `None` for one left
+/// blank: what a caller that has no default to fall back on (a note's born
+/// links) refuses.
+#[must_use]
+pub fn relation_named(value: &str) -> Option<String> {
+    present(Some(value)).map(str::to_lowercase)
+}
+
+/// What an activity line says about a link: the other end, the relation, and
+/// which link it was.
+///
+/// The line is named on the link's `from` end, so `to_id` is the end the reader
+/// does not already know. One helper, because `linked` and `unlinked` describe
+/// the same link and a reader of the log has to be able to pair them.
+///
+/// **These three keys are a shape a second writer depends on.**
+/// [`crate::note`]'s `DrawnLink` spells them again for the `born[]` entries
+/// of a note's `created` line (#524), so that a born link withdrawn from the
+/// panel pairs with the birth that drew it. They are not one type: this one
+/// carries a fourth key for a proposal's `reason` and lives where `LinkRow`
+/// does, while `born[]` is composed from an insert's `returning` inside the
+/// store's own transaction, where no `LinkRow` exists. What holds them equal is
+/// `a_notes_birth_is_one_line_and_a_withdrawn_born_link_pairs_with_it`, which
+/// reads one against the other -- so a key **renamed** here fails that test.
+/// A key *added* here would not, and would not need to: `born[]` promising less
+/// than a line does is what it already promises.
+fn activity_detail(link: &LinkRow) -> serde_json::Value {
+    let mut detail = serde_json::json!({
+        "link_id": link.id,
+        "to_id": link.to_id,
+        "relation": link.relation,
+    });
+    // Only when there is one, which is only ever for a link knobas proposed:
+    // "accepted" with no reason beside it is a line that says a decision was
+    // made and not what it was about. A key that is absent and a key that is
+    // `null` are different facts to a reader of the log, and the second is the
+    // one worth avoiding.
+    if let (Some(map), Some(reason)) = (detail.as_object_mut(), link.reason.as_deref()) {
+        map.insert("reason".to_owned(), serde_json::Value::from(reason));
+    }
+    detail
+}
+
+/// The `from` end of a stored link. A stored id was parsed on its way in, so
+/// a miss here is knobas's own fault and reads as a database failure.
+fn from_end(link: &LinkRow) -> Result<EntityRef, CoreError> {
+    EntityRef::parse(&link.from_id)
+        .map_err(|error| CoreError::Db(sqlx::Error::Decode(Box::new(error))))
+}
+
+/// One activity line about `link` by `actor`, on the end it was drawn from.
+///
+/// The to-end's own history panel therefore does not list it -- a known and
+/// accepted v1 limitation; that entity's links panel still shows the link. If
+/// the inbox (#45) ever needs the other side, the fix is a read-side change and
+/// not a second row.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the write fails.
+pub async fn record_activity(
+    pool: &PgPool,
+    actor: &str,
+    verb: &str,
+    link: &LinkRow,
+) -> Result<crate::activity::ActivityRow, CoreError> {
+    let from = from_end(link)?;
+    crate::activity::record(pool, actor, verb, Some(&from), activity_detail(link)).await
+}
+
+/// [`record_activity`], against a connection the caller chooses, so a line
+/// can be written inside the transaction that made the mutation it describes.
+async fn record_activity_with(
+    conn: &mut sqlx::PgConnection,
+    actor: &str,
+    verb: &str,
+    link: &LinkRow,
+) -> Result<crate::activity::ActivityRow, CoreError> {
+    let from = from_end(link)?;
+    crate::activity::record_with(conn, actor, verb, Some(&from), activity_detail(link)).await
+}
+
+/// Draw a link between two entities by hand, as `actor`, and write the
+/// `linked` line announcing it.
+///
+/// `relation` defaults to [`DEFAULT_RELATION`] and is folded by
+/// [`relation_of`]; `note` is optional and is kept as typed; the origin is
+/// always [`Origin::Manual`] -- it is deliberately not client-suppliable in v1,
+/// because the other origins belong to the suggestion engine and to import.
+///
+/// The pair may already carry a *proposal*: `link_pair_active_idx` spans
+/// proposals and links alike, so knobas suggesting this link is what would
+/// refuse it. The proposal is answered first ([`crate::suggest::resolve_edge`]):
+/// the same direction is promoted, the reverse withdrawn with a `dismissed`
+/// line of its own ([`LinkMutation::superseded`]).
+///
+/// # Errors
+///
+/// [`CoreError::Invalid`] if the two are the same entity -- both ends
+/// resolve, they are simply the same one, and the row would draw as a panel
+/// entry pointing at the entity the reader is already on (Björn's ruling on
+/// the review of #52, 2026-08-28); [`CoreError::EndpointMissing`] if either
+/// endpoint has no local entity; [`CoreError::Duplicate`] if that pair is
+/// already actively linked under that relation; [`CoreError::Db`] otherwise.
+pub async fn draw(
+    pool: &PgPool,
+    from: &EntityRef,
+    to: &EntityRef,
+    relation: Option<&str>,
+    note: Option<&str>,
+    actor: &str,
+) -> Result<LinkMutation, CoreError> {
+    if from == to {
+        return Err(CoreError::Invalid(format!(
+            "{from} cannot be linked to itself"
+        )));
+    }
+
+    let relation = relation_of(relation);
+
+    // Answered *before* the insert rather than after it fails: a unique
+    // violation aborts the transaction it happens in, and there would be
+    // nothing left to answer it with.
+    //
+    // One transaction, because `Superseded` is only half a mutation: the
+    // withdrawn proposal and the link that replaced it land together or not at
+    // all.
+    let mut tx = pool.begin().await?;
+    let answered = crate::suggest::resolve_edge(&mut tx, from, to, &relation).await?;
+    let note = present(note);
+
+    let (link, superseded) = match answered {
+        // Drawing by hand the link knobas proposed is the same act as pressing
+        // *Accept*, and the alternative is telling the user "already linked"
+        // about a pair whose links panel is empty.
+        crate::suggest::Edge::Promoted(link) => (link, None),
+        // The user drew the proposal's reverse, which contradicts its direction.
+        // The user wins: the proposal is withdrawn and the link they drew is
+        // written with the ends they gave it.
+        crate::suggest::Edge::Superseded(proposal) => {
+            let line = record_activity_with(&mut tx, actor, "dismissed", &proposal).await?;
+            let link =
+                create_with(&mut *tx, from, to, &relation, Origin::Manual, note, actor).await?;
+            (link, Some(line))
+        }
+        // Nothing proposed for this pair. Whatever refuses the write now is a
+        // real link, which is what `conflict` has always meant here.
+        crate::suggest::Edge::Open => (
+            create_with(&mut *tx, from, to, &relation, Origin::Manual, note, actor).await?,
+            None,
+        ),
+    };
+
+    let activity = record_activity_with(&mut tx, actor, "linked", &link).await?;
+    tx.commit().await?;
+    Ok(LinkMutation {
+        link,
+        activity,
+        superseded,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

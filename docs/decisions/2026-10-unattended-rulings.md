@@ -15162,3 +15162,74 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1879.
   error path (`fresh_settings` removes directories). Every other hit is an HTTP status, a name
   collision, or a call already under `spawn_blocking` or `tokio::fs`. *Reversing:* one wrapper
   each.
+
+## #1870: the command modules' own SQL moves below the shim (Opus implementer, 2026-10-23)
+
+- **Which lower module owns each read.** *Fork:* everything into `knobas-core`, or each read beside
+  the behaviour it serves. *Ruling:* a read over the mirror and `knobas.*` alone goes to
+  `knobas-core`, beside its siblings: the pins write and *This job*'s read into `builds` (where
+  `PINS_SETTING` and the frame-kinds CTE already were), the paste resolver into `web_url` (beside
+  the normalisation it is built from), drawing a link into `link`, and the detail view, Code's
+  facts and *Viewed* into new modules `detail`, `code_facts` and `viewed`. A read that needs an
+  app type or an adapter stays in the app crate, in the behaviour module that already owns its
+  neighbours: `ticket_titled` in `protocol` (beside `draw_link` and `ACTION_ITEM_RELATION`), the
+  saved view's columns, members and column rule in `ticket_views` (which owns `ViewColumn` and
+  every other `sync.saved_view` read), the first run in `settings`, and `with_commits`' budgeted
+  live read in `sources::crud::shared_commits`, beside the `pipeline_commits` it wraps.
+  *Reversing:* cheap, each is a move.
+- **`with_commits` splits into a rule and a read.** *Fork:* move it whole into `sources::crud`, or
+  behind a trait in core. *Ruling:* the rule (which shas need a pipeline's settings, and which
+  commit a run then links) is two pure functions in `knobas_core::builds`, `shared_shas` and
+  `link_commits`, with unit tests; the 5 s budget and the settings reads are
+  `sources::crud::shared_commits`. The command keeps the four calls between them. *Reversing:*
+  small.
+- **`EntityDetail` stays in the app.** *Fork:* move the wire type to core. *Ruling:* it carries
+  `knobas_source::KindInfo`, and `knobas-core` does not depend on `knobas-source`. Core's
+  `detail::read` answers a `Detail` record and the shim adds `kind_info`. `SourceRef` moves (it
+  names nothing from a source). `Detail` carries the configured adapter kind separately, because
+  `SourceRef::adapter_kind` falls back to the source id and would look up an adapter nobody
+  configured. *Reversing:* small.
+- **`web_url::resolve` answers a `sqlx::Error`.** *Fork:* `CoreError`, as core's stores do.
+  *Ruling:* its callers are the paste command and three `sources::crud` look-ups, and
+  `SourcesError` has a `Db(sqlx::Error)` arm and no `CoreError` one; a `sqlx::Error` keeps every
+  caller's `?` and every message as it was. *Reversing:* trivial, plus a `SourcesError` arm.
+- **`form_readings` stays in `lookups.rs`.** *Fork:* move it too. *Ruling:* it is an in-memory
+  read of the registry's declared forms into `RESOLVE_URL`'s `$2`, needs `knobas_source` and an
+  `AdapterRegistry`, and holds no statement; core takes the readings as a parameter.
+  *Reversing:* trivial.
+- **The moved wire types keep their doc comments verbatim.** ts-rs copies a doc comment into the
+  generated TypeScript, so `PipelineReason`, `JobPipeline`, `CodeFacts`, `UrlMatch` and
+  `SourceRef` moved with their docs character for character, crate-relative links included, and
+  `cargo test -p knobas-app --lib ipc_mirror` leaves `app/src/lib/ipc/generated/` unchanged. No
+  wire shape changed and no §10.8 entry is due. *Reversing:* n/a.
+- **A note's born links fold their relation through `link::relation_named`.** *Fork:* keep
+  `create_note_inner`'s own `present(..).to_lowercase()`. *Ruling:* one folding rule; it is the
+  same expression, now in one place. *Reversing:* trivial.
+- **The self-link refusal moves into `link::draw` as `CoreError::Invalid`.** Same message, and
+  `Invalid` maps to the same `invalid` code. *Reversing:* trivial.
+- **`no_command_issues_its_own_statement` pins the class.** *Fork:* close the issue on the moves
+  alone. *Ruling:* a source scan over `src/commands/` beside `no_command_takes_the_app_state_directly`,
+  with the issue's two spellings (`sqlx::query`, `.begin()`), so the next statement in a command
+  fails a test rather than waiting for a reviewer. *Reversing:* trivial.
+- **Seams.** *Fork:* the tdd skill asks for the seams to be confirmed with the user; the run is
+  unattended. *Ruling:* the seams are the existing `_inner` integration tests, unchanged but for
+  three re-pointed imports, plus the two new core unit tests and the scan. *Reversing:* n/a.
+- **`knobas-sync` is touched by one doc path.** `write_queue.rs` names
+  `knobas_app::protocol::ticket_titled` where it named the command module. No live suite exercises
+  a comment. *Reversing:* n/a.
+
+Reviewed 2026-10-23 by the merge-manager (Opus), PR #1882.
+
+- **The scan names what a shim may take from sqlx, not two spellings it may not.** *Fork:* keep
+  the issue's two spellings (`sqlx::query*`, `.begin()`). *Ruling:* those let a statement in
+  through `sqlx::raw_sql`, `sqlx::QueryBuilder`, `use sqlx::{query_as, ..}` or `.acquire()`; a
+  shim with `sqlx::raw_sql("select 1")` passed the scan as written. Every `sqlx::` path in a
+  command module must now name `PgPool` or `Error`, the two the modules spell today, and
+  `.begin()` and `.acquire()` are both refused. The `raw_sql` mutant fails it. *Reversing:*
+  trivial; a shim that needs a third sqlx item adds it to `SHIM_ITEMS` with a reason.
+- **The implementer's eleven rulings stand.** The link transaction, the activity lines, the
+  self-link message and code, the 5 s shared deadline with its two warnings, and the detail
+  status rule are unchanged; the regenerated IPC mirror is byte-identical, so no §10.8 entry is
+  due. The verbatim wire-type docs leave intra-doc links in core that name app items
+  (`EntityDetail`) or the crate by name; rustdoc is not gated, and byte-identical TypeScript is
+  the better trade. *Reversing:* n/a.

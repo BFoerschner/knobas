@@ -4,50 +4,9 @@ use super::*;
 
 // -- what Code draws beside a row --------------------------------------------
 
-/// What Code draws beside one mirrored row (#966, #973, #986): a pull
-/// request's, branch's or commit's author, whether it is mine, and a
-/// repository's language and teams.
-///
-/// Not on [`EntityRow`]: a room line and a launcher row are one wire shape
-/// over two structs (`commands::search`'s pin), read by a dozen statements,
-/// and these four facts are Code's alone. Code asks for the rows it holds.
-#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
-#[ts(export_to = "entity.ts")]
-pub struct CodeFacts {
-    /// The row asked about.
-    pub entity_id: String,
-    /// The row's §4.1 author, as its source spells the account: Gitea's
-    /// login of a pull request's opener, of a commit's author, of a branch
-    /// tip's author. `None` where the source named none.
-    pub author: Option<String>,
-    /// Whether `author` is its own source's configured username, trimmed,
-    /// compared as the attention read compares it (#712). `false` for a
-    /// source with no username, whose rows are nobody's.
-    pub mine: bool,
-    /// A repository's declared language; `None` on a miss (Gitea's `""`).
-    pub language: Option<String>,
-    /// A repository's declared teams, in the record's order; empty on a miss.
-    pub teams: Vec<String>,
-}
+pub use knobas_core::code_facts::CodeFacts;
 
-/// One row per live item among `$1`; `$2` is the declarations.
-const CODE_FACTS: &str = concat!(
-    r#"
-select i.entity_id, i.author, coalesce(i.author = me.me, false) as mine,
-       "#,
-    knobas_core::declared_string!("$2", "language"),
-    r#" as language,
-       coalesce((select array_agg(v.value) from "#,
-    knobas_core::declared_list!("$2", "teams"),
-    r#" v), '{}') as teams
-  from sync.live_item i
-  left join lateral (select nullif(btrim(s.config->>'username'), '') as me
-                       from knobas.source_config s where s.id = i.source_id) me on true
- where i.entity_id = any($1)
-"#
-);
-
-/// [`code_facts`] over a pool, for a test.
+/// [`code_facts`] over a pool, for a test: [`knobas_core::code_facts::read`].
 ///
 /// # Errors
 ///
@@ -58,21 +17,7 @@ pub async fn code_facts_inner(
     entity_ids: &[String],
 ) -> Result<Vec<CodeFacts>, IpcError> {
     let declarations = declared_paths(pool, registry).await?;
-    let rows = sqlx::query(CODE_FACTS)
-        .bind(entity_ids)
-        .bind(declarations.as_param())
-        .fetch_all(pool)
-        .await?;
-    Ok(rows
-        .iter()
-        .map(|row| CodeFacts {
-            entity_id: row.get("entity_id"),
-            author: row.get("author"),
-            mine: row.get("mine"),
-            language: row.get("language"),
-            teams: row.get("teams"),
-        })
-        .collect())
+    Ok(knobas_core::code_facts::read(pool, &declarations, entity_ids).await?)
 }
 
 /// What Code draws beside each of `entity_ids` (#966): an id the mirror does
@@ -93,139 +38,32 @@ pub async fn code_facts(
 
 // -- the URL a paste names --------------------------------------------------
 
-/// What a pasted URL resolved to: the entity, and the kind that says where it
-/// opens (issue #496).
-///
-/// Deliberately not an [`EntityRow`] and not an [`EntityDetail`]. A paste
-/// answers one question -- *which entity is this link* -- and the frontend
-/// then navigates to that entity's own address, at which point the detail is
-/// fetched by the read that already exists. Answering with a row here would
-/// make every paste pay for a title and a path nothing on the way draws, and
-/// would put a second statement in the tree that has to keep in step with
-/// `sync.live_item`'s columns.
-///
-/// `kind` rather than only the id because an entity id names a *namespace*
-/// and a key (`gitea:acme/svc#142`), not a kind, and the address an entity
-/// opens at is `#/<kind>/<id>` -- or, for an asset or a route, the Tree's own
-/// encoder. The frontend has one function that turns the pair into an
-/// address; it has nothing that turns an id alone into one.
-#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
-#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
-#[ts(export_to = "entity.ts")]
-pub struct UrlMatch {
-    pub entity_id: String,
-    pub kind: String,
-}
-
-/// The one statement that reads `sync.item.web_url` (#496), and the forms
-/// an adapter declares beside it (#1475).
-///
-/// **`sync.item`, not `sync.live_item`**, and for the two reasons
-/// [`DETAIL`] reaches past that view as well: a withdrawn entity still opens
-/// and says it is gone (spec #491 story 15 -- *"a stale link explains
-/// itself"*), and a disabled source's items still open. It is the **third**
-/// reader to do so, and `CONTEXT.md`'s **Live item** entry is the list of
-/// them: a fourth owes a reason of its own and a line there. Resolving to a
-/// tombstone and letting the detail's banner do the explaining is a better
-/// answer than *Not in the mirror*, which would send the reader to the
-/// browser to discover the same thing.
-///
-/// **Two arms, one read.** The first is the stored address: both sides of
-/// the comparison go through `web_url_normalized!` -- the stored column and
-/// the pasted parameter -- so there is exactly one rule and it cannot be
-/// applied to one side only. `crates/knobas-core/src/web_url.rs` carries the
-/// rule and the reasoning; migration `0023` carries the index.
-/// `where i.web_url is not null` is the index's own predicate, repeated so the
-/// planner may use the partial index.
-///
-/// The second is `$2`, the pasted address read as each declared
-/// [`UrlForm`](knobas_source::url_forms::UrlForm) ([`form_readings`]): a base
-/// URL, an adapter kind, an entity kind and the payload values the item must
-/// hold. The base is held to a configured source's `base_url` under the same
-/// rule as the first arm, so a form never needs a second spelling of it; the
-/// values are compared with `#>>` on that source's items of that kind. This
-/// is a payload read outside an adapter (ADR-0007), and its failure direction
-/// is the **miss**: a path the item does not hold is `null`, which is
-/// distinct from every value, so the item is not named. A reading with no
-/// values is skipped rather than allowed to name every item; `read` never
-/// makes one, and `a_reading_with_no_values_names_nothing` pins the guard.
-///
-/// `order by via_form, entity_id limit 1`: the stored address wins over a form,
-/// and nothing stops two mirrored items reporting one address, so an
-/// ambiguous paste must answer the same entity on every run rather than
-/// whichever row the plan reached first.
-///
-/// `$2` is `[]` for a caller that wants the stored address alone.
-pub const RESOLVE_URL: &str = concat!(
-    "select found.entity_id, found.kind
-       from (
-         select i.entity_id, i.kind, 0 as via_form
-           from sync.item i
-          where i.web_url is not null
-            and ",
-    knobas_core::web_url_normalized!("i.web_url"),
-    " = ",
-    knobas_core::web_url_normalized!("$1::text"),
-    "
-         union all
-         select i.entity_id, i.kind, 1 as via_form
-           from jsonb_to_recordset($2::jsonb)
-                  as r(adapter_kind text, base text, kind text, fields jsonb)
-           join knobas.source_config s
-             on s.kind = r.adapter_kind
-            and ",
-    knobas_core::web_url_normalized!("s.base_url"),
-    " = ",
-    knobas_core::web_url_normalized!("r.base"),
-    "
-           join sync.item i
-             on i.source_id = s.id
-            and i.kind = r.kind
-          where jsonb_array_length(r.fields) > 0
-            and not exists (
-                  select 1
-                    from jsonb_to_recordset(r.fields) as f(path text[], value text)
-                   where i.payload #>> f.path is distinct from f.value)
-       ) found
-      order by found.via_form, found.entity_id
-      limit 1"
-);
-
-/// `$2` of [`RESOLVE_URL`] for a caller that resolves the stored address
-/// alone.
-pub(crate) fn no_form_readings() -> sqlx::types::Json<Vec<FormReading>> {
-    sqlx::types::Json(Vec::new())
-}
+pub use knobas_core::web_url::UrlMatch;
 
 /// `url` read as every form every adapter declares, as `$2` of
-/// [`RESOLVE_URL`]: no adapter is named here, and no form is applied
-/// anywhere but in that statement.
-pub(crate) fn form_readings(
-    registry: &dyn AdapterRegistry,
-    url: &str,
-) -> sqlx::types::Json<Vec<FormReading>> {
-    sqlx::types::Json(
-        registry
-            .descriptors()
-            .into_iter()
-            .flat_map(|descriptor| {
-                let adapter_kind = descriptor.adapter_kind;
-                descriptor
-                    .url_forms
-                    .iter()
-                    .flat_map(|form| form.read(url))
-                    .map(|reading| FormReading {
-                        adapter_kind: adapter_kind.clone(),
-                        reading,
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect(),
-    )
+/// [`knobas_core::web_url::RESOLVE_URL`]: no adapter is named here, and no
+/// form is applied anywhere but in that statement.
+pub(crate) fn form_readings(registry: &dyn AdapterRegistry, url: &str) -> Vec<FormReading> {
+    registry
+        .descriptors()
+        .into_iter()
+        .flat_map(|descriptor| {
+            let adapter_kind = descriptor.adapter_kind;
+            descriptor
+                .url_forms
+                .iter()
+                .flat_map(|form| form.read(url))
+                .map(|reading| FormReading {
+                    adapter_kind: adapter_kind.clone(),
+                    reading,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
-/// One element of [`RESOLVE_URL`]'s `$2`: a reading, and the adapter kind
-/// whose sources it may name. Its keys are the statement's
+/// One element of [`knobas_core::web_url::RESOLVE_URL`]'s `$2`: a reading, and
+/// the adapter kind whose sources it may name. Its keys are the statement's
 /// `jsonb_to_recordset` columns.
 #[derive(Debug, serde::Serialize)]
 pub(crate) struct FormReading {
@@ -264,16 +102,8 @@ pub async fn resolve_url_inner(
         )));
     }
 
-    let row = sqlx::query(RESOLVE_URL)
-        .bind(url)
-        .bind(form_readings(registry, url))
-        .fetch_optional(pool)
-        .await?;
-
-    Ok(row.map(|row| UrlMatch {
-        entity_id: row.get("entity_id"),
-        kind: row.get("kind"),
-    }))
+    let forms = form_readings(registry, url);
+    Ok(knobas_core::web_url::resolve(pool, url, &forms).await?)
 }
 
 /// Whether `url` is an absolute `http`/`https` URL.

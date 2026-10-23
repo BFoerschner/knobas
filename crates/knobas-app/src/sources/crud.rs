@@ -13,8 +13,6 @@ use knobas_sync::config::{self, AuthKind, CredentialHealth, InsertConfig, PatchC
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
 
-use crate::commands::entity::{RESOLVE_URL, no_form_readings};
-
 use super::{
     ConnectionReport, NewSource, SecretInput, SourceDraft, SourcePatch, SourceSummary, SourcesError,
 };
@@ -808,8 +806,9 @@ pub async fn reachable_transitions(
 /// its repository's URL and sha, because the adapter that drew it -- TeamCity,
 /// listing a build's changes -- cannot see another source's mirror. The app
 /// can: [`commit_page`] composes the commit's page from the two, and the
-/// paste resolver's own statement ([`RESOLVE_URL`]) finds the entity whose
-/// page it is. Found, the row gets that entity's id; not found, it stays
+/// paste resolver's own statement
+/// ([`knobas_core::web_url::resolve_stored`]) finds the entity whose page it
+/// is. Found, the row gets that entity's id; not found, it stays
 /// plain text. Either way the hint is cleared, so it never reaches the shell.
 ///
 /// # Errors
@@ -898,14 +897,10 @@ pub async fn pipeline_settings(
             )) else {
                 continue;
             };
-            let found: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
-                .bind(&page)
-                .bind(no_form_readings())
-                .fetch_optional(pool)
-                .await?;
+            let found = knobas_core::web_url::resolve_stored(pool, &page).await?;
             repository.entity_id = found
-                .filter(|(_, kind)| kind == "repo")
-                .map(|(entity_id, _)| entity_id);
+                .filter(|found| found.kind == "repo")
+                .map(|found| found.entity_id);
         }
     }
     Ok(Some(settings))
@@ -975,15 +970,10 @@ pub async fn pipeline_commits(
             let Some(page) = commit_page(repository, sha) else {
                 continue;
             };
-            let hit: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
-                .bind(&page)
-                .bind(no_form_readings())
-                .fetch_optional(pool)
-                .await?;
-            if let Some((commit, kind)) = hit
-                && kind == "commit"
+            if let Some(hit) = knobas_core::web_url::resolve_stored(pool, &page).await?
+                && hit.kind == "commit"
             {
-                hits.insert(commit);
+                hits.insert(hit.entity_id);
             }
         }
         if hits.len() == 1 {
@@ -991,6 +981,44 @@ pub async fn pipeline_commits(
         }
     }
     Ok(found)
+}
+
+/// How long [`shared_commits`] waits for all its pipelines' settings together
+/// (#1144). The live read only sharpens a link, and the run page's runs wait
+/// on it, so a slow or unreachable source costs at most this before those
+/// runs answer without the link. One HTTP call alone may take 45 s
+/// (`knobas_http::SEND_BUDGET`), and a settings read makes several.
+const COMMIT_READ_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// [`pipeline_commits`] for each pipeline of `shared` (its shas two mirrored
+/// commits hold, `knobas_core::builds::shared_shas`), one live read per
+/// pipeline, all of them within [`COMMIT_READ_BUDGET`]. A pipeline whose
+/// settings cannot be read, or not in time, answers nothing and is logged:
+/// its runs then link no commit, which is never a failure of the read that
+/// asked.
+pub async fn shared_commits<'a>(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    shared: std::collections::BTreeMap<&'a str, Vec<String>>,
+) -> knobas_core::builds::ResolvedCommits<'a> {
+    let mut resolved = knobas_core::builds::ResolvedCommits::new();
+    let deadline = tokio::time::Instant::now() + COMMIT_READ_BUDGET;
+    for (pipeline, wanted) in shared {
+        let read = pipeline_commits(pool, secrets, registry, pipeline, &wanted);
+        match tokio::time::timeout_at(deadline, read).await {
+            Err(_) => {
+                tracing::warn!(pipeline, "a run's repository took too long to read");
+            }
+            Ok(Ok(found)) => {
+                resolved.insert(pipeline, found);
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(pipeline, %error, "a run's repository could not be read");
+            }
+        }
+    }
+    resolved
 }
 
 /// The runs of pipeline `entity_id` older than run `before`, asked of its own
@@ -1097,12 +1125,8 @@ async fn resolve_commit_hints(
             let Some(page) = commit_page(&repo_url, &hint.sha) else {
                 continue;
             };
-            let found: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
-                .bind(&page)
-                .bind(no_form_readings())
-                .fetch_optional(pool)
-                .await?;
-            row.entity_id = found.map(|(entity_id, _kind)| entity_id);
+            let found = knobas_core::web_url::resolve_stored(pool, &page).await?;
+            row.entity_id = found.map(|found| found.entity_id);
         }
     }
     Ok(())
