@@ -2981,21 +2981,16 @@ mod tests {
     }
 
     /// #1637: dropping the future that runs `initdb` kills it, rather than
-    /// leaving it writing into a directory nobody is waiting on.
+    /// leaving it writing into a directory nobody is waiting on. Held after
+    /// the bootstrap, an `initdb` left running waits on its child past the
+    /// 30 s [`interrupt_initdb`] gives it to be gone (#1908); before, a drop
+    /// at 150 ms said nothing once load made `initdb` take longer than the
+    /// 2 s the test waited.
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_dropped_initdb_is_killed_with_its_future() {
         let dir = tempfile::tempdir().unwrap();
-        let (settings, initdb) = initdb_for(dir.path()).await;
-
-        let dropped = tokio::time::timeout(
-            Duration::from_millis(150),
-            run_initdb(&initdb, &settings, COMMAND_TIMEOUT),
-        )
-        .await;
-        assert!(dropped.is_err(), "a full initdb takes longer than 150 ms");
-        // A full `initdb` here takes about 0.4 s; base/5 is the `postgres`
-        // database, among the last things it makes.
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        let settings = interrupt_initdb(dir.path(), KillPoint::AfterBootstrap).await;
         assert!(
             !settings.data_dir.join("base/5").exists(),
             "the dropped initdb ran on to the end"
