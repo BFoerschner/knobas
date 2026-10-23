@@ -15702,3 +15702,52 @@ Measured on the seeded Jira Data Center 10.3 (`just jira-live`'s container): wit
 - **The implementer's rulings above (merge-manager review, Opus).** *Ruling:* upheld. The seam ships only its default: `SchedulerTiming::default()` at `knobas-app/src/sources/mod.rs:611,694` is the only production construction, and `Scheduler::shutdown` is the field's only reader. Every hang guard (`HANG_GUARD` 30 s, `PATIENCE` 20 s, `await_inside_count` 30 s) bounds a wait that is milliseconds on correct code, and a guard that fires fails the test without hanging it: the test's runtime drops the held run, and the quitting thread is left detached. The kept margins and lower bounds (`run.started_at >= due_at`, the cap and six-blocked 300 ms, the ticker's two ticks, `sync_after_write`'s 100 ms) can only let a mutant pass. *Reversing:* n/a.
 - **The test that pins #1924 said so only in the PR (merge-manager, Opus).** *Fork:* leave the pin to the PR body and the rulings, or say it beside the test. *Ruling:* a comment at the fixture and at the 200 ms look in `a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_next_start`. It names #1924 and #1927 and says the test stays on the default grace until #1924's fix. *Reasoning:* the next agent to read the test sees green, and only the comment tells it that the green is a known wrong behaviour. *Reversing:* trivial.
 - **Follow-ups filed by the class (merge-manager, Opus).** *Fork:* keep #1924 as the background-send instance, or widen it to its cause. *Ruling:* #1924 now names the cause, a flush handed `never()` that keeps starting writes after the quit's cancel. A comment lists the other production paths: *Flush now* (`write_queue.rs:266,268`, via `flush_writes`) and the foreground submit and worklog paths into `flush_entity_of`. `network.rs:810` (a 1 s deadline bounded at 3 s) joins #1925 as an instance. #1925, #1926 and #1927 have three different roots (a clock the test cannot inject, a lock order nothing shows, a negative window), so none folds. *Reasoning:* *Filing a follow-up*: one issue per root cause, every instance listed. *Reversing:* n/a.
+
+## #1708: the six entity-id columns `0050` missed, and the context's foreign key (implementer, Opus, 2026-10-24)
+
+- **Reserved for Björn, ruled by implementer on Opus: migration `0060`** (Björn's 2026-10-22
+  waiver, review handoff). *Ruling:* `0060_the_ids_0050_missed_compare_bytewise_and_a_context_is_an_entity.sql`,
+  next after `0059` on `origin/main` at `9deb973b`, transactional (no `-- no-transaction`), with
+  its §10.8 entry `docs/contract/10.8/1708-migration-0060-context-entity-key.md`. *Reasoning:* the
+  ticket's "next after `0055`" predates `0056` to `0059`. *Reversing:* a later migration.
+- **Which columns: six, not five.** *Fork:* the ticket lists five. *Ruling:* add
+  `knobas.ticket_view.saved_view`. *Reasoning:* every text column in `knobas` and `sync` was read
+  off a database migrated to `0059`, with its collation and foreign keys. `saved_view` holds a
+  `sync.saved_view.entity_id` (`0053`'s column comment) and was `default`. The rest are not entity
+  ids: `inbox_state.item_key` is `'<category>:<subject>'` (`0009`), `saved_view.ref_id` and the
+  `remote_id`s are the source's, `asset.monitors` and `route.monitors` are monitor names, and
+  `link_set`, `smart_list`, `ticket_view`, `dep_view` and `dep_layer` ids are knobas' own rows.
+  The three views read none of the six tables. *Reversing:* one migration.
+- **Reserved for Björn, ruled by implementer on Opus: the orphan handling.** *Fork:* delete
+  context rows with no entity row; add the key `not valid` and validate; or write the missing
+  entity rows. *Ruling:* delete, as the ticket says, and the migration's comment names the rule.
+  *Reasoning:* every writer since #47 writes both rows in one transaction, so an orphan comes from
+  a hand edit or a partial restore only. It cannot be used: membership is links, and both ends of
+  a link are keyed to `knobas.entity`. `not valid` keeps the orphans, and validating in the same
+  file fails on the first one. Writing entity rows would make the switcher's dead entry live under
+  a title nobody chose for an entity. A timer or block that ran in a deleted context keeps its
+  `ctx:` id, which `0016` reads correctly. *Reversing:* the rows are gone, and had no members; a
+  pre-`0060` backup holds them.
+- **Reserved for Björn, ruled by implementer on Opus: the index choice.** *Ruling:* no index
+  added. *Reasoning:* the key's referencing side is `context_pkey`. The collation change rebuilds
+  `context_pkey`, `write_queue_link_owed` and `run_preset_name_idx` (`pipeline_id` first) in `C`.
+  `timer` holds one row, a block's room is read by the block's id, and `saved_view` is read by a
+  sync's prefix match, which no btree serves. *Reversing:* one migration.
+- **The key's delete action.** *Ruling:* `on delete cascade`, named `context_entity_fk`.
+  *Reasoning:* the shape `0006` gave `note_entity_fk` and `0017` the asset and route keys: the
+  entity row is the identity. No knobas path deletes an entity row; archiving sets `archived_at`.
+  A linked context's entity cannot be deleted anyway, since `knobas.link`'s keys restrict it.
+  *Reversing:* drop and re-add the constraint.
+- **Seams.** *Fork:* the TDD skill asks for seams agreed up front, with no one to agree them.
+  *Ruling:* the catalog (`every_entity_id_compares_bytewise_and_a_title_by_the_database`), a
+  write (`zero_sixty_refuses_a_context_without_its_entity`) and the upgrade
+  (`zero_sixty_removes_a_context_without_its_entity_and_keeps_the_rest`, wound back to `0059` on a
+  scratch database, which #1897's reuse declines afterwards). *Reversing:* n/a.
+- **Seeds that wrote a context alone.** *Fork:* the foreign key refuses five test seeds
+  (`knobas-db` `tests/schema.rs` ×2, `knobas-core` `tests/it/contexts.rs`, `knobas-app`
+  `tests/it/backup.rs` and `backup_ipc.rs`). *Ruling:* each seed writes the entity row first; none
+  asserted on the context's lack of one. *Reasoning:* that is the shape the key exists to refuse,
+  and `knobas_core::context::insert` writes both. *Reversing:* n/a.
+- **ADR-0027.** *Ruling:* one line under *Consequences* naming `0060`. *Reasoning:* the ADR's
+  decision is unchanged; its count of `0050`'s columns is history, and a reader of "every column"
+  should find where the last six went. *Reversing:* delete the line.
