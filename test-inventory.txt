@@ -2021,6 +2021,7 @@ knobas-search	lib/knobas_search	query::tests::leading_prefixes_are_exclusive_and
 knobas-search	lib/knobas_search	query::tests::me_and_a_name_are_both_bound_but_only_the_name_is_echoed
 knobas-search	lib/knobas_search	query::tests::mine_without_an_identity_resolves_to_no_authors_but_stays_set
 knobas-search	lib/knobas_search	query::tests::name_is_a_typed_glob_that_ignores_case
+knobas-search	lib/knobas_search	query::tests::needles_and_alternatives_match_the_shared_parity_fixture
 knobas-search	lib/knobas_search	query::tests::needles_are_what_the_text_asks_for
 knobas-search	lib/knobas_search	query::tests::reach_is_a_typed_filter_that_ignores_case
 knobas-search	lib/knobas_search	query::tests::repeated_values_mean_any_and_a_minus_negates

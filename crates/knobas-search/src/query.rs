@@ -1752,10 +1752,9 @@ mod tests {
     /// copy agree.
     #[test]
     fn needles_and_alternatives_match_the_shared_parity_fixture() {
-        let rows: Vec<serde_json::Value> = serde_json::from_str(include_str!(
-            "../tests/fixtures/needle-parity.json"
-        ))
-        .expect("fixture is JSON");
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../tests/fixtures/needle-parity.json"))
+                .expect("fixture is JSON");
         assert!(rows.len() > 10);
         let v = fixture();
         let words = |value: &serde_json::Value| -> Vec<String> {
@@ -1769,7 +1768,11 @@ mod tests {
         for row in rows {
             let typed = row["typed"].as_str().expect("typed");
             let text = parse(typed, &v).query.text;
-            assert_eq!(needles(&text), words(&row["needles"]), "needles of {typed:?}");
+            assert_eq!(
+                needles(&text),
+                words(&row["needles"]),
+                "needles of {typed:?}"
+            );
             let expected: Vec<(Vec<String>, Vec<String>)> = row["alternatives"]
                 .as_array()
                 .expect("alternatives")
