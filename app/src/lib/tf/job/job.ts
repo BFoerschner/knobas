@@ -11,8 +11,6 @@ import type { AssetStatus } from "../../ipc/assets";
 import type { EntityDetail, EntityRow, Reached, Tone } from "../../ipc/entity";
 import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
 
-/** What the job reads of a `list_sources` row: the fields of the wire row it uses, all always sent. */
-export type SourceFacts = Pick<SourceSummary, "id" | "display_name" | "config" | "roles" | "auth_kind">;
 import type { Week } from "../../ipc/time";
 import type { SourceSummary } from "../../ipc/sources";
 import { signInFails } from "../../shell/health.svelte";
@@ -22,6 +20,9 @@ import { keyOf, minutesLabel } from "../../time/format";
 import { minutesOf } from "../../time/week";
 import { CI, claims } from "../roles.svelte";
 import { reenterWords, secretNoun } from "../settings/settings";
+
+/** What the job reads of a `list_sources` row: the fields of the wire row it uses, all always sent. */
+export type SourceFacts = Pick<SourceSummary, "id" | "display_name" | "config" | "roles" | "auth_kind">;
 
 /** Whether an address segment is an entity id (`jira:PAY-231`) rather than a key. */
 export function isEntityId(segment: string): boolean {
