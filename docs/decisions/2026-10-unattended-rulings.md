@@ -13150,3 +13150,29 @@ The measurement came after it.
   (`docs/contract/10.8/1775-1779-a-strangers-port-clears-a-live-pids-lock-and-a-dead-server-fails-the-window.md`):
   `db:state` can go `ready` to `failed`, and `retry_database` from that state restarts instead of
   bringing up. No type changes. *Reversing:* n/a.
+
+### #1775 and #1779: merge-manager review (Opus merge-manager, 2026-10-23)
+
+- **The implementer's reserved #1775 ruling.** Reserved for Björn, ruled by merge-manager on Opus:
+  upheld. *Reasoning:* every client of the embedded server dials `127.0.0.1`. The pool, the
+  connector and `pg_dump`'s `PGHOST` all derive from `build_settings`'s `host`, which was
+  `127.0.0.1` before this PR, and no code or script builds a `localhost` URL for it, so
+  `listen_addresses=127.0.0.1` cuts off no client. The argument for clearing beside a live pid holds
+  on the code. A stranger's answer only reaches `adopt` while knobas holds `.owner.lock`, and it
+  shows that no postmaster of ours is bound to `127.0.0.1:<port>`. An unbound one is stopped by the
+  SysV interlock. *Reversing:* as the implementer's ruling.
+- **The restart gate had no test.** *Ruling:* added
+  `a_quit_during_a_restart_stops_the_server_the_restart_started`. The test holds the bring-up lock
+  so the restart stalls inside its gate. The hold outlasts the scheduler's bounded shutdown, which
+  runs first in the quit. A shorter hold hid the gate: the restart finished during that wait, so
+  the gate-less mutant passed at a 1 s hold and fails at this one. *Reversing:* delete one test.
+- **The watch's lifetime.** *Ruling:* it is not enrolled in the scheduler's `Background` set. It
+  holds nothing and writes nothing. On a quit it ends at its next tick, because the lifecycle no
+  longer holds a server, and process exit drops it in any case. *Reversing:* low.
+- **`ps -p` outside the watch.** *Ruling:* `restart` and `stop` call `server_is_running` inline,
+  one `ps` (~9 ms) per *Retry* or quit. They run on the runtime or on the exit handler's
+  `block_on`. Accepted: the watch's five-second probe is the only repeated call, and it runs on
+  `spawn_blocking`. *Reversing:* low.
+- **`stop` on a dead server answers `Ok`.** *Ruling:* no caller relied on the error. The callers
+  are the exit handler and a failed bring-up's stop, which only log it, and tests on live servers.
+  *Reversing:* low.
