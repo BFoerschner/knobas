@@ -48,9 +48,10 @@ pub(crate) const PG_CTL: &str = if cfg!(windows) {
     "pg_ctl"
 };
 
-/// The settings a managed server writes durably under, passed as `-c` at
-/// every start (#1896): see [`build_settings`].
-const DURABLE: [(&str, &str); 3] = [
+/// The settings the app's server writes durably under, passed as `-c` every
+/// time it starts (#1896): see [`build_settings`]. The gate's test server
+/// overrides `fsync` (see `start_with_max_connections`).
+const DURABLE_SETTINGS: [(&str, &str); 3] = [
     ("fsync", "on"),
     ("synchronous_commit", "on"),
     ("full_page_writes", "on"),
@@ -433,7 +434,9 @@ impl EmbeddedDb {
     /// and shared with every other `root_dir` on the machine), runs `initdb` into `root_dir/data` the
     /// first time, starts the server on an ephemeral loopback port with
     /// `fsync` on (#1896) and creates the `knobas` database if it does not
-    /// exist yet.
+    /// exist yet. An adopted server runs with the settings it was started
+    /// with: an orphan of a build before #1896 has `fsync` off until this
+    /// handle stops or restarts it.
     ///
     /// A server that is already up and serving this very data directory, one
     /// a signal-killed run left behind, is *adopted* rather than fought over:
@@ -1494,7 +1497,7 @@ fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
     // the last setting of a name wins, so the `-c fsync=on` this puts after
     // `-F` is the one the server runs with. The other two are PostgreSQL's
     // defaults, set here so no `postgresql.conf` can lower them.
-    for (name, value) in DURABLE {
+    for (name, value) in DURABLE_SETTINGS {
         settings
             .configuration
             .insert(name.to_owned(), value.to_owned());

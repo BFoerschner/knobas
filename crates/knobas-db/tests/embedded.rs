@@ -254,8 +254,8 @@ async fn the_apps_server_runs_with_fsync_on_after_a_restart_too() {
     let restarted = durability(db.pool()).await;
     db.stop().await.unwrap();
 
-    assert_eq!(started, DURABLE, "the started server");
-    assert_eq!(restarted, DURABLE, "the restarted server");
+    assert_eq!(started, DURABLE_SETTINGS, "the started server");
+    assert_eq!(restarted, DURABLE_SETTINGS, "the restarted server");
 }
 
 /// #1896: an orphan this build left is adopted, and the adopting handle's
@@ -279,7 +279,7 @@ async fn an_adopted_server_restarts_with_fsync_on() {
     let restarted = durability(adopted.pool()).await;
     adopted.stop().await.unwrap();
 
-    assert_eq!(restarted, DURABLE);
+    assert_eq!(restarted, DURABLE_SETTINGS);
 }
 
 /// #1896: the test server `just test` starts keeps `fsync` off, on purpose:
@@ -302,22 +302,21 @@ async fn the_gates_test_server_runs_with_fsync_off() {
 
 /// `fsync`, `synchronous_commit` and `full_page_writes` at PostgreSQL's
 /// defaults: the values a crash cannot corrupt a database under.
-const DURABLE: [&str; 3] = ["fsync=on", "synchronous_commit=on", "full_page_writes=on"];
+const DURABLE_SETTINGS: [&str; 3] = ["fsync=on", "synchronous_commit=on", "full_page_writes=on"];
 
-/// What the server behind `pool` runs [`DURABLE`]'s settings at, in its
-/// `name=value` form.
-async fn durability(pool: &sqlx::PgPool) -> [String; 3] {
-    let mut values = DURABLE.map(String::from);
-    for setting in &mut values {
-        let name = setting.split('=').next().unwrap().to_owned();
+/// What the server behind `pool` runs those three settings at, each as
+/// `name=value`.
+async fn durability(pool: &sqlx::PgPool) -> Vec<String> {
+    let mut read = Vec::new();
+    for name in ["fsync", "synchronous_commit", "full_page_writes"] {
         let value: String = sqlx::query_scalar("select current_setting($1)")
-            .bind(&name)
+            .bind(name)
             .fetch_one(pool)
             .await
             .unwrap();
-        *setting = format!("{name}={value}");
+        read.push(format!("{name}={value}"));
     }
-    values
+    read
 }
 
 /// #1779: stopping a handle whose server already died is not a failure.

@@ -42,7 +42,7 @@ bench = false
 # Its `start()` passes `-F` (`fsync=off`) ahead of the `-c` settings, and the
 # app's server relies on a later `-c fsync=on` winning (#1896, see
 # `embedded::build_settings`). `tests/embedded.rs`'s `*_fsync_on*` tests read
-# the setting back from a running server, so a version that changes either
+# the setting back from a running server, so a version that lets `-F` win
 # fails them.
 postgresql_embedded = { version = "0.21", default-features = false, features = [
     "theseus",
