@@ -14300,3 +14300,29 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   `require_https` tested on their own. *Reasoning:* a test-only trust root is a second way past
   the platform verifier in the frozen crate. The cost: `locate` giving a remote origin
   `Start::ThisMachine` would pass every test. *Reversing:* low.
+
+## #1828, #1830: merge-manager review of PR #1832 (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by merge-manager on Opus: changing `crates/knobas-http/**`.**
+  *Ruling:* the implementer's ruling is confirmed. *Reasoning:* the change is additive.
+  `HttpClient::new` builds the client it built before (`Policy::default()` for reads, none for
+  writes), every adapter keeps `new`, and the write client never asks the check. The one shared
+  path the change touches is `send_with`'s `classify_transport`. There, a refused hop returns
+  first and is not transient, so #1818's resend and #1821's `Unconfirmed` never see it. The
+  §10.8 entry adds only `A` rows and matches the diff. *Reversing:* low (one constructor, one
+  private module, one re-export).
+- **The cell in `remote::get` that hands the refused hop back as `NotHttps`.** *Ruling:*
+  confirmed. *Reasoning:* each `get` builds its own client, so the cell belongs to one read. The
+  check runs only on redirect hops, after `get` has checked the first URL itself. A refused hop
+  ends the send without a resend, so the cell is written at most once and read only on the
+  failed send. A failed send with an empty cell maps to `Unreachable`, as before. The other way,
+  matching on `Protocol`'s message, would read a refusal out of prose. A `SourceError` variant
+  would change the SPI for one caller. *Reversing:* trivial.
+- **The https origin of #1828's first criterion, witnessed only through `Located`.** *Fork:*
+  close it with a test or hand it on. *Ruling:* hand-on accepted. No gate test can close it.
+  Every path from a remote origin to a `Located` fetches over TLS first (the release API, or the
+  manifest URL), and knobas-http trusts only the platform's roots. `Start::of` is tested on
+  `https://api.github.com/x`, and `artifact` is tested on the `Located` such an origin yields.
+  What stays unwitnessed is the line in `from_release_api` that takes the start from the API URL,
+  and review confirms it. A test-only trust root in the frozen crate would cost more than the gap
+  does. *Reversing:* low (a TLS fixture can add the witness later without touching this code).
