@@ -570,14 +570,18 @@ pub async fn list_sync_runs<R: tauri::Runtime>(
     limit: u32,
 ) -> Result<Vec<knobas_sync::run_log::SyncRunRow>, IpcError> {
     let state = crate::sources::state(&app)?;
-    knobas_sync::run_log::list(&state.pool, source_id.as_deref(), i64::from(limit.min(super::ROW_CEILING)))
-        .await
-        .map_err(|error| {
-            to_ipc(
-                &crate::sources::SourcesError::Db(error),
-                source_id.as_deref(),
-            )
-        })
+    knobas_sync::run_log::list(
+        &state.pool,
+        source_id.as_deref(),
+        i64::from(limit.min(super::ROW_CEILING)),
+    )
+    .await
+    .map_err(|error| {
+        to_ipc(
+            &crate::sources::SourcesError::Db(error),
+            source_id.as_deref(),
+        )
+    })
 }
 
 #[tauri::command]

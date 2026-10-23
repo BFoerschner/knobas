@@ -426,7 +426,10 @@ mod tests {
                 .any(|line| line == format!("PATH={}", path.to_string_lossy())),
             "{printed}"
         );
-        assert!(printed.lines().any(|line| line == "LANG=en_US.UTF-8"), "{printed}");
+        assert!(
+            printed.lines().any(|line| line == "LANG=en_US.UTF-8"),
+            "{printed}"
+        );
     }
 
     /// The legacy keys are #501's spellings, and the list's key is its own.

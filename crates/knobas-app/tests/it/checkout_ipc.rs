@@ -892,15 +892,9 @@ async fn opening_a_checkout_runs_the_application_with_the_scanned_path() {
     let checkout = root.path().join(&repo.name).to_string_lossy().into_owned();
     let expected = ["--wait".to_owned(), checkout.clone()];
 
-    let argv = open(
-        &pool,
-        &repo.id,
-        Some("vscode"),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let argv = open(&pool, &repo.id, Some("vscode"), None, None)
+        .await
+        .unwrap();
     // Exactly two arguments: the flag the command carried, and the checkout.
     // The repo's URL, its key, its title and its source are all in scope at
     // the call site and **none of them** reaches the process (ADR-0016).
@@ -909,9 +903,7 @@ async fn opening_a_checkout_runs_the_application_with_the_scanned_path() {
 
     // No application named is the default, which a list's first entry is.
     fs::remove_file(&record).unwrap();
-    open(&pool, &repo.id, None, None, None)
-        .await
-        .unwrap();
+    open(&pool, &repo.id, None, None, None).await.unwrap();
     assert_eq!(recorded(&record).await, expected);
 }
 
@@ -941,15 +933,9 @@ async fn an_override_with_a_space_is_one_argument() {
     .await
     .unwrap();
 
-    open(
-        &pool,
-        &repo.id,
-        Some("viewer"),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    open(&pool, &repo.id, Some("viewer"), None, None)
+        .await
+        .unwrap();
 
     assert_eq!(
         recorded(&record).await,
@@ -1019,15 +1005,9 @@ async fn a_file_opens_with_the_file_command_and_its_line() {
     .await
     .unwrap();
 
-    open(
-        &pool,
-        &repo.id,
-        None,
-        Some("src/sepa/retry.rs"),
-        Some(42),
-    )
-    .await
-    .unwrap();
+    open(&pool, &repo.id, None, Some("src/sepa/retry.rs"), Some(42))
+        .await
+        .unwrap();
     assert_eq!(
         recorded(&record).await,
         [
@@ -1165,14 +1145,24 @@ async fn trying_a_command_runs_the_template_the_setting_holds() {
     let pool = pool().await;
     let (repo, root, stub, record, _workshop) = scanned(&pool).await;
     let checkout = root.path().join(&repo.name).to_string_lossy().into_owned();
-    let draft = |flag: &str| app(None, "MyGitViewer", &format!("{} {flag} {{path}}", stub.display()), None);
+    let draft = |flag: &str| {
+        app(
+            None,
+            "MyGitViewer",
+            &format!("{} {flag} {{path}}", stub.display()),
+            None,
+        )
+    };
 
     set_applications(&pool, &[draft("--try")], None)
         .await
         .unwrap();
     let id = settings(&pool).await.unwrap().applications[0].id.clone();
     open(&pool, &repo.id, Some(&id), None, None).await.unwrap();
-    assert_eq!(recorded(&record).await, ["--try".to_owned(), checkout.clone()]);
+    assert_eq!(
+        recorded(&record).await,
+        ["--try".to_owned(), checkout.clone()]
+    );
 
     fs::remove_file(&record).unwrap();
     set_applications(&pool, &[draft("--again")], None)
