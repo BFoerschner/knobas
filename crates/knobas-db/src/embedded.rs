@@ -139,8 +139,9 @@ pub enum DbError {
     /// process holds the ownership lock, and `reason` names its pid (ruling
     /// B2, spec #1619). A second window is refused rather than let in beside
     /// the first, because the first one's quit stops the server under it.
-    /// The other causes are a lock file whose process is still alive but
-    /// whose server cannot be reached as ours, and `reason` says which.
+    /// The other cause is a lock file whose recorded port answers as a
+    /// PostgreSQL that cannot be reached as ours (one still starting up or
+    /// shutting down, say), and `reason` says what it answered.
     ///
     /// Note what this error does *not* do: it never stops that server.
     /// Anything that shuts a stranger's postmaster down risks taking a
@@ -421,8 +422,8 @@ impl EmbeddedDb {
     ///
     /// Returns [`DbError`] if the install, `initdb`, start, database creation
     /// or the initial connection fails, or [`DbError::AlreadyRunning`] if a
-    /// live knobas has this profile open, or a live process's server holds
-    /// the data directory and cannot be reached as ours.
+    /// live knobas has this profile open, or a server answering on the port
+    /// the lock file records cannot be reached as ours.
     pub async fn start(cfg: DbConfig) -> Result<EmbeddedDb, DbError> {
         if let Some(url) = cfg.existing_url.as_deref() {
             tracing::info!("connecting to externally managed postgres");
@@ -1006,16 +1007,6 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
                 std::mem::forget(postgresql);
                 return adopt(adoption, port, owner_lock).await;
             }
-            Lock::LiveProcess { pid } => {
-                std::mem::forget(postgresql);
-                return Err(DbError::AlreadyRunning {
-                    data_dir,
-                    reason: format!(
-                        "postmaster.pid records process {pid}, which is still running, but \
-                         nothing answers on the port it recorded (the start failed with: {error})"
-                    ),
-                });
-            }
         }
     }
 
@@ -1429,33 +1420,42 @@ fn read_password(password_file: &Path) -> Result<Option<String>, DbError> {
 enum Lock {
     /// There is no lock file, so it is not what refused the start.
     Absent,
-    /// The lock belonged to a server that is gone, and has been removed: the
-    /// start is worth retrying.
+    /// Nothing answered on the port the lock records, and the lock has been
+    /// removed: the start is worth retrying.
     Cleared,
     /// Something is answering on the port the lock records. Whether it is
     /// *our* server is [`adopt`]'s to establish, and the recorded pid plays
     /// no part in it (#1775).
     Live { port: u16 },
-    /// Nothing answers on the recorded port, but the process the lock records
-    /// is still alive. Not clearable: see [`inspect_lock`].
-    LiveProcess { pid: u32 },
 }
 
 /// Classify `data_dir`'s `postmaster.pid`, clearing it when it is stale.
 ///
-/// Two independent pieces of evidence, because either one alone lies:
+/// Called only with `.owner.lock` held ([`start_managed`]), so no knobas has
+/// this profile open, and only after PostgreSQL itself refused the start,
+/// which it does for a lock naming any live process it may signal.
 ///
-/// * The **port** (line 4): a TCP handshake proves *something* is listening,
-///   but a recycled ephemeral port can put a stranger there, so an answer is
-///   not proof the lock is live -- which is why [`adopt`] asks the server what
-///   it serves before trusting it.
-/// * The **pid** (line 1): a live process is proof the lock may still be
-///   owned. A postmaster that is still starting up, one wedged before it
-///   opened its socket, or one listening on an interface this probe does not
-///   reach all fail the 500 ms handshake while owning the data directory --
-///   and clearing the lock under a live postmaster is how two servers end up
-///   writing one data directory. So a dead port is only clearable once the
-///   recorded process is gone too.
+/// The **port** (line 4) is the one piece of evidence read. A TCP handshake
+/// proves *something* is listening, but a recycled ephemeral port can put a
+/// stranger there, so an answer is not proof the lock is live -- which is why
+/// [`adopt`] asks the server what it serves before trusting it.
+///
+/// A **silent** port clears the lock **whatever the recorded pid is doing**
+/// (#1789, reversing the rest of ruling B5). The pid (line 1) used to keep
+/// the lock whenever it was alive, which locked a profile out on every launch
+/// once a reboot had recycled the pid to some other process of ours. A
+/// postmaster of ours answers on `127.0.0.1` from the moment it binds until
+/// it exits, through crash recovery and shutdown alike ([`build_settings`]
+/// pins that address), so a silent port with a live postmaster of ours behind
+/// it is one in the few milliseconds between writing `postmaster.pid` and
+/// binding, which no relaunch reaches unless the process is frozen there, or
+/// an orphan an older build started on `localhost`. Clearing under either
+/// puts no second server on the files: PostgreSQL's shared-memory interlock
+/// lets only one of the two postmasters past it (see [`adopt`], *A stranger
+/// on the port*), the other exits, and the survivor, whose lock file is then
+/// gone, shuts itself down within a minute; the next start replays the WAL.
+/// The evidence is recorded in `docs/decisions/2026-10-unattended-rulings.md`
+/// under #1789.
 fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
     let pid_file = data_dir.join("postmaster.pid");
 
@@ -1465,12 +1465,7 @@ fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
         Err(source) => return Err(DbError::io(pid_file, source)),
     };
 
-    // Line 1 is the postmaster's pid, line 4 the port it last listened on.
-    let recorded_pid = contents
-        .lines()
-        .next()
-        .and_then(|line| line.trim().parse::<u32>().ok())
-        .filter(|pid| *pid != 0);
+    // Line 4 is the port the postmaster last listened on.
     let recorded_port = contents
         .lines()
         .nth(3)
@@ -1485,16 +1480,6 @@ fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
             "postmaster.pid names a port something is answering on"
         );
         return Ok(Lock::Live { port });
-    }
-
-    if let Some(pid) = recorded_pid
-        && process_alive(pid)
-    {
-        tracing::warn!(
-            pid,
-            "postmaster.pid names a live process, though its port is silent: keeping the lock"
-        );
-        return Ok(Lock::LiveProcess { pid });
     }
 
     tracing::warn!(pid_file = %pid_file.display(), "removing stale postmaster.pid");
@@ -1545,8 +1530,8 @@ fn recorded_pid(data_dir: &Path) -> Option<u32> {
 /// and 1 when it did not, on both macOS and Linux.
 ///
 /// A pid is *not* proof of identity -- pids are recycled, so the process may
-/// be anything at all. It is only ever used here as evidence that the lock
-/// might still be owned, never as evidence that it is.
+/// be anything at all. Only [`ServerWatch`] asks, about a pid it saw its own
+/// server write minutes ago, where a recycled pid is as good as impossible.
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
     std::process::Command::new("ps")
@@ -1558,8 +1543,8 @@ fn process_alive(pid: u32) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// No `ps` to ask, so nothing is known: the pid contributes no evidence and
-/// the port decides alone, exactly as it did before the check existed.
+/// No `ps` to ask, so nothing is known. [`ServerWatch::is_gone`] does not ask
+/// off unix.
 #[cfg(not(unix))]
 fn process_alive(_pid: u32) -> bool {
     false
@@ -1991,22 +1976,17 @@ mod tests {
         assert!(!pid_file.exists());
     }
 
-    /// A silent port is *not* on its own proof that the lock is free: a
-    /// postmaster still starting up, or wedged before it opened its socket,
-    /// fails the handshake while owning the data directory. Clearing the lock
-    /// there is how a second server ends up writing the same files.
+    /// #1789: a silent port clears the lock whatever the recorded pid is
+    /// doing. A live pid behind it is, after a reboot, one recycled to some
+    /// other process of ours, and keeping the lock refused every launch.
     #[test]
-    fn inspect_lock_keeps_a_pid_file_whose_process_is_still_alive() {
+    fn inspect_lock_removes_a_pid_file_whose_process_lives_but_whose_port_is_silent() {
         let dir = tempfile::tempdir().unwrap();
         // Our own pid: alive for certain, for as long as this test runs.
-        let alive = std::process::id();
-        let (lock, pid_file) = inspect_with_a_silent_port(dir.path(), alive);
+        let (lock, pid_file) = inspect_with_a_silent_port(dir.path(), std::process::id());
 
-        assert_eq!(lock, Lock::LiveProcess { pid: alive });
-        assert!(
-            pid_file.exists(),
-            "a lock whose process is still running must not be cleared"
-        );
+        assert_eq!(lock, Lock::Cleared);
+        assert!(!pid_file.exists());
     }
 
     #[test]
@@ -2044,7 +2024,7 @@ mod tests {
     #[test]
     fn process_liveness_tells_a_running_process_from_a_reaped_one() {
         // Both directions, because a `process_alive` stuck at either answer
-        // would satisfy one of the `inspect_lock` cases above on its own.
+        // would satisfy one of the watch's cases above on its own.
         assert!(process_alive(std::process::id()));
         assert!(!process_alive(dead_pid()));
     }

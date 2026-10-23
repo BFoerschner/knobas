@@ -115,90 +115,79 @@ async fn stopping_a_server_that_already_died_succeeds() {
         .expect("a server that is already gone stops cleanly");
 }
 
-/// A `postmaster.pid` naming a **live** process whose port is silent is
-/// reported, not cleared -- and the same directory starts normally once that
-/// process is gone.
+/// #1789: the after-reboot shape with a silent port. Our lock file names a
+/// pid that has been recycled to some live, unrelated process of ours, and a
+/// port nothing listens on. Nobody holds the ownership lock, so no knobas has
+/// the profile open, and the start clears the lock and comes up on its own
+/// data directory, where it used to be refused on every launch until the
+/// reader deleted `postmaster.pid` (ruling B5, reversed by #1789).
 ///
-/// The two halves are one story. A failed TCP handshake alone says nothing
-/// about ownership: a postmaster still starting up, or wedged before it opened
-/// its socket, fails it while holding the data directory, and clearing the lock
-/// there puts a second server on the same files. What makes the lock clearable
-/// is the *process* being gone, which is the second half.
-///
-/// The recorded PID must belong to a process that is alive and is not the
+/// The recorded pid must belong to a process that is alive and is not the
 /// postmaster's own ancestry: `CreateLockFile` unlinks the file itself for a
-/// dead PID, and exempts its own PID, its parent and its grandparent (the test
+/// dead pid, and exempts its own pid, its parent and its grandparent (the test
 /// binary is the grandparent). Either shortcut lets `start()` succeed on the
-/// first attempt and none of this code is reached at all. A spawned child
-/// satisfies both conditions, so PostgreSQL genuinely refuses and
-/// `inspect_lock` has to do the work.
+/// first attempt and `inspect_lock` is never reached. A spawned `sleep`
+/// satisfies both, so PostgreSQL genuinely refuses the first start and the
+/// lock really reaches `inspect_lock`.
 #[tokio::test]
-async fn a_lock_naming_a_live_process_is_reported_until_that_process_is_gone() {
+async fn a_lock_naming_a_live_unrelated_process_and_a_silent_port_is_cleared() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = DbConfig {
         root_dir: dir.path().to_path_buf(),
         existing_url: None,
     };
-
-    let db = EmbeddedDb::start(cfg.clone()).await.unwrap();
-    db.stop().await.unwrap();
-
-    // The lock file survives, names a live process, and records a port nothing
-    // listens on.
-    let mut sleeper = std::process::Command::new("sleep")
-        .arg("120")
-        .spawn()
+    EmbeddedDb::start(cfg.clone())
+        .await
+        .unwrap()
+        .stop()
+        .await
         .unwrap();
-    let live_pid = sleeper.id();
-    let dead_port = {
+
+    let mut sleeper = Sleeper::spawn();
+    let silent_port = {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         listener.local_addr().unwrap().port()
     };
     let data_dir = dir.path().join("data");
     let pid_file = data_dir.join("postmaster.pid");
-    std::fs::write(
-        &pid_file,
-        format!(
-            "{live_pid}\n{}\n1700000000\n{dead_port}\n",
-            data_dir.display()
+    let lock = format!(
+        "{}\n{}\n1700000000\n{silent_port}\n",
+        sleeper.pid(),
+        data_dir.display()
+    );
+    std::fs::write(&pid_file, &lock).unwrap();
+    assert!(
+        !port_answers(silent_port),
+        "the recorded port must be silent"
+    );
+
+    let db = match EmbeddedDb::start(cfg).await {
+        Ok(db) => db,
+        Err(error) => panic!(
+            "no knobas owns the profile and nothing answers on the port, whatever the pid does: \
+             {error}"
         ),
-    )
-    .unwrap();
-
-    let refused = EmbeddedDb::start(cfg.clone()).await;
-
-    // Asserted before the child is reaped, because both facts are about the
-    // window in which it was alive.
-    let error = match refused {
-        Err(error) => error,
-        Ok(_) => {
-            let _ = sleeper.kill();
-            let _ = sleeper.wait();
-            panic!("a lock whose process is still running must not be taken over");
-        }
     };
-    assert!(
-        matches!(error, knobas_db::DbError::AlreadyRunning { .. }),
-        "{error:?}"
-    );
-    assert!(
-        pid_file.exists(),
-        "the lock must survive: clearing it is what lets a second server in"
-    );
-
-    let _ = sleeper.kill();
-    let _ = sleeper.wait();
-
-    // The process is gone now, so the same lock is stale and the start goes
-    // through.
-    let db = EmbeddedDb::start(cfg)
-        .await
-        .expect("a lock whose process is gone must not block the start");
-    let one: (i32,) = sqlx::query_as("select 1")
+    let (serving,): (String,) = sqlx::query_as("show data_directory")
         .fetch_one(db.pool())
         .await
         .unwrap();
-    assert_eq!(one.0, 1);
+    assert_eq!(
+        std::fs::canonicalize(&serving).unwrap(),
+        std::fs::canonicalize(&data_dir).unwrap(),
+        "the start came up on its own data directory"
+    );
+    assert!(db.owns_server());
+    assert_ne!(
+        std::fs::read_to_string(&pid_file).unwrap(),
+        lock,
+        "the stale lock was replaced by the new server's own"
+    );
+    assert!(
+        sleeper.is_alive(),
+        "clearing the lock leaves the recorded process alone"
+    );
+
     db.stop().await.unwrap();
 }
 
@@ -661,6 +650,10 @@ impl Sleeper {
 
     fn pid(&self) -> u32 {
         self.0.id()
+    }
+
+    fn is_alive(&mut self) -> bool {
+        self.0.try_wait().unwrap().is_none()
     }
 }
 
