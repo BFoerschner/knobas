@@ -477,6 +477,7 @@ knobas-app	test/it	backup_ipc::the_archive_list_is_ordered_by_date_and_not_by_th
 knobas-app	test/it	backup_ipc::the_archive_list_says_which_archives_are_share_exports
 knobas-app	test/it	backup_ipc::the_nightly_job_exports_once_and_then_leaves_it_alone
 knobas-app	test/it	bring_up::a_failed_migration_stops_the_server_without_holding_the_runtime
+knobas-app	test/it	bring_up::a_quit_during_a_restart_stops_the_server_the_restart_started
 knobas-app	test/it	bring_up::a_quit_while_migrating_stops_the_server
 knobas-app	test/it	bring_up::a_second_bring_up_over_one_registry_refuses_no_installed_adapter
 knobas-app	test/it	bring_up::a_second_demo_launch_on_a_live_owner_is_refused_naming_the_profile_and_the_owner

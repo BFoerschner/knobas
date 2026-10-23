@@ -841,6 +841,67 @@ async fn a_server_that_dies_after_ready_fails_the_window_and_retry_restarts_it()
     assert!(!port_answers(port), "the quit stops the restarted server");
 }
 
+/// #1779: a quit while *Retry* is restarting the server. The restart takes
+/// the server out of the lifecycle for as long as it runs, so a quit that did
+/// not wait for it would find nothing to stop, and the postmaster the restart
+/// then started would outlive the window (the defect #1634 fixed for
+/// bring-up). The exit handler waits on the restart's gate and stops what it
+/// started.
+///
+/// The test holds the profile's bring-up lock, which every start takes, so
+/// the restart stalls inside its gate until a thread lets it go. The hold
+/// outlasts the scheduler's shutdown, which comes first in the quit and waits
+/// up to its grace plus a pool close: a shorter hold let the restart finish
+/// during that wait, and the quit then found the server held again whether
+/// or not it waited on the gate.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quit_during_a_restart_stops_the_server_the_restart_started() {
+    let data = tempfile::tempdir().unwrap();
+    let profile = Profile::new(false, data.path());
+    let root = profile.db_config(None).root_dir;
+    let registry = Registry::default();
+    let app = mock_app(&profile, &registry);
+    let _quits = QuitsOnDrop(&app);
+    knobas_app::bring_up(app.handle(), &profile, None, registry).await;
+    assert_eq!(app.state::<Lifecycle>().get(), DbState::Ready);
+    let port = port_of(&root);
+
+    knobas_db::test_util::kill_server(&root);
+    until(&app, "the window notices its server died", |state| {
+        matches!(state, DbState::Failed { .. })
+    })
+    .await;
+
+    let bring_up_lock = std::fs::File::create(root.join(".bring-up.lock")).unwrap();
+    bring_up_lock.lock().expect("the bring-up lock is free");
+    knobas_app::commands::app::retry_database(app.handle().clone()).expect("retry");
+    until(&app, "the restart begins", |state| {
+        matches!(state, DbState::Starting { detail: Some(_) })
+    })
+    .await;
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(knobas_sync::scheduler::SHUTDOWN_GRACE + Duration::from_secs(5));
+        drop(bring_up_lock);
+    });
+
+    shutdown(&app);
+    release.join().unwrap();
+    // Settled first: a quit that did not wait returned before the restart
+    // started the server it then leaves running.
+    until(&app, "the restart settles", |state| {
+        !matches!(state, DbState::Starting { .. })
+    })
+    .await;
+    assert!(
+        !port_answers(port),
+        "the quit waits for the restart and stops the server it started"
+    );
+    assert!(
+        !root.join("data").join("postmaster.pid").exists(),
+        "no postmaster is left on the data directory"
+    );
+}
+
 // -- a trigger racing the quit (#1633) --------------------------------------
 
 /// Events that hold the first `running` announcement -- the one a trigger
