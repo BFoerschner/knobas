@@ -192,6 +192,19 @@ async fn serially() -> tokio::sync::MutexGuard<'static, ()> {
     SERIAL.lock().await
 }
 
+/// Every `sync:state` a scheduler emitted, in order; the other events are
+/// dropped.
+#[derive(Default)]
+struct Recorder(std::sync::Mutex<Vec<SourceSyncStatus>>);
+
+impl SyncEvents for Recorder {
+    fn sync_state(&self, s: SourceSyncStatus) {
+        self.0.lock().unwrap().push(s);
+    }
+    fn source_health(&self, _h: knobas_sync::config::CredentialHealth) {}
+    fn activity_new(&self, _r: knobas_core::activity::ActivityRow) {}
+}
+
 /// One caller's channel: everything it was told about a run, in order.
 ///
 /// A test's stand-in for `knobas-app`'s `ChannelSink`, and the only way to say
@@ -319,8 +332,9 @@ async fn seed_quiet(pool: &PgPool, n: usize) -> Vec<String> {
 /// `config::due` clamps the schedule up by `backoff_until`, and
 /// `Scheduler::trigger` consults neither it nor `enabled`, so this keeps
 /// exactly the asymmetry these tests need while leaving the source *normal*:
-/// enabled, mirrored, searchable. Nothing in this file asserts on
-/// `backoff_until`, which is what makes it free to borrow.
+/// enabled, mirrored, searchable. The two tests that assert on `backoff_until`
+/// read it before they retire their source or after their own run has set it,
+/// which is what keeps it free to borrow.
 async fn retire(pool: &PgPool, ids: &[String]) {
     for id in ids {
         sqlx::query(
@@ -900,16 +914,6 @@ async fn a_trigger_says_running_before_it_returns() {
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
 
-    #[derive(Default)]
-    struct Recorder(std::sync::Mutex<Vec<SourceSyncStatus>>);
-    impl SyncEvents for Recorder {
-        fn sync_state(&self, s: SourceSyncStatus) {
-            self.0.lock().unwrap().push(s);
-        }
-        fn source_health(&self, _h: knobas_sync::config::CredentialHealth) {}
-        fn activity_new(&self, _r: knobas_core::activity::ActivityRow) {}
-    }
-
     let events = Arc::new(Recorder::default());
     let connector = knobas_db::test_util::test_connector().await;
     let scheduler = Scheduler::start(SchedulerDeps {
@@ -965,16 +969,6 @@ async fn a_running_state_names_its_own_run_not_another_open_one() {
     // starting a run of its own would put a third id in play.
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-
-    #[derive(Default)]
-    struct Recorder(std::sync::Mutex<Vec<SourceSyncStatus>>);
-    impl SyncEvents for Recorder {
-        fn sync_state(&self, s: SourceSyncStatus) {
-            self.0.lock().unwrap().push(s);
-        }
-        fn source_health(&self, _h: knobas_sync::config::CredentialHealth) {}
-        fn activity_new(&self, _r: knobas_core::activity::ActivityRow) {}
-    }
 
     let events = Arc::new(Recorder::default());
     let connector = knobas_db::test_util::test_connector().await;
@@ -2010,16 +2004,6 @@ async fn a_run_whose_adapter_panics_is_recorded_and_stops_running() {
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-
-    #[derive(Default)]
-    struct Recorder(std::sync::Mutex<Vec<SourceSyncStatus>>);
-    impl SyncEvents for Recorder {
-        fn sync_state(&self, s: SourceSyncStatus) {
-            self.0.lock().unwrap().push(s);
-        }
-        fn source_health(&self, _h: knobas_sync::config::CredentialHealth) {}
-        fn activity_new(&self, _r: knobas_core::activity::ActivityRow) {}
-    }
 
     let events = Arc::new(Recorder::default());
     let connector = knobas_db::test_util::test_connector().await;

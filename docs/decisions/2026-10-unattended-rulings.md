@@ -13502,24 +13502,29 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   keeps today's behaviour (watchers closed at once, the row left to `reconcile_abandoned`) and
   `shutdown` awaits a spawned tail under the grace. A STATUS bound would leave the row open and
   no ending emitted, which spec #1619 says must exist. *Reversing:* low.
-- **Once, not twice.** *Ruling:* `run_task` clears the guard's `record` the moment it has a
-  verdict, before its own `end_run`. A task that dies inside `end_run` then gets only the
-  watchers' ending, as before, rather than a second row write and a second `sync:state` ending.
-  The spawned tail carries a guard with `record` unset, so an aborted tail still closes the
-  watchers. *Reversing:* n/a.
-- **Row before ending.** *Ruling:* the guard no longer closes the watchers itself when it spawns
-  the tail; `end_run` closes them after `settle`, as on the ordinary path. A trigger in that window
-  joins the dying run and is told its ending, and a caller that reads `status_for` the moment it
-  hears the ending reads a finished run. *Reversing:* low.
+- **Once, not twice.** *Fork:* disarm the guard's recording before `run_task`'s own `end_run`,
+  or after it. *Ruling:* before: `run_task` clears the guard's `recorder` the moment it has a
+  verdict. *Reasoning:* disarmed after, a task aborted or panicking inside `end_run` would have
+  its row written and its `sync:state` ending sent a second time. Disarmed before, it gets only
+  the watchers' ending, as it did before #1638. The spawned tail carries a guard with `recorder`
+  unset, so an aborted tail still closes the watchers. *Reversing:* n/a.
+- **Row before ending.** *Fork:* close the watchers in the drop at once and record afterwards, or
+  close them only once the row is written. *Ruling:* the latter: when the guard spawns the tail,
+  `end_run` closes the watchers after `settle`, as on the ordinary path. *Reasoning:* closed
+  first, a caller that reads `status_for` the moment it hears the ending can still read the run
+  as open, and a trigger in that window starts a second run beside an open row. Closed after, a
+  trigger in the window joins the dying run and is told its ending. The cost is that the ending
+  now waits for `settle`'s statements, bounded by the pool's own timeouts. *Reversing:* low.
 - **The backoff.** *Fork:* treat the panic as the cancelled run is treated (no verdict, no
   backoff), or as an `error`. *Ruling:* an `error`: one rung up the ladder, no credential verdict,
   a stored `unreachable` cleared, as for a protocol bug. *Reasoning:* a panic is the adapter's
   fault, not the reader's, and an adapter that panics every run should back off like one that
   errors every run. `reconcile_abandoned` writes `error` too, so the ladder already counted these
   rows after a restart. *Reversing:* one constructor.
-- **The message.** *Ruling:* `RUN_STOPPED_MESSAGE` now reads "the run stopped before it could
-  finish". The old "without recording an outcome" became false once the guard records one.
-  Nothing outside `scheduler.rs` matched the old text. *Reversing:* one string.
+- **The message.** *Fork:* keep `RUN_STOPPED_MESSAGE`'s text or change it. *Ruling:* it now reads
+  "the run stopped before it could finish". *Reasoning:* the old "without recording an outcome"
+  became false once the guard records one, and the row now stores the text. Nothing outside
+  `scheduler.rs` matched the old text. *Reversing:* one string.
 - **A §10.8 entry.** *Ruling:* booked (`1638-a-panicked-run-is-recorded.md`). `knobas-sync` is not
   frozen, but `sync:state`, `sync_status` and `list_sources` observably change for a panicked run,
   as they did for #1629's cancelled run. *Reversing:* n/a.

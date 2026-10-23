@@ -2039,7 +2039,7 @@ impl Inner {
             source_id: source_id.clone(),
             run_id,
             started,
-            record: Some(Arc::clone(&self)),
+            recorder: Some(Arc::clone(&self)),
         };
         let permit = tokio::select! {
             biased;
@@ -2070,7 +2070,7 @@ impl Inner {
         // From here this task records its own ending, so the guard only closes
         // the watchers if the task dies on the way: once, never a second row
         // write or a second `sync:state` ending.
-        closing.record = None;
+        closing.recorder = None;
         self.end_run(&source_id, run_id, &result, &watchers, started)
             .await;
     }
@@ -2161,7 +2161,7 @@ fn stopped() -> RunResult {
 /// cannot be forgotten by a later edit to `run_task` the way a line at the
 /// bottom of the function can.
 ///
-/// **Two halves** (#1638, spec #1619). While `record` is set -- the task has
+/// **Two halves** (#1638, spec #1619). While `recorder` is set -- the task has
 /// not reached its verdict -- a drop hands [`Inner::end_run`] to the
 /// scheduler's [`Background`] set with [`stopped`]: the row is finished, the
 /// backoff and the `sync:state` ending follow as for any failed run, and the
@@ -2186,12 +2186,12 @@ struct Closing {
     run_id: i64,
     started: std::time::Instant,
     /// The scheduler, while the ending is still this guard's to record.
-    record: Option<Arc<Inner>>,
+    recorder: Option<Arc<Inner>>,
 }
 
 impl Drop for Closing {
     fn drop(&mut self) {
-        if let Some(inner) = self.record.take()
+        if let Some(inner) = self.recorder.take()
             && tokio::runtime::Handle::try_current().is_ok()
         {
             // Carries the second half into the task: if the task is aborted
@@ -2201,11 +2201,10 @@ impl Drop for Closing {
                 source_id: self.source_id.clone(),
                 run_id: self.run_id,
                 started: self.started,
-                record: None,
+                recorder: None,
             };
             let background = inner.background.clone();
             let spawned = background.spawn(async move {
-                let fallback = fallback;
                 inner
                     .end_run(
                         &fallback.source_id,
@@ -2220,11 +2219,12 @@ impl Drop for Closing {
                 return;
             }
         }
+        let verdict = stopped();
         self.watchers.close(ending(
             self.run_id,
             &self.source_id,
-            SyncOutcome::Error,
-            Some(RUN_STOPPED_MESSAGE.to_owned()),
+            verdict.outcome,
+            verdict.error,
             0,
             elapsed_ms(self.started),
         ));
