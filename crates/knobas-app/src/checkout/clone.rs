@@ -285,8 +285,8 @@ pub async fn stop(
     let removed = match removed.await {
         Ok(Some(removed)) => removed,
         Ok(None) => return Ok(CloneAnswer::NotCloning),
-        // The start gave up before its runner existed.
-        // `try_exists` off the runtime; an error reads as "gone", as `exists` did.
+        // The start gave up before its runner existed. A folder that cannot
+        // be looked at reads as gone.
         Err(_) => !tokio::fs::try_exists(&path).await.unwrap_or(false),
     };
     Ok(CloneAnswer::Stopped {
@@ -567,12 +567,15 @@ async fn spawn_into(
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    match spawn_off_runtime(command).await? {
+    // The folder made above goes whenever git did not start, also when the
+    // spawn's task did not finish.
+    let spawned = spawn_off_runtime(command).await;
+    if !matches!(spawned, Ok(Ok(_))) {
+        let _ = tokio::fs::remove_dir_all(target).await;
+    }
+    match spawned? {
         Ok(child) => Ok(Ok(child)),
-        Err(error) => {
-            let _ = tokio::fs::remove_dir_all(target).await;
-            Err(IpcError::invalid(format!("git could not be run: {error}")))
-        }
+        Err(error) => Err(IpcError::invalid(format!("git could not be run: {error}"))),
     }
 }
 

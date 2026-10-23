@@ -185,7 +185,8 @@ pub(super) enum Unrunnable {
     /// Not on the search path, or Apple's shim on a Mac without the Command
     /// Line Tools.
     NoGit,
-    /// The Command Line Tools probe did not answer.
+    /// The Command Line Tools probe did not answer, or the `PATH` lookup's
+    /// task did not finish.
     ProbeFailed(String),
 }
 
@@ -282,8 +283,9 @@ pub(super) fn refusal(stderr: &str) -> String {
 }
 
 /// [`find_on`] off the async runtime: it stats each `PATH` entry. A task that
-/// panicked or was cancelled is a failed lookup, `ProbeFailed`: the readers
-/// answer in [`TreeRead`], which has no internal error.
+/// panicked or was cancelled is a failed lookup, `ProbeFailed`: [`locate`]'s
+/// callers answer in [`TreeRead`] or `DiffRead`, and neither has an internal
+/// error.
 async fn find_off_runtime(search: &OsStr, name: &str) -> Result<Option<PathBuf>, Unrunnable> {
     let (search, name) = (search.to_owned(), name.to_owned());
     tokio::task::spawn_blocking(move || find_on(&search, &name))
