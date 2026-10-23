@@ -328,7 +328,6 @@ impl Searcher {
     /// # Errors
     ///
     /// [`SearchError::Invalid`] for a query outside the engine's bounds,
-    /// [`SearchError::UnknownList`] for a `list:` nobody ships,
     /// [`SearchError::Db`] if the statement fails.
     pub async fn search(&self, query: SearchQuery) -> Result<SearchResponse, SearchError> {
         let started = Instant::now();
@@ -347,9 +346,19 @@ impl Searcher {
         };
 
         if let Some(list) = parsed.list_id.clone() {
-            return self
+            // A reader typing `list:mine` passes through `list:m` and `list:mi`;
+            // like every other half-typed state, an id nobody ships answers
+            // with nothing and is echoed as an unknown token, never an error.
+            // (`smart_list_items` is a command, not typing, and still errors.)
+            let mut echoed = interpreted.clone();
+            echoed.unknown_tokens.push(format!("list:{list}"));
+            return match self
                 .list_response(&list, query.limit, &vocab, interpreted, started)
-                .await;
+                .await
+            {
+                Err(SearchError::UnknownList(_)) => Ok(empty(echoed, started)),
+                other => other,
+            };
         }
 
         let text = (!parsed.query.text.is_empty()).then_some(parsed.query.text.as_str());

@@ -301,15 +301,18 @@ async fn every_builtin_runs_and_decodes() {
         Err(SearchError::UnknownList(_))
     ));
     // And the same id typed into the box, since `list:` routes here.
-    assert!(matches!(
-        s.search(knobas_search::SearchQuery {
+    // Typed, it is a half-typed state: empty answer, the id echoed as unknown.
+    let typed = s
+        .search(knobas_search::SearchQuery {
             raw: "list:nope".to_owned(),
             limit: 20,
             filters: knobas_search::SearchFilters::default(),
         })
-        .await,
-        Err(SearchError::UnknownList(_))
-    ));
+        .await
+        .unwrap();
+    assert!(typed.groups.is_empty());
+    assert_eq!(typed.total, 0);
+    assert_eq!(typed.interpreted.unknown_tokens, ["list:nope"]);
 }
 
 /// The counts are real, and they come back in one pass with the summary.
