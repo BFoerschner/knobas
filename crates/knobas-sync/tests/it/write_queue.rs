@@ -49,6 +49,12 @@ enum Answer {
     /// its budget, so nothing was sent (#1729). The fake makes a real
     /// `knobas_http` send that the limiter holds, as an adapter's would be.
     HeldByQuota,
+    /// The server read the write's request whole and closed the connection
+    /// without answering (#1821): a keep-alive timeout firing as the write
+    /// went out, or a server that fell over on it. The fake records the
+    /// write, since it may have landed, and makes a real once-sent
+    /// `knobas_http` POST to a server that does exactly that.
+    HungUpOn,
     /// The source said no to the operation in a fault knobas raised itself:
     /// a status-less `Protocol`, the shape [`Answer::HeldByQuota`] fails in
     /// too, with no quota behind it.
@@ -195,6 +201,10 @@ impl Source for Fake {
                 .await
                 .unwrap();
         }
+        if answer == Answer::HungUpOn {
+            self.written.lock().unwrap().push(op);
+            return Err(hung_up_on().await);
+        }
         if answer == Answer::LandsThenTimesOut {
             self.written.lock().unwrap().push(op);
             return Err(SourceError::Unconfirmed {
@@ -281,6 +291,58 @@ async fn held_by_the_local_quota() -> SourceError {
         } => SourceError::protocol(format!("posting the comment: {message}")),
         other => panic!("the limiter's failure is a status-less Protocol: {other:?}"),
     }
+}
+
+/// What an adapter's once-sent write answers when the server reads its
+/// request whole and closes the connection without a byte of answer (#1821).
+///
+/// The server hangs up on every request, on a thread of its own with
+/// blocking sockets: the request is read to the end of its body first, so
+/// the close is a clean end of stream where the client waits for a status
+/// line, which hyper reports as an incomplete message.
+async fn hung_up_on() -> SourceError {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for socket in listener.incoming() {
+            let Ok(mut socket) = socket else { return };
+            let mut read = Vec::new();
+            let mut buffer = [0u8; 4096];
+            let whole = |read: &[u8]| {
+                let end = read.windows(4).position(|w| w == b"\r\n\r\n")? + 4;
+                let head = String::from_utf8_lossy(&read[..end]).to_ascii_lowercase();
+                let length = head
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length:"))
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                (read.len() >= end + length).then_some(())
+            };
+            while whole(&read).is_none() {
+                match socket.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => read.extend_from_slice(&buffer[..n]),
+                }
+            }
+            let _ = socket.flush();
+            let _ = socket.shutdown(std::net::Shutdown::Both);
+        }
+    });
+    let client = knobas_http::HttpClient::new(knobas_http::HttpConfig {
+        base_url: url,
+        ..knobas_http::HttpConfig::default()
+    })
+    .unwrap();
+    client
+        .send(
+            client
+                .request(knobas_http::Method::POST, "/rest/api/2/issue")
+                .json(&serde_json::json!({ "fields": { "summary": "once" } }))
+                .no_retry(),
+        )
+        .await
+        .expect_err("the server hangs up on every request")
 }
 
 struct FakeRegistry {
@@ -2191,6 +2253,54 @@ async fn a_write_the_source_refuses_on_repeat_waits_rather_than_holds() {
 
     h.answer(Answer::LandsThenTimesOut);
     let write = h.create_pull_request(&repo, "knobas-1125").await;
+    let waiting = h.reload(write.id).await;
+    assert_eq!(waiting.state, WriteState::Pending, "{waiting:?}");
+    assert_eq!(waiting.wait_reason, Some(WaitReason::Unreachable));
+
+    h.answer(Answer::Accept);
+    h.flush_later().await;
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+}
+
+/// **#1821.** A create the server hung up on before answering is held, not
+/// refused: the server read it whole, so the ticket may stand at the source.
+/// Before, the transport's status-less `Protocol` read as the source refusing
+/// the write, and a ticket that landed showed as one that never would.
+#[tokio::test]
+async fn a_create_the_server_hung_up_on_is_held_not_refused() {
+    let h = harness().await;
+    let project = EntityRef::new(&h.source, "PAY");
+
+    h.answer(Answer::HungUpOn);
+    let write = h.create_ticket(&project, "SEPA retries double-book").await;
+
+    let held = h.reload(write.id).await;
+    assert_eq!(held.state, WriteState::Held, "{held:?}");
+    assert_eq!(held.wait_reason, None, "{held:?}");
+    let unconfirmed = &held.held_snapshot.as_ref().expect("a held side")["unconfirmed"];
+    assert_eq!(unconfirmed["source"], "Fake", "{unconfirmed}");
+
+    h.answer(Answer::Accept);
+    for _ in 0..3 {
+        flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    }
+    assert_eq!(
+        h.delivered(),
+        vec!["SEPA retries double-book".to_owned()],
+        "a create that may have landed is not sent again on its own"
+    );
+}
+
+/// A write whose second arrival is refused (Gitea's `409` for a second pull
+/// request from one head) waits on the ladder after the same hang-up and goes
+/// on its own (#1821), as it does after a timeout.
+#[tokio::test]
+async fn a_resend_harmless_write_the_server_hung_up_on_waits_on_the_ladder() {
+    let h = harness().await;
+    let repo = EntityRef::new(&h.source, "tidewater/payout-service");
+
+    h.answer(Answer::HungUpOn);
+    let write = h.create_pull_request(&repo, "knobas-1821").await;
     let waiting = h.reload(write.id).await;
     assert_eq!(waiting.state, WriteState::Pending, "{waiting:?}");
     assert_eq!(waiting.wait_reason, Some(WaitReason::Unreachable));
