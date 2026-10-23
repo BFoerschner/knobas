@@ -28,7 +28,18 @@ contains() { # contains <name> <haystack> <needle>
     case $2 in *"$3"*) echo "ok: $1" ;; *) echo "FAIL: $1: '$3' not in '$2'" >&2; fails=$((fails + 1)) ;; esac
 }
 # A taker: sources the real script, takes a slot, holds it for $1 seconds.
-taker() { bash -c ". '$here/gate-slot.sh'; trap release_slot EXIT; hold_gate_slot t && sleep $1" 2>&1; }
+# A taker that never gives up (a wait that ignores its deadline) is killed after
+# 30 s and exits 143, so that fails a check instead of hanging the run (macOS
+# has no `timeout`).
+taker() {
+    bash -c ". '$here/gate-slot.sh'; trap release_slot EXIT; hold_gate_slot t && sleep $1" 2>&1 &
+    local t=$! k
+    ( sleep 30; kill "$t" 2>/dev/null ) >/dev/null 2>&1 &
+    k=$!
+    wait "$t"; local code=$?
+    kill "$k" 2>/dev/null; wait "$k" 2>/dev/null
+    return "$code"
+}
 
 # 1 + 2. Two live holders; a third taker.
 sleep 60 & a=$!
