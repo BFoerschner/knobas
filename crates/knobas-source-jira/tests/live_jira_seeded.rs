@@ -90,7 +90,7 @@
 //! One **version on PAY**, a favourite filter naming it and a board on that
 //! filter, so that a query Jira refuses exists (#1893): the version is deleted
 //! by the test, and the board and the filter, or all three on a failure, by
-//! [`RefusedProbe`]'s `Drop`, which checks each answers 404 afterwards. A
+//! [`RefusedProbe`]'s `Drop`, which checks each is gone afterwards. A
 //! killed run's probe is taken back by the next run before it starts.
 //!
 //! What a *killed* run left behind is put back by the next one, and by this
@@ -3183,7 +3183,7 @@ const REFUSED_PROBE: &str = "knobas live refused-query probe";
 /// on PAY, a favourite filter naming it, and a Kanban board on that filter.
 /// [`Drop`] takes back whatever of it is still there, passing or panicking
 /// alike, on a thread with a runtime of its own (the reasons `Labeled`'s
-/// `Drop` gives), and checks each one answers 404 afterwards.
+/// `Drop` gives), and checks each one is gone afterwards.
 struct RefusedProbe {
     url: String,
     user: String,
@@ -3311,8 +3311,12 @@ impl Drop for RefusedProbe {
     }
 }
 
-/// `DELETE` each path in order and **check** it answers 404 afterwards. A
-/// 404 to the `DELETE` is a thing already gone, not a failure.
+/// Take back each path in order and **check** it is gone afterwards. A thing
+/// already gone is not a failure. Jira Data Center 10 answers `DELETE` on a
+/// version 405, so a version goes through `removeAndSwap` (no issue holds
+/// it); and it answers a filter that is not there 400 ("not available to
+/// you, perhaps it has been deleted"), to a `GET` and a `DELETE` alike,
+/// where a board or a version is a 404.
 async fn take_back(
     http: &reqwest::Client,
     url: &str,
@@ -3321,17 +3325,25 @@ async fn take_back(
     paths: &[String],
 ) -> Result<(), String> {
     for path in paths {
-        let response = http
-            .delete(format!("{url}/{path}"))
+        let gone = |status: u16| {
+            status == 404 || (status == 400 && path.starts_with("rest/api/2/filter/"))
+        };
+        let request = if path.starts_with("rest/api/2/version/") {
+            http.post(format!("{url}/{path}/removeAndSwap"))
+                .json(&serde_json::json!({}))
+        } else {
+            http.delete(format!("{url}/{path}"))
+        };
+        let response = request
             .header("Accept", "application/json")
             .basic_auth(user, Some(password))
             .send()
             .await
-            .map_err(|e| format!("DELETE {path}: {e}"))?;
+            .map_err(|e| format!("taking back {path}: {e}"))?;
         let status = response.status().as_u16();
-        if !(200..300).contains(&status) && status != 404 {
+        if !(200..300).contains(&status) && !gone(status) {
             return Err(format!(
-                "DELETE {path} -> {status}: {}",
+                "taking back {path} -> {status}: {}",
                 response.text().await.unwrap_or_default()
             ));
         }
@@ -3344,8 +3356,8 @@ async fn take_back(
             .map_err(|e| format!("GET {path}: {e}"))?
             .status()
             .as_u16();
-        if status != 404 {
-            return Err(format!("{path} answers {status} after its DELETE"));
+        if !gone(status) {
+            return Err(format!("{path} answers {status} after it was taken back"));
         }
     }
     Ok(())
@@ -3432,14 +3444,15 @@ async fn a_board_and_a_favourite_filter_whose_version_was_deleted_are_left_out_a
         );
     }
 
-    let (status, body) = seeded
-        .request(
-            reqwest::Method::DELETE,
-            &format!("rest/api/2/version/{version_id}"),
-            None,
-        )
-        .await;
-    assert_eq!(status, 204, "deleting the version: {body}");
+    let deleted = take_back(
+        &seeded.http,
+        &seeded.url,
+        &seeded.user,
+        &seeded.password,
+        &[format!("rest/api/2/version/{version_id}")],
+    )
+    .await;
+    assert_eq!(deleted, Ok(()), "deleting the version");
     probe.version = None;
     let (status, saved) = seeded.get(&format!("rest/api/2/filter/{filter_id}")).await;
     assert_eq!(status, 200, "{saved}");
