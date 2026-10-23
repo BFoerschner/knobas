@@ -309,7 +309,8 @@ async fn boards(
         match one(api, cfg, base_url, &board, &names, only.as_ref()).await {
             Ok(Some(view)) => views.push(view),
             Ok(None) => {}
-            Err(error) if not_readable(&error) => {}
+            // A board's filter Jira can no longer run (400), like a favourite's.
+            Err(error) if not_readable(&error) || error.status() == Some(400) => {}
             Err(error) => return Err(error),
         }
     }
@@ -1084,5 +1085,18 @@ mod tests {
         let (items, _) = sync(&api, None).await;
         let keys: Vec<&str> = items.iter().map(|i| i.entity.key.as_str()).collect();
         assert_eq!(keys, ["board-21", "board-22", "filter-122"]);
+    }
+
+    /// A board whose saved filter Jira can no longer run (a field deleted
+    /// since it was saved) is left out, rather than failing every sync.
+    #[tokio::test]
+    async fn a_board_jira_refuses_to_run_is_left_out() {
+        let api = Agile {
+            refused: Some("(project in (PAY, WEB)) AND (fixVersion is EMPTY) ORDER BY Rank ASC"),
+            ..with_favourites()
+        };
+        let (items, _) = sync(&api, None).await;
+        let keys: Vec<&str> = items.iter().map(|i| i.entity.key.as_str()).collect();
+        assert_eq!(keys, ["board-21", "filter-122", "filter-10300"]);
     }
 }
