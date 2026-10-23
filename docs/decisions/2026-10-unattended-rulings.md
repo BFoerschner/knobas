@@ -14431,3 +14431,20 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   redundant next to `from_utf8` and `from_str_radix`, but `from_str_radix` takes a leading `+`.
   *Ruling:* keep the check and pin it (`"\+12"` → `+12`), so dropping it fails a test.
   *Reasoning:* without it, `\+12` would decode to a newline in a path. *Reversing:* trivial.
+
+## #1645: review of the implementer's rulings (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by merge-manager on Opus: the implementer's two forks on the frozen
+  `crates/knobas-source/src/**`.** *Ruling:* both confirmed: the change goes in, and a malformed
+  escape reads as its characters, not as a miss. *Reasoning:* `diff::parse` is public, frozen and
+  infallible (`Vec<DiffFile>`), and the ticket asks for a behaviour-only change with no shape
+  change. A miss has only two places to go. A miss of the whole view needs a new return shape.
+  A miss of one file drops that file without a word, which is not the fallback ADR-0020 rule 2
+  describes (a failed read, drawn under a line naming it) and is quieter than that rule allows.
+  The characters keep the file in the view. They match how `take_quoted` already reads `\q` and
+  `\12x`, and the ticket's criterion allows them ("a miss or the decoded path"). Spec #1620 says
+  "miss and fall back" (story 14). The ticket's criterion narrows that, so no follow-up.
+  Checked: the old code decoded exactly the byte triples the new code decodes (a leading digit
+  rules out a sign, and `from_str_radix` takes a sign only in front), so only an input that used
+  to panic reads differently, as the §10.8 entry says. *Reversing:* low. `take_quoted` would
+  answer `Option`, `parse` would need a shape change, and that change gets its own §10.8 entry.
