@@ -13864,3 +13864,21 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   (`ECONNRESET`) before answering. *Ruling:* no, `IncompleteMessage` only, as the ticket names.
   *Reasoning:* the seen failure is the clean close; the reset shape has not been seen here and
   would widen the retry past the diagnosis. *Reversing:* low.
+
+### #1818 merge review (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, the frozen-surface change: the implementer's ruling stands.** *Fork:*
+  confirm the change to `crates/knobas-http/**`, or hold it for Björn. *Ruling:* confirmed. The
+  resend sits in `send_with`'s transport classifier, behind `retry` and `follows`, so the
+  limiter, the budget check, the quota mark, #1640's cap and second client and every
+  `SourceError` mapping are as on main; the §10.8 entry matches the diff. `hyper = "1"` resolves
+  to the one `hyper` 1.11.0 already in `Cargo.lock`, and the gate has no dependency allowlist.
+  *Reasoning:* a two-close `GET` ends on its second attempt with the second attempt's
+  `Protocol { status: None }`, never loops, and a write never takes this path. *Reversing:*
+  low.
+- **Does `no_retry` stop the resend of a `GET`?** *Fork:* resend any `GET` or `HEAD`, or none
+  that opted out. *Ruling:* none that opted out, as the code already does (`no_retry` takes the
+  once-sent branch). *Reasoning:* `Request::no_retry`'s doc promises one sending; a read that asked
+  for it is rare (no adapter does) but gets what it asked for. Pinned by the new
+  `hung_up::a_read_sent_with_no_retry_is_not_sent_again`, which fails if the once-sent branch
+  also resends a read. *Reversing:* low.

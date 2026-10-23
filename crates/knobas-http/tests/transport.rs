@@ -2427,6 +2427,28 @@ mod hung_up {
         }
     }
 
+    /// **A read sent with `no_retry` is not sent again either**: the
+    /// caller asked for one sending, and a `GET` is no exception to that.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_read_sent_with_no_retry_is_not_sent_again() {
+        let server = HangUpServer::new(HangUp::OnReuse);
+        let client = client(&server);
+        pool_a_connection(&client).await;
+
+        let error = client
+            .send(client.request(Method::GET, "/second").no_retry())
+            .await
+            .expect_err("never answered");
+
+        let line = "GET /second HTTP/1.1";
+        assert_eq!(server.hung_up(), [line]);
+        assert_eq!(server.count(line), 1, "sent again: {:?}", server.lines());
+        assert!(
+            matches!(error, SourceError::Protocol { status: None, .. }),
+            "{error:?}"
+        );
+    }
+
     /// A read is sent again **once**: a server that hangs up on every
     /// request is broken, not racing its keep-alive timeout, and is told so
     /// after two requests rather than [`knobas_http::MAX_ATTEMPTS`].

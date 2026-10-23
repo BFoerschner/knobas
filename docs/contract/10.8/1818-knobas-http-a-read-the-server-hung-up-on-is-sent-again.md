@@ -22,6 +22,7 @@
     (`Protocol { status: None }`). The crate doc's Retries bullet, the `retry` module doc,
     `send`'s doc and the private `Request::follows` field's doc say so.
   - `tests/transport.rs` gains the `hung_up` module: a server that reads each request whole and
-    closes the connection unanswered, and five tests (a read sent again and answered, for `GET`
-    and `HEAD`; a `POST` not sent again, with and without `no_retry`; a read sent twice only; the
-    resend waits for the limiter; the resend stays inside the send budget).
+    closes the connection unanswered, and six tests (a read sent again and answered, for `GET`
+    and `HEAD`; a `POST` not sent again, with and without `no_retry`; a `GET` sent with
+    `no_retry` not sent again; a read sent twice only; the resend waits for the limiter; the
+    resend stays inside the send budget).

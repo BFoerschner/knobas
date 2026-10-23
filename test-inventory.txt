@@ -1780,6 +1780,7 @@ knobas-http	test/transport	each_auth_variant_has_its_own_wire_spelling
 knobas-http	test/transport	every_attempt_waits_for_the_rate_limiter
 knobas-http	test/transport	hung_up::a_read_sent_again_stays_inside_the_send_budget
 knobas-http	test/transport	hung_up::a_read_sent_again_waits_for_the_rate_limiter
+knobas-http	test/transport	hung_up::a_read_sent_with_no_retry_is_not_sent_again
 knobas-http	test/transport	hung_up::a_read_the_server_hung_up_on_is_sent_again
 knobas-http	test/transport	hung_up::a_read_the_server_keeps_hanging_up_on_is_sent_twice_only
 knobas-http	test/transport	hung_up::a_write_the_server_hung_up_on_is_not_sent_again
