@@ -312,3 +312,207 @@ async fn a_tool_that_refuses_reports_its_stderr() {
         other => panic!("pg_restore should refuse a file that is no archive: {other:?}"),
     }
 }
+
+/// An archive whose rows break a key the target declares, taken from a source
+/// with that key dropped: the shape a hand-edited archive or a backup from
+/// before the key's migration has. `seed` writes the rows; `tables` restricts
+/// the dump the way a share export is restricted, and `None` is a whole
+/// backup.
+async fn an_archive_breaking(
+    label: &str,
+    seed: &str,
+    tables: Option<&[&str]>,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let from = knobas_db::test_util::scratch_database(label).await;
+    let source = from.pool(2).await.expect("a pool on the source database");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(seed.to_owned()))
+        .execute(&source)
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let archive = dir.path().join(format!("{label}.knobas"));
+    match tables {
+        None => backup::dump(&from, &archive).await,
+        Some(tables) => backup::dump_tables(&from, &archive, tables).await,
+    }
+    .expect("a dump");
+    (dir, archive)
+}
+
+/// Every `knobas` table that holds a row, bookkeeping tables left out: what
+/// "the restore loaded nothing" is asserted against.
+async fn tables_holding_rows(pool: &sqlx::PgPool) -> Vec<String> {
+    let tables: Vec<String> = sqlx::query_scalar(
+        "select c.relname::text from pg_class c
+           join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'knobas' and c.relkind = 'r'
+            and c.relname <> all(array['setting', 'dep_layer_kind', 'dep_layer', 'dep_view'])
+          order by 1",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let mut holding = Vec::new();
+    for table in tables {
+        let any: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "select exists (select 1 from knobas.{table})"
+        )))
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        if any {
+            holding.push(table);
+        }
+    }
+    holding
+}
+
+/// Restore `archive`, whose rows break `key` on `knobas.{table}`, into a
+/// fresh target holding bookkeeping rows of its own, and assert the restore
+/// refused it by name and left the target as it found it: no row of the
+/// archive's in any table, and the bookkeeping rows it cleared put back.
+async fn a_refused_restore_of(archive: &std::path::Path, label: &str, table: &str, key: &str) {
+    let into = knobas_db::test_util::scratch_database(label).await;
+    let target = into.pool(2).await.expect("a pool on the target");
+    sqlx::raw_sql(
+        "insert into knobas.setting (key, value) values ('this-machine', '\"kept\"'::jsonb);",
+    )
+    .execute(&target)
+    .await
+    .unwrap();
+    let bookkeeping = ["setting", "dep_layer_kind", "dep_layer", "dep_view"];
+    let mut before = Vec::new();
+    for held in bookkeeping {
+        before.push(rows_of(&target, held).await);
+    }
+
+    match backup::restore(&into, archive).await {
+        Err(backup::BackupError::BrokenKey {
+            table: refused,
+            key: broken,
+            rows,
+        }) => {
+            assert_eq!((refused.as_str(), broken.as_str()), (table, key));
+            assert_eq!(rows, 1, "one row of the archive breaks {key}");
+        }
+        other => panic!("a restore breaking {key} on knobas.{table} must refuse: {other:?}"),
+    }
+
+    assert_eq!(
+        tables_holding_rows(&target).await,
+        Vec::<String>::new(),
+        "the refused restore left the archive's rows behind"
+    );
+    for (held, rows) in bookkeeping.iter().zip(&before) {
+        assert_eq!(
+            &rows_of(&target, held).await,
+            rows,
+            "knobas.{held} lost or changed rows in a refused restore"
+        );
+    }
+    assert!(
+        !has_the_rename_shim(&target).await,
+        "the refused restore left the rename shim's column behind"
+    );
+}
+
+/// A whole backup holding a note with no entity row (#1930): a note is the
+/// one content knobas cannot fetch again, so the restore refuses rather than
+/// drop it, and names the table and the key.
+#[tokio::test]
+async fn a_backup_holding_a_note_without_its_entity_is_refused() {
+    let (_dir, archive) = an_archive_breaking(
+        "orphan-note",
+        "alter table knobas.note drop constraint note_entity_fk;
+         insert into knobas.note (id, title, body_md) values ('note:orphan', 'orphan', 'body');",
+        None,
+    )
+    .await;
+    a_refused_restore_of(&archive, "orphan-note-into", "note", "note_entity_fk").await;
+}
+
+/// A backup taken before `0060` (#1708) that holds a context with no entity
+/// row (#1930): `0060`'s orphan rule holds on restore as it holds on an
+/// upgrade. The orphan is not restored, the whole context and its member
+/// come back, a block that ran in the orphan keeps the room it recorded, and
+/// the restored database holds `context_entity_fk`. The source is wound back
+/// to the schema `0059` left, as `tests/schema.rs` winds back its upgrade.
+#[tokio::test]
+async fn a_backup_from_before_zero_sixty_restores_without_its_orphan_context() {
+    let (_dir, archive) = an_archive_breaking(
+        "orphan-context",
+        "alter table knobas.context drop constraint context_entity_fk;
+         alter table knobas.context alter column id type text collate \"default\";
+         alter table knobas.timer alter column context_id type text collate \"default\";
+         alter table knobas.block alter column context_id type text collate \"default\";
+         alter table knobas.write_queue alter column link_to type text collate \"default\";
+         alter table knobas.run_preset alter column pipeline_id type text collate \"default\";
+         alter table knobas.ticket_view alter column saved_view type text collate \"default\";
+         delete from public._sqlx_migrations where version = 60;
+         insert into knobas.entity (id, kind, title) values ('ctx:whole', 'ctx', 'whole'),
+                                                            ('mock:member', 'ticket', 'member');
+         insert into knobas.context (id, kind, title) values ('ctx:whole', 'adhoc', 'whole'),
+                                                             ('ctx:orphan', 'adhoc', 'orphan');
+         insert into knobas.link (from_id, to_id, origin, created_by)
+         values ('ctx:whole', 'mock:member', 'manual', 'me');
+         insert into knobas.block (started_at, ended_at, kind, label, context_id)
+         values ('2026-10-01T08:00:00Z', '2026-10-01T09:00:00Z', 'manual', 'standup', 'ctx:orphan');",
+        None,
+    )
+    .await;
+
+    let into = knobas_db::test_util::scratch_database("orphan-context-into").await;
+    backup::restore(&into, &archive)
+        .await
+        .expect("a pre-0060 backup with an orphan context restores");
+
+    let pool = into.pool(2).await.expect("a pool on the target");
+    let contexts: Vec<String> = sqlx::query_scalar("select id from knobas.context order by id")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(contexts, ["ctx:whole"], "the orphan goes, the whole one stays");
+    let members: Vec<String> =
+        sqlx::query_scalar("select to_id from knobas.link where from_id = 'ctx:whole'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(members, ["mock:member"], "the whole context keeps its member");
+    let rooms: Vec<Option<String>> = sqlx::query_scalar("select context_id from knobas.block")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        rooms,
+        [Some("ctx:orphan".to_owned())],
+        "the afternoon keeps its room"
+    );
+    // The key itself, re-checked against every row the way adding it checks
+    // them: what a restore that left the orphan in would fail with 23503.
+    sqlx::raw_sql(
+        "alter table knobas.context drop constraint context_entity_fk;
+         alter table knobas.context add constraint context_entity_fk
+           foreign key (id) references knobas.entity (id) on delete cascade;",
+    )
+    .execute(&pool)
+    .await
+    .expect("the restored contexts hold context_entity_fk");
+}
+
+/// A share export (`dump_tables`, the path every share part takes) holding a
+/// link to an entity it does not carry (#1930): refused by name, and nothing
+/// of it restored. No part knobas offers does this, since each part that
+/// links takes `entity` with it; the archive is the hand-edited shape.
+#[tokio::test]
+async fn a_share_export_holding_a_link_to_a_missing_entity_is_refused() {
+    let (_dir, archive) = an_archive_breaking(
+        "orphan-link",
+        "alter table knobas.link drop constraint link_to_id_fkey;
+         insert into knobas.entity (id, kind, title) values ('mock:here', 'ticket', 'here');
+         insert into knobas.link (from_id, to_id, origin, created_by)
+         values ('mock:here', 'mock:gone', 'manual', 'me');",
+        Some(&["entity", "link"]),
+    )
+    .await;
+    a_refused_restore_of(&archive, "orphan-link-into", "link", "link_to_id_fkey").await;
+}
