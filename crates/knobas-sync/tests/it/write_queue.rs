@@ -1838,6 +1838,58 @@ async fn behind_a_head_on_the_wire(fate: Fate) {
     assert_eq!(delivered.len(), 3, "{delivered:?}");
 }
 
+/// #1807 beside #1628: a head that closed while the flush task waited hands
+/// its turn on only to a successor the tick owes. One waiting out a rung of
+/// the ladder is not sent early because the write ahead of it went.
+///
+/// Arranged: the task's pass reads the head on `mine`, then sends a slow
+/// write on `other`; while that one is on the wire the reader withdraws the
+/// head, and the write after it, now the entity's head, is recorded as
+/// waiting `unreachable` on its first rung.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_head_withdrawn_while_the_task_waited_hands_on_only_to_an_owed_write() {
+    let h = harness().await;
+    let mine = h.mirror("PAY-1812-A", "a payout fails").await;
+    let other = h.mirror("PAY-1812-B", "a refund fails").await;
+    let comment = |entity: &EntityRef, body: &str| WriteOp::Comment {
+        entity: entity.to_string(),
+        body: body.to_owned(),
+    };
+
+    let slow = flusher::queue(&h.deps, &h.source, comment(&other, "the slow one"))
+        .await
+        .unwrap();
+    let head = flusher::queue(&h.deps, &h.source, comment(&mine, "the head"))
+        .await
+        .unwrap();
+    let next = flusher::queue(&h.deps, &h.source, comment(&mine, "on a rung"))
+        .await
+        .unwrap();
+    h.paced
+        .lock()
+        .unwrap()
+        .dwell
+        .insert(other.to_string(), std::time::Duration::from_millis(500));
+
+    let meanwhile = async {
+        let (target, _) = h.first_paced().await;
+        assert_eq!(target, other.to_string(), "the slow write goes first");
+        flusher::discard(&h.deps, head.id).await.unwrap().unwrap();
+        store::wait(&h.deps.pool, next.id, WaitReason::Unreachable, None)
+            .await
+            .unwrap()
+            .unwrap();
+    };
+    let (task, ()) = tokio::join!(flusher::flush_source(&h.deps, &h.source), meanwhile);
+    task.unwrap();
+
+    assert_eq!(h.reload(slow.id).await.state, WriteState::Sent);
+    let row = h.reload(next.id).await;
+    assert_eq!(row.state, WriteState::Pending, "sent before its rung");
+    assert_eq!(row.attempts, 1);
+    assert_eq!(h.delivered(), vec!["the slow one".to_owned()]);
+}
+
 /// Issue #336: a create that landed after the user withdrew it is recorded,
 /// and the record carries what the source called what it made.
 ///

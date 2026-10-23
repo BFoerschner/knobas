@@ -13482,3 +13482,11 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
 - **A §10.8 entry.** *Ruling:* booked (`1807-a-submit-behind-a-landed-head-tries-its-own-write.md`):
   `submit_write` now finds its write `sent` and asks for the mirror refresh where it used to skip
   it. *Reversing:* one file.
+- **The ladder on a handed-on write (merge-manager on Opus, PR #1812).** *Fork:* leave the hand-on's
+  `owed` filter unpinned, as the implementer's ruling argued a successor cannot be waiting, or pin
+  it. *Ruling:* pin it, with `a_head_withdrawn_while_the_task_waited_hands_on_only_to_an_owed_write`.
+  *Reasoning:* a successor can be waiting after all: a flusher reads the head, the reader withdraws
+  it while the flusher waits for the lock, and a second flusher tries the successor, now the head,
+  and records `unreachable`. The mutant that reads the hand-on with `Pass::Now` survived every
+  existing test and sent that write before its rung; the new test kills it. *Reversing:* delete
+  the test.

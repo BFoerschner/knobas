@@ -22,6 +22,7 @@
 
   Witnessed by `crates/knobas-sync/tests/it/write_queue.rs`
   (`a_submit_behind_a_head_the_flush_task_is_sending_tries_its_own_write`,
-  `a_submit_behind_a_head_withdrawn_on_the_wire_tries_its_own_write`), beside #1629's
+  `a_submit_behind_a_head_withdrawn_on_the_wire_tries_its_own_write`,
+  `a_head_withdrawn_while_the_task_waited_hands_on_only_to_an_owed_write`), beside #1629's
   `two_flushes_of_one_source_deliver_a_write_once` and
   `a_press_beside_a_failing_send_does_not_send_it_again`.
