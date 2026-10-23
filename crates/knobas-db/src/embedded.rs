@@ -2726,20 +2726,28 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
+        // A watchdog frees the creation after two seconds whatever happens, so
+        // a creation that does hold the worker ends the test as a failure
+        // rather than a hang.
+        let watchdog = fifo.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(2));
+            let _ = File::open(&watchdog);
+        });
         runtime.block_on(async {
             let root = dir.path().to_path_buf();
+            let started = std::time::Instant::now();
             let lock = tokio::spawn(async move { bring_up_lock(&root).await.map(|_| ()) });
-            tokio::time::timeout(Duration::from_secs(5), async {
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            })
-            .await
-            .expect("the worker is free while the lock file is being created");
-            // Release the creation. The lock itself is refused on a FIFO on
-            // some systems, so only that it settles is asserted.
-            let reader = tokio::task::spawn_blocking(move || File::open(&fifo).map(drop))
+            // The tick runs on the one worker, beside the lock's creation.
+            tokio::spawn(tokio::time::sleep(Duration::from_millis(200)))
                 .await
                 .unwrap();
-            reader.unwrap();
+            assert!(
+                started.elapsed() < Duration::from_secs(1),
+                "the worker was held while the lock file was being created"
+            );
+            // The lock itself is refused on a FIFO on some systems, so only
+            // that it settles is asserted.
             let _ = lock.await.unwrap();
         });
     }
