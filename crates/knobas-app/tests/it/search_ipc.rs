@@ -308,7 +308,13 @@ async fn launcher_home_reports_source_health_beside_the_lists() {
 /// "3 waiting" may never absorb a held write).
 #[tokio::test]
 async fn launcher_home_counts_the_pending_writes() {
-    let pool = pool().await;
+    // `write_queue::counts` is the whole table's: a database of its own, so no
+    // other test's queued write moves the delta (#1907).
+    let pool = knobas_db::test_util::scratch_database("search_ipc_pending_writes")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
     let entity = knobas_core::entity::EntityRef::new("jira", &token("wq"));
 
     let before = launcher_home_inner(&pool, &Registry::for_process())

@@ -277,7 +277,8 @@ async fn activity_records_and_lists() {
     .unwrap();
 
     let entity_id = t.to_string();
-    let rows = activity::recent(&pool, 10, None).await.unwrap();
+    // Wide enough that lines other tests write meanwhile cannot push ours out.
+    let rows = activity::recent(&pool, 500, None).await.unwrap();
     assert!(
         rows.iter()
             .any(|r| r.verb == "commented" && r.entity_id.as_deref() == Some(entity_id.as_str()))

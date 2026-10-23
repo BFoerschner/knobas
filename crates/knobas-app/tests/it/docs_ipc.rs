@@ -24,6 +24,17 @@ async fn pool() -> sqlx::PgPool {
     pool
 }
 
+/// A database of its own, for a test that asserts a read answering one
+/// database-wide value (`last_read` is the newest visit to any live page):
+/// on the shared database another test's visit decides it by scheduling (#1907).
+async fn own_pool(label: &str) -> sqlx::PgPool {
+    let scratch = knobas_db::test_util::scratch_database(label).await;
+    scratch
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database")
+}
+
 /// A Confluence source nothing else in this database uses.
 async fn confluence(pool: &sqlx::PgPool) -> String {
     let id = format!("conf{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
@@ -243,7 +254,7 @@ async fn children_are_in_the_sources_order_and_by_title_where_it_has_none() {
 /// `#/docs` opens the page read last: the newest visit to a live page.
 #[tokio::test]
 async fn the_page_read_last_is_the_newest_visit() {
-    let pool = pool().await;
+    let pool = own_pool("docs_ipc_last_read").await;
     let src = confluence(&pool).await;
     let first = page(&pool, &src, "1", "First", "OPS", &[], "").await;
     let second = page(&pool, &src, "2", "Second", "OPS", &[], "").await;
@@ -1225,7 +1236,7 @@ async fn configured_as(pool: &sqlx::PgPool, adapter: &str) -> String {
 /// search hit. Every page here mentions the reader and holds the same word.
 #[tokio::test]
 async fn the_docs_reads_hold_only_the_wiki_fillers_pages() {
-    let pool = pool().await;
+    let pool = own_pool("docs_ipc_wiki_fillers").await;
     let w = word();
     let filler = confluence(&pool).await;
     let with_miss = confluence(&pool).await;
