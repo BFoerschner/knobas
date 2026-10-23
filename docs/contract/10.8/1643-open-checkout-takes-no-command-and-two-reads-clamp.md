@@ -28,7 +28,8 @@
 
   Mirrored in `app/src/lib/ipc/entity.ts`: `OpenAt` loses `command` and `openCheckout` sends
   none. Answered by the fake IPC (`fake/checkouts.ts`, which no longer reads `command`), held by
-  `fake-tauri.test.ts`'s argument census. Witnessed by `tests/it/checkout_ipc.rs`
+  `fake-features.test.ts` (a `command` sent anyway is not run) and `fake-tauri.test.ts`'s
+  argument census. Witnessed by `tests/it/checkout_ipc.rs`
   (`trying_a_command_runs_the_template_the_setting_holds`), `checkout::open`'s
   `a_spawned_program_inherits_no_knobas_variable`, `tests/it/suggestions_ipc.rs` and
   `tests/it/entity.rs` (`a_limit_past_the_ceiling_reads_five_hundred_*`), and

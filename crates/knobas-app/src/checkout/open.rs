@@ -321,7 +321,7 @@ async fn file_inside(checkout: &Path, relative: &str) -> Result<PathBuf, IpcErro
 /// editor outlives the click that started it and a dropped `Child` that is
 /// never waited on is a zombie for the life of the process.
 fn spawn(argv: &[String]) -> std::io::Result<()> {
-    let child = command(argv, std::env::vars_os())?
+    let child = scrubbed_command(argv, std::env::vars_os())?
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -341,20 +341,20 @@ fn spawn(argv: &[String]) -> std::io::Result<()> {
 /// otherwise hand it to every shell started in it. The git paths drop `GIT_*`
 /// for their reason; this drops `KNOBAS_*` for this one. Everything else,
 /// `PATH` and `HOME` first, is what the program needs to find its way.
-fn command(
+fn scrubbed_command(
     argv: &[String],
     parent: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
 ) -> std::io::Result<std::process::Command> {
     let (program, arguments) = argv
         .split_first()
         .ok_or_else(|| std::io::Error::other("the command has no program in it"))?;
-    let mut command = std::process::Command::new(program);
-    command.args(arguments).env_clear().envs(
+    let mut built = std::process::Command::new(program);
+    built.args(arguments).env_clear().envs(
         parent
             .into_iter()
             .filter(|(name, _)| !name.as_encoded_bytes().starts_with(b"KNOBAS_")),
     );
-    Ok(command)
+    Ok(built)
 }
 
 #[cfg(test)]
@@ -407,7 +407,7 @@ mod tests {
         )
         .unwrap();
 
-        let output = command(&argv, parent).unwrap().output().unwrap();
+        let output = scrubbed_command(&argv, parent).unwrap().output().unwrap();
 
         assert!(output.status.success(), "{output:?}");
         let printed = String::from_utf8(output.stdout).unwrap();

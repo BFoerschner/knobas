@@ -449,6 +449,20 @@ test("Try it needs a name, and a dialog closed after a try puts the list back as
   expect(defaultApplication).toBe("vscode");
 });
 
+test("a dialog closed while a try is saving puts the list back after it and starts nothing (#1643)", async () => {
+  const dialog = await openDialog("Add an application…");
+  type(dialog.querySelector<HTMLInputElement>("#tf-app-name")!, "MyGitViewer");
+  type(dialog.querySelector<HTMLInputElement>("#tf-app-command")!, "MyGitViewer {path}");
+  button("Try it on payout-service", dialog).click();
+  button("Cancel", dialog).click();
+  await settle();
+  expect(calls.saved.map(([drafts]) => drafts.map((draft) => draft.id))).toEqual([
+    ["terminal", "vscode", null],
+    ["terminal", "vscode"],
+  ]);
+  expect(calls.open).toEqual([]);
+});
+
 test("Try it on an application being edited saves the edit over it and opens it by its id", async () => {
   const dialog = await openDialog("Manage applications…");
   [...dialog.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Edit…")!.click();

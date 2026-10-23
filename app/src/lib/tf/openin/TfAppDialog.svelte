@@ -43,9 +43,13 @@
   let error = $state<string | null>(null);
   let busy = $state(false);
   /** The entry's place in the saved list: `index`, or where a *Try it* saved a new one. */
-  let at = $state<number | null>((() => index)());
+  let entryAt: number | null = (() => index)();
   /** The list and its default before the first *Try it*, put back if the dialog closes unsaved. */
-  let before: { list: CheckoutApplication[]; default: string | null } | null = null;
+  let beforeTry: { list: CheckoutApplication[]; default: string | null } | null = null;
+  /** The save a *Try it* has in flight, which putting the list back waits for. */
+  let trying: Promise<void> | null = null;
+  /** Set when the dialog closes: a try whose save lands after it starts nothing. */
+  let closed = false;
 
   let commandField = $state<HTMLInputElement | null>(null);
   let fileField = $state<HTMLInputElement | null>(null);
@@ -88,7 +92,7 @@
     error = null;
     try {
       await store(list);
-      before = null;
+      beforeTry = null;
       push({ text: said });
       onclose();
     } catch (cause) {
@@ -101,12 +105,12 @@
   function withEntry(): CheckoutApplication[] {
     const list = [...(apps.settings?.applications ?? [])];
     const entry: CheckoutApplication = {
-      id: at !== null ? (list[at]?.id ?? "") : "",
+      id: entryAt !== null ? (list[entryAt]?.id ?? "") : "",
       name: name.trim(),
       command: command.trim(),
       file_command: fileCommand.trim() || null,
     };
-    if (at !== null && at < list.length) list[at] = entry;
+    if (entryAt !== null && entryAt < list.length) list[entryAt] = entry;
     else list.push(entry);
     return list;
   }
@@ -126,30 +130,42 @@
     if (sample === null || !ready) return;
     const was = { list: [...(apps.settings?.applications ?? [])], default: apps.settings?.default_application ?? null };
     const list = withEntry();
+    const first = beforeTry === null;
+    // Before the save, so a dialog closed while it is in flight puts the list back.
+    beforeTry ??= was;
     busy = true;
     error = null;
+    trying = store(list);
     try {
-      await store(list);
+      await trying;
     } catch (cause) {
       error = ipcErrorMessage(cause);
+      if (first) beforeTry = null;
       return;
     } finally {
       busy = false;
+      trying = null;
     }
-    before ??= was;
-    at ??= list.length - 1;
-    const id = apps.settings?.applications[at]?.id;
-    if (id !== undefined) await apps.run(sample.entityId, name.trim(), { application: id });
+    entryAt ??= list.length - 1;
+    if (closed) return;
+    const id = apps.settings?.applications[entryAt]?.id;
+    if (id === undefined) error = `${name.trim()} was saved, but the list came back without it.`;
+    else await apps.run(sample.entityId, name.trim(), { application: id });
   }
 
   /** Close unsaved: a list a *Try it* changed goes back to what it was. */
   function dismiss() {
-    const restore = before;
-    before = null;
+    closed = true;
+    const restore = beforeTry;
+    beforeTry = null;
     if (restore !== null) {
-      apps.save(restore.list, restore.default).catch((cause: unknown) => {
-        push({ text: `Could not take back the try of ${name.trim()}: ${ipcErrorMessage(cause)}`, tone: "err" });
-      });
+      const tried = name.trim();
+      (trying ?? Promise.resolve())
+        .catch(() => {})
+        .then(() => apps.save(restore.list, restore.default))
+        .catch((cause: unknown) => {
+          push({ text: `Could not take back the try of ${tried}: ${ipcErrorMessage(cause)}`, tone: "err" });
+        });
     }
     onclose();
   }

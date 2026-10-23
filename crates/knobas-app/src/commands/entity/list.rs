@@ -11,9 +11,9 @@ use super::*;
 /// fillers are resolved here and handed to [`entity_list::read`].
 ///
 /// The behaviour lives here rather than in the command so it is reachable from
-/// a test: a `#[tauri::command]` cannot be called directly. So does the
-/// clamp: `limit` reads at most [`ROW_CEILING`](crate::commands::ROW_CEILING)
-/// rows (#1643).
+/// a test: a `#[tauri::command]` cannot be called directly. The clamp is here
+/// for that reason too: `limit` reads at most
+/// [`ROW_CEILING`](crate::commands::ROW_CEILING) rows (#1643).
 ///
 /// # Errors
 ///
