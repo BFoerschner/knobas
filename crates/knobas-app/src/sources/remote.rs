@@ -559,7 +559,10 @@ mod tests {
             "http://127.0.0.1.example/m.json",
         ] {
             let error = Origin::parse(input, &Endpoints::default()).expect_err(input);
-            assert!(matches!(error, FetchError::NotHttps(_)), "{input}: {error:?}");
+            assert!(
+                matches!(error, FetchError::NotHttps(_)),
+                "{input}: {error:?}"
+            );
             assert!(error.to_string().contains("https"), "{error}");
         }
     }
@@ -602,7 +605,14 @@ mod tests {
     async fn a_redirect_to_plain_http_off_this_machine_is_refused() {
         use std::io::{Read as _, Write as _};
         let target = undeclared_body(16);
-        let port = target.rsplit(':').next().unwrap().split('/').next().unwrap().to_owned();
+        let port = target
+            .rsplit(':')
+            .next()
+            .unwrap()
+            .split('/')
+            .next()
+            .unwrap()
+            .to_owned();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let from = listener.local_addr().expect("addr").port();
         std::thread::spawn(move || {
