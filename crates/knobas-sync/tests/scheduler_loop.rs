@@ -24,12 +24,52 @@ use knobas_sync::scheduler::{
 };
 use sqlx::PgPool;
 
-/// An adapter that sleeps in `sync`, and records the high-water mark of how
-/// many of its instances were inside `sync` at once.
+/// Where a held adapter waits until the test lets it through (#1920).
+///
+/// This replaces a dwell that stood in for "the run is still going when the
+/// test acts". A dwell says that only while the machine is fast enough; on
+/// a loaded gate the run ended first, and the test went red on correct code.
+/// A door says it until the test opens the door, however slow the machine
+/// is.
+///
+/// A semaphore with no permits. [`admit`](Door::admit) lets a counted number
+/// of waits through, and [`open`](Door::open) closes the semaphore, which makes
+/// every wait return at once, the ones already parked and the ones to come.
+struct Door(tokio::sync::Semaphore);
+
+impl Door {
+    fn shut() -> Arc<Door> {
+        Arc::new(Door(tokio::sync::Semaphore::new(0)))
+    }
+
+    /// Let the next `waits` through, and keep the door shut behind them.
+    fn admit(&self, waits: usize) {
+        self.0.add_permits(waits);
+    }
+
+    /// Let everything through from now on.
+    fn open(&self) {
+        self.0.close();
+    }
+
+    async fn pass(&self) {
+        // `Err` is the closed semaphore: the door is open.
+        if let Ok(permit) = self.0.acquire().await {
+            permit.forget();
+        }
+    }
+}
+
+/// An adapter that waits in `sync`, at its door if it has one and then for
+/// its dwell, and records the high-water mark of how many of its instances
+/// were inside `sync` at once.
 struct Slow {
     id: String,
     inside: Arc<AtomicUsize>,
     peak: Arc<AtomicUsize>,
+    /// Passed after `inside` counts this run, so a test that sees the count
+    /// knows the run is parked here.
+    door: Option<Arc<Door>>,
     dwell: Duration,
     /// A function, not a value: `SourceError` is not `Clone` (frozen SPI).
     fault: Option<fn() -> SourceError>,
@@ -84,6 +124,9 @@ impl Source for Slow {
     ) -> Result<Cursor, SourceError> {
         let now = self.inside.fetch_add(1, Ordering::SeqCst) + 1;
         self.peak.fetch_max(now, Ordering::SeqCst);
+        if let Some(door) = &self.door {
+            door.pass().await;
+        }
         tokio::time::sleep(self.dwell).await;
         self.inside.fetch_sub(1, Ordering::SeqCst);
         if let Some(fault) = self.fault {
@@ -125,6 +168,7 @@ impl Source for Slow {
 struct SlowRegistry {
     inside: Arc<AtomicUsize>,
     peak: Arc<AtomicUsize>,
+    door: Option<Arc<Door>>,
     dwell: Duration,
     fault: Option<fn() -> SourceError>,
 }
@@ -138,6 +182,7 @@ impl AdapterRegistry for SlowRegistry {
             id: instance.id,
             inside: Arc::clone(&self.inside),
             peak: Arc::clone(&self.peak),
+            door: self.door.clone(),
             dwell: self.dwell,
             fault: self.fault,
         }))
@@ -178,6 +223,7 @@ impl RunConnections for TestConnections {
 const FAST: SchedulerTiming = SchedulerTiming {
     startup_delay: Duration::from_millis(50),
     tick: Duration::from_millis(50),
+    shutdown_grace: knobas_sync::scheduler::SHUTDOWN_GRACE,
 };
 
 /// Serialises the tests in this binary.
@@ -350,31 +396,41 @@ async fn retire(pool: &PgPool, ids: &[String]) {
 }
 
 async fn deps(pool: PgPool, dwell: Duration) -> (SchedulerDeps, Arc<AtomicUsize>) {
-    let (deps, peak, _inside) = slow_deps(pool, dwell).await;
+    let (deps, peak, _inside) = slow_deps(pool, dwell, None).await;
     (deps, peak)
 }
 
-/// The same deps as [`deps`], returning the *inside* counter instead of the
-/// peak: how many runs are in the adapter's `sync` right now.
-///
-/// What a test needs it for is timing it cannot otherwise have. `trigger`
-/// returns as soon as the run's log row exists, but the run has not yet read
-/// `knobas.source_config` -- and that read is the one existence check a run
-/// makes, so a test that deletes the source before it happens gets a run that
-/// refuses and writes nothing, which is not the interleaving it meant to
-/// arrange. `Slow` bumps this counter on entry to `sync`, which is *after*
-/// that read, so waiting for it puts the test in the window it is about.
-async fn deps_watching_the_adapter(
-    pool: PgPool,
-    dwell: Duration,
-) -> (SchedulerDeps, Arc<AtomicUsize>) {
-    let (deps, _peak, inside) = slow_deps(pool, dwell).await;
-    (deps, inside)
+/// What a test holds of [`held_deps`]' adapter.
+struct Held {
+    /// Every run waits here, inside `sync`, until the test lets it through.
+    door: Arc<Door>,
+    /// How many runs are in the adapter's `sync` right now.
+    ///
+    /// What a test needs it for is an order it cannot otherwise see. `trigger`
+    /// returns as soon as the run's log row exists, but the run has not yet
+    /// read `knobas.source_config` -- and that read is the one existence check
+    /// a run makes, so a test that deletes the source before it happens gets a
+    /// run that refuses and writes nothing, which is not the interleaving it
+    /// meant to arrange. `Slow` bumps this counter on entry to `sync`, which is
+    /// *after* that read, so waiting for it puts the test in the window it is
+    /// about, and the door keeps the window open until the test is done in it.
+    inside: Arc<AtomicUsize>,
+    /// The most runs that were in the adapter at once.
+    peak: Arc<AtomicUsize>,
+}
+
+/// Deps whose every run parks at a shut door inside the adapter: the run is
+/// demonstrably still going for as long as the test needs it to be (#1920).
+async fn held_deps(pool: PgPool) -> (SchedulerDeps, Held) {
+    let door = Door::shut();
+    let (deps, peak, inside) = slow_deps(pool, Duration::ZERO, Some(Arc::clone(&door))).await;
+    (deps, Held { door, inside, peak })
 }
 
 async fn slow_deps(
     pool: PgPool,
     dwell: Duration,
+    door: Option<Arc<Door>>,
 ) -> (SchedulerDeps, Arc<AtomicUsize>, Arc<AtomicUsize>) {
     let connector = knobas_db::test_util::test_connector().await;
     let peak = Arc::new(AtomicUsize::new(0));
@@ -387,6 +443,7 @@ async fn slow_deps(
                 inside: Arc::clone(&inside),
                 peak: Arc::clone(&peak),
                 dwell,
+                door,
                 fault: None,
             }),
             secrets: Arc::new(MemoryStore::new()),
@@ -406,7 +463,7 @@ async fn concurrent_runs_never_exceed_the_cap() {
     let _serial = serially().await;
     let (pool, sched_pool) = pools().await;
     let ids = seed(&pool, SYNC_CONCURRENCY + 3).await;
-    let (deps, peak) = deps(sched_pool, Duration::from_millis(600)).await;
+    let (deps, held) = held_deps(sched_pool).await;
 
     let scheduler = Scheduler::start(deps).await.unwrap();
     for id in &ids {
@@ -415,25 +472,40 @@ async fn concurrent_runs_never_exceed_the_cap() {
             .await
             .unwrap();
     }
-    // Every triggered run has finished: a condition, not a span (#307). The
-    // peak is only final once the last of them has left the adapter.
+    // The cap's worth of runs parked at the door (#1920). Before, a 600 ms
+    // dwell had to outlast eight triggers, and on a loaded machine the first
+    // runs finished before the last began, so the peak fell short of a cap
+    // that was holding.
+    await_inside_count(&held.inside, SYNC_CONCURRENCY).await;
+    // A margin, not a witness: a scheduler with no cap lets the other three in
+    // straight after, and this is the time it gets to. Load only shortens it,
+    // which can let that mutant pass, never fail a scheduler that holds.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let peak = held.peak.load(Ordering::SeqCst);
+    held.door.open();
+    // Every triggered run has finished: a condition, not a span (#307).
     for id in &ids {
         await_source_idle(&pool, id).await;
     }
     scheduler.shutdown().await;
 
     // **Equality, not `<=`.** Three sources more than the cap are triggered at
-    // once against a 600 ms dwell, so the semaphore is what decides the peak
-    // and the peak is what it decides. A `<=` here would read the very constant
+    // once and none can leave the adapter, so the semaphore is what decides
+    // the peak and the peak is what it decides. A `<=` here would read the very constant
     // it is checking: raising `SYNC_CONCURRENCY` to 30 raises the bound *and*
     // the peak, and the test stays green while the cap is gone. (Observed --
     // that mutation survived the first draft of this assertion.)
     assert_eq!(
-        peak.load(Ordering::SeqCst),
+        peak,
         SYNC_CONCURRENCY,
         "{} sources triggered at once must saturate the cap of {SYNC_CONCURRENCY} \
          and never exceed it",
         ids.len()
+    );
+    assert_eq!(
+        held.peak.load(Ordering::SeqCst),
+        SYNC_CONCURRENCY,
+        "and the three let in after the door opened never ran beside five"
     );
     for id in &ids {
         let row = &run_log::list(&pool, Some(id), 1).await.unwrap()[0];
@@ -454,7 +526,8 @@ async fn six_blocked_runs_five_go_and_the_sixth_waits() {
     let (pool, sched_pool) = pools().await;
     let ids = seed(&pool, 6).await;
     let bookkeeping = sched_pool.clone();
-    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_millis(1500)).await;
+    let (deps, adapter) = held_deps(sched_pool).await;
+    let inside = &adapter.inside;
     assert_eq!(SYNC_CONCURRENCY, 5);
 
     let scheduler = Scheduler::start(deps).await.unwrap();
@@ -464,17 +537,11 @@ async fn six_blocked_runs_five_go_and_the_sixth_waits() {
             .await
             .unwrap();
     }
-    for _ in 0..100 {
-        if inside.load(Ordering::SeqCst) == 5 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert_eq!(
-        inside.load(Ordering::SeqCst),
-        5,
-        "five runs are in the adapter"
-    );
+    // Blocked at the door until the end of the test (#1920), not for a 1.5 s
+    // dwell that had to outlast the waits below on a loaded machine.
+    await_inside_count(inside, 5).await;
+    // A margin for the sixth to get in if the cap let it; load can shorten
+    // it, never fail a cap that holds.
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(
         inside.load(Ordering::SeqCst),
@@ -492,6 +559,7 @@ async fn six_blocked_runs_five_go_and_the_sixth_waits() {
         );
     }
     drop(held);
+    adapter.door.open();
 
     for id in &ids {
         await_source_idle(&pool, id).await;
@@ -514,18 +582,21 @@ async fn a_second_trigger_joins_the_run_already_in_flight() {
     let (pool, sched_pool) = pools().await;
     let ids = seed(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, _) = deps(sched_pool, Duration::from_millis(600)).await;
+    let (deps, held) = held_deps(sched_pool).await;
 
     let scheduler = Scheduler::start(deps).await.unwrap();
     let first = scheduler
         .trigger(&id, SyncTrigger::Manual, None)
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Still going, held at the door (#1920), rather than 100 ms into a 600 ms
+    // dwell that a loaded machine could see out before the second press.
+    await_inside(&held.inside).await;
     let second = scheduler
         .trigger(&id, SyncTrigger::Manual, None)
         .await
         .unwrap();
+    held.door.open();
     assert_eq!(
         first, second,
         "the caller is handed the run that is already going"
@@ -569,29 +640,26 @@ async fn the_ticker_runs_a_due_source_by_itself() {
     let (pool, sched_pool) = pools().await;
     let ids = seed(&pool, 1).await;
     let id = ids[0].clone();
-    // A dwell longer than the window below, so the run the first tick starts
-    // is still open when the second tick looks. `config::due` lists a source
-    // with an open run -- it only knows about finished ones -- so the second
-    // tick sees the same source due again, and the only thing between it and
-    // a second row is the scheduler's own "already has an open run" guard.
-    // A dwell shorter than the window would have the run finished, and the
-    // source not due, before that guard was ever asked.
-    let (deps, _) = deps(sched_pool, Duration::from_millis(400)).await;
+    // The run the first tick starts is held at the door, so it is still open
+    // when the later ticks look. `config::due` lists a source with an open
+    // run -- it only knows about finished ones -- so each later tick sees the
+    // same source due again, and the only thing between it and a second row
+    // is the scheduler's own "already has an open run" guard. A run that
+    // finished first would leave the source not due, and the guard never
+    // asked: a 400 ms dwell used to stand in for the door, and on a loaded
+    // machine it ran out first (#1920).
+    let (deps, held) = held_deps(sched_pool).await;
 
     let scheduler = Scheduler::start(deps).await.unwrap();
-    // A never-run source is due immediately; the first tick is one startup
-    // delay away, and the second one tick after that -- so this span covers
-    // both looks. It is a **window, not a wait**: "the ticker looked twice"
-    // is not a condition anything outside the scheduler can observe, so the
-    // spec keeps it as two injected ticks (#412). It is not what makes the
-    // second look observable, though: that is the dwell above outlasting the
-    // tick, plus the wait below -- the ticker keeps looking every tick until
-    // the run finishes, and each look through the 400 ms dwell meets the
-    // guard again. Cut to 10 ms, this span leaves the test green and the
-    // guard mutant still failing with eight rows, not two. The 50-100 ms
-    // sleeps elsewhere in this file are margins against a test's own dwell,
-    // not the scheduler's clock.
-    tokio::time::sleep(FAST.startup_delay + 2 * FAST.tick).await;
+    // A never-run source is due immediately: the first tick's run.
+    await_inside(&held.inside).await;
+    // Two more ticks while it is held. A **window, not a wait**: "the ticker
+    // looked twice" is not a condition anything outside the scheduler can
+    // observe, so the spec keeps it as two injected ticks (#412). On a loaded
+    // machine the ticker may look fewer times inside it, which weakens the
+    // test and cannot turn it red; the guard mutant fails with a row per look.
+    tokio::time::sleep(2 * FAST.tick).await;
+    held.door.open();
     // Then the run finishing is a condition (#307), and it has to have
     // finished for the interval to run from anywhere.
     await_source_idle(&pool, &id).await;
@@ -619,9 +687,15 @@ async fn shutdown_during_a_long_run_returns_promptly_and_leaves_no_open_run() {
     let (pool, sched_pool) = pools().await;
     let ids = seed(&pool, 1).await;
     let id = ids[0].clone();
-    // Far longer than the shutdown grace period. Never waited out: the
-    // assertion below is that shutdown does not wait for it.
-    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_secs(30)).await;
+    // Held at the door for good: the run never finishes on its own, so only
+    // the cancellation can end it.
+    let (mut deps, held) = held_deps(sched_pool).await;
+    // A grace far past the wait on `shutdown` below (#1920). A run stopped by
+    // the abort at the grace's end would hold the quit for an hour, so a quit
+    // that returns at all is one whose run **noticed** the cancellation at
+    // its next await point. The old witness was a 2 s bound against the 3 s
+    // grace, which a loaded gate overran on correct code.
+    deps.timing.shutdown_grace = Duration::from_secs(3600);
     // A stored `unreachable` the run will not get to re-witness, and the rung
     // the ladder stands on before it: neither is the cancelled run's to move
     // (#1629, spec #1618 ruling A8).
@@ -643,21 +717,16 @@ async fn shutdown_during_a_long_run_returns_promptly_and_leaves_no_open_run() {
         .unwrap();
     // The run is inside its transaction, holding the connection the stall was
     // about -- a condition rather than a 200 ms guess (#307).
-    await_inside(&inside).await;
+    await_inside(&held.inside).await;
 
-    let started = std::time::Instant::now();
-    scheduler.shutdown().await;
-    let took = started.elapsed();
-    // Well inside the three-second grace period, because the run **notices**
-    // the cancellation at its next await point rather than being waited out and
-    // then aborted. A bound of ten seconds would be satisfied by the abort
-    // backstop alone, so it would say nothing about the token -- that mutation
-    // survived the first draft of this test.
-    assert!(
-        took < Duration::from_secs(2),
-        "shutdown took {took:?}; a cancelled run stops at its next await, it is \
-         not waited out"
-    );
+    // Thirty seconds is a hang guard, not a measurement: the grace above is an
+    // hour, so a run that is waited out rather than stopped fails here.
+    tokio::time::timeout(Duration::from_secs(30), scheduler.shutdown())
+        .await
+        .expect(
+            "the quit waited out its grace: a cancelled run stops at its next \
+             await, it is not waited out",
+        );
 
     // And it closed its **own** row on the way out. The next start's
     // `reconcile_abandoned` is the backstop for a process that was killed, not
@@ -727,7 +796,8 @@ async fn a_cancelled_run_leaves_the_source_lock_free() {
     let (pool, sched_pool) = pools().await;
     let ids = seed(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_secs(30)).await;
+    let (deps, held) = held_deps(sched_pool).await;
+    let inside = &held.inside;
 
     let scheduler = Scheduler::start(deps).await.unwrap();
     scheduler
@@ -741,7 +811,7 @@ async fn a_cancelled_run_leaves_the_source_lock_free() {
     // the lock free for a reason this test is not about, so the sleep was
     // buying a green that says nothing. `await_inside` puts the run past that
     // statement and inside the adapter, where it demonstrably holds the lock.
-    await_inside(&inside).await;
+    await_inside(inside).await;
     let mut asking = probe(&pool).await;
     assert!(
         !lock_is_free(&mut asking, &id).await,
@@ -923,6 +993,7 @@ async fn a_trigger_says_running_before_it_returns() {
             inside: Arc::new(AtomicUsize::new(0)),
             peak: Arc::new(AtomicUsize::new(0)),
             dwell: Duration::from_secs(5),
+            door: None,
             fault: None,
         }),
         secrets: Arc::new(MemoryStore::new()),
@@ -979,6 +1050,7 @@ async fn a_running_state_names_its_own_run_not_another_open_one() {
             inside: Arc::new(AtomicUsize::new(0)),
             peak: Arc::new(AtomicUsize::new(0)),
             dwell: Duration::from_secs(5),
+            door: None,
             fault: None,
         }),
         secrets: Arc::new(MemoryStore::new()),
@@ -1131,6 +1203,7 @@ async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<Stri
             // Long enough that `elapsed_ms` cannot round to zero on a fast
             // machine, short enough not to slow the suite.
             dwell: Duration::from_millis(30),
+            door: None,
             fault,
         }),
         secrets: Arc::new(MemoryStore::new()),
@@ -1307,7 +1380,7 @@ async fn two_callers_watching_one_run_both_hear_it_end() {
     // "still hears it start" is about the ticker's run and not its own.
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, _) = deps(sched_pool, Duration::from_millis(600)).await;
+    let (deps, held) = held_deps(sched_pool).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
     let starter = Heard::new();
@@ -1316,13 +1389,14 @@ async fn two_callers_watching_one_run_both_hear_it_end() {
         .trigger(&id, SyncTrigger::Manual, Some(starter.sink()))
         .await
         .unwrap();
-    // Well inside the adapter's dwell, so the second caller joins a run that is
-    // genuinely still going rather than one that is already over.
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Held at the door, so the second caller joins a run that is genuinely
+    // still going rather than one that is already over (#1920).
+    await_inside(&held.inside).await;
     let second = scheduler
         .trigger(&id, SyncTrigger::Manual, Some(joiner.sink()))
         .await
         .unwrap();
+    held.door.open();
     assert_eq!(first, second, "one run, two watchers");
 
     let by_starter = await_ending(&starter).await;
@@ -1475,7 +1549,7 @@ async fn a_first_run_trigger_after_the_run_ended_is_served_the_ending_from_the_r
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, _) = deps(sched_pool, Duration::from_millis(300)).await;
+    let (deps, held) = held_deps(sched_pool).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
     // The scheduler's own first run of a brand-new source: `FirstRun` and no
@@ -1493,9 +1567,11 @@ async fn a_first_run_trigger_after_the_run_ended_is_served_the_ending_from_the_r
     // `finished_at` before the run tells anyone, so waiting on the log row
     // would leave the run's sinks still open and test the in-flight path by
     // accident. `Manual` asks for work rather than for the first sync, so it
-    // does not spend the claim either.
+    // does not spend the claim either. The run is held at the door while the
+    // observer joins (#1920): a 300 ms dwell used to, and a loaded machine
+    // could see it out first and have the observer start a run of its own.
     let observer = Heard::new();
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    await_inside(&held.inside).await;
     assert_eq!(
         scheduler
             .trigger(&id, SyncTrigger::Manual, Some(observer.sink()))
@@ -1504,6 +1580,7 @@ async fn a_first_run_trigger_after_the_run_ended_is_served_the_ending_from_the_r
         scheduled,
         "the observer joined the wake's run rather than starting one"
     );
+    held.door.open();
     await_ending(&observer).await;
 
     let wizard = Heard::new();
@@ -1575,15 +1652,18 @@ async fn a_failure_reads_the_same_live_or_joined_and_retry_still_runs() {
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
     let connector = knobas_db::test_util::test_connector().await;
+    let inside = Arc::new(AtomicUsize::new(0));
+    let door = Door::shut();
     let scheduler = Scheduler::start(SchedulerDeps {
         pool: sched_pool,
         connections: Arc::new(TestConnections(connector)),
         registry: Arc::new(SlowRegistry {
-            inside: Arc::new(AtomicUsize::new(0)),
+            inside: Arc::clone(&inside),
             peak: Arc::new(AtomicUsize::new(0)),
-            // Long enough that the live watcher joins a run that is genuinely
-            // still going; the fault is raised after the dwell.
-            dwell: Duration::from_millis(400),
+            // Held until the live watcher has joined, so it joins a run that is
+            // genuinely still going (#1920); the fault is raised after it.
+            dwell: Duration::ZERO,
+            door: Some(Arc::clone(&door)),
             fault: Some(|| SourceError::Unreachable("simulated".into())),
         }),
         secrets: Arc::new(MemoryStore::new()),
@@ -1599,7 +1679,7 @@ async fn a_failure_reads_the_same_live_or_joined_and_retry_still_runs() {
         .trigger(&id, SyncTrigger::FirstRun, None)
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    await_inside(&inside).await;
     let live = Heard::new();
     assert_eq!(
         scheduler
@@ -1609,6 +1689,7 @@ async fn a_failure_reads_the_same_live_or_joined_and_retry_still_runs() {
         failed,
         "the live watcher joined the run that was going, rather than starting one"
     );
+    door.open();
     let watched = await_ending(&live).await;
 
     let late = Heard::new();
@@ -1697,6 +1778,7 @@ async fn the_wizards_retry_after_watching_its_own_run_fail_starts_a_run() {
             inside: Arc::new(AtomicUsize::new(0)),
             peak: Arc::new(AtomicUsize::new(0)),
             dwell: Duration::from_millis(20),
+            door: None,
             fault: Some(|| SourceError::Unreachable("simulated".into())),
         }),
         secrets: Arc::new(MemoryStore::new()),
@@ -1749,13 +1831,17 @@ async fn a_wizard_that_joined_the_wakes_run_still_gets_a_run_when_it_retries() {
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
     let connector = knobas_db::test_util::test_connector().await;
+    let inside = Arc::new(AtomicUsize::new(0));
+    let door = Door::shut();
     let scheduler = Scheduler::start(SchedulerDeps {
         pool: sched_pool,
         connections: Arc::new(TestConnections(connector)),
         registry: Arc::new(SlowRegistry {
-            inside: Arc::new(AtomicUsize::new(0)),
+            inside: Arc::clone(&inside),
             peak: Arc::new(AtomicUsize::new(0)),
-            dwell: Duration::from_millis(300),
+            // Held until the wizard has joined (#1920).
+            dwell: Duration::ZERO,
+            door: Some(Arc::clone(&door)),
             fault: Some(|| SourceError::Unreachable("simulated".into())),
         }),
         secrets: Arc::new(MemoryStore::new()),
@@ -1769,12 +1855,13 @@ async fn a_wizard_that_joined_the_wakes_run_still_gets_a_run_when_it_retries() {
         .trigger(&id, SyncTrigger::FirstRun, None)
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    await_inside(&inside).await;
     let wizard = Heard::new();
     let joined = scheduler
         .trigger(&id, SyncTrigger::FirstRun, Some(wizard.sink()))
         .await
         .unwrap();
+    door.open();
     assert_eq!(joined, woken, "the wizard joined the run the wake started");
     assert_eq!(await_ending(&wizard).await.phase, SyncPhase::Failed);
 
@@ -1812,7 +1899,10 @@ async fn adding_a_source_produces_exactly_one_run_on_every_interleaving() {
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 2).await;
     let (wizard_first, wake_first) = (ids[0].clone(), ids[1].clone());
-    let (deps, _) = deps(sched_pool, Duration::from_millis(400)).await;
+    // Both runs held at the door until both second callers have arrived, so
+    // each one finds a run still going (#1920). A 400 ms dwell used to, and a
+    // loaded machine could see it out before the second trigger.
+    let (deps, held) = held_deps(sched_pool).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
     // The wizard's trigger arrives first; the wake's finds the run it started.
@@ -1832,12 +1922,12 @@ async fn adding_a_source_produces_exactly_one_run_on_every_interleaving() {
         .trigger(&wake_first, SyncTrigger::FirstRun, None)
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
     let b = Heard::new();
     let b_wizard = scheduler
         .trigger(&wake_first, SyncTrigger::FirstRun, Some(b.sink()))
         .await
         .unwrap();
+    held.door.open();
 
     assert_eq!(a_wizard, a_wake, "the wake joined the wizard's run");
     assert_eq!(b_wizard, b_wake, "the wizard joined the wake's run");
@@ -1892,7 +1982,10 @@ async fn a_sink_that_panics_fails_neither_the_run_nor_the_sink_behind_it() {
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, _) = deps(sched_pool, Duration::from_millis(300)).await;
+    // Held at the door until the live sink has joined behind the broken one
+    // (#1920): a 300 ms dwell could run out first on a loaded machine, and the
+    // live sink then started a run of its own.
+    let (deps, held) = held_deps(sched_pool).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
     let run = scheduler
@@ -1903,12 +1996,12 @@ async fn a_sink_that_panics_fails_neither_the_run_nor_the_sink_behind_it() {
         )
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(50)).await;
     let live = Heard::new();
     scheduler
         .trigger(&id, SyncTrigger::Manual, Some(live.sink()))
         .await
         .unwrap();
+    held.door.open();
 
     let ending = await_ending(&live).await;
     scheduler.shutdown().await;
@@ -1949,6 +2042,7 @@ async fn a_run_whose_task_panics_still_gives_its_watchers_an_ending() {
             peak: Arc::new(AtomicUsize::new(0)),
             dwell: Duration::from_millis(10),
             // Never returns: the adapter blows up where a bug in one would.
+            door: None,
             fault: Some(|| panic!("the adapter blew up")),
         }),
         secrets: Arc::new(MemoryStore::new()),
@@ -2014,6 +2108,7 @@ async fn a_run_whose_adapter_panics_is_recorded_and_stops_running() {
             inside: Arc::new(AtomicUsize::new(0)),
             peak: Arc::new(AtomicUsize::new(0)),
             dwell: Duration::from_millis(10),
+            door: None,
             fault: Some(|| panic!("the adapter blew up")),
         }),
         secrets: Arc::new(MemoryStore::new()),
@@ -2126,23 +2221,28 @@ async fn a_panicking_sink_served_from_the_record_does_not_unwind_into_the_caller
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, _) = deps(sched_pool, Duration::from_millis(300)).await;
+    let (deps, held) = held_deps(sched_pool).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
     // The same setup as
     // `a_first_run_trigger_after_the_run_ended_is_served_the_ending_from_the_record`,
     // and for the same reasons: no sink on the first trigger, so the `FirstRun`
     // claim is still unspent, and `Manual` to know the run is completely over.
+    // Held at the door while the observer joins (#1920).
     let scheduled = scheduler
         .trigger(&id, SyncTrigger::FirstRun, None)
         .await
         .unwrap();
     let observer = Heard::new();
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    scheduler
-        .trigger(&id, SyncTrigger::Manual, Some(observer.sink()))
-        .await
-        .unwrap();
+    assert_eq!(
+        scheduler
+            .trigger(&id, SyncTrigger::Manual, Some(observer.sink()))
+            .await
+            .unwrap(),
+        scheduled,
+        "the observer joined the wake's run rather than starting one"
+    );
+    held.door.open();
     await_ending(&observer).await;
 
     // The wizard arrives after the end with a sink that blows up on the
@@ -2225,7 +2325,7 @@ async fn a_source_re_added_under_a_deleted_ones_id_is_not_served_the_deleted_one
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, _) = deps(sched_pool, Duration::from_millis(200)).await;
+    let (deps, held) = held_deps(sched_pool).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
     // The first source's own first sync, run to completion. `Manual` with a
@@ -2234,16 +2334,21 @@ async fn a_source_re_added_under_a_deleted_ones_id_is_not_served_the_deleted_one
     // and it asks for work rather than for the first sync, so it leaves the
     // `FirstRun` claim unspent, which is the state that makes the entry
     // serveable to a later wizard.
+    // Held at the door while the observer joins (#1920).
     let deleted_sources_run = scheduler
         .trigger(&id, SyncTrigger::FirstRun, None)
         .await
         .unwrap();
     let observer = Heard::new();
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    scheduler
-        .trigger(&id, SyncTrigger::Manual, Some(observer.sink()))
-        .await
-        .unwrap();
+    assert_eq!(
+        scheduler
+            .trigger(&id, SyncTrigger::Manual, Some(observer.sink()))
+            .await
+            .unwrap(),
+        deleted_sources_run,
+        "the observer joined the run rather than starting one"
+    );
+    held.door.open();
     await_ending(&observer).await;
 
     // What `delete_source` does, and what it now tells the scheduler.
@@ -2311,17 +2416,27 @@ async fn mirrored(pool: &PgPool, id: &str) -> (i64, i64) {
 /// `run_locked`'s `select cursor from knobas.source_config` has not happened
 /// yet, a delete would be seen, and the run would refuse and write nothing:
 /// green, and about nothing.
-async fn await_inside(inside: &Arc<AtomicUsize>) {
-    // Five seconds, the same budget `await_ending` allows, and for the same
-    // reason: this is a deadline on a machine that may be running six other
-    // test binaries, not a measurement of how long reaching the adapter takes.
-    for _ in 0..500 {
-        if inside.load(Ordering::SeqCst) > 0 {
+async fn await_inside(inside: &AtomicUsize) {
+    await_inside_count(inside, 1).await;
+}
+
+/// Wait until at least `runs` runs are inside the adapter at once.
+async fn await_inside_count(inside: &AtomicUsize, runs: usize) {
+    // A deadline on a machine that may be running six other test binaries,
+    // not a measurement of how long reaching the adapter takes. Thirty
+    // seconds: a held run never leaves, so the margin costs nothing on the
+    // passing side.
+    for _ in 0..3000 {
+        if inside.load(Ordering::SeqCst) >= runs {
             return;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    panic!("no run reached the adapter in five seconds; there is nothing to interleave with");
+    panic!(
+        "{} of {runs} runs reached the adapter in thirty seconds; there is nothing to \
+         interleave with",
+        inside.load(Ordering::SeqCst)
+    );
 }
 
 /// **Deleting a source with `purge_items` while a sync of it is in flight
@@ -2349,11 +2464,16 @@ async fn a_purge_survives_the_run_that_was_in_flight_when_the_source_was_deleted
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_millis(400)).await;
+    // Each run waits at the door until the test has done what it does mid-run
+    // (#1920). A 400 ms dwell used to hold the window, and on a loaded gate
+    // the run committed before the delete did.
+    let (deps, held) = held_deps(sched_pool).await;
+    let inside = &held.inside;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
     // A mirror to purge, first: one run to completion, so the source has an
     // item and a live entity before anybody deletes anything.
+    held.door.admit(1);
     let first = Heard::new();
     scheduler
         .trigger(&id, SyncTrigger::Manual, Some(first.sink()))
@@ -2373,7 +2493,7 @@ async fn a_purge_survives_the_run_that_was_in_flight_when_the_source_was_deleted
         .trigger(&id, SyncTrigger::Manual, Some(watcher.sink()))
         .await
         .unwrap();
-    await_inside(&inside).await;
+    await_inside(inside).await;
     config::delete(&pool, &id, true).await.unwrap();
     assert!(
         inside.load(Ordering::SeqCst) > 0,
@@ -2382,6 +2502,7 @@ async fn a_purge_survives_the_run_that_was_in_flight_when_the_source_was_deleted
          and this test would be green over a scheduler that purges nothing"
     );
     scheduler.forget_source(&id, Purge::Items).await;
+    held.door.open();
 
     // ADR-0005 through the new path: the caller enrolled before the deletion is
     // still told how its run ended. Nothing here cancels anything.
@@ -2436,7 +2557,11 @@ async fn adding_a_source_back_under_the_id_voids_the_purge_armed_for_the_old_one
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_millis(400)).await;
+    // Each run waits at the door until the test has done what it does mid-run
+    // (#1920). A 400 ms dwell used to hold the window, and on a loaded gate
+    // the run committed before the delete did.
+    let (deps, held) = held_deps(sched_pool).await;
+    let inside = &held.inside;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
     let watcher = Heard::new();
@@ -2444,7 +2569,7 @@ async fn adding_a_source_back_under_the_id_voids_the_purge_armed_for_the_old_one
         .trigger(&id, SyncTrigger::Manual, Some(watcher.sink()))
         .await
         .unwrap();
-    await_inside(&inside).await;
+    await_inside(inside).await;
 
     // Delete with the purge, then think better of it -- all while the run is
     // still fetching.
@@ -2458,6 +2583,7 @@ async fn adding_a_source_back_under_the_id_voids_the_purge_armed_for_the_old_one
     scheduler.forget_source(&id, Purge::Items).await;
     re_add(&pool, &id).await;
     scheduler.source_added(&id).await;
+    held.door.open();
 
     let ending = await_ending(&watcher).await;
     assert_eq!(
@@ -2528,7 +2654,11 @@ async fn a_source_added_inside_the_delete_does_not_have_the_forgets_purge_armed_
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_millis(400)).await;
+    // Each run waits at the door until the test has done what it does mid-run
+    // (#1920). A 400 ms dwell used to hold the window, and on a loaded gate
+    // the run committed before the delete did.
+    let (deps, held) = held_deps(sched_pool).await;
+    let inside = &held.inside;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
     let watcher = Heard::new();
@@ -2536,7 +2666,7 @@ async fn a_source_added_inside_the_delete_does_not_have_the_forgets_purge_armed_
         .trigger(&id, SyncTrigger::Manual, Some(watcher.sink()))
         .await
         .unwrap();
-    await_inside(&inside).await;
+    await_inside(inside).await;
 
     // `delete_source`, one statement at a time -- and the add landing between
     // its second step and its third.
@@ -2549,6 +2679,7 @@ async fn a_source_added_inside_the_delete_does_not_have_the_forgets_purge_armed_
     re_add(&pool, &id).await;
     scheduler.source_added(&id).await;
     scheduler.forget_source(&id, Purge::Items).await;
+    held.door.open();
 
     let ending = await_ending(&watcher).await;
     assert_eq!(
@@ -2742,7 +2873,11 @@ async fn deleting_a_source_mid_run_without_purging_keeps_its_items() {
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_millis(400)).await;
+    // Each run waits at the door until the test has done what it does mid-run
+    // (#1920). A 400 ms dwell used to hold the window, and on a loaded gate
+    // the run committed before the delete did.
+    let (deps, held) = held_deps(sched_pool).await;
+    let inside = &held.inside;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
     let watcher = Heard::new();
@@ -2750,7 +2885,7 @@ async fn deleting_a_source_mid_run_without_purging_keeps_its_items() {
         .trigger(&id, SyncTrigger::Manual, Some(watcher.sink()))
         .await
         .unwrap();
-    await_inside(&inside).await;
+    await_inside(inside).await;
     config::delete(&pool, &id, false).await.unwrap();
     assert!(
         inside.load(Ordering::SeqCst) > 0,
@@ -2759,6 +2894,7 @@ async fn deleting_a_source_mid_run_without_purging_keeps_its_items() {
          and this test would be green over a scheduler that purges nothing"
     );
     scheduler.forget_source(&id, Purge::Keep).await;
+    held.door.open();
 
     let ending = await_ending(&watcher).await;
     assert_eq!((ending.phase, ending.items), (SyncPhase::Finished, 1));
@@ -2790,7 +2926,9 @@ async fn forgetting_a_source_mid_run_still_gives_that_runs_watchers_their_ending
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, _) = deps(sched_pool, Duration::from_millis(400)).await;
+    // Held at the door until the new source's wizard has its own run, so the
+    // deletion lands mid-run (#1920) rather than 50 ms into a 400 ms dwell.
+    let (deps, held) = held_deps(sched_pool).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
     let watcher = Heard::new();
@@ -2798,7 +2936,7 @@ async fn forgetting_a_source_mid_run_still_gives_that_runs_watchers_their_ending
         .trigger(&id, SyncTrigger::FirstRun, Some(watcher.sink()))
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    await_inside(&held.inside).await;
 
     // Deleted mid-run, and added again straight away -- the impatient version
     // of the same user action.
@@ -2811,6 +2949,7 @@ async fn forgetting_a_source_mid_run_still_gives_that_runs_watchers_their_ending
         .trigger(&id, SyncTrigger::FirstRun, Some(wizard.sink()))
         .await
         .unwrap();
+    held.door.open();
 
     // ADR-0005 for the caller that was already there: the run it was handed is
     // one it can observe, deletion or no deletion.
@@ -2829,8 +2968,9 @@ async fn forgetting_a_source_mid_run_still_gives_that_runs_watchers_their_ending
 // The write queue's flush beside the ticker (#1629, spec #1618 ruling A7).
 // ---------------------------------------------------------------------------
 
-/// A [`Slow`] whose writes land, each after `dwell`: a source that takes its
-/// time over a write, as an unreachable one spends the send budget on each.
+/// A [`Slow`] whose writes land, each once it is let through its door: a
+/// source that takes its time over a write, as an unreachable one spends the
+/// send budget on each, and that takes it for as long as the test needs.
 ///
 /// `started` counts the calls to `write`, `finished` the ones that returned,
 /// of the one source a test counts; a write in flight is the difference.
@@ -2838,7 +2978,7 @@ async fn forgetting_a_source_mid_run_still_gives_that_runs_watchers_their_ending
 /// and a source an earlier test left owing would otherwise count here.
 struct Writer {
     slow: Slow,
-    dwell: Duration,
+    door: Arc<Door>,
     counted: bool,
     started: Arc<AtomicUsize>,
     finished: Arc<AtomicUsize>,
@@ -2873,7 +3013,7 @@ impl Source for Writer {
         if self.counted {
             self.started.fetch_add(1, Ordering::SeqCst);
         }
-        tokio::time::sleep(self.dwell).await;
+        self.door.pass().await;
         if self.counted {
             self.finished.fetch_add(1, Ordering::SeqCst);
         }
@@ -2885,7 +3025,7 @@ impl Source for Writer {
 }
 
 struct WriterRegistry {
-    dwell: Duration,
+    door: Arc<Door>,
     counted: String,
     started: Arc<AtomicUsize>,
     finished: Arc<AtomicUsize>,
@@ -2903,20 +3043,21 @@ impl AdapterRegistry for WriterRegistry {
                 inside: Arc::new(AtomicUsize::new(0)),
                 peak: Arc::new(AtomicUsize::new(0)),
                 dwell: Duration::ZERO,
+                door: None,
                 fault: None,
             },
-            dwell: self.dwell,
+            door: Arc::clone(&self.door),
             started: Arc::clone(&self.started),
             finished: Arc::clone(&self.finished),
         }))
     }
 }
 
-/// Deps whose every source syncs at once and writes after `dwell`, and the
-/// two write counters of `counted`.
+/// Deps whose every source syncs at once and writes once `door` lets it, and
+/// the two write counters of `counted`.
 async fn writer_deps(
     pool: PgPool,
-    dwell: Duration,
+    door: &Arc<Door>,
     counted: &str,
 ) -> (SchedulerDeps, Arc<AtomicUsize>, Arc<AtomicUsize>) {
     let connector = knobas_db::test_util::test_connector().await;
@@ -2926,7 +3067,7 @@ async fn writer_deps(
         pool,
         connections: Arc::new(TestConnections(connector)),
         registry: Arc::new(WriterRegistry {
-            dwell,
+            door: Arc::clone(door),
             counted: counted.to_owned(),
             started: Arc::clone(&started),
             finished: Arc::clone(&finished),
@@ -3003,12 +3144,13 @@ async fn await_count(counter: &Arc<AtomicUsize>, n: usize) {
 /// the ticker goes on looking while a write is on the wire.
 ///
 /// Red with the flush inline in the tick: the ticker sits in the write until
-/// it returns, and the due source's run starts after it.
+/// it returns, and the due source's run starts after it. The write here is
+/// held at its door until the run has started (#1920), so "after it" is
+/// never: the inline flush fails at the hang guard below rather than at a
+/// clock reading.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_slow_write_does_not_hold_off_a_source_that_falls_due() {
-    /// The ticket's: a write that dwells ten seconds, beside a source due in
-    /// one.
-    const WRITE_DWELL: Duration = Duration::from_secs(10);
+    /// The ticket's: a source due one second in.
     const DUE_IN: Duration = Duration::from_secs(1);
 
     let _serial = serially().await;
@@ -3026,35 +3168,39 @@ async fn a_slow_write_does_not_hold_off_a_source_that_falls_due() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    let (deps, started, finished) = writer_deps(sched_pool, WRITE_DWELL, &writing[0]).await;
+    let door = Door::shut();
+    let (deps, started, finished) = writer_deps(sched_pool, &door, &writing[0]).await;
 
     let scheduler = Scheduler::start(deps).await.unwrap();
     owe_a_comment(scheduler.deps(), &writing[0], "W-1").await;
     await_count(&started, 1).await;
 
-    // Until the write returns: the run has to start while it is on the wire.
-    let run = loop {
-        if let Some(run) = run_log::list(&pool, Some(&due_soon[0]), 1)
-            .await
-            .unwrap()
-            .pop()
-        {
-            break run;
+    // The write stays on the wire until the run has started. Thirty seconds
+    // is a hang guard, thirty times `DUE_IN`, not a measurement.
+    let run = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Some(run) = run_log::list(&pool, Some(&due_soon[0]), 1)
+                .await
+                .unwrap()
+                .pop()
+            {
+                break run;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert_eq!(
-            finished.load(Ordering::SeqCst),
-            0,
-            "the due source's run did not start until the write returned"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    };
-    // Within a tick of falling due. `DUE_IN` again on top, for the queries a
-    // loaded machine runs slowly: still a tenth of the dwell it is told from.
-    let late = (run.started_at - due_at).to_std().unwrap_or_default();
-    assert!(
-        late < FAST.tick + DUE_IN,
-        "the due source started {late:?} after it fell due"
+    })
+    .await
+    .expect("the due source's run did not start while the write was on the wire");
+    assert_eq!(
+        finished.load(Ordering::SeqCst),
+        0,
+        "the write is still on the wire"
     );
+    assert!(
+        run.started_at >= due_at,
+        "the run is the one its falling due started: {run:?}"
+    );
+    door.open();
 
     scheduler.shutdown().await;
     drop_owed(&pool, &writing).await;
@@ -3066,21 +3212,25 @@ async fn a_slow_write_does_not_hold_off_a_source_that_falls_due() {
 /// behind it are not started, and stay owed for the next launch.
 ///
 /// Red with the flush inline in the tick: nothing looks at the cancel inside
-/// it, and the next two writes go out before the grace runs out and the
-/// abort lands.
+/// it, and the next two writes go out once the first returns.
+///
+/// Ordered, not timed (#1920): the first write is held at its door until the
+/// quit has begun, and only then let finish. The old version raced a 750 ms
+/// write against the quit and bounded the quit by the grace, and on a loaded
+/// machine either could lose.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_quit_during_a_flush_stops_it_between_writes() {
     use knobas_core::write_queue::{self as store, WriteState};
-    use knobas_sync::scheduler::SHUTDOWN_GRACE;
-
-    // Short enough that, unchecked, all three start inside the grace; long
-    // enough that the first is still on the wire when the quit comes.
-    let dwell = SHUTDOWN_GRACE / 4;
 
     let _serial = serially().await;
     let (pool, sched_pool) = pools().await;
     let writing = seed_quiet(&pool, 1).await;
-    let (deps, started, _finished) = writer_deps(sched_pool, dwell, &writing[0]).await;
+    let door = Door::shut();
+    let (mut deps, started, finished) = writer_deps(sched_pool, &door, &writing[0]).await;
+    // A grace far past the wait on the quit below: the write on the wire is
+    // let finish whenever this test opens its door, and an abort would hold
+    // the quit for an hour rather than land early.
+    deps.timing.shutdown_grace = Duration::from_secs(3600);
 
     let scheduler = Scheduler::start(deps).await.unwrap();
     let mut owed = Vec::new();
@@ -3089,22 +3239,34 @@ async fn a_quit_during_a_flush_stops_it_between_writes() {
     }
     await_count(&started, 1).await;
 
-    let before = started.load(Ordering::SeqCst);
-    let quitting = std::time::Instant::now();
-    scheduler.shutdown().await;
-    let took = quitting.elapsed();
-    let after = started.load(Ordering::SeqCst);
+    let quitting = tokio::spawn({
+        let scheduler = scheduler.clone();
+        async move { scheduler.shutdown().await }
+    });
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !scheduler.is_shutting_down() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the quit begins");
+    // The quit has begun with the first write on the wire. Let it, and
+    // anything after it, through.
+    door.open();
+    tokio::time::timeout(Duration::from_secs(30), quitting)
+        .await
+        .expect("the quit waited for something other than the write on the wire")
+        .unwrap();
 
-    // At most one: a write that began between the read above and the cancel
-    // inside `shutdown` is not one the quit could have stopped.
-    assert!(
-        after - before <= 1,
-        "{} writes were started after the quit",
-        after - before
+    assert_eq!(
+        started.load(Ordering::SeqCst),
+        1,
+        "a write was started after the quit began"
     );
-    assert!(
-        took < SHUTDOWN_GRACE,
-        "the write on the wire was aborted rather than let finish: {took:?}"
+    assert_eq!(
+        finished.load(Ordering::SeqCst),
+        1,
+        "the write on the wire was aborted rather than let finish"
     );
     let mut states = Vec::new();
     for write in &owed {
@@ -3112,11 +3274,12 @@ async fn a_quit_during_a_flush_stops_it_between_writes() {
     }
     assert_eq!(
         states.iter().filter(|s| **s == WriteState::Sent).count(),
-        after,
-        "each write the source took is marked sent, and no other: {states:?}"
+        1,
+        "the write the source took is marked sent, and no other: {states:?}"
     );
-    assert!(
-        states.iter().filter(|s| **s == WriteState::Pending).count() >= 1,
+    assert_eq!(
+        states.iter().filter(|s| **s == WriteState::Pending).count(),
+        2,
         "the writes behind the quit stay owed: {states:?}"
     );
     drop_owed(&pool, &writing).await;

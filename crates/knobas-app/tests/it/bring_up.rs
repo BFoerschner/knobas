@@ -515,6 +515,7 @@ async fn shutdown_stops_the_scheduler_before_the_database_and_a_second_does_noth
         timing: knobas_sync::scheduler::SchedulerTiming {
             startup_delay: Duration::from_secs(3600),
             tick: Duration::from_secs(3600),
+            ..Default::default()
         },
     })
     .await
@@ -1026,6 +1027,7 @@ async fn a_trigger_that_reaches_the_spawn_after_the_quit_ends_its_row() {
         timing: knobas_sync::scheduler::SchedulerTiming {
             startup_delay: Duration::from_secs(3600),
             tick: Duration::from_secs(3600),
+            ..Default::default()
         },
     })
     .await

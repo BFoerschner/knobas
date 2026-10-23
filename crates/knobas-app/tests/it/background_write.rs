@@ -238,6 +238,7 @@ async fn fixture_on(connector: knobas_db::embedded::Connector) -> Fixture {
 const HELD_OFF: knobas_sync::scheduler::SchedulerTiming = knobas_sync::scheduler::SchedulerTiming {
     startup_delay: Duration::from_secs(3600),
     tick: Duration::from_secs(3600),
+    shutdown_grace: knobas_sync::scheduler::SHUTDOWN_GRACE,
 };
 
 fn comment(body: &str) -> serde_json::Value {
@@ -529,6 +530,7 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
         timing: knobas_sync::scheduler::SchedulerTiming {
             startup_delay: Duration::from_millis(10),
             tick: Duration::from_millis(50),
+            ..Default::default()
         },
     })
     .await

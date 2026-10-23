@@ -1380,6 +1380,7 @@ async fn writes(
             timing: knobas_sync::scheduler::SchedulerTiming {
                 startup_delay: std::time::Duration::from_secs(3600),
                 tick: std::time::Duration::from_secs(3600),
+                ..Default::default()
             },
         })
         .await
