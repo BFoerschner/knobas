@@ -415,8 +415,10 @@ impl Searcher {
     /// The keys are the launcher's: [`query::parse`] and [`query::merge`]
     /// with no chips, matched by the predicates [`sql::search_sql`] uses. The
     /// words are the view's: each must appear in the row's key, title,
-    /// assignee or epic ([`sql::ids_sql`]). Over the live mirror. A prefix
-    /// (`#`, `>`) and `list:` mean nothing here and are not acted on.
+    /// assignee or epic, a `-word` or `-"phrase"` must not, and `or`
+    /// separates alternatives ([`query::word_alternatives`],
+    /// [`sql::ids_sql`], #1889). Over the live mirror. A prefix (`#`, `>`)
+    /// and `list:` mean nothing here and are not acted on.
     ///
     /// # Errors
     ///
@@ -451,7 +453,7 @@ impl Searcher {
         })?;
         let parsed = query::parse(&query.raw, vocab);
         let mut filters = query::merge(&parsed, &query.filters);
-        let words = query::needles(&parsed.query.text);
+        let words = query::word_alternatives(&parsed.query.text);
         if words.is_empty() && filters.is_empty() {
             return Ok(None);
         }
@@ -569,7 +571,8 @@ impl Searcher {
         let vocab = self.vocabulary().await?;
         let mut out: Vec<Option<Reading>> = Vec::with_capacity(raws.len());
         // The readable texts that still need a count: (slot in `out`, words, filters).
-        let mut pending: Vec<(usize, Vec<String>, query::EffectiveFilters)> = Vec::new();
+        let mut pending: Vec<(usize, Vec<query::WordAlternative>, query::EffectiveFilters)> =
+            Vec::new();
         for raw in raws {
             if let Err(error) = validate(SearchQuery {
                 raw: (*raw).to_owned(),
@@ -595,12 +598,12 @@ impl Searcher {
                 continue;
             }
             filters.kinds = vec![kind.to_owned()];
-            let words = query::needles(&parsed.query.text);
+            let words = query::word_alternatives(&parsed.query.text);
             pending.push((out.len(), words, filters));
             out.push(None);
         }
         // One statement for every readable text, not a scan awaited per view.
-        let queries: Vec<(&[String], &query::EffectiveFilters)> = pending
+        let queries: Vec<(&[query::WordAlternative], &query::EffectiveFilters)> = pending
             .iter()
             .map(|(_, words, filters)| (words.as_slice(), filters))
             .collect();

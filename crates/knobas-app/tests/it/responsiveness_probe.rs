@@ -938,6 +938,9 @@ async fn what_the_reader_waits_on() {
     // lanes still reads every match, so that row stays beside it. `a` is one
     // broad letter (every key here holds one), `jira0-123` a narrow one, and
     // `zzqx` a word nothing holds, which makes every row's assignee read run.
+    // A word left out and an `or` (#1889): `-zzqx` keeps every row and reads
+    // every row's assignee and parents to be sure, `-a` leaves out every row
+    // on its key, and `a or zzqx` reads the second alternative for no row.
     let tickets_view = "tickets view: filter";
     time(
         tickets_view,
@@ -956,7 +959,7 @@ async fn what_the_reader_waits_on() {
         },
     )
     .await;
-    for word in ["a", "jira0-123", "zzqx"] {
+    for word in ["a", "jira0-123", "zzqx", "-zzqx", "-a", "a or zzqx"] {
         for (cap, label) in [(Some(50), "50 a column"), (None, "every match, lanes")] {
             time(
                 tickets_view,

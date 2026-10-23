@@ -775,33 +775,88 @@ async fn matching_ids_are_every_ticket_the_query_admits() {
     );
 }
 
-/// The Tickets view reads its words as the launcher grammar does (#1651):
-/// a quoted phrase is one needle, a `-word` is no needle at all, and the
-/// rail's `readings` agree with `matching_ids` on the same text.
+/// The Tickets view reads its words as the launcher grammar does (#1651,
+/// #1889): a quoted phrase is one word, a `-word` or a `-"phrase"` leaves
+/// out the rows that hold it, and `or` splits the words into alternatives,
+/// each binding tighter than `or` as `websearch_to_tsquery` reads them. A
+/// row holds a word through its key, title, assignee or epic, so a word
+/// left out is left out through each of them. The rail's `readings` agree
+/// with `matching_ids` on every text.
 #[tokio::test]
-async fn quoted_and_negated_words_read_through_the_needles() {
+async fn the_view_reads_phrases_negations_and_or_as_the_grammar_does() {
     let pool = pool().await;
     let p = project();
-    let phrase = store(&pool, &p, 1, BASE).await;
-    let scattered = store(&pool, &p, 2, BASE).await;
-    sqlx::query("update sync.item set title = 'Fix sepa retry loop' where entity_id = $1")
-        .bind(&phrase)
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("update sync.item set title = 'Retry the sepa job' where entity_id = $1")
-        .bind(&scattered)
-        .execute(&pool)
-        .await
-        .unwrap();
+    let one = store(&pool, &p, 1, BASE).await;
+    let two = store(&pool, &p, 2, BASE).await;
+    let three = store(&pool, &p, 3, BASE).await;
+    let four = store(&pool, &p, 4, BASE).await;
+    for (id, title) in [
+        (&one, "Fix sepa retry loop"),
+        (&two, "Retry the sepa job"),
+        (&three, "Blocked: dead letter queue"),
+        (&four, "Ledger letter is dead"),
+    ] {
+        sqlx::query("update sync.item set title = $2 where entity_id = $1")
+            .bind(id)
+            .bind(title)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    // An epic only the second ticket's row names, and an assignee only the
+    // fourth's: words a title does not hold.
+    sqlx::query(
+        "update sync.item set payload = payload
+              || jsonb_build_object('epic', jsonb_build_object('key', $2::text))
+          where entity_id = $1",
+    )
+    .bind(&two)
+    .bind(format!("{p}-EPIC"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "update sync.item set payload = jsonb_set(payload, '{fields,assignee}',
+              '{\"name\": \"priya.nair\", \"key\": \"priya.nair\"}'::jsonb)
+          where entity_id = $1",
+    )
+    .bind(&four)
+    .execute(&pool)
+    .await
+    .unwrap();
     let searcher = searcher(&pool).await;
-    let quoted = format!("project:{p} \"sepa retry\"");
-    let negated = format!("project:{p} -zeppelin");
-    let literal = format!("project:{p} sepa -retry");
-    let texts = [quoted.as_str(), negated.as_str(), literal.as_str()];
-    let readings = searcher.readings(&texts, "ticket").await.unwrap();
-    let mut counts = Vec::new();
-    for (text, reading) in texts.iter().zip(readings) {
+    let epic = format!("{p}-epic");
+    let key = format!("{p}-1");
+    let cases: Vec<(String, Vec<&String>)> = vec![
+        ("\"sepa retry\"".to_owned(), vec![&one]),
+        ("-zeppelin".to_owned(), vec![&one, &two, &three, &four]),
+        ("sepa -retry".to_owned(), vec![]),
+        ("-blocked".to_owned(), vec![&one, &two, &four]),
+        ("-\"dead letter\"".to_owned(), vec![&one, &two, &four]),
+        ("-dead letter".to_owned(), vec![]),
+        ("-dead".to_owned(), vec![&one, &two]),
+        // Left out through the key, the epic and the assignee.
+        (format!("-{key}"), vec![&two, &three, &four]),
+        (format!("-{epic}"), vec![&one, &three, &four]),
+        ("-PRIYA".to_owned(), vec![&one, &two, &three]),
+        ("ledger or \"sepa retry\"".to_owned(), vec![&one, &four]),
+        ("ledger OR loop".to_owned(), vec![&one, &four]),
+        // `and` binds tighter than `or`: (dead & letter) | loop, never
+        // dead & (letter | loop).
+        ("dead letter or loop".to_owned(), vec![&one, &three, &four]),
+        // A `-` binds to its own alternative: (sepa & !job) | job, never
+        // (sepa | job) & !job.
+        ("sepa -job or job".to_owned(), vec![&one, &two]),
+        // An `or` with nothing on one side is no alternative.
+        ("or ledger or".to_owned(), vec![&four]),
+    ];
+    let texts: Vec<String> = cases
+        .iter()
+        .map(|(typed, _)| format!("project:{p} {typed}"))
+        .collect();
+    let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+    let readings = searcher.readings(&refs, "ticket").await.unwrap();
+    for ((text, (typed, expected)), reading) in texts.iter().zip(&cases).zip(readings) {
         let ids = searcher
             .matching_ids(text, "ticket")
             .await
@@ -810,15 +865,21 @@ async fn quoted_and_negated_words_read_through_the_needles() {
         assert_eq!(
             reading,
             knobas_search::Reading::Count(ids.len().try_into().unwrap()),
-            "readings agree with matching_ids on {text}"
+            "readings agree with matching_ids on {typed}"
         );
-        counts.push(sorted(ids));
+        assert_eq!(
+            sorted(ids),
+            sorted(expected.iter().map(|id| (*id).clone()).collect()),
+            "{typed}"
+        );
     }
-    assert_eq!(counts[0], vec![phrase.clone()], "the phrase, not its words");
-    // `-zeppelin` is no needle: neither a literal substring to find nor the
-    // word `zeppelin` required, and the words that remain (none) narrow nothing.
-    assert_eq!(counts[1], sorted(vec![phrase.clone(), scattered.clone()]));
-    assert_eq!(counts[2], sorted(vec![phrase, scattered]), "`sepa` alone");
+    // A negation alone narrows: it is a word filter, not nothing typed.
+    let alone = searcher
+        .matching_ids(&format!("-{key}"), "ticket")
+        .await
+        .unwrap()
+        .expect("a negated word narrows");
+    assert!(alone.contains(&two) && !alone.contains(&one));
 }
 
 /// The Tickets view's words with no key beside them (#897), which is what a

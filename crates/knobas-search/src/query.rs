@@ -663,7 +663,8 @@ fn negates_what_cannot_be_negated(token: &str) -> bool {
 /// order typed, once each. What it leaves out is left out (`-word`,
 /// `-"a phrase"`), and so is `or`, which `websearch_to_tsquery` reads as the
 /// operator. `text` is [`ParsedQuery::text`](crate::types::ParsedQuery), the
-/// grammar's keys already taken out.
+/// grammar's keys already taken out. These are the marks, not a filter: the
+/// Tickets view filters by [`word_alternatives`].
 #[must_use]
 pub fn needles(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
@@ -671,14 +672,55 @@ pub fn needles(text: &str) -> Vec<String> {
         if token.starts_with('-') || token.eq_ignore_ascii_case("or") {
             continue;
         }
-        let needle = token
-            .trim_matches(|c: char| !c.is_alphanumeric())
-            .to_lowercase();
-        if !needle.is_empty() && !out.contains(&needle) {
-            out.push(needle);
-        }
+        push_needle(&mut out, &token);
     }
     out
+}
+
+/// One alternative of the Tickets view's word filter (#1889): a row it
+/// admits holds every word of `holds` and none of `lacks`. Each is a needle
+/// as [`needles`] spells it, lowercased, once each.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct WordAlternative {
+    pub holds: Vec<String>,
+    pub lacks: Vec<String>,
+}
+
+/// The Tickets view's word filter (#1889): the alternatives a query's text
+/// asks for, a row admitted when it meets one of them. `or` (any case)
+/// separates them, and each binds its words tighter than `or`, as
+/// `websearch_to_tsquery` reads the launcher's text: `a b or c -d` is
+/// `(a & b) | (c & !d)`. A `-word` or `-"a phrase"` is left out of the
+/// alternative it stands in. An `or` with nothing on one side adds no
+/// alternative, and none at all is no word filter. `text` is
+/// [`ParsedQuery::text`](crate::types::ParsedQuery), the keys taken out.
+#[must_use]
+pub fn word_alternatives(text: &str) -> Vec<WordAlternative> {
+    let mut out: Vec<WordAlternative> = Vec::new();
+    let mut current = WordAlternative::default();
+    for token in tokenize(text) {
+        if token.eq_ignore_ascii_case("or") {
+            out.push(std::mem::take(&mut current));
+        } else if let Some(left_out) = token.strip_prefix('-') {
+            push_needle(&mut current.lacks, left_out);
+        } else {
+            push_needle(&mut current.holds, &token);
+        }
+    }
+    out.push(current);
+    out.retain(|alternative| !(alternative.holds.is_empty() && alternative.lacks.is_empty()));
+    out
+}
+
+/// `token` as a needle -- its quotes and edge punctuation off, lowercased --
+/// onto `out`, unless it is empty or there already.
+fn push_needle(out: &mut Vec<String>, token: &str) {
+    let needle = token
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .to_lowercase();
+    if !needle.is_empty() && !out.contains(&needle) {
+        out.push(needle);
+    }
 }
 
 /// `key:value`, if the token is one at all.
@@ -1701,6 +1743,30 @@ mod tests {
         );
         assert!(needles("").is_empty());
         assert!(needles("-only").is_empty());
+    }
+
+    /// The view's word filter (#1889): `or` splits the alternatives, and a
+    /// `-word` or `-"phrase"` is left out of the one it stands in.
+    #[test]
+    fn word_alternatives_split_on_or_and_record_what_is_left_out() {
+        let alt = |holds: &[&str], lacks: &[&str]| WordAlternative {
+            holds: holds.iter().map(|w| (*w).to_owned()).collect(),
+            lacks: lacks.iter().map(|w| (*w).to_owned()).collect(),
+        };
+        assert_eq!(
+            word_alternatives(r#"Retry "backoff policy" -cron -"dead letter" OR sepa, retry -"#),
+            [
+                alt(&["retry", "backoff policy"], &["cron", "dead letter"]),
+                alt(&["sepa", "retry"], &[]),
+            ]
+        );
+        assert_eq!(word_alternatives("-only"), [alt(&[], &["only"])]);
+        assert_eq!(
+            word_alternatives("or a or or -b or"),
+            [alt(&["a"], &[]), alt(&[], &["b"])]
+        );
+        assert!(word_alternatives("").is_empty());
+        assert!(word_alternatives("or - \"\"").is_empty());
     }
 
     /// A minus on a key or marker the grammar knows and cannot negate is
