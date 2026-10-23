@@ -39,9 +39,7 @@ export const TRANSLATE_QUERY = "translate_query";
 export interface ClaimingSource {
   id: string;
   /** What a person calls it: what a card names when two sources hold its key (#1476). */
-  display_name?: string;
-  /** Carried as the source list has it and never read: a surface draws by role. */
-  adapter_kind?: string;
+  display_name: string;
   roles: readonly RoleClaim[];
   /** The claimed roles whose declared paths missed on the source's records (#1199). */
   role_misses: readonly RoleMiss[];
@@ -80,7 +78,7 @@ export function createSourceRoles(): SourceRoles {
     take(sources) {
       state.sources = sources.map((row) => ({
         id: row.id,
-        ...(row.display_name === undefined ? {} : { display_name: row.display_name }),
+        display_name: row.display_name,
         roles: [...row.roles],
         role_misses: [...row.role_misses],
       }));

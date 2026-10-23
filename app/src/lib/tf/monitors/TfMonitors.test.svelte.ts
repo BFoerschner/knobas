@@ -13,6 +13,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import type { MonitorPorts } from "./TfMonitors.svelte";
 import TfMonitors from "./TfMonitors.svelte";
+import { sourceFacts } from "../job/source-facts.fixture";
 
 const NOW = new Date("2026-10-16T14:00:00Z");
 
@@ -127,7 +128,7 @@ function ports(over: Partial<MonitorPorts> = {}): MonitorPorts {
       routeEdits.push([id, list]);
       return {} as never;
     },
-    listSources: async () => [{ id: "kuma", display_name: "Uptime Kuma" }, { id: "jira", display_name: "Jira" }],
+    listSources: async () => [sourceFacts("kuma", { display_name: "Uptime Kuma" }), sourceFacts("jira", { display_name: "Jira" })],
     listContexts: async () => [],
     getEntity: async (id) => {
       if (id !== "jira:PAY-231") throw { code: "not_found" };

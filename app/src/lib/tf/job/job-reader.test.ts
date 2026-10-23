@@ -8,6 +8,7 @@ import { expect, test } from "vitest";
 
 import type { ContextRow, EntityDetail, EntityFilter, EntityRow, JobLinkSets, Reached } from "../../ipc/entity";
 import { createJobReader, type JobReaderPorts } from "./job-reader.svelte";
+import { sourceFacts } from "./source-facts.fixture";
 
 /** Lets every settled promise's callbacks run. */
 async function flush() {
@@ -49,7 +50,7 @@ function fakes(over: { failing?: string[] } = {}) {
   const ports: JobReaderPorts = {
     listSources: () => {
       asked.push("listSources");
-      return Promise.resolve([{ id: "jira" }]);
+      return Promise.resolve([sourceFacts("jira")]);
     },
     getEntity: async (id) => {
       asked.push(`getEntity ${id}`);

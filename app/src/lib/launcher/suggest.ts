@@ -110,7 +110,7 @@ function candidates(key: SuggestKey, lists: FilterSuggestions): Suggestion[] {
     case "under":
       return lists.parents.map((p) => ({ value: p.name, detail: p.kind }));
     default:
-      return (lists.fields ?? [])
+      return lists.fields
         .filter((f) => f.key === key)
         .map((f) => ({ value: f.value, detail: f.detail }));
   }

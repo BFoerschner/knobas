@@ -11,19 +11,10 @@ import type { AssetStatus } from "../../ipc/assets";
 import type { EntityDetail, EntityRow, Reached, Tone } from "../../ipc/entity";
 import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
 
-/** What the job reads of a source; every field past the id may be missing. */
-export interface SourceFacts {
-  id: string;
-  display_name?: string;
-  config?: unknown;
-  kinds?: { id: string }[];
-  /** The roles it claims (#1196): read only for the Builds staleness warning; the mirror narrows the rows (#1300). */
-  roles?: readonly RoleClaim[];
-  /** How it signs in: read only for the noun of the Builds staleness warning (#1405). */
-  auth_kind?: AuthMethod | null;
-}
+/** What the job reads of a `list_sources` row: the fields of the wire row it uses, all always sent. */
+export type SourceFacts = Pick<SourceSummary, "id" | "display_name" | "config" | "roles" | "auth_kind">;
 import type { Week } from "../../ipc/time";
-import type { AuthMethod, RoleClaim } from "../../ipc/sources";
+import type { SourceSummary } from "../../ipc/sources";
 import { signInFails } from "../../shell/health.svelte";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { protocolDayOf } from "../../standup/protocol";
@@ -477,7 +468,7 @@ export function staleBuilds(
   // A source whose claims the job was not handed claims nothing.
   const holders = sources.filter(
     (source) =>
-      (source.roles !== undefined && claims({ roles: source.roles }, CI)) || rows.some((row) => row.source_id === source.id),
+      claims({ roles: source.roles }, CI) || rows.some((row) => row.source_id === source.id),
   );
   const out: Staleness[] = [];
   for (const source of holders) {

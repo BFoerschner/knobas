@@ -114,7 +114,7 @@
       try {
         const found = await resolveTicket(key, await ports.listSources(), ports.getEntity);
         if (!live || found === null) return;
-        const from: ProposedFrom = { key, summary: found.row.title, description: found.body_text ?? "" };
+        const from: ProposedFrom = { key, summary: found.row.title, description: found.body_text };
         ({ title, body } = proposal(name, from));
         ticket = { key, id: found.row.entity_id };
       } catch {

@@ -402,7 +402,7 @@ export function handlers(): Handlers {
       const draft = args["draft"] as LinkSetDraft;
       if (!draft.name.trim()) throw { code: "invalid", message: "a link set needs a name", source_id: null };
       if (draft.id !== null) found(draft.id);
-      for (const pattern of draft.patterns ?? []) {
+      for (const pattern of draft.patterns) {
         const hits = patternHits(pattern);
         if (typeof hits === "string") throw { code: "invalid", message: `\`${pattern.query}\` is not a pattern: ${hits}`, source_id: null };
       }
@@ -411,7 +411,7 @@ export function handlers(): Handlers {
         name: draft.name.trim(),
         description: draft.description.trim(),
         members: draft.members.map((member) => ({ ...member })),
-        patterns: (draft.patterns ?? []).map((pattern) => ({ kind: pattern.kind, query: pattern.query.trim() })),
+        patterns: draft.patterns.map((pattern) => ({ kind: pattern.kind, query: pattern.query.trim() })),
         rules: draft.rules.map((rule) => ({ ...rule })),
       };
       SETS = [...SETS.filter((entry) => entry.id !== set.id), set];

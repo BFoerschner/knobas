@@ -38,6 +38,7 @@ import { createKindRegistry } from "../../shell/kind-registry.svelte";
 import type { FrameKinds } from "./job";
 import { reachTally } from "./sections";
 import TfJob from "./TfJob.svelte";
+import { sourceFacts } from "./source-facts.fixture";
 
 let target: HTMLElement;
 let job: ReturnType<typeof mount> | null = null;
@@ -187,7 +188,7 @@ function ports(
   const rows = over.rows ?? [PR_OPEN, BRANCH, REPO];
   const all = [...rows, ...(over.others ?? [])];
   return {
-    listSources: () => Promise.resolve([{ id: "gitea" }, { id: "jira" }]),
+    listSources: () => Promise.resolve([sourceFacts("gitea"), sourceFacts("jira")]),
     getEntity: (id) => {
       calls.read.push(id);
       return id === ID ? Promise.resolve(ticket()) : Promise.reject({ code: "not_found", message: `${id} is not in the mirror`, source_id: null });
@@ -658,7 +659,7 @@ test("Builds warns when a source that holds builds cannot sign in, with the fix"
   open("PAY-231", {
     ports: ports({
       others: [B_FAIL],
-      listSources: () => Promise.resolve([{ id: "teamcity", display_name: "TeamCity" }, { id: "jira" }]),
+      listSources: () => Promise.resolve([sourceFacts("teamcity", { display_name: "TeamCity" }), sourceFacts("jira")]),
       credentialHealth: () => Promise.resolve([failing]),
       syncStatus: () => Promise.resolve([run]),
     }),
@@ -673,7 +674,7 @@ test("a source that signs in draws no warning", async () => {
   open("PAY-231", {
     ports: ports({
       others: [B_OK],
-      listSources: () => Promise.resolve([{ id: "teamcity", display_name: "TeamCity" }, { id: "jira" }]),
+      listSources: () => Promise.resolve([sourceFacts("teamcity", { display_name: "TeamCity" }), sourceFacts("jira")]),
       credentialHealth: () => Promise.resolve([{ source_id: "teamcity", state: "ok", checked_at: null, detail: null, secret_expires_at: null }]),
     }),
   });
@@ -859,7 +860,7 @@ function flow(outcomes: StartWorkStep["outcome"][], repo = REPO.entity_id): Star
 }
 
 const TODO_MINE = () => ticket({ status: "To Do", author: "mara" });
-const MARA = () => Promise.resolve([{ id: "jira", config: { username: "mara" } }, { id: "gitea" }]);
+const MARA = () => Promise.resolve([sourceFacts("jira", { config: { username: "mara" } }), sourceFacts("gitea")]);
 
 function steps(): [string | undefined, string | undefined][] {
   return [...target.querySelectorAll(".tf-step")].map((row) => [row.querySelector("strong")?.textContent ?? undefined, row.querySelector(".tf-state")?.textContent ?? undefined]);

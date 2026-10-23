@@ -7,6 +7,7 @@ import { expect, test } from "vitest";
 
 import type { CredentialHealth } from "../../ipc/sources";
 import { staleBuilds } from "./job";
+import { sourceFacts } from "./source-facts.fixture";
 
 const NOW = new Date("2026-10-18T12:00:00Z");
 const refused = (source_id: string): CredentialHealth => ({
@@ -17,10 +18,10 @@ const refused = (source_id: string): CredentialHealth => ({
   secret_expires_at: null,
 });
 
-test("a source claiming ci warns with no build drawn; one only declaring a build kind does not", () => {
+test("a source claiming ci warns with no build drawn; one claiming only the ticket-system role does not", () => {
   const sources = [
-    { id: "relay", display_name: "Relay CI", roles: [{ role: "ci", reads: ["run_log"] }] },
-    { id: "tracker", display_name: "Tracker", kinds: [{ id: "build" }], roles: [{ role: "ticket-system", reads: [] }] },
+    sourceFacts("relay", { display_name: "Relay CI", roles: [{ role: "ci", reads: ["run_log"] }] }),
+    sourceFacts("tracker", { display_name: "Tracker", roles: [{ role: "ticket-system", reads: [] }] }),
   ];
 
   const warned = staleBuilds(sources, [refused("relay"), refused("tracker")], [], [], NOW);
@@ -30,8 +31,8 @@ test("a source claiming ci warns with no build drawn; one only declaring a build
 
 test("the warning names the source's credential: no token stored, Re-enter token (#1405)", () => {
   const sources = [
-    { id: "relay", display_name: "Relay CI", auth_kind: "Pat" as const, roles: [{ role: "ci", reads: [] }] },
-    { id: "jenkins", display_name: "Jenkins", auth_kind: "UserPassword" as const, roles: [{ role: "ci", reads: [] }] },
+    sourceFacts("relay", { display_name: "Relay CI", auth_kind: "Pat", roles: [{ role: "ci", reads: [] }] }),
+    sourceFacts("jenkins", { display_name: "Jenkins", auth_kind: "UserPassword", roles: [{ role: "ci", reads: [] }] }),
   ];
   const missing = (source_id: string): CredentialHealth => ({ ...refused(source_id), state: "missing_secret" });
 
