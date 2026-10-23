@@ -1,0 +1,41 @@
+-- 0059_the_mirror_search_keeps_a_short_pending_list.sql -- `0001`'s full-text
+-- index over the mirror merges its pending list at 256 kB, not 4 MB, so the
+-- launcher keeps reading it after a sync (#1869).
+--
+-- Single-writer, like every migration: a ticket that needs more schema takes
+-- the next number and never edits this file or its predecessors. Recorded in
+-- `docs/contract.md` section 10.8
+-- (`docs/contract/10.8/1869-migration-0059-mirror-search-pending-list.md`).
+--
+-- ## Why
+--
+-- `0057`'s reason, on the launcher's own index. With `fastupdate` on (the
+-- default), a sync's writes land in an unsorted pending list, merged once it
+-- passes `gin_pending_list_limit` (4 MB) or a vacuum reaches it; a manual
+-- `analyze` does not merge it. The planner charges every pending page as a
+-- random read. The responsiveness probe's mirror (23,500 items, synced, never
+-- analyzed) was left with 367 pages pending, and a search for
+-- `payment retry` walked every entity and probed its item instead of reading
+-- the index: 25 to 36 ms, against 2.0 to 2.6 ms once the list was merged.
+-- Grown 100 rows at a time on that mirror, the plan held up to 213 pages and
+-- flipped at 225. Analyzed, the plan held at 367 pages and the list cost
+-- 0.5 to 1.5 ms a search.
+--
+-- ## Why 256 kB, and not 1 MB or `fastupdate = off`
+--
+-- At 256 kB the list holds at most 33 pages, the limit `0057` chose for the
+-- same charge. Writing those 23,500 items' `fts` into a table with this index
+-- alone, in the sync's batches of 500 and one transaction, took 1.6 to 2.7 s, against 0.6 to 1.0 s at 4 MB, 0.9 to 1.3 s at 1 MB and 3.6 to
+-- 9.8 s with no pending list: a first sync pays some 40 to 75 us an item, in
+-- the background. 1 MB holds 129 pages, under this mirror's flip. The walk the
+-- planner prices against the list is estimated from the mirror's size and the
+-- charge is not, so a smaller mirror flips on a shorter list.
+--
+-- ## The list already pending
+--
+-- Merged here, so an upgraded mirror plans the search on the index before its
+-- next sync: 83 ms for the probe mirror's 367 pages.
+
+alter index sync.item_fts_idx set (gin_pending_list_limit = 256);
+
+select gin_clean_pending_list('sync.item_fts_idx'::regclass);
