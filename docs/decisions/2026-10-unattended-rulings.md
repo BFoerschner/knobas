@@ -14642,3 +14642,23 @@ Ruled 2026-10-23 by the implementer (Sonnet) while building the bundle.
   sample can't separate it from load (round 2, at the lowest load, reads the same on both). The
   rail sitting at its budget on `main` is #1855 (`backlog`), which asks for that plan.
   *Reversing:* none. #1855 decides the budget.
+
+## #1658 (PR #1852): blocking calls off the runtime in clone, open and notes export
+
+Ruled 2026-10-23 by the merge-manager (Opus).
+
+- **The surviving `AlreadyExists` mutant.** *Fork:* write a test for the race where the folder
+  appears between `spawn_into`'s `symlink_metadata` and its `create_dir`, or accept that no test
+  covers it. *Ruling:* accepted, with no test. *Reasoning:* the branch only fires when the folder
+  appears inside that window. A seam test could only open the window with a sleep or a new
+  injection point, which would be flaky or put test-only code into the clone path. Nothing in the
+  branch changed except an `.await`, and it was just as unwitnessed before this PR. Ordering and
+  the `Clones` reservation are unchanged. *Reversing:* cheap, add a seam and a test.
+- **A blocking task that panicked or was cancelled in `open`.** *Fork:* the PR mapped the
+  `JoinError` into the "'{template}' could not be run" `Invalid` error. *Ruling:* it is `Internal`,
+  as in clone's `adopt_off_runtime`, and `open`'s `# Errors` says so. *Reasoning:* a runtime that
+  did not finish the task says nothing about the user's command template. *Reversing:* trivial,
+  one `map_err`.
+- **Blocking calls the ticket did not name.** `spawn_into`'s `Command::spawn`, `git_on_path`'s
+  `is_file` probes and `stop`'s `path.exists()` stay on the runtime. They are outside #1658's
+  grep and wording, and are filed as #1856 (backlog).

@@ -218,7 +218,7 @@ impl Clones {
 /// [`NotReady`](crate::IpcErrorCode::NotReady) once the quit has stopped the
 /// running clones ([`stop_all`]);
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query or filesystem
-/// failure.
+/// failure, or a blocking task that did not finish.
 pub async fn start(
     pool: &PgPool,
     registry: &dyn AdapterRegistry,
@@ -518,7 +518,7 @@ async fn spawn_into(
     shown: &str,
 ) -> Result<Result<tokio::process::Child, CloneAnswer>, IpcError> {
     if tokio::fs::symlink_metadata(target).await.is_ok() {
-        return adopt_blocking(target, url, shown).await.map(Err);
+        return adopt_off_runtime(target, url, shown).await.map(Err);
     }
 
     let git = working_tree::git_on_path()
@@ -538,7 +538,7 @@ async fn spawn_into(
     })?;
     if let Err(error) = tokio::fs::create_dir(target).await {
         if error.kind() == std::io::ErrorKind::AlreadyExists {
-            return adopt_blocking(target, url, shown).await.map(Err);
+            return adopt_off_runtime(target, url, shown).await.map(Err);
         }
         return Err(IpcError::internal(format!(
             "could not make {shown}: {error}"
@@ -575,8 +575,11 @@ async fn spawn_into(
     }
 }
 
-/// [`adopt_or_refuse`] on a blocking thread: it reads the folder's git config.
-async fn adopt_blocking(target: &Path, url: &str, shown: &str) -> Result<CloneAnswer, IpcError> {
+/// [`adopt_or_refuse`] off the async runtime: it reads the folder's git
+/// config and asks whether the clone finished, so a slow or network-mounted
+/// folder never holds a runtime worker. A task that panicked or was cancelled
+/// is [`Internal`](crate::IpcErrorCode::Internal).
+async fn adopt_off_runtime(target: &Path, url: &str, shown: &str) -> Result<CloneAnswer, IpcError> {
     let (target, url, shown) = (target.to_path_buf(), url.to_owned(), shown.to_owned());
     tokio::task::spawn_blocking(move || adopt_or_refuse(&target, &url, &shown))
         .await

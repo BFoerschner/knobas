@@ -234,7 +234,8 @@ pub async fn set_applications(
 /// cannot be run, or a program that would not start;
 /// [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror does not hold the
 /// entity or it has no checkout on this machine;
-/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure, or a launch
+/// whose blocking task did not finish.
 pub async fn open(
     pool: &PgPool,
     entity_id: &str,
@@ -282,11 +283,11 @@ pub async fn open(
         },
     )
     .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))?;
+    // The fork and exec run off the async runtime.
     let to_run = argv.clone();
     tokio::task::spawn_blocking(move || spawn(&to_run))
         .await
-        .map_err(std::io::Error::other)
-        .and_then(|started| started)
+        .map_err(IpcError::internal)?
         .map_err(|error| IpcError::invalid(format!("'{template}' could not be run: {error}")))?;
     Ok(argv)
 }
