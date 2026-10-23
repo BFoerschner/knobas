@@ -865,7 +865,9 @@ impl Drop for Queued {
         Cleanup::new(
             "the live suite did not remove the build it queued, so the server is no longer in \
              the plain-seed state",
-            format!("build {id} may still be standing; the next run's leftover clearing removes it"),
+            format!(
+                "build {id} may still be standing; the next run's leftover clearing removes it"
+            ),
         )
         .within(CLEANUP_BUDGET)
         .run(move || async move { joined(remove(&client(), &url, &token, &[id]).await) });
