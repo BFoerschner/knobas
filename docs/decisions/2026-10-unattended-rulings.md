@@ -14162,3 +14162,76 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   checking each hop means changing `crates/knobas-http/**`, which is another frozen surface and
   outside this ticket. The gap needs the release's own https server to redirect to plain http.
   *Reversing:* n/a.
+
+## #1643 / PR #1826: implementer rulings (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus: `open_checkout`'s IPC arguments.** *Fork:*
+  drop `command` outright, or keep it and validate the program against the saved list. *Ruling:*
+  drop it, with no replacement argument; `application`, `file` and `line` stay as they were, and
+  the §10.8 entry is `docs/contract/10.8/1643-open-checkout-takes-no-command-and-two-reads-clamp.md`.
+  *Reasoning:* spec #1620 ruling C4 and ADR-0016: a program from a setting is only true when
+  the command takes no program. A check against the list would be a second copy of the list's
+  rules at the shim. *Reversing:* the argument, the `Run` enum and the entry come back.
+- **What *Try it* does to the dialog.** *Fork:* after a try saves the draft, close the dialog, or
+  keep it open; and on Cancel, keep the saved try or put the list back. *Ruling:* the dialog
+  stays open and edits the entry the try saved (*Add application* then writes over it, not a
+  second one); closing it unsaved saves the list and default back as they were before the first
+  try. *Try it* needs a name now, as the save refuses one without. *Reasoning:* C4 calls the
+  save "one extra write the reader does not see"; an application that stays in every menu after
+  Cancel is one the reader sees. *Reversing:* `dismiss` in `TfAppDialog.svelte` calls `onclose`
+  alone.
+- **How the environment is scrubbed.** *Fork:* `env_remove` a fixed list of the variables knobas
+  reads, or drop every `KNOBAS_*` name. *Ruling:* `env_clear` and pass the parent's environment
+  back less every name starting `KNOBAS_`. The builder takes the parent environment as an
+  argument, so the test hands it a `KNOBAS_DB_URL` without setting one in the test process.
+  *Reasoning:* a fixed list misses the next variable somebody adds; `std::env::set_var` in a
+  threaded test binary is unsound. *Reversing:* one filter.
+- **Where the clamp sits.** *Fork:* in the `#[tauri::command]` itself, or in its `_inner` body.
+  *Ruling:* in `room_suggestions_inner` and `list_entities_inner`, which are the shims' bodies,
+  under a named `commands::ROW_CEILING` that `list_sync_runs` now reads too. *Reasoning:* a
+  `#[tauri::command]` cannot be called from a test, and the criterion asks for a tested clamp.
+  Every caller of the `_inner`s is a command or a test. *Reversing:* move two lines.
+- **500 against the views that ask for 1000.** *Fork:* clamp `list_entities` at 500 as the ticket
+  says, or at the 1000 that `TfCode`, `TfRepo`, `TfPr` and `TfCodeRow` ask for. *Ruling:* 500,
+  per the criterion; filed #1825 (`ready-for-agent`) for the four views, which now draw at most
+  500 rows of a larger mirror. *Reasoning:* a ruling may not contradict the ticket.
+  *Reversing:* one constant, or paging in the four views (#1825).
+
+## #1643 / PR #1826: merge-manager rulings (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus (`open_checkout` loses `command`): upheld.**
+  Reviewed against ADR-0016 and C4: the shim, the `_inner`, the fake and `entity.ts` all drop the
+  argument, and nothing in `app/src` still sends one. The generated mirror carries types only,
+  not command arguments, so `just ipc-mirror` producing no change is right. *Reversing:* as the
+  implementer's ruling.
+- **The four views that ask `list_entities` for 1000 rows.** *Fork:* merge with the 500 clamp
+  and #1825 as the follow-up, or keep the views whole in this PR. *Ruling:* keep them whole:
+  `entity.ts`'s `listEntities` reads a limit past `ROW_CEILING` in reads of 500 from `offset`,
+  up to `LIST_MOST` (1000), and drops a row a later read repeats. `ROW_CEILING` is declared in
+  `entity.ts` and a Rust test holds it equal to `commands::ROW_CEILING`. *Reasoning:* the clamp
+  is the ticket's (500, the one `list_sync_runs` uses), but a view that drew 1000 repositories
+  yesterday and 500 today, with nothing saying so, is a regression this PR would ship; the
+  pull request page finds its repository in that read, so a source with more than 500
+  repositories would lose the header's checkout. Paging keeps every payload under the ceiling,
+  and the 1000 cap keeps a miscomputed limit from reading a whole table in pieces. #1825 is
+  narrowed to the truncation past 1000, which predates this PR. *Reversing:* `listEntities`
+  goes back to one `invoke`.
+- **`TfPr`'s `room_suggestions` read of 1000.** *Ruling:* 500, unpaged. *Reasoning:*
+  `room_suggestions` takes no offset, and Review reads the same room at 500 (`REVIEW_LIMIT`), so
+  the pull request page now marks the proposals Review lists. Named in #1825. *Reversing:* an
+  offset on `room_suggestions`, a §10.8 change.
+- **Closing the dialog after *Try it* saves the old list back.** *Fork:* is that a lost edit or
+  a race that overwrites a newer save? *Ruling:* neither, no change. *Reasoning:* Cancel
+  discarded a try before this PR too (the try saved nothing), so putting the list back keeps
+  what Cancel meant; *Add application* and *Save* clear the snapshot, so a confirmed save is
+  never undone. Inside the dialog *Save*, *Add* and *Try it* are disabled while the try's save is
+  in flight, so the restore is ordered after it. The one race left is a second whole-list save
+  (a ↑ or a new default in *Manage applications*) sent in the milliseconds between Cancel and
+  the try's answer; that is the same last-writer-wins property two fast ↑ clicks already have,
+  and no person clicks inside it. *Reversing:* serialise `Apps.save`.
+- ***Try it* is disabled until a name and a command are typed (prototype-6 always enables
+  it).** *Ruling:* keep it, a departure from prototype-6 named here as the conventions ask.
+  *Reasoning:* *Try it* now saves, and the save refuses an entry with no name; the button
+  shares *Add application*'s `ready`, which the dialog already drew disabled for the same
+  reason, and it was already disabled with no command before this PR. *Reversing:* enable it
+  and show the save's refusal in the dialog.

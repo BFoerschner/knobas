@@ -161,22 +161,23 @@ pub async fn entity_thread(
 /// when `file` names one. Answers the argument vector it started.
 ///
 /// `application` is an id from `checkout_settings`, the default when it is
-/// `None`. `command` instead runs a command typed into *Add an application*
-/// that is not saved yet (*Try it*). `file` is a path relative to the
-/// checkout and must be a file inside it on disk; `line` fills `{line}`.
+/// `None`. `file` is a path relative to the checkout and must be a file inside
+/// it on disk; `line` fills `{line}`.
 ///
-/// The one place knobas starts a program a person chose. Every value filled
-/// into it is from this disk: the checkout path and a file inside it, never a
-/// field of the mirrored repo (ADR-0016). It returns as soon as the program
-/// has started.
+/// The one place knobas starts a program a person chose. The program is a
+/// template from `knobas.setting`, never one the webview sends: *Try it* saves
+/// the draft and opens it by id (#1643). Every value filled into it is from
+/// this disk: the checkout path and a file inside it, never a field of the
+/// mirrored repo (ADR-0016). The program inherits no `KNOBAS_*` variable. It
+/// returns as soon as the program has started.
 ///
 /// # Errors
 ///
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
 /// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an unknown
 /// application, an address that is not a repo or a branch, a file that is not
-/// inside the checkout, a command that cannot be run, or a program that would
-/// not start; [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) if the
+/// inside the checkout, a saved command that cannot be run, or a program that
+/// would not start; [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) if the
 /// mirror does not hold the entity or it has no checkout on this machine;
 /// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
 /// failure.
@@ -187,14 +188,16 @@ pub async fn open_checkout(
     application: Option<String>,
     file: Option<String>,
     line: Option<u32>,
-    command: Option<String>,
 ) -> Result<Vec<String>, IpcError> {
     let pool = lifecycle.pool()?;
-    let run = match command.as_deref() {
-        Some(command) => crate::checkout::Run::Command(command),
-        None => crate::checkout::Run::Application(application.as_deref()),
-    };
-    crate::checkout::open::open(&pool, &entity_id, run, file.as_deref(), line).await
+    crate::checkout::open::open(
+        &pool,
+        &entity_id,
+        application.as_deref(),
+        file.as_deref(),
+        line,
+    )
+    .await
 }
 
 /// Settings › Checkouts (#844, R-13a.3): the clones root, the git found, the

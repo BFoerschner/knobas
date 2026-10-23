@@ -389,22 +389,94 @@ test("Add an application: placeholders insert, the preview fills this checkout, 
   expect(text(dialog.querySelector("[role='status']"))).toContain("passed through as plain text");
   type(command, "MyGitViewer {path}");
 
+  // *Try it* saves the draft, then opens it by the id the save gave it: the
+  // program is always a saved template (#1643, ADR-0016).
   button("Try it on payout-service", dialog).click();
   await settle();
-  expect(calls.open.at(-1)).toEqual([REPO, { command: "MyGitViewer {path}" }]);
-
-  button("Add application", dialog).click();
-  await settle();
   expect(calls.saved).toHaveLength(1);
-  const [drafts, defaultApplication] = calls.saved[0]!;
-  expect(drafts.map((draft) => [draft.id, draft.name, draft.command])).toEqual([
+  expect(calls.saved[0]![0].map((draft) => [draft.id, draft.name, draft.command])).toEqual([
     ["terminal", "Terminal", "open -a Terminal {path}"],
     ["vscode", "VS Code", "code {path}"],
     [null, "MyGitViewer", "MyGitViewer {path}"],
   ]);
+  expect(calls.open.at(-1)).toEqual([REPO, { application: "mygitviewer" }]);
+  expect(document.querySelector("[role='dialog']")).not.toBeNull();
+
+  // Adding it then writes over the entry the try saved, not a second one.
+  button("Add application", dialog).click();
+  await settle();
+  expect(calls.saved).toHaveLength(2);
+  const [drafts, defaultApplication] = calls.saved[1]!;
+  expect(drafts.map((draft) => [draft.id, draft.name, draft.command])).toEqual([
+    ["terminal", "Terminal", "open -a Terminal {path}"],
+    ["vscode", "VS Code", "code {path}"],
+    ["mygitviewer", "MyGitViewer", "MyGitViewer {path}"],
+  ]);
   expect(defaultApplication).toBe("vscode");
   expect(toasts.items.map((toast) => toast.text)).toContain("Added MyGitViewer. It is in every Open in… menu.");
   expect(document.querySelector("[role='dialog']")).toBeNull();
+});
+
+test("Try it needs a name, and a dialog closed after a try puts the list back as it was (#1643)", async () => {
+  const dialog = await openDialog("Add an application…");
+  type(dialog.querySelector<HTMLInputElement>("#tf-app-command")!, "MyGitViewer {path}");
+  const tryIt = button("Try it on payout-service", dialog);
+  expect(tryIt.disabled).toBe(true);
+  type(dialog.querySelector<HTMLInputElement>("#tf-app-name")!, "MyGitViewer");
+  expect(tryIt.disabled).toBe(false);
+
+  tryIt.click();
+  await settle();
+  type(dialog.querySelector<HTMLInputElement>("#tf-app-command")!, "MyGitViewer --new {path}");
+  tryIt.click();
+  await settle();
+  expect(calls.saved.map(([drafts]) => drafts.map((draft) => draft.id))).toEqual([
+    ["terminal", "vscode", null],
+    ["terminal", "vscode", "mygitviewer"],
+  ]);
+  expect(calls.saved[1]![0][2]!.command).toBe("MyGitViewer --new {path}");
+  expect(calls.open.map(([, at]) => at)).toEqual([{ application: "mygitviewer" }, { application: "mygitviewer" }]);
+
+  button("Cancel", dialog).click();
+  await settle();
+  expect(document.querySelector("[role='dialog']")).toBeNull();
+  expect(calls.saved).toHaveLength(3);
+  const [restored, defaultApplication] = calls.saved[2]!;
+  expect(restored.map((draft) => [draft.id, draft.command])).toEqual([
+    ["terminal", "open -a Terminal {path}"],
+    ["vscode", "code {path}"],
+  ]);
+  expect(defaultApplication).toBe("vscode");
+});
+
+test("a dialog closed while a try is saving puts the list back after it and starts nothing (#1643)", async () => {
+  const dialog = await openDialog("Add an application…");
+  type(dialog.querySelector<HTMLInputElement>("#tf-app-name")!, "MyGitViewer");
+  type(dialog.querySelector<HTMLInputElement>("#tf-app-command")!, "MyGitViewer {path}");
+  button("Try it on payout-service", dialog).click();
+  button("Cancel", dialog).click();
+  await settle();
+  expect(calls.saved.map(([drafts]) => drafts.map((draft) => draft.id))).toEqual([
+    ["terminal", "vscode", null],
+    ["terminal", "vscode"],
+  ]);
+  expect(calls.open).toEqual([]);
+});
+
+test("Try it on an application being edited saves the edit over it and opens it by its id", async () => {
+  const dialog = await openDialog("Manage applications…");
+  [...dialog.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Edit…")!.click();
+  await settle();
+  const editor = document.querySelector<HTMLElement>("[role='dialog']")!;
+  expect(text(editor.querySelector("h2"))).toBe("Edit an application");
+  type(editor.querySelector<HTMLInputElement>("#tf-app-command")!, "open -a iTerm {path}");
+  button("Try it on payout-service", editor).click();
+  await settle();
+  expect(calls.saved.at(-1)![0].map((draft) => [draft.id, draft.command])).toEqual([
+    ["terminal", "open -a iTerm {path}"],
+    ["vscode", "code {path}"],
+  ]);
+  expect(calls.open.at(-1)).toEqual([REPO, { application: "terminal" }]);
 });
 
 test("Manage applications: the radio picks the default, ↑ moves one up, Edit… opens it with Remove", async () => {

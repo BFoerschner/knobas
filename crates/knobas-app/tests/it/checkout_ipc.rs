@@ -29,7 +29,7 @@ use knobas_app::checkout::open::{APPLICATIONS_KEY, GitFound, legacy_key, open};
 use knobas_app::checkout::uncommitted::DiffRead;
 use knobas_app::checkout::working_tree::TreeRead;
 use knobas_app::checkout::{
-    CheckoutView, FoundBy, Run, clones_root, local_changes, set_applications, set_clones_root,
+    CheckoutView, FoundBy, clones_root, local_changes, set_applications, set_clones_root,
     set_override, settings, view,
 };
 use knobas_core::checkout::open::{Draft, shipped};
@@ -892,15 +892,9 @@ async fn opening_a_checkout_runs_the_application_with_the_scanned_path() {
     let checkout = root.path().join(&repo.name).to_string_lossy().into_owned();
     let expected = ["--wait".to_owned(), checkout.clone()];
 
-    let argv = open(
-        &pool,
-        &repo.id,
-        Run::Application(Some("vscode")),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let argv = open(&pool, &repo.id, Some("vscode"), None, None)
+        .await
+        .unwrap();
     // Exactly two arguments: the flag the command carried, and the checkout.
     // The repo's URL, its key, its title and its source are all in scope at
     // the call site and **none of them** reaches the process (ADR-0016).
@@ -909,9 +903,7 @@ async fn opening_a_checkout_runs_the_application_with_the_scanned_path() {
 
     // No application named is the default, which a list's first entry is.
     fs::remove_file(&record).unwrap();
-    open(&pool, &repo.id, Run::Application(None), None, None)
-        .await
-        .unwrap();
+    open(&pool, &repo.id, None, None, None).await.unwrap();
     assert_eq!(recorded(&record).await, expected);
 }
 
@@ -941,15 +933,9 @@ async fn an_override_with_a_space_is_one_argument() {
     .await
     .unwrap();
 
-    open(
-        &pool,
-        &repo.id,
-        Run::Application(Some("viewer")),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    open(&pool, &repo.id, Some("viewer"), None, None)
+        .await
+        .unwrap();
 
     assert_eq!(
         recorded(&record).await,
@@ -982,7 +968,7 @@ async fn a_branch_opens_its_repositorys_checkout() {
     .await
     .unwrap();
 
-    open(&pool, &branch, Run::Application(Some("vscode")), None, None)
+    open(&pool, &branch, Some("vscode"), None, None)
         .await
         .unwrap();
 
@@ -1019,15 +1005,9 @@ async fn a_file_opens_with_the_file_command_and_its_line() {
     .await
     .unwrap();
 
-    open(
-        &pool,
-        &repo.id,
-        Run::Application(None),
-        Some("src/sepa/retry.rs"),
-        Some(42),
-    )
-    .await
-    .unwrap();
+    open(&pool, &repo.id, None, Some("src/sepa/retry.rs"), Some(42))
+        .await
+        .unwrap();
     assert_eq!(
         recorded(&record).await,
         [
@@ -1040,7 +1020,7 @@ async fn a_file_opens_with_the_file_command_and_its_line() {
     open(
         &pool,
         &repo.id,
-        Run::Application(Some("plain")),
+        Some("plain"),
         Some("src/sepa/retry.rs"),
         None,
     )
@@ -1077,7 +1057,7 @@ async fn a_file_outside_the_checkout_is_refused_and_nothing_runs() {
     .unwrap();
 
     for file in ["../secret", "/etc/hosts", "link", "missing.rs", ".git"] {
-        let error = open(&pool, &repo.id, Run::Application(None), Some(file), None)
+        let error = open(&pool, &repo.id, None, Some(file), None)
             .await
             .expect_err(file);
         assert_eq!(error.code, IpcErrorCode::Invalid, "{file}");
@@ -1097,7 +1077,7 @@ async fn a_file_outside_the_checkout_is_refused_and_nothing_runs() {
 async fn a_repo_with_no_checkout_refuses_and_names_it() {
     let pool = pool().await;
     let repo = repo(&pool).await;
-    let error = open(&pool, &repo.id, Run::Application(None), None, None)
+    let error = open(&pool, &repo.id, None, None, None)
         .await
         .expect_err("there is nothing to open");
     assert_eq!(error.code, IpcErrorCode::NotFound);
@@ -1137,43 +1117,59 @@ async fn a_command_that_cannot_be_run_is_refused_where_it_is_typed() {
     );
 }
 
-/// A command whose program is not on this machine refuses, and the refusal
-/// names the command -- the string somebody has to go and change.
+/// A saved command whose program is not on this machine refuses, and the
+/// refusal names the command -- the string somebody has to go and change.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_program_that_will_not_start_names_the_command() {
     let pool = pool().await;
     let (repo, _root, _stub, _record, _workshop) = scanned(&pool).await;
     let command = "/nonexistent/knobas-not-an-editor {path}";
-    let error = open(&pool, &repo.id, Run::Command(command), None, None)
+    set_applications(&pool, &[app(None, "Gone", command, None)], None)
+        .await
+        .unwrap();
+    let error = open(&pool, &repo.id, Some("gone"), None, None)
         .await
         .expect_err("there is no such program");
     assert_eq!(error.code, IpcErrorCode::Invalid);
     assert!(error.message.contains(command), "{}", error.message);
 }
 
-/// *Try it*: a command that is not saved runs at the checkout as a saved one
-/// would, and saves nothing.
+/// *Try it* (#1643): the dialog saves the draft and opens it by its id, so the
+/// program is the one `knobas.setting` holds at the moment of the open, and
+/// nothing the webview sends names one (ADR-0016). Saved again with another
+/// flag, the next open runs the new template.
 #[cfg(unix)]
 #[tokio::test]
-async fn trying_a_command_runs_it_unsaved() {
+async fn trying_a_command_runs_the_template_the_setting_holds() {
     let pool = pool().await;
     let (repo, root, stub, record, _workshop) = scanned(&pool).await;
-    let before = settings(&pool).await.unwrap();
-    let command = format!("{} --try {{path}}", stub.display());
+    let checkout = root.path().join(&repo.name).to_string_lossy().into_owned();
+    let draft = |flag: &str| {
+        app(
+            None,
+            "MyGitViewer",
+            &format!("{} {flag} {{path}}", stub.display()),
+            None,
+        )
+    };
 
-    open(&pool, &repo.id, Run::Command(&command), None, None)
+    set_applications(&pool, &[draft("--try")], None)
         .await
         .unwrap();
-
+    let id = settings(&pool).await.unwrap().applications[0].id.clone();
+    open(&pool, &repo.id, Some(&id), None, None).await.unwrap();
     assert_eq!(
         recorded(&record).await,
-        [
-            "--try".to_owned(),
-            root.path().join(&repo.name).to_string_lossy().into_owned()
-        ]
+        ["--try".to_owned(), checkout.clone()]
     );
-    assert_eq!(settings(&pool).await.unwrap(), before);
+
+    fs::remove_file(&record).unwrap();
+    set_applications(&pool, &[draft("--again")], None)
+        .await
+        .unwrap();
+    open(&pool, &repo.id, Some(&id), None, None).await.unwrap();
+    assert_eq!(recorded(&record).await, ["--again".to_owned(), checkout]);
 }
 
 /// Until a list is saved, the list is this platform's shipped one with #501's

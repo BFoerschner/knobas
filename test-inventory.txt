@@ -67,6 +67,7 @@ knobas-app	lib/knobas_app	capture::tests::the_plugin_parses_an_accelerator_and_r
 knobas-app	lib/knobas_app	capture::tests::the_shortcut_is_stored_under_its_own_key
 knobas-app	lib/knobas_app	capture::tests::what_the_main_window_recorded_is_what_comes_back
 knobas-app	lib/knobas_app	checkout::open::tests::a_default_whose_entry_is_gone_is_the_first
+knobas-app	lib/knobas_app	checkout::open::tests::a_spawned_program_inherits_no_knobas_variable
 knobas-app	lib/knobas_app	checkout::open::tests::the_keys_are_501s_and_the_lists_own
 knobas-app	lib/knobas_app	checkout::tests::a_leading_tilde_is_the_home_directory
 knobas-app	lib/knobas_app	checkout::tests::the_setting_key_is_the_one_the_migration_names
@@ -103,6 +104,7 @@ knobas-app	lib/knobas_app	commands::entity::detail::tests::two_adapters_declarin
 knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_role_the_mirror_sends
 knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_saved_view_the_mirror_sends
 knobas-app	lib/knobas_app	commands::entity::tests::the_mirror_invokes_the_commands_by_their_registered_names
+knobas-app	lib/knobas_app	commands::entity::tests::the_mirror_pages_by_the_backends_row_ceiling
 knobas-app	lib/knobas_app	commands::search::tests::search_failures_keep_their_kind
 knobas-app	lib/knobas_app	commands::search::tests::the_two_entity_rows_are_one_wire_shape
 knobas-app	lib/knobas_app	commands::sources::tests::adding_a_source_voids_a_purge_the_scheduler_still_owes_that_id
@@ -550,7 +552,7 @@ knobas-app	test/it	checkout_ipc::the_local_changes_are_read_at_the_resolved_chec
 knobas-app	test/it	checkout_ipc::the_refusals_carry_the_codes_the_panel_branches_on
 knobas-app	test/it	checkout_ipc::the_shipped_list_with_501s_templates_is_the_list_until_one_is_saved
 knobas-app	test/it	checkout_ipc::the_view_says_where_the_working_tree_stands
-knobas-app	test/it	checkout_ipc::trying_a_command_runs_it_unsaved
+knobas-app	test/it	checkout_ipc::trying_a_command_runs_the_template_the_setting_holds
 knobas-app	test/it	clone_ipc::a_clone_lands_in_the_root_under_the_repository_name
 knobas-app	test/it	clone_ipc::a_clone_that_did_not_finish_is_not_adopted
 knobas-app	test/it	clone_ipc::a_failed_clone_says_gits_last_line_and_leaves_nothing
@@ -654,6 +656,7 @@ knobas-app	test/it	entity::a_duplicate_pair_and_relation_is_a_conflict
 knobas-app	test/it	entity::a_fork_pull_request_does_not_propose_the_base_repos_branch
 knobas-app	test/it	entity::a_kind_with_no_declared_state_falls_back_to_recency
 knobas-app	test/it	entity::a_kuma_source_has_a_room_of_its_own_and_no_project_rooms
+knobas-app	test/it	entity::a_limit_past_the_ceiling_reads_five_hundred_rows
 knobas-app	test/it	entity::a_link_endpoint_that_is_not_in_the_mirror_is_not_found_at_the_command_seam
 knobas-app	test/it	entity::a_link_made_from_its_two_ends_alone_is_related_manual_and_visible_from_both
 knobas-app	test/it	entity::a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel
@@ -1048,6 +1051,7 @@ knobas-app	test/it	suggestion_pass::only_the_emit_that_ends_a_run_ok_requests_a_
 knobas-app	test/it	suggestion_pass::requests_during_a_pass_coalesce_into_one_more_pass
 knobas-app	test/it	suggestion_pass::requests_that_do_not_wait_coalesce_into_one_more_pass
 knobas-app	test/it	suggestions_ipc::a_bad_suggestion_id_is_invalid_and_an_unknown_one_is_not_found
+knobas-app	test/it	suggestions_ipc::a_limit_past_the_ceiling_reads_five_hundred_proposals
 knobas-app	test/it	suggestions_ipc::a_pass_over_the_demo_corpus_proposes_suggestions_a_reader_can_judge
 knobas-app	test/it	suggestions_ipc::accepting_moves_a_proposal_into_the_panel_and_records_it
 knobas-app	test/it	suggestions_ipc::dismissing_is_remembered_across_a_later_pass

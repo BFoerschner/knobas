@@ -214,17 +214,13 @@ pub async fn set_applications(
 
 // -- the spawn ----------------------------------------------------------------
 
-/// What to run: a saved application (the default when none is named), or a
-/// command typed into the *Add an application* dialog that is not saved yet
-/// (*Try it*).
-#[derive(Clone, Copy, Debug)]
-pub enum Run<'a> {
-    Application(Option<&'a str>),
-    Command(&'a str),
-}
-
-/// Run an application at this entity's checkout, at a file in it when one is
-/// named. Answers the argument vector it started.
+/// Run a saved application at this entity's checkout (the default when
+/// `application` is `None`), at a file in it when one is named. Answers the
+/// argument vector it started.
+///
+/// The program is always a template from `knobas.setting` (ADR-0016): *Try
+/// it* saves the draft first and opens it by its id (#1643), so nothing the
+/// webview sends names a program.
 ///
 /// The file is a path relative to the checkout, and it must be a file inside
 /// it **on disk**: the words are checked first ([`rules::inside`]), and then
@@ -242,7 +238,7 @@ pub enum Run<'a> {
 pub async fn open(
     pool: &PgPool,
     entity_id: &str,
-    run: Run<'_>,
+    application: Option<&str>,
     file: Option<&str>,
     line: Option<u32>,
 ) -> Result<Vec<String>, IpcError> {
@@ -257,28 +253,25 @@ pub async fn open(
         Some(relative) => Some(file_inside(&checkout, relative).await?),
         None => None,
     };
-    let template = match run {
-        Run::Command(command) => command.trim().to_owned(),
-        Run::Application(id) => {
-            let stored = load(pool).await?;
-            let wanted = id.map(str::to_owned).or_else(|| stored.default.clone());
-            let app = wanted
-                .as_deref()
-                .and_then(|id| stored.by_id(id))
-                .ok_or_else(|| match &wanted {
-                    Some(id) => IpcError::invalid(format!(
-                        "'{id}' is not one of your applications: see Settings › Checkouts"
-                    )),
-                    None => IpcError::invalid(
-                        "there is no application to open a checkout with: add one in Settings › \
-                         Checkouts",
-                    ),
-                })?;
-            match (&file, &app.file_command) {
-                (Some(_), Some(file_command)) => file_command.clone(),
-                _ => app.command.clone(),
-            }
-        }
+    let stored = load(pool).await?;
+    let wanted = application
+        .map(str::to_owned)
+        .or_else(|| stored.default.clone());
+    let app = wanted
+        .as_deref()
+        .and_then(|id| stored.by_id(id))
+        .ok_or_else(|| match &wanted {
+            Some(id) => IpcError::invalid(format!(
+                "'{id}' is not one of your applications: see Settings › Checkouts"
+            )),
+            None => IpcError::invalid(
+                "there is no application to open a checkout with: add one in Settings › \
+                 Checkouts",
+            ),
+        })?;
+    let template = match (&file, &app.file_command) {
+        (Some(_), Some(file_command)) => file_command.clone(),
+        _ => app.command.clone(),
     };
     let argv = rules::fill(
         &template,
@@ -328,11 +321,7 @@ async fn file_inside(checkout: &Path, relative: &str) -> Result<PathBuf, IpcErro
 /// editor outlives the click that started it and a dropped `Child` that is
 /// never waited on is a zombie for the life of the process.
 fn spawn(argv: &[String]) -> std::io::Result<()> {
-    let (program, arguments) = argv
-        .split_first()
-        .ok_or_else(|| std::io::Error::other("the command has no program in it"))?;
-    let child = std::process::Command::new(program)
-        .args(arguments)
+    let child = scrubbed_command(argv, std::env::vars_os())?
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -342,6 +331,30 @@ fn spawn(argv: &[String]) -> std::io::Result<()> {
         let _ = child.wait();
     });
     Ok(())
+}
+
+/// `argv[0]` with the rest as its arguments, in `parent`'s environment less
+/// every `KNOBAS_*` variable (#1643).
+///
+/// knobas's own variables are for knobas: under `just dev` `KNOBAS_DB_URL`
+/// carries the database password, and a terminal opened at a checkout would
+/// otherwise hand it to every shell started in it. The git paths drop `GIT_*`
+/// for their reason; this drops `KNOBAS_*` for this one. Everything else,
+/// `PATH` and `HOME` first, is what the program needs to find its way.
+fn scrubbed_command(
+    argv: &[String],
+    parent: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> std::io::Result<std::process::Command> {
+    let (program, arguments) = argv
+        .split_first()
+        .ok_or_else(|| std::io::Error::other("the command has no program in it"))?;
+    let mut built = std::process::Command::new(program);
+    built.args(arguments).env_clear().envs(
+        parent
+            .into_iter()
+            .filter(|(name, _)| !name.as_encoded_bytes().starts_with(b"KNOBAS_")),
+    );
+    Ok(built)
 }
 
 #[cfg(test)]
@@ -365,6 +378,58 @@ mod tests {
         }
         .settle_default();
         assert_eq!(empty.default, None);
+    }
+
+    /// A template of `env`, started as [`spawn`] starts a program: knobas's own
+    /// `KNOBAS_*` variables (under `just dev`, the database URL and its
+    /// password) do not reach it, and the rest of the environment does (#1643).
+    #[cfg(unix)]
+    #[test]
+    fn a_spawned_program_inherits_no_knobas_variable() {
+        let path = std::env::var_os("PATH").expect("the tests run with a PATH");
+        let parent = [
+            ("PATH".into(), path.clone()),
+            (
+                "KNOBAS_DB_URL".into(),
+                "postgres://knobas:hunter2@127.0.0.1:5433/knobas".into(),
+            ),
+            ("KNOBAS_".into(), "bare".into()),
+            ("KNOBAS_LOG".into(), "debug".into()),
+            ("LANG".into(), "en_US.UTF-8".into()),
+        ];
+        let argv = rules::fill(
+            "env",
+            &Fill {
+                checkout: Path::new("/"),
+                file: None,
+                line: None,
+            },
+        )
+        .unwrap();
+
+        let output = scrubbed_command(&argv, parent).unwrap().output().unwrap();
+
+        assert!(output.status.success(), "{output:?}");
+        let printed = String::from_utf8(output.stdout).unwrap();
+        let names: Vec<&str> = printed
+            .lines()
+            .filter_map(|line| line.split_once('=').map(|(name, _)| name))
+            .collect();
+        assert!(
+            !names.iter().any(|name| name.starts_with("KNOBAS_")),
+            "{printed}"
+        );
+        assert!(!printed.contains("hunter2"), "{printed}");
+        assert!(
+            printed
+                .lines()
+                .any(|line| line == format!("PATH={}", path.to_string_lossy())),
+            "{printed}"
+        );
+        assert!(
+            printed.lines().any(|line| line == "LANG=en_US.UTF-8"),
+            "{printed}"
+        );
     }
 
     /// The legacy keys are #501's spellings, and the list's key is its own.

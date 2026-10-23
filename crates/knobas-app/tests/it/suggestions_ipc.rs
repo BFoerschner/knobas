@@ -477,3 +477,42 @@ async fn evidence_for_a_bad_id_is_invalid_and_for_an_unknown_one_not_found() {
         IpcErrorCode::NotFound
     );
 }
+
+/// A limit the webview miscomputed reads at most 500 rows, the ceiling
+/// `list_sync_runs` reads under (#1643): 501 proposals, each touching items no
+/// other proposal fills to three rows, and `u32::MAX` asked for. The count
+/// is the whole room's still.
+#[tokio::test]
+async fn a_limit_past_the_ceiling_reads_five_hundred_proposals() {
+    let pool = knobas_db::test_util::scratch_database("suggest_clamp")
+        .await
+        .pool(4)
+        .await
+        .expect("a pool onto this test's own database");
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title)
+         select 'mock:CLAMP-' || n, 'ticket', 'Clamp ' || n from generate_series(0, 501) n",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // A chain, so every item is in at most two proposals and the tray's
+    // three-rows-per-item rule (#774) leaves every one of them drawable.
+    sqlx::query(
+        "insert into knobas.link
+           (from_id, to_id, relation, origin, created_by, confirmed_at, rule, rule_class, reason)
+         select 'mock:CLAMP-' || n, 'mock:CLAMP-' || (n + 1), 'related', 'suggested', 'knobas',
+                null, 'clamp', 'similarity', 'seeded for the clamp'
+           from generate_series(0, 500) n",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let page = room_suggestions_inner(&pool, &[], None, u32::MAX)
+        .await
+        .unwrap();
+
+    assert_eq!(page.rows.len(), 500);
+    assert_eq!(page.total, 501);
+}
