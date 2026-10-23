@@ -799,6 +799,15 @@ async fn a_server_that_dies_after_ready_fails_the_window_and_retry_restarts_it()
         message.contains("stopped"),
         "the message says the server stopped: {message}"
     );
+    let refused = app
+        .state::<Lifecycle>()
+        .pool()
+        .expect_err("no pool while the server is down");
+    assert!(
+        refused.message.contains("Retry"),
+        "a command is told why: {}",
+        refused.message
+    );
 
     match knobas_db::EmbeddedDb::start(profile.db_config(None)).await {
         Err(knobas_db::DbError::AlreadyRunning { reason, .. }) => assert!(
