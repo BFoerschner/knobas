@@ -14,14 +14,18 @@
 //!
 //! **The exceptions, named rather than denied** (#1659): some `_inner`
 //! functions here still hold their own SQL or a resolution rule, and are not
-//! yet moved below. `entity/builds.rs` (`with_commits`, `JOB_PIPELINES`),
-//! `entity/detail.rs` (`DETAIL`, `RESOLVE_URL`), `entity/standup.rs`
-//! (`ticket_titled`), `entity/board.rs` (`saved_view_board_laned`) and
-//! `entity/links.rs` (`create_link_inner`'s two-way transaction) are the ones;
-//! each has a `backlog` ticket to move it (#1870 to #1874). What is already settled: who am I
-//! (`identity_of`), the declared paths and the stored declarations are derived
-//! once per command, through `identity_of`, `sources::paths::declared_paths`
-//! and [`search::declare`] / [`search::searcher`], not re-read in a body.
+//! yet moved below. Among them `entity/builds.rs` (`with_commits`,
+//! `JOB_PIPELINES`), `entity/detail.rs` (`DETAIL`), `entity/lookups.rs`
+//! (`RESOLVE_URL`, `CODE_FACTS`), `entity/standup.rs` (`ticket_titled`),
+//! `entity/board.rs` (`saved_view_board_laned`), `entity/links.rs`
+//! (`create_link_inner`'s two-way transaction), `entity/viewed.rs` and
+//! `app.rs`. The full list, with lines and the grep that finds them, is the
+//! one `backlog` issue #1870. What is already settled: who am I
+//! (`identity_of`), the declared paths and the stored declarations are each
+//! derived once per command, through `identity_of`,
+//! `sources::paths::declared_paths` and [`search::declare`] /
+//! [`search::searcher`], not re-read in a body. (`docs_tree` still lists the
+//! sources twice, once for the paths and once in `sources::crud::fillers`.)
 
 pub mod app;
 pub mod assets;
