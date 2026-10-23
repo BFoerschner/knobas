@@ -20,7 +20,8 @@ The first test run or `just dev` downloads PostgreSQL 18.6 once into the shared
 
 `just check` is the quality gate. Under the ticket loop the merge-manager runs
 it once, on the head it merges (`just gate`, below). It first
-fails on a stale contract index (`scripts/contract-index.py --check`), then
+fails on a stale contract index (`scripts/contract-index.py --check`) or a
+table below that lost step with the tree (`scripts/doc-lists.py`), then
 runs three halves side by side:
 
 - `front`: `svelte-check`, the Vitest suite and `vite build`.
@@ -35,13 +36,20 @@ prints its whole log. A passing one prints each recipe's wall time, and the
 cargo half adds `test`'s build and run times and its ten slowest test binaries.
 
 `just gate` runs `check-front` instead on a frontend-only head: the
-contract-index check, the conflict-marker scan, `svelte-check`, the Vitest files the change can reach
+contract-index and doc-list checks, the conflict-marker scan, `svelte-check`, the Vitest files the change can reach
 (`just front-changed`) and `vite build`.
 
 `just front` alone is the fast loop for frontend work. `just pre-gate` formats,
 refreshes the inventory and the contract index, and runs a few quick checks.
-It does not replace the gate. `just docs-check` is the two cheap checks alone
-(contract index, conflict markers) for a docs-only change.
+It does not replace the gate. `just docs-check` is the three cheap checks alone
+(contract index, doc lists, conflict markers) for a docs-only change.
+
+`scripts/doc-lists.py` holds four hand-written tables to the tree, both ways:
+*Crates* and *Frontend* below (every directory under `crates/` and
+`app/src/lib/`, and every path a row names), and in `testenv/README.md` the
+live-suite recipes (every `<x>-live` recipe) and the `live-up` products (every
+product `testenv/live-lib.sh`'s `_live_main` knows). A new crate needs its row
+in the same PR.
 
 Clippy runs twice on purpose. `clippy` uses `--all-targets`, which pulls in
 every crate's dev-dependencies. Cargo unifies features across one invocation,
@@ -188,6 +196,7 @@ under `docs/contract/10.8/`. `docs/contract.md` is the record.
 | `knobas-core` | The domain: entity addressing (`<namespace>:<key>`), links, the activity stream and their stores. |
 | `knobas-db` | Embedded PostgreSQL lifecycle (start, adopt, stop), the connection pool and the migrations. |
 | `knobas-source` | The adapter SPI: the `Source` trait, the contract battery and the serde data adapters exchange. It has no database dependency. |
+| `knobas-spi-types` | The types the adapter SPI shares with the core: payload declarations, entity references, tones and how a write is delivered. No database, no async runtime: it and `knobas-source` build for `wasm32-wasip2`, so an external adapter can depend on them. `knobas-core` re-exports it under the old paths (#1234). |
 | `knobas-http` | The HTTP stack the adapters share: one reqwest client, retry classes, rate limiting and the status to `SourceError` mapping. The write queue in `knobas-sync` also reads its local-quota mark (#1729). |
 | `knobas-source-jira` | Jira Data Center adapter, with status, comment and create writes. |
 | `knobas-source-confluence` | Confluence Data Center adapter, with page writes. |
@@ -195,6 +204,8 @@ under `docs/contract/10.8/`. `docs/contract.md` is the record.
 | `knobas-source-teamcity` | TeamCity adapter: build configurations and builds, with trigger and re-run. |
 | `knobas-source-kuma` | Uptime Kuma adapter: monitors from `/metrics`; pause, resume and create over socket.io with an account. |
 | `knobas-source-mock` | The reference adapter. It serves the Tidewater fixture and talks to nothing. UI and engine tests use it. |
+| `knobas-wasm-host` | The WASM host (ADR-0028): loads an external adapter, a component built against `wit/adapter.wit`, runs it under wasmtime with a deadline and memory cap on every call and `wasi:http` held to its manifest's hosts, and hands it to the rest of knobas as a `dyn Source` (#1198). |
+| `knobas-wasm-fixture` | Test only. The fixture external adapter the WASM host is tested with: a fixed corpus with a cursor, built to a component by `just wasm-fixture` (#1198). No external adapter ships with knobas. |
 | `knobas-mockd` | Deprecated and frozen (ADR-0013). An HTTP mock of Jira and TeamCity, kept as a dev-dependency for older tests until the live suites cover them. |
 | `knobas-live-cleanup` | Dev-dependency only. The one runner every live suite's `Drop` guard hands its cleanup to: a thread and runtime of its own, a bound on the whole sequence, and a report that cannot abort a test that is already unwinding (#1913). |
 | `knobas-secrets` | The OS-keychain credential store behind a trait, with an in-memory store for tests. No secret reaches Postgres or crosses the bridge. |
@@ -217,7 +228,7 @@ under `docs/contract/10.8/`. `docs/contract.md` is the record.
 | `app/src/lib/sources/` | `FirstRun.svelte` (the first-run wizard) and the helpers behind it: account, connection, diagnostics, schema-form and fixtures. There is no sources view. |
 | `app/src/lib/launcher/` | The ⌘K overlay. It binds its own hotkey and handles its own `Esc`. |
 | `app/src/lib/ipc/` | Hand-written mirrors of the command surface, one file per Rust command module in `crates/knobas-app/src/commands/`. |
-| `app/src/lib/{assets,capture,inbox,notes,settings,standup,start-work,time}/` | Feature views. |
+| `app/src/lib/{assets,capture,inbox,standup,start-work,time}/` | Feature views. Notes and settings are pages under `tf/` (`tf/note/`, `tf/settings/`). |
 
 Three module-level runes hold state several trees read:
 `shell/health.svelte.ts` (live credential health), `shell/kind-registry.svelte.ts`

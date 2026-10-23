@@ -59,8 +59,10 @@ export CARGO_BUILD_JOBS := env("CARGO_BUILD_JOBS", "4")
 check:
     #!/usr/bin/env bash
     set -euo pipefail
-    # A stale section 10.8 index fails the gate before anything slow runs (#737).
+    # A stale section 10.8 index fails the gate before anything slow runs (#737),
+    # and so does a hand-written table that lost step with the tree (#1919).
     python3 -I scripts/contract-index.py --check
+    python3 -I scripts/doc-lists.py
     front_log= scripts_log= cargo_log= front_pid= scripts_pid= cargo_pid=
     # The script checks are a half of their own (#920): none of them runs
     # cargo or reads `target/`, and in the cargo chain their 23 s (warm,
@@ -184,19 +186,23 @@ check:
 # (#920): `front-changed` below. `check` still runs every test.
 check-front base="origin/main":
     python3 -I scripts/contract-index.py --check
+    python3 -I scripts/doc-lists.py
     just conflict-markers
     just front-changed "{{base}}"
     @echo "check-front: ok"
 
-# The two checks that guard a docs-only change, nothing else: the contract-index
-# check (a new `docs/contract/10.8/` file without a regenerated index) and the
-# conflict-marker scan. Seconds, no `node_modules`, no cargo. What a docs-only
-# self-merge runs in place of a gate (#1691, ruling D5 in
+# The three checks that guard a docs-only change, nothing else: the
+# contract-index check (a new `docs/contract/10.8/` file without a regenerated
+# index), the doc-list check (#1919: a crate, `app/src/lib/` directory,
+# live-suite recipe or live product a hand-written table lists, or misses) and
+# the conflict-marker scan. Seconds, no `node_modules`, no cargo. What a
+# docs-only self-merge runs in place of a gate (#1691, ruling D5 in
 # `docs/decisions/2026-10-review-planning-rulings.md`); `scripts/docs-check-test.sh`
-# pins both red cases. Calls the script directly, not `just conflict-markers`,
+# pins the red cases. Calls the script directly, not `just conflict-markers`,
 # so the test can run it from a scratch tree.
 docs-check:
     python3 -I scripts/contract-index.py --check
+    python3 -I scripts/doc-lists.py
     scripts/conflict-markers.sh
 
 # `front` with vitest narrowed to what a change since BASE can reach (#920).
@@ -555,7 +561,8 @@ shell:
 # `gh` and a private TMPDIR, about 15 s. And the gate scope's (issue #1543): a
 # head that changes only an app file a testenv script pins answers `full`. And
 # `docs-check` (issue #1691): green on a clean tree, red on a stray section 10.8
-# file and on a conflict marker in prose.
+# file, on a conflict marker in prose, and on a table row the tree lost or a
+# member the table lacks (#1919).
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/bash-guard-test.sh
