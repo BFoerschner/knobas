@@ -167,6 +167,8 @@ The three specs: **#1618** (walks and queues that assume the remote stays still)
 
 **Ruling:** an authentication refusal from the recorded port with a dead recorded pid is a stale lock; a live pid still refuses.
 
+*The live-pid half was reversed by #1775 (2026-10-23): with the ownership lock free, an answer that is not ours clears the lock whatever the pid is doing. See `2026-10-unattended-rulings.md`, #1775.*
+
 **Reasoning:** a postmaster of ours accepts our password, so a refusal plus a dead pid is the evidence the wire-level arm already accepts.
 
 **If you disagree, the cost of reversing this is:** one arm in `adopt`.

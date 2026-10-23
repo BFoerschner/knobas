@@ -826,6 +826,29 @@ fn stop_server(root: &Path) {
     }
 }
 
+/// Stop the server serving `root_dir` with `pg_ctl stop -m immediate -w`,
+/// under whatever handle holds it (#1779): the backends are killed and the
+/// postmaster exits at once, removing `postmaster.pid` (a `kill -9` would
+/// leave it, which `ServerWatch`'s unit test covers). The handle is
+/// left as it was, still holding the ownership lock, which is the state a
+/// window whose postmaster died is in.
+///
+/// # Panics
+///
+/// If `pg_ctl` cannot be found or reports a failure: a test that meant to
+/// kill a server and did not would go on to assert about a live one.
+pub fn kill_server(root_dir: &Path) {
+    let data_dir = root_dir.join("data");
+    let mut pg_ctl = crate::embedded::pg_ctl_stop_immediate(&data_dir)
+        .expect("pg_ctl is in the installation directory");
+    let output = pg_ctl.output().expect("pg_ctl runs");
+    assert!(
+        output.status.success(),
+        "pg_ctl stop -m immediate failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

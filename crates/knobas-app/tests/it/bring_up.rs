@@ -729,6 +729,179 @@ async fn a_failed_migration_stops_the_server_without_holding_the_runtime() {
     );
 }
 
+// -- a server that dies after ready (#1779) ---------------------------------
+
+/// Runs the app's exit handler when dropped, so a failed assertion still
+/// stops the server the mock app holds. A second run is a no-op.
+struct QuitsOnDrop<'a>(&'a tauri::App<MockRuntime>);
+
+impl Drop for QuitsOnDrop<'_> {
+    fn drop(&mut self) {
+        shutdown(self.0);
+    }
+}
+
+/// How long the window may take to notice: the watch looks every few seconds.
+const NOTICED_WITHIN: Duration = Duration::from_secs(30);
+
+/// Wait until `app`'s lifecycle satisfies `done`, or panic naming `what`.
+async fn until(
+    app: &tauri::App<MockRuntime>,
+    what: &str,
+    done: impl Fn(&DbState) -> bool,
+) -> DbState {
+    tokio::time::timeout(NOTICED_WITHIN, async {
+        loop {
+            let state = app.state::<Lifecycle>().get();
+            if done(&state) {
+                return state;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "{what}: still {:?} after {NOTICED_WITHIN:?}",
+            app.state::<Lifecycle>().get()
+        )
+    })
+}
+
+/// #1779: the window's own postmaster dies after bring-up reached `ready`.
+/// The window used to stay `ready` over a port that no longer answered, and
+/// *Retry* is only offered from `failed`, so a quit was the only way out.
+/// Now the window notices and moves to `failed`, a second launch is still
+/// refused because the window still owns the profile, and *Retry* starts
+/// the server again on the same data directory and port, where the pool the
+/// commands use reaches it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_that_dies_after_ready_fails_the_window_and_retry_restarts_it() {
+    let data = tempfile::tempdir().unwrap();
+    let profile = Profile::new(false, data.path());
+    let root = profile.db_config(None).root_dir;
+    let registry = Registry::default();
+    let app = mock_app(&profile, &registry);
+    let _quits = QuitsOnDrop(&app);
+    knobas_app::bring_up(app.handle(), &profile, None, registry).await;
+    assert_eq!(app.state::<Lifecycle>().get(), DbState::Ready);
+    let port = port_of(&root);
+
+    knobas_db::test_util::kill_server(&root);
+    let failed = until(&app, "the window notices its server died", |state| {
+        matches!(state, DbState::Failed { .. })
+    })
+    .await;
+    let DbState::Failed { message } = failed else {
+        unreachable!()
+    };
+    assert!(
+        message.contains("stopped"),
+        "the message says the server stopped: {message}"
+    );
+    let refused = app
+        .state::<Lifecycle>()
+        .pool()
+        .expect_err("no pool while the server is down");
+    assert_eq!(
+        refused.message, message,
+        "a command is told the server stopped, not that it never started"
+    );
+
+    match knobas_db::EmbeddedDb::start(profile.db_config(None)).await {
+        Err(knobas_db::DbError::AlreadyRunning { reason, .. }) => assert!(
+            reason.contains(&format!("knobas process {} ", std::process::id())),
+            "the refusal names the failed window: {reason}"
+        ),
+        Err(other) => panic!("a second launch is refused while the window is failed, not {other}"),
+        Ok(_) => panic!("a second launch was let in beside the failed window"),
+    }
+
+    knobas_app::commands::app::retry_database(app.handle().clone()).expect("retry");
+    until(&app, "retry brings the server back", |state| {
+        *state == DbState::Ready
+    })
+    .await;
+    assert_eq!(port_of(&root), port, "on the same port");
+    let pool = app
+        .state::<Lifecycle>()
+        .pool()
+        .expect("the commands' pool is back");
+    let (serving,): (String,) = sqlx::query_as("show data_directory")
+        .fetch_one(&pool)
+        .await
+        .expect("the commands' pool reaches the restarted server");
+    assert_eq!(
+        std::fs::canonicalize(serving).unwrap(),
+        std::fs::canonicalize(root.join("data")).unwrap(),
+        "on the same data directory"
+    );
+
+    shutdown(&app);
+    assert!(!port_answers(port), "the quit stops the restarted server");
+}
+
+/// #1779: a quit while *Retry* is restarting the server. The restart takes
+/// the server out of the lifecycle for as long as it runs, so a quit that did
+/// not wait for it would find nothing to stop, and the postmaster the restart
+/// then started would outlive the window (the defect #1634 fixed for
+/// bring-up). The exit handler waits on the restart's gate and stops what it
+/// started.
+///
+/// The test holds the profile's bring-up lock, which every start takes, so
+/// the restart stalls inside its gate until a thread lets it go. The hold
+/// outlasts the scheduler's shutdown, which comes first in the quit and waits
+/// up to its grace plus a pool close: a shorter hold let the restart finish
+/// during that wait, and the quit then found the server held again whether
+/// or not it waited on the gate.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quit_during_a_restart_stops_the_server_the_restart_started() {
+    let data = tempfile::tempdir().unwrap();
+    let profile = Profile::new(false, data.path());
+    let root = profile.db_config(None).root_dir;
+    let registry = Registry::default();
+    let app = mock_app(&profile, &registry);
+    let _quits = QuitsOnDrop(&app);
+    knobas_app::bring_up(app.handle(), &profile, None, registry).await;
+    assert_eq!(app.state::<Lifecycle>().get(), DbState::Ready);
+    let port = port_of(&root);
+
+    knobas_db::test_util::kill_server(&root);
+    until(&app, "the window notices its server died", |state| {
+        matches!(state, DbState::Failed { .. })
+    })
+    .await;
+
+    let bring_up_lock = std::fs::File::create(root.join(".bring-up.lock")).unwrap();
+    bring_up_lock.lock().expect("the bring-up lock is free");
+    knobas_app::commands::app::retry_database(app.handle().clone()).expect("retry");
+    until(&app, "the restart begins", |state| {
+        matches!(state, DbState::Starting { detail: Some(_) })
+    })
+    .await;
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(knobas_sync::scheduler::SHUTDOWN_GRACE + Duration::from_secs(5));
+        drop(bring_up_lock);
+    });
+
+    shutdown(&app);
+    release.join().unwrap();
+    // Settled first: a quit that did not wait returned before the restart
+    // started the server it then leaves running.
+    until(&app, "the restart settles", |state| {
+        !matches!(state, DbState::Starting { .. })
+    })
+    .await;
+    assert!(
+        !port_answers(port),
+        "the quit waits for the restart and stops the server it started"
+    );
+    assert!(
+        !root.join("data").join("postmaster.pid").exists(),
+        "no postmaster is left on the data directory"
+    );
+}
+
 // -- a trigger racing the quit (#1633) --------------------------------------
 
 /// Events that hold the first `running` announcement -- the one a trigger

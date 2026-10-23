@@ -161,6 +161,11 @@ use and names the knobas process to quit. It touches nothing on the way. Any
 other second launch that gets past the guard on a live profile ends the same
 way.
 
+If the postmaster dies while knobas runs (a crash, a `pg_ctl stop` by hand),
+the window notices within a few seconds and shows the boot screen with
+*Retry*. *Retry* starts the server again on the same port and data directory.
+The window keeps the profile meanwhile, so a second launch is still refused.
+
 To stop an orphaned server by hand, use its own `pg_ctl`. It is not on `PATH`:
 
 ```bash

@@ -5,6 +5,7 @@
 //! to be answerable **while PostgreSQL is still starting**, which is why
 //! nothing in this module takes `State<'_, AppState>` -- see [`Lifecycle`].
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use knobas_sync::scheduler::AdapterRegistry;
@@ -92,6 +93,17 @@ pub struct Lifecycle {
     /// consumes the handle, and the take is what makes the second of the two
     /// exit events a no-op.
     server: Mutex<Option<knobas_db::EmbeddedDb>>,
+    /// Counts the servers [`hold_server`](Self::hold_server) was given, so a
+    /// watch on one server (#1779) never acts on the next.
+    generation: AtomicU64,
+    /// The shared state, set aside while the server that died under it
+    /// (#1779) is down: a command answers `not_ready` meanwhile, and the
+    /// restart puts it back, pools and engines as they were.
+    suspended: Mutex<Option<Arc<AppState>>>,
+    /// Held by a restart from first to last (#1779), and taken by the exit
+    /// handler before it takes the server, so a quit during a restart waits
+    /// for it and then stops what it started.
+    restart_gate: tokio::sync::Mutex<()>,
     /// The adapter registry every read takes, as the trait object (#1321).
     /// Here rather than on `AppState`, because the reads that answer before
     /// the database is up (the Add-source form's adapter list) need it too.
@@ -122,6 +134,9 @@ impl Lifecycle {
             db: Mutex::new(DbState::Starting { detail: None }),
             app: Mutex::new(None),
             server: Mutex::new(None),
+            generation: AtomicU64::new(0),
+            suspended: Mutex::new(None),
+            restart_gate: tokio::sync::Mutex::new(()),
             registry,
         }
     }
@@ -172,7 +187,79 @@ impl Lifecycle {
     /// stage bring-up reached. A test that installs an [`AppState`] by hand
     /// holds its server here for the same reason.
     pub fn hold_server(&self, db: knobas_db::EmbeddedDb) {
-        *self.server.lock().unwrap_or_else(PoisonError::into_inner) = Some(db);
+        let mut server = self.server.lock().unwrap_or_else(PoisonError::into_inner);
+        *server = Some(db);
+        self.generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Which server [`hold_server`](Self::hold_server) holds: a number that
+    /// changes each time it is given one.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
+    }
+
+    /// Whether a server is held: false once a quit or a failed bring-up took
+    /// it.
+    pub(crate) fn holds_server(&self) -> bool {
+        self.server
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+    }
+
+    /// The server of `generation` died under a `ready` window (#1779): set
+    /// the shared state aside and move to `failed` with `message`, so the
+    /// boot screen offers *Retry*. The server stays held, and with it the
+    /// profile's ownership lock, so no second launch is let in meanwhile.
+    ///
+    /// False, and nothing changes, when that server is no longer the one
+    /// held (a quit took it, or it was restarted) or the window is not
+    /// `ready`. The caller emits the new state when this answers true.
+    pub(crate) fn server_died(&self, generation: u64, message: String) -> bool {
+        let server = self.server.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut db = self.db.lock().unwrap_or_else(PoisonError::into_inner);
+        if server.is_none() || self.generation() != generation || *db != DbState::Ready {
+            return false;
+        }
+        let state = self
+            .app
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        *self
+            .suspended
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = state;
+        *db = DbState::Failed { message };
+        true
+    }
+
+    /// Whether the failure *Retry* answers is a server that died after
+    /// `ready` (#1779), which a restart in place recovers, rather than a
+    /// bring-up that never finished.
+    pub(crate) fn server_is_down(&self) -> bool {
+        self.suspended
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+    }
+
+    /// Put back the shared state [`server_died`](Self::server_died) set
+    /// aside, once its server is up again.
+    pub(crate) fn resume(&self) {
+        let state = self
+            .suspended
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(state) = state {
+            *self.app.lock().unwrap_or_else(PoisonError::into_inner) = Some(state);
+        }
+    }
+
+    /// The gate a restart holds from first to last; see the field.
+    pub(crate) fn restart_gate(&self) -> &tokio::sync::Mutex<()> {
+        &self.restart_gate
     }
 
     /// The server [`hold_server`](Self::hold_server) was given, once: for the
@@ -214,6 +301,8 @@ impl Lifecycle {
     /// The refusal for a call that beat bring-up, or followed a failed one.
     fn not_ready(&self) -> IpcError {
         IpcError::not_ready(match self.get() {
+            // It did start, and then stopped (#1779): the message says so.
+            DbState::Failed { message } if self.server_is_down() => message,
             DbState::Failed { message } => format!("the database did not start: {message}"),
             _ => "the database is still starting".to_owned(),
         })
@@ -321,8 +410,15 @@ pub fn frontend_ready<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(),
 /// has somewhere to say so.
 #[tauri::command]
 pub fn retry_database<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), IpcError> {
-    if app.state::<Lifecycle>().begin_retry() {
-        crate::spawn_bring_up(app);
+    let lifecycle = app.state::<Lifecycle>();
+    if lifecycle.begin_retry() {
+        if lifecycle.server_is_down() {
+            // Up, migrated and running engines until its server died
+            // (#1779): starting the server again is the whole recovery.
+            crate::spawn_restart(app.clone());
+        } else {
+            crate::spawn_bring_up(app.clone());
+        }
     }
     Ok(())
 }
