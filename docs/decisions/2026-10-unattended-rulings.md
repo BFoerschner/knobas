@@ -13445,3 +13445,40 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
 - **A submit on a source that needs a person.** *Ruling:* not owed. A submit there no longer
   tries the other entities' untried writes. The tick skips such a source (#1628) and sends them
   once it answers again, and the submit's own try would have failed the same way. *Reversing:* n/a.
+## #1807: a submit behind a head another flusher just sent (Opus implementer, 2026-10-23)
+
+- **What a closed head gives the flusher that waited for it.** *Fork:* count it as progress, so
+  `flush` re-reads `heads` after the pass, or hand the turn, lock and all, to the entity's next
+  write. *Ruling:* hand the turn on (`turn`). *Reasoning:* the ticket asks for the submit's write
+  to go before the other entity's slow write is done. Counting progress drops the lock between the
+  re-read and the next `turn`, and the flush task, queued on the FIFO mutex behind the submit,
+  takes it for its other write first. The submit then still waits a whole send. Handing on keeps
+  the lock and re-reads the entity's head under it, so per-entity order, #1729's quota watch
+  (inside `attempt`) and #1628's ladder (`heads` filters `owed`) are unchanged. The successor is
+  read under the lock, so no flusher sends it twice. *Reversing:* one `if` in `turn`.
+- **Which closed heads hand on.** *Fork:* only `sent`, or every closed state. *Ruling:* `sent` and
+  `discarded` (`!is_open()`). *Reasoning:* either one makes the entity's next write its head, as
+  `store::due` reads it. A `held` or `refused` head still blocks the entity, so `heads` returns
+  nothing for it, and a head another flusher attempted and failed is still pending with
+  `attempted_at` moved, which stays `Gone`, as the ticket's second criterion requires. *Reversing:*
+  the predicate.
+- **The flush task and *Flush now* follow the same rule.** *Ruling:* yes, it is in `turn`, which
+  every pass uses. *Reasoning:* a task waiting for a head a submit just landed now sends that
+  entity's next write in the same turn, not on its next pass. That is still one write of that
+  entity, in queue order, and the successor is never one the task's own list held, since `due`
+  gives one write per entity. On a *Flush now* the successor is read without the `owed` filter, as
+  every head of that pass is. It cannot be waiting anything out anyway: a write is attempted only
+  as its entity's head. *Reversing:* pass a reach to `turn`.
+- **The timing test reads rows, not a clock.** *Ruling:* the submit starts once the head is on the
+  wire, and the test reads its own write's state and the other entity's write's state the moment it
+  returns: `sent` and `pending`. *Reasoning:* the other entity's write takes 1 s after the submit
+  lets go of the lock. That leaves one `heads` query of headroom, not a share of a bound, and a
+  loaded machine cannot push the old code under it. *Reversing:* n/a.
+- **The withdrawn case is withdrawn mid-send.** *Ruling:* through the fake's
+  `Interrupt::Withdraw`, which fires at the end of the head's dwell, once the submit is waiting for
+  the source. *Reasoning:* the first draft withdrew it before the submit, so the submit read the
+  next write as its head straight away and the test passed on the old code too (mutants M1 and M3
+  survived it). *Reversing:* n/a.
+- **A §10.8 entry.** *Ruling:* booked (`1807-a-submit-behind-a-landed-head-tries-its-own-write.md`):
+  `submit_write` now finds its write `sent` and asks for the mirror refresh where it used to skip
+  it. *Reversing:* one file.
