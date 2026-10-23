@@ -16,7 +16,9 @@
 # server plus up to 12 transient servers the `knobas-db` lifecycle suite
 # starts. Two gates fit; three fit only when their peaks miss each other, and
 # cost 2.4x the single wall each; five ran the kernel out and every worktree
-# went red with `shmget: No space left on device`. So a recipe takes one of
+# went red with `shmget: No space left on device`. (CPU is bounded per gate,
+# not by the slot count: `test` runs two libtest threads per binary, #1892,
+# so two gates' test runs fit the twelve cores.) So a recipe takes one of
 # `KNOBAS_GATE_SLOTS` (default 2) slots before it does anything else, and with
 # none free prints one line naming the holders' pids and polls, up to
 # `KNOBAS_GATE_SLOT_WAIT` seconds (default 150), then exits 75 naming the same

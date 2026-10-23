@@ -807,7 +807,9 @@ clippy-libs *PKGS:
 # anything else, a third gate prints one line naming the holders and polls up
 # to `KNOBAS_GATE_SLOT_WAIT` seconds, and the slot is released by the same
 # EXIT, INT and TERM traps that close the pipe. The ceiling is SysV shared
-# memory, not CPU: one gate peaks at 13 of macOS's 32 segments.
+# memory, not CPU: one gate peaks at 13 of macOS's 32 segments. What a gate
+# costs in CPU is bounded inside it instead, by the test threads per binary
+# below (#1892).
 #
 # Portability: plain bash 3.2, jq, xargs with `-P`/`-I` (both BSD and GNU),
 # pgrep, getconf, `ln -s`, `readlink` and `find -mmin`. `check.yml` on

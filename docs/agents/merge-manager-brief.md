@@ -10,7 +10,7 @@ The loop runs unattended; one prompt stalls it until Björn is back. The Bash ho
 
 Read `docs/agents/working-model.md`, `CLAUDE.md`, `docs/agents/issue-tracker.md`, `CONTEXT.md`. In the worktree from your dispatch: `git fetch && git status`; the branch must be pushed and clean, else **report, never force**.
 
-**Pre-build** unless `scripts/gate-scope.sh` says `front`: `env -C <worktree> nice -n 10 env -u RUSTUP_TOOLCHAIN CARGO_BUILD_JOBS=4 cargo test --workspace --no-run` in the background (`env -C`, never `cd <worktree> &&`), log in the scratchpad. Wait for it or kill it before the pre-gate (*Merge tail* step 1).
+**Pre-build** unless `scripts/gate-scope.sh` says `front`: `env -C <worktree> env -u RUSTUP_TOOLCHAIN CARGO_BUILD_JOBS=4 cargo test --workspace --no-run` in the background (never under `nice`: a niced cargo that starts the sccache server nices every compile on the machine, #1892) (`env -C`, never `cd <worktree> &&`), log in the scratchpad. Wait for it or kill it before the pre-gate (*Merge tail* step 1).
 
 ## Decisions
 
