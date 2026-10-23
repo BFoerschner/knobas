@@ -14362,3 +14362,12 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   the bound is for a first contact alone; `restart` is only reached for a server this handle owns
   and has answered on, after `pg_ctl start --wait`, and `tests/embedded.rs`'s restart test is in
   the gate on the same loaded runner. *Reversing:* one line.
+- **The other dropped-port dead URLs** (merge-manager, Opus). *Fork:* move every gate-run
+  bind-to-0-and-drop dead URL to port 1 here, or only the copies this family failed in. *Ruling:*
+  only those; the rest (`knobas_mockd::refused_url`, Jira's `http.rs`/`source.rs`, and any other
+  dropped listener) go to #1831, with the case for one shared helper. *Reasoning:* #1815 asks to
+  fix the failures it names; a sweep across six crates is its own change and its own review.
+  *Reversing:* n/a.
+- **Which head the Linux run must be on** (merge-manager, Opus). *Ruling:* the last head whose
+  tree differs from the merge head outside `docs/` only. *Reasoning:* `check.yml`'s cargo, front
+  and scripts halves read nothing under `docs/decisions/`. *Reversing:* one more dispatched run.
