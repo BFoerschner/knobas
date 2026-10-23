@@ -22,7 +22,7 @@
   row.
 
   Pinned by `crates/knobas-db/tests/schema.rs`'
-  `zero_fifty_seven_caps_the_body_trigram_pending_list` (the list stays under 33 pages through a
-  load the default limit leaves about 170 pages of, and the migration rerun over such a list merges
-  it), and by `crates/knobas-app/tests/it/read_plans.rs`, whose mirror now carries the probe's
+  `zero_fifty_seven_caps_the_body_trigram_pending_list` (read after every 20 rows, the list stays
+  under 33 pages through a load the default limit lets reach about 480, and the migration rerun
+  over such a list merges it), and by `crates/knobas-app/tests/it/read_plans.rs`, whose mirror now carries the probe's
   common word and whose mention rule must read `item_body_trgm_idx` in both statistics states.
