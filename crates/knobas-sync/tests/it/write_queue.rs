@@ -74,6 +74,18 @@ enum Interrupt {
     NewCredential,
 }
 
+/// A dwell for the writes to some targets only, and the moment each of them
+/// went on the wire (#1797): a timing test needs the flush task's writes slow
+/// and the submit's own quick, and a clock that starts when the first slow
+/// write does.
+#[derive(Default)]
+struct Paced {
+    /// How long a write to this entity id takes, in place of `dwell`.
+    dwell: std::collections::HashMap<String, std::time::Duration>,
+    /// Each paced write's target, and when the fake started on it.
+    started: Vec<(String, std::time::Instant)>,
+}
+
 /// A `Source` that records every write it is handed and answers to order.
 struct Fake {
     id: String,
@@ -102,6 +114,9 @@ struct Fake {
     /// [`SourceError::Moved`] with this version and its text, as Gitea's
     /// `sha` check answers a stale base.
     file_at: Arc<Mutex<Option<String>>>,
+    /// A dwell for some targets only, and when each of their writes went on
+    /// the wire; see [`Paced`].
+    paced: Arc<Mutex<Paced>>,
     /// The pool the withdrawal above goes through. The fake reaches the store
     /// directly rather than the flusher, which would need the `SchedulerDeps`
     /// that holds this fake.
@@ -153,7 +168,17 @@ impl Source for Fake {
         }
         *self.asked.lock().unwrap() += 1;
         let answer = *self.answer.lock().unwrap();
-        let dwell = *self.dwell.lock().unwrap();
+        let paced = {
+            let mut paced = self.paced.lock().unwrap();
+            let dwell = paced.dwell.get(op.target()).copied();
+            if dwell.is_some() {
+                paced
+                    .started
+                    .push((op.target().to_owned(), std::time::Instant::now()));
+            }
+            dwell
+        };
+        let dwell = paced.unwrap_or_else(|| *self.dwell.lock().unwrap());
         if !dwell.is_zero() {
             tokio::time::sleep(dwell).await;
         }
@@ -266,6 +291,7 @@ struct FakeRegistry {
     receipt: Arc<Mutex<Option<String>>>,
     interrupt: Arc<Mutex<Option<Interrupt>>>,
     file_at: Arc<Mutex<Option<String>>>,
+    paced: Arc<Mutex<Paced>>,
     pool: sqlx::PgPool,
 }
 
@@ -284,6 +310,7 @@ impl AdapterRegistry for FakeRegistry {
             receipt: Arc::clone(&self.receipt),
             interrupt: Arc::clone(&self.interrupt),
             file_at: Arc::clone(&self.file_at),
+            paced: Arc::clone(&self.paced),
             pool: self.pool.clone(),
         }))
     }
@@ -365,6 +392,7 @@ struct Harness {
     receipt: Arc<Mutex<Option<String>>>,
     interrupt: Arc<Mutex<Option<Interrupt>>>,
     file_at: Arc<Mutex<Option<String>>>,
+    paced: Arc<Mutex<Paced>>,
     source: String,
 }
 
@@ -734,6 +762,7 @@ async fn harness() -> Harness {
     let receipt = Arc::new(Mutex::new(None));
     let interrupt = Arc::new(Mutex::new(None));
     let file_at = Arc::new(Mutex::new(None));
+    let paced = Arc::new(Mutex::new(Paced::default()));
     let events = Arc::new(Recorder::default());
     Harness {
         deps: SchedulerDeps {
@@ -747,6 +776,7 @@ async fn harness() -> Harness {
                 receipt: Arc::clone(&receipt),
                 interrupt: Arc::clone(&interrupt),
                 file_at: Arc::clone(&file_at),
+                paced: Arc::clone(&paced),
                 pool,
             }),
             secrets: Arc::new(secrets),
@@ -761,6 +791,7 @@ async fn harness() -> Harness {
         receipt,
         interrupt,
         file_at,
+        paced,
         source,
     }
 }
@@ -1551,6 +1582,71 @@ async fn a_press_beside_a_failing_send_does_not_send_it_again() {
     let row = h.reload(write.id).await;
     assert_eq!(row.attempts, 2);
     assert_eq!(row.wait_reason, Some(WaitReason::Unreachable));
+}
+
+/// #1797: a submit tries its own write and returns, and leaves the source's
+/// other writes to the flush task. It waits for the send on the wire, since
+/// the source takes one write at a time, and not for the writes the task
+/// still owes after it.
+///
+/// The task's two writes each take `DWELL` and the submit's own takes no
+/// time, so a submit that waited for the second would return 2 × `DWELL` or
+/// more after the first went on the wire. The clock starts at that moment,
+/// not at the submit, so the old wait cannot slip under the bound by
+/// starting late in the first send.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_submit_does_not_wait_for_the_flush_tasks_other_writes() {
+    const DWELL: std::time::Duration = std::time::Duration::from_secs(1);
+    let h = harness().await;
+    let first = h.mirror("PAY-1797-A", "a payout fails").await;
+    let second = h.mirror("PAY-1797-B", "a refund fails").await;
+    let mine = h.mirror("PAY-1797-C", "a transfer fails").await;
+    for entity in [&first, &second] {
+        flusher::queue(
+            &h.deps,
+            &h.source,
+            WriteOp::Comment {
+                entity: entity.to_string(),
+                body: format!("owed on {}", entity.key),
+            },
+        )
+        .await
+        .unwrap();
+        h.paced
+            .lock()
+            .unwrap()
+            .dwell
+            .insert(entity.to_string(), DWELL);
+    }
+
+    let submit = async {
+        let on_the_wire = loop {
+            if let Some((_, at)) = h.paced.lock().unwrap().started.first() {
+                break *at;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        };
+        h.comment(&mine, "mine").await;
+        on_the_wire.elapsed()
+    };
+    let (task, waited) = tokio::join!(flusher::flush_source(&h.deps, &h.source), submit);
+    task.unwrap();
+
+    assert!(
+        waited < 2 * DWELL,
+        "the submit waited {waited:?}, through the flush task's second send"
+    );
+    let mut delivered = h.delivered();
+    delivered.sort();
+    assert_eq!(
+        delivered,
+        vec![
+            "mine".to_owned(),
+            "owed on PAY-1797-A".to_owned(),
+            "owed on PAY-1797-B".to_owned(),
+        ],
+        "every write is delivered once"
+    );
 }
 
 /// Issue #336: a create that landed after the user withdrew it is recorded,
