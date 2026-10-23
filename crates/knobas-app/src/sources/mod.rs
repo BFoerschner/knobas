@@ -349,11 +349,6 @@ pub struct SourceSummary {
     /// The mirror narrows a role's reads by these claims itself; the shell
     /// reads them only for which optional reads a source answers
     /// (`tf/roles.svelte.ts`, #1300).
-    ///
-    /// Always sent. Optional in the generated TypeScript (`#[ts(optional)]`)
-    /// only so a stand-in summary written before #1196 still type-checks; a
-    /// summary without it claims nothing.
-    #[ts(as = "Option<Vec<knobas_source::role::RoleClaim>>", optional)]
     pub roles: Vec<knobas_source::role::RoleClaim>,
     /// The claimed roles whose declared paths missed on the records this
     /// source's syncs emitted (#1199, ADR-0028 *The checks*): the mirror
@@ -362,10 +357,6 @@ pub struct SourceSummary {
     /// (`tf/roles.svelte.ts`), and its health line names each path. Only
     /// roles still in [`roles`](Self::roles); empty when every claimed role
     /// is filled or not judged yet.
-    ///
-    /// Always sent; optional in the generated TypeScript for the reason
-    /// [`roles`](Self::roles) is.
-    #[ts(as = "Option<Vec<knobas_source::role::data::RoleMiss>>", optional)]
     pub role_misses: Vec<knobas_source::role::data::RoleMiss>,
 }
 

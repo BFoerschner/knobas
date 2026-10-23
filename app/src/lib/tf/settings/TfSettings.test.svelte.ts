@@ -75,6 +75,8 @@ function summary(id: string, name: string, state: CredentialHealth["state"], ove
     item_count: 177,
     auth_kind: "UserPassword",
     kinds: [ticket],
+    roles: [],
+    role_misses: [],
     ...over,
   };
 }

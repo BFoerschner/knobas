@@ -42,19 +42,19 @@ export interface ClaimingSource {
   display_name?: string;
   /** Carried as the source list has it and never read: a surface draws by role. */
   adapter_kind?: string;
-  roles?: readonly RoleClaim[];
+  roles: readonly RoleClaim[];
   /** The claimed roles whose declared paths missed on the source's records (#1199). */
-  role_misses?: readonly RoleMiss[];
+  role_misses: readonly RoleMiss[];
 }
 
-/** Whether `source` claims `role`. A source that names no claims claims nothing. */
-export function claims(source: ClaimingSource, role: string): boolean {
-  return (source.roles ?? []).some((claim) => claim.role === role);
+/** Whether `source` claims `role`. */
+export function claims(source: Pick<ClaimingSource, "roles">, role: string): boolean {
+  return source.roles.some((claim) => claim.role === role);
 }
 
 /** Whether `source` fills `role`: claims it, and its records did not miss one of its paths (#1199). */
 export function fills(source: ClaimingSource, role: string): boolean {
-  return claims(source, role) && !(source.role_misses ?? []).some((miss) => miss.role === role);
+  return claims(source, role) && !source.role_misses.some((miss) => miss.role === role);
 }
 
 export interface SourceRoles {
@@ -81,8 +81,8 @@ export function createSourceRoles(): SourceRoles {
       state.sources = sources.map((row) => ({
         id: row.id,
         ...(row.display_name === undefined ? {} : { display_name: row.display_name }),
-        roles: [...(row.roles ?? [])],
-        role_misses: [...(row.role_misses ?? [])],
+        roles: [...row.roles],
+        role_misses: [...row.role_misses],
       }));
     },
     forget() {
@@ -91,7 +91,7 @@ export function createSourceRoles(): SourceRoles {
     answers(role, sourceId, read) {
       const source = state.sources?.find((row) => row.id === sourceId);
       if (source === undefined || !fills(source, role)) return false;
-      return (source.roles ?? []).some((claim) => claim.role === role && claim.reads.includes(read));
+      return source.roles.some((claim) => claim.role === role && claim.reads.includes(read));
     },
     nameOf(sourceId) {
       return state.sources?.find((row) => row.id === sourceId)?.display_name ?? sourceId;

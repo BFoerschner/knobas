@@ -25,15 +25,15 @@ test("a source claims a role its list entry names, and fills it while its record
   expect(claims(forge, "ticket-system")).toBe(true);
   expect(fills(forge, "ticket-system")).toBe(false);
   expect(fills(forge, "code-host")).toBe(true);
-  expect(claims({ id: "bare" }, "code-host")).toBe(false);
+  expect(claims({ roles: [] }, "code-host")).toBe(false);
 });
 
 test("an optional read is answered only by a listed source whose claim names it (#1208)", () => {
   const roles = createSourceRoles();
   expect(roles.answers("ticket-system", "jira", "translate_query")).toBe(false);
   roles.take([
-    { id: "jira", roles: [{ role: "ticket-system", reads: ["reachable_transitions", "translate_query"] }] },
-    { id: "gitea", roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }] },
+    { id: "jira", roles: [{ role: "ticket-system", reads: ["reachable_transitions", "translate_query"] }], role_misses: [] },
+    { id: "gitea", roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }], role_misses: [] },
     {
       id: "missed",
       roles: [{ role: "ticket-system", reads: ["translate_query"] }],
@@ -53,6 +53,9 @@ test("an optional read is answered only by a listed source whose claim names it 
 test("a source is named by its display name, or its id when the list never said (#1476)", () => {
   const roles = createSourceRoles();
   expect(roles.nameOf("jira")).toBe("jira");
-  roles.take([{ id: "jira", display_name: "Tidewater Jira" }, { id: "mock" }]);
+  roles.take([
+    { id: "jira", display_name: "Tidewater Jira", roles: [], role_misses: [] },
+    { id: "mock", roles: [], role_misses: [] },
+  ]);
   expect([roles.nameOf("jira"), roles.nameOf("mock"), roles.nameOf("gone")]).toEqual(["Tidewater Jira", "mock", "gone"]);
 });

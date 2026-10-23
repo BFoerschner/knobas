@@ -25,7 +25,7 @@
   /** The reads the status bar needs, injectable so a test needs no bridge. */
   export interface TfShellPorts {
     /** The source list: the status bar's names, and each source's role claims (#1196) and misses (#1199). */
-    listSources: () => Promise<(Pick<Summary, "id" | "display_name"> & Partial<Pick<Summary, "roles" | "role_misses">>)[]>;
+    listSources: () => Promise<Pick<Summary, "id" | "display_name" | "roles" | "role_misses">[]>;
     syncStatus: () => Promise<SyncRow[]>;
     listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
   }

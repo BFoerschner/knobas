@@ -16,7 +16,7 @@ const KIND_INFO = [
 ];
 
 /** The five sources the sources view draws. */
-export const FIXTURE_SOURCES: (SourceSummary & { roles: { role: string; reads: string[] }[] })[] = [
+export const FIXTURE_SOURCES: SourceSummary[] = [
   {
     ...fixtureSource("mock", "mock", "Tidewater (mock)", "https://mock.tidewater.example", "ok", 21, 90, null),
     // The fixture's repositories, pull requests and tickets are the mock's
@@ -131,7 +131,7 @@ function fixtureSource(
    * column exists to tell them apart.
    */
   authKind: AuthMethod | null,
-): SourceSummary & { roles: { role: string; reads: string[] }[] } {
+): SourceSummary {
   return {
     id,
     adapter_kind: adapterKind,
@@ -173,7 +173,9 @@ function fixtureSource(
     item_count: itemCount,
     kinds: KIND_INFO,
     // The roles the source's adapter claims (#1196); each fixture names its own.
-    roles: [] as { role: string; reads: string[] }[],
+    roles: [],
+    // Its claimed roles whose paths missed (#1199): none, until a test records one.
+    role_misses: [],
   };
 }
 
@@ -513,7 +515,7 @@ export function handlers(): Handlers {
         throw { code: "conflict", message: `a source called ${id} already exists`, source_id: id };
       }
       const adapter = FIXTURE_ADAPTERS.find((row) => row.adapter_kind === input["adapter_kind"]);
-      const row: SourceSummary & { roles: { role: string; reads: string[] }[] } = {
+      const row: SourceSummary = {
         ...FIXTURE_SOURCES[0]!,
         id,
         adapter_kind: String(input["adapter_kind"] ?? "mock"),
@@ -528,7 +530,8 @@ export function handlers(): Handlers {
         sync_interval_secs: Number(input["sync_interval_secs"] ?? 900),
         health: { source_id: id, state: "ok", checked_at: SYNCED_AT, detail: null, secret_expires_at: null },
         // The adapter's claims and kinds, as `list_sources` takes them from its template.
-        roles: adapter?.roles ?? [],
+        roles: adapter === undefined ? [] : adapter.roles,
+        role_misses: [],
         kinds: adapter?.entity_kinds ?? KIND_INFO,
         item_count: 0,
         last_run: null,

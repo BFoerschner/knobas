@@ -132,6 +132,8 @@ function summary(id = "jira"): SourceSummary {
     next_run_at: null,
     item_count: 0,
     kinds: [],
+    roles: [],
+    role_misses: [],
   };
 }
 

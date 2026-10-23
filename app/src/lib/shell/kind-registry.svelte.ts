@@ -130,7 +130,7 @@ export function createKindRegistry(ports?: KindRegistryPorts): KindRegistry {
     frameKinds(role: string, frame: Frame) {
       if (!loaded) return null;
       const kinds = state.adapters
-        .filter((adapter) => (adapter.roles ?? []).some((claim) => claim.role === role))
+        .filter((adapter) => adapter.roles.some((claim) => claim.role === role))
         .flatMap((adapter) => (adapter.payload_paths ?? []).filter((paths) => paths.frame === frame).map((paths) => paths.kind));
       return [...new Set(kinds)];
     },

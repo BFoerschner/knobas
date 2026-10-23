@@ -217,10 +217,13 @@ function start(
           over.listSources ??
           (() =>
             Promise.resolve(
-              over.sources ?? [
-                { id: "jira", display_name: "Jira" },
-                { id: "teamcity", display_name: "TeamCity" },
-              ],
+              // As `list_sources` sends a source: its claims and misses, empty unless the test names them.
+              (
+                over.sources ?? [
+                  { id: "jira", display_name: "Jira" },
+                  { id: "teamcity", display_name: "TeamCity" },
+                ]
+              ).map((source) => ({ roles: [], role_misses: [], ...source })),
             )),
         syncStatus: () => Promise.resolve(sync),
         listen: over.listen ?? (() => Promise.resolve(() => {})),
@@ -944,7 +947,7 @@ test("the shell hands the source list's role claims to the surfaces (#1196)", as
 test("a finished sync reads the source list again, so a role its records missed stops answering (#1199)", async () => {
   const claim = [{ role: "ticket-system", reads: ["reachable_transitions"] }];
   const miss = { role: "ticket-system", kind: "ticket", field: "priority", path: "fields.priority.name" };
-  let answer: Awaited<ReturnType<TfShellPorts["listSources"]>> = [{ id: "jira", display_name: "Jira", roles: claim }];
+  let answer: Awaited<ReturnType<TfShellPorts["listSources"]>> = [{ id: "jira", display_name: "Jira", roles: claim, role_misses: [] }];
   const handlers = new Map<string, (event: { payload: unknown }) => void>();
   start({
     listSources: () => Promise.resolve(answer),
