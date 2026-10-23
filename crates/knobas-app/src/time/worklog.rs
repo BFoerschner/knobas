@@ -983,9 +983,9 @@ async fn log_with(
 /// [`Delivery::Background`], answer the copy once it is kept and send behind
 /// the answer.
 ///
-/// The last three steps of [`log`], extracted because #283's *Log all* takes
-/// exactly the same three and taking them a second way is how two paths come
-/// to disagree about whether a copy exists before a write is sent.
+/// The last three steps of [`log`]. *Log all* sends through [`log`] too, one
+/// ticked row at a time, so there is one path deciding whether a copy exists
+/// before a write is sent (#1657 retired the bulk one).
 ///
 /// **Queue first, copy second, flush third** -- see this module's docs. The
 /// copy has to carry the queue row's id before anything can settle it, because
@@ -1040,67 +1040,6 @@ async fn commit(
     .fetch_optional(&state.pool)
     .await?;
     settled.as_ref().map_or(Ok(worklog), worklog_of)
-}
-
-/// Log everything unlogged on one ticket inside one interval -- *Log all*'s
-/// single step (#283).
-///
-/// [`log`] with the reader taken out of it. The differences are the whole
-/// point of it being a second entry rather than a parameter on the first:
-///
-/// * **The interval is the caller's two instants**, not a date and an offset.
-///   The week timesheet computes seven of them in the webview, which is the
-///   only place a reader's midnights are known, and a week containing a
-///   daylight-saving change has two offsets across it.
-/// * **The seconds and the start are derived, never given.** In the draft they
-///   are the reader's account of their afternoon and knobas has no business
-///   overruling them; in a bulk action nobody has looked at a single one of
-///   them, so the only honest number is [`concatenate`]'s -- the blocks added
-///   up, gaps excluded.
-/// * **The comment is the caller's, and *Log all* passes an empty one.** A
-///   worklog with no words is a worklog (story 33); generated bullets nobody
-///   ticked are not.
-///
-/// # Errors
-/// `invalid` for a source that does not take worklogs and for a day whose
-/// blocks add up to nothing; `conflict` when the interval has no unlogged
-/// manual blocks on this ticket left; otherwise whatever the queue or the
-/// database says.
-pub(super) async fn log_within(
-    state: &SourcesState,
-    entity_id: &str,
-    from: DateTime<Utc>,
-    to: DateTime<Utc>,
-    comment: &str,
-    delivery: Delivery,
-) -> Result<Worklog, IpcError> {
-    if !takes_a_worklog_for(&state.pool, state.registry.as_ref(), entity_id).await? {
-        return Err(IpcError::invalid(format!(
-            "{entity_id} belongs to a source that does not take worklogs -- \
-             `{LOG_WORK}` is not in what its adapter declares"
-        )));
-    }
-    let spans = unlogged(&state.pool, entity_id, from, to).await?;
-    let Some((started_at, _, seconds)) = concatenate(&spans) else {
-        return Err(IpcError::conflict(format!(
-            "there is no unlogged time on {entity_id} in that interval -- it \
-             has been logged already, or the blocks are on another day"
-        )));
-    };
-    if seconds <= 0 {
-        return Err(IpcError::invalid(
-            "a worklog of no time is not a worklog -- edit the interval or leave \
-             the blocks unlogged",
-        ));
-    }
-    commit(
-        state,
-        entity_id,
-        (started_at, seconds, comment),
-        &spans,
-        delivery,
-    )
-    .await
 }
 
 #[cfg(test)]

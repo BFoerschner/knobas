@@ -309,8 +309,9 @@ ended_at: string, };
  *
  * The confirmation's line, and the acceptance criterion is that it exists
  * *before* anything is sent: a bulk write to a ticketing system is not
- * something to discover afterwards. [`log_all`] re-derives its own work
- * rather than taking this back, for the reason
+ * something to discover afterwards. The dialog sends each ticked line
+ * through the `log_work` command, which re-derives the blocks rather than
+ * taking them from this line, for the reason
  * [`worklog::log`](super::worklog::log) does not take block ids -- a caller
  * that could name the blocks could name another ticket's.
  */

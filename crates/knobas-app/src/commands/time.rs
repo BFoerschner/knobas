@@ -460,8 +460,8 @@ pub async fn week_timesheet(
 /// The confirmation's list, and it is a command of its own rather than a field
 /// on the timesheet because it is a different question: the timesheet is what
 /// the week *was*, and this is what a button is about to do to a ticketing
-/// system other people read. [`log_all`] re-derives its own work rather than
-/// being handed this back, for the reason [`log_work`] does not take block ids.
+/// system other people read. The dialog sends each row it ticks through
+/// [`log_work`], which re-derives the blocks rather than being handed them.
 ///
 /// **Takes no `Lifecycle`** and reaches the pool through the sources state, the
 /// shape [`worklog_draft`] records: the plan asks each target's *adapter*
@@ -479,35 +479,6 @@ pub async fn log_all_preview<R: tauri::Runtime>(
 ) -> Result<Vec<time::week::PlannedWorklog>, IpcError> {
     let sources = crate::sources::state(&app)?;
     time::week::plan(&sources.pool, sources.registry.as_ref(), &days).await
-}
-
-/// Log the week: one worklog per day and ticket, from that day's unlogged
-/// manual blocks (issue #283, spec story 43).
-///
-/// The worklogs it made. Each is queued and copied the way a single *Log* is,
-/// and sent behind the answer (#775), so they appear in the pending-writes
-/// panel like any other write.
-/// Passive and label blocks are untouched -- [`crate::time::week::plan`]
-/// carries why each exclusion is a rule rather than a filter.
-///
-/// A day and ticket that fails does **not** roll back the ones that succeeded:
-/// the copies are knobas' record of writes that may already have landed, and
-/// ADR-0012 forbids losing one. The failure is reported once the rest of the
-/// week is logged.
-///
-/// # Errors
-///
-/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
-/// [`Invalid`](crate::IpcErrorCode::Invalid) for a day list the timesheet
-/// would refuse, and otherwise whatever the queue or the database said.
-#[tauri::command]
-pub async fn log_all<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    days: Vec<time::week::DayWindow>,
-) -> Result<Vec<time::worklog::Worklog>, IpcError> {
-    let sources = crate::sources::state(&app)?;
-    // Answers on queue (#775): *Log all* closes before the week is sent.
-    time::week::log_all_in_background(&sources, &days).await
 }
 
 #[cfg(test)]
@@ -567,7 +538,6 @@ mod tests {
             "ad_hoc_block",
             "week_timesheet",
             "log_all_preview",
-            "log_all",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),
@@ -621,12 +591,11 @@ mod tests {
             ("start_timer", "inRoom"),
             ("ad_hoc_block", "blockId"),
             ("ad_hoc_block", "offsetMinutes"),
-            // One argument on all three, and it is a *list of structs*: Tauri
+            // One argument on both, and it is a *list of structs*: Tauri
             // renames the argument and leaves the fields inside it alone, so
             // `days` here and `day`, `from`, `to` inside each entry.
             ("week_timesheet", "days"),
             ("log_all_preview", "days"),
-            ("log_all", "days"),
         ] {
             let at = MIRROR
                 .find(&format!("\"{call}\""))

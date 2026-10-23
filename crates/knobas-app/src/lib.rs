@@ -409,7 +409,6 @@ pub fn run() {
             commands::time::ad_hoc_block,
             commands::time::week_timesheet,
             commands::time::log_all_preview,
-            commands::time::log_all,
             // Appended at the foot of the list rather than beside the other
             // `commands::entity::` lines: the barrel is append-only (§10.8),
             // and #288 was appending to it in the same week.
