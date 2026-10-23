@@ -60,7 +60,7 @@ use working_tree::TreeRead;
 // born here; what moved is three functions and no behaviour.
 use crate::settings::{read as read_setting, settable, write as write_setting};
 
-pub use open::{CheckoutSettings, Run, set_applications, settings};
+pub use open::{CheckoutSettings, set_applications, settings};
 
 /// The `knobas.setting` key holding the clones root.
 ///
