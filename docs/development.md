@@ -48,8 +48,8 @@ It does not replace the gate. `just docs-check` is the three cheap checks alone
 *Crates* and *Frontend* below (every directory under `crates/` and
 `app/src/lib/`, and every path a row names), and in `testenv/README.md` the
 live-suite recipes (every `<x>-live` recipe) and the `live-up` products (every
-product `testenv/live-lib.sh`'s `_live_main` knows). A new crate needs its row
-in the same PR.
+product `testenv/live-lib.sh`'s `_live_main` knows). A crate added without its
+row fails the gate.
 
 Clippy runs twice on purpose. `clippy` uses `--all-targets`, which pulls in
 every crate's dev-dependencies. Cargo unifies features across one invocation,

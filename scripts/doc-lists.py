@@ -7,11 +7,11 @@ lib directory or a `*-live` recipe is added without touching the doc, and three
 crates went without a row for months. Each check runs both ways: a member with
 no row, and a row naming no member.
 
-  docs/development.md   Crates     every directory under crates/ with a Cargo.toml
-  docs/development.md   Frontend   every directory under app/src/lib/; every
-                                   `app/...` path a row names exists
-  testenv/README.md     live suites  every justfile recipe named `<x>-live[-<y>]`
-  testenv/README.md     live-up    every product `_live_main` in testenv/live-lib.sh knows
+  docs/development.md   Crates       every directory under crates/ with a Cargo.toml
+  docs/development.md   Frontend     every directory under app/src/lib/; every
+                                     `app/...` path a row names exists
+  testenv/README.md     live suites  every public justfile recipe named `<x>-live[-<y>]`
+  testenv/README.md     live-up      every product `_live_main` in testenv/live-lib.sh knows
 
 The tree is what git lists (tracked, or untracked and not ignored) and is still
 on disk, so an ignored `target/` or a directory a branch switch left empty does
@@ -24,8 +24,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEV = "docs/development.md"
-TESTENV = "testenv/README.md"
+DEV_MD = "docs/development.md"
+TESTENV_README = "testenv/README.md"
 
 
 def tree_files():
@@ -71,36 +71,35 @@ def both_ways(where, have, named, what):
 
 def crates(files):
     have = {m.group(1) for f in files if (m := re.fullmatch(r"crates/([^/]+)/Cargo\.toml", f))}
-    named = {n for row in first_column(DEV, "| Crate | What it is |") for n in row}
-    return both_ways(f"{DEV}, Crates", have, named, "a directory under crates/ with a Cargo.toml")
+    named = {n for row in first_column(DEV_MD, "| Crate | What it is |") for n in row}
+    return both_ways(f"{DEV_MD}, Crates", have, named, "a directory under crates/ with a Cargo.toml")
 
 
 def frontend(files):
-    misses = []
-    for row in first_column(DEV, "| Path | What lives there |"):
-        for path in (p for n in row for p in expand(n)):
-            if path.endswith("/"):
-                ok = any(f.startswith(path) for f in files)
-            else:
-                ok = path in files
-            if not ok:
-                misses.append(f"{DEV}, Frontend: the row `{path}` names nothing that exists")
+    """Every lib directory has a row, and every path a row names exists (a
+    row may name a file, or a directory outside lib/, as `App.svelte`'s does)."""
+    named = {p for row in first_column(DEV_MD, "| Path | What lives there |") for n in row for p in expand(n)}
+    exists = {p for p in named if (any(f.startswith(p) for f in files) if p.endswith("/") else p in files)}
     dirs = {m.group(1) for f in files if (m := re.match(r"(app/src/lib/[^/]+/)", f))}
-    named = {p for row in first_column(DEV, "| Path | What lives there |") for n in row for p in expand(n)}
-    misses += [f"{DEV}, Frontend: `{d}` has no row (a directory under app/src/lib/)" for d in sorted(dirs - named)]
-    return misses
+    where = f"{DEV_MD}, Frontend"
+    return both_ways(where, dirs, dirs & named, "a directory under app/src/lib/") + both_ways(
+        where, exists, named, "a path under app/"
+    )
 
 
 def live_suites(_files):
+    # A recipe header at column 0: `name:`, `name param="x":`, quiet `@name:`;
+    # not `name := value`. Private `_x-live-y` helpers start with `_` and are
+    # skipped on purpose: they are not suites.
     recipes = set()
     for line in (ROOT / "justfile").read_text().splitlines():
-        m = re.match(r"([a-z][a-z0-9-]*)(\s[^:]*)?:(?!=)", line)
+        m = re.match(r"@?([a-z][a-z0-9_-]*)(\s[^:]*)?:(?!=)", line)
         if m and re.search(r".-live(-|$)", m.group(1)):
             recipes.add(m.group(1))
     named = set()
-    for row in first_column(TESTENV, "| Recipe | Suite |"):
+    for row in first_column(TESTENV_README, "| Recipe | Suite |"):
         named |= {n.removeprefix("just ") for n in row if n.startswith("just ")}
-    return both_ways(f"{TESTENV}, live suites", recipes, named, "a justfile recipe named <x>-live")
+    return both_ways(f"{TESTENV_README}, live suites", recipes, named, "a justfile recipe named <x>-live")
 
 
 def live_products(_files):
@@ -111,8 +110,8 @@ def live_products(_files):
     have = set(re.findall(r"^\s+([a-z0-9-]+)\) echo ", body.group(1), re.M))
     if not have:
         raise LookupError("testenv/live-lib.sh: `_live_main` names no product")
-    named = {n for row in first_column(TESTENV, "| Product | `live-up` starts |") for n in row}
-    return both_ways(f"{TESTENV}, live-up", have, named, "a product testenv/live-lib.sh's _live_main knows")
+    named = {n for row in first_column(TESTENV_README, "| Product | `live-up` starts |") for n in row}
+    return both_ways(f"{TESTENV_README}, live-up", have, named, "a product testenv/live-lib.sh's _live_main knows")
 
 
 def main():
