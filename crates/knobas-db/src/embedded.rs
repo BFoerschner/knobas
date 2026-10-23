@@ -81,7 +81,8 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 /// `postmaster.pid` still has a live server behind it.
 const LIVENESS_TIMEOUT: Duration = Duration::from_millis(500);
 
-/// Upper bound on the *first* connection to a server, before a pool exists.
+/// Upper bound on the first connection of a *first contact*: `KNOBAS_DB_URL`'s
+/// server, before anything has answered on it.
 ///
 /// M0 let `PgPoolOptions::connect` decide, and its acquire timeout is 30 s: a
 /// `KNOBAS_DB_URL` pointing at a dead port therefore left the boot screen on
@@ -353,6 +354,8 @@ impl Connector {
         Ok(pool)
     }
 
+    /// The app pool's settings, with no connection opened yet: the two
+    /// callers above differ only in how long they wait for the first one.
     fn app_pool_unconnected(&self) -> PgPool {
         let options = self.options.clone().options([(
             "statement_timeout",

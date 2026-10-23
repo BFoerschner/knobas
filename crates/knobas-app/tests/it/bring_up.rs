@@ -8,6 +8,7 @@
 //! is witnessed by what the next reader sees, never by where a word sits in
 //! the source.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -708,8 +709,8 @@ async fn a_failed_migration_stops_the_server_without_holding_the_runtime() {
 
     let registry = Registry::default();
     let app = mock_app(&profile, &registry);
-    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let ticker = tokio::spawn({
+    let released = Arc::new(AtomicBool::new(false));
+    let releaser = tokio::spawn({
         let released = Arc::clone(&released);
         let handle = app.handle().clone();
         let gate = gate.path().to_path_buf();
@@ -717,7 +718,7 @@ async fn a_failed_migration_stops_the_server_without_holding_the_runtime() {
             loop {
                 if handle.state::<Lifecycle>().get() == DbState::Migrating
                     && gate.join("waiting").exists()
-                    && !released.swap(true, std::sync::atomic::Ordering::SeqCst)
+                    && !released.swap(true, Ordering::SeqCst)
                 {
                     std::fs::write(gate.join("go"), b"").expect("the stop is released");
                 }
@@ -727,7 +728,7 @@ async fn a_failed_migration_stops_the_server_without_holding_the_runtime() {
     });
 
     knobas_app::bring_up(app.handle(), &profile, None, registry).await;
-    ticker.abort();
+    releaser.abort();
 
     assert!(
         matches!(app.state::<Lifecycle>().get(), DbState::Failed { .. }),
@@ -742,7 +743,7 @@ async fn a_failed_migration_stops_the_server_without_holding_the_runtime() {
         "the stop never waited on the archive command, so nothing here was witnessed"
     );
     assert!(
-        released.load(std::sync::atomic::Ordering::SeqCst),
+        released.load(Ordering::SeqCst),
         "the runtime's one thread did not run while the server's stop waited on it"
     );
 }
