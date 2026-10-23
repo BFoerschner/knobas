@@ -3192,6 +3192,7 @@ dependencies = [
  "governor",
  "http",
  "http-body",
+ "hyper",
  "knobas-http",
  "knobas-source",
  "reqwest",

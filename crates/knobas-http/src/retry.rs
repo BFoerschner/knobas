@@ -3,8 +3,11 @@
 //! Roadmap §4: three attempts, exponential, **429/502/503/504, connect errors
 //! and timeouts only**. Not 500 (a deterministic server bug repeated three
 //! times is three times the load and the same answer), and not 4xx (the
-//! request is wrong). Writes retry too, since M2's write-backs (issue #43):
-//! [`Request::json`](crate::Request::json) buffers its body, so a retry
+//! request is wrong). One more, for reads only: a `GET` or `HEAD` the server
+//! closed its connection on before answering is sent once more
+//! ([`closed_before_answering`], #1818). Writes retry too, since M2's
+//! write-backs (issue #43): [`Request::json`](crate::Request::json) buffers
+//! its body, so a retry
 //! re-sends the same bytes. A write that must not arrive twice opts out with
 //! [`Request::no_retry`](crate::Request::no_retry) (issue #1122).
 //!
@@ -39,6 +42,36 @@ pub const fn status_is_transient(status: u16) -> bool {
 #[must_use]
 pub fn error_is_transient(error: &reqwest::Error) -> bool {
     error.is_timeout() || error.is_connect()
+}
+
+/// A request whose connection the server closed before the answer's status
+/// line and headers were complete: hyper's `IncompleteMessage`, at the bottom
+/// of reqwest's error chain.
+///
+/// This is what a pooled keep-alive connection looks like when the server's
+/// idle timeout closes it just as the next request goes out on it -- Node's
+/// default is 5 s, and Kuma's `live_kuma` suite met it between two syncs. The
+/// request was written, so it may have been read: only a method that is safe
+/// to repeat may be sent again on it, and [`HttpClient::send`] does that once,
+/// for a `GET` or `HEAD` that did not opt out ([`Request::no_retry`]). A body
+/// that breaks off after its headers fails the body's read, never `send`, so
+/// it is not this.
+///
+/// [`HttpClient::send`]: crate::HttpClient::send
+/// [`Request::no_retry`]: crate::Request::no_retry
+#[must_use]
+pub fn closed_before_answering(error: &reqwest::Error) -> bool {
+    let mut cause = std::error::Error::source(error);
+    while let Some(error) = cause {
+        if error
+            .downcast_ref::<hyper::Error>()
+            .is_some_and(hyper::Error::is_incomplete_message)
+        {
+            return true;
+        }
+        cause = error.source();
+    }
+    false
 }
 
 /// How long to wait before attempt `attempt + 1`, counting from 1.
