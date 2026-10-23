@@ -23,9 +23,10 @@
   window was granted both profiles' folders whichever profile ran it (P13). Mirrored in
   `app/src/lib/ipc/backup.ts` (`openBackupFolder`), held by `commands/backup.rs`'s
   `the_mirror_invokes_the_commands_by_their_registered_names` (now six commands), answered by the
-  fake IPC (`fake/settings.ts`, opening nothing), called by `SectionPorts.openBackupFolder` in
-  `app/src/lib/tf/settings/ports.ts`, which loses its `directory` argument (the section's
-  `TfSettingsSections.test.svelte.ts` expects the call with none). Witnessed by
+  fake IPC (`fake/settings.ts`, opening nothing; its `Answers` line in `fake-answers.ts`), called
+  by `SectionPorts.openBackupFolder` in `app/src/lib/tf/settings/ports.ts`, which loses its
+  `directory` argument, as do the two *Open the backup folder* buttons in `TfBackupSection.svelte`
+  (the section's `TfSettingsSections.test.svelte.ts` expects the call with none). Witnessed by
   `tests/it/backup_ipc.rs`'s `open_backup_folder_opens_the_running_profiles_folder_and_no_other`
   and `a_folder_the_opener_refuses_is_an_error_that_names_it`, with `open_backup_folder` added to
   `every_backup_command_is_registered_and_its_arguments_decode`; and by `tests/it/wiring.rs`'s
