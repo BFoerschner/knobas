@@ -293,7 +293,11 @@ impl Searcher {
 
     /// What this installation is configured with, its sources given their
     /// declarations. One round trip, the one every query already made.
-    async fn vocabulary(&self) -> Result<Vocabulary, SearchError> {
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the read fails.
+    pub async fn vocabulary(&self) -> Result<Vocabulary, SearchError> {
         Ok(Vocabulary::load(&self.pool, self.kinds.clone())
             .await?
             .declaring(&self.payload_paths))
@@ -423,13 +427,29 @@ impl Searcher {
         raw: &str,
         kind: &str,
     ) -> Result<Option<Vec<String>>, SearchError> {
+        let vocab = self.vocabulary().await?;
+        self.matching_ids_in(&vocab, raw, kind).await
+    }
+
+    /// [`matching_ids`](Self::matching_ids) against a vocabulary the caller
+    /// already loaded from [`vocabulary`](Self::vocabulary), for a command that
+    /// needs the identity in it too and so loads it once (#1659).
+    ///
+    /// # Errors
+    ///
+    /// As [`matching_ids`](Self::matching_ids).
+    pub async fn matching_ids_in(
+        &self,
+        vocab: &Vocabulary,
+        raw: &str,
+        kind: &str,
+    ) -> Result<Option<Vec<String>>, SearchError> {
         let query = validate(SearchQuery {
             raw: raw.to_owned(),
             limit: 1,
             filters: SearchFilters::default(),
         })?;
-        let vocab = self.vocabulary().await?;
-        let parsed = query::parse(&query.raw, &vocab);
+        let parsed = query::parse(&query.raw, vocab);
         let mut filters = query::merge(&parsed, &query.filters);
         let words = parsed
             .query

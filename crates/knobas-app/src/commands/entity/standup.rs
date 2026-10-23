@@ -479,14 +479,13 @@ async fn action_item_payload(
     get_note_inner(pool, note_id).await?;
     Ok((
         project_ref,
-        serde_json::json!({
-            "CreateTicket": {
-                "entity": project,
-                "title": title,
-                "body": body,
-                "ticket_type": ticket_type,
-            }
-        }),
+        serde_json::to_value(knobas_source::WriteOp::CreateTicket {
+            entity: project.to_owned(),
+            title: title.to_owned(),
+            body: body.to_owned(),
+            ticket_type: ticket_type.to_owned(),
+        })
+        .map_err(IpcError::internal)?,
     ))
 }
 
@@ -516,15 +515,15 @@ pub async fn action_item_ticket_inner(
     let write = knobas_core::write_queue::get(pool, write_id)
         .await?
         .ok_or_else(|| IpcError::not_found(format!("no queued write with id {write_id}")))?;
-    let create = write
-        .payload
-        .get("CreateTicket")
-        .filter(|_| write.op == "create_ticket")
-        .ok_or_else(|| IpcError::invalid(format!("write {write_id} does not file a ticket")))?;
-    let title = create
-        .get("title")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
+    // ADR-0007: the queued payload is knobas's own `WriteOp`, so it is read as
+    // one. Fail-closed and pinned: a payload that is not a ticket's create
+    // (or not a `WriteOp` at all) is refused, never read as a title-less create.
+    let not_a_ticket = || IpcError::invalid(format!("write {write_id} does not file a ticket"));
+    let title = match serde_json::from_value::<knobas_source::WriteOp>(write.payload.clone()) {
+        Ok(knobas_source::WriteOp::CreateTicket { title, .. }) => title,
+        _ => return Err(not_a_ticket()),
+    };
+    let title = title.as_str();
     let mut ticket_entity_id = None;
     let mut linked = false;
     if write.state == knobas_core::write_queue::WriteState::Sent {

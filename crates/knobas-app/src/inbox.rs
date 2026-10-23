@@ -87,11 +87,15 @@ pub async fn stream(
     now: DateTime<Utc>,
     shelf: Shelf,
 ) -> Result<Vec<InboxEntry>, IpcError> {
-    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    // One listing of the sources for both the paths and the ops (#1659).
+    let sources = knobas_sync::config::list(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    let declared = declared_ops_of(&sources, registry);
+    let declarations = crate::sources::paths::declared_paths_of(sources, registry);
     let items = inbox::items(pool, identity, now, shelf, &declarations)
         .await
         .map_err(IpcError::internal)?;
-    let declared = declared_ops(pool, registry).await?;
     Ok(items
         .into_iter()
         .map(|item| InboxEntry {
@@ -137,26 +141,23 @@ fn offer(category: Category, declared: Option<&Vec<String>>) -> Vec<String> {
 /// kind, not of the instance, so this needs no secret and no built adapter.
 /// That is `sources::write_queue::submittable`'s reading and this must agree
 /// with it, or the inbox would offer a button that call then refuses.
-async fn declared_ops(
-    pool: &PgPool,
+fn declared_ops_of(
+    sources: &[knobas_sync::config::SourceConfigRow],
     registry: &dyn AdapterRegistry,
-) -> Result<HashMap<String, Vec<String>>, IpcError> {
+) -> HashMap<String, Vec<String>> {
     let by_kind: HashMap<String, Vec<String>> = registry
         .descriptors()
         .into_iter()
         .map(|d| (d.adapter_kind, d.write_ops))
         .collect();
-    let sources = knobas_sync::config::list(pool)
-        .await
-        .map_err(IpcError::internal)?;
-    Ok(sources
-        .into_iter()
+    sources
+        .iter()
         .filter_map(|source| {
             by_kind
                 .get(&source.adapter_kind)
-                .map(|ops| (source.id, ops.clone()))
+                .map(|ops| (source.id.clone(), ops.clone()))
         })
-        .collect())
+        .collect()
 }
 
 /// The two answers the inbox itself records.

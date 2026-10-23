@@ -7,11 +7,25 @@
 //! `generate_handler!` list in `crate::run` are the only shared surfaces, both
 //! append-only and orchestrator-owned.
 //!
-//! Every command is a thin shim: take the arguments Tauri deserialised, call
+//! Most commands are a thin shim: take the arguments Tauri deserialised, call
 //! the crate that owns the behaviour, convert the failure into an
-//! [`IpcError`](crate::IpcError). Nothing here decides anything -- when a
-//! command grows a policy, that policy belongs in a crate below it, with its
-//! own tests.
+//! [`IpcError`](crate::IpcError). When a command grows a policy, that policy
+//! belongs in a crate below it, with its own tests.
+//!
+//! **The exceptions, named rather than denied** (#1659): some `_inner`
+//! functions here still hold their own SQL or a resolution rule, and are not
+//! yet moved below. Among them `entity/builds.rs` (`with_commits`,
+//! `JOB_PIPELINES`), `entity/detail.rs` (`DETAIL`), `entity/lookups.rs`
+//! (`RESOLVE_URL`, `CODE_FACTS`), `entity/standup.rs` (`ticket_titled`),
+//! `entity/board.rs` (`saved_view_board_laned`), `entity/links.rs`
+//! (`create_link_inner`'s two-way transaction), `entity/viewed.rs` and
+//! `app.rs`. The full list, with lines and the grep that finds them, is the
+//! one `backlog` issue #1870. What is already settled: who am I
+//! (`identity_of`), the declared paths and the stored declarations are each
+//! derived once per command, through `identity_of`,
+//! `sources::paths::declared_paths` and [`search::declare`] /
+//! [`search::searcher`], not re-read in a body. (`docs_tree` still lists the
+//! sources twice, once for the paths and once in `sources::crud::fillers`.)
 
 pub mod app;
 pub mod assets;

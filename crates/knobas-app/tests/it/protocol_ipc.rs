@@ -1248,3 +1248,35 @@ async fn the_ticket_read_refuses_a_write_that_files_no_ticket() {
         .expect_err("not a ticket's write");
     assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
 }
+
+/// **#1660, both directions of the ADR-0007 read.** The queued payload is read
+/// as the `WriteOp` it is: a `CreateTicket` whose shape has drifted (no title
+/// here) is refused as not a ticket's create, never read as a create with an
+/// empty title that links to nothing and answers `linked: false` for good.
+/// The other direction, a `CreateTicket` with a title, links in
+/// `an_action_item_answers_once_queued_and_its_ticket_is_named_and_linked_behind_it`.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_ticket_read_refuses_a_create_whose_shape_is_not_a_write_op() {
+    let harness = Harness::new("protocol_ticket_read_drifted").await;
+    let opened = harness.open().await;
+    let filed = create_action_item_ticket_inner(
+        &harness.state,
+        &opened.note_id,
+        &format!("{TRACKER}:PAY"),
+        "Task",
+        "Ask Ines about the SEPA retry",
+        "",
+    )
+    .await
+    .expect("the create is queued");
+    sqlx::query("update knobas.write_queue set payload = $2 where id = $1")
+        .bind(filed.write_id)
+        .bind(serde_json::json!({"CreateTicket": {"entity": "tracker:PAY", "summary": "x"}}))
+        .execute(harness.pool())
+        .await
+        .unwrap();
+    let refused = action_item_ticket_inner(harness.pool(), &opened.note_id, filed.write_id)
+        .await
+        .expect_err("a drifted shape is not a ticket's create");
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
+}

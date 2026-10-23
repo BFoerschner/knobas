@@ -169,18 +169,7 @@ pub async fn mini_board_laned(
         None => Vec::new(),
     };
     let declarations = declared_paths(pool, registry).await?;
-    let only = match query.map(str::trim).filter(|query| !query.is_empty()) {
-        Some(query) => {
-            crate::commands::search::searcher(pool, registry)
-                .await?
-                .matching_ids(query, "ticket")
-                .await?
-        }
-        None => None,
-    };
-    let identity = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
-        .await?
-        .identity;
+    let (only, identity) = tickets_matching(pool, registry, query).await?;
     Ok(knobas_core::mini_board::read_scoped(
         pool,
         knobas_core::mini_board::Scope {
@@ -195,6 +184,27 @@ pub async fn mini_board_laned(
         per_column,
     )
     .await?)
+}
+
+/// The ticket ids a board's search admits (`None`: no search, nothing
+/// narrowed) and the identity `@me` resolves to, from **one** vocabulary read:
+/// the searcher loads it for the parse, and the board wants the identity out
+/// of the same load rather than a second one (#1659). Without a search the
+/// identity alone is read, and no searcher is built.
+async fn tickets_matching(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    query: Option<&str>,
+) -> Result<(Option<Vec<String>>, Vec<String>), IpcError> {
+    let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) else {
+        return Ok((None, identity_of(pool).await?));
+    };
+    let searcher = crate::commands::search::searcher(pool, registry).await?;
+    let vocabulary = searcher.vocabulary().await?;
+    let only = searcher
+        .matching_ids_in(&vocabulary, query, "ticket")
+        .await?;
+    Ok((only, vocabulary.identity))
 }
 
 /// A saved view's board, such as a Jira view's (#877, #1245, R-3.21, R-3.24):
@@ -268,19 +278,12 @@ pub async fn saved_view_board_laned(
         .map(|(at, id)| (id.as_str(), at))
         .collect();
     let mut only = members.clone();
-    if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty())
-        && let Some(matched) = crate::commands::search::searcher(pool, registry)
-            .await?
-            .matching_ids(query, "ticket")
-            .await?
-    {
+    let (matched, identity) = tickets_matching(pool, registry, query).await?;
+    if let Some(matched) = matched {
         let matched: std::collections::HashSet<String> = matched.into_iter().collect();
         only.retain(|id| matched.contains(id));
     }
     let declarations = declared_paths(pool, registry).await?;
-    let identity = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
-        .await?
-        .identity;
     let whole = knobas_core::mini_board::read_scoped(
         pool,
         knobas_core::mini_board::Scope {

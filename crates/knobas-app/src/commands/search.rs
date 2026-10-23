@@ -355,6 +355,19 @@ pub async fn searcher(
     )
 }
 
+/// Store this process's declarations and build nothing else: [`searcher`]
+/// for a command that wants the stored copy written (the census, `under:`,
+/// the Docs spaces read it) and never searches, so it skips the
+/// notes-visibility read the searcher makes (#1659).
+///
+/// # Errors
+///
+/// `internal` if the declarations cannot be written.
+pub async fn declare(pool: &PgPool, registry: &dyn AdapterRegistry) -> Result<(), IpcError> {
+    knobas_search::Searcher::declaring(pool.clone(), registry.descriptors()).await?;
+    Ok(())
+}
+
 /// [`search`], against a pool and a registry.
 ///
 /// # Errors

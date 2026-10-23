@@ -573,6 +573,11 @@ knobas-app	test/it	clone_ipc::the_app_clones_over_https_and_ssh_only
 knobas-app	test/it	clone_ipc::two_starts_at_once_start_one_clone
 knobas-app	test/it	code_facts_ipc::a_repository_reads_its_declared_language_and_teams
 knobas-app	test/it	code_facts_ipc::an_author_is_mine_when_it_is_the_sources_configured_username
+knobas-app	test/it	command_statements::a_searched_laned_board_derives_each_once
+knobas-app	test/it	command_statements::docs_tree_derives_identity_declarations_and_sources_once
+knobas-app	test/it	command_statements::inbox_items_lists_the_sources_once
+knobas-app	test/it	command_statements::list_projects_declares_without_reading_the_notes_setting
+knobas-app	test/it	command_statements::the_counter_sees_a_statement
 knobas-app	test/it	config_schema_mirror::a_fixture_that_is_gone_stops_the_test
 knobas-app	test/it	config_schema_mirror::a_literal_that_is_not_as_const_stops_the_test
 knobas-app	test/it	config_schema_mirror::a_name_the_fixture_cannot_resolve_stops_the_test
@@ -896,6 +901,7 @@ knobas-app	test/it	protocol_ipc::publishing_a_date_twice_queues_one_page
 knobas-app	test/it	protocol_ipc::publishing_creates_the_page_and_links_it_both_ways
 knobas-app	test/it	protocol_ipc::publishing_with_no_target_refuses_rather_than_guessing
 knobas-app	test/it	protocol_ipc::the_stored_target_is_what_the_next_publish_uses
+knobas-app	test/it	protocol_ipc::the_ticket_read_refuses_a_create_whose_shape_is_not_a_write_op
 knobas-app	test/it	protocol_ipc::the_ticket_read_refuses_a_write_that_files_no_ticket
 knobas-app	test/it	read_plans::every_reshaped_read_plans_without_estimates_on_analyzed_tables
 knobas-app	test/it	read_plans::every_reshaped_read_plans_without_estimates_on_tables_never_analyzed

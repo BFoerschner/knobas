@@ -14951,3 +14951,58 @@ Reviewed 2026-10-23 by the merge-manager (Opus).
 - **#1858's `common_word` ruling stays reversed.** *Ruling:* confirmed. *Reasoning:* the flag kept
   the mirror away from the list it flipped on; with the list capped, the plan test holds on the
   mirror the probe seeds. *Reversing:* low.
+## #1659 and #1660: derive once per command; read a queued create through WriteOp (Sonnet implementer, 2026-10-23)
+
+- **Which "laned ticket-board read".** *Fork:* `mini_board_laned` or `saved_view_board_laned`.
+  *Ruling:* the count test measures `mini_board_laned` with a search (the path with all three
+  derivations); both boards share the new `tickets_matching` helper, so the saved view gets the same
+  saving. *Reversing:* trivial, add a saved-view fixture to the test.
+- **Where "moved below the shim" stops.** *Fork:* move the five statement-holding reads into
+  `knobas-core` or name them as exceptions (the ticket allows either, with one `backlog` follow-up
+  per file not moved). *Ruling:* named in `commands/mod.rs`'s doc, with a
+  `backlog` follow-up (filed as #1870 to #1874, one per file; folded into #1870 by the
+  merge-manager, below). *Reasoning:* a Sonnet-sized measured refactor; moving five policies is five tickets of its
+  own. *Reversing:* n/a.
+- **`searcher()` split.** *Fork:* commands that discard the searcher still paid its notes-visibility
+  read. *Ruling:* `search::declare` stores the declarations and builds nothing; every discarding call
+  site (docs, projects, link sets) uses it. `Searcher::vocabulary` is public and `matching_ids_in`
+  takes a loaded vocabulary, so a searched board loads the vocabulary once. *Reversing:* trivial.
+- **`docs_tree` keeps one repeated source listing.** *Fork:* `declared_paths` and `fillers` each
+  list the sources. *Ruling:* left; `role_scope` lists the sources and reads the role check itself,
+  and sharing the list means a new `role_scope_in` in `sources::crud`. `docs_tree` still drops from 10
+  to 9. *Reversing:* small.
+- **#1660: the write queue is untouched.** The payload is still the serialised `WriteOp`;
+  `action_item_payload` now builds it with `serde_json::to_value(WriteOp::CreateTicket {..})`, whose
+  output is the same externally tagged shape. Nothing stored or replayed changes.
+
+Reviewed 2026-10-23 by the merge-manager (Opus), PR #1876.
+
+- **One follow-up for the class, not five.** *Fork:* #1659's body asks for "one `backlog` follow-up
+  per file not moved"; Björn's rule of 2026-10-23 (merge-manager brief, *Filing a follow-up*) says
+  one issue per root cause. *Ruling:* the newer rule wins. #1870 is the class issue: every instance
+  with `path:line` and the grep that found them, including `lookups.rs`, `viewed.rs`, `app.rs` and
+  `set_pipeline_pinned_inner`, which #1659 did not name. #1871 to #1874 are closed into it. The
+  `commands/mod.rs` doc cites #1870 and puts `RESOLVE_URL` in `lookups.rs`, where it lives.
+  *Reversing:* cheap, reopen the four.
+- **The statement counter is never the only dispatcher.** *Fork:* the counter's zero-count retry
+  and `rebuild_interest_cache` hid a race rather than closing it. While the counter's thread-local
+  dispatcher is the only one registered, tracing-core 0.1.36 takes its `has_just_one` path: the
+  interest of a callsite first registered on another test's thread, and the max level a rebuild
+  sets, come from *that* thread's default (`never`, `OFF`). A count can then come up short, and not
+  only to zero: a slow statement logs at `WARN`, through a callsite of its own. *Ruling:* a
+  process-lifetime `NoSubscriber` dispatch keeps two or more dispatchers registered while counting,
+  so every interest and max level is the union over the live ones. The global
+  `rebuild_interest_cache` call is gone, since it rewrote the process's max level from whichever
+  thread called it. The zero retry stays, at three tries, for a callsite whose first registration
+  straddles the counter's. *Reversing:* trivial.
+- **`action_item_ticket_inner` drops the `op == "create_ticket"` cross-check.** *Fork:* keep it
+  beside the variant match. *Ruling:* dropped. `op` is derived from the variant
+  (`WriteOp::identifier`), and the variant match is the check ADR-0007 asks for. The stored payload
+  is the same JSON value (`jsonb`, externally tagged, the same four fields), so the queue's storage
+  and replay are unchanged and no §10.8 entry is due. *Reversing:* trivial.
+- **`standup.rs` joins the write choke point's `HANDS_TO_THE_QUEUE`.** *Fork:* the gate's
+  `write_choke_point` test refused `standup.rs` for naming `WriteOp`; list it, or move the build and
+  the read-back into `sources/write_queue.rs`, which is listed already. *Ruling:* list it, beside
+  `start_work/plan.rs` and `time/worklog.rs`, which build ops for the queue the same way; it
+  contains no `.write(` call, which the list still forbids. *Reversing:* small, two helpers in
+  `sources/write_queue.rs` and the entry removed.
