@@ -277,8 +277,9 @@ async fn activity_records_and_lists() {
     .unwrap();
 
     let entity_id = t.to_string();
-    // Wide enough that lines other tests write meanwhile cannot push ours out.
-    let rows = activity::recent(&pool, 500, None).await.unwrap();
+    // Scoped to the ticket this test seeded: the global stream's newest ten
+    // are whichever lines the file's other tests wrote last (#1907).
+    let rows = activity::recent(&pool, 10, Some(&t)).await.unwrap();
     assert!(
         rows.iter()
             .any(|r| r.verb == "commented" && r.entity_id.as_deref() == Some(entity_id.as_str()))

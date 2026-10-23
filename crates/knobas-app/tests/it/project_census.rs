@@ -9,8 +9,9 @@
 //! change the trigger code claims to follow, and pins the newest name per
 //! project with literal expectations of its own.
 //!
-//! Its own database (one per test file, #572), so it may write
-//! `sync.parent_declaration` freely.
+//! `sync.parent_declaration` is one row per adapter kind, and every test's
+//! [`pool`] writes it back, so the test that rewrites it takes a database of
+//! its own ([`own_pool`], #1907).
 
 use knobas_app::commands::entity::list_projects_inner;
 use knobas_app::sources::Registry;
@@ -19,6 +20,20 @@ use sqlx::PgPool;
 async fn pool() -> PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
+    declared(pool).await
+}
+
+async fn own_pool(label: &str) -> PgPool {
+    let pool = knobas_db::test_util::scratch_database(label)
+        .await
+        .pool(4)
+        .await
+        .expect("a pool on the scratch database");
+    declared(pool).await
+}
+
+/// The declarations' stored copy, written as bring-up writes it (ADR-0019).
+async fn declared(pool: PgPool) -> PgPool {
     knobas_app::commands::search::searcher(&pool, &Registry::for_process())
         .await
         .unwrap();
@@ -139,7 +154,7 @@ fn row(source: &str, key: &str, name: Option<&str>) -> Row {
 /// walk and with what it should say. One test: the steps build on each other.
 #[tokio::test]
 async fn the_census_is_the_walk_after_every_change() {
-    let pool = pool().await;
+    let pool = own_pool("project_census_walk").await;
     let a = configured(&pool, "jira").await;
     let b = configured(&pool, "jira").await;
     let both = [a.as_str(), b.as_str()];
