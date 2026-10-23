@@ -14268,7 +14268,7 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   `HttpClient::with_redirect_check(config, check)`. *Reasoning:* reqwest's redirect policy is set
   on the `reqwest::Client`, and its `Attempt` cannot see the request, so a per-request option
   would need a third reqwest client inside every `HttpClient`, adapters' included. An
-  `HttpConfig` field would have to be added to the seven adapter constructors that name every
+  `HttpConfig` field would have to be added to the six adapter constructors that name every
   field, each one a chance to get it wrong. A constructor of its own leaves `HttpClient::new`
   and every adapter's client exactly as they were; `remote::get` builds one client per read
   anyway. *Reversing:* low.
