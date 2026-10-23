@@ -12885,3 +12885,75 @@ The measurement came after it.
   asks about is `postmaster.pid`'s, and #1775 states it correctly. *Reversing:* low.
 - **The `owner_lock: None` grep criterion.** *Ruling:* ticked. The one hit is `existing_url`'s
   arm, a server knobas does not manage. It is no adoption arm and no borrower. *Reversing:* n/a.
+### #1771: a loosening after a quiet has what the quiet refilled (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): the frozen-surface
+  change to `crates/knobas-http/**`.** *Fork:* change the frozen crate's limiter, or leave #1771
+  open until Björn signs it off. *Ruling:* change it, private to `limiter.rs` behind the
+  unchanged public `InstanceLimiter`: `Slot::register`'s loosening branch, `Paced::loosened` in
+  place of `Paced::drained`, and `Rate::refilled_in` shared with `Paced::tightened`, whose `u128`
+  `Paced::with_left` now saturates itself. No signature,
+  `HttpConfig` field or adapter change, and #1729's `watch_local_quota` mark is untouched. Booked
+  in `docs/contract/10.8/1771-knobas-http-loosening-after-a-quiet-has-what-it-refilled.md`.
+  *Reasoning:* as for #1740 and #1764: the waiver covers this spec's frozen-surface steps, and the
+  change is the limiter's own arithmetic. *Reversing:* low, one branch.
+- **What a loosening is credited with.** *Fork:* the quiet only (what the looser rate refills in
+  `Slot::idle()`, at most its burst), or also the replaced limiter's unspent requests counted in
+  seconds, as a tightening is. *Ruling:* the quiet only. *Reasoning:* the seconds conversion runs
+  the wrong way on a loosening: a full stricter limiter at 1/s burst 10 is ten seconds, a thousand
+  requests at 100/s, and it is full right after it was built, so the conversion would be #1728's
+  fresh burst on every alternation. The quiet is safe: nothing was sent for that long, so the
+  looser quota's bucket over the real requests would hold at least that much. A back-to-back
+  alternation has a quiet of milliseconds and starts drained (the transport tests
+  `a_loosening_right_away_starts_drained` and `a_tightening_after_a_loosening_starts_with_what_was_left`,
+  and the module test `a_loosening_right_away_takes_nothing_from_a_full_limiter`). *Reversing:* low, one expression.
+- **A change looser in one field and stricter in the other.** *Ruling:* still a loosening (#1728),
+  now credited with the quiet at its rate, capped at its burst. *Reasoning:* the cap is the
+  stricter burst, so nothing past either field is sent. *Reversing:* n/a.
+- **A loosening before any grant.** *Ruling:* the quiet counts from `Slot::born`, as for a
+  tightening (#1764's merge review). *Reasoning:* the slot's first limiter was built with its
+  whole burst then, and a looser quota governing from `born` would have started full too.
+  *Reversing:* n/a.
+- **How the tests wait.** *Ruling:* real sleeps, as #1764 ruled: one 500 ms quiet each in
+  `a_loosening_after_a_quiet_starts_with_what_the_quiet_refilled` (burst 4 at 10/s refills in
+  0.4 s) and `a_request_ends_the_quiet_before_a_loosening` (at most two at 20/s after the request,
+  against eight counted from the build). *Reversing:* low.
+- **Live suite and transport test.** *Ruling:* none owed, as for #1740 and #1764. *Reasoning:* no
+  live suite seeds two quotas on one server, and the module tests go through `for_origin`,
+  `Slot::register` and `Paced::loosened`, the path a client takes. `a_loosening_right_away_starts_drained`
+  and `a_quota_loosens_once_the_stricter_client_is_gone` still pin the transport side.
+  *Reversing:* n/a.
+
+### #1771: merge review of PR #1777 (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by the implementer on Opus: the frozen-surface change.** *Fork:*
+  confirm the implementer's ruling, or send it back. *Ruling:* confirmed. The change stays inside
+  `limiter.rs` behind the unchanged public `InstanceLimiter`, and the §10.8 entry names the
+  loosening branch, `Paced::loosened`, `Rate::refilled_in`, `with_left`'s `u128`, the tests and the
+  one renamed transport test, which is the whole diff. *Reversing:* low.
+- **A loosening-specific test for the refill's units.** *Fork:* rely on #1764's
+  `a_quiet_is_counted_at_the_stricter_rate`, which kills a units error in the shared
+  `Rate::refilled_in`, or add one on the loosening path. *Ruling:* add
+  `a_short_quiet_credits_a_loosening_in_proportion` (150 ms at 10/s, burst 50: between 1 and 10).
+  *Reasoning:* a mutant on the loosening path alone (`refilled_in(idle * 1000)` in
+  `Paced::loosened`) survived every other test; this one kills it, and kills the shared helper off
+  by a thousand in both directions. No other test pins a loosening's credit between drained and
+  full. *Reversing:* low, one test.
+- **The name `a_loosened_quota_starts_drained`.** *Fork:* keep it because the ticket's criteria
+  name it, or rename it. *Ruling:* renamed `a_loosening_right_away_starts_drained`, body unchanged.
+  *Reasoning:* a loosening now starts drained only right after a request, so the old name says
+  something false. The criterion asks that the behaviour stays green, and it does under the new
+  name. *Reversing:* low.
+- **Right after a grant, a loosening has nothing.** *Ruling:* confirmed. *Reasoning:*
+  `refilled_in` rounds down, so a quiet of microseconds is 0 below about 10⁵ requests a second.
+  The transport tests `a_loosening_right_away_starts_drained` and
+  `a_tightening_after_a_loosening_starts_with_what_was_left` pin #1728's alternation, and
+  `a_loosening_right_away_takes_nothing_from_a_full_limiter` pins it at module level.
+- **Waits still on the replaced limiter.** *Fork:* accept, or spend the replaced limiter at the
+  loosening as a tightening does. *Ruling:* accept. *Reasoning:* a holder that cloned the old
+  limiter before the swap can still be let through on it. Drained, the new limiter absorbed that;
+  credited, each such grant is one over the looser quota. The bound is one request per wait in
+  flight at the swap, which is the bound #1772 accepted for its `Relaxed` read. A wait on the old
+  limiter means it was drained, so the quiet credited is at most one of its emission intervals.
+  Spending it would not help: those waiters are let through by its refill, not its burst.
+  *Reversing:* low.

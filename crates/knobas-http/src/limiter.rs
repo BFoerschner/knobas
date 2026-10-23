@@ -25,15 +25,17 @@
 //! A changed quota is a new governor limiter, which every holder waits on
 //! from its next request. Two sources at different quotas on one server,
 //! syncing one after the other, would be handed a fresh burst on every
-//! alternation if either kind of change started full. A **loosening** starts
-//! drained. A **tightening** starts with the credit the limiter it replaces
-//! had left (#1740): as many seconds of the stricter rate as the old
-//! limiter's unspent requests were seconds of its own, or, if more, what the
-//! stricter rate refills in the time since any of the origin's limiters last
-//! let a request through (#1764), at most the stricter burst. A tightening
-//! after a quiet at least as long as the stricter burst's refill therefore
-//! has the whole stricter burst, as in #1630, however fast the old quota
-//! refills; one right after the old quota's requests has what they left.
+//! alternation if either kind of change started full. Both count the
+//! **quiet**: the time since any of the origin's limiters last let a request
+//! through (#1764). A **loosening** starts with what the looser rate refills
+//! in the quiet, at most its burst, and nothing of what the limiter it
+//! replaces had left (#1728, #1771). A **tightening** starts with the credit
+//! the limiter it replaces had left (#1740): as many seconds of the stricter
+//! rate as the old limiter's unspent requests were seconds of its own, or, if
+//! more, what the stricter rate refills in the quiet, at most the stricter
+//! burst. Either change after a quiet at least as long as the new burst's
+//! refill therefore has the whole new burst, as in #1630; a loosening right
+//! after a request starts drained, and a tightening has what was left.
 //!
 //! [`InstanceLimiter`] is public so a sender outside [`HttpClient`] -- the
 //! wasm host's network policy (#1631) -- can wait on the same quota.
@@ -248,6 +250,12 @@ impl Rate {
             burst: self.burst.min(other.burst),
         }
     }
+
+    /// How many requests this rate refills in `idle`, rounded down and not
+    /// capped at the burst.
+    fn refilled_in(self, idle: Duration) -> u128 {
+        idle.as_nanos() * u128::from(self.per_second.get()) / 1_000_000_000
+    }
 }
 
 /// A holder's stake in its origin's quota: the slot counts the quota it was
@@ -299,10 +307,11 @@ impl Slot {
     ///
     /// A changed quota is a new governor limiter -- governor cannot change
     /// the quota of one it has built -- and every holder waits on it from its
-    /// next request. One looser in either field starts drained, so a
-    /// loosening never sends a burst the limiter it replaces would have held
-    /// back; a stricter one takes over what the old one had left, or what
-    /// the stricter rate refilled since the origin's last request
+    /// next request. One looser in either field starts with what its rate
+    /// refilled since the origin's last request ([`Paced::loosened`]), so a
+    /// loosening hands out what the quiet earned and nothing the limiter it
+    /// replaces had left; a stricter one takes over what the old one had
+    /// left, or what the stricter rate refilled since then
     /// ([`Paced::tightened`]).
     fn register(&self, asked: Rate) -> Arc<Registration> {
         let registration = Arc::new(Registration);
@@ -317,7 +326,7 @@ impl Slot {
         if rate != held.paced.rate {
             let loosens = rate.stricter(held.paced.rate) != rate;
             held.paced = Arc::new(if loosens {
-                Paced::drained(rate)
+                Paced::loosened(rate, self.idle())
             } else {
                 Paced::tightened(&held.paced, rate, self.idle())
             });
@@ -371,15 +380,24 @@ impl Paced {
         }
     }
 
-    /// A limiter at `rate` whose burst is already spent: the first request
-    /// waits for the refill.
-    fn drained(rate: Rate) -> Self {
-        Self::with_left(rate, 0)
+    /// A limiter at `rate`, looser than the one it replaces in at least one
+    /// field, for an origin that has let nothing through for `idle`: it
+    /// starts with what `rate` refills in `idle`, at most its burst (#1771).
+    ///
+    /// Not with what the old limiter had left (#1728): a full stricter
+    /// limiter, counted in seconds of the looser rate, would hand out a fresh
+    /// burst on every alternation of two quotas. The quiet itself is safe to
+    /// credit: nothing was sent for that long, so the looser quota would have
+    /// refilled that much had it governed throughout. Right after a request
+    /// the quiet is milliseconds and the limiter starts drained.
+    fn loosened(rate: Rate, idle: Duration) -> Self {
+        Self::with_left(rate, rate.refilled_in(idle))
     }
 
     /// A limiter at `rate` with `left` requests to send at once, at most its
     /// whole burst.
-    fn with_left(rate: Rate, left: u32) -> Self {
+    fn with_left(rate: Rate, left: u128) -> Self {
+        let left = u32::try_from(left).unwrap_or(u32::MAX);
         let paced = Self::new(rate);
         // A fresh limiter has its whole burst, and this is at most that, so
         // it always fits.
@@ -412,9 +430,9 @@ impl Paced {
     fn tightened(old: &Self, rate: Rate, idle: Duration) -> Self {
         let left = u128::from(old.take_left()) * u128::from(rate.per_second.get())
             / u128::from(old.rate.per_second.get());
-        let refilled = idle.as_nanos() * u128::from(rate.per_second.get()) / 1_000_000_000;
+        let refilled = rate.refilled_in(idle);
         // `with_left` caps it at the new burst.
-        Self::with_left(rate, u32::try_from(left.max(refilled)).unwrap_or(u32::MAX))
+        Self::with_left(rate, left.max(refilled))
     }
 
     /// Take every request this limiter could send at once, and count them.
@@ -613,9 +631,9 @@ mod tests {
         assert!(strict.slot.current().take_left() <= 2);
     }
 
-    /// A loosening does not end the quiet (#1764): its limiter starts
-    /// drained, but nothing was sent, so the stricter quota coming back half
-    /// a second later has refilled its whole burst all the same.
+    /// A loosening does not end the quiet (#1764): a new limiter was built,
+    /// but nothing was sent, so the stricter quota coming back half a second
+    /// later has refilled its whole burst all the same.
     #[test]
     fn a_loosening_does_not_end_the_quiet() {
         let url = url::Url::parse("http://loosened.invalid:1764").expect("url");
@@ -626,6 +644,75 @@ mod tests {
         let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
 
         assert_eq!(strict.slot.current().take_left(), 4);
+    }
+
+    /// A loosening after a quiet starts with what the looser quota refilled
+    /// in it (#1771): its burst of four takes 0.4 s at ten a second, and
+    /// nothing was sent for half a second, so it starts with all four.
+    #[test]
+    fn a_loosening_after_a_quiet_starts_with_what_the_quiet_refilled() {
+        let url = url::Url::parse("http://quiet.invalid:1771").expect("url");
+        drop(InstanceLimiter::for_origin(&url, Rate::new(1, 1)));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let loose = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
+
+        assert_eq!(loose.slot.current().rate, Rate::new(10, 4), "it loosened");
+        assert_eq!(loose.slot.current().take_left(), 4);
+    }
+
+    /// A loosening after a short quiet is credited in proportion to it, not
+    /// with its whole burst (#1771): 150 ms at ten a second is one request of
+    /// fifty, and the bound leaves the sleep almost a second to run long.
+    /// Counted in the wrong unit either way, the credit would be none or all
+    /// fifty.
+    #[test]
+    fn a_short_quiet_credits_a_loosening_in_proportion() {
+        let url = url::Url::parse("http://short.invalid:1771").expect("url");
+        drop(InstanceLimiter::for_origin(&url, Rate::new(1, 1)));
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let loose = InstanceLimiter::for_origin(&url, Rate::new(10, 50));
+
+        assert_eq!(loose.slot.current().rate, Rate::new(10, 50), "it loosened");
+        let left = loose.slot.current().take_left();
+        assert!(
+            (1..=10).contains(&left),
+            "{left} of fifty after 150 ms at ten a second"
+        );
+    }
+
+    /// A loosening right after the stricter limiter was built hands out
+    /// nothing, though that limiter was full (#1728): its ten requests are
+    /// ten seconds at one a second, a thousand at a hundred a second, and
+    /// crediting them would be the fresh burst on every alternation. What a
+    /// hundred a second refills while the test runs is at most one.
+    #[test]
+    fn a_loosening_right_away_takes_nothing_from_a_full_limiter() {
+        let url = url::Url::parse("http://full.invalid:1771").expect("url");
+        drop(InstanceLimiter::for_origin(&url, Rate::new(1, 10)));
+        let loose = InstanceLimiter::for_origin(&url, Rate::new(100, 20));
+
+        assert_eq!(loose.slot.current().rate, Rate::new(100, 20), "it loosened");
+        assert!(loose.slot.current().take_left() <= 1);
+    }
+
+    /// The quiet a loosening is credited with ends at the last request let
+    /// through (#1771): half a second, then a request, then the loosening,
+    /// leaves what twenty a second refills while the test runs, at most two
+    /// in 100 ms. Counted from the slot's build it would have all eight.
+    #[tokio::test]
+    async fn a_request_ends_the_quiet_before_a_loosening() {
+        let url = url::Url::parse("http://ended.invalid:1771").expect("url");
+        let strict = InstanceLimiter::for_origin(&url, Rate::new(10, 4));
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        strict
+            .until_ready_within(std::time::Duration::from_secs(1))
+            .await
+            .expect("a full limiter lets one through");
+        drop(strict);
+        let loose = InstanceLimiter::for_origin(&url, Rate::new(20, 8));
+
+        assert_eq!(loose.slot.current().rate, Rate::new(20, 8), "it loosened");
+        assert!(loose.slot.current().take_left() <= 2);
     }
 
     /// A zero reads as one, as it always has: `0/s` means "one", not "never".

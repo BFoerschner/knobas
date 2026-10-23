@@ -1697,9 +1697,13 @@ knobas-http	lib/knobas_http	classify::tests::no_retry_after_header_is_no_delay
 knobas-http	lib/knobas_http	classify::tests::retry_after_is_read_in_its_delay_seconds_form
 knobas-http	lib/knobas_http	classify::tests::statuses_map_to_the_fault_the_user_sees
 knobas-http	lib/knobas_http	classify::tests::the_caller_maps_a_failing_body_into_the_message
+knobas-http	lib/knobas_http	limiter::tests::a_loosening_after_a_quiet_starts_with_what_the_quiet_refilled
 knobas-http	lib/knobas_http	limiter::tests::a_loosening_does_not_end_the_quiet
+knobas-http	lib/knobas_http	limiter::tests::a_loosening_right_away_takes_nothing_from_a_full_limiter
 knobas-http	lib/knobas_http	limiter::tests::a_quiet_is_counted_at_the_stricter_rate
 knobas-http	lib/knobas_http	limiter::tests::a_request_ends_the_quiet
+knobas-http	lib/knobas_http	limiter::tests::a_request_ends_the_quiet_before_a_loosening
+knobas-http	lib/knobas_http	limiter::tests::a_short_quiet_credits_a_loosening_in_proportion
 knobas-http	lib/knobas_http	limiter::tests::a_tightening_after_a_quiet_starts_with_what_the_quiet_refilled
 knobas-http	lib/knobas_http	limiter::tests::a_tightening_credits_seconds_of_refill
 knobas-http	lib/knobas_http	limiter::tests::a_tightening_takes_over_the_seconds_its_predecessor_had_left
@@ -1718,7 +1722,7 @@ knobas-http	test/transport	a_dribbled_body_outlasts_the_request_timeout
 knobas-http	test/transport	a_json_body_and_its_content_type_both_reach_the_request
 knobas-http	test/transport	a_limiter_wait_never_outlasts_the_budget
 knobas-http	test/transport	a_limiter_wait_that_outlasts_the_budget_is_the_local_quota
-knobas-http	test/transport	a_loosened_quota_starts_drained
+knobas-http	test/transport	a_loosening_right_away_starts_drained
 knobas-http	test/transport	a_once_sent_write_that_never_connected_is_unreachable
 knobas-http	test/transport	a_once_sent_write_turned_away_as_busy_is_not_unconfirmed
 knobas-http	test/transport	a_path_is_appended_to_the_whole_base_url
