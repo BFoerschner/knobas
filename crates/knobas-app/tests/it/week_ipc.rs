@@ -73,10 +73,7 @@ fn week() -> Vec<DayWindow> {
 /// and an empty comment. UTC days, so the offset is zero. The waiting
 /// [`time::worklog::log`] rather than the command's queue-and-answer one, so
 /// the source has been handed every worklog by the time this returns.
-async fn log_the_plan(
-    state: &SourcesState,
-    days: &[DayWindow],
-) -> Vec<time::worklog::Worklog> {
+async fn log_the_plan(state: &SourcesState, days: &[DayWindow]) -> Vec<time::worklog::Worklog> {
     let planned = time::week::plan(&state.pool, state.registry.as_ref(), days)
         .await
         .expect("the plan reads");

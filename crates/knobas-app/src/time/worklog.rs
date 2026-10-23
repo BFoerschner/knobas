@@ -983,9 +983,10 @@ async fn log_with(
 /// [`Delivery::Background`], answer the copy once it is kept and send behind
 /// the answer.
 ///
-/// The last three steps of [`log`]. *Log all* sends through [`log`] too, one
-/// ticked row at a time, so there is one path deciding whether a copy exists
-/// before a write is sent (#1657 retired the bulk one).
+/// The last three steps of [`log`] and [`log_in_background`]. *Log all*'s
+/// dialog sends each ticked row through the `log_work` command, so these three
+/// are the one place that decides whether a copy exists before a write is
+/// sent.
 ///
 /// **Queue first, copy second, flush third** -- see this module's docs. The
 /// copy has to carry the queue row's id before anything can settle it, because

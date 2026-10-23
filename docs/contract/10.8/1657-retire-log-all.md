@@ -43,9 +43,12 @@
     `fake-answers.ts`. `fake-features.test.ts`' week test stops logging through it; the test
     beside it, *Log all's dialog path*, already empties the plan through `log_work`.
   - `crates/knobas-app/tests/it/week_ipc.rs`' three *Log all* tests send the plan the way the
-    dialog does, one `time::worklog::log` per planned row, through a `log_the_plan` helper.
+    dialog does, one `time::worklog::log` per planned row, through a `log_the_plan` helper; its
+    module doc says the week's tests send the plan that way. `fake-features.test.ts`' week test
+    is retitled *the week and Log all's plan*.
   - Prose only: `mockups/shared/capabilities.md`'s *Log all* row names `log_work` in place of
-    `log_all`.
+    `log_all`, and a comment in `the_mirror_sends_the_argument_names_tauri_expects` reads "on
+    both" for "on all three".
 
   **What is not touched.** No migration, no event, no `WriteOp`, no DTO. `TfLogAll.svelte` and
   its tests are unchanged. Nothing under `crates/knobas-source/src/**` or `crates/knobas-http/**`,
