@@ -1,6 +1,8 @@
 // A crate root resolves `mod` beside itself, so the path is spelled out.
 #[path = "embedded/elsewhere.rs"]
 mod elsewhere;
+#[path = "embedded/slow_answer.rs"]
+mod slow_answer;
 
 use knobas_db::{DbConfig, EmbeddedDb};
 

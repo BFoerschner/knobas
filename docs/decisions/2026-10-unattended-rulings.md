@@ -14326,3 +14326,54 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   What stays unwitnessed is the line in `from_release_api` that takes the start from the API URL,
   and review confirms it. A test-only trust root in the frozen crate would cost more than the gap
   does. *Reversing:* low (a TLS fixture can add the witness later without touching this code).
+### #1815 / #1809: the Linux runner's five failures (Opus, 2026-10-23)
+
+- **Where the five-second first-connect bound applies.** *Fork:* raise it, give the test helpers a
+  pool of their own that skips it, or confine it to the case it was written for. *Ruling:* only
+  `KNOBAS_DB_URL`'s first contact (`EmbeddedDb::start`'s `existing_url` branch) keeps it;
+  `Connector::pool`, `Connector::app_pool` and so the managed and adopted starts wait for the first
+  connection under the pool's acquire timeout (30 s). *Reasoning:* the constant's own doc argues
+  it from a dead URL, and on the runner it fired on live servers that had answered moments
+  earlier: `start_managed` had just run `database_exists` on that server, and the test pools'
+  servers had just created their database. A test-only pool would have left the shipped boot
+  screen reading a slow live server as "no answer"; a bigger number would still be a bound on the
+  machine's load. *Reversing:* one call per site; the probe is unchanged.
+- **The adapters' dead URL.** *Fork:* hold a port bound and never listened on (#1811's
+  `SilentPort`), or name a port no bind to 0 can be handed. *Ruling:* port 1, checked refused once
+  per process. *Reasoning:* a bound, unlistened socket refuses a connect on Linux but on macOS the
+  connect waits out its timeout (measured: 7.8 s for a raw connect, 24 s for Gitea's
+  closed-port test), which would slow every local gate. Port 1 is below both systems' ephemeral
+  ranges and privileged on Linux. The gate-run copies (Gitea's and Kuma's `tests/it/support`,
+  Confluence's `http.rs`) changed; the live suites' copies did not, since those run serially
+  outside the gate. *Reversing:* one function per crate.
+- **The failed-migration bring-up witness.** *Fork:* derive the 80 ms bound from a baseline, or
+  hold the stop open until the runtime acts. *Ruling:* hold it open: the server archives through a
+  test command that waits for a file only a task on the runtime writes, and a shutdown waits for
+  the archiver. *Reasoning:* a baseline measured under the same load still compares two scheduler
+  gaps; the gate makes the outcome a fact about the thread. Pausing the test process for 150 ms
+  every 50 ms failed the old test 3 of 3 and passes the new one 3 of 3. *Reversing:* the test only.
+- **The knobas-db embedded failure.** *Ruling:* it is this family, not #1802's or #1808's: run
+  39893420478 failed `a_lock_naming_a_live_unrelated_process_and_a_silent_port_is_cleared` at line
+  141, the first `EmbeddedDb::start`, with the five-second timeout. #1808's failure is line 159's
+  port guard and #1802's is `AlreadyRunning`. Fixed here by the first ruling. *Reversing:* n/a.
+- **`restart`'s probe** (merge-manager, Opus). *Fork:* leave `EmbeddedDb::restart`'s closing
+  check under the five-second bound, or wait under the pool's acquire timeout. *Ruling:* the
+  acquire timeout. *Reasoning:* the branch's own first ruling and `FIRST_CONNECT_TIMEOUT`'s doc say
+  the bound is for a first contact alone; `restart` is only reached for a server this handle owns
+  and has answered on, after `pg_ctl start --wait`, and `tests/embedded.rs`'s restart test is in
+  the gate on the same loaded runner. *Reversing:* one line.
+- **The other dropped-port dead URLs** (merge-manager, Opus). *Fork:* move every gate-run
+  bind-to-0-and-drop dead URL to port 1 here, or only the copies this family failed in. *Ruling:*
+  only those; the rest (`knobas_mockd::refused_url`, Jira's `http.rs`/`source.rs`, and any other
+  dropped listener) go to #1831, with the case for one shared helper. *Reasoning:* #1815 asks to
+  fix the failures it names; a sweep across six crates is its own change and its own review.
+  *Reversing:* n/a.
+- **Which head the Linux run must be on** (merge-manager, Opus). *Ruling:* the last head whose
+  tree differs from the merge head outside `docs/` only. *Reasoning:* `check.yml`'s cargo, front
+  and scripts halves read nothing under `docs/decisions/`. *Reversing:* one more dispatched run.
+- **The wasm-host log-flood test** (merge-manager, Opus). *Fork:* leave #1833 to its own PR, or fix
+  it here. *Ruling:* here, closing #1833. *Reasoning:* it failed this PR's gate twice in a row under
+  load (749 + 150, then 282 + 617 dropped lines in two notes against one expected), so no gate on
+  a loaded machine merges anything; it is #1815's family, a test reading the machine's speed. The
+  assertion now sums the notes' counts and still fails on an unreported or miscounted drop.
+  *Reversing:* the test only.
