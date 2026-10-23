@@ -3,7 +3,7 @@
   event, no DTO field, no grammar key, nothing in `crates/knobas-source/src/**`,
   `crates/knobas-http/**`, `error.rs` or `profile.rs`, nothing added to either append-only
   barrel or to `commands/` / `ipc/`. What `reach:` answers is unchanged. Reserved for Björn and
-  ruled by the implementer on Opus under his 2026-10-22 waiver; the ruling is in
+  ruled by the implementer on Opus under Björn's 2026-10-22 waiver; the ruling is in
   `docs/decisions/2026-10-unattended-rulings.md` under `## #1850, #1851 and #1855`.
 
   **The migration** (`0058_a_ticket_is_found_by_its_key_in_any_case.sql`). Two btree indexes,
@@ -30,5 +30,6 @@
   the indexes, so no archive carries them and `RENAMED_COLUMNS` needs no row.
 
   Pinned by `crates/knobas-search/tests/it/reach.rs`' `the_start_set_is_found_through_an_index`:
-  over 4,000 entities, never analyzed and analyzed, the plan's start set has no sequential scan,
-  reads the `entity_ticket_*` indexes, and finds the two tickets a typed id and a bare key name.
+  over 4,000 entities, never analyzed and analyzed, the plan's start set has no sequential scan
+  and no filter, probes an index on each half (an `Index Cond` on `lower(id)` and one on the
+  lowercased key), and finds the two tickets a typed id and a bare key name.

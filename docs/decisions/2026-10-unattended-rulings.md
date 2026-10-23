@@ -15029,12 +15029,12 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1876.
   *Reasoning:* a primary-key probe finds only an id typed whole and in the stored case, and a
   key typed without its namespace (`reach:pay-231`, the common form) would still scan every
   entity. Two indexes, one per half of the start set's `or`, are what the planner can join with
-  a `BitmapOr`. At 22k the start set went from 5.7 ms to 0.04 ms. *Reversing:* one migration
+  a `BitmapOr`. On the probe's 23,500 entities the start set went from 5.7 ms to 0.04 ms. *Reversing:* one migration
   dropping both indexes.
 - **Partial indexes, and the estimate they leave.** *Fork:* partial on tickets, or over every
   entity. *Ruling:* partial. *Reasoning:* the start set reads only tickets, so other kinds would
   pay a btree insert for nothing. The cost: PostgreSQL does not use a partial index's expression
-  statistics for estimates, so the start set is still estimated at 150 rows for 1 at 22k (198 at
+  statistics for estimates, so the start set is still estimated at 150 rows for 1 on the probe (198 at
   100k), the same as before the index. Nothing downstream changed plan on that estimate in the
   reads taken here. *Reversing:* drop the `where` from both.
 - **#1851: the serial plan stays.** *Fork:*
@@ -15063,7 +15063,7 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1876.
   `lists::summaries` and `saved::summaries` with `tokio::try_join!`, and neither statement
   changes. *Reasoning:* measured at 100k with 8 lists, the rail was two statements in turn: the
   built-ins' (about 65 ms; its scan of `sync.live_item` is already a `Gather`, and the estate's
-  aggregate runs after it) and the saved lists' (about 42 ms, already a `Parallel Append` over
+  aggregate runs after it) and the saved lists' (42 to 48 ms, already a `Parallel Append` over
   the eight branches, with `/tc`'s browse count of 33,333 rows through `sync.live_item` the
   longest at about 38 ms). Neither reads what the other answers. At once the rail costs the
   longer one: 114 to 116 ms p50 became 64 to 66 (three alternated rounds against `main`'s

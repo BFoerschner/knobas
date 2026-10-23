@@ -732,9 +732,8 @@ async fn saving_a_query_that_cannot_be_a_list_names_the_rule_and_offers_no_delet
 }
 
 /// The rail's two halves -- the built-ins' statement and the saved lists'
-/// reads -- run at once, not one after the other (#1855): at the cap of saved
-/// lists over 100,000 items they read about 65 ms and 45 ms, and in turn they
-/// sat at the 100 ms budget.
+/// reads -- run at once, not one after the other (#1855; the reason and the
+/// measurement are `Searcher::smart_lists_of`'s).
 ///
 /// Witnessed by locks rather than a clock, on a database of its own (nothing
 /// else in this file may wait on its tables): one table only the built-ins
@@ -765,9 +764,9 @@ async fn the_rails_two_halves_run_at_once() {
 
     let watch = async {
         let started = std::time::Instant::now();
-        let mut waiting = 0;
+        let mut tables_waited_on = 0;
         while started.elapsed() < std::time::Duration::from_secs(10) {
-            waiting = sqlx::query_scalar::<_, i64>(
+            tables_waited_on = sqlx::query_scalar::<_, i64>(
                 "select count(distinct relation) from pg_locks
                   where locktype = 'relation' and not granted
                     and database = (select oid from pg_database where datname = current_database())
@@ -776,24 +775,25 @@ async fn the_rails_two_halves_run_at_once() {
             .fetch_one(&pool)
             .await
             .unwrap();
-            if waiting == 2 {
+            if tables_waited_on == 2 {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         builtins.rollback().await.unwrap();
         saved.rollback().await.unwrap();
-        waiting
+        tables_waited_on
     };
-    let (rail, waiting) = tokio::join!(searcher.smart_lists(), watch);
+    let (rail, tables_waited_on) = tokio::join!(searcher.smart_lists(), watch);
     assert_eq!(
-        waiting, 2,
+        tables_waited_on, 2,
         "the rail's halves did not both wait on their tables at once, so one \
          ran after the other"
     );
     let rail = rail.unwrap();
     assert!(
-        rail.iter().any(|list| list.saved && list.label == "Payouts"),
+        rail.iter()
+            .any(|list| list.saved && list.label == "Payouts"),
         "{rail:?}"
     );
 }

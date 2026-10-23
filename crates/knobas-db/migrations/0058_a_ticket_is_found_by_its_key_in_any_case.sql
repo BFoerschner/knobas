@@ -10,7 +10,8 @@
 --
 -- `reach:<key>` starts its walk from every ticket whose id or key (the id
 -- past its namespace) is one of the typed values, compared lowercased
--- (`knobas_search::sql::reaches`, #817, #1653): `reach:pay-231` and
+-- (`knobas_search::sql::reaches`, #817, #1653; the values are lowercased by
+-- the server since #1652): `reach:pay-231` and
 -- `reach:jira:PAY-231` both name `jira:PAY-231`. Nothing indexed either
 -- expression, so the start set was a scan of every entity, once per
 -- statement since #1653 and once per saved list holding `reach:` on the

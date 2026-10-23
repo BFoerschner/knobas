@@ -297,7 +297,12 @@ async fn the_start_set_is_found_through_an_index() {
                 && start.contains("Index Cond: (lower(substr(id, "),
             "analyzed: {analyzed}; the start set does not probe both ticket indexes:\n{start}"
         );
-        // The rows it found are the two the values name, case aside.
-        assert!(start.contains("rows=2"), "analyzed: {analyzed}:\n{start}");
+        // The rows it found are the two the values name, case aside: the
+        // start set's own node, not one of the probes under it.
+        let top = start.lines().next().unwrap_or_default();
+        assert!(
+            top.contains(" rows=2.00 "),
+            "analyzed: {analyzed}:\n{start}"
+        );
     }
 }
