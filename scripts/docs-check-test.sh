@@ -50,7 +50,7 @@ expect green "the tree after both are removed"
 # regenerated around the stray file, so only the entry-file check can refuse it.
 idx() { python3 -I "$scratch/scripts/contract-index.py" >/dev/null; }
 check_err() { python3 -I "$scratch/scripts/contract-index.py" --check 2>&1 >/dev/null || true; }
-printf '# Notes\n\nNot an entry.\n' > "$scratch/docs/contract/10.8/README.md"
+printf '# Notes\n\nNot an entry, though it names issue #12.\n' > "$scratch/docs/contract/10.8/README.md"
 idx
 expect red "a README.md in section 10.8 with the index regenerated"
 case "$(check_err)" in
@@ -58,8 +58,12 @@ case "$(check_err)" in
     *) echo "FAIL: the refusal does not name README.md" >&2; failures=$((failures + 1)) ;;
 esac
 rm "$scratch/docs/contract/10.8/README.md"
+printf -- '- **A bullet that names no issue.**\n' > "$scratch/docs/contract/10.8/n99-no-issue.md"
 idx
-expect green "the index regenerated without the README.md"
+expect red "a bullet entry file that names no issue"
+rm "$scratch/docs/contract/10.8/n99-no-issue.md"
+idx
+expect green "the index regenerated without the stray files"
 
 # #1697: prose after the index's end marker stays below it, on check and on regeneration.
 python3 -I - "$scratch/docs/contract.md" <<'PY'
