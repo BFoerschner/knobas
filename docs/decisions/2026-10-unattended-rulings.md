@@ -14533,3 +14533,54 @@ Ruled 2026-10-23 by the implementer (Sonnet) while building the bundle.
   no error; a new case would mock the port's answer and test nothing the engine does not. The
   engine test asserts the empty response, total 0 and the `list:nope` token. *Reversing:* trivial,
   one test.
+## #1650 and #1653: the launcher's named tiebreak and `reach:`'s walk (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus: migration `0056`.** *Fork:* §10.8 freezes
+  `crates/knobas-db/migrations/**`; #1650 offers *"or the title lexeme array becomes a generated
+  column"*. *Ruling:* add it, three stored generated columns on `sync.item` and `sync.live_item`
+  showing them, with its entry `1650-migration-0056-stored-name-words.md`. *Reasoning:* the next
+  ruling. *Reversing:* one migration dropping the three columns and restoring `0050`'s view, and
+  `Corpus::named` back to lexing.
+- **Stored lexemes, not naming after the cap.** *Fork:* #1650's first fix direction is to compute
+  `named` after the per-kind cap and re-sort. *Ruling:* store the lexemes. *Reasoning:* measured
+  both. A cut by rank and recency before naming loses the row the tiebreak exists for (the oldest
+  of many equal ranks, story 25), so an exact version must shortlist every row tied with the
+  cap's last rank, and name all of them. Where ranks tie widely, that shortlist is every match: on
+  the search crate's corpus at 22,000 rows, `ledger` went from 61 to 83 ms with `m` carrying the
+  title; with six-word titles from about 82 to 120 ms carrying it, and to 180 ms or more joining
+  the shortlist back to its corpus by id. Stored columns are
+  exact and cost a comparison per match: 81 to 83 ms became 65 to 67 ms on six-word titles. The
+  cap's semantics are now pinned by `ranking.rs`' new
+  `the_item_named_exactly_the_word_survives_a_cap_of_equally_ranked_siblings`. *Reversing:* as
+  above.
+- **The mirror only.** *Fork:* the notes, assets and routes lex their title per match too.
+  *Ruling:* leave them lexing. *Reasoning:* they live in the `knobas` schema, which a backup
+  dumps, so a column there is a backup and restore question as well; and it is the mirror that a
+  common word matches most of. *Reversing:* a migration per table and a `named` per corpus.
+- **The ticket's mutant does not apply.** *Fork:* #1650's *Mutants* section is "compute `named`
+  before the cap again". *Ruling:* the equivalent mutant here is "lex the mirror per match again"
+  (`LIVE_ITEM.named = None`), which kills `sql_shape.rs`' shape test, `ticket_by_key.rs` and a
+  unit test. *Reversing:* none needed.
+- **Where `payout` is measured.** *Fork:* #1650's first criterion asks for `payout` on the 22k
+  probe, whose vocabulary has no `payout` (the probe's titles and bodies draw on 42 named words
+  and 4,000 synthetic ones). *Ruling:* measure at 22,000 rows of the search crate's own corpus,
+  where `payout` matches 1,100 rows and `ledger` all 22,000, and on the same corpus with six-word
+  titles; run the probe once at the end for its search rows. The criterion cannot pass as worded;
+  a wording follow-up is filed. *Reversing:* none.
+- **#1653 hoists the whole walk, not only its start set.** *Fork:* the ticket names the start
+  set. *Ruling:* one materialized CTE `reaches(id)` holding the walk's result. *Reasoning:* the
+  walk reads nothing but the start set and the links, so every branch walked to the same ids; one
+  walk is the start set once plus the links once. *Reversing:* trivial.
+- **"Resolving the typed key by exact match first".** *Fork:* the values reach the builder
+  lowercased, and nothing on `knobas.entity` indexes `lower(id)` or the key past the namespace, so
+  an exact lookup by primary key never finds a Jira ticket. *Ruling:* the start set resolves by
+  equality on the lowercased id and key, once a statement, a scan of `knobas.entity` (about 2 ms
+  at 22,000 entities); an index-served lookup is a follow-up (`backlog`). *Reasoning:* the
+  ticket's failure is four to eight scans per board, which one removes; an index needs a
+  migration on the backed-up schema for the last 2 ms. *Reversing:* trivial.
+- **`reach:`'s values are bound first among the dimensions.** *Fork:* binds are allocated in the
+  order their placeholders first appear; the CTE now reads them before any branch. *Ruling:* bind
+  them right after the declarations, pinned by
+  `reachs_values_are_numbered_where_the_walk_reads_them`. The saved summary was already out of
+  that order for ticket keys (its `fdecl` precedes the text bind) and stays as it was.
+  *Reversing:* trivial.

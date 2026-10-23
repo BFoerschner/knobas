@@ -22,7 +22,7 @@ Stated here so a reader who hits one finds the ruling rather than a bug to file:
 If a combined configuration is ever wanted, it is one migration and one ADR amendment, not a scattering of edits:
 
 1. A new text-search configuration (for example one built on `simple` with `unaccent` as a dictionary, or a `german`-and-`english` pair whose `tsvector`s are concatenated), created in the migration and installed with `create extension if not exists unaccent` on the embedded server, which must ship the contrib library.
-2. Every generated `fts` column altered by `alter column … set expression` to the new configuration, the shape migration `0019` used on `knobas.asset` and `0048` used on `sync.item`, so the index is rebuilt from the new expression.
+2. Every generated `fts` column altered by `alter column … set expression` to the new configuration, the shape migration `0019` used on `knobas.asset` and `0048` used on `sync.item`, so the index is rebuilt from the new expression; and `sync.item`'s three stored name columns (`title_words`, `title_tail_words`, `key_words`, migration `0056`, #1650), which the launcher compares the typed words with, altered the same way, or no mirror row is named what was typed.
 3. The query side in `crates/knobas-search/src/sql.rs` switched in the same PR, since a query under one configuration against an index built under another matches nothing.
 4. The ranking witness in `crates/knobas-search/tests/it/ranking.rs` re-run and the perf gate (`just search-perf`) re-measured, because a second stemmer changes both the lexeme sets and the match counts the budget was read against.
 
