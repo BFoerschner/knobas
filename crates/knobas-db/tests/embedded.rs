@@ -73,21 +73,28 @@ async fn a_data_directory_an_interrupted_initdb_left_is_initialised_again() {
     again.stop().await.unwrap();
 }
 
-/// #1637: a data directory that has `PG_VERSION` is never removed, whatever
+/// #1819: a data directory that holds a database is never removed, whatever
 /// else it lacks. Each one here fails to start, and every file in it is still
 /// there afterwards.
 ///
-/// The first is what a power loss during `initdb` leaves in practice:
-/// `PG_VERSION` and `postgresql.conf`, no `global/pg_control`. The second has
-/// no `postgresql.conf`, so `initdb` runs and refuses a directory that is not
-/// empty. Recovering either would mean deleting a directory that might hold a
-/// database, and the launch reports the failure instead.
+/// A database is a directory under `base/` other than the templates `1` and
+/// `4`, or anything under `pg_tblspc/`. A killed `initdb` leaves neither: it
+/// makes `base/5`, the `postgres` database, last. Each fixture here lacks
+/// `global/pg_control` and has no marker, so only the database keeps it. The
+/// second has no `postgresql.conf`, so `initdb` runs and refuses a directory
+/// that is not empty.
 #[tokio::test]
-async fn a_data_directory_with_pg_version_is_never_removed() {
-    for with_conf in [true, false] {
+async fn a_data_directory_that_holds_a_database_is_never_removed() {
+    for (with_conf, database) in [
+        (true, "base/16384"),
+        (false, "base/5"),
+        (true, "pg_tblspc/16385"),
+    ] {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
-        std::fs::create_dir_all(data.join("base")).unwrap();
+        std::fs::create_dir_all(data.join("base/1")).unwrap();
+        std::fs::create_dir_all(data.join("pg_tblspc")).unwrap();
+        std::fs::create_dir_all(data.join(database)).unwrap();
         std::fs::write(data.join("PG_VERSION"), "18\n").unwrap();
         std::fs::write(data.join("keep-me"), "a reader's file\n").unwrap();
         if with_conf {
@@ -101,18 +108,21 @@ async fn a_data_directory_with_pg_version_is_never_removed() {
         .await;
         if let Ok(db) = refused {
             db.stop().await.unwrap();
-            panic!("a directory with PG_VERSION but no cluster started (conf: {with_conf})");
+            panic!("a directory with no pg_control started ({database})");
         }
         assert!(
             data.join("PG_VERSION").is_file() && data.join("keep-me").is_file(),
-            "the directory is untouched (conf: {with_conf})"
+            "the directory is kept ({database})"
         );
         assert_eq!(
             data.join("postgresql.conf").is_file(),
             with_conf,
-            "the directory is untouched (conf: {with_conf})"
+            "the directory is kept ({database})"
         );
-        assert!(data.join("base").is_dir(), "the directory is untouched");
+        assert!(
+            data.join(database).is_dir(),
+            "the directory is kept ({database})"
+        );
     }
 }
 

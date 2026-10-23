@@ -961,9 +961,10 @@ enum Started {
 /// borrower. The kernel releases the lock however its holder dies, so a held
 /// lock always means a live holder, whatever state its server is in.
 ///
-/// Under both locks, a data directory an interrupted `initdb` left
-/// half-written is removed ([`remove_half_written`]), an uninitialised one is
-/// initialised by knobas's own `initdb` ([`initialise`]), and after `setup()`
+/// Under both locks, a data directory an interrupted `initdb` left is
+/// removed and a finished one an older build made is marked
+/// ([`recover_or_mark`]), an uninitialised one is initialised by knobas's
+/// own `initdb` and marked ([`initialise`]), and after `setup()`
 /// the password file and the data directory are kept to their owner
 /// ([`keep_to_owner`]).
 async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Started, DbError> {
@@ -983,7 +984,7 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
         }
     };
     adopt_recorded_password(&mut settings)?;
-    remove_half_written(&data_dir)?;
+    recover_or_mark(&data_dir)?;
 
     // `PostgreSQL::new` consumes the settings, and the adoption path needs
     // them after the handle is gone.
@@ -1451,43 +1452,147 @@ fn read_password(password_file: &Path) -> Result<Option<String>, DbError> {
     }
 }
 
-/// Remove a data directory an interrupted `initdb` left half-written (#1637).
+/// Remove a data directory an interrupted `initdb` left (#1637, #1819), and
+/// mark a finished one an older build made.
 ///
 /// **Called under [`bring_up_lock`] and the ownership lock, before
-/// anything reads the directory.** Half-written means `postgresql.conf` is
-/// there and `PG_VERSION` is not. `postgresql_embedded` takes
-/// `postgresql.conf` alone for "initialised", so it would skip `initdb` and
-/// the start would fail with *not a database cluster directory*, on every
-/// launch until the reader deleted the directory by hand.
+/// anything reads the directory.** `postgresql_embedded` takes
+/// `postgresql.conf` alone for "initialised", so it skips `initdb` on what a
+/// killed one left, and the launch fails on it every time until the reader
+/// deletes the directory by hand. What [`shape`] finds decides:
 ///
-/// `PG_VERSION` is what makes the removal safe. `initdb` writes it before
-/// `postgresql.conf`, so a directory without it was never a cluster: what
-/// leaves this shape is `initdb`'s own cleanup after a failure, which removes
-/// `PG_VERSION` first, cut short. PostgreSQL refuses to start without
-/// `PG_VERSION`, so no server can be running on it either. A directory that
-/// has one is **never** removed, whatever else it lacks: it may hold a
-/// database. Evidence: `docs/decisions/2026-10-unattended-rulings.md`, #1637.
+/// - **Marked**: knobas's `initdb` finished here ([`INITDB_FINISHED`]). Never
+///   removed, whatever the directory lacks later.
+/// - **Holds a database**, no marker: a finished `initdb` an older build ran.
+///   Marked now and never removed.
+/// - **Unfinished**: removed, so `initdb` runs again.
 ///
-/// An entry that cannot be examined counts as present, so a `PG_VERSION` this
-/// process cannot `stat` keeps the directory. A data directory that is a
-/// symlink loses the link alone (`remove_dir_all` follows no symlink): what
-/// it points at is left as it was, and `initdb` makes a directory in its place.
-fn remove_half_written(data_dir: &Path) -> Result<(), DbError> {
-    // Absent only when the file system says so: any other error is "present".
-    let absent = |name: &str| {
-        std::fs::symlink_metadata(data_dir.join(name))
+/// A data directory that is a symlink loses the link alone (`remove_dir_all`
+/// follows no symlink): what it points at is left as it was, and `initdb`
+/// makes a directory in its place. Evidence:
+/// `docs/decisions/2026-10-unattended-rulings.md`, #1637 and #1819.
+fn recover_or_mark(data_dir: &Path) -> Result<(), DbError> {
+    match shape(data_dir) {
+        Shape::Marked | Shape::NotInitialised => Ok(()),
+        Shape::HoldsDatabase => {
+            mark_finished(data_dir);
+            Ok(())
+        }
+        Shape::Unfinished if served(data_dir) => {
+            tracing::warn!(
+                data_dir = %data_dir.display(),
+                "an interrupted initdb left this data directory, but a server answers on \
+                 the port its postmaster.pid records: keeping it"
+            );
+            Ok(())
+        }
+        Shape::Unfinished => {
+            tracing::warn!(
+                data_dir = %data_dir.display(),
+                "an interrupted initdb left this data directory with no database in it: \
+                 removing it so initdb runs again"
+            );
+            std::fs::remove_dir_all(data_dir).map_err(|source| DbError::io(data_dir, source))
+        }
+    }
+}
+
+/// What [`recover_or_mark`] found in a data directory.
+#[derive(Debug, PartialEq, Eq)]
+enum Shape {
+    /// Knobas's `initdb` finished here ([`INITDB_FINISHED`]).
+    Marked,
+    /// Nothing an `initdb` left: no `PG_VERSION`, no `postgresql.conf`.
+    NotInitialised,
+    /// No marker, and it holds a database or may: a finished `initdb` an
+    /// older build ran, or one whose databases cannot be listed.
+    HoldsDatabase,
+    /// What an interrupted `initdb` left: it holds no database.
+    Unfinished,
+}
+
+/// Read `data_dir`'s shape. **A doubt about a database keeps the
+/// directory**: an entry that cannot be examined counts as present, so an
+/// unreadable marker keeps it, and a `base/` or `pg_tblspc/` that cannot be
+/// listed, or is missing, counts as holding a database.
+///
+/// Without `PG_VERSION` and with `postgresql.conf`, it is unfinished (#1637):
+/// `initdb` writes `PG_VERSION` first and its cleanup removes it first.
+///
+/// With `PG_VERSION`, it is unfinished when it **holds no database**: nothing
+/// under `base/` but the templates `1` and `4`, and nothing under
+/// `pg_tblspc/`. `initdb` makes `base/5`, the `postgres` database, last of
+/// all, so a finished one always has it, and the reader's data lives in the
+/// `knobas` database a launch creates after that. Every build has run
+/// PostgreSQL 18.6. On a version before 15, where `postgres` and `template0`
+/// had no fixed OIDs, a finished cluster still has a directory that is not
+/// `1` or `4`.
+fn shape(data_dir: &Path) -> Shape {
+    let present = |name: &str| {
+        !std::fs::symlink_metadata(data_dir.join(name))
             .is_err_and(|source| source.kind() == io::ErrorKind::NotFound)
     };
-    if absent("postgresql.conf") || !absent("PG_VERSION") {
-        return Ok(());
+    if present(INITDB_FINISHED) {
+        return Shape::Marked;
     }
-    tracing::warn!(
-        data_dir = %data_dir.display(),
-        "the data directory has postgresql.conf but no PG_VERSION: an interrupted initdb \
-         left it half-written, removing it so initdb runs again"
-    );
-    std::fs::remove_dir_all(data_dir).map_err(|source| DbError::io(data_dir, source))
+    if !present("PG_VERSION") {
+        return if present("postgresql.conf") {
+            Shape::Unfinished
+        } else {
+            Shape::NotInitialised
+        };
+    }
+    let only = |dir: &str, allowed: &[&str]| match std::fs::read_dir(data_dir.join(dir)) {
+        Ok(entries) => entries.into_iter().all(|entry| {
+            entry.is_ok_and(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| allowed.contains(&name))
+            })
+        }),
+        // Even "not found" is a doubt: `initdb` makes both before
+        // `PG_VERSION`, so a missing one is a link to a volume not mounted,
+        // or a directory being copied in, not a killed `initdb`.
+        Err(_) => false,
+    };
+    if only("base", &["1", "4"]) && only("pg_tblspc", &[]) {
+        Shape::Unfinished
+    } else {
+        Shape::HoldsDatabase
+    }
 }
+
+/// Whether `data_dir`'s `postmaster.pid` is a postmaster's whose port
+/// something answers on, or cannot be read. A server running on an
+/// unfinished directory is one an older build started on it and lost; its
+/// files stay under it.
+///
+/// The lock `initdb`'s own backends write is not a server's: they run
+/// standalone, record their pid negated and the default port 5432, and
+/// listen on nothing. One left by a power loss would otherwise keep the
+/// directory whenever any PostgreSQL answers on 5432.
+fn served(data_dir: &Path) -> bool {
+    match std::fs::read_to_string(data_dir.join("postmaster.pid")) {
+        Ok(contents) => {
+            lock_pid(&contents).is_some() && lock_port(&contents).is_some_and(port_answers)
+        }
+        Err(source) => source.kind() != io::ErrorKind::NotFound,
+    }
+}
+
+/// Mark `data_dir` as one a finished `initdb` made, so no launch removes it.
+/// A failure is logged: the next launch reads the same shape and tries again.
+fn mark_finished(data_dir: &Path) {
+    let marker = data_dir.join(INITDB_FINISHED);
+    let note = "initdb finished in this directory; knobas never removes it (#1819)\n";
+    if let Err(error) = std::fs::write(&marker, note) {
+        tracing::warn!(%error, marker = %marker.display(), "could not mark the data directory finished");
+    }
+}
+
+/// The file knobas writes into a data directory once its `initdb` has finished (#1819).
+const INITDB_FINISHED: &str = "knobas-initdb-finished";
 
 /// Name of the placeholder data directory [`install`] hands `setup()`.
 const INSTALL_ONLY: &str = ".install-only";
@@ -1502,7 +1607,9 @@ const INITDB_GRACE: Duration = Duration::from_secs(10);
 /// The crate's `setup()` runs `initdb` too, but with no way to set
 /// `kill_on_drop`, so a timed-out `initdb` kept running after knobas had given
 /// up (#1637). This runs the same command with the same flags, and the
-/// `setup()` that follows finds `postgresql.conf` and skips its own.
+/// `setup()` that follows finds `postgresql.conf` and skips its own. A
+/// finished `initdb` is marked ([`INITDB_FINISHED`]), so no later launch
+/// removes the directory.
 ///
 /// The password file is created here, as the crate would, but readable by
 /// its owner alone from the first byte (#1642).
@@ -1520,7 +1627,9 @@ async fn initialise(root_dir: &Path, settings: &Settings) -> Result<(), DbError>
         write_password_file(&settings.password_file, &settings.password)?;
     }
     let initdb = binaries.join(format!("initdb{}", std::env::consts::EXE_SUFFIX));
-    run_initdb(&initdb, settings, COMMAND_TIMEOUT).await
+    run_initdb(&initdb, settings, COMMAND_TIMEOUT).await?;
+    mark_finished(&settings.data_dir);
+    Ok(())
 }
 
 /// Install the PostgreSQL binaries if they are not there yet, and return
@@ -1574,8 +1683,9 @@ fn write_password_file(path: &Path, password: &str) -> Result<(), DbError> {
 /// **A timeout terminates it first**: `SIGTERM` makes `initdb` remove what it
 /// made, the whole data directory when it created it, so the next launch
 /// starts from nothing. `SIGKILL`, which `kill_on_drop` sends, leaves a
-/// directory with `PG_VERSION` that [`remove_half_written`] does not touch.
-/// It is the fallback once [`INITDB_GRACE`] has passed.
+/// directory with `PG_VERSION` and no marker, which the next launch's
+/// [`recover_or_mark`] removes. It is the fallback once [`INITDB_GRACE`]
+/// has passed.
 ///
 /// A failure reads as the crate's did: `DatabaseInitializationError` with the
 /// command's output, or *deadline has elapsed*.
@@ -1735,14 +1845,7 @@ fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
         Err(source) => return Err(DbError::io(pid_file, source)),
     };
 
-    // Line 4 is the port the postmaster last listened on.
-    let recorded_port = contents
-        .lines()
-        .nth(3)
-        .and_then(|line| line.trim().parse::<u16>().ok())
-        .filter(|port| *port != 0);
-
-    if let Some(port) = recorded_port
+    if let Some(port) = lock_port(&contents)
         && port_answers(port)
     {
         tracing::warn!(
@@ -1783,14 +1886,30 @@ impl ServerWatch {
 /// The postmaster's pid, line 1 of `data_dir`'s `postmaster.pid`, if the
 /// file is there and names one.
 fn recorded_pid(data_dir: &Path) -> Option<u32> {
-    std::fs::read_to_string(data_dir.join("postmaster.pid"))
-        .ok()?
+    lock_pid(&std::fs::read_to_string(data_dir.join("postmaster.pid")).ok()?)
+}
+
+/// A `postmaster.pid`'s line 1, the postmaster's pid. A standalone backend
+/// records its pid negated, which this reads as none.
+fn lock_pid(contents: &str) -> Option<u32> {
+    contents
         .lines()
         .next()?
         .trim()
         .parse::<u32>()
         .ok()
         .filter(|pid| *pid != 0)
+}
+
+/// A `postmaster.pid`'s line 4, the port the postmaster last listened on.
+fn lock_port(contents: &str) -> Option<u16> {
+    contents
+        .lines()
+        .nth(3)?
+        .trim()
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port != 0)
 }
 
 /// Whether a process with `pid` exists right now.
@@ -2577,7 +2696,8 @@ mod tests {
     }
 
     /// #1637: a half-written data directory that is a symlink loses the link,
-    /// never what it points at, and one with `PG_VERSION` keeps everything.
+    /// never what it points at, and one with a database in it keeps
+    /// everything.
     #[cfg(unix)]
     #[test]
     fn a_half_written_symlinked_data_directory_loses_the_link_alone() {
@@ -2588,7 +2708,7 @@ mod tests {
         let data = dir.path().join("data");
         std::os::unix::fs::symlink(&target, &data).unwrap();
 
-        remove_half_written(&data).unwrap();
+        recover_or_mark(&data).unwrap();
 
         assert!(
             std::fs::symlink_metadata(&data).is_err(),
@@ -2602,10 +2722,12 @@ mod tests {
 
         std::os::unix::fs::symlink(&target, &data).unwrap();
         std::fs::write(target.join("PG_VERSION"), "18\n").unwrap();
-        remove_half_written(&data).unwrap();
+        std::fs::create_dir_all(target.join("base/16384")).unwrap();
+        std::fs::create_dir_all(target.join("pg_tblspc")).unwrap();
+        recover_or_mark(&data).unwrap();
         assert!(
             data.join("postgresql.conf").is_file(),
-            "with PG_VERSION, kept"
+            "with a database in it, kept"
         );
     }
 
@@ -2629,5 +2751,313 @@ mod tests {
             !settings.data_dir.join("base/5").exists(),
             "the dropped initdb ran on to the end"
         );
+    }
+
+    /// Every process `initdb` into `data_dir` has running, itself included,
+    /// with its arguments. Its children get the data directory through the
+    /// environment, so they are found under `initdb`'s pid.
+    fn initdb_tree(data_dir: &Path) -> Vec<(u32, String)> {
+        let listing = std::process::Command::new("ps")
+            .args(["-axo", "pid=,ppid=,args="])
+            .output()
+            .unwrap();
+        let processes: Vec<(u32, u32, String)> = String::from_utf8_lossy(&listing.stdout)
+            .lines()
+            .filter_map(|line| {
+                let mut fields = line.split_whitespace();
+                let pid = fields.next()?.parse().ok()?;
+                let ppid = fields.next()?.parse().ok()?;
+                Some((pid, ppid, fields.collect::<Vec<_>>().join(" ")))
+            })
+            .collect();
+        let pgdata = format!("--pgdata {}", data_dir.display());
+        let mut tree: Vec<(u32, String)> = processes
+            .iter()
+            .filter(|(_, _, args)| args.contains("initdb") && args.contains(&pgdata))
+            .map(|(pid, _, args)| (*pid, args.clone()))
+            .collect();
+        let mut next = 0;
+        while next < tree.len() {
+            let parent = tree[next].0;
+            tree.extend(
+                processes
+                    .iter()
+                    .filter(|(_, ppid, _)| *ppid == parent)
+                    .map(|(pid, _, args)| (*pid, args.clone())),
+            );
+            next += 1;
+        }
+        tree
+    }
+
+    /// Where a killed `initdb` stops (#1819), one state of the three that
+    /// fail every launch. Each was named by starting a server on what the
+    /// kill left and logging in (recorded under #1819 in
+    /// `docs/decisions/2026-10-unattended-rulings.md`).
+    #[derive(Clone, Copy, Debug)]
+    enum KillPoint {
+        /// The configuration probes, before the bootstrap: no `pg_control`.
+        BeforeBootstrap,
+        /// The bootstrap, before `setup_auth`: our password is refused.
+        DuringBootstrap,
+        /// The single-user setup, as soon as it runs: `initdb` has piped
+        /// `setup_auth` and dies before the rest, so there is no `postgres`
+        /// database. About 25 ms later it has piped everything, and the
+        /// backend drains it to the end.
+        DuringSetup,
+    }
+
+    /// Run `initdb` into a fresh profile under `dir` and drop it at `point`,
+    /// which kills it as a bring-up given up does (`kill_on_drop`), then wait
+    /// for its children to drain the pipe it fed them and exit.
+    async fn interrupt_initdb(dir: &Path, point: KillPoint) -> Settings {
+        let (settings, initdb) = initdb_for(dir).await;
+        let data = settings.data_dir.clone();
+        let reached = async {
+            loop {
+                // One listing per poll, and the kill straight after it: the
+                // single-user window is about 25 ms. Before the bootstrap
+                // there is none to take: the children then are `postgres
+                // --check` probes, which write nothing and exit at once.
+                let tree = match point {
+                    KillPoint::BeforeBootstrap if data.join("postgresql.conf").exists() => {
+                        return Vec::new();
+                    }
+                    KillPoint::BeforeBootstrap => Vec::new(),
+                    KillPoint::DuringBootstrap if !data.join("global/pg_control").exists() => {
+                        Vec::new()
+                    }
+                    KillPoint::DuringBootstrap | KillPoint::DuringSetup => initdb_tree(&data),
+                };
+                let child = if matches!(point, KillPoint::DuringBootstrap) {
+                    "--boot"
+                } else {
+                    "--single"
+                };
+                if tree.iter().any(|(_, args)| args.contains(child)) {
+                    return tree;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        };
+        let tree = tokio::select! {
+            finished = run_initdb(&initdb, &settings, COMMAND_TIMEOUT) => {
+                panic!("initdb finished before {point:?}: {finished:?}")
+            }
+            tree = reached => tree,
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        for (pid, _) in &tree {
+            while process_alive(*pid) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "initdb's child {pid} outlived it by 30 s"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+        let has = |name: &str| data.join(name).exists();
+        assert!(has("PG_VERSION") && has("postgresql.conf"), "{point:?}");
+        match point {
+            KillPoint::BeforeBootstrap => assert!(!has("global/pg_control"), "{point:?}"),
+            KillPoint::DuringBootstrap => {
+                assert!(has("global/pg_control") && !has("base/4"), "{point:?}");
+            }
+            KillPoint::DuringSetup => {
+                assert!(has("global/pg_control") && !has("base/5"), "{point:?}");
+            }
+        }
+        settings
+    }
+
+    /// #1819: each state a killed `initdb` leaves with `PG_VERSION` in it
+    /// comes back from a launch initialised. Before, `postgresql.conf` read
+    /// as "initialised" and each failed every launch.
+    #[tokio::test]
+    async fn each_directory_a_killed_initdb_leaves_comes_back_from_a_launch() {
+        for point in [
+            KillPoint::BeforeBootstrap,
+            KillPoint::DuringBootstrap,
+            KillPoint::DuringSetup,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let settings = interrupt_initdb(dir.path(), point).await;
+
+            let db = EmbeddedDb::start(DbConfig {
+                root_dir: dir.path().to_path_buf(),
+                existing_url: None,
+            })
+            .await
+            .unwrap_or_else(|error| panic!("{point:?}: the launch failed: {error}"));
+            let one: Result<(i32,), _> = sqlx::query_as("select 1").fetch_one(db.pool()).await;
+            db.stop().await.unwrap();
+            assert_eq!(one.unwrap().0, 1, "{point:?}");
+            assert!(
+                settings.data_dir.join(INITDB_FINISHED).is_file(),
+                "{point:?}: the new initdb is marked finished"
+            );
+        }
+    }
+
+    /// #1819: a directory a finished `initdb` made is kept, from this build
+    /// and from the two older flows: #1637's `initdb`, which wrote no
+    /// marker, and the crate's own `setup()` before it, followed by the
+    /// launch that made the knobas database and a reader's row in it. An
+    /// older build's directory is marked the first time a launch sees it.
+    #[tokio::test]
+    async fn a_directory_a_finished_initdb_made_is_never_removed() {
+        // #1637's flow, stopped after `initdb` and before any start.
+        let dir = tempfile::tempdir().unwrap();
+        let (settings, initdb) = initdb_for(dir.path()).await;
+        run_initdb(&initdb, &settings, COMMAND_TIMEOUT)
+            .await
+            .unwrap();
+        let sentinel = write(&settings.data_dir, "keep-me", "a finished initdb\n");
+        let cfg = DbConfig {
+            root_dir: dir.path().to_path_buf(),
+            existing_url: None,
+        };
+        EmbeddedDb::start(cfg).await.unwrap().stop().await.unwrap();
+        assert!(sentinel.is_file(), "#1637's directory is kept");
+        assert!(
+            settings.data_dir.join(INITDB_FINISHED).is_file(),
+            "and marked"
+        );
+
+        // The crate's own `setup()`, as every build before #1637 ran it.
+        let dir = tempfile::tempdir().unwrap();
+        let settings = build_settings(dir.path()).unwrap();
+        let mut older = PostgreSQL::new(settings.clone());
+        older.setup().await.unwrap();
+        older.start().await.unwrap();
+        older.create_database(DATABASE_NAME).await.unwrap();
+        let url = older.settings().url(DATABASE_NAME);
+        let mut conn = PgConnection::connect(&url).await.unwrap();
+        for statement in [
+            "create table reader (v text)",
+            "insert into reader values ('kept')",
+        ] {
+            sqlx::query(statement).execute(&mut conn).await.unwrap();
+        }
+        conn.close().await.unwrap();
+        older.stop().await.unwrap();
+        drop(older);
+        assert!(!settings.data_dir.join(INITDB_FINISHED).exists());
+
+        let cfg = DbConfig {
+            root_dir: dir.path().to_path_buf(),
+            existing_url: None,
+        };
+        for launch in ["first", "second"] {
+            let db = EmbeddedDb::start(cfg.clone()).await.unwrap();
+            let row: Result<(String,), _> = sqlx::query_as("select v from reader")
+                .fetch_one(db.pool())
+                .await;
+            db.stop().await.unwrap();
+            let row = row.unwrap_or_else(|error| panic!("{launch} launch: {error}"));
+            assert_eq!(row.0, "kept", "{launch} launch");
+            assert!(
+                settings.data_dir.join(INITDB_FINISHED).is_file(),
+                "{launch} launch: marked"
+            );
+        }
+    }
+
+    /// What a killed `initdb` leaves, at `data`: `PG_VERSION`,
+    /// `postgresql.conf`, `base/1` alone and an empty `pg_tblspc/`.
+    fn unfinished(data: &Path) {
+        std::fs::create_dir_all(data.join("base/1")).unwrap();
+        std::fs::create_dir_all(data.join("pg_tblspc")).unwrap();
+        write(data, "PG_VERSION", "18\n");
+        write(data, "postgresql.conf", "");
+    }
+
+    /// #1824 review: a `base/` or `pg_tblspc/` that is a symlink to nothing,
+    /// a volume not mounted, counts as holding a database. Read as empty, it
+    /// removed the directory: the cluster's catalog and WAL with it.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_whose_databases_are_on_a_missing_volume_is_kept() {
+        for moved in ["base", "pg_tblspc"] {
+            let dir = tempfile::tempdir().unwrap();
+            let data = dir.path().join("data");
+            unfinished(&data);
+            std::fs::remove_dir_all(data.join(moved)).unwrap();
+            let unmounted = dir.path().join("unmounted").join(moved);
+            std::os::unix::fs::symlink(&unmounted, data.join(moved)).unwrap();
+
+            recover_or_mark(&data).unwrap();
+
+            assert!(data.join("PG_VERSION").is_file(), "{moved}: kept");
+        }
+    }
+
+    /// #1819: a `base/` that cannot be listed counts as holding a database,
+    /// so the directory is kept.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_whose_databases_cannot_be_listed_is_kept() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        unfinished(&data);
+        let base = data.join("base");
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let found = shape(&data);
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert_eq!(found, Shape::HoldsDatabase);
+    }
+
+    /// #1819: a marked directory is never removed, whatever it lacks later.
+    #[test]
+    fn a_marked_directory_is_never_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        unfinished(&data);
+        write(&data, INITDB_FINISHED, "");
+
+        recover_or_mark(&data).unwrap();
+
+        assert!(
+            data.join("PG_VERSION").is_file(),
+            "the marked directory is kept"
+        );
+    }
+
+    /// #1819: an unfinished directory a postmaster answers for is kept, so
+    /// its files are not removed under it. A standalone backend's lock, or a
+    /// postmaster's whose port is silent, keeps nothing.
+    #[test]
+    fn an_unfinished_directory_is_kept_only_while_a_postmaster_answers_for_it() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        unfinished(&data);
+        pid_file(&data, std::process::id(), port);
+
+        recover_or_mark(&data).unwrap();
+        assert!(
+            data.join("PG_VERSION").is_file(),
+            "kept while its port answers"
+        );
+
+        // `initdb`'s standalone backend: its pid negated, and no listener.
+        pid_file(&data, std::process::id(), port);
+        let standalone = format!(
+            "-{}",
+            std::fs::read_to_string(data.join("postmaster.pid")).unwrap()
+        );
+        write(&data, "postmaster.pid", &standalone);
+        recover_or_mark(&data).unwrap();
+        assert!(!data.exists(), "a standalone backend's lock keeps nothing");
+        unfinished(&data);
+        // A port below 1024 that no test can bind: nothing answers there.
+        pid_file(&data, std::process::id(), 1);
+        recover_or_mark(&data).unwrap();
+        assert!(!data.exists(), "removed when nothing answers");
+        drop(listener);
     }
 }
