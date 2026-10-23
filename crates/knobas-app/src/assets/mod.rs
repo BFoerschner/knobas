@@ -313,6 +313,13 @@ const MONITOR_KIND: &str = "monitor";
 // ---------------------------------------------------------------------------
 // The wire vocabularies
 // ---------------------------------------------------------------------------
+//
+// A row read decodes these columns through the codec `closed_vocabulary!`
+// generates, which refuses a spelling it does not know. Unreachable past the
+// CHECK constraints, and an error rather than a default all the same: a row
+// carrying a word this build has no meaning for is a database this build
+// should not be drawing, not one to guess about. (`knobas-sync`'s readers fall
+// back instead, so a run a newer knobas logged still lists.)
 
 knobas_core::closed_vocabulary! {
     /// An asset's **own** status -- what a person recorded about it.

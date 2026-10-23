@@ -373,7 +373,7 @@ pub async fn proposal_overflow(
 /// subquery inside an `or` that cannot be pulled up into a join and so runs
 /// hashed, once: 6 ms never analyzed, 9 ms analyzed, either plan.
 ///
-/// Its predicate is [`in_room!`], the one [`WALK`] and [`WALK_MEMBERS`] ask.
+/// Its predicate is [`in_room!`] itself, the room every tray statement asks.
 const PROPOSAL_COUNT: &str = concat!(
     "select count(*)
        from knobas.proposed_link l

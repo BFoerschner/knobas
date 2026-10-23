@@ -179,8 +179,8 @@ pub struct UnknownValue {
 #[cfg(test)]
 mod tests {
     crate::closed_vocabulary! {
-        /// A vocabulary of the macro's own, so the codec is tested once at the
-        /// macro rather than again at every enum it declares.
+        /// A vocabulary of the macro's own, so the generated codec and its error
+        /// are tested at the macro; each declared enum keeps its own pins.
         pub enum Shade {
             Light => "light",
             DarkGrey => "dark_grey",
