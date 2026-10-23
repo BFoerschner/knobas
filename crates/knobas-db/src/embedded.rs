@@ -3024,25 +3024,26 @@ mod tests {
 
     /// The `postgres` a held `initdb` runs: every run passes through to the
     /// real one, but the one its kill point names writes `held` and waits for
-    /// `release`. Its directory's parent is the gate.
+    /// `release`. The files it reads and writes are in its directory's parent.
     #[cfg(unix)]
     const HELD_POSTGRES: &str = r#"#!/bin/sh
-gate=$(dirname "$(dirname "$0")")
-real=$(cat "$gate/real-postgres")
-point=$(cat "$gate/point")
+dir=$(dirname "$(dirname "$0")")
+real=$(cat "$dir/real-postgres")
+point=$(cat "$dir/point")
 case $point in
-probes) held=--check ;;
-*) held=--single ;;
+probes) run=--check ;;
+*) run=--single ;;
 esac
 case " $* " in
-*" $held "*) ;;
+*" $run "*) ;;
 *) exec "$real" "$@" ;;
 esac
 hold() {
-    : >"$gate/held"
+    : >"$dir/held"
     n=0
-    while [ ! -e "$gate/release" ]; do
-        # The test gave up: run nothing more.
+    while [ ! -e "$dir/release" ]; do
+        # About 60 s, past the test's own 30 s waits: the test gave up,
+        # so run nothing more.
         [ "$n" -lt 600 ] || exit 1
         sleep 0.1
         n=$((n + 1))
@@ -3067,27 +3068,27 @@ setup)
     } | "$real" "$@"
     ;;
 esac
-: >"$gate/done"
+: >"$dir/done"
 "#;
 
-    /// A copy of `initdb` under `gate` that is held at `point`, and its path.
+    /// A copy of `initdb` under `hold_dir` that is held at `point`, and its path.
     /// `initdb` runs the `postgres` beside it and reads `share/` beside its
     /// directory; its library is found the same way.
     #[cfg(unix)]
-    fn held_initdb(gate: &Path, initdb: &Path, point: KillPoint) -> PathBuf {
+    fn held_initdb(hold_dir: &Path, initdb: &Path, point: KillPoint) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let bin = initdb.parent().unwrap();
         let install = bin.parent().unwrap();
-        std::fs::create_dir(gate.join("bin")).unwrap();
+        std::fs::create_dir(hold_dir.join("bin")).unwrap();
         for dir in ["lib", "share"] {
-            std::os::unix::fs::symlink(install.join(dir), gate.join(dir)).unwrap();
+            std::os::unix::fs::symlink(install.join(dir), hold_dir.join(dir)).unwrap();
         }
-        let copy = gate.join("bin").join("initdb");
+        let copy = hold_dir.join("bin").join("initdb");
         std::fs::copy(initdb, &copy).unwrap();
-        let postgres = write(&gate.join("bin"), "postgres", HELD_POSTGRES);
+        let postgres = write(&hold_dir.join("bin"), "postgres", HELD_POSTGRES);
         std::fs::set_permissions(&postgres, std::fs::Permissions::from_mode(0o755)).unwrap();
         write(
-            gate,
+            hold_dir,
             "real-postgres",
             bin.join("postgres").to_str().unwrap(),
         );
@@ -3096,13 +3097,13 @@ esac
             KillPoint::AfterBootstrap => "bootstrapped",
             KillPoint::DuringSetup => "setup",
         };
-        write(gate, "point", point);
+        write(hold_dir, "point", point);
         copy
     }
 
     /// The pids of the processes running `program`.
     #[cfg(unix)]
-    fn running(program: &Path) -> Vec<u32> {
+    fn pids_running(program: &Path) -> Vec<u32> {
         let listing = std::process::Command::new("ps")
             .args(["-ww", "-axo", "pid=,args="])
             .output()
@@ -3137,15 +3138,15 @@ esac
     async fn interrupt_initdb(dir: &Path, point: KillPoint) -> Settings {
         let (settings, initdb) = initdb_for(dir).await;
         let data = settings.data_dir.clone();
-        let gate_dir = tempfile::tempdir().unwrap();
-        let gate = gate_dir.path();
-        let initdb = held_initdb(gate, &initdb, point);
+        let hold = tempfile::tempdir().unwrap();
+        let hold_dir = hold.path();
+        let initdb = held_initdb(hold_dir, &initdb, point);
         let reached = async {
-            while !gate.join("held").exists() {
+            while !hold_dir.join("held").exists() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
             // `initdb` waits on the held child, so it is still running.
-            running(&initdb)
+            pids_running(&initdb)
         };
         let pids = tokio::select! {
             finished = run_initdb(&initdb, &settings, COMMAND_TIMEOUT) => {
@@ -3155,8 +3156,11 @@ esac
         };
         assert_eq!(pids.len(), 1, "{point:?}: one initdb runs, {pids:?}");
         wait_until("initdb outlived its kill", || !process_alive(pids[0])).await;
-        write(gate, "release", "");
-        wait_until("the held child had not exited", || gate.join("done").exists()).await;
+        write(hold_dir, "release", "");
+        wait_until("the held child had not exited", || {
+            hold_dir.join("done").exists()
+        })
+        .await;
 
         let has = |name: &str| data.join(name).exists();
         assert!(has("PG_VERSION") && has("postgresql.conf"), "{point:?}");
