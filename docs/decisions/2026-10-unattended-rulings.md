@@ -14550,7 +14550,9 @@ Ruled 2026-10-23 by the implementer (Sonnet) while building the bundle.
   title; with six-word titles from about 82 to 120 ms carrying it, and to 180 ms or more joining
   the shortlist back to its corpus by id. Stored columns are
   exact and cost a comparison per match: 81 to 83 ms became 65 to 67 ms on six-word titles. The
-  cap's semantics are now pinned by `ranking.rs`' new
+  price is paid at 100,000 rows. With the per-match cost gone, the planner stops parallelising the
+  mirror branch, and a 5,000-match word goes from 24 to 38 ms p50: still within the budget, but a
+  regression, filed as #1851 rather than hidden. The cap's semantics are now pinned by `ranking.rs`' new
   `the_item_named_exactly_the_word_survives_a_cap_of_equally_ranked_siblings`. *Reversing:* as
   above.
 - **The mirror only.** *Fork:* the notes, assets and routes lex their title per match too.
