@@ -414,7 +414,8 @@ async fn rename_once_free(server: &Connector, from: &str, to: &str) -> Result<bo
                 break;
             }
             // A session got in between the two statements.
-            Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some(OBJECT_IN_USE) => {}
+            Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some(OBJECT_IN_USE) => {
+            }
             // The test dropped it.
             Err(sqlx::Error::Database(error))
                 if error.code().as_deref() == Some(INVALID_CATALOG_NAME) =>

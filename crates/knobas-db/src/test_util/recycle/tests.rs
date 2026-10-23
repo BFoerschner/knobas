@@ -209,7 +209,10 @@ async fn a_kept_connector_keeps_its_database_off_the_shelf() {
     let kept = std::thread::spawn(move || lease(shelf, server, "x".to_owned(), snapshot))
         .join()
         .expect("the thread");
-    assert!(!on_the_shelf(shelf), "a `static` holding the connector still uses it");
+    assert!(
+        !on_the_shelf(shelf),
+        "a `static` holding the connector still uses it"
+    );
     drop(kept);
     assert!(on_the_shelf(shelf), "returned with the last clone");
 }
