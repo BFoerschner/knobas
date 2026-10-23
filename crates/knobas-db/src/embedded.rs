@@ -464,7 +464,8 @@ impl EmbeddedDb {
             });
         }
 
-        let settings = build_settings(&cfg.root_dir)?;
+        let root = cfg.root_dir.clone();
+        let settings = off_runtime(&cfg.root_dir, move || build_settings(&root)).await??;
         launch(&cfg.root_dir, settings).await
     }
 
@@ -485,7 +486,8 @@ impl EmbeddedDb {
         root_dir: PathBuf,
         max_connections: u32,
     ) -> Result<EmbeddedDb, DbError> {
-        let mut settings = build_settings(&root_dir)?;
+        let root = root_dir.clone();
+        let mut settings = off_runtime(&root_dir, move || build_settings(&root)).await??;
         settings
             .configuration
             .insert("max_connections".to_owned(), max_connections.to_string());
@@ -757,16 +759,20 @@ impl EmbeddedDb {
         else {
             return Ok(());
         };
-        let Some(pg_ctl) = pg_ctl_stop_immediate(&data_dir) else {
+        // The lookup stats the installation and the stop forks: both under
+        // `spawn_blocking`, which a dropped caller does not cut off.
+        let stop_dir = data_dir.clone();
+        let Some(output) = off_runtime(&data_dir, move || {
+            pg_ctl_stop_immediate(&stop_dir).map(|mut pg_ctl| pg_ctl.output())
+        })
+        .await?
+        else {
             return Err(DbError::io(
                 installation_dir(),
                 io::Error::new(io::ErrorKind::NotFound, format!("no {PG_CTL} under it")),
             ));
         };
-        let output = tokio::process::Command::from(pg_ctl)
-            .output()
-            .await
-            .map_err(|source| DbError::io(&data_dir, source))?;
+        let output = output.map_err(|source| DbError::io(&data_dir, source))?;
         if !output.status.success() {
             return Err(DbError::io(
                 &data_dir,
@@ -846,7 +852,8 @@ async fn launch(root_dir: &Path, settings: Settings) -> Result<EmbeddedDb, DbErr
                 serving,
                 "postmaster.pid points at a server that is not ours: clearing the stale lock"
             );
-            clear_lock(&data_dir)?;
+            let locked = data_dir.clone();
+            off_runtime(&data_dir, move || clear_lock(&locked)).await??;
             match start_managed(root_dir, settings).await? {
                 Started::Ready(db) => Ok(*db),
                 // Only reachable if something recreated the lock file in
@@ -1000,7 +1007,13 @@ enum Started {
 async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Started, DbError> {
     let _guard = bring_up_lock(root_dir).await?;
     let data_dir = settings.data_dir.clone();
-    let owner_lock = match claim_ownership(root_dir)? {
+    let root = root_dir.to_path_buf();
+    let claimed = off_runtime(&root, {
+        let root = root.clone();
+        move || claim_ownership(&root)
+    })
+    .await??;
+    let owner_lock = match claimed {
         Ownership::Ours(lock) => lock,
         Ownership::Held { by } => {
             let holder = by.map_or_else(
@@ -1013,8 +1026,15 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
             });
         }
     };
-    adopt_recorded_password(&mut settings)?;
-    recover_or_mark(&data_dir)?;
+    // Each step reads or writes the data directory, so each runs under
+    // `spawn_blocking`, in the order it ran before; the bring-up lock and the
+    // ownership lock are held across them.
+    settings = off_runtime(&data_dir, move || {
+        adopt_recorded_password(&mut settings).map(|()| settings)
+    })
+    .await??;
+    let recovering = data_dir.clone();
+    off_runtime(&data_dir, move || recover_or_mark(&recovering)).await??;
 
     // `PostgreSQL::new` consumes the settings, and the adoption path needs
     // them after the handle is gone.
@@ -1036,7 +1056,8 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
 
     initialise(root_dir, &adoption).await?;
     postgresql.setup().await?;
-    keep_to_owner(&adoption);
+    let owned = adoption.clone();
+    off_runtime(&data_dir, move || keep_to_owner(&owned)).await?;
 
     if let Err(error) = postgresql.start().await {
         // `PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever
@@ -1046,7 +1067,9 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
         // it: it owns no OS resource, only paths and strings, so the leak is a
         // few hundred bytes for the rest of the process -- a trade worth
         // making against shutting down a database somebody else is using.
-        match inspect_lock(&data_dir)? {
+        let inspecting = data_dir.clone();
+        let lock = off_runtime(&data_dir, move || inspect_lock(&inspecting)).await??;
+        match lock {
             // A hard-killed process (crash, `kill -9`, laptop shutdown)
             // leaves `postmaster.pid` behind and PostgreSQL then refuses to
             // start. The lock is gone now, so the start is worth retrying.
@@ -1231,7 +1254,8 @@ async fn adopt(
         .fetch_one(&mut admin)
         .await
         .map_err(|source| unreachable(format!("cannot query it: {source}")))?;
-    if provably_different(Path::new(&serving.0), &data_dir) {
+    let (served_dir, ours) = (PathBuf::from(&serving.0), data_dir.clone());
+    if off_runtime(&data_dir, move || provably_different(&served_dir, &ours)).await? {
         // A mismatch clears the lock **whatever the recorded pid is doing**,
         // as the stranger arms above do since #1775. Ruled first for this
         // arm, and here is the argument:
@@ -1649,17 +1673,37 @@ const INITDB_GRACE: Duration = Duration::from_secs(10);
 /// and `create_new` refuses a password file that is there.
 async fn initialise(root_dir: &Path, settings: &Settings) -> Result<(), DbError> {
     // The crate's own test (`is_initialized`), so `setup()` agrees with it.
-    if settings.data_dir.join("postgresql.conf").exists() {
+    let conf = settings.data_dir.join("postgresql.conf");
+    if off_runtime(&conf.clone(), move || conf.exists()).await? {
         return Ok(());
     }
     let binaries = install(root_dir, settings).await?;
-    if !settings.password_file.exists() {
-        write_password_file(&settings.password_file, &settings.password)?;
-    }
+    let (file, password) = (settings.password_file.clone(), settings.password.clone());
+    off_runtime(&settings.password_file, move || {
+        if file.exists() {
+            Ok(())
+        } else {
+            write_password_file(&file, &password)
+        }
+    })
+    .await??;
     let initdb = binaries.join(format!("initdb{}", std::env::consts::EXE_SUFFIX));
     run_initdb(&initdb, settings, COMMAND_TIMEOUT).await?;
-    mark_finished(&settings.data_dir);
+    let data_dir = settings.data_dir.clone();
+    off_runtime(&settings.data_dir, move || mark_finished(&data_dir)).await?;
     Ok(())
+}
+
+/// Run `work` on a blocking thread and return its answer. A dropped caller
+/// does not cut the work off: it finishes and its answer is discarded. A task
+/// that panicked or was cancelled is a [`DbError::Io`] on `path`.
+async fn off_runtime<T: Send + 'static>(
+    path: &Path,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, DbError> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| DbError::io(path, io::Error::other(error)))
 }
 
 /// Install the PostgreSQL binaries if they are not there yet, and return
@@ -1672,9 +1716,13 @@ async fn initialise(root_dir: &Path, settings: &Settings) -> Result<(), DbError>
 /// also what resolve the version directory the binaries live in.
 async fn install(root_dir: &Path, settings: &Settings) -> Result<PathBuf, DbError> {
     let placeholder = root_dir.join(INSTALL_ONLY);
-    std::fs::create_dir_all(&placeholder).map_err(|source| DbError::io(&placeholder, source))?;
+    tokio::fs::create_dir_all(&placeholder)
+        .await
+        .map_err(|source| DbError::io(&placeholder, source))?;
     let conf = placeholder.join("postgresql.conf");
-    std::fs::write(&conf, "").map_err(|source| DbError::io(&conf, source))?;
+    tokio::fs::write(&conf, "")
+        .await
+        .map_err(|source| DbError::io(&conf, source))?;
 
     let mut install_settings = settings.clone();
     install_settings.data_dir.clone_from(&placeholder);
@@ -1683,7 +1731,7 @@ async fn install(root_dir: &Path, settings: &Settings) -> Result<PathBuf, DbErro
     let binaries = postgresql.settings().binary_dir();
     // Nothing to stop: the placeholder has no `postmaster.pid`.
     drop(postgresql);
-    if let Err(error) = std::fs::remove_dir_all(&placeholder) {
+    if let Err(error) = tokio::fs::remove_dir_all(&placeholder).await {
         tracing::warn!(%error, placeholder = %placeholder.display(), "could not remove the install placeholder");
     }
     installed?;
@@ -1729,7 +1777,7 @@ async fn run_initdb(initdb: &Path, settings: &Settings, limit: Duration) -> Resu
     // The crate's `CREATE_NO_WINDOW`: no console flashes up over the app.
     #[cfg(windows)]
     command.creation_flags(0x0800_0000);
-    let child = command
+    command
         .arg("--auth")
         .arg("password")
         .arg("--pgdata")
@@ -1743,8 +1791,12 @@ async fn run_initdb(initdb: &Path, settings: &Settings, limit: Duration) -> Resu
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
+        .kill_on_drop(true);
+    // The fork runs under `spawn_blocking`; a caller dropped meanwhile gets
+    // the child dropped with the result, and `kill_on_drop` ends it.
+    let child = tokio::task::spawn_blocking(move || command.spawn())
+        .await
+        .map_err(|error| DbError::io(initdb, io::Error::other(error)))?
         .map_err(|source| DbError::io(initdb, source))?;
     let pid = child.id();
     let mut output = std::pin::pin!(child.wait_with_output());
@@ -1754,7 +1806,13 @@ async fn run_initdb(initdb: &Path, settings: &Settings, limit: Duration) -> Resu
             tracing::warn!(?pid, "initdb timed out: stopping it");
             // Its own cleanup runs before it exits. A drop past the grace
             // kills it.
-            if pid.is_some_and(terminate) {
+            let sent = match pid {
+                Some(pid) => tokio::task::spawn_blocking(move || terminate(pid))
+                    .await
+                    .unwrap_or(false),
+                None => false,
+            };
+            if sent {
                 let _ = tokio::time::timeout(INITDB_GRACE, &mut output).await;
             }
             return Err(failed("deadline has elapsed".to_owned()));
@@ -2076,7 +2134,10 @@ const BRING_UP_POLL: Duration = Duration::from_millis(50);
 /// protects, and holding the returned `File` is what does that.
 async fn bring_up_lock(root_dir: &Path) -> Result<File, DbError> {
     let path = root_dir.join(BRING_UP_LOCK);
-    let file = File::create(&path).map_err(|source| DbError::io(&path, source))?;
+    let created = path.clone();
+    let file = off_runtime(&path, move || File::create(&created))
+        .await?
+        .map_err(|source| DbError::io(&path, source))?;
 
     let deadline = std::time::Instant::now() + BRING_UP_TIMEOUT;
     let mut waited = false;
@@ -2642,6 +2703,45 @@ mod tests {
             bring_up_lock(dir.path()).await.is_ok(),
             "dropping the guard must release the lock"
         );
+    }
+
+    /// The lock file's creation does not hold a runtime worker (#1860). A
+    /// FIFO in its place blocks `File::create` until something opens it for
+    /// reading, so a creation on the worker would stop the one worker of this
+    /// runtime: its timer task could not fire while the creation waits.
+    #[cfg(unix)]
+    #[test]
+    fn the_bring_up_lock_is_created_off_the_runtime_worker() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join(BRING_UP_LOCK);
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let root = dir.path().to_path_buf();
+            let lock = tokio::spawn(async move { bring_up_lock(&root).await.map(|_| ()) });
+            tokio::time::timeout(Duration::from_secs(5), async {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            })
+            .await
+            .expect("the worker is free while the lock file is being created");
+            // Release the creation. The lock itself is refused on a FIFO on
+            // some systems, so only that it settles is asserted.
+            let reader = tokio::task::spawn_blocking(move || File::open(&fifo).map(drop))
+                .await
+                .unwrap();
+            reader.unwrap();
+            let _ = lock.await.unwrap();
+        });
     }
 
     /// A dropped ownership lock is free at once, even while another thread

@@ -585,9 +585,9 @@ async fn spawn_into(
 /// panicked or was cancelled, [`Internal`](crate::IpcErrorCode::Internal); the
 /// inner one is the spawn's own.
 async fn spawn_off_runtime(
-    mut command: tokio::process::Command,
+    command: tokio::process::Command,
 ) -> Result<std::io::Result<tokio::process::Child>, IpcError> {
-    tokio::task::spawn_blocking(move || command.spawn())
+    working_tree::spawn_off_runtime(command)
         .await
         .map_err(IpcError::internal)
 }

@@ -724,7 +724,9 @@ async fn bring_up_app<R: tauri::Runtime>(
     let detail = if config.existing_url.is_some() {
         tracing::info!("{DB_URL_ENV} is set: using an externally managed postgres");
         Some(format!("connecting to the server {DB_URL_ENV} points at"))
-    } else if config.root_dir.exists() {
+    } else if tokio::fs::metadata(&config.root_dir).await.is_ok() {
+        // `Path::exists` off the worker (`tokio::fs` runs under
+        // `spawn_blocking`); a dropped bring-up does not cut the stat off.
         tracing::info!(root_dir = %config.root_dir.display(), "starting the embedded postgres");
         None
     } else {

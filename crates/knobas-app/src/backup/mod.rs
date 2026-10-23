@@ -52,7 +52,7 @@
 pub mod policy;
 pub mod share;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -334,7 +334,7 @@ pub async fn export_now(state: &BackupState) -> Result<BackupRecord, ExportError
     write_setting(&state.pool, LAST_KEY, &record).await?;
 
     let schedule = load_schedule(&state.pool).await?;
-    prune(state, schedule.keep)?;
+    prune_off_runtime(state, schedule.keep).await?;
     tracing::info!(file = %record.file, bytes = record.bytes, "backup exported");
     Ok(record)
 }
@@ -414,7 +414,7 @@ pub async fn status(state: &BackupState) -> Result<BackupStatus, ExportError> {
         schedule,
         directory: state.directory.display().to_string(),
         last,
-        archives: archives(state),
+        archives: archives_off_runtime(state).await?,
     })
 }
 
@@ -430,7 +430,11 @@ pub async fn status(state: &BackupState) -> Result<BackupStatus, ExportError> {
 /// [`BackupError::TargetNotEmpty`] when the database still holds data.
 pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError> {
     let path = state.directory.join(file);
-    if !policy::is_archive_name(file) || !path.is_file() {
+    if !policy::is_archive_name(file)
+        || !tokio::fs::metadata(&path)
+            .await
+            .is_ok_and(|meta| meta.is_file())
+    {
         return Err(ExportError::NoSuchArchive(file.to_owned()));
     }
     knobas_db::backup::restore(&state.connector, &path).await?;
@@ -640,8 +644,8 @@ const RESTORED_WITHOUT_A_SECRET: &str =
 /// `remove_file` can take -- so a directory called `knobas-....knobas` would
 /// be listed to the user as an archive and then fail every export that tried
 /// to age it out.
-fn archives(state: &BackupState) -> Vec<ArchiveFile> {
-    let Ok(entries) = std::fs::read_dir(&state.directory) else {
+fn archives(directory: &Path) -> Vec<ArchiveFile> {
+    let Ok(entries) = std::fs::read_dir(directory) else {
         return Vec::new();
     };
     let mut found: Vec<ArchiveFile> = entries
@@ -678,14 +682,41 @@ fn archives(state: &BackupState) -> Vec<ArchiveFile> {
     found
 }
 
+/// [`archives`] off the async runtime: a directory listing and a stat per
+/// entry. A task that panicked or was cancelled is an
+/// [`ExportError::Io`] on the directory. A dropped caller does not cut the
+/// listing off; its answer is discarded.
+async fn archives_off_runtime(state: &BackupState) -> Result<Vec<ArchiveFile>, ExportError> {
+    let directory = state.directory.clone();
+    tokio::task::spawn_blocking(move || archives(&directory))
+        .await
+        .map_err(|error| ExportError::Io {
+            path: state.directory.clone(),
+            source: std::io::Error::other(error),
+        })
+}
+
+/// [`prune`] off the async runtime. A task that panicked or was cancelled is
+/// an [`ExportError::Io`] on the directory. A dropped caller does not cut the
+/// pruning off: the aged-out archives are still deleted.
+async fn prune_off_runtime(state: &BackupState, keep: u32) -> Result<(), ExportError> {
+    let directory = state.directory.clone();
+    tokio::task::spawn_blocking(move || prune(&directory, keep))
+        .await
+        .map_err(|error| ExportError::Io {
+            path: state.directory.clone(),
+            source: std::io::Error::other(error),
+        })?
+}
+
 /// Delete the archives retention has aged out.
-fn prune(state: &BackupState, keep: u32) -> Result<(), ExportError> {
-    let names: Vec<String> = archives(state)
+fn prune(directory: &Path, keep: u32) -> Result<(), ExportError> {
+    let names: Vec<String> = archives(directory)
         .into_iter()
         .map(|archive| archive.file)
         .collect();
     for name in policy::expired(&names, keep) {
-        let path = state.directory.join(&name);
+        let path = directory.join(&name);
         std::fs::remove_file(&path).map_err(|source| ExportError::Io { path, source })?;
         tracing::info!(file = %name, "backup pruned");
     }

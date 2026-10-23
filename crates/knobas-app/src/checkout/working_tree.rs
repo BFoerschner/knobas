@@ -112,16 +112,22 @@ pub(super) async fn command_line_tools_installed() -> bool {
     static ANSWER: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
     *ANSWER
         .get_or_init(|| async {
-            !cfg!(target_os = "macos")
-                || tokio::process::Command::new("xcode-select")
-                    .arg("-p")
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .kill_on_drop(true)
-                    .status()
-                    .await
-                    .is_ok_and(|status| status.success())
+            if !cfg!(target_os = "macos") {
+                return true;
+            }
+            let mut command = tokio::process::Command::new("xcode-select");
+            command
+                .arg("-p")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .kill_on_drop(true);
+            // A dropped probe kills the child, also when its spawn task
+            // finishes after the drop (the child is dropped with the result).
+            match spawn_off_runtime(command).await {
+                Ok(Ok(mut child)) => child.wait().await.is_ok_and(|status| status.success()),
+                _ => false,
+            }
         })
         .await
 }
@@ -142,7 +148,7 @@ async fn read_guarded(
         Err(Unrunnable::NoGit) => return TreeRead::NoGit,
         Err(Unrunnable::ProbeFailed(reason)) => return TreeRead::Failed { reason },
     };
-    if !path.is_dir() {
+    if !is_dir_off_runtime(path).await {
         return TreeRead::NotARepo;
     }
 
@@ -154,7 +160,16 @@ async fn read_guarded(
         "--untracked-files=normal",
     ]);
 
-    let output = match tokio::time::timeout(timeout, command.output()).await {
+    let run = async {
+        match spawn_off_runtime(command).await {
+            Ok(Ok(child)) => child.wait_with_output().await,
+            Ok(Err(error)) => Err(error),
+            Err(error) => Err(std::io::Error::other(format!(
+                "its start did not finish: {error}"
+            ))),
+        }
+    };
+    let output = match tokio::time::timeout(timeout, run).await {
         Err(_) => {
             return TreeRead::Failed {
                 reason: format!("git did not answer within {} s", timeout.as_secs()),
@@ -280,6 +295,28 @@ pub(super) fn refusal(stderr: &str) -> String {
         .unwrap_or("git refused without saying why")
         .trim()
         .to_owned()
+}
+
+/// `command.spawn()` off the async runtime: the fork and exec are synchronous
+/// syscalls, also inside `tokio::process::Command::{output,status}`. The
+/// blocking thread still carries the runtime's context, which the child's
+/// pipes and its reaping need. The outer error is a task that panicked or was
+/// cancelled; the inner one is the spawn's own. A caller that is dropped while
+/// the spawn runs does not cut it off: the child arrives, is dropped with the
+/// result, and `kill_on_drop` ends it.
+pub(super) async fn spawn_off_runtime(
+    mut command: tokio::process::Command,
+) -> Result<std::io::Result<tokio::process::Child>, tokio::task::JoinError> {
+    tokio::task::spawn_blocking(move || command.spawn()).await
+}
+
+/// `path.is_dir()` off the async runtime (`tokio::fs` runs it under
+/// `spawn_blocking`; a dropped caller does not cut the stat off). A path that
+/// cannot be stat'ed is not a folder.
+pub(super) async fn is_dir_off_runtime(path: &Path) -> bool {
+    tokio::fs::metadata(path)
+        .await
+        .is_ok_and(|metadata| metadata.is_dir())
 }
 
 /// [`find_on`] off the async runtime: it stats each `PATH` entry. A task that

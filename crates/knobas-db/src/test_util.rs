@@ -226,8 +226,13 @@ impl Server {
     /// root.
     async fn of_its_own() -> Server {
         let root_dir = scratch_root();
-        claim(&root_dir);
-        reap_abandoned(&root_dir);
+        let first = root_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            claim(&first);
+            reap_abandoned(&first);
+        })
+        .await
+        .expect("claim the scratch root");
         let db = EmbeddedDb::start(DbConfig {
             root_dir,
             existing_url: None,
@@ -437,8 +442,14 @@ pub async fn serve_until_closed(
     mut output: impl Write,
 ) -> Result<(), crate::DbError> {
     let root_dir = scratch_root();
-    let lock = claim(&root_dir);
-    reap_abandoned(&root_dir);
+    let first = root_dir.clone();
+    let lock = tokio::task::spawn_blocking(move || {
+        let lock = claim(&first);
+        reap_abandoned(&first);
+        lock
+    })
+    .await
+    .expect("claim the scratch root");
     let db = EmbeddedDb::start_with_max_connections(root_dir.clone(), GATE_MAX_CONNECTIONS).await?;
 
     let url = db

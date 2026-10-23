@@ -271,7 +271,7 @@ async fn dump_with(
     scope: &[String],
 ) -> Result<u64, BackupError> {
     if let Some(parent) = archive.parent() {
-        std::fs::create_dir_all(parent).map_err(|source| BackupError::Io {
+        tokio::fs::create_dir_all(parent).await.map_err(|source| BackupError::Io {
             path: parent.to_path_buf(),
             source,
         })?;
@@ -288,7 +288,8 @@ async fn dump_with(
 
     run_tool(connector, PG_DUMP, &args).await?;
 
-    let bytes = std::fs::metadata(archive)
+    let bytes = tokio::fs::metadata(archive)
+        .await
         .map_err(|source| BackupError::Io {
             path: archive.to_path_buf(),
             source,
@@ -312,9 +313,9 @@ pub async fn archive_contents(archive: &Path) -> Result<Vec<TocEntry>, BackupErr
     // The one tool call that needs neither a server nor a password: a table of
     // contents is read off the file. Hence `tool_command` directly rather than
     // `run_tool`, which exists to attach a connection.
-    let mut command = tool_command(PG_RESTORE)?;
+    let mut command = tool_command(PG_RESTORE).await?;
     command.arg("--list").arg(archive);
-    let output = run(PG_RESTORE, &mut command).await?;
+    let output = run(PG_RESTORE, command).await?;
 
     Ok(String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -346,9 +347,9 @@ pub async fn archive_contents(archive: &Path) -> Result<Vec<TocEntry>, BackupErr
 /// not read the file.
 pub async fn archive_sql(archive: &Path) -> Result<String, BackupError> {
     // Neither a server nor a password: the script is rendered from the file.
-    let mut command = tool_command(PG_RESTORE)?;
+    let mut command = tool_command(PG_RESTORE).await?;
     command.arg("--file=-").arg(archive);
-    let output = run(PG_RESTORE, &mut command).await?;
+    let output = run(PG_RESTORE, command).await?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
@@ -730,31 +731,54 @@ async fn run_tool(
     tool: &str,
     args: &[&OsStr],
 ) -> Result<Output, BackupError> {
-    let mut command = tool_command(tool)?;
+    let mut command = tool_command(tool).await?;
     command.args(args);
     // The connection, and in particular the password, reaches the child in its
     // *environment* and never in `argv` -- see `Connector::libpq_env`.
     for (key, value) in connector.libpq_env() {
         command.env(key, value);
     }
-    run(tool, &mut command).await
+    run(tool, command).await
 }
 
 /// The bundled `tool` as a command with no arguments yet.
-fn tool_command(tool: &str) -> Result<tokio::process::Command, BackupError> {
-    Ok(tokio::process::Command::new(locate(tool)?))
+///
+/// Looking the tool up stats the installation directory, so it runs under
+/// `spawn_blocking`; a caller dropped meanwhile does not cut the lookup off. A
+/// lookup task that panicked or was cancelled is a [`BackupError::Spawn`].
+async fn tool_command(tool: &str) -> Result<tokio::process::Command, BackupError> {
+    let name = tool.to_owned();
+    let found = tokio::task::spawn_blocking(move || locate(&name))
+        .await
+        .map_err(|error| BackupError::Spawn {
+            tool: tool.to_owned(),
+            source: io::Error::other(error),
+        })??;
+    Ok(tokio::process::Command::new(found))
 }
 
 /// Run `command`, turning a non-zero exit into a [`BackupError::Tool`]
 /// carrying its stderr.
-async fn run(tool: &str, command: &mut tokio::process::Command) -> Result<Output, BackupError> {
-    let output = command
-        .output()
+///
+/// `Command::output()` forks on the calling worker, so the spawn runs under
+/// `spawn_blocking` and the wait stays async. A dropped caller does not cut the
+/// spawn off; the child is dropped with its result (no `kill_on_drop`, as
+/// before). A spawn task that panicked or was cancelled is a
+/// [`BackupError::Spawn`].
+async fn run(tool: &str, mut command: tokio::process::Command) -> Result<Output, BackupError> {
+    let spawn_error = |source| BackupError::Spawn {
+        tool: tool.to_owned(),
+        source,
+    };
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let child = tokio::task::spawn_blocking(move || command.spawn())
         .await
-        .map_err(|source| BackupError::Spawn {
-            tool: tool.to_owned(),
-            source,
-        })?;
+        .map_err(|error| spawn_error(io::Error::other(error)))?
+        .map_err(spawn_error)?;
+    let output = child.wait_with_output().await.map_err(spawn_error)?;
     check(tool, &output)?;
     Ok(output)
 }
