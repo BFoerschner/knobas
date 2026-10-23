@@ -108,6 +108,18 @@ fn synthetic() -> u64 {
     *SYNTHETIC.get_or_init(|| env("RP_SYNTHETIC", 4_000))
 }
 
+/// A word the body text of three items in four carries (#1849), so a search
+/// keystroke has a word that matches most of the mirror. Nothing else in the
+/// text does: [`WORDS`] and the synthetic words each match about one row in a
+/// hundred. A ticket asking for "`payout` on the 22k probe" reads this one.
+const COMMON_WORD: &str = "common";
+
+/// Whether item `i` carries [`COMMON_WORD`]: three in four, a share no
+/// fixture size changes and `RP_ITEMS` scaling keeps above half.
+fn carries_common_word(i: u64) -> bool {
+    !i.is_multiple_of(4)
+}
+
 const STATUSES: &[&str] = &["Open", "In Progress", "In Review", "Blocked", "Done"];
 
 struct Rng(u64);
@@ -140,6 +152,11 @@ pub(crate) struct Synthetic {
     pub(crate) descriptor: SourceDescriptor,
     pub(crate) kind: &'static str,
     pub(crate) count: u64,
+    /// Whether three bodies in four carry [`COMMON_WORD`] (#1849). The probe
+    /// seeds it; `read_plans.rs` does not, its plan shapes were fixed on a
+    /// mirror without a word in most bodies and the mention rule's index plan
+    /// flips to a scan of every body once one is there.
+    pub(crate) common_word: bool,
 }
 
 #[async_trait::async_trait]
@@ -250,6 +267,12 @@ impl Source for Synthetic {
                 )
             } else {
                 rng.words(40)
+            };
+            // After every draw, so the rest of the text is the seed it was.
+            let body_text = if self.common_word && carries_common_word(i) {
+                format!("{body_text} {COMMON_WORD}")
+            } else {
+                body_text
             };
             sink.item(SyncItem {
                 entity: knobas_core::entity::EntityRef::new(id, &entity_key),
@@ -456,6 +479,7 @@ async fn seed(
             },
             kind: "ticket",
             count: tickets,
+            common_word: true,
         });
     }
     synthetic.push(Synthetic {
@@ -465,6 +489,7 @@ async fn seed(
         },
         kind: "page",
         count: pages,
+        common_word: true,
     });
     synthetic.push(Synthetic {
         descriptor: SourceDescriptor {
@@ -473,6 +498,7 @@ async fn seed(
         },
         kind: "build",
         count: builds,
+        common_word: true,
     });
     synthetic.push(Synthetic {
         descriptor: SourceDescriptor {
@@ -481,6 +507,7 @@ async fn seed(
         },
         kind: "pr",
         count: prs,
+        common_word: true,
     });
     for source in &synthetic {
         knobas_app::sources::demo::load_mirror_of(pool, source)
@@ -730,6 +757,8 @@ async fn what_the_reader_waits_on() {
         ("prs", prs.to_string()),
         ("links", "939".to_owned()),
         ("synthetic", synthetic().to_string()),
+        // The common word in three bodies of four (#1849).
+        ("common_word", COMMON_WORD.to_owned()),
         // A page's body and marks (#860): a seed of the shape before them is
         // another seed.
         ("page_shape", "storage-and-marks".to_owned()),
@@ -1083,6 +1112,29 @@ async fn what_the_reader_waits_on() {
         })
         .await;
     }
+    // The word that matches most of the mirror (#1849): the ranking and the
+    // count run over every match, not the few a prefix of `payment` reaches.
+    let common = knobas_search::SearchQuery {
+        raw: COMMON_WORD.into(),
+        limit: 50,
+        filters: Default::default(),
+    };
+    let matched = search_inner(pool, &registry, common.clone())
+        .await
+        .unwrap_or_else(|e| panic!("search {COMMON_WORD:?}: {e:?}"))
+        .total;
+    time(
+        "search keystroke",
+        &format!("search {COMMON_WORD:?} (matches {matched} of {items})"),
+        runs,
+        || search_inner(pool, &registry, common.clone()),
+    )
+    .await;
+    println!("RP-MATCHES search {COMMON_WORD:?} total={matched} items={items}");
+    assert!(
+        i64::from(matched) * 2 >= items,
+        "{COMMON_WORD:?} matches {matched} of {items} items, under half"
+    );
 
     // -- Docs (#859 to #862) -------------------------------------------------
     time("open Docs", "docs_tree", runs, || {

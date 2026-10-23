@@ -257,6 +257,12 @@ pub(crate) use list_paths;
 /// 171 to 202 ms; through these CTEs 122 to 146 ms, beside 152 to 155 ms for
 /// the text query `payout`, which every row matched. A ticket key over the
 /// whole mirror costs what a text query matching all of it does.
+///
+/// Which fixture that was is not in the tree (#1849): the figures above are
+/// #811's own, on a Jira-only corpus whose generator was not kept, and no
+/// fixture in the tree has a `payout` that every row holds. Read the text
+/// query on the 22k responsiveness probe instead: `common` matches 17,625 of
+/// its 23,500 items, 78 to 83 ms warm at machine load 6 to 12 (#1849).
 macro_rules! field_paths_ctes {
     () => {
         concat!(
