@@ -104,10 +104,25 @@ async fn readings_count_unreadable_and_empty_texts_each_in_its_own_slot() {
         Reading::Unreadable("updated:soonish".to_owned()),
         "the token the grammar did not know"
     );
-    assert_eq!(readings[2], Reading::Count(0), "a readable text nothing matches");
-    assert_eq!(readings[3], Reading::Count(3), "a filter alone counts its rows");
-    assert_eq!(readings[4], Reading::Count(0), "another kind admits no ticket");
-    assert!(matches!(readings[5], Reading::Unreadable(_)), "past the bound");
+    assert_eq!(
+        readings[2],
+        Reading::Count(0),
+        "a readable text nothing matches"
+    );
+    assert_eq!(
+        readings[3],
+        Reading::Count(3),
+        "a filter alone counts its rows"
+    );
+    assert_eq!(
+        readings[4],
+        Reading::Count(0),
+        "another kind admits no ticket"
+    );
+    assert!(
+        matches!(readings[5], Reading::Unreadable(_)),
+        "past the bound"
+    );
     assert_eq!(searcher.readings(&[], "ticket").await.unwrap(), vec![]);
 }
 
