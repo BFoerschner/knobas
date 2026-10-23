@@ -15395,3 +15395,22 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1883.
 
 - **A `-word` is dropped, not excluded.** *Fork:* the ticket's first criterion says `project:PAY -blocked` "excludes `blocked`", but its title and fix direction say to read the words through `query::needles`, which drops `-word`; `ids_sql` has only a "every word appears" predicate and no exclusion. *Ruling:* follow the fix direction: the negated word is no needle, so it neither has to appear nor is it required absent. *Reasoning:* real exclusion is a new SQL predicate in `ids_sql` and `ids_counts_sql`, a hot path the ticket does not ask to change. The tested contract is that the literal `-word` is no longer matched. *Reversing:* add a `not strpos` predicate over the grammar's excluded words in both statements.
 - **Merge-manager review (Sonnet), PR #1887.** The first criterion of #1651 is half unmet: the literal `-word` is no longer matched, but nothing is excluded. The ruling above may not contradict the ticket, so it stands only as the fix direction; the exclusion (and `-"phrase"`, `or`) is filed as #1889, `ready-for-agent`, because it is a hot-path SQL change that needs the 22k probe. #1651 closes with this PR. *Reversing:* none needed; #1889 carries it.
+## #1884: shell `??` fallbacks on fields the mirror types as present (Sonnet implementer, 2026-10-23)
+
+- **`SourceFacts` is a `Pick` of `SourceSummary`.** *Fork:* keep the job's hand-written partial
+  view of a `list_sources` row, or derive it. *Ruling:* derive it (`id`, `display_name`, `config`,
+  `roles`, `auth_kind`), so its ports and the tests' stand-ins send every field, through the new
+  `sourceFacts(id, over)` fixture. *Reasoning:* #1664 left it loose on purpose for this ticket; the
+  `Pick` follows the wire without a copy that can drift. *Reversing:* write the interface out again.
+- **`SourceFacts` drops `kinds`.** *Fork:* nothing under the job, inbox, monitors or code surfaces
+  reads a source's `kinds`, and requiring it would need a full `KindInfo` in every stand-in.
+  *Ruling:* drop the field (the stale-builds test stops declaring a build kind it never used and
+  its name says what it does check). *Reversing:* add `"kinds"` to the `Pick`.
+- **Neighbouring projections tightened with it.** `ClaimingSource.display_name` is required and its
+  unread `adapter_kind` is gone; `TfMonitors` and `TfRepoCompare` lose `row.display_name ?? row.id`
+  and `found.body_text ?? ""`; `TfCode`'s `listSources` port and `headerLine` take
+  `Pick<SourceSummary, "id" | "base_url">`. *Reversing:* trivial.
+- **Left on purpose: `shell/dev/fake/link-sets.ts` `draft.patterns ?? []`.** `LinkSetDraft.patterns`
+  is `#[serde(default)]` in Rust, so the real command takes a draft without it and the fake
+  matches; the generated type calling it required is the same request-side-default case the
+  #1884 body excludes. Removing the fallback fails `fake-features.test.ts`.
