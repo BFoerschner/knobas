@@ -1603,6 +1603,7 @@ knobas-db	lib/knobas_db	backup::tests::a_two_word_tag_does_not_shift_the_schema
 knobas-db	lib/knobas_db	backup::tests::an_object_with_no_schema_reads_a_dash
 knobas-db	lib/knobas_db	backup::tests::the_header_and_the_comments_are_not_entries
 knobas-db	lib/knobas_db	embedded::tests::a_directory_a_finished_initdb_made_is_never_removed
+knobas-db	lib/knobas_db	embedded::tests::a_directory_whose_databases_are_on_a_missing_volume_is_kept
 knobas-db	lib/knobas_db	embedded::tests::a_directory_whose_databases_cannot_be_listed_is_kept
 knobas-db	lib/knobas_db	embedded::tests::a_dropped_initdb_is_killed_with_its_future
 knobas-db	lib/knobas_db	embedded::tests::a_half_written_symlinked_data_directory_loses_the_link_alone

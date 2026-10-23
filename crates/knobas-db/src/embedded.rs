@@ -1513,8 +1513,8 @@ enum Shape {
 
 /// Read `data_dir`'s shape. **A doubt about a database keeps the
 /// directory**: an entry that cannot be examined counts as present, so an
-/// unreadable marker keeps it, and a directory that cannot be listed counts
-/// as holding a database.
+/// unreadable marker keeps it, and a `base/` or `pg_tblspc/` that cannot be
+/// listed, or is missing, counts as holding a database.
 ///
 /// Without `PG_VERSION` and with `postgresql.conf`, it is unfinished (#1637):
 /// `initdb` writes `PG_VERSION` first and its cleanup removes it first.
@@ -1551,7 +1551,10 @@ fn shape(data_dir: &Path) -> Shape {
                     .is_some_and(|name| allowed.contains(&name))
             })
         }),
-        Err(source) => source.kind() == io::ErrorKind::NotFound,
+        // Even "not found" is a doubt: `initdb` makes both before
+        // `PG_VERSION`, so a missing one is a link to a volume not mounted,
+        // or a directory being copied in, not a killed `initdb`.
+        Err(_) => false,
     };
     if only("base", &["1", "4"]) && only("pg_tblspc", &[]) {
         Shape::Unfinished
@@ -2720,6 +2723,7 @@ mod tests {
         std::os::unix::fs::symlink(&target, &data).unwrap();
         std::fs::write(target.join("PG_VERSION"), "18\n").unwrap();
         std::fs::create_dir_all(target.join("base/16384")).unwrap();
+        std::fs::create_dir_all(target.join("pg_tblspc")).unwrap();
         recover_or_mark(&data).unwrap();
         assert!(
             data.join("postgresql.conf").is_file(),
@@ -2960,11 +2964,32 @@ mod tests {
     }
 
     /// What a killed `initdb` leaves, at `data`: `PG_VERSION`,
-    /// `postgresql.conf`, and `base/1` alone.
+    /// `postgresql.conf`, `base/1` alone and an empty `pg_tblspc/`.
     fn unfinished(data: &Path) {
         std::fs::create_dir_all(data.join("base/1")).unwrap();
+        std::fs::create_dir_all(data.join("pg_tblspc")).unwrap();
         write(data, "PG_VERSION", "18\n");
         write(data, "postgresql.conf", "");
+    }
+
+    /// #1824 review: a `base/` or `pg_tblspc/` that is a symlink to nothing,
+    /// a volume not mounted, counts as holding a database. Read as empty, it
+    /// removed the directory: the cluster's catalog and WAL with it.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_whose_databases_are_on_a_missing_volume_is_kept() {
+        for moved in ["base", "pg_tblspc"] {
+            let dir = tempfile::tempdir().unwrap();
+            let data = dir.path().join("data");
+            unfinished(&data);
+            std::fs::remove_dir_all(data.join(moved)).unwrap();
+            let unmounted = dir.path().join("unmounted").join(moved);
+            std::os::unix::fs::symlink(&unmounted, data.join(moved)).unwrap();
+
+            recover_or_mark(&data).unwrap();
+
+            assert!(data.join("PG_VERSION").is_file(), "{moved}: kept");
+        }
     }
 
     /// #1819: a `base/` that cannot be listed counts as holding a database,

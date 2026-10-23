@@ -93,6 +93,7 @@ async fn a_data_directory_that_holds_a_database_is_never_removed() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
         std::fs::create_dir_all(data.join("base/1")).unwrap();
+        std::fs::create_dir_all(data.join("pg_tblspc")).unwrap();
         std::fs::create_dir_all(data.join(database)).unwrap();
         std::fs::write(data.join("PG_VERSION"), "18\n").unwrap();
         std::fs::write(data.join("keep-me"), "a reader's file\n").unwrap();

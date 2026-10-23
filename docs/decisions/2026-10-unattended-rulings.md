@@ -14050,3 +14050,32 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   whose creator, pid 24266, was dead (`NATTCH` 0, 08:00:01) appeared during another run. No
   rerun of mine reproduced it, and sibling runs were starting servers too, so it was left.
   *Reversing:* n/a.
+
+## #1819 / PR #1824: merge-manager review (Opus merge-manager, 2026-10-23)
+
+- **A missing `base/` or `pg_tblspc/` keeps the directory.** *Fork:* read a `base/` or
+  `pg_tblspc/` that is not found as empty, as the PR did, or as a doubt. *Ruling:* a doubt, so
+  the directory counts as holding a database. *Reasoning:* `initdb` makes both before it writes
+  `PG_VERSION`, so no killed `initdb` lacks either. What does lack one is a `base/` symlinked to a
+  volume that is not mounted: `read_dir` reports *not found*, the directory read as unfinished,
+  and `remove_dir_all` took `global/`, `pg_wal/` and the rest with it, leaving the reader's
+  databases on that volume with no cluster to open them. Red before the fix:
+  `a_directory_whose_databases_are_on_a_missing_volume_is_kept` (`base`). The fixtures of the
+  unfinished-directory tests and of `a_data_directory_that_holds_a_database_is_never_removed` now
+  have the empty `pg_tblspc/` every killed `initdb` has, so each is still decided by its database
+  (mutant M2 rerun: it dies). *Reversing:* one match arm.
+- **The predicate, checked on 18.6.** A complete `initdb` with this machine's 18.6 binaries
+  leaves `base/` holding `1`, `4` and `5`, and `pg_tblspc/` empty, so no finished directory reads
+  as unfinished. A dropped `postgres` leaves the `knobas` database (OID 16384 or above), and one
+  in a tablespace leaves an entry under `pg_tblspc/`. *Reversing:* n/a.
+- **The answering-server check is not a data guard.** *Fork:* add a live-pid test to `served` for
+  a postmaster in the instant between writing `postmaster.pid` and binding (#1789's window), or
+  not. *Ruling:* not. *Reasoning:* `served` is read only for a directory that holds no database,
+  and this build starts no server on one: it removes it first, and its own `initdb` leaves
+  `base/5`. A postmaster an older build left in that instant loses files that hold no reader's
+  data. A pid test would bring back the recycled-pid lockout #1789 removed. *Reversing:* one
+  function.
+- **A data directory copied in during a launch.** *Fork:* guard against a copy that has reached
+  `base/1` but not the rest, or not. *Ruling:* not. *Reasoning:* a copy or a move across volumes
+  keeps its source until it finishes, and a move within one is a rename, so nothing the reader
+  has is lost. *Reversing:* n/a.
