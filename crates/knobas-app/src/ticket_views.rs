@@ -871,11 +871,12 @@ impl SavedViewLayout {
                 })
                 .collect()
         } else {
-            let mut by_status: std::collections::HashMap<Option<String>, Vec<MiniBoardCard>> = whole
-                .columns
-                .into_iter()
-                .map(|column| (column.status, column.cards))
-                .collect();
+            let mut by_status: std::collections::HashMap<Option<String>, Vec<MiniBoardCard>> =
+                whole
+                    .columns
+                    .into_iter()
+                    .map(|column| (column.status, column.cards))
+                    .collect();
             self.columns
                 .iter()
                 .map(|column| MiniBoardColumn {

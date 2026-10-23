@@ -242,6 +242,9 @@ pub async fn resolve<F: serde::Serialize + Sync>(
 /// # Errors
 ///
 /// The statement's.
-pub async fn resolve_stored(pool: &sqlx::PgPool, url: &str) -> Result<Option<UrlMatch>, sqlx::Error> {
+pub async fn resolve_stored(
+    pool: &sqlx::PgPool,
+    url: &str,
+) -> Result<Option<UrlMatch>, sqlx::Error> {
     resolve::<serde_json::Value>(pool, url, &[]).await
 }

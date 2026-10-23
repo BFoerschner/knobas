@@ -45,18 +45,18 @@ pub use knobas_core::web_url::UrlMatch;
 /// form is applied anywhere but in that statement.
 pub(crate) fn form_readings(registry: &dyn AdapterRegistry, url: &str) -> Vec<FormReading> {
     registry
-            .descriptors()
-            .into_iter()
-            .flat_map(|descriptor| {
-                let adapter_kind = descriptor.adapter_kind;
-                descriptor
-                    .url_forms
-                    .iter()
-                    .flat_map(|form| form.read(url))
-                    .map(|reading| FormReading {
-                        adapter_kind: adapter_kind.clone(),
-                        reading,
-                    })
+        .descriptors()
+        .into_iter()
+        .flat_map(|descriptor| {
+            let adapter_kind = descriptor.adapter_kind;
+            descriptor
+                .url_forms
+                .iter()
+                .flat_map(|form| form.read(url))
+                .map(|reading| FormReading {
+                    adapter_kind: adapter_kind.clone(),
+                    reading,
+                })
                 .collect::<Vec<_>>()
         })
         .collect()

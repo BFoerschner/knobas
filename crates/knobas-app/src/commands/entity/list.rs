@@ -1,8 +1,8 @@
 //! The entity list's commands: shims over [`knobas_core::entity_list`], which
 //! holds the read, its types and the six statements (#1317).
 
-use knobas_core::entity_list::{self, EntityFilter, EntityPage};
 pub(super) use knobas_core::entity_list::EntityRow;
+use knobas_core::entity_list::{self, EntityFilter, EntityPage};
 
 use super::*;
 

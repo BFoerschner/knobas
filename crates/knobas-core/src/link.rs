@@ -618,7 +618,8 @@ fn activity_detail(link: &LinkRow) -> serde_json::Value {
 /// The `from` end of a stored link. A stored id was parsed on its way in, so
 /// a miss here is knobas's own fault and reads as a database failure.
 fn from_end(link: &LinkRow) -> Result<EntityRef, CoreError> {
-    EntityRef::parse(&link.from_id).map_err(|error| CoreError::Db(sqlx::Error::Decode(Box::new(error))))
+    EntityRef::parse(&link.from_id)
+        .map_err(|error| CoreError::Db(sqlx::Error::Decode(Box::new(error))))
 }
 
 /// One activity line about `link` by `actor`, on the end it was drawn from.

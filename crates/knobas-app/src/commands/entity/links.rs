@@ -415,8 +415,9 @@ pub async fn create_note_inner(
         .map(|link| {
             Ok(knobas_core::note::BornLink {
                 target: EntityRef::parse(&link.target_id).map_err(IpcError::invalid)?,
-                relation: knobas_core::link::relation_named(&link.relation)
-                    .ok_or_else(|| IpcError::invalid("a link drawn with a note needs a relation"))?,
+                relation: knobas_core::link::relation_named(&link.relation).ok_or_else(|| {
+                    IpcError::invalid("a link drawn with a note needs a relation")
+                })?,
             })
         })
         .collect::<Result<Vec<_>, IpcError>>()?;

@@ -22,8 +22,8 @@
 //! The gate's test seeds this file's database (#572); the reading seeds a
 //! scratch database of its own, so neither size is the other's fixture.
 
-use knobas_core::detail::DETAIL_BUILDS_AT;
 use knobas_app::sources::Registry;
+use knobas_core::detail::DETAIL_BUILDS_AT;
 use sqlx::PgPool;
 
 /// The gate's size: enough rows that the planner prices a scan above the

@@ -856,9 +856,18 @@ mod tests {
     /// asked once per pipeline however many of its runs name it (#1144).
     #[test]
     fn only_a_shared_sha_is_asked_of_its_pipeline() {
-        let (mut a, mut b, mut c, mut d) =
-            (run(Some("aaa")), run(Some("bbb")), run(Some("bbb")), run(None));
-        let runs = vec![("p1", &mut a), ("p1", &mut b), ("p1", &mut c), ("p2", &mut d)];
+        let (mut a, mut b, mut c, mut d) = (
+            run(Some("aaa")),
+            run(Some("bbb")),
+            run(Some("bbb")),
+            run(None),
+        );
+        let runs = vec![
+            ("p1", &mut a),
+            ("p1", &mut b),
+            ("p1", &mut c),
+            ("p2", &mut d),
+        ];
         let shared = shared_shas(&runs, &held());
         assert_eq!(
             shared,
@@ -885,9 +894,15 @@ mod tests {
             ("p1", &mut missing),
         ];
         let resolved = HashMap::from([
-            ("p1", HashMap::from([("bbb".to_owned(), "gitea:two@bbb".to_owned())])),
+            (
+                "p1",
+                HashMap::from([("bbb".to_owned(), "gitea:two@bbb".to_owned())]),
+            ),
             // A commit the mirror does not hold for that sha is never offered.
-            ("p2", HashMap::from([("bbb".to_owned(), "gitea:three@bbb".to_owned())])),
+            (
+                "p2",
+                HashMap::from([("bbb".to_owned(), "gitea:three@bbb".to_owned())]),
+            ),
         ]);
         link_commits(&mut runs, &held(), &resolved);
         assert_eq!(only.commit_id.as_deref(), Some("gitea:one@aaa"));
