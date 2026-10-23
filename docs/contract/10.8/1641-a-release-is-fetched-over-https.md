@@ -9,7 +9,9 @@
   http: a release is fetched over https, or over http only from this machine (127.0.0.1, ::1,
   localhost)". The new `knobas_app::sources::remote::FetchError::NotHttps` variant carries it.
   Every fetch of a release (the manifest, a release API's answer, an asset its answer names, and
-  the artifact) refuses the same way a URL or a redirect that is not https off this machine.
+  the artifact) refuses the same way when the URL it is given, or the URL the answer came from
+  after any redirects, is not https off this machine. A plain-http hop between the two is not
+  checked (#1830).
   A GitHub repository URL is not checked: nothing is fetched from it, and its release is read
   through the API.
 

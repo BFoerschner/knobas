@@ -365,8 +365,10 @@ fn require_https(url: &url::Url) -> Result<(), FetchError> {
 }
 
 /// GET `url` through the one HTTP stack, with no credential, refusing a
-/// body over `cap` bytes, and a URL or a redirect [`require_https`] refuses:
-/// a release's API names the assets' URLs, and a download redirects.
+/// body over `cap` bytes, and a URL [`require_https`] refuses: `url`
+/// itself, and the URL the answer came from after any redirects (a
+/// release's API names the assets' URLs, and a download redirects). A
+/// plain-http hop between the two is not seen (#1830).
 async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
     let unreachable = |error| FetchError::Unreachable {
         url: url.to_owned(),

@@ -14118,7 +14118,8 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   `localhost.` and `*.localhost` are not. *Reversing:* trivial.
 - **Beyond `Origin::parse`.** *Fork:* the pasted URL only, as the ticket names, or every fetch.
   *Ruling:* every fetch of a release refuses a non-https URL off this machine, and so does a
-  redirect's target. *Reasoning:* a release API's answer names the asset URLs and a download
+  URL the answer came from after any redirects (a hop between the two is not checked: #1830,
+  merge-manager review). *Reasoning:* a release API's answer names the asset URLs and a download
   redirects; checking only what was pasted leaves both on whatever scheme the server answers.
   *Reversing:* low, two checks in `remote::get`.
 - **A GitHub repository URL over http.** *Ruling:* accepted: nothing is fetched from it, and its
@@ -14127,3 +14128,37 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   with the https message, and so does a restore that has to fetch it again. *Ruling:* intended;
   the reader re-installs it from an https URL. Booked in
   `docs/contract/10.8/1641-a-release-is-fetched-over-https.md`. *Reversing:* low.
+
+### #1641, merge-manager review (Opus, 2026-10-23)
+
+- **The range tables.** *Fork:* accept the two tables or correct an entry. *Ruling:* accept.
+  Checked line by line against the IPv4 and IPv6 special-purpose registries (2025-10-09): every
+  entry marked not globally reachable is in `NOT_PUBLIC_V4`, `NOT_PUBLIC_V6` or outside
+  `2000::/3`, and every entry marked reachable inside a refused block (`192.0.0.9`, `192.0.0.10`;
+  `2001:1::1`–`3`, `2001:3::/32`, `2001:4:112::/48`, `2001:20::/28`, `2001:30::/28`) is in
+  `PUBLIC_V4` or `PUBLIC_V6`. *Reversing:* low.
+- **The implementer's calls on unclear entries.** *Ruling:* all four upheld. TEREDO refused: a
+  public host does not live on a Teredo address, and its client half is obfuscated, so no
+  carried-address reading is safe. `192.88.99.0/24` public but for `.2`: that is the registry's
+  own split. IPv4-compatible `::a.b.c.d` refused. The local-use NAT64 `64:ff9b:1::/48` refused
+  whole and not unmapped: a local translator may map it onto the reader's own network, and the
+  registry marks it not reachable. *Reversing:* trivial each.
+- **`localhost` over plain http is judged by its name, not its resolved address.** *Fork:*
+  resolve and check that the peer is loopback, or drop the `localhost` allowance. *Ruling:* keep
+  it as it is. *Reasoning:* the install fetch goes through knobas-http's system resolver, and
+  RFC 6761 §6.3 keeps `localhost` off the wire. macOS answers it locally, as do `/etc/hosts` and
+  systemd-resolved, so an on-path attacker gets no DNS query to poison. The wasm host's rebinding
+  guard is a separate path and is not involved: it covers a component's own requests, not the
+  install. *Reversing:* trivial.
+- **An adapter installed earlier from plain http off this machine.** *Fork:* migrate the stored
+  `source_url`, or let the update path fail. *Ruling:* let it fail, with no migration. *Reasoning:*
+  the installed component keeps running and nothing stored changes. `check_adapter_updates`
+  records the `NotHttps` message as the adapter's failed check, which the Settings list shows
+  (`TfInstalledAdapters`). `update_adapter` answers `invalid` with the same message. Upgrading
+  the URL to https silently would fetch from a server the reader never named. *Reversing:* low.
+- **The redirect check sees the last URL only.** *Fork:* check every hop now, or file it.
+  *Ruling:* file it as #1830 (`backlog`) and correct the wording in `remote::get` and the §10.8
+  entry. *Reasoning:* knobas-http follows a GET's redirects with reqwest's default policy, so
+  checking each hop means changing `crates/knobas-http/**`, which is another frozen surface and
+  outside this ticket. The gap needs the release's own https server to redirect to plain http.
+  *Reversing:* n/a.
