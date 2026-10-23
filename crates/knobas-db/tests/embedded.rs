@@ -296,7 +296,11 @@ async fn an_orphan_running_with_fsync_off_is_adopted_with_fsync_on() {
         .execute(orphan.pool())
         .await
         .unwrap();
-    assert_eq!(durability(orphan.pool()).await[0], "fsync=off", "the orphan");
+    assert_eq!(
+        durability(orphan.pool()).await[0],
+        "fsync=off",
+        "the orphan"
+    );
     orphan.abandon();
 
     let adopted = EmbeddedDb::start(DbConfig {
