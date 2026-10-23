@@ -1603,6 +1603,7 @@ knobas-db	lib/knobas_db	embedded::tests::a_path_that_cannot_be_resolved_is_never
 knobas-db	lib/knobas_db	embedded::tests::a_stranger_on_the_recorded_port_clears_the_lock_whatever_the_pid_is_doing
 knobas-db	lib/knobas_db	embedded::tests::a_tool_comes_from_the_pinned_version_when_several_are_installed
 knobas-db	lib/knobas_db	embedded::tests::a_tool_is_still_found_without_a_version_directory
+knobas-db	lib/knobas_db	embedded::tests::a_watch_sees_a_killed_postmaster_whose_lock_file_stayed
 knobas-db	lib/knobas_db	embedded::tests::adopt_treats_a_stranger_on_the_recorded_port_as_a_stale_lock
 knobas-db	lib/knobas_db	embedded::tests::an_absent_password_file_leaves_the_invented_password_alone
 knobas-db	lib/knobas_db	embedded::tests::an_empty_password_file_leaves_the_invented_password_alone

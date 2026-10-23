@@ -2013,6 +2013,27 @@ mod tests {
         assert!(pid_file.exists());
     }
 
+    /// #1779: a postmaster killed outright (`kill -9`, a crash) leaves its
+    /// `postmaster.pid` behind, still naming it. The watch reads that as
+    /// gone because the process is, and a file naming a live postmaster as
+    /// running.
+    #[test]
+    fn a_watch_sees_a_killed_postmaster_whose_lock_file_stayed() {
+        let dir = tempfile::tempdir().unwrap();
+        let watch = |pid| ServerWatch {
+            data_dir: dir.path().to_path_buf(),
+            pid,
+        };
+        let alive = std::process::id();
+        pid_file(dir.path(), alive, free_port());
+        assert!(!watch(alive).is_gone(), "a live postmaster is running");
+
+        let killed = dead_pid();
+        pid_file(dir.path(), killed, free_port());
+        assert!(watch(killed).is_gone(), "a killed postmaster is gone");
+        assert!(watch(alive).is_gone(), "a file naming another pid is gone");
+    }
+
     #[test]
     fn process_liveness_tells_a_running_process_from_a_reaped_one() {
         // Both directions, because a `process_alive` stuck at either answer
