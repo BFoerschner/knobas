@@ -14163,7 +14163,7 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   outside this ticket. The gap needs the release's own https server to redirect to plain http.
   *Reversing:* n/a.
 
-## #1643: implementer rulings (Opus implementer, 2026-10-23)
+## #1643 / PR #1826: implementer rulings (Opus implementer, 2026-10-23)
 
 - **Reserved for Björn, ruled by implementer on Opus: `open_checkout`'s IPC arguments.** *Fork:*
   drop `command` outright, or keep it and validate the program against the saved list. *Ruling:*
