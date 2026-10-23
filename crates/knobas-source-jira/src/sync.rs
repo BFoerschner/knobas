@@ -309,39 +309,71 @@ impl SyncRun<'_> {
         // The Jira views (#877), after the issues: their keys are the issues'
         // keys, and a view read first would name tickets this run had not yet
         // mirrored.
-        let views = crate::views::read(self.api, self.cfg, self.base_url).await?;
+        // Bounded (#1700, ruling D6): every board's and favourite's keys are
+        // paged through on a read, so an idle run within the hour skips it and
+        // carries the last read's views forward. A source with no views to
+        // read asks nothing, so it always "reads".
+        let server_now = server.server_time.as_deref().and_then(parse_jira_time);
+        let read_views = emitted > 0
+            || crate::views::due(
+                previous.as_ref().and_then(|c| c.board_read.as_ref()),
+                server_now,
+                self.cfg,
+            );
         let delivered = previous
             .as_ref()
             .map(|c| c.views.as_slice())
             .unwrap_or_default();
-        let now: Vec<crate::cursor::SeenView> = views
-            .iter()
-            .map(|view| crate::cursor::SeenView {
-                k: view.key.clone(),
-                h: knobas_source::fingerprint::of(&view.payload),
-            })
-            .collect();
         let mut views_emitted = 0_usize;
-        for (view, seen) in views.iter().zip(&now) {
-            if delivered.contains(seen) {
-                continue;
-            }
-            sink.item(crate::views::item(self.source_id, view)).await?;
-            views_emitted += 1;
-        }
-        for old in delivered {
-            if !now.iter().any(|seen| seen.k == old.k) {
-                sink.item(crate::views::gone(self.source_id, &old.k))
-                    .await?;
+        let (now, board_read): (Vec<crate::cursor::SeenView>, _) = if read_views {
+            let views = crate::views::read(self.api, self.cfg, self.base_url).await?;
+            let now: Vec<crate::cursor::SeenView> = views
+                .iter()
+                .map(|view| crate::cursor::SeenView {
+                    k: view.key.clone(),
+                    h: knobas_source::fingerprint::of(&view.payload),
+                })
+                .collect();
+            for (view, seen) in views.iter().zip(&now) {
+                if delivered.contains(seen) {
+                    continue;
+                }
+                sink.item(crate::views::item(self.source_id, view)).await?;
                 views_emitted += 1;
             }
-        }
+            for old in delivered {
+                if !now.iter().any(|seen| seen.k == old.k) {
+                    sink.item(crate::views::gone(self.source_id, &old.k))
+                        .await?;
+                    views_emitted += 1;
+                }
+            }
+            (
+                now,
+                server_now
+                    .filter(|_| crate::views::reads_any(self.cfg))
+                    .map(|at| crate::cursor::BoardRead {
+                        at,
+                        scope: crate::views::scope(self.cfg),
+                    }),
+            )
+        } else {
+            (
+                delivered.to_vec(),
+                previous.as_ref().and_then(|c| c.board_read.clone()),
+            )
+        };
 
         // Battery clause 2: nothing happened, so the position did not move.
         // Returning the *input string* rather than a re-encoded struct makes
         // that byte-identical by construction.
+        // A board read that moved the read stamp is a change to the cursor too,
+        // or the hour would never restart.
+        let stamp_moved =
+            previous.as_ref().and_then(|c| c.board_read.as_ref()) != board_read.as_ref();
         if emitted == 0
             && views_emitted == 0
+            && !stamp_moved
             && let Some(cursor) = cursor
         {
             return Ok(cursor);
@@ -364,6 +396,7 @@ impl SyncRun<'_> {
             (_, Some(w)) => JiraCursor::advanced(bounds, w, offset, &seen_in_window),
         };
         next.views = now;
+        next.board_read = board_read;
         Ok(next.encode())
     }
 
@@ -477,6 +510,8 @@ mod tests {
         /// zone from one rendered in UTC, which is the trap this adapter's
         /// whole `serverInfo` call exists to avoid.
         offset_secs: i32,
+        /// Minutes the server clock stands past 11:48 UTC.
+        clock_minutes: i64,
         /// Extra `total` the fake claims beyond what it will ever return -- a
         /// server whose index shrank under the run.
         phantom_total: u32,
@@ -498,6 +533,7 @@ mod tests {
                 comments: HashMap::new(),
                 worklogs: HashMap::new(),
                 offset_secs: 2 * 3600,
+                clock_minutes: 0,
                 phantom_total: 0,
                 endless: false,
                 unauthorized: false,
@@ -576,8 +612,16 @@ mod tests {
             };
             Ok(serde_json::from_value(serde_json::json!({
                 "version": "9.17.0", "deploymentType": "Server",
+                // The same instant (11:48 UTC) on whatever wall clock the zone
+                // reads: a zone change is not an hour passing.
                 "serverTime": format!(
-                    "2026-08-22T11:48:00.000{sign}{:02}{:02}", mins / 60, mins % 60
+                    "{}{sign}{:02}{:02}",
+                    (chrono::NaiveDate::from_ymd_opt(2026, 8, 22).unwrap().and_hms_opt(11, 48, 0).unwrap()
+                        + chrono::Duration::seconds(i64::from(self.offset_secs))
+                        + chrono::Duration::minutes(self.clock_minutes))
+                    .format("%Y-%m-%dT%H:%M:%S.000"),
+                    mins / 60,
+                    mins % 60
                 )
             }))
             .unwrap())
@@ -585,6 +629,20 @@ mod tests {
 
         async fn myself(&self) -> Result<Myself, SourceError> {
             Ok(serde_json::from_value(serde_json::json!({ "name": "mara.lindqvist" })).unwrap())
+        }
+
+        /// A Jira Software with no boards: it answers, and the call is counted.
+        async fn boards(
+            &self,
+            _project: Option<&str>,
+            _start_at: u32,
+            _max: u32,
+        ) -> Result<crate::views::BoardPage, SourceError> {
+            self.calls.lock().unwrap().push("boards".to_owned());
+            Ok(
+                serde_json::from_value(serde_json::json!({ "values": [], "isLast": true }))
+                    .unwrap(),
+            )
         }
 
         /// A sync run never asks for the field table -- discovery is
@@ -769,6 +827,100 @@ mod tests {
             issue("PAY-228", "2026-08-21T16:05:00.000+0000", 0, 0),
             issue("PAY-231", "2026-08-22T11:48:00.000+0000", 2, 2),
         ]
+    }
+
+    /// The board read is bounded (#1700, ruling D6): an idle run within the
+    /// hour asks Jira for no board; a run that emitted an issue, or one an hour
+    /// on, does.
+    #[tokio::test]
+    async fn an_idle_run_within_the_hour_reads_no_board() {
+        let mut api = FakeApi {
+            issues: five_issues(),
+            ..FakeApi::default()
+        };
+        let config = cfg(serde_json::json!({ "boards": "synced", "projects": ["PAY"] }));
+        let (_, cursor) = keys_of(&api, &config, None).await;
+        let first = api.count("boards");
+        assert!(first > 0, "the first run reads the boards");
+
+        api.clock_minutes = 59;
+        let (idle, again) = keys_of(&api, &config, Some(cursor.clone())).await;
+        assert!(idle.is_empty(), "{idle:?}");
+        assert_eq!(
+            api.count("boards"),
+            first,
+            "no board request within the hour"
+        );
+        assert_eq!(again, cursor);
+    }
+
+    #[tokio::test]
+    async fn a_run_that_emitted_an_issue_reads_the_boards() {
+        let mut api = FakeApi {
+            issues: five_issues(),
+            ..FakeApi::default()
+        };
+        let config = cfg(serde_json::json!({ "boards": "synced", "projects": ["PAY"] }));
+        let (_, cursor) = keys_of(&api, &config, None).await;
+        let first = api.count("boards");
+
+        api.issues
+            .push(issue("PAY-300", "2026-08-22T11:50:00.000+0000", 0, 0));
+        api.clock_minutes = 2;
+        let (emitted, _) = keys_of(&api, &config, Some(cursor)).await;
+        assert_eq!(emitted, ["PAY-300"]);
+        assert!(
+            api.count("boards") > first,
+            "an emitted issue reads the boards"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_idle_run_an_hour_on_reads_the_boards_and_restarts_the_hour() {
+        let mut api = FakeApi {
+            issues: five_issues(),
+            ..FakeApi::default()
+        };
+        let config = cfg(serde_json::json!({ "boards": "synced", "projects": ["PAY"] }));
+        let (_, cursor) = keys_of(&api, &config, None).await;
+        let first = api.count("boards");
+
+        api.clock_minutes = 60;
+        let (idle, hourly) = keys_of(&api, &config, Some(cursor.clone())).await;
+        assert!(idle.is_empty(), "{idle:?}");
+        let second = api.count("boards");
+        assert!(second > first, "an hour on, the boards are read");
+        assert_ne!(
+            hourly, cursor,
+            "the read is recorded, or the hour never restarts"
+        );
+
+        api.clock_minutes = 90;
+        let (_, later) = keys_of(&api, &config, Some(hourly.clone())).await;
+        assert_eq!(api.count("boards"), second, "thirty minutes after the read");
+        assert_eq!(later, hourly);
+    }
+
+    #[tokio::test]
+    async fn a_changed_boards_setting_is_read_at_once() {
+        let api = FakeApi {
+            issues: five_issues(),
+            ..FakeApi::default()
+        };
+        let (_, cursor) = keys_of(
+            &api,
+            &cfg(serde_json::json!({ "boards": "synced", "projects": ["PAY"] })),
+            None,
+        )
+        .await;
+        let first = api.count("boards");
+        keys_of(
+            &api,
+            &cfg(serde_json::json!({ "boards": "all", "projects": ["PAY"] })),
+            Some(cursor),
+        )
+        .await;
+        assert!(api.count("boards") > first);
     }
 
     #[tokio::test]

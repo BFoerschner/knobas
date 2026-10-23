@@ -3060,6 +3060,7 @@ knobas-source-jira	lib/knobas_source_jira	config::tests::the_cloud_flavor_is_ref
 knobas-source-jira	lib/knobas_source_jira	config::tests::the_epic_link_field_must_be_a_bare_field_id
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::a_cursor_with_no_watermark_asks_for_everything
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::a_record_that_changed_within_one_second_is_not_the_one_already_delivered
+knobas-source-jira	lib/knobas_source_jira	cursor::tests::a_v4_envelope_without_the_board_read_stamp_decodes
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::an_offset_change_widens_the_overlap_once
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::an_unreadable_cursor_means_full_sync
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::entries_sharing_a_timestamp_are_still_ordered_deterministically
@@ -3141,9 +3142,11 @@ knobas-source-jira	lib/knobas_source_jira	source::tests::keys_jira_issues_are_is
 knobas-source-jira	lib/knobas_source_jira	source::tests::the_cloud_flavor_is_refused_at_build_time
 knobas-source-jira	lib/knobas_source_jira	source::tests::the_connection_note_is_the_epic_link_clause_in_three_arms
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_ceiling_below_the_previous_watermark_does_not_move_it_back
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_changed_boards_setting_is_read_at_once
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_changed_issue_is_the_only_thing_the_next_run_emits
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_full_sync_walks_the_whole_total_not_just_the_first_page
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_page_that_arrives_empty_while_total_still_claims_more_ends_the_run
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_run_that_emitted_an_issue_reads_the_boards
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_sink_failure_aborts_the_run
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_total_that_grew_between_pages_is_read_to_its_end
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_total_that_shrank_between_pages_fails_the_run
@@ -3154,6 +3157,8 @@ knobas-source-jira	lib/knobas_source_jira	sync::tests::an_empty_page_ends_the_ru
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_incremental_emits_nothing_and_returns_the_same_cursor
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_poll_does_not_reach_back_further_than_the_overlap
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_run_after_the_server_changed_zone_returns_the_same_bytes
+knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_run_an_hour_on_reads_the_boards_and_restarts_the_hour
+knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_run_within_the_hour_reads_no_board
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_incremental_run_that_hits_the_page_cap_fails_too
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_issue_edited_behind_the_walk_does_not_shift_an_unread_one_past_it
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_issue_edited_during_the_walk_does_not_carry_the_watermark_past_the_ceiling
@@ -3191,6 +3196,7 @@ knobas-source-jira	lib/knobas_source_jira	translate::tests::each_clause_knobas_l
 knobas-source-jira	lib/knobas_source_jira	translate::tests::the_favourite_filter_keeps_its_project_and_leaves_out_the_fix_version_saying_why
 knobas-source-jira	lib/knobas_source_jira	translate::tests::the_kanban_board_keeps_both_projects_and_leaves_out_jira_s_default_sub_filter
 knobas-source-jira	lib/knobas_source_jira	views::tests::a_board_deleted_in_jira_is_delivered_as_gone_at_the_next_sync
+knobas-source-jira	lib/knobas_source_jira	views::tests::a_board_jira_refuses_to_run_is_left_out
 knobas-source-jira	lib/knobas_source_jira	views::tests::a_board_this_account_cannot_read_is_left_out
 knobas-source-jira	lib/knobas_source_jira	views::tests::a_board_whose_keys_changed_is_delivered_again
 knobas-source-jira	lib/knobas_source_jira	views::tests::a_cursor_from_before_the_views_delivers_every_board_once
@@ -3206,6 +3212,7 @@ knobas-source-jira	lib/knobas_source_jira	views::tests::every_board_i_can_see_ad
 knobas-source-jira	lib/knobas_source_jira	views::tests::favourite_boards_are_the_boards_whose_filter_is_a_favourite_filter
 knobas-source-jira	lib/knobas_source_jira	views::tests::favourite_filters_turned_off_are_delivered_as_gone_at_the_next_sync
 knobas-source-jira	lib/knobas_source_jira	views::tests::no_boards_brings_none_in_and_takes_the_ones_there_were_away
+knobas-source-jira	lib/knobas_source_jira	views::tests::the_keys_are_asked_for_at_jiras_page_maximum
 knobas-source-jira	lib/knobas_source_jira	write::tests::a_worklogs_started_carries_milliseconds_and_a_numeric_offset
 knobas-source-jira	lib/knobas_source_jira	write::tests::a_write_jira_would_repeat_is_sent_once
 knobas-source-jira	test/it	field_discovery::a_401_on_the_field_table_is_still_unauthorized

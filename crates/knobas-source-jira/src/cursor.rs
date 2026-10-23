@@ -83,6 +83,19 @@ pub(crate) struct JiraCursor {
     /// and an older cursor without the field reads as one with no views.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<SeenView>,
+    /// The last run that read the boards (#1700, ruling
+    /// D6). Optional with a default, so `CURSOR_VERSION` stays 4 and an
+    /// envelope written before the field reads as "never read".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board_read: Option<BoardRead>,
+}
+
+/// When the boards were last read, and under which *Boards and filters*
+/// setting: a changed setting is read at once, not an hour on.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct BoardRead {
+    pub at: DateTime<Utc>,
+    pub scope: String,
 }
 
 /// One delivered Jira view: its item key and the fingerprint of its payload.
@@ -126,6 +139,7 @@ impl JiraCursor {
             tz_offset_secs,
             seen: Vec::new(),
             views: Vec::new(),
+            board_read: None,
         }
     }
 
@@ -229,6 +243,7 @@ impl JiraCursor {
             tz_offset_secs,
             seen,
             views: Vec::new(),
+            board_read: None,
         }
     }
 }
@@ -267,6 +282,18 @@ mod tests {
     /// The fingerprint [`saw`] would report for `key`.
     fn h(key: &str) -> String {
         format!("h-{key}")
+    }
+
+    /// #1700: the board-read stamp is an optional field, so the version stays
+    /// 4 and an envelope written before it still decodes, as never read.
+    #[test]
+    fn a_v4_envelope_without_the_board_read_stamp_decodes() {
+        assert_eq!(CURSOR_VERSION, 4);
+        let old = r#"{"v":4,"updated_to":null,"tz_offset_secs":0,"seen":[],"views":[{"k":"board-1","h":"x"}]}"#;
+        let cursor = JiraCursor::parse(old).expect("a v4 envelope without the field reads");
+        assert_eq!(cursor.board_read, None);
+        assert_eq!(cursor.views.len(), 1);
+        assert_eq!(cursor.encode(), old, "and re-encodes without inventing it");
     }
 
     #[test]
