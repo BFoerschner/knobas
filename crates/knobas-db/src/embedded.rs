@@ -139,8 +139,9 @@ pub enum DbError {
     /// process holds the ownership lock, and `reason` names its pid (ruling
     /// B2, spec #1619). A second window is refused rather than let in beside
     /// the first, because the first one's quit stops the server under it.
-    /// The other causes are a lock file whose process is still alive but
-    /// whose server cannot be reached as ours, and `reason` says which.
+    /// The other cause is a lock file whose recorded port answers as a
+    /// PostgreSQL that cannot be reached as ours (one still starting up or
+    /// shutting down, say), and `reason` says what it answered.
     ///
     /// Note what this error does *not* do: it never stops that server.
     /// Anything that shuts a stranger's postmaster down risks taking a
@@ -421,8 +422,8 @@ impl EmbeddedDb {
     ///
     /// Returns [`DbError`] if the install, `initdb`, start, database creation
     /// or the initial connection fails, or [`DbError::AlreadyRunning`] if a
-    /// live knobas has this profile open, or a live process's server holds
-    /// the data directory and cannot be reached as ours.
+    /// live knobas has this profile open, or a server answering on the port
+    /// the lock file records cannot be reached as ours.
     pub async fn start(cfg: DbConfig) -> Result<EmbeddedDb, DbError> {
         if let Some(url) = cfg.existing_url.as_deref() {
             tracing::info!("connecting to externally managed postgres");
@@ -1419,8 +1420,8 @@ fn read_password(password_file: &Path) -> Result<Option<String>, DbError> {
 enum Lock {
     /// There is no lock file, so it is not what refused the start.
     Absent,
-    /// The lock belonged to a server that is gone, and has been removed: the
-    /// start is worth retrying.
+    /// Nothing answered on the port the lock records, and the lock has been
+    /// removed: the start is worth retrying.
     Cleared,
     /// Something is answering on the port the lock records. Whether it is
     /// *our* server is [`adopt`]'s to establish, and the recorded pid plays
@@ -1432,7 +1433,7 @@ enum Lock {
 ///
 /// Called only with `.owner.lock` held ([`start_managed`]), so no knobas has
 /// this profile open, and only after PostgreSQL itself refused the start,
-/// which it does for a lock naming a live process of ours.
+/// which it does for a lock naming any live process it may signal.
 ///
 /// The **port** (line 4) is the one piece of evidence read. A TCP handshake
 /// proves *something* is listening, but a recycled ephemeral port can put a
@@ -1446,14 +1447,12 @@ enum Lock {
 /// postmaster of ours answers on `127.0.0.1` from the moment it binds until
 /// it exits, through crash recovery and shutdown alike ([`build_settings`]
 /// pins that address), so a silent port with a live postmaster of ours behind
-/// it is one of two things: one in the 2 ms between writing `postmaster.pid`
-/// and binding, which no relaunch reaches unless the process is frozen there,
-/// or an orphan an older build started on `localhost` that kept only `::1`.
-/// Clearing under either puts no second server on the files: PostgreSQL's
-/// shared-memory interlock admits one postmaster per data directory, and the
-/// one left without a valid lock file shuts itself down within a minute. No
-/// data is at stake; the next start replays the WAL. The evidence is recorded
-/// in `docs/decisions/2026-10-unattended-rulings.md` under #1789.
+/// it is one in the 2 ms between writing `postmaster.pid` and binding, which
+/// no relaunch reaches unless the process is frozen there, or an orphan an
+/// older build started on `localhost`. Clearing under either is safe for the
+/// reasons [`adopt`] gives under *A stranger on the port*; the next start
+/// replays the WAL. The evidence is recorded in
+/// `docs/decisions/2026-10-unattended-rulings.md` under #1789.
 fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
     let pid_file = data_dir.join("postmaster.pid");
 
