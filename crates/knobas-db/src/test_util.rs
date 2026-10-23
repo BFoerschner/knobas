@@ -388,7 +388,7 @@ async fn template(server: &crate::embedded::Connector) -> &'static recycle::Temp
                 .await
                 .expect("migrate the template database");
             let mut conn = pool.acquire().await.expect("a session on the template");
-            let template = recycle::capture(&mut *conn, name)
+            let template = recycle::capture(&mut conn, name)
                 .await
                 .expect("read the template's state");
             drop(conn);

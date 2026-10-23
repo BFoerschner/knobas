@@ -468,7 +468,11 @@ async fn reset(
     let seeded: Vec<i64> = template.seeds.iter().map(|seed| seed.oid).collect();
     let now = snapshot(conn, &template.catalog_query, &seeded).await?;
     let same_relations = now.tables.len() == before.tables.len()
-        && now.tables.iter().zip(&before.tables).all(|(n, b)| n.oid == b.oid)
+        && now
+            .tables
+            .iter()
+            .zip(&before.tables)
+            .all(|(n, b)| n.oid == b.oid)
         && now.sequences.len() == before.sequences.len()
         && now
             .sequences
@@ -476,7 +480,11 @@ async fn reset(
             .zip(&before.sequences)
             .all(|(n, b)| n.oid == b.oid)
         && now.stats.len() == before.stats.len()
-        && now.stats.iter().zip(&before.stats).all(|(n, b)| n.oid == b.oid);
+        && now
+            .stats
+            .iter()
+            .zip(&before.stats)
+            .all(|(n, b)| n.oid == b.oid);
     if now.catalog != before.catalog || !same_relations {
         return Ok(None);
     }
