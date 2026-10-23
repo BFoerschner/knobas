@@ -12923,3 +12923,37 @@ The measurement came after it.
   `Slot::register` and `Paced::loosened`, the path a client takes. `a_loosening_right_away_starts_drained`
   and `a_quota_loosens_once_the_stricter_client_is_gone` still pin the transport side.
   *Reversing:* n/a.
+
+### #1771: merge review of PR #1777 (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by the implementer on Opus: the frozen-surface change.** *Fork:*
+  confirm the implementer's ruling, or send it back. *Ruling:* confirmed. The change stays inside
+  `limiter.rs` behind the unchanged public `InstanceLimiter`, and the §10.8 entry names the
+  loosening branch, `Paced::loosened`, `Rate::refilled_in`, `with_left`'s `u128`, the tests and the
+  one renamed transport test, which is the whole diff. *Reversing:* low.
+- **A loosening-specific test for the refill's units.** *Fork:* rely on #1764's
+  `a_quiet_is_counted_at_the_stricter_rate`, which kills a units error in the shared
+  `Rate::refilled_in`, or add one on the loosening path. *Ruling:* add
+  `a_short_quiet_credits_a_loosening_in_proportion` (150 ms at 10/s, burst 50: between 1 and 10).
+  *Reasoning:* a mutant on the loosening path alone (`refilled_in(idle * 1000)` in
+  `Paced::loosened`) survived every other test; this one kills it, and kills the shared helper off
+  by a thousand in both directions. No other test pins a loosening's credit between drained and
+  full. *Reversing:* low, one test.
+- **The name `a_loosened_quota_starts_drained`.** *Fork:* keep it because the ticket's criteria
+  name it, or rename it. *Ruling:* renamed `a_loosening_right_away_starts_drained`, body unchanged.
+  *Reasoning:* a loosening now starts drained only right after a request, so the old name says
+  something false. The criterion asks that the behaviour stays green, and it does under the new
+  name. *Reversing:* low.
+- **Right after a grant, a loosening has nothing.** *Ruling:* confirmed. *Reasoning:*
+  `refilled_in` rounds down, so a quiet of microseconds is 0 below about 10⁵ requests a second.
+  The transport tests `a_loosening_right_away_starts_drained` and
+  `a_tightening_after_a_loosening_starts_with_what_was_left` pin #1728's alternation, and
+  `a_loosening_right_away_takes_nothing_from_a_full_limiter` pins it at module level.
+- **Waits still on the replaced limiter.** *Fork:* accept, or spend the replaced limiter at the
+  loosening as a tightening does. *Ruling:* accept. *Reasoning:* a holder that cloned the old
+  limiter before the swap can still be let through on it. Drained, the new limiter absorbed that;
+  credited, each such grant is one over the looser quota. The bound is one request per wait in
+  flight at the swap, which is the bound #1772 accepted for its `Relaxed` read. A wait on the old
+  limiter means it was drained, so the quiet credited is at most one of its emission intervals.
+  Spending it would not help: those waiters are let through by its refill, not its burst.
+  *Reversing:* low.
