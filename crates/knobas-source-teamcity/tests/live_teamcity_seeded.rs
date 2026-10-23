@@ -42,6 +42,12 @@
 //!   that branch with the override in its resulting parameters, the
 //!   configuration keeps its own value, and the next incremental run returns
 //!   exactly that build.
+//! * **A trigger and a re-run through the adapter** (#1699): `trigger_build`
+//!   puts exactly one build of the named configuration on the queue, and
+//!   `rerun_build` one of the seeded build's own configuration; a
+//!   configuration the server does not have, and a build that was deleted,
+//!   are each refused on TeamCity's 404 with nothing queued. These were the
+//!   mockd suite's until then; ADR-0013 retired them there.
 //! * **The `sinceBuild` watermark on a build this suite queues**: full run,
 //!   idle run, one `POST /app/rest/buildQueue`, and the next run returns
 //!   exactly that build and moves the position to it; the run after that is
@@ -52,7 +58,9 @@
 //!
 //! It is not read-only. One test queues one build through TeamCity's own REST
 //! API, and one through the adapter's `run_build`, and each waits for the one
-//! agent to run it; each build is **deleted again**
+//! agent to run it; the trigger and re-run cases queue theirs through the
+//! adapter with the agents parked, so the builds never leave the queue; each
+//! build is **deleted again**
 //! when the test ends, passing or panicking alike -- [`Queued`] does it from
 //! `Drop`, through `knobas_live_cleanup::Cleanup`, and checks afterwards that
 //! the build is really gone rather than assuming so. What a *killed* run left
@@ -776,7 +784,7 @@ async fn remove(http: &reqwest::Client, url: &str, token: &str, ids: &[i64]) -> 
     failures
 }
 
-/// The one build the mutating test queues, deleted again when the guard
+/// One build a mutating test queues, deleted again when the guard
 /// drops -- passing or panicking alike -- and the deletion checked.
 ///
 /// Built before the test's baseline sync, because clearing an earlier run's
@@ -830,7 +838,8 @@ impl Queued {
     }
 
     /// Own the removal of a build something else queued -- the adapter's
-    /// `run_build`, whose receipt names it (#669) -- from this line onwards.
+    /// `run_build`, whose receipt names it (#669), or a trigger or re-run,
+    /// found on the queue by [`adopt_first`] -- from this line onwards.
     fn adopt(&mut self, id: i64) {
         assert!(self.id.is_none(), "this guard owns exactly one build");
         self.id = Some(id);
@@ -3265,6 +3274,224 @@ async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_
         "the agent's log names the clean checkout:\n{log}"
     );
     drop((busy, waiting, ours));
+}
+
+/// The whole build queue, each row with the fields a trigger or a re-run is
+/// asserted on (#1699). `GET /app/rest/buildQueue` rather than the builds
+/// locator, so a build put on the queue for **any** configuration is on the
+/// page: a write aimed at the wrong configuration must show up here to be
+/// caught.
+async fn queued_builds(seeded: &Seeded) -> Vec<serde_json::Value> {
+    let (status, body) = seeded
+        .get("app/rest/buildQueue?fields=build(id,state,buildType(id),branchName,defaultBranch)")
+        .await;
+    assert_eq!(status, 200, "GET buildQueue: {body}");
+    body["build"].as_array().cloned().unwrap_or_default()
+}
+
+/// Hand the guard the first build on the queue, if there is one, before
+/// anything is asserted about it: a write that queued something it should not
+/// have is still cleaned up when the assertion after this fails.
+fn adopt_first(guard: &mut Queued, queued: &[serde_json::Value]) {
+    if let Some(row) = queued.first() {
+        guard.adopt(id_of(row));
+    }
+}
+
+/// `op` is refused on TeamCity's own 404 and puts nothing on the queue
+/// (#1699): a target the server does not have is a refusal the write queue
+/// does not retry. Whatever the write did queue goes to `guard` first.
+async fn refused_and_nothing_queued(
+    seeded: &Seeded,
+    source: &dyn Source,
+    op: knobas_source::WriteOp,
+    guard: &mut Queued,
+    what: &str,
+) {
+    let refused = source.write(op).await;
+    let queued = queued_builds(seeded).await;
+    adopt_first(guard, &queued);
+    println!("SEEDED {what}: {refused:?}");
+    assert!(
+        matches!(
+            refused,
+            Err(SourceError::Protocol {
+                status: Some(404),
+                ..
+            })
+        ),
+        "{what} is a refusal, not a retry: {refused:?}"
+    );
+    assert!(queued.is_empty(), "{what} queues nothing: {queued:?}");
+}
+
+/// The restore point a write test records before it writes (#1699): every
+/// build on the server, which a green run leaves as exactly the seeded ones.
+async fn restore_point(seeded: &Seeded, when: &str) -> Vec<i64> {
+    let ids = seeded.build_ids("defaultFilter:false,count:100").await;
+    println!(
+        "SEEDED restore point {when}: {} build(s) {ids:?}",
+        ids.len()
+    );
+    assert_eq!(
+        ids,
+        seeded.seeded_ids_newest_first(),
+        "{when}, the server holds exactly the seeded builds"
+    );
+    ids
+}
+
+/// **Story 9 against the real server** (#1699, ADR-0013): the adapter's
+/// `TriggerBuild` puts exactly one build on TeamCity's queue, of the
+/// configuration the entity named; and a configuration the server does not
+/// have is a refusal (a 404 the write queue does not retry), with nothing
+/// queued in its place.
+///
+/// The agents are parked ([`AgentsParked`]) so the build stays on the queue
+/// where the whole queue can be read, rather than being taken by the agent
+/// between the write and the read; the [`Queued`] guards cancel and delete
+/// whatever the writes queued, and the build counts are back at the restore
+/// point afterwards. The source is scoped to another configuration first, so
+/// a trigger that ran whatever was first in scope queues the wrong one.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_trigger_through_the_adapter_queues_one_build_of_the_configuration_it_named() {
+    use knobas_source::WriteOp;
+
+    let seeded = seeded();
+    // The agent guard first, so a failure anywhere re-enables the agents; the
+    // build guards drop before it, while their builds are still queued.
+    let mut parked = AgentsParked::new(&seeded);
+    let mut refused_guard = Queued::new(&seeded).await;
+    let mut guard = Queued::new(&seeded).await;
+    let named = QUICK_CONFIGURATION;
+    let other = seeded.fixture_build(1187).build_type.clone();
+    let source = seeded.scoped_to(&[other.as_str(), named]);
+    let before = restore_point(&seeded, "before the trigger").await;
+    parked.park(&seeded).await;
+    assert_eq!(
+        queued_builds(&seeded).await,
+        Vec::<serde_json::Value>::new(),
+        "the queue starts empty"
+    );
+
+    refused_and_nothing_queued(
+        &seeded,
+        &*source,
+        WriteOp::TriggerBuild {
+            entity: "teamcity:buildType:Knobas_NoSuchConfiguration1699".to_owned(),
+        },
+        &mut refused_guard,
+        "a trigger of a configuration the server does not have",
+    )
+    .await;
+
+    let receipt = source
+        .write(WriteOp::TriggerBuild {
+            entity: format!("teamcity:buildType:{named}"),
+        })
+        .await
+        .unwrap_or_else(|e| panic!("the trigger is queued: {e:?}"));
+    let queued = queued_builds(&seeded).await;
+    adopt_first(&mut guard, &queued);
+    println!("SEEDED queue after the trigger: {queued:?} (receipt {receipt:?})");
+    assert_eq!(queued.len(), 1, "exactly one build was queued: {queued:?}");
+    let build = &queued[0];
+    assert_eq!(
+        build["buildType"]["id"], named,
+        "the build is of the configuration the trigger named: {build}"
+    );
+    assert_eq!(build["state"], "queued", "{build}");
+    // A trigger names no branch (`write.rs`, *One endpoint, two operations*),
+    // so TeamCity builds the configuration's default one.
+    assert_eq!(build["defaultBranch"], true, "{build}");
+    assert!(
+        !seeded.seeded_ids().contains(&id_of(build)),
+        "a new build, not a seeded one: {build}"
+    );
+
+    drop((guard, refused_guard, parked));
+    let after = restore_point(&seeded, "after the trigger").await;
+    assert_eq!(after, before);
+}
+
+/// **Story 10 against the real server** (#1699, ADR-0013): the adapter's
+/// `RerunBuild` on the seeded failed build 1187 asks the server which
+/// configuration the build belonged to and queues exactly one new build of
+/// **that** configuration; and once that build is deleted, re-running it is a
+/// refusal on TeamCity's own 404 for a build that is gone, with nothing
+/// queued.
+///
+/// Parked agents, guards and restore point as in the trigger's case above.
+/// The source is scoped to another configuration first, so a re-run that ran
+/// whatever was first in scope rather than the build's own configuration
+/// queues the wrong one; the build's entity id carries nothing but its id.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_rerun_through_the_adapter_queues_the_builds_own_configuration_and_a_gone_build_is_refused()
+ {
+    use knobas_source::WriteOp;
+
+    let seeded = seeded();
+    let mut parked = AgentsParked::new(&seeded);
+    let mut refused_guard = Queued::new(&seeded).await;
+    let mut guard = Queued::new(&seeded).await;
+    let failed = seeded.fixture_build(1187).clone();
+    let source = seeded.scoped_to(&[QUICK_CONFIGURATION, failed.build_type.as_str()]);
+    let before = restore_point(&seeded, "before the re-run").await;
+    parked.park(&seeded).await;
+    assert_eq!(
+        queued_builds(&seeded).await,
+        Vec::<serde_json::Value>::new(),
+        "the queue starts empty"
+    );
+
+    let receipt = source
+        .write(WriteOp::RerunBuild {
+            entity: format!("teamcity:build:{}", failed.real_id),
+        })
+        .await
+        .unwrap_or_else(|e| panic!("the re-run is queued: {e:?}"));
+    let queued = queued_builds(&seeded).await;
+    adopt_first(&mut guard, &queued);
+    println!(
+        "SEEDED queue after re-running build {} (1187): {queued:?} (receipt {receipt:?})",
+        failed.real_id
+    );
+    assert_eq!(queued.len(), 1, "exactly one build was queued: {queued:?}");
+    let build = &queued[0];
+    let rerun = id_of(build);
+    assert_eq!(
+        build["buildType"]["id"], failed.build_type,
+        "a re-run runs the build's own configuration: {build}"
+    );
+    assert_eq!(build["state"], "queued", "{build}");
+    // 1187 ran on a feature branch, and a re-run still names none: the
+    // configuration's default branch is built, as `write.rs` rules.
+    assert_eq!(build["defaultBranch"], true, "{build}");
+    assert_ne!(rerun, failed.real_id, "a re-run is a new build");
+    assert!(
+        !seeded.seeded_ids().contains(&rerun),
+        "a new build, not a seeded one: {build}"
+    );
+
+    // The re-run's build deleted (and checked gone by the guard): re-running
+    // it now is re-running a build the server does not have.
+    drop(guard);
+    refused_and_nothing_queued(
+        &seeded,
+        &*source,
+        WriteOp::RerunBuild {
+            entity: format!("teamcity:build:{rerun}"),
+        },
+        &mut refused_guard,
+        &format!("a re-run of deleted build {rerun}"),
+    )
+    .await;
+
+    drop((refused_guard, parked));
+    let after = restore_point(&seeded, "after the re-run").await;
+    assert_eq!(after, before);
 }
 
 /// **The cleanup keeps the fixture the seed's** (#1560): a project the seed
