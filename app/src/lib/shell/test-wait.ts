@@ -6,8 +6,9 @@ import { beforeEach, vi } from "vitest";
  * keeps a separate deadline timer whose handler only rejects. When the event loop
  * stalls past the deadline, every expired timer runs in one pass: the poll (still
  * false), the app's own timer that makes the condition true, then the deadline,
- * which rejects with the work already done. `waitFor` checks once more when the
- * deadline fires and fails only if the condition is still false.
+ * which rejects with the work already done. This `waitFor` is vitest's with one
+ * more look when the deadline fires: it flushes effects, calls the callback again,
+ * and fails only if that call fails too. `until` is the labelled form of it.
  */
 export async function waitFor<T>(
   callback: () => T | Promise<T>,
@@ -47,7 +48,7 @@ function timeline(): string {
 export async function until(
   condition: () => boolean,
   whatWasWaitedFor: string,
-  options: { timeout?: number; interval?: number } = { timeout: 3_000, interval: 5 },
+  { timeout = 3_000, interval = 5 }: { timeout?: number; interval?: number } = {},
 ): Promise<void> {
   const start = performance.now();
   let polls = 0;
@@ -56,7 +57,7 @@ export async function until(
       polls += 1;
       flushSync();
       if (!condition()) throw new Error(whatWasWaitedFor);
-    }, options);
+    }, { timeout, interval });
     waits.push({ label: whatWasWaitedFor, ms: performance.now() - start, polls, timedOut: false });
   } catch (cause) {
     waits.push({ label: whatWasWaitedFor, ms: performance.now() - start, polls, timedOut: true });
