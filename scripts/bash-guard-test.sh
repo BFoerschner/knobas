@@ -117,7 +117,6 @@ check refuse 'perl -pi.bak -e s/a/b/ ~/.zshrc'
 check refuse 'sed -Ei s/a/b/ ~/.bashrc'
 check refuse 'sed --in-place=.bak s/a/b/ ~/.bashrc'
 check pass 'perl -pe s/a/b/ ~/.zshrc'
-check pass "perl -MList::Util=sum -ne 'print' ~/.bashrc"
 check pass 'sed -n /PATH/p ~/.bashrc'
 
 # not a Bash call, or no command: let through

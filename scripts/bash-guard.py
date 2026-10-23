@@ -34,9 +34,8 @@ import re
 import sys
 
 WRITERS = {"rm", "rmdir", "mv", "cp", "touch", "mkdir", "ln", "tee", "truncate", "install", "chmod", "chown", "rsync"}
-# Writers only in place: `-i` alone or bundled after the flags that take no argument
-# (`perl -pi`, `sed -Ei`), or sed's `--in-place`. `perl -MList::Util` is no `-i`.
-IN_PLACE = {"sed": r"^(-[nErsuzal]*i|--in-place)", "perl": r"^-[aclnpstuwTUWX0-9]*i"}
+# Writers only in place: `-i` alone or bundled (`perl -pi`, `sed -Ei`), or sed's `--in-place`.
+IN_PLACE = {"sed": r"^(-[a-zA-Z]*i|--in-place)", "perl": r"^-[a-zA-Z]*i"}
 # Words before the command's name, each with the options of its own that take an argument.
 WRAPPERS = {"sudo": {"-u", "-g"}, "command": set(), "exec": set(), "time": set(), "nohup": set(),
             "nice": {"-n"}, "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s"}}
