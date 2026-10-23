@@ -14533,3 +14533,112 @@ Ruled 2026-10-23 by the implementer (Sonnet) while building the bundle.
   no error; a new case would mock the port's answer and test nothing the engine does not. The
   engine test asserts the empty response, total 0 and the `list:nope` token. *Reversing:* trivial,
   one test.
+## #1650 and #1653: the launcher's named tiebreak and `reach:`'s walk (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus: migration `0056`.** *Fork:* §10.8 freezes
+  `crates/knobas-db/migrations/**`; #1650 offers *"or the title lexeme array becomes a generated
+  column"*. *Ruling:* add it, three stored generated columns on `sync.item` and `sync.live_item`
+  showing them, with its entry `1650-migration-0056-stored-name-words.md`. *Reasoning:* the next
+  ruling. *Reversing:* one migration dropping the three columns and restoring `0050`'s view, and
+  `Corpus::named` back to lexing.
+- **Stored lexemes, not naming after the cap.** *Fork:* #1650's first fix direction is to compute
+  `named` after the per-kind cap and re-sort. *Ruling:* store the lexemes. *Reasoning:* measured
+  both. A cut by rank and recency before naming loses the row the tiebreak exists for (the oldest
+  of many equal ranks, story 25), so an exact version must shortlist every row tied with the
+  cap's last rank, and name all of them. Where ranks tie widely, that shortlist is every match: on
+  the search crate's corpus at 22,000 rows, `ledger` went from 61 to 83 ms with `m` carrying the
+  title; with six-word titles from about 82 to 120 ms carrying it, and to 180 ms or more joining
+  the shortlist back to its corpus by id. Stored columns are
+  exact and cost a comparison per match: 81 to 83 ms became 65 to 67 ms on six-word titles. The
+  price is paid at 100,000 rows. With the per-match cost gone, the planner stops parallelising the
+  mirror branch, and a 5,000-match word goes from 24 to 38 ms p50: still within the budget, but a
+  regression, filed as #1851 rather than hidden. The cap's semantics are now pinned by `ranking.rs`' new
+  `the_item_named_exactly_the_word_survives_a_cap_of_equally_ranked_siblings`. *Reversing:* as
+  above.
+- **The mirror only.** *Fork:* the notes, assets and routes lex their title per match too.
+  *Ruling:* leave them lexing. *Reasoning:* they live in the `knobas` schema, which a backup
+  dumps, so a column there is a backup and restore question as well; and it is the mirror that a
+  common word matches most of. *Reversing:* a migration per table and a `named` per corpus.
+- **The ticket's mutant does not apply.** *Fork:* #1650's *Mutants* section is "compute `named`
+  before the cap again". *Ruling:* the equivalent mutant here is "lex the mirror per match again"
+  (`LIVE_ITEM.named = None`), which kills `sql_shape.rs`' shape test, `ticket_by_key.rs` and a
+  unit test. *Reasoning:* with nothing computed after the cap there is no position to move back;
+  what the fix removes is the per-match lexing, so that is what the mutant puts back.
+  *Reversing:* none needed.
+- **Where `payout` is measured.** *Fork:* #1650's first criterion asks for `payout` on the 22k
+  probe, whose vocabulary has no `payout` (the probe's titles and bodies draw on 42 named words
+  and 4,000 synthetic ones). *Ruling:* measure at 22,000 rows of the search crate's own corpus,
+  where `payout` matches 1,100 rows and `ledger` all 22,000, and on the same corpus with six-word
+  titles; run the probe once at the end for its search rows. The criterion cannot pass as worded;
+  a wording follow-up is filed. *Reasoning:* the corpus the ticket's 152 ms came from (#811's,
+  `corpus.rs`) is not in the tree, and a word with no match on the probe measures nothing; the
+  search crate's corpus has a word in every row and one in a twentieth, which bracket the case.
+  *Reversing:* none.
+- **#1653 hoists the whole walk, not only its start set.** *Fork:* the ticket names the start
+  set. *Ruling:* one materialized CTE `reaches(id)` holding the walk's result. *Reasoning:* the
+  walk reads nothing but the start set and the links, so every branch walked to the same ids; one
+  walk is the start set once plus the links once. *Reversing:* trivial.
+- **"Resolving the typed key by exact match first".** *Fork:* the values reach the start set
+  lowered (by the server since #1844's `bind_lowered`), and nothing on `knobas.entity` indexes `lower(id)` or the key past the namespace, so
+  an exact lookup by primary key never finds a Jira ticket. *Ruling:* the start set resolves by
+  equality on the lowercased id and key, once a statement, a scan of `knobas.entity` (about 2 ms
+  at 22,000 entities); an index-served lookup is a follow-up (`backlog`). *Reasoning:* the
+  ticket's failure is four to eight scans per board, which one removes; an index needs a
+  migration on the backed-up schema for the last 2 ms. *Reversing:* trivial.
+- **`reach:`'s values are bound first among the dimensions.** *Fork:* binds are allocated in the
+  order their placeholders first appear; the CTE now reads them before any branch. *Ruling:* bind
+  them right after the declarations, pinned by
+  `reachs_values_are_numbered_where_the_walk_reads_them`. The saved summary was already out of
+  that order for ticket keys (its `fdecl` precedes the text bind), and `reach:` is now a second
+  such case there: its `reaches` CTE reads the values ahead of the text. Both stay, named in
+  `saved_summary_sql`'s comment. *Reasoning:* the order is a reading aid that the planner does
+  not depend on, and moving the summary's text bind after its filters would change every saved
+  list's bind list for it.
+  *Reversing:* trivial.
+
+### #1650 and #1653: review of the implementer's rulings (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by merge-manager on Opus: migration `0056` and its §10.8 entry.**
+  *Ruling:* confirmed, on the head rebased onto `163bd976`. *Reasoning:* the ticket names the
+  generated column as its second fix direction. Each of the three columns is the per-match
+  expression it replaces, over the same columns: `NAMED`'s two halves and `KEY_NAMED`. The old
+  guards (`strpos(...) > 0 and`, `key is not null and`) become the null branches, and
+  `coalesce(..., false)` keeps a null from sorting first under `named desc`. `sync.live_item` is
+  `0050`'s definition plus the three columns. No migration from `0051` to `0055` touches it, and
+  no open PR holds a `0056`. Every write to `sync.item` names its columns, so a generated column
+  breaks none. The view's other readers name their columns too. The entry matches the diff. One
+  edit: the entry named only the implementer's ratification and a heading that doesn't exist
+  (`## #1650`). It now names this ruling and `## #1650 and #1653`. *Reversing:* as the
+  implementer's ruling says.
+- **Stored lexemes, not naming after the cap.** *Ruling:* confirmed, and it is no departure. The
+  ticket's *What to build* offers both directions ("or the title lexeme array becomes a generated
+  column"), and every criterion is met on this route: one materialized match scan (asserted), the
+  ordering tests, the transcript and the mutants. M1 stands in for the ticket's mutant, which has
+  no position left to move. *Reversing:* as above.
+- **The 100k regression (`payout`, 5,000 matches, 24 to 38 ms).** *Ruling:* the trade holds.
+  *Reasoning:* reproduced in an alternating A/B of the `perf` binaries from `main` and this head,
+  three rounds each: common word at 100k, 23 to 25 ms p90 on `main` and 37 to 43 on the branch.
+  It is real, not load. It is still at 40% of the budget. It comes from a planner choice (the
+  mirror branch loses its `Gather`), not from added work. Searches up to 22k, the size an install
+  has, get faster, and so do the widest matches with longer titles. #1851 tracks it as `backlog`:
+  Björn would not notice 14 ms in the app. *Reversing:* #1851.
+- **Hand-on: the 22k probe has no `payout` (#1849).** *Ruling:* accepted. *Reasoning:* checked.
+  `crates/knobas-app/tests/it/responsiveness_probe.rs` draws its text from `WORDS` (no `payout`)
+  and `w<n>` synthetic words. `payout` appears only in pull request ids, which no `fts` indexes.
+  A probe word with no matches measures nothing, so the criterion is ticked with that note. The
+  bend is in the probe, not in the code.
+- **Hand-on: exact-match-first is not index-served (#1850).** *Ruling:* accepted. *Reasoning:*
+  "exact match first" is in #1653's *What to build*, not its criteria. Every criterion is met:
+  one start-set predicate over `corpus::ALL`, and one `knobas.entity` scan in the plan. The start
+  set already resolves by equality, never by a pattern. No primary-key lookup finds
+  `jira:PAY-231` from a typed `pay-231`. Since #1844 the as-typed value is a bind of its own, so
+  #1850 can add `e.id = any(<as typed>)` cheaply for a fully typed id. That is noted on #1850.
+- **The `just search-perf` red is load, not the diff.** *Ruling:* not a blocker. *Reasoning:*
+  three runs on this branch went red on three different assertions: the rail at 103, `under:` at
+  100, and, on the rebased head, the rail at 102 while the same run's curve read 97. In my A/B,
+  `under:` read 62 to 83 ms p90 on both binaries, and `main` went red on the rail at 108 in round
+  3. This diff changes no `under:` or rail statement: the fixture has no `reach:`, and a browse
+  has no `named`. The one thing that could reach them is the wider `sync.item` row, and this
+  sample can't separate it from load (round 2, at the lowest load, reads the same on both). The
+  rail sitting at its budget on `main` is #1855 (`backlog`), which asks for that plan.
+  *Reversing:* none. #1855 decides the budget.

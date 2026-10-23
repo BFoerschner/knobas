@@ -114,13 +114,18 @@ pub struct Corpus {
     pub(crate) source_id: &'static str,
     /// The row's title (`"i.title"`).
     pub(crate) title: &'static str,
-    /// The second name a row goes by, if the corpus has one: a ticket's key
-    /// (#1174). A row is *named* what was typed when its title or this is the
-    /// typed words, so `PAY-231` ranks the ticket PAY-231 above PAY-2310,
-    /// which matches the same words with its last one as a prefix. Null for a
-    /// row with no key, which then names nothing by it. The index has to hold
-    /// it too (migration `0048`), or the row is never matched to be named.
-    pub(crate) key: Option<&'static str>,
+    /// Whether a match is *named* what was typed (`q.words`), read from
+    /// lexemes the relation stores, or `None` to lex [`Self::title`] per
+    /// match through `crate::sql::NAMED`.
+    ///
+    /// The mirror stores them (migration `0056`, #1650): it is the corpus a
+    /// common word matches most of, and lexing every matching title per
+    /// keystroke was a fifth of the statement there. The stored
+    /// comparison must be true exactly where `NAMED` over the same title is,
+    /// which the migration's columns are written to be and
+    /// `knobas-db`'s `zero_fifty_six_stores_what_the_launcher_lexed_per_match`
+    /// pins. Read once per match, so it is a comparison and nothing heavier.
+    pub(crate) named: Option<&'static str>,
     /// The indexed `tsvector`. **Matched against, never selected** -- reading
     /// one into a `FromRow` struct panics at runtime (interfaces §1).
     pub(crate) fts: &'static str,
@@ -452,11 +457,16 @@ pub const LIVE_ITEM: Corpus = Corpus {
     kind: "i.kind",
     source_id: "i.source_id",
     title: "i.title",
-    // The id past its namespace, as `0048` indexes it and `sql::ids_sql`
-    // reads it: `jira:PAY-231` is `PAY-231`. Tickets only, as in `0048`.
-    key: Some(
-        "case when i.kind = 'ticket' \
-         then substr(i.entity_id, strpos(i.entity_id, ':') + 1) end",
+    // Three names, stored by `0056`: the title, the text after its last `/`
+    // (#621, null without one), and a ticket's key (#1174), the id past its
+    // namespace as `0048` indexes it and `sql::ids_sql` reads it --
+    // `jira:PAY-231` is `PAY-231`, null for every other kind. The key is why
+    // `PAY-231` ranks the ticket PAY-231 above PAY-2310, which matches the
+    // same words with its last one as a prefix. A null half is "not named by
+    // it", which `coalesce` makes false before `named desc` can sort it first.
+    named: Some(
+        "coalesce(i.title_words = q.words or i.title_tail_words = q.words \
+         or i.key_words = q.words, false)",
     ),
     fts: "i.fts",
     // The words alone: a page's Docs-search marks never reach an excerpt (#860).
@@ -507,7 +517,7 @@ pub const NOTE: Corpus = Corpus {
     kind: "'note'",
     source_id: "'note'",
     title: "n.title",
-    key: None,
+    named: None,
     fts: "n.fts",
     headline_text: "n.title || ' — ' || n.body_md",
     // A note is the user's own; there is no author column and no author to
@@ -572,7 +582,7 @@ pub const ASSET: Corpus = Corpus {
     kind: "'asset'",
     source_id: "'asset'",
     title: "a.name",
-    key: None,
+    named: None,
     fts: "a.fts",
     headline_text: "a.name || ' — ' || a.path_text || ' — ' || a.props_text",
     author: None,
@@ -655,7 +665,7 @@ pub const ROUTE: Corpus = Corpus {
     kind: "'route'",
     source_id: "'route'",
     title: "r.name",
-    key: None,
+    named: None,
     fts: "r.fts",
     headline_text: "r.name || ' — ' || r.url",
     author: None,

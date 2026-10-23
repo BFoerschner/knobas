@@ -2473,3 +2473,117 @@ async fn zero_fifty_five_keeps_the_start_of_an_episode_of_failed_sign_ins() {
     assert!(again > began);
     assert_eq!(set("ok").await, None);
 }
+
+/// `0056` (#1650): the mirror stores the lexemes the launcher's `named`
+/// compares the typed words with, and each column is, row for row, what the
+/// statement computed per match before it: `NAMED`'s two halves over the
+/// title and `KEY_NAMED` over a ticket's key, spelled below as they stood in
+/// `knobas_search::sql` before #1650. `sync.live_item` shows them, and a title
+/// that changes takes its lexemes with it.
+#[tokio::test]
+async fn zero_fifty_six_stores_what_the_launcher_lexed_per_match() {
+    let pool = knobas_db::test_util::scratch_database("stored-name-words")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    let rows = [
+        ("jira:PAY-231", "ticket", "Retry failed SEPA payouts"),
+        ("jira:PAY-2310", "ticket", "Payout"),
+        (
+            "gitea:repo:tidewater/payout-service",
+            "repo",
+            "tidewater/payout-service",
+        ),
+        ("gitea:branch:7", "branch", "feature/payout"),
+        ("confluence:page:1", "page", "The Payouts of the day"),
+        ("confluence:page:2", "page", ""),
+    ];
+    for (id, kind, title) in rows {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $3)")
+            .bind(id)
+            .bind(kind)
+            .bind(title)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, payload)
+             values ($1, split_part($1, ':', 1), $2, $3, '{}'::jsonb)",
+        )
+        .bind(id)
+        .bind(kind)
+        .bind(title)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // Every row, through the view the launcher reads: whether each stored
+    // column differs from the expression it stands for.
+    let differing = "select i.entity_id from sync.live_item i
+        where i.title_words is distinct from tsvector_to_array(to_tsvector('english', i.title))
+           or i.title_tail_words is distinct from
+              case when strpos(i.title, '/') > 0
+                   then tsvector_to_array(to_tsvector('english', split_part(i.title, '/', -1))) end
+           or i.key_words is distinct from
+              case when i.kind = 'ticket'
+                   then tsvector_to_array(to_tsvector('english',
+                          substr(i.entity_id, strpos(i.entity_id, ':') + 1))) end";
+    let shown: i64 = sqlx::query_scalar("select count(*) from sync.live_item")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        shown, 6,
+        "every row is live, so the comparison reads them all"
+    );
+    let wrong: Vec<String> = sqlx::query_scalar(differing)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert!(wrong.is_empty(), "stored lexemes differ for {wrong:?}");
+
+    // Literals, so the comparison above cannot agree with a column that
+    // copies a wrong expression into both places.
+    let words = |id: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, (Vec<String>, Option<Vec<String>>, Option<Vec<String>>)>(
+                "select title_words, title_tail_words, key_words from sync.item
+                  where entity_id = $1",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let strs = |words: &[&str]| words.iter().map(|w| (*w).to_owned()).collect::<Vec<_>>();
+    assert_eq!(
+        words("jira:PAY-2310").await,
+        (strs(&["payout"]), None, Some(strs(&["-2310", "pay"])))
+    );
+    assert_eq!(
+        words("gitea:branch:7").await,
+        (strs(&["feature/payout"]), Some(strs(&["payout"])), None)
+    );
+    assert_eq!(
+        words("confluence:page:1").await,
+        (strs(&["day", "payout"]), None, None)
+    );
+    assert_eq!(words("confluence:page:2").await, (Vec::new(), None, None));
+
+    sqlx::query("update sync.item set title = 'Payout jitter' where entity_id = 'jira:PAY-2310'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        words("jira:PAY-2310").await,
+        (
+            strs(&["jitter", "payout"]),
+            None,
+            Some(strs(&["-2310", "pay"]))
+        )
+    );
+}

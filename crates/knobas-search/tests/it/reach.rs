@@ -177,6 +177,25 @@ async fn reach_returns_the_same_ids_as_the_read() {
         search(&pool, &format!("reach:{}", sub.to_lowercase())).await,
         read
     );
+
+    // A saved list holding it: the rail's count is the read's, from the one
+    // walk its statement makes for every corpus (#1653), and so are its rows.
+    let searcher = Searcher::declaring(pool.clone(), [knobas_source_jira::descriptor_template()])
+        .await
+        .unwrap();
+    let saved = searcher
+        .save_list(&format!("Reach of {key}"), &format!("reach:{key}"))
+        .await
+        .unwrap();
+    assert_eq!(saved.count, i64::try_from(read.len()).unwrap(), "{saved:?}");
+    let opened = searcher.smart_list_items(&saved.id, 200).await.unwrap();
+    let mut listed: Vec<String> = opened
+        .groups
+        .iter()
+        .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
+        .collect();
+    listed.sort();
+    assert_eq!(listed, read);
 }
 
 /// A key no ticket answers to reaches nothing: an empty answer, not every row.

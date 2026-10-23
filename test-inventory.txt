@@ -1719,6 +1719,7 @@ knobas-db	test/schema	zero_fifty_five_dates_an_episode_already_under_way_at_its_
 knobas-db	test/schema	zero_fifty_five_keeps_the_start_of_an_episode_of_failed_sign_ins
 knobas-db	test/schema	zero_fifty_four_keeps_the_query_an_install_already_had
 knobas-db	test/schema	zero_fifty_four_names_the_saved_views_query_for_the_role
+knobas-db	test/schema	zero_fifty_six_stores_what_the_launcher_lexed_per_match
 knobas-db	test/schema	zero_fifty_three_keeps_the_saved_views_an_install_already_had
 knobas-db	test/schema	zero_fifty_three_names_the_saved_views_for_the_role
 knobas-db	test/schema	zero_seven_backfills_every_existing_link_as_confirmed
@@ -2030,6 +2031,7 @@ knobas-search	lib/knobas_search	sql::tests::an_absent_filter_emits_no_predicate
 knobas-search	lib/knobas_search	sql::tests::an_over_wide_updated_window_is_clamped_rather_than_saturated
 knobas-search	lib/knobas_search	sql::tests::mine_without_an_identity_binds_an_empty_array_rather_than_dropping_the_filter
 knobas-search	lib/knobas_search	sql::tests::placeholders_are_numbered_in_bind_order
+knobas-search	lib/knobas_search	sql::tests::reachs_values_are_numbered_where_the_walk_reads_them
 knobas-search	lib/knobas_search	sql::tests::the_corpus_is_the_live_view_and_fts_is_never_selected
 knobas-search	lib/knobas_search	sql::tests::the_headline_runs_after_the_limit
 knobas-search	lib/knobas_search	sql::tests::the_per_kind_total_costs_one_grouped_aggregate_not_a_second_sort
@@ -2114,6 +2116,7 @@ knobas-search	test/it	ranking::a_strong_body_match_still_beats_a_weak_title_matc
 knobas-search	test/it	ranking::a_title_match_ranks_above_a_body_match_in_every_kind
 knobas-search	test/it	ranking::the_cap_and_the_limit_keep_the_title_match_and_the_true_total
 knobas-search	test/it	ranking::the_item_named_exactly_the_word_ranks_above_its_hyphenated_siblings
+knobas-search	test/it	ranking::the_item_named_exactly_the_word_survives_a_cap_of_equally_ranked_siblings
 knobas-search	test/it	reach::reach_of_an_unknown_key_is_empty
 knobas-search	test/it	reach::reach_returns_the_same_ids_as_the_read
 knobas-search	test/it	readings::readings_count_unreadable_and_empty_texts_each_in_its_own_slot
@@ -2149,10 +2152,12 @@ knobas-search	test/it	sql_shape::an_absurd_updated_window_answers_instead_of_err
 knobas-search	test/it	sql_shape::browse_mode_orders_by_recency_and_ranks_nothing
 knobas-search	test/it	sql_shape::every_filter_narrows_the_match_and_none_of_them_is_a_literal
 knobas-search	test/it	sql_shape::hostile_text_is_a_search_term_and_nothing_else
+knobas-search	test/it	sql_shape::reachs_start_set_is_resolved_once_per_statement
 knobas-search	test/it	sql_shape::rows_tied_on_rank_and_timestamp_are_ordered_by_entity_id
 knobas-search	test/it	sql_shape::the_best_match_comes_first_and_recency_only_breaks_ties
 knobas-search	test/it	sql_shape::the_launchers_statement_is_never_a_named_prepared_statement
 knobas-search	test/it	sql_shape::the_limit_cuts_the_page_and_never_the_totals
+knobas-search	test/it	sql_shape::the_mirror_is_named_from_stored_lexemes_and_lexes_no_title_per_match
 knobas-search	test/it	state_chip::a_built_in_lists_rows_carry_their_state_chip
 knobas-search	test/it	state_chip::a_search_hit_carries_its_state_chip
 knobas-search	test/it	state_chip::the_boards_newest_rows_carry_their_state_chip

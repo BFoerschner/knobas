@@ -39,7 +39,7 @@
 use chrono::{DateTime, Duration, Utc};
 use knobas_search::corpus::{self, LIVE_ITEM};
 use knobas_search::query::EffectiveFilters;
-use knobas_search::sql::{query_as_with, search_sql};
+use knobas_search::sql::{SavedQuery, query_as_with, saved_summary_sql, search_sql};
 
 /// One row of the launcher's result set.
 ///
@@ -958,4 +958,99 @@ async fn named_statements(conn: &mut sqlx::PgConnection) -> i64 {
         .fetch_one(&mut *conn)
         .await
         .unwrap()
+}
+
+/// The mirror's `named` (#1650) compares the lexemes `0056` stores and lexes
+/// nothing per match: on a word in most of the mirror, lexing every matching
+/// title and key was a fifth of the statement. The corpora that
+/// store none still lex their title, and the match set is still scanned once.
+#[test]
+fn the_mirror_is_named_from_stored_lexemes_and_lexes_no_title_per_match() {
+    for prefix_last in [false, true] {
+        let built = search_sql(
+            corpus::ALL,
+            Some("payout"),
+            prefix_last,
+            &EffectiveFilters::default(),
+            10,
+            40,
+        );
+        let sql = built.sql();
+        assert!(sql.contains("i.title_words = q.words"), "{sql}");
+        assert!(sql.contains("i.key_words = q.words"), "{sql}");
+        for lexed in [
+            "to_tsvector('english', i.title)",
+            "to_tsvector('english', split_part(i.title",
+            "to_tsvector('english', case when i.kind",
+            "to_tsvector('english', substr(i.entity_id",
+        ] {
+            assert!(!sql.contains(lexed), "{lexed} per match:\n{sql}");
+        }
+        // A note, an asset and a route store nothing, and are lexed as before.
+        for title in ["n.title", "a.name", "r.name"] {
+            assert!(
+                sql.contains(&format!(
+                    "tsvector_to_array(to_tsvector('english', {title})) = q.words"
+                )),
+                "{title}:\n{sql}"
+            );
+        }
+        assert_eq!(sql.matches("m as materialized (").count(), 1, "{sql}");
+    }
+}
+
+/// `reach:`'s walk (#1653) is resolved once a statement, in one materialized
+/// CTE every corpus branch reads, and not spliced into each branch: its start
+/// set scans `knobas.entity`, and over `corpus::ALL` that was four scans a
+/// search and four per saved list on the rail. Once per saved list there,
+/// because each list binds values of its own.
+#[test]
+fn reachs_start_set_is_resolved_once_per_statement() {
+    let start = "lower(e.id) = any(";
+    let filters = EffectiveFilters {
+        reach: vec!["pay-231".to_owned()],
+        ..EffectiveFilters::default()
+    };
+    for text in [Some("payout"), None] {
+        let built = search_sql(corpus::ALL, text, false, &filters, 10, 40);
+        let sql = built.sql();
+        assert_eq!(sql.matches(start).count(), 1, "{sql}");
+        assert_eq!(sql.matches(" as materialized (").count(), 2, "{sql}");
+        assert_eq!(
+            sql.matches(" in (select rx.id from reaches rx)").count(),
+            corpus::ALL.len(),
+            "every branch reads the one walk:\n{sql}"
+        );
+    }
+
+    let other = EffectiveFilters {
+        reach: vec!["ops-7".to_owned()],
+        ..EffectiveFilters::default()
+    };
+    let queries = [
+        SavedQuery {
+            id: "a",
+            text: None,
+            filters: &filters,
+        },
+        SavedQuery {
+            id: "b",
+            text: Some("deploy"),
+            filters: &other,
+        },
+    ];
+    let built = saved_summary_sql(corpus::ALL, &queries).expect("two saved lists");
+    let sql = built.sql();
+    assert_eq!(sql.matches(start).count(), queries.len(), "{sql}");
+
+    // No `reach:`, no walk.
+    let bare = search_sql(
+        corpus::ALL,
+        Some("payout"),
+        false,
+        &EffectiveFilters::default(),
+        10,
+        40,
+    );
+    assert!(!bare.sql().contains("reaches"), "{}", bare.sql());
 }

@@ -204,8 +204,10 @@ pub fn search_sql(
         );
     }
 
-    // A ticket key's declared paths, resolved once for the statement (#811).
+    // A ticket key's declared paths, resolved once for the statement (#811),
+    // and what `reach:` reaches, walked once for every corpus (#1653).
     sql.push_str(&field_paths(&bound));
+    sql.push_str(&reaches(&bound));
 
     // One narrow row per match. MATERIALIZED because `totals` and `top` both
     // read it and the scan must happen once.
@@ -219,14 +221,11 @@ pub fn search_sql(
             (true, false) => format!("ts_rank_cd({}, q.tsq)", corpus.fts),
             (false, _) => "0::real".to_owned(),
         };
-        let named = if text.is_some() {
-            let by_title = NAMED.replace("{title}", corpus.title);
-            match corpus.key {
-                Some(key) => format!("({by_title} or {})", KEY_NAMED.replace("{key}", key)),
-                None => by_title,
-            }
-        } else {
-            "false".to_owned()
+        // What a corpus stores (#1650) it is not lexed for, per match.
+        let named = match (text, corpus.named) {
+            (None, _) => "false".to_owned(),
+            (Some(_), Some(stored)) => stored.to_owned(),
+            (Some(_), None) => NAMED.replace("{title}", corpus.title),
         };
         let _ = writeln!(
             sql,
@@ -362,6 +361,7 @@ fn ids_body(builder: &mut Builder, words: &[String], filters: &EffectiveFilters)
 
     let mut sql = String::from("with\n");
     sql.push_str(&field_paths(&bound));
+    sql.push_str(&reaches(&bound));
     // `with` needs at least one CTE; this one is free.
     sql.push_str("nothing as (select 1)\n");
     // The live mirror as the base table and two hashed exclusion sets, not
@@ -515,6 +515,11 @@ fn bind_dimensions(
     filters: &EffectiveFilters,
     declarations: Option<&String>,
 ) -> BoundFilters {
+    // First of the dimensions because the statement reads it first: the
+    // `reaches` CTE (#1653) comes before every corpus branch.
+    let reach = filters
+        .filters_by_reach()
+        .then(|| bind_lowered(builder, &filters.reach));
     BoundFilters {
         sources: (!filters.sources.is_empty())
             .then(|| builder.param(Bind::Texts(filters.sources.clone()))),
@@ -542,9 +547,7 @@ fn bind_dimensions(
                 bind_lowered(builder, &filters.under),
             )
         }),
-        reach: filters
-            .filters_by_reach()
-            .then(|| bind_lowered(builder, &filters.reach)),
+        reach,
         names: (!filters.names.is_empty())
             .then(|| builder.param(Bind::Texts(filters.names.clone()))),
         fields: Vec::new(),
@@ -612,8 +615,12 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
             None => "false".to_owned(),
         });
     }
-    if let Some(values) = &bound.reach {
-        predicates.push(format!("{} in ({})", corpus.entity_id, reach_ids(values)));
+    if bound.reach.is_some() {
+        // The statement's one walk ([`reaches`]), never a walk per corpus.
+        predicates.push(format!(
+            "{} in (select rx.id from reaches rx)",
+            corpus.entity_id
+        ));
     }
     if let Some(names) = &bound.names {
         // `knobas_core::name_glob_matches!`, the text a link-set pattern
@@ -678,21 +685,38 @@ fn bind_lowered(builder: &mut Builder, values: &[String]) -> String {
     format!("array[{}]::text[]", each.join(", "))
 }
 
-/// What the tickets a `reach:` names reach (#817), as one subquery over the
-/// values' placeholder: `knobas_core::reach_walk!`, the walk the job-reach
-/// read makes, started from every ticket whose id or key is one of the
-/// values. Every corpus reads the same ids, so an asset, a note or a route is
-/// kept exactly when the read would list it.
-fn reach_ids(values: &str) -> String {
+/// What the tickets a `reach:` names reach (#817), as the CTE `reaches(id)`
+/// ending in `,\n`, or nothing for a query without `reach:`:
+/// `knobas_core::reach_walk!`, the walk the job-reach read makes, started from
+/// every ticket whose id or key is one of the values. Every corpus reads the
+/// same ids, so an asset, a note or a route is kept exactly when the read
+/// would list it.
+///
+/// **One CTE, materialized, that every corpus branch reads** (#1653). The
+/// start set compares `lower(e.id)` and the key past its namespace, which no
+/// index on `knobas.entity` serves, so it is a scan of every entity; spliced
+/// into each branch, as it was, that was four scans and four walks a search
+/// over [`crate::corpus::ALL`], and four more per saved list on the rail.
+/// `materialized` so the planner cannot inline it back into each branch.
+///
+/// Resolved by equality, value by value: the id as typed or the key, both
+/// lowercased, and never a pattern.
+fn reaches(bound: &BoundFilters) -> String {
+    let Some(values) = &bound.reach else {
+        return String::new();
+    };
     format!(
-        "with recursive start(t) as (
+        "reaches as materialized (
+    with recursive start(t) as (
         select e.id from knobas.entity e
          where e.kind = 'ticket'
            and (lower(e.id) = any({values}::text[])
                 or lower(substr(e.id, strpos(e.id, ':') + 1)) = any({values}::text[]))
     ),
     {}
-    select r.id from reached r",
+    select r.id from reached r
+),
+",
         knobas_core::reach_walk!()
     )
 }
@@ -777,7 +801,10 @@ pub fn saved_summary_sql(corpora: &[&Corpus], queries: &[SavedQuery<'_>]) -> Opt
             sql.push_str("union all\n");
         }
         // Binds in the order their placeholders appear, as in `search_sql`:
-        // the id column first, then the tsquery, then the filters.
+        // the id column first, then the tsquery, then the filters -- with two
+        // exceptions, which read filter binds ahead of the tsquery's: a ticket
+        // key's `fdecl` and `reach:`'s `reaches` (#1653), both CTEs of the
+        // subquery the branches sit in.
         let id = builder.param(Bind::Text(query.id.to_owned()));
         let fts = query.text.map(|raw| {
             let text = builder.param(Bind::Text(raw.to_owned()));
@@ -789,9 +816,11 @@ pub fn saved_summary_sql(corpora: &[&Corpus], queries: &[SavedQuery<'_>]) -> Opt
             sql,
             "select {id} as list_id, count(*) as total, max(m.synced_at) as newest\n  from ("
         );
-        let paths = field_paths(&bound);
-        if let Some(paths) = paths.strip_suffix(",\n") {
-            let _ = writeln!(sql, "  with {paths}");
+        // Per saved list, since each binds values of its own; once for all
+        // of its corpora.
+        let ctes = field_paths(&bound) + &reaches(&bound);
+        if let Some(ctes) = ctes.strip_suffix(",\n") {
+            let _ = writeln!(sql, "  with {ctes}");
         }
         for (index, corpus) in corpora.iter().enumerate() {
             if index > 0 {
@@ -1011,15 +1040,13 @@ const RANK_WHOLE: &str = "case when {fts} @@ q.whole then ts_rank_cd({fts}, q.wh
 /// `payout` by the same rule. The guard is for cost, not meaning: with no `/`,
 /// `split_part` returns the whole title and the second half can only repeat
 /// the first, so a planner that skips the guard changes no answer.
+///
+/// **Lexed per match**, and so only for a corpus that stores no lexemes of
+/// its own (`Corpus::named`, #1650): the notes, the assets and the routes. The
+/// mirror stores this expression's two halves, and a ticket's key lexed the
+/// same way, as columns (migration `0056`), and compares those, because a
+/// word in every row of the mirror made this a fifth of the statement.
 const NAMED: &str = "(tsvector_to_array(to_tsvector('english', {title})) = q.words\n              or (strpos({title}, '/') > 0\n                  and tsvector_to_array(to_tsvector('english', split_part({title}, '/', -1))) = q.words))";
-
-/// Whether a match is named what was typed by its key `{key}` (#1174), lexed
-/// as [`NAMED`] lexes a title. The parser reads `PAY-231` as `pay` and the
-/// signed number `-231`, so while the last word is a prefix `PAY-231` also
-/// matches PAY-2310 at the same rank, and recency would put the newer one
-/// first. A row with no key names nothing by it.
-const KEY_NAMED: &str =
-    "({key} is not null and tsvector_to_array(to_tsvector('english', {key})) = q.words)";
 
 /// The result ordering, qualified with `prefix` (`""`, `"m."` or `"d."`).
 ///
@@ -1410,6 +1437,31 @@ mod tests {
         );
     }
 
+    /// `reach:`'s values are read by the `reaches` CTE (#1653), ahead of every
+    /// corpus branch, so they are bound ahead of the branches' filters.
+    #[test]
+    fn reachs_values_are_numbered_where_the_walk_reads_them() {
+        let built = search_sql(
+            crate::corpus::ALL,
+            Some("sepa"),
+            false,
+            &EffectiveFilters {
+                reach: vec!["pay-231".to_owned()],
+                ..filters(&["jira"], &[], None, &[])
+            },
+            10,
+            50,
+        );
+        assert_eq!(
+            placeholders(&built.sql),
+            (1..=built.binds.len()).collect::<Vec<_>>(),
+            "{}",
+            built.sql
+        );
+        assert_eq!(built.binds[1], Bind::Text("pay-231".to_owned()));
+        assert_eq!(built.binds[2], Bind::Texts(vec!["jira".to_owned()]));
+    }
+
     /// A statement with no filters must number its placeholders densely too --
     /// the bind list shrinks with the predicates, and a gap would be a query
     /// that reads an argument nobody sent.
@@ -1472,12 +1524,11 @@ mod tests {
         assert!(!done.sql.contains("':*'"), "{}", done.sql);
         assert!(!done.sql.contains("q.whole"), "{}", done.sql);
         // Either way, a row named exactly what was typed comes first among
-        // equal ranks (`NAMED`), and only among them.
+        // equal ranks, and only among them: for the mirror, by the lexemes it
+        // stores (`Corpus::named`, #1650) rather than by `NAMED` per match.
         for built in [&typing, &done] {
             assert!(
-                built
-                    .sql
-                    .contains("tsvector_to_array(to_tsvector('english', i.title)) = q.words"),
+                built.sql.contains("i.title_words = q.words"),
                 "{}",
                 built.sql
             );
@@ -1745,7 +1796,7 @@ mod tests {
             kind: "o.kind",
             source_id: "o.source_id",
             title: "o.title",
-            key: None,
+            named: None,
             fts: "o.fts",
             headline_text: "o.title",
             // No author column: an author filter must exclude this corpus
