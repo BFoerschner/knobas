@@ -30,6 +30,129 @@ async fn starts_answers_and_survives_restart() {
     db.stop().await.unwrap();
 }
 
+/// #1637: a data directory with `postgresql.conf` and no `PG_VERSION` is a
+/// half-written one, and the launch initialises it again instead of failing.
+///
+/// `postgresql_embedded` reads `postgresql.conf` alone as "initialised", so it
+/// skipped `initdb` here and `pg_ctl start` failed with *is not a database
+/// cluster directory*, on this launch and every one after it. `initdb` writes
+/// `PG_VERSION` before `postgresql.conf` and its own cleanup after a failure
+/// removes `PG_VERSION` first, so this shape is an `initdb` cleanup that was
+/// itself cut short (the evidence is under #1637 in
+/// `docs/decisions/2026-10-unattended-rulings.md`). The fixture is the
+/// directory such a cut left: its subdirectories, emptied, and the
+/// configuration files.
+#[tokio::test]
+async fn a_data_directory_an_interrupted_initdb_left_is_initialised_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    for sub in ["base/1", "global", "pg_wal/archive_status", "pg_xact"] {
+        std::fs::create_dir_all(data.join(sub)).unwrap();
+    }
+    std::fs::write(data.join("postgresql.conf"), "# written by initdb\n").unwrap();
+    std::fs::write(data.join("pg_hba.conf"), "# written by initdb\n").unwrap();
+    let cfg = DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    };
+
+    let db = EmbeddedDb::start(cfg.clone())
+        .await
+        .expect("a half-written data directory is initialised again");
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(one.0, 1);
+    assert!(data.join("PG_VERSION").is_file(), "initdb ran again");
+    db.stop().await.unwrap();
+
+    let again = EmbeddedDb::start(cfg)
+        .await
+        .expect("and the next launch starts it as any other");
+    again.stop().await.unwrap();
+}
+
+/// #1637: a data directory that has `PG_VERSION` is never removed, whatever
+/// else it lacks. Each one here fails to start, and every file in it is still
+/// there afterwards.
+///
+/// The first is what a power loss during `initdb` leaves in practice:
+/// `PG_VERSION` and `postgresql.conf`, no `global/pg_control`. The second has
+/// no `postgresql.conf`, so `initdb` runs and refuses a directory that is not
+/// empty. Recovering either would mean deleting a directory that might hold a
+/// database, and the launch reports the failure instead.
+#[tokio::test]
+async fn a_data_directory_with_pg_version_is_never_removed() {
+    for with_conf in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        std::fs::create_dir_all(data.join("base")).unwrap();
+        std::fs::write(data.join("PG_VERSION"), "18\n").unwrap();
+        std::fs::write(data.join("keep-me"), "a reader's file\n").unwrap();
+        if with_conf {
+            std::fs::write(data.join("postgresql.conf"), "# written by initdb\n").unwrap();
+        }
+
+        let refused = EmbeddedDb::start(DbConfig {
+            root_dir: dir.path().to_path_buf(),
+            existing_url: None,
+        })
+        .await;
+        if let Ok(db) = refused {
+            db.stop().await.unwrap();
+            panic!("a directory with PG_VERSION but no cluster started (conf: {with_conf})");
+        }
+        assert!(
+            data.join("PG_VERSION").is_file() && data.join("keep-me").is_file(),
+            "the directory is untouched (conf: {with_conf})"
+        );
+        assert_eq!(
+            data.join("postgresql.conf").is_file(),
+            with_conf,
+            "the directory is untouched (conf: {with_conf})"
+        );
+        assert!(data.join("base").is_dir(), "the directory is untouched");
+    }
+}
+
+/// #1642: the superuser password file is readable by its owner alone, and so
+/// is the data directory, on a fresh profile and on one an older build left
+/// wider. The file is the whole key to the mirror: the server listens on
+/// loopback with password auth, and any local account could connect with it.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_password_file_and_the_data_directory_are_the_owners_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode =
+        |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    let dir = tempfile::tempdir().unwrap();
+    let password_file = dir.path().join(".pgpass");
+    let data = dir.path().join("data");
+    let cfg = DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    };
+
+    let db = EmbeddedDb::start(cfg.clone()).await.unwrap();
+    db.stop().await.unwrap();
+    assert_eq!(mode(&password_file), 0o600, "a fresh password file");
+    assert_eq!(mode(&data) & 0o077, 0, "a fresh data directory");
+
+    // What a build before #1642 left: `File::create`'s 0644, and a data
+    // directory PostgreSQL itself accepts (group access, 0750).
+    std::fs::set_permissions(&password_file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o750)).unwrap();
+    let db = EmbeddedDb::start(cfg).await.unwrap();
+    db.stop().await.unwrap();
+    assert_eq!(
+        mode(&password_file),
+        0o600,
+        "an older build's password file"
+    );
+    assert_eq!(mode(&data), 0o700, "an older build's data directory");
+}
+
 /// The server listens on `127.0.0.1` and nowhere else on its port (#1775).
 /// PostgreSQL's default, `localhost`, adds `::1`, and a server that came up
 /// there alone, because a stranger held `127.0.0.1:<port>`, was alive while

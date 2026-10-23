@@ -13726,3 +13726,108 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   Node's 5 s keep-alive, so the next sync reuses a connection Kuma is closing. It also fails with
   every request on the one client, as on main (1 of 3), so it predates this PR and does not block
   the merge: #1818. *Reversing:* n/a.
+
+## #1637 and #1642: a half-written data directory, `initdb`'s kill, and a private password file (Opus implementer, 2026-10-23)
+
+- **Reproduce first (#1637).** *Fork:* reproduce "postgresql.conf without PG_VERSION fails every
+  launch", or refute it. *Ruling:* reproduced, and that shape is rare. *Reasoning:* the launch on
+  such a directory failed with *not a database cluster directory* (the red
+  `a_data_directory_an_interrupted_initdb_left_is_initialised_again`). How it arises, from
+  PostgreSQL 18.6 on this Mac (scripts `issue-1637-e*.py` in that run's scratchpad):
+  1. `initdb` writes `PG_VERSION` before `postgresql.conf`. 55 runs froze `initdb` and its
+     children with `SIGSTOP` 20 to 450 ms in (a full `initdb` takes about 0.4 s), copied the
+     directory, then killed them. Every copy had both files. That is the shape a power loss
+     leaves. None of the copies had `postgresql.conf` without `PG_VERSION`.
+  2. The shape arose once, in about 340 kills: `initdb` was failing on its own and was killed
+     during its cleanup. The cleanup's `rmtree` removes `PG_VERSION` before `postgresql.conf`.
+  3. On the copies, a start fails with *could not find the database system* (no `pg_control`,
+     up to ~50 ms in), or starts a server that refuses our password (before `setup_auth`), or one
+     that lacks the `postgres` database. Each fails every launch, as the ticket says, and is
+     filed as #1819.
+  *Reversing:* n/a.
+- **What may be removed.** *Fork:* the shape the ticket names, or any directory that fails to
+  start. *Ruling:* only `postgresql.conf` present and `PG_VERSION` absent, as
+  the dispatch requires, checked with `symlink_metadata`. An entry that cannot be examined counts
+  as present, so a `PG_VERSION` that cannot be `stat`ed keeps the directory. It runs in
+  `start_managed` after the ownership claim and the password read, under both locks, before
+  setup. *Reasoning:* a directory without `PG_VERSION` was never a cluster, and PostgreSQL will
+  not start on it, so no server is running there either. `Path::exists` reads a permission
+  error as "absent" and would have deleted a real cluster over a bad mode. *Reversing:* one
+  predicate.
+- **The PG_VERSION shapes are not recovered here.** *Fork:* widen the removal to them here, or
+  file them. *Ruling:* filed as #1819
+  (`ready-for-agent`, Opus). It asks for a ruling on a marker that tells a finished `initdb`
+  from a killed one. *Reasoning:* the dispatch forbids removing a directory with `PG_VERSION`.
+  Without a marker, no on-disk test separates a killed `initdb` from a reader's database with a
+  missing file. *Reversing:* n/a.
+- **How `initdb` gets `kill_on_drop`.** *Fork:* patch around the crate, or run `initdb`
+  ourselves. *Ruling:* knobas runs it (`initialise` and `run_initdb`), with the crate's flags.
+  `setup()` then finds `postgresql.conf` and skips its own. *Reasoning:* `postgresql_embedded`
+  0.21 builds the `tokio::process::Command` inside its private `initialize()`, so nothing can
+  set `kill_on_drop` there. *Reversing:* medium. Delete the two functions and `setup()` runs
+  `initdb` again.
+- **Installing without `initdb`.** *Fork:* call `postgresql_archive`'s `get_archive` and
+  `extract` directly, or let the crate's `setup()` install. *Ruling:* `setup()` installs, pointed
+  at a placeholder data directory (`<root>/.install-only`) that holds an empty `postgresql.conf`,
+  which `setup()` takes for initialised. The placeholder is removed afterwards. *Reasoning:* a
+  cold machine then downloads and unpacks through the crate's own code, and `PostgreSQL::new`
+  resolves the version directory. A copy of the install path would drift from the crate, and no
+  local test runs a cold install. *Reversing:* low.
+- **A timeout sends `SIGTERM` before the kill.** *Fork:* `kill_on_drop` alone, or `SIGTERM`,
+  a 10 s grace, then the drop's `SIGKILL`. *Ruling:* `SIGTERM` first. *Reasoning:* 40 `SIGTERM`s
+  10 to 400 ms in all left no data directory, because `initdb` traps the signal and removes what
+  it made. A `SIGKILL` leaves the `PG_VERSION` shape of #1819, which fails every launch. Without
+  the kill, the old crate path let `initdb` run on. A drop, which cannot wait, still kills. Both
+  are tested: `a_timed_out_initdb_is_stopped_and_removes_what_it_made` and
+  `a_dropped_initdb_is_killed_with_its_future`. *Reversing:* low.
+- **The password file's mode (#1642).** *Fork:* chmod after setup only, or also create the file
+  0600. *Ruling:* created 0600 (`OpenOptionsExt::mode`) when
+  knobas writes it, and set to 0600 after every `setup()`, so a 0644 file an older build left is
+  tightened too. The data directory is set to 0700 when it is wider (PostgreSQL also accepts
+  0750). Both only on `cfg(unix)`. *Reasoning:* the ticket asks for 0600 after setup. Writing it
+  0600 also closes the moment between creation and the chmod. *Reversing:* low.
+- **A failed chmod is logged, not returned.** *Fork:* fail the launch, or warn. *Ruling:* warn.
+  *Reasoning:* knobas owns the file, so a chmod can fail only on a volume that does not keep
+  Unix modes. Failing there would fail every launch over a mode the volume cannot hold.
+  *Reversing:* one match arm.
+- **§10.8.** *Fork:* book the recovery as a boot-screen change, or not. *Ruling:* none owed. *Reasoning:* no IPC type, migration or module-layout change.
+  No boot-screen state or message changes. A directory that used to fail now starts, and an
+  `initdb` failure reads as before (`DatabaseInitializationError` with the command's output, or
+  *deadline has elapsed*). *Reversing:* n/a.
+- **SysV segments left by the experiments.** *Fork:* leave the segments for the reaper, or
+  remove them by hand. *Ruling:* removed by hand. *Reasoning:* killing `initdb`'s whole process
+  group with `SIGKILL` during the first experiment left 31 SysV segments from its bootstrap
+  backends. With `kern.sysv.shmmni` at 32, every new PostgreSQL on the machine failed with *could
+  not create shared memory segment* from about 07:08 to 07:13. PostgreSQL reclaims a stale
+  segment only when the same data directory starts again, and those directories were gone. The
+  31 were removed by their creator pids (the experiment's dead `postgres` children, `NATTCH` 0).
+  Later experiments removed the segments their own processes created. A run that kills only `initdb`, as `kill_on_drop` does, leaves none: the
+  backend reads EOF and exits. *Reversing:* n/a.
+
+### #1637 and #1642: merge-manager review (Opus, 2026-10-23)
+
+- **A symlinked data directory.** *Fork:* resolve the link and remove what it points at, or
+  remove the link alone. *Ruling:* the link alone, which `std::fs::remove_dir_all` already does:
+  it follows no symlink, so the target keeps every file and `initdb` makes a real `data/` in the
+  link's place. *Reasoning:* a wrong removal loses a database; a removed link loses nothing.
+  Witnessed by `a_half_written_symlinked_data_directory_loses_the_link_alone` (a mutant that
+  removes the canonical path dies). *Reversing:* low.
+- **"Under both locks" holds on every path.** *Fork:* guard `remove_half_written` itself, or rely
+  on its one caller. *Ruling:* rely on it. *Reasoning:* `start_managed` is its only caller, and
+  every bring-up reaches it through `launch`: the first launch, the stale-lock retry, and #1779's
+  restart after *Failed* (`EmbeddedDb::start` again). A restore is a logical `pg_restore` over
+  the connector and never touches `data/`. *Reversing:* n/a.
+- **The install placeholder leaves nothing behind.** *Fork:* accept the placeholder, or install
+  through `postgresql_archive`. *Ruling:* accept it. *Reasoning:* in `postgresql_embedded` 0.21
+  `setup()` writes the password file only inside `initialize()`, which the placeholder's empty
+  `postgresql.conf` skips. The handle's drop stops nothing (no `postmaster.pid`) and deletes
+  nothing (`temporary` is false). A placeholder a kill left is rewritten and removed by the next
+  launch. *Reversing:* n/a.
+- **`initdb` matches the crate's.** *Fork:* accept the copy as is, or align it. *Ruling:* aligned
+  on the one difference. The arguments are the crate's, in its order (`--auth password --pgdata
+  --encoding UTF8 --pwfile --username postgres`), with no environment and stdin closed, as
+  `output()` leaves it, under the same 60 s limit. The crate also sets `CREATE_NO_WINDOW` on
+  Windows. knobas now sets it too, under `cfg(windows)`, which this Mac does not compile.
+  *Reasoning:* a data directory either `initdb` made is the same. A profile that is already
+  initialised skips `initialise` before the install, so it starts as before; only the two modes
+  change. *Reversing:* one line.

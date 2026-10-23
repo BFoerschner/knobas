@@ -960,6 +960,12 @@ enum Started {
 /// second window borrows a server whose owner's quit would stop it under the
 /// borrower. The kernel releases the lock however its holder dies, so a held
 /// lock always means a live holder, whatever state its server is in.
+///
+/// Under both locks, a data directory an interrupted `initdb` left
+/// half-written is removed ([`remove_half_written`]), an uninitialised one is
+/// initialised by knobas's own `initdb` ([`initialise`]), and after `setup()`
+/// the password file and the data directory are kept to their owner
+/// ([`keep_to_owner`]).
 async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Started, DbError> {
     let _guard = bring_up_lock(root_dir).await?;
     let data_dir = settings.data_dir.clone();
@@ -977,6 +983,7 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
         }
     };
     adopt_recorded_password(&mut settings)?;
+    remove_half_written(&data_dir)?;
 
     // `PostgreSQL::new` consumes the settings, and the adoption path needs
     // them after the handle is gone.
@@ -996,7 +1003,9 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
     // -- which re-downloads whenever this file changes -- runs the cold one.
     tokio::task::yield_now().await;
 
+    initialise(root_dir, &adoption).await?;
     postgresql.setup().await?;
+    keep_to_owner(&adoption);
 
     if let Err(error) = postgresql.start().await {
         // `PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever
@@ -1441,6 +1450,240 @@ fn read_password(password_file: &Path) -> Result<Option<String>, DbError> {
         Err(source) => Err(DbError::io(password_file, source)),
     }
 }
+
+/// Remove a data directory an interrupted `initdb` left half-written (#1637).
+///
+/// **Called under [`bring_up_lock`] and the ownership lock, before
+/// anything reads the directory.** Half-written means `postgresql.conf` is
+/// there and `PG_VERSION` is not. `postgresql_embedded` takes
+/// `postgresql.conf` alone for "initialised", so it would skip `initdb` and
+/// the start would fail with *not a database cluster directory*, on every
+/// launch until the reader deleted the directory by hand.
+///
+/// `PG_VERSION` is what makes the removal safe. `initdb` writes it before
+/// `postgresql.conf`, so a directory without it was never a cluster: what
+/// leaves this shape is `initdb`'s own cleanup after a failure, which removes
+/// `PG_VERSION` first, cut short. PostgreSQL refuses to start without
+/// `PG_VERSION`, so no server can be running on it either. A directory that
+/// has one is **never** removed, whatever else it lacks: it may hold a
+/// database. Evidence: `docs/decisions/2026-10-unattended-rulings.md`, #1637.
+///
+/// An entry that cannot be examined counts as present, so a `PG_VERSION` this
+/// process cannot `stat` keeps the directory. A data directory that is a
+/// symlink loses the link alone (`remove_dir_all` follows no symlink): what
+/// it points at is left as it was, and `initdb` makes a directory in its place.
+fn remove_half_written(data_dir: &Path) -> Result<(), DbError> {
+    // Absent only when the file system says so: any other error is "present".
+    let absent = |name: &str| {
+        std::fs::symlink_metadata(data_dir.join(name))
+            .is_err_and(|source| source.kind() == io::ErrorKind::NotFound)
+    };
+    if absent("postgresql.conf") || !absent("PG_VERSION") {
+        return Ok(());
+    }
+    tracing::warn!(
+        data_dir = %data_dir.display(),
+        "the data directory has postgresql.conf but no PG_VERSION: an interrupted initdb \
+         left it half-written, removing it so initdb runs again"
+    );
+    std::fs::remove_dir_all(data_dir).map_err(|source| DbError::io(data_dir, source))
+}
+
+/// Name of the placeholder data directory [`install`] hands `setup()`.
+const INSTALL_ONLY: &str = ".install-only";
+
+/// How long a timed-out `initdb` gets to clean up after `SIGTERM` before
+/// it is killed.
+const INITDB_GRACE: Duration = Duration::from_secs(10);
+
+/// Initialise `settings.data_dir` with an `initdb` of our own, unless it
+/// already has `postgresql.conf`, the crate's mark of an initialised one.
+///
+/// The crate's `setup()` runs `initdb` too, but with no way to set
+/// `kill_on_drop`, so a timed-out `initdb` kept running after knobas had given
+/// up (#1637). This runs the same command with the same flags, and the
+/// `setup()` that follows finds `postgresql.conf` and skips its own.
+///
+/// The password file is created here, as the crate would, but readable by
+/// its owner alone from the first byte (#1642).
+///
+/// Both checks use `Path::exists`, which reads an unreadable entry as absent,
+/// and both fail safe: `initdb` refuses a data directory that is not empty,
+/// and `create_new` refuses a password file that is there.
+async fn initialise(root_dir: &Path, settings: &Settings) -> Result<(), DbError> {
+    // The crate's own test (`is_initialized`), so `setup()` agrees with it.
+    if settings.data_dir.join("postgresql.conf").exists() {
+        return Ok(());
+    }
+    let binaries = install(root_dir, settings).await?;
+    if !settings.password_file.exists() {
+        write_password_file(&settings.password_file, &settings.password)?;
+    }
+    let initdb = binaries.join(format!("initdb{}", std::env::consts::EXE_SUFFIX));
+    run_initdb(&initdb, settings, COMMAND_TIMEOUT).await
+}
+
+/// Install the PostgreSQL binaries if they are not there yet, and return
+/// their `bin` directory.
+///
+/// The install is the crate's own `setup()`, so a cold machine downloads and
+/// unpacks exactly as before. It is pointed at a placeholder data directory
+/// holding an empty `postgresql.conf`, which `setup()` takes for initialised,
+/// so it installs and runs no `initdb`. `PostgreSQL::new` and `setup()` are
+/// also what resolve the version directory the binaries live in.
+async fn install(root_dir: &Path, settings: &Settings) -> Result<PathBuf, DbError> {
+    let placeholder = root_dir.join(INSTALL_ONLY);
+    std::fs::create_dir_all(&placeholder).map_err(|source| DbError::io(&placeholder, source))?;
+    let conf = placeholder.join("postgresql.conf");
+    std::fs::write(&conf, "").map_err(|source| DbError::io(&conf, source))?;
+
+    let mut install_settings = settings.clone();
+    install_settings.data_dir.clone_from(&placeholder);
+    let mut postgresql = PostgreSQL::new(install_settings);
+    let installed = postgresql.setup().await;
+    let binaries = postgresql.settings().binary_dir();
+    // Nothing to stop: the placeholder has no `postmaster.pid`.
+    drop(postgresql);
+    if let Err(error) = std::fs::remove_dir_all(&placeholder) {
+        tracing::warn!(%error, placeholder = %placeholder.display(), "could not remove the install placeholder");
+    }
+    installed?;
+    Ok(binaries)
+}
+
+/// Write the superuser password `initdb --pwfile` reads, readable by its
+/// owner alone from creation on (#1642). Refuses a file that is already there.
+fn write_password_file(path: &Path, password: &str) -> Result<(), DbError> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options
+        .open(path)
+        .and_then(|mut file| file.write_all(password.as_bytes()))
+        .map_err(|source| DbError::io(path, source))
+}
+
+/// Run `initdb` into `settings.data_dir`, as `postgresql_embedded` would, with
+/// `kill_on_drop` and a bounded wait.
+///
+/// **A drop kills it**: the future dropped mid-`initdb` (the bring-up given
+/// up, its runtime shut down) takes `initdb` with it, rather than leaving it
+/// writing into a directory nobody is waiting on.
+///
+/// **A timeout terminates it first**: `SIGTERM` makes `initdb` remove what it
+/// made, the whole data directory when it created it, so the next launch
+/// starts from nothing. `SIGKILL`, which `kill_on_drop` sends, leaves a
+/// directory with `PG_VERSION` that [`remove_half_written`] does not touch.
+/// It is the fallback once [`INITDB_GRACE`] has passed.
+///
+/// A failure reads as the crate's did: `DatabaseInitializationError` with the
+/// command's output, or *deadline has elapsed*.
+async fn run_initdb(initdb: &Path, settings: &Settings, limit: Duration) -> Result<(), DbError> {
+    let failed = |message: String| {
+        DbError::Embedded(postgresql_embedded::Error::DatabaseInitializationError(
+            message,
+        ))
+    };
+    let mut command = tokio::process::Command::new(initdb);
+    // The crate's `CREATE_NO_WINDOW`: no console flashes up over the app.
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
+    let child = command
+        .arg("--auth")
+        .arg("password")
+        .arg("--pgdata")
+        .arg(&settings.data_dir)
+        .arg("--encoding")
+        .arg("UTF8")
+        .arg("--pwfile")
+        .arg(&settings.password_file)
+        .arg("--username")
+        .arg(postgresql_embedded::BOOTSTRAP_SUPERUSER)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|source| DbError::io(initdb, source))?;
+    let pid = child.id();
+    let mut output = std::pin::pin!(child.wait_with_output());
+    let output = match tokio::time::timeout(limit, &mut output).await {
+        Ok(output) => output.map_err(|source| DbError::io(initdb, source))?,
+        Err(_) => {
+            tracing::warn!(?pid, "initdb timed out: stopping it");
+            // Its own cleanup runs before it exits. A drop past the grace
+            // kills it.
+            if pid.is_some_and(terminate) {
+                let _ = tokio::time::timeout(INITDB_GRACE, &mut output).await;
+            }
+            return Err(failed("deadline has elapsed".to_owned()));
+        }
+    };
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(failed(format!(
+            "Command error: stdout={}; stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )))
+    }
+}
+
+/// Ask `pid` to terminate, and say whether the signal went out. Best-effort:
+/// the caller's drop kills it anyway.
+#[cfg(unix)]
+fn terminate(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// No signal but the kill a drop sends, so there is nothing to wait for.
+#[cfg(not(unix))]
+fn terminate(_pid: u32) -> bool {
+    false
+}
+
+/// Keep the password file and the data directory to their owner (#1642).
+///
+/// The password file is the whole key to the mirror: the server listens on
+/// loopback with password auth, so any local account that reads it connects
+/// as the superuser. A build before #1642 left it at `File::create`'s 0644,
+/// so it is set to 0600 on every launch, not only on the one that writes it.
+/// The data directory is tightened to 0700 if it is wider: `initdb` makes it
+/// 0700, and PostgreSQL also accepts 0750.
+///
+/// A failure is logged, not returned: a volume that ignores Unix modes would
+/// otherwise fail every launch over a mode it cannot hold.
+#[cfg(unix)]
+fn keep_to_owner(settings: &Settings) {
+    use std::os::unix::fs::PermissionsExt;
+    let tighten = |path: &Path, mode: u32| {
+        let wider = std::fs::metadata(path)
+            .map(|metadata| metadata.permissions().mode() & 0o777 & !mode != 0);
+        let result = match wider {
+            Ok(true) => std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)),
+            Ok(false) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        };
+        if let Err(error) = result {
+            tracing::warn!(%error, path = %path.display(), "could not keep this to its owner");
+        }
+    };
+    tighten(&settings.password_file, 0o600);
+    tighten(&settings.data_dir, 0o700);
+}
+
+/// Windows keeps a profile's files to its user through the profile's ACL.
+#[cfg(not(unix))]
+fn keep_to_owner(_settings: &Settings) {}
 
 /// What `postmaster.pid` says about a data directory a start just failed on.
 #[derive(Debug, PartialEq, Eq)]
@@ -2295,5 +2538,96 @@ mod tests {
         }
 
         assert_eq!(refused, 0, "claims refused after their lock was dropped");
+    }
+
+    /// `initdb` set up to run into a fresh profile under `dir`, and its path.
+    async fn initdb_for(dir: &Path) -> (Settings, PathBuf) {
+        let settings = build_settings(dir).unwrap();
+        write_password_file(&settings.password_file, &settings.password).unwrap();
+        let initdb = install(dir, &settings).await.unwrap().join("initdb");
+        assert!(
+            !dir.join(INSTALL_ONLY).exists(),
+            "the install placeholder is removed"
+        );
+        (settings, initdb)
+    }
+
+    /// #1637: an `initdb` that outlives its limit is stopped, and it removes
+    /// the data directory it made on the way out, so the next launch starts
+    /// from nothing rather than from a directory with `PG_VERSION` in it that
+    /// nothing recovers.
+    #[tokio::test]
+    async fn a_timed_out_initdb_is_stopped_and_removes_what_it_made() {
+        let dir = tempfile::tempdir().unwrap();
+        let (settings, initdb) = initdb_for(dir.path()).await;
+
+        let error = run_initdb(&initdb, &settings, Duration::from_millis(150))
+            .await
+            .expect_err("a full initdb takes longer than 150 ms");
+        assert!(
+            error.to_string().contains("deadline has elapsed"),
+            "{error}"
+        );
+        assert!(
+            !settings.data_dir.exists(),
+            "initdb removed the data directory it made"
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert!(!settings.data_dir.exists(), "and nothing wrote it again");
+    }
+
+    /// #1637: a half-written data directory that is a symlink loses the link,
+    /// never what it points at, and one with `PG_VERSION` keeps everything.
+    #[cfg(unix)]
+    #[test]
+    fn a_half_written_symlinked_data_directory_loses_the_link_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("elsewhere");
+        std::fs::create_dir_all(target.join("base")).unwrap();
+        std::fs::write(target.join("postgresql.conf"), "").unwrap();
+        let data = dir.path().join("data");
+        std::os::unix::fs::symlink(&target, &data).unwrap();
+
+        remove_half_written(&data).unwrap();
+
+        assert!(
+            std::fs::symlink_metadata(&data).is_err(),
+            "the link is gone"
+        );
+        assert!(
+            target.join("postgresql.conf").is_file(),
+            "its target is kept"
+        );
+        assert!(target.join("base").is_dir(), "its target is kept");
+
+        std::os::unix::fs::symlink(&target, &data).unwrap();
+        std::fs::write(target.join("PG_VERSION"), "18\n").unwrap();
+        remove_half_written(&data).unwrap();
+        assert!(
+            data.join("postgresql.conf").is_file(),
+            "with PG_VERSION, kept"
+        );
+    }
+
+    /// #1637: dropping the future that runs `initdb` kills it, rather than
+    /// leaving it writing into a directory nobody is waiting on.
+    #[tokio::test]
+    async fn a_dropped_initdb_is_killed_with_its_future() {
+        let dir = tempfile::tempdir().unwrap();
+        let (settings, initdb) = initdb_for(dir.path()).await;
+
+        let dropped = tokio::time::timeout(
+            Duration::from_millis(150),
+            run_initdb(&initdb, &settings, COMMAND_TIMEOUT),
+        )
+        .await;
+        assert!(dropped.is_err(), "a full initdb takes longer than 150 ms");
+        // A full `initdb` here takes about 0.4 s; base/5 is the `postgres`
+        // database, among the last things it makes.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(
+            !settings.data_dir.join("base/5").exists(),
+            "the dropped initdb ran on to the end"
+        );
     }
 }
