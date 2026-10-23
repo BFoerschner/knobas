@@ -13979,9 +13979,9 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   `postgres` and `template0` had no fixed OIDs, a finished cluster still has one. The ticket's
   example reads in the other direction: a directory it would not mark (no `base/5`, but a
   `knobas` database) would then be judged by its absence. Here the migration rule is the exact
-  complement of the removal test, so no directory falls between the two. Every doubt keeps the
-  directory: a marker or a `PG_VERSION` that cannot be `stat`ed counts as present, and a `base/`
-  that cannot be listed counts as holding a database. The marker matters after the first sight:
+  complement of the removal test, so no directory falls between the two. A doubt about a database
+  keeps the directory: a marker that cannot be `stat`ed counts as present, and a `base/` or
+  `pg_tblspc/` that cannot be listed counts as holding a database. The marker matters after the first sight:
   once a directory is marked, nothing it loses later (a dropped `postgres`, a damaged `base/`)
   can make a launch remove it. *Reversing:* low. Without the marker, the test runs on every
   launch.

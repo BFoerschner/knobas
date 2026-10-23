@@ -1508,9 +1508,10 @@ enum Shape {
     Unfinished,
 }
 
-/// Read `data_dir`'s shape. **Every doubt keeps the directory**: an entry
-/// that cannot be examined counts as present, and a directory that cannot be
-/// listed as holding a database.
+/// Read `data_dir`'s shape. **A doubt about a database keeps the
+/// directory**: an entry that cannot be examined counts as present, so an
+/// unreadable marker keeps it, and a directory that cannot be listed counts
+/// as holding a database.
 ///
 /// Without `PG_VERSION` and with `postgresql.conf`, it is unfinished (#1637):
 /// `initdb` writes `PG_VERSION` first and its cleanup removes it first.
