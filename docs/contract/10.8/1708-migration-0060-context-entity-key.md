@@ -28,7 +28,11 @@
 
   **Backups.** An archive taken before `0060` restores into it unchanged: `restore` loads
   `--data-only` with `--disable-triggers`, so the load order (`context` before `entity`) still
-  works, and a collation changes no value. `RENAMED_COLUMNS` needs no row.
+  works, and a collation changes no value. `RENAMED_COLUMNS` needs no row. The same flag means
+  the load checks no foreign key, so an orphan context in such an archive loads past
+  `context_entity_fk`. `0060`'s delete covers a profile upgraded in place, not a restored one.
+  That gap belongs to every key a restore loads, and #1930 tracks it. A share export's
+  `contexts` part always carries `entity` (`knobas_app::backup::share`).
 
   Pinned by `crates/knobas-db/tests/schema.rs`:
   `every_entity_id_compares_bytewise_and_a_title_by_the_database` (`UNKEYED_ENTITY_IDS` grows by
