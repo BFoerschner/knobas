@@ -11,10 +11,19 @@
 #    is reclaimed.
 # 4. Race: with one slot and five takers started together, exactly one holds it
 #    and the other four expire with 75.
+# 5. The merge-tail holder goes first (#1866): a gate run under
+#    `merge-tail-lock.sh hold` (KNOBAS_MERGE_TAIL_HOLDER set) takes the next
+#    free slot ahead of a pre-gate that has waited longer, and the pre-gate
+#    says why it waits and takes the slot once the holder's run is done. A
+#    holder that gave up (exit 75) or was SIGKILLed while waiting holds
+#    nobody back.
 #
 # Everything runs under a private TMPDIR, so the machine's real
 # `$TMPDIR/knobas-gate-slots` is never touched.
 set -uo pipefail # no -e: a failed check is counted, and the run goes on
+# Under a holder's re-gate (`hold <PR> just gate` runs `witness-unit`) the
+# environment carries the holder's mark; every taker here sets its own.
+unset KNOBAS_MERGE_TAIL_HOLDER
 here=$(cd "$(dirname "$0")" && pwd)
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/knobas-gate-slot-check.XXXXXX")
 export TMPDIR=$scratch/tmp
@@ -93,6 +102,57 @@ for i in 1 2 3 4 5; do
 done
 check "race: exactly one taker wins" "$won" 1
 check "race: the others expire with 75" "$lost" 4
+
+# 5. The merge-tail holder's gate goes first. One slot, held by a live pid.
+# The pre-gate starts first and polls at about 0, 1, 2, 3 s; the holder's
+# gate at about 0.5, 1.5, 2.5 s. The slot frees at 2.7 s, so the pre-gate's
+# next poll comes first: on first come, first served it would take the slot.
+# Every taker gives up after 20 s and holds what it took for 3 s.
+slots_dir=$TMPDIR/knobas-gate-slots
+start_taker() { # start_taker <out file> <hold seconds> [VAR=value...]: sets `started` to its pid
+    local out=$1 hold=$2; shift 2
+    env "$@" KNOBAS_GATE_SLOTS=1 KNOBAS_GATE_SLOT_WAIT=20 \
+        bash -c ". '$here/gate-slot.sh'; trap release_slot EXIT; hold_gate_slot t && sleep $hold" > "$out" 2>&1 &
+    started=$!
+}
+rm -rf "$slots_dir"; mkdir -p "$slots_dir"
+sleep 60 & a=$!; holders=$a
+ln -s "$a" "$slots_dir/slot-1"
+start_taker "$scratch/pre.out" 3; pre=$started
+sleep 0.5
+start_taker "$scratch/holder.out" 3 KNOBAS_MERGE_TAIL_HOLDER=1900; hold=$started
+holders="$a $pre $hold"
+sleep 2.2
+kill "$a"; wait "$a" 2>/dev/null
+sleep 1.5
+check "the merge-tail holder's gate takes the freed slot ahead of a pre-gate that waited longer" \
+    "$(readlink "$slots_dir/slot-1")" "$hold"
+contains "the pre-gate says a merge-tail holder's gate goes first" "$(cat "$scratch/pre.out")" "merge-tail holder"
+wait "$hold"; code=$?
+check "the holder's gate ran" "$code" 0
+wait "$pre"; code=$?
+check "the pre-gate takes the slot once the holder's run is done" "$code" 0
+holders=
+
+# A holder whose wait expired (75) holds nobody back afterwards.
+sleep 60 & a=$!; holders=$a
+rm -rf "$slots_dir"; mkdir -p "$slots_dir"; ln -s "$a" "$slots_dir/slot-1"
+out=$(KNOBAS_MERGE_TAIL_HOLDER=1900 KNOBAS_GATE_SLOTS=1 KNOBAS_GATE_SLOT_WAIT=1 taker 0); code=$?
+check "a holder's gate still gives up with 75 when no slot frees" "$code" 75
+kill "$a"; wait "$a" 2>/dev/null; holders=
+out=$(KNOBAS_GATE_SLOTS=1 KNOBAS_GATE_SLOT_WAIT=0 taker 0); code=$?
+check "a holder that gave up holds no pre-gate back" "$code" 0
+
+# A holder SIGKILLed while it waits (no trap ran) holds nobody back either.
+sleep 60 & a=$!; holders=$a
+rm -rf "$slots_dir"; mkdir -p "$slots_dir"; ln -s "$a" "$slots_dir/slot-1"
+start_taker "$scratch/killed.out" 0 KNOBAS_MERGE_TAIL_HOLDER=1900; hold=$started
+holders="$a $hold"
+sleep 1
+kill -KILL "$hold"; wait "$hold" 2>/dev/null
+kill "$a"; wait "$a" 2>/dev/null; holders=
+out=$(KNOBAS_GATE_SLOTS=1 KNOBAS_GATE_SLOT_WAIT=0 taker 0); code=$?
+check "a holder that was SIGKILLed while waiting holds no pre-gate back" "$code" 0
 
 [ "$fails" -eq 0 ] || { echo "gate-slot-test: $fails failed" >&2; exit 1; }
 echo "gate-slot-test: ok"

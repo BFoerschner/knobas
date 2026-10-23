@@ -38,6 +38,25 @@
 # gates beside each other even so; what is left is the databases themselves
 # (#1897). `KNOBAS_GATE_SLOTS=2` brings the old ceiling back.
 #
+# THE MERGE-TAIL HOLDER GOES FIRST (#1866). Since #1862 pre-gates run beside
+# the merge-tail lock holder's re-gate, and every merge-manager queued in
+# `take` waits on that re-gate. So a gate run under `merge-tail-lock.sh hold`,
+# which exports KNOBAS_MERGE_TAIL_HOLDER=<PR> to its command, gets the next
+# free slot ahead of every other taker: while it waits it keeps a link
+# `holder-waiting-<pid>` -> pid beside the slots, and a taker without the
+# variable takes no slot, not even a free one, while a live such link exists.
+# It cannot cut into a run that already holds the slot, so the holder waits at
+# most for the run in progress, not for the queue behind it. On 2026-10-23
+# PR #1900's re-gate waited the full 150 s behind a bare `just test` and exited
+# 75 after 239 s under the lock; its rerun found the slot free, and a pre-gate
+# that started meanwhile waited about 95 s behind the holder. The link names
+# its pid, so a holder SIGKILLed mid-wait is seen dead (`kill -0`) and its
+# link removed by the next taker; one interrupted removes its own from the
+# traps. A pre-gate kept back still waits at most `KNOBAS_GATE_SLOT_WAIT` and
+# then exits 75 like any other. A taker running this file from before #1866
+# (a worktree not yet rebased) does not look for the link; it can take the
+# slot ahead of the holder, as every taker could before.
+#
 # So a recipe takes one of `KNOBAS_GATE_SLOTS` (default 1) slots before it
 # does anything else, and with none free prints one line naming the holders' pids and polls, up to
 # `KNOBAS_GATE_SLOT_WAIT` seconds (default 150), then exits 75 naming the same
@@ -101,8 +120,11 @@
 # Where the slots live, and this shell's state in the protocol. `slot` is the
 # link this shell holds (empty when it holds none), `held` the pids the last
 # failed pass found, `reclaim_lock` a lock this shell is inside right now.
+# `holder_pr` is the merge-tail holder's PR when this gate runs under `hold`,
+# `holder_mark` this shell's "a holder is waiting" link while it waits, and
+# `ahead` the waiting holders' pids the last pass yielded to.
 slot_root=${TMPDIR:-/tmp}/knobas-gate-slots
-slot='' held='' reclaim_lock=''
+slot='' held='' reclaim_lock='' holder_pr='' holder_mark='' ahead=''
 # Set by `hold_gate_slot` from the environment before `take_slot` reads them;
 # declared here so a `set -u` shell cannot meet them unset.
 slots=1 slot_wait=150
@@ -113,8 +135,22 @@ slots=1 slot_wait=150
 # slot taken afresh -- see above.
 take_slot() {
     local i name holder lock=$slot_root/reclaim
-    held=
+    held= ahead=
     mkdir -p "$slot_root"
+    if [ -n "$holder_pr" ]; then
+        # Put back a mark removed by hand with the directory.
+        [ -L "$holder_mark" ] || ln -s "$$" "$holder_mark" 2>/dev/null || true
+    else
+        waiting_holders
+        if [ -n "$ahead" ]; then
+            for ((i = 1; i <= slots; i++)); do
+                holder=$(readlink "$slot_root/slot-$i" 2>/dev/null || true)
+                [ -z "$holder" ] || held="$held $holder"
+            done
+            held=${held# }
+            return 1
+        fi
+    fi
     for ((i = 1; i <= slots; i++)); do
         name=$slot_root/slot-$i
         if ln -s "$$" "$name" 2>/dev/null; then slot=$name; return 0; fi
@@ -141,12 +177,29 @@ take_slot() {
     return 1
 }
 
+# Sets `ahead` to the pids of the merge-tail holders' gates waiting for a
+# slot right now. A mark whose pid is dead is a holder SIGKILLed mid-wait
+# (its traps did not run) and is removed: only that pid ever makes that name.
+waiting_holders() {
+    local m p
+    ahead=
+    for m in "$slot_root"/holder-waiting-*; do
+        [ -L "$m" ] || continue
+        p=${m##*-}
+        if kill -0 "$p" 2>/dev/null; then ahead="$ahead $p"; else rm -f "$m"; fi
+    done
+    ahead=${ahead# }
+}
+
 release_slot() {
     # A reclaim lock this shell still holds is an interrupt that landed
     # inside the reclaim's few milliseconds; the sweep must not be what
     # removes it.
     [ -z "$reclaim_lock" ] || rmdir "$reclaim_lock" 2>/dev/null || true
     reclaim_lock=
+    # A holder interrupted while it waits takes its mark with it.
+    [ -z "$holder_mark" ] || rm -f "$holder_mark"
+    holder_mark=
     [ -n "$slot" ] || return 0
     # Only a link that still names this shell: a reclaimer removes a
     # slot only when its holder is dead, so this is belt and braces.
@@ -160,7 +213,7 @@ release_slot() {
 # terminal has to be able to tell which recipe is queued. Call it with
 # `release_slot` already armed in the EXIT, INT and TERM traps.
 hold_gate_slot() {
-    local name=$1 wait_from waited announced=
+    local name=$1 wait_from waited reason why said=
     slots=${KNOBAS_GATE_SLOTS:-1}
     case $slots in
         ''|*[!0-9]*) echo "error: KNOBAS_GATE_SLOTS must be a whole number of at least 1, not '$slots'" >&2; exit 1 ;;
@@ -175,19 +228,40 @@ hold_gate_slot() {
         ''|*[!0-9]*) echo "error: KNOBAS_GATE_SLOT_WAIT must be a whole number of seconds, not '$slot_wait'" >&2; exit 1 ;;
     esac
     slot_wait=$((10#$slot_wait))
+    # Set by `merge-tail-lock.sh hold` for the command it runs: this gate is
+    # the merge-tail holder's, and the queue in `take` waits on it.
+    holder_pr=${KNOBAS_MERGE_TAIL_HOLDER:-}
+    if [ -n "$holder_pr" ]; then
+        mkdir -p "$slot_root"
+        holder_mark=$slot_root/holder-waiting-$$
+        rm -f "$holder_mark"; ln -s "$$" "$holder_mark" 2>/dev/null || true
+    fi
     wait_from=$SECONDS
     until take_slot; do
         waited=$((SECONDS - wait_from))
-        if [ -z "$announced" ]; then
-            announced=1
-            echo "$name: all $slots gate slots are held (pids $held); waiting up to $slot_wait s for one to free"
+        if [ -n "$ahead" ]; then
+            reason=yield why="the merge-tail holder's gate (pid $ahead) is waiting for a gate slot and goes first (slots held by pids ${held:-none})"
+        else
+            reason=held why="all $slots gate slots are held (pids $held)"
+        fi
+        # Said again when the reason changes: a pre-gate waiting on a run
+        # that a holder then queues behind is told the holder goes first.
+        if [ "$said" != "$reason" ]; then
+            said=$reason
+            if [ -n "$holder_pr" ]; then
+                echo "$name: $why; waiting up to $slot_wait s for one to free, ahead of any pre-gate (merge-tail holder #$holder_pr)"
+            else
+                echo "$name: $why; waiting up to $slot_wait s for one to free"
+            fi
         fi
         if [ "$waited" -ge "$slot_wait" ]; then
-            echo "error: all $slots gate slots are held (pids $held); waited $waited s for one to free, giving up (exit 75: the queue, not a red gate; run it again)" >&2
+            echo "error: $why; waited $waited s for one to free, giving up (exit 75: the queue, not a red gate; run it again)" >&2
             exit 75
         fi
         sleep 1
     done
+    [ -z "$holder_mark" ] || rm -f "$holder_mark"
+    holder_mark=
     waited=$((SECONDS - wait_from))
     [ "$waited" -eq 0 ] || echo "$name: gate slot free after $waited s"
 }
