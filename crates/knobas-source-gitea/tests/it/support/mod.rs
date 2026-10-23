@@ -1116,12 +1116,26 @@ fn path_prefix(prefix: &str) -> impl wiremock::Match + use<> {
     move |request: &wiremock::Request| request.url.path().starts_with(&prefix)
 }
 
-/// A port nothing listens on: bound to learn the number, then dropped.
+/// A URL nothing answers on (#1815): port 1 on the loopback, refused at once.
+///
+/// A fixed port, because a port nobody else can be handed is the point. One
+/// bound to `0` and dropped was free again at once, and a mock server another
+/// test started could take it and answer `404` where the test expected nothing
+/// at all. Port 1 is below every range a bind to `0` hands out (Linux and
+/// macOS alike), and privileged on Linux. Holding a port bound and never
+/// listened on instead is refused on Linux but silently dropped on macOS,
+/// where every connect then waits out its timeout.
+///
+/// Checked once per process, so a machine where something does answer there
+/// fails here, naming the port, rather than in whichever test asked.
 pub fn dead_url() -> String {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
-    format!("http://127.0.0.1:{port}")
+    static REFUSED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    REFUSED.get_or_init(|| {
+        let refused = std::net::TcpStream::connect(("127.0.0.1", 1))
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionRefused);
+        assert!(refused, "something answers on 127.0.0.1:1, the port dead_url names");
+    });
+    "http://127.0.0.1:1".to_owned()
 }
 
 /// One configured source pointing at `base_url`.
