@@ -30,6 +30,35 @@ async fn starts_answers_and_survives_restart() {
     db.stop().await.unwrap();
 }
 
+/// The server listens on `127.0.0.1` and nowhere else on its port (#1775).
+/// PostgreSQL's default, `localhost`, adds `::1`, and a server that came up
+/// there alone, because a stranger held `127.0.0.1:<port>`, was alive while
+/// the stranger answered our clients. On one address that start fails
+/// instead, which is what lets a stranger's answer clear our lock.
+#[tokio::test]
+async fn a_started_server_listens_on_the_ipv4_loopback_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+    let port = running_port(dir.path());
+    let answers = |ip: std::net::IpAddr| {
+        std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::new(ip, port),
+            std::time::Duration::from_millis(500),
+        )
+        .is_ok()
+    };
+    let on_v4 = answers(std::net::Ipv4Addr::LOCALHOST.into());
+    let on_v6 = answers(std::net::Ipv6Addr::LOCALHOST.into());
+    db.stop().await.unwrap();
+    assert!(on_v4, "the server answers on 127.0.0.1");
+    assert!(!on_v6, "the server must not listen on ::1 as well");
+}
+
 /// A `postmaster.pid` naming a **live** process whose port is silent is
 /// reported, not cleared -- and the same directory starts normally once that
 /// process is gone.
@@ -496,6 +525,94 @@ async fn a_lock_naming_a_foreign_postgres_and_a_dead_process_is_cleared() {
 
     db.stop().await.unwrap();
     squatter.stop().await;
+}
+
+/// #1775: the after-reboot shape. Our lock file names a pid that has been
+/// recycled to some live, unrelated process of ours, and a port another
+/// PostgreSQL now holds, one that refuses our password. Nobody holds the
+/// ownership lock, so no knobas has the profile open, and a postmaster of
+/// ours bound to that port would have answered there itself. The start clears
+/// the lock and comes up on its own data directory, where it used to be
+/// refused on every launch until the reader deleted `postmaster.pid`.
+///
+/// The live pid is a spawned `sleep`, so PostgreSQL's own `CreateLockFile`
+/// refuses the first start (it removes a lock whose process is gone itself)
+/// and the lock really reaches `adopt`.
+#[tokio::test]
+async fn a_lock_naming_a_foreign_postgres_and_a_live_unrelated_process_is_cleared() {
+    let ours = tempfile::tempdir().unwrap();
+    let cfg = DbConfig {
+        root_dir: ours.path().to_path_buf(),
+        existing_url: None,
+    };
+    EmbeddedDb::start(cfg.clone())
+        .await
+        .unwrap()
+        .stop()
+        .await
+        .unwrap();
+    let data_dir = ours.path().join("data");
+    let squatter = Squatter::start().await;
+    let sleeper = Sleeper::spawn();
+    let pid_file = data_dir.join("postmaster.pid");
+    std::fs::write(
+        &pid_file,
+        format!(
+            "{}\n{}\n1700000000\n{}\n",
+            sleeper.pid(),
+            data_dir.display(),
+            squatter.port
+        ),
+    )
+    .unwrap();
+
+    let db = match EmbeddedDb::start(cfg).await {
+        Ok(db) => db,
+        Err(error) => panic!("a stranger on the port is not ours, whatever the pid does: {error}"),
+    };
+    let (serving,): (String,) = sqlx::query_as("show data_directory")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::canonicalize(&serving).unwrap(),
+        std::fs::canonicalize(&data_dir).unwrap(),
+        "the start came up on its own data directory"
+    );
+    assert!(db.owns_server());
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(squatter.pool())
+        .await
+        .expect("clearing our own stale lock leaves the squatter serving");
+    assert_eq!(one.0, 1);
+
+    db.stop().await.unwrap();
+    squatter.stop().await;
+}
+
+/// A live process that is not a postmaster, killed and reaped on every path.
+struct Sleeper(std::process::Child);
+
+impl Sleeper {
+    fn spawn() -> Sleeper {
+        Sleeper(
+            std::process::Command::new("sleep")
+                .arg("120")
+                .spawn()
+                .unwrap(),
+        )
+    }
+
+    fn pid(&self) -> u32 {
+        self.0.id()
+    }
+}
+
+impl Drop for Sleeper {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
 }
 
 /// A pid that is certainly not running: a child that has already been reaped.
