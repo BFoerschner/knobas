@@ -103,11 +103,11 @@ done
 check "race: exactly one taker wins" "$won" 1
 check "race: the others expire with 75" "$lost" 4
 
-# 5. The merge-tail holder's gate goes first. One slot, held by a live pid.
-# The pre-gate starts first and polls at about 0, 1, 2, 3 s; the holder's
-# gate at about 0.5, 1.5, 2.5 s. The slot frees at 2.7 s, so the pre-gate's
-# next poll comes first: on first come, first served it would take the slot.
-# Every taker gives up after 20 s and holds what it took for 3 s.
+# 5. The merge-tail holder's gate goes first. One slot, held by a live pid;
+# the pre-gate starts waiting first, the holder's gate second. The slot frees
+# while the holder's gate is stopped (SIGSTOP: alive, but it cannot poll), so
+# on first come, first served the pre-gate's next poll would take it. Every
+# taker gives up after 20 s and holds what it took for 3 s.
 slots_dir=$TMPDIR/knobas-gate-slots
 start_taker() { # start_taker <out file> <hold seconds> [VAR=value...]: sets `started` to its pid
     local out=$1 hold=$2; shift 2
@@ -122,12 +122,17 @@ start_taker "$scratch/pre.out" 3; pre=$started
 sleep 0.5
 start_taker "$scratch/holder.out" 3 KNOBAS_MERGE_TAIL_HOLDER=1900; hold=$started
 holders="$a $pre $hold"
-sleep 2.2
+sleep 1.5
+kill -STOP "$hold"
 kill "$a"; wait "$a" 2>/dev/null
+sleep 2.5
+# The freed link still names the dead pid: a taker that yields reclaims nothing.
+check "a pre-gate leaves the freed slot to a waiting holder's gate" "$(readlink "$slots_dir/slot-1")" "$a"
+contains "the pre-gate says a merge-tail holder's gate goes first" "$(cat "$scratch/pre.out")" "merge-tail holder"
+kill -CONT "$hold"
 sleep 1.5
 check "the merge-tail holder's gate takes the freed slot ahead of a pre-gate that waited longer" \
     "$(readlink "$slots_dir/slot-1")" "$hold"
-contains "the pre-gate says a merge-tail holder's gate goes first" "$(cat "$scratch/pre.out")" "merge-tail holder"
 wait "$hold"; code=$?
 check "the holder's gate ran" "$code" 0
 wait "$pre"; code=$?
