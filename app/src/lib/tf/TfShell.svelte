@@ -218,7 +218,8 @@
   $effect(() => {
     const key = navJob;
     const segment = lastJob?.segment ?? null;
-    const timed = timer.current?.target ?? null;
+    // The timer is read only with no job opened: a start or stop must not re-run a read for a segment already held (#1687).
+    const timed = segment === null ? (timer.current?.target ?? null) : null;
     if (key === null || !lifecycle.ready) {
       navJobId = null;
       navJobRead = null;
