@@ -2490,7 +2490,11 @@ async fn zero_fifty_six_stores_what_the_launcher_lexed_per_match() {
     let rows = [
         ("jira:PAY-231", "ticket", "Retry failed SEPA payouts"),
         ("jira:PAY-2310", "ticket", "Payout"),
-        ("gitea:repo:tidewater/payout-service", "repo", "tidewater/payout-service"),
+        (
+            "gitea:repo:tidewater/payout-service",
+            "repo",
+            "tidewater/payout-service",
+        ),
         ("gitea:branch:7", "branch", "feature/payout"),
         ("confluence:page:1", "page", "The Payouts of the day"),
         ("confluence:page:2", "page", ""),
@@ -2530,7 +2534,10 @@ async fn zero_fifty_six_stores_what_the_launcher_lexed_per_match() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(shown, 6, "every row is live, so the comparison reads them all");
+    assert_eq!(
+        shown, 6,
+        "every row is live, so the comparison reads them all"
+    );
     let wrong: Vec<String> = sqlx::query_scalar(differing)
         .fetch_all(&pool)
         .await
@@ -2573,6 +2580,10 @@ async fn zero_fifty_six_stores_what_the_launcher_lexed_per_match() {
         .unwrap();
     assert_eq!(
         words("jira:PAY-2310").await,
-        (strs(&["jitter", "payout"]), None, Some(strs(&["-2310", "pay"])))
+        (
+            strs(&["jitter", "payout"]),
+            None,
+            Some(strs(&["-2310", "pay"]))
+        )
     );
 }

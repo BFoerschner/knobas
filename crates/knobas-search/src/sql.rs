@@ -1045,7 +1045,6 @@ const RANK_WHOLE: &str = "case when {fts} @@ q.whole then ts_rank_cd({fts}, q.wh
 /// word in most of the mirror made this the larger part of the statement.
 const NAMED: &str = "(tsvector_to_array(to_tsvector('english', {title})) = q.words\n              or (strpos({title}, '/') > 0\n                  and tsvector_to_array(to_tsvector('english', split_part({title}, '/', -1))) = q.words))";
 
-
 /// The result ordering, qualified with `prefix` (`""`, `"m."` or `"d."`).
 ///
 /// `entity_id` is the last key on purpose: rank ties and identical timestamps

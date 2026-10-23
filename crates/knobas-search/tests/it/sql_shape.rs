@@ -39,7 +39,7 @@
 use chrono::{DateTime, Duration, Utc};
 use knobas_search::corpus::{self, LIVE_ITEM};
 use knobas_search::query::EffectiveFilters;
-use knobas_search::sql::{query_as_with, saved_summary_sql, search_sql, SavedQuery};
+use knobas_search::sql::{SavedQuery, query_as_with, saved_summary_sql, search_sql};
 
 /// One row of the launcher's result set.
 ///
@@ -1028,14 +1028,29 @@ fn reachs_start_set_is_resolved_once_per_statement() {
         ..EffectiveFilters::default()
     };
     let queries = [
-        SavedQuery { id: "a", text: None, filters: &filters },
-        SavedQuery { id: "b", text: Some("deploy"), filters: &other },
+        SavedQuery {
+            id: "a",
+            text: None,
+            filters: &filters,
+        },
+        SavedQuery {
+            id: "b",
+            text: Some("deploy"),
+            filters: &other,
+        },
     ];
     let built = saved_summary_sql(corpus::ALL, &queries).expect("two saved lists");
     let sql = built.sql();
     assert_eq!(sql.matches(start).count(), queries.len(), "{sql}");
 
     // No `reach:`, no walk.
-    let bare = search_sql(corpus::ALL, Some("payout"), false, &EffectiveFilters::default(), 10, 40);
+    let bare = search_sql(
+        corpus::ALL,
+        Some("payout"),
+        false,
+        &EffectiveFilters::default(),
+        10,
+        40,
+    );
     assert!(!bare.sql().contains("reaches"), "{}", bare.sql());
 }
