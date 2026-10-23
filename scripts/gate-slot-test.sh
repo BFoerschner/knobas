@@ -15,8 +15,8 @@
 #    `merge-tail-lock.sh hold` (KNOBAS_MERGE_TAIL_HOLDER set) takes the next
 #    free slot ahead of a pre-gate that has waited longer, and the pre-gate
 #    says why it waits and takes the slot once the holder's run is done. A
-#    holder that gave up (exit 75) or was SIGKILLed while waiting holds
-#    nobody back.
+#    holder that holds its slot, gave up (exit 75) or was SIGKILLed while
+#    waiting holds nobody back.
 #
 # Everything runs under a private TMPDIR, so the machine's real
 # `$TMPDIR/knobas-gate-slots` is never touched.
@@ -111,7 +111,7 @@ check "race: the others expire with 75" "$lost" 4
 slots_dir=$TMPDIR/knobas-gate-slots
 start_taker() { # start_taker <out file> <hold seconds> [VAR=value...]: sets `started` to its pid
     local out=$1 hold=$2; shift 2
-    env "$@" KNOBAS_GATE_SLOTS=1 KNOBAS_GATE_SLOT_WAIT=20 \
+    env KNOBAS_GATE_SLOTS=1 KNOBAS_GATE_SLOT_WAIT=20 "$@" \
         bash -c ". '$here/gate-slot.sh'; trap release_slot EXIT; hold_gate_slot t && sleep $hold" > "$out" 2>&1 &
     started=$!
 }
@@ -138,6 +138,16 @@ check "the holder's gate ran" "$code" 0
 wait "$pre"; code=$?
 check "the pre-gate takes the slot once the holder's run is done" "$code" 0
 holders=
+
+# A holder's gate that holds a slot holds nobody back: with two slots, a
+# pre-gate takes the second at once while the holder's run goes on.
+rm -rf "$slots_dir"
+start_taker "$scratch/holding.out" 3 KNOBAS_MERGE_TAIL_HOLDER=1900 KNOBAS_GATE_SLOTS=2; hold=$started
+holders=$hold
+sleep 0.5
+out=$(KNOBAS_GATE_SLOTS=2 KNOBAS_GATE_SLOT_WAIT=0 taker 0); code=$?
+check "a holder's gate that holds a slot leaves the free one to a pre-gate" "$code" 0
+wait "$hold"; holders=
 
 # A holder whose wait expired (75) holds nobody back afterwards.
 sleep 60 & a=$!; holders=$a
