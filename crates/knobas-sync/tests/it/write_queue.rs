@@ -1588,30 +1588,81 @@ async fn a_press_beside_a_failing_send_does_not_send_it_again() {
 /// other writes to the flush task. It waits for the send on the wire, since
 /// the source takes one write at a time, and not for the writes the task
 /// still owes after it.
-///
-/// The task's two writes each take `DWELL` and the submit's own takes no
-/// time, so a submit that waited for the second would return 2 × `DWELL` or
-/// more after the first went on the wire. The clock starts at that moment,
-/// not at the submit, so the old wait cannot slip under the bound by
-/// starting late in the first send.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_submit_does_not_wait_for_the_flush_tasks_other_writes() {
+    beside_the_flush_task(Mine::Submitted).await;
+}
+
+/// #1797: as a submit, a write queued and then sent on its own, which is
+/// what `submit_write` and a worklog do (`flush_write`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_queued_write_sent_on_its_own_does_not_wait_for_the_flush_tasks_other_writes() {
+    beside_the_flush_task(Mine::Queued).await;
+}
+
+/// #1797: as a submit, *Send mine anyway*.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn send_mine_anyway_does_not_wait_for_the_flush_tasks_other_writes() {
+    beside_the_flush_task(Mine::Released).await;
+}
+
+/// #1797: as a submit, *Edit and send*.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_amend_does_not_wait_for_the_flush_tasks_other_writes() {
+    beside_the_flush_task(Mine::Amended).await;
+}
+
+/// How [`beside_the_flush_task`] sends the write a person just made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mine {
+    /// `submit`.
+    Submitted,
+    /// `queue`, then `flush_write`.
+    Queued,
+    /// `apply_anyway` on a write held before the task's pass.
+    Released,
+    /// `amend` on a write held before the task's pass.
+    Amended,
+}
+
+/// The flush task's pass owes two writes on other entities, each of which
+/// takes `DWELL`; `mine` is sent while the first is on the wire, and its own
+/// write takes no time. Asserts it returned less than 2 × `DWELL` after the
+/// first went on the wire, and that every write was delivered once.
+///
+/// A flush of `mine` that waited for the task's second write would return
+/// 2 × `DWELL` or more after the first went out. The clock starts at that
+/// moment, not when `mine` is sent, so the old wait cannot slip under the
+/// bound by starting late in the first send.
+async fn beside_the_flush_task(mine: Mine) {
     const DWELL: std::time::Duration = std::time::Duration::from_secs(1);
     let h = harness().await;
     let first = h.mirror("PAY-1797-A", "a payout fails").await;
     let second = h.mirror("PAY-1797-B", "a refund fails").await;
-    let mine = h.mirror("PAY-1797-C", "a transfer fails").await;
+    let pull = mirror_pull(&h, "o/r#1797", "Bound the retry jitter", "open").await;
+
+    let comment = |entity: &EntityRef, body: &str| WriteOp::Comment {
+        entity: entity.to_string(),
+        body: body.to_owned(),
+    };
+    // A write the user is shown as held, for the two that release one: its
+    // pull request was closed between the queue and the send.
+    let held = if matches!(mine, Mine::Released | Mine::Amended) {
+        let write = flusher::queue(&h.deps, &h.source, comment(&pull, "mine"))
+            .await
+            .unwrap();
+        mirror_pull(&h, "o/r#1797", "Bound the retry jitter", "closed").await;
+        flusher::flush_source(&h.deps, &h.source).await.unwrap();
+        assert_eq!(h.reload(write.id).await.state, WriteState::Held);
+        Some(write.id)
+    } else {
+        None
+    };
     for entity in [&first, &second] {
-        flusher::queue(
-            &h.deps,
-            &h.source,
-            WriteOp::Comment {
-                entity: entity.to_string(),
-                body: format!("owed on {}", entity.key),
-            },
-        )
-        .await
-        .unwrap();
+        let owed = format!("owed on {}", entity.key);
+        flusher::queue(&h.deps, &h.source, comment(entity, &owed))
+            .await
+            .unwrap();
         h.paced
             .lock()
             .unwrap()
@@ -1619,22 +1670,42 @@ async fn a_submit_does_not_wait_for_the_flush_tasks_other_writes() {
             .insert(entity.to_string(), DWELL);
     }
 
-    let submit = async {
+    let send = async {
         let on_the_wire = loop {
             if let Some((_, at)) = h.paced.lock().unwrap().started.first() {
                 break *at;
             }
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         };
-        h.comment(&mine, "mine").await;
+        match (mine, held) {
+            (Mine::Submitted, _) => {
+                h.comment(&pull, "mine").await;
+            }
+            (Mine::Queued, _) => {
+                let write = flusher::queue(&h.deps, &h.source, comment(&pull, "mine"))
+                    .await
+                    .unwrap();
+                flusher::flush_write(&h.deps, write.id).await.unwrap();
+            }
+            (Mine::Released, Some(id)) => {
+                flusher::apply_anyway(&h.deps, id).await.unwrap().unwrap();
+            }
+            (Mine::Amended, Some(id)) => {
+                flusher::amend(&h.deps, id, comment(&pull, "mine"))
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
+            (_, None) => unreachable!("a release needs a held write"),
+        }
         on_the_wire.elapsed()
     };
-    let (task, waited) = tokio::join!(flusher::flush_source(&h.deps, &h.source), submit);
+    let (task, waited) = tokio::join!(flusher::flush_source(&h.deps, &h.source), send);
     task.unwrap();
 
     assert!(
         waited < 2 * DWELL,
-        "the submit waited {waited:?}, through the flush task's second send"
+        "{mine:?} waited {waited:?}, through the flush task's second send"
     );
     let mut delivered = h.delivered();
     delivered.sort();
