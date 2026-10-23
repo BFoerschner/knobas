@@ -3,6 +3,7 @@
  * over `mini_board`, the filter bar sending its query to the server, the
  * yellow selected card and the preview.
  */
+import { needles } from "./needles";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -246,11 +247,8 @@ function harness(
       },
       board: (perColumn, query, _savedView, lanes) => {
         reads.push(lanes ? { perColumn, query, lanes } : { perColumn, query });
-        // Grammar keys narrow nothing here; the reads record them.
-        const words = (query ?? "")
-          .toLowerCase()
-          .split(/\s+/)
-          .filter((word) => word !== "" && !word.includes(":"));
+        // Grammar keys narrow nothing here; the reads record them. The words are the needles, a phrase whole.
+        const words = needles(query ?? "");
         const kept = corpus.filter(({ card }) =>
           words.every((word) => `${card.key} ${card.title}`.toLowerCase().includes(word)),
         );
@@ -894,6 +892,16 @@ test("the views pane: Mine, Team, Epics and Projects first, then typed groups, e
     "# Ops",
     "OPS board",
   ]);
+});
+
+test("the marks are what the server read: a phrase whole, never an or, a -word or a key (#1903)", async () => {
+  const h = harness();
+  await open(h);
+  const input = field();
+  type(input, 'or "failed sepa" -blocked project:PAY');
+  await settle();
+  const marked = [...target.querySelectorAll(".tf-tcard mark")].map((m) => m.textContent);
+  expect(marked).toEqual(["failed SEPA"]);
 });
 
 test("Find a view narrows the pane by name and by query, and marks the name", async () => {

@@ -5,6 +5,7 @@
  */
 import type { AttentionGroup, CodeFacts, ContextKind, ContextRow, LaneField, Signal, StateChip } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
+import { wordAlternatives } from "../../../tf/tickets/needles";
 import { JOB_ROWS, fakeReach } from "./job-reach";
 import { fakeJiraBoard, fakeLanes } from "./ticket-views";
 
@@ -690,9 +691,10 @@ function fakeSignals(id: string) {
 export const FAKE_IDENTITY = "mara";
 
 /**
- * `mini_board`'s `query` (#810), restated over the fixture: every word must
+ * `mini_board`'s `query` (#810), restated over the fixture: the words must
  * appear in the key, the title, the assignee or the epic, ignoring case, as
- * `knobas_search::sql::ids_sql` has it, and each ticket key the
+ * `knobas_search::query::word_alternatives` reads them (`or`, `-word`, a
+ * quoted phrase), and each ticket key the
  * Tickets view's chips and dropdowns write (`issuetype:`, `priority:`,
  * `assignee:`, `status:`, `project:`, `under:`), and `label:` and `has:`
  * (#813, #815), must hold, values of one key
@@ -702,12 +704,8 @@ export const FAKE_IDENTITY = "mara";
 function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolean {
   const tokens = [...query.matchAll(/(-?)([a-z]+):(?:"([^"]*)"|(\S+))|(\S+)/gi)];
   const keys = new Map<string, { negated: boolean; values: string[] }>();
-  const words: string[] = [];
   for (const [, minus, key, quoted, bare, word] of tokens) {
-    if (word !== undefined) {
-      words.push(word.toLowerCase());
-      continue;
-    }
+    if (word !== undefined) continue;
     const name = `${minus}${key!.toLowerCase()}`;
     const held = keys.get(name) ?? { negated: minus === "-", values: [] };
     held.values.push((quoted ?? bare ?? "").toLowerCase());
@@ -715,7 +713,12 @@ function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolea
   }
   const card = boardCard(entry);
   const haystack = `${card.key} ${card.title} ${card.assignee ?? ""} ${card.path ?? ""}`.toLowerCase();
-  if (!words.every((word) => haystack.includes(word))) return false;
+  // The words as the grammar reads them (#1889): `or` separates alternatives,
+  // `-word` and `-"phrase"` are left out of the one they stand in, a phrase is one needle.
+  const alternatives = wordAlternatives(query);
+  const admits = ({ holds, lacks }: { holds: string[]; lacks: string[] }) =>
+    holds.every((word) => haystack.includes(word)) && !lacks.some((word) => haystack.includes(word));
+  if (alternatives.length > 0 && !alternatives.some(admits)) return false;
   const field: Record<string, string | null> = {
     issuetype: card.issue_type,
     priority: card.priority,

@@ -20,7 +20,7 @@
 
   let {
     card,
-    typed,
+    needles,
     selected,
     onselect,
     onopen,
@@ -28,7 +28,7 @@
     source = null,
   }: {
     card: MiniBoardCard;
-    typed: string;
+    needles: readonly string[];
     selected: boolean;
     onselect: () => void;
     /** A double click: open the job. */
@@ -57,10 +57,10 @@
   onclick={onselect}
   ondblclick={onopen}
 >
-  <span class="tf-k"><Marked text={card.key} {typed} /></span>
+  <span class="tf-k"><Marked text={card.key} {needles} /></span>
   {#if source}<span class="tf-dim tf-tsrc">{source}</span>{/if}
   {#if kind && shows("type")}<span class="tf-dim tf-tkind">{kind}</span>{/if}
-  <span class="tf-s"><Marked text={card.title} {typed} /></span>
+  <span class="tf-s"><Marked text={card.title} {needles} /></span>
   {#if epic && shows("epic")}<span class="tf-cep">{epic}</span>{/if}
   <span class="tf-meta">
     {#if shows("signals")}<Signals signals={card.signals} />{/if}
