@@ -14688,7 +14688,7 @@ Ruled 2026-10-23 by the merge-manager (Opus).
   the plan through `log_work`, so a second copy would add nothing. *Reversing:* low.
 - **`TfLogAll.svelte`'s header comment.** *Ruling:* left as it is, because the ticket requires
   the file unchanged. Its lines "`log_all` is not called" and "`log_all`'s rule" now name a
-  retired command; filed as a backlog follow-up. *Reversing:* n/a.
+  retired command; filed as #1853 (backlog). *Reversing:* n/a.
 - **`mockups/shared/capabilities.md`.** *Ruling:* its *Log all* row names `log_work` in place of
   `log_all`, in this PR, because the row lists the commands the feature runs on. *Reversing:*
   trivial.
