@@ -687,10 +687,9 @@ fn answered_nothing() -> std::sync::MutexGuard<'static, HashSet<(FarEnd, &'stati
 /// ([`ANSWERED_NOTHING`]). So a source with nothing to find is asked once per
 /// process, and an id the reader typed is never asked about, let alone
 /// replaced ([`config::fill_missing`] repeats that rule inside the one
-/// statement). The
-/// discovery is best-effort: a source that fails or times out here
-/// ([`DISCOVERY_BUDGET`]) syncs as it did before, and the run reports the real
-/// failure itself.
+/// statement). The discovery is best-effort: a source that fails or times out
+/// here ([`DISCOVERY_BUDGET`]) syncs as it did before, and the run reports the
+/// real failure itself.
 ///
 /// Returns the ids found for empty keys, or `None` when there is nothing to
 /// record, so the caller builds the adapter again only then. Nothing is
@@ -1249,10 +1248,11 @@ pub const SYNC_CONCURRENCY: usize = 5;
 /// well under the smallest interval a user can configure. That floor is each
 /// adapter's own `min_sync_interval_secs` (#1187): TeamCity declares 20 s,
 /// Uptime Kuma 45 s, every other adapter
-/// [`knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS`] (60 s), and an external
-/// adapter whatever its descriptor says. Five seconds is a quarter of the
-/// lowest of them today. Against a floor near five seconds, a run up to one
-/// tick late nearly doubles the interval.
+/// [`knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS`] (60 s). Five seconds is a
+/// quarter of the lowest compiled-in floor today. An external adapter's floor
+/// is whatever its descriptor says, and nothing here bounds it from below:
+/// against a floor near five seconds, a run up to one tick late nearly doubles
+/// the interval.
 const TICK: Duration = Duration::from_secs(5);
 
 /// How long the ticker waits before its first look, unless
