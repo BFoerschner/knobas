@@ -85,6 +85,7 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
             },
             kind: "ticket",
             count: 1_500,
+            common_word: false,
         });
     }
     sources.push(Synthetic {
@@ -94,6 +95,7 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
         },
         kind: "build",
         count: 1_500,
+        common_word: false,
     });
     sources.push(Synthetic {
         descriptor: SourceDescriptor {
@@ -102,6 +104,7 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
         },
         kind: "page",
         count: 500,
+        common_word: false,
     });
     for source in &sources {
         knobas_app::sources::demo::load_mirror_of(&pool, source)

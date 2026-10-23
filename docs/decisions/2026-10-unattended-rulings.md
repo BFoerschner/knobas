@@ -14735,3 +14735,15 @@ Ruled 2026-10-23 by the merge-manager (Opus).
 - **#1853 for `TfLogAll.svelte`'s comment.** *Ruling:* confirmed as filed, `backlog` being the
   right label because nobody sees a comment in the app. It is already in progress in its own
   worktree. *Reversing:* n/a.
+
+## #1849 / PR #1858: the common word is the probe's, not `read_plans`'
+
+- **`Synthetic` takes a `common_word` flag; only the probe sets it.** *Ruling:* the gate's
+  `read_plans` mirror seeds without `common`. *Reasoning:* `read_plans` builds its mirror from the
+  same `Synthetic` and, with `common` in three bodies of four, both mention plans left
+  `item_body_trgm_idx` for a scan of every body (`every_reshaped_read_plans_*` red, 2 of 2, on
+  `afda7376`). Tried: the word at the front instead of the end (still red), another word (red at
+  three in four and at one in two, green at one in four), shares of 1/2, 2/3 and 7/8 (red). The
+  ticket needs at least half, so the share stays and the plan test keeps the seed it was fixed on.
+  Why the planner flips on the share is not diagnosed; the mention rule on a real mirror is not
+  shown to flip. *Reversing:* low, flip two `common_word` literals.
