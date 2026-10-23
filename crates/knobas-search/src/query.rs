@@ -1010,11 +1010,7 @@ pub fn pattern_of(parsed: &Parsed) -> Result<Pattern, String> {
             .collect(),
         // A pattern is stored as typed: `knobas_core`'s matcher folds the
         // stored side with the server's `lower()` (#1843).
-        names: parsed
-            .names
-            .iter()
-            .cloned()
-            .collect(),
+        names: parsed.names.iter().cloned().collect(),
     };
     if pattern == Pattern::default() {
         return Err("a pattern needs a project, a parent or a name to match".to_owned());
