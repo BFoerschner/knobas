@@ -752,6 +752,8 @@ async fn attempt(
 }
 
 /// Close the run: log it, judge the credential, set or clear the backoff, emit.
+/// A run the quit cancelled is logged and emitted, and judged on nothing
+/// (#1629).
 ///
 /// Every step is best-effort *after* the sync itself committed. The data is
 /// already durable at this point, so a failed bookkeeping statement is warned
@@ -860,6 +862,14 @@ async fn purge_again(deps: &SchedulerDeps, source_id: &str) {
 }
 
 async fn apply_health_and_backoff(deps: &SchedulerDeps, source_id: &str, result: &RunResult) {
+    // A run the quit cancelled (#1629, spec #1618 ruling A8) is the reader's
+    // act, not the source's fault: no verdict on the credential, no clearing
+    // of a stored `unreachable` it did not re-witness, and the backoff left
+    // as it was. Its row still ends, above, and its ending is still sent
+    // (ADR-0005); `failures_since_last_ok` does not count it either.
+    if result.was_cancelled() {
+        return;
+    }
     let (state, detail) = match result.outcome {
         SyncOutcome::Ok => (Some(AuthState::Ok), None),
         SyncOutcome::Unauthorized if result.error.as_deref() == Some(MISSING_SECRET_MESSAGE) => {
@@ -1285,6 +1295,12 @@ struct Inner {
     /// run, a new source, a re-entered credential), so the UI does not wait out
     /// a tick.
     wake: Notify,
+    /// Poked by the ticker on every tick: the write queue's flush runs on a
+    /// task of its own ([`flush_loop`], #1629), so a write that spends its
+    /// send budget holds no source's schedule. A poke while a flush is under
+    /// way leaves one permit, so the flush runs once more after it, not once
+    /// per tick it missed.
+    flush_due: Notify,
     cancel: CancellationToken,
     /// Handles to join (or abort) at shutdown.
     ///
@@ -1350,6 +1366,7 @@ impl Scheduler {
                 pending_purges: HashSet::new(),
             }),
             wake: Notify::new(),
+            flush_due: Notify::new(),
             cancel: CancellationToken::new(),
             tasks: Mutex::new(Vec::new()),
             background,
@@ -1357,7 +1374,11 @@ impl Scheduler {
         });
 
         let ticker = tokio::spawn(tick_loop(Arc::clone(&inner)));
-        inner.tasks.lock().await.push(ticker);
+        // Beside the runs in `tasks`, so `shutdown` joins it within the same
+        // grace and aborts it at its end. Not through the door: it opens no
+        // run row, so there is nothing a quit could leave half-started.
+        let flusher = tokio::spawn(flush_loop(Arc::clone(&inner)));
+        inner.tasks.lock().await.extend([ticker, flusher]);
         Ok(Scheduler { inner })
     }
 
@@ -2024,11 +2045,11 @@ impl Inner {
         };
 
         let result = match permit {
-            None => cancelled_result(),
+            None => RunResult::cancelled(),
             Some(_permit) => {
                 tokio::select! {
                     biased;
-                    () = self.cancel.cancelled() => cancelled_result(),
+                    () = self.cancel.cancelled() => RunResult::cancelled(),
                     result = execute_run(
                         &self.deps,
                         &source_id,
@@ -2129,18 +2150,6 @@ impl Drop for Closing {
     }
 }
 
-/// The verdict for a run the user's quit interrupted.
-///
-/// Logged as an error rather than silently dropped: the diagnostics view is
-/// where "why is there a gap in my sync history" gets answered.
-fn cancelled_result() -> RunResult {
-    RunResult {
-        outcome: SyncOutcome::Error,
-        counts: run_log::RunCounts::default(),
-        error: Some("cancelled: knobas is shutting down".to_owned()),
-    }
-}
-
 /// Look for due sources every [`SchedulerTiming::tick`], or whenever something
 /// pokes `wake`.
 async fn tick_loop(inner: Arc<Inner>) {
@@ -2184,13 +2193,11 @@ async fn tick_loop(inner: Arc<Inner>) {
         // while nothing is due would otherwise leave the queue sitting until
         // the next scheduled run.
         //
-        // Nearly free when nothing is owed: `flush_source` returns before
-        // building an adapter or touching the keychain if nothing in the
-        // source's queue is owed (a write waiting on a refused credential
-        // never is, #1628). Cancellation is not checked between the two -- a flush
-        // that has started is one write against one source, and `shutdown`'s
-        // grace window covers it.
-        crate::write_queue::flush_all(&inner.deps).await;
+        // Woken, not run: the flush is on its own task (`flush_loop`, #1629,
+        // spec #1618 ruling A7). A pass can be every due write of every
+        // source, each of which may spend the 45 s send budget, and inline
+        // here it held every source's schedule for as long.
+        inner.flush_due.notify_one();
 
         tokio::select! {
             biased;
@@ -2198,6 +2205,26 @@ async fn tick_loop(inner: Arc<Inner>) {
             () = inner.wake.notified() => {}
             () = tokio::time::sleep(tick) => {}
         }
+    }
+}
+
+/// The write queue's flush, woken by every tick ([`Inner::flush_due`]).
+///
+/// What a started flush is: every head write each source owes, source after
+/// source, each send bounded only by the adapter's budget (45 s). What a quit
+/// does to it: the cancel is selected against between writes, so no write is
+/// started after it; the one on the wire is let finish inside
+/// [`SHUTDOWN_GRACE`], so its `sent` lands, and is aborted at the grace's end,
+/// which leaves that one request at risk of a re-send on the next start
+/// (ADR-0012's window).
+async fn flush_loop(inner: Arc<Inner>) {
+    loop {
+        tokio::select! {
+            biased;
+            () = inner.cancel.cancelled() => return,
+            () = inner.flush_due.notified() => {}
+        }
+        crate::write_queue::flush_all_until(&inner.deps, &inner.cancel).await;
     }
 }
 

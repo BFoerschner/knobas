@@ -200,9 +200,9 @@ const NOT_LOGGED_IN: &str = "You are not logged in.";
 /// field.** The measured exchange is twelve reads in a few hundred
 /// milliseconds, and a large estate adds packets to the login rather than idle
 /// waits, so there is no deployment this is tight for and nothing here for a
-/// form to tune. What tripping it costs is one minute of the scheduler --
-/// `flush_all` is awaited inline in the tick -- which is a price worth paying
-/// once for a bound that exists at all.
+/// form to tune. What tripping it costs is one minute of the write queue's
+/// flush task -- it runs beside the ticker since #1629, so no sync waits on
+/// it -- which is a price worth paying once for a bound that exists at all.
 const CALL_BUDGET: Duration = Duration::from_secs(60);
 
 /// Kuma's own event names, spelled as its `server.js` registers them.

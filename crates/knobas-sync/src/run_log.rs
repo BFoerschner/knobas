@@ -249,6 +249,37 @@ pub struct RunResult {
     pub error: Option<String>,
 }
 
+/// The message a run the quit interrupted is logged with, and the one thing
+/// that tells its row from a failure (#1629).
+///
+/// A message rather than an outcome of its own: `outcome` is a checked column
+/// and an IPC type, and what a cancellation has to change is the ladder, not
+/// how the diagnostics view names the run. It stays an `error` there.
+pub const CANCELLED_MESSAGE: &str = "cancelled: knobas is shutting down";
+
+impl RunResult {
+    /// The verdict for a run the user's quit interrupted.
+    ///
+    /// Logged as an error rather than silently dropped: the diagnostics view
+    /// is where "why is there a gap in my sync history" gets answered.
+    #[must_use]
+    pub fn cancelled() -> RunResult {
+        RunResult {
+            outcome: SyncOutcome::Error,
+            counts: RunCounts::default(),
+            error: Some(CANCELLED_MESSAGE.to_owned()),
+        }
+    }
+
+    /// Whether this is [`cancelled`](Self::cancelled)'s verdict: a run the
+    /// reader stopped, which says nothing about the source (spec #1618,
+    /// ruling A8).
+    #[must_use]
+    pub fn was_cancelled(&self) -> bool {
+        self.outcome == SyncOutcome::Error && self.error.as_deref() == Some(CANCELLED_MESSAGE)
+    }
+}
+
 /// Open a run and return its id.
 ///
 /// Written before the adapter is touched, so a run that hangs or crashes is
@@ -507,6 +538,10 @@ pub async fn last_finished(
 /// excluded: a slow source is not a failing one, and counting it would double
 /// the backoff of a source that is merely taking its time.
 ///
+/// So is a run the quit cancelled ([`CANCELLED_MESSAGE`], #1629): the reader
+/// stopped it, and a large first sync quit twice would otherwise climb the
+/// ladder for nothing the source did.
+///
 /// # Errors
 /// [`sqlx::Error`] if the query fails.
 pub async fn failures_since_last_ok(
@@ -518,10 +553,12 @@ pub async fn failures_since_last_ok(
            from knobas.sync_run
           where source_id = $1
             and finished_at is not null
+            and error is distinct from $2
             and id > coalesce((select max(id) from knobas.sync_run
                                 where source_id = $1 and outcome = 'ok'), 0)",
     )
     .bind(source_id)
+    .bind(CANCELLED_MESSAGE)
     .fetch_one(pool)
     .await?;
     Ok(n)

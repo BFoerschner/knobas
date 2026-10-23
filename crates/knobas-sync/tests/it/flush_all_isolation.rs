@@ -2,8 +2,8 @@
 //! as a test rather than as a header (#620).
 //!
 //! `flush_all` reaches *every* configured source in a module's database, and
-//! the real scheduler's tick calls it too (`crate::write_queue::flush_all`,
-//! from `scheduler.rs`). Each test harness's secret store holds only its own
+//! so does the real scheduler's flush task, which every tick wakes
+//! (`crate::write_queue::flush_all_until`, from `scheduler.rs`). Each test harness's secret store holds only its own
 //! source's credential, so a flush started by one test fails to build the
 //! other tests' sources and re-reasons their due writes `unauthorized`. A
 //! test in the same module that asserts `Unreachable` then reads back
@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 const WAIT_REASON: [&str; 2] = [concat!("Wait", "Reason"), concat!("wait", "_reason")];
 
 /// The two ways to flush every source: by hand, or by starting the real
-/// scheduler, whose tick calls `flush_all`.
+/// scheduler, whose flush task does what `flush_all` does.
 const FLUSHES_EVERYTHING: [&str; 2] = [concat!("flush_all", "("), concat!("Scheduler::start", "(")];
 
 /// A file's code, with its comment lines removed.
@@ -96,7 +96,7 @@ fn no_file_that_asserts_a_wait_reason_flushes_every_source() {
         offenders.is_empty(),
         "these files assert a write's wait reason and also flush every source: \
          {offenders:?}\n\
-         `flush_all` (and the real scheduler, whose tick calls it) fails to build \
+         `flush_all` (and the real scheduler's flush task) fails to build \
          the other tests' sources and re-reasons their rows `unauthorized`, so a \
          wait-reason assertion in the same database flakes under load (#609, #620). \
          Move the flushing test to `write_queue_flush_all.rs`."
