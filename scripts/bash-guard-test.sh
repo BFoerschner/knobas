@@ -46,6 +46,8 @@ check pass 'if test -d x; then ls; fi'
 check pass 'for d in a b; do echo $d; done'
 check pass 'echo builtin'
 check pass 'builtin echo hi && ls'
+check pass 'command -v cd >/dev/null && echo yes'
+check refuse 'command cd /tmp && ls'
 check pass 'git commit -m "{ cd x && y; }"'
 # eval and shell strings are parsed as the commands they run
 check refuse 'eval "cd x && y"'
@@ -67,6 +69,9 @@ check refuse 'cd $(pwd) && ls'
 check refuse 'cd "$(cd x && pwd)"'
 check refuse 'echo "$(cd /tmp && pwd)"'
 check refuse 'echo "`cd /tmp && pwd`"'
+# testenv/README.md names the passing form of the refused one
+check refuse 'eval "$(cd testenv && ./seed --env)"'
+check pass 'eval "$(env -C testenv ./seed --env)"'
 check pass 'ls "$(git rev-parse --show-toplevel)"'
 check pass $'git commit -m "$(cat <<\'EOF\'\nParse heredocs; cd x && y is data\nEOF\n)"'
 # a comment is not a command

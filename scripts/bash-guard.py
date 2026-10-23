@@ -294,6 +294,8 @@ def name_and_args(words):
                     i += 1
                 i += 1
             continue
+        if text == "command" and i + 1 < len(words) and words[i + 1].text in ("-v", "-V"):
+            break  # `command -v cd` looks a name up and runs nothing
         if text in WRAPPERS:
             takes_argument = WRAPPERS[text]
             i += 1

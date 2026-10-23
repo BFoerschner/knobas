@@ -1602,8 +1602,8 @@ Ruled 2026-10-15 by the implementer, in the PR for #810. Each is fork / ruling /
 - **Which read draws the tickets.** *Ruling:* `mini_board`, with a `query` argument and five more card fields (`issue_type`, `assignee`, `updated_at`, `path`, `mine`), not a new command. *Reasoning:* the board's columns, their order, the per-column cap and the totals already live in that read; a second read would restate them. *Reversing:* medium: a command, its §10.8 entry and a fake handler.
 - **How the server filters.** *Ruling:* `Searcher::matching_ids` runs the launcher's parse and key predicates (`ids_sql`) for every admitted ticket id, uncapped, and the board narrows to those ids. *Reasoning:* R-2.7 says the grammar, not the browser. A very broad filter at estate scale sends many ids; no screen is slow on testenv data. *Reversing:* low.
 - **What the typed words match** (from the spec review). The launcher's full-text match covers only the title and the body, so a key, an assignee or an epic typed into the filter found nothing, stopwords emptied the board, and the marks disagreed with the matches. *Ruling:* in the view, each word must appear as a substring, ignoring case, in the key, the title, the declared assignee or a declared parent's name; the body is not searched. The grammar's keys are unchanged. *Reasoning:* R-2.3 ("every word typed has to appear somewhere in the row") and the placeholder "Filter by key, summary, epic or person" are prototype-6's `ticketMatches`. *Reversing:* low, one predicate in `ids_sql`.
-- **The card's comment count** (R-3.7). No source declares a comment count, and the mirror holds Jira's comments only inside `body_text`. *Ruling:* not drawn; follow-up #894 for a declared count. *Reasoning:* a payload read outside a declaration is what ADR-0007 forbids. *Reversing:* the follow-up.
-- **The epic's name.** Prototype-6 draws "PAY-200 Payout reliability"; the card's `path` line is the epic's key. *Ruling:* the key only, in this PR, folded into #894. *Reasoning:* the name is the parent's own title, a second read the path line does not make. *Reversing:* the follow-up.
+- **The card's comment count** (R-3.7). No source declares a comment count, and the mirror holds Jira's comments only inside `body_text`. *Ruling:* not drawn; follow-up #894 for a declared count. *Reasoning:* a payload read outside a declaration is what ADR-0007 forbids. *Reversing:* #1795.
+- **The epic's name.** Prototype-6 draws "PAY-200 Payout reliability"; the card's `path` line is the epic's key. *Ruling:* the key only, in this PR, folded into #894. *Reasoning:* the name is the parent's own title, a second read the path line does not make. *Reversing:* #1795.
 - **"Every match while a filter has text".** *Ruling:* the read is uncapped only while words are typed; chips and dropdowns alone keep eight a column. *Reasoning:* prototype-6 lifts the cap on `f.q` only. *Reversing:* one line.
 - **Show N more.** *Ruling:* the next read's per-column cap becomes the largest expanded column's total, and the column draws every card. *Reasoning:* an uncapped read of an All board is what #753 removed. *Reversing:* low.
 - **The list layout.** *Ruling:* the same read as the board, newest first, ending in *Show N more* that lifts every column's cap. Header sorting, `j`/`k` and lanes are #813's; the Signals column waits for #815. *Reasoning:* the ticket's siblings own them. *Reversing:* none needed.
@@ -13033,3 +13033,29 @@ The measurement came after it.
   narrowed to flags that take no argument. *Ruling:* the ticket's pattern, with #1790 filed for
   the narrowing. *Reasoning:* a ruling may not contradict the ticket. The cost is a rare false
   refusal: `perl -Mstrict … ~/.bashrc`. *Reversing:* #1790.
+
+### #1689: merge review of PR #1791 (Opus merge-manager, 2026-10-23)
+
+- **`bash -c "cd /tmp"` alone passes.** *Fork:* refuse every `cd` inside a shell string, or only
+  a chained one. *Ruling:* only a chained one, as the implementer had it. *Reasoning:* a lone `cd`
+  in a child shell is one command, the same as a lone `cd`, and changes nothing after it.
+  *Reversing:* one flag in `simple_commands`.
+- **A bare `((x<<2))` opening a phantom heredoc is not owed in this PR.** *Fork:* read `((` at a
+  command's start as arithmetic now, or file it. *Ruling:* filed as a backlog follow-up with the
+  two other misses the review found (`function f { cd x; ls; }`, and a `$(cd x && y)` in the body
+  of a heredoc with an unquoted delimiter, which the shell runs). *Reasoning:* all three fail open
+  only: they hide a command, they never refuse one. 2 of 60,793 transcript commands hit the first,
+  and the ticket names none of them. *Reversing:* #1795.
+- **`eval "$(cd testenv && ./seed --env)"` stays refused, and the docs name the passing form.**
+  *Fork:* exempt it, or refuse it and say what to type. *Ruling:* refuse it. *Reasoning:* no
+  doc, brief or recipe tells an agent to type it; agents built it from `testenv/README.md`, which
+  runs every command from `testenv/`. The README now says that an agent prefixes each one with
+  `env -C testenv`, and the test pins both forms. *Reversing:* low.
+- **`command -v cd` is a lookup, not a `cd`.** *Fork:* keep `command` a plain wrapper, or stop at
+  `-v`/`-V`. *Ruling:* stop there. *Reasoning:* the wrapper's option skipping is new in this PR,
+  and it made `command -v cd >/dev/null && echo yes`, which passed on `main`, a refusal.
+  `command cd /tmp && ls` is still refused. *Reversing:* one line.
+- **A missing script's `exit 1` lets the call through.** Checked against Claude Code's hook docs:
+  exit 2 blocks a `PreToolUse` call, and any other status is a non-blocking error unless the hook
+  sets `onFailure: "block"`, which this wiring does not. The wiring line runs the same under `sh -c`
+  and `zsh -c`, with a project dir that contains spaces and one that is missing.
