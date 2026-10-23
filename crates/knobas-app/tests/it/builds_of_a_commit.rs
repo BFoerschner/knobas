@@ -10,8 +10,9 @@
 //! writer's shape, a source given another adapter kind, a change to the stored
 //! declarations, and a delete.
 //!
-//! Its own database (one per test file, #572), so it may write
-//! `sync.parent_declaration` freely. The perf reading is
+//! `sync.parent_declaration` is one row per adapter kind, and every test's
+//! [`pool`] writes it back, so the test that rewrites it takes a database of
+//! its own ([`scratch`], #1907). The perf reading is
 //! `builds_of_a_commit_perf.rs`, in a database of its own, so a declaration
 //! change here never recomputes under its timing.
 
@@ -22,7 +23,20 @@ use sqlx::PgPool;
 async fn pool() -> PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
-    // The declarations' stored copy, written as bring-up writes it (ADR-0019).
+    declared(pool).await
+}
+
+async fn scratch(label: &str) -> PgPool {
+    let pool = knobas_db::test_util::scratch_database(label)
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    declared(pool).await
+}
+
+/// The declarations' stored copy, written as bring-up writes it (ADR-0019).
+async fn declared(pool: PgPool) -> PgPool {
     knobas_app::commands::search::searcher(&pool, &Registry::for_process())
         .await
         .unwrap();
@@ -156,7 +170,7 @@ async fn stored_count(pool: &PgPool, entity: &str) -> i64 {
 /// comparison with the walk. One test: the steps build on each other.
 #[tokio::test]
 async fn a_commits_builds_are_the_walk_after_every_change() {
-    let pool = pool().await;
+    let pool = scratch("builds_of_a_commit_walk").await;
     let gitea = configured(&pool, "gitea").await;
     let teamcity = configured(&pool, "teamcity").await;
     let (a, b) = (sha(), sha());

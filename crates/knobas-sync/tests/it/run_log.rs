@@ -325,7 +325,14 @@ async fn a_mix_keeps_the_last_day_and_old_runs_up_to_200() {
 
 #[tokio::test]
 async fn the_diagnostics_read_can_span_every_source_or_one() {
-    let pool = pool().await;
+    // The unfiltered read is the newest 500 of the whole table, and the
+    // prune tests here start hundreds of runs dated now: a database of its
+    // own, so none of theirs pushes `a` out (#1907).
+    let pool = knobas_db::test_util::scratch_database("run_log_span")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
     let a = unique("run");
     let b = unique("run");
     for id in [&a, &b] {

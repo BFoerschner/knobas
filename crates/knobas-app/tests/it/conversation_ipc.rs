@@ -3,7 +3,8 @@
 //! PostgreSQL with a Jira record stored as the adapter stores it.
 //!
 //! This file's database is its own (#572); each test uses a key nothing else
-//! holds. The identity `@me` resolves to is `mara`, the one username any source
+//! holds, and a test that reads the newest lines of the whole activity log
+//! takes a database of its own ([`scratch`], #1907). The identity `@me` resolves to is `mara`, the one username any source
 //! here is configured with.
 
 use knobas_app::conversation::{ChangeKind, thread, visit};
@@ -13,6 +14,22 @@ use knobas_core::entity::EntityRef;
 async fn pool() -> sqlx::PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
+    with_sources(pool).await
+}
+
+/// A database of its own, for a test that reads the newest line of the
+/// database-wide activity log: on the shared one another test's line is newer
+/// by scheduling (#1907).
+async fn scratch(label: &str) -> sqlx::PgPool {
+    let scratch = knobas_db::test_util::scratch_database(label).await;
+    let pool = scratch
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    with_sources(pool).await
+}
+
+async fn with_sources(pool: sqlx::PgPool) -> sqlx::PgPool {
     for (id, config) in [("jira", r#"{"username":"mara"}"#), ("gitea", "{}")] {
         sqlx::query(
             "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
@@ -127,7 +144,7 @@ async fn a_visit_to_nothing_is_refused_and_writes_nothing() {
 /// same ticket still shows.
 #[tokio::test]
 async fn a_visit_is_not_in_the_recent_activity() {
-    let pool = pool().await;
+    let pool = scratch("conversation_ipc_activity").await;
     let id = issue(&pool, serde_json::json!({})).await;
     let entity = EntityRef::parse(&id).unwrap();
     knobas_core::activity::record(

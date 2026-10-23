@@ -824,7 +824,14 @@ async fn search_is_under_a_hundred_milliseconds_over_a_hundred_thousand_items() 
 #[tokio::test]
 #[ignore = "seeds a 100k corpus and dirties its index; run it deliberately"]
 async fn the_artifact_this_harness_is_built_to_avoid() {
-    let pool = pool().await;
+    // The pending list is the whole index's: on the file's shared database
+    // another test's seed fills it between the reads, and the 20,000 rows
+    // dirtied here would land under that test's timings (#1907).
+    let pool = knobas_db::test_util::scratch_database("perf_gin_pending")
+        .await
+        .pool(5)
+        .await
+        .expect("a pool on the scratch database");
     testing::seed_sources(&pool).await.unwrap();
     testing::seed_corpus(&pool, 100_000).await.unwrap();
     let searcher = Searcher::new(pool.clone());

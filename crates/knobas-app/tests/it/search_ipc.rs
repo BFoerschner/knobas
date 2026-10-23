@@ -8,10 +8,10 @@
 //! hand-written TypeScript mirrors, the error codes the frontend branches on,
 //! and the one DTO that is a composition of two streams' data.
 //!
-//! Every test in this file shares one database (`knobas_db::test_util`), and
+//! The tests in this file share one database (`knobas_db::test_util`), and
 //! libtest does not order them. So: nothing truncates, every corpus assertion
-//! is scoped to a token this test seeded, and no assertion is made about an
-//! absolute row count of anything global.
+//! is scoped to a token this test seeded, and a test that reads a count of
+//! anything global takes a database of its own (#1907).
 
 use knobas_app::IpcErrorCode;
 use knobas_app::assets::ESTATE_FILE_PRODUCER;
@@ -299,16 +299,20 @@ async fn launcher_home_reports_source_health_beside_the_lists() {
 
 /// The footer's number is the write queue's *pending* rows (issue #212).
 ///
-/// A delta rather than an absolute, for the reason this file's header gives:
-/// the file shares one database and `write_queue::counts` is global, so what
-/// can be pinned is the movement. Both directions are asserted, because the
-/// direction is the decision: queueing a write raises the count, and *holding*
+/// `write_queue::counts` is the whole table's, so this test takes a database
+/// of its own: on the file's shared one, another test's queued write moves
+/// the count between the reads (#1907). Both directions are asserted, because
+/// the direction is the decision: queueing a write raises the count, and *holding*
 /// that same write lowers it again -- "N pending writes" says be patient, and a
 /// held write is asking for a decision instead (`QueueCounts`' own rule that
 /// "3 waiting" may never absorb a held write).
 #[tokio::test]
 async fn launcher_home_counts_the_pending_writes() {
-    let pool = pool().await;
+    let pool = knobas_db::test_util::scratch_database("search_ipc_pending_writes")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
     let entity = knobas_core::entity::EntityRef::new("jira", &token("wq"));
 
     let before = launcher_home_inner(&pool, &Registry::for_process())
