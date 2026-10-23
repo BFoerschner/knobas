@@ -246,8 +246,11 @@ lock ready 1310 "$head0" "$main0" > /dev/null
 status=$(gated_status 1310 "$scratch/g1.out")
 check "gated: same head, main unchanged: merge without gating again (status $status)" [ "$status" = 0 ]
 check "gated: it says so" has "$scratch/g1.out" "without gating again"
+# 1311's record is as good as 1310's: only the lock tells them apart.
+lock ready 1311 "$head0" "$main0" > /dev/null
 status=$(gated_status 1311 "$scratch/g2.out")
 check "gated: a PR that does not hold the lock, exit 1 (status $status)" [ "$status" = 1 ]
+check "gated: it says the PR does not hold the lock" has "$scratch/g2.out" "does NOT hold the lock"
 
 g -C "$wt" commit -q --allow-empty -m "fix after the pre-gate"
 status=$(gated_status 1310 "$scratch/g3.out")
