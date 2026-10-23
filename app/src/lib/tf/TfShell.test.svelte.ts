@@ -854,6 +854,33 @@ test("the Day tab's open rows offer Add to the job last opened, found by its key
   expect(addToButton()?.textContent?.trim()).toBe("Add to PAY-231");
 });
 
+test("a timer start and stop with a job last opened re-reads no ticket for the nav job (#1687)", async () => {
+  const reads = { listSources: 0, getEntity: 0 };
+  const jobPorts: JobPorts = {
+    ...JOB_PORTS,
+    listSources: () => {
+      reads.listSources += 1;
+      return JOB_PORTS.listSources();
+    },
+    getEntity: (id) => {
+      reads.getEntity += 1;
+      return JOB_PORTS.getEntity(id);
+    },
+  };
+  const timer = $state<{ current: RunningTimer | null; elapsed: string | null }>({ current: null, elapsed: null });
+  start({ jobPorts, timer });
+  await at("#/job/PAY-231");
+  await at("#/time/2026-08-22");
+  const before = { ...reads };
+  expect(before.listSources, "the nav job was read once").toBeGreaterThan(0);
+
+  timer.current = { target: { kind: "entity", entity_id: "jira:PAY-231" }, started_at: "2026-08-22T12:00:00Z", last_heartbeat: "2026-08-22T12:00:00Z" } as RunningTimer;
+  await settle();
+  timer.current = null;
+  await settle();
+  expect(reads, "a timer start and stop costs the nav job no IPC").toEqual(before);
+});
+
 test("with no job opened, the Day tab's open rows offer Add to the timer's ticket (#1027)", async () => {
   const timer = {
     current: { target: { kind: "entity", entity_id: "jira:PAY-231" }, started_at: "2026-08-22T12:00:00Z", last_heartbeat: "2026-08-22T12:00:00Z" } as RunningTimer,
