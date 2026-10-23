@@ -6,7 +6,7 @@
 # Why this feature is witnessed here and not in a suite. A **global** shortcut
 # is the one keystroke in knobas that has to arrive while knobas is not the
 # application being typed at. `capture_ipc.rs` proves what is stored and what is
-# reported, and `capture.test.ts` what the window does with a keystroke
+# reported, and `capture.test.svelte.ts` what the window does with a keystroke
 # -- both against ports, with no window server, no key and no other application
 # in them. The only witness for the premise is a real Mac with something else
 # in front (ADR-0016).
@@ -31,7 +31,7 @@
 # (`CaptureWindow.test.svelte.ts`), a combination the system refuses (needs an
 # application holding one), and the note's *captured from* link -- a note has
 # no view while notes hide, so no window draws its links; the link is pinned at
-# `capture_ipc.rs` and `capture.test.ts`, which is where spec #491's
+# `capture_ipc.rs` and `capture.test.svelte.ts`, which is where spec #491's
 # stream map puts it.
 #
 # What it leaves behind on the demo profile: notes shown, this shortcut stored,
