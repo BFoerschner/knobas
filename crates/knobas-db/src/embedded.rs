@@ -3002,118 +3002,173 @@ mod tests {
         );
     }
 
-    /// Every process `initdb` into `data_dir` has running, itself included,
-    /// with its arguments. Its children get the data directory through the
-    /// environment, so they are found under `initdb`'s pid.
-    fn initdb_tree(data_dir: &Path) -> Vec<(u32, String)> {
-        let listing = std::process::Command::new("ps")
-            .args(["-axo", "pid=,ppid=,args="])
-            .output()
-            .unwrap();
-        let processes: Vec<(u32, u32, String)> = String::from_utf8_lossy(&listing.stdout)
-            .lines()
-            .filter_map(|line| {
-                let mut fields = line.split_whitespace();
-                let pid = fields.next()?.parse().ok()?;
-                let ppid = fields.next()?.parse().ok()?;
-                Some((pid, ppid, fields.collect::<Vec<_>>().join(" ")))
-            })
-            .collect();
-        let pgdata = format!("--pgdata {}", data_dir.display());
-        let mut tree: Vec<(u32, String)> = processes
-            .iter()
-            .filter(|(_, _, args)| args.contains("initdb") && args.contains(&pgdata))
-            .map(|(pid, _, args)| (*pid, args.clone()))
-            .collect();
-        let mut next = 0;
-        while next < tree.len() {
-            let parent = tree[next].0;
-            tree.extend(
-                processes
-                    .iter()
-                    .filter(|(_, ppid, _)| *ppid == parent)
-                    .map(|(pid, _, args)| (*pid, args.clone())),
-            );
-            next += 1;
-        }
-        tree
-    }
-
     /// Where a killed `initdb` stops (#1819), one state of the three that
     /// fail every launch. Each was named by starting a server on what the
     /// kill left and logging in (recorded under #1819 in
     /// `docs/decisions/2026-10-unattended-rulings.md`).
+    ///
+    /// **Each is a run `initdb` is held in** (#1908): its `postgres` waits
+    /// there until the test has killed `initdb`. A kill timed by watching
+    /// the process tree missed the single-user setup's window, about 25 ms,
+    /// under load.
+    #[cfg(unix)]
     #[derive(Clone, Copy, Debug)]
     enum KillPoint {
         /// The configuration probes, before the bootstrap: no `pg_control`.
+        /// Held in the first `postgres --check`, which then runs.
         BeforeBootstrap,
-        /// The bootstrap, before `setup_auth`: our password is refused.
-        DuringBootstrap,
+        /// The bootstrap done, the setup not begun: our password is refused.
+        /// Held in the single-user `postgres`, which then never starts.
+        AfterBootstrap,
         /// The single-user setup, as soon as it runs: `initdb` has piped
         /// `setup_auth` and dies before the rest, so there is no `postgres`
-        /// database. About 25 ms later it has piped everything, and the
-        /// backend drains it to the end.
+        /// database. Held after `setup_auth`'s password, and then given what
+        /// `initdb` piped before it died, at most a pipe's buffer.
         DuringSetup,
     }
 
-    /// Run `initdb` into a fresh profile under `dir` and drop it at `point`,
-    /// which kills it as a bring-up given up does (`kill_on_drop`), then wait
-    /// for its children to drain the pipe it fed them and exit.
+    /// The `postgres` a held `initdb` runs: every run passes through to the
+    /// real one, but the one its kill point names writes `held` and waits for
+    /// `release`. Its directory's parent is the gate.
+    #[cfg(unix)]
+    const HELD_POSTGRES: &str = r#"#!/bin/sh
+gate=$(dirname "$(dirname "$0")")
+real=$(cat "$gate/real-postgres")
+point=$(cat "$gate/point")
+case $point in
+probes) held=--check ;;
+*) held=--single ;;
+esac
+case " $* " in
+*" $held "*) ;;
+*) exec "$real" "$@" ;;
+esac
+hold() {
+    : >"$gate/held"
+    n=0
+    while [ ! -e "$gate/release" ]; do
+        # The test gave up: run nothing more.
+        [ "$n" -lt 600 ] || exit 1
+        sleep 0.1
+        n=$((n + 1))
+    done
+}
+case $point in
+probes)
+    hold
+    "$real" "$@"
+    ;;
+bootstrapped)
+    hold
+    ;;
+setup)
+    {
+        while IFS= read -r line; do
+            printf '%s\n' "$line"
+            case $line in 'ALTER USER '*) break ;; esac
+        done
+        hold
+        cat
+    } | "$real" "$@"
+    ;;
+esac
+: >"$gate/done"
+"#;
+
+    /// A copy of `initdb` under `gate` that is held at `point`, and its path.
+    /// `initdb` runs the `postgres` beside it and reads `share/` beside its
+    /// directory; its library is found the same way.
+    #[cfg(unix)]
+    fn held_initdb(gate: &Path, initdb: &Path, point: KillPoint) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = initdb.parent().unwrap();
+        let install = bin.parent().unwrap();
+        std::fs::create_dir(gate.join("bin")).unwrap();
+        for dir in ["lib", "share"] {
+            std::os::unix::fs::symlink(install.join(dir), gate.join(dir)).unwrap();
+        }
+        let copy = gate.join("bin").join("initdb");
+        std::fs::copy(initdb, &copy).unwrap();
+        let postgres = write(&gate.join("bin"), "postgres", HELD_POSTGRES);
+        std::fs::set_permissions(&postgres, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write(
+            gate,
+            "real-postgres",
+            bin.join("postgres").to_str().unwrap(),
+        );
+        let point = match point {
+            KillPoint::BeforeBootstrap => "probes",
+            KillPoint::AfterBootstrap => "bootstrapped",
+            KillPoint::DuringSetup => "setup",
+        };
+        write(gate, "point", point);
+        copy
+    }
+
+    /// The pids of the processes running `program`.
+    #[cfg(unix)]
+    fn running(program: &Path) -> Vec<u32> {
+        let listing = std::process::Command::new("ps")
+            .args(["-ww", "-axo", "pid=,args="])
+            .output()
+            .unwrap();
+        let program = program.to_str().unwrap();
+        String::from_utf8_lossy(&listing.stdout)
+            .lines()
+            .filter_map(|line| {
+                let (pid, args) = line.trim_start().split_once(' ')?;
+                args.trim_start()
+                    .starts_with(program)
+                    .then(|| pid.parse().ok())?
+            })
+            .collect()
+    }
+
+    /// Wait up to 30 s for `done`, naming `what` when it does not come.
+    #[cfg(unix)]
+    async fn wait_until(what: &str, done: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while !done() {
+            assert!(std::time::Instant::now() < deadline, "{what} after 30 s");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Run `initdb` into a fresh profile under `dir` and drop it once it is
+    /// held at `point`, which kills it as a bring-up given up does
+    /// (`kill_on_drop`). Then let its held child go on, and wait for it to
+    /// drain what `initdb` piped it and exit.
+    #[cfg(unix)]
     async fn interrupt_initdb(dir: &Path, point: KillPoint) -> Settings {
         let (settings, initdb) = initdb_for(dir).await;
         let data = settings.data_dir.clone();
+        let gate_dir = tempfile::tempdir().unwrap();
+        let gate = gate_dir.path();
+        let initdb = held_initdb(gate, &initdb, point);
         let reached = async {
-            loop {
-                // One listing per poll, and the kill straight after it: the
-                // single-user window is about 25 ms. Before the bootstrap
-                // there is none to take: the children then are `postgres
-                // --check` probes, which write nothing and exit at once.
-                let tree = match point {
-                    KillPoint::BeforeBootstrap if data.join("postgresql.conf").exists() => {
-                        return Vec::new();
-                    }
-                    KillPoint::BeforeBootstrap => Vec::new(),
-                    KillPoint::DuringBootstrap if !data.join("global/pg_control").exists() => {
-                        Vec::new()
-                    }
-                    KillPoint::DuringBootstrap | KillPoint::DuringSetup => initdb_tree(&data),
-                };
-                let child = if matches!(point, KillPoint::DuringBootstrap) {
-                    "--boot"
-                } else {
-                    "--single"
-                };
-                if tree.iter().any(|(_, args)| args.contains(child)) {
-                    return tree;
-                }
-                tokio::time::sleep(Duration::from_millis(1)).await;
+            while !gate.join("held").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
+            // `initdb` waits on the held child, so it is still running.
+            running(&initdb)
         };
-        let tree = tokio::select! {
+        let pids = tokio::select! {
             finished = run_initdb(&initdb, &settings, COMMAND_TIMEOUT) => {
                 panic!("initdb finished before {point:?}: {finished:?}")
             }
-            tree = reached => tree,
+            pids = reached => pids,
         };
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        for (pid, _) in &tree {
-            while process_alive(*pid) {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "initdb's child {pid} outlived it by 30 s"
-                );
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }
+        assert_eq!(pids.len(), 1, "{point:?}: one initdb runs, {pids:?}");
+        wait_until("initdb outlived its kill", || !process_alive(pids[0])).await;
+        write(gate, "release", "");
+        wait_until("the held child had not exited", || gate.join("done").exists()).await;
+
         let has = |name: &str| data.join(name).exists();
         assert!(has("PG_VERSION") && has("postgresql.conf"), "{point:?}");
         match point {
             KillPoint::BeforeBootstrap => assert!(!has("global/pg_control"), "{point:?}"),
-            KillPoint::DuringBootstrap => {
+            KillPoint::AfterBootstrap | KillPoint::DuringSetup => {
                 assert!(has("global/pg_control") && !has("base/4"), "{point:?}");
-            }
-            KillPoint::DuringSetup => {
-                assert!(has("global/pg_control") && !has("base/5"), "{point:?}");
             }
         }
         settings
@@ -3122,11 +3177,12 @@ mod tests {
     /// #1819: each state a killed `initdb` leaves with `PG_VERSION` in it
     /// comes back from a launch initialised. Before, `postgresql.conf` read
     /// as "initialised" and each failed every launch.
+    #[cfg(unix)]
     #[tokio::test]
     async fn each_directory_a_killed_initdb_leaves_comes_back_from_a_launch() {
         for point in [
             KillPoint::BeforeBootstrap,
-            KillPoint::DuringBootstrap,
+            KillPoint::AfterBootstrap,
             KillPoint::DuringSetup,
         ] {
             let dir = tempfile::tempdir().unwrap();
