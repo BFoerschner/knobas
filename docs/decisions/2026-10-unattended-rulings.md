@@ -15263,3 +15263,24 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1882.
 - **The #1196 and #1199 entries stay verbatim.** *Ruling:* the new entry says it amends where they
   type the mirror. *Reasoning:* §10.8 is a dated ledger, and the earlier entries were true on
   their dates. *Reversing:* n/a.
+
+Reviewed 2026-10-23 by the merge-manager (Opus), PR #1885.
+
+- **Reserved for Björn, ruled by the implementer on Opus, confirmed by the merge-manager on Opus:
+  the IPC schema change.** *Fork:* keep `roles` and `role_misses` optional in the mirror, or type
+  them as serde sends them. *Ruling:* confirmed as ruled. `SourceSummary` derives `Serialize`
+  only, with no struct-level serde attribute and no `skip_serializing_if` on either field, so both
+  always reach the wire, `[]` when empty; the new unit test pins that and fails on a
+  `skip_serializing_if` (implementer's mutant 1). Its three answering commands (`list_sources`,
+  `add_source`, `update_source`) are unchanged, and svelte-check sees every reader. *Reversing:*
+  re-add the two attributes and regenerate.
+- **The §10.8 entry names the `settings.ts` fallbacks too.** *Fork:* the entry said "their `??
+  []` fallbacks go" of the three hand-written projections, but the diff also drops two in
+  `tf/settings/settings.ts` (`sourceState`, `roleMissLines`), which read the generated type.
+  *Ruling:* the entry names them, so it matches the diff. The #1196 and #1199 entries stay
+  verbatim. *Reversing:* trivial.
+- **#1884 stands as the class; a type-aware scan is folded into it.** *Fork:* its instance list
+  comes from a grep it calls incomplete. *Ruling:* a TypeScript-checker scan of every `??` under
+  `app/src` whose left side cannot be nullish adds no non-test, non-fake instance beyond the two
+  it lists; it is posted on #1884 with the fake-IPC hits, and no second issue is opened.
+  *Reversing:* n/a.

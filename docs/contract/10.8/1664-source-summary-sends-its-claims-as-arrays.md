@@ -19,8 +19,9 @@
   fills both into the sources a test names). The shell's projections fed from `list_sources`
   require them: `tf/roles.svelte.ts`'s `ClaimingSource` (and `claims()` takes
   `Pick<ClaimingSource, "roles">`), `TfShellPorts.listSources`, and the fake IPC's `FakeClaimer`.
-  Their `?? []` fallbacks go, as does a dead one on `SourceDescriptor.roles` in
-  `shell/kind-registry.svelte.ts`. The job's `SourceFacts` keeps `roles` optional, and
+  Their `?? []` fallbacks go, as do the two in `tf/settings/settings.ts` (`sourceState` and
+  `roleMissLines`, which read `role_misses` through a `Pick<SourceSummary, …>`) and a dead one on
+  `SourceDescriptor.roles` in `shell/kind-registry.svelte.ts`. The job's `SourceFacts` keeps `roles` optional, and
   `staleBuilds` reads it behind `source.roles !== undefined` (#1884). Witnessed by `knobas-app`'s
   `sources::tests::a_summary_that_claims_and_misses_nothing_still_sends_both_arrays` and by
   svelte-check.
