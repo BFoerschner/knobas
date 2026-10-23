@@ -114,6 +114,34 @@ check pass $'cat > /tmp/x <<EOF\necho x > .git/info/exclude\nEOF'
 check pass $'cat <<-EOF\n\tcd x && y\n\tEOF\nls'
 check pass $'cat <<A <<B\ncd x && y\nA\ncd x && y\nB'
 check pass 'cat <<<"$x" > /tmp/y'
+# a bare `((...))` is arithmetic: its `<<` is a shift, so the next line is read
+check refuse $'(( n = 1 << 3 ))\ncd x && ls'
+check refuse $'((x<<2))\necho x > .git/info/exclude'
+check refuse $'if ((x<<2)); then ls; fi\ncd x && ls'
+check refuse $'for ((i=0; i<<1; i++)); do ls; done\ncd x && ls'
+check pass '((x<<2))'
+check pass 'for ((i=0; i<3; i++)); do echo $i; done'
+# ...but a `((` whose inner group is not closed by `))` is two subshells, as the shell reads it
+check refuse '((cd x); ls)'
+check refuse 'echo $((cd x); ls)'
+# a substitution inside arithmetic runs
+check refuse 'echo $(( $(cd x && pwd) + 1 ))'
+check refuse '(( $(cd x && echo 1) ))'
+check pass 'echo $(( $(wc -l < x) + 1 ))'
+# `function f` is no command: the body's first word is
+check refuse 'function f { cd x; ls; }'
+check pass 'function f { ls; }'
+# the shell runs the substitutions in the body of a heredoc whose delimiter is unquoted
+check refuse $'cat <<EOF\n$(cd x && pwd)\nEOF'
+check refuse $'cat <<EOF\n`cd x && pwd`\nEOF'
+check refuse $'cat > /tmp/x <<EOF\nline $(cd x &&\npwd) end\nEOF'
+check refuse $'<<EOF\n$(cd x && pwd)\nEOF\nls'
+check pass $'cat <<\'EOF\'\n$(cd x && pwd)\nEOF'
+check pass $'cat <<"EOF"\n`cd x && pwd`\nEOF'
+check pass $'cat <<\\EOF\n$(cd x && pwd)\nEOF'
+check pass $'cat <<EOF\n\\$(cd x && pwd)\nEOF'
+check pass $'cat <<EOF\nroot: $(git rev-parse --show-toplevel)\nEOF'
+check pass $'cat > /tmp/y <<EOF\n$(cat ./.git/HEAD)\nEOF'
 
 # shell configuration
 check refuse 'echo export X=1 >> ~/.bashrc'
@@ -126,6 +154,16 @@ check refuse 'sed -Ei s/a/b/ ~/.bashrc'
 check refuse 'sed --in-place=.bak s/a/b/ ~/.bashrc'
 check pass 'perl -pe s/a/b/ ~/.zshrc'
 check pass 'sed -n /PATH/p ~/.bashrc'
+# an `i` in an option's glued argument is no in-place flag (`-Mstrict`, `-Ilib`, `-fedit.sed`)
+check pass "perl -Mstrict -ne 'print' ~/.bashrc"
+check pass "perl -MList::Util=sum -ne 'print' ~/.bashrc"
+check pass 'perl -Ilib -ne print ~/.bashrc'
+check pass 'sed -fedit.sed ~/.bashrc'
+check refuse 'perl -lni -e print ~/.zshrc'
+check refuse 'perl -0777 -pi -e s/a/b/ ~/.zshrc'
+check refuse 'sed -ni /x/p ~/.bashrc'
+check refuse "sed -I '' s/a/b/ ~/.bashrc"
+check refuse 'sed --in-pl s/a/b/ ~/.bashrc'
 
 # not a Bash call, or no command: let through
 printf '%s' '{"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}}' | python3 -I "$guard" || fail "a Read call was refused"

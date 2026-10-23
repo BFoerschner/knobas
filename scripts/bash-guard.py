@@ -23,8 +23,10 @@ The shapes, each one a prompt or a rule of CLAUDE.md's *Machine* section:
 Only the command line is read, the way the shell reads it: quotes first. Quoted
 text and heredoc bodies are data, never commands, so a commit message or a
 script written through a heredoc that mentions `cd` passes; only an unquoted
-`<<` that is not `<<<` opens a heredoc. What runs as a command is read as one:
-a `$(...)` or backquote (quoted or not), and the string of an `eval` or `sh -c`.
+`<<` that is not `<<<` opens a heredoc, and a `((...))` is arithmetic, whose `<<`
+is a shift. What runs as a command is read as one: a `$(...)` or backquote
+(quoted or not, in arithmetic too, and in the body of a heredoc whose delimiter
+is unquoted), and the string of an `eval` or `sh -c`.
 
 Test: scripts/bash-guard-test.sh, run by `just witness-unit`.
 """
@@ -35,13 +37,18 @@ import sys
 from typing import NamedTuple
 
 WRITERS = {"rm", "rmdir", "mv", "cp", "touch", "mkdir", "ln", "tee", "truncate", "install", "chmod", "chown", "rsync"}
-# Writers only in place: `-i` alone or bundled (`perl -pi`, `sed -Ei`), or sed's `--in-place`.
-IN_PLACE = {"sed": r"^(-[a-zA-Z]*i|--in-place)", "perl": r"^-[a-zA-Z]*i"}
+# Writers only in place: `-i` alone or bundled after flags that take no argument (`perl -pi`,
+# `sed -Ei`, BSD sed's `-I`), or sed's `--in-place` and its abbreviations down to `--i`. An `i` in an
+# option's glued argument is no flag: `perl -Mstrict`, `perl -Ilib`, `sed -fedit.sed`.
+IN_PLACE = {"sed": r"^(-[nErsuzal]*[iI]|--i(n(-(p(l(a(ce?)?)?)?)?)?)?(=|$))",
+            "perl": r"^-[aclfnpsStTuUwWX0-9]*i"}
 # Words before the command's name, each with the options of its own that take an argument.
 WRAPPERS = {"sudo": {"-u", "-g"}, "command": set(), "exec": set(), "time": set(), "nohup": set(),
             "nice": {"-n"}, "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s"}, "builtin": set()}
 # Reserved words lead into the command they hold: `if cd x`, `do cd x`, `{ cd x`.
 RESERVED = {"{", "}", "!", "if", "then", "else", "elif", "fi", "do", "done", "while", "until"}
+# Words after which a `((` is arithmetic, as at a command's start: `if ((x))`, `for ((i=0; ...))`.
+ARITHMETIC_LEADS = RESERVED | {"for", "time"}
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 MAX_DEPTH = 8  # eval and `sh -c` nested deeper than this are not read
 SHELL_CONFIG = (".bashrc", ".bash_profile", ".profile", ".zshrc", ".zprofile", ".zshenv", ".zlogin")
@@ -69,13 +76,14 @@ class Parser:
 
     Quoting is known at every character, so only an unquoted `<<` that is not
     `<<<` opens a heredoc, and its body (the lines after the next unquoted
-    newline, up to the delimiter) is skipped as data. A `$(...)` or backquote,
-    quoted or not, is parsed as commands of its own.
+    newline, up to the delimiter) is data. A `$(...)` or backquote, quoted or
+    not, is parsed as commands of its own, and so is one in the body of a
+    heredoc whose delimiter is unquoted, since the shell runs it.
     """
 
     def __init__(self, text):
         self.s = text
-        self.pending = []  # heredocs opened on the current line: (delimiter, strip tabs)
+        self.pending = []  # heredocs opened on the current line: (delimiter, strip tabs, quoted, its command)
 
     def parse(self, i, stop=None):
         """The commands from `i` up to `stop` (`)` or a backquote; None runs to the end), and the index past it."""
@@ -130,7 +138,15 @@ class Parser:
             if c == "\n":
                 new_command()
                 i = self.heredoc_bodies(i + 1)
+                new_command()  # a body's substitutions may have filled a command of only `<<EOF`
                 continue
+            if s.startswith("((", i) and word is None and all(w.text in ARITHMETIC_LEADS for w in commands[-1]):
+                arithmetic = Word()
+                j = self.arithmetic(i, arithmetic)
+                if j is not None:
+                    commands[-1].append(arithmetic)
+                    i = j
+                    continue
             if c in ";|&()":
                 if c == "(":
                     parens += 1
@@ -145,7 +161,7 @@ class Parser:
                 continue
             if s.startswith("<<", i):  # `<<<`, a here-string, reads an empty delimiter: no heredoc
                 end_word()
-                i = self.heredoc(i + 2)
+                i = self.heredoc(i + 2, commands[-1])
                 continue
             if c == ">":
                 end_word()
@@ -203,20 +219,43 @@ class Parser:
     def expansion(self, i, word):
         """Read the `$((...))`, `$(...)` or backquote at `i` into `word`; the index past it."""
         if self.s.startswith("$((", i):
-            return self.arithmetic(i, word)
+            j = self.arithmetic(i, word)
+            if j is not None:
+                return j
         return self.substitution(i, word)
 
     def arithmetic(self, i, word):
-        """Read a `$((...))` at `i` into `word` as one expansion: its `<<` is a shift, not a heredoc."""
+        """Read the `$((...))` or `((...))` at `i` into `word` as one expansion, or None when it is no arithmetic.
+
+        Its `<<` is a shift, not a heredoc, and a substitution inside it runs, so
+        it is parsed. As the shell reads it, `((` is arithmetic only when the group
+        its second `(` opens is closed by `))`: `((cd x); ls)` is two subshells.
+        """
         s = self.s
-        j, parens = i + 1, 0
+        inner = Word()  # the substitutions inside, whose text is already in s[i:j]
+        j, parens = i + (s[i] == "$"), 0
         while j < len(s):
+            if s[j] == "`" or (s.startswith("$(", j) and not s.startswith("$((", j)):
+                j = self.substitution(j, inner)
+                continue
+            if s[j] == '"':
+                j = self.double_quoted(j + 1, inner)
+                continue
+            if s[j] == "'":
+                j = find_or_end(s, "'", j + 1) + 1
+                continue
             parens += {"(": 1, ")": -1}.get(s[j], 0)
             j += 1
-            if parens == 0:
+            if parens == 1 and s[j - 1] == ")":  # the second `(` is closed
+                if not s.startswith(")", j):
+                    return None
+                j += 1
                 break
+        else:
+            return None
         word.text += s[i:j]
         word.expands = True
+        word.subs += inner.subs
         return j
 
     def substitution(self, i, word):
@@ -230,18 +269,20 @@ class Parser:
         word.subs.append(commands)
         return j
 
-    def heredoc(self, i):
+    def heredoc(self, i, command):
         """Read the delimiter of a heredoc whose `<<` ends before `i`; its body starts at the next unquoted newline.
 
         The third `<` of a here-string ends the delimiter at once, so `<<<` opens nothing.
+        `command` is the list of words the heredoc belongs to, which its body's substitutions join.
         """
         s = self.s
         strip_tabs = s.startswith("-", i)
         i += strip_tabs
         while i < len(s) and s[i] in " \t":
             i += 1
-        delimiter = ""
+        delimiter, quoted = "", False
         while i < len(s) and s[i] not in " \t\n;|&<>()":
+            quoted = quoted or s[i] in "'\"\\"
             if s[i] in "'\"":
                 j = find_or_end(s, s[i], i + 1)
                 delimiter += s[i + 1:j]
@@ -252,21 +293,45 @@ class Parser:
             delimiter += s[i]
             i += 1
         if delimiter:
-            self.pending.append((delimiter, strip_tabs))
+            self.pending.append((delimiter, strip_tabs, quoted, command))
         return i
 
     def heredoc_bodies(self, i):
-        """Skip the bodies of the heredocs opened on the line that ended before `i`."""
+        """Read the bodies of the heredocs opened on the line that ended before `i`; the index past the last.
+
+        A body is data, but when its delimiter is unquoted the shell runs its
+        `$(...)` and backquotes: they join the heredoc's command as one more word.
+        """
         s = self.s
-        for delimiter, strip_tabs in self.pending:
+        pending, self.pending = self.pending, []
+        for delimiter, strip_tabs, quoted, command in pending:
+            body = Word()
             while i < len(s):
                 j = find_or_end(s, "\n", i)
                 line = s[i:j]
-                i = j + 1
                 if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                    i = j + 1
                     break
-        self.pending = []
+                i = j + 1 if quoted else self.body_line(i, body)
+            if body.subs:
+                body.text = "<<" + delimiter  # the substitutions' text is no path to write to
+                command.append(body)
         return min(i, len(s))
+
+    def body_line(self, i, word):
+        """Read a line of an unquoted heredoc's body from `i`, its substitutions into `word`; the index past its newline.
+
+        Quotes are text there; a backslash escapes `$`, a backquote or itself.
+        """
+        s = self.s
+        while i < len(s) and s[i] != "\n":
+            if s[i] == "\\":
+                i += 2
+            elif s[i] == "`" or s.startswith("$(", i):
+                i = self.expansion(i, word)
+            else:
+                i += 1
+        return i + 1
 
 
 def commands_of(command):
@@ -280,7 +345,7 @@ def commands_of(command):
 
 
 def name_and_args(words):
-    """The command's name and its arguments, past assignments, wrappers like `env -C dir` and reserved words."""
+    """The command's name and its arguments, past assignments, wrappers like `env -C dir`, reserved words and `function f`."""
     i = 0
     while i < len(words):
         text = words[i].text
@@ -304,6 +369,9 @@ def name_and_args(words):
             continue
         if text in RESERVED:
             i += 1
+            continue
+        if text == "function":  # `function f { ...; }`: the body's first word is the command
+            i += 2
             continue
         break
     if i >= len(words):
