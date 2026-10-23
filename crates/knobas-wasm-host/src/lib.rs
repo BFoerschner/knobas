@@ -470,6 +470,14 @@ pub(crate) struct HostState {
     download: source::DownloadSlot,
     /// The instance id, for the component's log lines.
     source_id: String,
+    /// What the component may still write to the log.
+    log: limits::LogBudget,
+}
+
+impl Drop for HostState {
+    fn drop(&mut self) {
+        self.report_dropped_log_lines();
+    }
 }
 
 impl HostState {
@@ -491,6 +499,20 @@ impl HostState {
             sink,
             download: source::DownloadSlot::none(),
             source_id,
+            log: limits::LogBudget::new(std::time::Instant::now()),
+        }
+    }
+
+    /// Say how many of the component's log lines were dropped since this
+    /// was last said.
+    fn report_dropped_log_lines(&mut self) {
+        let dropped = self.log.take_dropped();
+        if dropped > 0 {
+            tracing::warn!(
+                source = self.source_id.as_str(),
+                "the external adapter wrote {dropped} more log lines than the host writes \
+                 (100 a call, then one a second); they were dropped"
+            );
         }
     }
 }

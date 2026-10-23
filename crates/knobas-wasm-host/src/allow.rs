@@ -340,8 +340,7 @@ const GLOBAL_UNICAST: (Ipv6Addr, u32) = (Ipv6Addr::new(0x2000, 0, 0, 0, 0, 0, 0,
 fn is_public_v6(ip: Ipv6Addr) -> bool {
     let n = u128::from(ip);
     let inside = |&(block, length): &(Ipv6Addr, u32)| within(n, u128::from(block), length);
-    PUBLIC_V6.iter().any(inside)
-        || (inside(&GLOBAL_UNICAST) && !NOT_PUBLIC_V6.iter().any(inside))
+    PUBLIC_V6.iter().any(inside) || (inside(&GLOBAL_UNICAST) && !NOT_PUBLIC_V6.iter().any(inside))
 }
 
 /// The IPv4 address `ip` carries: IPv4-mapped, NAT64's well-known prefix,

@@ -178,8 +178,16 @@ impl sink::Host for HostState {
     }
 }
 
+/// Each line cut and the call's lines paced ([`limits::LogBudget`]): the
+/// deadline bounds how long a component runs, not how much it writes to
+/// the reader's log file (#1641).
 impl log::Host for HostState {
     async fn log(&mut self, level: log::Level, message: String) {
+        if !self.log.admit(std::time::Instant::now()) {
+            return;
+        }
+        self.report_dropped_log_lines();
+        let message = limits::log_line(&message);
         let source = self.source_id.as_str();
         match level {
             log::Level::Trace => tracing::trace!(source, "{message}"),

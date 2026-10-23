@@ -71,6 +71,9 @@ knobas-wasm-host = { path = ".", features = ["test-util"] }
 # witnessed where the engine reads it (#1380).
 knobas-sync = { path = "../knobas-sync" }
 tokio.workspace = true
+# Catches the host's log lines for a component that floods its log (#1641).
+# The release `knobas-app` already pulls.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry"] }
 # Components written as text for the version check: one that exports a source
 # at an unsupported major version, one that exports none. Pinned to the copy
 # wasmtime's own tree resolves.
