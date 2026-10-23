@@ -13858,7 +13858,7 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   `Protocol { status: None }` reading. *Reasoning:* the server read the request whole before it
   closed; whether it acted is unknown, and ADR-0012's once-sent reading is the ticket's
   constraint. Whether that reading should be `Unconfirmed` rather than `Protocol` is outside the
-  ticket and filed as a follow-up. *Reversing:* low.
+  ticket: #1821. *Reversing:* low.
 - **A reset rather than a close.** *Fork:* also resend a read whose connection was reset
   (`ECONNRESET`) before answering. *Ruling:* no, `IncompleteMessage` only, as the ticket names.
   *Reasoning:* the seen failure is the clean close; the reset shape has not been seen here and
