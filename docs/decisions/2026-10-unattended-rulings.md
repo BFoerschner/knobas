@@ -14448,3 +14448,45 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   rules out a sign, and `from_str_radix` takes a sign only in front), so only an input that used
   to panic reads differently, as the §10.8 entry says. *Reversing:* low. `take_quoted` would
   answer `Option`, `parse` would need a shape change, and that change gets its own §10.8 entry.
+## #1836: free the merge-tail lock when its holder dies (Fable implementer, 2026-10-23)
+
+- **What proves a holder alive.** *Fork:* keep the MERGED/CLOSED-plus-grace rule and add a
+  liveness rule beside it, or replace it. *Ruling:* replace it. A holder's claim is
+  `$LOCK/alive`, touched by every lock call the holder makes (`assert`, `partner`, `merged`, a
+  re-entrant `take`) and every 30 s by `hold <PR> <command…>` while the command runs; a claim
+  older than the lease is a dead holder, whatever its PR's state. The lock no longer calls `gh`.
+  *Reasoning:* a holder that merged and released is gone, and a holder that merged and died
+  stops refreshing, so the lease covers every case the old rule did; the old rule missed the
+  case that cost 20 min on 2026-10-23 (a holder dead with its PR open), and its `gh` call was a
+  failure mode of its own (an API error read as UNKNOWN meant no takeover ever). *Reversing:*
+  restore the `gh pr view` branch beside the lease check; the test's `gh` stub would go back to
+  answering.
+- **The lease.** *Ruling:* 600 s (`KNOBAS_MERGE_TAIL_LEASE`), refreshed every poll (30 s)
+  under `hold`; a dead holder loses the lock to the next waiter within lease + poll, 630 s.
+  *Reasoning:* between two lock calls a live holder following the brief spends at most a few
+  minutes (rebase, a `node_modules` copy, the mergeable poll of up to 2 min, model latency); the
+  gate itself runs under `hold` and so does not count. A live holder that loses the lock anyway
+  learns it at `assert` and stops, so the cost of a lease too short is a wasted gate, not a double
+  merge, and 600 s keeps a 2× margin over the longest legitimate gap. *Reversing:* one default.
+- **`take` returns while still queued.** *Ruling:* exit 4 after 100 s (`KNOBAS_MERGE_TAIL_WAIT`),
+  queue entry kept, and the briefs say to call it again in the foreground. *Reasoning:* the Bash
+  tool kills a foreground call at 120 s by default, and a waiter that moved `take` to the
+  background to escape that (the #1835 merge-manager did, with a Monitor) would, if it died,
+  take the lock for nobody the moment its turn came. A `take` that returns under the default
+  timeout needs neither. *Reversing:* raise the default; nothing else reads the exit code.
+- **A lock the pre-#1836 script took.** *Ruling:* with no `alive` file the claim is as old as
+  `holder`, written at `take`. *Reasoning:* the four merge-managers waiting in old `take` loops
+  when this merges acquire with old code and never write `alive`; measuring from `holder` gives
+  such a holder 600 s from its take, enough for a usual tail (gate p90 290 s) and bounded if it
+  dies. A tail longer than that loses the lock to a new-code waiter and stops at `assert`; named
+  in the PR. *Reversing:* a one-line special case, and it stops mattering once no old `take` runs.
+- **How an agent waits.** *Fork:* the briefs said a wait on background work is a Monitor whose
+  until-loop ends on the work's own state (#1829, the same morning); the #1834 and #1817
+  merge-managers did exactly that and died anyway. *Ruling:* a subagent waits in the foreground
+  (one Bash call, timeout 600000, an `until` loop on the work's own end state, called again when
+  it returns on the timeout) and never ends its turn to wait; a Monitor is for events acted on
+  while working. *Reasoning:* this session's subagent transcripts show 60 agents ending a turn
+  with a Monitor armed; 25 resumed at least once, 34 never did (an upper bound, some were
+  replaced first), among them both of today's dead merge-managers, whose Monitors demonstrably
+  fired (their task files hold the event and `[exited with code 0]`). The resume is the harness's,
+  not the repo's; the foreground wait does not depend on it. *Reversing:* the #1829 wording.
