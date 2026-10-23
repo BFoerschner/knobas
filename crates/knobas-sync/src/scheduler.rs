@@ -2025,18 +2025,21 @@ impl Inner {
         // behind the concurrency cap has been waiting, and the bar should say
         // so.
         let started = std::time::Instant::now();
-        // Closes the watchers however this task ends. `Watchers::close` is
+        // Ends the run however this task ends. `Watchers::close` is
         // first-call-wins, so the real ending below still wins on every
         // ordinary path; this one fires only when the task never reached it --
         // a panicking adapter, or the abort `shutdown` falls back on. Without
         // it a caller holding that run's id waits for ever, and the source is
         // never released: the same failure ADR-0005 is about, arriving through
-        // a door the happy path cannot see.
-        let _closing = Closing {
+        // a door the happy path cannot see. Until the verdict below is in, it
+        // also records the ending (#1638), so the row and the `sync:state`
+        // ending exist whatever the adapter did.
+        let mut closing = Closing {
             watchers: Arc::clone(&watchers),
             source_id: source_id.clone(),
             run_id,
             started,
+            record: Some(Arc::clone(&self)),
         };
         let permit = tokio::select! {
             biased;
@@ -2064,7 +2067,27 @@ impl Inner {
         // Dropping the run future above is what rolls its transaction back and
         // closes its connection -- which is why `settle` can still write.
 
-        settle(&self.deps, &source_id, run_id, &result).await;
+        // From here this task records its own ending, so the guard only closes
+        // the watchers if the task dies on the way: once, never a second row
+        // write or a second `sync:state` ending.
+        closing.record = None;
+        self.end_run(&source_id, run_id, &result, &watchers, started)
+            .await;
+    }
+
+    /// Record a run's verdict and tell everyone watching how it ended: settle,
+    /// the purge a delete left for it, the ending (which releases the source),
+    /// the wake. The tail of [`run_task`](Self::run_task), and what the
+    /// [`Closing`] guard runs for a task that died before it (#1638).
+    async fn end_run(
+        &self,
+        source_id: &str,
+        run_id: i64,
+        result: &RunResult,
+        watchers: &Watchers,
+        started: std::time::Instant,
+    ) {
+        settle(&self.deps, source_id, run_id, result).await;
         // Only a run that committed changed the mirror. Not awaited: the
         // pass is a background task, and the run's ending must not wait on it.
         if result.outcome == SyncOutcome::Ok {
@@ -2072,7 +2095,7 @@ impl Inner {
         }
         let ending = ending(
             run_id,
-            &source_id,
+            source_id,
             result.outcome,
             result.error.clone(),
             u64::try_from(result.counts.upserted).unwrap_or(0),
@@ -2087,8 +2110,8 @@ impl Inner {
             // all. Applied *before* the ending, so a caller that has been told
             // the run is over is looking at a mirror this run no longer owns.
             let mut claims = self.claims.lock().await;
-            if claims.pending_purges.remove(&source_id) {
-                purge_again(&self.deps, &source_id).await;
+            if claims.pending_purges.remove(source_id) {
+                purge_again(&self.deps, source_id).await;
             }
             // The ending, and with it the release of the source: a trigger that
             // finds these watchers closed knows the run is over and may start
@@ -2111,34 +2134,92 @@ impl Inner {
     }
 }
 
-/// What a run whose task died without settling is reported as.
+/// What a run whose task died before its verdict is reported as, in its row and
+/// in its ending.
 ///
-/// Not a lie about the data: the run's transaction went with the task, so
-/// nothing it had fetched landed. It is a lie about nothing else either --
-/// there is no outcome recorded for such a run, which is exactly what the
-/// sentence says.
-const RUN_STOPPED_MESSAGE: &str = "the run stopped without recording an outcome";
+/// Not a claim about the data beyond what is true: the run's transaction went
+/// with the task, so nothing it had fetched landed. It says no more than that
+/// the run did not get to say how it went. Until #1638 it read "without
+/// recording an outcome"; the guard now records this one.
+const RUN_STOPPED_MESSAGE: &str = "the run stopped before it could finish";
 
-/// Closes a run's watchers if its task ends without doing so itself.
+/// The verdict [`Closing`] records for a run whose task died before its own:
+/// an error, on the ladder like any other (#1638). A panic is an adapter bug,
+/// and a bug that recurs every run backs off like one that answers an error.
+fn stopped() -> RunResult {
+    RunResult {
+        outcome: SyncOutcome::Error,
+        counts: run_log::RunCounts::default(),
+        error: Some(RUN_STOPPED_MESSAGE.to_owned()),
+    }
+}
+
+/// Ends a run if its task ends without doing so itself.
 ///
 /// A guard rather than a `catch_unwind` or a second code path: this is the only
 /// construction that also covers the abort in [`Scheduler::shutdown`], and it
 /// cannot be forgotten by a later edit to `run_task` the way a line at the
 /// bottom of the function can.
 ///
+/// **Two halves** (#1638, spec #1619). While `record` is set -- the task has
+/// not reached its verdict -- a drop hands [`Inner::end_run`] to the
+/// scheduler's [`Background`] set with [`stopped`]: the row is finished, the
+/// backoff and the `sync:state` ending follow as for any failed run, and the
+/// watchers are closed after the row, as on the ordinary path. That is the
+/// panicking adapter. Once the set has closed -- the quit began, and the abort
+/// in `shutdown` comes after that -- the spawn is refused and only the second
+/// half runs: the watchers are closed here, now, and the row is
+/// `reconcile_abandoned`'s at the next start, since the pool is about to close
+/// under any write. The second half is also what a task that dies inside
+/// `end_run` gets, and what the spawned `end_run` itself carries if it is
+/// aborted.
+///
 /// The panicking-adapter case runs this drop *during an unwind*, where a second
 /// panic escaping it aborts the process. [`Watchers::close`] is written not to
 /// panic for that reason -- it contains a misbehaving sink rather than letting
-/// it out -- so this guard is safe on the very path it exists for.
+/// it out -- and the spawn is only attempted inside a runtime, where
+/// [`Background::spawn`] does not panic, so this guard is safe on the very path
+/// it exists for.
 struct Closing {
     watchers: Arc<Watchers>,
     source_id: String,
     run_id: i64,
     started: std::time::Instant,
+    /// The scheduler, while the ending is still this guard's to record.
+    record: Option<Arc<Inner>>,
 }
 
 impl Drop for Closing {
     fn drop(&mut self) {
+        if let Some(inner) = self.record.take()
+            && tokio::runtime::Handle::try_current().is_ok()
+        {
+            // Carries the second half into the task: if the task is aborted
+            // or dropped unrun, its drop closes the watchers.
+            let fallback = Closing {
+                watchers: Arc::clone(&self.watchers),
+                source_id: self.source_id.clone(),
+                run_id: self.run_id,
+                started: self.started,
+                record: None,
+            };
+            let background = inner.background.clone();
+            let spawned = background.spawn(async move {
+                let fallback = fallback;
+                inner
+                    .end_run(
+                        &fallback.source_id,
+                        fallback.run_id,
+                        &stopped(),
+                        &fallback.watchers,
+                        fallback.started,
+                    )
+                    .await;
+            });
+            if spawned {
+                return;
+            }
+        }
         self.watchers.close(ending(
             self.run_id,
             &self.source_id,
