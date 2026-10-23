@@ -2,6 +2,13 @@
 # decides the toolchain. An inherited RUSTUP_TOOLCHAIN would silently
 # override the pin and let the gate pass on an unpinned compiler.
 
+# Four rustc jobs per cargo unless the caller says otherwise (#1892). Cargo's
+# own default is one per core, twelve here, and up to two gates and three
+# agents' builds share those cores; the briefs export 4 for every agent call,
+# and this is the same figure for a call that forgot. `CARGO_BUILD_JOBS=12
+# just check` still asks for twelve.
+export CARGO_BUILD_JOBS := env("CARGO_BUILD_JOBS", "4")
+
 # `front` runs *beside* the cargo chain, not before it. Neither writes what
 # the other reads: svelte-check, vitest and `vite build` never touch
 # `target/`, and what `front` produces (`app/node_modules`, `app/dist`) no
@@ -561,6 +568,7 @@ witness-unit:
     scripts/merge-tail-lock-test.sh
     scripts/gate-scope-test.sh
     scripts/gate-slot-test.sh
+    scripts/machine-load-test.sh
     scripts/docs-check-test.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh
@@ -592,6 +600,20 @@ pre-gate:
         echo "pre-gate: WARNING cargo's rustc-wrapper '$wrapper' is missing; every cargo call will fail (testenv/README.md, 'sccache on a dev machine')"
     elif [ -n "$wrapper" ] && [ "$(basename "$wrapper")" = sccache ] && ! "$wrapper" --version >/dev/null 2>&1; then
         echo "pre-gate: WARNING sccache at '$wrapper' does not run (testenv/README.md, 'sccache on a dev machine')"
+    fi
+    # A niced sccache server nices every compile on the machine (#1892):
+    # sccache runs rustc as the server's child, and the server takes the
+    # priority of whichever cargo call started it. On 2026-10-23 one had run
+    # at nice 10 for eleven hours, so the gates' compiles ran niced behind
+    # everything else. One line, never a failure.
+    if [ -n "$wrapper" ] && [ "$(basename "$wrapper")" = sccache ]; then
+        # The server is the `sccache` with no arguments; a client names the compiler it wraps.
+        for p in $(pgrep -f '(^|/)sccache$' || true); do
+            ni=$(ps -o ni= -p "$p" 2>/dev/null | tr -d ' ' || true)
+            if [ -n "$ni" ] && [ "$ni" -gt 0 ]; then
+                echo "pre-gate: WARNING the sccache server (pid $p) runs at nice $ni, and so does every compile it runs; 'sccache --stop-server' when no build is running, and the next cargo call starts it at normal priority"
+            fi
+        done
     fi
     before=$(snapshot)
     # A leftover conflict marker, then the bundle build (#999): PR #997's
@@ -921,6 +943,32 @@ test:
     fi
     [ "$jobs" -le "$cores" ] || jobs=$cores
 
+    # TEST THREADS PER BINARY, T = 2 (#1892): libtest's own default is one
+    # test thread per core, so six binaries at once could run 72 tests, and
+    # nearly every one of them starts with a `create database` on the gate's
+    # server. That is where a gate's load came from: on 2026-10-23, sampling
+    # the runnable threads of one `just test`'s own processes (the daemonized
+    # postmaster and its backends included) every 2 s, beside the loop's other
+    # work, warm tree, one run each:
+    #   T=12 (default): run 134 s, own runnable threads mean 20.0 (p90 36), 14.4 of them Postgres
+    #   T=4:            run 138 s, mean 8.4 (p90 16), Postgres 5.2
+    #   T=2:            run 158 s, mean 4.5 (p90 12), Postgres 2.8
+    # The run is bound by the server and the file system (a scratch
+    # database's files are created, then unlinked with the root), not by test
+    # threads, so a quarter of the load costs a sixth more time. Two gates'
+    # test runs at T=2 fit the twelve cores; at the default, one did not.
+    # `KNOBAS_TEST_THREADS` overrides it; it reaches every binary and the
+    # doc-test run as `RUST_TEST_THREADS`.
+    threads=${KNOBAS_TEST_THREADS:-2}
+    case $threads in
+        ''|*[!0-9]*) echo "error: KNOBAS_TEST_THREADS must be a whole number of at least 1, not '$threads'" >&2; exit 1 ;;
+    esac
+    threads=$((10#$threads))
+    if [ "$threads" -lt 1 ]; then
+        echo "error: KNOBAS_TEST_THREADS must be at least 1 (libtest reads 0 as an error)" >&2; exit 1
+    fi
+    export RUST_TEST_THREADS=$threads
+
     # One binary: run it with everything it prints in `out/<n>.log`, its exit
     # status in `out/<n>.status`, and one line on stdout. The summary is the
     # binary's own `test result:` line reduced to its counts and time.
@@ -951,7 +999,7 @@ test:
     export -f run_one
     mkdir "$gate/out"
 
-    echo "test: $count binaries, $jobs at a time, doc-tests alongside; one Postgres for all of them"
+    echo "test: $count binaries, $jobs at a time with $threads test threads each, doc-tests alongside; one Postgres for all of them"
     run_start=$SECONDS
     ( awk '{ print NR }' "$gate/tests" | xargs -P "$jobs" -I{} bash -c 'run_one "$1"' _ {} ) 3>&- &
     pool_pid=$!
