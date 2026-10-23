@@ -730,3 +730,70 @@ async fn saving_a_query_that_cannot_be_a_list_names_the_rule_and_offers_no_delet
     assert!(!message.contains("Delete it"), "{message}");
     assert!(!message.contains("Needs attention"), "{message}");
 }
+
+/// The rail's two halves -- the built-ins' statement and the saved lists'
+/// reads -- run at once, not one after the other (#1855): at the cap of saved
+/// lists over 100,000 items they read about 65 ms and 45 ms, and in turn they
+/// sat at the 100 ms budget.
+///
+/// Witnessed by locks rather than a clock, on a database of its own (nothing
+/// else in this file may wait on its tables): one table only the built-ins
+/// read (`knobas.monitor_alert`, the estate's alerts) and one only the saved
+/// half reads (`knobas.smart_list`) are held, and both halves have to be
+/// waiting on them at the same moment. Run in turn, the second never starts
+/// while the first is held.
+#[tokio::test]
+async fn the_rails_two_halves_run_at_once() {
+    let pool = knobas_db::test_util::scratch_database("rail_halves")
+        .await
+        .pool(6)
+        .await
+        .expect("a pool on the scratch database");
+    let searcher = Searcher::new(pool.clone());
+    searcher.save_list("Payouts", "payout").await.unwrap();
+
+    let mut builtins = pool.begin().await.unwrap();
+    sqlx::query("lock table knobas.monitor_alert in access exclusive mode")
+        .execute(&mut *builtins)
+        .await
+        .unwrap();
+    let mut saved = pool.begin().await.unwrap();
+    sqlx::query("lock table knobas.smart_list in access exclusive mode")
+        .execute(&mut *saved)
+        .await
+        .unwrap();
+
+    let watch = async {
+        let started = std::time::Instant::now();
+        let mut waiting = 0;
+        while started.elapsed() < std::time::Duration::from_secs(10) {
+            waiting = sqlx::query_scalar::<_, i64>(
+                "select count(distinct relation) from pg_locks
+                  where locktype = 'relation' and not granted
+                    and database = (select oid from pg_database where datname = current_database())
+                    and relation in ('knobas.monitor_alert'::regclass, 'knobas.smart_list'::regclass)",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            if waiting == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        builtins.rollback().await.unwrap();
+        saved.rollback().await.unwrap();
+        waiting
+    };
+    let (rail, waiting) = tokio::join!(searcher.smart_lists(), watch);
+    assert_eq!(
+        waiting, 2,
+        "the rail's halves did not both wait on their tables at once, so one \
+         ran after the other"
+    );
+    let rail = rail.unwrap();
+    assert!(
+        rail.iter().any(|list| list.saved && list.label == "Payouts"),
+        "{rail:?}"
+    );
+}

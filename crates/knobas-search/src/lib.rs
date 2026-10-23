@@ -712,8 +712,10 @@ impl Searcher {
     /// Three round trips with nothing saved: the vocabulary (for the identity
     /// behind `@me`, which every search loads anyway), one statement carrying
     /// the built-ins' counts, freshness stamps and seen-stamps together, and
-    /// one small select over `knobas.smart_list`. Two more once something is
-    /// saved -- see [`saved::summaries`], which is where that cost is stated.
+    /// one small select over `knobas.smart_list`, the last two at once. Two
+    /// more once something is saved -- see [`saved::summaries`], which is
+    /// where that cost is stated -- after the select and still beside the
+    /// built-ins' statement (#1855).
     ///
     /// # Errors
     ///
@@ -724,12 +726,22 @@ impl Searcher {
     }
 
     /// [`Self::smart_lists`] over a vocabulary the caller already loaded.
+    ///
+    /// **The two halves are read at once**, each on a connection of its own
+    /// (#1855): neither reads what the other answers, and in turn they were
+    /// the sum of the built-ins' scan of the mirror and every saved list's
+    /// count, about 65 ms and 45 ms at the cap over 100,000 items, against a
+    /// 100 ms budget. At once they cost the longer of the two. The work is
+    /// the same; the latency is what ⌘K pays.
     async fn smart_lists_of(
         &self,
         vocab: &Vocabulary,
     ) -> Result<Vec<SmartListSummary>, SearchError> {
-        let mut out = lists::summaries(&self.pool, &vocab.identity).await?;
-        out.extend(saved::summaries(&self.pool, vocab, self.corpora()).await?);
+        let (mut out, saved) = tokio::try_join!(
+            lists::summaries(&self.pool, &vocab.identity),
+            saved::summaries(&self.pool, vocab, self.corpora()),
+        )?;
+        out.extend(saved);
         Ok(out)
     }
 
