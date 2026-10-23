@@ -309,11 +309,8 @@ mod tests {
     /// caught here rather than by a real instance.
     #[tokio::test]
     async fn a_refused_connection_is_unreachable() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
         let http = client(
-            &format!("http://127.0.0.1:{port}"),
+            &knobas_mockd::refused_url(),
             &crate::JiraConfig::default(),
             a_credential(),
         )

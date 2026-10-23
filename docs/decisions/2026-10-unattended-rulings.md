@@ -14393,3 +14393,21 @@ Ruled 2026-10-23 by the implementer (Sonnet).
   and a local helper would be an adapter code change made after the live run, which the working model's
   live-run rule would then require again for a refactor that changes no behaviour. The three
   checks agree today. *Reversing:* extract one `fn` and use it in all three places.
+
+## #1831: the remaining dead URLs (Sonnet implementer, 2026-10-23)
+
+- **Where the shared helper lives.** *Fork:* a new shared helper, or edit `knobas_mockd::refused_url`
+  in place and let Jira and TeamCity use it. *Ruling:* edit it in place; Confluence reuses its own
+  `http.rs` `dead_url`, and `knobas-http`'s transport test gets one local copy. *Reasoning:*
+  ADR-0013 freezes mockd at "nothing new"; changing one existing function's body adds nothing, and
+  Jira and TeamCity already depend on it. Confluence has no mockd dev-dependency and should not
+  gain one for a test helper. *Reversing:* one function per crate.
+- **The refused-then-rebound retry test.** *Fork:* move
+  `a_write_that_opted_out_of_retries_is_retried_after_a_refused_connection` to port 1. *Ruling:* no.
+  *Reasoning:* it must bind the same port 120 ms later, which port 1 cannot do unprivileged; it
+  holds no URL for a stranger to answer, and a stolen port fails its `rebind` expect loudly rather
+  than passing on a wrong answer. *Reversing:* n/a.
+- **Left alone.** The `live_*` suites' copies (serial, outside the gate, as #1817 ruled) and every
+  site that holds its listener (mock servers, `SilentPort`-style guards, `knobas-db`'s
+  `embedded.rs` test, whose dropped listener is only a held pid-file port and already names port 1
+  for the dead case).

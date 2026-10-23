@@ -490,10 +490,7 @@ mod tests {
     }
 
     fn dead_port_url() -> String {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        format!("http://127.0.0.1:{port}")
+        knobas_mockd::refused_url()
     }
 
     /// The descriptor a *configured* source reports: the instance's id (which

@@ -234,7 +234,7 @@ fn error_envelope(body: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use knobas_source::AuthMethod;
 
@@ -409,7 +409,7 @@ mod tests {
     ///
     /// Checked once per process, so a machine where something does answer there
     /// fails here, naming the port, rather than in whichever test asked.
-    fn dead_url() -> String {
+    pub(crate) fn dead_url() -> String {
         static REFUSED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
         REFUSED.get_or_init(|| {
             let refused = std::net::TcpStream::connect(("127.0.0.1", 1))

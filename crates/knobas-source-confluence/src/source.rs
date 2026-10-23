@@ -301,10 +301,7 @@ mod tests {
     }
 
     fn dead_port_url() -> String {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        format!("http://127.0.0.1:{port}")
+        crate::http::tests::dead_url()
     }
 
     /// A one-shot Confluence on `127.0.0.1:0` that answers `body` to whatever
