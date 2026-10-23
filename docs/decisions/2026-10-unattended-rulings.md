@@ -13586,3 +13586,9 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   `quanta`'s clock and the test reads `Instant`, and the two can round a refill differently; the
   one is the original test's own allowance at a zero-length window, not a wider tolerance.
   *Reversing:* low.
+- **#1808 (a silent port another bind can take) is fixed here; #1809 is left.** *Fork:* the
+  orchestrator asked for both if they share a cause. *Ruling:* #1808 shares the class (how the
+  embedded tests pick ports) and failed once in this ticket's own 22 runs, so `SilentPort` holds a
+  bound, never-listened socket for each of the three tests that dropped one. #1809 is a scheduler
+  gap bound in `knobas-app`'s bring-up test; its fix needs a marker inside the migration step,
+  which is neither of the causes here. *Reversing:* low.
