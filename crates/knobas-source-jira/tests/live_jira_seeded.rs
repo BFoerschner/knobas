@@ -87,6 +87,12 @@
 //! long status history exists (#1083). Each moves the `PAY` key counter, which
 //! nothing may assume stands still.
 //!
+//! One **version on PAY**, a favourite filter naming it and a board on that
+//! filter, so that a query Jira refuses exists (#1893): the version is deleted
+//! by the test, and the board and the filter, or all three on a failure, by
+//! [`RefusedProbe`]'s `Drop`, which checks each is gone afterwards. A
+//! killed run's probe is taken back by the next run before it starts.
+//!
 //! What a *killed* run left behind is put back by the next one, and by this
 //! suite for **both** of them: [`Seeded::clear_leftovers`] restores the corpus
 //! from `seed-state.json` -- a stray issue deleted, a stray comment deleted, a
@@ -3166,6 +3172,386 @@ async fn only_the_boards_built_on_my_favourite_filters_come_in_when_the_choice_i
         "SEEDED favourite boards: {probe} on favourite filter {filter_id} came in; boards {} and {} did not",
         sprint.board_id, kanban.board_id
     );
+}
+
+/// The names this suite's refused-query probe gives its board, its favourite
+/// filter and its version on PAY (#1893). Not a substring of any other
+/// probe's name: the board listing's `name=` matches on a part of the name.
+const REFUSED_PROBE: &str = "knobas live refused-query probe";
+
+/// One thing the refused-query probe made on the seeded Jira, by its id.
+#[derive(Debug, Clone, PartialEq)]
+enum Probed {
+    Board(u64),
+    Filter(u64),
+    Version(String),
+}
+
+impl Probed {
+    fn path(&self) -> String {
+        match self {
+            Probed::Board(id) => format!("rest/agile/1.0/board/{id}"),
+            Probed::Filter(id) => format!("rest/api/2/filter/{id}"),
+            Probed::Version(id) => format!("rest/api/2/version/{id}"),
+        }
+    }
+
+    /// Whether Jira's answer about it says it is not there. Jira Data Center
+    /// 10 answers a filter that is not there 400 ("not available to you,
+    /// perhaps it has been deleted"), to a `GET` and a `DELETE` alike, where
+    /// a board or a version that is not there is a 404.
+    fn gone(&self, status: u16) -> bool {
+        status == 404 || (status == 400 && matches!(self, Probed::Filter(_)))
+    }
+
+    /// The request that removes it. Jira Data Center 10 answers `DELETE` on a
+    /// version 405, so a version goes through `removeAndSwap` (no issue holds
+    /// it).
+    fn removal(&self, http: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
+        match self {
+            Probed::Version(_) => http
+                .post(format!("{url}/{}/removeAndSwap", self.path()))
+                .json(&serde_json::json!({})),
+            Probed::Board(_) | Probed::Filter(_) => http.delete(format!("{url}/{}", self.path())),
+        }
+    }
+}
+
+/// What the refused-query probe made on the seeded Jira (#1893): a version
+/// on PAY, a favourite filter naming it, and a Kanban board on that filter.
+/// [`Drop`] takes back whatever of it is still there, passing or panicking
+/// alike, on a thread with a runtime of its own (the reasons `Labeled`'s
+/// `Drop` gives), and checks each one is gone afterwards.
+struct RefusedProbe {
+    url: String,
+    user: String,
+    password: String,
+    /// In the order it was made.
+    made: Vec<Probed>,
+}
+
+impl RefusedProbe {
+    /// Takes back what a killed run left first, so the views a test counts
+    /// hold no stale probe.
+    async fn new(seeded: &Seeded) -> RefusedProbe {
+        let mine = |rows: serde_json::Value| -> Vec<String> {
+            rows.as_array()
+                .into_iter()
+                .flatten()
+                .filter(|row| {
+                    row["name"]
+                        .as_str()
+                        .is_some_and(|name| name.starts_with(REFUSED_PROBE))
+                })
+                .map(|row| match &row["id"] {
+                    serde_json::Value::String(id) => id.clone(),
+                    other => other.to_string(),
+                })
+                .collect()
+        };
+        // A listing that failed would read as "nothing left behind".
+        let listed = |(status, rows): (u16, serde_json::Value), what: &str| {
+            assert_eq!(
+                status, 200,
+                "listing {what} for a killed run's probe: {rows}"
+            );
+            rows
+        };
+        let boards = listed(
+            seeded
+                .get(&format!(
+                    "rest/agile/1.0/board?name={}",
+                    url_encode(REFUSED_PROBE)
+                ))
+                .await,
+            "the boards",
+        );
+        let favourites = listed(
+            seeded.get("rest/api/2/filter/favourite").await,
+            "the favourite filters",
+        );
+        let versions = listed(
+            seeded.get("rest/api/2/project/PAY/versions").await,
+            "PAY's versions",
+        );
+        let number = |id: String| id.parse::<u64>().expect("a numeric id");
+        let stale: Vec<Probed> = mine(boards["values"].clone())
+            .into_iter()
+            .map(|id| Probed::Board(number(id)))
+            .chain(
+                mine(favourites)
+                    .into_iter()
+                    .map(|id| Probed::Filter(number(id))),
+            )
+            .chain(mine(versions).into_iter().map(Probed::Version))
+            .collect();
+        if let Err(failure) = take_back(
+            &seeded.http,
+            &seeded.url,
+            &seeded.user,
+            &seeded.password,
+            &stale,
+        )
+        .await
+        {
+            panic!("a killed run's refused-query probe is still on the server: {failure}");
+        }
+        RefusedProbe {
+            url: seeded.url.clone(),
+            user: seeded.user.clone(),
+            password: seeded.password.clone(),
+            made: Vec::new(),
+        }
+    }
+
+    /// Own `thing`'s removal from this line on.
+    fn made(&mut self, thing: Probed) {
+        self.made.push(thing);
+    }
+
+    /// Take `thing` back now, and stop owning it once it is gone.
+    async fn take_back_now(&mut self, thing: &Probed) -> Result<(), String> {
+        take_back(
+            &client(),
+            &self.url,
+            &self.user,
+            &self.password,
+            std::slice::from_ref(thing),
+        )
+        .await?;
+        self.made.retain(|made| made != thing);
+        Ok(())
+    }
+}
+
+impl Drop for RefusedProbe {
+    fn drop(&mut self) {
+        // The last made first: a board holds its filter, and the filter
+        // names the version.
+        let mut left: Vec<Probed> = std::mem::take(&mut self.made);
+        if left.is_empty() {
+            return;
+        }
+        left.reverse();
+        let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
+        let report = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime for the cleanup")
+                .block_on(async move { take_back(&client(), &url, &user, &password, &left).await })
+        })
+        .join();
+        let failure = match report {
+            Ok(Ok(())) => return,
+            Ok(Err(e)) => e,
+            Err(_) => "the cleanup thread panicked (its own message is on stderr); the next \
+                       run's sweep takes the probe back"
+                .to_owned(),
+        };
+        let report = format!(
+            "the live suite did not take back its refused-query probe, so the server is no \
+             longer in the plain-seed state: {failure}"
+        );
+        if std::thread::panicking() {
+            eprintln!("live suite cleanup: {report}");
+        } else {
+            panic!("{report}");
+        }
+    }
+}
+
+/// Take back each thing in order and **check** it is gone afterwards. A thing
+/// already gone is not a failure.
+async fn take_back(
+    http: &reqwest::Client,
+    url: &str,
+    user: &str,
+    password: &str,
+    things: &[Probed],
+) -> Result<(), String> {
+    for thing in things {
+        let path = thing.path();
+        let response = thing
+            .removal(http, url)
+            .header("Accept", "application/json")
+            .basic_auth(user, Some(password))
+            .send()
+            .await
+            .map_err(|e| format!("taking back {path}: {e}"))?;
+        let status = response.status().as_u16();
+        if !(200..300).contains(&status) && !thing.gone(status) {
+            return Err(format!(
+                "taking back {path} -> {status}: {}",
+                response.text().await.unwrap_or_default()
+            ));
+        }
+        let status = http
+            .get(format!("{url}/{path}"))
+            .header("Accept", "application/json")
+            .basic_auth(user, Some(password))
+            .send()
+            .await
+            .map_err(|e| format!("GET {path}: {e}"))?
+            .status()
+            .as_u16();
+        if !thing.gone(status) {
+            return Err(format!("{path} answers {status} after it was taken back"));
+        }
+    }
+    Ok(())
+}
+
+/// **A board and a favourite filter whose query Jira can no longer run
+/// (#1893, #1698)** are left out, and the sync goes on. The test makes a
+/// version on PAY, a favourite filter `project = PAY AND fixVersion =
+/// "<it>"`, and a Kanban board on that filter: one sync with every board and
+/// the favourite filters brings both in. Then it deletes the version. Jira
+/// keeps the filter's JQL as saved, still lists the board and still answers
+/// its configuration, and answers the query itself 400, which is the arm
+/// `views::read` and `views::boards` leave a view out on. The next full sync
+/// succeeds without the probe board and filter, and with the seed's boards
+/// and favourite filter (the control: the views were read). [`RefusedProbe`]
+/// takes the board, the filter and the version back, passing or failing.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn a_board_and_a_favourite_filter_whose_version_was_deleted_are_left_out_and_the_sync_goes_on()
+ {
+    let seeded = seeded();
+    let views = seeded.seed.views.as_ref().expect(
+        "seed-state.json records no Jira views: re-run `./seed-atlassian-content.sh jira` (#877)",
+    );
+    let seeded_views = [
+        format!("board-{}", seeded.seed.sprint().board_id),
+        format!("board-{}", views.kanban.board_id),
+        format!("filter-{}", views.favourite_filter.id),
+    ];
+    let mut probe = RefusedProbe::new(&seeded).await;
+    let name = format!("{REFUSED_PROBE} {}", uuid_like());
+
+    let (status, version) = seeded
+        .request(
+            reqwest::Method::POST,
+            "rest/api/2/version",
+            Some(serde_json::json!({ "name": name, "project": "PAY" })),
+        )
+        .await;
+    assert_eq!(status, 201, "{version}");
+    let version_id = version["id"].as_str().expect("a version id").to_owned();
+    probe.made(Probed::Version(version_id.clone()));
+    let jql = format!("project = PAY AND fixVersion = \"{name}\" ORDER BY Rank ASC");
+    let (status, filter) = seeded
+        .request(
+            reqwest::Method::POST,
+            "rest/api/2/filter",
+            Some(serde_json::json!({ "name": name, "jql": jql, "favourite": true })),
+        )
+        .await;
+    assert_eq!(status, 200, "{filter}");
+    let filter_id: u64 = filter["id"]
+        .as_str()
+        .and_then(|id| id.parse().ok())
+        .expect("a filter id");
+    probe.made(Probed::Filter(filter_id));
+    let (status, board) = seeded
+        .request(
+            reqwest::Method::POST,
+            "rest/agile/1.0/board",
+            Some(serde_json::json!({ "name": name, "type": "kanban", "filterId": filter_id })),
+        )
+        .await;
+    assert!(status == 200 || status == 201, "{status} {board}");
+    let board_id = board["id"].as_u64().expect("a board id");
+    probe.made(Probed::Board(board_id));
+    let (board_view, filter_view) = (format!("board-{board_id}"), format!("filter-{filter_id}"));
+    let source = seeded.source(serde_json::json!({
+        "projects": ["PAY"], "boards": "all", "favourite_filters": true,
+    }));
+    let view_keys = |items: &[SyncItem]| -> Vec<String> {
+        let mut views: Vec<String> = items
+            .iter()
+            .filter(|i| i.kind == "jira_view")
+            .map(|i| i.entity.key.clone())
+            .collect();
+        views.sort();
+        views
+    };
+
+    let (before, _) = full(&*source).await;
+    let before = view_keys(&before);
+    for key in [&board_view, &filter_view] {
+        assert!(
+            before.contains(key),
+            "{key} did not come in while its version was there: {before:?}"
+        );
+    }
+
+    let deleted = probe
+        .take_back_now(&Probed::Version(version_id.clone()))
+        .await;
+    assert_eq!(deleted, Ok(()), "deleting the version");
+    let (status, saved) = seeded.get(&format!("rest/api/2/filter/{filter_id}")).await;
+    assert_eq!(status, 200, "{saved}");
+    assert_eq!(
+        saved["jql"].as_str(),
+        Some(jql.as_str()),
+        "Jira rewrote the filter when its version went"
+    );
+    let (status, favourites) = seeded.get("rest/api/2/filter/favourite").await;
+    assert_eq!(status, 200, "{favourites}");
+    assert!(
+        favourites
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|f| f["id"].as_str() == Some(filter_id.to_string().as_str())),
+        "the filter left the favourites with its version, so the run never reaches its \
+         query: {favourites}"
+    );
+    let (status, listed) = seeded
+        .get(&format!("rest/agile/1.0/board?name={}", url_encode(&name)))
+        .await;
+    assert_eq!(status, 200, "{listed}");
+    assert!(
+        listed["values"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|b| b["id"].as_u64() == Some(board_id)),
+        "the board left the listing with its version, so the run never reaches its query: {listed}"
+    );
+    let (status, config) = seeded
+        .get(&format!("rest/agile/1.0/board/{board_id}/configuration"))
+        .await;
+    assert_eq!(status, 200, "{config}");
+    let (status, refused) = seeded
+        .get(&format!(
+            "rest/api/2/search?jql={}&maxResults=0&fields=key",
+            url_encode(&jql)
+        ))
+        .await;
+    assert_eq!(
+        status, 400,
+        "Jira answers a filter whose version is gone with something other than 400: {refused}"
+    );
+
+    let (after, _) = full(&*source).await;
+    let after = view_keys(&after);
+    for key in [&board_view, &filter_view] {
+        assert!(
+            !after.contains(key),
+            "{key} came in although Jira refuses its query: {after:?}"
+        );
+    }
+    for key in &seeded_views {
+        assert!(after.contains(key), "{key} did not come in: {after:?}");
+    }
+    println!(
+        "SEEDED refused query: with version {version_id} deleted, Jira answered {jql:?} 400 \
+         ({refused}); {board_view} and {filter_view} came in before and were left out after, \
+         beside {seeded_views:?}"
+    );
+    drop(probe);
 }
 
 /// **Why a Jira view has no quick filters (#879, R-3.24, R-3.26)**: the
