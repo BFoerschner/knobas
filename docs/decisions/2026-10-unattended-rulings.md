@@ -13396,3 +13396,35 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
 - **No test pins a recovering postmaster's refusal.** *Ruling:* not owed by this PR. That arm
   (`Lock::Live` into `adopt`, 57P03 into `AlreadyRunning`) is unchanged here, and constructing a
   `PgDatabaseError` with a chosen code needs a live server in that state. *Reversing:* low.
+## #1797: a submit flushes its own entity (Opus implementer, 2026-10-23)
+
+- **Which of the ticket's two directions.** *Fork:* the submit's flush tries its own entity and
+  leaves the rest of the source to the flush task, or a flusher that finds the source's lock taken
+  leaves the writes it has not reached to the holder. *Ruling:* the first. *Reasoning:* the holder
+  read its writes before the submit queued, and on a failing source its pass makes no progress, so
+  it never re-reads and never reaches the new write. The second direction would leave a person's
+  write untried until the next tick, which is the opposite of "returns once its own write has been
+  tried", and it makes what a submit sends depend on who held the lock. The first changes one
+  filter on `due`, keeps the per-write lock and its re-read (#1629), the quota watch around each
+  write (#1729), the ladder (#1628) and per-entity order. *Reversing:* the filter.
+- **How far into the entity.** *Fork:* stop at the submitted write, or follow the entity's writes
+  as far as they go, as the source-wide flush did. *Ruling:* as far as they go. *Reasoning:* a
+  write queued behind it on the same entity was blocked by it, and *Send mine anyway* on a held
+  head is expected to let its successors follow (story 22's
+  `one_entitys_writes_keep_their_order_without_blocking_another` asks for exactly that). The cost
+  is one entity's later writes, not the source's. *Reversing:* an `id <=` bound in the filter.
+- **Which callers narrow.** *Ruling:* `submit`, `apply_anyway`, `amend` and a new
+  `flush_write(deps, id)`, which the app's `flush` (every `submit_write`, `log_work` and
+  background send) now calls in place of `flush_source`. `flush_source`, the flush task and
+  *Flush now* still reach the whole source. *Reasoning:* the ticket names the submit, *Send mine
+  anyway* and an amend; the app's send is the same submit by another door. A press of *Flush now*
+  asks for the whole source. *Reversing:* low.
+- **The timing test's clock.** *Ruling:* it starts when the first slow write goes on the wire, as
+  the fake records it, not when the submit is called, and the fake dwells per entity so the
+  submit's own write takes no time. *Reasoning:* timed from the submit, the old code returns at
+  2 × D minus however late the submit started, which can fall under the bound; timed from the
+  first send it cannot, since both sleeps run in full after it. D is 1 s so the DB work of a submit
+  under load stays far under the other D of headroom. *Reversing:* n/a.
+- **A §10.8 entry.** *Ruling:* booked (`1797-a-submit-flushes-its-own-entity.md`): a submit no
+  longer sends the other owed writes of its source, which a caller of `submit_write` can observe.
+  *Reversing:* one file.
