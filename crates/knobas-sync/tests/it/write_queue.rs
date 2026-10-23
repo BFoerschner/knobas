@@ -1729,12 +1729,34 @@ async fn beside_the_flush_task(mine: Mine) {
 /// #1807: a submit on an entity whose earlier write the flush task is
 /// sending tries its own write once that one lands, and does not wait for
 /// the slow write the task owes on another entity after it.
-///
-/// Arranged rather than timed: the submit starts while the task's first
-/// write is on the wire, and the assertions read the rows the moment the
-/// submit returns, so no bound on the clock decides the verdict.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_submit_behind_a_head_the_flush_task_is_sending_tries_its_own_write() {
+    behind_a_head_on_the_wire(Head::Lands).await;
+}
+
+/// #1807: as above, with the head withdrawn while it is on the wire, which
+/// closes it as surely as its landing does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_submit_behind_a_head_withdrawn_on_the_wire_tries_its_own_write() {
+    behind_a_head_on_the_wire(Head::Withdrawn).await;
+}
+
+/// What becomes of the head in [`behind_a_head_on_the_wire`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Head {
+    /// The flush task's send settles it.
+    Lands,
+    /// The reader withdraws it before the submit.
+    Withdrawn,
+}
+
+/// The flush task's pass sends a head write on one entity and then a slow
+/// write on another, each taking `DWELL`; a submit on the first entity starts
+/// while the head is on the wire. Asserts that, the moment the submit
+/// returns, its own write was sent and the other entity's was not yet.
+///
+/// Arranged rather than timed: no bound on the clock decides the verdict.
+async fn behind_a_head_on_the_wire(fate: Head) {
     const DWELL: std::time::Duration = std::time::Duration::from_secs(1);
     let h = harness().await;
     let mine = h.mirror("PAY-1807-A", "a payout fails").await;
@@ -1773,6 +1795,9 @@ async fn a_submit_behind_a_head_the_flush_task_is_sending_tries_its_own_write() 
         assert_eq!(target, mine.to_string(), "the head on `mine` goes first");
         // The head has read its dwell; the submitted write takes none.
         h.paced.lock().unwrap().dwell.remove(&mine.to_string());
+        if fate == Head::Withdrawn {
+            flusher::discard(&h.deps, head.id).await.unwrap().unwrap();
+        }
         let submitted = h.comment(&mine, "mine").await;
         (
             h.reload(submitted.id).await.state,
@@ -1793,7 +1818,11 @@ async fn a_submit_behind_a_head_the_flush_task_is_sending_tries_its_own_write() 
         WriteState::Pending,
         "the submit waited for the other entity's write"
     );
-    assert_eq!(h.reload(head.id).await.state, WriteState::Sent);
+    let settled = match fate {
+        Head::Lands => WriteState::Sent,
+        Head::Withdrawn => WriteState::Discarded,
+    };
+    assert_eq!(h.reload(head.id).await.state, settled);
     assert_eq!(h.reload(slow.id).await.state, WriteState::Sent);
     let delivered = h.delivered();
     assert_eq!(
