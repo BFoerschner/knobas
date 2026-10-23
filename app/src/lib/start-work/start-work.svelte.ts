@@ -87,9 +87,9 @@ export interface Field {
  * The parts of a step's proposal the reader may change before it runs.
  *
  * Read out of the stored payload rather than from a table of what each op has,
- * so a proposal carrying a field this list does not name is still shown. What
- * is *not* offered is deliberate: `entity` is the target, and a proposal that
- * repointed itself at another repository would be a different flow.
+ * so a proposal carrying a field this list does not name is still shown. That
+ * includes `entity`: the repository dropdown repoints the branch and pull
+ * request steps, and `start_work_amend` takes the amendment.
  */
 export function fieldsOf(step: StartWorkStep): Field[] {
   const op = opBody(step);
@@ -104,7 +104,7 @@ export function fieldsOf(step: StartWorkStep): Field[] {
     status: ["Status", false],
   };
   return Object.entries(op)
-    .filter(([key, value]) => key !== "entity" && typeof value === "string")
+    .filter(([, value]) => typeof value === "string")
     .map(([key, value]) => {
       const [label, long] = named[key] ?? [key, false];
       return { key, label, value: value as string, long };
