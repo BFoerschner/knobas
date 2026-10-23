@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -I \"$CLAUDE_PROJECT_DIR/scripts/bash-guard.py\"",
+            "command": "g=\"$CLAUDE_PROJECT_DIR/scripts/bash-guard.py\"; if [ -f \"$g\" ]; then exec python3 -I \"$g\"; fi; cat >/dev/null; echo \"bash-guard: $g is missing, so this call runs unguarded\" >&2; exit 1",
             "timeout": 10
           }
         ]
