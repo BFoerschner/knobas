@@ -881,6 +881,36 @@ test("a timer start and stop with a job last opened re-reads no ticket for the n
   expect(reads, "a timer start and stop costs the nav job no IPC").toEqual(before);
 });
 
+test("a last job moved to another source's ticket under the same key is never answered with the old id (#1782)", async () => {
+  let release: () => void = () => {};
+  let hold: Promise<void> | null = null;
+  const jobPorts: JobPorts = {
+    ...TWO_SOURCE_PORTS,
+    listSources: async () => {
+      if (hold !== null) await hold;
+      return TWO_SOURCE_PORTS.listSources();
+    },
+  };
+  created.length = 0;
+  start({ jobPorts });
+  await at("#/job/PAY-231");
+  await at("#/time/2026-08-22");
+  expect(addToButton()?.textContent?.trim(), "the bare key resolved to Jira's ticket").toBe("Add to PAY-231");
+
+  hold = new Promise<void>((resolve) => (release = resolve));
+  await at("#/job/tide:PAY-231");
+  await at("#/time/2026-08-22");
+  expect(addToButton(), "the new read is late: no id is offered, least of all the old one").toBeUndefined();
+
+  release();
+  hold = null;
+  await settle();
+  expect(addToButton()?.textContent?.trim()).toBe("Add to PAY-231");
+  addToButton()!.click();
+  await settle();
+  expect(created).toEqual([{ kind: "entity", entity_id: "tide:PAY-231" }]);
+});
+
 test("with no job opened, the Day tab's open rows offer Add to the timer's ticket (#1027)", async () => {
   const timer = {
     current: { target: { kind: "entity", entity_id: "jira:PAY-231" }, started_at: "2026-08-22T12:00:00Z", last_heartbeat: "2026-08-22T12:00:00Z" } as RunningTimer,
