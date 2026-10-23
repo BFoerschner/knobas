@@ -120,6 +120,21 @@ mod tests {
         }
     }
 
+    /// `entity.ts` reads `list_entities` in reads of the ceiling the backend
+    /// clamps to (#1643): a ceiling raised or lowered on one side only would
+    /// have the views ask for rows that never come, or stop paging early.
+    #[test]
+    fn the_mirror_pages_by_the_backends_row_ceiling() {
+        let declared = format!(
+            "export const ROW_CEILING = {};",
+            crate::commands::ROW_CEILING
+        );
+        assert!(
+            MIRROR.contains(&declared),
+            "entity.ts does not declare `{declared}`"
+        );
+    }
+
     /// `mini_board`'s saved-view argument (#1245) is the one `entity.ts` sends.
     /// Tauri reads a command's arguments by name, camel-cased, so a rename on
     /// one side alone is no compile error: the board would quietly answer the

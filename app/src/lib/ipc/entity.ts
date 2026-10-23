@@ -252,13 +252,56 @@ export type {
   WorkingTreeState,
 } from "./generated/entity";
 
-/** One page of the room `filter` addresses, newest (or first) `limit` rows. */
-export function listEntities(
+/**
+ * The most rows `list_entities` and `room_suggestions` answer in one read:
+ * `knobas_app::commands::ROW_CEILING` (#1643). A test in
+ * `commands/entity/mod.rs` holds the two equal.
+ */
+export const ROW_CEILING = 500;
+
+/**
+ * The most rows one {@link listEntities} call gathers: two reads, the 1000
+ * the code, repository and pull request views ask for (#1643).
+ */
+export const LIST_MOST = 2 * ROW_CEILING;
+
+/**
+ * One page of the room `filter` addresses, newest (or first) `limit` rows.
+ *
+ * The backend answers at most {@link ROW_CEILING} rows a read, so a `limit`
+ * past it is read in reads of that size from `offset` on, up to
+ * {@link LIST_MOST} rows (#1643): no one payload carries more than the
+ * ceiling, and a view that asks for 1000 still gets 1000. `total`, `tally`
+ * and `groups` are the first read's; a row a later read repeats (the room
+ * moved between the reads) is kept once.
+ */
+export async function listEntities(
   filter: EntityFilter,
   limit: number,
   offset: number,
 ): Promise<EntityPage> {
-  return invoke<EntityPage>("list_entities", { filter, limit, offset });
+  const want = Math.min(limit, LIST_MOST);
+  const first = await invoke<EntityPage>("list_entities", { filter, limit: Math.min(want, ROW_CEILING), offset });
+  const rows = [...first.rows];
+  const seen = new Set(rows.map((row) => row.entity_id));
+  let read = first.rows.length;
+  let last = read;
+  while (last === ROW_CEILING && read < want) {
+    const page = await invoke<EntityPage>("list_entities", {
+      filter,
+      limit: Math.min(want - read, ROW_CEILING),
+      offset: offset + read,
+    });
+    for (const row of page.rows) {
+      if (!seen.has(row.entity_id)) {
+        seen.add(row.entity_id);
+        rows.push(row);
+      }
+    }
+    last = page.rows.length;
+    read += last;
+  }
+  return read === first.rows.length ? first : { ...first, rows };
 }
 
 /**

@@ -24,10 +24,16 @@
   - **The clamp.** `knobas_app::commands::ROW_CEILING` (500) is the ceiling `list_sync_runs`
     already read under, now named. `room_suggestions_inner` and `list_entities_inner` read
     `limit.min(ROW_CEILING)` rows; `total` is still the whole room's. The commands' arguments do
-    not change.
+    not change. `entity.ts` declares the same `ROW_CEILING` (held equal by
+    `commands::entity`'s `the_mirror_pages_by_the_backends_row_ceiling`), and its `listEntities`
+    reads a `limit` past it in reads of the ceiling from `offset` on, up to `LIST_MOST` (1000)
+    rows, keeping `total`, `tally` and `groups` from the first read: the code, repository and
+    pull request views that ask for 1000 rows still get 1000. `room_suggestions` takes no
+    offset, so the pull request page's read of 1000 proposals gets 500, as many as Review's own
+    read (`REVIEW_LIMIT`).
 
   Mirrored in `app/src/lib/ipc/entity.ts`: `OpenAt` loses `command` and `openCheckout` sends
-  none. Answered by the fake IPC (`fake/checkouts.ts`, which no longer reads `command`), held by
+  none; `listEntities` pages past the ceiling (`entity.test.ts`). Answered by the fake IPC (`fake/checkouts.ts`, which no longer reads `command`), held by
   `fake-features.test.ts` (a `command` sent anyway is not run) and `fake-tauri.test.ts`'s
   argument census. Witnessed by `tests/it/checkout_ipc.rs`
   (`trying_a_command_runs_the_template_the_setting_holds`), `checkout::open`'s

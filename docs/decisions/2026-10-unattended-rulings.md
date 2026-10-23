@@ -14196,3 +14196,42 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   per the criterion; filed #1825 (`ready-for-agent`) for the four views, which now draw at most
   500 rows of a larger mirror. *Reasoning:* a ruling may not contradict the ticket.
   *Reversing:* one constant, or paging in the four views (#1825).
+
+## #1643 / PR #1826: merge-manager rulings (Opus merge-manager, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus (`open_checkout` loses `command`): upheld.**
+  Reviewed against ADR-0016 and C4: the shim, the `_inner`, the fake and `entity.ts` all drop the
+  argument, and nothing in `app/src` still sends one. The generated mirror carries types only,
+  not command arguments, so `just ipc-mirror` producing no change is right. *Reversing:* as the
+  implementer's ruling.
+- **The four views that ask `list_entities` for 1000 rows.** *Fork:* merge with the 500 clamp
+  and #1825 as the follow-up, or keep the views whole in this PR. *Ruling:* keep them whole:
+  `entity.ts`'s `listEntities` reads a limit past `ROW_CEILING` in reads of 500 from `offset`,
+  up to `LIST_MOST` (1000), and drops a row a later read repeats. `ROW_CEILING` is declared in
+  `entity.ts` and a Rust test holds it equal to `commands::ROW_CEILING`. *Reasoning:* the clamp
+  is the ticket's (500, the one `list_sync_runs` uses), but a view that drew 1000 repositories
+  yesterday and 500 today, with nothing saying so, is a regression this PR would ship; the
+  pull request page finds its repository in that read, so a source with more than 500
+  repositories would lose the header's checkout. Paging keeps every payload under the ceiling,
+  and the 1000 cap keeps a miscomputed limit from reading a whole table in pieces. #1825 is
+  narrowed to the truncation past 1000, which predates this PR. *Reversing:* `listEntities`
+  goes back to one `invoke`.
+- **`TfPr`'s `room_suggestions` read of 1000.** *Ruling:* 500, unpaged. *Reasoning:*
+  `room_suggestions` takes no offset, and Review reads the same room at 500 (`REVIEW_LIMIT`), so
+  the pull request page now marks the proposals Review lists. Named in #1825. *Reversing:* an
+  offset on `room_suggestions`, a §10.8 change.
+- **Closing the dialog after *Try it* saves the old list back.** *Fork:* is that a lost edit or
+  a race that overwrites a newer save? *Ruling:* neither, no change. *Reasoning:* Cancel
+  discarded a try before this PR too (the try saved nothing), so putting the list back keeps
+  what Cancel meant; *Add application* and *Save* clear the snapshot, so a confirmed save is
+  never undone. Inside the dialog *Save*, *Add* and *Try it* are disabled while the try's save is
+  in flight, so the restore is ordered after it. The one race left is a second whole-list save
+  (a ↑ or a new default in *Manage applications*) sent in the milliseconds between Cancel and
+  the try's answer; that is the same last-writer-wins property two fast ↑ clicks already have,
+  and no person clicks inside it. *Reversing:* serialise `Apps.save`.
+- ***Try it* is disabled until a name and a command are typed (prototype-6 always enables
+  it).** *Ruling:* keep it, a departure from prototype-6 named here as the conventions ask.
+  *Reasoning:* *Try it* now saves, and the save refuses an entry with no name; the button
+  shares *Add application*'s `ready`, which the dialog already drew disabled for the same
+  reason, and it was already disabled with no command before this PR. *Reversing:* enable it
+  and show the save's refusal in the dialog.
