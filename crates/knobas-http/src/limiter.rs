@@ -470,7 +470,7 @@ pub(crate) fn http_url(url: &str) -> Result<url::Url, SourceError> {
             knobas_source::instance::redact_userinfo(url)
         ))
     })?;
-    refuse_userinfo(&parsed)?;
+    refuse_userinfo_in(&parsed)?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(SourceError::protocol(format!(
             "base url {url:?} is not http(s)"
@@ -480,7 +480,7 @@ pub(crate) fn http_url(url: &str) -> Result<url::Url, SourceError> {
 }
 
 /// [`crate::refuse_userinfo`] on a URL already parsed.
-pub(crate) fn refuse_userinfo(url: &url::Url) -> Result<(), SourceError> {
+pub(crate) fn refuse_userinfo_in(url: &url::Url) -> Result<(), SourceError> {
     if url.username().is_empty() && url.password().is_none() {
         return Ok(());
     }

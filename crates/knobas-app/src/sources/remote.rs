@@ -348,6 +348,7 @@ async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
     if let Some(query) = parsed.query() {
         path = format!("{path}?{query}");
     }
+    let max_body = u64::try_from(cap).unwrap_or(u64::MAX);
     let client = HttpClient::new(HttpConfig {
         base_url: origin,
         adapter_kind: "adapter-install".to_owned(),
@@ -355,7 +356,7 @@ async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
         // This read's own cap, which for a component is over the client's
         // default (#1640): the client counts the body against it as it
         // arrives, and a body that runs past it is `TooLarge` below.
-        max_body: u64::try_from(cap).unwrap_or(u64::MAX),
+        max_body,
         ..HttpConfig::default()
     })
     .map_err(unreachable)?;
@@ -367,7 +368,7 @@ async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
         url: url.to_owned(),
         cap,
     };
-    if response.content_length().is_some_and(|n| n > cap as u64) {
+    if response.content_length().is_some_and(|n| n > max_body) {
         return Err(too_large());
     }
     let bytes = response.bytes().await.map_err(|e| {

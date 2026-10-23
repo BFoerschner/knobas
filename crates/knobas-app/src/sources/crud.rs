@@ -41,6 +41,8 @@ fn check_id(id: &str) -> Result<(), SourcesError> {
 /// URL, so the password goes no further than the form.
 fn check_base_url(base_url: &str) -> Result<(), SourcesError> {
     knobas_http::refuse_userinfo(base_url).map_err(|error| {
+        // The bare sentence: `to_string` would put `protocol: ` before it
+        // in the dialog.
         SourcesError::Invalid(match error {
             knobas_source::SourceError::Protocol { message, .. } => message,
             other => other.to_string(),

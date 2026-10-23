@@ -83,7 +83,7 @@ pub(crate) fn declared_over(response: &reqwest::Response, cap: u64) -> Option<Ov
 
 /// The cap a failed read ran into, if that is why it failed: anywhere in the
 /// error's source chain, since reqwest wraps a body's error once or twice.
-pub(crate) fn over_cap(error: &(dyn std::error::Error + 'static)) -> Option<OverCap> {
+pub(crate) fn ran_into(error: &(dyn std::error::Error + 'static)) -> Option<OverCap> {
     let mut next = Some(error);
     while let Some(error) = next {
         if let Some(over) = error.downcast_ref::<OverCap>() {

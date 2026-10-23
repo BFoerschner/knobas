@@ -238,22 +238,37 @@ pub struct HttpConfig {
 impl std::fmt::Debug for HttpConfig {
     /// Every field, the base URL without its userinfo (#1640).
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Destructured without `..`, so a field added later cannot be left
+        // out of this rendering without the compiler saying so.
+        let Self {
+            base_url,
+            adapter_kind,
+            adapter_version,
+            auth,
+            requests_per_second,
+            burst,
+            connect_timeout,
+            request_timeout,
+            body_message,
+            forbidden,
+            max_body,
+        } = self;
         formatter
             .debug_struct("HttpConfig")
             .field(
                 "base_url",
-                &knobas_source::instance::redact_userinfo(&self.base_url),
+                &knobas_source::instance::redact_userinfo(base_url),
             )
-            .field("adapter_kind", &self.adapter_kind)
-            .field("adapter_version", &self.adapter_version)
-            .field("auth", &self.auth)
-            .field("requests_per_second", &self.requests_per_second)
-            .field("burst", &self.burst)
-            .field("connect_timeout", &self.connect_timeout)
-            .field("request_timeout", &self.request_timeout)
-            .field("body_message", &self.body_message)
-            .field("forbidden", &self.forbidden)
-            .field("max_body", &self.max_body)
+            .field("adapter_kind", adapter_kind)
+            .field("adapter_version", adapter_version)
+            .field("auth", auth)
+            .field("requests_per_second", requests_per_second)
+            .field("burst", burst)
+            .field("connect_timeout", connect_timeout)
+            .field("request_timeout", request_timeout)
+            .field("body_message", body_message)
+            .field("forbidden", forbidden)
+            .field("max_body", max_body)
             .finish()
     }
 }
@@ -448,6 +463,12 @@ impl HttpClient {
     /// needs to know is what the source finally said. A first attempt the
     /// limiter holds past the budget is [`SourceError::Protocol`] with the
     /// [`LocalQuota`]'s message: the source said nothing, and was not asked.
+    /// A request other than a `GET` or `HEAD` answered with a redirect is
+    /// [`SourceError::Protocol`] with the redirect's status, naming its
+    /// `Location`, and is not followed (#1640).
+    ///
+    /// The body of a success is read through [`HttpConfig::max_body`]: a read
+    /// of it past the cap fails, which [`over_the_cap`] tells apart.
     pub async fn send(&self, request: Request) -> Result<reqwest::Response, SourceError> {
         self.send_with(request, Deadline::Whole).await
     }
@@ -664,22 +685,15 @@ impl HttpClient {
     ///
     /// The mapped [`SourceError`], or [`SourceError::Protocol`] if the body is
     /// not the JSON the adapter expected -- which is a contract violation, not
-    /// a connectivity problem.
+    /// a connectivity problem -- or is over [`HttpConfig::max_body`], declared
+    /// or as read: `<path>: the answer is larger than <cap>, the most knobas
+    /// reads of one answer` (#1640).
     pub async fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
         query: &[(&str, &str)],
     ) -> Result<T, SourceError> {
-        let response = self
-            .send(self.request(Method::GET, path).query(query))
-            .await?;
-        if let Some(over) = cap::declared_over(&response, self.max_body) {
-            return Err(SourceError::protocol(format!("{path}: {over}")));
-        }
-        response
-            .json::<T>()
-            .await
-            .map_err(|error| read_error(path, &error, |error| format!("decoding {path}: {error}")))
+        self.get_json_with(path, query, None).await
     }
 
     /// GET a JSON document, with the body's start in the message when it is
@@ -692,7 +706,8 @@ impl HttpClient {
     /// body that breaks off reads `<path>: the answer's body broke off:
     /// <error>`. A failing status is [`status_error`]'s either way: its body
     /// already reaches the message there, read by the caller's
-    /// [`BodyMessage`] where it has one.
+    /// [`BodyMessage`] where it has one. A body over [`HttpConfig::max_body`]
+    /// reads as [`HttpClient::get_json`] says, excerpt or not.
     ///
     /// `query` is anything [`Request::query`] takes, so a caller whose values
     /// are computed can hand over owned `String`s.
@@ -1010,7 +1025,7 @@ async fn body_of(response: reqwest::Response, max_body: u64) -> String {
     }
     match cap::capped(response, max_body).text().await {
         Ok(body) => body,
-        Err(error) => cap::over_cap(&error)
+        Err(error) => cap::ran_into(&error)
             .map(|over| over.to_string())
             .unwrap_or_default(),
     }
@@ -1021,7 +1036,7 @@ async fn body_of(response: reqwest::Response, max_body: u64) -> String {
 /// itself and says so in its own words.
 #[must_use]
 pub fn over_the_cap(error: &reqwest::Error) -> bool {
-    cap::over_cap(error).is_some()
+    cap::ran_into(error).is_some()
 }
 
 /// A failed read of `path`'s answer: the cap's sentence when the cap is why,
@@ -1031,7 +1046,7 @@ fn read_error(
     error: &reqwest::Error,
     otherwise: impl FnOnce(&reqwest::Error) -> String,
 ) -> SourceError {
-    match cap::over_cap(error) {
+    match cap::ran_into(error) {
         Some(over) => SourceError::protocol(format!("{path}: {over}")),
         None => SourceError::protocol(otherwise(error)),
     }
@@ -1075,7 +1090,7 @@ fn redirected(response: &reqwest::Response) -> SourceError {
 /// [`SourceError::Protocol`], whose message does not repeat the URL.
 pub fn refuse_userinfo(base_url: &str) -> Result<(), SourceError> {
     match url::Url::parse(base_url) {
-        Ok(parsed) => limiter::refuse_userinfo(&parsed),
+        Ok(parsed) => limiter::refuse_userinfo_in(&parsed),
         Err(_) => Ok(()),
     }
 }
