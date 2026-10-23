@@ -13260,3 +13260,41 @@ The measurement came after it.
   `tests/it/main.rs`. *Reasoning:* the list is for top-level `tests/*.rs` that a recipe runs with
   `--test`; the ticket's aim is one binary per crate. *Reversing:* low, add the directory names to
   the guard's `found` set.
+## #1790 + #1795: bash-guard, in-place flags, arithmetic, function bodies, heredoc bodies (Opus implementer, 2026-10-23)
+
+- **The perl class is the ticket's sketch plus `f` and `S`.** *Fork:* `[aclnpstuwTUWX0-9]` as
+  sketched, or every perl flag that takes no argument. *Ruling:* `^-[aclfnpsStTuUwWX0-9]*i`.
+  *Reasoning:* `-f` and `-S` take no argument, so `-fi` and `-Si` are in-place bundles too. `-C`
+  stays out: `i` is one of its own letters (`-Ci`, a UTF-8 input layer). So do `-x`, `-d` and `-D`,
+  which take a glued argument. *Reversing:* one character class.
+- **BSD sed's `-I` counts as in place.** *Fork:* match only `-i`, or `-I` as well. *Ruling:* both,
+  `^-[nErsuzal]*[iI]`. *Reasoning:* macOS `/usr/bin/sed -I '' s/a/b/ f` edits `f` in place
+  (checked), and the old pattern let it write `~/.bashrc`. GNU sed has no `-I`, so the only cost
+  there is refusing a command that errors anyway. *Reversing:* one letter.
+- **`--in-place` matches its abbreviations down to `--i`.** *Ruling:* yes. *Reasoning:* GNU sed's
+  getopt_long accepts any unambiguous prefix, and no other GNU sed long option starts with `i`.
+  Not checked against a real GNU sed: none is installed on this machine. BSD sed has no long
+  options. *Reversing:* one regex.
+- **A `((` is arithmetic only when its inner group is closed by `))`.** *Fork:* every `((` at a
+  command's start, or the shell's rule. *Ruling:* the shell's rule, for `((` and `$((` alike.
+  *Reasoning:* bash 5.3 runs `((echo hi); echo there)` as two subshells and `echo $((echo a); echo
+  b)` as a command substitution (checked). Reading those as arithmetic would hide their commands,
+  and the old `$((` reader did hide them: `echo $((cd x); ls)` passed. *Reversing:* two lines in
+  `arithmetic`.
+- **A substitution inside arithmetic is parsed.** *Fork:* keep `$((...))` opaque, as #1791 had it,
+  or parse its `$(...)` and backquotes. *Ruling:* parse them. *Reasoning:* the shell runs them, and
+  `echo $(( $(cd x && pwd) + 1 ))` passed. Same direction as the ticket: it only turns a hidden
+  command into a seen one. *Reversing:* one line.
+- **"A command's start" for `((`.** *Ruling:* no word yet, or only reserved words, `for` and `time`
+  before it (`if ((x))`, `for ((i=0; ...))`, `time ((x))`). *Reasoning:* anywhere else `((` is a
+  syntax error and nothing runs. *Reversing:* one set.
+- **A heredoc body's substitutions join the heredoc's command as one word.** *Fork:* a command of
+  their own, or a word of the command that opened the heredoc. *Ruling:* a word, with the text
+  `<<DELIM`, never the substitution's text. *Reasoning:* that is where the shell runs them, so
+  `cd <<EOF` keeps its own-argument exemption the way `cd "$(...)"` does, and a `$(cat
+  ./.git/HEAD)` in the body of `tee /tmp/x <<EOF` is not read as a write target. A delimiter
+  holding any quote or backslash makes the body data, as in the shell. *Reversing:* low.
+- **Transcript replay: no verdict changes.** All Bash commands in this project's transcripts and
+  their subagent transcripts, 61,185 unique (66,603 calls), old guard (61a7dd73) against new: 0
+  verdicts differ, 0 exceptions; both refuse 23,427. So no doc tells an agent to type a newly
+  refused command, and no doc changes.
