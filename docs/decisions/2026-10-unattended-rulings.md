@@ -15233,3 +15233,33 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1882.
   due. The verbatim wire-type docs leave intra-doc links in core that name app items
   (`EntityDetail`) or the crate by name; rustdoc is not gated, and byte-identical TypeScript is
   the better trade. *Reversing:* n/a.
+## #1664: `SourceSummary.roles` and `role_misses` typed as the arrays the wire sends (Opus implementer, 2026-10-23)
+
+- **Reserved for Björn, ruled by implementer on Opus: the IPC schema change and its §10.8 entry.**
+  *Fork:* §10.8 freezes the IPC schema, and #1664 drops the two `#[ts(as = "Option<Vec<…>>",
+  optional)]` attributes on `SourceSummary.roles` and `role_misses`. *Ruling:* drop them; entry
+  `1664-source-summary-sends-its-claims-as-arrays.md`. *Reasoning:* serde always sent both fields
+  (no `skip_serializing_if`), so the change is to the TypeScript alone; the only code that relied
+  on the optional typing was stand-ins written before #1196 and the `?? []` fallbacks. The wire
+  direction is now witnessed by
+  `sources::tests::a_summary_that_claims_and_misses_nothing_still_sends_both_arrays`, because
+  svelte-check sees only the TypeScript side. *Reversing:* put the two attributes back and
+  regenerate the mirror.
+- **Which of the shell's own projections tighten.** *Fork:* the hand-written types that carry
+  `roles` or `role_misses` (`ClaimingSource` in `tf/roles.svelte.ts`, `TfShellPorts.listSources`,
+  the fake's `FakeClaimer`, the job's `SourceFacts`) could keep them optional, which keeps a
+  fallback, or require them. *Ruling:* the first three require them; `SourceFacts` stays as it is,
+  and `staleBuilds` reads its `roles` behind `source.roles !== undefined`. *Reasoning:* the first
+  three are fed straight from `list_sources` rows (or the fake's `FIXTURE_SOURCES`), and they are
+  where the fallbacks were. `SourceFacts` is the job's partial view, documented as "every field
+  past the id may be missing". It is the port type of `OpenJobPorts` and of four surfaces, and
+  `TfCode` narrows its `listSources` to `{ id, base_url? }`. Tightening it would rewrite those
+  port contracts and about twenty test stand-ins outside this ticket. Filed as part of #1884.
+  *Reversing:* make `SourceFacts.roles` required and fix its ports.
+- **`claims()` takes `Pick<ClaimingSource, "roles">`.** *Ruling:* so `staleBuilds` can pass
+  `{ roles }` without inventing an id. *Reversing:* trivial.
+- **The fake tests take a recorded miss back by `= []`, not `delete`.** *Ruling:* the fixture's
+  own value is now `[]`, so that is the restore. *Reversing:* trivial.
+- **The #1196 and #1199 entries stay verbatim.** *Ruling:* the new entry says it amends where they
+  type the mirror. *Reasoning:* §10.8 is a dated ledger, and the earlier entries were true on
+  their dates. *Reversing:* n/a.
