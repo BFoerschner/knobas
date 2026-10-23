@@ -73,15 +73,23 @@ pub(crate) mod mirror {
             if lead.starts_with("//") || lead.starts_with('*') || lead.starts_with("/*") {
                 continue;
             }
+            // The name follows the `>(` that closes the type argument. A site
+            // this cannot read is a panic, never a skipped line: a skipped
+            // `invoke` would let a ghost command through the reverse check.
             let rest = &mirror[at..];
-            let Some((_, after)) = rest.split_once('(') else {
-                continue;
+            let name = rest
+                .split_once(">(")
+                .and_then(|(_, after)| after.trim_start().strip_prefix('"'))
+                .and_then(|quoted| quoted.split_once('"'))
+                .map(|(name, _)| name);
+            let Some(name) = name else {
+                panic!(
+                    "an `invoke<` call site whose command name is not a double-quoted \
+                     literal right after `>(`: {}",
+                    rest.lines().next().unwrap_or_default()
+                );
             };
-            if let Some(quoted) = after.trim_start().strip_prefix('"')
-                && let Some((name, _)) = quoted.split_once('"')
-            {
-                names.push(name);
-            }
+            names.push(name);
         }
         names
     }
