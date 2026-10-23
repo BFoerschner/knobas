@@ -478,9 +478,7 @@ fn take_quoted(value: &str) -> (String, &str) {
         match bytes[i] {
             b'"' => return (String::from_utf8_lossy(&out).into_owned(), &value[i + 1..]),
             b'\\' if i + 1 < bytes.len() => {
-                if i + 3 < bytes.len()
-                    && let Some(byte) = octal(&bytes[i + 1..i + 4])
-                {
+                if let Some(byte) = bytes.get(i + 1..i + 4).and_then(octal) {
                     out.push(byte);
                     i += 4;
                     continue;
@@ -503,7 +501,7 @@ fn take_quoted(value: &str) -> (String, &str) {
 }
 
 /// The byte a three-digit octal escape names (`303` → `0xC3`), or `None`
-/// when the three bytes are not all digits or name more than a byte. Read
+/// unless the bytes are all octal digits and name one byte. Read
 /// as bytes: the text is whatever the instance answered, and a slice of the
 /// `&str` could end inside a character (#1645).
 fn octal(digits: &[u8]) -> Option<u8> {
