@@ -12999,6 +12999,7 @@ The measurement came after it.
 - **The 45 min JVM lock keeps its wait.** *Ruling:* the briefs send queued live recipes to the
   background with Monitor instead of capping that wait. *Reversing:* two sentences.
 ## #1689, bash-guard: compound shapes, heredocs, fail-open wiring
+## #1689: bash-guard, compound shapes, heredocs, fail-open wiring (Opus implementer, 2026-10-23)
 
 - **`eval` and `sh -c` are not commands of their own.** *Fork:* count the wrapper beside the
   commands of its string, or let the string's commands stand in for it. *Ruling:* the string's

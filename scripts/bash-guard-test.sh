@@ -9,13 +9,16 @@ here=$(dirname "$0")
 guard=$here/bash-guard.py
 
 failures=0
+fail() { echo "FAIL: $1" >&2; failures=$((failures + 1)); }
+call() { # call <command>: the Bash tool call a hook reads on stdin
+    python3 -I -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))' "$1"
+}
 check() { # check <pass|refuse> <command>
     local want=$1 command=$2 got=pass status=0
-    python3 -I -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))' "$command" |
-        python3 -I "$guard" >/dev/null 2>&1 || status=$?
+    call "$command" | python3 -I "$guard" >/dev/null 2>&1 || status=$?
     [ "$status" -eq 0 ] || got=refuse
     [ "$status" -eq 0 ] || [ "$status" -eq 2 ] || got="exit $status"
-    if [ "$got" != "$want" ]; then echo "FAIL: wanted $want, got $got: $command" >&2; failures=$((failures + 1)); fi
+    [ "$got" = "$want" ] || fail "wanted $want, got $got: $command"
 }
 
 # cd
@@ -120,25 +123,24 @@ check pass 'perl -pe s/a/b/ ~/.zshrc'
 check pass 'sed -n /PATH/p ~/.bashrc'
 
 # not a Bash call, or no command: let through
-printf '%s' '{"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}}' | python3 -I "$guard" || { echo "FAIL: a Read call was refused" >&2; failures=$((failures + 1)); }
-printf '%s' 'not json' | python3 -I "$guard" || { echo "FAIL: unreadable input was refused" >&2; failures=$((failures + 1)); }
+printf '%s' '{"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}}' | python3 -I "$guard" || fail "a Read call was refused"
+printf '%s' 'not json' | python3 -I "$guard" || fail "unreadable input was refused"
 
 # the wiring in .claude/settings.json: a refusal comes through as exit 2, and a
 # missing script lets the call through (any status but 2) and says why on stderr
 hook=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["hooks"]["PreToolUse"][0]["hooks"][0]["command"])' "$here/../.claude/settings.json")
 wired() { # wired <project dir> <command>: the hook's exit status, a space, its stderr
     local status=0 err
-    err=$(python3 -I -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))' "$2" |
-        CLAUDE_PROJECT_DIR=$1 sh -c "$hook" 2>&1 >/dev/null) || status=$?
+    err=$(call "$2" | CLAUDE_PROJECT_DIR=$1 sh -c "$hook" 2>&1 >/dev/null) || status=$?
     echo "$status $err"
 }
-case $(wired "$here/.." 'cd /tmp && ls') in "2 bash-guard: \`cd\` chained"*) ;; *) echo "FAIL: the wired hook did not refuse a chained cd" >&2; failures=$((failures + 1)) ;; esac
-case $(wired "$here/.." 'ls') in "0 ") ;; *) echo "FAIL: the wired hook refused ls" >&2; failures=$((failures + 1)) ;; esac
+case $(wired "$here/.." 'cd /tmp && ls') in "2 bash-guard: \`cd\` chained"*) ;; *) fail "the wired hook did not refuse a chained cd" ;; esac
+case $(wired "$here/.." 'ls') in "0 ") ;; *) fail "the wired hook refused ls" ;; esac
 missing=$(wired /nonexistent/bash-guard-test 'cd /tmp && ls')
 case $missing in
-    "2 "*) echo "FAIL: a missing script blocked the call: $missing" >&2; failures=$((failures + 1)) ;;
+    "2 "*) fail "a missing script blocked the call: $missing" ;;
     *" bash-guard: /nonexistent/bash-guard-test/scripts/bash-guard.py is missing"*) ;;
-    *) echo "FAIL: a missing script did not say why: $missing" >&2; failures=$((failures + 1)) ;;
+    *) fail "a missing script did not say why: $missing" ;;
 esac
 
 if [ "$failures" -gt 0 ]; then echo "bash-guard-test: $failures failure(s)" >&2; exit 1; fi

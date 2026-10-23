@@ -32,18 +32,25 @@ Test: scripts/bash-guard-test.sh, run by `just witness-unit`.
 import json
 import re
 import sys
+from typing import NamedTuple
 
 WRITERS = {"rm", "rmdir", "mv", "cp", "touch", "mkdir", "ln", "tee", "truncate", "install", "chmod", "chown", "rsync"}
 # Writers only in place: `-i` alone or bundled (`perl -pi`, `sed -Ei`), or sed's `--in-place`.
 IN_PLACE = {"sed": r"^(-[a-zA-Z]*i|--in-place)", "perl": r"^-[a-zA-Z]*i"}
 # Words before the command's name, each with the options of its own that take an argument.
 WRAPPERS = {"sudo": {"-u", "-g"}, "command": set(), "exec": set(), "time": set(), "nohup": set(),
-            "nice": {"-n"}, "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s"}}
-# Reserved words and `builtin` lead into the command they hold: `if cd x`, `do cd x`, `{ cd x`.
-KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "do", "done", "while", "until", "builtin"}
+            "nice": {"-n"}, "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s"}, "builtin": set()}
+# Reserved words lead into the command they hold: `if cd x`, `do cd x`, `{ cd x`.
+RESERVED = {"{", "}", "!", "if", "then", "else", "elif", "fi", "do", "done", "while", "until"}
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 MAX_DEPTH = 8  # eval and `sh -c` nested deeper than this are not read
 SHELL_CONFIG = (".bashrc", ".bash_profile", ".profile", ".zshrc", ".zprofile", ".zshenv", ".zlogin")
+
+
+def find_or_end(s, ch, i):
+    """The index of `ch` in `s` from `i`, or the end of `s`."""
+    j = s.find(ch, i)
+    return len(s) if j < 0 else j
 
 
 class Word:
@@ -75,7 +82,7 @@ class Parser:
         s = self.s
         commands = [[]]
         word = None
-        depth = 0  # plain parentheses opened inside this substitution
+        parens = 0  # plain parentheses opened inside this substitution
 
         def current():
             nonlocal word
@@ -100,12 +107,11 @@ class Parser:
                     current().text += s[i + 1]
                 i += 2
                 continue
-            if (stop == "`" and c == "`") or (stop == ")" and c == ")" and depth == 0):
+            if (stop == "`" and c == "`") or (stop == ")" and c == ")" and parens == 0):
                 end_word()
                 return [cmd for cmd in commands if cmd], i + 1
             if c == "'":
-                j = s.find("'", i + 1)
-                j = len(s) if j < 0 else j
+                j = find_or_end(s, "'", i + 1)
                 current().text += s[i + 1:j]
                 i = j + 1
                 continue
@@ -115,15 +121,11 @@ class Parser:
             if c == '"':
                 i = self.double_quoted(i + 1, current())
                 continue
-            if s.startswith("$((", i):
-                i = self.arithmetic(i, current())
-                continue
             if s.startswith("$(", i) or c == "`":
-                i = self.substitution(i, current())
+                i = self.expansion(i, current())
                 continue
             if c == "#" and word is None:  # a comment runs to the end of the line
-                j = s.find("\n", i)
-                i = len(s) if j < 0 else j
+                i = find_or_end(s, "\n", i)
                 continue
             if c == "\n":
                 new_command()
@@ -131,9 +133,9 @@ class Parser:
                 continue
             if c in ";|&()":
                 if c == "(":
-                    depth += 1
-                elif c == ")" and depth:
-                    depth -= 1
+                    parens += 1
+                elif c == ")" and parens:
+                    parens -= 1
                 new_command()
                 i += 1
                 continue
@@ -177,11 +179,8 @@ class Parser:
                     word.text += s[i:i + 2]
                 i += 2
                 continue
-            if s.startswith("$((", i):
-                i = self.arithmetic(i, word)
-                continue
             if s.startswith("$(", i) or s[i] == "`":
-                i = self.substitution(i, word)
+                i = self.expansion(i, word)
                 continue
             if s[i] == "$":
                 word.expands = True
@@ -201,14 +200,20 @@ class Parser:
             i += 1
         return i + 1
 
+    def expansion(self, i, word):
+        """Read the `$((...))`, `$(...)` or backquote at `i` into `word`; the index past it."""
+        if self.s.startswith("$((", i):
+            return self.arithmetic(i, word)
+        return self.substitution(i, word)
+
     def arithmetic(self, i, word):
         """Read a `$((...))` at `i` into `word` as one expansion: its `<<` is a shift, not a heredoc."""
         s = self.s
-        j, depth = i + 1, 0
+        j, parens = i + 1, 0
         while j < len(s):
-            depth += {"(": 1, ")": -1}.get(s[j], 0)
+            parens += {"(": 1, ")": -1}.get(s[j], 0)
             j += 1
-            if depth == 0:
+            if parens == 0:
                 break
         word.text += s[i:j]
         word.expands = True
@@ -238,8 +243,7 @@ class Parser:
         delimiter = ""
         while i < len(s) and s[i] not in " \t\n;|&<>()":
             if s[i] in "'\"":
-                j = s.find(s[i], i + 1)
-                j = len(s) if j < 0 else j
+                j = find_or_end(s, s[i], i + 1)
                 delimiter += s[i + 1:j]
                 i = j + 1
                 continue
@@ -256,8 +260,7 @@ class Parser:
         s = self.s
         for delimiter, strip_tabs in self.pending:
             while i < len(s):
-                j = s.find("\n", i)
-                j = len(s) if j < 0 else j
+                j = find_or_end(s, "\n", i)
                 line = s[i:j]
                 i = j + 1
                 if (line.lstrip("\t") if strip_tabs else line) == delimiter:
@@ -297,7 +300,7 @@ def name_and_args(words):
             while i < len(words) and words[i].text.startswith("-"):
                 i += 2 if words[i].text in takes_argument else 1
             continue
-        if text in KEYWORDS:
+        if text in RESERVED:
             i += 1
             continue
         break
@@ -318,14 +321,17 @@ def script_of(name, args):
     return None
 
 
-class Simple:
+class Simple(NamedTuple):
     """One simple command: its words, name and arguments, and how many commands its own words hold."""
 
-    def __init__(self, words, name, args, own, counts=True):
-        self.words, self.name, self.args, self.own, self.counts = words, name, args, own, counts
+    words: list
+    name: str
+    args: list
+    nested: int  # commands in the substitutions of its own words
+    counts: bool = True  # False for an `eval` or `sh -c`, which its string's commands stand in for
 
 
-def simple_commands(commands, depth=0):
+def simple_commands(commands, depth=0):  # depth: substitutions, eval and `sh -c` strings around these
     """Every simple command, those inside substitutions, `eval` and `sh -c` strings included.
 
     An `eval` or `sh -c` stands for the commands of its string: it is kept for
@@ -363,11 +369,11 @@ def protected(path):
 def verdict(command):
     """None when the command may run, else the message that refuses it."""
     simples = simple_commands(commands_of(command))
-    total = sum(x.counts for x in simples)
-    for x in simples:
-        name, args, words = x.name, x.args, x.words
+    total = sum(cmd.counts for cmd in simples)
+    for cmd in simples:
+        name, args, words = cmd.name, cmd.args, cmd.words
         # A substitution in cd's own argument (`cd "$(git rev-parse --show-toplevel)"`) is no second command.
-        if name in ("cd", "pushd") and total - 1 - x.own > 0:
+        if name in ("cd", "pushd") and total - 1 - cmd.nested > 0:
             return ("`cd` chained into a compound command stops the run for a permission prompt. "
                     "Use absolute paths, `git -C <dir>`, `npm --prefix <dir>`, or `env -C <dir> <cmd>` "
                     "for anything that must run in a directory (cargo, just).")
