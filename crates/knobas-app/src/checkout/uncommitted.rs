@@ -41,7 +41,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use knobas_source::diff::{DiffFile, MAX_LINES_PER_VIEW, parse_view};
 
 use super::working_tree::{
-    APPLE_SHIM, Unrunnable, command_line_tools_installed, git_at, locate, not_a_repo, refusal,
+    APPLE_SHIM, Unrunnable, command_line_tools_installed, git_at, is_dir_off_runtime, locate,
+    not_a_repo, refusal, spawn_off_runtime,
 };
 
 /// How long the whole read (all three commands) may take.
@@ -159,7 +160,7 @@ async fn read_guarded(search: &OsStr, path: &Path, timeout: Duration, caps: Read
         Err(Unrunnable::NoGit) => return DiffRead::NoGit,
         Err(Unrunnable::ProbeFailed(reason)) => return DiffRead::Failed { reason },
     };
-    if !path.is_dir() {
+    if !is_dir_off_runtime(path).await {
         return DiffRead::NotARepo;
     }
     let all = async {
@@ -250,13 +251,23 @@ async fn untracked(git: &Path, path: &Path, cap: usize) -> Result<(Vec<String>, 
 /// bytes; past either git is killed. Answers what was read and whether the
 /// cut came, or the refusal git gave.
 async fn run_capped(
-    mut command: tokio::process::Command,
+    command: tokio::process::Command,
     max_lines: usize,
     max_bytes: usize,
 ) -> Result<(Vec<u8>, bool), DiffRead> {
-    let mut child = command.spawn().map_err(|error| DiffRead::Failed {
-        reason: format!("git could not be run: {error}"),
-    })?;
+    let mut child = match spawn_off_runtime(command).await {
+        Ok(Ok(child)) => child,
+        Ok(Err(error)) => {
+            return Err(DiffRead::Failed {
+                reason: format!("git could not be run: {error}"),
+            });
+        }
+        Err(error) => {
+            return Err(DiffRead::Failed {
+                reason: format!("git could not be run: its start did not finish: {error}"),
+            });
+        }
+    };
     let stdout = child.stdout.take().expect("stdout is piped");
     let mut stderr = child.stderr.take().expect("stderr is piped");
 
