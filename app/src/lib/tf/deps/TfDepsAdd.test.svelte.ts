@@ -6,7 +6,7 @@
  * deletes a route. What the commands answer is `assets_ipc.rs`'.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AssetRow, AssetType, Dependencies, DepItem, DepViews, RouteRow } from "../../ipc/assets";
 import { toasts } from "../../shell/toasts.svelte";
@@ -191,6 +191,28 @@ test("Create sends create_asset with environment and owner unset, then the new t
   const toast = toasts.items.at(-1)!;
   expect(toast.text).toBe("Created payments-api");
   expect(toast.action?.label).toBe("Edit it");
+});
+
+test("the flash timer is cleared when the page unmounts within 1.6 s (PAGE-14)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    render();
+    await settle();
+    target.querySelector<HTMLButtonElement>("[aria-label='Add to Services']")!.click();
+    await settle();
+    type_(field("Name"), "payments-api");
+    type_(field("Inside"), "asset:vm");
+    button("Create", dialog()).click();
+    await settle();
+    await settle();
+    expect(target.querySelector(".tf-dp-flash")).not.toBeNull();
+    const pending = vi.getTimerCount();
+    unmount(app!);
+    app = null;
+    expect(vi.getTimerCount()).toBe(pending - 1);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("after a create, the layer it landed in still folds by hand", async () => {

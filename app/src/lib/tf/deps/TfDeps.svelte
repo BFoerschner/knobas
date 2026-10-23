@@ -353,6 +353,9 @@
 
   // The flashed tile, once drawn: scrolled to the middle and focused; the flash ends on its own.
   let flashed: string | null = null;
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
+  // Not the flash effect's own cleanup: that runs on every re-read and would strand the flash on.
+  $effect(() => () => clearTimeout(flashTimer));
   $effect(() => {
     const id = flash;
     if (id === null || id === flashed || drawn === null || drawn.where.get(id) !== tileEl(id)) return;
@@ -360,7 +363,7 @@
     const tile = bandsEl?.querySelector<HTMLElement>(`.tf-dp-t[data-id="${CSS.escape(id)}"]`);
     tile?.scrollIntoView?.({ block: "center" });
     tile?.querySelector<HTMLElement>(".tf-dp-open")?.focus();
-    setTimeout(() => {
+    flashTimer = setTimeout(() => {
       if (flash === id) flash = null;
       flashed = null;
     }, 1600);
