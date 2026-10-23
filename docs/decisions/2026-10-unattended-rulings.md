@@ -13176,3 +13176,48 @@ The measurement came after it.
 - **`stop` on a dead server answers `Ok`.** *Ruling:* no caller relied on the error. The callers
   are the exit handler and a failed bring-up's stop, which only log it, and tests on live servers.
   *Reversing:* low.
+
+## #1629: the flush beside the ticker, and a cancelled run off the ladder (Opus implementer, 2026-10-23)
+
+- **How settle tells a cancelled run.** *Fork:* a new `SyncOutcome`, a flag on `RunResult`, or
+  the message the row already carries. *Ruling:* the message, as `run_log::CANCELLED_MESSAGE`,
+  with `RunResult::cancelled()` and `was_cancelled()`. *Reasoning:* `outcome` is a checked column
+  and an IPC type, and what A8 changes is the ladder, not how the diagnostics view names the run.
+  `apply_health_and_backoff` already tells `missing_secret` apart by its message.
+  *Reversing:* low.
+- **What a cancelled run skips.** *Ruling:* the credential verdict, the `clear_unreachable` and
+  the backoff, all three, and `failures_since_last_ok` leaves its row out of the count. The row
+  still closes and the ending is still sent. *Reasoning:* the ticket's criterion asks for the
+  rung unchanged, and the cancelled row is a finished row the count would otherwise include.
+  Skipping only the backoff write would still have the next real failure climb one rung for it.
+  *Reversing:* one arm and one predicate.
+- **Where the quit stops the flush.** *Fork:* select each send against the cancel, dropping it
+  mid-flight, or check between writes and let the one on the wire finish. *Ruling:* between
+  writes. The lock acquisition is selected against the cancel, and `flush_every` checks it per
+  source. *Reasoning:* #1633's B1 lets a send at the source finish so its `sent` lands before the
+  pool closes. Dropping the send would put that request at risk of a re-send on every quit, not
+  only when the grace runs out. *Reversing:* one `select!` around `attempt`.
+- **The flush task's wake.** *Ruling:* a `Notify` the ticker pokes each tick; the task is in
+  `tasks`, not behind the door, as #1633's merge-manager allowed. A tick that comes while a flush
+  is running leaves one permit, so the flush runs once more after it, not once per missed tick.
+  *Reversing:* low.
+- **A lock per write needs a re-read.** *Fork:* hold the lock per write as the ticket says and
+  trust the pass's copy, or re-read under the lock. *Ruling:* re-read (`write_queue::turn`): a
+  write no longer pending, or whose `attempted_at`/`attempts` moved, is skipped, and on a pass of
+  the tick's kind so is one no longer owed. The row as read now is what is sent. *Reasoning:*
+  with the lock released between writes, two flushers that read the same head write would
+  otherwise both send it (`two_flushes_of_one_source_deliver_a_write_once`). Comparing
+  `attempted_at` also stops a *Flush now* from re-sending a write the tick tried while the press
+  waited. *Reversing:* drop the per-write lock back to per pass.
+- **The ticket's "so an IPC submit does not wait behind the ticker" does not follow from a
+  per-write lock.** `submit` flushes every owed write of its source, and the mutex hands over in
+  FIFO order, so a submit and the flush task take turns and the submit still waits through the
+  task's sends on that source. *Ruling:* the lock is per write as the ticket says; the conflict is
+  filed as #1797 (`ready-for-agent`). *Reversing:* n/a.
+- **The witnesses.** The responsiveness and stop-between-writes tests are in `scheduler_loop.rs`,
+  behind its serial lock, over a `Writer` fake that counts only its own source's writes and a
+  `forgive` that drops what a test leaves owed. *Reasoning:* the flush reaches every source in the
+  binary's database, and the first draft's quit test counted a write left owed by the test
+  before it. The 10 s dwell and 1 s due time are the ticket's; the lateness bound is one tick plus
+  that 1 s for a loaded machine, a tenth of the dwell. The quit test's dwell is
+  `SHUTDOWN_GRACE / 4`. *Reversing:* n/a.
