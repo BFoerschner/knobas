@@ -874,6 +874,81 @@ async fn harness() -> Harness {
     }
 }
 
+/// A registry whose builds take two seconds, the way an external adapter's
+/// does while its component's `descriptor()` dwells, and that says when one
+/// has started.
+struct Dwelling {
+    inner: Arc<dyn AdapterRegistry>,
+    entered: std::sync::mpsc::Sender<()>,
+}
+
+impl AdapterRegistry for Dwelling {
+    fn descriptors(&self) -> Vec<SourceDescriptor> {
+        self.inner.descriptors()
+    }
+
+    fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
+        let _ = self.entered.send(());
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        self.inner.build(instance)
+    }
+}
+
+/// A flush builds its adapter off the runtime (#1705): on one worker, a
+/// build held there would hold every other command until it finished. The
+/// second command here is sent once the build has started, and answers while
+/// it is still going.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn a_flush_whose_adapter_is_slow_to_build_holds_no_worker() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-1", "a payout fails").await;
+    let (entered, built) = std::sync::mpsc::channel();
+    let deps = Arc::new(SchedulerDeps {
+        pool: h.deps.pool.clone(),
+        connections: Arc::clone(&h.deps.connections),
+        registry: Arc::new(Dwelling {
+            inner: Arc::clone(&h.deps.registry),
+            entered,
+        }),
+        secrets: Arc::clone(&h.deps.secrets),
+        events: Arc::clone(&h.deps.events),
+        timing: h.deps.timing,
+    });
+    let write = flusher::queue(
+        &deps,
+        &h.source,
+        WriteOp::Comment {
+            entity: ticket.to_string(),
+            body: "on it".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    let flushing = tokio::spawn({
+        let deps = Arc::clone(&deps);
+        async move { flusher::flush_entity_of(&deps, write.id).await }
+    });
+    // The test's own thread, not the worker, waits here.
+    built
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("the flush builds its adapter");
+
+    let asked = std::time::Instant::now();
+    let pool = deps.pool.clone();
+    let read = tokio::spawn(async move { store::get(&pool, write.id).await })
+        .await
+        .unwrap();
+    let answered_in = asked.elapsed();
+    assert!(read.is_ok(), "{:?}", read.err());
+    assert!(!flushing.is_finished(), "the build was still going");
+    assert!(
+        answered_in < std::time::Duration::from_millis(1_000),
+        "a command answered in {answered_in:?} while a build was in flight"
+    );
+    flushing.await.unwrap().unwrap();
+    assert_eq!(h.delivered(), vec!["on it".to_owned()]);
+}
+
 /// The happy path, and story 20's first two lines: a write that can go, goes,
 /// and both the queueing and the delivery are in the activity stream.
 #[tokio::test]
