@@ -461,6 +461,12 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
     use tauri::Manager as _;
 
     let connector = knobas_db::test_util::scratch_database("background_write_quit").await;
+    // On the default grace, not `HELD_OFF_PATIENT_QUIT`, and on purpose: this
+    // pins today's behaviour, which is wrong (#1924). The background send's
+    // entity flush has no stop, so once the first comment lands it sends the
+    // one submitted after the quit began. The look below comes before that,
+    // and the 3 s grace then aborts it at the gate. With an hour's grace the
+    // quit never ends. #1924 moves this test to the long grace with its fix.
     let Fixture {
         state, wrote, gate, ..
     } = fixture_on(connector.clone(), HELD_OFF).await;
@@ -498,7 +504,9 @@ async fn a_send_at_the_source_at_quit_lands_and_a_submit_after_waits_for_the_nex
     )
     .await
     .expect("a submit during the quit is still queued");
-    // Give a send that was spawned for it the time to reach the source.
+    // Give a send that was spawned for it the time to reach the source. A
+    // negative window (#1927): the send #1924 names arrives after this look,
+    // once the gate lets the first comment land.
     tokio::time::sleep(Duration::from_millis(200)).await;
     let entered_during_quit = *wrote.entered.lock().unwrap();
     gate.add_permits(1);
