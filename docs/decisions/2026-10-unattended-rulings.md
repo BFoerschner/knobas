@@ -14918,3 +14918,36 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1859.
   `route_fts_idx` (`0018`). *Reasoning:* different indexes and different reads; `knobas-search`'s
   notes record `item_fts_idx`'s list inflating benchmark reads 24x to 182x, and each needs its own
   reading on an unvacuumed database before a migration. *Reversing:* n/a.
+
+Reviewed 2026-10-23 by the merge-manager (Opus).
+
+- **Reserved for Björn, ruled by merge-manager on Opus: migration `0057`.** *Fork:* confirm the
+  implementer's ruling or rule again. *Ruling:* confirmed. *Reasoning:* a storage parameter and a
+  merge, no rewrite, rebuild or data change, a two-way door a later migration resets; the §10.8
+  entry matches the diff; no predicate or statistics change moves the per-page charge, and a merge
+  in the sink is code on the write path that still leaves a long list during a first sync.
+  *Reversing:* one migration resetting the limit.
+- **The write cost is accepted.** *Fork:* about 0.2 to 0.3 s more per 5,000 bodies in a first
+  sync. *Ruling:* accept. *Reasoning:* it is paid in the sync's background writes, a few tenths of
+  a second against a first sync's network time; the mention rule it keeps on the index runs on
+  every inbox read (4.8 ms and some 1,300 buffers against 0.1 ms and 10). *Reversing:* as above.
+- **The boot merge is accepted.** *Fork:* the boot that applies `0057` merges up to 4 MB of
+  pending list once. *Ruling:* accept. *Reasoning:* it is the merge an insert past the 4 MB
+  default already runs inside a sync, once; the migrator runs with `statement_timeout = 0`
+  (`migrate.rs`), and a mirror autovacuum has reached has little or nothing pending.
+  *Reversing:* drop the `gin_clean_pending_list` statement.
+- **The schema test turns autovacuum off on `sync.item`.** *Fork:* the test samples the list after
+  every 20 rows on the shared test server, where autovacuum is on. *Ruling:* switch it off for
+  the table, as `plan_shape::never_analyzed` does. *Reasoning:* an autovacuum analyze merges a GIN
+  pending list and holds the merge lock while it does; an insert past the cap meanwhile skips its
+  own merge, so a sample could read over the cap, and repeated visits during the default-limit
+  load could keep the list under four times the cap. The test runs about 8 s against a 60 s
+  naptime, so a visit lands in some runs. With it off, the only merges are the inserts' and the
+  migration's, and the counts follow from the seeded bodies. *Reversing:* one statement.
+- **`0057` keeps its number.** *Fork:* the #1850/#1851/#1855 bundle may add a migration.
+  *Ruling:* keep `0057`. *Reasoning:* no open PR adds a migration (#1876 does not) and the
+  `issue-1850` worktree stops at `0056`; whoever lands second renumbers. *Reversing:* rename one
+  file and its ledger entry.
+- **#1858's `common_word` ruling stays reversed.** *Ruling:* confirmed. *Reasoning:* the flag kept
+  the mirror away from the list it flipped on; with the list capped, the plan test holds on the
+  mirror the probe seeds. *Reversing:* low.

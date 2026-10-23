@@ -2611,6 +2611,13 @@ async fn zero_fifty_seven_caps_the_body_trigram_pending_list() {
         .execute(&pool)
         .await
         .unwrap();
+    // An autovacuum worker's analyze merges the list too, and holds the merge
+    // lock while it does, so an insert past the cap meanwhile skips its own
+    // merge: off, so the only merges are the inserts' and the migration's.
+    sqlx::query("alter table sync.item set (autovacuum_enabled = false)")
+        .execute(&pool)
+        .await
+        .unwrap();
     let pending = |pool: sqlx::PgPool| async move {
         sqlx::query_scalar::<_, i32>(
             "select pending_pages from pgstatginindex('sync.item_body_trgm_idx')",
