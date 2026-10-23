@@ -138,7 +138,7 @@ take_slot() {
     held= ahead=
     mkdir -p "$slot_root"
     if [ -n "$holder_pr" ]; then
-        # Put back a mark removed by hand with the directory.
+        # Every pass, so a mark removed by hand with the directory comes back.
         [ -L "$holder_mark" ] || ln -s "$$" "$holder_mark" 2>/dev/null || true
     else
         waiting_holders
@@ -231,11 +231,7 @@ hold_gate_slot() {
     # Set by `merge-tail-lock.sh hold` for the command it runs: this gate is
     # the merge-tail holder's, and the queue in `take` waits on it.
     holder_pr=${KNOBAS_MERGE_TAIL_HOLDER:-}
-    if [ -n "$holder_pr" ]; then
-        mkdir -p "$slot_root"
-        holder_mark=$slot_root/holder-waiting-$$
-        rm -f "$holder_mark"; ln -s "$$" "$holder_mark" 2>/dev/null || true
-    fi
+    [ -z "$holder_pr" ] || holder_mark=$slot_root/holder-waiting-$$
     wait_from=$SECONDS
     until take_slot; do
         waited=$((SECONDS - wait_from))
