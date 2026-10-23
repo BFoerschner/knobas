@@ -11,7 +11,9 @@ use super::*;
 /// fillers are resolved here and handed to [`entity_list::read`].
 ///
 /// The behaviour lives here rather than in the command so it is reachable from
-/// a test: a `#[tauri::command]` cannot be called directly.
+/// a test: a `#[tauri::command]` cannot be called directly. So does the
+/// clamp: `limit` reads at most [`ROW_CEILING`](crate::commands::ROW_CEILING)
+/// rows (#1643).
 ///
 /// # Errors
 ///
@@ -29,6 +31,7 @@ pub async fn list_entities_inner(
         Some(role) => Some(crate::sources::crud::role_scope(pool, registry, role).await?),
         None => None,
     };
+    let limit = limit.min(crate::commands::ROW_CEILING);
     Ok(entity_list::read(pool, filter, limit, offset, declarations, fillers).await?)
 }
 

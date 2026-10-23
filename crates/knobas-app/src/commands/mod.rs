@@ -20,6 +20,12 @@ pub mod search;
 pub mod sources;
 pub mod time;
 
+/// The most rows one list read hands the bridge, whatever limit the webview
+/// sends (#1643): a frontend arithmetic slip would otherwise serialise a whole
+/// table through the IPC payload. `list_sync_runs`, `room_suggestions` and
+/// `list_entities` read under it.
+pub const ROW_CEILING: u32 = 500;
+
 #[cfg(test)]
 mod tests {
     /// No command anywhere in this directory takes `State<'_, AppState>`.

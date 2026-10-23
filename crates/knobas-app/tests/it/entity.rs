@@ -4422,3 +4422,43 @@ async fn a_commit_no_build_ran_on_carries_none() {
         assert!(detail.builds.is_empty(), "{entity}: {:?}", detail.builds);
     }
 }
+
+/// A limit the webview miscomputed reads at most 500 rows, the ceiling
+/// `list_sync_runs` reads under (#1643): 501 items in a database of the
+/// test's own, and `u32::MAX` asked for. The total is the whole room's still.
+#[tokio::test]
+async fn a_limit_past_the_ceiling_reads_five_hundred_rows() {
+    let pool = knobas_db::test_util::scratch_database("list_clamp")
+        .await
+        .pool(4)
+        .await
+        .expect("a pool onto this test's own database");
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title)
+         select 'mock:CLAMP-' || n, 'ticket', 'Clamp ' || n from generate_series(1, 501) n",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, payload)
+         select id, 'mock', kind, title, '{}'::jsonb from knobas.entity",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let page = list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &all(),
+        u32::MAX,
+        0,
+        &no_paths(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(page.rows.len(), 500);
+    assert_eq!(page.total, 501);
+}

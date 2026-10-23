@@ -44,6 +44,9 @@ pub struct SuggestionPage {
 /// is what keeps "proposals scope by membership" from becoming circular with
 /// "membership is built from links".
 ///
+/// `limit` draws at most [`ROW_CEILING`](crate::commands::ROW_CEILING) rows,
+/// whatever the webview asks for (#1643).
+///
 /// # Errors
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if a query fails.
@@ -65,7 +68,8 @@ pub async fn room_suggestions_inner(
     // The count reads the whole room and the rows read its newest end: two
     // connections at once, so the read waits for the slower and not the sum.
     let drawn = async {
-        let rows = suggest::proposals(pool, sources, members, i64::from(limit)).await?;
+        let limit = i64::from(limit.min(crate::commands::ROW_CEILING));
+        let rows = suggest::proposals(pool, sources, members, limit).await?;
         let more = suggest::proposal_overflow(pool, sources, members, &rows).await?;
         Ok::<_, knobas_core::CoreError>((rows, more))
     };
