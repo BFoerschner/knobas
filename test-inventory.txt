@@ -2037,6 +2037,7 @@ knobas-search	lib/knobas_search	query::tests::type_falls_back_to_kind_while_the_
 knobas-search	lib/knobas_search	query::tests::under_is_a_typed_filter_that_ignores_case
 knobas-search	lib/knobas_search	query::tests::unknown_tokens_are_capped_so_a_paste_cannot_grow_the_response
 knobas-search	lib/knobas_search	query::tests::websearch_operators_and_phrases_survive_into_the_text
+knobas-search	lib/knobas_search	query::tests::word_alternatives_split_on_or_and_keep_what_is_left_out
 knobas-search	lib/knobas_search	saved::tests::a_slug_is_addressable_whatever_the_label_was
 knobas-search	lib/knobas_search	saved::tests::every_refusal_names_its_own_rule_under_one_heading
 knobas-search	lib/knobas_search	saved::tests::saving_names_the_rule_and_only_the_rail_offers_to_delete
@@ -2210,8 +2211,8 @@ knobas-search	test/it	ticket_keys::label_matches_any_of_an_items_labels
 knobas-search	test/it	ticket_keys::matching_ids_are_every_ticket_the_query_admits
 knobas-search	test/it	ticket_keys::no_active_sprint_offers_no_current
 knobas-search	test/it	ticket_keys::project_matches_the_key_or_the_name
-knobas-search	test/it	ticket_keys::quoted_and_negated_words_read_through_the_needles
 knobas-search	test/it	ticket_keys::sprint_current_is_a_ticket_in_an_active_sprint
+knobas-search	test/it	ticket_keys::the_view_reads_phrases_negations_and_or_as_the_grammar_does
 knobas-search	test/it	ticket_keys::words_alone_match_the_key_the_title_and_the_declared_assignee
 knobas-search	test/it	under::a_bare_name_two_owners_share_scopes_to_both
 knobas-search	test/it	under::a_plain_repo_name_finds_the_repo_and_not_its_contents
