@@ -13,7 +13,8 @@
   message used to read "the run stopped without recording an outcome".
 
   A run the quit's abort stops after `SHUTDOWN_GRACE` is unchanged: its watchers get that ending
-  and its row is left for `reconcile_abandoned`.
+  and its row is left for `reconcile_abandoned`. So is a run whose adapter panics after the quit
+  has begun, since the scheduler's background set takes no new work from then on.
 
   Witnessed by `crates/knobas-sync/tests/scheduler_loop.rs`
   (`a_run_whose_adapter_panics_is_recorded_and_stops_running`,

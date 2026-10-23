@@ -13528,3 +13528,22 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
 - **A §10.8 entry.** *Ruling:* booked (`1638-a-panicked-run-is-recorded.md`). `knobas-sync` is not
   frozen, but `sync:state`, `sync_status` and `list_sources` observably change for a panicked run,
   as they did for #1629's cancelled run. *Reversing:* n/a.
+
+### #1638: merge-manager review (Opus, 2026-10-23)
+
+- **A drop on a runtime that is shutting down.** *Fork:* guard the spawn further, or rely on
+  `Handle::try_current` plus tokio's handling of a spawn onto a closed runtime. *Ruling:* as
+  written. *Reasoning:* off a runtime the guard falls through to closing the watchers; on one that
+  is shutting down, tokio 1.53 shuts the new task down at bind instead of panicking, and dropping
+  its future runs the inner guard (`recorder` unset), which closes the watchers. Neither path can
+  panic during the unwind or re-enter `Background`'s lock. *Reversing:* n/a.
+- **The quit racing the spawn.** *Ruling:* no gap. `Background::spawn` checks the closed state and
+  spawns under one lock, and `close` takes the set under the same lock, so a tail either lands in
+  the set the quit awaits or is refused. *Reversing:* n/a.
+- **Panic versus cancel for the ladder.** *Ruling:* the distinction is drawn by the right signal.
+  `was_cancelled` and `failures_since_last_ok` key on `CANCELLED_MESSAGE`, which only
+  `RunResult::cancelled` writes; the guard writes `RUN_STOPPED_MESSAGE`, so #1629's cancelled run
+  still does not back off and a panic does. *Reversing:* one constructor.
+- **§10.8 wording.** *Ruling:* the entry now also says a panic after the quit has begun keeps the
+  old treatment (watchers closed, row left to `reconcile_abandoned`), since that is observable and
+  the entry named only the abort. *Reversing:* one sentence.
