@@ -39,7 +39,7 @@
 use chrono::{DateTime, Duration, Utc};
 use knobas_search::corpus::{self, LIVE_ITEM};
 use knobas_search::query::EffectiveFilters;
-use knobas_search::sql::{query_as_with, search_sql};
+use knobas_search::sql::{query_as_with, saved_summary_sql, search_sql, SavedQuery};
 
 /// One row of the launcher's result set.
 ///
@@ -997,4 +997,45 @@ fn the_mirror_is_named_from_stored_lexemes_and_lexes_no_title_per_match() {
         }
         assert_eq!(sql.matches("m as materialized (").count(), 1, "{sql}");
     }
+}
+
+/// `reach:`'s walk (#1653) is resolved once a statement, in one materialized
+/// CTE every corpus branch reads, and not spliced into each branch: its start
+/// set scans `knobas.entity`, and over `corpus::ALL` that was four scans a
+/// search and four per saved list on the rail. Once per saved list there,
+/// because each list binds values of its own.
+#[test]
+fn reachs_start_set_is_resolved_once_per_statement() {
+    let start = "lower(e.id) = any(";
+    let filters = EffectiveFilters {
+        reach: vec!["pay-231".to_owned()],
+        ..EffectiveFilters::default()
+    };
+    for text in [Some("payout"), None] {
+        let built = search_sql(corpus::ALL, text, false, &filters, 10, 40);
+        let sql = built.sql();
+        assert_eq!(sql.matches(start).count(), 1, "{sql}");
+        assert_eq!(sql.matches(" as materialized (").count(), 2, "{sql}");
+        assert_eq!(
+            sql.matches(" in (select rx.id from reaches rx)").count(),
+            corpus::ALL.len(),
+            "every branch reads the one walk:\n{sql}"
+        );
+    }
+
+    let other = EffectiveFilters {
+        reach: vec!["ops-7".to_owned()],
+        ..EffectiveFilters::default()
+    };
+    let queries = [
+        SavedQuery { id: "a", text: None, filters: &filters },
+        SavedQuery { id: "b", text: Some("deploy"), filters: &other },
+    ];
+    let built = saved_summary_sql(corpus::ALL, &queries).expect("two saved lists");
+    let sql = built.sql();
+    assert_eq!(sql.matches(start).count(), queries.len(), "{sql}");
+
+    // No `reach:`, no walk.
+    let bare = search_sql(corpus::ALL, Some("payout"), false, &EffectiveFilters::default(), 10, 40);
+    assert!(!bare.sql().contains("reaches"), "{}", bare.sql());
 }

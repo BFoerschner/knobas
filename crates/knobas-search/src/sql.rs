@@ -204,8 +204,10 @@ pub fn search_sql(
         );
     }
 
-    // A ticket key's declared paths, resolved once for the statement (#811).
+    // A ticket key's declared paths, resolved once for the statement (#811),
+    // and what `reach:` reaches, walked once for every corpus (#1653).
     sql.push_str(&field_paths(&bound));
+    sql.push_str(&reaches(&bound));
 
     // One narrow row per match. MATERIALIZED because `totals` and `top` both
     // read it and the scan must happen once.
@@ -359,6 +361,7 @@ fn ids_body(builder: &mut Builder, words: &[String], filters: &EffectiveFilters)
 
     let mut sql = String::from("with\n");
     sql.push_str(&field_paths(&bound));
+    sql.push_str(&reaches(&bound));
     // `with` needs at least one CTE; this one is free.
     sql.push_str("nothing as (select 1)\n");
     // The live mirror as the base table and two hashed exclusion sets, not
@@ -512,6 +515,11 @@ fn bind_dimensions(
     filters: &EffectiveFilters,
     declarations: Option<&String>,
 ) -> BoundFilters {
+    // First of the dimensions because the statement reads it first: the
+    // `reaches` CTE (#1653) comes before every corpus branch.
+    let reach = filters
+        .filters_by_reach()
+        .then(|| bind_lowered(builder, &filters.reach));
     BoundFilters {
         sources: (!filters.sources.is_empty())
             .then(|| builder.param(Bind::Texts(filters.sources.clone()))),
@@ -539,9 +547,7 @@ fn bind_dimensions(
                 bind_lowered(builder, &filters.under),
             )
         }),
-        reach: filters
-            .filters_by_reach()
-            .then(|| bind_lowered(builder, &filters.reach)),
+        reach,
         names: (!filters.names.is_empty())
             .then(|| builder.param(Bind::Texts(filters.names.clone()))),
         fields: Vec::new(),
@@ -609,8 +615,12 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
             None => "false".to_owned(),
         });
     }
-    if let Some(values) = &bound.reach {
-        predicates.push(format!("{} in ({})", corpus.entity_id, reach_ids(values)));
+    if bound.reach.is_some() {
+        // The statement's one walk ([`reaches`]), never a walk per corpus.
+        predicates.push(format!(
+            "{} in (select rx.id from reaches rx)",
+            corpus.entity_id
+        ));
     }
     if let Some(names) = &bound.names {
         // `knobas_core::name_glob_matches!`, the text a link-set pattern
@@ -675,21 +685,38 @@ fn bind_lowered(builder: &mut Builder, values: &[String]) -> String {
     format!("array[{}]::text[]", each.join(", "))
 }
 
-/// What the tickets a `reach:` names reach (#817), as one subquery over the
-/// values' placeholder: `knobas_core::reach_walk!`, the walk the job-reach
-/// read makes, started from every ticket whose id or key is one of the
-/// values. Every corpus reads the same ids, so an asset, a note or a route is
-/// kept exactly when the read would list it.
-fn reach_ids(values: &str) -> String {
+/// What the tickets a `reach:` names reach (#817), as the CTE `reaches(id)`
+/// ending in `,\n`, or nothing for a query without `reach:`:
+/// `knobas_core::reach_walk!`, the walk the job-reach read makes, started from
+/// every ticket whose id or key is one of the values. Every corpus reads the
+/// same ids, so an asset, a note or a route is kept exactly when the read
+/// would list it.
+///
+/// **One CTE, materialized, that every corpus branch reads** (#1653). The
+/// start set compares `lower(e.id)` and the key past its namespace, which no
+/// index on `knobas.entity` serves, so it is a scan of every entity; spliced
+/// into each branch, as it was, that was four scans and four walks a search
+/// over [`crate::corpus::ALL`], and four more per saved list on the rail.
+/// `materialized` so the planner cannot inline it back into each branch.
+///
+/// Resolved by equality, value by value: the id as typed or the key, both
+/// lowercased, and never a pattern.
+fn reaches(bound: &BoundFilters) -> String {
+    let Some(values) = &bound.reach else {
+        return String::new();
+    };
     format!(
-        "with recursive start(t) as (
+        "reaches as materialized (
+    with recursive start(t) as (
         select e.id from knobas.entity e
          where e.kind = 'ticket'
            and (lower(e.id) = any({values}::text[])
                 or lower(substr(e.id, strpos(e.id, ':') + 1)) = any({values}::text[]))
     ),
     {}
-    select r.id from reached r",
+    select r.id from reached r
+),
+",
         knobas_core::reach_walk!()
     )
 }
@@ -786,9 +813,11 @@ pub fn saved_summary_sql(corpora: &[&Corpus], queries: &[SavedQuery<'_>]) -> Opt
             sql,
             "select {id} as list_id, count(*) as total, max(m.synced_at) as newest\n  from ("
         );
-        let paths = field_paths(&bound);
-        if let Some(paths) = paths.strip_suffix(",\n") {
-            let _ = writeln!(sql, "  with {paths}");
+        // Per saved list, since each binds values of its own; once for all
+        // of its corpora.
+        let ctes = field_paths(&bound) + &reaches(&bound);
+        if let Some(ctes) = ctes.strip_suffix(",\n") {
+            let _ = writeln!(sql, "  with {ctes}");
         }
         for (index, corpus) in corpora.iter().enumerate() {
             if index > 0 {
@@ -1404,6 +1433,31 @@ mod tests {
             "{:?}",
             built.binds[8]
         );
+    }
+
+    /// `reach:`'s values are read by the `reaches` CTE (#1653), ahead of every
+    /// corpus branch, so they are bound ahead of the branches' filters.
+    #[test]
+    fn reachs_values_are_numbered_where_the_walk_reads_them() {
+        let built = search_sql(
+            crate::corpus::ALL,
+            Some("sepa"),
+            false,
+            &EffectiveFilters {
+                reach: vec!["pay-231".to_owned()],
+                ..filters(&["jira"], &[], None, &[])
+            },
+            10,
+            50,
+        );
+        assert_eq!(
+            placeholders(&built.sql),
+            (1..=built.binds.len()).collect::<Vec<_>>(),
+            "{}",
+            built.sql
+        );
+        assert_eq!(built.binds[1], Bind::Text("pay-231".to_owned()));
+        assert_eq!(built.binds[2], Bind::Texts(vec!["jira".to_owned()]));
     }
 
     /// A statement with no filters must number its placeholders densely too --
