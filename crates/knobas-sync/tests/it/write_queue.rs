@@ -1507,6 +1507,48 @@ async fn two_flushes_of_one_source_deliver_a_write_once() {
     assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
 }
 
+/// #1629: the source's lock is held per write, so a second flusher takes its
+/// turn at a write the first has just attempted, and re-reads it first. A
+/// *Flush now* that read the write before the tick's attempt failed does not
+/// send it a second time: the attempt it asked for has just been made.
+///
+/// Arranged rather than raced: the press starts while the tick's send is on
+/// the wire, so it read the row before the attempt was recorded.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_press_beside_a_failing_send_does_not_send_it_again() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-1629", "a payout fails").await;
+
+    h.answer(Answer::Unreachable);
+    let write = h.comment(&ticket, "once per turn").await;
+    assert_eq!(*h.asked.lock().unwrap(), 1);
+    h.rewind(86_400).await;
+    *h.dwell.lock().unwrap() = std::time::Duration::from_millis(300);
+
+    let press = async {
+        for _ in 0..500 {
+            if *h.asked.lock().unwrap() == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(*h.asked.lock().unwrap(), 2, "the tick's send is on the wire");
+        flusher::flush_now(&h.deps, Some(&h.source)).await
+    };
+    let (tick, press) = tokio::join!(flusher::flush_source(&h.deps, &h.source), press);
+    tick.unwrap();
+    press.unwrap();
+
+    assert_eq!(
+        *h.asked.lock().unwrap(),
+        2,
+        "the press sent the write the tick had just tried"
+    );
+    let row = h.reload(write.id).await;
+    assert_eq!(row.attempts, 2);
+    assert_eq!(row.wait_reason, Some(WaitReason::Unreachable));
+}
+
 /// Issue #336: a create that landed after the user withdrew it is recorded,
 /// and the record carries what the source called what it made.
 ///
