@@ -15305,10 +15305,10 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1885.
   writing the 23,500 items' `fts` into a table with this index alone, in batches of 500 in one
   transaction, three rounds: no index 0.2 to 0.3 s, 4 MB 0.6 to 1.0 s, 1 MB 0.9 to 1.3 s,
   256 kB 1.6 to 2.7 s, 64 kB 2.8 to 5.7 s, `fastupdate = off` 3.6 to 9.8 s. 256 kB costs a first
-  sync some 40 to 75 us an item, in the background; 0.2 to 0.4 s per 5,000, the order #1864's
+  sync some 40 to 75 µs an item, in the background; 0.2 to 0.4 s per 5,000, the order #1864's
   merge-manager accepted. 1 MB (129 pages) holds on this mirror, but the walk the planner prices
   against the charge is estimated from the mirror's size, so a smaller mirror flips on a shorter
-  list; at 33 pages the charge is about 130. *Reversing:* one migration.
+  list; at 33 pages the charge is a planner cost of about 130. *Reversing:* one migration.
 - **Reserved for Björn, ruled by implementer on Opus: migration `0059`** (Björn's 2026-10-22
   waiver, as dispatched). *Fork:* §10.8 freezes `crates/knobas-db/migrations/**`. *Ruling:* add
   `0059`, the storage parameter and a merge of what is pending, with its entry

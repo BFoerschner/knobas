@@ -2690,8 +2690,8 @@ async fn zero_fifty_seven_caps_the_body_trigram_pending_list() {
 
 /// `0059` (#1869): the launcher's mirror search index keeps a pending list of
 /// at most 256 kB, as `0057` keeps the mention index's. With the default
-/// limit, 1,000 bodies of forty random words leave 334 pages unmerged, short
-/// of the 4 MB merge; on the responsiveness probe's never-analyzed mirror
+/// limit, 1,000 bodies of forty random words reach about 330 unmerged pages,
+/// short of the 4 MB merge; on the responsiveness probe's never-analyzed mirror
 /// a list past about 220 pages priced `item_fts_idx` above a walk of every
 /// entity, and a two-word search went from 2.5 ms to 25 ms. Read after every
 /// 20 rows, so a list that grew past the cap and was merged before the load

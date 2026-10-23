@@ -449,8 +449,9 @@ pub async fn pending_list(pool: &PgPool) -> Result<(i32, i64), SearchError> {
 /// that clearing it does something -- *when you build a detector, mutate the
 /// detector*. Crossing `gin_pending_list_limit` (256 kB on this index since
 /// `0059`, 4 MB before) makes PostgreSQL merge the list unasked, so a larger
-/// dirtying step does not leave a longer list, and can leave a shorter one. That is the same mechanism that makes the artifact's severity
-/// depend on where a load stopped rather than on corpus size.
+/// dirtying step does not leave a longer list, and can leave a shorter one.
+/// That is the same mechanism that makes the artifact's severity depend on
+/// where a load stopped rather than on corpus size.
 ///
 /// # Errors
 ///

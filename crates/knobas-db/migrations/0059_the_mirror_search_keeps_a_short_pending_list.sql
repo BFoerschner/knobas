@@ -25,9 +25,10 @@
 --
 -- At 256 kB the list holds at most 33 pages, the limit `0057` chose for the
 -- same charge. Writing those 23,500 items' `fts` into a table with this index
--- alone, in the sync's batches of 500 and one transaction, took 1.6 to 2.7 s, against 0.6 to 1.0 s at 4 MB, 0.9 to 1.3 s at 1 MB and 3.6 to
--- 9.8 s with no pending list: a first sync pays some 40 to 75 us an item, in
--- the background. 1 MB holds 129 pages, under this mirror's flip. The walk the
+-- alone, in the sync's batches of 500 and one transaction, took 1.6 to
+-- 2.7 s, against 0.6 to 1.0 s at 4 MB, 0.9 to 1.3 s at 1 MB and 3.6 to 9.8 s
+-- with no pending list: a first sync pays some 40 to 75 us an item, in the
+-- background. 1 MB holds 129 pages, under this mirror's flip. The walk the
 -- planner prices against the list is estimated from the mirror's size and the
 -- charge is not, so a smaller mirror flips on a shorter list.
 --
