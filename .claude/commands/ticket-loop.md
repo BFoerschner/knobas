@@ -26,6 +26,8 @@ A step a ticket, milestone or spec **reserves for Björn** is ruled by an **Opus
 
 A criterion no agent can witness is handed on in the PR ("Not witnessable by an agent, handed to the milestone review: …") and taken up by the milestone reviewer.
 
+**Issues you file** (a failed release workflow, a red Linux run, a live-fixture break, a gap a report hands you) follow the briefs' *Filing a follow-up* (Björn, 2026-10-23): search for the class first (`gh issue list --state all --search '<cause>'`, the sibling sites), fold an instance into the open issue that names its cause, else one issue per root cause, its body naming the cause, every instance and the search. The same holds for what you have a reviewer or splitter file.
+
 ## The brief files
 
 Masters: `/Users/dev/Projects/knobas/docs/agents/implementer-brief.md` and `merge-manager-brief.md` (root checkout, current `main`). Once per session, copy each to the scratchpad as `<role>-brief-<session>.md` (parallel agents share the scratchpad) and replace its *Attribution* block with this session's attribution from the system reminder. Dispatch with the copy's path. A new standing rule goes into the master through a docs-only self-merge and a fresh copy, never into dispatch prompts or memory.
@@ -79,7 +81,7 @@ Fill free seats in this order. A **direct request from Björn** runs beside the 
 2. **Live-fixture fixes** (`Live fixture:`; a failure every run of a live suite hits).
 3. **Milestone tickets**, milestone first (TF1 before TF2 …), then issue number.
 4. **No-milestone tickets**, by issue number. In 3 and 4, a ticket without a `refactor<N>` label goes before every ticket with one (Björn, 2026-10-19).
-5. **Backlog:** promote the oldest open `backlog` issue yourself (`gh issue edit N --remove-label backlog --add-label ready-for-agent`, one-line comment "promoted: frontier empty") and dispatch it. Never leave a seat empty or ask Björn to promote while backlog exists. Close an overtaken backlog issue with a comment saying what overtook it.
+5. **Backlog:** promote the oldest open `backlog` issue whose body names its root cause and lists the instances found (the briefs' *Filing a follow-up*) yourself (`gh issue edit N --remove-label backlog --add-label ready-for-agent`, one-line comment "promoted: frontier empty") and dispatch it. One that names only the place a defect surfaced is not promoted: when it is the oldest left, dispatch a Sonnet researcher (background, no worktree) to find the class, fold it into an open issue that names the cause or rewrite its body with the cause, every instance and the search, and set `ready-for-agent`; it enters next iteration. Never leave a seat empty or ask Björn to promote while backlog exists. Close an overtaken backlog issue with a comment saying what overtook it.
 
 **Bundle** up to three tickets that edit the same screen (same prototype-6 route or view component) or the same files: one implementer, worktree `issue-<lowest>`, one PR with one `Closes #N` per ticket, all claimed. A ticket joins when free or blocked only by the bundle. A free ticket whose screen a running agent is editing waits for that merge.
 

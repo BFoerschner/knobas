@@ -14845,3 +14845,24 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1859.
 - **Docs-only self-merges.** *Ruling:* the same order, with `just docs-check` as the pre-gate
   and the re-gate. *Reasoning:* one order for every reader of the brief; the check takes
   seconds either way. *Reversing:* trivial.
+
+## #1865: the follow-up rule and the backlog audit (Fable implementer, 2026-10-23)
+
+- **`Registry::build` (#1705) stays apart from the blocking-calls class (#1860).** *Ruling:* two
+  issues, cross-linked. *Reasoning:* the same root (a synchronous call on a tokio worker), but
+  #1705 carries ruling D9 (a helper beside the registry, SPI unchanged) and a dwell test; folding
+  it into a stat-and-fork sweep would widen an Opus ticket that is ready. *Reversing:* low, one
+  comment.
+- **#1850, #1851, #1855 and #1864 are not one issue.** *Ruling:* kept apart; each body now names
+  its cause and its siblings. *Reasoning:* read `sql.rs`: the rail (`saved_summary_sql`) has no
+  `m` and no rank, so #1851's cost-estimate flip is not #1855's statement; #1850 is a missing
+  index; #1864 a statistics flip on another index. No one fix reaches two of them. *Reversing:*
+  low; #1851's body says to fold the others in if the diagnosis finds a shared setting.
+- **The knobas-db bring-up and backup calls join #1860.** *Ruling:* listed, marked once per
+  process or per export. *Reasoning:* the class is the mechanism, not the frequency; a list that
+  leaves them out invites the next symptom issue. *Reversing:* n/a.
+- **A backlog issue that names only a symptom is researched, not promoted and not skipped.**
+  *Ruling:* ticket-loop Step 4, item 5 dispatches a Sonnet researcher without a worktree.
+  *Reasoning:* promoting it dispatches a symptom fix, the cost #1865 names; skipping it starves
+  the seat that "never leave a seat empty" protects. *Reversing:* low, one sentence.
+- **`tdd` not invoked, no mutants.** *Ruling:* docs-only, no code. *Reversing:* n/a.
