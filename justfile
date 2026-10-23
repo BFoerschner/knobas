@@ -403,10 +403,7 @@ _inventory-write FILE:
     trap 'rm -f "$tmp"; trap - TERM; kill -TERM $$' TERM
     if [ -e "{{FILE}}" ]; then cp -p "{{FILE}}" "$tmp"; fi
     just _test-executables \
-      | awk -F'\t' '$1 == "test"' \
-      | while IFS=$'\t' read -r _ pkg target exe _; do
-            "$exe" --list 2>/dev/null | sed -n 's/: test$//p' | sed "s|^|${pkg}\t${target}\t|"
-        done \
+      | scripts/inventory-list.sh \
       | grep -vxF -f <(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' test-inventory-conditional.txt) \
       | LC_ALL=C sort > "$tmp"
     mv "$tmp" "{{FILE}}"
@@ -556,6 +553,8 @@ witness-unit:
     scripts/bash-guard-test.sh
     scripts/shot-test.sh
     scripts/test-layout-test.sh
+    scripts/inventory-list-test.sh
+    scripts/ipc-mirror-check-test.sh
     scripts/append-only-merge-test.sh
     scripts/test-prefix-guard-test.sh
     scripts/test-prefix-guard.sh
@@ -2218,7 +2217,9 @@ estate-live:
 
 # The generated IPC mirror is current (#1325, contract §2.6 as amended):
 # regenerate `app/src/lib/ipc/generated/` from the Rust types and fail when
-# the result differs from what HEAD holds, untracked files included. The
+# the run changed the working tree (`scripts/ipc-mirror-check.sh`: the
+# reference is the tree before the run, not HEAD, so a mirror `pre-gate` just
+# regenerated is not reported stale). The
 # writer is `knobas-app`'s `ipc_mirror` unit test; to regenerate by hand run
 # `cargo test -p knobas-app --lib ipc_mirror` and commit the result.
 #
@@ -2237,18 +2238,8 @@ ipc-mirror:
     fi
     exe=$(cut -f4 <<< "$line")
     dir=$(cut -f5 <<< "$line")
-    (cd "$dir" && "$exe" --exact ipc_mirror::the_generated_ipc_mirror_is_written --quiet)
-    generated=app/src/lib/ipc/generated
-    stale=$( { git diff --name-only HEAD -- "$generated"; git ls-files --others --exclude-standard -- "$generated"; } )
-    if [ -n "$stale" ]; then
-        git --no-pager diff HEAD -- "$generated"
-        echo >&2
-        echo "error: the generated IPC mirror is stale; the Rust types now produce:" >&2
-        sed 's/^/  /' <<< "$stale" >&2
-        echo "  Commit the regenerated files (the run above wrote them)." >&2
-        exit 1
-    fi
-    echo "ipc-mirror: app/src/lib/ipc/generated/ matches the Rust types"
+    scripts/ipc-mirror-check.sh app/src/lib/ipc/generated \
+      env -C "$dir" "$exe" --exact ipc_mirror::the_generated_ipc_mirror_is_written --quiet
 
 # Move loose section 10.8 entries into docs/contract/10.8/ and regenerate the index (#737).
 contract-index:
