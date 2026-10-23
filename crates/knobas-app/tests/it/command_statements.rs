@@ -28,11 +28,22 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Count {
     }
 }
 
-/// One counted section at a time in this file: two threads installing and
-/// dropping thread-local subscribers at once raced tracing's callsite interest
-/// cache and counted nothing on some runs. (`ipc.rs` installs the binary's one
-/// global subscriber, so this cannot be one.)
+/// One counted section at a time in this file, so the steady state one test
+/// counts is never another's warm-up on the same database.
 static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// A dispatcher registered for the whole process and never dropped. While the
+/// counter's thread-local one is the only dispatcher tracing has registered,
+/// tracing-core takes its "just one" path: an interest it computes for a
+/// callsite registered on another test's thread, and the max level a rebuild
+/// sets there, come from *that* thread's default (none: `never`, `OFF`), so a
+/// sqlx callsite can be cached as uninteresting for the counter too and the
+/// count comes up short. With this one alive the counter is never alone, and
+/// every interest and max level is the union over all live dispatchers, the
+/// counter's included. (`ipc.rs` installs the binary's one global subscriber,
+/// so the counter cannot be one, and that test may not have run yet.)
+static NEVER_ALONE: std::sync::LazyLock<tracing::Dispatch> =
+    std::sync::LazyLock::new(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new()));
 
 async fn pool() -> PgPool {
     let pool = knobas_db::test_util::test_pool().await;
@@ -55,13 +66,15 @@ where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
+    std::sync::LazyLock::force(&NEVER_ALONE);
     let _only = ONE_AT_A_TIME.lock().await;
     work().await;
-    // Every command here issues a statement, so a count of nothing is the
-    // subscriber missing a callsite that tracing had cached as uninteresting
-    // (it still happens when another binary test drops a dispatcher): look
-    // again rather than report it.
-    for _ in 0..5 {
+    // Every command here issues a statement, so a count of nothing can only be
+    // a callsite whose first registration on another thread straddled the
+    // counter's (tracing-core computes its interest before it lists it): look
+    // again under a new dispatcher, whose registration rebuilds every listed
+    // callsite, rather than report it.
+    for _ in 0..3 {
         let seen = Arc::new(AtomicUsize::new(0));
         let guard = tracing::subscriber::set_default(
             tracing_subscriber::registry().with(Count(seen.clone())),
@@ -72,7 +85,6 @@ where
         if counted > 0 {
             return counted;
         }
-        tracing::callsite::rebuild_interest_cache();
     }
     0
 }
