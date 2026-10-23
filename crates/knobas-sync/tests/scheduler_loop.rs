@@ -2883,7 +2883,7 @@ async fn owe_a_comment(
 
 /// Drop what `ids` still owe, so the next test's flush does not send it: the
 /// write queue's half of [`retire`].
-async fn forgive(pool: &PgPool, ids: &[String]) {
+async fn drop_owed(pool: &PgPool, ids: &[String]) {
     sqlx::query("delete from knobas.write_queue where source_id = any($1)")
         .bind(ids)
         .execute(pool)
@@ -2962,7 +2962,7 @@ async fn a_slow_write_does_not_hold_off_a_source_that_falls_due() {
     );
 
     scheduler.shutdown().await;
-    forgive(&pool, &writing).await;
+    drop_owed(&pool, &writing).await;
     retire(&pool, &[writing, due_soon].concat()).await;
 }
 
@@ -3024,6 +3024,6 @@ async fn a_quit_during_a_flush_stops_it_between_writes() {
         states.iter().filter(|s| **s == WriteState::Pending).count() >= 1,
         "the writes behind the quit stay owed: {states:?}"
     );
-    forgive(&pool, &writing).await;
+    drop_owed(&pool, &writing).await;
     retire(&pool, &writing).await;
 }

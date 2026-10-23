@@ -1532,7 +1532,11 @@ async fn a_press_beside_a_failing_send_does_not_send_it_again() {
             }
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
-        assert_eq!(*h.asked.lock().unwrap(), 2, "the tick's send is on the wire");
+        assert_eq!(
+            *h.asked.lock().unwrap(),
+            2,
+            "the tick's send is on the wire"
+        );
         flusher::flush_now(&h.deps, Some(&h.source)).await
     };
     let (tick, press) = tokio::join!(flusher::flush_source(&h.deps, &h.source), press);

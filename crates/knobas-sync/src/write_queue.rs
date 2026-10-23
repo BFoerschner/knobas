@@ -213,14 +213,15 @@ pub async fn queue(
     Ok(queued)
 }
 
-/// Flush every source that owes something: the scheduler's tick.
+/// Flush every source that owes something, as the scheduler's flush task does
+/// on every tick ([`flush_all_until`]), with nothing to stop it.
 ///
 /// One source's failure never stops another's: each is flushed on its own and
 /// its errors are logged rather than raised, which is what story 21 asks for
 /// -- one broken credential must not stop everything. Sequential rather than
 /// concurrent, deliberately: the queue is small, and each source's writes take
 /// its own lock anyway (see [`gate`]). The scheduler runs it on a task of its
-/// own ([`flush_all_until`]), so however long it takes, nobody's sync waits.
+/// own, so however long it takes, nobody's sync waits.
 ///
 /// A source whose health needs a human -- the credential was refused, or
 /// there is none -- is skipped whole, the test `Scheduler::trigger_all` makes
@@ -229,7 +230,7 @@ pub async fn queue(
 /// credential), so what keeps a refused write from going again is
 /// [`owed`], read per row.
 pub async fn flush_all(deps: &SchedulerDeps) {
-    flush_all_until(deps, &CancellationToken::new()).await;
+    flush_all_until(deps, &never()).await;
 }
 
 /// [`flush_all`], stopping between writes once `stop` is cancelled: the
@@ -259,12 +260,17 @@ pub(crate) async fn flush_all_until(deps: &SchedulerDeps, stop: &CancellationTok
 /// [`flush_all`]'s are.
 pub async fn flush_now(deps: &SchedulerDeps, source_id: Option<&str>) -> Result<(), FlushError> {
     match source_id {
-        Some(id) => flush(deps, id, Pass::Now, &CancellationToken::new()).await,
+        Some(id) => flush(deps, id, Pass::Now, &never()).await,
         None => {
-            flush_every(deps, Pass::Now, &CancellationToken::new()).await;
+            flush_every(deps, Pass::Now, &never()).await;
             Ok(())
         }
     }
+}
+
+/// The stop a flush nobody quits is handed: a submit's, a press's, a test's.
+fn never() -> CancellationToken {
+    CancellationToken::new()
 }
 
 /// Which head writes a pass sends.
@@ -412,7 +418,8 @@ fn gate(source_id: &str) -> Arc<Gate> {
 /// One source's share of the flush loop's process-wide state; see [`gate`].
 #[derive(Default)]
 struct Gate {
-    /// Held across one write's attempt: the re-read, the send, the settle.
+    /// Held across one turn at a write ([`turn`]): the re-read, then the
+    /// attempt and its settle, or the wait a failed build records.
     flush: tokio::sync::Mutex<()>,
     /// How many times [`release_unauthorized`] has run for the source in this
     /// process.
@@ -441,7 +448,7 @@ struct CredentialSeen<'a> {
 /// credential -- is **not** an error: its writes wait, with the reason
 /// recorded, which is the whole point of the queue.
 pub async fn flush_source(deps: &SchedulerDeps, source_id: &str) -> Result<(), FlushError> {
-    flush(deps, source_id, Pass::Owed, &CancellationToken::new()).await
+    flush(deps, source_id, Pass::Owed, &never()).await
 }
 
 async fn flush(
@@ -514,7 +521,8 @@ async fn flush(
 enum Turn<'g> {
     /// The write is as this flusher read it, and still owed: send it,
     /// holding the source's lock until it has settled.
-    Go(tokio::sync::MutexGuard<'g, ()>, QueuedWrite),
+    /// Boxed: a queue row is far larger than the other two arms.
+    Go(tokio::sync::MutexGuard<'g, ()>, Box<QueuedWrite>),
     /// Another flusher attempted it, or it settled or was withdrawn, since
     /// it was read.
     Gone,
@@ -527,9 +535,9 @@ enum Turn<'g> {
 ///
 /// The row as it stands now is what is sent, not the copy the pass read: an
 /// amend that landed in between is the version the reader means. It is
-/// [`Turn::Gone`] if it is no longer pending, if its `attempted_at` moved
-/// (every attempt stamps it, under this lock), or, on a pass of the tick's
-/// kind, if it is no longer [`owed`].
+/// [`Turn::Gone`] if it is no longer pending, if its `attempted_at` or
+/// `attempts` moved (every attempt bumps both, under this lock), or, on a
+/// pass of the tick's kind, if it is no longer [`owed`].
 async fn turn<'g>(
     deps: &SchedulerDeps,
     gate: &'g Gate,
@@ -551,7 +559,7 @@ async fn turn<'g>(
     if !untouched || (pass == Pass::Owed && !owed(&now, chrono::Utc::now())) {
         return Ok(Turn::Gone);
     }
-    Ok(Turn::Go(sending, now))
+    Ok(Turn::Go(sending, Box::new(now)))
 }
 
 /// *I know, and I still mean it* (story 13): release a held write and try it.
