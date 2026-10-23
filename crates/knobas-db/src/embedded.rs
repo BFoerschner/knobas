@@ -434,9 +434,8 @@ impl EmbeddedDb {
     /// and shared with every other `root_dir` on the machine), runs `initdb` into `root_dir/data` the
     /// first time, starts the server on an ephemeral loopback port with
     /// `fsync` on (#1896) and creates the `knobas` database if it does not
-    /// exist yet. An adopted server runs with the settings it was started
-    /// with: an orphan of a build before #1896 has `fsync` off until this
-    /// handle stops or restarts it.
+    /// exist yet. An adopted orphan an older build left running with `fsync`
+    /// off is stopped and started again with it on (#1896).
     ///
     /// A server that is already up and serving this very data directory, one
     /// a signal-killed run left behind, is *adopted* rather than fought over:
@@ -1163,6 +1162,10 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
 /// was free, `owner_lock` is it, and the clean quit of this process stops the
 /// server.
 ///
+/// An orphan running with `fsync` off, which every build before #1896
+/// started, is stopped and started again on `settings` ([`restart_durable`]),
+/// so the app never goes on writing to it without syncing.
+///
 /// # A stranger on the port
 ///
 /// An answer on the recorded port that is not a server of ours -- not
@@ -1344,7 +1347,23 @@ async fn adopt(
             tracing::info!("the {DATABASE_NAME} database appeared before this adoption created it");
         }
     }
+    let fsync: (String,) = sqlx::query_as("select current_setting('fsync')")
+        .fetch_one(&mut admin)
+        .await
+        .map_err(|source| unreachable(format!("cannot query it: {source}")))?;
     let _ = admin.close().await;
+
+    // An orphan a build before #1896 started runs with `fsync` off: that
+    // build passed `-F` alone. A command-line setting outranks a reload, so
+    // only a start of our own gives it the `fsync=on` this build passes.
+    // Stopping it is safe for the reason `stop` stopping an adopted server
+    // is: `owner_lock` is held, so no knobas has this profile open.
+    let postgresql = if fsync.0 == "on" {
+        None
+    } else {
+        restart_durable(&settings).await?
+    };
+    let stop_settings = postgresql.is_none().then_some(settings);
 
     let connector = Connector::parse(&url)?;
     let pool = connector.app_pool().await.map_err(|source| {
@@ -1360,13 +1379,46 @@ async fn adopt(
     Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
         connector,
-        postgresql: None,
+        postgresql,
         // `settings.port` was set to the recorded port above, and
         // `adopt_recorded_password` gave it the password `initdb` burned in,
         // so this is a handle over the server we are actually connected to.
-        stop_settings: Some(settings),
+        stop_settings,
         owner_lock: Some(owner_lock),
     })))
+}
+
+/// Stop the orphan [`adopt`] found running with `fsync` off and start it
+/// again on `settings`, which pass `fsync=on` (#1896), on the port it had.
+///
+/// `Some` handle when the server runs durably now, which then stops it as a
+/// server started here does. `None` when the stop failed: the orphan is
+/// adopted as it is, with `fsync` off until the next quit, since a launch
+/// refused over a setting the previous build chose would cost the user more
+/// than the setting does. A failed start after a clean stop is an error, as
+/// any failed start is.
+async fn restart_durable(settings: &Settings) -> Result<Option<PostgreSQL>, DbError> {
+    tracing::warn!(
+        port = settings.port,
+        "the orphaned postgres runs with fsync off: starting it again with fsync on"
+    );
+    let orphan = PostgreSQL::new(settings.clone());
+    if let Err(error) = orphan.stop().await {
+        tracing::warn!(%error, "could not stop it: adopting it with fsync off");
+        // Its `Drop` would run `pg_ctl stop` again, under a server the
+        // caller goes on to connect to.
+        std::mem::forget(orphan);
+        return Ok(None);
+    }
+    drop(orphan);
+    let mut postgresql = PostgreSQL::new(settings.clone());
+    if let Err(error) = postgresql.start().await {
+        // As in `start_managed`: a handle whose start failed is never
+        // dropped, since its `Drop` stops whatever `postmaster.pid` names.
+        std::mem::forget(postgresql);
+        return Err(error.into());
+    }
+    Ok(Some(postgresql))
 }
 
 /// Whether two paths are **provably different** directories.

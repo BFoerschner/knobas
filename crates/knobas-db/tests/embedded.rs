@@ -282,6 +282,44 @@ async fn an_adopted_server_restarts_with_fsync_on() {
     assert_eq!(restarted, DURABLE_SETTINGS);
 }
 
+/// #1896: an orphan a build before the fix left runs with `fsync` off, and
+/// the launch that adopts it starts it again with `fsync` on, data intact.
+/// The gate's test server stands in for that build: it is the one start that
+/// still passes `fsync=off`, on the same data directory layout.
+#[tokio::test]
+async fn an_orphan_running_with_fsync_off_is_adopted_with_fsync_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let orphan = EmbeddedDb::start_with_max_connections(dir.path().to_path_buf(), 20)
+        .await
+        .unwrap();
+    sqlx::query("create table kept as select 1896 as issue")
+        .execute(orphan.pool())
+        .await
+        .unwrap();
+    assert_eq!(durability(orphan.pool()).await[0], "fsync=off", "the orphan");
+    orphan.abandon();
+
+    let adopted = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .expect("the orphan is adopted");
+    let settings = durability(adopted.pool()).await;
+    let kept: i32 = sqlx::query_scalar("select issue from kept")
+        .fetch_one(adopted.pool())
+        .await
+        .unwrap();
+    adopted.stop().await.unwrap();
+
+    assert_eq!(settings, DURABLE_SETTINGS);
+    assert_eq!(kept, 1896);
+    assert!(
+        !dir.path().join("data/postmaster.pid").exists(),
+        "the quit stops the server the adoption started"
+    );
+}
+
 /// #1896: the test server `just test` starts keeps `fsync` off, on purpose:
 /// its data directory is thrown away at the end of the run, and nothing on it
 /// has to outlive a crash. The rest stay at their defaults.
