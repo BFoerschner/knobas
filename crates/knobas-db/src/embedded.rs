@@ -431,8 +431,9 @@ impl EmbeddedDb {
     /// For a managed server this installs PostgreSQL into the shared,
     /// version-keyed `~/.theseus/postgresql/<version>` (a no-op once present,
     /// and shared with every other `root_dir` on the machine), runs `initdb` into `root_dir/data` the
-    /// first time, starts the server on an ephemeral loopback port and creates
-    /// the `knobas` database if it does not exist yet.
+    /// first time, starts the server on an ephemeral loopback port with
+    /// `fsync` on (#1896) and creates the `knobas` database if it does not
+    /// exist yet.
     ///
     /// A server that is already up and serving this very data directory, one
     /// a signal-killed run left behind, is *adopted* rather than fought over:
@@ -478,13 +479,14 @@ impl EmbeddedDb {
     }
 
     /// [`start`](Self::start) for a managed server with a larger connection
-    /// limit than the desktop app's server has.
+    /// limit than the desktop app's server has, and with `fsync` off.
     ///
     /// For the test server `just test` runs: every test binary of a gate opens
     /// its pools on that one server, so PostgreSQL's default ceiling of 100 is
     /// what a parallel run would hit first. The knob is exposed here rather
     /// than through [`DbConfig`] because no shipped path wants it -- hence
-    /// `test-util` only.
+    /// `test-util` only. `fsync` is off because the run deletes the data
+    /// directory at its end; the app's server runs it on (#1896).
     ///
     /// # Errors
     ///
@@ -499,6 +501,13 @@ impl EmbeddedDb {
         settings
             .configuration
             .insert("max_connections".to_owned(), max_connections.to_string());
+        // Over the `fsync=on` `build_settings` passes (#1896): this server's
+        // data directory is deleted when the run ends, so a crash costs it
+        // nothing a sync to disk would have saved, and every test's `create
+        // database` and `drop database` skip the flush.
+        settings
+            .configuration
+            .insert("fsync".to_owned(), "off".to_owned());
         launch(&root_dir, settings).await
     }
 

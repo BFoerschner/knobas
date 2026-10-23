@@ -282,6 +282,24 @@ async fn an_adopted_server_restarts_with_fsync_on() {
     assert_eq!(restarted, DURABLE);
 }
 
+/// #1896: the test server `just test` starts keeps `fsync` off, on purpose:
+/// its data directory is thrown away at the end of the run, and nothing on it
+/// has to outlive a crash. The rest stay at their defaults.
+#[tokio::test]
+async fn the_gates_test_server_runs_with_fsync_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = EmbeddedDb::start_with_max_connections(dir.path().to_path_buf(), 20)
+        .await
+        .unwrap();
+    let settings = durability(db.pool()).await;
+    db.stop().await.unwrap();
+
+    assert_eq!(
+        settings,
+        ["fsync=off", "synchronous_commit=on", "full_page_writes=on"]
+    );
+}
+
 /// `fsync`, `synchronous_commit` and `full_page_writes` at PostgreSQL's
 /// defaults: the values a crash cannot corrupt a database under.
 const DURABLE: [&str; 3] = ["fsync=on", "synchronous_commit=on", "full_page_writes=on"];
