@@ -2590,14 +2590,23 @@ mod tests {
 
         remove_half_written(&data).unwrap();
 
-        assert!(std::fs::symlink_metadata(&data).is_err(), "the link is gone");
-        assert!(target.join("postgresql.conf").is_file(), "its target is kept");
+        assert!(
+            std::fs::symlink_metadata(&data).is_err(),
+            "the link is gone"
+        );
+        assert!(
+            target.join("postgresql.conf").is_file(),
+            "its target is kept"
+        );
         assert!(target.join("base").is_dir(), "its target is kept");
 
         std::os::unix::fs::symlink(&target, &data).unwrap();
         std::fs::write(target.join("PG_VERSION"), "18\n").unwrap();
         remove_half_written(&data).unwrap();
-        assert!(data.join("postgresql.conf").is_file(), "with PG_VERSION, kept");
+        assert!(
+            data.join("postgresql.conf").is_file(),
+            "with PG_VERSION, kept"
+        );
     }
 
     /// #1637: dropping the future that runs `initdb` kills it, rather than
