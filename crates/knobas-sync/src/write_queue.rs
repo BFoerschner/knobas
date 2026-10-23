@@ -143,6 +143,9 @@ fn retryable(error: &SourceError, held_on: Option<&LocalQuota>) -> Option<WaitRe
 /// [`FlushError::Store`] or [`FlushError::Db`] if the queue's own writes fail.
 /// A source that cannot take the write is **not** an error here -- that is the
 /// entire point.
+///
+/// The try is [`flush_write`]'s: this write's entity, in queue order, and
+/// nothing else the source owes (#1797).
 pub async fn submit(
     deps: &SchedulerDeps,
     source_id: &str,
@@ -150,7 +153,7 @@ pub async fn submit(
 ) -> Result<QueuedWrite, FlushError> {
     let queued = queue(deps, source_id, op).await?;
     // Try it now. A failure here is the queue working, not the call failing.
-    flush_source(deps, source_id).await?;
+    flush(deps, source_id, Pass::Owed, Reach::Entity(&queued.entity_id), &never()).await?;
     Ok(queued)
 }
 
@@ -166,10 +169,10 @@ pub async fn submit(
 /// crash in the gap between the send and the copy would leave a worklog on the
 /// ticket with no trace of it here and the same afternoon offered for logging
 /// again. `submit` has that gap by construction; this half plus
-/// [`flush_source`] does not.
+/// [`flush_write`] does not.
 ///
 /// The pair is therefore: `queue`, write the local record against this row's
-/// id, then [`flush_source`]. A crash between them leaves a pending write and
+/// id, then [`flush_write`]. A crash between them leaves a pending write and
 /// a copy that says so -- which is the ordinary state of every worklog logged
 /// while Jira is down, and the next flush finishes it.
 ///
@@ -260,7 +263,7 @@ pub(crate) async fn flush_all_until(deps: &SchedulerDeps, stop: &CancellationTok
 /// [`flush_all`]'s are.
 pub async fn flush_now(deps: &SchedulerDeps, source_id: Option<&str>) -> Result<(), FlushError> {
     match source_id {
-        Some(id) => flush(deps, id, Pass::Now, &never()).await,
+        Some(id) => flush(deps, id, Pass::Now, Reach::Source, &never()).await,
         None => {
             flush_every(deps, Pass::Now, &never()).await;
             Ok(())
@@ -282,6 +285,26 @@ enum Pass {
     Now,
 }
 
+/// Which of a source's head writes a flush looks at.
+#[derive(Clone, Copy, Debug)]
+enum Reach<'w> {
+    /// Every entity's: the flush task, *Flush now*, [`flush_source`].
+    Source,
+    /// One entity's, the entity of the write a submit, an amend or *Send
+    /// mine anyway* is for ([`flush_write`], #1797).
+    ///
+    /// The source takes one write at a time, and the flush task holds it for
+    /// one write, not a pass (#1629). A flush that reached the whole source
+    /// would take turns with the task through every write it owes, which on
+    /// an unreachable source is one send budget each, before reaching the
+    /// write a person just made; this one waits for the send on the wire and
+    /// then makes its own. The task sends the rest on its next tick. The
+    /// entity's writes go in queue order, as `due` hands them out: those
+    /// queued before this one first, and those after it once it lands, as
+    /// a released head lets its successors follow.
+    Entity(&'w str),
+}
+
 async fn flush_every(deps: &SchedulerDeps, pass: Pass, stop: &CancellationToken) {
     let sources = match config::list(&deps.pool).await {
         Ok(sources) => sources,
@@ -297,7 +320,7 @@ async fn flush_every(deps: &SchedulerDeps, pass: Pass, stop: &CancellationToken)
         if pass == Pass::Owed && source.health.state.needs_human() {
             continue;
         }
-        if let Err(error) = flush(deps, &source.id, pass, stop).await {
+        if let Err(error) = flush(deps, &source.id, pass, Reach::Source, stop).await {
             tracing::warn!(source = %source.id, %error, "write queue flush failed");
         }
     }
@@ -333,8 +356,12 @@ async fn heads(
     deps: &SchedulerDeps,
     source_id: &str,
     pass: Pass,
+    reach: Reach<'_>,
 ) -> Result<Vec<QueuedWrite>, FlushError> {
     let mut due = store::due(&deps.pool, source_id).await?;
+    if let Reach::Entity(entity) = reach {
+        due.retain(|write| write.entity_id == entity);
+    }
     if pass == Pass::Owed {
         let now = chrono::Utc::now();
         due.retain(|write| owed(write, now));
@@ -434,6 +461,7 @@ struct CredentialSeen<'a> {
 }
 
 /// Flush what one source is owed: every head write [`owed`] says is due.
+/// The flush task's reach; a submit's is [`flush_write`]'s, one entity.
 ///
 /// Loops while it makes progress: `due` hands out one write per entity, so a
 /// second pass is what lets an entity's *next* write follow the one that just
@@ -448,18 +476,45 @@ struct CredentialSeen<'a> {
 /// credential -- is **not** an error: its writes wait, with the reason
 /// recorded, which is the whole point of the queue.
 pub async fn flush_source(deps: &SchedulerDeps, source_id: &str) -> Result<(), FlushError> {
-    flush(deps, source_id, Pass::Owed, &never()).await
+    flush(deps, source_id, Pass::Owed, Reach::Source, &never()).await
+}
+
+/// Flush write `id`: its entity's head writes, as [`flush_source`]
+/// would, and nothing else its source owes (#1797).
+///
+/// What a submit, an amend and *Send mine anyway* run, and what a caller
+/// that [`queue`]d a write sends it with. It waits for the source's write
+/// on the wire, if the flush task has one out, and not for the writes the
+/// task owes after it; those go on the task's next tick. Nothing happens if
+/// no write carries `id`.
+///
+/// # Errors
+///
+/// As [`flush_source`].
+pub async fn flush_write(deps: &SchedulerDeps, id: i64) -> Result<(), FlushError> {
+    let Some(write) = store::get(&deps.pool, id).await? else {
+        return Ok(());
+    };
+    flush(
+        deps,
+        &write.source_id,
+        Pass::Owed,
+        Reach::Entity(&write.entity_id),
+        &never(),
+    )
+    .await
 }
 
 async fn flush(
     deps: &SchedulerDeps,
     source_id: &str,
     pass: Pass,
+    reach: Reach<'_>,
     stop: &CancellationToken,
 ) -> Result<(), FlushError> {
     let gate = gate(source_id);
 
-    let mut due = heads(deps, source_id, pass).await?;
+    let mut due = heads(deps, source_id, pass, reach).await?;
     if due.is_empty() {
         // Nothing owed: do not build an adapter or touch the keychain. A
         // source whose every write waits on a refused credential stops here.
@@ -510,7 +565,7 @@ async fn flush(
         // Only the first pass of a *Flush now* sends what is waiting: the
         // writes it just failed are not owed now, so this is not a second
         // send of anything.
-        due = heads(deps, source_id, Pass::Owed).await?;
+        due = heads(deps, source_id, Pass::Owed, reach).await?;
         if due.is_empty() {
             return Ok(());
         }
@@ -582,7 +637,8 @@ pub async fn apply_anyway(
         return Ok(None);
     };
     announce(deps, "released", &released).await;
-    flush_source(deps, &released.source_id).await?;
+    let reach = Reach::Entity(&released.entity_id);
+    flush(deps, &released.source_id, Pass::Owed, reach, &never()).await?;
     Ok(Some(released))
 }
 
@@ -613,7 +669,8 @@ pub async fn amend(
         return Ok(None);
     };
     announce(deps, "amended", &amended).await;
-    flush_source(deps, &amended.source_id).await?;
+    let reach = Reach::Entity(&amended.entity_id);
+    flush(deps, &amended.source_id, Pass::Owed, reach, &never()).await?;
     Ok(Some(amended))
 }
 
