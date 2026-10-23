@@ -334,11 +334,14 @@ async fn a_component_that_floods_its_log_is_held_to_a_few_short_lines() {
         );
     }
     assert!(bytes <= flood.len() * (4096 + 64), "{bytes} bytes");
-    let dropped = 1000 - flood.len();
-    assert!(
-        notes
-            .iter()
-            .any(|(_, message)| message.contains(&format!("{dropped} more log lines"))),
-        "{notes:?}"
-    );
+    // Said once, or in parts when the call spans a refill (#1833): a loaded
+    // machine decides how many notes, and the host owes the total.
+    let said: usize = notes
+        .iter()
+        .filter_map(|(_, message)| {
+            let (before, _) = message.split_once(" more log lines")?;
+            before.rsplit(' ').next()?.parse::<usize>().ok()
+        })
+        .sum();
+    assert_eq!(said, 1000 - flood.len(), "{notes:?}");
 }

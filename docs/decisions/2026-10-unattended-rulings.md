@@ -14371,3 +14371,9 @@ Ruled 2026-10-23 by the implementer (Sonnet).
 - **Which head the Linux run must be on** (merge-manager, Opus). *Ruling:* the last head whose
   tree differs from the merge head outside `docs/` only. *Reasoning:* `check.yml`'s cargo, front
   and scripts halves read nothing under `docs/decisions/`. *Reversing:* one more dispatched run.
+- **The wasm-host log-flood test** (merge-manager, Opus). *Fork:* leave #1833 to its own PR, or fix
+  it here. *Ruling:* here, closing #1833. *Reasoning:* it failed this PR's gate twice in a row under
+  load (749 + 150, then 282 + 617 dropped lines in two notes against one expected), so no gate on
+  a loaded machine merges anything; it is #1815's family, a test reading the machine's speed. The
+  assertion now sums the notes' counts and still fails on an unreported or miscounted drop.
+  *Reversing:* the test only.
