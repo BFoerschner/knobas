@@ -539,12 +539,12 @@ fn bind_dimensions(
                 declarations
                     .cloned()
                     .unwrap_or_else(|| builder.param(Bind::Json(filters.declarations.as_param()))),
-                builder.param(Bind::Texts(filters.under.clone())),
+                bind_lowered(builder, &filters.under),
             )
         }),
         reach: filters
             .filters_by_reach()
-            .then(|| builder.param(Bind::Texts(filters.reach.clone()))),
+            .then(|| bind_lowered(builder, &filters.reach)),
         names: (!filters.names.is_empty())
             .then(|| builder.param(Bind::Texts(filters.names.clone()))),
         fields: Vec::new(),
@@ -606,8 +606,7 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
             // again needs no change here.
             Some(under) => format!(
                 "exists (select 1 from (select {declarations}::jsonb as d, \
-                 {} as v) ud where {under})",
-                lowered(values)
+                 {values}::text[] as v) ud where {under})"
             ),
             // A corpus whose rows declare no parent sits beneath nothing.
             None => "false".to_owned(),
@@ -660,13 +659,23 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
     predicates
 }
 
-/// A text-array placeholder with every value lower-cased **by the server**
-/// (#1652): the typed value is bound as typed, so it is folded by the same
-/// `lower()` as the stored side it is compared to, not by Rust's
-/// `to_lowercase`, which differs from libc on `İ` and a final sigma. An
-/// uncorrelated `array(...)`, so it is one init plan per statement.
-fn lowered(placeholder: &str) -> String {
-    format!("array(select lower(lv.x) from unnest({placeholder}::text[]) lv(x))")
+/// A text array of the typed values, each lower-cased **by the server**
+/// (#1652): `array[lower($1::text), lower($2::text)]`, one bind per value.
+///
+/// The value is bound as typed and folded by the same `lower()` as the stored
+/// side it is compared to, not by Rust's `to_lowercase`, which differs from
+/// libc on `İ` and a final sigma. One bind per value rather than
+/// `lower(<array bind>::text)` or an `unnest`: both of those are stable or
+/// subplan expressions the planner cannot fold, and an `under:` over 100,000
+/// items went from 64 ms to 102 ms at p90 on the estimates they lose. `lower`
+/// of a bound text is immutable, so the array folds to a constant, as the
+/// array bind it replaces was.
+fn bind_lowered(builder: &mut Builder, values: &[String]) -> String {
+    let each: Vec<String> = values
+        .iter()
+        .map(|value| format!("lower({}::text)", builder.param(Bind::Text(value.clone()))))
+        .collect();
+    format!("array[{}]::text[]", each.join(", "))
 }
 
 /// What the tickets a `reach:` names reach (#817), as one subquery over the
@@ -675,13 +684,12 @@ fn lowered(placeholder: &str) -> String {
 /// values. Every corpus reads the same ids, so an asset, a note or a route is
 /// kept exactly when the read would list it.
 fn reach_ids(values: &str) -> String {
-    let values = lowered(values);
     format!(
         "with recursive start(t) as (
         select e.id from knobas.entity e
          where e.kind = 'ticket'
-           and (lower(e.id) = any({values})
-                or lower(substr(e.id, strpos(e.id, ':') + 1)) = any({values}))
+           and (lower(e.id) = any({values}::text[])
+                or lower(substr(e.id, strpos(e.id, ':') + 1)) = any({values}::text[]))
     ),
     {}
     select r.id from reached r",
@@ -852,6 +860,42 @@ where
         };
     }
     query
+}
+
+/// The 1-based positions among the typed `under:` `values` that a parent
+/// answers to (#1652), for `crate::under::report_unknown`.
+///
+/// Compared in SQL on both sides, as `PARENTS_SQL` is, so a value Rust and the
+/// server lower-case differently (`İ`) is still known. The statement is built
+/// here because `AssertSqlSafe` is confined to this module; every value is a
+/// bind. The values reach `lower(p.name) = any(array[lower($1::text), ...])`,
+/// which folds to a constant, so the read stays on `item_parent_name_idx`
+/// (`lower(ip.name)`); a join on `lower(v.t)` reads the whole parent view
+/// (64 ms to 102 ms at p90 over 100,000 items).
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the lookup fails.
+pub(crate) async fn known_parent_positions(
+    pool: &sqlx::PgPool,
+    values: &[String],
+) -> Result<Vec<i64>, sqlx::Error> {
+    let lowered = format!(
+        "array[{}]::text[]",
+        (1..=values.len())
+            .map(|n| format!("lower(${n}::text)"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let mut query = sqlx::query_scalar::<Postgres, i64>(sqlx::AssertSqlSafe(format!(
+        "select o.i from unnest({lowered}) with ordinality o(l, i) \
+         where o.l in (select lower(p.name) from {} p where lower(p.name) = any({lowered}))",
+        crate::under::parent_names!()
+    )));
+    for value in values {
+        query = query.bind(value.clone());
+    }
+    query.fetch_all(pool).await
 }
 
 /// The plan the launcher's own statement runs under.
