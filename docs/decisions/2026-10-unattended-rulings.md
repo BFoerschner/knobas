@@ -12998,3 +12998,37 @@ The measurement came after it.
   gives; the line also says "not a red gate". *Reversing:* one number and the test's assertion.
 - **The 45 min JVM lock keeps its wait.** *Ruling:* the briefs send queued live recipes to the
   background with Monitor instead of capping that wait. *Reversing:* two sentences.
+## #1689, bash-guard: compound shapes, heredocs, fail-open wiring
+
+- **`eval` and `sh -c` are not commands of their own.** *Fork:* count the wrapper beside the
+  commands of its string, or let the string's commands stand in for it. *Ruling:* the string's
+  commands stand in for it. The wrapper is still read for its redirections. *Reasoning:* `bash -c
+  "cd /tmp"` holds one command, the same as `cd /tmp`, which passes. If the wrapper counted, every
+  `sh -c` holding a lone `cd` would be refused as chained. *Reversing:* one flag in
+  `simple_commands`.
+- **Reserved words count as commands.** *Fork:* drop a command made only of `}`, `fi` or `done`
+  from the count, or keep it. *Ruling:* keep it, so `{ cd /tmp; }` alone is refused. *Reasoning:*
+  every case the ticket names has a real second command, and a brace group around a lone `cd` does
+  nothing that `cd` alone doesn't. Counting them keeps the rule "more than one command" without
+  special cases. *Reversing:* low.
+- **Quoted substitutions are parsed.** *Fork:* keep `"$(...)"` as data, as the old tokenizer did,
+  or parse it. *Ruling:* parse it, quoted or not. *Reasoning:* the shell runs it. As data, `echo
+  "$(cd /tmp && pwd)"` passed while the unquoted form was refused. Over the 60,793 Bash commands in
+  this project's transcripts, the new guard refuses 20 that the old one passed. All 20 contain
+  `eval "$(cd testenv && ./seed --env)"` or a `( cd /tmp && … )` inside `bash -c`, which is the
+  `$(cd x && pwd)` shape the guard already lists as refused. The allowed form is `eval "$(env -C
+  testenv ./seed --env)"`. *Reversing:* low.
+- **A missing script exits 1, not 0.** *Fork:* exit 0 (silent) or another non-blocking status.
+  *Ruling:* `exit 1` after draining stdin. *Reasoning:* Claude Code never shows the stderr of a
+  hook that exits 0. A non-blocking non-zero status lets the call through and shows the user the
+  first line of stderr as a hook error, which the ticket requires ("the hook prints why"). Only 2
+  blocks. *Reversing:* one word in `.claude/settings.json`.
+- **The tracked `scripts/__pycache__/*.pyc` goes.** *Fork:* leave the bytecode #1486 committed,
+  or untrack it and ignore `__pycache__/`. *Ruling:* untrack and ignore. *Reasoning:* every change
+  to the script makes it stale, and importing the script (as a test harness does) rewrites it.
+  That dirties the checkout, and a dirty root checkout makes `gh pr merge` exit 1. *Reversing:*
+  none needed.
+- **The in-place match is the ticket's `-[a-zA-Z]*i`.** *Fork:* the ticket's pattern, or one
+  narrowed to flags that take no argument. *Ruling:* the ticket's pattern, with #1790 filed for
+  the narrowing. *Reasoning:* a ruling may not contradict the ticket. The cost is a rare false
+  refusal: `perl -Mstrict … ~/.bashrc`. *Reversing:* #1790.
