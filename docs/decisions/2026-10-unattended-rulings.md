@@ -12982,6 +12982,18 @@ The measurement came after it.
   tool timeout recognisable, and a front-only gate (23-58 s) fits with room. *Reversing:* one
   number (`KNOBAS_GATE_SLOT_WAIT`, default in `scripts/gate-slot.sh`); a lower cap (about 150 s)
   would be needed for a full gate to always fit under load.
+  *Merge-manager, same day:* kept at 240 s. The ticket's criterion names 240 s, so a ruling may not
+  change it. Fork: a lower cap means more exit-75 retries when two gates hold the slots; a higher
+  one lets a foreground call still hit the 600 s ceiling. Under `check` the slot is taken in
+  `test`, after the fmt/clippy/inventory prefix, so wait + gate is what must fit and the prefix
+  eats the budget first; a fixed cap cannot fit every loaded gate. A retry after 75 costs one
+  call, a tool kill costs a gate read as red, so the wait stays the larger of the two risks. A
+  follow-up (backlog) asks whether the cap should be the budget left of 600 s.
+- **Exit 75 must reach the caller.** `just check` turned every failed half into `exit 1`, so the
+  75 never got past `just gate`, and the briefs' sentence was false. *Ruling:* `check` exits 75
+  when the cargo half exited 75 and the front and scripts halves passed; any other red wins and
+  exits 1. Verified through the real `just gate` chain with a held slot on a private TMPDIR: top
+  exit 75. *Reversing:* delete the 7-line `if` in `check`.
 - **Exit code 75, not another number.** *Ruling:* `EX_TEMPFAIL`, distinct from the 1 a failed step
   gives; the line also says "not a red gate". *Reversing:* one number and the test's assertion.
 - **The 45 min JVM lock keeps its wait.** *Ruling:* the briefs send queued live recipes to the
