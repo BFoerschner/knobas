@@ -960,6 +960,12 @@ enum Started {
 /// second window borrows a server whose owner's quit would stop it under the
 /// borrower. The kernel releases the lock however its holder dies, so a held
 /// lock always means a live holder, whatever state its server is in.
+///
+/// Under both locks, a data directory an interrupted `initdb` left
+/// half-written is removed ([`remove_half_written`]), an uninitialised one is
+/// initialised by knobas's own `initdb` ([`initialise`]), and after `setup()`
+/// the password file and the data directory are kept to their owner
+/// ([`keep_to_owner`]).
 async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Started, DbError> {
     let _guard = bring_up_lock(root_dir).await?;
     let data_dir = settings.data_dir.clone();
