@@ -43,6 +43,11 @@
 //! that differs declines the database), the template's rows go back into the
 //! ones that had some, the sequences are set back, and the cumulative
 //! statistics are reset.
+//!
+//! Left out on purpose: what a session holds (advisory locks, `listen`, a
+//! `set`) ends with the sessions the taker terminates, and a prepared
+//! transaction would keep the rename from going through. Roles are the
+//! server's, not the database's, so a fresh copy would share them too.
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -109,13 +114,18 @@ struct Stats {
     frozen: i32,
 }
 
-/// One sequence's position.
+/// One sequence's position, as `setval` takes it.
+///
+/// Both halves, because `setval(s, n, false)` moves a sequence nothing has
+/// called yet without making it called: `pg_sequence_last_value` reads null
+/// before and after, and the next `nextval` would hand out `n`, not the start.
 #[derive(Clone, Debug, PartialEq, sqlx::FromRow)]
 struct Sequence {
     oid: i64,
-    start: i64,
-    /// `None` before the first `nextval`.
-    last: Option<i64>,
+    last: i64,
+    /// Whether the next `nextval` returns `last` plus the increment rather
+    /// than `last` itself.
+    called: bool,
 }
 
 /// The rows the migrations left in one table.
@@ -262,9 +272,9 @@ async fn snapshot(
     .fetch_all(&mut *conn)
     .await?;
     let sequences: Vec<Sequence> = sqlx::query_as(
-        "select seqrelid::int8 as oid, seqstart as start,
-                pg_sequence_last_value(seqrelid) as last
-           from pg_sequence order by seqrelid",
+        "select s.seqrelid::int8 as oid, d.last_value as last, d.is_called as called
+           from pg_sequence s, pg_get_sequence_data(s.seqrelid) d
+          order by s.seqrelid",
     )
     .fetch_all(&mut *conn)
     .await?;
@@ -530,8 +540,8 @@ async fn reset(
         if sequence != was {
             sqlx::query("select setval($1::oid::regclass, $2, $3)")
                 .bind(was.oid)
-                .bind(was.last.unwrap_or(was.start))
-                .bind(was.last.is_some())
+                .bind(was.last)
+                .bind(was.called)
                 .execute(&mut *tx)
                 .await?;
         }

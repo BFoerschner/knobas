@@ -94,6 +94,8 @@ async fn a_recycled_database_reads_as_a_fresh_copy_does() {
         "insert into knobas.setting (key, value) select 'k' || g, '1' from generate_series(1, 500) g;
          insert into knobas.heartbeat default values;
          insert into knobas.heartbeat default values;
+         -- Moved but not called: the position alone says where `nextval` goes.
+         select setval(pg_get_serial_sequence('knobas.heartbeat', 'id'), 1000, false);
          update knobas.dep_view set name = 'renamed by a test';
          delete from knobas.dep_layer where id = 'code';
          analyze;",
