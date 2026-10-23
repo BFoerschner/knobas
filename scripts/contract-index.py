@@ -7,7 +7,8 @@ file instead of all appending to the end of docs/contract.md.
 
   contract-index.py            move any entry bullet still in contract.md into
                                its own file (verbatim), then rewrite the index
-  contract-index.py --check    exit 1 if the index is stale or a bullet is loose
+  contract-index.py --check    exit 1 if the index is stale, a bullet is loose, or an entry
+                               file's first line is not a bullet naming an issue
   contract-index.py --verify-move-to FILE
                                with the default mode: write the verbatim
                                concatenation of the moved bullets, in their
@@ -29,21 +30,23 @@ REGION_END = "**`crates/knobas-sync/**` is NOT frozen"
 
 
 def split(lines):
-    """-> (head, entries, tail): bullets at column 0 inside the region, in order."""
+    """-> (head, kept, entries, after, tail): bullets at column 0 inside the region, in order.
+
+    kept is prose above the index, after is prose below its end marker (it stays there)."""
     s = next(i for i, l in enumerate(lines) if l.startswith(REGION_START))
     e = next(i for i, l in enumerate(lines) if l.startswith(REGION_END))
     # head ends after the region-start line; index block (if any) is dropped.
     body = lines[s + 1 : e]
     entries, cur = [], None
-    kept = []
-    in_index = False
+    kept, after = [], []
+    in_index = seen_end = False
     for l in body:
         if l.startswith(BEGIN[:20]):
             in_index = True
             continue
         if in_index:
             if l.startswith(END):
-                in_index = False
+                in_index, seen_end, cur = False, True, None
             continue
         if l.startswith("- "):
             cur = [l]
@@ -51,10 +54,13 @@ def split(lines):
         elif cur is not None:
             cur.append(l)
         else:
-            kept.append(l)
-    while kept and kept[-1] == "":
-        kept.pop()
-    return lines[: s + 1], kept, entries, lines[e:]
+            (after if seen_end else kept).append(l)
+    for part in (kept, after):
+        while part and part[-1] == "":
+            part.pop()
+    while after and after[0] == "":
+        after.pop(0)
+    return lines[: s + 1], kept, entries, after, lines[e:]
 
 
 def title_of(entry):
@@ -117,18 +123,32 @@ def index_lines():
     return out
 
 
+def bad_entry_files():
+    """Entry files whose first line is not a bullet naming an issue (a stray README.md)."""
+    bad = []
+    for p in sorted(DIR.glob("*.md")):
+        lines = p.read_text().split("\n")
+        if not lines[0].startswith("- ") or issue_of(lines) is None:
+            bad.append(p.name)
+    return bad
+
+
 def main():
     check = "--check" in sys.argv
     proof = sys.argv[sys.argv.index("--verify-move-to") + 1] if "--verify-move-to" in sys.argv else None
     DIR.mkdir(parents=True, exist_ok=True)
     text = CONTRACT.read_text()
     lines = text.split("\n")
-    head, kept, entries, tail = split(lines)
+    head, kept, entries, after, tail = split(lines)
     if check:
         if entries:
             print("contract-index: loose 10.8 entry bullets remain in docs/contract.md; run `just contract-index`", file=sys.stderr)
             return 1
-        want = "\n".join(head + kept + [""] + index_lines() + [""] + tail)
+        bad = bad_entry_files()
+        if bad:
+            print(f"contract-index: docs/contract/10.8/ files whose first line is not a bullet naming an issue: {', '.join(bad)}", file=sys.stderr)
+            return 1
+        want = "\n".join(head + kept + [""] + index_lines() + [""] + (after + [""] if after else []) + tail)
         if want != text:
             print("contract-index: the section 10.8 index in docs/contract.md is stale; run `just contract-index`", file=sys.stderr)
             return 1
@@ -137,7 +157,7 @@ def main():
         Path(proof).write_text("".join(l + "\n" for e in entries for l in e))
     move(entries, [p.name for p in DIR.glob("*.md")])
     # kept = prose between the region-start line and the first bullet (blank lines)
-    new = head + kept + [""] + index_lines() + [""] + tail
+    new = head + kept + [""] + index_lines() + [""] + (after + [""] if after else []) + tail
     CONTRACT.write_text("\n".join(new))
     print(f"contract-index: moved {len(entries)} entries; index has {len(list(DIR.glob('*.md')))} files")
     return 0
