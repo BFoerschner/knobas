@@ -14747,3 +14747,38 @@ Ruled 2026-10-23 by the merge-manager (Opus).
   ticket needs at least half, so the share stays and the plan test keeps the seed it was fixed on.
   Why the planner flips on the share is not diagnosed; the mention rule on a real mirror is not
   shown to flip. *Reversing:* low, flip two `common_word` literals.
+## #1856: the last blocking calls in clone's spawn and git lookup (Sonnet implementer, 2026-10-23)
+
+- **`PATH` lookup that panicked or was cancelled.** *Fork:* the #1852 convention maps a failed
+  blocking task to `Internal`, but `git_on_path` and the working-tree readers answer in `TreeRead`,
+  which has no internal error. *Ruling:* `find_off_runtime` maps it to `Unrunnable::ProbeFailed`
+  ("the PATH lookup did not finish"), so the readers say `Failed` and clone says "git could not be
+  checked". `spawn_off_runtime` (clone) does map to `Internal`. *Reasoning:* a new `TreeRead` variant
+  would touch every reader for a case that needs a panic in a `stat` loop. *Reversing:* low.
+- **`stop`'s fallback.** *Ruling:* `tokio::fs::try_exists(..).unwrap_or(false)`, so an error reads as
+  "gone", exactly as `Path::exists` did. *Reversing:* trivial.
+- **Ordering and cancellation.** *Ruling:* no change in order; each call is awaited where it ran
+  inline. A dropped future no longer interrupts a spawn or a lookup already handed to the blocking
+  pool; it finishes and its result is dropped (a spawned child dies with `kill_on_drop`).
+
+Reviewed 2026-10-23 by the merge-manager (Opus), PR #1859.
+
+- **`ProbeFailed` for a lookup that did not finish.** *Fork:* map it to `ProbeFailed`, add a
+  `TreeRead`/`DiffRead` arm, or rename the variant. *Ruling:* the implementer's mapping stands; the
+  variant's doc now names the lookup too, and the name stays. *Reasoning:* the case needs a panic in
+  a `stat` loop or a runtime shutdown, and both arms are exported IPC types (§10.8). *Reversing:*
+  low, a rename of a `pub(super)` variant.
+- **A spawn task that did not finish left the folder.** *Fork:* `spawn_off_runtime(..).await?`
+  returned before `remove_dir_all`, which only the spawn's own error reached. *Ruling:* fixed on the
+  branch: the folder `spawn_into` made is removed whenever git did not start. *Reasoning:* the same
+  rule as the spawn error, at no cost. *Reversing:* trivial.
+- **Cancellation.** *Fork:* whether anything relies on dropping a start, a read or a stop to cut a
+  spawn or lookup short. *Ruling:* nothing does; `clone_repo` and the readers' commands await
+  directly, and the new await point in `spawn_into` has the same window as the `create_dir` before
+  it. *Reversing:* n/a.
+- **`stop`'s surviving mutant (`unwrap_or(true)`).** *Fork:* build a fixture where the stat fails or
+  hand the gap on. *Ruling:* handed on, no test. *Reasoning:* the branch needs a stop that races a
+  start giving up, then a stat that errors; the behaviour is `Path::exists`'s, unchanged. *Reversing:*
+  a test with an unreadable clones root, if the race ever gets a seam.
+- **The readers' other blocking calls** (`is_dir`, `output()`, `run_capped`'s spawn, the Command
+  Line Tools probe). *Ruling:* out of #1856's scope, filed as #1860 (`backlog`). *Reversing:* n/a.

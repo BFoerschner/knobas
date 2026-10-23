@@ -185,7 +185,8 @@ pub(super) enum Unrunnable {
     /// Not on the search path, or Apple's shim on a Mac without the Command
     /// Line Tools.
     NoGit,
-    /// The Command Line Tools probe did not answer.
+    /// The Command Line Tools probe did not answer, or the `PATH` lookup's
+    /// task did not finish.
     ProbeFailed(String),
 }
 
@@ -199,7 +200,7 @@ pub(super) async fn locate(
     probe: impl AsyncFnOnce() -> bool,
     timeout: Duration,
 ) -> Result<PathBuf, Unrunnable> {
-    let Some(git) = find_on(search, "git") else {
+    let Some(git) = find_off_runtime(search, "git").await? else {
         return Err(Unrunnable::NoGit);
     };
     if git == shim {
@@ -279,6 +280,19 @@ pub(super) fn refusal(stderr: &str) -> String {
         .unwrap_or("git refused without saying why")
         .trim()
         .to_owned()
+}
+
+/// [`find_on`] off the async runtime: it stats each `PATH` entry. A task that
+/// panicked or was cancelled is a failed lookup, `ProbeFailed`: [`locate`]'s
+/// callers answer in [`TreeRead`] or `DiffRead`, and neither has an internal
+/// error.
+async fn find_off_runtime(search: &OsStr, name: &str) -> Result<Option<PathBuf>, Unrunnable> {
+    let (search, name) = (search.to_owned(), name.to_owned());
+    tokio::task::spawn_blocking(move || find_on(&search, &name))
+        .await
+        .map_err(|error| {
+            Unrunnable::ProbeFailed(format!("the PATH lookup did not finish: {error}"))
+        })
 }
 
 /// The first executable called `name` in a `PATH`-style list.
