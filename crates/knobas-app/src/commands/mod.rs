@@ -18,7 +18,7 @@
 //! `entity/detail.rs` (`DETAIL`, `RESOLVE_URL`), `entity/standup.rs`
 //! (`ticket_titled`), `entity/board.rs` (`saved_view_board_laned`) and
 //! `entity/links.rs` (`create_link_inner`'s two-way transaction) are the ones;
-//! each has a `backlog` ticket to move it. What is already settled: who am I
+//! each has a `backlog` ticket to move it (#1870 to #1874). What is already settled: who am I
 //! (`identity_of`), the declared paths and the stored declarations are derived
 //! once per command, through `identity_of`, `sources::paths::declared_paths`
 //! and [`search::declare`] / [`search::searcher`], not re-read in a body.
