@@ -775,6 +775,52 @@ async fn matching_ids_are_every_ticket_the_query_admits() {
     );
 }
 
+/// The Tickets view reads its words as the launcher grammar does (#1651):
+/// a quoted phrase is one needle, a `-word` is no needle at all, and the
+/// rail's `readings` agree with `matching_ids` on the same text.
+#[tokio::test]
+async fn quoted_and_negated_words_read_through_the_needles() {
+    let pool = pool().await;
+    let p = project();
+    let phrase = store(&pool, &p, 1, BASE).await;
+    let scattered = store(&pool, &p, 2, BASE).await;
+    sqlx::query("update sync.item set title = 'Fix sepa retry loop' where entity_id = $1")
+        .bind(&phrase)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("update sync.item set title = 'Retry the sepa job' where entity_id = $1")
+        .bind(&scattered)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let searcher = searcher(&pool).await;
+    let quoted = format!("project:{p} \"sepa retry\"");
+    let negated = format!("project:{p} -zeppelin");
+    let literal = format!("project:{p} sepa -retry");
+    let texts = [quoted.as_str(), negated.as_str(), literal.as_str()];
+    let readings = searcher.readings(&texts, "ticket").await.unwrap();
+    let mut counts = Vec::new();
+    for (text, reading) in texts.iter().zip(readings) {
+        let ids = searcher
+            .matching_ids(text, "ticket")
+            .await
+            .unwrap()
+            .expect("a query with a key narrows");
+        assert_eq!(
+            reading,
+            knobas_search::Reading::Count(ids.len().try_into().unwrap()),
+            "readings agree with matching_ids on {text}"
+        );
+        counts.push(sorted(ids));
+    }
+    assert_eq!(counts[0], vec![phrase.clone()], "the phrase, not its words");
+    // `-zeppelin` is no needle: neither a literal substring to find nor the
+    // word `zeppelin` required, and the words that remain (none) narrow nothing.
+    assert_eq!(counts[1], sorted(vec![phrase.clone(), scattered.clone()]));
+    assert_eq!(counts[2], sorted(vec![phrase, scattered]), "`sepa` alone");
+}
+
 /// The Tickets view's words with no key beside them (#897), which is what a
 /// keystroke on *All tickets* sends: the key, the title and the declared
 /// assignee are each a word of the row, and every word is still required.

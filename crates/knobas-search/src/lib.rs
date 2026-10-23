@@ -451,13 +451,7 @@ impl Searcher {
         })?;
         let parsed = query::parse(&query.raw, vocab);
         let mut filters = query::merge(&parsed, &query.filters);
-        let words = parsed
-            .query
-            .text
-            .to_lowercase()
-            .split_whitespace()
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
+        let words = query::needles(&parsed.query.text);
         if words.is_empty() && filters.is_empty() {
             return Ok(None);
         }
@@ -601,13 +595,7 @@ impl Searcher {
                 continue;
             }
             filters.kinds = vec![kind.to_owned()];
-            let words = parsed
-                .query
-                .text
-                .to_lowercase()
-                .split_whitespace()
-                .map(str::to_owned)
-                .collect::<Vec<_>>();
+            let words = query::needles(&parsed.query.text);
             pending.push((out.len(), words, filters));
             out.push(None);
         }
