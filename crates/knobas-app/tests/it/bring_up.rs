@@ -729,6 +729,110 @@ async fn a_failed_migration_stops_the_server_without_holding_the_runtime() {
     );
 }
 
+// -- a server that dies after ready (#1779) ---------------------------------
+
+/// Runs the app's exit handler when dropped, so a failed assertion still
+/// stops the server the mock app holds. A second run is a no-op.
+struct QuitsOnDrop<'a>(&'a tauri::App<MockRuntime>);
+
+impl Drop for QuitsOnDrop<'_> {
+    fn drop(&mut self) {
+        shutdown(self.0);
+    }
+}
+
+/// How long the window may take to notice: the watch looks every few seconds.
+const NOTICED_WITHIN: Duration = Duration::from_secs(30);
+
+/// Wait until `app`'s lifecycle satisfies `done`, or panic naming `what`.
+async fn until(
+    app: &tauri::App<MockRuntime>,
+    what: &str,
+    done: impl Fn(&DbState) -> bool,
+) -> DbState {
+    tokio::time::timeout(NOTICED_WITHIN, async {
+        loop {
+            let state = app.state::<Lifecycle>().get();
+            if done(&state) {
+                return state;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "{what}: still {:?} after {NOTICED_WITHIN:?}",
+            app.state::<Lifecycle>().get()
+        )
+    })
+}
+
+/// #1779: the window's own postmaster dies after bring-up reached `ready`.
+/// The window used to stay `ready` over a port that no longer answered, and
+/// *Retry* is only offered from `failed`, so a quit was the only way out.
+/// Now the window notices and moves to `failed`, a second launch is still
+/// refused because the window still owns the profile, and *Retry* starts
+/// the server again on the same data directory and port, where the pool the
+/// commands use reaches it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_that_dies_after_ready_fails_the_window_and_retry_restarts_it() {
+    let data = tempfile::tempdir().unwrap();
+    let profile = Profile::new(false, data.path());
+    let root = profile.db_config(None).root_dir;
+    let registry = Registry::default();
+    let app = mock_app(&profile, &registry);
+    let _quits = QuitsOnDrop(&app);
+    knobas_app::bring_up(app.handle(), &profile, None, registry).await;
+    assert_eq!(app.state::<Lifecycle>().get(), DbState::Ready);
+    let port = port_of(&root);
+
+    knobas_db::test_util::kill_server(&root);
+    let failed = until(&app, "the window notices its server died", |state| {
+        matches!(state, DbState::Failed { .. })
+    })
+    .await;
+    let DbState::Failed { message } = failed else {
+        unreachable!()
+    };
+    assert!(
+        message.contains("stopped"),
+        "the message says the server stopped: {message}"
+    );
+
+    match knobas_db::EmbeddedDb::start(profile.db_config(None)).await {
+        Err(knobas_db::DbError::AlreadyRunning { reason, .. }) => assert!(
+            reason.contains(&format!("knobas process {} ", std::process::id())),
+            "the refusal names the failed window: {reason}"
+        ),
+        Err(other) => panic!("a second launch is refused while the window is failed, not {other}"),
+        Ok(_) => panic!("a second launch was let in beside the failed window"),
+    }
+
+    knobas_app::commands::app::retry_database(app.handle().clone()).expect("retry");
+    until(&app, "retry brings the server back", |state| {
+        *state == DbState::Ready
+    })
+    .await;
+    assert_eq!(port_of(&root), port, "on the same port");
+    let pool = app
+        .state::<Lifecycle>()
+        .pool()
+        .expect("the commands' pool is back");
+    let (serving,): (String,) = sqlx::query_as("show data_directory")
+        .fetch_one(&pool)
+        .await
+        .expect("the commands' pool reaches the restarted server");
+    assert_eq!(
+        std::fs::canonicalize(serving).unwrap(),
+        std::fs::canonicalize(root.join("data")).unwrap(),
+        "on the same data directory"
+    );
+
+    shutdown(&app);
+    assert!(!port_answers(port), "the quit stops the restarted server");
+}
+
 // -- a trigger racing the quit (#1633) --------------------------------------
 
 /// Events that hold the first `running` announcement -- the one a trigger

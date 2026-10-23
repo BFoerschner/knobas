@@ -74,7 +74,7 @@ tauri = { version = "2", features = ["tracing"] }
 # cancellation. Everything else in this crate runs on Tauri's runtime without
 # naming it; a loop that has to be stoppable cannot. `process` is the working
 # tree read (#704): `git status` with a timeout that kills it.
-tokio = { workspace = true, features = ["process"] }
+tokio = { workspace = true, features = ["process", "sync"] }
 tokio-util = { version = "0.7", default-features = false }
 # *Open in browser* (interfaces §8 P5). The first Tauri plugin in the app, and
 # the one that discharges the M0 carry-over about `capabilities/default.json`

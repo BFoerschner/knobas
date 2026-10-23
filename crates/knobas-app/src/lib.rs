@@ -741,11 +741,15 @@ async fn bring_up_app<R: tauri::Runtime>(
             .map_err(|error| naming_the_profile(error, profile))?;
         let pool = db.pool().clone();
         let connector = db.connector();
+        // Taken now, while the server is the one this bring-up started, and
+        // armed at `ready` (#1779). `None` for `KNOBAS_DB_URL`'s server.
+        let watch = db.watch();
         // **Held the moment it is up** (#1634): the exit handler stops what the
         // lifecycle holds, so a quit during the migration, the sweeps or the
         // engines' start stops this server too. Bring-up goes on over the pool
         // and the connector, which the handle hands out but does not need.
         lifecycle.hold_server(db);
+        let generation = lifecycle.generation();
         set_db_state(handle, DbState::Migrating);
         knobas_db::migrate::run(&pool).await?;
         // `migrating` is the schema and nothing else (#1703, ruling D8):
@@ -832,17 +836,20 @@ async fn bring_up_app<R: tauri::Runtime>(
         {
             tracing::error!(%error, "the capture shortcut could not be read");
         }
-        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(pool)
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>((pool, watch, generation))
     }
     .await;
 
     let message = match outcome {
-        Ok(pool) => {
+        Ok((pool, watch, generation)) => {
             lifecycle.install(AppState::over(pool));
             // Installed *before* the state moves to `ready`: a frontend
             // that reacted to `ready` by fetching would otherwise race the
             // pool it was told about.
             set_db_state(handle, DbState::Ready);
+            if let Some(watch) = watch {
+                spawn_watch(handle.clone(), watch, generation);
+            }
             return;
         }
         Err(error) => {
@@ -861,6 +868,108 @@ async fn bring_up_app<R: tauri::Runtime>(
         tracing::error!(%error, "stopping the server of a failed bring-up failed");
     }
     set_db_state(handle, DbState::Failed { message });
+}
+
+/// How often a `ready` window looks at its own server (#1779). A read of
+/// `postmaster.pid` and one `ps -p`, on a blocking thread, off every
+/// command's path.
+const WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// What the boot screen says when the window's server died after `ready`.
+const SERVER_DIED: &str =
+    "the database server stopped while knobas was running; Retry starts it again";
+
+/// Watch the server of `generation` until it dies or stops being the one
+/// held (#1779).
+///
+/// Nothing else notices a postmaster that dies after `ready`: the window
+/// stayed `ready`, every command failed against a port that no longer
+/// answered, and *Retry* is only offered from `failed`. On a death the
+/// window moves to `failed`, the server and its ownership lock stay held,
+/// and *Retry* restarts it in place ([`spawn_restart`]).
+///
+/// The watch ends when a quit or a restart replaced the server it was
+/// armed for; a restart arms a watch of its own.
+fn spawn_watch<R: tauri::Runtime>(
+    handle: tauri::AppHandle<R>,
+    watch: knobas_db::embedded::ServerWatch,
+    generation: u64,
+) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(WATCH_INTERVAL).await;
+            let lifecycle = handle.state::<Lifecycle>();
+            if lifecycle.generation() != generation || !lifecycle.holds_server() {
+                return;
+            }
+            let probe = watch.clone();
+            let gone = tauri::async_runtime::spawn_blocking(move || probe.is_gone())
+                .await
+                .unwrap_or(false);
+            if !gone {
+                continue;
+            }
+            if lifecycle.server_died(generation, SERVER_DIED.to_owned()) {
+                tracing::error!("the embedded postgres stopped under a ready window");
+                events::emit(&handle, None, events::DB_STATE, lifecycle.get());
+            }
+            return;
+        }
+    });
+}
+
+/// Start the window's server again after it died under it (#1779), on its
+/// own task: *Retry* from the `failed` that [`spawn_watch`] set.
+///
+/// The server is started in place, on its port, under the ownership lock the
+/// window never let go of, so the pools, the sync engine and the backup task
+/// reach it again as they are, and the shared state set aside at the death
+/// is put back. Nothing is migrated or started anew: none of it stopped.
+pub(crate) fn spawn_restart<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
+    tauri::async_runtime::spawn(async move {
+        restart_server(&handle).await;
+    });
+}
+
+async fn restart_server<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
+    let lifecycle = handle.state::<Lifecycle>();
+    // Held to the end, so a quit meanwhile waits and then stops what this
+    // started; see `shutdown_database`.
+    let _gate = lifecycle.restarting().lock().await;
+    let Some(mut db) = lifecycle.take_server() else {
+        // A quit took it first.
+        return;
+    };
+    set_db_state(
+        handle,
+        DbState::Starting {
+            detail: Some("restarting the database server".to_owned()),
+        },
+    );
+    let restarted = db.restart().await;
+    let watch = db.watch();
+    lifecycle.hold_server(db);
+    match restarted {
+        Ok(()) => {
+            lifecycle.resume();
+            set_db_state(handle, DbState::Ready);
+            if let Some(watch) = watch {
+                spawn_watch(handle.clone(), watch, lifecycle.generation());
+            }
+        }
+        Err(error) => {
+            tracing::error!(%error, "the embedded postgres did not start again");
+            set_db_state(
+                handle,
+                DbState::Failed {
+                    message: format!(
+                        "the database server stopped while knobas was running and did not \
+                         start again: {error}"
+                    ),
+                },
+            );
+        }
+    }
 }
 
 /// A start refused because the data directory is in use, prefixed with the
@@ -929,7 +1038,12 @@ fn shutdown_database<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     // leaves the download half-finished, which the next start resumes, the
     // same as any other interrupted first run -- and after a failed bring-up,
     // which stopped its own.
-    if let Some(db) = lifecycle.take_server() {
+    // After a restart in flight (#1779), which holds this gate to its end.
+    let server = tauri::async_runtime::block_on(async {
+        let _gate = lifecycle.restarting().lock().await;
+        lifecycle.take_server()
+    });
+    if let Some(db) = server {
         tracing::info!("stopping the embedded postgres");
         if let Err(error) = tauri::async_runtime::block_on(db.stop()) {
             tracing::error!(%error, "stopping the embedded postgres failed");
