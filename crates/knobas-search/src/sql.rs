@@ -801,7 +801,10 @@ pub fn saved_summary_sql(corpora: &[&Corpus], queries: &[SavedQuery<'_>]) -> Opt
             sql.push_str("union all\n");
         }
         // Binds in the order their placeholders appear, as in `search_sql`:
-        // the id column first, then the tsquery, then the filters.
+        // the id column first, then the tsquery, then the filters -- with two
+        // exceptions, which read filter binds ahead of the tsquery's: a ticket
+        // key's `fdecl` and `reach:`'s `reaches` (#1653), both CTEs of the
+        // subquery the branches sit in.
         let id = builder.param(Bind::Text(query.id.to_owned()));
         let fts = query.text.map(|raw| {
             let text = builder.param(Bind::Text(raw.to_owned()));
@@ -1042,7 +1045,7 @@ const RANK_WHOLE: &str = "case when {fts} @@ q.whole then ts_rank_cd({fts}, q.wh
 /// its own (`Corpus::named`, #1650): the notes, the assets and the routes. The
 /// mirror stores this expression's two halves, and a ticket's key lexed the
 /// same way, as columns (migration `0056`), and compares those, because a
-/// word in most of the mirror made this the larger part of the statement.
+/// word in every row of the mirror made this a fifth of the statement.
 const NAMED: &str = "(tsvector_to_array(to_tsvector('english', {title})) = q.words\n              or (strpos({title}, '/') > 0\n                  and tsvector_to_array(to_tsvector('english', split_part({title}, '/', -1))) = q.words))";
 
 /// The result ordering, qualified with `prefix` (`""`, `"m."` or `"d."`).

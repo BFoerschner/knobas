@@ -14560,13 +14560,18 @@ Ruled 2026-10-23 by the implementer (Sonnet) while building the bundle.
 - **The ticket's mutant does not apply.** *Fork:* #1650's *Mutants* section is "compute `named`
   before the cap again". *Ruling:* the equivalent mutant here is "lex the mirror per match again"
   (`LIVE_ITEM.named = None`), which kills `sql_shape.rs`' shape test, `ticket_by_key.rs` and a
-  unit test. *Reversing:* none needed.
+  unit test. *Reasoning:* with nothing computed after the cap there is no position to move back;
+  what the fix removes is the per-match lexing, so that is what the mutant puts back.
+  *Reversing:* none needed.
 - **Where `payout` is measured.** *Fork:* #1650's first criterion asks for `payout` on the 22k
   probe, whose vocabulary has no `payout` (the probe's titles and bodies draw on 42 named words
   and 4,000 synthetic ones). *Ruling:* measure at 22,000 rows of the search crate's own corpus,
   where `payout` matches 1,100 rows and `ledger` all 22,000, and on the same corpus with six-word
   titles; run the probe once at the end for its search rows. The criterion cannot pass as worded;
-  a wording follow-up is filed. *Reversing:* none.
+  a wording follow-up is filed. *Reasoning:* the corpus the ticket's 152 ms came from (#811's,
+  `corpus.rs`) is not in the tree, and a word with no match on the probe measures nothing; the
+  search crate's corpus has a word in every row and one in a twentieth, which bracket the case.
+  *Reversing:* none.
 - **#1653 hoists the whole walk, not only its start set.** *Fork:* the ticket names the start
   set. *Ruling:* one materialized CTE `reaches(id)` holding the walk's result. *Reasoning:* the
   walk reads nothing but the start set and the links, so every branch walked to the same ids; one
@@ -14582,5 +14587,9 @@ Ruled 2026-10-23 by the implementer (Sonnet) while building the bundle.
   order their placeholders first appear; the CTE now reads them before any branch. *Ruling:* bind
   them right after the declarations, pinned by
   `reachs_values_are_numbered_where_the_walk_reads_them`. The saved summary was already out of
-  that order for ticket keys (its `fdecl` precedes the text bind) and stays as it was.
+  that order for ticket keys (its `fdecl` precedes the text bind), and `reach:` is now a second
+  such case there: its `reaches` CTE reads the values ahead of the text. Both stay, named in
+  `saved_summary_sql`'s comment. *Reasoning:* the order is a reading aid that the planner does
+  not depend on, and moving the summary's text bind after its filters would change every saved
+  list's bind list for it.
   *Reversing:* trivial.

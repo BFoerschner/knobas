@@ -50,10 +50,10 @@
 --
 -- Adding a stored generated column rewrites `sync.item` once, under the
 -- `ACCESS EXCLUSIVE` lock any table rewrite takes, at the boot that applies
--- this: the shape `0027` and `0048` paid (6.9 s at 100,000 rows for `0048`,
--- which also rebuilt the GIN index; this rebuilds none). After it, each write
--- of a row lexes its title up to three more times, once, where the launcher
--- lexed it once per keystroke that matched it.
+-- this: the shape `0027` and `0048` paid (6.9 s at 100,000 rows on `0027`'s
+-- measurement, which also rebuilt the GIN index; this rebuilds none). After
+-- it, each write of a row lexes its title up to twice more and a ticket's key
+-- once, where the launcher lexed them once per keystroke that matched the row.
 
 alter table sync.item
   add column title_words text[] generated always as (
