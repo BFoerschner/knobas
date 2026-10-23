@@ -1602,8 +1602,19 @@ async fn on_a_server_of_its_own_each_source_file_gets_a_database_of_its_own() {
 /// (`test_util`'s `$TMPDIR/knobas-test-<pid>`), and remove the root and the
 /// lock beside it. The child is gone, so its lock is free and the server is
 /// an orphan, which a start on the same root adopts and owns.
+///
+/// Under that lock, taken first and held to the end, as a reaper takes it
+/// (#1802): with the child gone, the first test binary of any run to sweep
+/// `$TMPDIR` finds the root abandoned, and a sweep that ran between this
+/// adoption and its stop deleted the data directory under it -- `pg_ctl:
+/// directory ... is not a database cluster directory`. Held here, the lock
+/// makes every reaper pass the root by; taken after a reaper's, it finds
+/// nothing left to stop.
 async fn stop_the_server_a_child_left(pid: u32) {
     let root = std::env::temp_dir().join(format!("knobas-test-{pid}"));
+    let lock_path = root.with_file_name(format!("knobas-test-{pid}.lock"));
+    let lock = std::fs::File::create(&lock_path).expect("the child's scratch lock");
+    lock.lock().expect("wait out any reaper of the child's root");
     if root.join("data").join("postmaster.pid").exists() {
         let adopted = EmbeddedDb::start(DbConfig {
             root_dir: root.clone(),
@@ -1621,5 +1632,6 @@ async fn stop_the_server_a_child_left(pid: u32) {
             .expect("stop the server the child left");
     }
     let _ = std::fs::remove_dir_all(&root);
-    let _ = std::fs::remove_file(root.with_file_name(format!("knobas-test-{pid}.lock")));
+    let _ = std::fs::remove_file(&lock_path);
+    drop(lock);
 }
