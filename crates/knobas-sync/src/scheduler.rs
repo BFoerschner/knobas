@@ -52,7 +52,8 @@ pub use crate::run_log::SourceSyncStatus;
 /// installed external adapters (P6: every adapter crate exposes
 /// `descriptor_template()` and `build(SourceInstance)`). Everything a read
 /// takes from the registry is here, so a read can take `&dyn AdapterRegistry`
-/// and a test can hand it a registry of its own (#1321).
+/// and a test can hand it a registry of its own (#1321). A read that builds an
+/// adapter takes `&Arc<dyn AdapterRegistry>`, for [`build_off_runtime`].
 pub trait AdapterRegistry: Send + Sync + 'static {
     /// One descriptor **template** per adapter kind the registry holds, with
     /// `id == adapter_kind`: the kinds, declared paths, roles and write ops

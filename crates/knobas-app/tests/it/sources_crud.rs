@@ -18,7 +18,7 @@ use sqlx::PgPool;
 /// depend on another stream's timing. Without this the whole *failed*
 /// credential path in `set_secret` is unreachable — and a mutation that clears
 /// the backoff after a rejected password survived the entire suite because of
-/// it. `crud` takes `&dyn AdapterRegistry` so this can exist.
+/// it. `crud` takes the registry as a trait object so this can exist.
 /// A function rather than a value: `SourceError` is not `Clone` (frozen SPI),
 /// and each `build` needs its own.
 struct RefusingRegistry(fn() -> SourceError);
