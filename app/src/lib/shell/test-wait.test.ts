@@ -1,25 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { until, waitFor } from "./test-wait";
 
-/** A stall longer than the deadline, then the timer that makes the condition true. */
-function stallThenFlip(): { flipped: () => boolean } {
+/**
+ * The stall, ordered rather than timed (#1898). The flip and the deadline share one duration,
+ * and timers of one duration fire in the order they were set, so the flip always runs before
+ * the deadline handler, with no poll in between (the interval is far past the deadline): the
+ * order a long stall produces, whatever the machine is doing.
+ */
+const DEADLINE = 20;
+const stalled = { timeout: DEADLINE, interval: 60_000 };
+
+function flipBeforeDeadline(): { flipped: () => boolean } {
   let done = false;
   setTimeout(() => {
-    const end = performance.now() + 200;
-    while (performance.now() < end);
-  }, 0);
-  setTimeout(() => {
     done = true;
-  }, 10);
+  }, DEADLINE);
   return { flipped: () => done };
 }
 
 describe("test-wait (#1799)", () => {
-  it("waitFor passes when the condition is true by the time the deadline fires", async () => {
-    const { flipped } = stallThenFlip();
-    await waitFor(() => expect(flipped()).toBe(true), { timeout: 100, interval: 5 });
-  });
-
   it("waitFor returns the callback's value", async () => {
     expect(await waitFor(() => 7, { timeout: 100, interval: 5 })).toBe(7);
   });
@@ -36,8 +35,15 @@ describe("test-wait (#1799)", () => {
     expect((failure as Error).cause).toBeInstanceOf(Error);
   });
 
-  it("until passes a stalled wait whose condition came true", async () => {
-    const { flipped } = stallThenFlip();
-    await until(flipped, "flip", { timeout: 100, interval: 5 });
+  describe("a stall past the deadline", () => {
+    it("waitFor passes when the condition is true by the time the deadline fires", async () => {
+      const { flipped } = flipBeforeDeadline();
+      await waitFor(() => expect(flipped()).toBe(true), stalled);
+    });
+
+    it("until passes a stalled wait whose condition came true", async () => {
+      const { flipped } = flipBeforeDeadline();
+      await until(flipped, "flip", stalled);
+    });
   });
 });
