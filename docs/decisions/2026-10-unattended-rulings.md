@@ -13059,3 +13059,20 @@ The measurement came after it.
   exit 2 blocks a `PreToolUse` call, and any other status is a non-blocking error unless the hook
   sets `onFailure: "block"`, which this wiring does not. The wiring line runs the same under `sh -c`
   and `zsh -c`, with a project dir that contains spaces and one that is missing.
+
+## #1793, the gate's slot wait: fixed 150 s, long waits in the background
+
+- **Fork: the budget left of 600 s, or a lower fixed cap.** Data, `.worktrees/.throughput.tsv`
+  (Oct 20-23, gate wall seconds): full gates n=38, p50 383, p90 504, max 626; front gates n=48,
+  p50 33-41, p90 51-58, max 78. A full gate already uses 64-84% of the 600 s ceiling, so the 240 s
+  wait of #1690 fits only the median-or-better case (383 + 240 = 623). *Ruling:* a fixed 150 s
+  (default of `KNOBAS_GATE_SLOT_WAIT`). A dynamic budget needs the prefix's elapsed time, which
+  `test` cannot see (it is the caller's), plus a guessed run reserve; the phase split was not
+  measured because the machine ran at load 13-17 beside five live agents, so any single timing
+  would mislead. 150 + median 383 = 533 fits; the p90 does not fit with any wait, and that tail is
+  the gate's own run, not the queue. *Reversing:* one number in `scripts/gate-slot.sh`, the test's
+  two assertions, and the sentence in three docs.
+- **Fork: background the gate when slots are held.** *Ruling:* yes, after an exit 75, not before:
+  the gate cannot know in advance. Briefs say: rerun in the background with Monitor and
+  `KNOBAS_GATE_SLOT_WAIT=900` (no 600 s ceiling there), never in a foreground call. Exit 75
+  semantics from #1690 are untouched. *Reversing:* one clause in each brief.
