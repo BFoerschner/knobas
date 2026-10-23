@@ -1745,6 +1745,48 @@ mod tests {
         assert!(needles("-only").is_empty());
     }
 
+    /// The Tickets page's `needles.ts` is a second copy of this grammar. Both
+    /// read `tests/fixtures/needle-parity.json` (typed text, its needles and
+    /// alternatives); `needles.test.ts` is the other half. A grammar change
+    /// here that moves a row fails the other side until the fixture and the
+    /// copy agree.
+    #[test]
+    fn needles_and_alternatives_match_the_shared_parity_fixture() {
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../tests/fixtures/needle-parity.json"))
+                .expect("fixture is JSON");
+        assert!(rows.len() > 10);
+        let v = fixture();
+        let words = |value: &serde_json::Value| -> Vec<String> {
+            value
+                .as_array()
+                .expect("array")
+                .iter()
+                .map(|w| w.as_str().expect("string").to_owned())
+                .collect()
+        };
+        for row in rows {
+            let typed = row["typed"].as_str().expect("typed");
+            let text = parse(typed, &v).query.text;
+            assert_eq!(
+                needles(&text),
+                words(&row["needles"]),
+                "needles of {typed:?}"
+            );
+            let expected: Vec<(Vec<String>, Vec<String>)> = row["alternatives"]
+                .as_array()
+                .expect("alternatives")
+                .iter()
+                .map(|a| (words(&a["holds"]), words(&a["lacks"])))
+                .collect();
+            let got: Vec<(Vec<String>, Vec<String>)> = word_alternatives(&text)
+                .into_iter()
+                .map(|a| (a.holds, a.lacks))
+                .collect();
+            assert_eq!(got, expected, "alternatives of {typed:?}");
+        }
+    }
+
     /// The view's word filter (#1889): `or` splits the alternatives, and a
     /// `-word` or `-"phrase"` is left out of the one it stands in.
     #[test]

@@ -134,9 +134,14 @@ export interface Mark {
  * as in prototype-6: one letter would mark half of every row.
  */
 export function marks(text: string, typed: string): Mark[] {
+  return markNeedles(text, words(typed));
+}
+
+/** {@link marks} for needles already read (lowercased); a needle may hold spaces, as a phrase does. */
+export function markNeedles(text: string, needles: readonly string[]): Mark[] {
   const hit = new Array<boolean>(text.length).fill(false);
   const lower = text.toLowerCase();
-  for (const word of words(typed)) {
+  for (const word of needles) {
     if (word.length < 2) continue;
     for (let at = lower.indexOf(word); at !== -1; at = lower.indexOf(word, at + 1)) {
       hit.fill(true, at, at + word.length);

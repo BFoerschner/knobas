@@ -112,6 +112,7 @@
   import { sourceRoles, TICKET_SYSTEM, TRANSLATE_QUERY } from "../roles.svelte";
   import { columnKey, createBoardReader, messageOf, viewSession } from "./board-reader.svelte";
   import SavedViewSourceLine from "./SavedViewSourceLine.svelte";
+  import { needles as readNeedles } from "./needles";
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
@@ -289,6 +290,8 @@
   /** The filter bar's id: its state is kept per view. */
   const filterId = $derived(viewId === null ? "tickets-all" : `tickets-${viewId}`);
   const filter = $derived(sessionFilter(filterId));
+  /** What the server read from the typed text, marked on the cards (#1903). */
+  const needles = $derived(readNeedles(filter.text));
   let suggested = $state<Pick<FilterSuggestions, "fields" | "parents"> | null>(null);
 
   /** At most this many chips a group; past it a field has too many values for chips. */
@@ -725,7 +728,7 @@
                       {card}
                       fields={view?.card_fields ?? null}
                       source={sourceOf(card)}
-                      typed={filter.text}
+                      {needles}
                       selected={current?.card.entity_id === card.entity_id}
                       onselect={() => select(card)}
                       onopen={() => openJob(card)}
@@ -777,11 +780,11 @@
                   {#if column === "key"}
                     {@const source = sourceOf(card)}
                     <td class="tf-mono tf-nowrap"
-                      ><Marked text={card.key} typed={filter.text} />{#if source}<span class="tf-sub">{source}</span>{/if}</td
+                      ><Marked text={card.key} {needles} />{#if source}<span class="tf-sub">{source}</span>{/if}</td
                     >
                   {:else if column === "summary"}
                     <td
-                      ><Marked text={card.title} typed={filter.text} />{#if card.path}<span class="tf-sub"
+                      ><Marked text={card.title} {needles} />{#if card.path}<span class="tf-sub"
                           >{card.path}</span
                         >{/if}</td
                     >
