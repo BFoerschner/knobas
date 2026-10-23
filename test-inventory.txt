@@ -86,7 +86,6 @@ knobas-app	lib/knobas_app	checkout::working_tree::tests::what_the_reader_does_no
 knobas-app	lib/knobas_app	commands::app::tests::a_call_before_the_database_is_up_is_not_ready
 knobas-app	lib/knobas_app	commands::app::tests::a_failed_bring_up_says_why_in_the_refusal
 knobas-app	lib/knobas_app	commands::app::tests::a_retry_is_claimed_once_and_only_out_of_a_failure
-knobas-app	lib/knobas_app	commands::app::tests::completing_the_first_run_upserts_the_key_app_status_reads
 knobas-app	lib/knobas_app	commands::app::tests::db_state_serialises_as_the_contract_declares
 knobas-app	lib/knobas_app	commands::app::tests::every_command_in_this_module_has_a_typescript_mirror
 knobas-app	lib/knobas_app	commands::app::tests::lifecycle_starts_starting_and_remembers_the_last_set
@@ -113,6 +112,7 @@ knobas-app	lib/knobas_app	commands::sources::tests::no_command_takes_the_sources
 knobas-app	lib/knobas_app	commands::sources::tests::the_forget_scan_would_notice_the_call_going_missing
 knobas-app	lib/knobas_app	commands::sources::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::sources::tests::the_scan_catches_the_signature_it_forbids
+knobas-app	lib/knobas_app	commands::tests::no_command_issues_its_own_statement
 knobas-app	lib/knobas_app	commands::tests::no_command_takes_the_app_state_directly
 knobas-app	lib/knobas_app	commands::time::tests::the_draft_quotes_adr_0012s_sentence_verbatim
 knobas-app	lib/knobas_app	commands::time::tests::the_mirror_invokes_the_commands_by_their_registered_names
@@ -178,6 +178,7 @@ knobas-app	lib/knobas_app	protocol::tests::inline_markdown_is_left_as_the_charac
 knobas-app	lib/knobas_app	protocol::tests::prose_is_paragraphs_and_a_run_of_bullets_is_one_list
 knobas-app	lib/knobas_app	protocol::tests::the_action_items_heading_is_matched_case_insensitively
 knobas-app	lib/knobas_app	protocol::tests::the_template_carries_the_three_sections_and_a_readable_action_item
+knobas-app	lib/knobas_app	settings::tests::completing_the_first_run_upserts_the_key_app_status_reads
 knobas-app	lib/knobas_app	slug::tests::a_slug_is_an_address_whatever_the_name_was
 knobas-app	lib/knobas_app	slug::tests::the_first_free_id_counts_up_from_two
 knobas-app	lib/knobas_app	sources::crud::tests::a_failed_test_only_blames_the_credential_when_the_source_did
@@ -1255,6 +1256,8 @@ knobas-core	lib/knobas_core	asset::tests::find_answers_for_a_declared_type_and_m
 knobas-core	lib/knobas_core	asset::tests::no_type_declares_one_key_twice
 knobas-core	lib/knobas_core	asset::tests::the_table_holds_the_sixteen_types_the_spec_names
 knobas-core	lib/knobas_core	asset::tests::the_two_chains_the_design_draws_are_each_a_link_at_a_time
+knobas-core	lib/knobas_core	builds::tests::a_shared_sha_links_only_the_commit_its_pipeline_builds
+knobas-core	lib/knobas_core	builds::tests::only_a_shared_sha_is_asked_of_its_pipeline
 knobas-core	lib/knobas_core	builds::tests::the_pins_are_read_by_their_constant
 knobas-core	lib/knobas_core	checkout::clone::tests::a_clone_is_finished_when_its_head_names_a_commit
 knobas-core	lib/knobas_core	checkout::clone::tests::a_failure_is_said_with_gits_own_line
