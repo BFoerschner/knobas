@@ -736,4 +736,38 @@ mod tests {
             SecretStoreKind::Keychain
         );
     }
+
+    /// The generated `SourceSummary` types `roles` and `role_misses` as
+    /// required arrays (#1664), so the shell reads them with no fallback. That
+    /// is only true while serde sends them when they are empty, which is the
+    /// case a mock source and every filled role answer.
+    #[test]
+    fn a_summary_that_claims_and_misses_nothing_still_sends_both_arrays() {
+        let summary = serde_json::to_value(super::SourceSummary {
+            id: "s".into(),
+            adapter_kind: "mock".into(),
+            display_name: "S".into(),
+            base_url: String::new(),
+            enabled: true,
+            sync_interval_secs: 300,
+            config: serde_json::json!({}),
+            health: knobas_sync::config::CredentialHealth {
+                source_id: "s".into(),
+                state: knobas_sync::config::AuthState::Ok,
+                checked_at: None,
+                detail: None,
+                secret_expires_at: None,
+            },
+            last_run: None,
+            next_run_at: None,
+            item_count: 0,
+            auth_kind: None,
+            kinds: Vec::new(),
+            roles: Vec::new(),
+            role_misses: Vec::new(),
+        })
+        .unwrap();
+        assert_eq!(summary["roles"], serde_json::json!([]), "{summary}");
+        assert_eq!(summary["role_misses"], serde_json::json!([]), "{summary}");
+    }
 }
