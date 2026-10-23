@@ -171,10 +171,12 @@ mod tests {
             }
             checked += 1;
         }
+        // Twenty-four today (#1870); a floor well under that, so a walk that
+        // stopped descending into `entity/` fails here rather than passing.
         assert!(
-            checked >= 4,
-            "only {checked} command modules were scanned -- the walk found \
-             nothing, so this test proves nothing"
+            checked >= 20,
+            "only {checked} command modules were scanned -- the walk missed \
+             most of them, so this test proves little"
         );
     }
 

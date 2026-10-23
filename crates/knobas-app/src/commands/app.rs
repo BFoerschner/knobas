@@ -339,7 +339,7 @@ pub async fn app_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppStatu
     // run", so both stay false-y until the database can answer.
     let pool = app.state::<Lifecycle>().app_state();
     let (source_count, first_run) = match pool {
-        Some(state) => crate::settings::first_run(&state.pool)
+        Some(state) => crate::settings::sources_and_first_run(&state.pool)
             .await
             .unwrap_or((0, false)),
         None => (0, false),

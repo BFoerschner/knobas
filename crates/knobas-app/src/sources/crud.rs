@@ -1001,8 +1001,8 @@ pub async fn shared_commits<'a>(
     secrets: &Arc<dyn SecretStore>,
     registry: &dyn AdapterRegistry,
     shared: std::collections::BTreeMap<&'a str, Vec<String>>,
-) -> std::collections::HashMap<&'a str, std::collections::HashMap<String, String>> {
-    let mut resolved = std::collections::HashMap::new();
+) -> knobas_core::builds::ResolvedCommits<'a> {
+    let mut resolved = knobas_core::builds::ResolvedCommits::new();
     let deadline = tokio::time::Instant::now() + COMMIT_READ_BUDGET;
     for (pipeline, wanted) in shared {
         let read = pipeline_commits(pool, secrets, registry, pipeline, &wanted);

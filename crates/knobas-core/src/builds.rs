@@ -134,8 +134,8 @@ const PIPELINE_RUNS: i64 = 100;
 /// statement, so the live corpus is joined on its `(source_id, kind)` rather
 /// than every row's declaration being looked up.
 ///
-/// Exported for the payload macros' callers; [`JOB_PIPELINES`] joins the
-/// frame's kinds too.
+/// Exported at the crate root so a statement spells it `crate::frame_kinds_cte!()`
+/// inside a `concat!`; [`JOB_PIPELINES`] joins the frame's kinds too.
 #[macro_export]
 macro_rules! frame_kinds_cte {
     () => {
@@ -559,6 +559,11 @@ pub fn shared_shas<'a>(
     shared
 }
 
+/// What a pipeline's settings said each of its shared shas is (#1144), by
+/// pipeline id, then sha, then the commit's entity id: what
+/// [`link_commits`] links a shared sha by.
+pub type ResolvedCommits<'a> = HashMap<&'a str, HashMap<String, String>>;
+
 /// Fills each run's [`RunRow::commit_id`] from its `revision` (#1004): the
 /// one commit `held` names for that sha, or, for a sha two hold (#1144), the
 /// one `resolved` names for the run's pipeline -- what its settings say it
@@ -568,7 +573,7 @@ pub fn shared_shas<'a>(
 pub fn link_commits(
     runs: &mut [(&str, &mut RunRow)],
     held: &HashMap<String, Vec<String>>,
-    resolved: &HashMap<&str, HashMap<String, String>>,
+    resolved: &ResolvedCommits<'_>,
 ) {
     for (pipeline, run) in runs {
         let Some(sha) = run.revision.as_ref() else {

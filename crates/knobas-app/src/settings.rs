@@ -133,7 +133,7 @@ pub fn settable(value: Option<&str>) -> Option<&str> {
 /// # Errors
 ///
 /// The statement's.
-pub async fn first_run(pool: &PgPool) -> Result<(u32, bool), sqlx::Error> {
+pub async fn sources_and_first_run(pool: &PgPool) -> Result<(u32, bool), sqlx::Error> {
     let sources: i64 = sqlx::query_scalar("select count(*) from knobas.source_config")
         .fetch_one(pool)
         .await?;
@@ -155,7 +155,7 @@ const COMPLETE_FIRST_RUN_SQL: &str = "insert into knobas.setting (key, value) \
      values ('first_run.completed', 'true'::jsonb) \
      on conflict (key) do update set value = excluded.value, updated_at = now()";
 
-/// Record that the §14a wizard finished: the row [`first_run`] reads.
+/// Record that the §14a wizard finished: the row [`sources_and_first_run`] reads.
 /// Idempotent by `on conflict`: finishing the wizard twice -- a double click,
 /// a second window -- is the same as finishing it once.
 ///
@@ -172,7 +172,7 @@ mod tests {
     use super::*;
 
     /// The write has to be an upsert, and it has to touch exactly the key
-    /// [`first_run`] reads.
+    /// [`sources_and_first_run`] reads.
     ///
     /// Both halves are load-bearing and neither is visible from the type: a
     /// plain `insert` makes finishing the wizard twice a primary-key violation
@@ -185,15 +185,17 @@ mod tests {
             COMPLETE_FIRST_RUN_SQL.contains("on conflict (key) do update"),
             "a plain insert makes a second Finish a primary-key violation: {COMPLETE_FIRST_RUN_SQL}"
         );
-        // `first_run`'s literal query, quoted from the same file, so a
+        // `sources_and_first_run`'s literal query, quoted from the same file, so a
         // rename on one side fails here rather than at run time.
         assert!(
             COMPLETE_FIRST_RUN_SQL.contains("'first_run.completed'"),
             "the wizard would write a key nothing reads: {COMPLETE_FIRST_RUN_SQL}"
         );
+        // The needle is assembled so this file holds it once, in the query:
+        // spelled whole here, the test would find itself and could not fail.
         let reader = include_str!("settings.rs");
         assert!(
-            reader.contains("where key = 'first_run.completed'"),
+            reader.contains(concat!("where key = ", "'first_run.completed'")),
             "app_status no longer reads the key this command writes"
         );
     }

@@ -139,7 +139,7 @@ async fn with_commits<'a>(
         Some((secrets, registry)) => {
             crate::sources::crud::shared_commits(pool, secrets, registry, shared).await
         }
-        None => std::collections::HashMap::new(),
+        None => knobas_core::builds::ResolvedCommits::new(),
     };
     knobas_core::builds::link_commits(&mut runs, &held, &resolved);
     Ok(())

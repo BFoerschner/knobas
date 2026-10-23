@@ -3704,7 +3704,7 @@ async fn a_born_link_survives_the_notes_first_autosave() {
 /// `unlinked` line carrying `link_id` -- which until this ticket had no
 /// `linked` partner anywhere, because nothing in `knobas_core::note` had ever
 /// written a line. The `created` line's `born[]` is that partner, in the three
-/// keys `link_detail` writes, so the two lines pair in the note's own history.
+/// keys `knobas_core::link`'s `activity_detail` writes, so the two lines pair in the note's own history.
 ///
 /// **One line, not three.** Counted with `==`, scoped to the note's own
 /// freshly-minted entity id -- which no other test in this file can touch --
