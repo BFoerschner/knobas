@@ -377,7 +377,9 @@ pub fn parse(raw: &str, vocab: &Vocabulary) -> Parsed {
     // lexeme, so it stays a prefix.
     parsed.prefix_last_term = !raw.ends_with(char::is_whitespace)
         && !parsed.query.text.is_empty()
-        && terms.last().is_some_and(|term| !term.starts_with('"') && !term.starts_with("-\""));
+        && terms
+            .last()
+            .is_some_and(|term| !term.starts_with('"') && !term.starts_with("-\""));
 
     parsed
 }
@@ -1234,7 +1236,12 @@ mod tests {
     #[test]
     fn a_negated_phrase_typed_last_is_not_a_prefix_but_a_negated_word_is() {
         let v = fixture();
-        for raw in [r#"-"a b""#, r#"a -"b c""#, r#"sepa -"retry batch""#, r#""a b"c"#] {
+        for raw in [
+            r#"-"a b""#,
+            r#"a -"b c""#,
+            r#"sepa -"retry batch""#,
+            r#""a b"c"#,
+        ] {
             assert!(!parse(raw, &v).prefix_last_term, "{raw}");
         }
         for raw in ["-word", "sepa -word", "a or", "\u{fc}berweisung"] {

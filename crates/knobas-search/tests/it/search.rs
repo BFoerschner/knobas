@@ -1096,7 +1096,11 @@ async fn page_search_answers_pages_only_and_survives_a_negated_phrase() {
     let typing = s.page_search(half, None, 10).await.unwrap().expect("words");
     assert_eq!(typing.hits.len(), 1, "{typing:?}");
     let negated = format!("{t} -\"retry batch\"");
-    let excluded = s.page_search(&negated, None, 10).await.unwrap().expect("words");
+    let excluded = s
+        .page_search(&negated, None, 10)
+        .await
+        .unwrap()
+        .expect("words");
     assert!(excluded.hits.is_empty(), "{excluded:?}");
 
     // Nothing to search for is `None`, not an error.
