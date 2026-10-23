@@ -78,11 +78,10 @@ async fn observed(conn: &mut PgConnection) -> Vec<(&'static str, String)> {
     ] {
         seen.push((sql, text(conn, sql).await));
     }
-    let next: i64 =
-        sqlx::query_scalar("insert into knobas.heartbeat default values returning id")
-            .fetch_one(conn)
-            .await
-            .expect("the next heartbeat id");
+    let next: i64 = sqlx::query_scalar("insert into knobas.heartbeat default values returning id")
+        .fetch_one(conn)
+        .await
+        .expect("the next heartbeat id");
     seen.push(("the next heartbeat id", next.to_string()));
     seen
 }
@@ -104,7 +103,9 @@ async fn a_recycled_database_reads_as_a_fresh_copy_does() {
     .expect("use the database the way a test does");
     drop(conn);
 
-    let name = recycled(server, &used).await.expect("nothing but rows changed");
+    let name = recycled(server, &used)
+        .await
+        .expect("nothing but rows changed");
     let (_, control) = fresh("control").await;
     let recycled = observed(&mut connect(server, &name).await).await;
     let fresh = observed(&mut connect(server, &control.name).await).await;
@@ -121,7 +122,10 @@ async fn a_recycled_database_cannot_be_reached_by_its_old_name() {
     let name = recycled(server, &used).await.expect("recycled");
 
     assert!(
-        sqlx::query("select 1").execute(&mut left_over).await.is_err(),
+        sqlx::query("select 1")
+            .execute(&mut left_over)
+            .await
+            .is_err(),
         "a session left over from the test before is cut"
     );
     assert!(
@@ -169,7 +173,6 @@ async fn a_dropped_database_is_not_recycled() {
         .expect("drop it");
     assert_eq!(recycled(server, &used).await, None);
 }
-
 
 /// Whether `shelf` has a database on it, put back if so.
 fn on(shelf: &'static Shelf) -> bool {
