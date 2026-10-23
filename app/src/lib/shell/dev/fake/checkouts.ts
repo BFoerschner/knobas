@@ -357,7 +357,16 @@ export function handlers(): Handlers {
     // overrides this file keeps.
     set_clones_root: (args) => {
       const path = args["path"];
-      fakeClonesRoot = typeof path === "string" && path.trim() !== "" ? path.trim().replace(/^~(?=\/|$)/, "/Users/mara") : null;
+      const typed = typeof path === "string" && path.trim() !== "" ? path.trim().replace(/^~(?=\/|$)/, "/Users/mara") : null;
+      // The refusal the backend gives (#1661): not absolute once `~` is home.
+      if (typed !== null && !typed.startsWith("/")) {
+        throw {
+          code: "invalid",
+          message: `the clones root must be an absolute path (or start with ~/), not ${JSON.stringify(typed)}`,
+          source_id: null,
+        };
+      }
+      fakeClonesRoot = typed;
       return null;
     },
     entity_checkout: (args) => fakeCheckout(String(args["entityId"] ?? "")),
