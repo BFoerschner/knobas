@@ -100,11 +100,13 @@ async fn the_fixture_component_s_items_reach_the_mirror_and_search_finds_them() 
 }
 
 /// The registry the reads are handed: the real one, with the fixture
-/// installed, that says when a build has started. The build itself is the
-/// real one's, so the fixture's `descriptor()` runs as it does in the app.
+/// installed, that says when a build has started and when one has finished.
+/// The build itself is the real one's, so the fixture's `descriptor()` runs
+/// as it does in the app.
 struct Entered {
     inner: Registry,
     entered: std::sync::mpsc::Sender<()>,
+    finished: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl AdapterRegistry for Entered {
@@ -117,12 +119,17 @@ impl AdapterRegistry for Entered {
         instance: SourceInstance,
     ) -> Result<Box<dyn knobas_source::Source>, knobas_source::SourceError> {
         let _ = self.entered.send(());
-        self.inner.build(instance)
+        let built = self.inner.build(instance);
+        self.finished
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        built
     }
 }
 
-/// How long the fixture's `descriptor()` waits on every build below.
-const DWELL_MS: u64 = 2_000;
+/// How long the fixture's `descriptor()` waits on every build below: the
+/// time the health poll has to answer in. Five seconds, not one or two, so a
+/// poll slowed by a loaded gate still answers inside it.
+const DWELL_MS: u64 = 5_000;
 
 /// A source of the fixture, `auth_kind` as stored, whose builds dwell.
 async fn dwelling_source(pool: &PgPool, auth_kind: &str) -> String {
@@ -146,7 +153,11 @@ async fn dwelling_source(pool: &PgPool, auth_kind: &str) -> String {
 /// One worker, so a build held on it would hold every other command: the
 /// health poll below would wait out the dwell. The build is known to be in
 /// flight when the poll is sent (the registry said so) and is still in flight
-/// when it answers.
+/// when it answers (the registry has not said it finished).
+///
+/// No wall-clock bound on the poll: a build held on the worker finishes
+/// before the poll can start, so the poll's answer finds it finished, however
+/// slow or fast either is. The dwell is only how long a green poll may take.
 async fn a_dwelling_build_holds_no_worker<F, Fut, T>(pool: PgPool, read: F)
 where
     F: FnOnce(std::sync::Arc<dyn AdapterRegistry>) -> Fut,
@@ -154,9 +165,11 @@ where
     T: Send + 'static,
 {
     let (entered, built) = std::sync::mpsc::channel();
+    let finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let registry: std::sync::Arc<dyn AdapterRegistry> = std::sync::Arc::new(Entered {
         inner: Registry::with_external(vec![knobas_wasm_host::load_fixture()]),
         entered,
+        finished: std::sync::Arc::clone(&finished),
     });
     let reading = tokio::spawn(read(registry));
     // The test's own thread, not the worker, waits here.
@@ -164,19 +177,13 @@ where
         .recv_timeout(std::time::Duration::from_secs(60))
         .expect("the read builds the adapter");
 
-    let asked = std::time::Instant::now();
     let health = tokio::spawn(async move { knobas_app::sources::crud::health(&pool).await })
         .await
         .unwrap();
-    let answered_in = asked.elapsed();
     assert!(health.is_ok(), "{:?}", health.err());
     assert!(
-        !reading.is_finished(),
-        "the build was still in its {DWELL_MS} ms descriptor when the poll answered"
-    );
-    assert!(
-        answered_in < std::time::Duration::from_millis(1_000),
-        "a command answered in {answered_in:?} while a build was in flight"
+        !finished.load(std::sync::atomic::Ordering::SeqCst),
+        "the poll answered only once the build had finished its {DWELL_MS} ms descriptor"
     );
     reading.await.unwrap();
 }
