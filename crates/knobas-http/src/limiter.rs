@@ -712,7 +712,10 @@ mod tests {
         assert_eq!(loose.slot.current().rate, Rate::new(100, 20), "it loosened");
         let left = loose.slot.current().take_left();
         let bound = refilled_since(100, loose.slot.born);
-        assert!(left <= bound, "{left} of twenty left, at most {bound} refilled");
+        assert!(
+            left <= bound,
+            "{left} of twenty left, at most {bound} refilled"
+        );
     }
 
     /// The quiet a loosening is credited with ends at the last request let
@@ -735,7 +738,10 @@ mod tests {
         assert_eq!(loose.slot.current().rate, Rate::new(20, 8), "it loosened");
         let left = loose.slot.current().take_left();
         let bound = refilled_since(20, asked);
-        assert!(left <= bound, "{left} of eight left, at most {bound} refilled");
+        assert!(
+            left <= bound,
+            "{left} of eight left, at most {bound} refilled"
+        );
     }
 
     /// A zero reads as one, as it always has: `0/s` means "one", not "never".
