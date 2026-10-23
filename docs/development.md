@@ -26,9 +26,9 @@ runs three halves side by side:
 - `front`: `svelte-check`, the Vitest suite and `vite build`.
 - the scripts: `shell`, `test-layout`, `witness-unit` and `conflict-markers`.
 - the cargo chain: `fmt`, `clippy`, `clippy-libs`, `inventory`, `ipc-mirror`
-  and `test`. `test` takes a slot under `$TMPDIR/knobas-gate-slots` (two at
-  once) and starts its tests against one shared test server, not a Postgres per
-  test.
+  and `test`. `test` takes a slot under `$TMPDIR/knobas-gate-slots` (one test
+  run at a time since #1892, four libtest threads per binary) and starts its
+  tests against one shared test server, not a Postgres per test.
 
 Each half's output is captured and printed when it finishes. A failing half
 prints its whole log. A passing one prints each recipe's wall time, and the

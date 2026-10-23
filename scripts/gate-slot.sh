@@ -10,15 +10,36 @@
 # directory is how a mutual exclusion stops being one.
 #
 # At most two gate-sized recipes run on one machine at a time (Björn,
-# 2026-09-06, #425; the measurement is #422's). The ceiling is SysV shared
-# memory, not CPU: macOS allows 32 segments machine-wide (`kern.sysv.shmmni`),
-# every postmaster holds one, and one `just test` peaks at 13 -- the gate
+# 2026-09-06, #425; the measurement is #422's), and one by default (below).
+# The ceiling on two is SysV shared memory, not CPU: macOS allows 32
+# segments machine-wide (`kern.sysv.shmmni`), every postmaster holds one, and one `just test` peaks at 13 -- the gate
 # server plus up to 12 transient servers the `knobas-db` lifecycle suite
 # starts. Two gates fit; three fit only when their peaks miss each other, and
 # cost 2.4x the single wall each; five ran the kernel out and every worktree
-# went red with `shmget: No space left on device`. So a recipe takes one of
-# `KNOBAS_GATE_SLOTS` (default 2) slots before it does anything else, and with
-# none free prints one line naming the holders' pids and polls, up to
+# went red with `shmget: No space left on device`.
+#
+# ONE SLOT BY DEFAULT since #1892 (2026-10-23): the memory ceiling allows
+# two, the cores do not. A gate's test run was most of the machine's load
+# (Postgres backends in `create database` for every test, the test threads,
+# and the file churn of creating and unlinking those databases), so two at
+# once is what stalled the vitest half of whichever gate was beside them.
+# Measured with two `just check` and one `just pre-gate` started 20 s apart in
+# one warm worktree, the machine-wide sampler every 5 s, `KNOBAS_TEST_THREADS`
+# per run (the `test` recipe says what that is):
+#   2 slots, 12 threads (as before): load1 median 43.5, max 65.3; 2 vitest
+#     timeouts (launcher-chain, fake-features), test runs 189-229 s
+#   2 slots, 2 threads: median 24.0, max 50.7; launcher-chain timed out again;
+#     test runs 276-292 s side by side
+#   1 slot, 4 threads: median 18.5, max 28.7; no timeouts; test runs 134 and
+#     154 s, the second after a 130 s wait for the slot; checks 170 and 293 s
+#   1 slot, 2 threads: median 16.1, max 36.7; runs 157-178 s, the waiter's
+#     check 340 s
+# So one slot, four threads. The load stays above the twelve cores with two
+# gates beside each other even so; what is left is the databases themselves
+# (#1897). `KNOBAS_GATE_SLOTS=2` brings the old ceiling back.
+#
+# So a recipe takes one of `KNOBAS_GATE_SLOTS` (default 1) slots before it
+# does anything else, and with none free prints one line naming the holders' pids and polls, up to
 # `KNOBAS_GATE_SLOT_WAIT` seconds (default 150), then exits 75 naming the same
 # holders. 150 is what a full gate leaves under the Bash tool's 600 s foreground
 # ceiling (383 s median, 504 s p90 over Oct 20-23, #1793): a wait that outlasts
@@ -33,8 +54,8 @@
 # gate" too. The slot is held from the recipe's start to after its server has
 # stopped, and released by the same EXIT, INT and TERM traps that clean up the
 # rest. For a bare `just test` on a cold tree that start is before the build,
-# so a waiting gate's compile does not share the cores the two running gates
-# are already saturating; under `check` the build has happened in `inventory`
+# so a waiting gate's compile does not share the cores the running gate is
+# already saturating; under `check` the build has happened in `inventory`
 # by then, and what waits is the run.
 #
 # A slot is a symlink, `$TMPDIR/knobas-gate-slots/slot-<n>`, whose target is
@@ -84,7 +105,7 @@ slot_root=${TMPDIR:-/tmp}/knobas-gate-slots
 slot='' held='' reclaim_lock=''
 # Set by `hold_gate_slot` from the environment before `take_slot` reads them;
 # declared here so a `set -u` shell cannot meet them unset.
-slots=2 slot_wait=150
+slots=1 slot_wait=150
 
 # One pass over the slots: takes a free one (or one whose holder is dead) and
 # returns 0 with `slot` set; else returns 1 with `held` naming the pids that
@@ -140,7 +161,7 @@ release_slot() {
 # `release_slot` already armed in the EXIT, INT and TERM traps.
 hold_gate_slot() {
     local name=$1 wait_from waited announced=
-    slots=${KNOBAS_GATE_SLOTS:-2}
+    slots=${KNOBAS_GATE_SLOTS:-1}
     case $slots in
         ''|*[!0-9]*) echo "error: KNOBAS_GATE_SLOTS must be a whole number of at least 1, not '$slots'" >&2; exit 1 ;;
     esac

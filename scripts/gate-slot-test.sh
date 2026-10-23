@@ -2,7 +2,8 @@
 # `scripts/gate-slot.sh`'s own test (#1690), run by `just witness-unit`.
 #
 # 1. The default wait is 150 s: a taker finding every slot held announces
-#    "waiting up to 150 s". (900 s outlasts the Bash tool's 600 s foreground
+#    "waiting up to 150 s". The default is one slot (#1892): slot-1 held is
+#    every slot held. (900 s outlasts the Bash tool's 600 s foreground
 #    ceiling, so a third gate was killed by the tool and read as a red gate.)
 # 2. The wait expiring exits 75, not 1, naming every holder's pid, so a
 #    timeout is told from a red gate; a short KNOBAS_GATE_SLOT_WAIT is honoured.
@@ -49,7 +50,7 @@ mkdir -p "$TMPDIR/knobas-gate-slots"
 ln -s "$a" "$TMPDIR/knobas-gate-slots/slot-1"
 ln -s "$b" "$TMPDIR/knobas-gate-slots/slot-2"
 
-unset KNOBAS_GATE_SLOT_WAIT
+unset KNOBAS_GATE_SLOT_WAIT KNOBAS_GATE_SLOTS
 bash -c ". '$here/gate-slot.sh'; hold_gate_slot t" >"$scratch/default.out" 2>&1 &
 p=$!
 sleep 2
@@ -57,6 +58,11 @@ kill "$p" 2>/dev/null
 wait "$p" 2>/dev/null
 out=$(cat "$scratch/default.out")
 contains "default wait is 150 s" "$out" "waiting up to 150 s"
+# One slot by default (#1892): with slot-1 held, a taker waits even though
+# slot-2 is a link to a live pid it never looks at.
+contains "default is one slot" "$out" "all 1 gate slots are held (pids $a)"
+# The two-slot checks below ask for two, as `KNOBAS_GATE_SLOTS=2` still can.
+export KNOBAS_GATE_SLOTS=2
 
 out=$(KNOBAS_GATE_SLOT_WAIT=2 taker 0); code=$?
 check "expired wait exits 75" "$code" 75
