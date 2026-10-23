@@ -15284,3 +15284,53 @@ Reviewed 2026-10-23 by the merge-manager (Opus), PR #1885.
   `app/src` whose left side cannot be nullish adds no non-test, non-fake instance beyond the two
   it lists; it is posted on #1884 with the fake-IPC hits, and no second issue is opened.
   *Reversing:* n/a.
+## #1869: which GIN indexes keep the default pending list (Opus implementer, 2026-10-23)
+
+- **Where the readings came from.** *Fork:* #1879's comment found 0 pending pages on all four
+  indexes on `perf.rs`' mirror, which `seed_corpus` vacuums. *Ruling:* read `item_fts_idx` on
+  clones of the responsiveness probe's snapshots (23,500 items through the real sync, autovacuum
+  off), and the three `knobas` indexes on a clone loaded by SQL with no vacuum. *Reasoning:* the
+  probe's snapshot is the mirror a sync leaves: 367 pages pending on `item_fts_idx`. Its estate and
+  notes are empty, so those were loaded at `knobas_search::testing`'s upper-bound shapes (3,303
+  assets, 1,500 routes, 10,000 notes) in one load each. Searches through `Searcher::search`,
+  median of 7 warm runs, each state read twice, alternating. *Reversing:* n/a, a method.
+- **`item_fts_idx`: cap at 256 kB.** *Ruling:* migration `0059`. *Reasoning:* never analyzed,
+  with 367 pages pending, `payment retry`, `payment re`, `JIRA0-42` and `kind:build fail` walked
+  every entity and probed its item instead of reading the index: 24 to 36 ms, against 2.0 to
+  3.0 ms with the list merged. Grown 100 rows at a time, the plan held to 213 pages (2.4 to
+  3.1 ms, the list read linearly) and flipped at 225. Analyzed, the plan held at 367 pages and the
+  list cost 0.5 to 1.5 ms a search. Single words (`pay`, `payment`, `common`) read the same in
+  both states. *Reversing:* one migration resetting the limit.
+- **256 kB, not 1 MB or `fastupdate = off`.** *Ruling:* 256 kB, `0057`'s limit. *Reasoning:*
+  writing the 23,500 items' `fts` into a table with this index alone, in batches of 500 in one
+  transaction, three rounds: no index 0.2 to 0.3 s, 4 MB 0.6 to 1.0 s, 1 MB 0.9 to 1.3 s,
+  256 kB 1.6 to 2.7 s, 64 kB 2.8 to 5.7 s, `fastupdate = off` 3.6 to 9.8 s. 256 kB costs a first
+  sync some 40 to 75 us an item, in the background; 0.2 to 0.4 s per 5,000, the order #1864's
+  merge-manager accepted. 1 MB (129 pages) holds on this mirror, but the walk the planner prices
+  against the charge is estimated from the mirror's size, so a smaller mirror flips on a shorter
+  list; at 33 pages the charge is about 130. *Reversing:* one migration.
+- **Reserved for Björn, ruled by implementer on Opus: migration `0059`** (Björn's 2026-10-22
+  waiver, as dispatched). *Fork:* §10.8 freezes `crates/knobas-db/migrations/**`. *Ruling:* add
+  `0059`, the storage parameter and a merge of what is pending, with its entry
+  `1869-migration-0059-mirror-search-pending-list.md`. *Reasoning:* the rulings above; `0058` is
+  on `main`, so `0059` is the next number. *Reversing:* as above.
+- **The migration merges the list already pending.** *Ruling:* `gin_clean_pending_list` after the
+  `alter`, as `0057`. *Reasoning:* the new limit merges only on the next insert past it. 83 ms
+  for the probe mirror's 367 pages. *Reversing:* drop the statement.
+- **`note_fts_idx`, `asset_fts_idx`, `route_fts_idx`: left on the default.** *Ruling:* no
+  migration. *Reasoning:* at the upper-bound shapes, loaded with no vacuum, the default left 75
+  pages on notes (one 4 MB merge, 1,261 rows after it), 108 on assets (the whole estate) and 20 on
+  routes (all 1,500, under 256 kB either way); at 256 kB, 12, 12 and 20. At the default the estate
+  branch of `asset: w101` read `knobas.asset` by a scan (0.4 to 1.1 ms) where the capped index
+  took 0.07 ms, and the notes' index read took 0.4 ms against 0.1 ms. Whole searches differed by
+  0.1 to 0.4 ms (`asset: w101` 2.8 against 2.5 ms, `kind:note w7 w108` 4.4 against 4.3 ms). A
+  scan of these tables is bounded by an estate or a notebook, never by a mirror, and they are
+  written by hand or by an import in the thousands. *Reversing:* one migration per index.
+- **The re-index button keeps the limit.** *Ruling:* no code. *Reasoning:* `reindex index
+  concurrently sync.item_fts_idx` on the probe clone left `reloptions` at
+  `{gin_pending_list_limit=256}`. *Reversing:* n/a.
+- **`perf.rs`' `the_artifact_this_harness_is_built_to_avoid` keeps its shape.** *Fork:* it asserts
+  `dirty_the_pending_list(20_000)` leaves pages pending; at 256 kB the list now holds 1 to 33.
+  *Ruling:* unchanged; `testing.rs`' docs name the new limit. *Reasoning:* a list ends empty only
+  when the last row's insert merges it, and the update is deterministic. `just search-perf` reads
+  it. *Reversing:* n/a.
