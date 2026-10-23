@@ -185,7 +185,8 @@ reentry_status=$(take_within 10 1280 "$scratch/r.out")
 check "take: re-entrant for the holder (status $reentry_status)" [ "$reentry_status" = 0 ]
 check "take: the re-entry leaves the holder in place" [ "$(assert_status 1280)" = 0 ]
 lock hold 1281 touch "$scratch/ran-as-non-holder" > "$scratch/h3.out" 2>&1; hold_status=$?
-check "hold: a non-holder's command does not run, exit 1 (status $hold_status)" [ "$hold_status" = 1 ] && check "hold: nothing ran" [ ! -e "$scratch/ran-as-non-holder" ]
+check "hold: a non-holder's command exits 1 (status $hold_status)" [ "$hold_status" = 1 ]
+check "hold: a non-holder's command does not run" [ ! -e "$scratch/ran-as-non-holder" ]
 lock hold 1280 bash -c 'exit 7' > /dev/null 2>&1; hold_status=$?
 check "hold: the holder's command exit status passes through (status $hold_status)" [ "$hold_status" = 7 ]
 check "hold: the holder still holds afterwards" [ "$(assert_status 1280)" = 0 ]

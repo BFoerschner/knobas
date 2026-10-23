@@ -26,7 +26,8 @@
 # gate (D4, #1690). It is a fixed cap because the budget left of 600 s is not
 # knowable here (the prefix before this point is the recipe's, not ours); the
 # way past it is `KNOBAS_GATE_SLOT_WAIT=900` on a gate the caller runs in the
-# background with Monitor, where no 600 s ceiling applies. 75 (EX_TEMPFAIL) is this exit's
+# background and waits for in the foreground, where no 600 s ceiling applies
+# to the gate itself (#1836). 75 (EX_TEMPFAIL) is this exit's
 # own code, so a wait that expired is told from a gate that failed (1 and up
 # from the recipe's own steps) by the code alone; the line says "not a red
 # gate" too. The slot is held from the recipe's start to after its server has
