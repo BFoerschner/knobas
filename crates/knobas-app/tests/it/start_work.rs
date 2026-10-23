@@ -832,6 +832,29 @@ async fn an_edited_proposal_is_what_gets_dispatched() {
     assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Pending);
 }
 
+/// The repository dropdown repoints the branch and pull request steps through
+/// `start_work_amend` (PAGE-10): the amendment of `entity` is accepted and read
+/// back, on both steps.
+#[tokio::test]
+async fn the_repository_of_a_branch_and_a_pull_request_step_can_be_amended() {
+    let pool = corpus("sw_edit_entity").await;
+    let flow = planned(&pool).await;
+    let other = "gitea:tidewater/other-service";
+
+    for (kind, tag) in [
+        (Step::CreateBranch, "CreateBranch"),
+        (Step::CreatePullRequest, "CreatePullRequest"),
+    ] {
+        let step = step_of(&flow, kind);
+        let mut edited = step.payload.clone();
+        edited[tag]["entity"] = serde_json::json!(other);
+        let after = start_work::repropose(&pool, step.id, edited)
+            .await
+            .unwrap();
+        assert_eq!(step_of(&after, kind).payload[tag]["entity"], other);
+    }
+}
+
 // -- a re-used head branch (#359) ------------------------------------------
 
 /// **The read, against a real mirror.** A head branch used twice leaves two
