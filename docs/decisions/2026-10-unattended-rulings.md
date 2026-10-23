@@ -13555,3 +13555,34 @@ a newly refused command, and no doc changes. The merge-manager's re-run on the f
   reach (bring_up, external_adapter_install, similar_text_incremental, knobas-db embedded, gitea
   client); that red is main's, filed as #1815 (bring_up also #1809). The front half of both runs
   was green. *Reversing:* none, the diff is one test file.
+
+## #1802: two load flakes, a limiter bound and an ownership lock (Opus implementer, 2026-10-23)
+
+- **The adoption failure is not a race in `start_managed`'s claim.** *Fork:* fix the claim, or
+  fix how the lock is released. *Ruling:* the release. *Reasoning:* the refusal named the test
+  binary's own pid, which only this test's processes could have written into its tempdir's
+  `.owner.lock`. A child another test thread was spawning held a copy of the dropped descriptor
+  between its fork and its exec, and an flock lasts until the last copy closes. Reproduced alone in
+  a 40-line program (296 of 2,000 reclaims refused beside four spawning threads, 0 without them, 0
+  with an explicit unlock) and in the new unit test (106 of 300). `OwnerLock` unlocks on drop.
+  *Reversing:* low, the newtype is the only change.
+- **No §10.8 entry.** *Ruling:* none owed. *Reasoning:* no IPC, migration or module-layout change;
+  a shipped process releases the lock only as it quits, and `restart` keeps it. *Reversing:* n/a.
+- **Cross-run collision ruled out.** *Reasoning:* every embedded test takes its own
+  `tempfile::tempdir()` (data directory, both lock files), and a fresh start asks for port 0. A
+  shared port fails a start with a bind error, never with *has this profile open*.
+  *Reversing:* n/a.
+- **The bring-up lock keeps closing without an unlock.** *Ruling:* unchanged. *Reasoning:* a
+  bring-up waits for its lock (50 ms polls), so a child's copy delays it by one exec and refuses
+  nothing. *Reversing:* low.
+- **The two sibling limiter tests with a literal refill bound get the measured one too.** *Fork:*
+  the named test only, or every test bounded by "what refills while the test runs". *Ruling:* all
+  three (`a_loosening_right_away_takes_nothing_from_a_full_limiter`, `a_request_ends_the_quiet`,
+  `a_request_ends_the_quiet_before_a_loosening`). *Reasoning:* same assertion shape, same cause;
+  the others' literals had 100 to 300 ms of margin where the named one had 10. The tests asserting a
+  floor or a whole burst are left alone: a stall only adds refill up to the burst.
+  *Reversing:* low.
+- **The bound adds one request to what the elapsed time refilled.** *Reasoning:* governor reads
+  `quanta`'s clock and the test reads `Instant`, and the two can round a refill differently; the
+  one is the original test's own allowance at a zero-length window, not a wider tolerance.
+  *Reversing:* low.
