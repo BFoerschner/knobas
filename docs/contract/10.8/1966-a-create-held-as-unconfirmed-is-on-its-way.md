@@ -30,8 +30,9 @@
 
   Answered by the fake IPC (`fake/standup.ts`) as `false`: the fixture holds nothing as
   unconfirmed. Called by `shell/follow-write.ts` (`willNotGo` no longer counts an unconfirmed hold;
-  new `mayHaveLanded` and `toastUnconfirmed`; `followWrite` toasts it once, offers no *Edit and
-  resend* and keeps following), so every page using `markQueued` keeps its mark; the Monitors tab
+  new `mayHaveLanded`, `toastUnconfirmed` and `unconfirmedTeller`, which tells each hold once and
+  which Standup's follows share; `followWrite` toasts it once, offers no *Edit and resend* and
+  keeps following), so every page using `markQueued` keeps its mark; the Monitors tab
   (*Monitor queued*, its title saying what to check, followed); a run's *Create ticket*
   (`TfRunTicket.svelte`, *Ticket queued* after a reload); Standup's action items and publish
   follow (`TfStandup.svelte`); and the week's held notes (`week-view.ts`). Witnessed by
