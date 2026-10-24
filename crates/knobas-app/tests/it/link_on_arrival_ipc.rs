@@ -279,6 +279,57 @@ async fn a_new_pull_request_is_linked_once_it_is_mirrored_open_on_its_head() {
     assert_eq!(reached(&pool).await, vec![PR.to_owned()]);
 }
 
+/// The pull request the receipt named is linked (#1949), and not another one
+/// open on the same head into a different base, which the head alone cannot
+/// tell from it. Until the named one is mirrored nothing is linked: a named
+/// pull request is waited for, never looked for by its head.
+#[tokio::test]
+async fn a_new_pull_request_the_receipt_named_is_linked_and_not_another_open_on_its_head() {
+    let pool = corpus("arrival_pr_named").await;
+    let open_on_head = serde_json::json!({
+        "merged": false, "state": "open", "head": {"ref": "feature/PAY-231-backoff"}
+    });
+    // A colleague's pull request from the same head into a release branch.
+    item(
+        &pool,
+        "gitea:tidewater/payout-service#149",
+        "pr",
+        "PAY-231: backport to release/2026.08",
+        open_on_head.clone(),
+    )
+    .await;
+    let id = queued(&pool, new_pull_request()).await;
+    knobas_core::write_queue::sent(&pool, id, Some("tidewater/payout-service#150"))
+        .await
+        .unwrap();
+    assert_eq!(
+        link_on_arrival(&pool, &declarations(), id, TICKET)
+            .await
+            .unwrap(),
+        None,
+        "the pull request the receipt named is not mirrored yet, and #149 is not it"
+    );
+    assert!(reached(&pool).await.is_empty());
+
+    item(
+        &pool,
+        PR,
+        "pr",
+        "PAY-231: Retry failed SEPA payouts",
+        open_on_head,
+    )
+    .await;
+    assert_eq!(
+        link_on_arrival(&pool, &declarations(), id, TICKET)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some(PR),
+        "the named pull request, although #149 is open on the same head"
+    );
+    assert_eq!(reached(&pool).await, vec![PR.to_owned()]);
+}
+
 /// A write that did not land links nothing, even with its entity mirrored:
 /// still waiting, refused (the branch already existed), or discarded.
 #[tokio::test]

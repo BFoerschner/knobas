@@ -330,8 +330,9 @@ pub async fn arrival_linkable(
 }
 
 /// Link what write `write_id` made to `ticket`, once it has: the branch a
-/// sent `CreateBranch` named, or the pull request open on a sent
-/// `CreatePullRequest`'s head, as the mirror holds them (#984), or the page a
+/// sent `CreateBranch` named, or the pull request a sent `CreatePullRequest`'s
+/// receipt named ([`named`], #1949; the one open on its head where the source
+/// named none), as the mirror holds them (#984), or the page a
 /// sent `CreatePage` made, by the id its settle stamped
 /// (`docs::created_page`, #1121), or the ticket a sent `CreateTicket` filed
 /// ([`ticket_filed`], #1451), drawn as the relation its op's `delivery()` states. Answers
@@ -376,16 +377,19 @@ pub async fn link_on_arrival(
             ticket_filed(pool, write_id, &write.source_id, title, write.queued_at).await?
         }
         WriteOp::CreatePullRequest { entity, head, .. } => {
-            match crate::start_work::queue::pull_request_on_head(
-                pool,
-                declarations,
-                &repo_of(entity)?,
-                head,
-            )
-            .await?
-            {
-                crate::start_work::PullRequestOnHead::Open(id) => Some(id),
-                _ => None,
+            match named(pool, write_id, crate::start_work::queue::KIND_PR).await? {
+                Named::Made(named) => named,
+                Named::Nothing => match crate::start_work::queue::pull_request_on_head(
+                    pool,
+                    declarations,
+                    &repo_of(entity)?,
+                    head,
+                )
+                .await?
+                {
+                    crate::start_work::PullRequestOnHead::Open(id) => Some(id),
+                    _ => None,
+                },
             }
         }
         _ => None,
@@ -418,7 +422,7 @@ async fn ticket_filed(
     title: &str,
     queued: chrono::DateTime<chrono::Utc>,
 ) -> Result<Option<String>, IpcError> {
-    if let Named::Ticket(named) = ticket_named(pool, write_id).await? {
+    if let Named::Made(named) = ticket_named(pool, write_id).await? {
         return Ok(named);
     }
     sqlx::query_scalar(
@@ -437,25 +441,37 @@ async fn ticket_filed(
     .map_err(IpcError::internal)
 }
 
-/// What a sent `CreateTicket`'s receipt said about the ticket it made.
+/// What a sent create's receipt said about the entity it made.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Named {
-    /// The source named the ticket: its entity id once the mirror holds it,
-    /// `None` until a sync brings it in. A named ticket is waited for, never
-    /// looked for by its title.
-    Ticket(Option<String>),
-    /// The source named nothing, so only the title can find the ticket.
+pub enum Named {
+    /// The source named what it made: its entity id once the mirror holds it,
+    /// `None` until a sync brings it in. A named entity is waited for, never
+    /// looked for by a field another one may share (a title, a head).
+    Made(Option<String>),
+    /// The source named nothing, so only such a field can find it.
     Nothing,
 }
 
-/// The ticket write `write_id` made, by the key its receipt named (#1754).
+/// The ticket write `write_id` made, by the key its receipt named (#1754):
+/// [`named`] for a `ticket`.
+pub(crate) async fn ticket_named(pool: &sqlx::PgPool, write_id: i64) -> Result<Named, IpcError> {
+    named(pool, write_id, "ticket").await
+}
+
+/// The entity of kind `kind` write `write_id` made, by the id its receipt
+/// named (#1754, #1949).
 ///
 /// The settle stamps a receipt's id on `knobas.write_queue.remote_id`, and a
 /// create's id is its entity's local part: Jira answers the key (`PAY-342`),
-/// Gitea `owner/repo/issues/<n>`. So the ticket is `<source_id>:<remote_id>`
-/// as `docs::created_page` resolves a page, and it is taken only while the
-/// mirror holds it as a live ticket.
-pub(crate) async fn ticket_named(pool: &sqlx::PgPool, write_id: i64) -> Result<Named, IpcError> {
+/// Gitea `owner/repo/issues/<n>` for an issue and `owner/repo#<n>` for a pull
+/// request. So the entity is `<source_id>:<remote_id>` as `docs::created_page`
+/// resolves a page, and it is taken only while the mirror holds it as a live
+/// item of `kind`.
+///
+/// # Errors
+///
+/// `internal` if a read fails.
+pub async fn named(pool: &sqlx::PgPool, write_id: i64, kind: &str) -> Result<Named, IpcError> {
     let stamped: Option<(String, Option<String>)> =
         sqlx::query_as("select source_id, remote_id from knobas.write_queue where id = $1")
             .bind(write_id)
@@ -466,13 +482,14 @@ pub(crate) async fn ticket_named(pool: &sqlx::PgPool, write_id: i64) -> Result<N
         return Ok(Named::Nothing);
     };
     let mirrored = sqlx::query_scalar(
-        "select entity_id from sync.live_item where entity_id = $1 and kind = 'ticket'",
+        "select entity_id from sync.live_item where entity_id = $1 and kind = $2",
     )
     .bind(format!("{source_id}:{remote}"))
+    .bind(kind)
     .fetch_optional(pool)
     .await
     .map_err(IpcError::internal)?;
-    Ok(Named::Ticket(mirrored))
+    Ok(Named::Made(mirrored))
 }
 
 /// [`deliver`] spawned onto the scheduler's background set with a copy of the

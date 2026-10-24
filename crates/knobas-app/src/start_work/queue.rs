@@ -27,7 +27,7 @@ use crate::{IpcError, IpcErrorCode};
 /// Every adapter that mirrors a repository's refs declares them under these
 /// names, which is what lets these two reads be written once.
 const KIND_BRANCH: &str = "branch";
-const KIND_PR: &str = "pr";
+pub(crate) const KIND_PR: &str = "pr";
 
 /// The flow's window onto the world.
 ///
