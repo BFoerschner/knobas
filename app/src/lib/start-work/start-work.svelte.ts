@@ -59,6 +59,16 @@ export function demandOf(outcome: StartWorkOutcome): Demand {
   }
 }
 
+/**
+ * Whether a step's proposal is the reader's to change: a step nothing has sent
+ * yet, or one that failed. The backend edits no other (#1707) -- a queued
+ * step's write is still open and is amended in the write queue, and a step
+ * that succeeded or was skipped is already decided.
+ */
+export function editable(outcome: StartWorkOutcome): boolean {
+  return outcome === "pending" || outcome === "failed";
+}
+
 /** What the stepper calls each step, in the reader's words rather than the wire's. */
 export function labelOf(step: StartWorkStepKind): string {
   switch (step) {

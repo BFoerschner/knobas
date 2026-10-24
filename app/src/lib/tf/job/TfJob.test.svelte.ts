@@ -943,6 +943,10 @@ test("each step's state follows the flow as its writes move through the queue, a
   expect(acted).toEqual(["run"]);
   expect(steps().slice(0, 4).map(([, state]) => state)).toEqual(["done", "queued", "ready", "ready"]);
   const queued = target.querySelector(".tf-step[data-step='pr']")!;
+  // A queued step's write is still open: it is amended in the write queue,
+  // not here (#1707). A step nothing has sent yet is still the reader's.
+  expect(queued.querySelector<HTMLInputElement>("input")?.disabled).toBe(true);
+  expect(target.querySelector<HTMLInputElement>(".tf-step[data-step='branch'] input")?.disabled).toBe(true);
   [...queued.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Retry")!.click();
   await settle();
   expect(acted).toEqual(["run", "retry 2"]);

@@ -24,7 +24,7 @@
   import type { EntityDetail, StartWorkStep } from "../../ipc/entity";
   import type { Timer } from "../../shell/timer.svelte";
   import { toastStarted } from "../../shell/queued-toast";
-  import { createStartWork, demandOf, edited, type StartWorkApi } from "../../start-work/start-work.svelte";
+  import { createStartWork, demandOf, editable, edited, type StartWorkApi } from "../../start-work/start-work.svelte";
   import { keyOf } from "./job";
 
   let {
@@ -123,7 +123,7 @@
   /** Another repository: both steps that name one move with it. */
   async function pick(repo: string) {
     for (const of of [branch, pr]) {
-      if (of && of.outcome !== "succeeded" && text(op(of)["entity"]) !== repo) {
+      if (of && editable(of.outcome) && text(op(of)["entity"]) !== repo) {
         await flow.amend(of.id, edited(of, "entity", repo));
       }
     }
@@ -168,15 +168,15 @@
       <span class="tf-state {state === 'ready' ? 'tf-dim' : ''}">{state}</span>
       <div class="tf-field">
         {#if row.id === "branch"}
-          <input aria-label={row.label} value={text(op(of)["name"])} disabled={!of || of.outcome === "succeeded"} onchange={(event) => amend(of, "name", event.currentTarget.value)} />
-          <select aria-label="Repository" value={repoOf} disabled={!of || of.outcome === "succeeded"} onchange={(event) => void pick(event.currentTarget.value)}>
+          <input aria-label={row.label} value={text(op(of)["name"])} disabled={!of || !editable(of.outcome)} onchange={(event) => amend(of, "name", event.currentTarget.value)} />
+          <select aria-label="Repository" value={repoOf} disabled={!of || !editable(of.outcome)} onchange={(event) => void pick(event.currentTarget.value)}>
             {#each options as repo, at (repo.entity_id)}
               <option value={repo.entity_id}>{repo.title}{at === 0 ? " (suggested)" : ""}</option>
             {/each}
           </select>
           <span class="tf-dim tf-small">from {text(op(of)["from_ref"]) || "main"}</span>
         {:else if row.id === "pr"}
-          <input aria-label={row.label} value={text(op(of)["title"])} disabled={!of || of.outcome === "succeeded"} onchange={(event) => amend(of, "title", event.currentTarget.value)} />
+          <input aria-label={row.label} value={text(op(of)["title"])} disabled={!of || !editable(of.outcome)} onchange={(event) => amend(of, "title", event.currentTarget.value)} />
           <span class="tf-dim tf-small">draft, to {text(op(of)["base"]) || "main"}</span>
         {:else if row.id === "link"}
           <input aria-label={row.label} value="{text((of?.payload as Record<string, unknown> | undefined)?.['relation']) || 'implements'} {key}" readonly />

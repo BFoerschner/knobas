@@ -31,7 +31,7 @@ vi.mock("../ipc/entity", () => ({
   startWorkAmend: () => Promise.resolve([]),
 }));
 
-const { createStartWork, edited } = await import("./start-work.svelte");
+const { createStartWork, editable, edited } = await import("./start-work.svelte");
 
 function one(id: number, outcome: StartWorkStep["outcome"]): StartWorkStep {
   return {
@@ -120,4 +120,9 @@ test("edited replaces one key of the op, so the repository picker's amendment ca
   const [tag] = Object.keys(amended);
   expect(amended[tag!]!.entity).toBe("gitea:other");
   expect(Object.keys(amended)).toHaveLength(1);
+});
+
+test("only a pending or a failed step is the reader's to edit, as the backend edits no other (#1707)", () => {
+  const outcomes = ["pending", "running", "succeeded", "queued", "failed", "skipped"] as const;
+  expect(outcomes.filter(editable)).toEqual(["pending", "failed"]);
 });
