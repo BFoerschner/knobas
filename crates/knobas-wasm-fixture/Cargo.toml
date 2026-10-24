@@ -7,11 +7,11 @@ version.workspace = true
 # WASM host is tested with, built to a component by `just wasm-fixture`
 # (`--target wasm32-wasip2`). It emits a fixed corpus with a cursor.
 #
-# Its descriptor and items are `knobas-source`'s own types (#1234), which
-# build for wasm32-wasip2 since they stopped pulling `knobas-core` and sqlx.
-# The rest of its answers are serde JSON written by hand, which is what an
-# adapter in any other language would do too. The host's battery run is what
-# holds both to the SPI.
+# It is built on the adapter SDK (`knobas-adapter-sdk`, #2028), its first
+# user: it implements the SDK's `Adapter` trait over the SPI types the SDK
+# re-exports, and holds no bindings or WIT conversions of its own. Its reads
+# are written as their JSON and decoded into the SPI type each is. The host's
+# battery run is what holds both the SDK and the fixture to the SPI.
 #
 # A workspace member, so the gate's fmt and clippy see it; on the host target
 # it compiles to a library nothing loads.
@@ -23,18 +23,16 @@ doctest = false
 [dependencies]
 # The items' `updated_at`, an SPI `SyncItem` field.
 chrono.workspace = true
-knobas-source = { path = "../knobas-source" }
+knobas-adapter-sdk = { path = "../knobas-adapter-sdk" }
+# `DeserializeOwned`, for the reads it writes as JSON.
+serde.workspace = true
 serde_json.workspace = true
-# Pinned exactly: 0.62.0 is the newest release older than two weeks
-# (2026-09-10). The bindings it generates are the guest half of
-# `crates/knobas-wasm-host/wit/adapter.wit`.
-wit-bindgen = { version = "=0.62.0", default-features = false, features = ["macros", "realloc", "std"] }
 # The guest half of `wasi:http` 0.2, for the fixture's one network read
 # (#1203). Pinned to the copy Rust's own std for `wasm32-wasip2` resolves.
 wasip2 = "=1.0.4"
 
 [features]
-# The same fixture built against the frozen 1.0.0 world (`wit-1.0.0/`), with
-# no `downloads`: `just wasm-fixture` builds it too, for the host's hold on
-# 1.0.0 components (#1205).
-v1_0 = []
+# The same fixture built against the frozen 1.0.0 world (the SDK's
+# `wit-1.0.0/`), with no `downloads`: `just wasm-fixture` builds it too, for
+# the host's hold on 1.0.0 components (#1205).
+v1_0 = ["knobas-adapter-sdk/v1_0"]

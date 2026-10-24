@@ -3100,6 +3100,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "knobas-adapter-sdk"
+version = "1.3.0"
+dependencies = [
+ "chrono",
+ "knobas-source",
+ "serde",
+ "serde_json",
+ "wit-bindgen 0.62.0",
+]
+
+[[package]]
 name = "knobas-app"
 version = "2.0.0"
 dependencies = [
@@ -3423,10 +3434,10 @@ name = "knobas-wasm-fixture"
 version = "2.0.0"
 dependencies = [
  "chrono",
- "knobas-source",
+ "knobas-adapter-sdk",
+ "serde",
  "serde_json",
  "wasip2",
- "wit-bindgen 0.62.0",
 ]
 
 [[package]]
