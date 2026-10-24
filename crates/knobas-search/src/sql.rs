@@ -397,7 +397,8 @@ fn ids_body(
 
 /// [`ids_sql`]'s word filter: the row meets one of `alternatives`, holding
 /// every word it asks for and none it leaves out (#1889). An alternative's
-/// words bind as one array, those it leaves out as another. One with
+/// words bind as one array, those it leaves out as another, each word as
+/// typed and folded by the server's `lower()` ([`bind_lowered`], #1988). One with
 /// neither admits every row, though `query::word_alternatives` never
 /// returns one.
 fn words_predicate(builder: &mut Builder, alternatives: &[WordAlternative]) -> String {
@@ -420,13 +421,13 @@ fn words_predicate(builder: &mut Builder, alternatives: &[WordAlternative]) -> S
         .map(|alternative| {
             let mut parts = Vec::new();
             if !alternative.holds.is_empty() {
-                let holds_all = builder.param(Bind::Texts(alternative.holds.clone()));
+                let holds_all = bind_lowered(builder, &alternative.holds);
                 parts.push(format!(
                     "not exists (select 1 from unnest({holds_all}::text[]) w(word) where not ({row_holds_word}))"
                 ));
             }
             if !alternative.lacks.is_empty() {
-                let lacks_all = builder.param(Bind::Texts(alternative.lacks.clone()));
+                let lacks_all = bind_lowered(builder, &alternative.lacks);
                 parts.push(format!(
                     "not exists (select 1 from unnest({lacks_all}::text[]) w(word) where {row_holds_word})"
                 ));
@@ -530,9 +531,10 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
     for filter in &filters.fields {
         // `has:`'s kinds before its user: its fragment reads them first,
         // to pick the links it walks (#939).
-        // The six name keys bind as typed and are folded by the server
-        // (#1843); `has:`, `sprint:` and `assigned:` read a spelling the
-        // parse already folded.
+        // The six name keys and `assigned:`'s usernames bind as typed and
+        // are folded by the server (#1843, #1975); `has:` and `sprint:`
+        // read a spelling the parse already folded, which names a signal or
+        // `current`.
         use crate::query::FieldKey;
         let values = match filter.key {
             FieldKey::Project
@@ -540,13 +542,14 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
             | FieldKey::IssueType
             | FieldKey::Priority
             | FieldKey::Assignee
-            | FieldKey::Label => bind_lowered(builder, &filter.values),
-            FieldKey::Sprint | FieldKey::Assigned | FieldKey::Has => {
-                builder.param(Bind::Texts(filter.values.clone()))
-            }
+            | FieldKey::Label
+            | FieldKey::Assigned => bind_lowered(builder, &filter.values),
+            FieldKey::Sprint | FieldKey::Has => builder.param(Bind::Texts(filter.values.clone())),
         };
-        let me = if filter.key == crate::query::FieldKey::Has {
-            builder.param(Bind::Texts(filter.me.clone()))
+        // `has:`'s usernames as configured, folded by the server as the
+        // reviewers they meet are.
+        let me = if filter.key == FieldKey::Has {
+            bind_lowered(builder, &filter.me)
         } else {
             "null".to_owned()
         };

@@ -984,3 +984,35 @@ async fn a_value_with_a_dotted_capital_i_matches_under_the_servers_fold() {
         assert_eq!(answer(&pool, &p, raw).await, expected, "{raw}");
     }
 }
+
+/// The Tickets view's words under the server's fold too (#1988): `İstanbul`
+/// is `i̇stanbul` to Rust and `istanbul` to the server, so a word folded in
+/// Rust missed the title the server folds. Kept and left out alike.
+#[tokio::test]
+async fn a_word_with_a_dotted_capital_i_matches_under_the_servers_fold() {
+    let pool = pool().await;
+    let p = project();
+    let rollout = store(&pool, &p, 1, BASE).await;
+    sqlx::query("update sync.item set title = 'İstanbul Rollout' where entity_id = $1")
+        .bind(&rollout)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let other = store(&pool, &p, 2, BASE).await;
+    let searcher = searcher(&pool).await;
+    for (typed, expected) in [
+        ("İstanbul", vec![rollout.clone()]),
+        ("-İstanbul", vec![other.clone()]),
+        ("İSTANBUL or nothing-at-all", vec![rollout.clone()]),
+    ] {
+        assert_eq!(
+            searcher
+                .matching_ids(&format!("project:{p} {typed}"), "ticket")
+                .await
+                .unwrap()
+                .map(sorted),
+            Some(expected),
+            "{typed}"
+        );
+    }
+}

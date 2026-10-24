@@ -18,7 +18,10 @@ async fn pool() -> sqlx::PgPool {
     knobas_db::migrate::run(&pool).await.unwrap();
     for (id, name, config) in [
         ("jira", "Jira", r#"{"username": "mara.lindqvist"}"#),
-        ("gitea", "Gitea", "{}"),
+        // A user the server and Rust fold differently (#1975): `İlker`. Only
+        // `a_review_asked_of_a_dotted_capital_i_user_is_on_the_card_and_in_has`
+        // asks them for a review.
+        ("gitea", "Gitea", r#"{"username": "İlker"}"#),
         ("teamcity", "TeamCity", "{}"),
     ] {
         sqlx::query(
@@ -504,4 +507,29 @@ async fn a_card_carries_its_labels_in_the_records_order() {
             (format!("{p}-2"), vec![]),
         ]
     );
+}
+
+/// A review asked of `İlker`, configured as `İlker` (#1975): Rust folds the
+/// name to `i̇lker` and the server to `ilker`, so both the card and `has:`
+/// fold it with the server's `lower()`, as they fold the reviewer.
+#[tokio::test]
+async fn a_review_asked_of_a_dotted_capital_i_user_is_on_the_card_and_in_has() {
+    let pool = pool().await;
+    let p = project();
+    let asked = ticket(&pool, &format!("{p}-1")).await;
+    ticket(&pool, &format!("{p}-2")).await;
+    let pr = format!("gitea:tide/{p}#9");
+    pull_request(&pool, &pr, "open", &["İlker"]).await;
+    link(&pool, &pr, &asked, "related", true).await;
+
+    let expected = vec![format!("{p}-1")];
+    let raw = format!("project:{p} has:review-for-me");
+    assert_eq!(searched(&pool, &raw).await, expected, "{raw}");
+    let shown: Vec<String> = cards(&pool, &format!("project:{p}"))
+        .await
+        .into_iter()
+        .filter(|c| c.signals.iter().any(|s| s.kind.as_str() == "review-for-me"))
+        .map(|c| c.key)
+        .collect();
+    assert_eq!(shown, expected, "the cards showing review-for-me");
 }

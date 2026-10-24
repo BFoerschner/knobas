@@ -10,6 +10,7 @@
 
 mod ancestor_path;
 mod bare_name;
+mod cased_identity;
 mod corpus_seam;
 mod declaring;
 mod help_card;
