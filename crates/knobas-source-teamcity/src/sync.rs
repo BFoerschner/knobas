@@ -125,7 +125,7 @@ pub(crate) async fn execute(
     //    they ran. Ids are assigned at queue time and are monotonic, so every
     //    such build has an id above everything that existed now, and one clamp
     //    covers all of them. See [`ceiling`] and [`cursor::advance`].
-    let probe = probe(rest).await?;
+    let probe = probe(rest, before).await?;
 
     // 2. Queued and running builds, unconditionally and **first**.
     //
@@ -584,9 +584,10 @@ fn capped_short(served: usize, asked: u32) -> Option<String> {
 /// set. A server that serves fewer rows than [`CEILING_PROBE`] asked for makes
 /// the ceiling lower, which [`ceiling`] already records as the safe direction
 /// -- a re-fetch on a later run, never a build.
-async fn probe(rest: &dyn Rest) -> Result<Vec<Rec<Build>>, SourceError> {
+async fn probe(rest: &dyn Rest, watermark: i64) -> Result<Vec<Rec<Build>>, SourceError> {
     Ok(rest
         .builds(&Locator {
+            since_build_id: (watermark > 1).then(|| watermark - 1),
             default_filter: Some(false),
             count: CEILING_PROBE,
             ..Locator::default()
@@ -1665,10 +1666,12 @@ mod tests {
         // (The full sync above made five: those three, with the project
         // tree, the listing and one per-configuration query in place of the
         // last. An unscoped source reads no tree when nothing moved, #849.)
+        // The probe asks from the watermark on (#2016), the watermark's own
+        // build included, so it witnesses 412 and nothing is asked by id.
         assert_eq!(
             rest.calls()[5..],
             [
-                "defaultFilter:false,count:100",
+                "sinceBuild:(id:411),defaultFilter:false,count:100",
                 "state:(queued:true,running:true),count:100",
                 "state:finished,sinceBuild:(id:412),canceled:any,failedToStart:any,branch:default:any,count:100",
             ]
@@ -2504,6 +2507,13 @@ mod tests {
     /// queries: it serves `before` at t0 and `after` from t1 on. The race in
     /// the middle of a run, made deterministic.
     ///
+    /// [`then`](MidRun::then) adds a further instant, for a run with more than
+    /// two clock-advancing queries: a source scoped to a configuration list
+    /// asks once per configuration (#1626), and #2016's race sits between
+    /// two of those. Each clock-advancing query sees the next instant, the
+    /// last one from there on; every other call sees the instant the last
+    /// such query saw.
+    ///
     /// The window is not theoretical: a full sync issues one request per
     /// configuration between the two, and at the default 5 req/s two hundred
     /// configurations is ~40 s.
@@ -2522,8 +2532,9 @@ mod tests {
     /// pins it.
     struct MidRun {
         build_types: Vec<serde_json::Value>,
-        before: Vec<serde_json::Value>,
-        after: Vec<serde_json::Value>,
+        instants: Vec<Vec<serde_json::Value>>,
+        /// Serve each page in fixture order ([`FakeRest::fixture_order`]).
+        as_given: bool,
         elapsed: Mutex<usize>,
     }
 
@@ -2542,11 +2553,10 @@ mod tests {
     /// literal, so widening the probe cannot silently un-identify it. It no
     /// longer discriminates on its own -- the probe and the in-flight poll
     /// both ask for [`PAGE`] now -- which is why `state` carries the check.
+    /// `sinceBuild` is not: an incremental run's probe asks from the
+    /// watermark on (#2016).
     fn is_ceiling_probe(l: &Locator) -> bool {
-        l.count == CEILING_PROBE
-            && l.state.is_none()
-            && l.since_build_id.is_none()
-            && l.build_type_id.is_none()
+        l.count == CEILING_PROBE && l.state.is_none() && l.build_type_id.is_none()
     }
 
     impl MidRun {
@@ -2557,15 +2567,38 @@ mod tests {
         ) -> Self {
             Self {
                 build_types,
-                before,
-                after,
+                instants: vec![before, after],
+                as_given: false,
                 elapsed: Mutex::new(0),
             }
         }
 
-        /// The server as it stands at one of the two instants this fake has.
-        fn snapshot(&self, builds: &[serde_json::Value]) -> FakeRest {
-            FakeRest::new(self.build_types.clone(), builds.to_vec())
+        /// One more instant, seen by the next clock-advancing query on.
+        fn then(mut self, builds: Vec<serde_json::Value>) -> Self {
+            self.instants.push(builds);
+            self
+        }
+
+        /// Pages come back in fixture order, however unordered that is.
+        fn fixture_order(mut self) -> Self {
+            self.as_given = true;
+            self
+        }
+
+        /// The server as it stood at instant `at`, or at the last one.
+        fn snapshot(&self, at: usize) -> FakeRest {
+            let builds = &self.instants[at.min(self.instants.len() - 1)];
+            let rest = FakeRest::new(self.build_types.clone(), builds.clone());
+            if self.as_given {
+                rest.fixture_order()
+            } else {
+                rest
+            }
+        }
+
+        /// The instant the last clock-advancing query saw: t0 before the first.
+        fn now(&self) -> usize {
+            self.elapsed().saturating_sub(1)
         }
 
         /// How many clock-advancing queries the run made. Exactly two on a
@@ -2578,30 +2611,32 @@ mod tests {
     #[async_trait::async_trait]
     impl Rest for MidRun {
         async fn server(&self) -> Result<crate::rest::Server, SourceError> {
-            self.snapshot(&self.before).server().await
+            self.snapshot(self.now()).server().await
         }
         async fn current_user(&self) -> Result<crate::rest::CurrentUser, SourceError> {
-            self.snapshot(&self.before).current_user().await
+            self.snapshot(self.now()).current_user().await
         }
         async fn build_types(&self) -> Result<Page<BuildType>, SourceError> {
-            self.snapshot(&self.before).build_types().await
+            self.snapshot(self.now()).build_types().await
         }
         async fn projects(&self) -> Result<Page<crate::rest::Project>, SourceError> {
-            self.snapshot(&self.before).projects().await
+            self.snapshot(self.now()).projects().await
         }
         async fn builds(&self, locator: &Locator) -> Result<Page<Build>, SourceError> {
-            let at_t0 = {
+            let at = {
                 let mut elapsed = self.elapsed.lock().expect("not poisoned");
-                if !is_ceiling_probe(locator) {
+                if is_ceiling_probe(locator) {
+                    // The instant the next clock-advancing query will see.
+                    *elapsed
+                } else {
                     *elapsed += 1;
+                    *elapsed - 1
                 }
-                *elapsed <= 1
             };
-            let builds = if at_t0 { &self.before } else { &self.after };
-            self.snapshot(builds).builds(locator).await
+            self.snapshot(at).builds(locator).await
         }
         async fn build_exists(&self, id: i64) -> Result<bool, SourceError> {
-            self.snapshot(&self.before).build_exists(id).await
+            self.snapshot(self.now()).build_exists(id).await
         }
     }
 
@@ -2861,15 +2896,15 @@ mod tests {
         assert_eq!(cursor, r#"{"v":2,"since_build_id":412}"#);
     }
 
-    /// A server whose opening pages cannot reach the top of its own id space.
+    /// A server whose unfiltered pages cannot reach the top of its own id
+    /// space.
     ///
     /// A hundred old builds listed first and one recent build past the end of
     /// the page, so `defaultFilter:false,count:100` comes back with a maximum
     /// of 100 while build 5 000 is sitting on the server. That is not a
     /// contrivance: `/app/rest/builds` is unordered and one page is not the
-    /// id space, which is precisely why "nothing this run witnessed reaches
-    /// the watermark" is a trigger to ask the server rather than a verdict
-    /// about it.
+    /// id space. An incremental run's probe asks from the watermark on
+    /// (#2016), so the hundred old builds are not on its page at all.
     fn a_page_that_cannot_reach_the_top(top: Option<i64>) -> FakeRest {
         let mut builds: Vec<serde_json::Value> = (1..=100)
             .map(|n| build(n, "Payout_Build", "Payout", "finished"))
@@ -2918,7 +2953,7 @@ mod tests {
         assert_eq!(
             rest.calls(),
             [
-                "defaultFilter:false,count:100",
+                "sinceBuild:(id:4999),defaultFilter:false,count:100",
                 "state:(queued:true,running:true),count:100",
                 "builds/id:5000",
             ],
@@ -2927,31 +2962,31 @@ mod tests {
         );
     }
 
-    /// ...and the case that is *not* a replaced server, which is what makes
-    /// the refusal above a check rather than a blanket failure.
+    /// ...and the case that is *not* a replaced server: build 5 000 is on
+    /// the server, behind the same hundred old builds.
     ///
-    /// The same hundred-build page, the same watermark, the same "nothing I
-    /// witnessed reaches it" trigger -- and build 5 000 is on the server, so
-    /// `/app/rest/builds/id:5000` finds it and the run carries on. This is
-    /// the ordinary case on an unordered server, and it is the one the
-    /// refusal this replaces got wrong on every run: issue #91's source
-    /// refused for ever, and resetting the cursor only restarted the loop.
-    ///
-    /// The watermark stands rather than being dragged down to the ceiling:
-    /// [`cursor::advance`] ignores a ceiling below the watermark.
+    /// Until #2016 the opening page held only those hundred, nothing it
+    /// witnessed reached the watermark, and `/app/rest/builds/id:5000` had to
+    /// confirm the build on every such run -- the ordinary case on an
+    /// unordered server, and the one issue #91's refusal got wrong for ever.
+    /// The probe now asks from the watermark on, its own build included, so
+    /// it witnesses 5 000 itself: the run carries on, the watermark stands,
+    /// and nothing is asked by id.
     #[tokio::test]
-    async fn a_watermark_the_pages_did_not_show_is_confirmed_by_id_and_the_run_proceeds() {
+    async fn a_watermark_behind_an_unordered_page_is_witnessed_by_the_probe() {
         let rest = a_page_that_cannot_reach_the_top(Some(5_000));
         let cursor_in = r#"{"v":2,"since_build_id":5000}"#.to_owned();
         let (items, cursor) = run(&rest, &TeamCityConfig::default(), Some(cursor_in.clone())).await;
         assert!(items.is_empty(), "nothing has finished since build 5000");
+        assert_eq!(cursor, cursor_in, "the watermark stands");
         assert_eq!(
-            cursor, cursor_in,
-            "the watermark stands: the pages did not show build 5000, the server did"
+            rest.calls()[0],
+            "sinceBuild:(id:4999),defaultFilter:false,count:100",
+            "the probe starts at the watermark's own build"
         );
         assert!(
-            rest.calls().contains(&"builds/id:5000".to_owned()),
-            "the run asked, rather than inferring a replacement from a page: {:?}",
+            !rest.calls().iter().any(|c| c.starts_with("builds/id:")),
+            "the probe witnessed build 5000, so nothing is asked by id: {:?}",
             rest.calls()
         );
     }
@@ -3137,6 +3172,102 @@ mod tests {
             "1000 was the newest build in existence when the run opened; 1100 was queued after \
              the poll and is still running, so the watermark may not pass 1000 or `sinceBuild` \
              will never offer 1100 again"
+        );
+    }
+
+    /// **A run whose opening pages missed the watermark still clamps under a
+    /// build queued after its in-flight poll** (#2016).
+    ///
+    /// A source scoped to two configurations, `Ledger_Deploy` and
+    /// `Payout_Build`, asks `sinceBuild` once for each, in that order, so the race window
+    /// runs from the in-flight poll to the second of those queries. The
+    /// watermark is 1187, and the server lists a hundred older builds before
+    /// it, so an unfiltered opening page of a hundred rows never reaches it:
+    /// the routine picture on a server whose pages are unordered (#91).
+    ///
+    /// Build Q (1190, `Ledger_Deploy`) is queued after the in-flight poll and
+    /// is still running when `Ledger_Deploy`'s query goes out. Build R (1191,
+    /// `Payout_Build`), queued after Q, has finished by `Payout_Build`'s
+    /// query. R is emitted and pushes `max_finished` to 1191, above Q. While
+    /// a ceiling below the watermark was ignored, the watermark moved to 1191
+    /// and `sinceBuild` never offered Q again. The probe now asks for the
+    /// builds from the watermark on, so it witnesses 1187 and the watermark
+    /// stays there.
+    ///
+    /// The next run is the price and the end of it: it emits R again, once,
+    /// with Q, and the watermark moves past both.
+    #[tokio::test]
+    async fn a_run_whose_opening_pages_missed_the_watermark_still_clamps_under_a_build_queued_mid_run()
+     {
+        let types = vec![
+            build_type("Payout_Build", "Payout"),
+            build_type("Ledger_Deploy", "Ledger"),
+        ];
+        let old: Vec<serde_json::Value> = (1..=100)
+            .map(|n| build(n, "Payout_Build", "Payout", "finished"))
+            .chain([build(1187, "Payout_Build", "Payout", "finished")])
+            .collect();
+        let with = |more: &[serde_json::Value]| -> Vec<serde_json::Value> {
+            old.iter().chain(more).cloned().collect()
+        };
+        let q = |state| build(1190, "Ledger_Deploy", "Ledger", state);
+        let r = |state| build(1191, "Payout_Build", "Payout", state);
+        let rest = MidRun::new(
+            types,
+            // t0: the probe and the in-flight poll. Neither Q nor R exists.
+            with(&[]),
+            // t1: `Ledger_Deploy`'s query. Q is running, R queued.
+            with(&[q("running"), r("queued")]),
+        )
+        // t2: `Payout_Build`'s query. R has finished, Q still runs.
+        .then(with(&[q("running"), r("finished")]))
+        // t3: the next run. Both have finished.
+        .then(with(&[q("finished"), r("finished")]))
+        .fixture_order();
+        let cfg = TeamCityConfig::from_json(&serde_json::json!({
+            "build_type_ids": ["Payout_Build", "Ledger_Deploy"]
+        }))
+        .expect("config");
+
+        let mut sink = VecSink(Vec::new());
+        let cursor = execute(
+            "teamcity",
+            TEST_BASE_URL,
+            &cfg,
+            &rest,
+            Some(r#"{"v":2,"since_build_id":1187}"#.to_owned()),
+            &mut sink,
+        )
+        .await
+        .expect("run");
+        assert_eq!(
+            keys(&sink.0),
+            ["buildType:Payout_Build", "build:1191"],
+            "R finished inside the run and is emitted; Q is in no set this run saw"
+        );
+        assert_eq!(
+            cursor, r#"{"v":2,"since_build_id":1187}"#,
+            "Q was queued after the in-flight poll and still runs, so the watermark may not pass \
+             1187, the newest build the run witnessed when it opened"
+        );
+
+        let mut sink = VecSink(Vec::new());
+        let next = execute("teamcity", TEST_BASE_URL, &cfg, &rest, Some(cursor), &mut sink)
+            .await
+            .expect("the next run");
+        assert_eq!(
+            keys(&sink.0),
+            [
+                "buildType:Ledger_Deploy",
+                "buildType:Payout_Build",
+                "build:1190",
+                "build:1191"
+            ],
+            "Q is emitted, and R once more"
+        );
+        assert_eq!(
+            next, r#"{"v":2,"since_build_id":1191}"#,
+            "the probe witnessed both, so the watermark moves past them"
         );
     }
 
