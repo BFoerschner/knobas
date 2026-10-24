@@ -16493,3 +16493,26 @@ Björn: "try not to create so many backlog tickets, tell the implementers to try
   unattended, they were picked: the Dependencies page mounted over stand-in ports, the house-rule
   matcher, the parser's own test module, bring-up over one registry (as LIFE-1's test does) plus
   `Registry::refuse`.
+- **Can `Registry::refuse` drop an adapter a live source still uses?** (merge-manager, Opus)
+  *Fork:* unload on refuse, or leave a loaded adapter in place until nothing holds it. *Ruling:*
+  unload, as the PR does. *Reasoning:* a built source owns its adapter. `build` clones the
+  `WasmAdapter` (an `Arc` of the compiled component) out from under the read lock, so a source
+  that is running keeps the component it was built from after `refuse` takes the registry's copy
+  away. What changes is the next `build` of that kind, which now fails with the refusal's reason.
+  That is the ticket's ask, and Settings already calls the adapter refused at that point. On the
+  restore path, the loaded adapter is the pre-restore one, and its artifact need not be the one
+  the restored row pins, so building from it was wrong anyway. `replace` already empties the slot
+  before its own check, so the two writers now agree. *Reversing:* low, one `retain`.
+- **Amend #1626 rather than bound the window.** (merge-manager, Opus) *Ruling:* the amendment
+  stands, and #2016 (backlog) is the bound. *Reasoning:* the ticket offers either option. The
+  bound changes what TeamCity's opening probe asks, and only a seeded live run can confirm that
+  the locator holds. That is a PR of its own, not a leftover. The amendment puts the real width
+  where the next reader of `cursor::advance` will see it. *Reversing:* n/a.
+- **The source-reading pin in `query.rs` is robust enough.** (merge-manager, Opus) *Ruling:*
+  kept as written. *Reasoning:* rustfmt's reflow of a long pattern (`"a" | "b"` onto `| "c" =>`
+  lines) parses the same way. A moved anchor (`fn apply_key_value(`, `match key {`, the
+  `_ => return false,` fallback) panics by its `expect`. A literal standing alone on a body line
+  counts as a key, which turns the test red, not green. The test reads green on a mutant only in
+  two cases: an arm with a guard (`"x" if … =>`), and a nested `_ => return false,` above the
+  fallback. Neither shape is in the function today, and either would go in front of a reviewer
+  as a new arm. *Reversing:* low.
