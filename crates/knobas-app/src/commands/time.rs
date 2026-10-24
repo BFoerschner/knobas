@@ -509,7 +509,9 @@ mod tests {
     /// fields alone. Both spellings are on this surface at once -- the
     /// `foreground` argument and the `entity_id` field inside it -- and
     /// getting either wrong is a call that arrives with the value missing and
-    /// no error anywhere.
+    /// no error anywhere. Read off the call's keys, not its text: a name on
+    /// the value side is not sent, so `offset: when.offsetMinutes` sends no
+    /// `offsetMinutes` (#2008).
     #[test]
     fn the_mirror_sends_the_argument_names_tauri_expects() {
         for (call, argument) in [
@@ -553,7 +555,7 @@ mod tests {
         ] {
             let invocation = crate::commands::mirror::invocation(MIRROR, call);
             assert!(
-                invocation.contains(argument),
+                crate::commands::mirror::keys(invocation).contains(&argument),
                 "the mirror calls {call} without passing {argument}, so the \
                  command receives nothing: {invocation}"
             );
