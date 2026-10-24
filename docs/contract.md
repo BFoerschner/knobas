@@ -2429,6 +2429,23 @@ Witnessed by `sync::tests`'
 `a_scoped_run_clamps_under_a_build_queued_mid_run_behind_an_unordered_page` and by
 `live_teamcity_seeded`'s `the_opening_probe_from_the_watermark_holds_its_build_and_every_newer_one`.
 
+### Amendments from the board listing read twice (2026-10-24, binding) — issue #2003
+
+Ruled by the Opus implementer (`docs/decisions/2026-10-unattended-rulings.md`, "#2003"). The
+change is in `crates/knobas-source-jira/**` and tests, none of which §10.8 freezes, so **no §10.8
+entry is owed**; no cursor version moves.
+
+**Jira's board listing is read twice on every board read.** `GET /rest/agile/1.0/board` pages by
+`startAt` over the boards in name order, ignoring case (measured on the seeded Jira 10.3;
+`orderBy=id` changes nothing), so a rename moves a row and the anchored walk above has no order
+to stand on. Every board read ends in `gone` for each view the previous cursor held that it did
+not read, so each listing (per project, or every board) is read twice and the union kept, the
+second listing's record first where both hold a board. Witnessed by `views::tests`'
+`a_board_deleted_while_the_listing_is_read_hides_no_other`,
+`a_board_renamed_while_the_listing_is_read_hides_no_other` and
+`a_board_renamed_between_the_two_listings_arrives_under_its_new_name`, and `live_jira_seeded`'s
+`the_board_listing_is_in_name_order_and_a_rename_moves_a_row`.
+
 ---
 
 ## 10. As built — the contract PR (2026-08-24)
