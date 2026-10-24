@@ -143,11 +143,7 @@ async fn a_trigger_and_a_re_run_name_the_build_they_queued() {
     ] {
         let label = format!("{op:?}");
         let receipt = source(&server).write(op).await.expect("queued");
-        assert_eq!(
-            receipt.remote_id.as_deref(),
-            Some("build:2214"),
-            "{label}"
-        );
+        assert_eq!(receipt.remote_id.as_deref(), Some("build:2214"), "{label}");
     }
 }
 

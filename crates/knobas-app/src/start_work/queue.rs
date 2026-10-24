@@ -120,7 +120,8 @@ impl<S: Borrow<SourcesState> + Send + Sync> Steps for Queue<S> {
         &self,
         write_id: i64,
     ) -> Result<crate::sources::write_queue::Named, IpcError> {
-        crate::sources::write_queue::entity_named(&self.state.borrow().pool, write_id, KIND_PR).await
+        crate::sources::write_queue::entity_named(&self.state.borrow().pool, write_id, KIND_PR)
+            .await
     }
 
     async fn refresh(&self, source: &str) {

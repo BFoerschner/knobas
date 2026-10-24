@@ -971,24 +971,24 @@ async fn link_step(
     }
     let (repo, head) = pull_request_of(pr_step)?;
 
-    if let Some(write_id) = pr_step.write_id {
-        if let Named::Made(mut named) = steps.pull_request_named(write_id).await? {
-            if named.is_none() {
-                steps.refresh(&repo.namespace).await;
-                if let Named::Made(again) = steps.pull_request_named(write_id).await? {
-                    named = again;
-                }
+    if let Some(write_id) = pr_step.write_id
+        && let Named::Made(mut named) = steps.pull_request_named(write_id).await?
+    {
+        if named.is_none() {
+            steps.refresh(&repo.namespace).await;
+            if let Named::Made(again) = steps.pull_request_named(write_id).await? {
+                named = again;
             }
-            let Some(pr) = named else {
-                return settle_failed(
-                    pool,
-                    step,
-                    "the pull request this flow opened has not reached the mirror yet",
-                )
-                .await;
-            };
-            return link_to(pool, steps, step, &pr).await;
         }
+        let Some(pr) = named else {
+            return settle_failed(
+                pool,
+                step,
+                "the pull request this flow opened has not reached the mirror yet",
+            )
+            .await;
+        };
+        return link_to(pool, steps, step, &pr).await;
     }
 
     let mut found = steps.pull_request(&repo, &head).await?;

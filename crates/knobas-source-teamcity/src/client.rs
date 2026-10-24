@@ -230,9 +230,17 @@ impl HttpRest {
     /// # Errors
     ///
     /// The [`SourceError`] the request maps to.
-    pub(crate) async fn queue_build(&self, build_type_id: &str) -> Result<Option<i64>, SourceError> {
-        self.queue_run(build_type_id, None, &[], crate::write::RunOptions::default())
-            .await
+    pub(crate) async fn queue_build(
+        &self,
+        build_type_id: &str,
+    ) -> Result<Option<i64>, SourceError> {
+        self.queue_run(
+            build_type_id,
+            None,
+            &[],
+            crate::write::RunOptions::default(),
+        )
+        .await
     }
 
     /// `POST /app/rest/buildQueue` for a custom run (issue #669): the
