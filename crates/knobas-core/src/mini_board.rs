@@ -322,10 +322,17 @@ const CARDS: &str = concat!(
 /// The signals of the cards a board keeps (#815): [`crate::signals`]' reader
 /// over the kept ids (`$3`), one statement for the whole board, the same
 /// reader `has:` asks. `$1` the declarations, `$2` the configured
-/// usernames, lowercased.
+/// usernames as configured, folded here by the server's `lower()` as the
+/// reviewers they meet are and as `has:` folds them (#1975); Rust's
+/// `to_lowercase` differs from it on `İ`.
 const SIGNALS: &str = concat!(
     "select s.tid, s.kind, s.text, s.tone from ",
-    crate::ticket_signals!("$1", "$2", "(select unnest($3::text[]) as tid)", "null"),
+    crate::ticket_signals!(
+        "$1",
+        "array(select lower(u) from unnest($2::text[]) u)",
+        "(select unnest($3::text[]) as tid)",
+        "null"
+    ),
     " s order by s.tid, s.ord, s.text"
 );
 
@@ -770,7 +777,6 @@ pub async fn read_scoped(
     }
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
     let declared = declarations.as_param();
-    let me: Vec<String> = identity.iter().map(|name| name.to_lowercase()).collect();
     // Planned for its parameters every time (#753): reused, the statement
     // went to PostgreSQL's generic plan on its sixth execution and an All room
     // of 15,000 tickets took 6 s where its own plan takes 0.1 s.
@@ -790,7 +796,7 @@ pub async fn read_scoped(
         .fetch_all(pool)
         .await?;
     let kept: Vec<String> = rows.iter().map(|row| row.entity_id.clone()).collect();
-    let mut signals = signals_of(pool, &kept, &declared, &me).await?;
+    let mut signals = signals_of(pool, &kept, &declared, identity).await?;
 
     // Grouped in the order the rows arrived, so the newest-first ordering the
     // statement asks for survives into each column; the columns themselves are

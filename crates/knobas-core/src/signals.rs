@@ -144,7 +144,8 @@ pub struct Signal {
 /// `$tickets` is a relation with one column, `tid`, of entity ids; an id
 /// that is not a ticket carries no signal. `$decl` is where the
 /// declarations are bound, as for [`crate::declared_string!`], and `$me` a
-/// `text[]` of the configured usernames, lowercased.
+/// `text[]` of the configured usernames, lowercased by the server's `lower()`
+/// (#1975: Rust's `to_lowercase` differs from it on `İ`).
 ///
 /// **Set-based, never once per ticket** (#815): the walk joins the tickets
 /// to the confirmed links once, so its cost is the links the tickets have,
@@ -473,7 +474,7 @@ macro_rules! open_prs {
 }
 
 /// Whether the pull request `i` declares a requested reviewer among `$me`
-/// (a `text[]`, lowercased), ignoring case: `review-for-me`'s test, in
+/// (a `text[]`, lowercased by the server), ignoring case: `review-for-me`'s test, in
 /// [`ticket_signals!`] and [`open_prs!`].
 #[doc(hidden)]
 #[macro_export]
