@@ -84,8 +84,8 @@ instead:
 - for `check.yml`: `just check`. Nothing then runs the gate on Linux;
   `docs/agents/working-model.md` (*Platform*) says what that leaves open.
 - for `testenv.yml`, after touching `testenv/`: `just check` covers its
-  `just shell` step. Its compose and port steps it does not, so run them from
-  `testenv/`: the three `docker compose ... config -q` lines in
+  `just shell` step. It does not cover the compose and port steps; run those
+  from `testenv/`: the three `docker compose ... config -q` commands in
   `.github/workflows/testenv.yml`, then `./check-ports.sh`.
 
 `gh workflow enable check.yml` and `gh workflow enable testenv.yml` bring them
