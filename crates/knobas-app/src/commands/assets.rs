@@ -1143,7 +1143,9 @@ mod tests {
     /// fields alone. Both spellings are on this surface at once -- the
     /// `assetId` argument and the `parent_id` field inside the row it answers
     /// with -- and getting either wrong is a call that arrives with the value
-    /// missing and no error anywhere.
+    /// missing and no error anywhere. Read off the call's keys, not its text:
+    /// a name on the value side, as in `changes: edits`, sends nothing
+    /// (#2008).
     #[test]
     fn the_mirror_sends_the_argument_names_tauri_expects() {
         for (call, argument) in [
@@ -1172,7 +1174,7 @@ mod tests {
         ] {
             let body = crate::commands::mirror::invocation(MIRROR, call);
             assert!(
-                body.contains(argument),
+                crate::commands::mirror::keys(body).contains(&argument),
                 "{call} does not send {argument}: {body}"
             );
         }

@@ -116,6 +116,70 @@ pub(crate) mod mirror {
             .unwrap_or_else(|| panic!("{name} is not invoked from the mirror"))
     }
 
+    /// The object keys an [`invocation`] sends, nested payload fields
+    /// included: every identifier after the call's `>(` whose previous
+    /// non-space character is `{` or `,` and whose next is `:`, `,` or `}`,
+    /// which is the `key: value` form and the shorthand both (#2008).
+    ///
+    /// Tauri reads the key, so a test that asks whether the call text
+    /// *contains* an argument name passes on `offset: when.offsetMinutes`,
+    /// which sends no `offsetMinutes`. The next-character rule keeps out a
+    /// generic's `B` in `<A, B>` and a value's `b` in `f(a, b)`.
+    pub(crate) fn keys(invocation: &str) -> Vec<&str> {
+        let args = invocation.split_once(">(").map_or(invocation, |(_, a)| a);
+        let is_ident = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+        let mut found = Vec::new();
+        let mut at = 0;
+        while let Some(start) = args[at..].find(is_ident).map(|i| at + i) {
+            let end = args[start..]
+                .find(|c: char| !is_ident(c))
+                .map_or(args.len(), |i| start + i);
+            let before = args[..start].trim_end().chars().next_back();
+            let after = args[end..].trim_start().chars().next();
+            if matches!(before, Some('{' | ','))
+                && matches!(after, Some(':' | ',' | '}'))
+            {
+                found.push(&args[start..end]);
+            }
+            at = end;
+        }
+        found
+    }
+
+    mod tests {
+        use super::keys;
+
+        /// The key side only: a name that appears as a value is not sent
+        /// (#2008). Tauri reads the key, so `offset: when.offsetMinutes` sends
+        /// no `offsetMinutes`, and `changes: edits` sends no `edits`.
+        #[test]
+        fn the_keys_of_a_call_are_its_key_side_names() {
+            let call = r#"invoke<Draft | null>("worklog_draft", {
+    entityId,
+    day: when.day,
+    offset: when.offsetMinutes,
+  }"#;
+            assert_eq!(keys(call), ["entityId", "day", "offset"]);
+            assert_eq!(
+                keys(r#"invoke<AssetRow>("edit_asset", { assetId, changes: edits }"#),
+                ["assetId", "changes"]
+            );
+        }
+
+        /// A nested payload's fields are keys too, and the generic, the
+        /// command name and a call inside a value are not.
+        #[test]
+        fn the_keys_of_a_call_include_nested_fields_and_nothing_else() {
+            let call = r#"invoke<Pair<A, B>>("start_timer", {
+    target: { kind: "entity", id },
+    note: label(a, b),
+    inRoom
+  }"#;
+            assert_eq!(keys(call), ["target", "kind", "id", "note", "inRoom"]);
+            assert!(keys(r#"invoke<void>("stop_timer""#).is_empty());
+        }
+    }
+
     /// Both directions: every registered command is invoked, every invoked
     /// command is registered.
     pub(crate) fn assert_mirrors(module: &str, mirror: &'static str, barrel: &str, min: usize) {

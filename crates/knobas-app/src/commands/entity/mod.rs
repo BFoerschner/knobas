@@ -125,14 +125,13 @@ mod tests {
             signature.contains("saved_view: Option<String>,"),
             "mini_board takes no `saved_view`: {signature}"
         );
-        let sent = MIRROR
-            .split_once("invoke<MiniBoard>(\"mini_board\", {")
-            .and_then(|(_, rest)| rest.split_once("});"))
-            .map(|(arguments, _)| arguments)
-            .expect("entity.ts invokes mini_board");
+        let sent = crate::commands::mirror::keys(crate::commands::mirror::invocation(
+            MIRROR,
+            "mini_board",
+        ));
         assert!(
-            sent.contains("savedView: "),
-            "entity.ts sends mini_board no `savedView`: {sent}"
+            sent.contains(&"savedView"),
+            "entity.ts sends mini_board no `savedView`: {sent:?}"
         );
     }
 
@@ -156,18 +155,17 @@ mod tests {
             !signature.contains("sources"),
             "mini_board still takes `sources`: {signature}"
         );
-        let sent = MIRROR
-            .split_once("invoke<MiniBoard>(\"mini_board\", {")
-            .and_then(|(_, rest)| rest.split_once("});"))
-            .map(|(arguments, _)| arguments)
-            .expect("entity.ts invokes mini_board");
+        let sent = crate::commands::mirror::keys(crate::commands::mirror::invocation(
+            MIRROR,
+            "mini_board",
+        ));
         assert!(
-            sent.contains("role: "),
-            "entity.ts sends mini_board no `role`: {sent}"
+            sent.contains(&"role"),
+            "entity.ts sends mini_board no `role`: {sent:?}"
         );
         assert!(
-            !sent.contains("sources"),
-            "entity.ts still sends mini_board `sources`: {sent}"
+            !sent.contains(&"sources"),
+            "entity.ts still sends mini_board `sources`: {sent:?}"
         );
     }
 }
