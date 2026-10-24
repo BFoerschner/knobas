@@ -34,6 +34,18 @@
   That gap belongs to every key a restore loads, and #1930 tracks it. A share export's
   `contexts` part always carries `entity` (`knobas_app::backup::share`).
 
+  **Amendment (#1930, 2026-10-24): the gap is closed.** After the load, `restore` checks every foreign
+  key of the `knobas` schema, read off the catalog. It deletes the context rows `0060`'s orphan
+  rule deletes (`knobas_db::backup::ORPHANS_A_RESTORE_DELETES`), so a pre-`0060` backup restores
+  without its orphan context, exactly as an upgrade in place leaves it. Any other broken key refuses
+  the restore with `BackupError::BrokenKey`, which names the table and the key. The refusal deletes
+  every row the load wrote and puts the bookkeeping rows back, as a failed load does (#1635). No
+  migration, no command and no IPC change: the error reaches the frontend as `internal`, like every
+  `BackupError` except `TargetNotEmpty`. Pinned by `crates/knobas-db/tests/backup.rs`:
+  `a_backup_from_before_zero_sixty_restores_without_its_orphan_context`,
+  `a_backup_holding_a_note_without_its_entity_is_refused` and
+  `a_share_export_holding_a_link_to_a_missing_entity_is_refused`.
+
   Pinned by `crates/knobas-db/tests/schema.rs`:
   `every_entity_id_compares_bytewise_and_a_title_by_the_database` (`UNKEYED_ENTITY_IDS` grows by
   the five unkeyed columns to 18; the foreign keys reach `knobas.context.id`),

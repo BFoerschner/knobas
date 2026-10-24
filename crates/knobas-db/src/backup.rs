@@ -159,6 +159,26 @@ pub enum BackupError {
     )]
     TargetNotMigrated,
 
+    /// The archive holds rows that break a foreign key the target declares
+    /// (#1930), so nothing of it was restored.
+    ///
+    /// The load runs with the keys held off (see [`restore`]), so this is
+    /// found after it, and the loaded rows are taken out again. A backup knobas
+    /// wrote does not do this: every key held in the database it came from,
+    /// and a share export carries the table each of its parts points at. What
+    /// does is a hand-edited archive, or one taken before a migration added
+    /// the key and did not settle its orphans.
+    #[error(
+        "the archive holds {rows} row(s) in {OWNED_SCHEMA}.{table} that break its foreign key \
+         {key}, so nothing was restored. A backup knobas wrote never does: was this archive \
+         edited by hand?"
+    )]
+    BrokenKey {
+        table: String,
+        key: String,
+        rows: i64,
+    },
+
     /// A restore whose load failed, and whose putting back of the
     /// [`BOOKKEEPING_TABLES`] failed after it (#1635).
     ///
@@ -463,8 +483,15 @@ fn is_description_word(word: &str) -> bool {
 /// `--disable-triggers`. A data-only restore loads tables in the archive's
 /// order, which is *not* a topological order for foreign keys -- `knobas.context`
 /// references `knobas.entity` and sorts before it -- so the constraints are held
-/// off for the load and enforced again after. This is the documented use of the
-/// flag and needs a superuser, which the embedded server's connection is.
+/// off for the load. This is the documented use of the flag and needs a
+/// superuser, which the embedded server's connection is.
+///
+/// Held off means *not checked*: PostgreSQL does not check the loaded rows
+/// against a key when its triggers come back on. So the restore checks every
+/// key of the schema itself once the load is in (#1930,
+/// [`ORPHANS_A_RESTORE_DELETES`] and [`BROKEN_KEYS`]). The rows a key's own
+/// migration deletes are deleted, and any other broken key refuses the restore
+/// with [`BackupError::BrokenKey`], which takes the loaded rows out again.
 ///
 /// # A failed load
 ///
@@ -472,12 +499,15 @@ fn is_description_word(word: &str) -> bool {
 /// clear and put back when `pg_restore` fails, and the rename shim's column is
 /// dropped either way. The load's own error is returned after that. Nothing
 /// else needs recovering: every other table was empty, and `pg_restore`'s
-/// single transaction leaves it so.
+/// single transaction leaves it so. A load refused for a broken key ends the
+/// same way: its transaction has committed by then, so the check empties
+/// every table it wrote before the bookkeeping rows are put back.
 ///
 /// # Errors
 ///
 /// [`BackupError::TargetNotMigrated`], [`BackupError::TargetNotEmpty`],
-/// [`BackupError::ToolMissing`], [`BackupError::Tool`]; [`BackupError::Sqlx`]
+/// [`BackupError::ToolMissing`], [`BackupError::Tool`],
+/// [`BackupError::BrokenKey`]; [`BackupError::Sqlx`]
 /// when a statement around the load fails; [`BackupError::NotPutBack`], naming
 /// the load's error too, when the load failed and putting the bookkeeping rows
 /// back failed after it.
@@ -535,6 +565,13 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
 
     let loaded = load(connector, archive).await;
     let mut conn = connector.connect().await?;
+    // The keys the load held off, checked before anything else reads the
+    // rows; a refusal takes the loaded rows out and falls through to the
+    // putting back below, exactly as a failed load does.
+    let loaded = match loaded {
+        Ok(()) => hold_to_keys(&mut conn).await,
+        failed => failed,
+    };
     // The rows first: a fold-up that failed after them would leave a column
     // the next restore drops anyway, while rows lost here have no way back.
     let loaded = match loaded {
@@ -563,6 +600,153 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
     }
     let _ = conn.close().await;
     loaded
+}
+
+/// The rows of a broken key a restore deletes rather than refuses (#1930):
+/// the key's name, and the statement that deletes them.
+///
+/// The rule is the migration's. A restore of an archive taken before a key
+/// existed ends where upgrading the database the archive came from would have
+/// ended: where the migration that added the key deleted the rows that broke
+/// it, the restore deletes them too; where it did not, upgrading would have
+/// failed on them, and the restore refuses ([`BackupError::BrokenKey`]).
+///
+/// One row, `0060`'s orphan rule: a context whose id has no entity row. It
+/// has no members and can get none, because membership is a link and both
+/// ends of a link are keyed to `knobas.entity`. Every other key in the schema
+/// either came with its table or, as `note_entity_fk` (`0006`) and
+/// `block_worklog_fk` (`0014`) did, was added with no orphan rule. A note is
+/// also the one content knobas cannot fetch again, which is reason enough not
+/// to drop one quietly.
+const ORPHANS_A_RESTORE_DELETES: &[(&str, &str)] = &[(
+    "context_entity_fk",
+    "delete from knobas.context c
+      where not exists (select 1 from knobas.entity e where e.id = c.id)",
+)];
+
+/// Every foreign key of the `knobas` schema, with the number of rows that
+/// break it.
+///
+/// Read off the catalog, as [`OCCUPANCY`] reads the tables, so a key a later
+/// migration adds is checked with no change here; and one static statement
+/// for the same reason, since each per-key probe is built by PostgreSQL's
+/// `format('%I')`. A row breaks a key the way PostgreSQL's own check (`MATCH
+/// SIMPLE`) has it: every referencing column set, and no referenced row
+/// equal on all of them.
+///
+/// Only keys *from* `knobas` tables. The load writes nothing else, and a key
+/// from a `sync` table into `knobas` (`sync.item` to `knobas.entity`) cannot
+/// break: its referencing rows were checked when they were written, and the
+/// load only adds to the table they point at.
+const BROKEN_KEYS: &str = r"
+select c.relname::text as table_name,
+       k.conname::text as key_name,
+       (xpath(
+          '/row/c/text()',
+          query_to_xml(
+            format('select count(*) as c from %I.%I r where %s and not exists (select 1 from %I.%I t where %s)',
+                   n.nspname, c.relname,
+                   (select string_agg(format('r.%I is not null', a.attname), ' and ')
+                      from unnest(k.conkey) as col(attnum)
+                      join pg_attribute a on a.attrelid = k.conrelid and a.attnum = col.attnum),
+                   tn.nspname, t.relname,
+                   (select string_agg(format('t.%I = r.%I', ta.attname, a.attname), ' and ')
+                      from unnest(k.conkey, k.confkey) as col(attnum, target_attnum)
+                      join pg_attribute a on a.attrelid = k.conrelid and a.attnum = col.attnum
+                      join pg_attribute ta on ta.attrelid = k.confrelid and ta.attnum = col.target_attnum)),
+            false, true, '')
+       ))[1]::text::bigint as rows
+  from pg_constraint k
+  join pg_class c on c.oid = k.conrelid
+  join pg_namespace n on n.oid = c.relnamespace
+  join pg_class t on t.oid = k.confrelid
+  join pg_namespace tn on tn.oid = t.relnamespace
+ where k.contype = 'f'
+   and n.nspname = $1
+ order by c.relname, k.conname
+";
+
+/// Check every foreign key the load held off (#1930).
+///
+/// The rows [`ORPHANS_A_RESTORE_DELETES`] names go first; then the first key
+/// still broken refuses the restore with [`BackupError::BrokenKey`]. Any
+/// refusal, a failed check included, takes every row the load wrote back out
+/// before it returns, so a restore that fails leaves the target as a failed
+/// load does: its bookkeeping rows are put back by the caller, and every
+/// other table is empty, as it was proved to be before the load.
+///
+/// When taking the rows out fails, its error is returned instead of the
+/// refusal, so the restore never reports "nothing was restored" while the
+/// archive's rows are still in (`a_refusal_whose_emptying_fails_says_so`).
+async fn hold_to_keys(conn: &mut sqlx::PgConnection) -> Result<(), BackupError> {
+    let checked = delete_orphans_then_check_keys(conn).await;
+    if checked.is_err() {
+        empty_owned_tables(conn).await?;
+    }
+    checked
+}
+
+/// The check half of [`hold_to_keys`], in one transaction: the orphan deletes
+/// are committed only when no key is left broken.
+async fn delete_orphans_then_check_keys(conn: &mut sqlx::PgConnection) -> Result<(), BackupError> {
+    let mut tx = conn.begin().await?;
+    for (key, delete) in ORPHANS_A_RESTORE_DELETES {
+        let deleted = sqlx::query(*delete)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        if deleted > 0 {
+            tracing::warn!(
+                key,
+                deleted,
+                "the restored archive held rows breaking a key; deleted, as its migration does"
+            );
+        }
+    }
+    let broken: Option<(String, String, i64)> = sqlx::query_as(BROKEN_KEYS)
+        .bind(OWNED_SCHEMA)
+        .fetch_all(&mut *tx)
+        .await?
+        .into_iter()
+        .find(|(_, _, rows): &(String, String, i64)| *rows > 0);
+    if let Some((table, key, rows)) = broken {
+        return Err(BackupError::BrokenKey { table, key, rows });
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Delete every row of every `knobas` table: the archive's rows, taken back
+/// out of a target that was empty before the load.
+///
+/// With triggers off, as the load wrote them (`session_replication_role`, the
+/// session-wide form of `--disable-triggers`, and as superuser for the same
+/// reason): the rows break a key, so deleting them in key order is not on
+/// offer, and nothing the load did not fire should fire on the way out. The
+/// bookkeeping tables are emptied too; the caller puts their rows back. Table
+/// names are quoted by PostgreSQL's `format('%I.%I')`, not on this side.
+async fn empty_owned_tables(conn: &mut sqlx::PgConnection) -> Result<(), sqlx::Error> {
+    let mut tx = conn.begin().await?;
+    sqlx::raw_sql("set local session_replication_role = replica")
+        .execute(&mut *tx)
+        .await?;
+    let tables: Vec<String> = sqlx::query_scalar(
+        "select format('%I.%I', n.nspname, c.relname)
+           from pg_class c
+           join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = $1 and c.relkind = 'r'",
+    )
+    .bind(OWNED_SCHEMA)
+    .fetch_all(&mut *tx)
+    .await?;
+    for table in tables {
+        // Quoted by `format('%I.%I')` above, and read off the catalog: nothing
+        // from a caller or an archive reaches this string.
+        sqlx::query(sqlx::AssertSqlSafe(format!("delete from {table}")))
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await
 }
 
 /// Every row of each of the [`BOOKKEEPING_TABLES`], as the text of a `jsonb`
