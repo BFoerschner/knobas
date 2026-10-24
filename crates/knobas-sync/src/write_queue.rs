@@ -1309,8 +1309,8 @@ async fn waited(
 /// why `create_ticket`, whose row carries a title and no address, needs the
 /// line. The tree already draws that same line, in the read direction:
 /// `knobas_app::sources::write_queue::ticket_filed`, the read-back for a
-/// created ticket whose source named no key, says why it is only the fallback
-/// -- it matches free prose (#1754 reads the key the receipt names first).
+/// created ticket whose source named no key, says what its title match cannot
+/// do -- it matches free prose (#1754 reads the key the receipt names first).
 ///
 /// **The property is the address, not "the server named nothing".** Gitea
 /// answers `WriteReceipt::none()` for both ops on the *success* path too, so a

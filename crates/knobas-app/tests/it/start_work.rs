@@ -1180,7 +1180,8 @@ async fn a_merged_pull_request_on_a_re_used_head_is_not_the_open_one() {
 /// pull request from the flow's head into a release branch is not the one the
 /// flow would open into `main`: Gitea opens both side by side, and refuses a
 /// second one only for the same head *and* base. So the read does not find it,
-/// and the create step goes on to open the flow's own.
+/// nor a record whose base it cannot read, and the create step goes on to open
+/// the flow's own.
 #[tokio::test]
 async fn an_open_pull_request_from_the_head_into_another_base_is_not_found() {
     let pool = corpus("sw_head_other_base").await;
@@ -1194,6 +1195,15 @@ async fn an_open_pull_request_from_the_head_into_another_base_is_not_found() {
             "merged": false, "state": "open",
             "head": {"ref": head}, "base": {"ref": "release/2026.08"}
         }),
+    )
+    .await;
+    // ADR-0007's miss: a record that carries no base is not one into `main`.
+    item(
+        &pool,
+        PR_REOPENED,
+        "pr",
+        "payout dashboard latency, part two",
+        serde_json::json!({"merged": false, "state": "open", "head": {"ref": head}}),
     )
     .await;
 

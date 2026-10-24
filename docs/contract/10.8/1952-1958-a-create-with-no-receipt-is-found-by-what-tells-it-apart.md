@@ -1,7 +1,7 @@
 - **IPC command semantics, issues #1952 and #1958 (2026-10-24): a create that named nothing in its
   receipt is found by what tells it apart, a pull request by its head and base, a ticket by one
   title rule.** Ruled by the implementer on Opus (`docs/decisions/2026-10-unattended-rulings.md`,
-  `## #1952 / #1958`). No signature change on a command, no new type, no migration, no event, no
+  `## #1952, #1958`). No signature change on a command, no new type, no migration, no event, no
   new module in `commands/` or `ipc/`; the generated mirror does not change. It narrows two reads
   #1754 and #1949 left as the fallback for a receiptless create.
 
@@ -18,7 +18,7 @@
        sync) for a sent `CreatePullRequest` whose receipt named nothing reads by the op's `head`
        and `base`. #1949's item 2 ("found by the open pull request on its head") now reads "from
        its head into its base".
-     - A mirrored record whose base is absent or not a string matches nothing: the create step
+     - A mirrored record whose base is absent or another string matches nothing: the create step
        sends and the forge refuses a duplicate in its own words, and the link step settles
        failed. The receipt-named path (`entity_named`, #1949) is unchanged.
   2. **One title rule for a receiptless ticket create** (#1958). **`action_item_ticket`** (and

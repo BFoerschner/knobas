@@ -189,16 +189,17 @@ pub enum Linked {
 /// The direction pinned the other way costs the bug it was reported as.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PullRequestOnHead {
-    /// A pull request from this head that knobas read as open, and that
-    /// nothing it read calls merged.
+    /// A pull request from this head into this base that knobas read as
+    /// open, and that nothing it read calls merged.
     Open(String),
-    /// The mirror holds pull requests from this head and knobas can tell that
-    /// none of them is open. Names one, and says whether it was merged, so the
-    /// step that refuses can say which word.
+    /// The mirror holds pull requests from this head into this base and
+    /// knobas can tell that none of them is open. Names one, and says whether
+    /// it was merged, so the step that refuses can say which word.
     Closed { id: String, merged: bool },
-    /// Nothing from this head has reached the mirror, or nothing whose state
-    /// knobas could read -- one answer on purpose: in both, knobas has no open
-    /// pull request it can name, and it may not act as though it has.
+    /// Nothing from this head into this base has reached the mirror, or
+    /// nothing whose state knobas could read -- one answer on purpose: in
+    /// both, knobas has no open pull request it can name, and it may not act
+    /// as though it has.
     Unknown,
 }
 

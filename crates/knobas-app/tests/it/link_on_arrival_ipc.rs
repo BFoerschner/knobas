@@ -3,7 +3,7 @@
 //! queued write makes has no id until the source mints one and a sync brings
 //! it in (#707), so the link is drawn after the write has been sent and the
 //! source re-read, against what the mirror then holds: the branch by its name
-//! in the repository, the open pull request on the head.
+//! in the repository, the open pull request from the head into the base.
 //!
 //! Over a real mirror, with the queue rows written the way the flush writes
 //! them (`knobas_core::write_queue`); what Gitea does with the write is
@@ -232,8 +232,8 @@ async fn the_proposal_the_branch_name_raised_is_confirmed_not_doubled() {
     assert_eq!(reached(&pool).await, vec![BRANCH.to_owned()]);
 }
 
-/// A sent `CreatePullRequest` links the pull request open on its head; one
-/// on the head that is already merged is not this write's, and is not
+/// A sent `CreatePullRequest` links the pull request open from its head into
+/// its base; one there that is already merged is not this write's, and is not
 /// linked.
 #[tokio::test]
 async fn a_new_pull_request_is_linked_once_it_is_mirrored_open_on_its_head() {

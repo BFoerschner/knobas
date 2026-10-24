@@ -191,12 +191,12 @@ pub async fn branch_named(
 /// pins.
 ///
 /// **A source-shaped read outside an adapter, and it is here because there is
-/// no other way.** A pull request open on the head is what the create step
-/// looks for before it writes, and what a create whose receipt named nothing
+/// no other way.** A pull request open from the head into the base is what the
+/// create step looks for before it writes, and what a create whose receipt named nothing
 /// is found by afterwards (a receipt that names one is resolved by its id,
 /// `sources::write_queue::entity_named`, #1949); §4.1 guarantees `title`,
 /// `body_text`, `updated_at` and a verbatim `payload`, and neither the head
-/// branch nor the state lives anywhere but the last of those. That is the same
+/// and base branches nor the state live anywhere but the last of those. That is the same
 /// seam #43 recorded for a ticket's status, met here in the read direction. It
 /// is confined to this one statement deliberately: a source that spells its
 /// pull requests differently needs one more `coalesce` here and nothing else

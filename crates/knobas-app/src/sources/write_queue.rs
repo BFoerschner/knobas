@@ -417,6 +417,10 @@ const CLOCK_SLACK: &str = "5 minutes";
 /// write was queued is somebody else's -- a title the reader made generic,
 /// filed before -- never this one.
 ///
+/// **What the title cannot do.** It matches free prose: two creates of one
+/// title queued within the window, or somebody filing the same summary by hand
+/// in it, can answer the other's ticket. That is why it is only the fallback.
+///
 /// **The one title rule** (#1958). A run's *Create ticket* is resolved here by
 /// [`link_on_arrival`], and an action item's by
 /// `commands::entity::action_item_ticket_inner`, and since #1951 both resolve
