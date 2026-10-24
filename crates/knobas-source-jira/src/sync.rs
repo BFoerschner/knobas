@@ -1729,6 +1729,9 @@ mod tests {
         issues: Mutex<Vec<serde_json::Value>>,
         between: Mutex<HashMap<u32, Upstream>>,
         served: Mutex<u32>,
+        /// The most rows one answer holds, whatever `maxResults` asked:
+        /// Jira's own `jira.search.views.default.max`.
+        clamp: u32,
         rest: FakeApi,
     }
 
@@ -1741,8 +1744,14 @@ mod tests {
                 issues: Mutex::new(issues),
                 between: Mutex::new(between.into_iter().collect()),
                 served: Mutex::new(0),
+                clamp: u32::MAX,
                 rest: FakeApi::default(),
             }
+        }
+
+        /// This server, answering at most `clamp` rows a page.
+        fn clamped(self, clamp: u32) -> Self {
+            Self { clamp, ..self }
         }
     }
 
@@ -1869,11 +1878,11 @@ mod tests {
                     let window: Vec<serde_json::Value> = matching
                         .iter()
                         .skip(start_at as usize)
-                        .take(max_results as usize)
+                        .take(max_results.min(self.clamp) as usize)
                         .cloned()
                         .collect();
                     serde_json::json!({
-                        "startAt": start_at, "maxResults": max_results,
+                        "startAt": start_at, "maxResults": max_results.min(self.clamp),
                         "total": matching.len(), "issues": window
                     })
                 }
@@ -2023,6 +2032,43 @@ mod tests {
         );
         let (keys, _) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
         assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5"]);
+    }
+
+    /// **A page asked from far back can stop short of the walk** and still
+    /// end nothing (merge review of #2006). Twelve issues, two a page, on a
+    /// server that clamps every answer at three rows (Jira's
+    /// `jira.search.views.default.max`). Eight are read when PAY-1 to PAY-4
+    /// are deleted; the walk steps back to offset 0, and the three rows there
+    /// (PAY-5 to PAY-7) are all read and end short of where it stood. That is
+    /// the clamp, not the listing's end: the walk goes on from PAY-7, and
+    /// PAY-9 to PAY-12 arrive.
+    #[tokio::test]
+    async fn a_step_back_answered_short_of_the_walk_ends_nothing() {
+        let twelve = (1..=12)
+            .map(|n| {
+                filed(
+                    &format!("PAY-{n}"),
+                    &format!("2026-08-{n:02}T09:00:00.000+0000"),
+                    &format!("2026-08-22T10:{n:02}:00.000+0000"),
+                )
+            })
+            .collect();
+        let api =
+            LiveIndex::new(twelve, [(4, delete(&["PAY-1", "PAY-2", "PAY-3", "PAY-4"]))]).clamped(3);
+        let (keys, _) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        let want: Vec<String> = (1..=12).map(|n| format!("PAY-{n}")).collect();
+        assert_eq!(keys, want);
+    }
+
+    /// The listing emptied under the walk: four issues read, all five
+    /// deleted. The walk steps back to offset 0, finds nothing there, and
+    /// ends `Ok` with what it read.
+    #[tokio::test]
+    async fn a_listing_emptied_under_the_walk_ends_it() {
+        let all = &["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5"];
+        let api = LiveIndex::new(five_filed(), [(2, delete(all))]);
+        let (keys, _) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4"]);
     }
 
     /// **A deletion and a filing between two pages hide nothing** (#1979).

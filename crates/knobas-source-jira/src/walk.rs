@@ -25,7 +25,9 @@
 //! one the walk has not read, rows have left behind the cursor; the walk asks
 //! again from twice as far back (the start of the listing at worst, where
 //! there is nothing before the first row) and goes on from there. Rows it
-//! meets twice are handed out once. So a deletion under the walk costs a
+//! meets twice are handed out once. An answer from further back that holds
+//! only rows already read stopped at its limit or the server's clamp, not at
+//! the listing's end, so the walk goes on from its last row. So a deletion under the walk costs a
 //! request or two and never fails the run, which is the false failure ruling
 //! A5's shrinking-`total` check paid (A5 as amended by #1979).
 //!
@@ -116,10 +118,21 @@ impl<'a> IssueWalk<'a> {
             page.issues
                 .retain(|issue| self.read.insert(identity(issue).to_owned()));
             if page.issues.is_empty() && reached <= self.at {
-                // Nothing past where the walk stood: the listing ended there,
-                // whatever its `total` claims.
-                self.ended = true;
-                return Ok(Walked::End);
+                if back <= 1 || reached == start {
+                    // Asked from the one row that anchors it, or from the
+                    // start of an empty listing, and nothing past where the
+                    // walk stood: the listing ended there, whatever its
+                    // `total` claims.
+                    self.ended = true;
+                    return Ok(Walked::End);
+                }
+                // Asked from further back, and every row the answer held was
+                // read: it stopped short of where the walk stood, at the
+                // limit or at the server's own clamp, not at the listing's
+                // end. Go on from its last row, which the walk has read.
+                self.at = reached;
+                back = 1;
+                continue;
             }
             self.at = reached;
             self.ended = self.at >= page.total;
