@@ -904,18 +904,21 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
     //    the reader chose, at the paths Gitea's own record carries them. The
     //    seam tests write that record by hand; this is the one place the read
     //    meets the record Gitea sends. Into `main` it is not found, which is
-    //    the pull request a colleague's from the same head would be.
+    //    the pull request a colleague's from the same head would be. Asked
+    //    through the `Steps` the run used, the read the create step and the
+    //    link step's fallback make: the seam tests' fake filters by base
+    //    itself, so this is also the one witness that `Queue` hands the base
+    //    on to the statement.
     let pr = format!("{repo}#{number}");
-    let declarations = declared_paths(&state).await;
     assert_eq!(
-        start_work::queue::pull_request_on_head(&state.pool, &declarations, &repo, &branch, &base)
+        start_work::Steps::pull_request(&steps, &repo, &branch, &base)
             .await
             .expect("the read answers"),
         start_work::PullRequestOnHead::Open(pr),
         "the pull request the flow opened is not found by its head and base"
     );
     assert_eq!(
-        start_work::queue::pull_request_on_head(&state.pool, &declarations, &repo, &branch, "main")
+        start_work::Steps::pull_request(&steps, &repo, &branch, "main")
             .await
             .expect("the read answers"),
         start_work::PullRequestOnHead::Unknown,

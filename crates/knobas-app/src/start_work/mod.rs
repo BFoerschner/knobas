@@ -1026,7 +1026,7 @@ async fn link_step(
                 pool,
                 step,
                 &format!(
-                    "no pull request from {head} is open -- {id} is {word}, and linking to it \
+                    "no pull request from {head} into {base} is open -- {id} is {word}, and linking to it \
                      would claim work this flow did not do"
                 ),
             )
@@ -1036,7 +1036,7 @@ async fn link_step(
             return settle_failed(
                 pool,
                 step,
-                &format!("no open pull request from {head} has reached the mirror yet"),
+                &format!("no open pull request from {head} into {base} has reached the mirror yet"),
             )
             .await;
         }
