@@ -333,17 +333,35 @@ async fn a_rejected_credential_is_unauthorized_from_both_entry_points() {
     assert_only_the_field_probe(&jira);
 }
 
+/// How long mockd holds a hung request: an hour, so it never answers inside
+/// a test. A hang that ended two seconds in raced the one-second request
+/// timeout on the wall clock (#1935); held for good, only the client's own
+/// timer can end the wait. mockd's hang is a sleep on the test's runtime,
+/// dropped with it, so the hour costs nothing.
+const HANG_FOR_GOOD_MS: u64 = 3_600_000;
+
+/// A hang guard and nothing more: a request timeout the source honours ends
+/// these calls in under four seconds (three one-second tries and their
+/// backoff), and the 30-second production default would run past it.
+async fn within_the_guard<T>(call: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(std::time::Duration::from_secs(20), call)
+        .await
+        .expect("the configured request timeout ends the call")
+}
+
 /// Exit criterion: timeout ⇒ `Unreachable`. A one-second request timeout, so
 /// the suite does not wait out the 30-second production default.
 #[tokio::test]
 async fn a_timeout_is_unreachable() {
     let jira = spawn_mock_jira().await;
-    jira.set_fault(MockFault::Timeout { hang_ms: 2_000 });
+    jira.set_fault(MockFault::Timeout {
+        hang_ms: HANG_FOR_GOOD_MS,
+    });
     let source = source(
         &jira.base_url(),
         serde_json::json!({ "request_timeout_secs": 1 }),
     );
-    let connected = source.test_connection().await;
+    let connected = within_the_guard(source.test_connection()).await;
     assert!(
         matches!(connected, Err(SourceError::Unreachable(_))),
         "{connected:?}"
@@ -667,17 +685,18 @@ async fn an_undeclared_op_never_reaches_the_server() {
 #[tokio::test]
 async fn a_write_to_a_jira_that_hangs_is_unconfirmed_rather_than_refused() {
     let jira = spawn_mock_jira().await;
-    jira.set_fault(MockFault::Timeout { hang_ms: 2_000 });
+    jira.set_fault(MockFault::Timeout {
+        hang_ms: HANG_FOR_GOOD_MS,
+    });
     let source = source(
         &jira.base_url(),
         serde_json::json!({ "request_timeout_secs": 1 }),
     );
-    let failed = source
-        .write(WriteOp::Comment {
-            entity: "jira:PAY-231".to_owned(),
-            body: "into the void".to_owned(),
-        })
-        .await;
+    let failed = within_the_guard(source.write(WriteOp::Comment {
+        entity: "jira:PAY-231".to_owned(),
+        body: "into the void".to_owned(),
+    }))
+    .await;
     assert!(
         matches!(failed, Err(SourceError::Unconfirmed { status: None, .. })),
         "{failed:?}"
