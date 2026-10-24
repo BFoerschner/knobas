@@ -27,6 +27,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use knobas_app::IpcErrorCode;
+use knobas_app::sources::write_queue::Named;
 use knobas_app::start_work::{self, Landing, Linked, PullRequestOnHead, Steps, queue};
 use knobas_core::entity::EntityRef;
 use knobas_core::start_work::{FlowStep, Step, StepOutcome};
@@ -95,7 +96,12 @@ struct Fake {
     /// The pull requests the mirror holds.
     pulls: Mutex<Vec<MirroredPull>>,
     /// What a refresh puts into the mirror, if anything.
-    on_refresh: Mutex<Option<MirroredPull>>,
+    on_refresh: Mutex<Vec<MirroredPull>>,
+    /// The pull request a sent `create_pull_request`'s receipt names, if the
+    /// source named one (#1949).
+    names: Option<String>,
+    /// Per write id, what its receipt named.
+    receipts: Mutex<std::collections::HashMap<i64, String>>,
     log: Mutex<Recorded>,
     next_write_id: Mutex<i64>,
     /// When set, every dispatch waits for a permit: a send held open (#779).
@@ -115,7 +121,9 @@ impl Fake {
             landings: Mutex::new(std::collections::HashMap::new()),
             branches: Mutex::new(Vec::new()),
             pulls: Mutex::new(Vec::new()),
-            on_refresh: Mutex::new(None),
+            on_refresh: Mutex::new(Vec::new()),
+            names: None,
+            receipts: Mutex::new(std::collections::HashMap::new()),
             log: Mutex::new(Recorded::default()),
             next_write_id: Mutex::new(1),
             gate: None,
@@ -145,11 +153,21 @@ impl Fake {
     /// shape, since `Source::write` answers nothing and the number is learned
     /// by reading back.
     fn revealing_on_refresh(self, head: &str) -> Self {
-        *self.on_refresh.lock().unwrap() = Some((
-            REPO.to_owned(),
-            head.to_owned(),
-            on_head(PR, Some(false), Some("open")),
-        ));
+        self.revealing_on_refresh_too(head, on_head(PR, Some(false), Some("open")))
+    }
+
+    /// A refresh also brings this pull request into the mirror.
+    fn revealing_on_refresh_too(self, head: &str, row: queue::OnHead) -> Self {
+        self.on_refresh
+            .lock()
+            .unwrap()
+            .push((REPO.to_owned(), head.to_owned(), row));
+        self
+    }
+
+    /// A sent `create_pull_request` answers a receipt naming `pr` (#1949).
+    fn naming(mut self, pr: &str) -> Self {
+        self.names = Some(pr.to_owned());
         self
     }
 
@@ -228,6 +246,11 @@ impl Steps for Fake {
                 let id = *next;
                 *next += 1;
                 self.landings.lock().unwrap().insert(id, landing.clone());
+                if let (Landing::Sent, "create_pull_request", Some(named)) =
+                    (&landing, op.as_str(), &self.names)
+                {
+                    self.receipts.lock().unwrap().insert(id, named.clone());
+                }
                 Ok((id, landing))
             }
         }
@@ -299,11 +322,24 @@ impl Steps for Fake {
         Ok(queue::pick_open(&rows))
     }
 
+    async fn pull_request_named(&self, write_id: i64) -> Result<Named, knobas_app::IpcError> {
+        // The real read's rule: the named one, once the mirror holds it.
+        let Some(named) = self.receipts.lock().unwrap().get(&write_id).cloned() else {
+            return Ok(Named::Nothing);
+        };
+        let held = self
+            .pulls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, _, row)| row.entity_id == named);
+        Ok(Named::Made(held.then_some(named)))
+    }
+
     async fn refresh(&self, _source: &str) {
         self.log.lock().unwrap().refreshed += 1;
-        if let Some(revealed) = self.on_refresh.lock().unwrap().take() {
-            self.pulls.lock().unwrap().push(revealed);
-        }
+        let revealed: Vec<MirroredPull> = self.on_refresh.lock().unwrap().drain(..).collect();
+        self.pulls.lock().unwrap().extend(revealed);
     }
 }
 
@@ -777,6 +813,61 @@ async fn a_whole_flow_creates_a_branch_a_pull_request_a_link_and_a_transition() 
             "the {step} step did not finish"
         );
     }
+}
+
+/// The link goes to the pull request the create's receipt named (#1949), not
+/// to another one open on the same head: a colleague's from that head into a
+/// release branch is open there too, and comes first in the mirror.
+#[tokio::test]
+async fn the_link_goes_to_the_pull_request_the_create_named_not_another_open_on_its_head() {
+    let pool = corpus("sw_named_pr").await;
+    let flow = planned(&pool).await;
+    let head = proposed_branch(&flow);
+    let fake = Fake::new()
+        .naming(PR)
+        .revealing_on_refresh_too(&head, on_head(PR_REOPENED, Some(false), Some("open")))
+        .revealing_on_refresh(&head);
+
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+
+    assert_eq!(
+        fake.ops(),
+        vec!["create_branch", "create_pull_request", "transition"]
+    );
+    assert_eq!(
+        fake.links(),
+        vec![(PR.to_owned(), TICKET.to_owned())],
+        "the ticket was linked to a pull request this flow did not open"
+    );
+    assert_eq!(
+        outcome(&flow, Step::LinkPullRequest),
+        StepOutcome::Succeeded
+    );
+}
+
+/// A named pull request the mirror has not seen after the one refresh fails
+/// the link step, retryable, and is never stood in for by another one open on
+/// its head (#1949).
+#[tokio::test]
+async fn a_named_pull_request_not_yet_mirrored_is_not_stood_in_for_by_another_on_its_head() {
+    let pool = corpus("sw_named_pr_unmirrored").await;
+    let flow = planned(&pool).await;
+    let head = proposed_branch(&flow);
+    let fake = Fake::new()
+        .naming(PR)
+        .revealing_on_refresh_too(&head, on_head(PR_REOPENED, Some(false), Some("open")));
+
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+
+    assert_eq!(outcome(&flow, Step::LinkPullRequest), StepOutcome::Failed);
+    assert!(fake.links().is_empty(), "linked to another pull request");
+    assert_eq!(fake.refreshes(), 1, "it asked for a sync before giving up");
+    let detail = step_of(&flow, Step::LinkPullRequest)
+        .detail
+        .clone()
+        .expect("the step has to carry why");
+    assert!(detail.contains("not reached the mirror"), "{detail}");
+    assert_eq!(outcome(&flow, Step::Transition), StepOutcome::Pending);
 }
 
 /// A pull request that never reaches the mirror leaves the link step failed and
