@@ -792,3 +792,67 @@ key_code() {
     done
     case $1 in *[!0-9]* | '') return 1 ;; *) echo "$1" ;; esac
 }
+
+# --- the window's size, before any driver or steps file (#2056) --------------
+
+# The narrowest window, in points, that the drivers and live-shot run in.
+# Tickets hides its preview at 1240 px and below (`@media (max-width: 1240px)`
+# in `app/src/lib/tf/css/tickets.css`, pinned by `desktop-witness-test.sh`),
+# and the capture driver opens its job from that preview. A window is as wide
+# as its web view on macOS, so points here are CSS pixels there.
+readonly WITNESS_MIN_WIDTH=1241
+
+# window_width_verdict <width> <height> <minimum width>
+#
+# `ok`, or the refusal naming the window's size and the minimum (status 1).
+window_width_verdict() {
+    case $1 in
+    '' | *[!0-9]*)
+        printf "could not read the window's size (got '%s')\n" "$1"
+        return 1
+        ;;
+    esac
+    if [ "$1" -ge "$3" ]; then
+        printf 'ok\n'
+        return 0
+    fi
+    printf '%s\n' "the window is $1x$2 points, narrower than the $3 the drivers need: below it Tickets hides its preview. Give it more room (an empty workspace, or a wider screen) and run again."
+    return 1
+}
+
+# witness_window_size <ax> <pid> [settle seconds, default 3]
+#
+# The one window-size step, run by the harness before its driver and by
+# live-shot before its steps file: a tiling window manager gives a new window
+# whatever share of the screen is left. Under AeroSpace (its CLI answers) the
+# window is fullscreened by its CG window id, which AeroSpace uses as its own,
+# whatever its width, so it also holds still; the fullscreen ends with the
+# window. Elsewhere a window narrower than WITNESS_MIN_WIDTH is widened through
+# the accessibility helper. Then the size is read again, for up to the settle
+# seconds while the window manager applies it, and printed; below the minimum
+# the last line is the refusal and the status is 1.
+witness_window_size() {
+    local ax=$1 pid=$2 settle=${3:-3} id width height
+    read -r id width height < <("$ax" window-id "$pid" 2>/dev/null) \
+        || { printf 'knobas has no window on screen to size\n'; return 1; }
+    printf 'window %s: %sx%s points as the window manager placed it\n' "$id" "$width" "$height"
+    if command -v aerospace >/dev/null && aerospace list-workspaces --focused >/dev/null 2>&1; then
+        aerospace fullscreen on --window-id "$id" --no-outer-gaps >/dev/null 2>&1 \
+            || { printf 'AeroSpace refused to fullscreen window %s\n' "$id"; return 1; }
+        printf 'AeroSpace: window %s fullscreen\n' "$id"
+    elif [ "$width" -lt "$WITNESS_MIN_WIDTH" ]; then
+        if "$ax" resize "$pid" "$WITNESS_MIN_WIDTH" "$height" >/dev/null 2>&1; then
+            printf 'widened window %s from %s to %s points\n' "$id" "$width" "$WITNESS_MIN_WIDTH"
+        else
+            printf 'could not widen window %s through accessibility\n' "$id"
+        fi
+    fi
+    local deadline=$((SECONDS + settle)) verdict
+    while :; do
+        read -r id width height < <("$ax" window-id "$pid" 2>/dev/null) || width=
+        verdict=$(window_width_verdict "$width" "$height" "$WITNESS_MIN_WIDTH") && break
+        [ "$SECONDS" -lt "$deadline" ] || { printf '%s\n' "$verdict"; return 1; }
+        sleep 0.2
+    done
+    printf 'window: %sx%s points (the drivers need %s wide)\n' "$width" "$height" "$WITNESS_MIN_WIDTH"
+}

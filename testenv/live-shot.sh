@@ -30,7 +30,9 @@
 # `press`, `focus` and `click-at` retry until they land, under the guard
 # KNOBAS_WITNESS_WAIT_S (60 s by default; at once when knobas has exited), as
 # `just shot`'s `click:` does; the steps start once the web view has drawn
-# something.
+# something and the window has the desktop witness's known size
+# (`witness_window_size`: fullscreen under AeroSpace, refused below
+# WITNESS_MIN_WIDTH points wide, #2056).
 # Every command first checks that the screen is not locked, and `type`, `key`
 # and `click-at` that knobas is frontmost (activating it once): keystrokes sent
 # to another app are a person's work typed over. A failing command writes
@@ -42,9 +44,6 @@
 #         lock for Gitea, the JVM lock for a JVM product), its seed, and put
 #         back after. Unset starts no product and takes no product lock.
 #       LIVE_SHOT_DRY_RUN=1  stop once the lock is held (its unit test reads it).
-#       LIVE_SHOT_AEROSPACE=1  fullscreen the window in AeroSpace, so a tiling
-#         window manager does not resize it between shots. Off by default;
-#         refused when `aerospace` is not on PATH.
 #       KNOBAS_WITNESS_WAIT_S=60  the guard on `press`, `focus` and
 #         `click-at`, whole seconds (testenv/desktop-witness-lib.sh).
 #
@@ -86,10 +85,6 @@ for tool in swiftc screencapture sips pgrep; do
     command -v "$tool" >/dev/null || die "$tool is required and is not on PATH"
 done
 product=${LIVE_SHOT_PRODUCT:-}
-aerospace=${LIVE_SHOT_AEROSPACE:-}
-case $aerospace in '' | 1) ;; *) die "LIVE_SHOT_AEROSPACE must be 1 or unset, got '$aerospace'" ;; esac
-[ -z "$aerospace" ] || command -v aerospace >/dev/null \
-    || die "LIVE_SHOT_AEROSPACE=1 but aerospace is not on PATH"
 # The guard on `press`, `focus` and `click-at` (#1961).
 wait_s=$(witness_guard) || exit 2
 mkdir -p "$out"
@@ -249,11 +244,11 @@ say "knobas is pid $app_pid; waiting for its window"
 "$ax" wait-window "$app_pid" 300 >/dev/null || die "knobas (pid $app_pid) showed no window in 5 minutes"
 "$ax" wait-content "$app_pid" 300 || die "knobas' window stayed blank for 5 minutes; see $out/demo.log"
 "$ax" activate "$app_pid" || die "knobas would not come forward"
-if [ -n "$aerospace" ]; then
-    read -r window _ < <("$ax" window-id "$app_pid") || die "AeroSpace: knobas has no window on screen"
-    aerospace fullscreen on --window-id "$window" --no-outer-gaps || die "AeroSpace refused to fullscreen window $window"
-    say "AeroSpace: window $window fullscreen"
-fi
+# The harness's window-size step (#2056): fullscreen under AeroSpace, so a
+# tiling window manager does not resize it between shots, and refused below
+# WITNESS_MIN_WIDTH.
+witness_window_size "$ax" "$app_pid" | sed 's/^/live-shot: /' \
+    || die "the window could not be given a size the steps run at (above)"
 settle 3
 
 say "running $steps"

@@ -1120,6 +1120,14 @@ if [ "$(uname -s)" = Darwin ] && command -v swiftc >/dev/null; then
     check "wait-content refuses a process whose window never draws" 1 "$answer"
     "$helper/ax" focus-visible $$ Anything second >/dev/null 2>&1 && answer=0 || answer=$?
     check "an n that is no number is a usage error" 2 "$answer"
+    # The window-size step's (#2056): no window to widen is a refusal, and a
+    # size that is no number is the usage block.
+    "$helper/ax" resize $$ 1241 800 >/dev/null 2>&1 && answer=0 || answer=$?
+    check "resize refuses a process with no window" 1 "$answer"
+    "$helper/ax" resize $$ wide 800 >/dev/null 2>&1 && answer=0 || answer=$?
+    check "a resize width that is no number is a usage error" 2 "$answer"
+    "$helper/ax" resize $$ 0 800 >/dev/null 2>&1 && answer=0 || answer=$?
+    check "a resize width of zero is a usage error" 2 "$answer"
 else
     printf 'desktop-witness-test: skipping the helper checks (needs macOS and swiftc)\n'
 fi
@@ -1145,14 +1153,12 @@ if [ "$(uname -s)" = Darwin ]; then
         local envs=()
         while [ "$1" != -- ]; do envs+=("$1"); shift; done
         shift
-        env TMPDIR="$shot_tmp/" LIVE_SHOT_DRY_RUN=1 LIVE_SHOT_PRODUCT= LIVE_SHOT_AEROSPACE= ${envs[@]+"${envs[@]}"} ./live-shot.sh "$@" 2>&1 && echo "status 0" || echo "status $?"
+        env TMPDIR="$shot_tmp/" LIVE_SHOT_DRY_RUN=1 LIVE_SHOT_PRODUCT= ${envs[@]+"${envs[@]}"} ./live-shot.sh "$@" 2>&1 && echo "status 0" || echo "status $?"
     }
     said=$(refusal -- "$shot_tmp/out")
     check_contains "live-shot: one argument is a usage refusal" "usage: just live-shot" "$said"
     said=$(refusal -- "$shot_tmp/out" "$shot_tmp/none.sh")
     check_contains "live-shot: a missing steps file is refused" "no steps file at" "$said"
-    said=$(refusal LIVE_SHOT_AEROSPACE=yes -- "$shot_tmp/out" "$shot_tmp/steps.sh")
-    check_contains "live-shot: LIVE_SHOT_AEROSPACE takes 1 only" "must be 1 or unset" "$said"
     said=$(refusal KNOBAS_WITNESS_WAIT_S=10s -- "$shot_tmp/out" "$shot_tmp/steps.sh")
     check_contains "live-shot: the step guard takes whole seconds only" \
         "KNOBAS_WITNESS_WAIT_S must be a whole number of seconds, got '10s'" "$said"
@@ -1173,6 +1179,103 @@ if [ "$(uname -s)" = Darwin ]; then
         "$([ -d "$shot_tmp/knobas-desktop-witness.lock" ] && echo yes || echo no)"
     rm -rf "$shot_tmp"
 fi
+
+# --- the window's size, before any driver or steps file (#2056) --------------
+#
+# A tiling window manager hands a new window whatever share of the screen is
+# left, and below Tickets' 1240 px breakpoint the preview the capture driver
+# opens its job from is never drawn. `witness_window_size` is the one step the
+# harness and live-shot run before their driver: fullscreen under AeroSpace,
+# widen by accessibility elsewhere, then refuse below the minimum, naming both.
+# Against a stub `ax` and a stub `aerospace` on a PATH that holds no real one.
+
+# The minimum is the breakpoint's, read from the stylesheet that hides the
+# preview, so moving the breakpoint without the minimum turns this red.
+breakpoint=$(awk '/@media \(max-width: [0-9]+px\)/ { match($0, /[0-9]+/); w = substr($0, RSTART, RLENGTH) }
+    /\.tf-tickets \.tf-preview \{ display: none; \}/ { print w; exit }' ../app/src/lib/tf/css/tickets.css)
+check "the minimum width is one past the breakpoint that hides Tickets' preview" \
+    "$((breakpoint + 1))" "$WITNESS_MIN_WIDTH"
+
+check "window_width_verdict: a window at the minimum is ok" ok \
+    "$(window_width_verdict 1241 820 1241)"
+said=$(window_width_verdict 860 1084 1241 && echo "status 0" || echo "status $?")
+check_contains "window_width_verdict: a narrow window names its size" "860x1084" "$said"
+check_contains "window_width_verdict: and the minimum" "1241" "$said"
+check_contains "window_width_verdict: and refuses" "status 1" "$said"
+said=$(window_width_verdict '' '' 1241 && echo "status 0" || echo "status $?")
+check_contains "window_width_verdict: an unreadable size is refused" "status 1" "$said"
+
+size_tmp=$(mktemp -d "${TMPDIR:-/tmp}/knobas-witness-size.XXXXXX")
+mkdir "$size_tmp/bin" "$size_tmp/state"
+cat >"$size_tmp/ax" <<'STUB'
+#!/usr/bin/env bash
+state=$(dirname "$0")/state
+case $1 in
+window-id)
+    [ -e "$state/width" ] || exit 1
+    printf '4242\t%s\t%s\n' "$(cat "$state/width")" "$(cat "$state/height")" ;;
+resize)
+    echo "resize $*" >>"$state/calls"
+    [ -e "$state/resizable" ] || exit 1
+    echo "$3" >"$state/width"; echo "$4" >"$state/height" ;;
+*) exit 2 ;;
+esac
+STUB
+cat >"$size_tmp/bin/aerospace" <<'STUB'
+#!/usr/bin/env bash
+state=$(dirname "$0")/../state
+case $1 in
+list-workspaces) [ -e "$state/aerospace-up" ] ;;
+fullscreen)
+    echo "aerospace $*" >>"$state/calls"
+    [ -e "$state/fullscreens" ] || exit 1
+    echo 1728 >"$state/width"; echo 1084 >"$state/height" ;;
+*) exit 2 ;;
+esac
+STUB
+chmod +x "$size_tmp/ax" "$size_tmp/bin/aerospace"
+# sized <width|none> <height> <flags...>: what the step said, its status, and
+# the calls it made, against a window of that size.
+sized() {
+    rm -f "$size_tmp/state/"*
+    [ "$1" = none ] || { echo "$1" >"$size_tmp/state/width"; echo "$2" >"$size_tmp/state/height"; }
+    shift 2
+    local flag
+    for flag in "$@"; do : >"$size_tmp/state/$flag"; done
+    PATH="$size_tmp/bin:/usr/bin:/bin" witness_window_size "$size_tmp/ax" $$ 0 2>&1 && echo "status 0" || echo "status $?"
+    cat "$size_tmp/state/calls" 2>/dev/null || true
+}
+
+said=$(sized 860 1084 aerospace-up fullscreens)
+check_contains "AeroSpace: the tiled window is fullscreened by its window id" \
+    "aerospace fullscreen on --window-id 4242 --no-outer-gaps" "$said"
+check_contains "AeroSpace: the log shows the size the window manager gave" "window 4242: 860x1084 points as the window manager placed it" "$said"
+check_contains "AeroSpace: the log shows the size the driver runs at" "window: 1728x1084" "$said"
+check_contains "AeroSpace: and the step passes" "status 0" "$said"
+said=$(sized 1280 820 aerospace-up fullscreens)
+check_contains "AeroSpace: a window wide enough is fullscreened too, so it holds still" \
+    "aerospace fullscreen on" "$said"
+said=$(sized 860 1084 aerospace-up)
+check_contains "AeroSpace: a refused fullscreen is a refusal" "AeroSpace refused to fullscreen window 4242" "$said"
+check_contains "AeroSpace: which fails the step" "status 1" "$said"
+
+said=$(sized 1280 820 fullscreens)
+check_contains "no AeroSpace running: a wide window runs as it is" "window: 1280x820" "$said"
+check_contains "no AeroSpace running: and passes" "status 0" "$said"
+check "no AeroSpace running: nothing is fullscreened or resized" no \
+    "$(case $said in (*aerospace\ fullscreen* | *resize*) echo yes ;; (*) echo no ;; esac)"
+said=$(sized 900 700 resizable)
+check_contains "no AeroSpace: a narrow window is widened to the minimum" "resize $$ 1241 700" "$said"
+check_contains "no AeroSpace: and runs at that size" "window: 1241x700" "$said"
+check_contains "no AeroSpace: and passes" "status 0" "$said"
+said=$(sized 900 700)
+check_contains "a window that stays narrow is refused, naming its size" "900x700" "$said"
+check_contains "and the minimum" "narrower than the 1241" "$said"
+check_contains "and fails the step" "status 1" "$said"
+said=$(sized none 0)
+check_contains "a window the window server cannot find is refused" "no window on screen" "$said"
+check_contains "and fails the step" "status 1" "$said"
+rm -rf "$size_tmp"
 
 # --- verdict ----------------------------------------------------------------
 
