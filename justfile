@@ -540,8 +540,9 @@ shell:
 # and live-shot's refusals (#1483), and skip themselves where macOS and
 # `swiftc` are not both present; live-shot's own refusals run dry, stopping
 # once its lock is held, and only on macOS. `shot-test.sh`'s pointer-step cases
-# (#1483) start headless Chrome on a fixture page, about 20 s, and skip where
-# Chrome is not installed.
+# (#1483) start headless Chrome on a fixture page, and its start-up cases
+# (#1957) a Chrome 20 s late, a dead one and a mute one, about 35 s in all;
+# they skip where Chrome is not installed.
 #
 # The test-layout script's own tests (issue #573) ride here too: they are bash
 # against fixture trees, need nothing installed, and take under a second.
