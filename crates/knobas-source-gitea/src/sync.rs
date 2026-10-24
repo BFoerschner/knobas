@@ -1743,20 +1743,42 @@ async fn walk_commits(
         let mut on_leg: Vec<(String, Option<DateTime<Utc>>)> = Vec::new();
         // A reached cap ends a full sync's branch quietly (see the note on
         // the caps), and cuts an incremental walk short like the budget.
-        let mut walk = PageWalk::new(PageNumber, MAX_COMMIT_PAGES, |page| {
-            source.client.commits(
-                at.owner,
-                at.name,
-                branch,
-                (window.lower, window.upper),
-                page,
-            )
-        });
+        // `skip` is the pages a cap passed over above a catch-up's window.
+        let from = |skip: u32| {
+            PageWalk::new(PageNumber, MAX_COMMIT_PAGES, move |page| {
+                source.client.commits(
+                    at.owner,
+                    at.name,
+                    branch,
+                    (window.lower, window.upper),
+                    page + skip,
+                )
+            })
+        };
+        let mut skip = 0;
+        let mut walk = from(skip);
+        // The commits above the window met on this leg, and whether the last
+        // page read lay wholly above it and was new to the leg (#2034).
+        let mut above: HashSet<String> = HashSet::new();
+        let mut overhead = false;
         loop {
             let batch = match walk.next().await {
                 Ok(Walked::Page(batch)) => batch,
                 Ok(Walked::End) => break,
                 Ok(Walked::Capped) if window.lower.is_none() => break,
+                // A server that ignores `until=` (Forgejo 17, #2034) lists a
+                // catch-up's branch from its head, and what the catch-up
+                // delivered before its window can fill every page one walk
+                // may read. Stopping there would leave the same catch-up to
+                // every run after, so the walk reads on from the next page.
+                // Bounded by the branch's own history: a page that only
+                // repeats what this leg already read is not `overhead`.
+                Ok(Walked::Capped) if overhead => {
+                    skip += MAX_COMMIT_PAGES;
+                    walk = from(skip);
+                    overhead = false;
+                    continue;
+                }
                 Ok(Walked::Capped) => {
                     out.stopped = Some(Stop {
                         leg: index,
@@ -1788,6 +1810,7 @@ async fn walk_commits(
             // Records on this page that were not already-delivered history:
             // new ones, and the ones above a catch-up's window.
             let mut fresh = 0usize;
+            let mut new_above = 0usize;
             for raw in batch {
                 let commit: model::Commit = match serde_json::from_value(raw.clone()) {
                     Ok(commit) => commit,
@@ -1806,6 +1829,10 @@ async fn walk_commits(
                 {
                     // `until=` is server-side too, and the same reasoning
                     // as `since=` below applies: not trusted to have held.
+                    // Forgejo 17 ignores it altogether (#2034).
+                    if above.insert(commit.sha.clone()) {
+                        new_above += 1;
+                    }
                     fresh += 1;
                     continue;
                 }
@@ -1851,6 +1878,7 @@ async fn walk_commits(
             if fresh == 0 {
                 break;
             }
+            overhead = on_leg.is_empty() && new_above > 0;
         }
     }
     Ok(out)

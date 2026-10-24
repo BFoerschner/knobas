@@ -39,6 +39,13 @@ pub struct World {
     /// a Gitea with a lowered `MAX_RESPONSE_ITEMS` answers (issue #81). Keeps
     /// a three-page listing small enough to walk under the rate limiter.
     pub cap: Option<usize>,
+    /// Commits listed with no `since`/`until` filter whatever the request
+    /// asked, as Forgejo 17.0.0 lists them: its `GET .../commits` declares
+    /// neither parameter (#2034, measured against the pinned container).
+    pub ignores_bounds: bool,
+    /// Commits listed from the first page whatever `page` says, as no
+    /// measured server does: the runaway case the page caps guard against.
+    pub ignores_pages: bool,
     hooks: Vec<(String, u32, Change)>,
 }
 
@@ -203,8 +210,11 @@ impl wiremock::Respond for Moving {
             }
             ["repos", owner, name, "commits"] => {
                 let sha = query.get("sha").cloned().unwrap_or_default();
-                let since = query.get("since").cloned();
-                let until = query.get("until").cloned();
+                let (since, until) = if world.ignores_bounds {
+                    (None, None)
+                } else {
+                    (query.get("since").cloned(), query.get("until").cloned())
+                };
                 let commits: Vec<Value> = world
                     .commits
                     .get(&format!("{owner}/{name}@{sha}"))
@@ -217,7 +227,11 @@ impl wiremock::Respond for Moving {
                             && until.as_ref().is_none_or(|u| at <= *u)
                     })
                     .collect();
-                ok(page_of(commits, page, size))
+                ok(page_of(
+                    commits,
+                    if world.ignores_pages { 1 } else { page },
+                    size,
+                ))
             }
             // Teams, issues and anything else: nothing to list.
             _ => ok(json!([])),
@@ -1141,4 +1155,135 @@ async fn a_commit_catch_up_finishes_every_branch_and_then_reads_what_moved() {
     let (idle, same) = run(&*gitea, Some(&cursor)).await;
     assert!(idle.is_empty(), "{idle:?}");
     assert_eq!(same, cursor);
+}
+
+/// #2034: on a server that lists commits whatever `until=` says (Forgejo 17),
+/// a catch-up re-reads from the branch head everything it delivered before
+/// its window, and that can be more than one walk's page cap. Five to a page,
+/// so the 100 above the window fill the 20 pages a walk may read; the run
+/// must read on past them to the 50 below, not stop there and leave the same
+/// catch-up for every run after.
+#[tokio::test]
+async fn a_commit_catch_up_reads_past_a_page_cap_of_commits_the_server_did_not_bound() {
+    let key = format!("{PAYOUT}@main");
+    let world = World {
+        cap: Some(5),
+        ignores_bounds: true,
+        repos: vec![repository(1, "payout-service", &at(0))],
+        branches: BTreeMap::from([(
+            PAYOUT.to_owned(),
+            vec![support::branch("main", &sha(1), "start", &at(0))],
+        )]),
+        commits: BTreeMap::from([(key.clone(), vec![support::commit(&sha(1), "start", &at(0))])]),
+        ..World::default()
+    };
+    let (server, moving) = Moving::start(world).await;
+    let gitea = gitea(
+        &server,
+        json!({ "prs_per_repo": 0, "commits_per_repo": 100 }),
+    );
+    let (_, cursor) = run(&*gitea, None).await;
+
+    let pushed = |k: u64| (sha(1000 + k), at(60 * seconds(k)));
+    moving.with(|world| {
+        let history = world.commits.get_mut(&key).expect("main has history");
+        for k in 1..=150 {
+            let (id, when) = pushed(k);
+            history.insert(0, support::commit(&id, "work", &when));
+        }
+        let (head, when) = pushed(150);
+        world.branches.insert(
+            PAYOUT.to_owned(),
+            vec![support::branch("main", &head, "work", &when)],
+        );
+    });
+
+    let (first, cursor) = run(&*gitea, Some(&cursor)).await;
+    assert_eq!(
+        emitted(&first, "commit").len(),
+        100,
+        "the budget bounds the run"
+    );
+
+    let (second, cursor) = run(&*gitea, Some(&cursor)).await;
+    let mut rest = emitted(&second, "commit");
+    rest.sort();
+    let mut expected: Vec<String> = (1..=50)
+        .map(|k| format!("gitea:{PAYOUT}@{}", pushed(k).0))
+        .collect();
+    expected.sort();
+    assert_eq!(
+        rest, expected,
+        "the 50 below the window, past the 100 above it"
+    );
+    assert!(
+        position(&cursor, PAYOUT)
+            .get("commits_catching_up")
+            .is_none(),
+        "caught up"
+    );
+
+    let (idle, same) = run(&*gitea, Some(&cursor)).await;
+    assert!(idle.is_empty(), "{idle:?}");
+    assert_eq!(same, cursor);
+}
+
+/// #2034's reading past the cap ends at a server that answers the same page
+/// whatever `page` asks: what it re-lists is nothing new to the walk, so the
+/// run stops at the cap as before and leaves the catch-up for the next run.
+#[tokio::test]
+async fn a_commit_catch_up_over_a_server_that_repeats_its_first_page_stops_at_the_cap() {
+    let key = format!("{PAYOUT}@main");
+    let world = World {
+        cap: Some(5),
+        ignores_bounds: true,
+        ignores_pages: true,
+        repos: vec![repository(1, "payout-service", &at(0))],
+        branches: BTreeMap::from([(
+            PAYOUT.to_owned(),
+            vec![support::branch("main", &sha(1), "start", &at(0))],
+        )]),
+        commits: BTreeMap::from([(key.clone(), vec![support::commit(&sha(1), "start", &at(0))])]),
+        ..World::default()
+    };
+    let (server, moving) = Moving::start(world).await;
+    let gitea = gitea(&server, json!({ "prs_per_repo": 0, "commits_per_repo": 5 }));
+    let (_, cursor) = run(&*gitea, None).await;
+    moving.with(|world| {
+        let history = world.commits.get_mut(&key).expect("main has history");
+        for k in 1..=150 {
+            history.insert(
+                0,
+                support::commit(&sha(1000 + k), "work", &at(60 * seconds(k))),
+            );
+        }
+        world.branches.insert(
+            PAYOUT.to_owned(),
+            vec![support::branch(
+                "main",
+                &sha(1150),
+                "work",
+                &at(60 * seconds(150)),
+            )],
+        );
+    });
+    let (first, cursor) = run(&*gitea, Some(&cursor)).await;
+    assert_eq!(
+        emitted(&first, "commit").len(),
+        5,
+        "the budget bounds the run"
+    );
+
+    let (second, after) = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run(&*gitea, Some(&cursor)),
+    )
+    .await
+    .expect("the walk ends at the cap");
+    assert!(emitted(&second, "commit").is_empty(), "{second:?}");
+    assert_eq!(
+        position(&after, PAYOUT)["commits_catching_up"],
+        position(&cursor, PAYOUT)["commits_catching_up"],
+        "the catch-up waits for a server that pages"
+    );
 }
