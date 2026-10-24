@@ -15757,3 +15757,59 @@ Measured on the seeded Jira Data Center 10.3 (`just jira-live`'s container): wit
 - **Reserved for Björn, ruled by the merge-manager on Opus: the implementer's rulings on `0060`.** *Ruling:* confirmed, all of them: the number, the transaction, the sixth column, deleting orphans, adding no index, and `on delete cascade`. *Reasoning:* `0060` is free. `origin/main` stops at `0059`, and the one other open PR, #1928, adds no migration. No foreign key or trigger points at `knobas.context`, so deleting an orphan cascades no further. The `ctx:` ids in `timer` and `block` stay as they are, which `0016` allows. The only production writer is `knobas_core::context::insert`, and it writes both rows in one transaction. *Cost:* I timed the migration on PostgreSQL 18.6 against a synthetic profile: 25,000 contexts (5,000 of them orphans), 500,000 blocks, 200,000 queued writes and 20,000 run presets. It took about 110 ms in total. `block` and `write_queue` kept their filenodes, so no table was rewritten; `context_pkey` was rebuilt. *Reversing:* the same as the implementer's rulings.
 - **A backup taken before `0060` that holds an orphan context.** *Fork:* make `restore` check the keys in this PR, or record the gap and file it. *Ruling:* record it in the §10.8 entry and file #1930 (`backlog`). *Reasoning:* reproduced. `pg_restore --data-only --disable-triggers` loads an orphan context past `context_entity_fk`, and nothing checks it afterwards. That holds for every foreign key a restore loads, so this is not `0060`'s problem. `restore` lies outside a migration ticket's scope. An orphan that comes back this way is exactly as harmless as it was before `0060`. *Reversing:* #1930 decides.
 - **The five seeds.** *Ruling:* none of them is weaker. `the_context_kind_vocabulary_is_closed` also gives the `bad` kind an entity row, so its refusal still comes from the kind check and not from the new key. The share-export round trip now also asserts that the context's entity row comes back.
+
+## #1930: a restore checks the foreign keys its load held off (implementer, Opus, 2026-10-24)
+
+- **Reserved for Björn, ruled by implementer on Opus: check the keys, or only correct the doc
+  comment** (Björn's 2026-10-22 waiver). *Fork:* the ticket's option 1 or option 2. *Ruling:*
+  option 1. *Reasoning:* reproduced on the current tree: a whole backup holding a note with no
+  entity row restored `Ok(())`, and the restored database then broke `note_entity_fk`. Option 2
+  writes the gap down and keeps it. *Reversing:* delete `hold_to_keys`'s call in `restore`.
+- **Reserved for Björn, ruled by implementer on Opus: refuse or delete, per key.** *Ruling:* one rule,
+  the migration's. A restore ends where an upgrade in place of the archive's database would have
+  ended. Where the migration that added a key deleted the rows breaking it, the restore deletes
+  them too. Today that is one key, `context_entity_fk` (`0060`), in `ORPHANS_A_RESTORE_DELETES`.
+  Every other broken key refuses with `BackupError::BrokenKey`, which names the table and the
+  key. *Reasoning:* every other key in `knobas` came with its table, or was added with no orphan
+  rule (`note_entity_fk` in `0006`, `block_worklog_fk` in `0014`), so an upgrade would have failed
+  on the same rows. A note is the one content knobas cannot fetch again, and dropping one quietly
+  is the worst outcome available. A later migration that adds a key with an orphan rule adds its
+  statement to the list. *Reversing:* a row in the list.
+- **Can a share-export part honestly carry a row whose key target it left behind?** *Ruling:* no,
+  so the refusal never turns away an honest restore. *Reasoning:* read off
+  `ShareParts::tables` against every `knobas` key. `links`, `assets`, `contexts` and `notes` take
+  `entity`. `assets` takes `asset` and `route` together, `time` takes `block` and `worklog`
+  together, and `link_sets` takes all three of its tables. `monitor_alert`, `monitor_sample`,
+  `checkout_override` and `dep_layer_kind` are in no part. The keys held in the source database
+  when it was dumped. The one honest exception is a context from before `0060`, and the delete
+  rule covers it. *Reversing:* n/a.
+- **How the keys are checked.** *Fork:* `alter table ... validate constraint`, one anti-join per
+  key, or loading without `--disable-triggers` with the keys made deferrable. *Ruling:* one
+  anti-join per key, read off `pg_constraint` in one static statement (`BROKEN_KEYS`), the way
+  `OCCUPANCY` reads the tables. *Reasoning:* `validate constraint` does nothing to a key that is
+  already valid, and the keys the load held off are still marked valid. Loading with triggers on
+  would fire every trigger the `--disable-triggers` load keeps off, the ones `0055` relies on
+  among them (§10.8 #1571). *Reversing:* one function.
+- **How a refusal leaves the target.** *Fork:* the load's transaction has committed by the time
+  the check runs. *Ruling:* delete every row of every `knobas` table, with triggers off
+  (`set local session_replication_role = replica`, the session form of the load's flag). Then
+  the caller puts the bookkeeping rows back, as for a failed load (#1635). *Reasoning:* the
+  target was proved empty apart from bookkeeping before the load, so emptying it is exact. With
+  the rows breaking a key, deleting them in key order is not possible. Truncating with `cascade`
+  would reach into `sync` through `sync.item`'s key. *Reversing:* one function.
+- **No IPC change.** *Fork:* map `BrokenKey` to its own `IpcError` kind, or let it fall through to
+  `internal`. *Ruling:* `internal`, so there is no new §10.8 entry. The `Backups` paragraph of
+  `1708-migration-0060-context-entity-key.md` is amended instead, because it described the gap.
+  *Reasoning:* `conflict` stays the one restore refusal a user can act on (pick an empty
+  database). An archive that breaks a key has no remedy in the app, and the message names the
+  table and the key. *Reversing:* one match arm and a §10.8 entry.
+- **Restore paths.** *Ruling:* there is one, `knobas_db::backup::restore`. `restore_backup`
+  reaches it for whole backups and for share exports alike. `grep -rn
+  "disable-triggers\|session_replication_role\|pg_restore" crates` finds one other trigger-off
+  load, `knobas_db::test_util::recycle`. That one is test-only and copies a template database
+  that holds its keys, so it is out of scope. *Reversing:* n/a.
+- **Seams.** *Fork:* the TDD skill asks for seams agreed up front, with no one to agree them.
+  *Ruling:* `knobas_db::backup::restore` over a real PostgreSQL, from an archive `dump` or
+  `dump_tables` wrote off a scratch database with the key dropped (or wound back to `0059`).
+  *Reasoning:* the claim is about what a restored database holds, and only a real load can
+  witness it. *Reversing:* n/a.
