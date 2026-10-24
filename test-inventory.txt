@@ -249,8 +249,11 @@ knobas-app	lib/knobas_app	start_work::queue::tests::a_pull_request_of_unreadable
 knobas-app	lib/knobas_app	start_work::queue::tests::a_repository_id_is_matched_literally_not_as_a_pattern
 knobas-app	lib/knobas_app	start_work::queue::tests::a_source_that_declares_no_merged_flag_still_reads_its_state
 knobas-app	lib/knobas_app	start_work::queue::tests::an_open_pull_request_wins_over_a_merged_one_from_the_same_head
+knobas-app	lib/knobas_app	start_work::queue::tests::each_reason_a_write_is_held_is_its_own_landing
 knobas-app	lib/knobas_app	start_work::tests::a_held_write_fails_its_step_rather_than_leaving_it_waiting
+knobas-app	lib/knobas_app	start_work::tests::a_hold_for_a_source_turned_off_says_so_and_stops_the_step
 knobas-app	lib/knobas_app	start_work::tests::a_refusal_carries_what_the_source_said
+knobas-app	lib/knobas_app	start_work::tests::a_send_never_answered_leaves_the_step_queued_and_says_to_check_the_source
 knobas-app	lib/knobas_app	start_work::tests::a_write_the_source_could_not_take_leaves_the_step_queued
 knobas-app	lib/knobas_app	start_work::tests::only_a_delivered_write_succeeds_its_step
 knobas-app	lib/knobas_app	tests::only_events_emit_names_the_emitter
@@ -1063,6 +1066,7 @@ knobas-app	test/it	start_work::a_landing_that_loses_to_an_interrupt_keeps_its_wr
 knobas-app	test/it	start_work::a_link_step_refuses_a_closed_pull_request_as_closed_and_not_as_merged
 knobas-app	test/it	start_work::a_link_step_refuses_a_merged_pull_request_and_names_it
 knobas-app	test/it	start_work::a_merge_already_followed_is_not_followed_twice
+knobas-app	test/it	start_work::a_merge_transition_never_answered_counts_as_followed
 knobas-app	test/it	start_work::a_merged_pull_request_moves_the_ticket_it_is_linked_to
 knobas-app	test/it	start_work::a_merged_pull_request_nobody_linked_moves_nothing
 knobas-app	test/it	start_work::a_merged_pull_request_on_a_re_used_head_is_not_the_open_one
@@ -1086,6 +1090,7 @@ knobas-app	test/it	start_work::a_step_a_run_behind_may_be_taking_cannot_be_skipp
 knobas-app	test/it	start_work::a_step_left_running_by_a_quit_reads_as_interrupted_and_can_be_retried_or_skipped
 knobas-app	test/it	start_work::a_step_skipped_while_the_run_looks_is_not_sent
 knobas-app	test/it	start_work::a_step_the_sequence_has_not_reached_cannot_be_retried
+knobas-app	test/it	start_work::a_transition_never_answered_is_on_its_way_and_its_retry_sends_nothing
 knobas-app	test/it	start_work::a_whole_flow_creates_a_branch_a_pull_request_a_link_and_a_transition
 knobas-app	test/it	start_work::an_edit_of_a_queued_step_is_refused_and_queues_nothing_new
 knobas-app	test/it	start_work::an_edited_proposal_is_what_gets_dispatched
