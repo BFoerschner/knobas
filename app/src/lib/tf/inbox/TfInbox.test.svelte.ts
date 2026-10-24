@@ -382,6 +382,17 @@ test("a row about a ticket links the job by its entity id, so a key two sources 
   expect(rowOf("Same key").querySelector(".tf-ctx a")?.getAttribute("href")).toBe("#/job/gitea%3APAY-231");
 });
 
+test("a row's Open job names the ticket's source, so a key two sources hold opens the one the row is about (#1977)", async () => {
+  await open({
+    extra: [
+      entry({ key: "new_assignment:gitea:PAY-231", category: "new_assignment", source_id: "gitea", entity_id: "gitea:PAY-231",
+        kind: "ticket", title: "Same key, other source", reason: "assigned to you", occurred_at: at(17, 0) }),
+    ],
+  });
+  const openJob = [...rowOf("Same key").querySelectorAll(".tf-acts a")].find((each) => text(each) === "Open job");
+  expect(openJob?.getAttribute("href")).toBe("#/job/gitea%3APAY-231");
+});
+
 test("an inbox left open across midnight ticks its clock: a row reads yesterday and Tomorrow moves a day on (#1681)", async () => {
   vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
   try {

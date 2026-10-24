@@ -1597,7 +1597,7 @@ test("a pasted link that resolves opens the entity it names", async () => {
   await search(PASTED);
 
   // The ticket-first shell's job, never the rooms UI's `#/ticket/…` (#1085).
-  expect(navigated).toEqual(["#/job/PAY-231"]);
+  expect(navigated).toEqual(["#/job/jira%3APAY-231"]);
   expect(closed, "the overlay gets out of the way first").toHaveBeenCalled();
 });
 

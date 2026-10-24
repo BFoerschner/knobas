@@ -870,7 +870,7 @@ test("once a sync brings the ticket in, the run page draws the linked ticket in 
   drawn.sync({ source_id: "jira", running: false });
   await settle();
   const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-342"));
-  expect(ticket?.getAttribute("href")).toBe("#/job/PAY-342");
+  expect(ticket?.getAttribute("href")).toBe("#/job/jira%3APAY-342");
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).not.toContain("Ticket queued");
   expect(queuedMarks("teamcity:build:1187", "ticket")).toEqual([]);
   expect(button("Create ticket")).toBeUndefined();
@@ -880,7 +880,7 @@ test("a run a ticket is already linked to draws the ticket and no Create ticket"
   draw("teamcity:build:1187", undefined, { links: () => Promise.resolve([ticketLink("PAY-300", "Flaky SEPA retry")]) });
   await settle();
   const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-300"));
-  expect(ticket?.getAttribute("href")).toBe("#/job/PAY-300");
+  expect(ticket?.getAttribute("href")).toBe("#/job/jira%3APAY-300");
   expect(ticket?.title).toBe("Flaky SEPA retry");
   expect(button("Create ticket")).toBeUndefined();
 });
@@ -938,7 +938,7 @@ test("after a reload, a ticket sent and not mirrored yet stays queued until the 
   drawn.sync({ source_id: "jira", running: false });
   await settle();
   const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-342"));
-  expect(ticket?.getAttribute("href")).toBe("#/job/PAY-342");
+  expect(ticket?.getAttribute("href")).toBe("#/job/jira%3APAY-342");
   expect(queuedMarks("teamcity:build:1187", "ticket")).toEqual([]);
   expect(button("Create ticket")).toBeUndefined();
   expect(drawn.listening()).toBe(listening - 1);
@@ -1018,7 +1018,7 @@ test("after a reload, a ticket the owed read links as it answers is drawn, and C
   });
   await settle();
   const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-342"));
-  expect(ticket?.getAttribute("href")).toBe("#/job/PAY-342");
+  expect(ticket?.getAttribute("href")).toBe("#/job/jira%3APAY-342");
   expect(button("Create ticket")).toBeUndefined();
 });
 

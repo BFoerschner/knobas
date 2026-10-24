@@ -74,10 +74,14 @@ function targetLabel(end: LinkEnd): string {
   return end.kind === "ticket" ? keyOf(end.entity_id) : endName(end);
 }
 
-/** The ticket key a proposal is about, for *about PAY-231*, or `null` when neither end is a ticket. */
-export function aboutKey(entry: SuggestionEntry): string | null {
+/**
+ * The ticket a proposal is about, for *about PAY-231*: its key to read and its
+ * entity id to link by, the id naming the source (#1977). `null` when neither
+ * end is a ticket.
+ */
+export function aboutTicket(entry: SuggestionEntry): { key: string; entityId: string } | null {
   const { target } = targetOf(entry);
-  return target.kind === "ticket" ? keyOf(target.entity_id) : null;
+  return target.kind === "ticket" ? { key: keyOf(target.entity_id), entityId: target.entity_id } : null;
 }
 
 const VERDICT_WORD: Record<Verdict, string> = { yes: "linked", no: "not related", skip: "later" };

@@ -195,7 +195,7 @@
     const job = breadcrumbJob.job;
     if (job === null) return;
     linkRequest.ask(job.key, target);
-    if (currentJob.entityId !== job.entityId) location.hash = jobHash(job.key);
+    if (currentJob.entityId !== job.entityId) location.hash = jobHash(job.entityId);
   }
 
   // ⌘T with nothing in front starts on the job the breadcrumb names (#1435);

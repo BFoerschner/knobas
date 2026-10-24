@@ -362,7 +362,7 @@ test("the first card is selected: yellow, and the preview shows it with Start wo
   expect(preview().textContent).toContain("The description of jira:PAY-1.");
   const button = preview().querySelector<HTMLAnchorElement>(".tf-go .tf-primary")!;
   expect(button.textContent).toBe("Start work");
-  expect(button.getAttribute("href")).toBe("#/job/PAY-1");
+  expect(button.getAttribute("href")).toBe("#/job/jira%3APAY-1");
 });
 
 test("selecting another card moves the yellow and the preview's button follows its state", async () => {
@@ -567,7 +567,7 @@ test("Enter presses the preview's button from a card", async () => {
   const first = target.querySelector<HTMLButtonElement>(".tf-tcard")!;
   first.focus();
   first.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-  expect(location.hash).toBe("#/job/PAY-1");
+  expect(location.hash).toBe("#/job/jira%3APAY-1");
 });
 
 test("Enter on a focused card that is not selected opens that card's ticket", async () => {
@@ -577,7 +577,7 @@ test("Enter on a focused card that is not selected opens that card's ticket", as
   expect(second.classList.contains("tf-card")).toBe(false);
   second.focus();
   second.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-  expect(location.hash).toBe(`#/job/${key}`);
+  expect(location.hash).toBe(`#/job/jira%3A${key}`);
 });
 
 const layoutButton = (name: string) =>
@@ -719,12 +719,12 @@ test("j/k walk the list's rows in their sorted order, and a double click opens t
   press("j");
   expect(selectedKey()).toBe("PAY-3");
   target.querySelectorAll<HTMLElement>(".tf-tbl tbody tr")[4]!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-  expect(location.hash).toBe("#/job/PAY-5");
+  expect(location.hash).toBe("#/job/jira%3APAY-5");
   location.hash = "#/tickets";
   layoutButton("Board").click();
   await settle();
   target.querySelectorAll<HTMLElement>(".tf-tcard")[1]!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-  expect(location.hash).toBe("#/job/PAY-2");
+  expect(location.hash).toBe("#/job/jira%3APAY-2");
 });
 
 test("list headers sort on click and show the direction; Key and Status never wrap", async () => {

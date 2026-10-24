@@ -113,7 +113,7 @@ test("the page draws the title, the body as it was typed, and each resolved ref 
     "Retries need a jittered backoff, see Retry failed SEPA payouts.\n\n  Ask [[mock:NOPE-1]] and Rotate PSP credentials too.",
   );
   const refs = [...body.querySelectorAll("a")].map((found) => [found.textContent, found.getAttribute("href")]);
-  expect(refs).toEqual([["Retry failed SEPA payouts", "#/job/PAY-231"]]);
+  expect(refs).toEqual([["Retry failed SEPA payouts", "#/job/mock%3APAY-231"]]);
   // A withdrawn target is still named, not linked.
   expect(body.querySelector(".tf-note-gone")?.textContent).toBe("Rotate PSP credentials");
 });
@@ -127,7 +127,7 @@ test("the note's links are rows that open their other end, a context's row only 
   ]);
   expect(rows).toEqual([
     ["Captured in SEPA retries", null],
-    ["Captured from Retry failed SEPA payouts", "#/job/PAY-231"],
+    ["Captured from Retry failed SEPA payouts", "#/job/mock%3APAY-231"],
     ["Related to Ledger drift notes", "#/note/note%3A9b2"],
   ]);
 });

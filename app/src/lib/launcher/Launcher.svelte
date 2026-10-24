@@ -66,7 +66,6 @@
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import { entityAddress } from "../tf/address";
   import type { LinkTarget } from "../tf/job/current.svelte";
-  import { sharesKey } from "./format";
   import { canBeTarget } from "../shell/timer";
   import TfDialog from "../tf/settings/TfDialog.svelte";
   import Board from "./Board.svelte";
@@ -552,11 +551,11 @@
    */
   function addressOf(row: LauncherRow): string | null {
     switch (row.kind) {
-      // A ticket whose key another source's row holds opens by its source (#1476).
+      // A ticket opens by its entity id, which names its source (#1476, #1977).
       case "hit":
-        return entityAddress(row.hit.kind, row.hit.entity_id, sharesKey(session.response?.groups.flatMap((g) => g.hits) ?? [])(row.hit), row.hit.title);
+        return entityAddress(row.hit.kind, row.hit.entity_id, row.hit.title);
       case "recent":
-        return entityAddress(row.row.kind, row.row.entity_id, sharesKey(session.home?.recent ?? [])(row.row), row.row.title);
+        return entityAddress(row.row.kind, row.row.entity_id, row.row.title);
       case "action":
         return row.action.hash;
       // The Inbox page's own link for the line, and the Inbox page for a line

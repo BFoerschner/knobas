@@ -231,7 +231,7 @@ test("the body: a live ticket chip, my mention in yellow, a page link, code with
   await draw(["confluence:2"]);
   const doc = target.querySelector(".tf-doc")!;
   const chip = doc.querySelector<HTMLAnchorElement>("a.tf-tchip")!;
-  expect(chip.getAttribute("href")).toBe("#/job/OPS-77");
+  expect(chip.getAttribute("href")).toBe("#/job/jira%3AOPS-77");
   expect(chip.textContent).toContain("On-call runbook outdated");
   expect(chip.textContent).toContain("To Do");
   const mentions = [...doc.querySelectorAll(".tf-ment")];
@@ -401,7 +401,7 @@ test("the rail: the outline, the work, the pages that link here and the history"
     "History",
   ]);
   expect(rail.querySelector(".tf-toc a")?.getAttribute("href")).toBe("#/page/confluence%3A2/1");
-  expect(rail.querySelector("a[href='#/job/OPS-77']")?.textContent).toContain("To Do");
+  expect(rail.querySelector("a[href='#/job/jira%3AOPS-77']")?.textContent).toContain("To Do");
   expect(rail.querySelector("a[href='#/page/confluence%3A5']")?.textContent).toBe("Payout designENG");
   expect([...rail.querySelectorAll(".tf-rail-list div")].map((d) => d.textContent)).toEqual([
     "EditedTomasz, 2026-07-02",

@@ -196,7 +196,7 @@
               {:else}
                 {@const kind = kinds[row.target.entity_id]}
                 {#if kind !== undefined}
-                  <a href={entityAddress(kind, row.target.entity_id, true)}><span class="tf-mono">{targetReading(row.target)}</span></a>
+                  <a href={entityAddress(kind, row.target.entity_id)}><span class="tf-mono">{targetReading(row.target)}</span></a>
                 {:else}
                   <span class="tf-mono">{targetReading(row.target)}</span>
                 {/if}

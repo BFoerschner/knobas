@@ -239,7 +239,7 @@ test("the card says how many comments, how many are new since the visit and how 
   const card = target.querySelector("[aria-label='Job card']")!;
   expect(squash(card)).toContain("11 comments, 2 new since 09:00, 1 mentions you");
   expect(squash(card.querySelector(".tf-last"))).toBe("Lena, today 12:45: [~mara] will the queue get an SLA?");
-  expect(card.querySelector<HTMLAnchorElement>(".tf-cbtn")?.getAttribute("href")).toBe("#/job/PAY-231/conversation");
+  expect(card.querySelector<HTMLAnchorElement>(".tf-cbtn")?.getAttribute("href")).toBe("#/job/jira%3APAY-231/conversation");
   expect(squash(card.querySelector(".tf-cbtn"))).toBe("Read the conversation");
   // The tab carries the count and the new ones.
   const tab = [...target.querySelectorAll("[role='tab']")][2]!;
@@ -449,7 +449,7 @@ test("a comment the queue holds drops its echo and toasts; Edit and resend puts 
   expect(box.value).toBe("");
   toast.more!.find((action) => action.label === "Edit and resend")!.run();
   await settle();
-  expect(location.hash).toBe("#/job/PAY-231/conversation");
+  expect(location.hash).toBe("#/job/jira%3APAY-231/conversation");
   expect(box.value).toBe("Looking at the jitter now");
 });
 
@@ -641,7 +641,7 @@ test("Also on this job names each set that applies with its reason, then the par
   await settle();
   const bar = target.querySelector(".tf-setsbar")!;
   expect(squash(bar)).toBe("Also on this job Payout stack via epic PAY-200 Parent PAY-230 sub-tasks show their parent’s connections Apply a link set…");
-  expect([...bar.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#/sets/payout-stack", "#/job/PAY-230"]);
+  expect([...bar.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#/sets/payout-stack", "#/job/jira%3APAY-230"]);
   // Two own links and three more from the set and the parent, the page once.
   expect(squash(target.querySelector(".tf-conn"))).toBe("5 connected, 1 proposed L");
   if (job) unmount(job);

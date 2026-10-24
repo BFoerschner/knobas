@@ -29,6 +29,7 @@
   } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { keyOf } from "../job/job";
+  import { jobHash } from "../route";
   import { draftOf } from "./apply";
   import type { Candidate, RuleChoices, SetPorts } from "./ports";
   import { counted } from "../counted";
@@ -351,7 +352,7 @@
         <div class="tf-roll">{set.shows_on.filter((ticket) => ticket.mine).length} of them yours. New tickets join as soon as they match.</div>
         <div class="tf-keys">
           {#each shownKeys as ticket (ticket.entity_id)}
-            <a href="#/job/{encodeURIComponent(keyOf(ticket.entity_id))}" class:tf-mine={ticket.mine} title={ticket.title}>{keyOf(ticket.entity_id)}</a>
+            <a href={jobHash(ticket.entity_id)} class:tf-mine={ticket.mine} title={ticket.title}>{keyOf(ticket.entity_id)}</a>
           {/each}
           {#if set.shows_on.length > SHOWN_KEYS}<span class="tf-dim">and {set.shows_on.length - SHOWN_KEYS} more</span>{/if}
         </div>

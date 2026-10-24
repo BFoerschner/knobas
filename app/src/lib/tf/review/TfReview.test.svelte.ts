@@ -173,6 +173,7 @@ test("the queue lists each proposal by its item, strength and target, newest fir
   expect(names()).toEqual(["9f2c1ab “key the retry on the mandate id”", "PAY-231 Retry failed SEPA payouts"]);
   expect(target.querySelector(".tf-claim")?.textContent).toBe("The commit message mentions PAY-231.");
   expect(target.querySelector(".tf-review-top .tf-dim")?.textContent).toBe("1 of 3, about PAY-231");
+  expect(target.querySelector(".tf-review-top .tf-dim a")?.getAttribute("href")).toBe("#/job/jira%3APAY-231");
   expect(target.querySelector(".tf-ql a[aria-current='true']")?.getAttribute("href")).toBe("#/review/l1");
 });
 

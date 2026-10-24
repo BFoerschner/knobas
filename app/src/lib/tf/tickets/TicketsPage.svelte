@@ -494,7 +494,7 @@
 
   function openJob(card: MiniBoardCard) {
     session.selected = card.entity_id;
-    location.hash = ticketAddress(card, shared);
+    location.hash = ticketAddress(card);
   }
 
   /** `j`/`k` and the arrows (R-3.10): the next or previous card on screen, selected and focused. */
@@ -532,7 +532,7 @@
       if (entry === null) return;
       event.preventDefault();
       session.selected = entry.card.entity_id;
-      location.hash = ticketAddress(entry.card, shared);
+      location.hash = ticketAddress(entry.card);
     };
     window.addEventListener("keydown", onkey);
     return () => window.removeEventListener("keydown", onkey);
@@ -840,7 +840,7 @@
   {#if current !== null && base !== null}
     <TicketPreview
       card={current.card}
-      address={ticketAddress(current.card, shared)}
+      address={ticketAddress(current.card)}
       description={reader.description}
       around={reader.around}
       timerOnIt={timedTicket === current.card.key}

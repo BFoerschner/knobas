@@ -157,15 +157,19 @@ export function sectionOf(route: TfRoute): Section | null {
 
 /**
  * The address of a section's own page: `#/inbox`, `#/settings`. Job's needs a
- * ticket key, so it has {@link jobHash} instead.
+ * ticket, so it has {@link jobHash} instead.
  */
 export function sectionHash(section: Exclude<Section, "job">): string {
   return `#/${section}`;
 }
 
-/** The address of a job, or of the bare Job page when no ticket is known. */
-export function jobHash(key: string | null): string {
-  return key === null ? "#/job" : `#/job/${encodeURIComponent(key)}`;
+/**
+ * The address of a job, or of the bare Job page when no ticket is known.
+ * `segment` is the ticket's entity id, which names its source (#1977), or the
+ * segment a reader opened the job at, handed back as it was.
+ */
+export function jobHash(segment: string | null): string {
+  return segment === null ? "#/job" : `#/job/${encodeURIComponent(segment)}`;
 }
 
 function decode(segment: string): string {

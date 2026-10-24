@@ -60,6 +60,7 @@
   import { dayKey } from "../../time/day";
   import { listenSynced, type PipelinePorts } from "../builds/pipeline-ports";
   import { keyOf } from "../job/job";
+  import { jobHash } from "../route";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import TfCreateTicket from "../TfCreateTicket.svelte";
@@ -672,7 +673,7 @@
           {:else if made.ticket === null}
             <span class="tf-chip">queued</span>
           {:else}
-            <a class="tf-mono" href="#/job/{encodeURIComponent(keyOf(made.ticket))}">{keyOf(made.ticket)}</a>
+            <a class="tf-mono" href={jobHash(made.ticket)}>{keyOf(made.ticket)}</a>
             {#if made.status}<span class="tf-chip">{made.status}</span>{/if}
           {/if}
         </div>

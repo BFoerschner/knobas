@@ -416,8 +416,8 @@ export function statusOrder(columns: readonly MiniBoardColumn[]): (string | null
 
 /**
  * The keys more than one card on the board holds (#1476): two sources'
- * PAY-231. Their cards and rows name their source, and each opens at its
- * source's address. Counted over the cards read.
+ * PAY-231. Their cards and rows name their source. Counted over the cards
+ * read.
  */
 export function sharedKeys(columns: readonly MiniBoardColumn[]): Set<string> {
   const seen = new Set<string>();
@@ -430,10 +430,9 @@ export function sharedKeys(columns: readonly MiniBoardColumn[]): Set<string> {
 }
 
 /**
- * Where a card opens (#1476): its job by key, or, for a key another source
- * holds too, by its entity id (`#/job/jira:PAY-231`), the address that names
- * the source ({@link entityAddress}'s rule).
+ * Where a card opens: its job by its entity id (`#/job/jira:PAY-231`), the
+ * address that names the source ({@link entityAddress}'s rule, #1476, #1977).
  */
-export function ticketAddress(card: Pick<MiniBoardCard, "key" | "entity_id">, shared: ReadonlySet<string>): string {
-  return entityAddress("ticket", card.entity_id, shared.has(card.key));
+export function ticketAddress(card: Pick<MiniBoardCard, "entity_id">): string {
+  return entityAddress("ticket", card.entity_id);
 }

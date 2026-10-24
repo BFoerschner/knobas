@@ -7,16 +7,16 @@ import { pageFor } from "./pages";
 import { parseTfHash } from "./route";
 
 test("an entity of a known kind goes where its own page is", () => {
-  expect(entityAddress("ticket", "jira:PAY-231")).toBe("#/job/PAY-231");
+  expect(entityAddress("ticket", "jira:PAY-231")).toBe("#/job/jira%3APAY-231");
   expect(entityAddress("pr", "gitea:acme/svc#142")).toBe("#/pr/gitea%3Aacme%2Fsvc%23142");
   expect(entityAddress("page", "confluence:42")).toBe("#/page/confluence%3A42");
   expect(entityAddress("asset", "asset:9f1c")).toBe("#/asset/asset%3A9f1c");
   expect(entityAddress("route", "route:9a1b")).toBe("#/route/route%3A9a1b");
 });
 
-test("a ticket whose key another source holds opens at its source's address (#1476)", () => {
-  expect(entityAddress("ticket", "jira:PAY-231", true)).toBe("#/job/jira%3APAY-231");
-  expect(entityAddress("pr", "gitea:acme/svc#142", true)).toBe("#/pr/gitea%3Aacme%2Fsvc%23142");
+test("a ticket opens at its source's address, so a key two sources hold opens the one it names (#1476, #1977)", () => {
+  expect(entityAddress("ticket", "gitea:PAY-231")).toBe("#/job/gitea%3APAY-231");
+  expect(entityAddress("ticket", "gitea:acme/payouts#144")).toBe("#/job/gitea%3Aacme%2Fpayouts%23144");
 });
 
 test("a note opens its own page, which sends the reader to Settings › Notes while notes hide (#1504, D10)", () => {
@@ -25,10 +25,10 @@ test("a note opens its own page, which sends the reader to Settings › Notes wh
 });
 
 test("a note titled by the protocol rule opens Time › Standup at its date (#1504)", () => {
-  expect(entityAddress("note", "note:7a1", false, "Standup 2026-09-03")).toBe("#/time/standup/2026-09-03");
-  expect(entityAddress("note", "note:7a1", false, "Standup notes")).toBe("#/note/note%3A7a1");
+  expect(entityAddress("note", "note:7a1", "Standup 2026-09-03")).toBe("#/time/standup/2026-09-03");
+  expect(entityAddress("note", "note:7a1", "Standup notes")).toBe("#/note/note%3A7a1");
   // The rule is a note's: a ticket that happens to be so titled is still a ticket.
-  expect(entityAddress("ticket", "jira:PAY-1", false, "Standup 2026-09-03")).toBe("#/job/PAY-1");
+  expect(entityAddress("ticket", "jira:PAY-1", "Standup 2026-09-03")).toBe("#/job/jira%3APAY-1");
 });
 
 test("a Jira view opens its ticket view, by the projection's slug (#1094)", () => {

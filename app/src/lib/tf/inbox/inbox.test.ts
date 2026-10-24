@@ -113,13 +113,13 @@ describe("where a row opens", () => {
   test("an assignment opens the job", () => {
     expect(opener(item({ category: "new_assignment", entity_id: "jira:PAY-240", kind: "ticket" }))).toEqual({
       label: "Open job",
-      href: "#/job/PAY-240",
+      href: "#/job/jira%3APAY-240",
     });
   });
   test("a mention opens where it was said", () => {
     expect(opener(item({ category: "mention", entity_id: "jira:PAY-231", kind: "ticket" }))).toEqual({
       label: "Open conversation",
-      href: "#/job/PAY-231/conversation",
+      href: "#/job/jira%3APAY-231/conversation",
     });
     expect(opener(item({ category: "mention", entity_id: "conf:SEPA", kind: "page" }))).toEqual({
       label: "Open page",

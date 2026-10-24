@@ -20,14 +20,13 @@ import { jobHash } from "./route";
 
 /**
  * The address of an entity of `kind`: `itemHash`, which owns every kind's
- * rule (#1101), save one: a ticket whose key another source holds too
- * (`shared`, #1476) opens by its entity id, the job address that names the
- * source, which only the caller can know. `title`, where the producer holds
- * one, lets a standup protocol note open Time › Standup at its date rather
- * than the note page (#1504).
+ * rule (#1101). A ticket opens its job by its entity id, the address that
+ * names the source, so a key two sources hold opens the one it was drawn
+ * from (#1476, #1977). `title`, where the producer holds one, lets a standup
+ * protocol note open Time › Standup at its date rather than the note page
+ * (#1504).
  */
-export function entityAddress(kind: string, entityId: string, shared = false, title?: string): string {
-  if (shared && kind === "ticket") return jobHash(entityId);
+export function entityAddress(kind: string, entityId: string, title?: string): string {
   return itemHash({ kind, entity_id: entityId, title });
 }
 

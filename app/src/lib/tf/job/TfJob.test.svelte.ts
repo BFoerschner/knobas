@@ -366,6 +366,22 @@ test("a key two sources hold: the card names its source and links the other's, a
   expect(sourceLine()?.textContent?.replace(/\s+/g, " ").trim()).toBe("In Jira · also in Tidewater Gitea");
 });
 
+test("on a job a key two sources hold, every link to the job's own tabs names its source (#1977)", async () => {
+  const hrefs = (selector: string) => [...target.querySelectorAll(selector)].map((each) => each.getAttribute("href"));
+  const said = { author: "Priya Nair", at: "2026-10-14T08:00:00Z", body: "Retry window agreed.", mine: false, mentions_me: false };
+  open("gitea:PAY-231", { ports: twoHolders() });
+  await settle();
+  expect(hrefs(".tf-wtabs a")).toEqual(["#/job/gitea%3APAY-231", "#/job/gitea%3APAY-231/map", "#/job/gitea%3APAY-231/conversation"]);
+  expect(hrefs(".tf-cbtn")).toEqual(["#/job/gitea%3APAY-231/conversation"]);
+  expect(section("assets").querySelector("a.tf-open")?.getAttribute("href")).toBe("#/job/gitea%3APAY-231/map");
+
+  unmount(job!);
+  open("gitea:PAY-231", { ports: { ...twoHolders(), entityThread: () => Promise.resolve({ comments: [said], changes: [], me: ["mara"] }) } });
+  await settle();
+  expect(target.querySelector(".tf-cbtn")?.textContent?.trim()).toBe("Read the conversation");
+  expect(hrefs(".tf-cbtn")).toEqual(["#/job/gitea%3APAY-231/conversation"]);
+});
+
 test("a key one source holds names no source on the card", async () => {
   open();
   await settle();
@@ -704,7 +720,7 @@ test("Assets reads each reached asset and rolls up environments and problems", a
   const rows = [...section("assets").querySelectorAll(".tf-rows a")];
   expect(rows.map((row) => row.getAttribute("href"))).toEqual([`#/asset/${encodeURIComponent("asset:c")}`, `#/asset/${encodeURIComponent("asset:vm")}`]);
   expect(rows[0]!.textContent).toContain("Container, stage, on vm-pay-stage-01");
-  expect(section("assets").querySelector("a.tf-open")?.getAttribute("href")).toBe("#/job/PAY-231/map");
+  expect(section("assets").querySelector("a.tf-open")?.getAttribute("href")).toBe("#/job/jira%3APAY-231/map");
 });
 
 test("Monitors and Pages roll up in prototype-6's words", async () => {
@@ -1223,7 +1239,7 @@ test("a move the queue refuses drops the queued status and toasts; Edit and rese
   expect(document.activeElement).not.toBe(select);
   toast.more!.find((action) => action.label === "Edit and resend")!.run();
   await settle();
-  expect(location.hash).toBe("#/job/PAY-231");
+  expect(location.hash).toBe("#/job/jira%3APAY-231");
   expect(document.activeElement).toBe(select);
   expect(select.value).toBe("In Progress");
 });
