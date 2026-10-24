@@ -139,10 +139,14 @@ async fn a_data_directory_an_initdb_killed_before_pg_version_left_is_initialised
 /// fixtures, six Linux filesystems of seven (evidence under #2007 in
 /// `docs/decisions/2026-10-unattended-rulings.md`).
 #[tokio::test]
-async fn a_data_directory_an_initdb_cleanup_cut_short_after_pg_version_left_is_initialised_again()
-{
+async fn a_data_directory_an_initdb_cleanup_cut_short_after_pg_version_left_is_initialised_again() {
     for files in [
-        &["PG_VERSION", "pg_hba.conf", "pg_ident.conf", "postgresql.auto.conf"][..],
+        &[
+            "PG_VERSION",
+            "pg_hba.conf",
+            "pg_ident.conf",
+            "postgresql.auto.conf",
+        ][..],
         &["PG_VERSION", "postgresql.auto.conf", "postgresql.conf"],
         &["PG_VERSION"],
     ] {
@@ -179,7 +183,10 @@ async fn a_data_directory_an_initdb_cleanup_cut_short_after_pg_version_left_is_i
 async fn a_data_directory_a_server_ran_on_that_lost_an_initdb_file_is_kept_unmarked() {
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data");
-    cut_cleanup(&data, &["PG_VERSION", "pg_hba.conf", "postgresql.auto.conf"]);
+    cut_cleanup(
+        &data,
+        &["PG_VERSION", "pg_hba.conf", "postgresql.auto.conf"],
+    );
     std::fs::write(data.join("postmaster.opts"), "postgres -D data\n").unwrap();
 
     let refused = EmbeddedDb::start(DbConfig {
@@ -212,7 +219,13 @@ async fn a_data_directory_a_server_ran_on_that_lost_an_initdb_file_is_kept_unmar
 /// finished `initdb` makes, `base/1`, `4` and `5` among them.
 fn cut_cleanup(data: &std::path::Path, files: &[&str]) {
     for sub in [
-        "base/1", "base/4", "base/5", "global", "pg_tblspc", "pg_wal", "pg_xact",
+        "base/1",
+        "base/4",
+        "base/5",
+        "global",
+        "pg_tblspc",
+        "pg_wal",
+        "pg_xact",
     ] {
         std::fs::create_dir_all(data.join(sub)).unwrap();
     }
@@ -226,13 +239,13 @@ fn cut_cleanup(data: &std::path::Path, files: &[&str]) {
 /// there afterwards.
 ///
 /// A database is a directory under `base/` other than the templates `1` and
-/// `4`, or anything under `pg_tblspc/`. A killed `initdb` leaves neither: it
-/// makes `base/5`, the `postgres` database, last. Each fixture here lacks
-/// `global/pg_control` and has no marker, so only the database keeps it. The
-/// second has no `postgresql.conf`, so `initdb` runs and refuses a directory
-/// that is not empty. Its `base/5` is a database because a server ran there
-/// (`postmaster.opts`): without one, it is what a cut-short cleanup leaves
-/// (#2007).
+/// `4`, or anything under `pg_tblspc/`. A killed `initdb` leaves no other
+/// directory under `base/` but `5`, the `postgres` database it makes last.
+/// Each fixture here lacks `global/pg_control` and has no marker, so only the
+/// database keeps it. The second has no `postgresql.conf`, so `initdb` runs
+/// and refuses a directory that is not empty. Its `base/5` counts as a
+/// database because a server ran there (`postmaster.opts`). Without one, it
+/// is what a cut-short cleanup leaves (#2007).
 #[tokio::test]
 async fn a_data_directory_that_holds_a_database_is_never_removed() {
     for (with_conf, database) in [
@@ -247,11 +260,10 @@ async fn a_data_directory_that_holds_a_database_is_never_removed() {
         std::fs::create_dir_all(data.join(database)).unwrap();
         std::fs::write(data.join("PG_VERSION"), "18\n").unwrap();
         std::fs::write(data.join("keep-me"), "a reader's file\n").unwrap();
-        if !with_conf {
-            std::fs::write(data.join("postmaster.opts"), "postgres -D data\n").unwrap();
-        }
         if with_conf {
             std::fs::write(data.join("postgresql.conf"), "# written by initdb\n").unwrap();
+        } else {
+            std::fs::write(data.join("postmaster.opts"), "postgres -D data\n").unwrap();
         }
 
         let refused = EmbeddedDb::start(DbConfig {

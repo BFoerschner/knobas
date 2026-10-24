@@ -1672,8 +1672,8 @@ fn recover_or_mark(data_dir: &Path) -> Result<(), DbError> {
 /// partway through could leave `PG_VERSION` with `base/` gone, which
 /// [`shape`] reads as a database on a volume not mounted. Without
 /// `PG_VERSION`, whatever the removal leaves reads as unfinished. A data
-/// directory that is a symlink loses the link alone, `PG_VERSION` in what it
-/// points at included.
+/// directory that is a symlink loses the link alone, and the `PG_VERSION`
+/// in what it points at stays.
 fn remove_unfinished(data_dir: &Path) -> Result<(), DbError> {
     let linked = std::fs::symlink_metadata(data_dir).is_ok_and(|meta| meta.is_symlink());
     if !linked {
@@ -1698,8 +1698,9 @@ enum Shape {
     /// Not what a finished `initdb` leaves, and a database in it or one
     /// that may be, or a server ran on it: no launch removes it or marks it.
     Unrecognised,
-    /// No marker, and it holds a database or may: a finished `initdb` an
-    /// older build ran, or one whose databases cannot be listed.
+    /// No marker, every file `initdb` writes there, and it holds a database
+    /// or may: a finished `initdb` an older build ran, or one whose databases
+    /// cannot be listed.
     HoldsDatabase,
     /// What an interrupted `initdb` left: it holds no database.
     Unfinished,
@@ -3101,7 +3102,9 @@ mod tests {
     /// that lists `base/` before `PG_VERSION`, a launch killed between the
     /// two left `PG_VERSION` without `base/`, which reads as a database on a
     /// volume not mounted. Here a `pg_wal/` that cannot be emptied cuts the
-    /// removal short, and APFS lists it before `PG_VERSION`.
+    /// removal short. APFS lists it before `PG_VERSION`, so on a Mac the test
+    /// fails without the fix; where `pg_wal/` is listed later it passes either
+    /// way.
     #[cfg(unix)]
     #[test]
     fn a_removal_cut_short_leaves_no_pg_version() {
@@ -3497,7 +3500,12 @@ esac
     /// server ran on is kept unmarked.
     #[test]
     fn a_directory_that_lost_an_initdb_file_and_may_hold_a_database_is_kept() {
-        for fixture in ["base/16384", "pg_tblspc/16385", "no base", "postmaster.opts"] {
+        for fixture in [
+            "base/16384",
+            "pg_tblspc/16385",
+            "no base",
+            "postmaster.opts",
+        ] {
             let dir = tempfile::tempdir().unwrap();
             let data = dir.path().join("data");
             unfinished(&data);
@@ -3505,7 +3513,9 @@ esac
             std::fs::remove_file(data.join("postgresql.conf")).unwrap();
             match fixture {
                 "no base" => std::fs::remove_dir_all(data.join("base")).unwrap(),
-                "postmaster.opts" => drop(write(&data, fixture, "postgres -D data\n")),
+                "postmaster.opts" => {
+                    write(&data, fixture, "postgres -D data\n");
+                }
                 database => std::fs::create_dir_all(data.join(database)).unwrap(),
             }
 
