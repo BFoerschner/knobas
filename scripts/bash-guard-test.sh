@@ -20,6 +20,11 @@ check() { # check <pass|refuse> <command>
     [ "$status" -eq 0 ] || [ "$status" -eq 2 ] || got="exit $status"
     [ "$got" = "$want" ] || fail "wanted $want, got $got: $command"
 }
+says() { # says <the start of a rule's message> <command>: refused with that rule's message
+    local want=$1 command=$2 err status=0
+    err=$(call "$command" | python3 -I "$guard" 2>&1 >/dev/null) || status=$?
+    case "$status $err" in "2 bash-guard: $want"*) ;; *) fail "wanted \"$want\", got $status $err: $command" ;; esac
+}
 
 # cd
 check refuse 'cd /tmp && ls'
@@ -148,6 +153,27 @@ check pass $'cat <<\\EOF\n$(cd x && pwd)\nEOF'
 check pass $'cat <<EOF\n\\$(cd x && pwd)\nEOF'
 check pass $'cat <<EOF\nroot: $(git rev-parse --show-toplevel)\nEOF'
 check pass $'cat > /tmp/y <<EOF\n$(cat ./.git/HEAD)\nEOF'
+
+# a redirection before the name is no name: the word after it is (#1981)
+cd_rule='`cd` chained' rm_rule='`rm` with a glob' write_rule='A Bash write under'
+says "$cd_rule" '>/dev/null cd /tmp && ls'
+says "$cd_rule" '2>/dev/null cd /tmp && ls'
+says "$cd_rule" '</dev/null cd /tmp && ls'
+says "$cd_rule" '{ >/dev/null cd /tmp; ls; }'
+says "$cd_rule" 'if >/dev/null cd /tmp; then ls; fi'
+says "$cd_rule" '&>/dev/null cd /tmp && ls'
+says "$rm_rule" '>/dev/null rm -f *.png'
+says "$write_rule" '2>&1 sed -i s/a/b/ ~/.zshrc'
+says "$write_rule" '</dev/null cp x ~/.claude/settings.json'
+says "$write_rule" '2> .git/x ls'
+says "$cd_rule" 'cd /tmp 2>/dev/null && ls'
+check pass 'cd /tmp 2>/dev/null'
+check pass '>/dev/null cd /tmp'
+check pass 'ls &>/dev/null'
+check pass 'cd /tmp &>/dev/null'
+check pass 'exec >/dev/null 2>&1'
+check pass 'diff <(ls a) <(ls b) 2>&1'
+check pass "echo '>.git/x'"
 
 # shell configuration
 check refuse 'echo export X=1 >> ~/.bashrc'

@@ -78,6 +78,8 @@ class Word:
         self.expands = False  # a `$` or backquote outside single quotes
         self.globs = False  # `*`, `?` or `[` outside any quotes
         self.subs = []  # one list of commands per `$(...)` or backquote in the word
+        self.redirect = False  # a redirection, its target the rest of the text: `>x`, `<x`, `<<<x`
+        self.body = None  # a heredoc's body, on the word that stands for it
 
 
 class Parser:
@@ -156,6 +158,30 @@ class Parser:
                     commands[-1].append(expression)
                     i = j
                     continue
+            if s.startswith("<<<", i):  # a here-string: the next word is its text
+                end_word()
+                word = self.redirection(i + 3, "<<<")
+                i = self.blanks(i + 3)
+                continue
+            if s.startswith("<<", i):
+                end_word()
+                i = self.heredoc(i + 2, commands[-1])
+                continue
+            if (c in "<>" and not s.startswith("(", i + 1)) or s.startswith("&>", i):
+                # `2>` and `{fd}>` are no words of the command; a digit
+                # quoted or glued to more text is (`a2>x` is the word `a2`).
+                if word is not None and re.fullmatch(r"[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\}", word.text) \
+                        and s.endswith(word.text, 0, i):
+                    word = None
+                end_word()
+                j = i + (c == "&")
+                writes = s[j] == ">" or s.startswith("<>", j)
+                j += 1
+                while j < len(s) and s[j] in ">&|":
+                    j += 1
+                word = self.redirection(j, ">" if writes else "<")
+                i = self.blanks(j)
+                continue
             if c in ";|&()":
                 if c == "(":
                     parens += 1
@@ -168,21 +194,6 @@ class Parser:
                 end_word()
                 i += 1
                 continue
-            if s.startswith("<<", i):  # `<<<`, a here-string, reads an empty delimiter: no heredoc
-                end_word()
-                i = self.heredoc(i + 2, commands[-1])
-                continue
-            if c == ">":
-                end_word()
-                j = i
-                while j < len(s) and s[j] in ">&|":
-                    j += 1
-                word = Word()
-                word.text = ">"
-                i = j
-                while i < len(s) and s[i] in " \t":
-                    i += 1
-                continue
             w = current()
             if c == "$":
                 w.expands = True
@@ -192,6 +203,19 @@ class Parser:
             i += 1
         end_word()
         return [cmd for cmd in commands if cmd], i
+
+    @staticmethod
+    def redirection(i, text):
+        """A redirection's word, its target still to be read into it."""
+        word = Word()
+        word.redirect, word.text = True, text
+        return word
+
+    def blanks(self, i):
+        """The index past the blanks at `i`."""
+        while i < len(self.s) and self.s[i] in " \t":
+            i += 1
+        return i
 
     def double_quoted(self, i, word):
         """Read a double-quoted string from `i` (past the quote) into `word`; the index past the closing quote."""
@@ -361,6 +385,9 @@ def name_and_args(words):
     i = 0
     while i < len(words):
         text = words[i].text
+        if words[i].redirect:  # `>/dev/null cd x`: the name comes after
+            i += 1
+            continue
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", text):
             i += 1
             continue
@@ -388,7 +415,7 @@ def name_and_args(words):
         break
     if i >= len(words):
         return None, []
-    return words[i].text.rsplit("/", 1)[-1], words[i + 1:]
+    return words[i].text.rsplit("/", 1)[-1], [w for w in words[i + 1:] if not w.redirect]
 
 
 def script_of(name, args):
@@ -466,7 +493,7 @@ def verdict(command):
                             f"(`{a.text}`). Name each file, or leave them.")
         writes = name in WRITERS or (name in IN_PLACE and any(re.match(IN_PLACE[name], a.text) for a in args))
         targets = [a.text for a in args if not a.text.startswith("-")] if writes else []
-        targets += [a.text[1:] for a in words if a.text.startswith(">") and len(a.text) > 1]
+        targets += [a.text[1:] for a in words if a.redirect and a.text.startswith(">") and len(a.text) > 1]
         for t in targets:
             why = protected(t)
             if why:
