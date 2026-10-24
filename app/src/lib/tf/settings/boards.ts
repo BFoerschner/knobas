@@ -10,6 +10,7 @@
  * that declares the section; the page draws it for whichever adapter does.
  */
 import type { SavedViewSource, TicketViewRow, UnsyncedTickets } from "../../ipc/search";
+import type { SourceDescriptor } from "../../ipc/sources";
 
 /** The section's name in an adapter's schema. */
 export const BOARDS_SECTION = "boards-and-filters";
@@ -30,6 +31,19 @@ export const BOARD_SCOPES: readonly (readonly [BoardScope, string])[] = [
 
 function field(config: unknown, key: string): unknown {
   return typeof config === "object" && config !== null ? (config as Record<string, unknown>)[key] : undefined;
+}
+
+/**
+ * The ticket system an adapter's saved views come from (#2032): the declared
+ * `system_name` of the first kind it emits that declares the saved-view frame,
+ * else the adapter's name. A restatement of `knobas_sync::saved_views::declared`,
+ * the authority, which names the views' groups and their rows' `system` the same way.
+ */
+export function savedViewSystem(adapter: Pick<SourceDescriptor, "name" | "entity_kinds" | "payload_paths">): string {
+  const first = adapter.payload_paths.find(
+    (paths) => paths.frame === "saved_view" && adapter.entity_kinds.some((kind) => kind.id === paths.kind),
+  );
+  return first?.system_name ?? adapter.name;
 }
 
 /** The stored choice; one the config leaves out, or does not know, is the default (D17). */

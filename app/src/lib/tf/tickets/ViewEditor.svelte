@@ -54,7 +54,7 @@
   } from "./editor";
   import { columnName, LANE_FIELDS, splitLanes } from "./tickets";
   import { counted } from "../counted";
-  import { copyKeeps, drawnJiraColumns, LIST_COLUMN_ORDER, savedViewKindWords, type CopiedFrom } from "./views";
+  import { copyKeeps, drawnSavedViewColumns, LIST_COLUMN_ORDER, savedViewKindWords, systemsWords, type CopiedFrom } from "./views";
 
   let {
     draft,
@@ -71,7 +71,10 @@
     copiedFrom = null,
     oncopy,
     copy = null,
+    systems = [],
   }: {
+    /** The ticket systems the saved views come from (#2032): what a view of your own is never sent to. */
+    systems?: readonly string[];
     /**
      * The saved view's query as its source reads it (#1208), for *A copy
      * keeps …*; `null` until it answers, and for a source that does not.
@@ -134,7 +137,7 @@
   /** *Which tickets* on a Jira view: where Jira's answer comes from, in prototype-6's words. */
   const decidesLine = $derived.by(() => {
     if (fixedSource === null) return "";
-    return `Jira decides, from the ${savedViewKindWords(fixedSource)}`;
+    return `${fixedSource.system} decides, from the ${savedViewKindWords(fixedSource)}`;
   });
   /** How much of a Jira view's query a copy would keep (#880). */
   const keepsLine = $derived.by(() => {
@@ -304,7 +307,7 @@
   const shown = $derived(
     answer === null
       ? null
-      : previewBoard(answer.columns, fixedSource !== null ? drawnJiraColumns(start.columns) : (columns ?? [])),
+      : previewBoard(answer.columns, fixedSource !== null ? drawnSavedViewColumns(start.columns) : (columns ?? [])),
   );
   const laneCount = $derived(
     answer === null || !laned
@@ -366,15 +369,15 @@
           <section class="tf-vw-sec">
             <h3>Which tickets</h3>
             <p>
-              {decidesLine} <b>{start.name}</b>. knobas runs its query at every sync and keeps Jira's order.{#if fixedSource.sprint}
-                Like the board in Jira, it shows the active sprint, now {fixedSource.sprint.name}, and moves on to the next
+              {decidesLine} <b>{start.name}</b>. knobas runs its query at every sync and keeps {fixedSource.system}'s order.{#if fixedSource.sprint}
+                Like the board in {fixedSource.system}, it shows the active sprint, now {fixedSource.sprint.name}, and moves on to the next
                 sprint when this one closes.{/if}
             </p>
             <pre class="tf-vw-source-query">{fixedSource.source_query}{#if fixedSource.sub_query}{"\n"}{fixedSource.sub_query}{/if}</pre>
             <!-- A source that does not translate its query (#1208) offers no copy, so the line does not either. -->
             <p class="tf-dim">
-              {#if oncopy}To change which tickets it holds, change it in Jira, or make your own copy. {keepsLine}{:else}To
-                change which tickets it holds, change it in Jira.{/if}
+              {#if oncopy}To change which tickets it holds, change it in {fixedSource.system}, or make your own copy. {keepsLine}{:else}To
+                change which tickets it holds, change it in {fixedSource.system}.{/if}
             </p>
             {#if oncopy}
               <div class="tf-vw-btns">
@@ -410,7 +413,7 @@
           <h3>Which tickets</h3>
           {#if copiedFrom !== null}
             <p class="tf-vw-from">
-              Copied from the Jira {copiedFrom.kind} <b>{copiedFrom.name}</b>. It no longer follows Jira.{#if copiedFrom.left.length > 0}{" "}Left out, because knobas cannot test {copiedFrom.left.length > 1 ? "them" : "it"}:
+              Copied from the {copiedFrom.system} {copiedFrom.kind} <b>{copiedFrom.name}</b>. It no longer follows {copiedFrom.system}.{#if copiedFrom.left.length > 0}{" "}Left out, because knobas cannot test {copiedFrom.left.length > 1 ? "them" : "it"}:
                 {#each copiedFrom.left as part, i (i)}{i > 0 ? ", " : ""}<code class="tf-mono">{part.clause}</code>
                   ({part.reason}){/each}.{/if}
             </p>
@@ -496,7 +499,7 @@
             <div class="tf-vw-sub">
               <h4>Columns</h4>
               {#if fixedSource !== null}
-                <p class="tf-dim">The columns come from the board in Jira and change when someone changes them there.</p>
+                <p class="tf-dim">The columns come from the board in {fixedSource.system} and change when someone changes them there.</p>
               {:else}
                 <p class="tf-dim">
                   Each status sits on one column. A column can hold several. First in this list is leftmost on the board.
@@ -691,8 +694,10 @@
     {/if}
     <span class="tf-first tf-dim tf-vw-store"
       >{fixedSource !== null
-        ? "Only how it looks here. Jira still decides which tickets."
-        : "Kept in knobas. Jira never sees it."}</span
+        ? `Only how it looks here. ${fixedSource.system} still decides which tickets.`
+        : systems.length === 0
+          ? "Kept in knobas. No source sees it."
+          : `Kept in knobas. ${systemsWords(systems)} ${systems.length > 1 ? "never see" : "never sees"} it.`}</span
     >
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-vw-form-{uid}" disabled={!named || saving}>{saveLabel}</button>

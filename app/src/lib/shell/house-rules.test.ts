@@ -601,6 +601,49 @@ test("no page under the ticket-first shell drops rows by source", () => {
 });
 
 /**
+ * A saved view's words name the ticket system it comes from (#2032, spec
+ * #1192 story 7): its row's `saved_view_source.system`, or the adapter's
+ * declaration on Settings' *Boards and filters*, never the word *Jira*
+ * spelled in the shell. A second ticket system's views would otherwise be
+ * told "Jira decides" and offered *Open in Jira*.
+ *
+ * Scanned with comments removed, so markup text and string literals count
+ * and the prose explaining Jira's case does not: a component's markup by
+ * `markupOf` and its scripts by `codeOf`, apart, since an apostrophe in
+ * markup text (*a ticket system's boards*) would open a string for `codeOf`
+ * that runs on over the next HTML comment. Tests are out: a fixture may be
+ * Jira's.
+ */
+const NAMES_JIRA = /jira/i;
+
+function drawnText(text: string, file: string): string {
+  if (!file.endsWith(".svelte")) return codeOf(text);
+  const scripts = [...text.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((match) => match[1]!);
+  return [markupOf(text), ...scripts.map(codeOf)].join("\n");
+}
+const SAVED_VIEW_WORDS = [join(TF_DIR, "tickets"), join(TF_DIR, "settings", "TfBoardsAndFilters.svelte")];
+
+test("the Jira rule reads markup and strings, not comments", () => {
+  const svelte = (script: string, markup: string) => drawnText(`<script lang="ts">${script}</script>\n${markup}`, "A.svelte");
+  expect(NAMES_JIRA.test(svelte("", "<p>Open in Jira</p>"))).toBe(true);
+  expect(NAMES_JIRA.test(svelte('const done = "The next Jira sync";', ""))).toBe(true);
+  expect(NAMES_JIRA.test(drawnText('export const DONE = "The next Jira sync";', "a.ts"))).toBe(true);
+  expect(NAMES_JIRA.test(svelte("// Jira's order\n/** Jira */", "<p>a ticket system's boards</p>\n<!-- a Jira view's line -->\n<p>{system}</p>"))).toBe(false);
+});
+
+test("no saved-view surface names Jira in what it draws", () => {
+  expect(
+    offenders(
+      (text, file) =>
+        SAVED_VIEW_WORDS.some((path) => file === path || file.startsWith(path + sep)) &&
+        !/\.test\.(svelte\.)?ts$/.test(file) &&
+        NAMES_JIRA.test(drawnText(text, file)),
+    ),
+    "draw the saved view's source (`saved_view_source.system`), not the word Jira",
+  ).toEqual([]);
+});
+
+/**
  * An entity id's key is `keyOf` (`lib/time/format.ts`), never a slice past
  * its first colon written in place (#1986). Eight copies survived #1678's
  * grep for `function keyOf`, written inline or under another name

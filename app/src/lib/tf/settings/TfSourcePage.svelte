@@ -54,7 +54,7 @@
   import { connectionLine, connectionNote, failedReport } from "../../sources/connection";
   import { DEFAULT_MIN_SYNC_INTERVAL_SECS } from "../../sources/new-source";
   import { declaresSection, validate } from "../../sources/schema-form";
-  import { BOARDS_SECTION } from "./boards";
+  import { BOARDS_SECTION, savedViewSystem } from "./boards";
   import TfBoardsAndFilters from "./TfBoardsAndFilters.svelte";
   import { push } from "../../shell/toasts.svelte";
   import type { Layers } from "../layers.svelte";
@@ -207,6 +207,8 @@
   const config = $derived(adapter === null ? { fields: [], error: null } : pageFields(adapter.config_schema));
   /** *Boards and filters* (#878): drawn for an adapter whose schema declares it. */
   const boardsSection = $derived(adapter !== null && declaresSection(adapter.config_schema, BOARDS_SECTION));
+  /** The ticket system its views come from, which the section names (#2032). */
+  const boardsSystem = $derived(adapter === null ? "" : savedViewSystem(adapter));
   let configValues = $state<Record<string, unknown>>({});
   /** The config the form was read from, validated as the form validates it. */
   let configLoaded = $state<Record<string, unknown>>({});
@@ -620,6 +622,7 @@
 {#if boardsSection}
   <TfBoardsAndFilters
     {source}
+    system={boardsSystem}
     {ports}
     {saving}
     {finished}

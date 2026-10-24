@@ -10,10 +10,12 @@ import {
   draftFromFilter,
   draftSavedViewCopy,
   draftRestore,
-  drawnJiraColumns,
+  drawnSavedViewColumns,
   groupViews,
   hiddenViews,
   savedViewKindWords,
+  savedViewSystems,
+  systemsWords,
   savedShowing,
   sprintEnds,
   translationText,
@@ -134,6 +136,7 @@ test("Jira boards and Jira filters come after every group of your own, and a Jir
 function savedViewOf(sourceQuery: string, extra: Partial<SavedViewSource> = {}): SavedViewSource {
   return {
     kind: "board",
+    system: "Jira",
     board_type: "scrum",
     source_query: sourceQuery,
     sub_query: null,
@@ -146,6 +149,38 @@ function savedViewOf(sourceQuery: string, extra: Partial<SavedViewSource> = {}):
     ...extra,
   };
 }
+
+test("a second ticket system's views come last by their source, and a group of your own is yours whatever it is called (#2032)", () => {
+  const views = [
+    row("triage", "Kestrel filters", 0, {
+      saved_view_source: savedViewOf("assignee: me", { kind: "filter", system: "Kestrel" }),
+      saved_view: "kestrel:filter-7",
+    }),
+    row("fix", "Jira filters", 1, { saved_view_source: savedViewOf("fixVersion is EMPTY", { kind: "filter" }), saved_view: "jira:filter-1" }),
+    row("cus", "Jira boards", 2, { saved_view_source: savedViewOf("project = CUS"), saved_view: "jira:board-31" }),
+    // A group somebody typed that reads like a synced one is still theirs.
+    row("lookalike", "Jira boards of mine", 3),
+    row("named", "Kestrel boards", 4),
+    row("mine", "Mine", 5),
+  ];
+  expect(groupViews(views, "").map((group) => [group.name, group.system])).toEqual([
+    ["Mine", null],
+    ["Jira boards of mine", null],
+    ["Kestrel boards", null],
+    // Each system's boards before its filters, the systems in the order their first view sits.
+    ["Kestrel filters", "Kestrel"],
+    ["Jira boards", "Jira"],
+    ["Jira filters", "Jira"],
+  ]);
+  expect(savedViewSystems(views)).toEqual(["Kestrel", "Jira"]);
+  expect(savedViewSystems(views.filter((view) => view.saved_view_source === null))).toEqual([]);
+});
+
+test("ticket systems are named in a list a sentence can hold (#2032)", () => {
+  expect(systemsWords(["Jira"])).toBe("Jira");
+  expect(systemsWords(["Jira", "Kestrel"])).toBe("Jira and Kestrel");
+  expect(systemsWords(["Jira", "Kestrel", "Plover"])).toBe("Jira, Kestrel and Plover");
+});
 
 test("a hidden Jira view leaves its group and is listed apart, in list order (#878, R-3.25)", () => {
   const views = [
@@ -164,19 +199,20 @@ test("a Jira view's columns are drawn by their own names, keeping Jira's order a
     { name: "Doing", statuses: ["In Progress", "In Review"], limit: 3 },
     { name: "Done", statuses: ["Done"], limit: null },
   ];
-  expect(drawnJiraColumns(own)).toEqual([
+  expect(drawnSavedViewColumns(own)).toEqual([
     { name: "Doing", statuses: ["Doing"], limit: 3 },
     { name: "Done", statuses: ["Done"], limit: null },
   ]);
   const board = [
     { status: "Doing", cards: [card("PAY-2", "2026-08-01T00:00:00Z"), card("PAY-1", "2026-08-09T00:00:00Z")], total: 2 },
   ];
-  expect(viewColumns(board, drawnJiraColumns(own))[0]!.cards.map((c) => c.key)).toEqual(["PAY-2", "PAY-1"]);
+  expect(viewColumns(board, drawnSavedViewColumns(own))[0]!.cards.map((c) => c.key)).toEqual(["PAY-2", "PAY-1"]);
 });
 
 test("Make an editable copy starts a view of your own from the Jira view: its conditions, Jira's columns, what it left out", () => {
   const savedViewSource = {
     kind: "board" as const,
+    system: "Jira",
     board_type: "kanban",
     source_query: "project in (OPS, WEB) AND component = on-call ORDER BY priority DESC",
     sub_query: null,
@@ -203,6 +239,7 @@ test("Make an editable copy starts a view of your own from the Jira view: its co
   expect(draft.columns).not.toBe(columns);
   expect(from).toEqual({
     kind: "board",
+    system: "Jira",
     name: "Platform on-call",
     left: [{ clause: "component = on-call", reason: "knobas does not sync components" }],
   });

@@ -128,11 +128,12 @@
     draftSavedViewCopy,
     draftNew,
     draftRestore,
-    drawnJiraColumns,
+    drawnSavedViewColumns,
     groupViews,
     hiddenViews,
-    JIRA_GROUPS,
     savedViewSourceId,
+    savedViewSystems,
+    systemsWords,
     LIST_COLUMN_ORDER,
     OWN_GROUPS,
     savedShowing,
@@ -254,7 +255,9 @@
   const sessionKey = $derived(viewId ?? "");
   /** The saved view the board reads (#877), or `null`: its source decides its tickets and their order. */
   const savedViewId = $derived(view?.saved_view_source ? view.saved_view : null);
-  /** Where *Choose which* goes: the first Jira view's source, else the sources. */
+  /** The ticket systems the saved views come from (#2032), for the list's foot and a view of your own. */
+  const systems = $derived(savedViewSystems(views ?? []));
+  /** Where *Choose which* goes: the first saved view's source, else the sources. */
   const savedViewSettingsHref = $derived.by(() => {
     const ref = (views ?? []).find((row) => row.saved_view_source !== null)?.saved_view;
     return ref ? sourceHash(savedViewSourceId(ref)) : "#/settings";
@@ -269,7 +272,7 @@
 
   const saved = $derived(savedShowing(view ?? null));
   /** The view's own columns, which gather the board's statuses (R-3.15). */
-  const ownColumns = $derived(savedViewId !== null ? drawnJiraColumns(view?.columns ?? []) : (view?.columns ?? []));
+  const ownColumns = $derived(savedViewId !== null ? drawnSavedViewColumns(view?.columns ?? []) : (view?.columns ?? []));
 
   // ---- the board: its reads are the reader's (#1319) ----
   // svelte-ignore state_referenced_locally
@@ -553,9 +556,7 @@
       {/if}
       {#each groups as group (group.name)}
         <h2>
-          {group.name}{#if (JIRA_GROUPS as readonly string[]).includes(group.name)}{" "}<span class="tf-vw-sync"
-              >from the Jira source</span
-            >{/if}
+          {group.name}{#if group.system !== null}{" "}<span class="tf-vw-sync">from the {group.system} source</span>{/if}
         </h2>
         {#each group.views as row (row.id)}
           <div class="tf-vw-row">
@@ -600,7 +601,10 @@
         {/if}
       {/if}
       <p class="tf-vw-foot">
-        Boards and favourite filters come in with the Jira source at every sync. <a href={savedViewSettingsHref}>Choose which</a>
+        {#if systems.length === 0}A ticket system's boards and favourite filters come in at every sync.{:else}Boards and favourite
+          filters come in with the {systemsWords(systems)}
+          {systems.length > 1 ? "sources" : "source"} at every sync.{/if}
+        <a href={savedViewSettingsHref}>Choose which</a>
       </p>
     </div>
   </nav>
@@ -823,6 +827,7 @@
       editing={editing !== null}
       unreadable={editing?.unreadable ?? null}
       groups={groupNames}
+      {systems}
       fields={suggested?.fields ?? []}
       parents={suggested?.parents ?? []}
       savedViewSource={editing?.saved_view_source ?? null}
