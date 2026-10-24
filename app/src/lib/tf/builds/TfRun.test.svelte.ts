@@ -978,10 +978,12 @@ test("after a reload, a ticket the owed read links as it answers is drawn, and C
   // Mirrored, not linked yet: the end of the sync has not resolved it, and the owed read does.
   let links: LinkEntry[] = [];
   draw("teamcity:build:1187", undefined, {
-    owedTickets: () => {
-      links = [ticketLink("PAY-342", FILED_TITLE)];
-      return Promise.resolve([]);
-    },
+    // The link is drawn as the read answers, not as it is asked.
+    owedTickets: () =>
+      Promise.resolve().then(() => {
+        links = [ticketLink("PAY-342", FILED_TITLE)];
+        return [];
+      }),
     links: () => Promise.resolve(links),
   });
   await settle();
