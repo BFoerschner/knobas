@@ -53,6 +53,8 @@ The three specs: **#1618** (walks and queues that assume the remote stays still)
 
 **If you disagree, the cost of reversing this is:** one line per adapter and the walk's comment; a keyset walk is a new paging protocol in `knobas-http` with its own §10.8 entry.
 
+*Amended by #1979 (2026-10-24): a deletion is no longer turned into a failed run.* The Jira and Confluence walks ask each page from the last record read, so a deletion hides nothing (A5's amendment below); Gitea's full sync lists twice.
+
 ### A2 — A 401-waiting write
 
 **The fork:** skip a write whose last attempt answered 401 until the credential changes, or put it on the sync side's backoff ladder.
