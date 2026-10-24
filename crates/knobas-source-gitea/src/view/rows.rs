@@ -9,7 +9,7 @@
 
 use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
-use knobas_source::view::{Tone, ViewRow};
+use knobas_source::view::{Block, Tone, ViewRow};
 
 use crate::model::{Commit, Repo};
 use crate::source::GiteaSource;
@@ -427,6 +427,23 @@ where
     })
     .await?;
     Ok(done.into_iter().flatten().collect())
+}
+
+/// One muted line standing where something could not be read, saying why:
+/// a pull request's checks (#710) or its comments (#2042).
+pub(super) fn muted_line(title: String) -> Block {
+    Block::Entities {
+        title: None,
+        rows: vec![ViewRow {
+            entity_id: None,
+            title,
+            meta: None,
+            tone: Some(Tone::Muted),
+            chip: None,
+            url: None,
+            commit: None,
+        }],
+    }
 }
 
 #[cfg(test)]

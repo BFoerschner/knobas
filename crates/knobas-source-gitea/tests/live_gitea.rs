@@ -6251,3 +6251,243 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
         "an account without push is told so"
     );
 }
+
+// -- what the token may not read (issue #2042) --------------------------------
+
+/// Issue #2042, spec #1192 story 10, against the real server: a token minted
+/// with `read:repository` and `read:user` alone reads the repository, a
+/// branch, a commit, a file and a pull request's view, every tab drawn. What
+/// it is refused is what Gitea keeps on the issue of the same index: the
+/// pull request's *Conversation* opens on a line naming `read:issue` and
+/// draws the reviews without the comments; *Add label…* says the token cannot
+/// write there (#2030's reason, which takes the place of the labels read's).
+/// A full sync on the same token completes and mirrors the pull request
+/// without its discussion (`sync::discussion`'s 403). A second token, which
+/// may write issues and not read the organisation, is told on *Add label…*
+/// that it lacks `read:organization`.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_token_that_may_not_read_issues_reads_every_view_but_the_discussion() {
+    use knobas_source::view::{Block, Tone};
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let api = format!("{}/api/v1", env.url);
+    let auth = format!("token {}", env.token);
+    let (admin, password) = TESTENV_ADMIN;
+    let names = ["knobas-live-2042-read", "knobas-live-2042-org"];
+    let remove = async || {
+        for name in names {
+            let _ = http
+                .delete(format!("{api}/users/{admin}/tokens/{name}"))
+                .basic_auth(admin, Some(password))
+                .send()
+                .await;
+        }
+    };
+    remove().await;
+    let mint = async |name: &str, scopes: &[&str]| -> serde_json::Value {
+        http.post(format!("{api}/users/{admin}/tokens"))
+            .basic_auth(admin, Some(password))
+            .json(&serde_json::json!({ "name": name, "scopes": scopes }))
+            .send()
+            .await
+            .expect("mint a token")
+            .json()
+            .await
+            .expect("the token record")
+    };
+    let minted = mint(names[0], &["read:repository", "read:user"]).await;
+    let token = minted["sha1"].as_str().unwrap_or_default().to_owned();
+    let minted_org = mint(names[1], &["read:repository", "write:issue", "read:user"]).await;
+    let org_token = minted_org["sha1"].as_str().unwrap_or_default().to_owned();
+
+    let full = env.full_name();
+    let pulls: serde_json::Value = http
+        .get(format!("{api}/repos/{full}/pulls?state=open&limit=50"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET the open pull requests")
+        .json()
+        .await
+        .expect("a pull request listing");
+    let sepa = pulls
+        .as_array()
+        .and_then(|p| {
+            p.iter()
+                .find(|p| p["title"] == "SEPA retry with exponential backoff")
+        })
+        .expect("the seed opens the SEPA retry pull request")
+        .clone();
+    let number = sepa["number"].as_u64().expect("a number");
+    // The comments the token may not read, as the seed's token reads them.
+    let said: Vec<serde_json::Value> = http
+        .get(format!("{api}/repos/{full}/issues/{number}/comments"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET the discussion")
+        .json()
+        .await
+        .expect("a comment listing");
+    // And what the token is answered there, before knobas reads it.
+    let refused = http
+        .get(format!("{api}/repos/{full}/issues/{number}/comments"))
+        .header("Authorization", format!("token {token}"))
+        .send()
+        .await
+        .expect("GET the discussion on the minted token");
+    let refused = (
+        refused.status().as_u16(),
+        refused.text().await.unwrap_or_default(),
+    );
+
+    let head = sepa["head"]["ref"].as_str().expect("a head").to_owned();
+    let sha = sepa["head"]["sha"].as_str().expect("a head sha").to_owned();
+    let (owner, repo) = (env.owner.as_str(), env.repo.as_str());
+    let id = |key: String| format!("gitea:{key}");
+    let pr = id(knobas_source_gitea::keys::pr_key(owner, repo, number));
+    let asked = [
+        (id(knobas_source_gitea::keys::repo_key(owner, repo)), None),
+        (
+            id(knobas_source_gitea::keys::repo_key(owner, repo)),
+            Some("file:README.md"),
+        ),
+        (
+            id(knobas_source_gitea::keys::branch_key(owner, repo, &head)),
+            None,
+        ),
+        (
+            id(knobas_source_gitea::keys::commit_key(owner, repo, &sha)),
+            None,
+        ),
+        (pr.clone(), None),
+        (pr.clone(), Some("files")),
+        (pr.clone(), Some("commits")),
+        (pr.clone(), Some("conversation")),
+    ];
+    let config = serde_json::json!({ "repos": [full] });
+    let narrow = env.source_with(&token, config.clone());
+    let orgless = env.source_with(&org_token, config.clone());
+    let wide = env.source(config);
+    let mut seen = Vec::new();
+    for (entity, section) in &asked {
+        let (a, b) = tokio::join!(narrow.view(entity, *section), wide.view(entity, *section));
+        seen.push((format!("{entity} {section:?}"), a, b));
+    }
+    let orgless = orgless.view(&pr, None).await;
+    let mut sink = VecSink(Vec::new());
+    let synced = narrow.sync(None, &mut sink).await;
+
+    remove().await;
+
+    assert!(!token.is_empty(), "a token was minted: {minted}");
+    assert!(!org_token.is_empty(), "a token was minted: {minted_org}");
+    assert_eq!(refused.0, 403, "the premise: {refused:?}");
+    assert!(
+        refused.1.contains("read:issue"),
+        "the premise: refused for the issue scope: {refused:?}"
+    );
+    assert!(
+        !said.is_empty(),
+        "the seed comments on the SEPA pull request"
+    );
+    let note = "This token cannot read this pull request's comments: it lacks the read:issue scope";
+    for (asked, narrow, wide) in seen {
+        let narrow = narrow
+            .unwrap_or_else(|e| panic!("the token reads {asked}: {e:?}"))
+            .expect("drawn");
+        let wide = wide
+            .unwrap_or_else(|e| panic!("the seed's token reads {asked}: {e:?}"))
+            .expect("drawn");
+        let ids = |v: &knobas_source::view::SourceView| {
+            v.sections.iter().map(|s| s.id.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&narrow), ids(&wide), "{asked}: every tab is drawn");
+        for (n, w) in narrow.sections.iter().zip(&wide.sections) {
+            if n.id != "conversation" || !asked.starts_with(&pr) {
+                assert_eq!(
+                    (n.count, n.blocks.len()),
+                    (w.count, w.blocks.len()),
+                    "{asked}: {} reads as the seed's token reads it",
+                    n.id
+                );
+                continue;
+            }
+            println!("LIVE {asked}: conversation {:?}", n.blocks.first());
+            let Some(Block::Entities { title: None, rows }) = n.blocks.first() else {
+                panic!("{asked}: the tab opens on the line: {n:#?}");
+            };
+            let drawn: Vec<_> = rows.iter().map(|r| (r.title.as_str(), r.tone)).collect();
+            assert_eq!(drawn, [(note, Some(Tone::Muted))], "{asked}");
+            assert_eq!(
+                n.count.map(|c| c + said.len() as u64),
+                w.count,
+                "{asked}: the reviews, and none of the {} comments",
+                said.len()
+            );
+        }
+        if asked == format!("{pr} None") {
+            let label = narrow
+                .actions
+                .iter()
+                .find(|a| a.label == "Add label…")
+                .expect("Add label… is drawn");
+            println!("LIVE {asked}: Add label… {:?}", label.disabled);
+            assert_eq!(
+                label.disabled.as_deref(),
+                Some("This token cannot write: it lacks the write:issue scope"),
+                "{asked}"
+            );
+        }
+    }
+
+    let orgless = orgless
+        .expect("a token that may not read the organisation reads the pull request")
+        .expect("drawn");
+    let label = orgless
+        .actions
+        .iter()
+        .find(|a| a.label == "Add label…")
+        .expect("Add label… is drawn");
+    println!(
+        "LIVE {pr} without read:organization: Add label… {:?}",
+        label.disabled
+    );
+    assert_eq!(
+        label.disabled.as_deref(),
+        Some(
+            "This token cannot read its organisation's labels: it lacks the read:organization scope"
+        ),
+    );
+    let conversation = orgless
+        .sections
+        .iter()
+        .find(|s| s.id == "conversation")
+        .expect("a conversation");
+    assert!(
+        !matches!(conversation.blocks.first(), Some(Block::Entities { .. })),
+        "a token that may read issues reads the comments: {conversation:#?}"
+    );
+
+    let cursor = synced.expect("a full sync on a token that may not read issues completes");
+    assert!(!cursor.is_empty(), "the run ends on a cursor");
+    let prs = of_kind(&sink.0, "pr");
+    let mirrored = prs
+        .iter()
+        .find(|i| i.title == "SEPA retry with exponential backoff")
+        .expect("the SEPA pull request is mirrored");
+    let first = said[0]["body"].as_str().expect("a comment's text");
+    assert!(
+        !mirrored.body_text.contains(first),
+        "mirrored without its discussion: {:?}",
+        mirrored.body_text
+    );
+    assert!(
+        of_kind(&sink.0, "ticket").is_empty(),
+        "the issue listing is refused too, and skipped"
+    );
+}
