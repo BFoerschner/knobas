@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::support::{InFlight, TOKEN, instance};
+use crate::support::{InFlight, TOKEN, instance, write_probe};
 
 const REPO: &str = "/api/v1/repos/tidewater/payout-service";
 /// The owning organisation's labels (#1235).
@@ -2726,20 +2726,6 @@ async fn add_label_tells_a_same_named_organisation_label_apart() {
 
 const SCOPE_REFUSAL: &str = "token does not have at least one of required scope(s)";
 
-/// Gitea's answer to the write `probe` names, sent with an empty body: the
-/// branch write (`write:repository`) or the issue write (`write:issue`).
-async fn probe(server: &MockServer, probe: &str, status: u16, message: &str) {
-    Mock::given(method("POST"))
-        .and(path(format!("{REPO}/{probe}")))
-        .and(wiremock::matchers::body_json(json!({})))
-        .respond_with(ResponseTemplate::new(status).set_body_json(json!({
-            "message": message,
-            "url": "http://gitea/api/swagger",
-        })))
-        .mount(server)
-        .await;
-}
-
 /// Each toolbar action's label and reason, the ones in `refused` replaced by
 /// `reason` and every other as `drawn` has it.
 fn expected(drawn: &SourceView, refused: &[&str], reason: &str) -> Vec<(String, Option<String>)> {
@@ -2775,11 +2761,20 @@ async fn what_the_token_may_not_write_is_drawn_disabled_saying_why() {
     let plain = gitea(open_pull(), reviews()).await;
     let drawn = source(&plain).view(PR, None).await.unwrap().unwrap();
     let labels: Vec<&str> = drawn.actions.iter().map(|a| a.label.as_str()).collect();
-    assert!(labels.contains(&"Comment…") && labels.contains(&"Merge…"), "{labels:?}");
+    assert!(
+        labels.contains(&"Comment…") && labels.contains(&"Merge…"),
+        "{labels:?}"
+    );
 
     let no_issue = gitea(open_pull(), reviews()).await;
-    probe(&no_issue, "branches", 422, "[BranchName]: Required").await;
-    probe(&no_issue, "issues", 403, SCOPE_REFUSAL).await;
+    write_probe(
+        &no_issue,
+        format!("{REPO}/branches"),
+        422,
+        "[BranchName]: Required",
+    )
+    .await;
+    write_probe(&no_issue, format!("{REPO}/issues"), 403, SCOPE_REFUSAL).await;
     let view = source(&no_issue).view(PR, None).await.unwrap().unwrap();
     assert_eq!(
         reasons(&view),
@@ -2791,12 +2786,13 @@ async fn what_the_token_may_not_write_is_drawn_disabled_saying_why() {
     );
 
     let read_only = gitea(open_pull(), reviews()).await;
-    probe(&read_only, "branches", 403, SCOPE_REFUSAL).await;
-    probe(&read_only, "issues", 403, SCOPE_REFUSAL).await;
+    write_probe(&read_only, format!("{REPO}/branches"), 403, SCOPE_REFUSAL).await;
+    write_probe(&read_only, format!("{REPO}/issues"), 403, SCOPE_REFUSAL).await;
     let view = source(&read_only).view(PR, None).await.unwrap().unwrap();
     for (label, why) in reasons(&view) {
         assert!(
-            why.as_deref().is_some_and(|w| w.starts_with("This token cannot write: ")),
+            why.as_deref()
+                .is_some_and(|w| w.starts_with("This token cannot write: ")),
             "{label}: {why:?}"
         );
     }
@@ -2812,14 +2808,14 @@ async fn what_the_token_may_not_write_is_drawn_disabled_saying_why() {
     assert_eq!(files.sections[0].count, Some(2), "the diff reads as before");
 
     let reader = gitea(open_pull(), reviews()).await;
-    probe(
+    write_probe(
         &reader,
-        "branches",
+        format!("{REPO}/branches"),
         403,
         "user should have a permission to write to a repo",
     )
     .await;
-    probe(&reader, "issues", 422, "[Title]: Required").await;
+    write_probe(&reader, format!("{REPO}/issues"), 422, "[Title]: Required").await;
     let view = source(&reader).view(PR, None).await.unwrap().unwrap();
     assert_eq!(
         reasons(&view),

@@ -12,7 +12,7 @@ use serde_json::json;
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::support::{TOKEN, instance};
+use crate::support::{TOKEN, instance, write_probe};
 
 const REPO: &str = "/api/v1/repos/tidewater/payout-service";
 const SHA: &str = "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192";
@@ -460,23 +460,6 @@ async fn a_mirrors_commit_offers_a_new_branch_disabled() {
     assert_eq!(view.actions[0].disabled, None);
 }
 
-/// Gitea's answer to a write's empty body, as measured on 1.27.3 (#2030):
-/// the scope refusal for a token without `write:repository`, the body's
-/// validation for one with it.
-async fn branch_probe(server: &MockServer, status: u16, message: &str) {
-    Mock::given(method("POST"))
-        .and(path(format!("{REPO}/branches")))
-        .and(header("Authorization", format!("token {TOKEN}").as_str()))
-        .and(wiremock::matchers::body_json(json!({})))
-        .respond_with(ResponseTemplate::new(status).set_body_json(json!({
-            "message": message,
-            "url": "http://gitea/api/swagger",
-        })))
-        .expect(1)
-        .mount(server)
-        .await;
-}
-
 /// Issue #2030: a token that may only read draws *New branch…* disabled, with
 /// what the token lacks, and the commit's reads are unchanged. Gitea is asked
 /// with a branch write whose empty body it refuses whatever the token: for
@@ -484,8 +467,9 @@ async fn branch_probe(server: &MockServer, status: u16, message: &str) {
 #[tokio::test]
 async fn a_read_only_token_offers_a_new_branch_disabled_saying_why() {
     let server = gitea(200).await;
-    branch_probe(
+    write_probe(
         &server,
+        format!("{REPO}/branches"),
         403,
         "token does not have at least one of required scope(s), required=[write:repository], \
          token scope=read:repository,read:user",
@@ -496,10 +480,20 @@ async fn a_read_only_token_offers_a_new_branch_disabled_saying_why() {
         view.actions[0].disabled.as_deref(),
         Some("This token cannot write: it lacks the write:repository scope")
     );
-    assert_eq!(section(&view, "diff").count, Some(2), "the reads are as drawn");
+    assert_eq!(
+        section(&view, "diff").count,
+        Some(2),
+        "the reads are as drawn"
+    );
 
     let server = gitea(200).await;
-    branch_probe(&server, 422, "[BranchName]: Required").await;
+    write_probe(
+        &server,
+        format!("{REPO}/branches"),
+        422,
+        "[BranchName]: Required",
+    )
+    .await;
     let view = source(&server).view(COMMIT, None).await.unwrap().unwrap();
     assert_eq!(view.actions[0].disabled, None, "a token that may write");
 }

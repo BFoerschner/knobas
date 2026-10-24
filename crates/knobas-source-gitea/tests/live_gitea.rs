@@ -6002,6 +6002,11 @@ fn read_of(view: &knobas_source::view::SourceView) -> Vec<(String, Option<u64>, 
         .collect()
 }
 
+/// A seeded person, as `testenv/seed-gitea.sh` creates them (`PEOPLE_PASS`):
+/// an owner of the organisation and no collaborator of the admin's mirror.
+/// The fixed local development account, never a real credential.
+const TESTENV_READER: (&str, &str) = ("jonas.becker", "tidewater-dev");
+
 /// Issue #2030, spec #1192 story 10, against the real server: a token minted
 /// with `read:repository` reads the repository, a branch, a commit, a pull
 /// request and a file as a token that may write does, and is offered every
@@ -6022,7 +6027,7 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
     let api = format!("{}/api/v1", env.url);
     let auth = format!("token {}", env.token);
     let (admin, password) = TESTENV_ADMIN;
-    let (reader, reader_password) = ("jonas.becker", "tidewater-dev");
+    let (reader, reader_password) = TESTENV_READER;
     let names = [
         (admin, password, "knobas-live-2030-read"),
         (admin, password, "knobas-live-2030-write"),
@@ -6049,24 +6054,45 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
             .json()
             .await
             .expect("the token record");
-        minted["sha1"].as_str().unwrap_or_default().to_owned()
+        // A failed mint panics here, naming it; the next run's `remove`
+        // clears what this one minted.
+        minted["sha1"]
+            .as_str()
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| panic!("{user} minted no token {name}: {minted}"))
+            .to_owned()
     };
     // Every read scope the adapter reads with: a pull request's view reads
     // its discussion off the issue (`read:issue`) and the organisation's
     // labels (`read:organization`).
     let read_only = mint(
         names[0],
-        &["read:repository", "read:issue", "read:organization", "read:user"],
+        &[
+            "read:repository",
+            "read:issue",
+            "read:organization",
+            "read:user",
+        ],
     )
     .await;
     let writes = mint(
         names[1],
-        &["write:repository", "write:issue", "read:organization", "read:user"],
+        &[
+            "write:repository",
+            "write:issue",
+            "read:organization",
+            "read:user",
+        ],
     )
     .await;
     let account = mint(
         names[2],
-        &["write:repository", "write:issue", "read:organization", "read:user"],
+        &[
+            "write:repository",
+            "write:issue",
+            "read:organization",
+            "read:user",
+        ],
     )
     .await;
 
@@ -6144,32 +6170,40 @@ async fn a_token_that_may_only_read_is_offered_its_writes_disabled_saying_why() 
 
     remove().await;
 
-    assert!(
-        !read_only.is_empty() && !writes.is_empty() && !account.is_empty(),
-        "three tokens were minted"
-    );
     for (entity, narrow, wide) in &seen {
         println!("LIVE {entity}: read-only {:?}", offered(narrow));
         println!("LIVE {entity}: may write {:?}", offered(wide));
-        assert_eq!(read_of(narrow), read_of(wide), "{entity}: the reads are unchanged");
+        assert_eq!(
+            read_of(narrow),
+            read_of(wide),
+            "{entity}: the reads are unchanged"
+        );
         let drawn = offered(narrow);
         assert!(!drawn.is_empty(), "{entity} offers writes to draw disabled");
         for (label, why) in &drawn {
             assert!(
-                why.as_deref().is_some_and(|w| w.starts_with("This token cannot write: it lacks the write:")),
+                why.as_deref()
+                    .is_some_and(|w| w.starts_with("This token cannot write: it lacks the write:")),
                 "{entity}: {label} is drawn disabled, saying which scope: {why:?}"
             );
         }
         let labels = |v| offered(v).into_iter().map(|(l, _)| l).collect::<Vec<_>>();
-        assert_eq!(labels(narrow), labels(wide), "{entity}: the same writes are drawn");
+        assert_eq!(
+            labels(narrow),
+            labels(wide),
+            "{entity}: the same writes are drawn"
+        );
         for (label, why) in offered(wide) {
             assert!(
-                !why.as_deref().is_some_and(|w| w.starts_with("This token cannot write")),
+                !why.as_deref()
+                    .is_some_and(|w| w.starts_with("This token cannot write")),
                 "{entity}: {label} is not refused a token that may write: {why:?}"
             );
         }
     }
-    let pushless = pushless.expect("a reader reads the mirror's commit").expect("drawn");
+    let pushless = pushless
+        .expect("a reader reads the mirror's commit")
+        .expect("drawn");
     assert_eq!(
         offered(&pushless),
         [(

@@ -105,6 +105,20 @@ pub enum GiteaKey {
     },
 }
 
+impl GiteaKey {
+    /// The repository this entity is in, as `(owner, repo)`.
+    #[must_use]
+    pub fn repository(&self) -> (&str, &str) {
+        match self {
+            Self::Repo { owner, repo }
+            | Self::Pr { owner, repo, .. }
+            | Self::Issue { owner, repo, .. }
+            | Self::Branch { owner, repo, .. }
+            | Self::Commit { owner, repo, .. } => (owner, repo),
+        }
+    }
+}
+
 /// Parse the key half of an entity id (everything after the instance id).
 #[must_use]
 pub fn parse_key(key: &str) -> Option<GiteaKey> {

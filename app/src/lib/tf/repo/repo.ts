@@ -18,6 +18,7 @@ import type {
   EntityRow,
   SourceView,
   TreeEntry,
+  ViewAction,
   ViewRow,
   ViewSection,
 } from "../../ipc/entity";
@@ -334,7 +335,7 @@ export function compareHash(repoId: string, branch: string): string {
  * (a mirror) where it offers one it would refuse.
  */
 export function branchFrom(view: SourceView | null): { from: ChoiceOption; disabled: string | null } | null {
-  const action = view?.actions.find((candidate) => candidate.write_op === "create_branch");
+  const action = toolbarAction(view, "create_branch");
   const field = action?.fields.find((candidate) => candidate.name === "from_ref");
   const from = field?.kind.type === "choice" ? field.kind.options[0] : undefined;
   return action && from ? { from, disabled: action.disabled } : null;
@@ -347,7 +348,12 @@ export function branchFrom(view: SourceView | null): { from: ChoiceOption; disab
  * source's answer (ADR-0020 rule 4).
  */
 export function toolbarRefusal(view: SourceView | null, writeOp: string): string | null {
-  return view?.actions.find((candidate) => candidate.write_op === writeOp)?.disabled ?? null;
+  return toolbarAction(view, writeOp)?.disabled ?? null;
+}
+
+/** The view's toolbar action for `writeOp`, where it offers one. */
+function toolbarAction(view: SourceView | null, writeOp: string): ViewAction | undefined {
+  return view?.actions.find((candidate) => candidate.write_op === writeOp);
 }
 
 /**

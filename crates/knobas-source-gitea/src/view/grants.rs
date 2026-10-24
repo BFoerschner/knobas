@@ -24,8 +24,10 @@
 //!
 //! The branch probe says one more thing. Gitea checks that the **account**
 //! may push before it reads the body, and refuses one that may not with a
-//! 403 `user should have a permission to write to a repo`: a reader of a
-//! public repository. Only the writes that push need that permission (a
+//! 403 (`user should have a permission to write to a repo`, measured with a
+//! reader of a public repository). The sentence is not matched: any 403 on
+//! the branch probe other than the scope refusal is read as this one, the
+//! only other check Gitea makes there before the body. Only the writes that push need that permission (a
 //! reader may still comment and review), so only those are disabled for it.
 //!
 //! Anything else the probe meets -- a 401, a 5xx, a timeout, an archived
@@ -56,7 +58,7 @@ impl Category {
     }
 
     /// The write whose empty body asks for this category's scope.
-    fn probe(self, owner: &str, repo: &str) -> String {
+    fn probe_path(self, owner: &str, repo: &str) -> String {
         match self {
             Self::Repository => format!("/repos/{owner}/{repo}/branches"),
             Self::Issue => format!("/repos/{owner}/{repo}/issues"),
@@ -116,8 +118,9 @@ fn reason(category: Category, refusal: Refusal) -> String {
 pub(super) async fn narrow(source: &GiteaSource, owner: &str, repo: &str, view: &mut SourceView) {
     let mut offered = Vec::new();
     // Read the ops through the same walk that disables them, so a write in a
-    // block this module never heard of is still asked about.
-    view.clone().refuse_writes(|op| {
+    // block this module never heard of is still asked about. Refusing none
+    // changes nothing.
+    view.refuse_writes(|op| {
         offered.push(op.to_owned());
         None
     });
@@ -135,10 +138,13 @@ pub(super) async fn narrow(source: &GiteaSource, owner: &str, repo: &str, view: 
     }
     view.refuse_writes(|op| {
         let category = category(op);
-        match (category, if category == Category::Repository { repository } else { issue }) {
-            (_, Some(Refusal::Scope)) => Some(reason(category, Refusal::Scope)),
-            (_, Some(Refusal::Account)) if pushes(op) => Some(reason(category, Refusal::Account)),
-            _ => None,
+        let refusal = match category {
+            Category::Repository => repository,
+            Category::Issue => issue,
+        };
+        match refusal? {
+            Refusal::Scope => Some(reason(category, Refusal::Scope)),
+            Refusal::Account => pushes(op).then(|| reason(category, Refusal::Account)),
         }
     });
 }
@@ -154,15 +160,15 @@ async fn probe(
     let repo = crate::client::GiteaClient::path_segment(repo).ok()?;
     let answer = source
         .client
-        .post_once(&category.probe(owner, repo), &json!({}))
+        .post_once(&category.probe_path(owner, repo), &json!({}))
         .await;
-    read(category, answer.err().as_ref())
+    refusal_of(category, answer.err().as_ref())
 }
 
 /// What a probe's failure says. `knobas-http` reads Gitea's scope sentence as
 /// `Unauthorized` with its 403 (`client::forbidden_refusal`, #722) and any
 /// other 403 as a refusal carrying Gitea's sentence.
-fn read(category: Category, failure: Option<&SourceError>) -> Option<Refusal> {
+fn refusal_of(category: Category, failure: Option<&SourceError>) -> Option<Refusal> {
     match failure? {
         SourceError::Unauthorized { status: Some(403) } => Some(Refusal::Scope),
         other if other.status() == Some(403) && category == Category::Repository => {
@@ -188,16 +194,19 @@ mod tests {
             message: "HTTP 422 Unprocessable Entity: [BranchName]: Required".into(),
         };
         for category in [Category::Repository, Category::Issue] {
-            assert_eq!(read(category, Some(&scope)), Some(Refusal::Scope));
-            assert_eq!(read(category, Some(&invalid)), None);
-            assert_eq!(read(category, None), None);
-            assert_eq!(read(category, Some(&SourceError::unauthorized())), None);
+            assert_eq!(refusal_of(category, Some(&scope)), Some(Refusal::Scope));
+            assert_eq!(refusal_of(category, Some(&invalid)), None);
+            assert_eq!(refusal_of(category, None), None);
+            assert_eq!(
+                refusal_of(category, Some(&SourceError::unauthorized())),
+                None
+            );
         }
         assert_eq!(
-            read(Category::Repository, Some(&account)),
+            refusal_of(Category::Repository, Some(&account)),
             Some(Refusal::Account)
         );
         // Unmeasured on the issue probe, so no verdict.
-        assert_eq!(read(Category::Issue, Some(&account)), None);
+        assert_eq!(refusal_of(Category::Issue, Some(&account)), None);
     }
 }

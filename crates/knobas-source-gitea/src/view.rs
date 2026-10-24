@@ -69,13 +69,8 @@ pub(crate) async fn draw(
     // What the view offers is the entity's answer; what the token may make
     // of it is Gitea's, asked once the view knows which writes it offers
     // (#2030).
-    if let GiteaKey::Commit { owner, repo, .. }
-    | GiteaKey::Pr { owner, repo, .. }
-    | GiteaKey::Branch { owner, repo, .. }
-    | GiteaKey::Repo { owner, repo } = &key
-    {
-        grants::narrow(source, owner, repo, &mut view).await;
-    }
+    let (owner, repo) = key.repository();
+    grants::narrow(source, owner, repo, &mut view).await;
     Ok(Some(view))
 }
 
