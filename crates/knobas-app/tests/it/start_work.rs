@@ -709,6 +709,49 @@ async fn a_held_write_stops_the_sequence_and_says_so() {
     assert!(detail.contains("somebody moved it to Done"), "{detail}");
 }
 
+/// A transition **sent and never answered** (#1125) may already be at Jira, so
+/// the step is on its way, not failed (Björn's #1966 ruling; #1973): it reads
+/// *queued*, says to check Jira, and a retry re-reads the write and sends no
+/// second transition. Once the user sends it again from the queue, the retry
+/// is what moves the step on.
+#[tokio::test]
+async fn a_transition_never_answered_is_on_its_way_and_its_retry_sends_nothing() {
+    let pool = corpus("sw_unconfirmed").await;
+    let flow = planned(&pool).await;
+    let fake = Fake::new()
+        .revealing_on_refresh(&proposed_branch(&flow))
+        .answering(
+            "transition",
+            Answer::Landed(Landing::Unconfirmed {
+                source: "Jira".to_owned(),
+                detail: None,
+            }),
+        );
+
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+
+    assert_eq!(outcome(&flow, Step::Transition), StepOutcome::Queued);
+    let step = step_of(&flow, Step::Transition);
+    let detail = step.detail.clone().unwrap();
+    assert!(detail.contains("check Jira"), "{detail}");
+    assert!(!detail.contains("changed"), "{detail}");
+    let write = step.write_id.expect("the transition was dispatched");
+
+    let flow = start_work::retry(&pool, &fake, step.id).await.unwrap();
+    assert_eq!(outcome(&flow, Step::Transition), StepOutcome::Queued);
+    assert_eq!(
+        fake.ops(),
+        vec!["create_branch", "create_pull_request", "transition"],
+        "a retry sent the transition a second time over one that may have landed"
+    );
+
+    // The user checked Jira and sent it again from the write queue.
+    fake.set_landing(write, Landing::Sent);
+    let flow = start_work::retry(&pool, &fake, step.id).await.unwrap();
+    assert_eq!(outcome(&flow, Step::Transition), StepOutcome::Succeeded);
+    assert_eq!(fake.ops().len(), 3, "{:?}", fake.ops());
+}
+
 /// A queue that refuses the op outright -- a source that does not declare it,
 /// a target that names no configured source -- is a **failed step carrying the
 /// reason**, not a failed command. The rest of the flow is still the user's to
@@ -1587,6 +1630,38 @@ async fn a_merged_pull_request_moves_the_ticket_it_is_linked_to() {
 
     assert_eq!(moved, 1);
     assert_eq!(fake.ops(), vec!["transition"]);
+}
+
+/// A merge's transition sent and never answered may have landed: it counts as
+/// followed, as a queued one does (#1966, #1973), and is never sent twice --
+/// the queued row is `due`'s memory either way.
+#[tokio::test]
+async fn a_merge_transition_never_answered_counts_as_followed() {
+    let pool = corpus("sw_merged_unconfirmed").await;
+    item(
+        &pool,
+        PR,
+        "pr",
+        "WIP: payout dashboard latency",
+        serde_json::json!({"merged": true, "state": "closed", "head": {"ref": "feature/PAY-231"}}),
+    )
+    .await;
+    knobas_app::commands::entity::create_link_inner(&pool, PR, TICKET, Some("implements"), None)
+        .await
+        .unwrap();
+    let fake = Fake::new().answering(
+        "transition",
+        Answer::Landed(Landing::Unconfirmed {
+            source: "Jira".to_owned(),
+            detail: None,
+        }),
+    );
+
+    let moved = start_work::merge::follow_merges(&pool, &fake, "In Review", &declarations())
+        .await
+        .unwrap();
+
+    assert_eq!(moved, 1);
 }
 
 /// **Story 18, and the half that matters most.** A merged pull request nobody

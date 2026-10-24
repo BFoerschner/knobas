@@ -14,7 +14,7 @@ use std::borrow::Borrow;
 use async_trait::async_trait;
 use knobas_core::entity::EntityRef;
 use knobas_core::payload::Declarations;
-use knobas_core::write_queue::{self, WriteState};
+use knobas_core::write_queue::{self, QueuedWrite, WriteState};
 use sqlx::PgPool;
 
 use super::{Landing, Linked, PullRequestOnHead, Steps};
@@ -56,20 +56,7 @@ impl<S: Borrow<SourcesState> + Send + Sync> Steps for Queue<S> {
 
     async fn landing_of(&self, write_id: i64) -> Result<Landing, IpcError> {
         let row = write_queue::get(&self.state.borrow().pool, write_id).await?;
-        Ok(match row {
-            None => Landing::Withdrawn,
-            Some(row) => match row.state {
-                WriteState::Sent => Landing::Sent,
-                WriteState::Pending => Landing::Waiting { detail: row.detail },
-                WriteState::Held => Landing::Held { detail: row.detail },
-                WriteState::Refused => Landing::Refused {
-                    detail: row
-                        .detail
-                        .unwrap_or_else(|| "the source refused the write".to_owned()),
-                },
-                WriteState::Discarded => Landing::Withdrawn,
-            },
-        })
+        Ok(landing_from(row))
     }
 
     async fn link(&self, from: &str, to: &str, relation: &str) -> Result<Linked, IpcError> {
@@ -138,6 +125,41 @@ impl<S: Borrow<SourcesState> + Send + Sync> Steps for Queue<S> {
         // in flight is `Scheduler::sync_after_write`'s job and was the #358
         // flake.
         crate::sources::write_queue::sync_after_write(self.state.borrow(), source).await;
+    }
+}
+
+/// A queue row, or its absence, read as a step's [`Landing`].
+///
+/// A held row says which of the three holds it is (CONTEXT.md, *Held write*:
+/// the reasons are never collapsed). A send never answered comes first
+/// ([`QueuedWrite::may_have_landed`]): whether the write may already be at the
+/// source is what decides that nothing may invite a second send (#1973).
+#[must_use]
+pub fn landing_from(row: Option<QueuedWrite>) -> Landing {
+    let Some(row) = row else {
+        return Landing::Withdrawn;
+    };
+    match row.state {
+        WriteState::Sent => Landing::Sent,
+        WriteState::Pending => Landing::Waiting { detail: row.detail },
+        WriteState::Held if row.may_have_landed() => {
+            let said = row
+                .held_snapshot
+                .as_ref()
+                .map(|held| &held["unconfirmed"]);
+            let text = |key: &str| said.and_then(|said| said[key].as_str()).map(str::to_owned);
+            Landing::Unconfirmed {
+                source: text("source").unwrap_or_else(|| row.source_id.clone()),
+                detail: text("detail").filter(|detail| !detail.is_empty()),
+            }
+        }
+        WriteState::Held => Landing::Held { detail: row.detail },
+        WriteState::Refused => Landing::Refused {
+            detail: row
+                .detail
+                .unwrap_or_else(|| "the source refused the write".to_owned()),
+        },
+        WriteState::Discarded => Landing::Withdrawn,
     }
 }
 
@@ -449,6 +471,61 @@ mod tests {
         // would make a trailing one indistinguishable from an escaped one.
         assert_eq!(escape_like("wiki_two"), "wiki\\_two");
         assert_eq!(escape_like("odd%"), "odd\\%");
+    }
+
+    /// A held queue row, the way `write_queue::get` answers it.
+    fn held(held_snapshot: Option<serde_json::Value>, source_enabled: bool) -> QueuedWrite {
+        QueuedWrite {
+            id: 3,
+            source_id: "jira".to_owned(),
+            entity_id: "jira:PAY-231".to_owned(),
+            op: "transition".to_owned(),
+            payload: serde_json::json!({}),
+            target_snapshot: serde_json::json!({}),
+            state: WriteState::Held,
+            wait_reason: None,
+            detail: Some("somebody moved it to Done".to_owned()),
+            queued_at: chrono::Utc::now(),
+            attempted_at: None,
+            attempts: 1,
+            held_snapshot,
+            settled_at: None,
+            source_enabled,
+        }
+    }
+
+    /// The held side's `unconfirmed` key is what tells a send never answered
+    /// from a target that changed (#1125, #1966); the step reads the first as
+    /// its own landing, naming the source to check, and never as a drift
+    /// (#1973). A held row without it is the drift it always was.
+    #[test]
+    fn each_reason_a_write_is_held_is_its_own_landing() {
+        let unconfirmed = write_queue::unconfirmed(
+            "transition",
+            serde_json::json!({}),
+            "Jira",
+            "timed out after 30s",
+        );
+        assert_eq!(
+            landing_from(Some(held(Some(unconfirmed.clone()), true))),
+            Landing::Unconfirmed {
+                source: "Jira".to_owned(),
+                detail: Some("timed out after 30s".to_owned()),
+            }
+        );
+        // Turned off after the send: it may still have arrived, which is the
+        // fact that decides whether a second send is safe.
+        assert!(matches!(
+            landing_from(Some(held(Some(unconfirmed), false))),
+            Landing::Unconfirmed { .. }
+        ));
+        assert_eq!(
+            landing_from(Some(held(Some(serde_json::json!({"op": "transition"})), true))),
+            Landing::Held {
+                detail: Some("somebody moved it to Done".to_owned()),
+            }
+        );
+        assert_eq!(landing_from(None), Landing::Withdrawn);
     }
 
     /// One mirrored pull request, spelled the way the statement answers it.
