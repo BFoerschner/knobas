@@ -944,8 +944,6 @@ mod session_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{method, path, query_param, query_param_is_missing};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     /// **A Kuma that stays up and never acknowledges anything.**
     ///
@@ -965,81 +963,135 @@ mod tests {
     /// after that answers a bare `2` after `hold` -- which is how a *healthy*
     /// idle engine.io session behaves, at Kuma's own 25 s ping interval. That
     /// is the point: nothing here is an error the transport could classify.
+    ///
+    /// Hand-rolled on the test's own runtime rather than wiremock, whose
+    /// server keeps the wall clock on a thread of its own: `hold` is a
+    /// `tokio::time::sleep`, so it passes on the same paused clock as the
+    /// deadline it is measured against (#1925).
     struct PingingKuma {
-        server: MockServer,
+        port: u16,
+        /// The session reads that arrived, the handshake excluded: the
+        /// first is answered at once, and every later one is held.
+        polls: tokio::sync::watch::Receiver<usize>,
     }
 
     impl PingingKuma {
         /// `hold` stands in for the ping interval, scaled down so a test can
         /// watch several polls go by inside a sub-second deadline.
         async fn start(hold: Duration) -> Self {
-            let server = MockServer::builder().start().await;
-            // The handshake: the one GET that carries no session yet.
-            Mock::given(method("GET"))
-                .and(path(PATH))
-                .and(query_param_is_missing("sid"))
-                .respond_with(ResponseTemplate::new(200).set_body_string(
-                    r#"0{"sid":"never-answers","upgrades":[],"pingInterval":25000,"pingTimeout":20000}"#,
-                ))
-                .mount(&server)
-                .await;
-            // The first read of the session: the namespace opened and Kuma
-            // listening for the login, as its connection handler ends.
-            Mock::given(method("GET"))
-                .and(path(PATH))
-                .and(query_param("sid", "never-answers"))
-                .respond_with(
-                    ResponseTemplate::new(200)
-                        .set_body_string("40{\"sid\":\"socket\"}\u{1e}42[\"loginRequired\"]"),
-                )
-                .up_to_n_times(1)
-                .with_priority(1)
-                .mount(&server)
-                .await;
-            // Every read after it: a heartbeat, for ever.
-            Mock::given(method("GET"))
-                .and(path(PATH))
-                .and(query_param("sid", "never-answers"))
-                .respond_with(
-                    ResponseTemplate::new(200)
-                        .set_body_string("2")
-                        .set_delay(hold),
-                )
-                .mount(&server)
-                .await;
-            // `40`, the emits and the pongs: engine.io answers a POST `ok`.
-            Mock::given(method("POST"))
-                .and(path(PATH))
-                .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
-                .mount(&server)
-                .await;
-            Self { server }
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind");
+            let port = listener.local_addr().expect("addr").port();
+            let (arrived, polls) = tokio::sync::watch::channel(0);
+            let arrived = Arc::new(arrived);
+            tokio::spawn(async move {
+                while let Ok((socket, _)) = listener.accept().await {
+                    tokio::spawn(Self::answer(socket, hold, Arc::clone(&arrived)));
+                }
+            });
+            Self { port, polls }
+        }
+
+        /// One request on `socket`, answered as Kuma would, then the
+        /// connection closed.
+        async fn answer(
+            mut socket: tokio::net::TcpStream,
+            hold: Duration,
+            arrived: Arc<tokio::sync::watch::Sender<usize>>,
+        ) {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let head_end = loop {
+                if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break end + 4;
+                }
+                match socket.read(&mut chunk).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(read) => request.extend_from_slice(&chunk[..read]),
+                }
+            };
+            let head = String::from_utf8_lossy(&request[..head_end]).into_owned();
+            // The body is read whole before answering, so closing the
+            // connection never resets it under an unread POST.
+            let length = head
+                .lines()
+                .filter_map(|line| line.split_once(':'))
+                .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            while request.len() < head_end + length {
+                match socket.read(&mut chunk).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(read) => request.extend_from_slice(&chunk[..read]),
+                }
+            }
+            let target = head.split(' ').nth(1).unwrap_or_default();
+            let body = if head.starts_with("POST ") {
+                // `40`, the emits and the pongs: engine.io answers `ok`.
+                "ok"
+            } else if !target.contains("sid=") {
+                // The handshake: the one GET that carries no session yet.
+                r#"0{"sid":"never-answers","upgrades":[],"pingInterval":25000,"pingTimeout":20000}"#
+            } else {
+                let mut first = false;
+                arrived.send_modify(|polls| {
+                    *polls += 1;
+                    first = *polls == 1;
+                });
+                if first {
+                    // The first read of the session: the namespace opened and
+                    // Kuma listening for the login, as its connection handler
+                    // ends.
+                    "40{\"sid\":\"socket\"}\u{1e}42[\"loginRequired\"]"
+                } else {
+                    // Every read after it: a heartbeat, for ever.
+                    tokio::time::sleep(hold).await;
+                    "2"
+                }
+            };
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: {}\r\n\
+                 connection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
         }
 
         fn base_url(&self) -> String {
-            self.server.uri()
+            format!("http://127.0.0.1:{}", self.port)
         }
 
         /// How many reads of the session the client actually made -- the
         /// handshake excluded, since it carries no `sid`.
-        async fn polls(&self) -> usize {
-            self.server
-                .received_requests()
+        fn polls(&self) -> usize {
+            *self.polls.borrow()
+        }
+
+        /// Wait for a read past the first `seen`: one the fake now holds.
+        async fn held_after(&self, seen: usize) {
+            let mut polls = self.polls.clone();
+            polls
+                .wait_for(|polls| *polls > seen)
                 .await
-                .expect("the fake records what it was asked")
-                .iter()
-                .filter(|request| {
-                    request.method.as_str() == "GET"
-                        && request.url.query().is_some_and(|q| q.contains("sid="))
-                })
-                .count()
+                .expect("the fake outlives its handle");
         }
     }
 
+    /// A socket for the fake, with `budget` for its deadline. Its quota is
+    /// far past what a run sends, so no read waits on the limiter: the
+    /// reads that fit inside the deadline are the fake's `hold` apart and
+    /// nothing else.
     fn socket_to(base_url: &str, budget: Duration) -> KumaSocket {
         KumaSocket::new(
             base_url,
-            &crate::KumaConfig::default(),
+            &crate::KumaConfig {
+                rate_per_sec: 1_000,
+                rate_burst: 2_000,
+                ..crate::KumaConfig::default()
+            },
             Account {
                 username: "knobas".to_owned(),
                 password: "knobas-dev".to_owned(),
@@ -1049,24 +1101,79 @@ mod tests {
         .with_budget(budget)
     }
 
-    /// One run against the fake: how long [`KumaSocket::call`] took, how many
-    /// reads it made, and what it finally said.
+    /// tokio's paused clock, held still until this is dropped (#1925): a
+    /// running blocking task stops it jumping to the next timer while the
+    /// runtime waits on a socket (`tokio::time::pause`, *Preventing
+    /// auto-advance*), so it moves only by `tokio::time::advance`, and a
+    /// request on the loopback takes no time on it.
+    struct HeldClock {
+        _release: std::sync::mpsc::Sender<()>,
+    }
+
+    impl HeldClock {
+        fn hold() -> Self {
+            let (release, held) = std::sync::mpsc::channel::<()>();
+            tokio::task::spawn_blocking(move || {
+                // Returns once the sender is dropped: that is the release.
+                let _ = held.recv();
+            });
+            Self { _release: release }
+        }
+    }
+
+    /// One run against the fake: how long [`KumaSocket::call`] took on
+    /// tokio's paused clock, how many reads it made, and what it finally
+    /// said.
     ///
-    /// The outer `tokio::time::timeout` is ten times the budget, so the code
-    /// *without* its deadline -- [`Session::read_until`] loops for ever -- fails
-    /// here rather than hanging `just check`, and it is loose enough that the
-    /// assertions on the deadline itself are what report a run that overshot.
+    /// The clock is held, and moved by the run itself: each time the fake
+    /// holds a read, by `hold`, which answers it, or by what is left of
+    /// `budget` if that is less, which is where the deadline fires. Between
+    /// two moves the client is waiting on the read the fake holds and nothing
+    /// else -- every read and POST of a session goes one after the other --
+    /// so no timer fires under a request in flight, and the run is the same
+    /// every time: the deadline at `budget` exactly, after as many reads as
+    /// fit inside it.
+    ///
+    /// The **real-time** backstop is twenty seconds of wall time, so the
+    /// code *without* its deadline -- [`Session::read_until`] loops for ever,
+    /// moved on by this loop -- fails here rather than hanging `just check`.
+    /// It is a hang backstop and nothing more: the run itself takes no wall
+    /// time worth naming.
     async fn until_it_gives_up(budget: Duration, hold: Duration) -> (Duration, usize, SourceError) {
         let kuma = PingingKuma::start(hold).await;
+        let clock = HeldClock::hold();
         let socket = socket_to(&kuma.base_url(), budget);
+        let backstop = std::time::Instant::now();
 
-        let started = std::time::Instant::now();
-        let refused =
-            tokio::time::timeout(budget * 10, socket.call(PAUSE_EVENT, &serde_json::json!(8)))
-                .await
-                .expect("the call is stopped by its own deadline, not by this one")
-                .expect_err("a session that never acknowledges cannot answer a write");
-        (started.elapsed(), kuma.polls().await, refused)
+        let started = tokio::time::Instant::now();
+        let monitor = serde_json::json!(8);
+        let call = socket.call(PAUSE_EVENT, &monitor);
+        tokio::pin!(call);
+        let mut seen = 1;
+        let refused = loop {
+            tokio::select! {
+                biased;
+                answered = &mut call => {
+                    break answered.expect_err("a session that never acknowledges cannot answer a write");
+                }
+                () = kuma.held_after(seen) => {
+                    seen = kuma.polls();
+                    assert!(
+                        backstop.elapsed() < Duration::from_secs(20),
+                        "still reading after {seen} polls: the call has no deadline"
+                    );
+                    // Past the budget the deadline has failed to fire, and
+                    // the session is moved on by whole holds until the
+                    // backstop above.
+                    let left = budget.saturating_sub(started.elapsed());
+                    let step = if left.is_zero() { hold } else { hold.min(left) };
+                    tokio::time::advance(step).await;
+                }
+            }
+        };
+        let took = started.elapsed();
+        drop(clock);
+        (took, kuma.polls(), refused)
     }
 
     /// **One write is bounded by time, and the assertion is the clock.**
@@ -1086,9 +1193,9 @@ mod tests {
     /// `pub(crate)`, so the test-only deadline override the same paragraph
     /// asks for is unreachable from an integration test -- which leaves a test
     /// that waits the production minute, or this.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_session_that_only_pings_is_given_up_on_when_the_time_is_gone() {
-        const HOLD: Duration = Duration::from_millis(100);
+        const HOLD: Duration = Duration::from_millis(120);
         const SHORT: Duration = Duration::from_millis(500);
         const LONG: Duration = Duration::from_millis(2_000);
 
@@ -1107,33 +1214,22 @@ mod tests {
         );
         assert!(message.contains(PAUSE_EVENT), "{message}");
 
-        // Both ends of both runs. The floor catches a deadline that is short
-        // of what it was given; the **ceiling** is the only thing that catches
-        // one that is longer -- a budget scaled up, or a bound that adds a
-        // wait of its own on top of it -- and a run with no ceiling cannot
-        // tell a sixty-second deadline from a six-hundred-second one. Twice
-        // the budget is the width: cancelling this future costs single-digit
-        // milliseconds, so the slack is 500 ms and 2 s against an overshoot
-        // that would have to be a doubling to survive it.
-        assert!(elapsed >= SHORT, "gave up before the deadline: {elapsed:?}");
-        assert!(
-            elapsed < SHORT * 2,
-            "gave up long after the deadline: {elapsed:?}"
-        );
+        // On tokio's paused clock (#1925) both runs end at their deadline
+        // exactly, which is the floor and the ceiling at once: a deadline
+        // short of what it was given, or one with a wait of its own on top,
+        // is off by that much. The reads are exact too: the invitation, then
+        // one held read every 120 ms the deadline leaves room to start, the
+        // last of them still held when it fires.
+        assert_eq!(elapsed, SHORT, "gave up off the deadline");
+        assert_eq!(polls, 1 + 5, "the invitation and the reads at 0..=480 ms");
 
         let (longer, more, _) = until_it_gives_up(LONG, HOLD).await;
-        assert!(
-            longer >= LONG,
-            "the longer deadline was given up on early, after {longer:?}"
-        );
-        assert!(
-            longer < LONG * 2,
-            "the longer deadline was given up on late, after {longer:?}"
-        );
-        assert!(
-            more > polls,
-            "{polls} reads in {elapsed:?} and {more} in {longer:?}: the reads one write \
-             makes have to be whatever fit inside its own deadline, not a fixed count"
+        assert_eq!(longer, LONG, "the longer deadline was given up on off it");
+        assert_eq!(
+            more,
+            1 + 17,
+            "the invitation and the reads at 0..=1920 ms: the reads one write makes have to \
+             be whatever fit inside its own deadline, not a fixed count"
         );
     }
 

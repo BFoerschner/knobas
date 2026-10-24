@@ -36,14 +36,18 @@ url = "2"
 
 [dev-dependencies]
 serde_json.workspace = true
-tokio.workspace = true
-# The docker-free stand-in for Kuma, and it serves two servers. The first is
-# `/metrics` recorded off the pinned container: `just check` and CI run no
-# containers (roadmap §3), so the contract battery needs a server that answers
-# without one; every shape it encodes is re-asserted in `tests/live_kuma.rs`
-# against the real Kuma, and if the two disagree, the recording is what is
-# wrong. The second is `socket::tests::PingingKuma`, an engine.io session that
-# never acknowledges -- the one fault a released Kuma cannot be asked to
-# produce, and the reason issue #486 rules a fake in for it alone.
+# `net` and `io-util` for `socket::tests::PingingKuma`, an engine.io session
+# that never acknowledges -- the one fault a released Kuma cannot be asked to
+# produce, and the reason issue #486 rules a fake in for it alone. It is
+# hand-rolled on the test's runtime so its hold passes on the paused clock
+# (`test-util`) the deadline is measured on, and `sync` says when it holds a
+# read (#1925).
+tokio = { workspace = true, features = ["net", "io-util", "sync", "test-util"] }
+# The docker-free stand-in for Kuma's `/metrics`, recorded off the pinned
+# container: `just check` and CI run no containers (roadmap §3), so the
+# contract battery needs a server that answers without one; every shape it
+# encodes is re-asserted in `tests/live_kuma.rs` against the real Kuma, and if
+# the two disagree, the recording is what is wrong. The session tests'
+# engine.io stand-in (`socket_session_tests.rs`) is one too.
 # It brings no `reqwest` of its own; `cargo tree -i reqwest` must stay at one.
 wiremock = "0.6"
