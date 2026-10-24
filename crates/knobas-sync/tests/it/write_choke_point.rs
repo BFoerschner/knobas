@@ -54,7 +54,8 @@ use std::path::{Path, PathBuf};
 const CHOKE_POINT: &str = "knobas-sync/src/write_queue.rs";
 
 /// The SPI's conformance harness: it writes in order to certify that an
-/// adapter refuses, which is the battery's job and nobody else's.
+/// adapter refuses an op it never declared. The flush refuses one first
+/// (#1950); certifying the adapter's own refusal is the battery's job.
 const BATTERY: &str = "knobas-source/src/contract.rs";
 
 /// Files that *build* a write op and hand it to the queue.

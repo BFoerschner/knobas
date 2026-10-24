@@ -389,8 +389,10 @@ where
     );
     // 5. Write ops the descriptor does not declare are refused, not attempted.
     //    The write queue's flush and the WASM host refuse one before it
-    //    reaches any adapter (`SourceDescriptor::declares`, #1950); this holds
-    //    a compiled-in adapter to its own refusal, the defence behind theirs.
+    //    reaches any adapter (`SourceDescriptor::declares`, #1950). Over a
+    //    compiled-in adapter this holds it to its own refusal, the defence
+    //    behind the flush's; over a WASM guest it is the host's refusal it
+    //    sees.
     let known = known_write_ops(&src_id);
     for id in &d.write_ops {
         assert!(

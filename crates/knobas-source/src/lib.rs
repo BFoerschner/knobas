@@ -1736,8 +1736,9 @@ pub trait Source: Send + Sync {
     /// [`SourceDescriptor::write_ops`] must be refused with
     /// [`SourceError::Protocol`] rather than attempted. The write queue's
     /// flush, the one caller, refuses one first by
-    /// [`SourceDescriptor::declares`] against this source's own descriptor
-    /// (#1950), so an adapter's refusal is the defence behind it, still held
+    /// [`SourceDescriptor::declares`] against this source's own descriptor,
+    /// and the WASM host does the same before a call crosses into a guest
+    /// (#1950). An adapter's refusal is the defence behind them, still held
     /// by [`contract::battery`].
     ///
     /// The answer is a [`WriteReceipt`], which for almost every op is
