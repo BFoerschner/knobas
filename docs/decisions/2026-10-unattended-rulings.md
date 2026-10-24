@@ -15861,3 +15861,57 @@ The merge-manager's review (Opus, 2026-10-24):
 - ***Send mine anyway* and *Edit and send* share the submit's path (merge-manager, Opus).** *Fork:* add a test for each, or accept the shared path. *Ruling:* accept. `apply_held_write` (`commands/sources.rs:696`) calls `apply_anyway`, and `amend_write` (`:728`) calls `amend`, both on `state.scheduler.deps()`. Both call `flush_entity` (`write_queue.rs:656,687`), the function `flush_entity_of` calls, which `a_quit_stops_a_submits_flush_between_writes` drives. Neither adds a stop of its own. *Reversing:* trivial, a test each.
 - **The surviving mutant M4, the between-sources check in `flush_every` deleted (merge-manager, Opus).** *Ruling:* equivalent for writes and for row states, so no test. Without it, a flush during the quit still reads each source's heads and builds its adapter, and then `turn` returns `Stopped` before either `attempt` or `waited`, so no write starts and no row is re-reasoned. The check only saves that listing and build. *Reversing:* trivial.
 - **#1932 stays a follow-up, not fixed here (merge-manager, Opus).** *Fork:* fold the foreground flushes into the background set in this PR, or leave #1932 open. *Ruling:* leave it, `ready-for-agent`. *Reasoning:* it has another root cause. #1924 is about what a flush *starts* after the quit, and #1932 is about what the quit *waits for*. The risk predates this PR, and this PR narrows it: a foreground flush used to start new writes for the whole grace, each of which the pool close could cut, and now it has at most the one write already on the wire. #1924 and its dispatch keep a write on the wire as it was. Moving five command paths into the background set changes their refusal behaviour and needs its own witness. #1932 passes *Filing a follow-up*: it names the cause, rerunning its grep finds exactly its five instances plus the excluded `start_work/queue.rs:49`, and no other open issue names that cause. *Reversing:* n/a.
+## #1925 (implementer, Opus, 2026-10-24)
+
+- **Reserved for Björn, ruled by implementer on Opus (waiver of 2026-10-22): the seam in the
+  frozen `knobas-http`.** *Fork:* an injected `Clock` on `InstanceLimiter` (a constructor
+  parameter, or a `test-util` setter), or tokio's own clock for every limiter. *Ruling:* tokio's
+  clock: a private governor clock reads `tokio::time::Instant`, the wait sleeps on tokio's
+  timer, and the send budget counts on the same clock; §10.8 entry `1925-…`. *Reasoning:* the
+  budget, every timeout and the wasm host's deadline already ran on tokio's timer, so a test that
+  pauses tokio's clock now moves all of them together, where an injected clock would move the
+  limiter alone and leave the budget it is bounded by on the wall clock. No public signature and
+  no `HttpConfig` field changes, and outside a paused test the reading is the monotonic clock, as
+  before. *Reversing:* put `DefaultClock` and `until_ready` back in `Paced`; the tests stay
+  correct but wait the wall clock again.
+- **Tests with a request on the wire.** *Fork:* tokio's paused clock as it comes, or held.
+  *Ruling:* held, by a running blocking task (`HeldClock`, tokio's documented way to stop
+  auto-advance), and moved only once the fake says every exchange is over. *Reasoning:* a paused
+  clock jumps to the next timer whenever the runtime is idle, and a runtime waiting on a loopback
+  socket is idle, so a request's own timeout would fire under it: the same flake on another
+  clock. *Reversing:* n/a.
+- **A wait for something a broken quota never lets happen.** *Fork:* leave it to hang, or bound
+  it. *Ruling:* a twenty-second real-time backstop that panics naming the wait (`real_backstop`),
+  and in the Kuma run a wall-clock check on every held read. *Reasoning:* a held clock fires no
+  timer, so without one a mutant hangs `just check`. It bounds a hang, not the quota: a correct
+  run takes no wall time worth naming. *Reversing:* n/a.
+- **The wasm host's thirty-request burst** (`an_adapter_firing_thirty_requests_reaches_its_instance_at_the_burst`).
+  *Fork:* the held clock, or lower bounds from before the call. *Ruling:* lower bounds: the
+  eleventh arrival at least one refill and the thirtieth at least twenty after the call started.
+  *Reasoning:* the fixture sends one request after another, so a held clock moved after each
+  exchange is moved by an unpaced mutant just as often and the mutant mimics the schedule; telling
+  a request parked on the limiter from one in flight needs a wall-clock window. No request goes
+  before the call starts, so the bound load cannot break is from there; counted from the first
+  arrival, a burst that reached the server late put the eleventh inside the window.
+  *Reversing:* n/a.
+- **The helpers, three copies.** *Fork:* one `HeldClock` and backstop behind `knobas-http`'s
+  `test-util` feature, or a copy in each test crate. *Ruling:* a copy in each (`knobas-http`'s
+  transport tests, the wasm host's network tests, Kuma's socket tests). *Reasoning:* a module in
+  the frozen crate's public surface, if behind a test feature, is a §10.8 addition for twenty
+  lines of test scaffolding, and each copy's doc names what its own fake signals. *Reversing:*
+  move them behind `test-util`.
+- **The Kuma fake.** *Fork:* keep wiremock and move only the deadline onto the paused clock, or
+  hand-roll `PingingKuma` on the test's runtime. *Ruling:* hand-rolled. *Reasoning:* wiremock's
+  `set_delay` waits on its own server thread's wall clock, which no test can pause, so the hold
+  and the deadline could not be measured on one clock. Its quota is set far past what a run sends,
+  so the reads inside the deadline are the hold apart and nothing else. *Reversing:* n/a.
+- **Siblings outside the issue's list.** *Fork:* fix every quota or deadline test met on the
+  way, or only the listed ones. *Ruling:* fixed the ones the held clock settles in the files the
+  ticket names (the quota-mark tests, `hung_up::a_read_sent_again_stays_inside_the_send_budget`,
+  the limiter's module tests, the wasm burst); filed #1935 for the deadline tests that race a
+  fake's wall-clock delay with bytes in flight at both ends (Kuma's session tests, the streamed
+  body tests). *Reversing:* n/a.
+- **Seams.** *Fork:* the TDD skill asks for seams agreed up front, with no one to agree them.
+  *Ruling:* `HttpClient::send` against a counting server, `InstanceLimiter` from the limiter's
+  module tests, the wasm `Source::test_connection`, `KumaSocket::call`, and Gitea's `patiently`.
+  Each is where its test already stood. *Reversing:* n/a.
