@@ -257,6 +257,17 @@ pub struct RunResult {
 /// how the diagnostics view names the run. It stays an `error` there.
 pub const CANCELLED_MESSAGE: &str = "cancelled: knobas is shutting down";
 
+/// What a run knobas' own rate limit stopped is logged with, ahead of the
+/// failure's own message, and the one thing that tells its row from a
+/// failure the source caused (#1980).
+///
+/// Written only by the scheduler, and only when
+/// [`knobas_http::watch_local_quota`] says a send inside the sync stopped on
+/// the quota: never read off the failure's message, which an adapter writes.
+/// A message for [`CANCELLED_MESSAGE`]'s reason: what it changes is the
+/// ladder, not how the diagnostics view names the run.
+pub const LOCAL_QUOTA_PREFIX: &str = "stopped on knobas' own rate limit, not the source: ";
+
 impl RunResult {
     /// The verdict for a run the user's quit interrupted.
     ///
@@ -277,6 +288,18 @@ impl RunResult {
     #[must_use]
     pub fn was_cancelled(&self) -> bool {
         self.outcome == SyncOutcome::Error && self.error.as_deref() == Some(CANCELLED_MESSAGE)
+    }
+
+    /// Whether knobas' own rate limit stopped this run
+    /// ([`LOCAL_QUOTA_PREFIX`]): a wait knobas imposed, which says nothing
+    /// about the source (#1980).
+    #[must_use]
+    pub fn stopped_on_local_quota(&self) -> bool {
+        self.outcome == SyncOutcome::Error
+            && self
+                .error
+                .as_deref()
+                .is_some_and(|error| error.starts_with(LOCAL_QUOTA_PREFIX))
     }
 }
 
@@ -535,6 +558,10 @@ pub async fn last_finished(
 /// stopped it, and a large first sync quit twice would otherwise climb the
 /// ladder for nothing the source did.
 ///
+/// And so is a run knobas' own rate limit stopped ([`LOCAL_QUOTA_PREFIX`],
+/// #1980): the source was not asked, so the next failure it does cause
+/// waits the rung it would have without the stop.
+///
 /// # Errors
 /// [`sqlx::Error`] if the query fails.
 pub async fn failures_since_last_ok(
@@ -547,11 +574,13 @@ pub async fn failures_since_last_ok(
           where source_id = $1
             and finished_at is not null
             and error is distinct from $2
+            and not coalesce(starts_with(error, $3), false)
             and id > coalesce((select max(id) from knobas.sync_run
                                 where source_id = $1 and outcome = 'ok'), 0)",
     )
     .bind(source_id)
     .bind(CANCELLED_MESSAGE)
+    .bind(LOCAL_QUOTA_PREFIX)
     .fetch_one(pool)
     .await?;
     Ok(n)
