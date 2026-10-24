@@ -77,6 +77,8 @@ pub(super) enum Shape {
     List,
     /// One object, or an array of objects.
     Parent,
+    /// One JSON object (#2050): a saved view's sprint.
+    Object,
 }
 
 impl Shape {
@@ -96,6 +98,7 @@ impl Shape {
                         .as_array()
                         .is_some_and(|chain| chain.iter().all(Value::is_object))
             }
+            Shape::Object => value.is_object(),
         }
     }
 }
@@ -153,6 +156,10 @@ pub(super) fn needs_of(field: Field, paths: &KindPaths) -> (Shape, Vec<PayloadPa
         Field::Finished => (Shape::Instant, plain(&paths.finished)),
         Field::Merged => (Shape::Flag, plain(&paths.merged)),
         Field::ResponseTime => (Shape::Number, plain(&paths.response_time)),
+        Field::SourceQuery => (Shape::Text, plain(&paths.source_query)),
+        Field::BoardType => (Shape::Text, plain(&paths.board_type)),
+        Field::SubQuery => (Shape::Text, plain(&paths.sub_query)),
+        Field::Sprint => (Shape::Object, plain(&paths.sprint)),
         Field::State => (
             Shape::TextOrFlag,
             paths.state.iter().map(|s| s.at.clone()).collect(),

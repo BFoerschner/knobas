@@ -371,6 +371,27 @@ pub struct KindPaths {
     /// is not a saved view.
     #[serde(default)]
     pub system_name: Option<String>,
+    /// The query a [`Frame::SavedView`] holds, in the source's own language
+    /// (#2050): Jira's `jql`, the board's saved filter or the filter's own
+    /// JQL. What the Tickets screen's source line and *View settings* draw;
+    /// `sync.saved_view.source_query`. Required of a saved-view kind by the
+    /// ticket-system minimum, and a view whose record carries none draws no
+    /// query. Empty for every kind that is not a saved view.
+    #[serde(default)]
+    pub source_query: Vec<PayloadPath>,
+    /// A saved view's board type in the source's own word (#2050): Jira's
+    /// `type` (`scrum`, `kanban`, `simple`). Optional; a filter has none.
+    #[serde(default)]
+    pub board_type: Vec<PayloadPath>,
+    /// The query a saved view narrows [`source_query`](Self::source_query)
+    /// with (#2050): a Jira Kanban board's `sub_query`. Optional.
+    #[serde(default)]
+    pub sub_query: Vec<PayloadPath>,
+    /// A saved view's active sprint (#2050), a JSON **object**
+    /// `{"id", "name", "end_date"}` as the shell draws it: Jira's `sprint`
+    /// on a Scrum board. Optional; a miss is no sprint.
+    #[serde(default)]
+    pub sprint: Vec<PayloadPath>,
     /// What a pipeline is called (#848): TeamCity's configuration `name`.
     /// Empty for every kind that is not a pipeline.
     #[serde(default)]
@@ -713,6 +734,10 @@ pub mod field {
     pub const MERGED_AT: &str = "merged_at";
     pub const RESPONSE_TIME: &str = "response_time";
     pub const BASE: &str = "base";
+    pub const SOURCE_QUERY: &str = "source_query";
+    pub const BOARD_TYPE: &str = "board_type";
+    pub const SUB_QUERY: &str = "sub_query";
+    pub const SPRINT: &str = "sprint";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -764,6 +789,10 @@ pub mod field {
         MERGED_AT,
         RESPONSE_TIME,
         BASE,
+        SOURCE_QUERY,
+        BOARD_TYPE,
+        SUB_QUERY,
+        SPRINT,
     ];
 }
 
