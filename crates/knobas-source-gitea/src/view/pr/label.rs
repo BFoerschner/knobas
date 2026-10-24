@@ -54,7 +54,11 @@ pub(super) async fn read(
         match all_pages(|page| client.org_labels_as(owner, page)).await {
             Err(error) if error.status() == Some(404) => Ok(Vec::new()),
             labels => labels.map_err(|error| {
-                refused(error, "its organisation's labels", grants::READ_ORGANIZATION)
+                refused(
+                    error,
+                    "its organisation's labels",
+                    grants::READ_ORGANIZATION,
+                )
             }),
         }
     };

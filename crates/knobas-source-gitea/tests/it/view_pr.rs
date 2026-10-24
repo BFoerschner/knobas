@@ -2838,7 +2838,13 @@ async fn what_the_token_may_not_write_is_drawn_disabled_saying_why() {
 async fn a_token_without_the_issue_scope_reads_the_view_but_its_comments() {
     let server = gitea(open_pull(), reviews()).await;
     let refused = json!({ "message": format!("{SCOPE_REFUSAL}, required=[read:issue]") });
-    answer(&server, format!("{REPO}/issues/142/comments"), 403, refused.clone()).await;
+    answer(
+        &server,
+        format!("{REPO}/issues/142/comments"),
+        403,
+        refused.clone(),
+    )
+    .await;
     answer(&server, format!("{REPO}/labels"), 403, refused).await;
     let note = "This token cannot read this pull request's comments: it lacks the read:issue scope";
     let view = source(&server).view(PR, None).await.unwrap().unwrap();
