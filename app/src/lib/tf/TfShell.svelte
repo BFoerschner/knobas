@@ -281,10 +281,11 @@
   let sourcesAsked = $state(0);
   const readSources = () => (sourcesAsked += 1);
   /**
-   * Which sources the health store holds. Removing a source sends no event:
-   * Settings re-lists the sources and hands the store the new membership
-   * (`Health.replace`), on Remove, Uninstall, Add source and restore alike, so
-   * a change of it is when the bar's own list is stale (#2059).
+   * Which sources the health store holds, and when it changes the bar's list
+   * is stale (#2059). Removing a source sends no event: Settings re-lists the
+   * sources and hands the store the new membership (`Health.replace`) on
+   * Remove, Uninstall, Add source and restore alike. A `source:health` for a
+   * source the store did not hold changes it too.
    */
   const membership = $derived(health.all.map((row) => row.source_id).join("\n"));
 
@@ -335,9 +336,7 @@
         if (was?.running === true && !row.running) readSources();
       }),
     );
-    // A source added or removed changes its health reading first.
-    hold(ports.listen(EVENTS.sourceHealth, readSources));
-    // Every queue transition writes an activity line (`StatusBar.svelte`).
+    // Every queue transition writes an activity line.
     hold(ports.listen(EVENTS.activityNew, () => void queue.refresh()));
     const stopBadges = badges.start();
     const tick = setInterval(() => (now = new Date()), 30_000);
