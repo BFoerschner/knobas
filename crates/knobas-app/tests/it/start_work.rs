@@ -164,10 +164,16 @@ impl Fake {
 
     /// A refresh also brings this pull request into the mirror.
     fn revealing_on_refresh_too(self, head: &str, row: queue::OnHead) -> Self {
+        self.revealing_on_refresh_into(head, BASE, row)
+    }
+
+    /// A refresh brings this pull request from `head` into `base` into the
+    /// mirror.
+    fn revealing_on_refresh_into(self, head: &str, base: &str, row: queue::OnHead) -> Self {
         self.on_refresh.lock().unwrap().push((
             REPO.to_owned(),
             head.to_owned(),
-            BASE.to_owned(),
+            base.to_owned(),
             row,
         ));
         self
@@ -1391,6 +1397,48 @@ async fn an_open_pull_request_from_the_head_into_another_base_gets_the_flow_its_
         fake.links(),
         vec![(PR.to_owned(), TICKET.to_owned())],
         "the ticket was linked to a pull request into another base"
+    );
+    assert_eq!(
+        outcome(&flow, Step::LinkPullRequest),
+        StepOutcome::Succeeded
+    );
+}
+
+/// The base is **the step's**, the one the reader chose in the review step, not
+/// the repository's default (#1952): with the flow pointed at a release branch,
+/// a pull request open from its head into `main` does not settle the create
+/// step, and the one the refresh brings in from the head into the release
+/// branch is the one linked.
+#[tokio::test]
+async fn the_pull_request_is_looked_for_into_the_base_the_reader_chose() {
+    let pool = corpus("sw_reproposed_base").await;
+    let flow = planned(&pool).await;
+    let head = proposed_branch(&flow);
+    let step = step_of(&flow, Step::CreatePullRequest);
+    let mut payload = step.payload.clone();
+    payload["CreatePullRequest"]["base"] = serde_json::json!("release/2026.08");
+    start_work::repropose(&pool, step.id, payload)
+        .await
+        .expect("the proposal is the reader's to change");
+    let fake = Fake::new()
+        .holding(&head, on_head(PR_REOPENED, Some(false), Some("open")))
+        .revealing_on_refresh_into(
+            &head,
+            "release/2026.08",
+            on_head(PR_BACKPORT, Some(false), Some("open")),
+        );
+
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+
+    assert_eq!(
+        fake.ops(),
+        vec!["create_branch", "create_pull_request", "transition"],
+        "a pull request into main settled a step the reader pointed at a release branch"
+    );
+    assert_eq!(
+        fake.links(),
+        vec![(PR_BACKPORT.to_owned(), TICKET.to_owned())],
+        "the ticket was linked to a pull request into a base the reader did not choose"
     );
     assert_eq!(
         outcome(&flow, Step::LinkPullRequest),
