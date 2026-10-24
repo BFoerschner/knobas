@@ -238,7 +238,7 @@ async fn a_pull_request_opened_whose_answer_was_lost_is_delivered() {
     .await;
     token_is_bjoern(&server).await;
 
-    source(&server)
+    let receipt = source(&server)
         .write(create_pull_request())
         .await
         .expect("the pull request this write opened is there");
@@ -246,6 +246,11 @@ async fn a_pull_request_opened_whose_answer_was_lost_is_delivered() {
         posts(&server).await,
         2,
         "the lost one and the refused repeat"
+    );
+    // The receipt names the one it found, as a first answer would (#1949).
+    assert_eq!(
+        receipt.remote_id.as_deref(),
+        Some("tidewater/payout-service#145")
     );
 }
 

@@ -146,6 +146,11 @@ async fn holds_branch_from(
 /// account, is this write's own, met again after its answer was lost
 /// (#1129): answered as delivered. One with another title, or opened by
 /// somebody else, keeps the refusal.
+///
+/// Answers the number of the pull request this write opened (#1949): the one
+/// Gitea's 201 carries, or, on that 409, the one found open for the pair.
+/// `None` where Gitea's answer carried none; the pull request is open all the
+/// same.
 pub(crate) async fn create_pull_request(
     client: &GiteaClient,
     owner: &str,
@@ -154,7 +159,7 @@ pub(crate) async fn create_pull_request(
     body: &str,
     head: &str,
     base: &str,
-) -> Result<(), SourceError> {
+) -> Result<Option<u64>, SourceError> {
     let path = format!(
         "/repos/{}/{}/pulls",
         GiteaClient::path_segment(owner)?,
@@ -167,20 +172,25 @@ pub(crate) async fn create_pull_request(
         )
         .await
     {
-        Ok(_) => Ok(()),
-        Err(error)
-            if error.status() == Some(409)
-                && holds_open_pull(client, owner, repo, title, head, base).await =>
-        {
-            Ok(())
+        Ok(made) => {
+            let answer: serde_json::Value = made.json().await.unwrap_or_default();
+            Ok(answer["number"].as_u64())
+        }
+        Err(error) if error.status() == Some(409) => {
+            match this_writes_open_pull(client, owner, repo, title, head, base).await {
+                Some(pull) => Ok(pull.number),
+                None => Err(error),
+            }
         }
         Err(error) => Err(error),
     }
 }
 
-/// One open pull request, as far as [`holds_open_pull`] reads it.
+/// One open pull request, as far as [`this_writes_open_pull`] reads it.
 #[derive(serde::Deserialize)]
 struct OpenPull {
+    #[serde(default)]
+    number: Option<u64>,
     #[serde(default)]
     title: String,
     head: PullEnd,
@@ -205,47 +215,47 @@ impl PullEnd {
     }
 }
 
-/// How many pages of open pull requests [`holds_open_pull`] reads: Gitea refuses a
+/// How many pages of open pull requests [`this_writes_open_pull`] reads: Gitea refuses a
 /// second one per pair, so the one it refused over is open, and recently
 /// updated, which is the listing's order. The readback ends on an empty page
 /// or here, whichever comes first.
 const OPEN_PULL_PAGES: u32 = 3;
 
-/// Whether an open pull request from `head` into `base` carries `title` and
-/// was opened by the account this token is. A colleague's pull request for
-/// the same pair, even under the same title, keeps the refusal: their body,
-/// not this write's, is on it. Any read that fails is "no", which keeps the
-/// refusal.
-async fn holds_open_pull(
+/// The open pull request from `head` into `base`, where it carries `title`
+/// and was opened by the account this token is: this write's own. A
+/// colleague's pull request for the same pair, even under the same title, is
+/// `None` and keeps the refusal: their body, not this write's, is on it. Any
+/// read that fails is `None`, which keeps the refusal.
+async fn this_writes_open_pull(
     client: &GiteaClient,
     owner: &str,
     repo: &str,
     title: &str,
     head: &str,
     base: &str,
-) -> bool {
+) -> Option<OpenPull> {
     for page in 1..=OPEN_PULL_PAGES {
-        let Ok(pulls) = client.open_pulls_as::<OpenPull>(owner, repo, page).await else {
-            return false;
-        };
-        if let Some(pull) = pulls
-            .iter()
-            .find(|p| p.head.names(head) && p.base.names(base))
-        {
-            let Some(by) = pull.user.as_ref().and_then(|u| u.login.as_deref()) else {
-                return false;
-            };
-            return pull.title == title && is_this_account(client, by).await;
-        }
+        let pulls = client
+            .open_pulls_as::<OpenPull>(owner, repo, page)
+            .await
+            .ok()?;
         // The end is an empty page, never a short one: a Gitea capped below
         // the 50 asked for answers short with more behind it (issue #81), and
         // reading that as the end turned a landed create into a refusal
         // (#1625).
         if pulls.is_empty() {
-            return false;
+            return None;
+        }
+        if let Some(pull) = pulls
+            .into_iter()
+            .find(|p| p.head.names(head) && p.base.names(base))
+        {
+            let by = pull.user.as_ref().and_then(|u| u.login.as_deref())?;
+            let ours = pull.title == title && is_this_account(client, by).await;
+            return ours.then_some(pull);
         }
     }
-    false
+    None
 }
 
 /// Reply on a pull request's discussion.

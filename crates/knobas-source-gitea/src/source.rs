@@ -324,9 +324,22 @@ impl Source for GiteaSource {
                 base,
             } => {
                 let (owner, repo) = self.repo_of(entity)?;
-                write::create_pull_request(&self.client, &owner, &repo, title, body, head, base)
-                    .await?;
-                Ok(WriteReceipt::none())
+                let made = write::create_pull_request(
+                    &self.client,
+                    &owner,
+                    &repo,
+                    title,
+                    body,
+                    head,
+                    base,
+                )
+                .await?;
+                // The pull request's key (#1949): the app takes `gitea:<key>`
+                // as this write's, where the head it opened from may carry
+                // another open one into a different base.
+                Ok(made.map_or_else(WriteReceipt::none, |number| {
+                    WriteReceipt::id(crate::keys::pr_key(&owner, &repo, number))
+                }))
             }
             WriteOp::Comment { entity, body } => {
                 let (owner, repo, index) = self.discussion_of(entity)?;
@@ -412,7 +425,11 @@ impl Source for GiteaSource {
                     base_sha,
                 };
                 let made = write::commit_file(&self.client, &owner, &repo, &commit).await?;
-                Ok(made.map_or_else(WriteReceipt::none, WriteReceipt::id))
+                // The commit's key, not its bare object id (#1949), so
+                // `gitea:<key>` is the commit as the mirror holds it.
+                Ok(made.map_or_else(WriteReceipt::none, |oid| {
+                    WriteReceipt::id(crate::keys::commit_key(&owner, &repo, &oid))
+                }))
             }
             WriteOp::SourceAction { entity, id, fields } => {
                 // The id first: one this adapter does not declare is refused
