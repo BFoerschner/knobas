@@ -242,7 +242,9 @@ impl SourceDescriptor {
     /// refused there with nothing sent, whatever the adapter would have done
     /// with it. Every compiled-in adapter still refuses one itself, and
     /// [`contract::battery`] still holds it to that: the check here is the
-    /// rule in one place, theirs is the defence behind it.
+    /// rule in one place, theirs is the defence behind it. The flush words
+    /// the refusal by [`Source::undeclared_reason`] where the adapter has a
+    /// more specific one.
     ///
     /// # Errors
     ///
@@ -1749,6 +1751,19 @@ pub trait Source: Send + Sync {
     /// edit or delete would need (issue #280) -- and an adapter that has
     /// nothing to say answers `none` rather than inventing an id.
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError>;
+    /// Why this source does not declare `op`, in words a person can act on,
+    /// when the adapter knows more than that it does not. An Uptime Kuma with
+    /// no account names the account to add (#452).
+    ///
+    /// The flush asks this only after [`SourceDescriptor::declares`] refused
+    /// `op`, and the answer becomes the refused row's detail in place of the
+    /// generic one (#1950). It is a wording, not a check: it sends nothing,
+    /// and its answer never decides whether `op` is refused. The default,
+    /// `None`, keeps the generic wording, as does every WASM guest.
+    fn undeclared_reason(&self, op: &WriteOp) -> Option<String> {
+        let _ = op;
+        None
+    }
     /// The statuses this entity's workflow offers **from where it stands right
     /// now**, in the source's own spelling (`CONTEXT.md`: *reachable
     /// transition*).

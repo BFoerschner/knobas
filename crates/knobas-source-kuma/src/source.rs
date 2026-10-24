@@ -151,6 +151,15 @@ fn create_target(source_id: &str, entity: &str) -> Result<(), SourceError> {
     )))
 }
 
+/// Why a source with no account performs no write: what to add, by name.
+fn no_account(op: &WriteOp) -> String {
+    format!(
+        "this Uptime Kuma source has no account configured, so it declares no write ops and \
+         cannot perform {:?} -- add the account to its credential",
+        op.identifier()
+    )
+}
+
 #[async_trait::async_trait]
 impl Source for KumaSource {
     /// The template under this instance's own id and name -- **plus the write
@@ -160,6 +169,13 @@ impl Source for KumaSource {
     /// descriptor depends on a credential.
     fn descriptor(&self) -> SourceDescriptor {
         descriptor::for_instance(&self.id, &self.display_name, self.socket.is_some())
+    }
+
+    /// The missing account, which is the one reason this adapter declares
+    /// fewer writes than it performs: the flush words its refusal with it
+    /// (#1950), as [`write`](Source::write) does its own.
+    fn undeclared_reason(&self, op: &WriteOp) -> Option<String> {
+        self.socket.is_none().then(|| no_account(op))
     }
 
     /// `GET /metrics`, and what it says.
@@ -281,11 +297,7 @@ impl Source for KumaSource {
     /// says why at its own arm.
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         let Some(socket) = self.socket.as_ref() else {
-            return Err(SourceError::protocol(format!(
-                "this Uptime Kuma source has no account configured, so it declares no write ops \
-                 and cannot perform {:?} -- add the account to its credential",
-                op.identifier()
-            )));
+            return Err(SourceError::protocol(no_account(&op)));
         };
         // Pause and resume are one shape -- a monitor id and an event name --
         // so they name their event here and share the send below, which is

@@ -1305,6 +1305,49 @@ async fn an_op_the_source_does_not_declare_is_refused_without_reaching_it() {
     assert_eq!(h.delivered(), vec!["on it".to_owned()]);
 }
 
+/// #1950, the ordering: an undeclared op on a target that has also moved is
+/// refused, not held. No change to the target makes it declared, and a held
+/// row's *Send again* would only be refused, so the reader is not asked to
+/// resolve it. A transition holds on the whole target, so a move it does not
+/// survive is one that would hold a declared op.
+#[tokio::test]
+async fn an_undeclared_op_on_a_moved_target_is_refused_rather_than_held() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-1952", "a payout fails").await;
+    let queued = flusher::queue(
+        &h.deps,
+        &h.source,
+        WriteOp::Transition {
+            entity: ticket.to_string(),
+            status: "Done".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Somebody edits the ticket before the flush.
+    h.mirror("PAY-1952", "a payout fails twice").await;
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    let row = h.reload(queued.id).await;
+    assert_eq!(row.state, WriteState::Refused);
+    assert_eq!(
+        row.detail.as_deref(),
+        Some(
+            format!(
+                "protocol: source {:?} does not declare the write \"transition\", so it was not \
+                 sent",
+                h.source
+            )
+            .as_str()
+        )
+    );
+    assert_eq!(row.held_snapshot, None, "nothing was held");
+    assert!(!h.verbs().contains(&"held".to_owned()));
+    assert_eq!(h.asked(), 0, "nothing reached the source");
+}
+
 /// Story 11, and the property the whole feature rests on: a target that moved
 /// on produces a held write rather than a silent overwrite. The control is the
 /// same flush against a target that did *not* move.
