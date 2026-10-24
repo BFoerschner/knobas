@@ -14,6 +14,7 @@ import { forgetQueued, queuedMarks } from "../queued.svelte";
 import type { RunPorts } from "./pipeline-ports";
 import { QUEUED_RUN } from "./pipeline";
 import TfRun from "./TfRun.svelte";
+import type { WriteAsk } from "../../shell/refused-writes";
 
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
@@ -874,6 +875,40 @@ test("filing queues a CreateTicket in the picked project, linked to the run, and
   expect(button("Create ticket")).toBeUndefined();
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket queued");
   expect(queuedMarks("teamcity:build:1187", "ticket").map((m) => m.text)).toEqual([FILED_TITLE]);
+});
+
+test("a project the source's credential cannot file in draws Create ticket disabled saying why, and queues nothing (#2052)", async () => {
+  const reason = "This Jira user cannot create tickets in WEB: it lacks the Create Issues permission";
+  const asked: WriteAsk[][] = [];
+  const drawn = draw("teamcity:build:1187", undefined, {
+    refusedWrites: (asks) => {
+      asked.push(asks);
+      return Promise.resolve(asks.some((ask) => ask.entity === "jira:WEB") ? [{ entity: "jira:WEB", op: "create_ticket", reason }] : []);
+    },
+  });
+  await settle();
+  button("Create ticket")!.click();
+  await settle();
+  expect(asked).toContainEqual([
+    { entity: "jira:PAY", op: "create_ticket" },
+    { entity: "jira:WEB", op: "create_ticket" },
+  ]);
+  const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
+  select.value = "jira:WEB";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  const create = dialogButton("Create ticket")!;
+  expect(create.getAttribute("aria-disabled")).toBe("true");
+  expect(create.title).toBe(reason);
+  expect(document.querySelector(".tf-dialog")?.textContent).toContain(reason);
+  create.click();
+  await settle();
+  expect(drawn.writes).toEqual([]);
+  // Another project is the reader's to pick, and files as before.
+  select.value = "jira:PAY";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  expect(dialogButton("Create ticket")!.hasAttribute("aria-disabled")).toBe(false);
 });
 
 test("once a sync brings the ticket in, the run page draws the linked ticket in place of the queued mark", async () => {

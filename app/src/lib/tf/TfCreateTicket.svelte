@@ -5,11 +5,16 @@
   (the words drawn as a note); a failed run's problem block files a title
   and body prefilled from the failing test, which the reader may change.
   The projects are `list_projects`', read by the surface.
+
+  A project the source's credential cannot file in (`refused_writes`, #2052,
+  asked about every project drawn) stays pickable, and picked draws *Create
+  ticket* disabled with the reason above it: another project may take it.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
 
   import type { Project } from "../ipc/entity";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../shell/refused-writes";
   import { canFile, projectEntity, type TicketDraft } from "./create-ticket";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import TfDialog from "./settings/TfDialog.svelte";
@@ -19,6 +24,7 @@
     projects,
     words = false,
     layers = sharedLayers,
+    refusedWrites,
     onclose,
     onfile,
   }: {
@@ -28,11 +34,19 @@
     /** Draw the title and body as fields; otherwise the title is a note and the body is the surface's. */
     words?: boolean;
     layers?: Layers;
+    /** What the projects' sources' credentials cannot write (#2052); the bridge's when left out. */
+    refusedWrites?: RefusedWritesPort;
     onclose: () => void;
     onfile: (draft: TicketDraft & { project: string }) => void;
   } = $props();
 
   let editing = $state<TicketDraft>(untrack(() => ({ ...draft })));
+
+  let refused = $state<RefusedWrite[]>([]);
+  /** As a string, so the same projects drawn again ask nothing again. */
+  const asks = $derived(JSON.stringify(projects.map((project) => ({ entity: projectEntity(project), op: "create_ticket" }))));
+  $effect(() => askInto(JSON.parse(asks) as WriteAsk[], refusedWrites, (answer) => (refused = answer)));
+  const cannot = $derived(refusalOf(refused, editing.project, "create_ticket"));
 </script>
 
 <TfDialog title="Create a ticket" {layers} {onclose}>
@@ -67,6 +81,7 @@
         />
       {/if}
     </div>
+    {#if cannot !== null}<p class="tf-dlg-note tf-fail">{cannot}</p>{/if}
     {#if words}
       <textarea
         aria-label="Ticket description"
@@ -80,10 +95,11 @@
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
       class="tf-btn tf-primary"
+      {...refusedAttrs(cannot)}
       disabled={!canFile(editing)}
       onclick={() => {
         const filed = { ...editing };
-        if (canFile(filed)) onfile(filed);
+        if (canFile(filed) && cannot === null) onfile(filed);
       }}
     >
       Create ticket
