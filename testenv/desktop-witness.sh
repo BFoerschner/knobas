@@ -354,8 +354,14 @@ KNOBAS_WITNESS_AX=$ax \
 #    the way out, and a SIGTERM'd Rust process runs no exit handler at all.
 # ---------------------------------------------------------------------------
 step "quitting"
-"$ax" activate "$app_pid" || true
-"$ax" key 12 command || true
+# ⌘Q only once knobas is in front: a keystroke goes to whatever is, and on a
+# Mac somebody is using that is their terminal or browser (seen on #1961's
+# runs: `activate` refused while the person typed elsewhere).
+if "$ax" activate "$app_pid"; then
+    "$ax" key 12 command || true
+else
+    note "knobas would not come forward, so no ⌘Q: it would quit whatever is in front"
+fi
 for _ in $(seq 1 40); do
     kill -0 "$app_pid" 2>/dev/null || break
     sleep 0.5
