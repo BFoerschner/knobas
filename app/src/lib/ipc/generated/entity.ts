@@ -2428,7 +2428,9 @@ relation: string, };
  */
 export type NoteRef = { 
 /**
- * The text between the brackets, exactly as the body wrote it.
+ * The text between the brackets as the body wrote it, trimmed of the
+ * whitespace around it ([`parse_refs`]): `[[ jira:PAY-231 ]]` is
+ * `jira:PAY-231`.
  *
  * Not necessarily a well-formed entity id: a typo is a ref that resolves
  * to nothing, and showing it back is how the user finds the typo (#46
