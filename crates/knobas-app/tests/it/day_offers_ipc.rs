@@ -162,25 +162,7 @@ async fn a_dismissal_committing_beside_a_read_is_not_offered_back() {
     // the dismissals, not granted (#1927). Before, a 500 ms margin stood for
     // this, and a read slower to get there came after the commit and passed
     // without meeting the race.
-    tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        loop {
-            let waiting: i64 = sqlx::query_scalar(
-                "select count(*) from pg_locks l join pg_class c on c.oid = l.relation
-                  where c.relname = 'passive_dismissal' and not l.granted
-                    and l.database = (select oid from pg_database
-                                       where datname = current_database())",
-            )
-            .fetch_one(&mut *dismissing)
-            .await
-            .expect("the locks read");
-            if waiting > 0 {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("the read never waited on the dismissal");
+    crate::support::await_lock_waiter(&mut dismissing, "passive_dismissal").await;
     dismissing.commit().await.expect("the dismissal commits");
 
     let beside = reader.await.expect("the read finished");

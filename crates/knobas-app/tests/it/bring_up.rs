@@ -640,25 +640,7 @@ async fn a_quit_while_migrating_stops_the_server() {
     // the migrations table, not granted (#1927). Before, a 500 ms margin stood
     // for this, and a migration slower to reach the lock was quit before it
     // got there.
-    tokio::time::timeout(Duration::from_secs(60), async {
-        loop {
-            let parked: i64 = sqlx::query_scalar(
-                "select count(*) from pg_locks l join pg_class c on c.oid = l.relation
-                  where c.relname = '_sqlx_migrations' and not l.granted
-                    and l.database = (select oid from pg_database
-                                       where datname = current_database())",
-            )
-            .fetch_one(&mut holder)
-            .await
-            .unwrap();
-            if parked > 0 {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("the migration parks on the lock");
+    crate::support::await_lock_waiter(&mut holder, "_sqlx_migrations").await;
 
     shutdown(&app);
     let still_up = port_answers(port);
@@ -1052,7 +1034,6 @@ async fn a_trigger_that_reaches_the_spawn_after_the_quit_ends_its_row() {
             // A quit that waits at the door waits for the trigger, not for
             // its grace to run out under a loaded machine.
             shutdown_grace: Duration::from_secs(3600),
-            ..Default::default()
         },
         quit: knobas_sync::scheduler::Quit::default(),
     })

@@ -2460,7 +2460,6 @@ async fn await_inside(inside: &AtomicUsize) {
     await_inside_count(inside, 1).await;
 }
 
-/// Wait until at least `runs` runs are inside the adapter at once.
 /// Wait until `runs` runs found the concurrency cap full and wait for a
 /// permit (#1927): the positive sign that the cap is holding them, where an
 /// adapter count alone cannot tell a held run from one not yet arrived.
@@ -2501,6 +2500,7 @@ async fn await_watching(scheduler: &Scheduler, source: &str, sinks: usize) {
     );
 }
 
+/// Wait until at least `runs` runs are inside the adapter at once.
 async fn await_inside_count(inside: &AtomicUsize, runs: usize) {
     // A deadline on a machine that may be running six other test binaries,
     // not a measurement of how long reaching the adapter takes. Thirty

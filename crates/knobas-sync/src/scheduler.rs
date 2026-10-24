@@ -26,6 +26,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -1512,7 +1513,7 @@ struct Inner {
     permits: Semaphore,
     /// How many runs found every permit taken and are waiting for one: see
     /// [`Scheduler::waiting_for_a_permit`].
-    waiting: std::sync::atomic::AtomicUsize,
+    waiting: AtomicUsize,
     claims: Mutex<Claims>,
     /// Poked when something changed that might make a source due (a finished
     /// run, a new source, a re-entered credential), so the UI does not wait out
@@ -1588,7 +1589,7 @@ impl Scheduler {
             deps,
             analyzer,
             permits: Semaphore::new(SYNC_CONCURRENCY),
-            waiting: std::sync::atomic::AtomicUsize::new(0),
+            waiting: AtomicUsize::new(0),
             claims: Mutex::new(Claims {
                 runs: HashMap::new(),
                 pending_purges: HashSet::new(),
@@ -2005,15 +2006,16 @@ impl Scheduler {
     /// rather than not yet arrived (#1927).
     #[must_use]
     pub fn waiting_for_a_permit(&self) -> usize {
-        self.inner.waiting.load(std::sync::atomic::Ordering::SeqCst)
+        self.inner.waiting.load(Ordering::SeqCst)
     }
 
     /// How many sinks are enrolled in the source's run in flight, each to hear
     /// its progress and its ending; `0` when no run is in flight. A caller
-    /// that joined the run ([`watch`](Self::watch), a second trigger,
-    /// [`sync_after_write`](Self::sync_after_write)) is one of them from the
-    /// moment it joined, so a test reads here that a caller has joined before
-    /// it lets the run end (#1927).
+    /// that joined the run with a sink ([`watch`](Self::watch), a trigger
+    /// that hands one, [`sync_after_write`](Self::sync_after_write)) is one of
+    /// them from the moment it joined, so a test reads here that a caller has
+    /// joined before it lets the run end (#1927). A trigger without a sink
+    /// joins without being counted.
     pub async fn watching(&self, source_id: &str) -> usize {
         let claims = self.inner.claims.lock().await;
         claims
@@ -2111,18 +2113,18 @@ impl Scheduler {
 /// One run counted in [`Inner::waiting`] for as long as it waits for a
 /// permit, however the wait ends: given a permit, cancelled, or the task
 /// aborted at the quit's grace.
-struct Waiting<'a>(&'a std::sync::atomic::AtomicUsize);
+struct Waiting<'a>(&'a AtomicUsize);
 
 impl<'a> Waiting<'a> {
-    fn enter(waiting: &'a std::sync::atomic::AtomicUsize) -> Waiting<'a> {
-        waiting.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    fn enter(waiting: &'a AtomicUsize) -> Waiting<'a> {
+        waiting.fetch_add(1, Ordering::SeqCst);
         Waiting(waiting)
     }
 }
 
 impl Drop for Waiting<'_> {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
