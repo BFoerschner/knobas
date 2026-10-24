@@ -117,6 +117,10 @@ struct Fake {
     look_gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
     /// How many branch reads have begun.
     looks: Mutex<usize>,
+    /// When set, the next landing read first lets another stepper press this
+    /// step's *Check again* and then its *Retry*: a step moved on between a
+    /// retry's read of it and its settle (#2015).
+    between: Mutex<Option<(PgPool, i64)>>,
 }
 
 impl Fake {
@@ -135,6 +139,7 @@ impl Fake {
             gate: None,
             look_gate: None,
             looks: Mutex::new(0),
+            between: Mutex::new(None),
         }
     }
 
@@ -277,6 +282,15 @@ impl Steps for Fake {
     }
 
     async fn landing_of(&self, write_id: i64) -> Result<Landing, knobas_app::IpcError> {
+        let between = self.between.lock().unwrap().take();
+        if let Some((pool, step_id)) = between {
+            start_work::ready_retry(&pool, self, step_id)
+                .await
+                .expect("the other stepper's Check again");
+            start_work::ready_retry(&pool, self, step_id)
+                .await
+                .expect("the other stepper's Retry");
+        }
         Ok(self
             .landings
             .lock()
@@ -864,6 +878,47 @@ async fn checking_again_on_a_queued_step_whose_write_was_refused_settles_it_fail
     let flow = start_work::retry(&pool, &fake, step.id).await.unwrap();
     assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Succeeded);
     assert_eq!(fake.ops(), vec!["create_branch", "transition"]);
+}
+
+/// A *Check again* that read the step `queued` settles it failed only if it is
+/// still `queued`. Here a second stepper pressed *Check again* and then *Retry*
+/// while the first one's re-read was out, so the step is `pending` again and
+/// the run's to take. Settling it failed would undo that retry, so the first
+/// re-read is refused and sends nothing (#2015, #1707).
+#[tokio::test]
+async fn checking_again_on_a_step_another_stepper_moved_on_is_refused_and_sends_nothing() {
+    let pool = corpus("sw_check_moved_on").await;
+    let flow = planned(&pool).await;
+    let fake = Fake::new()
+        .revealing_on_refresh(&proposed_branch(&flow))
+        .answering(
+            "transition",
+            Answer::Landed(Landing::Unconfirmed {
+                source: "Jira".to_owned(),
+                detail: None,
+            }),
+        );
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+    let step = step_of(&flow, Step::Transition).clone();
+    assert_eq!(step.outcome, StepOutcome::Queued);
+    fake.set_landing(step.write_id.expect("dispatched"), Landing::Withdrawn);
+
+    *fake.between.lock().unwrap() = Some((pool.clone(), step.id));
+    let refusal = start_work::ready_retry(&pool, &fake, step.id)
+        .await
+        .expect_err("the step is no longer the queued one this re-read read");
+
+    assert_eq!(refusal.code, IpcErrorCode::Conflict);
+    let flow = start_work::flow(&pool, &ticket()).await.unwrap();
+    assert_eq!(
+        outcome(&flow, Step::Transition),
+        StepOutcome::Pending,
+        "the re-read settled over the other stepper's retry"
+    );
+    assert_eq!(
+        fake.ops(),
+        vec!["create_branch", "create_pull_request", "transition"]
+    );
 }
 
 /// A queue that refuses the op outright -- a source that does not declare it,
