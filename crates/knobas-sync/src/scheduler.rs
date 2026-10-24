@@ -950,14 +950,15 @@ async fn attempt(
     // budget fails the sync with a status-less `Protocol`, which is also what
     // an adapter's own refusal looks like, and only the mark tells them apart.
     // The sync alone: the adapter is built on a blocking thread the watch
-    // cannot see into, and discovery's failure is not the run's.
-    let (report, held_on) = knobas_http::watch_local_quota(async {
-        match mode {
-            RunMode::Incremental => run_from_stored_cursor(&mut conn, &deps.pool, watched).await,
-            RunMode::Backfill => run_backfill(&mut conn, &deps.pool, watched).await,
-        }
-    })
-    .await;
+    // cannot see into, and discovery's failure is not the run's. Boxed: the
+    // watch nests the sync's future one level deeper, and every caller's
+    // future holds this one, which took `knobas-app`'s layout past the
+    // compiler's query depth.
+    let sync: std::pin::Pin<Box<dyn Future<Output = _> + Send + '_>> = match mode {
+        RunMode::Incremental => Box::pin(run_from_stored_cursor(&mut conn, &deps.pool, watched)),
+        RunMode::Backfill => Box::pin(run_backfill(&mut conn, &deps.pool, watched)),
+    };
+    let (report, held_on) = knobas_http::watch_local_quota(sync).await;
 
     // Explicit, and not left to `Drop`: `PgConnection::drop` closes the socket
     // without a terminate message, and a run that ends every five minutes

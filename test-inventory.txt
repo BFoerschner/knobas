@@ -4002,6 +4002,7 @@ knobas-sync	test/it	scheduler_run::a_healthy_run_is_logged_ok_clears_backoff_and
 knobas-sync	test/it	scheduler_run::a_never_synced_source_is_due_immediately
 knobas-sync	test/it	scheduler_run::a_run_emits_its_own_activity_line_and_not_the_newest_one
 knobas-sync	test/it	scheduler_run::a_run_reads_the_descriptor_once_watched_or_not
+knobas-sync	test/it	scheduler_run::a_run_stopped_on_the_local_quota_sets_no_backoff
 knobas-sync	test/it	scheduler_run::a_run_whose_adapter_is_slow_to_build_holds_no_worker
 knobas-sync	test/it	scheduler_run::a_run_with_no_channel_reports_nothing
 knobas-sync	test/it	scheduler_run::a_sink_that_panics_does_not_unwind_the_run
