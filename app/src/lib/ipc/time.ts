@@ -198,9 +198,11 @@ export interface ReaderDay {
   /** `"YYYY-MM-DD"`, in the reader's own reckoning. */
   day: string;
   /**
-   * Minutes east of UTC — `offsetMinutes()` from `lib/time/draft`, which is
-   * `getTimezoneOffset` **negated**. This machine is the only thing that knows
-   * which day the reader means.
+   * Minutes east of UTC at `day`'s own local midnight — `dayOffsetMinutes(day)`
+   * from `lib/time/day`, `getTimezoneOffset` **negated**. Never the offset at
+   * another hour of the day: on a clock change the two differ by an hour, and
+   * a draft read with one and logged with the other covers two windows (#1978).
+   * This machine is the only thing that knows which day the reader means.
    */
   offsetMinutes: number;
 }

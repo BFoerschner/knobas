@@ -38,7 +38,8 @@
 import type { AdHocBlock, Block, Draft, ReaderDay, TimerTarget } from "../ipc/time";
 import type { Timer } from "../shell/timer.svelte";
 import type { ToastSpec } from "../shell/toasts.svelte";
-import { localDay, offsetMinutes } from "../time/draft";
+import { dayOffsetMinutes } from "../time/day";
+import { localDay } from "../time/draft";
 
 /** How the reader left the draft. */
 export type DraftOutcome = "logged" | "later" | "keep" | "discard";
@@ -97,9 +98,10 @@ function same(a: TimerTarget, b: TimerTarget): boolean {
     : b.kind === "label" && a.label === b.label;
 }
 
+/** The day `at` falls on, with the offset `log_work` is sent for it: the one at that day's midnight. */
 function dayOf(at: string): ReaderDay {
-  const when = new Date(at);
-  return { day: localDay(when), offsetMinutes: offsetMinutes(when) };
+  const day = localDay(new Date(at));
+  return { day, offsetMinutes: dayOffsetMinutes(day) };
 }
 
 export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
