@@ -2874,6 +2874,28 @@ async fn a_token_without_the_issue_scope_reads_the_view_but_its_comments() {
     }
 }
 
+/// Only the scope refusal is drawn as a line: a discussion Gitea fails to
+/// serve for any other reason fails the view as before, so a blip is never
+/// drawn as a pull request nobody commented on (#2042).
+#[tokio::test]
+async fn a_discussion_gitea_fails_to_serve_fails_the_view() {
+    for (status, body) in [
+        (500, json!({ "message": "boom" })),
+        (403, json!({ "message": "user does not have access" })),
+    ] {
+        let server = gitea(open_pull(), reviews()).await;
+        answer(&server, format!("{REPO}/issues/142/comments"), status, body).await;
+        for asked in [None, Some("conversation")] {
+            let view = source(&server).view(PR, asked).await;
+            assert_eq!(
+                view.as_ref().err().and_then(SourceError::status),
+                Some(status),
+                "{asked:?}: {view:?}"
+            );
+        }
+    }
+}
+
 /// A token with `read:issue` and without `read:organization` reads the
 /// repository's labels and is refused its organisation's: *Add label…* names
 /// the scope it lacks, and the view draws.

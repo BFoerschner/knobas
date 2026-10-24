@@ -7,7 +7,10 @@
 //! [`repo`]'s (#663).
 //!
 //! Every read here is live and nothing is stored (rule 1). A refusal is the
-//! error it maps to, so the detail says *Showing the mirror* and why.
+//! error it maps to, so the detail says *Showing the mirror* and why, except
+//! where Gitea refuses one part of a view for the token's scope and serves
+//! the rest: that part says so and names the scope ([`grants::unread`],
+//! #2042).
 
 use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
