@@ -3300,6 +3300,71 @@ async fn a_quit_during_a_flush_stops_it_between_writes() {
     retire(&pool, &writing).await;
 }
 
+/// #1932: a write the flush task still has at its source when the quit's
+/// grace runs out is aborted and held as one the source may have, naming the
+/// source to check, so the next launch does not send it again blind. The
+/// writes behind it were never started and stay owed.
+///
+/// Red before #1932: the abort left the row pending, and the next launch's
+/// flush sent the comment again. The door stays shut until the quit is over,
+/// so the grace's length decides nothing here.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_write_on_the_wire_when_the_grace_ends_is_held_not_sent_again() {
+    use knobas_core::write_queue::{self as store, WriteState};
+
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let writing = seed_quiet(&pool, 1).await;
+    let door = Door::shut();
+    let (mut deps, started, finished) = writer_deps(sched_pool, &door, &writing[0]).await;
+    deps.timing.shutdown_grace = Duration::from_millis(100);
+
+    let scheduler = Scheduler::start(deps).await.unwrap();
+    let mut owed = Vec::new();
+    for key in ["C-1", "C-2"] {
+        owed.push(owe_a_comment(scheduler.deps(), &writing[0], key).await);
+    }
+    await_count(&started, 1).await;
+    tokio::time::timeout(HANG_GUARD, scheduler.shutdown())
+        .await
+        .expect("the quit ends at its grace");
+    door.open();
+
+    assert_eq!(
+        finished.load(Ordering::SeqCst),
+        0,
+        "the write was let finish"
+    );
+    let mut rows = Vec::new();
+    for write in &owed {
+        rows.push(store::get(&pool, write.id).await.unwrap().unwrap());
+    }
+    let cut: Vec<_> = rows
+        .iter()
+        .filter(|r| r.state == WriteState::Held)
+        .collect();
+    assert_eq!(
+        cut.len(),
+        1,
+        "the write the grace cut is held, and no other: {:?}",
+        rows.iter().map(|r| r.state).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        cut[0].held_snapshot.as_ref().unwrap()["unconfirmed"]["source"],
+        serde_json::json!("Slow"),
+        "held as one the source may have, naming the source to check"
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.state == WriteState::Pending)
+            .count(),
+        1,
+        "the write behind it stays owed"
+    );
+    drop_owed(&pool, &writing).await;
+    retire(&pool, &writing).await;
+}
+
 /// #1924: a submit's flush stops between writes once the quit has begun,
 /// as the flush task does. Its first write, on the wire at the quit, lands;
 /// the entity's next head, which the flush would take once that one lands,

@@ -183,24 +183,50 @@ pub struct SchedulerDeps {
 /// foreground submits were: each went on starting writes after the quit's
 /// cancel. A comment submitted once the quit had begun was sent during it,
 /// and one still on the wire at the grace's end was aborted with its row
-/// pending, so the next start sent it again (ADR-0012's window).
+/// pending, so the next start sent it again.
+///
+/// It also keeps the writes the quit **cut on the wire** (#1932): a send the
+/// grace ran out on, aborted before its outcome was recorded. The shutdown
+/// holds each before the pool closes, as a send that got no answer is held
+/// (#1125), so the next start does not send it again blind.
 ///
 /// Nothing outside this crate can begin it: a caller that wants the quit
 /// calls [`Scheduler::shutdown`]. Deps no scheduler was started with keep a
 /// quit that never begins, which is right, since nothing quits them.
 #[derive(Debug, Default)]
-pub struct Quit(CancellationToken);
+pub struct Quit {
+    token: CancellationToken,
+    cut: std::sync::Mutex<Vec<knobas_core::write_queue::QueuedWrite>>,
+}
 
 impl Quit {
     /// Whether [`Scheduler::shutdown`] has begun.
     pub(crate) fn has_begun(&self) -> bool {
-        self.0.is_cancelled()
+        self.token.is_cancelled()
     }
 
     /// The token itself: cancelled by [`Scheduler::shutdown`], selected
     /// against between writes.
     pub(crate) fn token(&self) -> &CancellationToken {
-        &self.0
+        &self.token
+    }
+
+    /// Keep `write` as one the quit cut on the wire.
+    pub(crate) fn keep_cut(&self, write: knobas_core::write_queue::QueuedWrite) {
+        self.cut
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(write);
+    }
+
+    /// Every write the quit cut on the wire so far, taken.
+    pub(crate) fn take_cut(&self) -> Vec<knobas_core::write_queue::QueuedWrite> {
+        std::mem::take(
+            &mut *self
+                .cut
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
 }
 
@@ -1977,8 +2003,10 @@ impl Scheduler {
     /// so its run is in `tasks` or its row ended. Then the runs and the set
     /// are awaited together. One grace ([`SchedulerTiming::shutdown_grace`],
     /// [`SHUTDOWN_GRACE`] outside tests) from the cancel covers
-    /// the door and both waits, and what is left at its end is aborted. Only
-    /// then the pool.
+    /// the door and both waits, and what is left at its end is aborted, and
+    /// awaited until it is gone. A write that was still at its source then
+    /// is held as one the source may have (#1932, `write_queue::hold_cut`),
+    /// so the next start does not send it again. Only then the pool.
     ///
     /// Idempotent: `RunEvent::ExitRequested` can fire more than once.
     pub async fn shutdown(&self) {
@@ -1992,25 +2020,40 @@ impl Scheduler {
             tracing::warn!("a trigger did not reach its spawn within the grace period");
         }
 
-        let handles = std::mem::take(&mut *self.inner.tasks.lock().await);
-        let aborts: Vec<_> = handles
-            .iter()
-            .map(tokio::task::JoinHandle::abort_handle)
-            .collect();
-        let joined = async {
-            for handle in handles {
-                let _ = handle.await;
-            }
-        };
+        let mut handles = std::mem::take(&mut *self.inner.tasks.lock().await);
         let runs = async {
+            let joined = async {
+                for handle in &mut handles {
+                    let _ = handle.await;
+                }
+            };
             if tokio::time::timeout_at(deadline, joined).await.is_err() {
                 tracing::warn!("a sync run did not stop within the grace period: aborting it");
-                for abort in aborts {
-                    abort.abort();
+                for handle in &handles {
+                    handle.abort();
+                }
+                // Until each is gone: an aborted task's future is dropped on
+                // its own worker, and a send it cut is kept as it drops. A
+                // handle joined above is finished, and polling it again
+                // would panic.
+                for handle in handles.iter_mut().filter(|handle| !handle.is_finished()) {
+                    let _ = handle.await;
                 }
             }
         };
         tokio::join!(runs, background);
+
+        // With the pool still open, and bounded as its close is: a row is one
+        // statement.
+        if tokio::time::timeout(
+            POOL_CLOSE_TIMEOUT,
+            crate::write_queue::hold_cut(&self.inner.deps),
+        )
+        .await
+        .is_err()
+        {
+            tracing::warn!("the writes the quit cut could not all be held in time");
+        }
 
         // Only now, with every run's task stopped: `close()` waits for
         // in-flight queries, and waiting for one parked on a remote system is
@@ -2483,9 +2526,8 @@ async fn tick_loop(inner: Arc<Inner>) {
 /// source, each send bounded only by the adapter's budget (45 s). What a quit
 /// does to it: the cancel is selected against between writes, so no write is
 /// started after it; the one on the wire is let finish inside
-/// [`SHUTDOWN_GRACE`], so its `sent` lands, and is aborted at the grace's end,
-/// which leaves that one request at risk of a re-send on the next start
-/// (ADR-0012's window).
+/// [`SHUTDOWN_GRACE`], so its `sent` lands, and is aborted at the grace's end
+/// and held as one the source may have (#1932), not sent again blind.
 async fn flush_loop(inner: Arc<Inner>) {
     loop {
         tokio::select! {

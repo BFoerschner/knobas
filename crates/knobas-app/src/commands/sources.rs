@@ -666,8 +666,10 @@ pub async fn write_queue_counts<R: tauri::Runtime>(
 /// user's behalf; [`apply_held_write`] is the only thing that moves one.
 ///
 /// # Errors
-/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up;
-/// `internal` if the queue's own reads or writes fail.
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// or if knobas quit while a write was at the source (#1932): it is held
+/// until the source has been checked. `internal` if the queue's own reads or
+/// writes fail.
 #[tauri::command]
 pub async fn flush_writes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -686,18 +688,15 @@ pub async fn flush_writes<R: tauri::Runtime>(
 ///
 /// # Errors
 /// `conflict` if the write is not held: it settled, or somebody else acted on
-/// it, while the panel was open.
+/// it, while the panel was open; `not_ready` if knobas quit while the write
+/// was at the source (#1932): it is held until the source has been checked.
 #[tauri::command]
 pub async fn apply_held_write<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     id: i64,
 ) -> Result<(), IpcError> {
     let state = crate::sources::state(&app)?;
-    knobas_sync::write_queue::apply_anyway(state.scheduler.deps(), id)
-        .await
-        .map_err(IpcError::internal)?
-        .map(|_| ())
-        .ok_or_else(|| IpcError::conflict(format!("write {id} is no longer held")))
+    crate::sources::write_queue::apply_anyway(&state.scheduler, id).await
 }
 
 /// *Edit and send* (story 15): replace a held or refused write's payload with
@@ -717,7 +716,8 @@ pub async fn apply_held_write<R: tauri::Runtime>(
 /// # Errors
 /// `invalid` if the payload is not a write op, or names a different op or
 /// target; `not_found` if no write carries `id`; `conflict` if the write has
-/// already settled.
+/// already settled; `not_ready` if knobas quit while the write was at the
+/// source (#1932): it is held until the source has been checked.
 #[tauri::command]
 pub async fn amend_write<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -725,7 +725,7 @@ pub async fn amend_write<R: tauri::Runtime>(
     payload: serde_json::Value,
 ) -> Result<(), IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::write_queue::amend(state.scheduler.deps(), id, payload).await
+    crate::sources::write_queue::amend(&state.scheduler, id, payload).await
 }
 
 /// Withdraw a write -- cancelling a pending one (story 7) or conceding a held

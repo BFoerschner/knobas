@@ -54,7 +54,8 @@ use crate::IpcError;
 ///
 /// [`IpcError`] with `invalid` for a payload that is not a write op or names
 /// an op the source does not declare, `not_found` for a source that is not
-/// configured, and `internal` if the queue's own writes fail.
+/// configured, `internal` if the queue's own writes fail, and `not_ready` if
+/// the quit's grace ran out while the write was at the source (#1932).
 pub async fn submit(
     state: &crate::sources::SourcesState,
     payload: serde_json::Value,
@@ -431,7 +432,7 @@ async fn ticket_filed(
     .map_err(IpcError::internal)
 }
 
-/// [`flush`] spawned onto the scheduler's background set with a copy of the
+/// [`deliver`] spawned onto the scheduler's background set with a copy of the
 /// state: the send behind [`submit_in_background`]'s answer, and behind a
 /// worklog's (#775).
 ///
@@ -469,7 +470,7 @@ pub(crate) fn send_in_background_then<F, Fut>(
     });
 }
 
-/// The two above: [`flush`] on the scheduler's background set, and once the
+/// The two above: [`deliver`] on the scheduler's background set, and once the
 /// write went, `after`. Refused, and logged, once the quit has begun.
 fn spawn_send<F, Fut>(state: &crate::sources::SourcesState, source_id: String, id: i64, after: F)
 where
@@ -478,7 +479,7 @@ where
 {
     let task = state.clone();
     let spawned = state.scheduler.background().spawn(async move {
-        if let Err(error) = flush(&task, &source_id, id).await {
+        if let Err(error) = deliver(&task, &source_id, id).await {
             tracing::warn!(
                 source = %source_id,
                 write_id = id,
@@ -541,24 +542,92 @@ pub async fn flush_now(
     state: &crate::sources::SourcesState,
     source_id: Option<String>,
 ) -> Result<(), IpcError> {
-    let deps = state.scheduler.deps();
-    knobas_sync::write_queue::flush_now(deps, source_id.as_deref())
-        .await
-        .map_err(|error| match source_id {
-            Some(id) => IpcError::internal(error).with_source(id),
-            None => IpcError::internal(error),
-        })
+    in_the_set(&state.scheduler, |scheduler| async move {
+        knobas_sync::write_queue::flush_now(scheduler.deps(), source_id.as_deref())
+            .await
+            .map_err(|error| match source_id {
+                Some(id) => IpcError::internal(error).with_source(id),
+                None => IpcError::internal(error),
+            })
+    })
+    .await
 }
 
-/// [`submit`]'s second half: send the write's entity in queue order
+/// A flush a command waits on, run in the scheduler's background set and
+/// awaited there (#1932): the quit waits for its write on the wire under the
+/// same grace as a background send's, so the `sent` mark lands before the
+/// pool closes, and a write still at the source when the grace ends is cut
+/// and held as one the source may have. Outside the set the quit did not
+/// wait, the pool closed under the write, and the next start sent it again.
+/// `flush` is handed a copy of the scheduler to run on.
+///
+/// **Once the quit has begun** the set takes nothing, and `flush` runs here
+/// instead, outside it. That is safe for a flush and nothing else: every
+/// flush stops before its next write once the quit has begun (#1924), so it
+/// sends nothing and only changes rows, a statement each. A command during
+/// the quit therefore answers as it did before: the row changes as asked and
+/// waits, pending, for the next start.
+///
+/// # Errors
+///
+/// What `flush` answers; `not_ready` if the quit's grace ran out while it was
+/// still sending; `internal` if it ended without an answer otherwise (a
+/// panic).
+async fn in_the_set<F, Fut>(scheduler: &Scheduler, flush: F) -> Result<(), IpcError>
+where
+    F: FnOnce(Scheduler) -> Fut,
+    Fut: std::future::Future<Output = Result<(), IpcError>> + Send + 'static,
+{
+    let (tell, answer) = tokio::sync::oneshot::channel();
+    let flush = flush(scheduler.clone());
+    let task = async move {
+        let _ = tell.send(flush.await);
+    };
+    if let Err(task) = scheduler.background().try_spawn(task) {
+        task.await;
+    }
+    answer.await.unwrap_or_else(|_| {
+        Err(if scheduler.is_shutting_down() {
+            IpcError::not_ready(
+                "knobas quit while the write was at the source; it is held until \
+                 you have checked the source",
+            )
+        } else {
+            IpcError::internal("the write's send ended without an answer")
+        })
+    })
+}
+
+/// [`submit`]'s second half, and the worklog's awaited delivery's: [`deliver`]
+/// in the scheduler's background set, waited for there ([`in_the_set`], #1932).
+///
+/// # Errors
+///
+/// As [`deliver`], or `not_ready` if the quit's grace ran out while the write
+/// was at the source.
+pub(crate) async fn flush(
+    state: &crate::sources::SourcesState,
+    source_id: &str,
+    write_id: i64,
+) -> Result<(), IpcError> {
+    let (task, source_id) = (state.clone(), source_id.to_owned());
+    in_the_set(&state.scheduler, move |_| async move {
+        deliver(&task, &source_id, write_id).await
+    })
+    .await
+}
+
+/// Send the write's entity in queue order
 /// (`knobas_sync::write_queue::flush_entity_of`, #1797), and re-read the mirror
-/// if the write landed.
+/// if the write landed. Both callers run it in the background set: [`flush`],
+/// which waits for it (and, once the quit has begun, runs it where it is),
+/// and [`spawn_send`], which does not wait.
 ///
 /// # Errors
 ///
 /// As [`submit`]. A source that cannot take the write is **not** an error --
 /// that is what the queue is for.
-pub(crate) async fn flush(
+async fn deliver(
     state: &crate::sources::SourcesState,
     source_id: &str,
     write_id: i64,
@@ -700,12 +769,14 @@ async fn refresh(scheduler: &Scheduler, source_id: &str) {
 ///
 /// `invalid` if `payload` is not a write op, or names a different op or target
 /// from the row it is amending; `not_found` if no write carries `id`;
-/// `conflict` if the write has already settled.
+/// `conflict` if the write has already settled; `not_ready` if the quit's
+/// grace ran out while the write was at the source.
 pub async fn amend(
-    deps: &SchedulerDeps,
+    scheduler: &Scheduler,
     id: i64,
     payload: serde_json::Value,
 ) -> Result<(), IpcError> {
+    let deps = scheduler.deps();
     // Decoded before it is stored, so a payload the SPI cannot read is a
     // refusal the user sees now rather than an undecodable row discovered at
     // flush time, against a source, with the edit already lost from the box.
@@ -717,11 +788,35 @@ pub async fn amend(
         .ok_or_else(|| IpcError::not_found(format!("no queued write with id {id}")))?;
     check(&existing, &op)?;
 
-    knobas_sync::write_queue::amend(deps, id, op)
-        .await
-        .map_err(IpcError::internal)?
-        .map(|_| ())
-        .ok_or_else(|| IpcError::conflict(format!("write {id} has already settled")))
+    // The amendment and its send, in the background set (#1932): the send is
+    // one a person waits on, as *Send mine anyway*'s is.
+    in_the_set(scheduler, |scheduler| async move {
+        knobas_sync::write_queue::amend(scheduler.deps(), id, op)
+            .await
+            .map_err(IpcError::internal)?
+            .map(|_| ())
+            .ok_or_else(|| IpcError::conflict(format!("write {id} has already settled")))
+    })
+    .await
+}
+
+/// *Send mine anyway* (story 13): release held write `id` and send it, in
+/// the scheduler's background set, waited for there ([`in_the_set`], #1932).
+///
+/// # Errors
+///
+/// `conflict` if the write is not held; `internal` if the queue's own reads
+/// or writes fail; `not_ready` if the quit's grace ran out while the write
+/// was at the source.
+pub async fn apply_anyway(scheduler: &Scheduler, id: i64) -> Result<(), IpcError> {
+    in_the_set(scheduler, |scheduler| async move {
+        knobas_sync::write_queue::apply_anyway(scheduler.deps(), id)
+            .await
+            .map_err(IpcError::internal)?
+            .map(|_| ())
+            .ok_or_else(|| IpcError::conflict(format!("write {id} is no longer held")))
+    })
+    .await
 }
 
 /// What an amendment may not change: the operation, and the target.

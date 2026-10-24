@@ -236,8 +236,8 @@ pub async fn queue(
 /// A7), as every flush does ([`Quit`](crate::scheduler::Quit), #1924).
 /// Between writes and not inside one. A write already on the wire is let
 /// finish, so its `sent` lands; `Scheduler::shutdown`'s grace is what bounds
-/// it, and its abort is what leaves that one request at risk, the window
-/// ADR-0012 discloses. No later write is started.
+/// it, and a write its abort cuts is held as one the source may have
+/// ([`hold_cut`], #1932). No later write is started.
 pub async fn flush_all(deps: &SchedulerDeps) {
     flush_every(deps, Pass::Owed).await;
 }
@@ -851,7 +851,27 @@ async fn attempt(
     // Watched for knobas' own rate limit (#1729): a request it held past the
     // send budget fails like a refusal and was never sent. See `retryable`.
     // ---------------------------------------------------------------------
+    let on_the_wire = OnTheWire {
+        quit: &deps.quit,
+        write: (!delivery.resend_harmless).then_some(write),
+    };
     let (written, held_on) = knobas_http::watch_local_quota(source.write(op)).await;
+    let recorded = settle(deps, seen, write, &delivery, written, held_on).await;
+    if recorded.is_ok() {
+        on_the_wire.recorded();
+    }
+    recorded
+}
+
+/// [`attempt`]'s second half: record what the source answered.
+async fn settle(
+    deps: &SchedulerDeps,
+    seen: &CredentialSeen<'_>,
+    write: &QueuedWrite,
+    delivery: &knobas_core::delivery::Delivery,
+    written: Result<WriteReceipt, SourceError>,
+    held_on: Option<LocalQuota>,
+) -> Result<bool, FlushError> {
     match written {
         Ok(receipt) => {
             // The receipt, and the settle, in one statement: `sent` is where
@@ -890,18 +910,7 @@ async fn attempt(
         // took out of the transport. So it is held, with the source to check
         // named, and *Send again* (`apply_anyway`) is the reader's.
         Err(error @ SourceError::Unconfirmed { .. }) if !delivery.resend_harmless => {
-            let source = config::get(&deps.pool, &write.source_id)
-                .await?
-                .map_or_else(|| write.source_id.clone(), |cfg| cfg.display_name);
-            let theirs = store::unconfirmed(
-                &write.op,
-                write.target_snapshot.clone(),
-                &source,
-                &error.to_string(),
-            );
-            if let Some(held) = store::hold(&deps.pool, write.id, theirs).await? {
-                announce(deps, "held", &held).await;
-            }
+            unanswered(deps, write, &error.to_string()).await?;
             Ok(false)
         }
         Err(error) => {
@@ -910,6 +919,83 @@ async fn attempt(
                 None => refused(deps, write, &error.to_string()).await?,
             }
             Ok(false)
+        }
+    }
+}
+
+/// Hold `write` as one its source may have acted on: it was sent and no
+/// answer came back (#1125), so the reader checks the source, then *Send
+/// again* or *Discard*. `detail` says what became of the answer.
+async fn unanswered(
+    deps: &SchedulerDeps,
+    write: &QueuedWrite,
+    detail: &str,
+) -> Result<(), FlushError> {
+    let source = config::get(&deps.pool, &write.source_id)
+        .await?
+        .map_or_else(|| write.source_id.clone(), |cfg| cfg.display_name);
+    let theirs = store::unconfirmed(&write.op, write.target_snapshot.clone(), &source, detail);
+    if let Some(held) = store::hold(&deps.pool, write.id, theirs).await? {
+        announce(deps, "held", &held).await;
+    }
+    Ok(())
+}
+
+/// A write from its send until its outcome is recorded (#1932).
+///
+/// Dropped unrecorded once the quit has begun -- the abort at the grace's
+/// end, or a statement that failed under the quit -- it keeps the write on
+/// [`Quit`](crate::scheduler::Quit)'s list of sends it cut, which
+/// [`hold_cut`] holds before the pool closes. Dropped unrecorded before the
+/// quit, by a statement that failed, it keeps nothing: the row is pending and
+/// the next flush sends it again, ADR-0012's window.
+///
+/// `write` is `None` for a write a second arrival changes nothing for
+/// (`resend_harmless`): pending is the right reading for it.
+///
+/// It is armed from before the call, so it cannot tell a request that left
+/// from one still waiting on knobas' own rate limit (#1729) or on its
+/// connection, nor a refusal whose record failed from a send with no answer.
+/// Each of those is held too: a check of the source finds nothing, and *Send
+/// again* sends it. Holding errs on the side ADR-0012 cannot.
+struct OnTheWire<'w> {
+    quit: &'w crate::scheduler::Quit,
+    write: Option<&'w QueuedWrite>,
+}
+
+impl OnTheWire<'_> {
+    /// The outcome is on the row: nothing was cut.
+    fn recorded(mut self) {
+        self.write = None;
+    }
+}
+
+impl Drop for OnTheWire<'_> {
+    fn drop(&mut self) {
+        if let Some(write) = self.write.take()
+            && self.quit.has_begun()
+        {
+            self.quit.keep_cut(write.clone());
+        }
+    }
+}
+
+/// What a write the quit cut is held with, for the reader.
+const CUT_DETAIL: &str = "knobas quit while the write was at the source, before it answered";
+
+/// Hold every write the quit cut on the wire (#1932), as one its source may
+/// have, so the next start does not send it again blind: what a send that got
+/// no answer is (#1125). `Scheduler::shutdown` calls it once the runs and the
+/// background set are gone, before the pool closes. A failure is logged: the
+/// row is then pending, and the next start sends it again.
+pub(crate) async fn hold_cut(deps: &SchedulerDeps) {
+    for write in deps.quit.take_cut() {
+        if let Err(error) = unanswered(deps, &write, CUT_DETAIL).await {
+            tracing::warn!(
+                write_id = write.id,
+                %error,
+                "a write the quit cut could not be held; the next start sends it again"
+            );
         }
     }
 }
