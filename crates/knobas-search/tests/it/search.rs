@@ -19,7 +19,19 @@
 use std::collections::HashSet;
 
 use chrono::{DateTime, Duration, Utc};
-use knobas_search::{KindCatalog, Prefix, SearchError, SearchFilters, SearchQuery, Searcher};
+use knobas_search::{
+    KindCatalog, Prefix, SearchError, SearchFilters, SearchQuery, SearchResponse, Searcher,
+};
+
+/// Every hit's entity id, in the order the groups and hits came back.
+fn ids(response: &SearchResponse) -> Vec<String> {
+    response
+        .groups
+        .iter()
+        .flat_map(|g| &g.hits)
+        .map(|h| h.row.entity_id.clone())
+        .collect()
+}
 
 /// A query object with the defaults the launcher sends.
 fn q(raw: &str) -> SearchQuery {
@@ -543,14 +555,6 @@ async fn a_named_person_filters_with_or_without_search_text() {
     .await;
     let s = searcher(&pool);
 
-    let ids = |r: &knobas_search::SearchResponse| -> Vec<String> {
-        r.groups
-            .iter()
-            .flat_map(|g| &g.hits)
-            .map(|h| h.row.entity_id.clone())
-            .collect()
-    };
-
     // The control: without the author filter the text matches both rows, so
     // the filter has something to remove rather than an empty world to be
     // trivially right in.
@@ -792,6 +796,12 @@ async fn hostile_input_is_answered_not_executed() {
         "-\"a b\"",
         "a -\"b c\"",
         "sepa -\"retry batch\"",
+        // A negated phrase, then a word `websearch_to_tsquery` drops: the
+        // tsquery text still ends in `)` (#1971).
+        "sepa -\"retry batch\" a",
+        "sepa -\"retry batch\" the",
+        "sepa -\"retry batch\" or",
+        "sepa -\"retry batch\" -",
         "a or",
         "\"a b\"c",
         "überweisung",
@@ -1048,9 +1058,48 @@ async fn a_negated_phrase_typed_last_answers_while_typing() {
     seed_sources(&pool).await;
     seeded_corpus(&pool, "negphrase").await;
     let s = searcher(&pool);
-    for raw in ["sepa -\"retry batch\"", "-\"retry batch\"", "sepa -\"retry"] {
+    for raw in [
+        "sepa -\"retry batch\"",
+        "-\"retry batch\"",
+        "sepa -\"retry",
+        // #1971: the next keystroke after the phrase, while `a` (on its way
+        // to `api`), a stopword, `or` or a lone `-` is the last word typed.
+        "sepa -\"retry batch\" a",
+        "sepa -\"retry batch\" the",
+        "sepa -\"retry batch\" or",
+        "sepa -\"retry batch\" -",
+    ] {
         s.search(q(raw)).await.expect(raw);
     }
+}
+
+/// #1971: the guard on the prefix cast skips only the shapes that cannot take
+/// `:*`. A half-typed last word is still a prefix: `retr` finds `retry`,
+/// whose lexeme `retri` it does not equal.
+#[tokio::test]
+async fn a_half_typed_last_word_is_still_a_prefix() {
+    let pool = pool().await;
+    seed_sources(&pool).await;
+    let t = token("halfword");
+    let id = format!("jira:{t}-SEPA-1");
+    seed(
+        &pool,
+        &id,
+        "ticket",
+        "jira",
+        &format!("{t} SEPA retry"),
+        "body",
+        None,
+        Utc::now() - Duration::days(1),
+    )
+    .await;
+    let s = searcher(&pool);
+    let typing = s.search(q(&format!("{t} sepa retr"))).await.unwrap();
+    assert_eq!(ids(&typing), vec![id.clone()], "{typing:?}");
+    // The control: the same word finished is not a prefix and finds nothing,
+    // so the hit above is the cast's doing.
+    let done = s.search(q(&format!("{t} sepa retr "))).await.unwrap();
+    assert!(ids(&done).is_empty(), "{done:?}");
 }
 
 /// #1648: `page_search` is reached only through knobas-app elsewhere. It

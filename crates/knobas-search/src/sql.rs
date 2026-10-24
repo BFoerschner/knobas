@@ -178,11 +178,16 @@ pub fn search_sql(
             // What makes the box answer while the word is still being typed.
             // `websearch_to_tsquery` output is already a well-formed, quoted
             // tsquery, so appending ':*' to its *text* and casting back turns
-            // only the last lexeme into a prefix. The guard is for the empty
-            // case -- a query of nothing but stopwords yields the empty
-            // tsquery, and ':*' on its own is a syntax error.
+            // only the last lexeme into a prefix. Two guards. A query of
+            // nothing but stopwords yields the empty tsquery, and ':*' on its
+            // own is a syntax error. And ':*' binds only to a quoted lexeme:
+            // a negated phrase followed by a word Postgres drops (a stopword,
+            // `or`, a lone `-`) ends its text in `)` whatever the parser saw
+            // typed last (#1971), so such text is matched whole. That makes
+            // `tsq` and `whole` the same tsquery, which `RANK_WHOLE` ranks by.
             sql.push_str(concat!(
                 "case when t.tsq::text = '' then null::tsquery\n",
+                "              when right(t.tsq::text, 1) <> '''' then t.tsq\n",
                 "              else (t.tsq::text || ':*')::tsquery end as tsq,\n",
                 // The same words with none of them a prefix: what a row is
                 // ranked by when it holds the last word whole (`RANK_WHOLE`).
@@ -1563,6 +1568,16 @@ mod tests {
         // The empty-tsquery guard: `':*'` appended to nothing is a syntax
         // error, not an empty match.
         assert!(typing.sql.contains("null::tsquery"), "{}", typing.sql);
+        // The quote guard: only text that ends in a quoted lexeme takes the
+        // `':*'`. A negated phrase followed by a word Postgres drops ends in
+        // `)`, and is matched whole (#1971).
+        assert!(
+            typing
+                .sql
+                .contains("when right(t.tsq::text, 1) <> '''' then t.tsq"),
+            "{}",
+            typing.sql
+        );
         // While a word may be a prefix, a row holding the words whole is
         // ranked by them (`RANK_WHOLE`, #611).
         assert!(

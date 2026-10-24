@@ -2229,6 +2229,7 @@ knobas-search	test/it	readings::ten_views_are_counted_in_one_statement
 knobas-search	test/it	search::a_clicked_chip_is_applied_and_echoed_like_a_typed_one
 knobas-search	test/it	search::a_deleted_item_disappears_from_the_index
 knobas-search	test/it	search::a_filter_with_no_text_browses_rather_than_answering_nothing
+knobas-search	test/it	search::a_half_typed_last_word_is_still_a_prefix
 knobas-search	test/it	search::a_kind_no_one_declared_is_still_grouped_and_labelled
 knobas-search	test/it	search::a_kind_the_limit_cut_still_reports_its_count
 knobas-search	test/it	search::a_named_person_filters_with_or_without_search_text
