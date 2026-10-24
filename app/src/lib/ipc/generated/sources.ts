@@ -473,6 +473,31 @@ frame: Frame | null,
  */
 system_name: string | null, 
 /**
+ * The query a [`Frame::SavedView`] holds, in the source's own language
+ * (#2050): Jira's `jql`, the board's saved filter or the filter's own
+ * JQL. What the Tickets screen's source line and *View settings* draw;
+ * `sync.saved_view.source_query`. Required of a saved-view kind by the
+ * ticket-system minimum, and a view whose record carries none draws no
+ * query. Empty for every kind that is not a saved view.
+ */
+source_query: Array<PayloadPath>, 
+/**
+ * A saved view's board type in the source's own word (#2050): Jira's
+ * `type` (`scrum`, `kanban`, `simple`). Optional; a filter has none.
+ */
+board_type: Array<PayloadPath>, 
+/**
+ * The query a saved view narrows [`source_query`](Self::source_query)
+ * with (#2050): a Jira Kanban board's `sub_query`. Optional.
+ */
+sub_query: Array<PayloadPath>, 
+/**
+ * A saved view's active sprint (#2050), a JSON **object**
+ * `{"id", "name", "end_date"}` as the shell draws it: Jira's `sprint`
+ * on a Scrum board. Optional; a miss is no sprint.
+ */
+sprint: Array<PayloadPath>, 
+/**
  * What a pipeline is called (#848): TeamCity's configuration `name`.
  * Empty for every kind that is not a pipeline.
  */
