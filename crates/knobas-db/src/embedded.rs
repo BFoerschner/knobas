@@ -1897,9 +1897,9 @@ fn write_password_file(path: &Path, password: &str) -> Result<(), DbError> {
 /// **A timeout terminates it first**: `SIGTERM` makes `initdb` remove what it
 /// made, the whole data directory when it created it, so the next launch
 /// starts from nothing. `SIGKILL`, which `kill_on_drop` sends, leaves a
-/// directory with `PG_VERSION` and no marker, which the next launch's
-/// [`recover_or_mark`] removes. It is the fallback once [`INITDB_GRACE`]
-/// has passed.
+/// directory with no marker, with `PG_VERSION` or, when it cuts that cleanup
+/// short, without (#1985); the next launch's [`recover_or_mark`] removes
+/// either. It is the fallback once [`INITDB_GRACE`] has passed.
 ///
 /// A failure reads as the crate's did: `DatabaseInitializationError` with the
 /// command's output, or *deadline has elapsed*.
@@ -3342,6 +3342,50 @@ esac
         std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)).unwrap();
 
         assert_eq!(found, Shape::HoldsDatabase);
+    }
+
+    /// #1985: without `PG_VERSION` and `postgresql.conf`, a directory that
+    /// holds a database, or one whose `base/` cannot be listed, is kept; an
+    /// empty one is left for `initdb`.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_without_pg_version_that_may_hold_a_database_is_kept() {
+        use std::os::unix::fs::PermissionsExt;
+        for database in ["base/16384", "pg_tblspc/16385", "unreadable"] {
+            let dir = tempfile::tempdir().unwrap();
+            let data = dir.path().join("data");
+            std::fs::create_dir_all(data.join("base/1")).unwrap();
+            std::fs::create_dir_all(data.join("pg_tblspc")).unwrap();
+            if database == "unreadable" {
+                let base = data.join("base");
+                std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o000)).unwrap();
+            } else {
+                std::fs::create_dir_all(data.join(database)).unwrap();
+            }
+
+            let found = shape(&data);
+            recover_or_mark(&data).unwrap();
+            let kept = data.join("base").exists();
+            let base = data.join("base");
+            let _ = std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700));
+
+            assert_eq!(found, Shape::Unrecognised, "{database}");
+            assert!(kept, "{database}: kept");
+            assert!(
+                !data.join(INITDB_FINISHED).exists(),
+                "{database}: not marked"
+            );
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        assert_eq!(shape(&data), Shape::NotInitialised, "empty");
+        assert_eq!(
+            shape(&dir.path().join("absent")),
+            Shape::NotInitialised,
+            "absent"
+        );
     }
 
     /// #1819: a marked directory is never removed, whatever it lacks later.
