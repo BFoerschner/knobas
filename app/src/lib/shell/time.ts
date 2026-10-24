@@ -9,7 +9,12 @@
  * One copy lives outside the shell: the Gitea views' commit and branch rows
  * carry their age in a view's text (`crates/knobas-source-gitea/src/view.rs`,
  * `ago`), because a view row's meta is a string. Change both or neither.
+ *
+ * The words under a day are `ageLabel`'s (`lib/time/format.ts`), which the
+ * stale line's *data is 38 min old* says too (#1986).
  */
+
+import { ageLabel } from "../time/format";
 
 /**
  * `"just now" | "4 min ago" | "3 h ago" | "2026-08-19"`.
@@ -38,10 +43,7 @@ export function ago(iso: string | null | undefined, now: Date = new Date()): str
 
   const minutes = Math.round((now.getTime() - then.getTime()) / 60_000);
   if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
-
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
+  if (Math.round(minutes / 60) < 24) return `${ageLabel(iso, now)} ago`;
 
   return then.toISOString().slice(0, 10);
 }

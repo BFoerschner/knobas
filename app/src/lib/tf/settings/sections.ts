@@ -8,6 +8,7 @@ import type { BackupRecord, BackupSchedule, ShareParts } from "../../ipc/backup"
 import type { InboxCategory } from "../../ipc/entity";
 import type { DbStats } from "../../ipc/sources";
 import { formatBytes } from "../../sources/diagnostics";
+import { stampLabel } from "../../time/format";
 
 /** One tick under *Share with a colleague*. */
 export interface ShareTick {
@@ -42,24 +43,15 @@ export function shareTicks(savedLists: boolean, savedViews = false, savedSets = 
   );
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** *today 02:00*, *yesterday 02:00*, *2 Oct 02:00*. */
-function dayAndClock(at: Date, now: Date): string {
-  const clock = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
-  if (at.toDateString() === now.toDateString()) return `today ${clock}`;
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (at.toDateString() === yesterday.toDateString()) return `yesterday ${clock}`;
-  return `${at.getDate()} ${MONTHS[at.getMonth()]} ${clock}`;
-}
-
-/** *Last backup*: *today 02:00, 48 MB, in ~/Library/…/backups*. */
+/**
+ * *Last backup*: *today 02:00, 48 MB, in ~/Library/…/backups*; an older one
+ * keeps its clock, *2026-10-02 23:00, …* (`stampLabel`, #1986).
+ */
 export function lastBackupWords(last: BackupRecord | null, directory: string, now: Date = new Date()): string {
   if (last === null) return "None yet";
-  return `${dayAndClock(new Date(last.taken_at), now)}, ${formatBytes(last.bytes)}, in ${directory}`;
+  return `${stampLabel(last.taken_at, now)}, ${formatBytes(last.bytes)}, in ${directory}`;
 }
 
 /**
