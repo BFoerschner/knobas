@@ -1021,6 +1021,11 @@ mod tests {
     /// nothing (#1984).
     #[test]
     fn the_mirror_invokes_the_commands_by_their_registered_names() {
-        crate::commands::mirror::assert_mirrors("sources", MIRROR, "app/src/lib/ipc/sources.ts", 29);
+        crate::commands::mirror::assert_mirrors(
+            "sources",
+            MIRROR,
+            "app/src/lib/ipc/sources.ts",
+            29,
+        );
     }
 }
