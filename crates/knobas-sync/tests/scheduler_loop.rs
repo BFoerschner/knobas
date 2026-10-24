@@ -3330,12 +3330,19 @@ async fn a_write_on_the_wire_when_the_grace_ends_is_held_not_sent_again() {
         .expect("the quit ends at its grace");
     door.open();
 
-    assert_eq!(finished.load(Ordering::SeqCst), 0, "the write was let finish");
+    assert_eq!(
+        finished.load(Ordering::SeqCst),
+        0,
+        "the write was let finish"
+    );
     let mut rows = Vec::new();
     for write in &owed {
         rows.push(store::get(&pool, write.id).await.unwrap().unwrap());
     }
-    let cut: Vec<_> = rows.iter().filter(|r| r.state == WriteState::Held).collect();
+    let cut: Vec<_> = rows
+        .iter()
+        .filter(|r| r.state == WriteState::Held)
+        .collect();
     assert_eq!(
         cut.len(),
         1,
@@ -3348,7 +3355,9 @@ async fn a_write_on_the_wire_when_the_grace_ends_is_held_not_sent_again() {
         "held as one the source may have, naming the source to check"
     );
     assert_eq!(
-        rows.iter().filter(|r| r.state == WriteState::Pending).count(),
+        rows.iter()
+            .filter(|r| r.state == WriteState::Pending)
+            .count(),
         1,
         "the write behind it stays owed"
     );

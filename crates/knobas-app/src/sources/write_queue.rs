@@ -763,7 +763,11 @@ async fn refresh(scheduler: &Scheduler, source_id: &str) {
 /// from the row it is amending; `not_found` if no write carries `id`;
 /// `conflict` if the write has already settled; `not_ready` if the quit's
 /// grace ran out while the write was at the source.
-pub async fn amend(scheduler: &Scheduler, id: i64, payload: serde_json::Value) -> Result<(), IpcError> {
+pub async fn amend(
+    scheduler: &Scheduler,
+    id: i64,
+    payload: serde_json::Value,
+) -> Result<(), IpcError> {
     let deps = scheduler.deps();
     // Decoded before it is stored, so a payload the SPI cannot read is a
     // refusal the user sees now rather than an undecodable row discovered at

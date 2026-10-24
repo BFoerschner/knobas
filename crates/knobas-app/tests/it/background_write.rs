@@ -1144,6 +1144,10 @@ async fn a_command_made_during_the_quit_changes_its_row_and_sends_nothing() {
     };
     assert_eq!(row(first).await.state, WriteState::Sent);
     let edited = row(held.id).await;
-    assert_eq!(edited.state, WriteState::Pending, "waits for the next start");
+    assert_eq!(
+        edited.state,
+        WriteState::Pending,
+        "waits for the next start"
+    );
     assert_eq!(edited.payload["Comment"]["body"], json!("as edited"));
 }

@@ -926,7 +926,11 @@ async fn settle(
 /// Hold `write` as one its source may have acted on: it was sent and no
 /// answer came back (#1125), so the reader checks the source, then *Send
 /// again* or *Discard*. `detail` says what became of the answer.
-async fn unanswered(deps: &SchedulerDeps, write: &QueuedWrite, detail: &str) -> Result<(), FlushError> {
+async fn unanswered(
+    deps: &SchedulerDeps,
+    write: &QueuedWrite,
+    detail: &str,
+) -> Result<(), FlushError> {
     let source = config::get(&deps.pool, &write.source_id)
         .await?
         .map_or_else(|| write.source_id.clone(), |cfg| cfg.display_name);
