@@ -277,6 +277,36 @@
   let sources = $state<Pick<SourceSummary, "id" | "display_name">[] | null>(null);
   let sync = $state<SourceSyncStatus[]>([]);
   let now = $state(new Date());
+  /** Bumped by an event that asks for the source list again. */
+  let sourcesAsked = $state(0);
+  const readSources = () => (sourcesAsked += 1);
+  /**
+   * Which sources the health store holds. Removing a source sends no event:
+   * Settings re-lists the sources and hands the store the new membership
+   * (`Health.replace`), on Remove, Uninstall, Add source and restore alike, so
+   * a change of it is when the bar's own list is stale (#2059).
+   */
+  const membership = $derived(health.all.map((row) => row.source_id).join("\n"));
+
+  $effect(() => {
+    if (!lifecycle.ready) return;
+    void membership;
+    void sourcesAsked;
+    // A read this one overtakes lands nothing: the newer answer stands.
+    let dead = false;
+    void ports
+      .listSources()
+      .then((rows) => {
+        if (dead) return;
+        sources = rows;
+        // Which sources answer an optional read of a role (#1208); the mirror narrows the rows (#1300).
+        sourceRoles.take(rows);
+      })
+      .catch(() => {});
+    return () => {
+      dead = true;
+    };
+  });
 
   $effect(() => {
     if (!lifecycle.ready) return;
@@ -285,17 +315,6 @@
     const hold = (pending: Promise<() => void>) =>
       void pending.then((off) => (dead ? off() : offs.push(off))).catch(() => {});
 
-    const readSources = () =>
-      void ports
-        .listSources()
-        .then((rows) => {
-          if (dead) return;
-          sources = rows;
-          // Which sources answer an optional read of a role (#1208); the mirror narrows the rows (#1300).
-          sourceRoles.take(rows);
-        })
-        .catch(() => {});
-    readSources();
     void ports
       .syncStatus()
       .then((rows) => {

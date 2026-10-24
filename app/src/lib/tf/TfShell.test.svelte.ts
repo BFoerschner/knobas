@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { CredentialHealth, RoleClaim, SourceSyncStatus } from "../ipc/sources";
 import type { RunningTimer } from "../ipc/time";
 import { writeQueuePanel, type WriteQueue } from "../shell/write-queue.svelte";
+import { createHealth, type Health } from "../shell/health.svelte";
 import { push, toasts } from "../shell/toasts.svelte";
 import Modal from "../shell/Modal.fixture.svelte";
 import { createBadges } from "./badges.svelte";
@@ -189,6 +190,7 @@ function start(
     counts?: WriteQueue["counts"];
     jobPorts?: JobPorts;
     dialogs?: Snippet<[SourceSyncStatus[]]>;
+    health?: Pick<Health, "all">;
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -203,7 +205,7 @@ function start(
       ontimer: over.ontimer ?? (() => {}),
       timer: over.timer ?? { current: null, elapsed: null },
       inbox: { count: 3 },
-      health: { all: [health("jira", "ok"), health("teamcity", "unauthorized")] },
+      health: over.health ?? { all: [health("jira", "ok"), health("teamcity", "unauthorized")] },
       badges: createBadges({
         failingBuilds: () => Promise.resolve(2),
         monitorsDown: () => Promise.resolve(over.monitorsDown ?? 0),
@@ -549,6 +551,34 @@ test("the status bar: sync ages, a 401 with Re-enter password, the queued writes
   expect(bad.textContent).toContain("TeamCity: sign-in failed");
   expect(bad.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/teamcity");
   expect(bar.querySelector("button.tf-queued")?.textContent).toBe("2 queued writes");
+});
+
+test("a source removed or added leaves or joins the status bar without a reload (#2059)", async () => {
+  // No event says a source was removed: Settings re-lists the sources and
+  // hands the health store the new membership, as `TfSettings.load` does.
+  const store = createHealth({ credentialHealth: () => Promise.resolve([]), listen: () => Promise.resolve(() => {}) });
+  store.replace([health("jira", "ok"), health("tide", "ok")]);
+  let listed = [
+    { id: "jira", display_name: "Jira" },
+    { id: "tide", display_name: "Tidewater Gitea" },
+  ];
+  start({ health: store, listSources: () => Promise.resolve(listed.map((s) => ({ roles: [], role_misses: [], ...s }))) });
+  await settle();
+  const bar = () => target.querySelector(".tf-status")!.textContent;
+  expect(bar()).toContain("Tidewater Gitea not synced yet");
+
+  // Remove, or Uninstall with either answer: the source is gone.
+  listed = [{ id: "jira", display_name: "Jira" }];
+  store.replace([health("jira", "ok")]);
+  await settle();
+  expect(bar()).toContain("Jira synced 4 min ago");
+  expect(bar()).not.toContain("Tidewater Gitea");
+
+  // Add source, or a restore: it is there again.
+  listed = [...listed, { id: "tide", display_name: "Tidewater Gitea" }];
+  store.replace([health("jira", "ok"), health("tide", "ok")]);
+  await settle();
+  expect(bar()).toContain("Tidewater Gitea not synced yet");
 });
 
 test("the queued-writes count opens the queue list (R-1.5)", async () => {
