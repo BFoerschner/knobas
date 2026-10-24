@@ -141,7 +141,8 @@ pub struct FieldFilter {
     /// `assigned:`'s window in days; `None` for every other key.
     pub within_days: Option<u32>,
     /// `has:`'s user (#815): in [`EffectiveFilters::fields`] the identity's
-    /// usernames, lowercased, which `has:review-for-me` reads; empty for
+    /// usernames as configured, which `has:review-for-me` reads and the
+    /// statement folds with the server's `lower()` (#1975); empty for
     /// every other key and before [`merge`].
     pub me: Vec<String>,
 }
@@ -457,11 +458,7 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
                 FieldFilter {
                     values,
                     me: if filter.key == FieldKey::Has {
-                        parsed
-                            .identity
-                            .iter()
-                            .map(|name| name.to_lowercase())
-                            .collect()
+                        parsed.identity.clone()
                     } else {
                         Vec::new()
                     },
@@ -682,7 +679,8 @@ pub fn needles(text: &str) -> Vec<String> {
 
 /// One alternative of the Tickets view's word filter (#1889): a row it
 /// admits holds every word of `holds` and none of `lacks`. Each is a needle
-/// as [`needles`] spells it, lowercased, once each.
+/// as [`needles`] cuts it, but as typed: the statement folds it with the
+/// server's `lower()`, as it folds the row (#1988). Once each, ignoring case.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct WordAlternative {
     pub holds: Vec<String>,
@@ -705,9 +703,9 @@ pub fn word_alternatives(text: &str) -> Vec<WordAlternative> {
         if token.eq_ignore_ascii_case("or") {
             out.push(std::mem::take(&mut current));
         } else if let Some(left_out) = token.strip_prefix('-') {
-            push_needle(&mut current.lacks, left_out);
+            push_word(&mut current.lacks, left_out);
         } else {
-            push_needle(&mut current.holds, &token);
+            push_word(&mut current.holds, &token);
         }
     }
     out.push(current);
@@ -718,12 +716,24 @@ pub fn word_alternatives(text: &str) -> Vec<WordAlternative> {
 /// `token` as a needle -- its quotes and edge punctuation off, lowercased --
 /// onto `out`, unless it is empty or there already.
 fn push_needle(out: &mut Vec<String>, token: &str) {
-    let needle = token
-        .trim_matches(|c: char| !c.is_alphanumeric())
-        .to_lowercase();
+    let needle = cut(token).to_lowercase();
     if !needle.is_empty() && !out.contains(&needle) {
         out.push(needle);
     }
+}
+
+/// `token` as [`word_alternatives`] keeps it: cut as a needle, but as typed,
+/// and once each for [`same_value`]'s once-each rule.
+fn push_word(out: &mut Vec<String>, token: &str) {
+    let word = cut(token);
+    if !word.is_empty() && !out.iter().any(|seen| same_value(seen, word)) {
+        out.push(word.to_owned());
+    }
+}
+
+/// A token with its quotes and edge punctuation off.
+fn cut(token: &str) -> &str {
+    token.trim_matches(|c: char| !c.is_alphanumeric())
 }
 
 /// `key:value`, if the token is one at all.
@@ -1782,9 +1792,14 @@ mod tests {
                 .iter()
                 .map(|a| (words(&a["holds"]), words(&a["lacks"])))
                 .collect();
+            // The fixture spells the words folded; the alternatives keep
+            // them as typed for the server to fold (#1988).
+            let fold = |words: Vec<String>| -> Vec<String> {
+                words.iter().map(|w| w.to_lowercase()).collect()
+            };
             let got: Vec<(Vec<String>, Vec<String>)> = word_alternatives(&text)
                 .into_iter()
-                .map(|a| (a.holds, a.lacks))
+                .map(|a| (fold(a.holds), fold(a.lacks)))
                 .collect();
             assert_eq!(got, expected, "alternatives of {typed:?}");
         }
@@ -1801,7 +1816,7 @@ mod tests {
         assert_eq!(
             word_alternatives(r#"Retry "backoff policy" -cron -"dead letter" OR sepa, retry -"#),
             [
-                alt(&["retry", "backoff policy"], &["cron", "dead letter"]),
+                alt(&["Retry", "backoff policy"], &["cron", "dead letter"]),
                 alt(&["sepa", "retry"], &[]),
             ]
         );
