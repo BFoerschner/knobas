@@ -9,7 +9,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AssetRow, AssetType, Dependencies, DepItem, DepViews, RouteRow } from "../../ipc/assets";
-import { toasts } from "../../shell/toasts.svelte";
+import { reset as resetToasts, toasts } from "../../shell/toasts.svelte";
 import { createDepViewState } from "./views.svelte";
 import { settingsOf } from "./views";
 import TfDeps from "./TfDeps.svelte";
@@ -210,6 +210,39 @@ test("the flash timer is cleared when the page unmounts within 1.6 s (PAGE-14)",
     unmount(app!);
     app = null;
     expect(vi.getTimerCount()).toBe(pending - 1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a second flash within 1.6 s leaves no timer of the first behind the unmount (PAGE-14)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    let made = 0;
+    const createAsset = (_type: string, name: string) => {
+      made += 1;
+      const id = `asset:new${made}`;
+      estate = read([...estate.items.filter((i) => i.id.startsWith("asset:new")), item(id, "service", name)]);
+      return Promise.resolve({ id } as AssetRow);
+    };
+    render({}, { createAsset });
+    await settle();
+    for (const name of ["payments-api", "ledger-api"]) {
+      target.querySelector<HTMLButtonElement>("[aria-label='Add to Services']")!.click();
+      await settle();
+      type_(field("Name"), name);
+      button("Create", dialog()).click();
+      await settle();
+      await settle();
+    }
+    expect(target.querySelector(".tf-dp-t[data-id='asset:new2']")!.classList.contains("tf-dp-flash")).toBe(true);
+    unmount(app!);
+    app = null;
+    // What is left besides the flash: jsdom's zero-delay selection timers,
+    // run here, and the two toasts' dismiss timers, which are the shell's.
+    vi.advanceTimersByTime(1);
+    resetToasts();
+    expect(vi.getTimerCount(), "a flash timer outlived the page").toBe(0);
   } finally {
     vi.useRealTimers();
   }

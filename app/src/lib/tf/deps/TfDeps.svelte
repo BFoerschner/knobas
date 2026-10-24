@@ -364,6 +364,8 @@
     const tile = bandsEl?.querySelector<HTMLElement>(`.tf-dp-t[data-id="${CSS.escape(id)}"]`);
     tile?.scrollIntoView?.({ block: "center" });
     tile?.querySelector<HTMLElement>(".tf-dp-open")?.focus();
+    // A second flash inside 1.6 s: the first one's timer goes, or the unmount clears only the last.
+    clearTimeout(flashTimer);
     flashTimer = setTimeout(() => {
       if (flash === id) flash = null;
       flashed = null;
