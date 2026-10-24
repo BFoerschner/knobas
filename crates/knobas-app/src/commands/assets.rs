@@ -1176,8 +1176,10 @@ mod tests {
             ("set_monitoring_settings", "settings"),
             ("ack_alert", "monitorId"),
         ] {
+            // The `invoke<..>(` call site, not the first quoted name: a doc
+            // comment naming the command may come before it (#1984).
             let at = MIRROR
-                .find(&format!("\"{call}\""))
+                .find(&format!(">(\"{call}\""))
                 .unwrap_or_else(|| panic!("{call} is not invoked from the mirror"));
             let body = &MIRROR[at..MIRROR[at..].find(");").map_or(MIRROR.len(), |end| at + end)];
             assert!(
