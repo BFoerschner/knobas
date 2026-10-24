@@ -93,6 +93,7 @@
     repoHash,
     repoPrs,
     REPO_TABS,
+    toolbarRefusal,
     type BranchOption,
     type RepoTab,
     type RepoTabId,
@@ -154,6 +155,12 @@
   let failed = $state<string | null>(null);
   /** `null` while the *Branches* section has not answered. */
   let branches = $state<BranchOption[] | null>(null);
+  /**
+   * Why the repository's own toolbar draws *New branch…* disabled (a mirror,
+   * a token that cannot write, #2030); `null` while it has not answered, and
+   * where it offers the branch.
+   */
+  let branchRefused = $state<string | null>(null);
   let checkout = $state<CheckoutView | undefined>(undefined);
   let local = $state<DiffRead | null>(null);
   let prs = $state<EntityRow[] | null>(null);
@@ -168,6 +175,7 @@
     source = null;
     failed = null;
     branches = null;
+    branchRefused = null;
     checkout = undefined;
     local = null;
     prs = null;
@@ -215,6 +223,14 @@
       () => {
         if (live) branches = [];
       },
+    );
+    // Whether the source offers a branch here is its toolbar's answer
+    // (ADR-0020 rule 4); a view that does not answer leaves the button be.
+    ports.entityView(id, null).then(
+      (view) => {
+        if (live) branchRefused = toolbarRefusal(view, "create_branch");
+      },
+      () => {},
     );
     readCheckout(id, () => live);
     const again = () => readCheckout(id, () => live);
@@ -346,7 +362,11 @@
           type="button"
           class="tf-btn"
           disabled={branches === null || branches.length === 0}
-          onclick={() => (newBranch = { from: null })}>New branch…</button>
+          aria-disabled={branchRefused !== null ? "true" : undefined}
+          title={branchRefused ?? undefined}
+          onclick={() => {
+            if (branchRefused === null) newBranch = { from: null };
+          }}>New branch…</button>
         {#if proposed !== null}
           <a class="tf-btn" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
         {/if}

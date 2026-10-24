@@ -30,6 +30,23 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 /// The only token the fake accepts. Anything else gets Gitea's 401.
 pub const TOKEN: &str = "tidewater-pat";
 
+/// Gitea's answer to a write sent with the body `{}` under `path` (#2030,
+/// `view::grants`), as measured on 1.27.3: the scope refusal (403) for a token
+/// without the route's write scope, the body's validation (422) for one with
+/// it, another 403 for an account that may not push.
+pub async fn write_probe(server: &MockServer, path_: String, status: u16, message: &str) {
+    Mock::given(method("POST"))
+        .and(path(path_))
+        .and(header("Authorization", format!("token {TOKEN}").as_str()))
+        .and(wiremock::matchers::body_json(json!({})))
+        .respond_with(ResponseTemplate::new(status).set_body_json(json!({
+            "message": message,
+            "url": "http://gitea/api/swagger",
+        })))
+        .mount(server)
+        .await;
+}
+
 /// Wiremock matches lower numbers first; the defaults sit at 5.
 const FORBIDDEN_PRIORITY: u8 = 3;
 const EMPTY_PAGE_PRIORITY: u8 = 8;

@@ -47,6 +47,64 @@ impl SourceView {
             actions: Vec::new(),
         }
     }
+
+    /// Draw every write `refused` answers a reason for as one the reader
+    /// cannot take, wherever the view offers it (issue #2030): an action is
+    /// disabled with the reason, a settings block's values stop being
+    /// editable, and a diff's line comments are no longer offered.
+    ///
+    /// For an adapter that learns what its **credential** may write -- a
+    /// token without the write scope -- after drawing what the entity
+    /// offers. A token can be replaced, so the reader can still reach the
+    /// state where the write is enabled, and ADR-0020 rule 4 draws such a
+    /// write disabled with its reason rather than leaving it out. The reason
+    /// replaces any the adapter drew: whatever else the reader fixes, the
+    /// credential still cannot make the write.
+    ///
+    /// `refused` is asked once for each write the view offers, in the order
+    /// they are drawn, so an adapter can also collect what to ask about.
+    pub fn refuse_writes(&mut self, mut refused: impl FnMut(&str) -> Option<String>) {
+        fn disable(actions: &mut [ViewAction], refused: &mut impl FnMut(&str) -> Option<String>) {
+            for action in actions {
+                if let Some(reason) = refused(&action.write_op) {
+                    action.disabled = Some(reason);
+                }
+            }
+        }
+        disable(&mut self.actions, &mut refused);
+        for block in self.sections.iter_mut().flat_map(|s| &mut s.blocks) {
+            // No wildcard arm: a block that comes to carry a write is a
+            // decision here, not one this walk misses.
+            match block {
+                Block::Actions { actions } => disable(actions, &mut refused),
+                Block::Settings {
+                    write_op, values, ..
+                } => {
+                    if refused(write_op).is_some() {
+                        for value in values {
+                            value.editable = false;
+                        }
+                    }
+                }
+                Block::Diff { commentable, .. } => {
+                    // `Commenting` carries no reason to draw, so the line
+                    // comments go; the review actions beside them say why.
+                    if commentable
+                        .as_ref()
+                        .is_some_and(|c| refused(&c.write_op).is_some())
+                    {
+                        *commentable = None;
+                    }
+                }
+                Block::Facts { .. }
+                | Block::Text { .. }
+                | Block::Entities { .. }
+                | Block::Log { .. }
+                | Block::Tree { .. }
+                | Block::File { .. } => {}
+            }
+        }
+    }
 }
 
 /// One tab of a view.
@@ -806,6 +864,72 @@ mod tests {
         let back: SourceView = serde_json::from_str(&json).unwrap();
         assert_eq!(back, view);
         assert_eq!(view.sections[0].blocks.len(), 9, "a block lost its probe");
+    }
+
+    /// Issue #2030: a write the credential cannot make is drawn disabled with
+    /// the reason wherever the view offers it -- the toolbar, an actions
+    /// block, a settings block's values, a diff's line comments -- and every
+    /// other write is left as the adapter drew it.
+    #[test]
+    fn a_refused_write_is_disabled_wherever_the_view_offers_it() {
+        let mut view = SourceView {
+            actions: every_action(),
+            sections: vec![ViewSection {
+                id: "overview".into(),
+                title: "Overview".into(),
+                count: None,
+                deferred: false,
+                blocks: every_block(),
+            }],
+        };
+        let before = view.clone();
+        view.refuse_writes(|op| {
+            matches!(op, "submit_review" | "set_parameter" | "delete_branch")
+                .then(|| "No write scope".to_owned())
+        });
+
+        let actions_block = |view: &SourceView| {
+            view.sections[0]
+                .blocks
+                .iter()
+                .find_map(|b| match b {
+                    Block::Actions { actions } => Some(actions.clone()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        for (drawn, was) in [
+            (view.actions.clone(), before.actions.clone()),
+            (actions_block(&view), actions_block(&before)),
+        ] {
+            let disabled: Vec<(&str, Option<&str>)> = drawn
+                .iter()
+                .map(|a| (a.label.as_str(), a.disabled.as_deref()))
+                .collect();
+            assert_eq!(
+                disabled,
+                [
+                    ("Merge…", None),
+                    ("Approve…", Some("No write scope")),
+                    ("Submit review…", Some("No write scope")),
+                    // A reason the adapter gave gives way: the credential's
+                    // holds whatever else changes.
+                    ("Delete branch…", Some("No write scope")),
+                ]
+            );
+            assert_eq!(drawn[0], was[0], "an allowed write is untouched");
+        }
+        for block in &view.sections[0].blocks {
+            match block {
+                Block::Diff { commentable, .. } => {
+                    assert_eq!(*commentable, None, "no line comments to send");
+                }
+                Block::Settings { values, .. } => {
+                    assert!(values.iter().all(|v| !v.editable), "{values:?}");
+                }
+                _ => {}
+            }
+        }
     }
 
     /// A tree and a file on the wire, as the TypeScript mirror reads them:

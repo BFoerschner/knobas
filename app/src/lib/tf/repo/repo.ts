@@ -18,6 +18,7 @@ import type {
   EntityRow,
   SourceView,
   TreeEntry,
+  ViewAction,
   ViewRow,
   ViewSection,
 } from "../../ipc/entity";
@@ -334,10 +335,25 @@ export function compareHash(repoId: string, branch: string): string {
  * (a mirror) where it offers one it would refuse.
  */
 export function branchFrom(view: SourceView | null): { from: ChoiceOption; disabled: string | null } | null {
-  const action = view?.actions.find((candidate) => candidate.write_op === "create_branch");
+  const action = toolbarAction(view, "create_branch");
   const field = action?.fields.find((candidate) => candidate.name === "from_ref");
   const from = field?.kind.type === "choice" ? field.kind.options[0] : undefined;
   return action && from ? { from, disabled: action.disabled } : null;
+}
+
+/**
+ * Why the view's toolbar draws `writeOp` disabled, in the source's words: a
+ * mirror, a token that cannot write (#2030). `null` where it offers the write
+ * enabled, or says nothing about it. Whether a write is offered is the
+ * source's answer (ADR-0020 rule 4).
+ */
+export function toolbarRefusal(view: SourceView | null, writeOp: string): string | null {
+  return toolbarAction(view, writeOp)?.disabled ?? null;
+}
+
+/** The view's toolbar action for `writeOp`, where it offers one. */
+function toolbarAction(view: SourceView | null, writeOp: string): ViewAction | undefined {
+  return view?.actions.find((candidate) => candidate.write_op === writeOp);
 }
 
 /**
@@ -361,6 +377,8 @@ export interface BranchStanding {
   pr: { entityId: string | null; number: string | null; state: string | null; tone: string | null } | null;
   /** The source offers a pull request from it now (*Open pull request…*, enabled). */
   canOpenPr: boolean;
+  /** Why the source draws that pull request disabled (nothing ahead, a token that cannot write, #2030), in its words. */
+  prBlocked: string | null;
   /** The source offers a delete at all: never for the default branch. */
   deletable: boolean;
   /** Why the delete cannot be taken now (a protected branch), in the source's words. */
@@ -399,6 +417,7 @@ export function branchStanding(view: SourceView | null): BranchStanding {
     merged: ahead === 0,
     pr,
     canOpenPr: offer !== undefined && offer.disabled === null,
+    prBlocked: offer?.disabled ?? null,
     deletable: remove !== undefined,
     deleteBlocked: remove?.disabled ?? null,
     commits: viewRows(section("commits")),

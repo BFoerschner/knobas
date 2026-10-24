@@ -21,6 +21,7 @@ mod act;
 mod branch;
 mod checks;
 mod files;
+mod grants;
 mod pr;
 mod repo;
 mod rows;
@@ -46,32 +47,31 @@ pub(crate) async fn draw(
     entity: &str,
     section: Option<&str>,
 ) -> Result<Option<SourceView>, SourceError> {
-    match source.key_of(entity)? {
+    let key = source.key_of(entity)?;
+    let mut view = match &key {
         GiteaKey::Commit { owner, repo, sha } => {
-            commit(source, entity, &owner, &repo, &sha, section)
-                .await
-                .map(Some)
+            commit(source, entity, owner, repo, sha, section).await?
         }
         GiteaKey::Pr {
             owner,
             repo,
             number,
-        } => pr::draw(source, entity, &owner, &repo, number, section)
-            .await
-            .map(Some),
+        } => pr::draw(source, entity, owner, repo, *number, section).await?,
         GiteaKey::Branch {
             owner,
             repo,
             branch,
-        } => branch::draw(source, entity, &owner, &repo, &branch, section)
-            .await
-            .map(Some),
-        GiteaKey::Repo { owner, repo } => repo::draw(source, entity, &owner, &repo, section)
-            .await
-            .map(Some),
+        } => branch::draw(source, entity, owner, repo, branch, section).await?,
+        GiteaKey::Repo { owner, repo } => repo::draw(source, entity, owner, repo, section).await?,
         // An issue's detail is the ticket's, drawn from the mirror (#1206).
-        GiteaKey::Issue { .. } => Ok(None),
-    }
+        GiteaKey::Issue { .. } => return Ok(None),
+    };
+    // What the view offers is the entity's answer; what the token may make
+    // of it is Gitea's, asked once the view knows which writes it offers
+    // (#2030).
+    let (owner, repo) = key.repository();
+    grants::narrow(source, owner, repo, &mut view).await;
+    Ok(Some(view))
 }
 
 /// A commit: *Overview* and *Diff*, neither deferred -- reading a commit's

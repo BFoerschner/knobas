@@ -309,7 +309,8 @@ test("Branches lists main as default, then each branch with ahead and behind or 
   expect(locked.title).toBe("Protected branch: lift its protection on Gitea to delete it");
   expect(text(target.querySelector(".tf-rbranches-note"))).toBe("The first 5 branches; there may be more on Gitea.");
   // Each branch's standing is its own view's read.
-  expect(reads.filter(([, section]) => section === null).map(([id]) => id).sort()).toEqual([CHORE, FEATURE, LOCKED, SPIKE].sort());
+  // Each branch's whole view, and the repository's for its toolbar (#2030).
+  expect(reads.filter(([, section]) => section === null).map(([id]) => id).sort()).toEqual([CHORE, FEATURE, LOCKED, REPO, SPIKE].sort());
 });
 
 test("the Branches filter narrows by name, No PR and Merged", async () => {
@@ -467,6 +468,40 @@ test("New branch from here… starts the branch at the commit's whole sha", asyn
   expect(writes).toEqual([{ CreateBranch: { entity: REPO, name: "feature/from-here", from_ref: "c90d11e4a7b2" } }]);
 });
 
+/** What a token that may only read is told, in its source's words (#2030). */
+const READ_ONLY = "This token cannot write: it lacks the write:repository scope";
+
+/** `ports()`, the repository's whole view offering `actions` as its toolbar. */
+const repoToolbar = (actions: ViewAction[], over: Partial<RepoPorts> = {}): RepoPorts => {
+  const base = ports(over);
+  return {
+    ...base,
+    entityView: async (id, section) =>
+      id === REPO && section === null ? { sections: [], actions } : base.entityView(id, section),
+  };
+};
+
+test("New branch… in the header is the repository's toolbar's: disabled with the source's reason, it opens nothing (#2030)", async () => {
+  await draw([REPO, "branches"], null, repoToolbar([action("create_branch", READ_ONLY), action("create_pull_request", READ_ONLY)]));
+  const header = target.querySelector(".tf-fhead")!;
+  const newBranch = button("New branch…", header)!;
+  expect(newBranch.getAttribute("aria-disabled")).toBe("true");
+  expect(newBranch.getAttribute("title")).toBe(READ_ONLY);
+  newBranch.click();
+  flushSync();
+  expect(dialog()).toBeNull();
+  expect(writes).toEqual([]);
+});
+
+test("New branch… in the header is enabled where the repository's toolbar offers it, or says nothing (#2030)", async () => {
+  await draw([REPO, "branches"], null, repoToolbar([action("create_branch")]));
+  const newBranch = button("New branch…", target.querySelector(".tf-fhead")!)!;
+  expect(newBranch.getAttribute("aria-disabled")).toBeNull();
+  newBranch.click();
+  flushSync();
+  expect(dialog()).not.toBeNull();
+});
+
 // ---------------------------------------------------------------- Compare (#840)
 
 const COMPARE = (branch: string) => [REPO, "compare", ...branch.split("/")];
@@ -501,6 +536,22 @@ test("the compare page proposes Into and From, the change and its commits, and q
   ]);
   expect(location.hash).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/prs");
   expect(toasts.items.at(-1)!.text).toBe("Queued: open PR Instant SEPA spike.");
+});
+
+test("Create pull request is disabled with the source's reason where the branch's view offers it disabled, and queues nothing (#2030)", async () => {
+  const blocked = branchView({ ahead: 2, behind: 9, actions: [action("create_pull_request", READ_ONLY), action("create_branch", READ_ONLY)] });
+  const base = ports();
+  await draw(COMPARE("spike/sepa-instant"), null, {
+    ...base,
+    entityView: async (id, section) => (id === SPIKE && section === null ? blocked : base.entityView(id, section)),
+  });
+  const create = button("Create pull request", target)!;
+  expect(create.getAttribute("aria-disabled")).toBe("true");
+  expect(create.getAttribute("title")).toBe(READ_ONLY);
+  type(target.querySelector<HTMLInputElement>(".tf-compare input[type=text]")!, "Instant SEPA spike");
+  create.click();
+  await settle();
+  expect(writes).toEqual([]);
 });
 
 test("From changes the address; a branch holding a key proposes its ticket's title and description", async () => {

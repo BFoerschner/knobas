@@ -12,7 +12,7 @@ use serde_json::json;
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::support::{TOKEN, instance};
+use crate::support::{TOKEN, instance, write_probe};
 
 const REPO: &str = "/api/v1/repos/tidewater/payout-service";
 const SHA: &str = "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192";
@@ -458,4 +458,61 @@ async fn a_mirrors_commit_offers_a_new_branch_disabled() {
     let server = gitea_of(200, false).await;
     let view = source(&server).view(COMMIT, None).await.unwrap().unwrap();
     assert_eq!(view.actions[0].disabled, None);
+}
+
+/// Issue #2030: a token that may only read draws *New branch…* disabled, with
+/// what the token lacks, and the commit's reads are unchanged. Gitea is asked
+/// with a branch write whose empty body it refuses whatever the token: for
+/// the scope where it lacks it, for the missing name where it has it.
+#[tokio::test]
+async fn a_read_only_token_offers_a_new_branch_disabled_saying_why() {
+    let server = gitea(200).await;
+    write_probe(
+        &server,
+        format!("{REPO}/branches"),
+        403,
+        "token does not have at least one of required scope(s), required=[write:repository], \
+         token scope=read:repository,read:user",
+    )
+    .await;
+    let view = source(&server).view(COMMIT, None).await.unwrap().unwrap();
+    assert_eq!(
+        view.actions[0].disabled.as_deref(),
+        Some("This token cannot write: it lacks the write:repository scope")
+    );
+    assert_eq!(
+        section(&view, "diff").count,
+        Some(2),
+        "the reads are as drawn"
+    );
+
+    let server = gitea(200).await;
+    write_probe(
+        &server,
+        format!("{REPO}/branches"),
+        422,
+        "[BranchName]: Required",
+    )
+    .await;
+    let view = source(&server).view(COMMIT, None).await.unwrap().unwrap();
+    assert_eq!(view.actions[0].disabled, None, "a token that may write");
+}
+
+/// A section read with no write in it asks Gitea nothing more (#2030).
+#[tokio::test]
+async fn a_view_without_writes_does_not_ask_what_the_token_may_write() {
+    let server = gitea(200).await;
+    source(&server)
+        .view(COMMIT, Some("diff"))
+        .await
+        .unwrap()
+        .unwrap();
+    let posts = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method == wiremock::http::Method::POST)
+        .count();
+    assert_eq!(posts, 0);
 }
