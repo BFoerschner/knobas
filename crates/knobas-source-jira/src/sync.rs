@@ -1957,6 +1957,17 @@ mod tests {
         assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5"]);
     }
 
+    /// **Two deletions behind the walk** shift the rows by two, past the one
+    /// row each request starts early by: offset 1 of the three left starts at
+    /// PAY-4. The page does not open on an issue the walk has read, so it is
+    /// asked again from the start, and PAY-3 is on it.
+    #[tokio::test]
+    async fn two_issues_deleted_behind_the_walk_hide_no_unread_one() {
+        let api = LiveIndex::new(five_filed(), [(1, delete(&["PAY-1", "PAY-2"]))]);
+        let (keys, _) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5"]);
+    }
+
     /// The same when the deletion leaves the page the walk asks next empty:
     /// four issues read of five, two of them deleted, and offset 3 of the
     /// three left holds nothing. Empty is not the end here; the walk asks from
