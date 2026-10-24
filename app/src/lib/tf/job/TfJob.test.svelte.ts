@@ -1006,6 +1006,34 @@ test("a failed step keeps Retry, which runs it again (#1998)", async () => {
   expect(acted).toEqual(["retry 2"]);
 });
 
+test("Check again on a queued step whose write was discarded redraws it failed, with Retry and the discard's sentence (#2015)", async () => {
+  let answer = flow(["succeeded", "queued", "pending", "pending"]);
+  open("PAY-231", {
+    ports: ports({
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
+      startWork: {
+        flow: () => Promise.resolve(answer),
+        run: () => Promise.resolve(answer),
+        retry: () => {
+          answer = flow(["succeeded", "failed", "pending", "pending"]);
+          answer[1]!.detail = "the write was discarded before it went";
+          return Promise.resolve(answer);
+        },
+        skip: () => Promise.resolve(answer),
+        amend: () => Promise.resolve(answer),
+      },
+    }),
+  });
+  await settle();
+  const row = target.querySelector(".tf-step[data-step='pr']")!;
+  [...row.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Check again")!.click();
+  await settle();
+  expect(row.querySelector(".tf-state")?.textContent).toBe("failed");
+  expect([...row.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Retry", "Skip"]);
+  expect(row.querySelector(".tf-swdetail")?.textContent).toBe("the write was discarded before it went");
+});
+
 test("Run all steps starts the timer as step 5, through the shell's start, which opens a running timer's draft first", async () => {
   let ran = false;
   const order: string[] = [];
