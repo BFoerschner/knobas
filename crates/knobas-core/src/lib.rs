@@ -40,8 +40,9 @@ pub use knobas_spi_types::{
 pub use knobas_spi_types::{delivery, entity, payload, tone};
 
 /// Declare an enum whose variants are a **closed vocabulary shared with the
-/// database**: each one has a stored spelling, and a CHECK constraint in the
-/// migrations lists exactly those spellings.
+/// database**: each one has a stored or computed spelling, and for every user
+/// but one (below) a CHECK constraint in the migrations lists exactly those
+/// spellings.
 ///
 /// The point is that `ALL` and `as_str` are generated from the *same* variant
 /// list as the enum itself, so the three cannot drift. A hand-written `ALL`

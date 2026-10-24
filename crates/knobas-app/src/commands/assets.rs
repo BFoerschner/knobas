@@ -905,7 +905,8 @@ pub async fn monitor_roster<R: tauri::Runtime>(
 /// The sources state is there whenever the caller's `lifecycle.pool()?` was,
 /// as for [`monitor_targets`].
 ///
-/// A keychain that *is* there and refuses reads the same way, and that is
+/// A keychain that refuses reads as a source offering nothing, so its
+/// monitors draw no buttons, and that is
 /// [`instance_write_ops`](crate::sources::crud::instance_write_ops)' doing
 /// rather than this loop's: a locked keychain must not cost the reader the
 /// whole Monitors tab, which needs nothing from it but two buttons.

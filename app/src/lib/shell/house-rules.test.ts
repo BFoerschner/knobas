@@ -264,11 +264,6 @@ test("a remote @import in a stylesheet fails the network rule", () => {
   }
 });
 
-/**
- * The rule above is a regex over a hostname, and a regex that is wrong in the
- * permissive direction is a lint that has quietly stopped being one. So it is
- * exercised against the shapes it has to separate, rather than trusted.
- */
 test("a protocol-relative url(), src or href fails the network rule (FE-7)", () => {
   const offences = [
     '@import url("//fonts.googleapis.com/css2?family=Inter");',
@@ -287,6 +282,11 @@ test("a protocol-relative url(), src or href fails the network rule (FE-7)", () 
   expect(fine.filter((text) => hasRemoteReference(text))).toEqual([]);
 });
 
+/**
+ * The rule above is a regex over a hostname, and a regex that is wrong in the
+ * permissive direction is a lint that has quietly stopped being one. So it is
+ * exercised against the shapes it has to separate, rather than trusted.
+ */
 test("the reserved-host exemption admits only names that cannot resolve", () => {
   const allowed = [
     "localhost",

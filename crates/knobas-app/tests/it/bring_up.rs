@@ -156,7 +156,7 @@ async fn a_retried_bring_up_that_refuses_a_loaded_adapter_unloads_it() {
     );
     assert!(
         !crate::external_adapter_install::kinds(&registry).contains(&"wasm-fixture".to_owned()),
-        "the adapter is refused and still loaded"
+        "a refused adapter is no longer loaded"
     );
 }
 
