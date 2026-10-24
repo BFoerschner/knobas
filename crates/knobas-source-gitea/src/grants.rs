@@ -142,7 +142,7 @@ pub(crate) struct Grants {
 
 impl Grants {
     /// Whether nothing was refused.
-    pub(crate) fn none(&self) -> bool {
+    pub(crate) fn refuses_nothing(&self) -> bool {
         self.repository.is_none() && self.issue.is_none()
     }
 
@@ -194,22 +194,23 @@ pub(crate) async fn refused(source: &GiteaSource, asks: &[WriteAsk]) -> Vec<Refu
             continue;
         };
         let (owner, repo) = key.repository();
-        let at = (owner.to_owned(), repo.to_owned());
-        match by_repository.iter_mut().find(|(r, _)| *r == at) {
-            Some((_, of)) => of.push(ask),
-            None => by_repository.push((at, vec![ask])),
+        let repository = (owner.to_owned(), repo.to_owned());
+        match by_repository.iter_mut().find(|(r, _)| *r == repository) {
+            Some((_, repo_asks)) => repo_asks.push(ask),
+            None => by_repository.push((repository, vec![ask])),
         }
     }
     // One repository after another: a surface asks about one entity, or one
     // picked project, so there is rarely a second to wait on.
     let mut answered: Vec<RefusedWrite> = Vec::new();
-    for ((owner, repo), of) in &by_repository {
-        let ops: Vec<&str> = of.iter().map(|a| a.op.as_str()).collect();
+    for ((owner, repo), repo_asks) in &by_repository {
+        let ops: Vec<&str> = repo_asks.iter().map(|a| a.op.as_str()).collect();
         let grants = probe(source, owner, repo, &ops).await;
-        answered.extend(
-            of.iter()
-                .filter_map(|ask| grants.refusal(&ask.op).map(|why| RefusedWrite::of(ask, why))),
-        );
+        answered.extend(repo_asks.iter().filter_map(|ask| {
+            grants
+                .refusal(&ask.op)
+                .map(|why| RefusedWrite::of(ask, why))
+        }));
     }
     asks.iter()
         .filter_map(|ask| answered.iter().find(|r| r.refuses(ask)).cloned())

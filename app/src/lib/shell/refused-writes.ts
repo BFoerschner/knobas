@@ -5,7 +5,8 @@
  * Confluence's writes (#2053): the Docs reader's *Comment*, *Edit section*
  * and *New page*, and stand-up's publish and its target picker, and Jira's
  * writes (#2052): the job's move and *Comment*, the worklog draft, the Day's
- * *Log…*, *Log all* and the create-ticket dialog.
+ * *Log…*, *Log all* and the create-ticket dialog. Gitea's comment, move and
+ * new ticket are drawn by the same surfaces (#2054).
  *
  * A surface draws its writes as before, then asks `refused_writes` about
  * them and draws each refused one disabled with the reason (`aria-disabled`

@@ -6355,7 +6355,9 @@ async fn a_read_only_token_is_refused_the_writes_drawn_outside_a_view_saying_why
 
     // A seeded issue and the seeded open pull request.
     let issues: serde_json::Value = http
-        .get(format!("{api}/repos/{full}/issues?state=all&type=issues&limit=1"))
+        .get(format!(
+            "{api}/repos/{full}/issues?state=all&type=issues&limit=1"
+        ))
         .header("Authorization", &auth)
         .send()
         .await
@@ -6373,7 +6375,9 @@ async fn a_read_only_token_is_refused_the_writes_drawn_outside_a_view_saying_why
         .json()
         .await
         .expect("a pull request listing");
-    let pull = pulls[0]["number"].as_u64().expect("the seed opens a pull request");
+    let pull = pulls[0]["number"]
+        .as_u64()
+        .expect("the seed opens a pull request");
     let (owner, repo) = (env.owner.as_str(), env.repo.as_str());
     let id = |key: String| format!("gitea:{key}");
     let issue = id(knobas_source_gitea::keys::issue_key(owner, repo, issue));

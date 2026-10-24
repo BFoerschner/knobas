@@ -72,7 +72,7 @@ async fn posts(server: &MockServer) -> Vec<String> {
 /// about, naming the scope the write's route needs, in the order asked.
 #[tokio::test]
 async fn a_read_only_token_is_refused_each_write_saying_which_scope() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     write_probe(&server, format!("{REPO}/issues"), 403, SCOPE_ISSUE).await;
     write_probe(&server, format!("{REPO}/branches"), 403, SCOPE_REPOSITORY).await;
 
@@ -109,9 +109,15 @@ async fn a_read_only_token_is_refused_each_write_saying_which_scope() {
 /// refused, and every write is drawn as before.
 #[tokio::test]
 async fn a_token_that_may_write_is_refused_nothing() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     write_probe(&server, format!("{REPO}/issues"), 422, "[Title]: Required").await;
-    write_probe(&server, format!("{REPO}/branches"), 422, "[BranchName]: Required").await;
+    write_probe(
+        &server,
+        format!("{REPO}/branches"),
+        422,
+        "[BranchName]: Required",
+    )
+    .await;
 
     let refused = source(&server).refused_writes(&asks()).await.unwrap();
 
@@ -122,7 +128,7 @@ async fn a_token_that_may_write_is_refused_nothing() {
 /// reader may still comment and approve.
 #[tokio::test]
 async fn an_account_that_may_not_push_is_refused_only_the_merge() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     write_probe(&server, format!("{REPO}/issues"), 422, "[Title]: Required").await;
     write_probe(
         &server,
@@ -149,9 +155,15 @@ async fn an_account_that_may_not_push_is_refused_only_the_merge() {
 /// does not.
 #[tokio::test]
 async fn each_repository_is_probed_for_the_categories_it_is_asked_about() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     write_probe(&server, format!("{REPO}/issues"), 403, SCOPE_ISSUE).await;
-    write_probe(&server, format!("{OTHER}/branches"), 422, "[BranchName]: Required").await;
+    write_probe(
+        &server,
+        format!("{OTHER}/branches"),
+        422,
+        "[BranchName]: Required",
+    )
+    .await;
     let ledger = id(keys::pr_key("tidewater", "ledger", 9));
 
     let refused = source(&server)
@@ -160,7 +172,10 @@ async fn each_repository_is_probed_for_the_categories_it_is_asked_about() {
         .unwrap();
 
     assert_eq!(
-        refused.iter().map(|r| r.entity.as_str()).collect::<Vec<_>>(),
+        refused
+            .iter()
+            .map(|r| r.entity.as_str())
+            .collect::<Vec<_>>(),
         [issue()]
     );
     let mut sent = posts(&server).await;
@@ -176,7 +191,7 @@ async fn each_repository_is_probed_for_the_categories_it_is_asked_about() {
 /// that meets anything but the two measured answers is no verdict.
 #[tokio::test]
 async fn what_this_source_cannot_answer_is_no_verdict() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let refused = source(&server)
         .refused_writes(&[
             ask("jira:PAY-1".to_owned(), "comment"),
@@ -186,7 +201,11 @@ async fn what_this_source_cannot_answer_is_no_verdict() {
         .await
         .unwrap();
     assert_eq!(refused, []);
-    assert_eq!(posts(&server).await, Vec::<String>::new(), "nothing is probed");
+    assert_eq!(
+        posts(&server).await,
+        Vec::<String>::new(),
+        "nothing is probed"
+    );
 
     // Unmounted, so the probe meets wiremock's 404.
     let refused = source(&server)

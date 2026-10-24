@@ -49,7 +49,7 @@ pub(super) async fn narrow(source: &GiteaSource, owner: &str, repo: &str, view: 
     });
     let ops: Vec<&str> = offered.iter().map(String::as_str).collect();
     let grants = crate::grants::probe(source, owner, repo, &ops).await;
-    if grants.none() {
+    if grants.refuses_nothing() {
         return;
     }
     view.refuse_writes(|op| grants.refusal(op));

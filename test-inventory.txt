@@ -2822,6 +2822,7 @@ knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::serialisation_is_stab
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_pull_request_is_fingerprinted_without_the_repositories_it_embeds
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_pull_request_keeps_its_fingerprint
 knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::an_embedded_user_signing_in_does_not_move_the_fingerprint
+knobas-source-gitea	lib/knobas_source_gitea	grants::tests::a_probe_answer_reads_as_the_measured_table_says
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::a_branch_named_like_a_sha_is_still_a_branch
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::an_issue_is_never_read_as_a_pull_request
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::branch_names_may_contain_the_separators
@@ -2870,7 +2871,6 @@ knobas-source-gitea	lib/knobas_source_gitea	view::act::tests::a_branch_name_read
 knobas-source-gitea	lib/knobas_source_gitea	view::act::tests::a_proposal_is_titled_by_its_one_commit_and_lists_what_it_carries
 knobas-source-gitea	lib/knobas_source_gitea	view::files::tests::a_file_is_cut_at_whole_lines
 knobas-source-gitea	lib/knobas_source_gitea	view::files::tests::languages_are_named_by_extension_or_name
-knobas-source-gitea	lib/knobas_source_gitea	view::grants::tests::a_probe_answer_reads_as_the_measured_table_says
 knobas-source-gitea	lib/knobas_source_gitea	view::pr::land::tests::a_required_context_pattern_is_matched_whole
 knobas-source-gitea	lib/knobas_source_gitea	view::repo::tests::a_long_text_is_cut_at_a_line_within_the_cap
 knobas-source-gitea	lib/knobas_source_gitea	view::repo::tests::sizes_read_in_the_unit_that_fits
@@ -2889,6 +2889,11 @@ knobas-source-gitea	test/it	client::an_unusable_instance_id_is_refused_at_build_
 knobas-source-gitea	test/it	client::test_connection_reports_the_account_and_the_server_version
 knobas-source-gitea	test/it	contract::fills_every_role_it_claims
 knobas-source-gitea	test/it	contract::passes_the_contract_battery
+knobas-source-gitea	test/it	grants::a_read_only_token_is_refused_each_write_saying_which_scope
+knobas-source-gitea	test/it	grants::a_token_that_may_write_is_refused_nothing
+knobas-source-gitea	test/it	grants::an_account_that_may_not_push_is_refused_only_the_merge
+knobas-source-gitea	test/it	grants::each_repository_is_probed_for_the_categories_it_is_asked_about
+knobas-source-gitea	test/it	grants::what_this_source_cannot_answer_is_no_verdict
 knobas-source-gitea	test/it	source_action::a_label_gitea_refuses_is_a_refusal_with_its_sentence
 knobas-source-gitea	test/it	source_action::add_label_puts_the_picked_label_on_the_pull_request
 knobas-source-gitea	test/it	source_action::add_label_without_a_label_or_aimed_wrong_is_refused_before_a_request
@@ -3178,6 +3183,7 @@ knobas-source-gitea	test/live_gitea	a_pull_request_is_commented_on_and_reviewed_
 knobas-source-gitea	test/live_gitea	a_pull_request_is_edited_closed_and_reopened_from_its_view
 knobas-source-gitea	test/live_gitea	a_pull_request_merged_the_moment_it_opens_lands_ten_times_in_ten
 knobas-source-gitea	test/live_gitea	a_pull_request_opened_through_the_api_appears_in_the_next_incremental_run
+knobas-source-gitea	test/live_gitea	a_read_only_token_is_refused_the_writes_drawn_outside_a_view_saying_why
 knobas-source-gitea	test/live_gitea	a_repository_reads_its_language_and_its_own_teams_not_owners
 knobas-source-gitea	test/live_gitea	a_required_status_check_holds_the_merge_until_it_passes
 knobas-source-gitea	test/live_gitea	a_revoked_token_is_unauthorized
