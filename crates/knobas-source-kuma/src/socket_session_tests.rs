@@ -347,10 +347,10 @@ impl Kuma {
 /// take no time on it, and let go once the fake holds a request it will never
 /// answer. From then on nothing the client is waiting for can arrive -- each
 /// stall below either ends the call at the client's first timeout or hangs
-/// every read after it too -- so the only thing that ends the wait is a timer of the client's own, a request timeout
-/// or the call's deadline, and the paused clock jumps straight to it. Each
-/// one starts at an instant the clock alone sets, so the time taken is
-/// exact. Both waits meet a twenty-second backstop of real time, which a
+/// every read after it too -- so the only thing that ends the wait is a
+/// timer of the client's own, a request timeout or the call's deadline, and
+/// the paused clock jumps straight to it. Each one starts at an instant the
+/// clock alone sets, so the time taken is exact. Both waits meet a twenty-second backstop of real time, which a
 /// call that never gives up fails on instead of hanging the run.
 async fn on_the_paused_clock<T>(
     server: &KumaServer,
@@ -384,6 +384,7 @@ fn socket_to(server: &KumaServer) -> KumaSocket {
     socket_with(server, crate::KumaConfig::default())
 }
 
+/// A socket to the fake with `cfg`'s timeouts, at [`socket_to`]'s quota.
 fn socket_with(server: &KumaServer, cfg: crate::KumaConfig) -> KumaSocket {
     KumaSocket::new(
         &server.uri(),
@@ -530,7 +531,7 @@ fn stalling(server: &KumaServer) -> KumaSocket {
     socket_with(
         server,
         crate::KumaConfig {
-            request_timeout_secs: 1,
+            request_timeout_secs: REQUEST_TIMEOUT.as_secs(),
             ..crate::KumaConfig::default()
         },
     )

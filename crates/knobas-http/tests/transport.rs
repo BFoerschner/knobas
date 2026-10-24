@@ -1631,7 +1631,11 @@ async fn a_streamed_body_slower_than_the_request_timeout_arrives_whole() {
 
     let kept = read.unwrap_or_else(|(broke_off, kept)| panic!("{broke_off} after {kept:?}"));
     assert_eq!(kept, b"x".repeat(PIECES));
-    assert_eq!(took, GAP * 10, "the body took its ten gaps");
+    assert_eq!(
+        took,
+        GAP * u32::try_from(PIECES).expect("ten"),
+        "the body took its ten gaps"
+    );
 }
 
 /// Issue #1012: a body that goes silent for longer than the stall timeout is

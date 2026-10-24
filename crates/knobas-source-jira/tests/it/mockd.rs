@@ -341,8 +341,9 @@ async fn a_rejected_credential_is_unauthorized_from_both_entry_points() {
 const HANG_FOR_GOOD_MS: u64 = 3_600_000;
 
 /// A hang guard and nothing more: a request timeout the source honours ends
-/// these calls in under four seconds (three one-second tries and their
-/// backoff), and the 30-second production default would run past it.
+/// these calls in under four seconds (the connection test's three
+/// one-second tries and their backoff, the comment's one try), and the
+/// 30-second production default would run past it.
 async fn within_the_guard<T>(call: impl std::future::Future<Output = T>) -> T {
     tokio::time::timeout(std::time::Duration::from_secs(20), call)
         .await
