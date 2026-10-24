@@ -38,6 +38,14 @@
 //!   disk, no environment, no keychain, and `wasi:http` 0.2's outgoing
 //!   handler held to the hosts the adapter's manifest declares. The host
 //!   attaches the credential, so an [`Instance`] carries none.
+//! * **Depending on it** is by git, at a knobas release:
+//!   `knobas-adapter-sdk = { git = "<the knobas repository>", tag = "<release>" }`.
+//!   The bindings read the WIT from `../knobas-wasm-host/wit`, which
+//!   resolves because cargo checks out the whole repository for a git
+//!   dependency; `cargo package` would leave it out, so the crate is not
+//!   published as it stands. The export macro names this crate
+//!   `knobas_adapter_sdk`, so the dependency keeps that name (no
+//!   `package =` rename).
 
 // The bindings name this crate by its own name, so that the paths they
 // write resolve in the adapter crate the export macro expands in, and here.
