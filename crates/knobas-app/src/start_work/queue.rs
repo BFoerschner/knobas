@@ -143,17 +143,13 @@ pub fn landing_from(row: Option<QueuedWrite>) -> Landing {
     match row.state {
         WriteState::Sent => Landing::Sent,
         WriteState::Pending => Landing::Waiting { detail: row.detail },
-        WriteState::Held if row.may_have_landed() => {
-            let said = row
-                .held_snapshot
-                .as_ref()
-                .map(|held| &held["unconfirmed"]);
-            let text = |key: &str| said.and_then(|said| said[key].as_str()).map(str::to_owned);
-            Landing::Unconfirmed {
-                source: text("source").unwrap_or_else(|| row.source_id.clone()),
-                detail: text("detail").filter(|detail| !detail.is_empty()),
-            }
-        }
+        WriteState::Held if let Some(unanswered) = row.unconfirmed_send() => Landing::Unconfirmed {
+            source: unanswered.source.unwrap_or(&row.source_id).to_owned(),
+            detail: unanswered
+                .detail
+                .filter(|detail| !detail.is_empty())
+                .map(str::to_owned),
+        },
         WriteState::Held if !row.source_enabled => Landing::SourceOff,
         WriteState::Held => Landing::Held { detail: row.detail },
         WriteState::Refused => Landing::Refused {
@@ -524,7 +520,10 @@ mod tests {
         ));
         assert_eq!(landing_from(Some(held(None, false))), Landing::SourceOff);
         assert_eq!(
-            landing_from(Some(held(Some(serde_json::json!({"op": "transition"})), true))),
+            landing_from(Some(held(
+                Some(serde_json::json!({"op": "transition"})),
+                true
+            ))),
             Landing::Held {
                 detail: Some("somebody moved it to Done".to_owned()),
             }
