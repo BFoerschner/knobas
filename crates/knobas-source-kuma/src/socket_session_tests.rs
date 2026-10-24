@@ -417,13 +417,16 @@ async fn more_writes_than_kuma_allows_logins_all_land_on_one_login() {
 /// drops it without an ack: the session stays up, answers its pings, and the
 /// write runs out its whole budget. The login waits for `loginRequired`,
 /// which Kuma pushes once every handler is registered.
-#[tokio::test]
+///
+/// On the held clock (#1935): the budget it would run out is short, and the
+/// exchanges that fit inside it take no time on that clock however slow the
+/// machine is.
+#[tokio::test(start_paused = true)]
 async fn the_login_waits_until_kuma_listens_for_it() {
     let (server, kuma) = Kuma::start(20).await;
     let socket = socket_to(&server).with_budget(Duration::from_secs(5));
-    pause(&socket)
-        .await
-        .expect("the write lands on a login Kuma was listening for");
+    let (written, _) = on_the_paused_clock(&server, pause(&socket)).await;
+    written.expect("the write lands on a login Kuma was listening for");
     assert_eq!(kuma.dropped(), 0, "no login went out before Kuma listened");
     assert_eq!(kuma.logins(), 1);
     assert_eq!(kuma.delivered(), 1);
@@ -611,14 +614,17 @@ async fn a_create_whose_ack_was_lost_after_landing_is_unconfirmed() {
 /// unknown`. That `400` is about the read, not the packet, which was
 /// accepted: `Unconfirmed` and not a `Protocol` the queue records as refused
 /// while the monitor exists.
-#[tokio::test]
+///
+/// Held through on the paused clock like the stalls (#1935): every answer
+/// comes at once, and the one-second request timeout cannot fire under one
+/// on a slow machine.
+#[tokio::test(start_paused = true)]
 async fn a_create_whose_session_was_reaped_before_its_ack_is_unconfirmed() {
     let (server, kuma) = Kuma::start(20).await;
     let socket = stalling(&server);
     kuma.engine().reap_after_acting = true;
-    let error = add(&socket)
-        .await
-        .expect_err("the session went with the ack");
+    let (error, _) = on_the_paused_clock(&server, add(&socket)).await;
+    let error = error.expect_err("the session went with the ack");
     assert!(
         matches!(
             error,
