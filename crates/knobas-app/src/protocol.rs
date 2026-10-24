@@ -654,6 +654,42 @@ async fn mirrored(pool: &PgPool, entity_id: &str) -> Result<bool, IpcError> {
     Ok(found.is_some())
 }
 
+/// The creates `note_id`'s action items filed that still owe it their link
+/// (#1951), oldest first: each `create_ticket` whose row names the note as
+/// its `link_to` (`commands::entity::create_action_item_ticket_inner` writes
+/// it) and that was not withdrawn.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn creates_owing(pool: &PgPool, note_id: &str) -> Result<Vec<i64>, IpcError> {
+    sqlx::query_scalar(
+        "select id from knobas.write_queue
+          where link_to = $1 and op = 'create_ticket' and state <> 'discarded'
+          order by id",
+    )
+    .bind(note_id)
+    .fetch_all(pool)
+    .await
+    .map_err(IpcError::internal)
+}
+
+/// Write `write_id`'s owed link is drawn: dropped from the row, as
+/// `sources::write_queue::link_arrivals` drops one it drew, so a link the
+/// reader removes is not drawn again by the next sync (#1951).
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn owed_no_more(pool: &PgPool, write_id: i64) -> Result<(), IpcError> {
+    sqlx::query("update knobas.write_queue set link_to = null where id = $1")
+        .bind(write_id)
+        .execute(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    Ok(())
+}
+
 /// Draw a link, treating one that is already there as drawn.
 ///
 /// `start_work::queue::Queue::link`'s reading, for its reason: a caller whose
