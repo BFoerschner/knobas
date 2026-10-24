@@ -2396,6 +2396,15 @@ result's `start` plus `limit`; the mention walk, the positions sweep and the re-
 from a page already read shifts the next page's first row onto it; the endpoint has no keyset.
 An incremental run lists once.
 
+**Jira's board listing is read twice on every board read (#2003).** `GET /rest/agile/1.0/board`
+pages by `startAt` over the boards in name order, ignoring case (measured on the seeded Jira 10.3;
+`orderBy` is not read), so a rename moves a row and the anchoring above has no order to stand
+on. Every board read ends in `gone` for each view it did not read, so each listing (per project,
+or every board) is read twice and the union kept. Witnessed by `views::tests`'
+`a_board_deleted_while_the_listing_is_read_hides_no_other` and
+`a_board_renamed_while_the_listing_is_read_hides_no_other`, and `live_jira_seeded`'s
+`the_board_listing_is_in_name_order_and_a_rename_moves_a_row`.
+
 Witnessed by the adapters' unit and `tests/it` probes (a listing that changes between two pages),
 and by `live_jira_seeded`'s `a_walk_in_pages_of_two_returns_the_whole_corpus_once` and
 `a_jql_id_range_stays_inside_one_project`, and `live_confluence_seeded`'s

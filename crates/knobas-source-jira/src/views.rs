@@ -365,22 +365,25 @@ async fn boards(
 /// **Why twice.** The listing pages by `startAt`, and Jira Software lists
 /// boards by name, ignoring case (measured on the seeded Jira 10.3 for #2003;
 /// `orderBy` is ignored). A board deleted from a page already read shifts the
-/// first board of the next page onto it, and a board renamed into a page
-/// already read moves out of the unread ones; either way no page returns the
-/// board it displaced. The listing offers no keyset, and since a rename
-/// moves a row, no order the issue walk's anchoring (`walk.rs`) could stand
-/// on. Every board read is followed by [`gone`] for each view the run did not
-/// read, so a board missed here would be delivered as gone. Reading the
-/// listing a second time and keeping the union is what Gitea's repository
-/// listing does (#1979): a board one listing missed is in the other unless a
-/// second change lands on the same row in the second. The caller drops the
-/// boards met twice.
+/// first board of the next page onto it, and a board renamed from an unread
+/// page into a read one leaves the unread pages; either way one live board is
+/// on no page of that listing. The listing offers no keyset, and since a
+/// rename moves a row, no order the issue walk's anchoring (`walk.rs`) could
+/// stand on. Every board read is followed by [`gone`] for each view the run
+/// did not read, so a board missed here would be delivered as gone. Reading
+/// the listing a second time and keeping the union is what Gitea's
+/// repository listing does (#1979): a board one listing missed is in the
+/// other unless a second change lands on the same row in the second.
+///
+/// The second listing comes first, so the caller's stable sort and dedup keep
+/// a board's newer record when both listings hold it.
 async fn listing(
     api: &(dyn JiraApi + '_),
     project: Option<&str>,
 ) -> Result<Vec<Board>, SourceError> {
+    let first = listed_once(api, project).await?;
     let mut boards = listed_once(api, project).await?;
-    boards.extend(listed_once(api, project).await?);
+    boards.extend(first);
     Ok(boards)
 }
 
@@ -1266,6 +1269,20 @@ mod tests {
             delivered,
             [("board-155".to_owned(), false)],
             "the renamed board, delivered under its new name"
+        );
+    }
+
+    /// A board renamed between the two listings is met in both: the second,
+    /// newer record is the one read, so the rename is delivered (the name is
+    /// in the payload) rather than waiting for the next board read.
+    #[tokio::test]
+    async fn a_board_renamed_between_the_two_listings_arrives_under_its_new_name() {
+        let before = seeded().boards;
+        let mut then = before.clone();
+        then[0].1 = "PAY sprint board, renamed";
+        assert_eq!(
+            read_again(before, then).await,
+            [("board-21".to_owned(), false)]
         );
     }
 
