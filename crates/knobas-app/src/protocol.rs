@@ -664,16 +664,55 @@ async fn mirrored(pool: &PgPool, entity_id: &str) -> Result<bool, IpcError> {
 /// # Errors
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
-pub async fn creates_owing(pool: &PgPool, note_id: &str) -> Result<Vec<i64>, IpcError> {
+pub async fn creates_owing(pool: &PgPool, entity_id: &str) -> Result<Vec<i64>, IpcError> {
     sqlx::query_scalar(
         "select id from knobas.write_queue
           where link_to = $1 and op = 'create_ticket' and state <> 'discarded'
           order by id",
     )
-    .bind(note_id)
+    .bind(entity_id)
     .fetch_all(pool)
     .await
     .map_err(IpcError::internal)
+}
+
+/// The tickets filed from `entity_id` that it does not link yet (#1953), as
+/// the queue holds them now, oldest first: [`creates_owing`], after each
+/// sent one whose ticket the mirror now holds is linked
+/// ([`link_on_arrival`](crate::sources::write_queue::link_on_arrival)) and
+/// owed no more ([`owed_no_more`]). So the answer is true whether the end of
+/// the sync (`link_arrivals`) or this read runs first, as
+/// `standup_protocol`'s `owed_tickets` is (#1951).
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if a read or a write fails.
+pub async fn tickets_owing(
+    pool: &PgPool,
+    declarations: &knobas_core::payload::Declarations,
+    entity_id: &str,
+) -> Result<Vec<knobas_core::write_queue::QueuedWrite>, IpcError> {
+    let mut owed = Vec::new();
+    for write_id in creates_owing(pool, entity_id).await? {
+        let Some(write) = knobas_core::write_queue::get(pool, write_id).await? else {
+            continue;
+        };
+        if write.state == knobas_core::write_queue::WriteState::Sent {
+            let linked = crate::sources::write_queue::link_on_arrival(
+                pool,
+                declarations,
+                write_id,
+                entity_id,
+            )
+            .await?;
+            if linked.is_some() {
+                owed_no_more(pool, write_id).await?;
+                continue;
+            }
+        }
+        owed.push(write);
+    }
+    Ok(owed)
 }
 
 /// Write `write_id`'s owed link is drawn: dropped from the row, as

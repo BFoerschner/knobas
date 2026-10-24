@@ -18,18 +18,18 @@
   each read of the links also asks `owed_tickets`, the tickets filed from the
   run that it does not link yet, and one still on its way (`pending` or
   `sent`) is marked queued as if filed this session, followed while it is
-  pending. A held or refused one offers *Create ticket*, as a live follow
-  told so does: it waits on the reader in the queue.
+  pending. A held or refused one offers *Create ticket*, as it does once a
+  live follow hears it was held or refused: it waits on the reader in the
+  queue.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { LinkEntry, Project } from "../../ipc/entity";
-  import type { SourceSummary } from "../../ipc/sources";
+  import type { QueuedWrite, SourceSummary } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
-  import type { QueuedWrite } from "../../ipc/sources";
   import { createTicketPayload, draftOfPayload, projectSource, type TicketDraft } from "../create-ticket";
   import { itemHash, keyOf } from "../job/job";
   import { askAgain, markQueued, queuedMark, queuedMarks, sameWords, settleQueued, takeAgain } from "../queued.svelte";
@@ -99,8 +99,9 @@
     const marked = queuedMarks(id, TICKET);
     if (going.some((write) => marked.some((mark) => mark.write === write.id))) return;
     const newest = going.at(-1);
-    const filed = newest === undefined ? null : draftOfPayload(newest.payload);
-    if (newest === undefined || filed === null) return;
+    if (newest === undefined) return;
+    const filed = draftOfPayload(newest.payload);
+    if (filed === null) return;
     // A sent one is past where the queue could hold or refuse it: nothing to follow.
     const follow = newest.state === "pending" ? { following: following(id, filed), follower: ports.follower() } : {};
     markQueued(id, TICKET, filed.title, { write: newest, ...follow });

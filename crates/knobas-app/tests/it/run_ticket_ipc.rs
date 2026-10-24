@@ -102,7 +102,11 @@ async fn linked(pool: &PgPool) -> Vec<String> {
 async fn a_ticket_filed_from_a_run_is_named_until_its_ticket_is_mirrored_and_linked() {
     let pool = corpus("owed_run_ticket").await;
     let id = filed_from(&pool, RUN).await;
-    assert_eq!(owed(&pool, RUN).await, vec![(id, WriteState::Pending)], "queued");
+    assert_eq!(
+        owed(&pool, RUN).await,
+        vec![(id, WriteState::Pending)],
+        "queued"
+    );
 
     knobas_core::write_queue::sent(&pool, id, Some("PAY-342"))
         .await

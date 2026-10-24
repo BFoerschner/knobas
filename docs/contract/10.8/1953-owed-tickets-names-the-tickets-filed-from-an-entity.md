@@ -12,8 +12,9 @@
 
   The answer is every `create_ticket` row whose `knobas.write_queue.link_to` (migration `0046`,
   an existing column) holds `entity_id` and whose state is not `discarded`, oldest first, as the
-  queue holds it now (`protocol::creates_owing`, #1951's read, now named for any entity). A held
-  or refused one is named with its state. Before it answers, the read resolves: a sent create
+  queue holds it now (`protocol::creates_owing`, #1951's read, its parameter now `entity_id`). A
+  held or refused one is named with its state. The logic is the new `protocol::tickets_owing`;
+  `commands::entity::owed_tickets_inner` is its shim. Before it answers, the read resolves: a sent create
   whose ticket the mirror now holds is linked (`sources::write_queue::link_on_arrival`, the end of
   a sync's resolution) and its `link_to` cleared (`protocol::owed_no_more`), so it is not named.
   The declarations it hands `link_on_arrival` are `sources::paths::declared_paths` over the sync

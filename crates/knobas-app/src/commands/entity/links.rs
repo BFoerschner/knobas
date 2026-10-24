@@ -215,11 +215,8 @@ pub async fn submit_write<R: tauri::Runtime>(
 /// before the sync that mirrors the ticket draws *Ticket queued* rather than
 /// offering *Create ticket* again.
 ///
-/// **It resolves before it answers**, as `standup_protocol`'s `owed_tickets`
-/// does (#1951): a sent create whose ticket the mirror now holds is linked
-/// ([`link_on_arrival`](crate::sources::write_queue::link_on_arrival)) and
-/// owed no more, so the answer is true whether the end of the sync
-/// (`link_arrivals`) or this read runs first.
+/// **It resolves before it answers** ([`crate::protocol::tickets_owing`]): a
+/// sent create whose ticket the mirror now holds is linked and owed no more.
 ///
 /// # Errors
 ///
@@ -229,20 +226,7 @@ pub async fn owed_tickets_inner(
     declarations: &knobas_core::payload::Declarations,
     entity_id: &str,
 ) -> Result<Vec<knobas_core::write_queue::QueuedWrite>, IpcError> {
-    let mut owed = Vec::new();
-    for write_id in crate::protocol::creates_owing(pool, entity_id).await? {
-        let linked =
-            crate::sources::write_queue::link_on_arrival(pool, declarations, write_id, entity_id)
-                .await?;
-        if linked.is_some() {
-            crate::protocol::owed_no_more(pool, write_id).await?;
-            continue;
-        }
-        if let Some(write) = knobas_core::write_queue::get(pool, write_id).await? {
-            owed.push(write);
-        }
-    }
-    Ok(owed)
+    crate::protocol::tickets_owing(pool, declarations, entity_id).await
 }
 
 /// [`owed_tickets_inner`] behind the sync engine, over its declarations.
