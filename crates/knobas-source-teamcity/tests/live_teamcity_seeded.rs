@@ -81,6 +81,12 @@
 //! seed) and the counter is not wound back; that is harmless, because the seed
 //! sets a counter only while the build with the fixture's number is absent.
 //!
+//! **One user is minted, and deleted again** (#2040): [`MintedViewer`], a
+//! `PROJECT_VIEWER` at global scope with one token, removed from `Drop`
+//! passing or panicking alike, and removed first if a killed run left it.
+//! It writes nothing: the test asserts the build queue and the newest build
+//! are as they were.
+//!
 //! **One owner at a time.** The leftover clearing cannot tell a sibling's
 //! build from a corpse, and clause 2 needs a server on which nothing is running:
 //! testenv/README.md, *One environment, one owner at a time*. `./seed
@@ -4549,4 +4555,207 @@ async fn a_run_reports_its_walk_over_the_real_configurations_and_listed_builds()
         .map(|d| (d, Some(of), "builds".to_owned()))
         .collect();
     assert_eq!(next.readings, expected);
+}
+
+// --- What the user may write (#2040) -----------------------------------------
+
+/// The user [`a_viewer_may_run_builds_and_may_not_change_parameters`] mints.
+const VIEWER: &str = "knobas-viewer-2040";
+
+/// A `PROJECT_VIEWER` at global scope and its token, deleted again from
+/// `Drop` (its tokens go with it).
+struct MintedViewer {
+    url: String,
+    admin: String,
+    token: String,
+}
+
+impl MintedViewer {
+    async fn mint(seeded: &Seeded) -> MintedViewer {
+        // A killed run's viewer first: the create below would be a conflict.
+        remove_user(&seeded.http, &seeded.url, &seeded.token)
+            .await
+            .unwrap_or_else(|e| panic!("removing a leftover {VIEWER}: {e}"));
+        let created = seeded
+            .http
+            .post(format!("{}/app/rest/users", seeded.url))
+            .header("Accept", "application/json")
+            .bearer_auth(&seeded.token)
+            .json(&serde_json::json!({
+                "username": VIEWER,
+                "name": "knobas live viewer (#2040)",
+                "password": format!("{VIEWER}-{}", std::process::id()),
+                "roles": { "role": [{ "roleId": "PROJECT_VIEWER", "scope": "g" }] },
+            }))
+            .send()
+            .await
+            .expect("POST /app/rest/users");
+        let status = created.status();
+        let body = created.text().await.unwrap_or_default();
+        assert!(status.is_success(), "creating {VIEWER} answered {status}: {body}");
+        // Guarded from here on, so a failing token request still removes it.
+        let mut viewer = MintedViewer {
+            url: seeded.url.clone(),
+            admin: seeded.token.clone(),
+            token: String::new(),
+        };
+        let minted = seeded
+            .http
+            .post(format!(
+                "{}/app/rest/users/username:{VIEWER}/tokens/knobas-2040",
+                seeded.url
+            ))
+            .header("Accept", "application/json")
+            .bearer_auth(&seeded.token)
+            .send()
+            .await
+            .expect("POST .../tokens");
+        let status = minted.status();
+        let body: serde_json::Value = minted.json().await.unwrap_or_default();
+        assert!(status.is_success(), "minting {VIEWER}'s token answered {status}: {body}");
+        viewer.token = body["value"]
+            .as_str()
+            .unwrap_or_else(|| panic!("the token's answer names no value: {body}"))
+            .to_owned();
+        viewer
+    }
+}
+
+impl Drop for MintedViewer {
+    fn drop(&mut self) {
+        let (url, admin) = (self.url.clone(), self.admin.clone());
+        Cleanup::new(
+            "the live suite did not remove the user it minted",
+            format!("{VIEWER} may still be standing; the next run removes it first"),
+        )
+        .within(CLEANUP_BUDGET)
+        .run(move || async move { remove_user(&client(), &url, &admin).await });
+    }
+}
+
+/// `DELETE /app/rest/users/username:{VIEWER}`; a 404 is a user already gone.
+async fn remove_user(http: &reqwest::Client, url: &str, token: &str) -> Result<(), String> {
+    let gone = http
+        .delete(format!("{url}/app/rest/users/username:{VIEWER}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("DELETE {VIEWER}: {e}"))?;
+    match gone.status().as_u16() {
+        200..=299 | 404 => Ok(()),
+        status => Err(format!("DELETE {VIEWER} answered {status}")),
+    }
+}
+
+/// The real server's answer to what #2040 reads (ADR-0013): a viewer may run
+/// a configuration's builds, trigger it and re-run a build of it, and may
+/// not change its parameters; the configuration's own view draws *Run…*
+/// enabled and no parameter editable. The seed's token, which may write,
+/// is refused nothing and its view's parameters are editable, as before.
+/// Nothing is written to find out: the queue and the newest build are as
+/// they were.
+#[tokio::test]
+#[ignore = "needs the seeded TeamCity: just teamcity-live-seeded"]
+async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
+    use knobas_source::grants::WriteAsk;
+    use knobas_source::view::{Block, SourceView};
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let config = "Payout_IntegrationTests";
+    let build = seeded
+        .seed
+        .builds
+        .iter()
+        .find(|b| b.build_type == config)
+        .unwrap_or_else(|| panic!("the seed recorded no build of {config}"))
+        .real_id;
+    let config_entity = format!("teamcity:buildType:{config}");
+    let build_entity = format!("teamcity:build:{build}");
+    let asks: Vec<WriteAsk> = [
+        (&config_entity, "run_build"),
+        (&config_entity, "trigger_build"),
+        (&config_entity, "set_parameter"),
+        (&build_entity, "rerun_build"),
+    ]
+    .into_iter()
+    .map(|(entity, op)| WriteAsk {
+        entity: entity.clone(),
+        op: op.to_owned(),
+    })
+    .collect();
+    let queue = async || seeded.get("app/rest/buildQueue?fields=count").await.1["count"].clone();
+    let newest = async || seeded.build_ids("defaultFilter:false,branch:default:any,count:1").await;
+    let (queued_before, newest_before) = (queue().await, newest().await);
+
+    let editable = |view: &SourceView| -> Vec<bool> {
+        view.sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .filter_map(|b| match b {
+                Block::Settings { values, .. } => Some(values.iter().map(|v| v.editable)),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    };
+
+    {
+        let viewer = MintedViewer::mint(&seeded).await;
+        let (status, permissions) = {
+            let response = seeded
+                .http
+                .get(format!("{}/app/rest/users/current/permissions", seeded.url))
+                .header("Accept", "application/json")
+                .bearer_auth(&viewer.token)
+                .send()
+                .await
+                .expect("GET permissions");
+            (response.status(), response.text().await.unwrap_or_default())
+        };
+        eprintln!("{VIEWER}'s permissions ({status}): {permissions}");
+        let source = seeded.source_with(&seeded.url, &viewer.token, serde_json::json!({}));
+        let refused = source
+            .refused_writes(&asks)
+            .await
+            .unwrap_or_else(|e| panic!("the viewer's permissions read: {e:?}"));
+        let ops: Vec<_> = refused.iter().map(|r| (r.entity.as_str(), r.op.as_str())).collect();
+        assert_eq!(ops, [(config_entity.as_str(), "set_parameter")], "{refused:#?}");
+        assert!(
+            refused[0].reason.starts_with("This TeamCity user cannot change the settings of ")
+                && refused[0].reason.ends_with("it lacks the Edit project permission"),
+            "{refused:#?}"
+        );
+        let view = source
+            .view(&config_entity, None)
+            .await
+            .expect("the viewer reads the view")
+            .expect("drawn");
+        let run = view
+            .actions
+            .iter()
+            .find(|a| a.write_op == "run_build")
+            .expect("Run… is offered");
+        assert_eq!(run.disabled, None, "a viewer may run builds");
+        let values = editable(&view);
+        assert!(!values.is_empty() && values.iter().all(|e| !e), "{values:?}");
+    }
+
+    let admin = seeded.source(serde_json::json!({}));
+    let refused = admin
+        .refused_writes(&asks)
+        .await
+        .expect("the seed account's permissions read");
+    assert_eq!(refused, [], "the seed's token may write");
+    let view = admin
+        .view(&config_entity, None)
+        .await
+        .expect("the seed reads the view")
+        .expect("drawn");
+    assert!(editable(&view).iter().any(|e| *e), "the seed may change parameters");
+
+    assert_eq!(queue().await, queued_before, "nothing was queued to find out");
+    assert_eq!(newest().await, newest_before, "no build was made to find out");
+    let (status, _) = seeded.get(&format!("app/rest/users/username:{VIEWER}")).await;
+    assert_eq!(status, 404, "{VIEWER} is removed again");
 }
