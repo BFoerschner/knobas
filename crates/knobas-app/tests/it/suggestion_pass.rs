@@ -92,12 +92,23 @@ async fn requests_during_a_pass_coalesce_into_one_more_pass() {
             tokio::spawn(async move { pass.run().await })
         })
         .collect();
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // All nine have been made, and every one found the pass running: none
+    // started a pass of its own (#1927). Before, a 200 ms look at the opened
+    // connections stood for this, and a second pass that opened later than
+    // the look went unseen.
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while pass.requested() < 10 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the nine requests are made");
     assert_eq!(
-        gated.opened.load(Ordering::SeqCst),
+        pass.started(),
         1,
         "a request during a pass must not start a second one beside it"
     );
+    assert_eq!(gated.opened.load(Ordering::SeqCst), 1);
 
     gated.gate.add_permits(100);
     let written = first.await.unwrap().unwrap();
@@ -254,12 +265,16 @@ async fn requests_that_do_not_wait_coalesce_into_one_more_pass() {
     for _ in 0..9 {
         pass.request();
     }
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // `request` numbers the request before it returns, so the nine are made
+    // and none started a pass: counted as they were made (#1927), not looked
+    // for in the opened connections 200 ms later.
+    assert_eq!(pass.requested(), 10);
     assert_eq!(
-        gated.opened.load(Ordering::SeqCst),
+        pass.started(),
         1,
         "a request during a pass must not start a second one beside it"
     );
+    assert_eq!(gated.opened.load(Ordering::SeqCst), 1);
 
     gated.gate.add_permits(100);
     tokio::time::timeout(Duration::from_secs(20), pass.idle())
@@ -443,10 +458,8 @@ async fn only_the_emit_that_ends_a_run_ok_requests_a_pass() {
         gate: Semaphore::new(0),
     });
     let forwarded = Arc::new(AtomicUsize::new(0));
-    let events = SuggestOnSync::new(
-        Counted(Arc::clone(&forwarded)),
-        SuggestionPass::new(gated.clone(), Duration::from_secs(60)),
-    );
+    let pass = SuggestionPass::new(gated.clone(), Duration::from_secs(60));
+    let events = SuggestOnSync::new(Counted(Arc::clone(&forwarded)), pass.clone());
 
     let mut starting = SourceSyncStatus::started("jira", 2);
     starting.last_outcome = Some(SyncOutcome::Ok);
@@ -458,10 +471,12 @@ async fn only_the_emit_that_ends_a_run_ok_requests_a_pass() {
     ] {
         events.sync_state(SourceSyncStatus::finished("jira", 2, outcome));
     }
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // A request is numbered inside `sync_state`, before it returns: these
+    // four made none (#1927). Before, a 200 ms look at the opened connections
+    // stood for this, and a pass that opened later than the look went unseen.
     assert_eq!(
-        gated.opened.load(Ordering::SeqCst),
-        0,
+        (pass.requested(), pass.started()),
+        (0, 0),
         "a run starting, or one that failed, requested a pass"
     );
 
@@ -473,6 +488,7 @@ async fn only_the_emit_that_ends_a_run_ok_requests_a_pass() {
     })
     .await
     .expect("a run that ended OK requests a pass");
+    assert_eq!((pass.requested(), pass.started()), (1, 1));
     assert_eq!(
         forwarded.load(Ordering::SeqCst),
         5,

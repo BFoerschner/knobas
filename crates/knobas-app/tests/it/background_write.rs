@@ -685,8 +685,23 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
     knobas_app::commands::entity::start_work_run(app.handle().clone(), AFTER.to_owned())
         .await
         .expect("a run asked for during the quit still answers the flow");
-    // Give a run that was spawned for it the time to queue its branch.
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // The closed set refused the run, and dropped it with its claim on the
+    // flow: no run holds the flow, so its branch step is the reader's to
+    // edit (#779). A run started anywhere for it would hold the flow from
+    // the ask on and refuse the edit, however late it reached its first step
+    // (#1927). Before, a 200 ms wait for such a run to queue its branch stood
+    // for this, and the quit then closed the pool on one that was slower.
+    let refused = knobas_app::start_work::flow(&state.pool, &entity(AFTER))
+        .await
+        .expect("the flow reads");
+    let (branch_step, proposal) = refused
+        .iter()
+        .find(|step| step.step == Step::CreateBranch)
+        .map(|step| (step.id, step.payload.clone()))
+        .expect("the flow has a branch step");
+    knobas_app::start_work::repropose(&state.pool, branch_step, proposal)
+        .await
+        .expect("no run holds the flow asked for during the quit");
     gate.add_permits(1);
     // A run still in the set at the grace's end is aborted, and the grace is
     // an hour: a quit over inside the patience is one whose run ended once

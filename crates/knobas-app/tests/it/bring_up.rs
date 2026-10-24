@@ -636,8 +636,29 @@ async fn a_quit_while_migrating_stops_the_server() {
     })
     .await
     .expect("bring-up reaches the migration");
-    // Long enough for the migration to be parked on the lock.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // The migration is parked on the lock: the server lists its request for
+    // the migrations table, not granted (#1927). Before, a 500 ms margin stood
+    // for this, and a migration slower to reach the lock was quit before it
+    // got there.
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let parked: i64 = sqlx::query_scalar(
+                "select count(*) from pg_locks l join pg_class c on c.oid = l.relation
+                  where c.relname = '_sqlx_migrations' and not l.granted
+                    and l.database = (select oid from pg_database
+                                       where datname = current_database())",
+            )
+            .fetch_one(&mut holder)
+            .await
+            .unwrap();
+            if parked > 0 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the migration parks on the lock");
 
     shutdown(&app);
     let still_up = port_answers(port);
@@ -1028,6 +1049,9 @@ async fn a_trigger_that_reaches_the_spawn_after_the_quit_ends_its_row() {
         timing: knobas_sync::scheduler::SchedulerTiming {
             startup_delay: Duration::from_secs(3600),
             tick: Duration::from_secs(3600),
+            // A quit that waits at the door waits for the trigger, not for
+            // its grace to run out under a loaded machine.
+            shutdown_grace: Duration::from_secs(3600),
             ..Default::default()
         },
         quit: knobas_sync::scheduler::Quit::default(),
@@ -1066,8 +1090,17 @@ async fn a_trigger_that_reaches_the_spawn_after_the_quit_ends_its_row() {
     })
     .await
     .expect("the quit begins");
-    // Time for a quit that does not wait on the trigger to finish.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The trigger is let go once the quit waits at the scheduler's door for
+    // it, or once a quit that does not wait is over (#1927). Before, a 300 ms
+    // margin stood for the second, and a quit that did not wait but took
+    // longer than that to close the pool passed.
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !quitting.is_finished() && !quit_waits_at_the_door(&scheduler) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the quit neither waits at the door nor ends");
     release.send(()).unwrap();
 
     let answered = tokio::time::timeout(Duration::from_secs(30), triggered)
@@ -1092,6 +1125,42 @@ async fn a_trigger_that_reaches_the_spawn_after_the_quit_ends_its_row() {
         ),
         "a trigger that reached the spawn after the quit answered {answered:?}"
     );
+}
+
+/// Whether the quit is queued at the scheduler's door, behind a trigger that
+/// holds it.
+///
+/// A trigger takes the door for reading before anything else, and the quit
+/// takes it for writing. Tokio's `RwLock` is fair: a reader asking while a
+/// writer is queued waits behind it. So a probe trigger that does not answer
+/// on its first poll is the quit waiting at the door; with nobody queued it
+/// answers at once, `ShuttingDown`, having opened nothing. Unconstrained, so
+/// tokio's cooperative budget cannot make the poll pending for its own
+/// reasons. The probe is dropped either way, and a dropped wait leaves the
+/// lock's queue.
+fn quit_waits_at_the_door(scheduler: &knobas_sync::scheduler::Scheduler) -> bool {
+    use std::future::Future as _;
+
+    let probe = tokio::task::unconstrained(scheduler.trigger(
+        PARKED,
+        knobas_sync::SyncTrigger::Manual,
+        None,
+    ));
+    let mut probe = std::pin::pin!(probe);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    match probe.as_mut().poll(&mut cx) {
+        std::task::Poll::Pending => true,
+        std::task::Poll::Ready(answer) => {
+            assert!(
+                matches!(
+                    answer,
+                    Err(knobas_sync::scheduler::TriggerError::ShuttingDown)
+                ),
+                "a trigger during the quit answered {answer:?}"
+            );
+            false
+        }
+    }
 }
 
 /// LIFE-4 and CORE-3 (spec #1619, rulings B2 and B6): a second `--demo` launch

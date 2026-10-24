@@ -88,6 +88,8 @@ struct Queue {
     requested: u64,
     answered: u64,
     running: bool,
+    /// How many requests found no pass running and started one.
+    started: u64,
 }
 
 #[derive(Clone)]
@@ -175,6 +177,26 @@ impl SuggestionPass {
         self.inner.finished.borrow().passes
     }
 
+    /// How many requests have been made since this pass was made, by
+    /// [`run`](Self::run) and [`request`](Self::request) alike: numbered as
+    /// they are made, so a test reads here that a request has arrived before
+    /// it looks at what the request did (#1927).
+    #[must_use]
+    pub fn requested(&self) -> u64 {
+        self.lock().requested
+    }
+
+    /// How many requests found no pass running and started one, since this
+    /// pass was made. A request made while a pass runs starts none: it joins
+    /// the pass owed behind the running one. Counted as the request is made,
+    /// under the queue's lock, so a test reads here that a request started
+    /// nothing, where a count of opened connections cannot tell a pass not
+    /// started from one not yet arrived (#1927).
+    #[must_use]
+    pub fn started(&self) -> u64 {
+        self.lock().started
+    }
+
     /// Wait until every request made before this call is answered.
     pub async fn idle(&self) {
         let ticket = self.lock().requested;
@@ -193,6 +215,7 @@ impl SuggestionPass {
         queue.requested += 1;
         if !queue.running {
             queue.running = true;
+            queue.started += 1;
             tokio::spawn(Arc::clone(&self.inner).drive());
         }
         queue.requested

@@ -523,11 +523,12 @@ async fn the_end_of_a_run_resolves_what_the_source_owes() {
 
     let pool = corpus("arrival_run_end").await;
     let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let background = knobas_sync::background::Background::new();
     let events = ArrivalLinks::new(
         Told(std::sync::Arc::clone(&told)),
         pool.clone(),
         std::sync::Arc::new(knobas_app::sources::Registry::for_process()),
-        knobas_sync::background::Background::new(),
+        background.clone(),
     );
     let id = queued(&pool, new_branch()).await;
     hold_arrival_link(&pool, id, TICKET).await.unwrap();
@@ -545,7 +546,16 @@ async fn the_end_of_a_run_resolves_what_the_source_owes() {
 
     let started = knobas_sync::SourceSyncStatus::started("gitea", 1);
     events.sync_state(started.clone());
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    // A resolution is a task in the set, spawned inside `sync_state`: none is
+    // there, and none ran to the end, which would have linked the branch. So
+    // nothing the start did can link it later (#1927). Before, a 300 ms look
+    // stood for this, and a resolution that linked later than the look went
+    // unseen.
+    assert_eq!(
+        background.running(),
+        0,
+        "a run starting spawned a resolution"
+    );
     assert!(
         reached(&pool).await.is_empty(),
         "a run starting links nothing"
