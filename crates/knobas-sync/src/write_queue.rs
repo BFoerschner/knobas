@@ -1291,10 +1291,9 @@ async fn waited(
 /// all, since any number of them can carry the same one -- which is exactly
 /// why `create_ticket`, whose row carries a title and no address, needs the
 /// line. The tree already draws that same line, in the read direction:
-/// `knobas_app::protocol::ticket_titled` is the read-back for a
-/// created ticket, and its own doc says why it is the weaker one --
-/// "`start_work`'s precedent matched a head branch, and this matches free
-/// prose".
+/// `knobas_app::protocol::ticket_titled`, the read-back for a created ticket
+/// whose source named no key, says why it is only the fallback -- it matches
+/// free prose (#1754 reads the key the receipt names first).
 ///
 /// **The property is the address, not "the server named nothing".** Gitea
 /// answers `WriteReceipt::none()` for both ops on the *success* path too, so a
@@ -1335,9 +1334,9 @@ async fn waited(
 /// belongs.
 ///
 /// **This is a disclosure, not a repair.** Nothing reconciles the artefact:
-/// knobas has no key on it, the next sync cannot tell a ticket it made from
-/// one a colleague made, and `create_page`'s id names a page that is not in
-/// the mirror until that sync. What the user gets is the record that it
+/// the withdrawn row links nothing, and the id the line carries (a page's,
+/// a ticket's key) names something that is not in the mirror until the next
+/// sync, which does not adopt it either. What the user gets is the record that it
 /// happened, on the container it happened under, which is where a person
 /// looking for it would look.
 ///

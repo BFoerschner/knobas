@@ -350,10 +350,10 @@ impl Source for JiraSource {
                 )
                 .await?;
                 // **A receipt the mirror can never stand in for.** A worklog
-                // is not a mirrored entity and two worklogs of the same length on the same day
-                // are indistinguishable from outside, so the id Jira just
-                // answered with is the only way the local copy can ever name
-                // the row it stands for (issue #280).
+                // is not a mirrored entity and two worklogs of the same
+                // length on the same day are indistinguishable from outside,
+                // so the id Jira just answered with is the only way the local
+                // copy can ever name the row it stands for (issue #280).
                 Ok(WriteReceipt::id(id))
             }
             WriteOp::CreateBranch { .. }

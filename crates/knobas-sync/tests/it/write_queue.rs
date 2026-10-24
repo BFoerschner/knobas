@@ -155,8 +155,8 @@ struct Fake {
     /// needs a write held on the wire uses a door instead ([`Doors`], #1926).
     dwell: Arc<Mutex<std::time::Duration>>,
     /// What the source says it made. `None` is `WriteReceipt::none()`, which
-    /// is what every op but `create_page` and `log_work` really answers; a
-    /// test that needs an id sets one.
+    /// is what an op that creates nothing addressable answers; a test that
+    /// needs an id sets one.
     receipt: Arc<Mutex<Option<String>>>,
     /// What settles the row from *inside* the write, once.
     ///

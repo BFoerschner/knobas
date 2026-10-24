@@ -363,10 +363,8 @@ pub struct ActionItemTicket {
 /// it is the start-work flow's shape in miniature: dispatch an op, find what it
 /// made by *reading the mirror*, draw the link.
 ///
-/// Reading the mirror rather than a receipt, because that is the only answer
-/// there is: `knobas-source-jira`'s create deliberately drops the key it was
-/// given, on the reasoning `WriteReceipt` records -- a created ticket is a
-/// mirrored entity, and the mirror is the reading that survives a re-send.
+/// The ticket is the one the create's receipt named (#1754), taken once the
+/// mirror holds it; a create whose source named no key is found by its title.
 /// `submit` re-syncs the source when the write lands, so the ticket is
 /// normally there by the time this looks.
 ///
@@ -525,11 +523,10 @@ pub async fn action_item_ticket_inner(
     if write.state == knobas_core::write_queue::WriteState::Sent {
         // The key the create's receipt named (#1754); the title only where
         // the source named none.
-        ticket_entity_id = match crate::sources::write_queue::ticket_named(pool, write_id).await? {
-            crate::sources::write_queue::Named::Ticket(named) => named,
-            crate::sources::write_queue::Named::Nothing => {
-                crate::protocol::ticket_titled(pool, &write.source_id, title).await?
-            }
+        use crate::sources::write_queue::{Named, ticket_named};
+        ticket_entity_id = match ticket_named(pool, write_id).await? {
+            Named::Ticket(named) => named,
+            Named::Nothing => crate::protocol::ticket_titled(pool, &write.source_id, title).await?,
         };
         if let Some(ticket) = ticket_entity_id.as_deref() {
             crate::protocol::draw_link(

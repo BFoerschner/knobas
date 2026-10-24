@@ -1522,8 +1522,8 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
             .expect("the queue row");
 
     // Both halves of the search are needed. JQL is an index read and Jira's
-    // index lags its own writes, so the key may not be there yet; and the index also lags
-    // *deletes*, so a key it hands back may be a ticket an earlier run's
+    // index lags its own writes, so the key may not be there yet; and the
+    // index also lags *deletes*, so a key it hands back may be a ticket an earlier run's
     // cleanup already removed. Taking the newest key on trust would then read
     // back a 404. `GET /rest/api/2/issue/{key}` goes to the database, so a
     // ghost fails the summary check and the poll goes round again.
