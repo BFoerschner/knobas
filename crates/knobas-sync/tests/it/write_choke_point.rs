@@ -26,9 +26,9 @@
 //! 3. **Anything that declares or implements the trait** -- the SPI itself, the
 //!    four adapters, and the sync engine's `Observed` decorator. These *are*
 //!    `Source::write`, or forward it; none of them decides that a write should
-//!    happen. An external adapter implements it through the WIT world's
-//!    `GuestAdapter` (ADR-0028): the host's `impl Source` forwards each write
-//!    to the guest's `write`, which the WASM fixture implements (#1407).
+//!    happen. An external adapter implements it through the adapter SDK's
+//!    `Adapter` (ADR-0028, #2028): the host's `impl Source` forwards each
+//!    write to the guest's `write`, which the WASM fixture implements (#1407).
 //! 4. **Callers that hand a write op *to* the queue** -- the desktop shell's
 //!    amendment guard builds a `WriteOp` out of what the reader typed and
 //!    passes it to `knobas_sync::write_queue::amend`. That is the queue being
