@@ -14,6 +14,7 @@ import {
   listProjects,
   olderPipelineRuns,
   owedTickets,
+  refusedWrites,
   pipelineSettings,
   runArtifacts,
   runLog,
@@ -50,6 +51,7 @@ import {
 } from "../../ipc/sources";
 import { EVENTS } from "../../ipc";
 import { writeFollower, type WriteFollower } from "../../shell/follow-write";
+import type { RefusedWritesPort } from "../../shell/refused-writes";
 import { openExternal } from "../../shell/open-external";
 import { isEntityId, resolveTicket } from "../job/job";
 import { branchOptions } from "../repo/repo";
@@ -84,6 +86,8 @@ export interface PipelinePorts {
   listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
   /** What follows a queued run until the queue holds or refuses it (#1449). */
   follower: () => WriteFollower;
+  /** The writes the source's credential cannot make (`refused_writes`, #2040). */
+  refusedWrites: RefusedWritesPort;
 }
 
 /** How many branches the job's read takes: a job reaches a handful. */
@@ -147,6 +151,7 @@ export const BRIDGE: PipelinePorts = {
   runParameters: (runId) => readRunParameters(runId),
   listen: (event, handler) => tauriListen(event, handler),
   follower: () => writeFollower(),
+  refusedWrites: (asks) => refusedWrites(asks),
 };
 
 /** The run page's reads (#853): the pipeline page's, and the run's source view. */

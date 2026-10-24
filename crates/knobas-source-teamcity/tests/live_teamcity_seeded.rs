@@ -81,6 +81,14 @@
 //! seed) and the counter is not wound back; that is harmless, because the seed
 //! sets a counter only while the build with the fixture's number is absent.
 //!
+//! **One user is minted, and deleted again** (#2040): [`MintedViewer`], a
+//! `PROJECT_VIEWER` at global scope with one token, removed from `Drop`
+//! passing or panicking alike, and removed first if a killed run left it.
+//! It writes nothing to find out: the test asserts the build queue and the
+//! newest build are as they were. For its project-scoped case it turns the
+//! server's per-project permissions on and puts them back from `Drop`
+//! ([`PerProject`]), and puts them off first if a killed run left them on.
+//!
 //! **One owner at a time.** The leftover clearing cannot tell a sibling's
 //! build from a corpse, and clause 2 needs a server on which nothing is running:
 //! testenv/README.md, *One environment, one owner at a time*. `./seed
@@ -4549,4 +4557,446 @@ async fn a_run_reports_its_walk_over_the_real_configurations_and_listed_builds()
         .map(|d| (d, Some(of), "builds".to_owned()))
         .collect();
     assert_eq!(next.readings, expected);
+}
+
+// --- What the user may write (#2040) -----------------------------------------
+
+/// The server's authentication settings as they were, put back from `Drop`
+/// after [`PerProject::on`] turned per-project permissions on.
+struct PerProject {
+    url: String,
+    admin: String,
+    was: serde_json::Value,
+}
+
+impl PerProject {
+    /// Per-project permissions off, as the seed leaves them, where a killed
+    /// run left them on: a killed run's `Drop` never ran, and the seeded
+    /// server keeps its volume, so every later run would read them on as the
+    /// server's own setting and put them back on.
+    async fn off_if_left_on(seeded: &Seeded) {
+        let (status, mut settings) = seeded.get("app/rest/server/authSettings").await;
+        assert_eq!(status, 200, "the authentication settings: {settings}");
+        if settings["perProjectPermissions"] != serde_json::Value::Bool(true) {
+            return;
+        }
+        eprintln!("per-project permissions were left on, by a killed run: putting them off");
+        settings["perProjectPermissions"] = serde_json::Value::Bool(false);
+        put_auth_settings(&seeded.http, &seeded.url, &seeded.token, &settings)
+            .await
+            .unwrap_or_else(|e| panic!("putting a killed run's per-project permissions off: {e}"));
+    }
+
+    async fn on(seeded: &Seeded) -> PerProject {
+        let (status, was) = seeded.get("app/rest/server/authSettings").await;
+        assert_eq!(status, 200, "the authentication settings: {was}");
+        let guard = PerProject {
+            url: seeded.url.clone(),
+            admin: seeded.token.clone(),
+            was: was.clone(),
+        };
+        let mut on = was;
+        on["perProjectPermissions"] = serde_json::Value::Bool(true);
+        put_auth_settings(&seeded.http, &seeded.url, &seeded.token, &on)
+            .await
+            .unwrap_or_else(|e| panic!("turning per-project permissions on: {e}"));
+        guard
+    }
+}
+
+impl Drop for PerProject {
+    fn drop(&mut self) {
+        let (url, admin, was) = (self.url.clone(), self.admin.clone(), self.was.clone());
+        Cleanup::new(
+            "the live suite did not put the server's authentication settings back",
+            "per-project permissions may still be on; `PUT /app/rest/server/authSettings` with \
+             `perProjectPermissions: false` puts them back",
+        )
+        .within(CLEANUP_BUDGET)
+        .run(move || async move { put_auth_settings(&client(), &url, &admin, &was).await });
+    }
+}
+
+async fn put_auth_settings(
+    http: &reqwest::Client,
+    url: &str,
+    token: &str,
+    settings: &serde_json::Value,
+) -> Result<(), String> {
+    let put = http
+        .put(format!("{url}/app/rest/server/authSettings"))
+        .header("Accept", "application/json")
+        .bearer_auth(token)
+        .json(settings)
+        .send()
+        .await
+        .map_err(|e| format!("PUT authSettings: {e}"))?;
+    let status = put.status();
+    let body: serde_json::Value = put.json().await.unwrap_or_default();
+    if !status.is_success() || body["perProjectPermissions"] != settings["perProjectPermissions"] {
+        return Err(format!("PUT authSettings answered {status}: {body}"));
+    }
+    Ok(())
+}
+
+/// The user [`a_viewer_may_run_builds_and_may_not_change_parameters`] mints.
+const VIEWER: &str = "knobas-viewer-2040";
+
+/// A `PROJECT_VIEWER` at global scope and its credential, deleted again
+/// from `Drop` (its tokens go with it).
+struct MintedViewer {
+    url: String,
+    admin: String,
+    password: String,
+    /// The token it minted for itself, or `None` where TeamCity would not let
+    /// it, and the viewer signs in with its password.
+    token: Option<String>,
+}
+
+impl MintedViewer {
+    async fn mint(seeded: &Seeded) -> MintedViewer {
+        // A killed run's viewer first: the create below would be a conflict.
+        remove_user(&seeded.http, &seeded.url, &seeded.token)
+            .await
+            .unwrap_or_else(|e| panic!("removing a leftover {VIEWER}: {e}"));
+        let password = format!("{VIEWER}-{}", std::process::id());
+        let created = seeded
+            .http
+            .post(format!("{}/app/rest/users", seeded.url))
+            .header("Accept", "application/json")
+            .bearer_auth(&seeded.token)
+            .json(&serde_json::json!({
+                "username": VIEWER,
+                "name": "knobas live viewer (#2040)",
+                "password": password,
+                "roles": { "role": [{ "roleId": "PROJECT_VIEWER", "scope": "g" }] },
+            }))
+            .send()
+            .await
+            .expect("POST /app/rest/users");
+        let status = created.status();
+        let body = created.text().await.unwrap_or_default();
+        assert!(
+            status.is_success(),
+            "creating {VIEWER} answered {status}: {body}"
+        );
+        // Guarded from here on, so a failing token request still removes it.
+        let mut viewer = MintedViewer {
+            url: seeded.url.clone(),
+            admin: seeded.token.clone(),
+            password: password.clone(),
+            token: None,
+        };
+        // As the viewer itself: an administrator may not mint another
+        // user's token ("You do not have enough permissions to create tokens
+        // for this user", 403, measured on 2026.1.3).
+        let minted = seeded
+            .http
+            .post(format!(
+                "{}/app/rest/users/current/tokens/knobas-2040",
+                seeded.url
+            ))
+            .header("Accept", "application/json")
+            .basic_auth(VIEWER, Some(&password))
+            .send()
+            .await
+            .expect("POST .../tokens");
+        let status = minted.status();
+        let body: serde_json::Value = minted.json().await.unwrap_or_default();
+        viewer.token = body["value"].as_str().map(str::to_owned);
+        if viewer.token.is_none() {
+            eprintln!(
+                "{VIEWER} signs in with its password: minting its token answered {status}: {body}"
+            );
+        }
+        viewer
+    }
+
+    /// The adapter, signed in as the viewer.
+    fn source(&self, seeded: &Seeded) -> Box<dyn Source> {
+        let (auth, secret, config) = match &self.token {
+            Some(token) => (AuthMethod::Pat, token.clone(), serde_json::json!({})),
+            None => (
+                AuthMethod::UserPassword,
+                self.password.clone(),
+                serde_json::json!({ "username": VIEWER }),
+            ),
+        };
+        match knobas_source_teamcity::build(SourceInstance {
+            id: "teamcity".to_owned(),
+            kind: knobas_source_teamcity::ADAPTER_KIND.to_owned(),
+            display_name: "Tidewater CI (seeded, viewer)".to_owned(),
+            base_url: seeded.url.clone(),
+            auth: Some(auth),
+            secret: Some(secret),
+            account: None,
+            config,
+        }) {
+            Ok(s) => s,
+            Err(e) => panic!("the adapter must build as the viewer: {e:?}"),
+        }
+    }
+
+    /// One raw `GET` as the viewer.
+    fn get(&self, seeded: &Seeded, path: &str) -> reqwest::RequestBuilder {
+        let request = seeded
+            .http
+            .get(format!("{}/{path}", seeded.url))
+            .header("Accept", "application/json");
+        match &self.token {
+            Some(token) => request.bearer_auth(token),
+            None => request.basic_auth(VIEWER, Some(&self.password)),
+        }
+    }
+}
+
+impl Drop for MintedViewer {
+    fn drop(&mut self) {
+        let (url, admin) = (self.url.clone(), self.admin.clone());
+        Cleanup::new(
+            "the live suite did not remove the user it minted",
+            format!("{VIEWER} may still be standing; the next run removes it first"),
+        )
+        .within(CLEANUP_BUDGET)
+        .run(move || async move { remove_user(&client(), &url, &admin).await });
+    }
+}
+
+/// `DELETE /app/rest/users/username:{VIEWER}`; a 404 is a user already gone.
+async fn remove_user(http: &reqwest::Client, url: &str, token: &str) -> Result<(), String> {
+    let gone = http
+        .delete(format!("{url}/app/rest/users/username:{VIEWER}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("DELETE {VIEWER}: {e}"))?;
+    match gone.status().as_u16() {
+        200..=299 | 404 => Ok(()),
+        status => Err(format!("DELETE {VIEWER} answered {status}")),
+    }
+}
+
+/// The real server's answer to what #2040 reads (ADR-0013): a viewer may run
+/// a configuration's builds, trigger it and re-run a build of it, and may
+/// not change its parameters; the configuration's own view draws *Run…*
+/// enabled and no parameter editable. Made administrator of the
+/// configuration's project, it may change that configuration's parameters
+/// and still not those of a configuration in another project. The seed's
+/// token, which may write,
+/// is refused nothing and its view's parameters are editable, as before.
+/// Nothing is written to find out: the queue and the newest build are as
+/// they were.
+#[tokio::test]
+#[ignore = "needs the seeded TeamCity: just teamcity-live-seeded"]
+async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
+    use knobas_source::grants::WriteAsk;
+    use knobas_source::view::{Block, SourceView};
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let config = "Payout_IntegrationTests";
+    let build = seeded
+        .seed
+        .builds
+        .iter()
+        .find(|b| b.build_type == config)
+        .unwrap_or_else(|| panic!("the seed recorded no build of {config}"))
+        .real_id;
+    let config_entity = format!("teamcity:buildType:{config}");
+    let build_entity = format!("teamcity:build:{build}");
+    let asks: Vec<WriteAsk> = [
+        (&config_entity, "run_build"),
+        (&config_entity, "trigger_build"),
+        (&config_entity, "set_parameter"),
+        (&build_entity, "rerun_build"),
+    ]
+    .into_iter()
+    .map(|(entity, op)| WriteAsk {
+        entity: entity.clone(),
+        op: op.to_owned(),
+    })
+    .collect();
+    let queue = async || seeded.get("app/rest/buildQueue?fields=count").await.1["count"].clone();
+    let newest = async || {
+        seeded
+            .build_ids("defaultFilter:false,branch:default:any,count:1")
+            .await
+    };
+    let (queued_before, newest_before) = (queue().await, newest().await);
+    let per_project = async || {
+        seeded.get("app/rest/server/authSettings").await.1["perProjectPermissions"].clone()
+    };
+    PerProject::off_if_left_on(&seeded).await;
+
+    let editable = |view: &SourceView| -> Vec<bool> {
+        view.sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .filter_map(|b| match b {
+                Block::Settings { values, .. } => Some(values.iter().map(|v| v.editable)),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    };
+
+    {
+        let viewer = MintedViewer::mint(&seeded).await;
+        let (status, permissions) = {
+            let response = viewer
+                .get(&seeded, "app/rest/users/current/permissions")
+                .send()
+                .await
+                .expect("GET permissions");
+            (response.status(), response.text().await.unwrap_or_default())
+        };
+        eprintln!("{VIEWER}'s permissions ({status}): {permissions}");
+        let source = viewer.source(&seeded);
+        let refused = source
+            .refused_writes(&asks)
+            .await
+            .unwrap_or_else(|e| panic!("the viewer's permissions read: {e:?}"));
+        let ops: Vec<_> = refused
+            .iter()
+            .map(|r| (r.entity.as_str(), r.op.as_str()))
+            .collect();
+        assert_eq!(
+            ops,
+            [(config_entity.as_str(), "set_parameter")],
+            "{refused:#?}"
+        );
+        assert!(
+            refused[0]
+                .reason
+                .starts_with("This TeamCity user cannot change the settings of ")
+                && refused[0]
+                    .reason
+                    .ends_with("it lacks the Edit project permission"),
+            "{refused:#?}"
+        );
+        let view = source
+            .view(&config_entity, None)
+            .await
+            .expect("the viewer reads the view")
+            .expect("drawn");
+        let run = view
+            .actions
+            .iter()
+            .find(|a| a.write_op == "run_build")
+            .expect("Run… is offered");
+        assert_eq!(run.disabled, None, "a viewer may run builds");
+        let values = editable(&view);
+        assert!(
+            !values.is_empty() && values.iter().all(|e| !e),
+            "{values:?}"
+        );
+
+        // A role given on one project holds there and nowhere else: the
+        // viewer made the configuration's project administrator may change
+        // its parameters, and still not those of a configuration elsewhere.
+        // Only with per-project permissions on: the seeded server has them
+        // off, and then every role is global and every assignment answers
+        // `isGlobalScope` (measured 2026-10-24). They are turned on for this
+        // and put back by `PerProject`'s `Drop`.
+        let _per_project = PerProject::on(&seeded).await;
+        let project_of = async |id: &str| {
+            seeded.build_type(id).await["projectId"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{id} names its project"))
+                .to_owned()
+        };
+        let (project, elsewhere) = (
+            project_of(config).await,
+            project_of(QUICK_CONFIGURATION).await,
+        );
+        assert_ne!(project, elsewhere, "the two configurations live apart");
+        let granted = seeded
+            .http
+            .put(format!(
+                "{}/app/rest/users/username:{VIEWER}/roles/PROJECT_ADMIN/p:{project}",
+                seeded.url
+            ))
+            .header("Accept", "application/json")
+            .bearer_auth(&seeded.token)
+            .send()
+            .await
+            .expect("PUT .../roles");
+        let status = granted.status();
+        let body = granted.text().await.unwrap_or_default();
+        assert!(
+            status.is_success(),
+            "making {VIEWER} {project}'s administrator answered {status}: {body}"
+        );
+        let permissions = viewer
+            .get(
+                &seeded,
+                "app/rest/users/current/permissions?locator=permission:edit_project",
+            )
+            .send()
+            .await
+            .expect("GET permissions")
+            .text()
+            .await
+            .unwrap_or_default();
+        eprintln!("{VIEWER}'s edit_project once {project}'s administrator: {permissions}");
+        let other_entity = format!("teamcity:buildType:{QUICK_CONFIGURATION}");
+        let refused = source
+            .refused_writes(&[
+                WriteAsk {
+                    entity: config_entity.clone(),
+                    op: "set_parameter".to_owned(),
+                },
+                WriteAsk {
+                    entity: other_entity.clone(),
+                    op: "set_parameter".to_owned(),
+                },
+            ])
+            .await
+            .unwrap_or_else(|e| panic!("the project administrator's permissions read: {e:?}"));
+        let ops: Vec<_> = refused
+            .iter()
+            .map(|r| (r.entity.as_str(), r.op.as_str()))
+            .collect();
+        assert_eq!(
+            ops,
+            [(other_entity.as_str(), "set_parameter")],
+            "{refused:#?}"
+        );
+    }
+
+    let admin = seeded.source(serde_json::json!({}));
+    let refused = admin
+        .refused_writes(&asks)
+        .await
+        .expect("the seed account's permissions read");
+    assert_eq!(refused, [], "the seed's token may write");
+    let view = admin
+        .view(&config_entity, None)
+        .await
+        .expect("the seed reads the view")
+        .expect("drawn");
+    assert!(
+        editable(&view).iter().any(|e| *e),
+        "the seed may change parameters"
+    );
+
+    assert_eq!(
+        queue().await,
+        queued_before,
+        "nothing was queued to find out"
+    );
+    assert_eq!(
+        newest().await,
+        newest_before,
+        "no build was made to find out"
+    );
+    let (status, _) = seeded
+        .get(&format!("app/rest/users/username:{VIEWER}"))
+        .await;
+    assert_eq!(status, 404, "{VIEWER} is removed again");
+    assert_eq!(
+        per_project().await,
+        serde_json::Value::Bool(false),
+        "per-project permissions are put back"
+    );
 }

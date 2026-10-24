@@ -39,6 +39,9 @@ export function isStartedHere(run: RunRow): boolean {
  */
 export const QUEUED_RUN = "run";
 
+/** The op every run here is queued as (`RunBuild`), as `refused_writes` asks about it (#2040). */
+export const RUN_OP = "run_build";
+
 /** The branch a run write names: `null` for the default, as the Run… dialog sends it (#852). */
 export function runBranch(payload: WriteOpPayload): string | null {
   return "RunBuild" in payload ? payload.RunBuild.branch : null;

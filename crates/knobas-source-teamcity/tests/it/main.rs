@@ -7,6 +7,7 @@
 //! because `just teamcity-live` and `just teamcity-live-seeded` run them by
 //! name (`test-layout-exceptions.txt`).
 
+mod grants;
 mod mockd;
 mod run;
 mod run_reads;

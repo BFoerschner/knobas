@@ -514,6 +514,35 @@ pub(crate) struct BuildType {
     pub description: Option<String>,
 }
 
+/// `GET /app/rest/users/current/permissions` (#2040): the user's permission
+/// assignments, one per permission and scope, each `isGlobalScope` or naming
+/// the `project` it was given on. Measured on 2026.1.3: 21 of them for a
+/// `PROJECT_VIEWER` at global scope.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PermissionAssignments {
+    #[serde(default)]
+    pub permission_assignment: Vec<PermissionAssignment>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PermissionAssignment {
+    pub permission: PermissionId,
+    pub is_global_scope: Option<bool>,
+    pub project: Option<ProjectId>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct PermissionId {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct ProjectId {
+    pub id: String,
+}
+
 /// One project as [`PROJECT_FIELDS`] answers it (#849). The server's own
 /// root project is `_Root` and has no parent.
 #[derive(Debug, Clone, serde::Deserialize)]

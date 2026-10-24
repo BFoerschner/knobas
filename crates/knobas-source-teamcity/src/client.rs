@@ -14,8 +14,8 @@ use crate::rest::{
     ARTIFACT_FIELDS, BUILD_CHANGE_FIELDS, BUILD_CONFIG_VIEW_FIELDS, BUILD_FIELDS, BUILD_ID_FIELDS,
     BUILD_TYPE_FIELDS, BUILD_VIEW_FIELDS, Build, BuildRecord, BuildType, Changes, ConfigRecord,
     CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, PARAMETER_FIELDS,
-    PROJECT_FIELDS, Project, Property, RECENT_BUILD_FIELDS, SERVER_FIELDS, Server, TestOccurrences,
-    USER_FIELDS,
+    PROJECT_FIELDS, PermissionAssignments, Project, Property, RECENT_BUILD_FIELDS, SERVER_FIELDS,
+    Server, TestOccurrences, USER_FIELDS,
 };
 
 /// One record, kept both as parsed fields and as the JSON it arrived as --
@@ -383,6 +383,60 @@ impl HttpRest {
                 ))
             })
     }
+}
+
+impl HttpRest {
+    /// `GET /app/rest/users/current/permissions` -- what the credential's
+    /// user may do, and where (#2040). Asked with no locator: the whole list
+    /// is one answer, and its `permission:(id:…)` form is refused.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to.
+    pub(crate) async fn permissions(&self) -> Result<PermissionAssignments, SourceError> {
+        self.one("app/rest/users/current/permissions", &[]).await
+    }
+
+    /// The project a configuration lives in (#2040).
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to, and an answer naming no project.
+    pub(crate) async fn config_project(&self, id: &str) -> Result<String, SourceError> {
+        let body = self
+            .get_raw(
+                &format!("app/rest/buildTypes/id:{id}"),
+                &[("fields", "projectId")],
+            )
+            .await?;
+        project_named(body.get("projectId"), id)
+    }
+
+    /// The project a build's configuration lives in (#2040).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::config_project`].
+    pub(crate) async fn build_project(&self, id: i64) -> Result<String, SourceError> {
+        let body = self
+            .get_raw(
+                &format!("app/rest/builds/id:{id}"),
+                &[("fields", "buildType(projectId)")],
+            )
+            .await?;
+        project_named(
+            body.get("buildType").and_then(|t| t.get("projectId")),
+            &id.to_string(),
+        )
+    }
+}
+
+fn project_named(value: Option<&serde_json::Value>, of: &str) -> Result<String, SourceError> {
+    value
+        .and_then(serde_json::Value::as_str)
+        .filter(|p| !p.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| SourceError::protocol(format!("teamcity: {of} names no project")))
 }
 
 impl HttpRest {

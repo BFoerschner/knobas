@@ -611,6 +611,9 @@ pub fn run() {
             // (§10.8).
             commands::sources::preview_install_adapter,
             commands::sources::preview_update_adapter,
+            // #2040's read of the writes a source's credential cannot make,
+            // appended at the foot: the list is append-only (§10.8).
+            commands::entity::refused_writes,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

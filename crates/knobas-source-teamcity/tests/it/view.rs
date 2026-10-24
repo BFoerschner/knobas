@@ -209,9 +209,18 @@ async fn a_build_configuration_opens_on_its_overview_with_one_tab_per_part() {
             ("vcs_roots", "VCS roots", Some(1), false),
         ]
     );
-    // One configuration read and one builds read for the whole view.
+    // One configuration read and one builds read for the whole view, then
+    // what the user may write (#2040), which this fake does not answer.
     let asked = server.received_requests().await.expect("recorded");
-    assert_eq!(asked.len(), 2, "{asked:#?}");
+    let paths: Vec<_> = asked.iter().map(|r| r.url.path()).collect();
+    assert_eq!(
+        paths,
+        [
+            CONFIG_PATH,
+            "/app/rest/builds",
+            "/app/rest/users/current/permissions"
+        ]
+    );
 }
 
 #[tokio::test]
@@ -627,9 +636,22 @@ async fn one_section_is_read_without_the_others() {
     assert_eq!(ids, ["parameters"]);
     let asked = server.received_requests().await.expect("recorded");
     assert!(
-        asked.iter().all(|r| r.url.path() == CONFIG_PATH),
-        "only the configuration was read: {asked:#?}"
+        asked
+            .iter()
+            .all(|r| [CONFIG_PATH, "/app/rest/users/current/permissions"].contains(&r.url.path())),
+        "only the configuration and what the user may write were read: {asked:#?}"
     );
+
+    // A tab that offers no write reads nothing of what the user may write (#2040).
+    let before = asked.len();
+    source(&server)
+        .view(CONFIG, Some("steps"))
+        .await
+        .expect("the read succeeds")
+        .expect("drawn");
+    let asked = server.received_requests().await.expect("recorded");
+    let steps: Vec<_> = asked[before..].iter().map(|r| r.url.path()).collect();
+    assert_eq!(steps, [CONFIG_PATH]);
 
     let refused = source(&server).view(CONFIG, Some("log")).await;
     assert!(

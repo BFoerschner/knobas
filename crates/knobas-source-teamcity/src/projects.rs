@@ -65,6 +65,16 @@ impl ProjectTree {
         out
     }
 
+    /// The name a person knows `id` by: its name, else its id.
+    pub(crate) fn name_of(&self, id: &str) -> String {
+        self.by_id
+            .get(id)
+            .and_then(|p| p.name.as_deref())
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or(id)
+            .to_owned()
+    }
+
     /// Whether `id` is one of `roots` or sits anywhere beneath one.
     pub(crate) fn within(&self, id: &str, roots: &[String]) -> bool {
         if roots.iter().any(|r| r == id) {

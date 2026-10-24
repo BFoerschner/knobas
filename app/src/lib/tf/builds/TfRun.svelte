@@ -7,7 +7,9 @@
     who or what started it, when, and how long it took. *Re-run* (the same
     branch and values, queued at once), *Run again with changes…* (the Run…
     dialog from this run, #852) and *Open in <source>*. A run in flight has
-    *Stop*, disabled: it needs a new write.
+    *Stop*, disabled: it needs a new write. A run the source's credential
+    cannot make (`refused_writes`, #2040) draws *Re-run* and both *Run
+    again…* disabled with the reason.
   - **Overview**: a failed run leads with its first failed test (the
     details as the source wrote them, *Show it in the log*, *Open the test
     file* where the details name a path, *Create ticket* or the ticket
@@ -37,6 +39,7 @@
   import type { PipelineRow, PipelineSettings, RunLog, RunRow, SourceView } from "../../ipc/entity";
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import { settleQueued } from "../queued.svelte";
   import { commitHash, fileHash } from "../repo/repo";
@@ -54,6 +57,7 @@
     staleLine,
     syncWith,
     triggerLabel,
+    RUN_OP,
   } from "./pipeline";
   import { RUN_BRIDGE, listenSynced, type RunPorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
@@ -135,6 +139,17 @@
     const wanted = { pipelineId, runId };
     untrack(() => open(wanted.pipelineId, wanted.runId));
   });
+
+  /** What the source's credential cannot write on the run's pipeline (#2040), asked once per pipeline. */
+  let refused = $state<RefusedWrite[]>([]);
+  $effect(() => {
+    refused = [];
+    return askInto([{ entity: pipelineId, op: RUN_OP }], ports.refusedWrites, (answer) => (refused = answer));
+  });
+  const cannotRun = $derived(refusalOf(refused, pipelineId, RUN_OP));
+  function runAgain() {
+    if (cannotRun === null) dialog = true;
+  }
 
   function open(pipe: string, id: string) {
     const mine = ++token;
@@ -340,7 +355,7 @@
   }
 
   function rerun() {
-    if (run === null || view === null) return;
+    if (run === null || view === null || cannotRun !== null) return;
     void queue(rerunRequest(pipelineId, run, settings, view));
   }
 
@@ -398,10 +413,16 @@
           type="button"
           class="tf-btn tf-primary"
           disabled={view === null}
-          title={view === null && viewRead ? "The run's settings could not be read" : undefined}
+          aria-disabled={cannotRun !== null ? "true" : undefined}
+          title={cannotRun ?? (view === null && viewRead ? "The run's settings could not be read" : undefined)}
           onclick={rerun}>Re-run</button
         >
-        <button type="button" class="tf-btn" onclick={() => (dialog = true)}>Run again with changes…</button>
+        <button
+          type="button"
+          class="tf-btn"
+          {...refusedAttrs(cannotRun)}
+          onclick={runAgain}>Run again with changes…</button
+        >
       {:else}
         <button type="button" class="tf-btn" aria-disabled="true" title="Needs a new write">Stop</button>
       {/if}
@@ -566,7 +587,12 @@
           </tbody>
         </table>
         {#if !inFlight}
-          <button type="button" class="tf-btn tf-runagain" onclick={() => (dialog = true)}>Run again with these…</button>
+          <button
+            type="button"
+            class="tf-btn tf-runagain"
+            {...refusedAttrs(cannotRun)}
+            onclick={runAgain}>Run again with these…</button
+          >
         {/if}
       {/if}
     {:else if tab === "log"}

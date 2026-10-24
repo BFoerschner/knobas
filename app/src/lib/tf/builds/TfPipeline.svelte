@@ -20,6 +20,10 @@
 
   *Run…* and *Run again…* open the Run… dialog (#852, `TfRunDialog`). *Pin* writes through the list's pins (#849, `onpin`). A run started here shows as
   *queued* at once, never as started (R-9.8).
+
+  A run or a parameter change the source's credential cannot make
+  (`refused_writes`, #2040) is drawn disabled with the reason, and a press on
+  it opens nothing.
 -->
 <script lang="ts">
   import { secondsLabel } from "../../time/format";
@@ -29,6 +33,7 @@
   import type { PipelineRow, PipelineSettings, RunRow, Setting } from "../../ipc/entity";
   import type { SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
   import { toastQueued } from "../../shell/queued-toast";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import { settingPayload } from "../../detail/view/settings";
   import FilterBar from "../filter/FilterBar.svelte";
@@ -66,6 +71,7 @@
     pipelineWord,
     pipelineSource,
     QUEUED_RUN,
+    RUN_OP,
     queuedRunRows,
     queuedRunWhat,
     resultWord,
@@ -124,6 +130,21 @@
     const wanted = id;
     untrack(() => open(wanted));
   });
+
+  /**
+   * What the source's credential cannot write on this pipeline (#2040): a run, and the op its
+   * settings name for a parameter. Asked once the settings are read, so once per pipeline.
+   */
+  let refused = $state<RefusedWrite[]>([]);
+  const parameterOp = $derived(settings?.parameter_write_op ?? null);
+  $effect(() => {
+    refused = [];
+    if (!settingsRead) return;
+    const asks = [{ entity: id, op: RUN_OP }, ...(parameterOp !== null ? [{ entity: id, op: parameterOp }] : [])];
+    return askInto(asks, ports.refusedWrites, (answer) => (refused = answer));
+  });
+  const cannotRun = $derived(refusalOf(refused, id, RUN_OP));
+  const cannotChange = $derived(parameterOp === null ? null : refusalOf(refused, id, parameterOp));
 
   function open(wanted: string) {
     const mine = ++token;
@@ -266,6 +287,7 @@
 
   /** *Run on <branch>*: one run on the queue, drawn queued at once (R-9.8). */
   function runOn(branch: string | null) {
+    if (cannotRun !== null) return;
     const words = branch ?? fallback ?? "the default branch";
     void queue({ RunBuild: { entity: id, branch, parameters: [] } }, `On ${words}, defaults`);
   }
@@ -290,6 +312,7 @@
   let dialog = $state<{ from: RunRow | null } | null>(null);
 
   function runDialog(from: RunRow | null) {
+    if (cannotRun !== null) return;
     dialog = { from };
   }
 
@@ -380,6 +403,7 @@
   }
 
   function change(setting: Setting) {
+    if (cannotChange !== null) return;
     editing = setting.name;
     draft = setting.secret ? "" : setting.value;
   }
@@ -415,11 +439,25 @@
     </div>
   </div>
   <div class="tf-acts">
-    <button type="button" class="tf-btn tf-primary" onclick={() => runDialog(null)}>Run…</button>
+    <button
+      type="button"
+      class="tf-btn tf-primary"
+      {...refusedAttrs(cannotRun)}
+      onclick={() => runDialog(null)}>Run…</button
+    >
     {#if jobBranch !== null}
-      <button type="button" class="tf-btn" onclick={() => runOn(jobBranch)}>Run on <span class="tf-mono">{jobBranch}</span></button>
+      <button
+        type="button"
+        class="tf-btn"
+        {...refusedAttrs(cannotRun)}
+        onclick={() => runOn(jobBranch)}>Run on <span class="tf-mono">{jobBranch}</span></button
+      >
     {:else}
-      <button type="button" class="tf-btn" onclick={() => runOn(null)}
+      <button
+        type="button"
+        class="tf-btn"
+        {...refusedAttrs(cannotRun)}
+        onclick={() => runOn(null)}
         >Run on {#if fallback !== null}<span class="tf-mono">{fallback}</span>{:else}the default branch{/if}</button
       >
     {/if}
@@ -548,7 +586,12 @@
                 {#if !isStartedHere(run)}
                   <a class="tf-btn tf-sm tf-ghost" href={`${runHash(id, run.entity_id)}/log`}>Log</a>
                   {#if run.finished !== null}
-                    <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => runDialog(run)}>Run again…</button>
+                    <button
+                      type="button"
+                      class="tf-btn tf-sm tf-ghost"
+                      {...refusedAttrs(cannotRun)}
+                      onclick={() => runDialog(run)}>Run again…</button
+                    >
                   {/if}
                 {/if}
               </td>
@@ -628,7 +671,12 @@
                   <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => void save(setting)}>Save</button>
                   <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editing = null)}>Cancel</button>
                 {:else if settings.parameter_write_op !== null && setting.editable}
-                  <button type="button" class="tf-btn tf-sm" onclick={() => change(setting)}>Change…</button>
+                  <button
+                    type="button"
+                    class="tf-btn tf-sm"
+                    {...refusedAttrs(cannotChange)}
+                    onclick={() => change(setting)}>Change…</button
+                  >
                 {/if}
               </td>
             </tr>

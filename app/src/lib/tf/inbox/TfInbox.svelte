@@ -9,7 +9,8 @@
   Over the inbox store the rooms UI already uses (`inbox/inbox.svelte.ts`:
   `inbox_items`, `inbox_count`, `snooze_inbox_item`, `complete_inbox_item`,
   `ack_alert`), `submit_write` for *Re-run*, and `job_reach` for which job a
-  row belongs to. No new command.
+  row belongs to. `refused_writes` (#2040) says which *Re-run* the source's
+  credential cannot make: that one is drawn disabled with the reason.
 -->
 <script lang="ts">
   import { clockLabel } from "../../time/format";
@@ -31,6 +32,7 @@
   import { inbox as sharedInbox, pickedMorning, snoozePresets, tomorrowValue, type Inbox } from "../../inbox/inbox.svelte";
   import { followWrite } from "../../shell/follow-write";
   import { toastQueued } from "../../shell/queued-toast";
+  import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -48,6 +50,8 @@
     getEntity: (entityId: string) => Promise<EntityDetail>;
     jobReach: (entityId: string) => Promise<Reached[]>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
+    /** What the sources' credentials cannot write (#2040); the bridge's when left out. */
+    refusedWrites?: RefusedWritesPort;
   }
 
   let {
@@ -126,6 +130,23 @@
     if (ready) void inbox.refresh();
   });
 
+  /** The row writes the sources' credentials cannot make, asked after the rows are drawn (#2040). */
+  let refused = $state<RefusedWrite[]>([]);
+  /** As a string, so a refresh that changes no row's writes asks nothing again. */
+  const asked = $derived(
+    JSON.stringify(
+      inbox.stream.flatMap((entry) =>
+        entry.item.entity_id === null
+          ? []
+          : rowActions(entry)
+              .filter((action) => entry.actions.includes(action))
+              .map((op) => ({ entity: entry.item.entity_id as string, op })),
+      ),
+    ),
+  );
+  $effect(() => askInto(JSON.parse(asked) as WriteAsk[], ports.refusedWrites, (answer) => (refused = answer)));
+  const refusal = (entry: InboxEntry, action: string) => refusalOf(refused, entry.item.entity_id, action);
+
   $effect(() => {
     if (job === null && filter.scope === "job") filter.scope = "all";
   });
@@ -189,6 +210,7 @@
   const labelOf = (action: string) => ACTION_FORMS[action]?.label ?? LABEL[action] ?? action;
 
   function press(entry: InboxEntry, action: string) {
+    if (refusal(entry, action) !== null) return;
     if (action === "rerun_build") void rerun(entry);
     else if (action === "ack") ack(entry);
     else if (action === "snooze") {
@@ -230,6 +252,7 @@
               type="button"
               class="tf-btn tf-sm"
               class:tf-ghost={action === "done"}
+              {...refusedAttrs(refusal(entry, action))}
               aria-expanded={action === "snooze" ? snoozing === item.key : undefined}
               onclick={() => press(entry, action)}>{labelOf(action)}</button
             >

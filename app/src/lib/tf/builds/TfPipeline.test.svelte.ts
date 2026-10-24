@@ -197,6 +197,7 @@ function draw(
       });
     },
     follower: () => ({ follow: () => () => {} }),
+    refusedWrites: () => Promise.resolve([]),
     ...overrides,
   };
   const runs = () => {
@@ -975,4 +976,71 @@ test("Add a parameter sends a free name and value; a failing sign-in warns that 
   await settle();
   expect(dialog()).toBeNull();
   expect(drawn.writes).toEqual([]);
+});
+
+const CANNOT_RUN = "This TeamCity user cannot run builds in Payouts: it lacks the Run build permission";
+const CANNOT_CHANGE = "This TeamCity user cannot change the settings of Payouts: it lacks the Edit project permission";
+
+test("writes the source's credential cannot make are drawn disabled saying why, and queue nothing (#2040)", async () => {
+  const asked: string[] = [];
+  const drawn = draw([PIPELINE.entity_id], "PAY-231", {
+    refusedWrites: (asks) => {
+      asked.push(JSON.stringify(asks));
+      return Promise.resolve(
+        asks.map((ask) => ({ ...ask, reason: ask.op === "run_build" ? CANNOT_RUN : CANNOT_CHANGE })),
+      );
+    },
+  });
+  await settle();
+  expect(asked).toEqual([
+    JSON.stringify([
+      { entity: PIPELINE.entity_id, op: "run_build" },
+      { entity: PIPELINE.entity_id, op: "set_parameter" },
+    ]),
+  ]);
+  const runNow = button("Run…")!;
+  const runOn = button("Run on feature/PAY-231-sepa-retry")!;
+  const again = [...firstRow()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Run again…")!;
+  for (const refused of [runNow, runOn, again]) {
+    expect(refused.getAttribute("aria-disabled")).toBe("true");
+    expect(refused.title).toBe(CANNOT_RUN);
+    refused.click();
+  }
+  await settle();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(drawn.writes).toEqual([]);
+});
+
+test("a parameter the credential cannot change offers Change… disabled saying why (#2040)", async () => {
+  draw([PIPELINE.entity_id, "params"], "PAY-231", {
+    settings: () => Promise.resolve(KINDS),
+    refusedWrites: (asks) =>
+      Promise.resolve(asks.filter((ask) => ask.op === "set_parameter").map((ask) => ({ ...ask, reason: CANNOT_CHANGE }))),
+  });
+  await settle();
+  const changes = paramRows().flatMap((row) =>
+    [...row.querySelectorAll<HTMLButtonElement>("button")].filter((b) => b.textContent === "Change…"),
+  );
+  expect(changes.length).toBeGreaterThan(0);
+  for (const change of changes) {
+    expect(change.getAttribute("aria-disabled")).toBe("true");
+    expect(change.title).toBe(CANNOT_CHANGE);
+    change.click();
+  }
+  await settle();
+  expect(target.querySelector('input[aria-label^="New default"], select[aria-label^="New default"]')).toBeNull();
+  expect(button("Run…")!.getAttribute("aria-disabled")).toBeNull();
+});
+
+test("a pipeline whose settings name no parameter op is asked about its runs alone (#2040)", async () => {
+  const asked: string[] = [];
+  draw([PIPELINE.entity_id], "PAY-231", {
+    settings: () => Promise.resolve({ ...SETTINGS, parameter_write_op: null }),
+    refusedWrites: (asks) => {
+      asked.push(JSON.stringify(asks));
+      return Promise.resolve([]);
+    },
+  });
+  await settle();
+  expect(asked).toEqual([JSON.stringify([{ entity: PIPELINE.entity_id, op: "run_build" }])]);
 });
