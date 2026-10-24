@@ -237,11 +237,18 @@ impl KumaServer {
         format!("http://127.0.0.1:{}", self.port)
     }
 
-    /// Wait until the fake holds a request it will never answer.
-    async fn hung(&self) {
+    /// How many requests the fake has held for good so far.
+    fn held(&self) -> usize {
+        *self.hung.borrow()
+    }
+
+    /// Wait until the fake holds a request it will never answer, past the
+    /// `before` it had already held: a second wait on one fake is not let go
+    /// by the first one's stall.
+    async fn hung(&self, before: usize) {
         self.hung
             .clone()
-            .wait_for(|hung| *hung > 0)
+            .wait_for(|hung| *hung > before)
             .await
             .expect("the fake outlives its handle");
     }
@@ -350,20 +357,22 @@ impl Kuma {
 /// every read after it too -- so the only thing that ends the wait is a
 /// timer of the client's own, a request timeout or the call's deadline, and
 /// the paused clock jumps straight to it. Each one starts at an instant the
-/// clock alone sets, so the time taken is exact. Both waits meet a twenty-second backstop of real time, which a
-/// call that never gives up fails on instead of hanging the run.
+/// clock alone sets, so the time taken is exact. Both waits meet a
+/// twenty-second backstop of real time, which a call that never gives up
+/// fails on instead of hanging the run.
 async fn on_the_paused_clock<T>(
     server: &KumaServer,
     work: impl std::future::Future<Output = T>,
 ) -> (T, Duration) {
     let started = tokio::time::Instant::now();
+    let held = server.held();
     let clock = HeldClock::hold();
     tokio::pin!(work);
     let before = real_backstop("an answer or a request held for good", async {
         tokio::select! {
             biased;
             done = &mut work => Some(done),
-            () = server.hung() => None,
+            () = server.hung(held) => None,
         }
     })
     .await;
