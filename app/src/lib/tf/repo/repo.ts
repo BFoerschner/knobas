@@ -341,6 +341,16 @@ export function branchFrom(view: SourceView | null): { from: ChoiceOption; disab
 }
 
 /**
+ * Why the view's toolbar draws `writeOp` disabled, in the source's words: a
+ * mirror, a token that cannot write (#2030). `null` where it offers the write
+ * enabled, or says nothing about it. Whether a write is offered is the
+ * source's answer (ADR-0020 rule 4).
+ */
+export function toolbarRefusal(view: SourceView | null, writeOp: string): string | null {
+  return view?.actions.find((candidate) => candidate.write_op === writeOp)?.disabled ?? null;
+}
+
+/**
  * Where a branch stands, read off its source's own view (`entity_view` of the
  * branch, `knobas-source-gitea`'s `view/branch.rs`): ahead and behind the
  * default branch, the pull request open from it, what it carries, and which
@@ -361,6 +371,8 @@ export interface BranchStanding {
   pr: { entityId: string | null; number: string | null; state: string | null; tone: string | null } | null;
   /** The source offers a pull request from it now (*Open pull request…*, enabled). */
   canOpenPr: boolean;
+  /** Why the source draws that pull request disabled (nothing ahead, a token that cannot write, #2030), in its words. */
+  prBlocked: string | null;
   /** The source offers a delete at all: never for the default branch. */
   deletable: boolean;
   /** Why the delete cannot be taken now (a protected branch), in the source's words. */
@@ -399,6 +411,7 @@ export function branchStanding(view: SourceView | null): BranchStanding {
     merged: ahead === 0,
     pr,
     canOpenPr: offer !== undefined && offer.disabled === null,
+    prBlocked: offer?.disabled ?? null,
     deletable: remove !== undefined,
     deleteBlocked: remove?.disabled ?? null,
     commits: viewRows(section("commits")),

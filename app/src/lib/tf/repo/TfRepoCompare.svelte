@@ -131,7 +131,9 @@
     return head !== null && !names.includes(head) ? [head, ...names] : names;
   });
   const changed = $derived(files?.length ?? standing?.files ?? null);
-  const ready = $derived(head !== null && title.trim() !== "" && base !== "" && base !== head && !busy);
+  /** Why the source draws the pull request disabled (#2030): its words, on the button. */
+  const refused = $derived(standing?.prBlocked ?? null);
+  const ready = $derived(head !== null && title.trim() !== "" && base !== "" && base !== head && !busy && refused === null);
 
   async function create() {
     if (!ready || head === null) return;
@@ -188,7 +190,12 @@
             <a class="tf-btn" href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}>Open PR {standing.pr.number ?? ""}</a>
           {/if}
         {:else}
-          <button type="submit" class="tf-btn tf-primary" disabled={!ready}>Create pull request</button>
+          <button
+            type="submit"
+            class="tf-btn tf-primary"
+            disabled={!ready && refused === null}
+            aria-disabled={refused !== null ? "true" : undefined}
+            title={refused ?? undefined}>Create pull request</button>
         {/if}
         {#if changed !== null}
           <span class="tf-dim tf-small tf-cfiles">{changed} {changed === 1 ? "file" : "files"} changed against {defaultBranch ?? into}</span>
