@@ -2481,6 +2481,51 @@ fn port_answers(port: u16) -> bool {
 mod tests {
     use super::*;
 
+    /// #2025: the reason is this start's last `FATAL`, from `FATAL:` on and
+    /// on one line, never an earlier start's.
+    #[test]
+    fn a_starts_reason_is_its_own_last_fatal_line() {
+        let earlier = "2026-10-24 10:00:00.000 CEST [1] FATAL:  lock file \"postmaster.pid\" already exists\n";
+        let log = format!(
+            "{earlier}2026-10-24 10:00:01.000 CEST [2] LOG:  could not open configuration file\n\
+             2026-10-24 10:00:01.000 CEST [2] FATAL:  could not load pg_hba.conf\n\
+             2026-10-24 10:00:01.000 CEST [2] LOG:  database system is shut down\n"
+        );
+        assert_eq!(
+            start_reason(log.as_bytes(), earlier.len() as u64).as_deref(),
+            Some("could not load pg_hba.conf")
+        );
+    }
+
+    /// #2025: a start that wrote no `FATAL` is reported by its own lines: all
+    /// of a short log, the last five of a long one, an earlier start's
+    /// `FATAL` left out. One that wrote nothing has no reason.
+    #[test]
+    fn a_start_without_a_fatal_line_is_reported_by_its_own_last_lines() {
+        let earlier = "FATAL:  an earlier start's reason\n";
+        let short = format!("{earlier}LOG:  one\n\n  LOG:   two\n");
+        assert_eq!(
+            start_reason(short.as_bytes(), earlier.len() as u64).as_deref(),
+            Some("LOG: one; LOG: two")
+        );
+        let long = format!("{earlier}1\n2\n3\n4\n5\n6\n7\n");
+        assert_eq!(
+            start_reason(long.as_bytes(), earlier.len() as u64).as_deref(),
+            Some("3; 4; 5; 6; 7")
+        );
+        assert_eq!(start_reason(earlier.as_bytes(), earlier.len() as u64), None);
+    }
+
+    /// #2025: a log shorter than it was before the start was replaced in
+    /// between, and is read whole.
+    #[test]
+    fn a_log_shorter_than_before_the_start_is_read_whole() {
+        assert_eq!(
+            start_reason(b"FATAL:  could not load pg_hba.conf\n", 4096).as_deref(),
+            Some("could not load pg_hba.conf")
+        );
+    }
+
     fn write(dir: &Path, name: &str, contents: &str) -> PathBuf {
         let path = dir.join(name);
         std::fs::write(&path, contents).unwrap();
