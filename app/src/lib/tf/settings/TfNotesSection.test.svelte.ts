@@ -328,6 +328,7 @@ test("a page the credential cannot add pages under is drawn disabled saying why,
   const hit = button("Notes archive");
   expect(hit.getAttribute("aria-disabled")).toBe("true");
   expect(hit.title).toBe(reason);
+  expect(hit.classList.contains("picked"), "a refused page is not picked").toBe(false);
   expect(button("Move 37 notes").disabled).toBe(true);
   expect(fake.moved).toEqual([]);
 });
