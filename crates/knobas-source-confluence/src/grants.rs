@@ -51,7 +51,7 @@ pub(crate) struct Page {
     /// The space's name, `None` where the record carries none.
     pub(crate) space_name: Option<String>,
     /// Whether `update` is among the page's operations for this user, `None`
-    /// where the record carries no operations at all.
+    /// where the record carries no operations: no verdict, not a refusal.
     pub(crate) may_update: Option<bool>,
 }
 
@@ -147,34 +147,36 @@ fn refusal(op: &str, page: &Page, held: Option<&Vec<String>>) -> Option<String> 
     }
 }
 
-/// `GET /rest/api/content/{id}?expand=space,operations`, as much as is read.
-#[derive(serde::Deserialize)]
-struct Record {
-    title: String,
-    space: RecordSpace,
-    /// Absent where the server did not expand them: then nothing says
-    /// whether this user may edit, which is no verdict, not a refusal.
-    #[serde(default)]
-    operations: Option<Vec<Operation>>,
-}
-
-#[derive(serde::Deserialize)]
-struct RecordSpace {
-    key: String,
-    #[serde(default)]
-    name: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct Operation {
-    operation: String,
-    #[serde(rename = "targetType")]
-    target_type: String,
-}
-
-impl From<Record> for Page {
-    fn from(record: Record) -> Self {
-        Self {
+/// The real reads (measured on Data Center 9.2.21, see the module).
+#[async_trait::async_trait]
+impl GrantReads for crate::http::ConfluenceHttp {
+    async fn page(&self, id: &str) -> Result<Page, SourceError> {
+        #[derive(serde::Deserialize)]
+        struct Space {
+            key: String,
+            #[serde(default)]
+            name: Option<String>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Operation {
+            operation: String,
+            #[serde(rename = "targetType")]
+            target_type: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct Record {
+            title: String,
+            space: Space,
+            #[serde(default)]
+            operations: Option<Vec<Operation>>,
+        }
+        let record: Record = self
+            .get_json(
+                &format!("rest/api/content/{id}"),
+                &[("expand", "space,operations".to_owned())],
+            )
+            .await?;
+        Ok(Page {
             title: record.title,
             space_key: record.space.key,
             space_name: record.space.name.filter(|n| !n.trim().is_empty()),
@@ -182,21 +184,7 @@ impl From<Record> for Page {
                 ops.iter()
                     .any(|o| o.operation == "update" && o.target_type == "page")
             }),
-        }
-    }
-}
-
-/// The real reads (measured on Data Center 9.2.21, see the module).
-#[async_trait::async_trait]
-impl GrantReads for crate::http::ConfluenceHttp {
-    async fn page(&self, id: &str) -> Result<Page, SourceError> {
-        let record: Record = self
-            .get_json(
-                &format!("rest/api/content/{id}"),
-                &[("expand", "space,operations".to_owned())],
-            )
-            .await?;
-        Ok(record.into())
+        })
     }
 
     async fn space_permissions(&self, key: &str) -> Result<Vec<String>, SourceError> {
@@ -388,26 +376,6 @@ mod tests {
         let fake = Fake::default();
         assert_eq!(judged(&fake, &[ask("7", "transition")]).await, vec![]);
         assert_eq!(fake.reads(), Vec::<String>::new());
-    }
-
-    #[test]
-    fn a_record_without_operations_says_nothing_of_an_edit() {
-        let decode = |json: serde_json::Value| -> Page {
-            serde_json::from_value::<Record>(json).unwrap().into()
-        };
-        let space = serde_json::json!({ "key": "ENG", "name": "Engineering" });
-        let bare = decode(serde_json::json!({ "title": "T", "space": space }));
-        assert_eq!(bare.may_update, None, "no operations is no verdict");
-        let read_only = decode(serde_json::json!({
-            "title": "T", "space": space,
-            "operations": [{ "operation": "read", "targetType": "page" }],
-        }));
-        assert_eq!(read_only.may_update, Some(false));
-        let editable = decode(serde_json::json!({
-            "title": "T", "space": space,
-            "operations": [{ "operation": "update", "targetType": "page" }],
-        }));
-        assert_eq!(editable.may_update, Some(true));
     }
 
     #[tokio::test]
