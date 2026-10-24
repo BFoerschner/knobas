@@ -4562,12 +4562,15 @@ async fn a_run_reports_its_walk_over_the_real_configurations_and_listed_builds()
 /// The user [`a_viewer_may_run_builds_and_may_not_change_parameters`] mints.
 const VIEWER: &str = "knobas-viewer-2040";
 
-/// A `PROJECT_VIEWER` at global scope and its token, deleted again from
-/// `Drop` (its tokens go with it).
+/// A `PROJECT_VIEWER` at global scope and its credential, deleted again
+/// from `Drop` (its tokens go with it).
 struct MintedViewer {
     url: String,
     admin: String,
-    token: String,
+    password: String,
+    /// The token it minted for itself, or `None` where TeamCity would not let
+    /// it, and the viewer signs in with its password.
+    token: Option<String>,
 }
 
 impl MintedViewer {
@@ -4576,6 +4579,7 @@ impl MintedViewer {
         remove_user(&seeded.http, &seeded.url, &seeded.token)
             .await
             .unwrap_or_else(|e| panic!("removing a leftover {VIEWER}: {e}"));
+        let password = format!("{VIEWER}-{}", std::process::id());
         let created = seeded
             .http
             .post(format!("{}/app/rest/users", seeded.url))
@@ -4584,7 +4588,7 @@ impl MintedViewer {
             .json(&serde_json::json!({
                 "username": VIEWER,
                 "name": "knobas live viewer (#2040)",
-                "password": format!("{VIEWER}-{}", std::process::id()),
+                "password": password,
                 "roles": { "role": [{ "roleId": "PROJECT_VIEWER", "scope": "g" }] },
             }))
             .send()
@@ -4597,27 +4601,64 @@ impl MintedViewer {
         let mut viewer = MintedViewer {
             url: seeded.url.clone(),
             admin: seeded.token.clone(),
-            token: String::new(),
+            password: password.clone(),
+            token: None,
         };
+        // As the viewer itself: an administrator may not mint another
+        // user's token ("You do not have enough permissions to create tokens
+        // for this user", 403, measured on 2026.1.3).
         let minted = seeded
             .http
-            .post(format!(
-                "{}/app/rest/users/username:{VIEWER}/tokens/knobas-2040",
-                seeded.url
-            ))
+            .post(format!("{}/app/rest/users/current/tokens/knobas-2040", seeded.url))
             .header("Accept", "application/json")
-            .bearer_auth(&seeded.token)
+            .basic_auth(VIEWER, Some(&password))
             .send()
             .await
             .expect("POST .../tokens");
         let status = minted.status();
         let body: serde_json::Value = minted.json().await.unwrap_or_default();
-        assert!(status.is_success(), "minting {VIEWER}'s token answered {status}: {body}");
-        viewer.token = body["value"]
-            .as_str()
-            .unwrap_or_else(|| panic!("the token's answer names no value: {body}"))
-            .to_owned();
+        viewer.token = body["value"].as_str().map(str::to_owned);
+        if viewer.token.is_none() {
+            eprintln!("{VIEWER} signs in with its password: minting its token answered {status}: {body}");
+        }
         viewer
+    }
+
+    /// The adapter, signed in as the viewer.
+    fn source(&self, seeded: &Seeded) -> Box<dyn Source> {
+        let (auth, secret, config) = match &self.token {
+            Some(token) => (AuthMethod::Pat, token.clone(), serde_json::json!({})),
+            None => (
+                AuthMethod::UserPassword,
+                self.password.clone(),
+                serde_json::json!({ "username": VIEWER }),
+            ),
+        };
+        match knobas_source_teamcity::build(SourceInstance {
+            id: "teamcity".to_owned(),
+            kind: knobas_source_teamcity::ADAPTER_KIND.to_owned(),
+            display_name: "Tidewater CI (seeded, viewer)".to_owned(),
+            base_url: seeded.url.clone(),
+            auth: Some(auth),
+            secret: Some(secret),
+            account: None,
+            config,
+        }) {
+            Ok(s) => s,
+            Err(e) => panic!("the adapter must build as the viewer: {e:?}"),
+        }
+    }
+
+    /// One raw `GET` as the viewer.
+    fn get(&self, seeded: &Seeded, path: &str) -> reqwest::RequestBuilder {
+        let request = seeded
+            .http
+            .get(format!("{}/{path}", seeded.url))
+            .header("Accept", "application/json");
+        match &self.token {
+            Some(token) => request.bearer_auth(token),
+            None => request.basic_auth(VIEWER, Some(&self.password)),
+        }
     }
 }
 
@@ -4703,18 +4744,15 @@ async fn a_viewer_may_run_builds_and_may_not_change_parameters() {
     {
         let viewer = MintedViewer::mint(&seeded).await;
         let (status, permissions) = {
-            let response = seeded
-                .http
-                .get(format!("{}/app/rest/users/current/permissions", seeded.url))
-                .header("Accept", "application/json")
-                .bearer_auth(&viewer.token)
+            let response = viewer
+                .get(&seeded, "app/rest/users/current/permissions")
                 .send()
                 .await
                 .expect("GET permissions");
             (response.status(), response.text().await.unwrap_or_default())
         };
         eprintln!("{VIEWER}'s permissions ({status}): {permissions}");
-        let source = seeded.source_with(&seeded.url, &viewer.token, serde_json::json!({}));
+        let source = viewer.source(&seeded);
         let refused = source
             .refused_writes(&asks)
             .await
