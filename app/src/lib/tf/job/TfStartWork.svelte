@@ -193,8 +193,9 @@
         {#if of && current?.id === of.id && (of.outcome === "failed" || of.outcome === "queued")}
           <!-- While a queued step's write is open, the button re-reads it and
                sends it nothing more (`ready_retry`'s rule 1), so it is not
-               *Retry* (#1998). A write discarded or refused since still runs
-               the step again here (#2015). -->
+               *Retry* (#1998). A write discarded or refused since settles the
+               step failed and sends nothing; the answer redraws it with
+               *Retry* (#2015). -->
           <button class="tf-btn tf-sm" disabled={flow.busy} onclick={() => void flow.retry(of.id)}>{of.outcome === "queued" ? "Check again" : "Retry"}</button>
         {/if}
         {#if of && current?.id === of.id && of.outcome !== "running"}

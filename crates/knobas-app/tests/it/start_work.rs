@@ -752,6 +752,116 @@ async fn a_transition_never_answered_is_on_its_way_and_its_retry_sends_nothing()
     assert_eq!(fake.ops().len(), 3, "{:?}", fake.ops());
 }
 
+/// A queued step's button is *Check again* (#1998): it re-reads the write. When
+/// the user checked Jira, found the transition there and **discarded** the
+/// write, the re-read settles the step failed with the discard's sentence and
+/// sends nothing (#2015). The failed step's *Retry* is then the retry, and it
+/// runs rules 2 and 3 as any failed step's does.
+#[tokio::test]
+async fn checking_again_on_a_queued_step_whose_write_was_discarded_settles_it_failed_and_sends_nothing()
+ {
+    let pool = corpus("sw_check_discarded").await;
+    let flow = planned(&pool).await;
+    let fake = Fake::new()
+        .revealing_on_refresh(&proposed_branch(&flow))
+        .answering(
+            "transition",
+            Answer::Landed(Landing::Unconfirmed {
+                source: "Jira".to_owned(),
+                detail: None,
+            }),
+        );
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+    let step = step_of(&flow, Step::Transition).clone();
+    assert_eq!(step.outcome, StepOutcome::Queued);
+
+    // The user found it in Jira and discarded the write in the write queue.
+    fake.set_landing(step.write_id.expect("dispatched"), Landing::Withdrawn);
+    let flow = start_work::retry(&pool, &fake, step.id).await.unwrap();
+
+    assert_eq!(outcome(&flow, Step::Transition), StepOutcome::Failed);
+    assert_eq!(
+        step_of(&flow, Step::Transition).detail.as_deref(),
+        Some("the write was discarded before it went")
+    );
+    assert_eq!(
+        fake.ops(),
+        vec!["create_branch", "create_pull_request", "transition"],
+        "checking again sent the transition a second time"
+    );
+
+    // The step reads failed now, and its *Retry* runs it again (rule 3).
+    fake.now_answers("transition", Answer::Landed(Landing::Sent));
+    let flow = start_work::retry(&pool, &fake, step.id).await.unwrap();
+    assert_eq!(outcome(&flow, Step::Transition), StepOutcome::Succeeded);
+    assert_eq!(
+        fake.ops(),
+        vec![
+            "create_branch",
+            "create_pull_request",
+            "transition",
+            "transition"
+        ]
+    );
+}
+
+/// The same for a queued write the source has since **refused**: the re-read
+/// settles the step failed with the source's own sentence and dispatches
+/// nothing, and the failed step's *Retry* looks before it writes (rule 2).
+#[tokio::test]
+async fn checking_again_on_a_queued_step_whose_write_was_refused_settles_it_failed_and_sends_nothing()
+ {
+    let pool = corpus("sw_check_refused").await;
+    let flow = planned(&pool).await;
+    let head = proposed_branch(&flow);
+    let fake = Fake::new().answering(
+        "create_branch",
+        Answer::Landed(Landing::Waiting {
+            detail: Some("the server did not answer".to_owned()),
+        }),
+    );
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+    let step = step_of(&flow, Step::CreateBranch).clone();
+    assert_eq!(step.outcome, StepOutcome::Queued);
+
+    fake.set_landing(
+        step.write_id.expect("dispatched"),
+        Landing::Refused {
+            detail: "branch already exists".to_owned(),
+        },
+    );
+    let looks = *fake.looks.lock().unwrap();
+    let flow = start_work::retry(&pool, &fake, step.id).await.unwrap();
+
+    assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Failed);
+    assert_eq!(
+        step_of(&flow, Step::CreateBranch).detail.as_deref(),
+        Some("branch already exists")
+    );
+    assert_eq!(fake.ops(), vec!["create_branch"], "checking again re-sent the branch");
+    assert_eq!(
+        *fake.looks.lock().unwrap(),
+        looks,
+        "checking again ran the step's read: it is the failed step's Retry that looks"
+    );
+
+    // It was there all along. The failed step's *Retry* reads the mirror,
+    // finds it, and sends nothing for it.
+    fake.branches
+        .lock()
+        .unwrap()
+        .push((REPO.to_owned(), head.clone()));
+    fake.pulls.lock().unwrap().push((
+        REPO.to_owned(),
+        head,
+        BASE.to_owned(),
+        on_head(PR, Some(false), Some("open")),
+    ));
+    let flow = start_work::retry(&pool, &fake, step.id).await.unwrap();
+    assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Succeeded);
+    assert_eq!(fake.ops(), vec!["create_branch", "transition"]);
+}
+
 /// A queue that refuses the op outright -- a source that does not declare it,
 /// a target that names no configured source -- is a **failed step carrying the
 /// reason**, not a failed command. The rest of the flow is still the user's to
