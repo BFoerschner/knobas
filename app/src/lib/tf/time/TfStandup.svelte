@@ -20,13 +20,17 @@
   landed before this tab opened is read back from the protocol's links (#1433):
   the backend links the note to the ticket it found by the item's words, so an
   item whose words a linked ticket carries shows that ticket, not *Create
-  ticket*.
+  ticket*. One filed before a reload whose ticket is not mirrored yet is read
+  back from the protocol's `owed_tickets` and drawn `queued` (#1951). While
+  any filed ticket is unnamed, the end of every sync asks for it again, so
+  the ticket the post-write read missed is named by the sync that brings it.
 
   `date` is the day the address names (`#/time/standup/<date>`, #1504), today
   without one.
 -->
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
+  import { listen as tauriListen } from "@tauri-apps/api/event";
 
   import { ipcErrorMessage } from "../../ipc";
   import {
@@ -54,6 +58,7 @@
   import { publishableSources } from "../../standup/protocol";
   import { digestWindows, LOOKBACK_DAYS } from "../../standup/standup";
   import { dayKey } from "../../time/day";
+  import { listenSynced } from "../builds/pipeline-ports";
   import { keyOf } from "../job/job";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
@@ -89,6 +94,8 @@
     search: typeof realSearch;
     /** Where the queue's movements are heard (#779). */
     follower: WriteFollower;
+    /** Where a sync's end is heard, to ask again for a ticket not yet named (#1951). */
+    listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
     /** *Copy as text*'s clipboard. */
     copy: (text: string) => Promise<void>;
   }
@@ -129,6 +136,7 @@
     listAdapters: realListAdapters,
     search: realSearch,
     follower: writeFollower(),
+    listen: (event, handler) => tauriListen(event, handler),
     copy: (text) => navigator.clipboard.writeText(text),
     ...ports,
   };
@@ -195,6 +203,7 @@
       drafts = { ...read.notes };
       failure = null;
       followPublication();
+      readOwed(opened);
       void readLinked(note.links, read.items);
     } catch (cause) {
       failure = ipcErrorMessage(cause);
@@ -405,8 +414,34 @@
 
   /** The tickets filed this session, by the action item's words. */
   let filed = $state<
-    { writeId: number; text: string; project: string; type: string; ticket: string | null; status: string | null }[]
+    { writeId: number; text: string; project: string | null; type: string; ticket: string | null; status: string | null }[]
   >([]);
+
+  /**
+   * The creates filed before this tab opened that the protocol does not link
+   * yet (#1951), drawn as this session's own are. Only those on their way:
+   * a held or refused one waits on the reader in the queue, and the item
+   * offers *Create ticket* as it does once a live follow is told so.
+   */
+  function readOwed(opened: Protocol) {
+    for (const owed of opened.owed_tickets) {
+      if (owed.state !== "pending" && owed.state !== "sent") continue;
+      if (filed.some((made) => made.writeId === owed.write_id)) continue;
+      filed = [...filed, { writeId: owed.write_id, text: owed.title, project: null, type: "Task", ticket: null, status: null }];
+      if (owed.state === "pending") followTicket(owed.write_id);
+    }
+  }
+
+  // While a filed ticket is unnamed, the sync that brings it in may be any source's.
+  const unnamed = $derived(filed.some((made) => made.ticket === null));
+  $effect(() => {
+    if (!unnamed) return;
+    return untrack(() =>
+      listenSynced(io, null, () => {}, () => {
+        for (const made of filed) if (made.ticket === null) void address(made.writeId);
+      }),
+    );
+  });
   let ticketFor = $state<{ text: string; project: string | null; type: string } | null>(null);
   let projects = $state<Project[]>([]);
 
@@ -462,7 +497,7 @@
 
   async function address(writeId: number) {
     const current = protocol;
-    if (!current) return;
+    if (!current || !filed.some((made) => made.writeId === writeId && made.ticket === null)) return;
     let answer;
     try {
       answer = await io.actionItemTicket(current.note_id, writeId);
@@ -511,7 +546,9 @@
 
   /** This session's newest create for the item's words, else the ticket the protocol links for them. */
   const filedFor = (text: string) =>
-    [...filed].reverse().find((made) => made.text === text) ?? linked.find((known) => known.text === text) ?? null;
+    [...filed].reverse().find((made) => made.text.trim() === text.trim()) ??
+    linked.find((known) => known.text === text) ??
+    null;
 </script>
 
 <div class="tf-su">

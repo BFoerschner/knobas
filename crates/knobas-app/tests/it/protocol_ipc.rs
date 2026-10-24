@@ -1222,6 +1222,104 @@ async fn an_action_items_ticket_that_arrives_on_a_later_sync_is_linked_by_that_s
     );
 }
 
+/// **#1951: a reload before the sync finds the create on its way**, not an
+/// item with no ticket to offer *Create ticket* for again. The protocol's
+/// read names each create its action items still owe a link, with the words
+/// it filed; once the ticket is mirrored, the read draws the link itself and
+/// names it no more.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_protocol_read_names_a_create_whose_ticket_is_not_mirrored_yet() {
+    let harness = Harness::new("protocol_action_item_reload").await;
+    harness.log().late = true;
+    let opened = harness.open().await;
+    assert!(opened.owed_tickets.is_empty(), "nothing filed yet");
+    let filed = create_action_item_ticket_inner(
+        &harness.state,
+        &opened.note_id,
+        &format!("{TRACKER}:PAY"),
+        "Task",
+        "  Ask Ines about the SEPA retry ",
+        "",
+    )
+    .await
+    .expect("the ticket is filed");
+
+    let reloaded = harness.open().await;
+    let owed: Vec<_> = reloaded
+        .owed_tickets
+        .iter()
+        .map(|t| {
+            (
+                t.write_id,
+                t.title.as_str(),
+                t.state,
+                t.ticket_entity_id.clone(),
+                t.linked,
+            )
+        })
+        .collect();
+    assert_eq!(
+        owed,
+        [(
+            filed.write_id,
+            "Ask Ines about the SEPA retry",
+            WriteState::Sent,
+            None,
+            false
+        )],
+        "sent, its ticket not mirrored, and named by the words it filed"
+    );
+
+    // The ticket arrives; this read is the first to look, before any
+    // resolution of the sync's.
+    harness.mirror(ticket_item("PAY-999", "Ask Ines about the SEPA retry"));
+    harness.sync(TRACKER).await;
+    let after = harness.open().await;
+    assert!(after.owed_tickets.is_empty(), "linked, so owed no more");
+    assert_eq!(
+        harness.related_tickets(&opened.note_id).await,
+        ["tracker:PAY-999"],
+        "the read drew the link"
+    );
+}
+
+/// A create still pending is on its way too, and one the reader withdrew in
+/// the queue is not (#1951).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_protocol_read_names_a_pending_create_and_not_a_discarded_one() {
+    let harness = Harness::new("protocol_action_item_owed_states").await;
+    harness.log().offline = true;
+    let opened = harness.open().await;
+    let mut ids = Vec::new();
+    for title in ["Ask Ines about the SEPA retry", "Book the retro room"] {
+        let filed = create_action_item_ticket_in_background(
+            &harness.state,
+            &opened.note_id,
+            &format!("{TRACKER}:PAY"),
+            "Task",
+            title,
+            "",
+        )
+        .await
+        .expect("the create is queued");
+        ids.push(filed.write_id);
+    }
+    let background = harness.state.scheduler.background();
+    until(|| async { background.running() }, |running| *running == 0).await;
+    knobas_core::write_queue::discard(harness.pool(), ids[1])
+        .await
+        .expect("the reader withdraws the second");
+
+    let owed: Vec<_> = harness
+        .open()
+        .await
+        .owed_tickets
+        .into_iter()
+        .map(|t| (t.write_id, t.state))
+        .collect();
+    assert_eq!(owed, [(ids[0], WriteState::Pending)]);
+}
+
 /// A link the create's own read drew is owed no more (#1951): the reader who
 /// removes it does not find the next sync drawing it again, as a link drawn
 /// on arrival is not (#1050).

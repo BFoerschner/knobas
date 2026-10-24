@@ -118,12 +118,44 @@ pub async fn standup_protocol_inner(
             }
         }
     };
+    let owed_tickets = owed_tickets(pool, &note.id).await?;
     Ok(crate::protocol::Protocol {
         day,
         note_id: note.id,
         page_title: crate::protocol::page_title_of(day),
         publication,
+        owed_tickets,
     })
+}
+
+/// The tickets `note_id`'s action items filed that it does not link yet
+/// (#1951): every create still holding the note as the link it owes
+/// ([`owe_the_note`]) and not withdrawn, each asked
+/// [`action_item_ticket_inner`], which links one whose ticket the mirror now
+/// holds. The rest are what [`Protocol::owed_tickets`](crate::protocol::Protocol::owed_tickets)
+/// names.
+///
+/// The read is the publication's `reconcile` for action items: the end of a
+/// sync resolves the same links (`link_arrivals`), and this makes the
+/// protocol's answer true whichever runs first.
+async fn owed_tickets(pool: &PgPool, note_id: &str) -> Result<Vec<ActionItemTicket>, IpcError> {
+    let owed: Vec<i64> = sqlx::query_scalar(
+        "select id from knobas.write_queue
+          where link_to = $1 and op = 'create_ticket' and state <> 'discarded'
+          order by id",
+    )
+    .bind(note_id)
+    .fetch_all(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    let mut tickets = Vec::with_capacity(owed.len());
+    for write_id in owed {
+        let ticket = action_item_ticket_inner(pool, note_id, write_id).await?;
+        if !ticket.linked {
+            tickets.push(ticket);
+        }
+    }
+    Ok(tickets)
 }
 
 /// [`standup_protocol_inner`] behind the lifecycle.
@@ -335,11 +367,15 @@ pub async fn set_standup_publish_target(
 }
 
 /// What became of filing a ticket from an action item.
-#[derive(Debug, serde::Serialize, ts_rs::TS)]
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct ActionItemTicket {
     /// The write queue row carrying the create.
     pub write_id: i64,
+    /// The ticket's title as filed: the action item's words, trimmed. What
+    /// the tab matches an item by when it reads a protocol's
+    /// [`owed_tickets`](crate::protocol::Protocol::owed_tickets) (#1951).
+    pub title: String,
     /// The queue's own word for where that write stands (#779): `pending`
     /// while it is on its way, `sent` once it landed, `refused` or `held`
     /// when it will not go on its own, `discarded` once withdrawn.
@@ -431,6 +467,7 @@ pub async fn create_action_item_ticket_in_background(
     let (queued, source_id) = crate::sources::write_queue::queue(state, payload).await?;
     owe_the_note(&state.pool, queued.id, note_id).await?;
     let (note, id) = (note_id.to_owned(), queued.id);
+    let title = title.trim().to_owned();
     crate::sources::write_queue::send_in_background_then(
         state,
         source_id,
@@ -444,6 +481,7 @@ pub async fn create_action_item_ticket_in_background(
     );
     Ok(ActionItemTicket {
         write_id: queued.id,
+        title,
         state: queued.state,
         detail: queued.detail,
         ticket_entity_id: None,
@@ -543,7 +581,6 @@ pub async fn action_item_ticket_inner(
         Ok(knobas_source::WriteOp::CreateTicket { title, .. }) => title,
         _ => return Err(not_a_ticket()),
     };
-    let title = title.as_str();
     let mut ticket_entity_id = None;
     let mut linked = false;
     if write.state == knobas_core::write_queue::WriteState::Sent {
@@ -552,7 +589,7 @@ pub async fn action_item_ticket_inner(
         use crate::sources::write_queue::{Named, ticket_named};
         ticket_entity_id = match ticket_named(pool, write_id).await? {
             Named::Ticket(named) => named,
-            Named::Nothing => crate::protocol::ticket_titled(pool, &write.source_id, title).await?,
+            Named::Nothing => crate::protocol::ticket_titled(pool, &write.source_id, &title).await?,
         };
         if let Some(ticket) = ticket_entity_id.as_deref() {
             crate::protocol::draw_link(
@@ -568,6 +605,7 @@ pub async fn action_item_ticket_inner(
     }
     Ok(ActionItemTicket {
         write_id,
+        title,
         state: write.state,
         detail: write.detail,
         ticket_entity_id,

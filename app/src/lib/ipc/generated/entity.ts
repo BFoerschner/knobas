@@ -44,6 +44,11 @@ export type ActionItemTicket = {
  */
 write_id: number, 
 /**
+ * The ticket's title as filed: the action item's words, trimmed. What
+ * the tab matches an item by when it reads [`owed_tickets`] (#1951).
+ */
+title: string, 
+/**
  * The queue's own word for where that write stands (#779): `pending`
  * while it is on its way, `sent` once it landed, `refused` or `held`
  * when it will not go on its own, `discarded` once withdrawn.
@@ -2768,7 +2773,16 @@ page_title: string,
 /**
  * The publication, when there has been one.
  */
-publication: Publication | null, };
+publication: Publication | null, 
+/**
+ * The tickets this protocol's action items filed that it does not link
+ * yet, oldest first (#1951): each create that still owes the note its
+ * link, sent or not, and not withdrawn. A reload reads an item filed
+ * here as on its way from this rather than offering *Create ticket*
+ * again; the read links each one whose ticket the mirror now holds, and
+ * names it no more.
+ */
+owed_tickets: Array<ActionItemTicket>, };
 
 /**
  * What became of a date's publication, as far as knobas can tell.
