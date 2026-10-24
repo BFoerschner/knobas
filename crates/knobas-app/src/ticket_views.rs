@@ -1042,32 +1042,16 @@ mod tests {
         }
     }
 
-    /// The barrel (`app/src/lib/ipc/search.ts`) invokes the view commands by
-    /// their names, and the handler barrel registers the two #1245 renamed:
-    /// a command is addressed by a string, so a barrel line left on an old
-    /// name is a button Tauri answers with "command not found".
+    /// The barrel (`app/src/lib/ipc/search.ts`) invokes every `search` command
+    /// by its registered name, the two #1245 renamed included, and invokes
+    /// nothing the handler list lacks: a command is addressed by a string, so
+    /// a barrel line left on an old name is a button Tauri answers with
+    /// "command not found". Only `invoke<..>("name"` call sites count, so a
+    /// doc comment naming a command stands in for nothing (#1984).
     #[test]
     fn the_view_commands_are_invoked_by_their_names() {
         let mirror = include_str!("../../../app/src/lib/ipc/search.ts");
-        for command in [
-            "ticket_views",
-            "save_ticket_view",
-            "delete_ticket_view",
-            "hide_saved_view",
-            "open_saved_view",
-        ] {
-            assert!(
-                mirror.contains(&format!("\"{command}\"")),
-                "{command} is not invoked by the barrel"
-            );
-        }
-        let barrel = include_str!("lib.rs");
-        for command in ["hide_saved_view", "open_saved_view"] {
-            assert!(
-                barrel.contains(&format!("commands::search::{command},")),
-                "{command} is not in the handler barrel"
-            );
-        }
+        crate::commands::mirror::assert_mirrors("search", mirror, "app/src/lib/ipc/search.ts", 13);
     }
 
     /// Each union the generated TypeScript declares for a display vocabulary
