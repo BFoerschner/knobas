@@ -10,8 +10,9 @@
 //! 3. Read the cursor. Unreadable or absent ⇒ full sync (interfaces §4.1).
 //! 4. Query `updated >= watermark − 2 minutes ORDER BY created ASC, id ASC`,
 //!    paging with `startAt` until `total` is reached -- ordered by keys an
-//!    edit cannot move (`id` breaks ties on `created`, #1720), and failed
-//!    when `total` shrinks under the walk ([`refuse_a_shrunk_total`], #1623).
+//!    edit cannot move (`id` breaks ties on `created`, #1720), each page
+//!    asked from the last issue read so one that left the listing under the
+//!    walk cannot hide another ([`crate::walk`], #1979).
 //! 5. Drop what the overlap re-delivered, complete truncated comment/worklog
 //!    containers, push the rest into the sink.
 //! 6. If nothing was pushed, hand back the cursor byte-identically. Otherwise
@@ -65,8 +66,6 @@
 //! `(key, updated)` was blind to the same change and to every change that
 //! needed no such coincidence.
 
-use std::sync::atomic::{AtomicU32, Ordering};
-
 use chrono::{DateTime, Utc};
 use knobas_http::{Offset, PageWalk, Walked};
 use knobas_source::watermark::Bounds;
@@ -77,6 +76,7 @@ use crate::cursor::JiraCursor;
 use crate::jql::{build_ceiling_jql, build_jql};
 use crate::map;
 use crate::model::{RawIssue, SearchPage, ServerInfo};
+use crate::walk::{IssueWalk, Step};
 use crate::{JiraConfig, time::parse_jira_time};
 
 /// The fields `/search` is asked for.
@@ -121,7 +121,9 @@ project,created,updated,labels,parent,resolution,issuelinks,timeoriginalestimate
 comment,worklog";
 
 /// A stop so a server that keeps reporting "more" cannot spin a run forever.
-/// At the default page size this is half a million issues.
+/// It counts requests, the walk's asks from further back included
+/// (`crate::walk`); at the default page size it is about half a million
+/// issues.
 ///
 /// Reaching it is a **failure**, never a quiet end to the walk. The one kind
 /// this adapter emits claims `full_sync_exhaustive: true`, which is the
@@ -149,35 +151,6 @@ comment,worklog";
 /// A source genuinely this large is narrowed with `projects` or `jql_filter`,
 /// which is what the message says.
 const MAX_PAGES: u32 = 5_000;
-
-/// Refuse a walk whose `total` fell below the largest one it reported before
-/// (#1623, ruling A5).
-///
-/// The walk is ordered by `created`, so an edit cannot move a row across a
-/// page boundary; a deletion still can. An issue deleted from a page already
-/// read -- or moved out of a `jql_filter` by an edit -- shifts every row
-/// behind it up by one, and the first unread issue lands in the window the
-/// walk has passed. Nothing in the rows says so; the falling `total` is the
-/// one witness. The run fails, as a reached [`MAX_PAGES`] does, because
-/// `ticket` is `full_sync_exhaustive` and an `Ok` over the hole licenses the
-/// sweep to tombstone the issue stepped over. A failed run costs one re-fetch
-/// on the next tick.
-///
-/// Against the peak, not the first page: an issue filed and another deleted
-/// mid-walk leave the end total where it started, with the hole still there.
-/// A deletion behind the cursor, which skips nothing, fails the run too; the
-/// total cannot tell the two apart, and the re-fetch is the cheap side.
-fn refuse_a_shrunk_total(peak: u32, total: u32) -> Result<(), SourceError> {
-    if total < peak {
-        return Err(SourceError::protocol(format!(
-            "the Jira search's total shrank from {peak} to {total} issues while the walk paged: \
-             an issue deleted under the walk, or moved out of this source's scope, shifts an \
-             unread one onto a page already read. Refusing to report a walk that may have \
-             stepped over an issue as a completed sync; the next run reads it again."
-        )));
-    }
-    Ok(())
-}
 
 /// The unit of the walk reading: the UI prints "120 of 300 issues".
 const ISSUES: &str = "issues";
@@ -214,21 +187,9 @@ impl SyncRun<'_> {
         // job in `advanced`, which holds it after the ceiling clamp too.
         let mut watermark: Option<DateTime<Utc>> = previous.as_ref().and_then(|c| c.updated_to);
 
-        // The largest `total` any answer of this walk has reported (#1623).
-        let peak = AtomicU32::new(0);
-        let mut walk = PageWalk::new(Offset, MAX_PAGES, |start_at| {
-            let (jql, fields, peak) = (&jql, &fields, &peak);
-            async move {
-                let page = self
-                    .api
-                    .search(jql, start_at, self.cfg.page_size, fields)
-                    .await?;
-                // Inside the fetch, so the empty page that ends the walk is
-                // read too: it is the one answer the walk never hands out.
-                refuse_a_shrunk_total(peak.fetch_max(page.total, Ordering::Relaxed), page.total)?;
-                Ok(page)
-            }
-        });
+        // Paged so an issue leaving the listing cannot hide another
+        // (`crate::walk`, #1979).
+        let mut walk = IssueWalk::new(self.api, &jql, &fields, self.cfg.page_size, MAX_PAGES);
         // The last page's own total, which the refusal quotes and the walk
         // reading draws against (#1381).
         let mut total = 0;
@@ -237,9 +198,9 @@ impl SyncRun<'_> {
         let mut walked: u64 = 0;
         loop {
             let page: SearchPage = match walk.next().await? {
-                Walked::Page(page) => page,
-                Walked::End => break,
-                Walked::Capped => {
+                Step::Page(page) => page,
+                Step::End => break,
+                Step::Capped => {
                     // Not a `break`: see the note on MAX_PAGES. Leaving the
                     // loop here and returning `Ok` would hand the engine a
                     // partial walk wearing a completed one's clothes.
@@ -689,12 +650,13 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("search@{start_at}"));
+            // A listing without end, two rows a page so a page asked from
+            // the last issue read still brings a new one.
             if self.endless {
+                let row = |n: u32| issue(&format!("PAY-{n}"), "2026-08-22T11:48:00.000+0000", 0, 0);
                 return Ok(serde_json::from_value(serde_json::json!({
                     "startAt": start_at, "maxResults": max_results, "total": u32::MAX,
-                    "issues": [issue(
-                        &format!("PAY-{start_at}"), "2026-08-22T11:48:00.000+0000", 0, 0
-                    )]
+                    "issues": [row(start_at), row(start_at + 1)]
                 }))
                 .unwrap());
             }
@@ -923,6 +885,9 @@ mod tests {
         assert!(api.count("boards") > first);
     }
 
+    /// Each page after the first is asked from the last issue read, one row
+    /// early, and one row longer (`crate::walk`): `@1` answers PAY-236 again
+    /// and two new ones, `@3` PAY-228 again and the last.
     #[tokio::test]
     async fn pages_with_start_at_until_the_total_is_reached() {
         let api = FakeApi {
@@ -939,7 +904,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(sink.0.len(), 5);
-        assert_eq!(api.searches(), vec!["search@0", "search@2", "search@4"]);
+        assert_eq!(api.searches(), vec!["search@0", "search@1", "search@3"]);
         // Same corpus, one page: identical set of keys.
         let mut one_page = VecSink(Vec::new());
         run(&api, &cfg(serde_json::json!({})), None, &mut one_page)
@@ -1263,11 +1228,12 @@ mod tests {
 
     /// `total` is a live number: an issue can leave the result set while the
     /// run is paging it, and a server can simply be wrong. The loop stops on
-    /// the page that arrives empty rather than on the arithmetic, because
-    /// `startAt` does not advance over rows that were not returned -- so a run
-    /// trusting `total` alone re-asks for the same offset forever.
+    /// the page that brings nothing past where the walk stood rather than on
+    /// the arithmetic, because `startAt` does not advance over rows that were
+    /// not returned -- so a run trusting `total` alone re-asks for the same
+    /// offset forever.
     #[tokio::test]
-    async fn a_page_that_arrives_empty_while_total_still_claims_more_ends_the_run() {
+    async fn a_page_with_nothing_past_the_walk_ends_it_while_total_still_claims_more() {
         let api = FakeApi {
             issues: five_issues(),
             phantom_total: 40,
@@ -1275,8 +1241,9 @@ mod tests {
         };
         let (keys, _) = keys_of(&api, &cfg(serde_json::json!({})), None).await;
         assert_eq!(keys.len(), 5);
-        // One page with the five issues, one that comes back empty and ends it.
-        assert_eq!(api.searches(), vec!["search@0", "search@5"]);
+        // One page with the five issues, then one asked from the last of them
+        // that holds it alone and ends the walk.
+        assert_eq!(api.searches(), vec!["search@0", "search@4"]);
     }
 
     /// Battery clause 2 says an idle run returns the cursor it was handed
@@ -1976,52 +1943,81 @@ mod tests {
         assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5"]);
     }
 
-    /// **A shrinking total fails the walk** (#1623, ruling A5). PAY-1 is
-    /// deleted after the first page; the second page starts at offset 2 of a
-    /// listing that now holds four, so PAY-3 is stepped over. The page that
-    /// says so is refused before its rows reach the sink, and the run fails
-    /// as a reached cap does, so the engine sweeps nothing on its word.
+    /// **A deletion behind the walk hides nothing and fails nothing** (#1979,
+    /// ruling A5 as amended). PAY-1 is deleted after the first page; offset 2
+    /// of the four left starts at PAY-4, so plain offset paging steps over
+    /// PAY-3, and A5's shrinking-total check failed the run for it. The walk
+    /// asks from the last issue read, finds the page opens on PAY-3, which it
+    /// has not read, and asks again from the start: every issue arrives once,
+    /// and the run is `Ok`.
     #[tokio::test]
-    async fn a_total_that_shrank_between_pages_fails_the_run() {
+    async fn an_issue_deleted_behind_the_walk_hides_no_unread_one() {
         let api = LiveIndex::new(five_filed(), [(1, delete(&["PAY-1"]))]);
-        let mut sink = VecSink(Vec::new());
-        let got = run(
-            &api,
-            &cfg(serde_json::json!({ "page_size": 2 })),
-            None,
-            &mut sink,
-        )
-        .await
-        .unwrap_err();
-        assert!(
-            matches!(&got, SourceError::Protocol { message: m, .. }
-                if m.contains("total shrank from 5 to 4")),
-            "{got:?}"
-        );
-        let keys: Vec<&str> = sink.0.iter().map(|i| i.entity.key.as_str()).collect();
-        assert_eq!(keys, vec!["PAY-1", "PAY-2"]);
+        let (keys, _) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5"]);
     }
 
-    /// The same when the shrink shows only on the page that ends the walk:
-    /// four rows read of five, two of them deleted, and the third page asks
-    /// for offset 4 of a listing of three. It comes back empty, which on its
-    /// own reads as the end; its total is what says PAY-5 was stepped over.
+    /// The same when the deletion leaves the page the walk asks next empty:
+    /// four issues read of five, two of them deleted, and offset 3 of the
+    /// three left holds nothing. Empty is not the end here; the walk asks from
+    /// further back until a page opens on an issue it has read, or on the
+    /// first row, and PAY-5 is on it.
     #[tokio::test]
-    async fn a_total_that_shrank_on_the_empty_last_page_fails_the_run_too() {
+    async fn a_deletion_that_empties_the_next_page_hides_no_unread_one() {
         let api = LiveIndex::new(five_filed(), [(2, delete(&["PAY-1", "PAY-2"]))]);
-        let mut sink = VecSink(Vec::new());
-        let got = run(
-            &api,
-            &cfg(serde_json::json!({ "page_size": 2 })),
-            None,
-            &mut sink,
-        )
-        .await
-        .unwrap_err();
-        assert!(
-            matches!(&got, SourceError::Protocol { message: m, .. }
-                if m.contains("total shrank from 5 to 3")),
-            "{got:?}"
+        let (keys, _) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5"]);
+    }
+
+    /// An issue entering the scope **behind** the walk -- reopened under a
+    /// `resolution = Unresolved` filter, say -- shifts every row the other
+    /// way, so the next page opens on issues already read. They are handed
+    /// out once, and the walk goes on to the end.
+    #[tokio::test]
+    async fn an_issue_entering_behind_the_walk_repeats_no_issue() {
+        let api = LiveIndex::new(
+            five_filed(),
+            [(
+                1,
+                Box::new(|issues: &mut Vec<serde_json::Value>| {
+                    issues.push(filed(
+                        "PAY-0",
+                        "2026-07-31T09:00:00.000+0000",
+                        "2026-08-22T11:45:00.000+0000",
+                    ));
+                }) as Upstream,
+            )],
+        );
+        let (keys, _) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        assert_eq!(keys, vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5"]);
+    }
+
+    /// **A deletion and a filing between two pages hide nothing** (#1979).
+    /// After the first page PAY-1, already read, is deleted and PAY-6 filed,
+    /// so the total stays 5: a check on the total sees nothing, and offset 2
+    /// of the listing that is left starts at PAY-4. The walk asks from where
+    /// it stood, sees the page does not open on an issue it has read, and
+    /// asks again from further back.
+    #[tokio::test]
+    async fn an_issue_deleted_while_another_is_filed_hides_no_unread_one() {
+        let api = LiveIndex::new(
+            five_filed(),
+            [(
+                1,
+                Box::new(|issues: &mut Vec<serde_json::Value>| {
+                    issues.retain(|i| i["key"] != "PAY-1");
+                    issues.push(filed(
+                        "PAY-6",
+                        "2026-08-22T11:45:00.000+0000",
+                        "2026-08-22T11:45:00.000+0000",
+                    ));
+                }) as Upstream,
+            )],
+        );
+        let (keys, _) = keys_of(&api, &cfg(serde_json::json!({ "page_size": 2 })), None).await;
+        assert_eq!(
+            keys,
+            vec!["PAY-1", "PAY-2", "PAY-3", "PAY-4", "PAY-5", "PAY-6"]
         );
     }
 
