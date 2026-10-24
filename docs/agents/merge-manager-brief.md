@@ -28,8 +28,15 @@ Start as soon as the PR opens, even as a draft.
 2. `mattpocock-skills:code-review`, **Spec axis** (criteria, out-of-scope list); the implementer did Standards. Add a **deep pass** against ADR and contract (and the required §10.8 entry, which must match the diff exactly) when the diff touches a frozen surface: §10.8 IPC, migrations, write queue, source adapters (`crates/knobas-source/src/**`, `crates/knobas-http/**`), concurrency or locking.
 3. Verify claims. Don't redo the implementer's mutants; add one only for a claim you find untested. Ask whether the fixture can witness the claim, and which direction is unwitnessed. A finding about a ticket you haven't read is a hypothesis: read it first.
 4. Don't open screenshot PNGs; review the named differences and the code. An image only to settle a doubt the code can't answer.
-5. Fix on the branch yourself (`git status --short`, named paths). Out-of-scope fixes: report with the finding quoted. Cap: 3 rounds, then stop and report.
+5. Fix on the branch yourself (`git status --short`, named paths). A gap beside the ticket follows *Fix it in place first*, below; one that fails its fit test you file and report with the finding quoted. Cap: 3 rounds, then stop and report.
 6. Re-run a live suite only if your fixes or the rebase touched what it exercises.
+
+**Fix it in place first** (Björn, 2026-10-24): a small gap your review finds beside the PR's ticket (a sibling bug, a missed instance of the cause the PR fixes, a stale code comment or doc line; a ticket, spec, ADR or glossary that is wrong goes through *Decisions*) you push onto the branch before you merge rather than file. File only a gap that fails the fit test.
+
+- **The fit test.** Fix it on the branch when all of these hold: your folded fixes together add about 100 changed lines or fewer to the PR's diff, tests included; it reaches no frozen surface the PR wasn't already touching (§10.8 IPC, migrations, write queue, source adapters, concurrency or locking: the deep-pass list in step 2); it doesn't change what `scripts/gate-scope.sh` prints for the branch; it takes no decision a ticket, spec or milestone reserves for Björn; and it changes nothing in the app Björn would need to judge that no ticket asked for. If one fails, file it (*Filing a follow-up*).
+- **The class must fit, not the instance.** Search for the cause's other instances first (*Search first*, below). Fix them all when together they pass the fit test; otherwise fix none and file the class.
+- **Tested like the rest.** Each fix has a test that fails without it (prose needs none), its own commit, and counts toward the 3-round cap.
+- **The PR says so.** Add a line under **Fixed in passing** in the PR body (`gh pr edit <n> --body-file`): what was wrong, `path:line`, the test that covers it. Your report's `Fixes:` names the commits; `Follow-ups:` lists only what failed the fit test. An open issue for the same cause gets a `Closes #N` line in the PR body when the branch now fixes every instance it lists, else a comment naming the PR.
 
 **Filing a follow-up** (Björn, 2026-10-23): file the class, not the instance you met.
 
