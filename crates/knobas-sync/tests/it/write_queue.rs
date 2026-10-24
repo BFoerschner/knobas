@@ -80,16 +80,67 @@ enum Interrupt {
     NewCredential,
 }
 
-/// A dwell for the writes to some targets only, and the moment each of them
-/// went on the wire (#1797): a timing test needs the flush task's writes slow
-/// and the submit's own quick, and a clock that starts when the first slow
-/// write does.
+/// How long a wait for a state that correct code reaches in milliseconds may
+/// take before the test fails instead of hanging: past any loaded gate, and
+/// reached only by a mutant (#1926).
+const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A write parked here stays on the wire until the test opens the door (#1926).
+/// A dwell said "the write is still out" only while the machine was fast
+/// enough; on a loaded gate it landed before the test had acted, and correct
+/// code went red. A door says it however slow the machine is.
+///
+/// A semaphore with no permits: [`open`](Door::open) closes it, which lets
+/// every wait through at once, the ones parked and the ones to come.
+struct Door(tokio::sync::Semaphore);
+
+impl Door {
+    fn shut() -> Arc<Door> {
+        Arc::new(Door(tokio::sync::Semaphore::new(0)))
+    }
+
+    fn open(&self) {
+        self.0.close();
+    }
+
+    async fn pass(&self) {
+        // `Err` is the closed semaphore: the door is open.
+        if let Ok(permit) = self.0.acquire().await {
+            permit.forget();
+        }
+    }
+}
+
+/// A door for the writes to some targets only, and the order those writes
+/// went on the wire (#1797, #1926): a lock-order test holds the flush task's
+/// writes on the wire and lets the submit's own through.
 #[derive(Default)]
-struct Paced {
-    /// How long a write to this entity id takes, in place of `dwell`.
-    dwell: std::collections::HashMap<String, std::time::Duration>,
-    /// Each paced write's target, and when the fake started on it.
-    started: Vec<(String, std::time::Instant)>,
+struct Doors {
+    /// The door a write to this entity id parks at.
+    at: std::collections::HashMap<String, Arc<Door>>,
+    /// The target of each write that reached its door, in order.
+    reached: Vec<String>,
+}
+
+/// Look every 5 ms until `reached` answers, and fail with `what` after
+/// [`HANG_GUARD`]: a state decides when this returns, not a clock.
+async fn until<T>(what: &str, mut reached: impl FnMut() -> Option<T>) -> T {
+    let deadline = std::time::Instant::now() + HANG_GUARD;
+    loop {
+        if let Some(found) = reached() {
+            return found;
+        }
+        assert!(std::time::Instant::now() < deadline, "{what}");
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+}
+
+/// `work`, failed with `what` if it has not returned after [`HANG_GUARD`]: a
+/// wait that correct code ends at once and a mutant never does.
+async fn guarded<T>(what: &str, work: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(HANG_GUARD, work)
+        .await
+        .unwrap_or_else(|_| panic!("{what}"))
 }
 
 /// A `Source` that records every write it is handed and answers to order.
@@ -99,9 +150,9 @@ struct Fake {
     /// Every `write` call, whatever it answered: what a cadence is counted in.
     asked: Arc<Mutex<usize>>,
     written: Arc<Mutex<Vec<WriteOp>>>,
-    /// How long the fake takes to answer. Zero everywhere but the concurrency
-    /// test, which needs the window between reading the queue and settling it
-    /// to be wide enough that a second flusher would fall into it.
+    /// How long the fake takes to answer. Zero everywhere but the refused
+    /// credential test, where it is time a re-send would spend. A test that
+    /// needs a write held on the wire uses a door instead ([`Doors`], #1926).
     dwell: Arc<Mutex<std::time::Duration>>,
     /// What the source says it made. `None` is `WriteReceipt::none()`, which
     /// is what every op but `create_page` and `log_work` really answers; a
@@ -120,9 +171,9 @@ struct Fake {
     /// [`SourceError::Moved`] with this version and its text, as Gitea's
     /// `sha` check answers a stale base.
     file_at: Arc<Mutex<Option<String>>>,
-    /// A dwell for some targets only, and when each of their writes went on
-    /// the wire; see [`Paced`].
-    paced: Arc<Mutex<Paced>>,
+    /// A door for some targets only, and which of their writes reached it;
+    /// see [`Doors`].
+    doors: Arc<Mutex<Doors>>,
     /// The pool the withdrawal above goes through. The fake reaches the store
     /// directly rather than the flusher, which would need the `SchedulerDeps`
     /// that holds this fake.
@@ -174,17 +225,18 @@ impl Source for Fake {
         }
         *self.asked.lock().unwrap() += 1;
         let answer = *self.answer.lock().unwrap();
-        let paced = {
-            let mut paced = self.paced.lock().unwrap();
-            let dwell = paced.dwell.get(op.target()).copied();
-            if dwell.is_some() {
-                paced
-                    .started
-                    .push((op.target().to_owned(), std::time::Instant::now()));
+        let door = {
+            let mut doors = self.doors.lock().unwrap();
+            let door = doors.at.get(op.target()).cloned();
+            if door.is_some() {
+                doors.reached.push(op.target().to_owned());
             }
-            dwell
+            door
         };
-        let dwell = paced.unwrap_or_else(|| *self.dwell.lock().unwrap());
+        if let Some(door) = door {
+            door.pass().await;
+        }
+        let dwell = *self.dwell.lock().unwrap();
         if !dwell.is_zero() {
             tokio::time::sleep(dwell).await;
         }
@@ -357,7 +409,7 @@ struct FakeRegistry {
     receipt: Arc<Mutex<Option<String>>>,
     interrupt: Arc<Mutex<Option<Interrupt>>>,
     file_at: Arc<Mutex<Option<String>>>,
-    paced: Arc<Mutex<Paced>>,
+    doors: Arc<Mutex<Doors>>,
     pool: sqlx::PgPool,
 }
 
@@ -376,7 +428,7 @@ impl AdapterRegistry for FakeRegistry {
             receipt: Arc::clone(&self.receipt),
             interrupt: Arc::clone(&self.interrupt),
             file_at: Arc::clone(&self.file_at),
-            paced: Arc::clone(&self.paced),
+            doors: Arc::clone(&self.doors),
             pool: self.pool.clone(),
         }))
     }
@@ -458,7 +510,7 @@ struct Harness {
     receipt: Arc<Mutex<Option<String>>>,
     interrupt: Arc<Mutex<Option<Interrupt>>>,
     file_at: Arc<Mutex<Option<String>>>,
-    paced: Arc<Mutex<Paced>>,
+    doors: Arc<Mutex<Doors>>,
     source: String,
 }
 
@@ -599,16 +651,36 @@ impl Harness {
         *self.interrupt.lock().unwrap() = Some(interrupt);
     }
 
-    /// Wait for the first paced write to go on the wire, and answer its
-    /// target and when it started (see [`Paced`]).
-    async fn first_paced(&self) -> (String, std::time::Instant) {
-        for _ in 0..1000 {
-            if let Some(first) = self.paced.lock().unwrap().started.first().cloned() {
-                return first;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        panic!("no paced write went on the wire");
+    /// Shut a door on every write to `entity` (see [`Doors`]), and hand it
+    /// back for the test to open.
+    fn door(&self, entity: &EntityRef) -> Arc<Door> {
+        let door = Door::shut();
+        self.doors
+            .lock()
+            .unwrap()
+            .at
+            .insert(entity.to_string(), Arc::clone(&door));
+        door
+    }
+
+    /// Wait for the `nth` write (from 1) to reach its door, and answer its
+    /// target.
+    async fn at_a_door(&self, nth: usize) -> String {
+        until(&format!("write {nth} never reached its door"), || {
+            self.doors.lock().unwrap().reached.get(nth - 1).cloned()
+        })
+        .await
+    }
+
+    /// Wait until `flushes` flushes are queued for the source's lock behind
+    /// the write on the wire (#1926): from then on the lock serves them before
+    /// any flush that asks after them, the flush task's next write included.
+    async fn queued_for_the_source(&self, flushes: usize) {
+        until(
+            &format!("{flushes} flushes never queued for the source"),
+            || (flusher::waiting_on_source(&self.source) >= flushes).then_some(()),
+        )
+        .await;
     }
 
     /// Queue a ticket under a project container -- the op ADR-0012 singles out
@@ -840,7 +912,7 @@ async fn harness() -> Harness {
     let receipt = Arc::new(Mutex::new(None));
     let interrupt = Arc::new(Mutex::new(None));
     let file_at = Arc::new(Mutex::new(None));
-    let paced = Arc::new(Mutex::new(Paced::default()));
+    let doors = Arc::new(Mutex::new(Doors::default()));
     let events = Arc::new(Recorder::default());
     Harness {
         deps: SchedulerDeps {
@@ -854,7 +926,7 @@ async fn harness() -> Harness {
                 receipt: Arc::clone(&receipt),
                 interrupt: Arc::clone(&interrupt),
                 file_at: Arc::clone(&file_at),
-                paced: Arc::clone(&paced),
+                doors: Arc::clone(&doors),
                 pool,
             }),
             secrets: Arc::new(secrets),
@@ -870,7 +942,7 @@ async fn harness() -> Harness {
         receipt,
         interrupt,
         file_at,
-        paced,
+        doors,
         source,
     }
 }
@@ -1680,8 +1752,10 @@ async fn a_source_with_no_credential_keeps_the_write() {
 /// store can un-post a comment. A queue that must not lose an edit must not
 /// post it twice either.
 ///
-/// The fake dwells for the length of its write, so the window a second flusher
-/// would fall into is wide enough to observe rather than a matter of luck.
+/// The first flusher's write is held on the wire at a door until the second
+/// is queued for the source's lock behind it (#1926), so the second has read
+/// the write while it was out: the window it would fall into is open by
+/// construction rather than for a dwell.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn two_flushes_of_one_source_deliver_a_write_once() {
     let h = harness().await;
@@ -1692,11 +1766,17 @@ async fn two_flushes_of_one_source_deliver_a_write_once() {
     assert_eq!(h.reload(write.id).await.state, WriteState::Pending);
 
     h.answer(Answer::Accept);
-    *h.dwell.lock().unwrap() = std::time::Duration::from_millis(300);
     h.rewind(86_400).await;
-    let (a, b) = tokio::join!(
+    let out = h.door(&ticket);
+    let lands = async {
+        h.at_a_door(1).await;
+        h.queued_for_the_source(1).await;
+        out.open();
+    };
+    let (a, b, ()) = tokio::join!(
         flusher::flush_source(&h.deps, &h.source),
         flusher::flush_source(&h.deps, &h.source),
+        lands,
     );
     a.unwrap();
     b.unwrap();
@@ -1714,8 +1794,9 @@ async fn two_flushes_of_one_source_deliver_a_write_once() {
 /// *Flush now* that read the write before the tick's attempt failed does not
 /// send it a second time: the attempt it asked for has just been made.
 ///
-/// Arranged rather than raced: the press starts while the tick's send is on
-/// the wire, so it read the row before the attempt was recorded.
+/// Arranged rather than raced: the press starts while the tick's send is held
+/// on the wire at a door, which opens once the press is queued for the
+/// source's lock (#1926), so it read the row before the attempt was recorded.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_press_beside_a_failing_send_does_not_send_it_again() {
     let h = harness().await;
@@ -1725,21 +1806,16 @@ async fn a_press_beside_a_failing_send_does_not_send_it_again() {
     let write = h.comment(&ticket, "once per turn").await;
     assert_eq!(*h.asked.lock().unwrap(), 1);
     h.rewind(86_400).await;
-    *h.dwell.lock().unwrap() = std::time::Duration::from_millis(300);
+    let out = h.door(&ticket);
 
     let press = async {
-        for _ in 0..500 {
-            if *h.asked.lock().unwrap() == 2 {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert_eq!(
-            *h.asked.lock().unwrap(),
-            2,
-            "the tick's send is on the wire"
-        );
-        flusher::flush_now(&h.deps, Some(&h.source)).await
+        h.at_a_door(1).await;
+        let lands = async {
+            h.queued_for_the_source(1).await;
+            out.open();
+        };
+        let (press, ()) = tokio::join!(flusher::flush_now(&h.deps, Some(&h.source)), lands);
+        press
     };
     let (tick, press) = tokio::join!(flusher::flush_source(&h.deps, &h.source), press);
     tick.unwrap();
@@ -1796,17 +1872,17 @@ enum Mine {
     Amended,
 }
 
-/// The flush task's pass owes two writes on other entities, each of which
-/// takes `DWELL`; `mine` is sent while the first is on the wire, and its own
-/// write takes no time. Asserts it returned less than 2 × `DWELL` after the
-/// first went on the wire, and that every write was delivered once.
+/// The flush task's pass owes two writes on other entities, each held on the
+/// wire at a door; `mine` is sent while the first is out, and its own write
+/// has no door. Asserts that `mine` returns while the task's second write is
+/// still held, and that every write was delivered once.
 ///
-/// A flush of `mine` that waited for the task's second write would return
-/// 2 × `DWELL` or more after the first went out. The clock starts at that
-/// moment, not when `mine` is sent, so the old wait cannot slip under the
-/// bound by starting late in the first send.
+/// Arranged, not timed (#1926): the first write's door opens only once the
+/// flush of `mine` is queued for the source's lock, so the lock serves it
+/// before the task's next write. The second's door opens only after `mine`
+/// returned, so a flush of `mine` that waited for that write never returns,
+/// and the hang guard fails it.
 async fn beside_the_flush_task(mine: Mine) {
-    const DWELL: std::time::Duration = std::time::Duration::from_secs(1);
     let h = harness().await;
     let first = h.mirror("PAY-1797-A", "a payout fails").await;
     let second = h.mirror("PAY-1797-B", "a refund fails").await;
@@ -1836,15 +1912,10 @@ async fn beside_the_flush_task(mine: Mine) {
         flusher::queue(&h.deps, &h.source, comment(entity, &owed))
             .await
             .unwrap();
-        h.paced
-            .lock()
-            .unwrap()
-            .dwell
-            .insert(entity.to_string(), DWELL);
     }
+    let (first_out, second_out) = (h.door(&first), h.door(&second));
 
     let send = async {
-        let (_, on_the_wire) = h.first_paced().await;
         match mine {
             Mine::Submitted => {
                 h.comment(&pull, "mine").await;
@@ -1867,15 +1938,23 @@ async fn beside_the_flush_task(mine: Mine) {
                     .unwrap();
             }
         }
-        on_the_wire.elapsed()
     };
-    let (task, waited) = tokio::join!(flusher::flush_source(&h.deps, &h.source), send);
+    let beside = async {
+        assert_eq!(h.at_a_door(1).await, first.to_string());
+        let lands = async {
+            h.queued_for_the_source(1).await;
+            first_out.open();
+        };
+        let ((), ()) = guarded(
+            &format!("{mine:?} waited for the flush task's second send"),
+            async { tokio::join!(send, lands) },
+        )
+        .await;
+        second_out.open();
+    };
+    let (task, ()) = tokio::join!(flusher::flush_source(&h.deps, &h.source), beside);
     task.unwrap();
 
-    assert!(
-        waited < 2 * DWELL,
-        "{mine:?} waited {waited:?}, through the flush task's second send"
-    );
     let mut delivered = h.delivered();
     delivered.sort();
     assert_eq!(
@@ -1916,15 +1995,15 @@ enum Fate {
 }
 
 /// The flush task's pass sends a head write on one entity and then a slow
-/// write on another, each taking `DWELL`; a submit on the first entity starts
-/// while the head is on the wire. Asserts that, the moment the submit
-/// returns, its own write was sent and the other entity's was not yet.
+/// write on another, each held on the wire at a door; a submit on the first
+/// entity starts while the head is out. Asserts that the submit returns with
+/// its own write sent while the other entity's is still held.
 ///
-/// Arranged rather than timed: the verdict reads rows, not a clock. The one
-/// bound is the other entity's `DWELL`, which the submit has, once it lets go
-/// of the source, to re-read its entity's heads and the two rows.
+/// Arranged, not timed (#1926): the head's door opens only once the submit is
+/// queued for the source's lock, so the lock serves it before the task's next
+/// write; the slow write's door opens only after the submit returned, so a
+/// submit that waited for it never returns, and the hang guard fails it.
 async fn behind_a_head_on_the_wire(fate: Fate) {
-    const DWELL: std::time::Duration = std::time::Duration::from_secs(1);
     let h = harness().await;
     let mine = h.mirror("PAY-1807-A", "a payout fails").await;
     let other = h.mirror("PAY-1807-B", "a refund fails").await;
@@ -1941,41 +2020,35 @@ async fn behind_a_head_on_the_wire(fate: Fate) {
     let slow = flusher::queue(&h.deps, &h.source, comment(&other, "the slow one"))
         .await
         .unwrap();
-    for entity in [&mine, &other] {
-        h.paced
-            .lock()
-            .unwrap()
-            .dwell
-            .insert(entity.to_string(), DWELL);
-    }
+    let (head_out, slow_out) = (h.door(&mine), h.door(&other));
     if fate == Fate::Withdrawn {
         h.interrupt(Interrupt::Withdraw(head.id));
     }
 
     let submit = async {
-        let (target, _) = h.first_paced().await;
+        let target = h.at_a_door(1).await;
         assert_eq!(target, mine.to_string(), "the head on `mine` goes first");
-        // The head has read its dwell; the submitted write takes none.
-        h.paced.lock().unwrap().dwell.remove(&mine.to_string());
-        let submitted = h.comment(&mine, "mine").await;
-        (
-            h.reload(submitted.id).await.state,
-            h.reload(slow.id).await.state,
+        let lands = async {
+            h.queued_for_the_source(1).await;
+            // The head goes, and the submitted write after it has no door.
+            head_out.open();
+        };
+        let (submitted, ()) = guarded(
+            "the submit waited for the other entity's write",
+            async { tokio::join!(h.comment(&mine, "mine"), lands) },
         )
+        .await;
+        let submitted = h.reload(submitted.id).await.state;
+        slow_out.open();
+        submitted
     };
-    let (task, (submitted, slow_then)) =
-        tokio::join!(flusher::flush_source(&h.deps, &h.source), submit);
+    let (task, submitted) = tokio::join!(flusher::flush_source(&h.deps, &h.source), submit);
     task.unwrap();
 
     assert_eq!(
         submitted,
         WriteState::Sent,
         "the submit returned without trying its own write"
-    );
-    assert_eq!(
-        slow_then,
-        WriteState::Pending,
-        "the submit waited for the other entity's write"
     );
     let settled = match fate {
         Fate::Lands => WriteState::Sent,
@@ -2002,9 +2075,9 @@ async fn behind_a_head_on_the_wire(fate: Fate) {
 /// the ladder is not sent early because the write ahead of it went.
 ///
 /// Arranged: the task's pass reads the head on `mine`, then sends a slow
-/// write on `other`; while that one is on the wire the reader withdraws the
-/// head, and the write after it, now the entity's head, is recorded as
-/// waiting `unreachable` on its first rung.
+/// write on `other`, held on the wire at a door until the reader has
+/// withdrawn the head and the write after it, now the entity's head, is
+/// recorded as waiting `unreachable` on its first rung.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_head_withdrawn_while_the_task_waited_hands_on_only_to_an_owed_write() {
     let h = harness().await;
@@ -2024,20 +2097,18 @@ async fn a_head_withdrawn_while_the_task_waited_hands_on_only_to_an_owed_write()
     let next = flusher::queue(&h.deps, &h.source, comment(&mine, "on a rung"))
         .await
         .unwrap();
-    h.paced
-        .lock()
-        .unwrap()
-        .dwell
-        .insert(other.to_string(), std::time::Duration::from_millis(500));
+    let slow_out = h.door(&other);
 
     let meanwhile = async {
-        let (target, _) = h.first_paced().await;
+        let target = h.at_a_door(1).await;
         assert_eq!(target, other.to_string(), "the slow write goes first");
         flusher::discard(&h.deps, head.id).await.unwrap().unwrap();
         store::wait(&h.deps.pool, next.id, WaitReason::Unreachable, None)
             .await
             .unwrap()
             .unwrap();
+        // Both have committed while the slow write was held (#1926).
+        slow_out.open();
     };
     let (task, ()) = tokio::join!(flusher::flush_source(&h.deps, &h.source), meanwhile);
     task.unwrap();
