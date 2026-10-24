@@ -475,7 +475,8 @@ mod tests {
         );
     }
 
-    /// Every command in this module is callable from the frontend.
+    /// Every command in this module is callable from the frontend, and every
+    /// command the mirror calls is one this module registers.
     ///
     /// The invoke functions are hand-written (contract §2.6), so a command
     /// added on the Rust side alone compiles, lints and tests green while
@@ -483,57 +484,15 @@ mod tests {
     /// Rust side alone leaves the mirror invoking a name that no longer
     /// exists, which fails only when a person clicks the button.
     ///
-    /// Matched on the `invoke("<name>")` string, because that is the thing
-    /// that actually has to agree: a TS function may be called anything.
+    /// Matched on the `invoke<..>("<name>"` call sites, because that is the
+    /// thing that actually has to agree: a TS function may be called
+    /// anything, and a doc comment naming a command calls nothing (#1984).
+    /// The list is `lib.rs`'s handler list; `tests/it/wiring.rs` pins that
+    /// every command declared here is on it.
     #[test]
     fn every_command_in_this_module_has_a_typescript_mirror() {
-        let code = include_str!("app.rs");
         let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
-
-        // Read out of this file rather than listed, so a command added below
-        // is covered without anyone remembering to add it here.
-        //
-        // The attribute is **assembled** rather than written out, and no
-        // string literal in this test spells it either. That is not cosmetic:
-        // `tests/it/wiring.rs` scans this same directory for the command
-        // attribute to build its own list of declared commands, and it strips
-        // comments but *not* string literals. A spelled-out copy here is
-        // counted as another command whose "name" is the next line of this
-        // test, and the handler-list assertion then fails with nonsense
-        // entries -- which is exactly what it did.
-        let marker = format!("#[{}::{}]", "tauri", "command");
-        let mut commands: Vec<&str> = Vec::new();
-        for (index, line) in code.lines().enumerate() {
-            if line.trim() != marker {
-                continue;
-            }
-            let signature = code
-                .lines()
-                .nth(index + 1)
-                .expect("the command attribute is followed by its signature");
-            let name = signature
-                .split("fn ")
-                .nth(1)
-                .and_then(|rest| rest.split(['<', '(']).next())
-                .expect("the signature names a function");
-            commands.push(name);
-        }
-        assert!(
-            commands.len() >= 5,
-            "no commands were found, so this test proves nothing: {commands:?}"
-        );
-
-        let missing: Vec<&str> = commands
-            .iter()
-            .copied()
-            .filter(|name| !mirror.contains(&format!("(\"{name}\"")))
-            .collect();
-        assert_eq!(
-            missing,
-            Vec::<&str>::new(),
-            "these commands have no `invoke(\"..\")` in app/src/lib/ipc/app.ts, so the frontend \
-             cannot call them. Found: {commands:?}"
-        );
+        crate::commands::mirror::assert_mirrors("app", mirror, "app/src/lib/ipc/app.ts", 5);
     }
 
     #[test]
