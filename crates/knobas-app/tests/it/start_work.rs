@@ -915,6 +915,53 @@ async fn a_retry_of_a_step_that_already_succeeded_is_refused_and_sends_nothing()
     assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Succeeded);
 }
 
+/// **A door before the send.** The run has read the flow and is looking at
+/// the source when the step is skipped underneath it. The run's move to
+/// running may only leave a pending step, so it finds the step taken and does
+/// not send it.
+#[tokio::test]
+async fn a_step_skipped_while_the_run_looks_is_not_sent() {
+    let pool = corpus("sw_skip_under_run").await;
+    let flow = planned(&pool).await;
+    let branch = step_of(&flow, Step::CreateBranch).id;
+    let look = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let fake = std::sync::Arc::new(
+        Fake::new()
+            .looking_through(&look)
+            .revealing_on_refresh(&proposed_branch(&flow)),
+    );
+
+    let run = tokio::spawn({
+        let (pool, fake) = (pool.clone(), std::sync::Arc::clone(&fake));
+        async move { start_work::run(&pool, &*fake, &ticket()).await }
+    });
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while *fake.looks.lock().unwrap() == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "the run never looked");
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    knobas_core::start_work::settle(
+        &pool,
+        branch,
+        &[StepOutcome::Pending],
+        StepOutcome::Skipped,
+        None,
+        Some("skipped"),
+    )
+    .await
+    .unwrap()
+    .expect("the step is still pending while the run looks");
+    look.add_permits(10);
+    let flow = run.await.unwrap().unwrap();
+
+    assert!(
+        !fake.ops().contains(&"create_branch".to_owned()),
+        "the run sent a step that was skipped underneath it: {:?}",
+        fake.ops()
+    );
+    assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Skipped);
+}
+
 /// **The door.** A send is held open, the step is interrupted underneath it,
 /// then the send lands. The landing may not leave a step that is no longer
 /// running, so the interruption stands -- but the write it made is kept on the
