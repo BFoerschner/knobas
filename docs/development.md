@@ -74,11 +74,22 @@ runs it and when.
 - `check.yml` runs the same `just check` on Linux. It does not restate the
   gate, so the two cannot drift.
 - `testenv.yml` lints the test environment's scripts and compose file without
-  starting containers. Run it after touching `testenv/`.
+  starting containers.
 
 Both are disabled since 2026-10-24 (Björn: the runner is too slow; the
-checks run on the Mac). `gh workflow enable <file>` brings one back
-(`docs/decisions/2026-10-24-bjorn-rulings.md`).
+checks run on the Mac; `docs/decisions/2026-10-24-bjorn-rulings.md`, #2035).
+Until he enables them again, a step that says to dispatch one runs this
+instead:
+
+- for `check.yml`: `just check`. Nothing then runs the gate on Linux;
+  `docs/agents/working-model.md` (*Platform*) says what that leaves open.
+- for `testenv.yml`, after touching `testenv/`: `just check` covers its
+  `just shell` step. It does not cover the compose and port steps; run those
+  from `testenv/`: the three `docker compose ... config -q` commands in
+  `.github/workflows/testenv.yml`, then `./check-ports.sh`.
+
+`gh workflow enable check.yml` and `gh workflow enable testenv.yml` bring them
+back. Dispatching is then:
 
 ```bash
 gh workflow run check.yml --ref <branch>
