@@ -93,6 +93,11 @@
 //! [`RefusedProbe`]'s `Drop`, which checks each is gone afterwards. A
 //! killed run's probe is taken back by the next run before it starts.
 //!
+//! Three **boards on PAY**, each on a filter of its own, so that the board
+//! listing's order can be read (#2003); one is renamed. [`OrderProbe`]'s
+//! `Drop` takes them back and checks, and the next run takes back a killed
+//! run's boards with their filters.
+//!
 //! What a *killed* run left behind is put back by the next one, and by this
 //! suite for **both** of them: [`Seeded::clear_leftovers`] restores the corpus
 //! from `seed-state.json` -- a stray issue deleted, a stray comment deleted, a
@@ -4014,5 +4019,216 @@ async fn an_edit_reorders_issues_tied_on_created_and_id_holds_them_still() {
         keys(seeded.jql(&walk, "key").await),
         by_id,
         "created ASC, id ASC is where it was"
+    );
+}
+
+/// The names this suite's board-order probe gives its boards (#2003). Not a
+/// substring of any other probe's name: the board listing's `name=` matches
+/// on a part of the name.
+const ORDER_PROBE: &str = "knobas live board-order probe";
+
+/// The boards and filters the board-order probe made, taken back by
+/// [`Drop`] passing or panicking alike, and checked gone afterwards.
+struct OrderProbe {
+    url: String,
+    user: String,
+    password: String,
+    /// In the order it was made: a filter, then the board on it.
+    made: Vec<Probed>,
+}
+
+impl OrderProbe {
+    /// Takes back the boards a killed run left first, each with the filter
+    /// it stands on.
+    async fn new(seeded: &Seeded) -> OrderProbe {
+        let (status, listed) = seeded
+            .get(&format!(
+                "rest/agile/1.0/board?name={}",
+                url_encode(ORDER_PROBE)
+            ))
+            .await;
+        assert_eq!(status, 200, "listing a killed run's probe boards: {listed}");
+        let mut stale = Vec::new();
+        for board in listed["values"].as_array().into_iter().flatten() {
+            let id = board["id"].as_u64().expect("a board id");
+            let (_, config) = seeded
+                .get(&format!("rest/agile/1.0/board/{id}/configuration"))
+                .await;
+            stale.push(Probed::Board(id));
+            if let Some(filter) = config["filter"]["id"].as_str() {
+                stale.push(Probed::Filter(filter.parse().expect("a filter id")));
+            }
+        }
+        if let Err(failure) = take_back(
+            &seeded.http,
+            &seeded.url,
+            &seeded.user,
+            &seeded.password,
+            &stale,
+        )
+        .await
+        {
+            panic!("a killed run's board-order probe is still on the server: {failure}");
+        }
+        OrderProbe {
+            url: seeded.url.clone(),
+            user: seeded.user.clone(),
+            password: seeded.password.clone(),
+            made: Vec::new(),
+        }
+    }
+
+    /// A Kanban board on PAY named `<ORDER_PROBE> <suffix>`, on a filter of
+    /// its own: its id.
+    async fn board(&mut self, seeded: &Seeded, suffix: &str) -> u64 {
+        let (status, filter) = seeded
+            .request(
+                reqwest::Method::POST,
+                "rest/api/2/filter",
+                Some(serde_json::json!({
+                    "name": format!("{ORDER_PROBE} filter {suffix} {}", uuid_like()),
+                    "jql": "project = PAY ORDER BY Rank ASC",
+                    "favourite": false,
+                })),
+            )
+            .await;
+        assert_eq!(status, 200, "{filter}");
+        let filter_id: u64 = filter["id"].as_str().unwrap().parse().unwrap();
+        self.made.push(Probed::Filter(filter_id));
+        let (status, board) = seeded
+            .request(
+                reqwest::Method::POST,
+                "rest/agile/1.0/board",
+                Some(serde_json::json!({
+                    "name": format!("{ORDER_PROBE} {suffix}"),
+                    "type": "kanban",
+                    "filterId": filter_id,
+                })),
+            )
+            .await;
+        assert!(status == 200 || status == 201, "{status} {board}");
+        let id = board["id"].as_u64().expect("a board id");
+        self.made.push(Probed::Board(id));
+        id
+    }
+}
+
+impl Drop for OrderProbe {
+    fn drop(&mut self) {
+        // The last made first: a board holds its filter.
+        let mut left: Vec<Probed> = std::mem::take(&mut self.made);
+        if left.is_empty() {
+            return;
+        }
+        left.reverse();
+        let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
+        Cleanup::new(
+            "the live suite did not take back its board-order probe, so the server is no longer \
+             in the plain-seed state",
+            "the probe boards may still be standing; the next run takes them back",
+        )
+        .run(move || async move { take_back(&client(), &url, &user, &password, &left).await });
+    }
+}
+
+/// PAY's board listing as `(id, name)`, in Jira's order, from one request.
+async fn pay_boards(seeded: &Seeded, extra: &str) -> Vec<(u64, String)> {
+    let (status, listed) = seeded
+        .get(&format!(
+            "rest/agile/1.0/board?projectKeyOrId=PAY&maxResults=50{extra}"
+        ))
+        .await;
+    assert_eq!(status, 200, "{listed}");
+    assert_eq!(
+        listed["isLast"], true,
+        "one page holds PAY's boards: {listed}"
+    );
+    listed["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| {
+            (
+                b["id"].as_u64().unwrap(),
+                b["name"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// **The order the agile board listing pages over (#2003)**, which
+/// `views::listing` reads twice because of it. Three boards made on PAY in
+/// the order `m`, `A`, `z` (so their ids rise that way) are listed `A`, `m`,
+/// `z`: by name, ignoring case, not by id, and `orderBy=id` changes nothing.
+/// A rename moves a row: `A` renamed `zz` is listed last. So no order an
+/// edit cannot move is on offer for the issue walk's anchoring (`walk.rs`).
+/// The source's views read, on the new double listing, brings every probe
+/// board in under its name as it stands.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn the_board_listing_is_in_name_order_and_a_rename_moves_a_row() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let mut probe = OrderProbe::new(&seeded).await;
+    let m = probe.board(&seeded, "m").await;
+    let upper_a = probe.board(&seeded, "A").await;
+    let z = probe.board(&seeded, "z").await;
+    assert!(m < upper_a && upper_a < z, "ids rise in the order made");
+    let probes = |listed: &[(u64, String)]| -> Vec<u64> {
+        listed
+            .iter()
+            .filter(|(_, name)| name.starts_with(ORDER_PROBE))
+            .map(|(id, _)| *id)
+            .collect()
+    };
+
+    let listed = pay_boards(&seeded, "").await;
+    assert_eq!(
+        probes(&listed),
+        [upper_a, m, z],
+        "by name, ignoring case: {listed:?}"
+    );
+    let mut by_name = listed.clone();
+    by_name.sort_by_key(|(_, name)| name.to_lowercase());
+    assert_eq!(listed, by_name, "the whole listing is in name order");
+    assert_eq!(
+        pay_boards(&seeded, "&orderBy=id").await,
+        listed,
+        "orderBy is not read"
+    );
+
+    let renamed = format!("{ORDER_PROBE} zz");
+    let (status, body) = seeded
+        .request(
+            reqwest::Method::PUT,
+            "rest/greenhopper/1.0/rapidviewconfig/name",
+            Some(serde_json::json!({ "id": upper_a, "name": renamed })),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let after = pay_boards(&seeded, "").await;
+    assert_eq!(
+        probes(&after),
+        [m, z, upper_a],
+        "the rename moved a row: {after:?}"
+    );
+
+    let source = seeded.source(serde_json::json!({ "projects": ["PAY"] }));
+    let (items, _) = full(&*source).await;
+    for (id, name) in [
+        (m, format!("{ORDER_PROBE} m")),
+        (z, format!("{ORDER_PROBE} z")),
+        (upper_a, renamed),
+    ] {
+        let view = items
+            .iter()
+            .find(|i| i.kind == "jira_view" && i.entity.key == format!("board-{id}"))
+            .unwrap_or_else(|| panic!("no view of board {id} among {:?}", keys(&items)));
+        assert_eq!(view.title, name);
+    }
+    println!(
+        "SEEDED board listing: {} boards on PAY by name ignoring case; probes {m} m, {upper_a} A, {z} z \
+         listed A, m, z, and A renamed zz listed last",
+        listed.len()
     );
 }

@@ -359,9 +359,33 @@ async fn boards(
     Ok(views)
 }
 
-/// One board listing, paged: a project's, or with `None` every board this
-/// account can see.
+/// One board listing: a project's, or with `None` every board this account
+/// can see, read twice (#2003).
+///
+/// **Why twice.** The listing pages by `startAt`, and Jira Software lists
+/// boards by name, ignoring case (measured on the seeded Jira 10.3 for #2003;
+/// `orderBy` is ignored). A board deleted from a page already read shifts the
+/// first board of the next page onto it, and a board renamed into a page
+/// already read moves out of the unread ones; either way no page returns the
+/// board it displaced. The listing offers no keyset, and since a rename
+/// moves a row, no order the issue walk's anchoring (`walk.rs`) could stand
+/// on. Every board read is followed by [`gone`] for each view the run did not
+/// read, so a board missed here would be delivered as gone. Reading the
+/// listing a second time and keeping the union is what Gitea's repository
+/// listing does (#1979): a board one listing missed is in the other unless a
+/// second change lands on the same row in the second. The caller drops the
+/// boards met twice.
 async fn listing(
+    api: &(dyn JiraApi + '_),
+    project: Option<&str>,
+) -> Result<Vec<Board>, SourceError> {
+    let mut boards = listed_once(api, project).await?;
+    boards.extend(listed_once(api, project).await?);
+    Ok(boards)
+}
+
+/// One pass over a board listing, paged.
+async fn listed_once(
     api: &(dyn JiraApi + '_),
     project: Option<&str>,
 ) -> Result<Vec<Board>, SourceError> {
