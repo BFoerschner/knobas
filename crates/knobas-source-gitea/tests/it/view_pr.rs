@@ -588,12 +588,14 @@ async fn the_files_tab_is_read_on_its_own_from_the_pull_requests_diff() {
     );
     // The diff, and beside it what places the line comments (#709): the pull
     // request's state and its reviews. No review here has line comments, so
-    // none is asked for them.
+    // none is asked for them. And whether the token may send a review at
+    // all (#2030): the branch probe, an empty write in the same scope.
     let mut asked = paths(&server).await;
     asked.sort();
     assert_eq!(
         asked,
         [
+            format!("{REPO}/branches"),
             format!("{REPO}/pulls/142"),
             format!("{REPO}/pulls/142.diff"),
             format!("{REPO}/pulls/142/reviews"),
@@ -2718,4 +2720,113 @@ async fn add_label_tells_a_same_named_organisation_label_apart() {
             crate::source_action::add_label_action(offered, None)
         );
     }
+}
+
+// -- what the token may write (issue #2030) ----------------------------------
+
+const SCOPE_REFUSAL: &str = "token does not have at least one of required scope(s)";
+
+/// Gitea's answer to the write `probe` names, sent with an empty body: the
+/// branch write (`write:repository`) or the issue write (`write:issue`).
+async fn probe(server: &MockServer, probe: &str, status: u16, message: &str) {
+    Mock::given(method("POST"))
+        .and(path(format!("{REPO}/{probe}")))
+        .and(wiremock::matchers::body_json(json!({})))
+        .respond_with(ResponseTemplate::new(status).set_body_json(json!({
+            "message": message,
+            "url": "http://gitea/api/swagger",
+        })))
+        .mount(server)
+        .await;
+}
+
+/// Each toolbar action's label and reason, the ones in `refused` replaced by
+/// `reason` and every other as `drawn` has it.
+fn expected(drawn: &SourceView, refused: &[&str], reason: &str) -> Vec<(String, Option<String>)> {
+    drawn
+        .actions
+        .iter()
+        .map(|a| {
+            let why = if refused.contains(&a.label.as_str()) {
+                Some(reason.to_owned())
+            } else {
+                a.disabled.clone()
+            };
+            (a.label.clone(), why)
+        })
+        .collect()
+}
+
+fn reasons(view: &SourceView) -> Vec<(String, Option<String>)> {
+    view.actions
+        .iter()
+        .map(|a| (a.label.clone(), a.disabled.clone()))
+        .collect()
+}
+
+/// Issue #2030, against the measured answers (`view::grants`): a token
+/// without `write:issue` cannot comment or label, which go through the
+/// issue of the same index, and may still review and merge; one without
+/// `write:repository` may do neither, and its diff takes no line comments;
+/// an account that may not push cannot merge and may still comment and
+/// review. Where Gitea gives no verdict the view is as the entity drew it.
+#[tokio::test]
+async fn what_the_token_may_not_write_is_drawn_disabled_saying_why() {
+    let plain = gitea(open_pull(), reviews()).await;
+    let drawn = source(&plain).view(PR, None).await.unwrap().unwrap();
+    let labels: Vec<&str> = drawn.actions.iter().map(|a| a.label.as_str()).collect();
+    assert!(labels.contains(&"Comment…") && labels.contains(&"Merge…"), "{labels:?}");
+
+    let no_issue = gitea(open_pull(), reviews()).await;
+    probe(&no_issue, "branches", 422, "[BranchName]: Required").await;
+    probe(&no_issue, "issues", 403, SCOPE_REFUSAL).await;
+    let view = source(&no_issue).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        reasons(&view),
+        expected(
+            &drawn,
+            &["Comment…", "Add label…"],
+            "This token cannot write: it lacks the write:issue scope"
+        )
+    );
+
+    let read_only = gitea(open_pull(), reviews()).await;
+    probe(&read_only, "branches", 403, SCOPE_REFUSAL).await;
+    probe(&read_only, "issues", 403, SCOPE_REFUSAL).await;
+    let view = source(&read_only).view(PR, None).await.unwrap().unwrap();
+    for (label, why) in reasons(&view) {
+        assert!(
+            why.as_deref().is_some_and(|w| w.starts_with("This token cannot write: ")),
+            "{label}: {why:?}"
+        );
+    }
+    let files = source(&read_only)
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .unwrap();
+    let Block::Diff { commentable, .. } = &files.sections[0].blocks[0] else {
+        panic!("{files:#?}");
+    };
+    assert_eq!(commentable, &None, "no line comments it cannot send");
+    assert_eq!(files.sections[0].count, Some(2), "the diff reads as before");
+
+    let reader = gitea(open_pull(), reviews()).await;
+    probe(
+        &reader,
+        "branches",
+        403,
+        "user should have a permission to write to a repo",
+    )
+    .await;
+    probe(&reader, "issues", 422, "[Title]: Required").await;
+    let view = source(&reader).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        reasons(&view),
+        expected(
+            &drawn,
+            &["Merge…"],
+            "This account cannot push to this repository"
+        )
+    );
 }
